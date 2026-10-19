@@ -1,0 +1,63 @@
+<!--
+ - Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ - See LICENSE.txt for license information
+ -
+ - 8x MI350P (gfx950, PCI device 0x75a8) on a dual-socket PCIe Gen5 switch
+ - node. GPUs are behind Broadcom PEX890 switches. There are no GPU-to-GPU
+ - XGMI links. GPU bus IDs match the measured 8-GPU host; parent switch bus
+ - IDs are a representative grouping (4 GPUs per socket), not a firmware dump.
+ -->
+<system version="2">
+  <cpu numaid="0" arch="x86_64" vendor="AuthenticAMD" familyid="26" modelid="2">
+    <pci busid="0000:01:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1000" subsystem_device="0xc030" link_speed="32.0 GT/s PCIe" link_width="16">
+      <pci busid="0000:02:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1000" subsystem_device="0xc030" link_speed="32.0 GT/s PCIe" link_width="16">
+        <pci busid="0000:05:00.0" class="0x120000" vendor="0x1002" device="0x75a8" subsystem_vendor="0x1002" subsystem_device="0x75a8" link_speed="32.0 GT/s PCIe" link_width="16">
+          <gpu dev="0" sm="256" gcn="gfx950" arch="38911" rank="0" gdr="1"/>
+        </pci>
+      </pci>
+      <pci busid="0000:40:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1000" subsystem_device="0xc030" link_speed="32.0 GT/s PCIe" link_width="16">
+        <pci busid="0000:44:00.0" class="0x120000" vendor="0x1002" device="0x75a8" subsystem_vendor="0x1002" subsystem_device="0x75a8" link_speed="32.0 GT/s PCIe" link_width="16">
+          <gpu dev="1" sm="256" gcn="gfx950" arch="38911" rank="1" gdr="1"/>
+        </pci>
+      </pci>
+    </pci>
+    <pci busid="0000:81:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1000" subsystem_device="0xc030" link_speed="32.0 GT/s PCIe" link_width="16">
+      <pci busid="0000:82:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1000" subsystem_device="0xc030" link_speed="32.0 GT/s PCIe" link_width="16">
+        <pci busid="0000:8e:00.0" class="0x120000" vendor="0x1002" device="0x75a8" subsystem_vendor="0x1002" subsystem_device="0x75a8" link_speed="32.0 GT/s PCIe" link_width="16">
+          <gpu dev="2" sm="256" gcn="gfx950" arch="38911" rank="2" gdr="1"/>
+        </pci>
+      </pci>
+      <pci busid="0000:c0:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1000" subsystem_device="0xc030" link_speed="32.0 GT/s PCIe" link_width="16">
+        <pci busid="0000:c9:00.0" class="0x120000" vendor="0x1002" device="0x75a8" subsystem_vendor="0x1002" subsystem_device="0x75a8" link_speed="32.0 GT/s PCIe" link_width="16">
+          <gpu dev="3" sm="256" gcn="gfx950" arch="38911" rank="3" gdr="1"/>
+        </pci>
+      </pci>
+    </pci>
+  </cpu>
+  <cpu numaid="1" arch="x86_64" vendor="AuthenticAMD" familyid="26" modelid="2">
+    <pci busid="0001:01:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1000" subsystem_device="0xc030" link_speed="32.0 GT/s PCIe" link_width="16">
+      <pci busid="0001:02:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1000" subsystem_device="0xc030" link_speed="32.0 GT/s PCIe" link_width="16">
+        <pci busid="0001:06:00.0" class="0x120000" vendor="0x1002" device="0x75a8" subsystem_vendor="0x1002" subsystem_device="0x75a8" link_speed="32.0 GT/s PCIe" link_width="16">
+          <gpu dev="4" sm="256" gcn="gfx950" arch="38911" rank="4" gdr="1"/>
+        </pci>
+      </pci>
+      <pci busid="0001:40:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1000" subsystem_device="0xc030" link_speed="32.0 GT/s PCIe" link_width="16">
+        <pci busid="0001:46:00.0" class="0x120000" vendor="0x1002" device="0x75a8" subsystem_vendor="0x1002" subsystem_device="0x75a8" link_speed="32.0 GT/s PCIe" link_width="16">
+          <gpu dev="5" sm="256" gcn="gfx950" arch="38911" rank="5" gdr="1"/>
+        </pci>
+      </pci>
+    </pci>
+    <pci busid="0001:81:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1000" subsystem_device="0xc030" link_speed="32.0 GT/s PCIe" link_width="16">
+      <pci busid="0001:82:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1000" subsystem_device="0xc030" link_speed="32.0 GT/s PCIe" link_width="16">
+        <pci busid="0001:90:00.0" class="0x120000" vendor="0x1002" device="0x75a8" subsystem_vendor="0x1002" subsystem_device="0x75a8" link_speed="32.0 GT/s PCIe" link_width="16">
+          <gpu dev="6" sm="256" gcn="gfx950" arch="38911" rank="6" gdr="1"/>
+        </pci>
+      </pci>
+      <pci busid="0001:c0:00.0" class="0x060400" vendor="0x1000" device="0xc030" subsystem_vendor="0x1000" subsystem_device="0xc030" link_speed="32.0 GT/s PCIe" link_width="16">
+        <pci busid="0001:ca:00.0" class="0x120000" vendor="0x1002" device="0x75a8" subsystem_vendor="0x1002" subsystem_device="0x75a8" link_speed="32.0 GT/s PCIe" link_width="16">
+          <gpu dev="7" sm="256" gcn="gfx950" arch="38911" rank="7" gdr="1"/>
+        </pci>
+      </pci>
+    </pci>
+  </cpu>
+</system>

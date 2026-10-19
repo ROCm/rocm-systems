@@ -278,3 +278,4 @@ target app was built with debug info; see the :ref:`note <pc-sampling-note>`.
 
   * PC sampling now only shows assembly instructions collected in our record of pc samples and not all instructions of compiled code are represented.
   * Source information requires the target app to be built with debug info (for example ``hipcc -g``). Without it, samples map to assembly only: profile mode captures no source files, the terminal table's ``source_line`` shows ``N/A``, and the ``Source`` column of the per-kernel CSV is empty.
+  * The ``Source`` column can show ``?`` instead of a line number, such as ``kernel.cpp:?``. The compiler does this when it builds one instruction from several source lines. To find the source of such an instruction, look at the source lines of the instructions it depends on. For example, a wait instruction such as ``s_waitcnt`` depends on earlier memory and LDS operations, such as ``global_*``, ``buffer_*``, ``s_load*`` or ``ds_*`` instructions.

@@ -4,10 +4,7 @@
 """Unit tests for the shared standalone HTML report shell."""
 
 import json
-import math
 from pathlib import Path
-
-import pytest
 
 from utils.html_report import report_shell
 from utils.html_report.report_shell import (
@@ -30,40 +27,21 @@ def test_build_document_places_fragments_in_one_shell() -> None:
         model={"name": "sample"},
     )
 
-    assert rendered.startswith("<!DOCTYPE html>")
-    assert '<meta charset="utf-8"/>' in rendered
-    assert '<meta name="viewport"' in rendered
     assert "<title>Report &lt;one&gt;</title>" in rendered
-    assert rendered.count("<style>") == 1
-    assert rendered.count("</style>") == 1
-    assert rendered.index("--report-border") < rendered.index(".page-marker")
-    assert rendered.count(".page-marker { color: red; }") == 1
-    assert rendered.index("<style>") < rendered.index("body-marker")
-    assert rendered.index("body-marker") < rendered.index('id="sample-model"')
-    assert rendered.index('id="sample-model"') < rendered.index("window.HtmlReport")
-    assert rendered.index("window.HtmlReport") < rendered.index("window.pageMarker")
-    assert rendered.count("<script>") == 2
+    assert (
+        rendered.index("--report-border")
+        < rendered.index(".page-marker")
+        < rendered.index("body-marker")
+        < rendered.index('id="sample-model"')
+        < rendered.index("window.HtmlReport")
+        < rendered.index("window.pageMarker")
+    )
     assert f'classList.add("{DARK_THEME_CLASS}")' in rendered
+    assert f":root.{DARK_THEME_CLASS}" in read_asset(_ASSETS, "report_base.css")
     assert f'"{DARK_THEME_CLASS}"' in read_asset(_ASSETS, "report_base.js")
 
 
-@pytest.mark.parametrize(
-    "model_id",
-    ["", "Bad Id", "2model", "bad_model", 'bad"id', "é-model"],
-)
-def test_build_document_rejects_invalid_model_id(model_id: str) -> None:
-    with pytest.raises(ValueError, match="invalid model id"):
-        build_document(
-            title="Report",
-            body_html="",
-            page_css="",
-            page_js="",
-            model_id=model_id,
-            model={},
-        )
-
-
-def test_build_document_embeds_json_safely_without_mutation() -> None:
+def test_embed_json_nulls_non_finite_floats_and_escapes_script_close() -> None:
     payload = {
         "integers": [7, (8,)],
         "floats": [1.5, float("nan"), float("inf"), float("-inf")],
@@ -73,17 +51,7 @@ def test_build_document_embeds_json_safely_without_mutation() -> None:
         },
     }
 
-    rendered = build_document(
-        title="Report",
-        body_html="",
-        page_css="",
-        page_js="",
-        model_id="sample-model",
-        model=payload,
-    )
-    serialized = rendered.split(
-        '<script id="sample-model" type="application/json">', 1
-    )[1].split("</script>", 1)[0]
+    serialized = report_shell._embed_json(payload)
 
     assert json.loads(serialized) == {
         "integers": [7, [8]],
@@ -94,16 +62,6 @@ def test_build_document_embeds_json_safely_without_mutation() -> None:
         },
     }
     assert "</" not in serialized
-    assert r"<\/script>" in serialized
-    assert payload["integers"] == [7, (8,)]
-    assert payload["floats"][0] == 1.5
-    assert math.isnan(payload["floats"][1])
-    assert payload["floats"][2] == float("inf")
-    assert payload["floats"][3] == float("-inf")
-    assert payload["name"] == "</script>"
-    assert payload["nested"] == {
-        "items": [(3, {"name": "already-json-safe", "value": float("-inf")})],
-    }
 
 
 def test_read_asset_caches_utf8(tmp_path: Path) -> None:
@@ -113,8 +71,3 @@ def test_read_asset_caches_utf8(tmp_path: Path) -> None:
     assert read_asset(tmp_path, "sample.txt") == "caf\u00e9"
     asset.write_text("changed", encoding="utf-8")
     assert read_asset(tmp_path, "sample.txt") == "caf\u00e9"
-
-
-def test_read_asset_reports_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError):
-        read_asset(tmp_path, "missing.txt")

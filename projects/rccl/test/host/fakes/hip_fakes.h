@@ -68,6 +68,7 @@ extern std::function<hipError_t(void* /*data*/,
 
 // Device model + inventory seams. Defaults succeed with plausible values.
 extern std::function<hipError_t(int* /*version*/)> g_hipRuntimeGetVersion;
+extern std::function<hipError_t(int* /*version*/)> g_hipDriverGetVersion;
 extern std::function<hipError_t(hipDeviceProp_t* /*prop*/, int /*device*/)>
     g_hipGetDeviceProperties;
 extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
@@ -78,6 +79,9 @@ extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
     g_hipHostMalloc;
 // Defaults to hipErrorInvalidValue with *ptr = nullptr, the fail-loud floor's behaviour.
 extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/)> g_hipMalloc;
+// Same floor as g_hipMalloc.
+extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/, unsigned /*flags*/)>
+    g_hipMallocManaged;
 extern std::function<hipError_t(void* /*ptr*/)> g_hipFree;
 extern std::function<hipError_t(void* /*ptr*/)> g_hipHostFree;
 extern int g_deviceCount;
@@ -87,6 +91,9 @@ extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
 extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
 // Defaults to hipErrorInvalidValue with *canAccessPeer = 0, the fail-loud floor's behaviour.
 extern std::function<hipError_t(int* /*canAccessPeer*/, int /*dev1*/, int /*dev2*/)> g_hipDeviceCanAccessPeer;
+// Both default to hipErrorInvalidValue, the fail-loud floor.
+extern std::function<hipError_t(int /*peerDevice*/, unsigned int /*flags*/)> g_hipDeviceEnablePeerAccess;
+extern std::function<hipError_t(int /*peerDevice*/)> g_hipDeviceDisablePeerAccess;
 
 // Deep-path result seams. Default to hipErrorInvalidValue so any call a test
 // hasn't opted into surfaces as an unexpected call; set to hipSuccess to enable
@@ -102,6 +109,8 @@ extern hipError_t g_hipDeviceGetPCIBusIdResult;
 // device index (drives busIdToCudaDev's per-device resolution).
 extern std::function<hipError_t(char* /*pciBusId*/, int /*len*/, int /*device*/)>
     g_hipDeviceGetPCIBusId;
+// Backs hipDeviceGetByPCIBusId. The default fails, as for a BDF this process cannot see.
+extern std::function<hipError_t(int* /*device*/, const char* /*pciBusId*/)> g_hipDeviceGetByPCIBusId;
 extern hipError_t g_hipEventCreateResult;
 extern hipError_t g_hipMemPoolResult;
 extern hipError_t g_hipStreamCreateResult;
@@ -109,6 +118,7 @@ extern hipError_t g_hipAsyncOpsResult;
 extern int g_hipWarpSize;
 // Backs hipDeviceGetAttribute(hipDeviceAttributeDirectManagedMemAccessFromHost); 1 is the MI300A answer.
 extern int g_hipDirectManagedMemAccess;
+extern int g_hipMemoryPoolsSupported;     // hipDeviceAttributeMemoryPoolsSupported (default 1)
 // A call count alone cannot tell one device copy's operands from another's, so record them per call.
 extern int g_hipMemcpyAsyncCalls;
 struct HipMemcpyAsyncRecord {
@@ -162,12 +172,21 @@ extern std::function<hipError_t(void* /*dst*/, const void* /*src*/, size_t /*byt
     g_hipMemcpyAsync;
 extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/, hipStream_t /*stream*/)>
     g_hipMemsetAsync;
+// Synchronous memset. The default really writes (std::memset) and returns
+// hipSuccess -- the allocation seams hand out std::malloc'd host memory, so a
+// buffer production zeroes is genuinely zero when a test reads it back.
+extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/)> g_hipMemset;
 
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamDestroy;
 extern std::function<hipError_t(hipStreamCaptureMode* /*mode*/)> g_hipThreadExchangeStreamCaptureMode;
 extern std::function<hipError_t(void)> g_hipGetLastError;
+// hipExtLaunchKernel (what hipExtLaunchKernelGGL calls). The default aborts: an unhooked launch is a broken test.
+extern std::function<hipError_t(const void* /*function*/, dim3 /*grid*/, dim3 /*block*/, void** /*args*/,
+                                size_t /*sharedMemBytes*/, hipStream_t /*stream*/, hipEvent_t /*startEvent*/,
+                                hipEvent_t /*stopEvent*/, int /*flags*/)>
+    g_hipExtLaunchKernel;
 
 // Event-record seam. The default delegates to g_hipAsyncOpsResult so the CE
 // proxy-progress tests keep the existing behaviour, but exposing it as a hook
@@ -210,6 +229,12 @@ extern std::function<hipError_t(hipStream_t /*stream*/, void* /*ptr*/,
                                 std::uint64_t /*value*/, unsigned int /*flags*/,
                                 std::uint64_t /*mask*/)>
     g_hipStreamWaitValue64;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+extern std::function<hipError_t(void** /*dsts*/, void** /*srcs*/, size_t* /*sizes*/, size_t /*count*/,
+                                hipMemcpyAttributes* /*attrs*/, size_t* /*attrsIdxs*/, size_t /*numAttrs*/,
+                                size_t* /*failIdx*/, hipStream_t /*stream*/)>
+    g_hipMemcpyBatchAsync;
+#endif
 
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.

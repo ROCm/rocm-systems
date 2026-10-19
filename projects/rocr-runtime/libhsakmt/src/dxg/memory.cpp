@@ -1303,3 +1303,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAmdGPUDeviceFd(HsaAMDGPUDeviceHandle DeviceHand
 {
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
+
+// Persisting GL2 cache sizing is an amdgpu DRM ioctl; no DXG/WDDM equivalent.
+HSAKMT_STATUS HSAKMTAPI hsaKmtSetPersistingCacheSize(HSAuint32 Node, HSAuint64 CacheSize)
+{
+  return HSAKMT_STATUS_NOT_SUPPORTED;
+}

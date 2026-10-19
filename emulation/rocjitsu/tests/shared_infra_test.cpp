@@ -95,6 +95,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -158,6 +159,7 @@ struct ForceScalarGuard {
 static_assert(GpuIsa<cdna3::Isa>);
 static_assert(GpuIsa<cdna5::Isa>);
 static_assert(GpuIsa<rdna4::Isa>);
+static_assert(HasAccVgpr<cdna1::Isa>);
 static_assert(HasAccVgpr<cdna2::Isa>);
 static_assert(HasAccVgpr<cdna3::Isa>);
 static_assert(HasAccVgpr<cdna4::Isa>);
@@ -205,6 +207,13 @@ static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).descriptor_vgpr_count_gra
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).descriptor_vgpr_count_granule_wave32 == 16);
 static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA5).descriptor_vgpr_count_granule_wave64 == 0);
 
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA4).vmcnt_capacity == 63);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_CDNA4).lgkmcnt_capacity == 15);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA3_5).vmcnt_capacity == 63);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA3_5).lgkmcnt_capacity == 63);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).vmcnt_capacity == 0);
+static_assert(isa_properties(ROCJITSU_CODE_ARCH_RDNA4).lgkmcnt_capacity == 0);
+
 // RDNA3/3.5 retain monolithic S_WAITCNT (GFX11 layout).
 static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
 
@@ -212,9 +221,9 @@ static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
 static_assert(rdna2::Isa::WF_SIZE_MAX == 64);
 static_assert(cdna5::Isa::WF_SIZE_MAX == 32);
 
-// CDNA1 and GFX1250 have no AccVGPRs; CDNA2/3/4 have 256.
+// CDNA1-4 have 256 AccVGPRs; GFX1250 has none.
 constexpr uint32_t kCdnaAccVgprsPerWf = cdna2::Isa::MAX_ACC_VGPRS_PER_WF;
-static_assert(cdna1::Isa::MAX_ACC_VGPRS_PER_WF == 0);
+static_assert(cdna1::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
 static_assert(kCdnaAccVgprsPerWf == 256);
 static_assert(cdna3::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
 static_assert(cdna4::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
@@ -612,6 +621,64 @@ TEST(TransposeLoadTest, Cdna4B64TrB8MatchesMfmaLaneLayout) {
   }
 }
 
+// Layouts independently described by Triton TargetFeatures (CDNA4 B4) and
+// ROCm FlyDSL CDNA4 CopyAtom (B4/B6). Exercise every bit, including packed
+// six-bit fields that cross DWORDs and both wave halves.
+TEST(TransposeLoadTest, Cdna4SubbyteTransposesEveryBitWithinSixteenLaneMatrices) {
+  for (unsigned bits : {4u, 6u}) {
+    const unsigned lane_bytes = bits * 2;
+    amdgpu::VectorMemState state(amdgpu::LOCAL_MEM);
+    state.wf_size = 64;
+    state.num_elems = lane_bytes / 4;
+    state.transpose = static_cast<uint8_t>(bits == 4 ? amdgpu::TransposeKind::CDNA4_TR_B4
+                                                     : amdgpu::TransposeKind::CDNA4_TR_B6);
+    for (unsigned input_bit = 0; input_bit < 64 * lane_bytes * 8; ++input_bit) {
+      state.response_data.assign(64 * lane_bytes, 0);
+      state.response_data[input_bit / 8] = 1u << (input_bit % 8);
+      const unsigned source_lane = input_bit / (16 * bits);
+      const unsigned source_element = (input_bit / bits) % 16;
+      const unsigned output_bit =
+          ((source_lane / 16 * 16 + source_element) * 16 + source_lane % 16) * bits +
+          input_bit % bits;
+      std::vector<uint8_t> expected(64 * lane_bytes, 0);
+      expected[output_bit / 8] = 1u << (output_bit % 8);
+      amdgpu::transpose_response(state);
+      EXPECT_EQ(state.response_data, expected) << "bits=" << bits << " input_bit=" << input_bit;
+    }
+  }
+}
+
+// Preserve the CDNA5 register/lane bit basis when adding the CDNA4 routing.
+TEST(TransposeLoadTest, Cdna5SubbyteTransposesEveryBitAcrossInterleavedGroups) {
+  for (uint32_t bits : {4u, 6u}) {
+    const uint32_t lane_bytes = bits * 2;
+    amdgpu::VectorMemState state(amdgpu::LOCAL_MEM);
+    state.wf_size = 64;
+    state.num_elems = lane_bytes / 4;
+    state.transpose = static_cast<uint8_t>(bits == 4 ? amdgpu::TransposeKind::TR_B4
+                                                     : amdgpu::TransposeKind::TR_B6);
+    for (uint32_t input_bit = 0; input_bit < 64 * lane_bytes * 8; ++input_bit) {
+      state.response_data.assign(64 * lane_bytes, 0);
+      state.response_data[input_bit / 8] = 1u << (input_bit % 8);
+      const uint32_t source_lane = input_bit / (16 * bits);
+      const uint32_t source_element = (input_bit / bits) % 16;
+      const uint32_t matrix_lane_bit = bits == 4 ? 3 : 2;
+      const uint32_t dest_lane =
+          (source_lane & 32) | (((source_lane >> matrix_lane_bit) & 1) << 4) | source_element;
+      // Remove the lane bit selecting the other sixteen-lane matrix.
+      const uint32_t low_mask = (1u << matrix_lane_bit) - 1;
+      const uint32_t dest_element =
+          (source_lane & low_mask) |
+          (((source_lane & 31) >> (matrix_lane_bit + 1)) << matrix_lane_bit);
+      const uint32_t output_bit = (dest_lane * 16 + dest_element) * bits + input_bit % bits;
+      std::vector<uint8_t> expected(64 * lane_bytes, 0);
+      expected[output_bit / 8] = 1u << (output_bit % 8);
+      amdgpu::transpose_response(state);
+      EXPECT_EQ(state.response_data, expected) << "bits=" << bits << " input_bit=" << input_bit;
+    }
+  }
+}
+
 TEST(TransposeLoadTest, Cdna5DsTrB8MatchesMatrixLayout) {
   amdgpu::VectorMemState state(amdgpu::LOCAL_MEM);
   state.wf_size = 32;
@@ -943,8 +1010,8 @@ TEST(MfmaExecTest, WmmaF8f6f4K128InputLocUsesPairAwareSubbyteLayouts) {
   auto mixed6 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/4, 6,
                                               /*mixed_subbyte=*/true);
   EXPECT_EQ(mixed6.lane, 3u);
-  EXPECT_EQ(mixed6.vgpr_offset, 3u);
-  EXPECT_EQ(mixed6.bit_offset, 0u);
+  EXPECT_EQ(mixed6.vgpr_offset, 0u);
+  EXPECT_EQ(mixed6.bit_offset, 24u);
 
   auto mixed4 = amdgpu::wmma_f8f6f4_input_loc(16, 128, /*i=*/3, /*k=*/31, 4,
                                               /*mixed_subbyte=*/true);
@@ -975,7 +1042,7 @@ TEST(MfmaExecTest, WmmaF8f6f4K128InputLocUsesPairAwareSubbyteLayouts) {
             3u);
 }
 
-TEST(MfmaExecTest, WmmaF8f6f4K128InputLocMatchesManualLayoutsExhaustively) {
+TEST(MfmaExecTest, WmmaF8f6f4K128InputLocMatchesOperandLayoutsExhaustively) {
   for (uint32_t data_bits : {4u, 6u, 8u}) {
     for (uint32_t index = 0; index < 16; ++index) {
       for (uint32_t k = 0; k < 128; ++k) {
@@ -1010,9 +1077,9 @@ TEST(MfmaExecTest, WmmaF8f6f4K128InputLocMatchesManualLayoutsExhaustively) {
         SCOPED_TRACE(::testing::Message()
                      << "mixed data_bits=" << data_bits << " index=" << index << " k=" << k);
         const uint32_t expected_lane = index + 16u * ((k >> 5u) & 1u);
-        const uint32_t expected_slot = 32u * ((k >> 6u) & 1u) + 16u * ((k >> 2u) & 1u) +
-                                       8u * ((k >> 4u) & 1u) + 4u * ((k >> 3u) & 1u) +
-                                       2u * ((k >> 1u) & 1u) + (k & 1u);
+        // Mixed 8-bit/sub-byte operands pair contiguous groups of 16/32 K
+        // values. The decoded one-hot execution test checks the pairing.
+        const uint32_t expected_slot = 32u * (k / 64u) + (k % 32u);
         const uint32_t expected_bit = expected_slot * data_bits;
         const auto actual =
             amdgpu::wmma_f8f6f4_input_loc(16, 128, index, k, data_bits, /*mixed_subbyte=*/true);
@@ -2694,6 +2761,169 @@ TEST_P(CuFactoryTest, CreatesSuccessfully) {
   EXPECT_EQ(cu->arch(), arch);
 }
 
+TEST_P(CuFactoryTest, ActivityQueriesTrackOverlappingPauseReasonsAndSlotReuse) {
+  amdgpu::GpuMemory memory("activity_memory");
+  amdgpu::L2Cache l2("activity_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = GetParam();
+  config.num_wf_slots = 2;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("activity_cu", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  EXPECT_FALSE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  auto launch = [&] { return cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf); };
+  auto *first = launch();
+  ASSERT_NE(first, nullptr);
+  EXPECT_TRUE(cu->has_active_wfs());
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  first->set_debug_halted(true);
+  EXPECT_TRUE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  auto *second = launch();
+  ASSERT_NE(second, nullptr);
+  EXPECT_TRUE(cu->has_runnable_wfs());
+
+  // Clearing one pause reason cannot make a wave runnable while another holds
+  // it. Repeated assignments must not change the aggregate a second time.
+  for (uint32_t mask = 0; mask < 8; ++mask) {
+    SCOPED_TRACE(mask);
+    for (unsigned repeat = 0; repeat < 2; ++repeat) {
+      second->set_debug_halted(mask & 1);
+      second->set_debug_suspended(mask & 2);
+      second->set_runtime_suspended(mask & 4);
+      EXPECT_TRUE(cu->has_active_wfs());
+      EXPECT_EQ(cu->has_runnable_wfs(), mask == 0);
+    }
+  }
+  second->set_debug_halted(false);
+  second->set_debug_suspended(false);
+  second->set_runtime_suspended(false);
+  const auto saved = second->debug_stop_state();
+  second->debug_trap(1);
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  second->restore_debug_stop_state(saved);
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  second->set_state(amdgpu::WfState::VM_RETRY);
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  second->set_state(amdgpu::WfState::WAITCNT);
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  second->halt();
+  EXPECT_TRUE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  first->halt();
+  EXPECT_FALSE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+  first = launch();
+  ASSERT_NE(first, nullptr);
+  EXPECT_TRUE(cu->has_active_wfs());
+  EXPECT_TRUE(cu->has_runnable_wfs());
+  first->halt();
+  EXPECT_FALSE(cu->has_active_wfs());
+  EXPECT_FALSE(cu->has_runnable_wfs());
+}
+
+TEST_P(CuFactoryTest, WorkgroupAdmissionTracksResidentSlotsAcrossFailureAndReuse) {
+  amdgpu::GpuMemory memory("admission_memory");
+  amdgpu::L2Cache l2("admission_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = GetParam();
+  config.num_wf_slots = 4;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("admission_cu", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  const auto capacity = [&](uint32_t free) {
+    for (uint32_t count = 0; count <= config.num_wf_slots + 1; ++count) {
+      EXPECT_EQ(cu->can_accept_workgroup(count), count <= free) << count;
+    }
+  };
+  capacity(4);
+  // Rejected creation, SGPR allocation, and VGPR allocation leave an idle slot.
+  EXPECT_EQ(cu->dispatch_wf_at(1, 0, 0, 106, 32, 1), nullptr);
+  EXPECT_EQ(cu->dispatch_wf_at(1, 0, 0, 0, 32), nullptr);
+  EXPECT_EQ(cu->dispatch_wf_at(1, 0, 0, 106, 0), nullptr);
+  capacity(4);
+  // A restored nonzero slot can coexist with untouched holes.
+  auto *last = cu->dispatch_wf_at(3, 7, 0, 106, 32);
+  ASSERT_NE(last, nullptr);
+  last->set_dispatch_id(11);
+  capacity(3);
+  for (const auto state : {amdgpu::WfState::WAITCNT, amdgpu::WfState::VM_RETRY,
+                           amdgpu::WfState::ENDING, amdgpu::WfState::RUNNING}) {
+    last->set_state(state);
+    capacity(3);
+  }
+  last->set_debug_halted(true);
+  last->set_debug_suspended(true);
+  last->set_runtime_suspended(true);
+  capacity(3);
+  auto *first = cu->dispatch_wf(8, 0, 106, 32);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->wf_id(), 0u);
+  first->set_dispatch_id(12);
+  capacity(2);
+  cu->abort_workgroup(11, 7);
+  capacity(3);
+  cu->free_wavefront_resources(*last);
+  capacity(3);
+  cu->abort_dispatch(12);
+  capacity(4);
+  for (uint32_t slot = 0; slot < config.num_wf_slots; ++slot) {
+    auto *wave = cu->dispatch_wf(20 + slot, 0, 106, 32);
+    ASSERT_NE(wave, nullptr);
+    EXPECT_EQ(wave->wf_id(), slot);
+    capacity(config.num_wf_slots - slot - 1);
+  }
+  EXPECT_EQ(cu->dispatch_wf(30, 0, 106, 32), nullptr);
+  for (uint32_t slot = 0; slot < config.num_wf_slots; ++slot) {
+    cu->wf(slot)->halt();
+    capacity(slot + 1);
+  }
+  EXPECT_FALSE(cu->can_accept_workgroup(1, 64 * 1024 + 1));
+  EXPECT_TRUE(cu->can_accept_workgroup(4, 64 * 1024));
+}
+
+TEST_P(CuFactoryTest, WorkgroupAdmissionRetainsScratchPrefixAndScoreboardBounds) {
+  amdgpu::GpuMemory memory("scratch_admission_memory");
+  amdgpu::L2Cache l2("scratch_admission_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = GetParam();
+  config.num_wf_slots = 4;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("scratch_admission_cu", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  cu->set_scratch_slots_per_cu(1);
+  EXPECT_TRUE(cu->can_accept_workgroup(4));
+  EXPECT_TRUE(cu->can_accept_workgroup(1, 0, 1));
+  EXPECT_FALSE(cu->can_accept_workgroup(2, 0, 1));
+  auto *first = cu->dispatch_wf(0, 0, 106, 32);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->wf_id(), 0u);
+  EXPECT_TRUE(cu->can_accept_workgroup(3));
+  EXPECT_FALSE(cu->can_accept_workgroup(1, 0, 1));
+  first->halt();
+  // Even UINT32_MAX is an exclusive physical scoreboard bound.
+  cu->set_shader_engine_location(0, UINT32_MAX - 1);
+  EXPECT_TRUE(cu->can_accept_workgroup(1));
+  EXPECT_FALSE(cu->can_accept_workgroup(2));
+  first = cu->dispatch_wf(1, 0, 106, 32);
+  ASSERT_NE(first, nullptr);
+  EXPECT_EQ(first->wf_id(), 0u);
+  EXPECT_FALSE(cu->can_accept_workgroup(1));
+  EXPECT_EQ(cu->dispatch_wf(2, 0, 106, 32), nullptr);
+  first->halt();
+  cu->set_shader_engine_location(0, UINT32_MAX);
+  EXPECT_FALSE(cu->can_accept_workgroup(1));
+  cu->set_shader_engine_location(0, 0);
+  EXPECT_TRUE(cu->can_accept_workgroup(4));
+}
+
 TEST_P(CuFactoryTest, LdsContentsSurviveWorkgroupAllocationReuse) {
   amdgpu::GpuMemory mem("test_mem");
   amdgpu::L2Cache l2("test_l2");
@@ -3017,15 +3247,13 @@ TEST(DppPermuteTest, Dpp8SelectsWithinGroupsOfEight) {
 }
 
 TEST(DppPermuteTest, True16SourceByteMaskFollowsOpSel) {
-  using namespace amdgpu::dpp;
-
-  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0000, /*source_index=*/0),
+  EXPECT_EQ(rocjitsu::amdgpu::true16_source_byte_mask(/*opsel=*/0b0000, /*source_index=*/0),
             ExecutionPlugin::kLowHalfByteMask);
-  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0001, /*source_index=*/0),
+  EXPECT_EQ(rocjitsu::amdgpu::true16_source_byte_mask(/*opsel=*/0b0001, /*source_index=*/0),
             ExecutionPlugin::kHighHalfByteMask);
-  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0000, /*source_index=*/1),
+  EXPECT_EQ(rocjitsu::amdgpu::true16_source_byte_mask(/*opsel=*/0b0000, /*source_index=*/1),
             ExecutionPlugin::kLowHalfByteMask);
-  EXPECT_EQ(true16_source_byte_mask(/*opsel=*/0b0010, /*source_index=*/1),
+  EXPECT_EQ(rocjitsu::amdgpu::true16_source_byte_mask(/*opsel=*/0b0010, /*source_index=*/1),
             ExecutionPlugin::kHighHalfByteMask);
 }
 
@@ -8124,5 +8352,47 @@ TEST(AluExceptionTest, OutputModifierDoesNotFabricateInexact) {
   EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f) & kInexact, 0u);
   EXPECT_EQ(amdgpu::classify_mul_f32(nan, 3.0f, 2.0f) & kInexact, 0u);
 }
+
+TEST(AluExceptionTest, MultiplyExactProductCoversF32RangeAndRounding) {
+  struct Case {
+    uint32_t lhs;
+    uint32_t rhs;
+    float scale;
+    uint32_t causes;
+  };
+  constexpr Case cases[] = {
+      {0x3f800000, 0x40000000, 4.0f, 0},
+      {0x3f800001, 0x3f800001, 1.0f, 1u << 5},
+      {0x00800000, 0x3f800000, 0.5f, 1u << 4},
+      {0x00800000, 0x00800000, 1.0f, (1u << 4) | (1u << 5)},
+      {0x00000001, 0x3f800000, 1.0f, (1u << 1) | (1u << 4)},
+      {0x00000001, 0x7f000000, 4.0f, 1u << 1},
+  };
+  for (uint32_t round = 0; round < 4; ++round) {
+    const amdgpu::fp_mode::ScopedEnvironment environment(round);
+    for (const auto &sample : cases) {
+      SCOPED_TRACE(testing::Message() << "round " << round << " lhs " << sample.lhs << " rhs "
+                                      << sample.rhs << " scale " << sample.scale);
+      volatile float lhs = std::bit_cast<float>(sample.lhs);
+      volatile float rhs = std::bit_cast<float>(sample.rhs);
+      EXPECT_EQ(amdgpu::classify_mul_f32(lhs, rhs, sample.scale), sample.causes);
+    }
+    volatile float largest = std::bit_cast<float>(0x7f7fffffu);
+    // Directed rounding toward a finite result still reports INEXACT.
+    EXPECT_EQ(amdgpu::classify_mul_f32(largest, 2.0f), (1u << 5) | (round < 2 ? 1u << 3 : 0u));
+  }
+}
+
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+TEST(AluExceptionTest, HostDazPreservesExactSubnormalOutputClassification) {
+  const amdgpu::fp_mode::ScopedEnvironment environment(0);
+  _mm_setcsr(_mm_getcsr() | (1u << 6));
+  volatile float lhs = std::bit_cast<float>(0x00800000u);
+  volatile float rhs = 1.0f;
+  // OMOD produces an exact subnormal. Widening that result through a host
+  // conversion would flush it and falsely report INEXACT.
+  EXPECT_EQ(amdgpu::classify_mul_f32(lhs, rhs, 0.5f), 1u << 4);
+}
+#endif
 
 } // namespace

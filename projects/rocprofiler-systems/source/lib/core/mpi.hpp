@@ -237,7 +237,7 @@ check_error([[maybe_unused]] const char* _func, [[maybe_unused]] int err_code,
             [[maybe_unused]] comm_t _comm = mpi::comm_world_v)
 {
 #if defined(ROCPROFSYS_USE_MPI)
-    bool _success = (err_code == MPI_SUCCESS);
+    bool const _success = (err_code == MPI_SUCCESS);
     if(!_success && !mpi::quiet())
     {
         int  len = 0;
@@ -328,9 +328,9 @@ initialize([[maybe_unused]] int& argc, [[maybe_unused]] char**& argv)
         bool _success_v = false;
         if(use_mpi_thread())
         {
-            auto _init = [&argc, &argv](int itr, const std::string& _type) {
-                int  _actual = -1;
-                auto ret     = MPI_Init_thread(&argc, &argv, itr, &_actual);
+            auto const _init = [&argc, &argv](int itr, const std::string& _type) {
+                int        _actual = -1;
+                auto const ret     = MPI_Init_thread(&argc, &argv, itr, &_actual);
                 if(_actual != itr)
                 {
                     LOG_WARNING("MPI_Init_thread does not support: {}", _type);
@@ -342,7 +342,7 @@ initialize([[maybe_unused]] int& argc, [[maybe_unused]] char**& argv)
             // int _provided = 0;
             // MPI_Query_thread(&_provided);
 
-            auto _mpi_type = use_mpi_thread_type();
+            auto const _mpi_type = use_mpi_thread_type();
             if(_mpi_type == "single")
             {
                 _success_v = _init(single, _mpi_type);
@@ -408,7 +408,7 @@ rank(comm_t comm)
         // application calls MPI_Finalize() directly
         static communicator_map_t<std::int32_t>* _instance =
             new communicator_map_t<std::int32_t>();
-        if(_instance->find(comm) == _instance->end())
+        if(!_instance->contains(comm))
         {
             PMPI_Comm_rank(comm, &_rank);
             (*_instance)[comm] = _rank;
@@ -431,7 +431,7 @@ size(comm_t comm)
         // application calls MPI_Finalize() directly
         static communicator_map_t<std::int32_t>* _instance =
             new communicator_map_t<std::int32_t>();
-        if(_instance->find(comm) == _instance->end())
+        if(!_instance->contains(comm))
         {
             PMPI_Comm_size(comm, &_size);
             (*_instance)[comm] = _size;
@@ -550,7 +550,7 @@ get_node_comm()
     {
         return comm_world_v;
     }
-    auto _get_node_comm = []() {
+    auto const _get_node_comm = []() {
         comm_t local_comm;
         comm_split_type(mpi::comm_world_v, mpi::comm_type_shared_v, 0, mpi::info_null_v,
                         &local_comm);
@@ -611,7 +611,7 @@ send([[maybe_unused]] const std::string& str, [[maybe_unused]] int dest,
         PMPI_Send(&len, 1, MPI_UNSIGNED_LONG_LONG, dest, tag, comm));
     if(len != 0)
     {
-        ulli_t _cmax = std::numeric_limits<int>::max();
+        ulli_t const _cmax = std::numeric_limits<int>::max();
         if(len <= _cmax)
         {
             ROCPROFSYS_MPI_ERROR_CHECK(
@@ -619,9 +619,9 @@ send([[maybe_unused]] const std::string& str, [[maybe_unused]] int dest,
         }
         else
         {
-            auto _len = str.length() / sizeof(long);
-            auto _rem = str.length() % sizeof(long);
-            auto _str = str;
+            auto       _len = str.length() / sizeof(long);
+            auto const _rem = str.length() % sizeof(long);
+            auto       _str = str;
             if(_rem > 0)
             {
                 _str.resize(_str.length() + _rem, '\0');
@@ -648,7 +648,7 @@ recv([[maybe_unused]] std::string& str, [[maybe_unused]] int src,
         PMPI_Recv(&len, 1, MPI_UNSIGNED_LONG_LONG, src, tag, comm, &s));
     if(len != 0)
     {
-        ulli_t _cmax = std::numeric_limits<int>::max();
+        ulli_t const _cmax = std::numeric_limits<int>::max();
         if(len <= _cmax)
         {
             std::vector<char> tmp(len);
@@ -658,16 +658,16 @@ recv([[maybe_unused]] std::string& str, [[maybe_unused]] int src,
         }
         else
         {
-            auto _len = len / sizeof(long);
-            auto _rem = len % sizeof(long);
+            auto       _len = len / sizeof(long);
+            auto const _rem = len % sizeof(long);
             if(_rem > 0) _len += 1;
             std::vector<long> tmp(_len);
             ROCPROFSYS_MPI_ERROR_CHECK(
                 PMPI_Recv(tmp.data(), _len, MPI_LONG, src, tag, comm, &s));
             std::vector<char> chars  = {};
-            auto              _ratio = sizeof(long) / sizeof(char);
+            auto const        _ratio = sizeof(long) / sizeof(char);
             chars.reserve(_len * _ratio);
-            for(auto& itr : tmp)
+            for(auto const& itr : tmp)
             {
                 for(size_t i = 0; i < _ratio; ++i)
                 {

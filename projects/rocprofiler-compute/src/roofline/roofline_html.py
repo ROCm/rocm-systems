@@ -15,6 +15,7 @@ from roofline.roofline_hover import KERNEL_NAME_FONT_FAMILY
 from utils.html_report.report_shell import build_document, read_asset
 
 ALL_PEAKS_VALUE = "all"
+LIMITING_PEAK_VALUE = "limiting"
 
 ROOF_EXTRAP_MIN_AI = 1e-150
 ROOF_EXTRAP_MAX_AI = 1e150
@@ -56,6 +57,7 @@ class RooflineViewModel:
             "frame": self.frame,
             "roofExtremeMaxAi": ROOF_EXTRAP_MAX_AI,
             "allPeaksValue": ALL_PEAKS_VALUE,
+            "limitingPeakValue": LIMITING_PEAK_VALUE,
             "kernelNameFontFamily": KERNEL_NAME_FONT_FAMILY,
         }
 
@@ -84,7 +86,9 @@ def build_interactive_document(
         PEAK_TITLE=html.escape(
             "Plot each kernel at its arithmetic intensity for this memory level, "
             "matching the (AI axis) marker in the Bandwidth rooflines panel. "
-            "All peaks plots every level at once."
+            "'All peaks' plots every level at once. "
+            "'Limited by' plots the limiting memory-level point, or the "
+            "leftmost point when no memory-level limiter is available."
         ),
         RUNTIME_TITLE=html.escape(
             "Show only the heaviest kernels whose combined percent of GPU "
@@ -96,8 +100,12 @@ def build_interactive_document(
     return build_document(
         title=title,
         body_html=body_html,
-        page_css=read_asset(_ASSETS_DIR, "roofline_plot.css"),
-        page_js=read_asset(_ASSETS_DIR, "roofline_plot.js"),
+        page_css=read_asset(_ASSETS_DIR, "roofline_plot.css")
+        + "\n"
+        + read_asset(_ASSETS_DIR, "roofline_kernel_list_tooltip.css"),
+        page_js=read_asset(_ASSETS_DIR, "roofline_kernel_list_tooltip.js")
+        + "\n"
+        + read_asset(_ASSETS_DIR, "roofline_plot.js"),
         model_id="roofline-model",
         model=view_model.to_payload(),
     )

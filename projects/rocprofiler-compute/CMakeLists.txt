@@ -612,24 +612,24 @@ add_test(
 
 # Memory chart tests — no GPU required
 add_test(
-    NAME test_mem_chart_gfx11
+    NAME test_memory_chart_loader
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx11.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_loader.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_loader.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_mem_chart_gfx9
+    NAME test_memory_chart_units
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx9.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx9.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_units.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_units.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_mem_chart_gfx1250
+    NAME test_memory_chart_render
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx1250.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx1250.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_render.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_render.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -796,6 +796,14 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_engine.xml
         ${COV_OPTION} tests/unit/membw_analysis/test_membw_engine.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_membw_summary
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_membw_summary.xml
+        ${COV_OPTION} tests/unit/membw_analysis/test_membw_summary.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1037,6 +1045,23 @@ if(TARGET test-compression)
 endif()
 
 # -----------------------------------
+# CSV formatter Tests
+# -----------------------------------
+
+if(TARGET test-csv)
+    if(TEST_FROM_INSTALL)
+        set(_csv_test_cmd tests/test-csv)
+    else()
+        set(_csv_test_cmd $<TARGET_FILE:test-csv>)
+    endif()
+    add_test(NAME test-csv COMMAND ${_csv_test_cmd})
+    sanitizer_runtime_env(_san_env)
+    if(_san_env)
+        set_tests_properties(test-csv PROPERTIES ENVIRONMENT "${_san_env}")
+    endif()
+endif()
+
+# -----------------------------------
 # Generate coverage tests
 # -----------------------------------
 
@@ -1080,10 +1105,11 @@ if(${ENABLE_COVERAGE})
         test_analysis_cli
         test_pattern_matching
         test_list_metrics_cli
-        test_mem_chart_gfx9
-        test_mem_chart_gfx11
-        test_mem_chart_gfx1250
+        test_memory_chart_loader
+        test_memory_chart_units
+        test_memory_chart_render
         test_membw_engine
+        test_membw_summary
         test_membw_guidance
         test_membw_metric_extract
         test_membw_pipeline
@@ -1106,6 +1132,7 @@ if(${ENABLE_COVERAGE})
         test_pc_sampling_analysis
         test_pc_sampling_analyze_cli
         test_pc_sampling_profile
+        test_per_kernel_isa_export
         test_metrics_common
         test_metric_validation
         test_native_tool_finder
@@ -1219,6 +1246,13 @@ install(
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE
 )
+# src/memory_chart (renderer and its JSON layouts)
+install(
+    DIRECTORY src/memory_chart
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
 # src/membw_analysis
 install(
     DIRECTORY src/membw_analysis
@@ -1291,6 +1325,26 @@ install(
     PATTERN "*.py"
     PATTERN "Makefile"
     PATTERN "workloads" EXCLUDE
+)
+# Agent Skills
+install(
+    DIRECTORY skills/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/skills
+    COMPONENT main
+    USE_SOURCE_PERMISSIONS
+)
+# Docs the skills link to
+install(
+    DIRECTORY docs/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/docs
+    COMPONENT main
+    FILES_MATCHING
+    PATTERN "*.rst"
+    PATTERN "*.md"
+    PATTERN "archive" EXCLUDE
+    PATTERN "design" EXCLUDE
+    PATTERN "sphinx" EXCLUDE
+    PATTERN "_templates" EXCLUDE
 )
 # modulefile
 install(

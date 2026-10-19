@@ -40,7 +40,7 @@ struct counter_track
 
     static ::perfetto::CounterTrack at(size_t _idx, size_t _n)
     {
-        std::lock_guard<std::mutex> _lk{ get_mutex() };
+        std::lock_guard<std::mutex> const _lk{ get_mutex() };
         return get_data().second.at(_idx).at(_n);
     }
 
@@ -61,8 +61,8 @@ template <typename Tp>
 auto
 counter_track<Tp>::exists(size_t _idx, std::int64_t _n)
 {
-    std::lock_guard<std::mutex> _lk{ get_mutex() };
-    bool                        _v = get_data().second.count(_idx) != 0;
+    std::lock_guard<std::mutex> const _lk{ get_mutex() };
+    bool const                        _v = get_data().second.contains(_idx);
     if(_n < 0 || !_v)
     {
         return _v;
@@ -75,7 +75,7 @@ size_t
 counter_track<Tp>::size(size_t _idx)
 {
     std::lock_guard<std::mutex> _lk{ get_mutex() };
-    bool                        _v = get_data().second.count(_idx) != 0;
+    bool                        _v = get_data().second.contains(_idx);
     if(!_v)
     {
         return 0;
@@ -88,11 +88,11 @@ auto
 counter_track<Tp>::emplace(size_t _idx, const std::string& _v, const char* _units,
                            const char* _category, std::int64_t _mult, bool _incr)
 {
-    std::lock_guard<std::mutex> _lk{ get_mutex() };
-    auto&                       _name_data  = get_data().first[_idx];
-    auto&                       _track_data = get_data().second[_idx];
+    std::lock_guard<std::mutex> const _lk{ get_mutex() };
+    auto&                             _name_data  = get_data().first[_idx];
+    auto&                             _track_data = get_data().second[_idx];
 
-    auto        _index     = _track_data.size();
+    auto const  _index     = _track_data.size();
     auto&       _name      = _name_data.emplace_back(std::make_unique<std::string>(_v));
     const char* _name_cstr = _name->c_str();
     const char* _unit_name = nullptr;

@@ -47,6 +47,8 @@
     #include <link.h>
 #endif
 
+#include <cstring>
+
 #if defined(__linux__)
     #include <amdgpu_drm.h>
 #endif
@@ -95,17 +97,16 @@ static_assert(
 namespace {
 
 __forceinline HsaMemoryMapFlags mem_perm(hsa_access_permission_t perm) {
-  switch (perm) {
-  case HSA_ACCESS_PERMISSION_RO:
-    return HSA_MEMORY_ACCESS_RO;
-  case HSA_ACCESS_PERMISSION_WO:
-    return HSA_MEMORY_ACCESS_WO;
-  case HSA_ACCESS_PERMISSION_RW:
-    return HSA_MEMORY_ACCESS_RW;
-  case HSA_ACCESS_PERMISSION_NONE:
-  default:
-    return HSA_MEMORY_ACCESS_NONE;
-  }
+  unsigned flags = HSA_MEMORY_ACCESS_NONE;
+
+  if (perm & HSA_ACCESS_PERMISSION_RO)
+    flags |= HSA_MEMORY_ACCESS_RO;
+  if (perm & HSA_ACCESS_PERMISSION_WO)
+    flags |= HSA_MEMORY_ACCESS_WO;
+  if (perm & HSA_ACCESS_PERMISSION_EX)
+    flags |= HSA_MEMORY_ACCESS_EX;
+
+  return static_cast<HsaMemoryMapFlags>(flags);
 }
 
 } // namespace
@@ -337,8 +338,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
              : kmt_alloc_flags.ui32.Contiguous);
   }
 
-  //// Only allow using the suballocator for ordinary VRAM.
-  if (m_region.IsLocalMemory() && !kmt_alloc_flags.ui32.NoAddress) {
+  if (!kmt_alloc_flags.ui32.NoAddress) {
     bool subAllocEnabled =
         !core::Runtime::runtime_singleton_->flag().disable_fragment_alloc();
     // Avoid modifying executable or queue allocations.
@@ -348,6 +348,17 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
 
     if (useSubAlloc) {
       mem = m_region.fragment_alloc(size);
+
+      // Suballocated fragments may hold stale data from previously freed
+      // fragments, unlike dedicated BOs which are backed by fresh (zeroed)
+      // kernel pages. Zero system-memory fragments so callers that rely on a
+      // freshly allocated buffer being zero-initialized (e.g. an hipHostMalloc
+      // buffer used as an atomic accumulator) behave as they do with a
+      // dedicated BO. Local (device) memory is not host-writable here and is
+      // left untouched (matching pre-existing VRAM suballocation behavior).
+      if (m_region.IsSystem()) {
+        memset(mem, 0, size);
+      }
 
       if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
           HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
@@ -430,7 +441,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     // On Windows/DXG, allow allocations to succeed even if MakeResident
     // is best-effort; WDDM will demand-page on GPU access.
     const bool is_windxg =
-        core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
+        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
     const bool require_pinning =
         !is_windxg &&
         (!m_region.full_profile() || m_region.IsLocalMemory() ||
@@ -459,6 +470,17 @@ hsa_status_t KfdDriver::FreeMemory(const core::DriverMemoryHandle& handle) {
   return (HSAKMT_CALL(hsaKmtFreeMemory(mem, handle.size)) == HSAKMT_STATUS_SUCCESS)
       ? HSA_STATUS_SUCCESS
       : HSA_STATUS_ERROR;
+}
+
+hsa_status_t KfdDriver::QueryPointerInfo(const void* ptr, const core::MemoryRegion* /*region*/,
+                                         core::MemoryRegion::AllocateFlags /*alloc_flags*/,
+                                         const core::DriverMemoryHandle* /*handle*/,
+                                         HsaPointerInfo* info) const {
+  if (HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, info)) != HSAKMT_STATUS_SUCCESS ||
+      info->Type == HSA_POINTER_UNKNOWN) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::CreateQueue(uint32_t node_id, HSA_QUEUE_TYPE type, uint32_t queue_pct,
@@ -658,6 +680,23 @@ hsa_status_t KfdDriver::ImportMemoryHandle(const core::Agent& agent, core::Drive
   default:
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
+}
+
+hsa_status_t KfdDriver::QueryDmaBufInfo(int dmabuf_fd, core::DmaBufInfo* info) const {
+  if (dmabuf_fd < 0 || info == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  // The symbol is loaded optionally, so an older thunk leaves it null.
+  if (HSAKMT_CALL(hsaKmtQueryDmaBufInfo) == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  HsaDmaBufInfo kmt_info = {};
+  if (HSAKMT_CALL(hsaKmtQueryDmaBufInfo)(dmabuf_fd, &kmt_info) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  info->size = kmt_info.Size;
+  info->node_id = kmt_info.GpuId;
+  info->is_device_memory = kmt_info.IsDeviceMemory != 0;
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t KfdDriver::Map(const core::DriverMemoryHandle& handle, void* mem, size_t offset, size_t size,
@@ -976,7 +1015,16 @@ hsa_status_t KfdDriver::GetDeviceFd(uint32_t node_id, int *fd) const {
 hsa_status_t KfdDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const {
   assert(clock_counter);
 
-  if (HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter)) != HSAKMT_STATUS_SUCCESS)
+  const bool precise_timestamps =
+      core::Runtime::runtime_singleton_ != nullptr &&
+      core::Runtime::runtime_singleton_->flag().enable_high_precision_timestamps() &&
+      core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(
+          hsaKmtGetClockCountersPrecise) != nullptr;
+
+  HSAKMT_STATUS err = precise_timestamps
+      ? HSAKMT_CALL(hsaKmtGetClockCountersPrecise(node_id, clock_counter))
+      : HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter));
+  if (err != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }

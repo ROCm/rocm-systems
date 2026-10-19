@@ -22,6 +22,7 @@ on:
       - '!**/.spellcheck.local.yaml'
       - '!**/.wordlist.txt'
       - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/skills/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
@@ -41,6 +42,7 @@ on:
       - '!**/.spellcheck.local.yaml'
       - '!**/.wordlist.txt'
       - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/skills/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
@@ -291,7 +293,6 @@ jobs:
             -DROCPROFSYS_BUILD_TESTING=OFF \
             -DROCPROFSYS_USE_PYTHON=ON \
             -DROCPROFSYS_BUILD_DYNINST=ON \
-            -DROCPROFSYS_BUILD_TBB=ON \
             -DROCPROFSYS_BUILD_ELFUTILS=ON \
             -DROCPROFSYS_BUILD_LIBIBERTY=ON \
             -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
