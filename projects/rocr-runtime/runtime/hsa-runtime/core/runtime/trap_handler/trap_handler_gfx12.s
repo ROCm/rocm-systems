@@ -41,6 +41,16 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 /// Trap Handler V2 source
+
+// Trap-during-VOP3PX instruction fixup. Scoped to gfx1250 revision 0; the
+// build for later revisions passes -defsym,HAVE_VOP3PX_FIXUP=0 to drop it.
+// Mirrors HAVE_VOP3PX_FIXUP in the first-level trap handler.
+// The S_SET_VGPR_MSB fixup below is NOT scoped - it applies to every
+// revision (KFD HAVE_VGPR_MSB_FIXUP).
+.ifndef HAVE_VOP3PX_FIXUP
+  .set HAVE_VOP3PX_FIXUP                           , 1
+.endif
+
 .set DOORBELL_ID_SIZE                              , 10
 .set DOORBELL_ID_MASK                              , ((1 << DOORBELL_ID_SIZE) - 1)
 .set EC_QUEUE_WAVE_ABORT_M0                        , (1 << (DOORBELL_ID_SIZE + 0))
@@ -1267,10 +1277,12 @@
  // Not VOP1, VOP2, VOPC, VOP3, VOP3SD, VOPD, or VOPD3.
  // Check if we are in the middle of VOP3PX.
   s_and_b32         ttmp13, ttmp14, 0xffff0000              // Bits 31:16
+.if HAVE_VOP3PX_FIXUP
   s_cmp_eq_u32      ttmp13, 0xcc330000                      // If 31:16 = 0xcc33, this is 8 bytes past VOP3PX
   s_cbranch_scc1    .fixup_vop3px_middle
   s_cmp_eq_u32      ttmp13, 0xcc880000                      // If 31:16 = 0xcc88, this is 8 bytes past VOP3PX
   s_cbranch_scc1    .fixup_vop3px_middle
+.endif
  // Might be in VOP3P, but we must ensure we are not VOP3PX2
   s_and_b32         ttmp13, ttmp14, 0xffff0000              // Bits 31:16
   s_cmp_eq_u32      ttmp13, 0xcc350000                      // If 31:16 = 0xcc35, this is VOP3PX2
@@ -1331,10 +1343,12 @@
   s_wait_kmcnt      0                                       // Wait for PC+2 and PC+3 to arrive in ttmp2 and ttmp3
   s_mov_b32         ttmp15, ttmp3                           // Move possible S_SET_VGPR_MSB into ttmp15
   s_branch          .fixup_one_dword                        // Go to common logic that checks if it is S_SET_VGPR_MSB
+.if HAVE_VOP3PX_FIXUP
 .fixup_vop3px_middle:
   s_sub_co_u32      ttmp0, ttmp0, 8                         // Rewind PC 8 bytes to beginning of instruction
   s_sub_co_ci_u32   ttmp1, ttmp1, 0
   s_branch          .fixup_two_dword                        // 2 DWORD inst (2nd half of a 4 DWORD inst)
+.endif
 .fixup_done:
 
   s_wait_idle                                               // Required by SPG before reading/writing XNACK_STATE_PRIV

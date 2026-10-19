@@ -46,9 +46,14 @@ cmake_minimum_required ( VERSION 3.7 )
 find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 find_package(LLVM REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 
-set (TARGET_DEVS "gfx900;gfx942;gfx950;gfx1010;gfx1030;gfx1100;gfx1200;gfx1250")
-set (POSTFIX "9;942;950;1010;10;11;12;1250")
-set (SOURCE_SUFFIX ";;;;;;_gfx12;_gfx12")
+# gfx1250 is built twice from the same source: the default build keeps the
+# trap-during-VOP3PX instruction fixup (revision 0), the _rev1 build drops it
+# via -defsym.  GpuAgent::AssembleShader picks between them using the ASIC
+# revision reported by KFD.
+set (TARGET_DEVS "gfx900;gfx942;gfx950;gfx1010;gfx1030;gfx1100;gfx1200;gfx1250;gfx1250")
+set (POSTFIX "9;942;950;1010;10;11;12;1250;1250_rev1")
+set (SOURCE_SUFFIX ";;;;;;_gfx12;_gfx12;_gfx12")
+set (ASM_DEFSYM ";;;;;;;;HAVE_VOP3PX_FIXUP=0")
 
 if(${CMAKE_VERBOSE_MAKEFILE})
   get_property(clang_path TARGET clang PROPERTY LOCATION)
@@ -61,12 +66,20 @@ endif()
 ##==========================================
 ##  Add custom command to generate a kernel code object file
 ##==========================================
-function(gen_kernel_bc TARGET_ID INPUT_FILE OUTPUT_FILE)
+function(gen_kernel_bc TARGET_ID INPUT_FILE OUTPUT_FILE DEFSYM)
 
   set(CODE_OBJECT "${OUTPUT_FILE}.hsaco")
 
+  ## Assembler symbol overrides, e.g. HAVE_VOP3PX_FIXUP=0.  The source provides
+  ## a default for every such symbol under .ifndef, so an empty DEFSYM yields
+  ## the unmodified handler.
+  set(DEFSYM_ARG "")
+  if(NOT "${DEFSYM}" STREQUAL "")
+    set(DEFSYM_ARG "-Wa,-defsym,${DEFSYM}")
+  endif()
+
   separate_arguments(CLANG_ARG_LIST UNIX_COMMAND
-  "-x assembler -target amdgcn-amd-amdhsa -mcpu=${TARGET_ID} -o ${CODE_OBJECT} ${INPUT_FILE}")
+  "-x assembler -target amdgcn-amd-amdhsa -mcpu=${TARGET_ID} ${DEFSYM_ARG} -o ${CODE_OBJECT} ${INPUT_FILE}")
 
   ## Add custom command to produce a code object file.
   add_custom_command(OUTPUT ${CODE_OBJECT} COMMAND clang ${CLANG_ARG_LIST}
@@ -93,12 +106,12 @@ endfunction(gen_kernel_bc)
 ##==========================================
 ## Find device code object name and forward to custom command
 ##==========================================
-function(build_kernel TRAP_HANDLER_NAME TARGET_ID POSTFIX SOURCE_SUFFIX)
+function(build_kernel TRAP_HANDLER_NAME TARGET_ID POSTFIX SOURCE_SUFFIX DEFSYM)
 
   ## generate trap handler object code files
   set (CODE_OBJECT_FILE "${TRAP_HANDLER_NAME}_${POSTFIX}")
   set (TRAP_FILE "${CMAKE_CURRENT_SOURCE_DIR}/trap_handler${SOURCE_SUFFIX}.s")
-  gen_kernel_bc(${TARGET_ID} ${TRAP_FILE} ${CODE_OBJECT_FILE})
+  gen_kernel_bc(${TARGET_ID} ${TRAP_FILE} ${CODE_OBJECT_FILE} "${DEFSYM}")
 
   ## Build a list of code object file names
   ## These will be target dependencies.
@@ -119,10 +132,11 @@ function(build_kernel_for_devices TRAP_HANDLER_NAME)
     list(GET TARGET_DEVS ${ind} dev)
     list(GET POSTFIX ${ind} post)
     list(GET SOURCE_SUFFIX ${ind} suffix)
+    list(GET ASM_DEFSYM ${ind} defsym)
     if(${CMAKE_VERBOSE_MAKEFILE})
       message("\n  Generating: ${dev} ...")
     endif()
-    build_kernel(${TRAP_HANDLER_NAME} ${dev} ${post} "${suffix}")
+    build_kernel(${TRAP_HANDLER_NAME} ${dev} ${post} "${suffix}" "${defsym}")
   endforeach(ind)
 
   set(HSACO_TARG_LIST ${HSACO_TARG_LIST} PARENT_SCOPE)
