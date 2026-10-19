@@ -13,7 +13,6 @@ target_link_libraries(
         rocjitsu_code
         rocjitsu_code_object
         rocjitsu_isa
-        rocjitsu_isa_registry
         simdojo
         rocjitsu_kmd
         rocjitsu_vm
@@ -30,5 +29,8 @@ target_link_libraries(
 rj_configure_target(rj_execution_fuzz_core PRIVATE_INCLUDES WARNINGS)
 
 add_executable(rj_execution_fuzz execution_fuzz_main.cpp)
-target_link_libraries(rj_execution_fuzz PRIVATE rj_execution_fuzz_core)
+target_link_libraries(
+    rj_execution_fuzz
+    PRIVATE rj_execution_fuzz_core rocjitsu_isa_registry
+)
 rj_configure_target(rj_execution_fuzz PRIVATE_INCLUDES WARNINGS)

@@ -431,7 +431,10 @@ set_tests_properties(
 add_executable(rj_decode_fuzz_test fuzz/decode/decode_fuzz_test.cpp)
 target_link_libraries(
     rj_decode_fuzz_test
-    PRIVATE rj_decode_fuzz_core GTest::gtest_main
+    PRIVATE
+        rj_decode_fuzz_core
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
 )
 rj_configure_target(rj_decode_fuzz_test PRIVATE_INCLUDES WARNINGS)
 add_dependencies(rj_decode_fuzz_test rj_decode_fuzz)
@@ -443,7 +446,10 @@ add_executable(
 )
 target_link_libraries(
     rj_code_object_fuzz_test
-    PRIVATE rj_code_object_fuzz_core GTest::gtest_main
+    PRIVATE
+        rj_code_object_fuzz_core
+        rocjitsu_amdgpu_isa_model_registry
+        GTest::gtest_main
 )
 target_include_directories(
     rj_code_object_fuzz_test
@@ -463,11 +469,27 @@ add_test(
 add_executable(rj_execution_fuzz_test fuzz/execution/execution_fuzz_test.cpp)
 target_link_libraries(
     rj_execution_fuzz_test
-    PRIVATE rj_execution_fuzz_core GTest::gtest_main
+    PRIVATE rj_execution_fuzz_core rocjitsu_isa_registry GTest::gtest_main
 )
 rj_configure_target(rj_execution_fuzz_test PRIVATE_INCLUDES WARNINGS)
 add_dependencies(rj_execution_fuzz_test rj_execution_fuzz)
 rj_add_gtest_tests(rj_execution_fuzz_test)
+
+add_executable(rj_aggregate_fuzz_test fuzz/aggregate/aggregate_fuzz_test.cpp)
+target_link_libraries(
+    rj_aggregate_fuzz_test
+    PRIVATE rj_aggregate_fuzz_core rocjitsu_isa_registry GTest::gtest_main
+)
+rj_configure_target(rj_aggregate_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_aggregate_fuzz_test rj_fuzz)
+rj_add_gtest_tests(rj_aggregate_fuzz_test)
+add_test(
+    NAME AggregateFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_fuzz>
+        -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/aggregate-fuzz-cli -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/aggregate/test_aggregate_fuzz_cli.cmake
+)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
