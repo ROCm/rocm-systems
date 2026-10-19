@@ -403,7 +403,6 @@ class OmniSoC_Base:
                 "profiling",
                 "single-pass packing could not place every single-pass metric set",
             )
-            raise AssertionError("single-pass packing failed")
         output_files, file_count, _stats = single_pass
         return output_files, file_count, accu_file_count
 
