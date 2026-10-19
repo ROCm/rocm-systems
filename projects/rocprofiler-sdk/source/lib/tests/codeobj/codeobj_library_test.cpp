@@ -22,6 +22,8 @@
 
 #include <gtest/gtest.h>
 #include <unistd.h>
+#include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -589,4 +591,32 @@ TEST(codeobj_library, memory_loaded_code_object_symbol_map)
     auto symbol = symbol_map.find("_Z18syncthreads_kernelPi.kd");
     ASSERT_NE(symbol, symbol_map.end());
     EXPECT_EQ(symbol->second, "_Z18syncthreads_kernelPi");
+
+    for(size_t offset = 0; offset < alignof(std::max_align_t); ++offset)
+    {
+        auto padded = std::vector<char>(objdata.size() + offset);
+        std::copy(objdata.begin(), objdata.end(), padded.begin() + offset);
+        auto actual =
+            rocprofiler::code_object::hip::get_kernel_symbol_device_name_map_from_executable(
+                padded.data() + offset, objdata.size());
+        auto info   = amd_comgr_code_object_info_t{};
+        info.offset = offset;
+        info.size   = objdata.size();
+        auto from_bundle =
+            rocprofiler::code_object::hip::get_kernel_symbol_device_name_map(info, padded.data());
+        std::fill(padded.begin(), padded.end(), '\0');
+        padded.clear();
+        padded.shrink_to_fit();
+        EXPECT_EQ(actual, symbol_map);
+        EXPECT_EQ(from_bundle, symbol_map);
+    }
+}
+
+TEST(codeobj_library, invalid_code_object_symbol_map)
+{
+    using rocprofiler::code_object::hip::get_kernel_symbol_device_name_map_from_executable;
+    EXPECT_TRUE(get_kernel_symbol_device_name_map_from_executable(nullptr, 1).empty());
+    EXPECT_TRUE(get_kernel_symbol_device_name_map_from_executable("", 0).empty());
+    EXPECT_TRUE(get_kernel_symbol_device_name_map_from_executable("not an ELF", 10).empty());
+    EXPECT_TRUE(get_kernel_symbol_device_name_map_from_executable("\177ELF", 4).empty());
 }
