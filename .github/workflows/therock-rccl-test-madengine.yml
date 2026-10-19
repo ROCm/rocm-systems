@@ -114,6 +114,14 @@ jobs:
           MINIFORGE_VERSION: "26.7.2-0"
           MINIFORGE_SHA256: "281b0ac7d550802efc81af633225a5e6116d29ae72f3ab4eae7168c3931a4c05"
         run: |
+          # The runner account's home is a small quota shared with every other
+          # job of that account, and conda will not finish without writing
+          # there: the installer creates ~/.conda, and conda create registers
+          # the env in it and caches notices in ~/.cache. A full home failed
+          # this step with EDQUOT. Inside the conda prefix, the cleanup step
+          # deletes it; only for this step, so the nodes keep the real home.
+          export HOME="${WORK_DIR}/conda/home"
+          echo "PIP_CACHE_DIR=${HOME}/.cache/pip" >> "$GITHUB_ENV"
           mkdir -p "${WORK_DIR}"
           installer="${WORK_DIR}/Miniforge3.sh"
           curl -fsSL -o "${installer}" \
