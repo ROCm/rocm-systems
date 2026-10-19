@@ -3384,6 +3384,11 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
     HIP_RETURN(hipErrorInvalidValue);
   }
 
+  // Legacy flag set; other bits are ignored, as before hipExtMemcpyBatchAsync.
+  constexpr unsigned int kLegacyFlagMask =
+      hipMemcpyFlagPreferOverlapWithCompute | hipMemcpyFlagExtPreferCE |
+      hipMemcpyFlagExtOpSwap | hipMemcpyFlagExtOpIndirectSrc | hipMemcpyFlagExtOpIndirectDst;
+
   // Convert by value; the struct strides differ.
   std::vector<hipExtMemcpyAttributes> extAttrs;
   hipExtMemcpyAttributes* extAttrsPtr = nullptr;
@@ -3393,7 +3398,7 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
       extAttrs[i].srcAccessOrder = attrs[i].srcAccessOrder;
       extAttrs[i].srcLocHint = attrs[i].srcLocHint;
       extAttrs[i].dstLocHint = attrs[i].dstLocHint;
-      extAttrs[i].flags = attrs[i].flags;
+      extAttrs[i].flags = attrs[i].flags & kLegacyFlagMask;
     }
     extAttrsPtr = extAttrs.data();
   }

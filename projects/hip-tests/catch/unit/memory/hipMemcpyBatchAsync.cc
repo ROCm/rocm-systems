@@ -2030,6 +2030,65 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_AttrValidation_Negative) {
 /**
  * Test Description
  * ------------------------
+ * - hipMemcpyBatchAsync ignores flag bits outside its original set (unknown bits and the
+ *   hipExtMemcpyBatchAsync-only hints), so the copy succeeds and the bytes are correct.
+ *   The same unknown bit is rejected by hipExtMemcpyBatchAsync.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_LegacyFlags_Ignored) {
+  constexpr size_t kNumElements = 1024;
+  constexpr size_t kSizeBytes = kNumElements * sizeof(int);
+  constexpr int kVal = 37;
+  const unsigned int flags = GENERATE(
+      0x2u, 0x80000000u, static_cast<unsigned int>(hipMemcpyFlagExtPreferComputeEngine),
+      static_cast<unsigned int>(hipMemcpyFlagExtPreferCE | hipMemcpyFlagExtPreferComputeEngine),
+      static_cast<unsigned int>(hipMemcpyFlagExtPreferLinear | hipMemcpyFlagExtPreferBroadcast));
+
+  void* d_src = nullptr;
+  void* d_dst = nullptr;
+  HIP_CHECK(hipMalloc(&d_src, kSizeBytes));
+  HIP_CHECK(hipMalloc(&d_dst, kSizeBytes));
+  std::vector<int> host(kNumElements, kVal);
+  HIP_CHECK(hipMemcpy(d_src, host.data(), kSizeBytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemset(d_dst, 0, kSizeBytes));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {d_dst};
+  void* srcs[] = {d_src};
+  size_t sizes[] = {kSizeBytes};
+  size_t attrsIdxs[] = {0};
+  size_t failIdx = 0;
+
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, flags};
+  HIP_CHECK(hipMemcpyBatchAsync(dsts, srcs, sizes, 1, &attr, attrsIdxs, 1, &failIdx, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+  REQUIRE(failIdx == SIZE_MAX);
+
+  std::vector<int> out(kNumElements);
+  HIP_CHECK(hipMemcpy(out.data(), d_dst, kSizeBytes, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < kNumElements; ++i) {
+    REQUIRE(out[i] == kVal);
+  }
+
+  hipExtMemcpyAttributes extAttr{};
+  extAttr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  extAttr.flags = 0x2;
+  HIP_CHECK_ERROR(hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr, 1,
+                                         &extAttr, attrsIdxs, 1, stream),
+                  hipErrorInvalidValue);
+
+  HIP_CHECK(hipFree(d_src));
+  HIP_CHECK(hipFree(d_dst));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
+ * Test Description
+ * ------------------------
  * - hipMemcpyFlagExtPreferComputeEngine routes a linear device-to-device batch onto the shader
  *   copy path (compute engine) instead of SDMA. The copied bytes must be correct.
  * Test source
