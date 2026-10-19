@@ -785,8 +785,9 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
     // RCCL: fence the RO=1 bulk data through an RO=0 scratchpad - RDMA_WRITE a
     // dummy payload into it, then RDMA_READ it back. The WRITE needs REMOTE_WRITE
     // on the flush QP.
-    bool useGpuFlushMem = rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering() &&
-                          comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr && comm->devs[i].gpuFlush.gpuMr != nullptr;
+    const bool useGpuFlushMem = rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering() &&
+                                comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr &&
+                                comm->devs[i].gpuFlush.gpuMr != nullptr;
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
     if (IbCastCommIsSharing(&comm->base)) {
@@ -805,8 +806,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
       writeWr.send_flags = 0;
       struct ibv_send_wr* badWriteWr;
       NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr));
-    }
-    if (useGpuFlushMem) {
+
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
     } else {
