@@ -7,7 +7,7 @@
 // Races HRR's dispatch slot store against the HIP entry-point slot load.
 //
 // This binary is built with -fsanitize=thread. Reader threads call through one slot of a
-// real HipDispatchTable with hip::LoadDispatchSlot, the helper behind every entry point in
+// dispatch table with hip::LoadDispatchSlot, the helper behind every entry point in
 // hip_table_interface.cpp. One writer thread installs and uninstalls a shim in that slot
 // with the release store HRR capture uses (store_slot in hip_capture.cpp). The shim reads
 // state that the writer set before the first install, as HRR shims read g_real_table.
@@ -15,12 +15,11 @@
 // With an ordinary read in LoadDispatchSlot, ThreadSanitizer reports a race on the slot.
 // With a relaxed load it reports a race on the shim state. The acquire load passes.
 
-#include <hip/amd_detail/hip_api_trace.hpp>
-
 #include "hip_dispatch_load.hpp"
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <thread>
@@ -33,32 +32,41 @@ namespace {
 constexpr int kReaders = 4;
 constexpr int kCycles = 2000;
 
-HipDispatchTable g_table{};
-t_hipGetDeviceCount g_real = nullptr;  // written once before install, read by the shim
+// One slot laid out like a HipDispatchTable entry (hip_api_trace.hpp): a size, then
+// function pointers. Only hip_dispatch_load.hpp is needed, so the test builds with any host
+// compiler, without the HIP headers or libamdhip64.
+using GetDeviceCountFn = int (*)(int*);
+struct DispatchTable {
+  std::size_t size;
+  GetDeviceCountFn hipGetDeviceCount_fn;
+};
+
+DispatchTable g_table{};
+GetDeviceCountFn g_real = nullptr;  // written once before install, read by the shim
 std::atomic<bool> g_done{false};
 std::atomic<long> g_real_calls{0};
 std::atomic<long> g_shim_calls{0};
 
-hipError_t real_get_device_count(int* count) {
+int real_get_device_count(int* count) {
   *count = 1;
   g_real_calls.fetch_add(1, std::memory_order_relaxed);
-  return hipSuccess;
+  return 0;
 }
 
-hipError_t shim_get_device_count(int* count) {
+int shim_get_device_count(int* count) {
   g_shim_calls.fetch_add(1, std::memory_order_relaxed);
   return g_real(count);
 }
 
 // The store HRR capture uses on Linux (store_slot in hip_capture.cpp).
-void store_slot(t_hipGetDeviceCount* slot, t_hipGetDeviceCount value) {
+void store_slot(GetDeviceCountFn* slot, GetDeviceCountFn value) {
   __atomic_store_n(slot, value, __ATOMIC_RELEASE);
 }
 
 void reader() {
   while (!g_done.load(std::memory_order_acquire)) {
     int count = 0;
-    if (hip::LoadDispatchSlot(g_table.hipGetDeviceCount_fn)(&count) != hipSuccess || count != 1)
+    if (hip::LoadDispatchSlot(g_table.hipGetDeviceCount_fn)(&count) != 0 || count != 1)
       std::abort();
   }
 }

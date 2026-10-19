@@ -80,7 +80,10 @@ if(EXISTS "${HRR_HIPAMD_SRC}/hip_dispatch_load.hpp")
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_dispatch_readers.cmake)
 
   # The load and HRR's slot store race cleanly under ThreadSanitizer. The test only
-  # means something with TSan, so it is built when the compiler supports it.
+  # means something with TSan, so it is built when the compiler supports it. It needs
+  # hip_dispatch_load.hpp and nothing from HIP, so the probe below covers the one thing
+  # that can fail to link: the TSan runtime. GCC's TSan runtime aborts at startup ("unexpected memory mapping") on kernels
+  # with vm.mmap_rnd_bits=32; run it under `setarch $(uname -m) -R` there.
   include(CheckCXXSourceCompiles)
   set(CMAKE_REQUIRED_FLAGS -fsanitize=thread)
   set(CMAKE_REQUIRED_LINK_OPTIONS -fsanitize=thread)
@@ -93,10 +96,9 @@ if(EXISTS "${HRR_HIPAMD_SRC}/hip_dispatch_load.hpp")
       CXX_STANDARD 17
       CXX_STANDARD_REQUIRED ON)
     target_include_directories(hrr-unit-tests-tsan PRIVATE "${HRR_HIPAMD_SRC}")
-    target_compile_definitions(hrr-unit-tests-tsan PRIVATE __HIP_PLATFORM_AMD__)
     target_compile_options(hrr-unit-tests-tsan PRIVATE -fsanitize=thread)
     target_link_options(hrr-unit-tests-tsan PRIVATE -fsanitize=thread)
-    target_link_libraries(hrr-unit-tests-tsan PRIVATE hip::host)
+    target_link_libraries(hrr-unit-tests-tsan PRIVATE Threads::Threads)
     # Building the unit tests builds this one too, so a plain ctest run includes it.
     add_dependencies(hrr-unit-tests hrr-unit-tests-tsan)
     add_test(NAME hrr-unit-tests-tsan COMMAND hrr-unit-tests-tsan)
