@@ -29,6 +29,7 @@
 #include "initialization.h"
 #include "logging.h"
 #include "os_driver.h"
+#include "property.h"
 #include "queue.h"
 #include "register.h"
 #include "runtime_rdebug.h"
@@ -1728,8 +1729,7 @@ process_t::runtime_enable (os_runtime_info_t runtime_info)
       status = os_driver ().set_process_flags (m_process_flags);
       if (status != AMD_DBGAPI_STATUS_SUCCESS
           && status != AMD_DBGAPI_STATUS_ERROR_PROCESS_EXITED)
-        fatal_error ("Could not set precise memory or precise ALU exceptions "
-                     "for %s (%s).",
+        fatal_error ("Could not set process properties for %s (%s).",
                      to_cstring (id ()), to_cstring (status));
     }
 
@@ -2773,6 +2773,59 @@ amd_dbgapi_set_alu_exceptions_precision (
   CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,
          AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID,
          AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT,
+         AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+  TRACE_END ();
+}
+
+amd_dbgapi_status_t AMD_DBGAPI
+amd_dbgapi_process_set_property (amd_dbgapi_process_id_t process_id,
+                                 amd_dbgapi_property_id_t property_id,
+                                 size_t value_size, const void *value)
+{
+  TRACE_BEGIN (param_in (property_id), param_in (process_id),
+               param_in (value_size),
+               make_hex (make_ref (param_in (value), value_size)));
+  TRY
+  {
+    if (!detail::is_initialized)
+      THROW (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED);
+
+    process_t *process = process_t::find (process_id);
+
+    if (process == nullptr)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID);
+
+    /* A frozen process is read-only; its properties cannot be changed.  */
+    if (process->is_frozen ())
+      THROW (AMD_DBGAPI_STATUS_ERROR_PROCESS_FROZEN);
+
+    if (process->from_core ())
+      THROW (AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
+
+    const property_t::properties_map_t &all_properties_map
+      = property_t::all ();
+
+    if (all_properties_map.find (property_id) == all_properties_map.end ())
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_PROPERTY_ID);
+
+    property_t::property_map_value_t &property
+      = all_properties_map.at (property_id);
+
+    if (!!(property->scope () & property_t::property_scope_t::process)
+        == false)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY);
+
+    if (value == nullptr)
+      THROW (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
+
+    property->set (process, value_size, value);
+  }
+  CATCH (AMD_DBGAPI_STATUS_ERROR_NOT_INITIALIZED,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_PROCESS_ID,
+         AMD_DBGAPI_STATUS_ERROR_PROCESS_FROZEN,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_PROPERTY_ID,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT,
+         AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT_COMPATIBILITY,
          AMD_DBGAPI_STATUS_ERROR_NOT_SUPPORTED);
   TRACE_END ();
 }
