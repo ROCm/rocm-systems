@@ -366,7 +366,9 @@ public:
 
   void setup_topology(const Sysfs::GpuInfo &gpu);
   void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc);
-  void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc);
+  void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc,
+                      bool publish_peer_links = true, bool strict_render_minor = false);
+  [[nodiscard]] bool strict_render_minor() const { return strict_render_minor_; }
   bool is_doorbell_range(const void *addr, size_t length) const override;
 
   /// @brief Perform an ordinary MAP_FIXED mmap while retiring replaced client doorbell views.
@@ -378,6 +380,9 @@ public:
 
   uint32_t gpu_id() const { return gpus_.empty() ? 0 : gpus_[0].gpu_id; }
   uint32_t num_gpus() const { return static_cast<uint32_t>(gpus_.size()); }
+  const Sysfs::GpuInfo *gpu_info_at(uint32_t ordinal) const {
+    return ordinal < gpu_infos_.size() ? &gpu_infos_[ordinal] : nullptr;
+  }
   /// @brief KFD gpu_id of the device at @p index, for callers that must name one.
   uint32_t gpu_id_at(uint32_t index) const {
     return index < gpus_.size() ? gpus_[index].gpu_id : 0;
@@ -504,6 +509,9 @@ public:
   };
 
 private:
+  /// Resolve a multi-GPU DRM render minor through published node metadata.
+  /// Before topology setup, retain the legacy ordinal fallback used by tests.
+  [[nodiscard]] std::optional<uint32_t> gpu_ordinal_for_render_minor(uint32_t minor) const;
   /// @brief Publish one process to every GPU memory/VM service atomically.
   /// @details The caller holds process_mutex_. A failed address-space
   /// registration unwinds every memory and VM registration made for @p proc.
@@ -895,6 +903,7 @@ private:
   /// @brief Per-GPU topology info captured at setup_topology, indexed to match
   /// gpus_. Feeds the AMDKFD_IOC_DBG_TRAP device snapshot.
   std::vector<Sysfs::GpuInfo> gpu_infos_;
+  bool strict_render_minor_ = false;
 
   static constexpr int kReservedFdCount = 256;
   int reserved_fd_base_ = 0;

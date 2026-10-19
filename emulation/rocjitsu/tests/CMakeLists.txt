@@ -3,6 +3,7 @@
 
 include(rj_configure_target)
 include(rj_configure_device_tests)
+include(rj_find_rocm_library)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(
@@ -485,6 +486,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${Python3_EXECUTABLE} -B
             ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_vfio_guest.py -v
     )
+    add_test(
+        NAME RcclScaleoutRunUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_rccl_scaleout.py -v
+    )
 endif()
 
 add_test(
@@ -493,6 +500,23 @@ add_test(
 )
 if(NOT ROCJITSU_ENABLE_VFIO)
     set_tests_properties(RocjitsuVfioCapabilityCheck PROPERTIES WILL_FAIL TRUE)
+endif()
+
+if(ROCJITSU_ENABLE_VFIO)
+    # Alias validation runs before binding and checks that the selected-node
+    # effective config is removed when the VFIO process exits.
+    add_test(
+        NAME RocjitsuVfioRepeatedSocketsRejectAliases
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_vfio_cli.py
+            $<TARGET_FILE:rocjitsu_bin>
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fabric_node_projection.json
+    )
+    set_tests_properties(
+        RocjitsuVfioRepeatedSocketsRejectAliases
+        PROPERTIES TIMEOUT 15
+    )
 endif()
 
 add_test(
@@ -851,6 +875,9 @@ if(ROCJITSU_ENABLE_VFIO)
         rocjitsu_tests
         PRIVATE rocjitsu_vmm_vfu libvfio-user::libvfio-user
     )
+    # Keep the fault in the host's final link: the wrapper replaces one
+    # vfu_run_ctx result after the library has answered a client request.
+    target_link_options(rocjitsu_tests PRIVATE "LINKER:--wrap=vfu_run_ctx")
     # Serving now builds a whole machine, so a test that drives the server end to
     # end needs a real config rather than a synthesized one.
     target_compile_definitions(
@@ -942,7 +969,7 @@ set(_rj_idle_wakeup_cases
 # Exclude exactly the cases registered below, so future cases still participate
 # in normal discovery until they receive an explicit timeout registration.
 set(_rj_gtest_exclusions
-    "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+    "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff:*EffectiveConfigTest.ReadsSelectedNodeLaunchConfigHandoff"
 )
 foreach(_idle_wakeup_case IN LISTS _rj_idle_wakeup_cases)
     string(APPEND _rj_gtest_exclusions ":${_idle_wakeup_case}")
@@ -1545,6 +1572,40 @@ rj_add_test(
         "--"
         "bin/rocjitsu_tests"
         "--gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+)
+
+rj_add_test(
+    NAME "EffectiveConfigTest.ReadsSelectedNodeLaunchConfigHandoff"
+    COMMAND
+        ${RJ_CLI}
+        --config
+        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fabric_node_projection.json
+        --node
+        tray7
+        --cpu-thread-budget
+        4
+        --
+        $<TARGET_FILE:rocjitsu_tests>
+        --gtest_filter=EffectiveConfigTest.ReadsSelectedNodeLaunchConfigHandoff
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    TIMEOUT 60
+)
+
+rj_add_test(
+    NAME "SystemGraphTest.DaemonStartsSelectedNode"
+    COMMAND
+        ${RJ_CLI}
+        --daemon
+        --config
+        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fabric_node_projection.json
+        --node
+        tray7
+        --
+        /bin/true
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+    # AF_UNIX sun_path is short; the source/build checkout may be much longer.
+    ENVIRONMENT "ROCJITSU_RUNTIME_DIR=/tmp/rj-system-graph"
+    TIMEOUT 60
 )
 
 function(rj_detect_kfd_gfx_target_versions out_var)
@@ -2551,7 +2612,7 @@ endif()
 
 # --- HSA init test (requires ROCm HSA runtime + CLI launcher) ---
 
-find_library(HSA_RUNTIME64 hsa-runtime64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
+rj_find_rocm_library(HSA_RUNTIME64 hsa-runtime64)
 if(HSA_RUNTIME64)
     get_filename_component(RJ_HSA_LIBRARY_DIR "${HSA_RUNTIME64}" DIRECTORY)
     add_executable(hsa_init_test hsa_init_test.cpp)
@@ -3594,11 +3655,13 @@ endif()
 
 # --- HIP tests (requires amdclang++ + CLI launcher) ---
 
+rj_amdcxx_supports_arch(RJ_AMDCXX_SUPPORTS_GFX1250 "${AMDCXX}" gfx1250)
 set(RJ_ENABLE_HIP_TESTS ON)
-find_library(HIP_RUNTIME64 amdhip64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
+rj_find_rocm_library(HIP_RUNTIME64 amdhip64)
 set(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX950 FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX942 FALSE)
+set(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 FALSE)
 
 function(rj_hip_runtime_supports_arch out_var arch)
     set(_supports FALSE)
@@ -3639,6 +3702,7 @@ if(RJ_ENABLE_HIP_TESTS)
     )
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX950 "gfx950")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX942 "gfx942")
+    rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX1250 "gfx1250")
 endif()
 
 if(RJ_ENABLE_HIP_TESTS)
@@ -3826,6 +3890,8 @@ if(RJ_ENABLE_HIP_TESTS)
         endif()
         rj_add_test(${_test_args})
     endfunction()
+
+    rj_find_rocm_library(RCCL_LIB rccl)
 
     if(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH)
         rj_add_hip_test(hip_memcpy_test ARCH ${RJ_HIP_TEST_ARCH})
@@ -4023,7 +4089,6 @@ if(RJ_ENABLE_HIP_TESTS)
         )
 
         # --- RCCL collective test ---
-        find_library(RCCL_LIB rccl PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
         if(RCCL_LIB AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
             rj_add_hip_test(hip_rccl_test ARCH gfx950 EXTRA_LIBS ${RCCL_LIB})
             add_dependencies(daemon_test hip_rccl_test_target)
@@ -4033,6 +4098,7 @@ if(RJ_ENABLE_HIP_TESTS)
                 RcclDaemonTest.AllGather
                 RcclDaemonTest.ReduceScatter
                 RcclDaemonTest.SendRecv
+                RcclDaemonTest.AllCasesInOneSession
             )
             foreach(TC IN LISTS RJ_RCCL_TESTS)
                 rj_add_test(
@@ -4062,6 +4128,27 @@ if(RJ_ENABLE_HIP_TESTS)
         message(
             STATUS
             "HIP smoke/daemon tests disabled (libamdhip64 does not advertise ${RJ_HIP_TEST_ARCH} support)"
+        )
+    endif()
+
+    # Build the same numerically checked rank workload for CDNA5 without
+    # changing the existing gfx950 daemon fixture or its CTest registrations.
+    if(
+        RCCL_LIB
+        AND RJ_HIP_RUNTIME_SUPPORTS_GFX1250
+        AND RJ_AMDCXX_SUPPORTS_GFX1250
+    )
+        rj_add_hip_test(
+            hip_rccl_gfx1250_test
+            ARCH gfx1250
+            SOURCE hip_rccl_test.cpp
+            EXTRA_LIBS ${RCCL_LIB}
+        )
+        message(STATUS "gfx1250 RCCL rank binary enabled (found ${RCCL_LIB})")
+    else()
+        message(
+            STATUS
+            "gfx1250 RCCL rank binary disabled (requires librccl and gfx1250 compiler/runtime support)"
         )
     endif()
 

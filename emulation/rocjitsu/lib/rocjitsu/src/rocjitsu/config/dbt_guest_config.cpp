@@ -157,6 +157,8 @@ load_dbt_guest_config_from_file(const std::string &path, util::DiagnosticEmitter
       json.value(), rocjitsu::kEmbeddedSchema, emit_error,
       [&has_dbt_guest, emit_error](const fb::SimulationConfig *config) {
         has_dbt_guest = config->dbt_guest() != nullptr;
+        if (config->system() && config->dbt_guest() && config->dbt_guest()->enabled())
+          throw std::invalid_argument("system cannot be combined with dbt_guest mode");
         return dbt_guest_from_fb(config->dbt_guest(), emit_error);
       });
   if (parsed.failed())
