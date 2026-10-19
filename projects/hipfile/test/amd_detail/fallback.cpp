@@ -23,12 +23,14 @@
 #include "state.h"
 
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cerrno>
 #include <climits>
 #include <cstdint>
 #include <cstring>
 #include <fcntl.h>
+#include <future>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
@@ -38,6 +40,7 @@
 #include <string>
 #include <sys/mman.h>
 #include <system_error>
+#include <thread>
 #include <unistd.h>
 #include <vector>
 
@@ -106,6 +109,36 @@ contains_expected_data(std::vector<uint8_t> &buffer, hoff_t buffer_offset, std::
     return true;
 }
 
+static void
+expect_bounce_stream_pool(MHip &mhip, MConfiguration &mcfg)
+{
+    EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
+    EXPECT_CALL(mhip, hipDeviceGetStreamPriorityRange)
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(HipStreamPriorityRange{1, -1}));
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority)
+        .Times(AnyNumber())
+        .WillRepeatedly(Return(reinterpret_cast<hipStream_t>(0x1234)));
+    EXPECT_CALL(mhip, hipStreamDestroy).Times(AnyNumber());
+    EXPECT_CALL(mcfg, deviceStreamPoolSize()).WillRepeatedly(Return(32));
+}
+
+static void
+expect_device_query(MHip &mhip, const int &current_device)
+{
+    EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Invoke([&current_device] {
+        return current_device;
+    }));
+}
+
+static void
+expect_device_updates(MHip &mhip, int &current_device)
+{
+    EXPECT_CALL(mhip, hipSetDevice).Times(AnyNumber()).WillRepeatedly(Invoke([&current_device](int d) {
+        current_device = d;
+    }));
+}
+
 struct FallbackIo : public HipFileOpened {
 
     shared_ptr<IBuffer>  buffer{};
@@ -122,7 +155,7 @@ struct FallbackIo : public HipFileOpened {
 
     FallbackIo() : buffer_data(1024 * 1024)
     {
-        EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
+        expect_bounce_stream_pool(mhip, mcfg);
 
         expect_buffer_registration(mhip, hipMemoryTypeDevice);
         Context<DriverState>::get()->registerBuffer(buffer_data.data(), buffer_data.size(), 0);
@@ -138,9 +171,11 @@ struct FallbackIo : public HipFileOpened {
         file.reset();
     }
 
-    hipError_t fake_hipMemcpy(void *dst, const void *src, size_t count, hipMemcpyKind kind)
+    hipError_t fake_hipMemcpy(void *dst, const void *src, size_t count, hipMemcpyKind kind,
+                              hipStream_t stream)
     {
         (void)kind;
+        (void)stream;
         memcpy(dst, src, count);
         return hipSuccess;
     }
@@ -195,7 +230,7 @@ struct FallbackParam : ::testing::TestWithParam<IoType> {
     {
         assert(hipFileDriverOpen() == HIPFILE_SUCCESS);
 
-        EXPECT_CALL(mhip, hipGetDevice).Times(AnyNumber()).WillRepeatedly(Return(0));
+        expect_bounce_stream_pool(mhip, mcfg);
 
         expect_buffer_registration(mhip, hipMemoryTypeDevice);
         void *buf{reinterpret_cast<void *>(0xFEFEFEFE)};
@@ -278,10 +313,11 @@ TEST_P(FallbackParam, FallbackIoTruncatesSizeToMAX_RW_COUNT)
                 .WillRepeatedly(testing::Invoke([](int, void *, size_t count, hoff_t) -> ssize_t {
                     return static_cast<ssize_t>(count);
                 }));
-            EXPECT_CALL(mhip, hipMemcpy).WillRepeatedly(testing::Return());
+            EXPECT_CALL(mhip, hipMemcpyWithStream).WillRepeatedly(testing::Return());
+            EXPECT_CALL(mhip, hipStreamSynchronize).WillRepeatedly(testing::Return());
             break;
         case IoType::Write:
-            EXPECT_CALL(mhip, hipMemcpy).WillRepeatedly(testing::Return());
+            EXPECT_CALL(mhip, hipMemcpyWithStream).WillRepeatedly(testing::Return());
             EXPECT_CALL(mhip, hipStreamSynchronize).WillRepeatedly(testing::Return());
             EXPECT_CALL(msys, pwrite)
                 .WillRepeatedly(testing::Invoke([](int, void *, size_t count, hoff_t) -> ssize_t {
@@ -319,7 +355,7 @@ TEST_P(FallbackParam, FallbackIoAllocatesChunkSizedHostBounceBuffer)
             EXPECT_CALL(msys, pread).WillOnce(testing::Return(0));
             break;
         case IoType::Write:
-            EXPECT_CALL(mhip, hipMemcpy);
+            EXPECT_CALL(mhip, hipMemcpyWithStream);
             EXPECT_CALL(mhip, hipStreamSynchronize);
             EXPECT_CALL(msys, pwrite).WillOnce(testing::Return(0));
             EXPECT_CALL(msys, fdatasync);
@@ -362,7 +398,8 @@ struct FallbackWrite : public FallbackIo {
     {
         EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
         EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
-        EXPECT_CALL(mhip, hipMemcpy).WillRepeatedly(testing::Invoke(this, &FallbackWrite::fake_hipMemcpy));
+        EXPECT_CALL(mhip, hipMemcpyWithStream)
+            .WillRepeatedly(testing::Invoke(this, &FallbackWrite::fake_hipMemcpy));
         EXPECT_CALL(mhip, hipStreamSynchronize).WillRepeatedly(testing::Return());
         EXPECT_CALL(msys, pwrite).WillRepeatedly(testing::Invoke(this, &FallbackWrite::fake_pwrite));
         EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
@@ -392,7 +429,7 @@ TEST_F(FallbackWrite, FallbackWriteThrowsOnPwriteException)
 {
     EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
-    EXPECT_CALL(mhip, hipMemcpy);
+    EXPECT_CALL(mhip, hipMemcpyWithStream);
     EXPECT_CALL(mhip, hipStreamSynchronize);
     EXPECT_CALL(msys, pwrite).WillOnce(testing::Throw(std::system_error(EIO, std::generic_category())));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
@@ -405,7 +442,7 @@ TEST_F(FallbackWrite, FallbackWriteThrowsOnHipmemcpyFailure)
 {
     EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
-    EXPECT_CALL(mhip, hipMemcpy).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
+    EXPECT_CALL(mhip, hipMemcpyWithStream).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
     EXPECT_CALL(mstats, error).Times(1);
 
@@ -416,7 +453,7 @@ TEST_F(FallbackWrite, FallbackWriteThrowsOnHipStreamSynchronizeError)
 {
     EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
-    EXPECT_CALL(mhip, hipMemcpy);
+    EXPECT_CALL(mhip, hipMemcpyWithStream);
     EXPECT_CALL(mhip, hipStreamSynchronize).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
     EXPECT_CALL(mstats, error).Times(1);
@@ -512,6 +549,28 @@ TEST_F(FallbackWrite, FallbackWriteAppendNonEmptySmallFile)
     ASSERT_TRUE(file_contains_expected_data(file_offset, 0, size));
 }
 
+TEST_F(FallbackWrite, WriteCopiesAndSynchronizesOnPooledStream)
+{
+    size_t size{4096};
+    auto   stream = reinterpret_cast<hipStream_t>(0xBEEF);
+    randomize_device_buffer();
+
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .WillRepeatedly(testing::Return(stream));
+    EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
+    EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
+    EXPECT_CALL(mhip, hipMemcpyWithStream(testing::_, testing::_, testing::_, hipMemcpyDeviceToHost, stream))
+        .WillRepeatedly(testing::Invoke(this, &FallbackWrite::fake_hipMemcpy));
+    EXPECT_CALL(mhip, hipStreamSynchronize(stream)).WillRepeatedly(testing::Return());
+    EXPECT_CALL(msys, pwrite).WillRepeatedly(testing::Invoke(this, &FallbackWrite::fake_pwrite));
+    EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(msys, fdatasync).Times(AnyNumber());
+    EXPECT_CALL(mstats, addIo).Times(1);
+
+    ASSERT_EQ(size, Fallback().io(IoType::Write, file, buffer, size, 0, 0, size));
+    ASSERT_TRUE(file_contains_expected_data(0, 0, size));
+}
+
 struct FallbackRead : public FallbackIo {
 
     void init_file(size_t length)
@@ -564,7 +623,9 @@ struct FallbackRead : public FallbackIo {
         EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
         EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
         EXPECT_CALL(msys, pread).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_pread));
-        EXPECT_CALL(mhip, hipMemcpy).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_hipMemcpy));
+        EXPECT_CALL(mhip, hipMemcpyWithStream)
+            .WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_hipMemcpy));
+        EXPECT_CALL(mhip, hipStreamSynchronize).WillRepeatedly(testing::Return());
         EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
         EXPECT_CALL(mstats, addIo).Times(1);
     }
@@ -611,7 +672,7 @@ TEST_F(FallbackRead, FallbackReadThrowsOnHipmemcpyFailure)
     EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
     EXPECT_CALL(msys, pread).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_pread));
-    EXPECT_CALL(mhip, hipMemcpy).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
+    EXPECT_CALL(mhip, hipMemcpyWithStream).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
     EXPECT_CALL(mstats, error).Times(1);
 
@@ -646,7 +707,9 @@ TEST_F(FallbackRead, FallbackReadHandlesShortPreads)
         .WillRepeatedly(testing::Invoke([this](int fd, void *buf, size_t count, hoff_t offset) -> ssize_t {
             return this->fake_pread(fd, buf, count, offset);
         }));
-    EXPECT_CALL(mhip, hipMemcpy).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_hipMemcpy));
+    EXPECT_CALL(mhip, hipMemcpyWithStream)
+        .WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_hipMemcpy));
+    EXPECT_CALL(mhip, hipStreamSynchronize).WillRepeatedly(testing::Return());
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
     EXPECT_CALL(mstats, addIo).Times(1);
     ASSERT_EQ(file_length, Fallback().io(IoType::Read, file, buffer, buffer->getLength(), 0, 0));
@@ -665,7 +728,9 @@ TEST_F(FallbackRead, FallbackReadHandlesInterruptedPread)
         .WillRepeatedly(testing::Invoke([this](int fd, void *buf, size_t count, hoff_t offset) -> ssize_t {
             return this->fake_pread(fd, buf, count, offset);
         }));
-    EXPECT_CALL(mhip, hipMemcpy).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_hipMemcpy));
+    EXPECT_CALL(mhip, hipMemcpyWithStream)
+        .WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_hipMemcpy));
+    EXPECT_CALL(mhip, hipStreamSynchronize).WillRepeatedly(testing::Return());
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
     EXPECT_CALL(mstats, addIo).Times(1);
     ASSERT_EQ(file_length, Fallback().io(IoType::Read, file, buffer, buffer->getLength(), 0, 0));
@@ -818,6 +883,74 @@ TEST_F(FallbackRead, FallbackReadWithNonZeroBufferOffsetAndFileOffset)
     ASSERT_TRUE(device_buffer_contains_expected_data(file_offset, buffer_offset, read_size));
 }
 
+TEST_F(FallbackRead, ReadCopiesAndSynchronizesOnPooledStream)
+{
+    size_t file_length{buffer->getLength()};
+    init_file(file_length);
+    auto stream = reinterpret_cast<hipStream_t>(0xBEEF);
+
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .WillRepeatedly(testing::Return(stream));
+    EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
+    EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
+    EXPECT_CALL(msys, pread).WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_pread));
+    EXPECT_CALL(mhip, hipMemcpyWithStream(testing::_, testing::_, testing::_, hipMemcpyHostToDevice, stream))
+        .WillRepeatedly(testing::Invoke(this, &FallbackRead::fake_hipMemcpy));
+    EXPECT_CALL(mhip, hipStreamSynchronize(stream)).WillRepeatedly(testing::Return());
+    EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, addIo).Times(1);
+
+    ASSERT_EQ(file_length, Fallback().io(IoType::Read, file, buffer, buffer->getLength(), 0, 0));
+    ASSERT_TRUE(device_buffer_contains_expected_data(0, 0, file_length));
+}
+
+TEST_F(FallbackRead, PooledStreamSurvivesDriverTeardownDuringInFlightRead)
+{
+    size_t io_size{4096};
+    auto   stream = reinterpret_cast<hipStream_t>(0xBEEF);
+
+    std::atomic<bool>  stream_live{false};
+    std::promise<void> pread_entered;
+    std::promise<void> resume_pread;
+    auto               pread_entered_fut = pread_entered.get_future();
+    auto               resume_pread_fut  = resume_pread.get_future();
+
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .WillRepeatedly(testing::InvokeWithoutArgs([&]() -> hipStream_t {
+            stream_live = true;
+            return stream;
+        }));
+    EXPECT_CALL(mhip, hipStreamDestroy).WillRepeatedly(testing::Invoke([&](hipStream_t) {
+        stream_live = false;
+    }));
+    EXPECT_CALL(mcfg, fallback()).WillRepeatedly(testing::Return(true));
+    EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
+    EXPECT_CALL(msys, pread).WillOnce(testing::Invoke([&](int, void *, size_t count, hoff_t) -> ssize_t {
+        pread_entered.set_value();
+        resume_pread_fut.wait();
+        return static_cast<ssize_t>(count);
+    }));
+    EXPECT_CALL(mhip, hipMemcpyWithStream)
+        .WillOnce(testing::Invoke([&](void *, const void *, size_t, hipMemcpyKind, hipStream_t) {
+            EXPECT_TRUE(stream_live.load());
+        }));
+    EXPECT_CALL(mhip, hipStreamSynchronize).WillRepeatedly(testing::Return());
+    EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
+    EXPECT_CALL(mstats, addIo).Times(1);
+
+    Fallback    fallback;
+    ssize_t     result{0};
+    std::thread io_thread([&] { result = fallback.io(IoType::Read, file, buffer, io_size, 0, 0, io_size); });
+
+    pread_entered_fut.wait();
+    fallback.driver_state_teardown();
+    resume_pread.set_value();
+    io_thread.join();
+
+    EXPECT_EQ(static_cast<ssize_t>(io_size), result);
+    EXPECT_FALSE(stream_live.load());
+}
+
 // Exercises the device-switch scope guard in _io_impl: when the buffer's GPU differs from the
 // caller's current device, hipSetDevice must switch before the copies and restore afterwards,
 // including when a copy throws.
@@ -829,9 +962,12 @@ struct FallbackDeviceSwitch : public FallbackIo {
 
     shared_ptr<IBuffer>  other_device_buffer{};
     std::vector<uint8_t> other_device_buffer_data{};
+    int                  current_device{kCallerDevice};
 
     FallbackDeviceSwitch() : other_device_buffer_data(64 * 1024)
     {
+        expect_device_query(mhip, current_device);
+
         // Register a buffer whose GPU id differs from the caller's current device (0).
         hipPointerAttribute_t attrs{};
         attrs.type   = hipMemoryTypeDevice;
@@ -853,52 +989,60 @@ struct FallbackDeviceSwitch : public FallbackIo {
 
 TEST_F(FallbackDeviceSwitch, WriteSwitchesToBufferDeviceBeforeCopyAndRestoresAfter)
 {
-    Sequence s;
-    EXPECT_CALL(mhip, hipSetDevice(kBufferDevice)).InSequence(s);
-    EXPECT_CALL(mhip, hipMemcpy).InSequence(s);
-    EXPECT_CALL(mhip, hipSetDevice(kCallerDevice)).InSequence(s);
+    expect_device_updates(mhip, current_device);
 
     EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
+    EXPECT_CALL(mhip, hipMemcpyWithStream).WillOnce(testing::InvokeWithoutArgs([this] {
+        EXPECT_EQ(kBufferDevice, current_device);
+    }));
     EXPECT_CALL(mhip, hipStreamSynchronize);
     EXPECT_CALL(msys, pwrite).WillOnce(testing::Return(static_cast<ssize_t>(kIoSize)));
     EXPECT_CALL(msys, fdatasync).Times(AnyNumber());
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
     EXPECT_CALL(mstats, addIo).Times(1);
 
-    ASSERT_EQ(kIoSize, Fallback().io(IoType::Write, file, other_device_buffer, kIoSize, 0, 0, kIoSize));
+    Fallback fallback;
+    ASSERT_EQ(kIoSize, fallback.io(IoType::Write, file, other_device_buffer, kIoSize, 0, 0, kIoSize));
+    EXPECT_EQ(kCallerDevice, current_device);
 }
 
 TEST_F(FallbackDeviceSwitch, ReadSwitchesToBufferDeviceBeforeCopyAndRestoresAfter)
 {
-    Sequence s;
-    EXPECT_CALL(mhip, hipSetDevice(kBufferDevice)).InSequence(s);
-    EXPECT_CALL(mhip, hipMemcpy).InSequence(s);
-    EXPECT_CALL(mhip, hipSetDevice(kCallerDevice)).InSequence(s);
+    expect_device_updates(mhip, current_device);
 
     EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
     EXPECT_CALL(msys, pread).WillOnce(testing::Return(static_cast<ssize_t>(kIoSize)));
+    EXPECT_CALL(mhip, hipMemcpyWithStream).WillOnce(testing::InvokeWithoutArgs([this] {
+        EXPECT_EQ(kBufferDevice, current_device);
+    }));
+    EXPECT_CALL(mhip, hipStreamSynchronize);
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
     EXPECT_CALL(mstats, addIo).Times(1);
 
-    ASSERT_EQ(kIoSize, Fallback().io(IoType::Read, file, other_device_buffer, kIoSize, 0, 0, kIoSize));
+    Fallback fallback;
+    ASSERT_EQ(kIoSize, fallback.io(IoType::Read, file, other_device_buffer, kIoSize, 0, 0, kIoSize));
+    EXPECT_EQ(kCallerDevice, current_device);
 }
 
 TEST_F(FallbackDeviceSwitch, RestoresCallerDeviceWhenCopyThrows)
 {
-    Sequence s;
-    EXPECT_CALL(mhip, hipSetDevice(kBufferDevice)).InSequence(s);
-    EXPECT_CALL(mhip, hipMemcpy).InSequence(s).WillOnce(testing::Throw(Hip::RuntimeError(hipErrorUnknown)));
-    EXPECT_CALL(mhip, hipSetDevice(kCallerDevice)).InSequence(s);
+    expect_device_updates(mhip, current_device);
 
     EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
+    EXPECT_CALL(mhip, hipMemcpyWithStream).WillOnce(testing::InvokeWithoutArgs([this] {
+        EXPECT_EQ(kBufferDevice, current_device);
+        throw Hip::RuntimeError(hipErrorUnknown);
+    }));
     EXPECT_CALL(msys, munmap).WillOnce(testing::Invoke(::munmap));
     EXPECT_CALL(mstats, error).Times(1);
 
-    ASSERT_THROW(Fallback().io(IoType::Write, file, other_device_buffer, kIoSize, 0, 0, kIoSize),
+    Fallback fallback;
+    ASSERT_THROW(fallback.io(IoType::Write, file, other_device_buffer, kIoSize, 0, 0, kIoSize),
                  Hip::RuntimeError);
+    EXPECT_EQ(kCallerDevice, current_device);
 }
 
 TEST_F(FallbackDeviceSwitch, DoesNotSwitchWhenBufferIsOnCallerDevice)
@@ -907,7 +1051,7 @@ TEST_F(FallbackDeviceSwitch, DoesNotSwitchWhenBufferIsOnCallerDevice)
     // the guard must not call hipSetDevice at all. StrictMock<MHip> fails if it does.
     EXPECT_CALL(mcfg, fallback()).WillOnce(testing::Return(true));
     EXPECT_CALL(msys, mmap).WillOnce(testing::Invoke(::mmap));
-    EXPECT_CALL(mhip, hipMemcpy);
+    EXPECT_CALL(mhip, hipMemcpyWithStream);
     EXPECT_CALL(mhip, hipStreamSynchronize);
     EXPECT_CALL(msys, pwrite).WillOnce(testing::Return(static_cast<ssize_t>(kIoSize)));
     EXPECT_CALL(msys, fdatasync).Times(AnyNumber());
@@ -915,6 +1059,165 @@ TEST_F(FallbackDeviceSwitch, DoesNotSwitchWhenBufferIsOnCallerDevice)
     EXPECT_CALL(mstats, addIo).Times(1);
 
     ASSERT_EQ(kIoSize, Fallback().io(IoType::Write, file, buffer, kIoSize, 0, 0, kIoSize));
+}
+
+struct BounceStreamPoolTest : public testing::Test {
+    StrictMock<MHip>           mhip{};
+    StrictMock<MSys>           msys{};
+    StrictMock<MConfiguration> mcfg{};
+
+    int       current_device{0};
+    uintptr_t next_handle{0x1000};
+    size_t    pool_size{32};
+
+    BounceStreamPoolTest()
+    {
+        expect_device_query(mhip, current_device);
+        expect_device_updates(mhip, current_device);
+        EXPECT_CALL(mhip, hipDeviceGetStreamPriorityRange)
+            .Times(AnyNumber())
+            .WillRepeatedly(testing::Return(HipStreamPriorityRange{1, -1}));
+        EXPECT_CALL(mhip, hipStreamDestroy).Times(AnyNumber());
+        EXPECT_CALL(mcfg, deviceStreamPoolSize()).WillRepeatedly(testing::Return(pool_size));
+    }
+
+    hipStream_t make_handle()
+    {
+        return reinterpret_cast<hipStream_t>(next_handle++);
+    }
+};
+
+TEST_F(BounceStreamPoolTest, LazilyCreatesNonBlockingStreamOnFirstUse)
+{
+    auto handle = reinterpret_cast<hipStream_t>(0x1234);
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .WillOnce(testing::Return(handle));
+
+    BounceStreamPool pool;
+    EXPECT_EQ(handle, pool.getStream(0)->stream);
+}
+
+TEST_F(BounceStreamPoolTest, CreatesStreamsAtGreatestPriority)
+{
+    EXPECT_CALL(mhip, hipDeviceGetStreamPriorityRange)
+        .WillOnce(testing::Return(HipStreamPriorityRange{3, -7}));
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, -7))
+        .WillOnce(testing::Return(make_handle()));
+
+    BounceStreamPool pool;
+    pool.getStream(0);
+}
+
+TEST_F(BounceStreamPoolTest, CreatesOneStreamPerRingSlotOverAFullRotation)
+{
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .Times(static_cast<int>(pool_size))
+        .WillRepeatedly(testing::InvokeWithoutArgs([this] { return make_handle(); }));
+
+    BounceStreamPool         pool;
+    std::vector<hipStream_t> streams;
+    std::vector<hipStream_t> expected;
+    for (size_t i = 0; i < pool_size; ++i) {
+        streams.push_back(pool.getStream(0)->stream);
+        expected.push_back(reinterpret_cast<hipStream_t>(0x1000 + i));
+    }
+
+    EXPECT_EQ(expected, streams);
+}
+
+TEST_F(BounceStreamPoolTest, ReusesStreamsInOrderAfterFullRotation)
+{
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .Times(static_cast<int>(pool_size))
+        .WillRepeatedly(testing::InvokeWithoutArgs([this] { return make_handle(); }));
+
+    BounceStreamPool         pool;
+    std::vector<hipStream_t> first_pass;
+    std::vector<hipStream_t> second_pass;
+    for (size_t i = 0; i < pool_size; ++i) {
+        first_pass.push_back(pool.getStream(0)->stream);
+    }
+    for (size_t i = 0; i < pool_size; ++i) {
+        second_pass.push_back(pool.getStream(0)->stream);
+    }
+
+    EXPECT_EQ(first_pass, second_pass);
+}
+
+TEST_F(BounceStreamPoolTest, MaintainsSeparateRingsPerDevice)
+{
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .WillRepeatedly(testing::InvokeWithoutArgs([this] { return make_handle(); }));
+
+    BounceStreamPool pool;
+    auto             a0 = pool.getStream(0)->stream;
+    auto             b0 = pool.getStream(1)->stream;
+    auto             a1 = pool.getStream(0)->stream;
+    auto             b1 = pool.getStream(1)->stream;
+
+    EXPECT_NE(a0, b0);
+    EXPECT_NE(a0, a1);
+    EXPECT_NE(b0, b1);
+    EXPECT_NE(a1, b1);
+}
+
+TEST_F(BounceStreamPoolTest, CreatesStreamOnRequestedDeviceThenRestoresCaller)
+{
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .WillOnce(testing::InvokeWithoutArgs([this] {
+            EXPECT_EQ(5, current_device);
+            return make_handle();
+        }));
+
+    BounceStreamPool pool;
+    pool.getStream(5);
+    EXPECT_EQ(0, current_device);
+}
+
+TEST_F(BounceStreamPoolTest, DestroysStreamsOnOwningDeviceThenRestoresCaller)
+{
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .WillOnce(testing::InvokeWithoutArgs([this] { return make_handle(); }));
+    EXPECT_CALL(mhip, hipStreamDestroy).WillRepeatedly(testing::Invoke([this](hipStream_t) {
+        EXPECT_EQ(9, current_device);
+    }));
+
+    {
+        BounceStreamPool pool;
+        pool.getStream(9);
+        EXPECT_EQ(0, current_device);
+    }
+    EXPECT_EQ(0, current_device);
+}
+
+TEST_F(BounceStreamPoolTest, ClearDestroysOnlyCreatedStreamsThenResetsPool)
+{
+    std::vector<hipStream_t> created;
+    std::vector<hipStream_t> destroyed;
+
+    EXPECT_CALL(mhip, hipStreamCreateWithPriority(hipStreamNonBlocking, testing::_))
+        .WillRepeatedly(testing::InvokeWithoutArgs([&] {
+            auto stream = make_handle();
+            created.push_back(stream);
+            return stream;
+        }));
+    EXPECT_CALL(mhip, hipStreamDestroy).WillRepeatedly(testing::Invoke([&](hipStream_t stream) {
+        destroyed.push_back(stream);
+    }));
+
+    BounceStreamPool pool;
+    pool.getStream(0);
+    pool.getStream(0);
+    pool.getStream(0);
+    ASSERT_EQ(3u, created.size());
+
+    pool.clear();
+
+    EXPECT_EQ(created, destroyed);
+
+    created.clear();
+    pool.getStream(0);
+    EXPECT_EQ(1u, created.size());
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON
