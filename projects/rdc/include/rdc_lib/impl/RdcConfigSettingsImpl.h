@@ -23,6 +23,7 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_IMPL_RDCCONFIGSETTINGSIMPL_H_
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <mutex>  // NOLINT
 #include <thread>
@@ -36,6 +37,10 @@ namespace rdc {
 
 class RdcConfigSettingsImpl : public RdcConfigSettings {
  public:
+  // Re-applies the settings every monitor_period instead of once a minute.
+  RdcConfigSettingsImpl(const RdcGroupSettingsPtr& group_settings,
+                        std::chrono::milliseconds monitor_period);
+
   // Set one configure
   rdc_status_t rdc_config_set(rdc_gpu_group_t group_id, rdc_config_setting_t setting) override;
 
@@ -47,6 +52,7 @@ class RdcConfigSettingsImpl : public RdcConfigSettings {
   rdc_status_t rdc_config_clear(rdc_gpu_group_t group_id) override;
 
   explicit RdcConfigSettingsImpl(const RdcGroupSettingsPtr& group_settings);
+  ~RdcConfigSettingsImpl() override;
 
  private:
   RdcGroupSettingsPtr group_settings_;
@@ -56,15 +62,12 @@ class RdcConfigSettingsImpl : public RdcConfigSettings {
   std::mutex mutex_;              // Mutex for cached_group_settings_
   std::atomic<bool> is_running_;  // Bool for  if the thread should keep running
   std::condition_variable cv_;
+  std::chrono::milliseconds monitor_period_{std::chrono::minutes(1)};
 
-  // monitorSettings() is kicked off from the RdcConfigSettingsImpl constructor as it's own thread
-  // Every minute, it will check if gpu settings from amdsmi are the same as inside
-  // cached_group_settings_ If not, it sets the mismatched values to the value in
-  // cached_group_settings_
+  // monitorSettings() runs as its own thread from the first rdc_config_set() until the
+  // object is destroyed. Every monitor_period_, it checks the GPUs of each group in
+  // cached_group_settings_ and sets again each setting that a GPU no longer has.
   void monitorSettings();
-  uint64_t wattsToMicrowatts(uint64_t watts) const;
-  uint64_t microwattsToWatts(int microwatts) const;
-  uint64_t mHzToHz(uint64_t mhz) const;
   rdc_status_t get_group_info(rdc_gpu_group_t group_id, rdc_group_info_t* rdc_group_info);
 };
 
