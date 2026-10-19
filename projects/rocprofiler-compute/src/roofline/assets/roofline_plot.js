@@ -10,11 +10,13 @@
 
   // ---- Config forwarded from roofline_html.py via the model ---------------
   var ALL_PEAKS_VALUE = model.allPeaksValue;
+  var LIMITING_PEAK_VALUE = model.limitingPeakValue;
   var ROOF_EXTREME_MAX_AI = model.roofExtremeMaxAi;
   var KERNEL_NAME_FONT_FAMILY = model.kernelNameFontFamily;
 
   // ---- Own presentation ---------------------------------------------------
   var ALL_PEAKS_LABEL = "All peaks";
+  var LIMITING_PEAK_LABEL = "Limited by";
   var FALLBACK_COLOR = "#888888";
   var PLOT_DIM_OPACITY = 0.15;
   // How far a roof drawn at 45 degrees in data space may lean on screen.
@@ -275,6 +277,11 @@
     var peak = effectivePeak();
     if (peak === ALL_PEAKS_VALUE) {
       return points;
+    }
+    if (peak === LIMITING_PEAK_VALUE) {
+      return points.filter(function (point) {
+        return point.peak === kernel.limitingPeak;
+      });
     }
     return points.filter(function (point) {
       return point.peak === peak;
@@ -1124,11 +1131,18 @@
     return entries;
   }
 
+  function peakLabel(peak) {
+    if (peak === ALL_PEAKS_VALUE) {
+      return ALL_PEAKS_LABEL;
+    }
+    if (peak === LIMITING_PEAK_VALUE) {
+      return LIMITING_PEAK_LABEL;
+    }
+    return peak;
+  }
+
   function exportViewSubtitle() {
-    var peak = effectivePeak();
-    var parts = [
-      "AI axis: " + (peak === ALL_PEAKS_VALUE ? ALL_PEAKS_LABEL : peak),
-    ];
+    var parts = ["AI axis: " + peakLabel(effectivePeak())];
     if (hasRuntimeData && isFinite(state.runtimeThreshold)) {
       parts.push("runtime shown: " + state.runtimeThreshold.toFixed(3) + "%");
     }
@@ -1343,6 +1357,10 @@
     if (!peakSelect) {
       return;
     }
+    var limitingEl = document.createElement("option");
+    limitingEl.value = LIMITING_PEAK_VALUE;
+    limitingEl.textContent = LIMITING_PEAK_LABEL;
+    peakSelect.appendChild(limitingEl);
     model.peaks.forEach(function (peak) {
       var el = document.createElement("option");
       el.value = peak;
@@ -1408,14 +1426,22 @@
     return badge;
   }
 
+  function buildRuntimePct(kernel) {
+    var pct = document.createElement("span");
+    pct.className = "roofline-kernel-pct";
+    pct.textContent = kernel.pctRuntime.toFixed(1) + "%";
+    pct.title = "Percent of GPU resident time";
+    return pct;
+  }
+
   function buildKernelPanel() {
     var items = kernelIndicesByRuntime().map(function (index) {
       var kernel = kernels[index];
       return {
         key: index,
-        label: kernel.name,
+        label: kernel.label,
+        title: kernel.name,
         color: kernel.color,
-        pct: kernelHasRuntime(kernel) ? kernel.pctRuntime : null,
       };
     });
     kernelPanel = window.HtmlReport.createKernelList({
@@ -1424,12 +1450,17 @@
       countElement: kernelCountEl,
       items: items,
       mode: "multi",
-      pctTitle: "Percent of GPU resident time",
       decorateRow: function (row, item) {
+        var kernel = kernels[item.key];
         row.querySelector(".report-panel-name").classList.add(
           "roofline-kernel-name"
         );
-        row.appendChild(buildOffPlotBadge(kernels[item.key]));
+        if (kernelHasRuntime(kernel)) {
+          row.querySelector(".report-panel-action").appendChild(
+            buildRuntimePct(kernel)
+          );
+        }
+        row.appendChild(buildOffPlotBadge(kernel));
       },
       onChange: function (keys) {
         selectedKernelKeys = keys;
@@ -1679,7 +1710,7 @@
 
   function init() {
     document.documentElement.style.setProperty(
-      "--roofline-kernel-font",
+      "--report-kernel-font",
       KERNEL_NAME_FONT_FAMILY
     );
     buildPeakOptions();

@@ -26,9 +26,10 @@
 #pragma once
 
 #include <stdarg.h>
-// <new> can not be used in the kernel
+// These headers can not be used in the kernel
 #if !DD_PLATFORM_IS_KM
 #include <new>
+#include <cstdio>
 #endif
 
 #include <ddDefs.h>
@@ -398,11 +399,15 @@ int32 AtomicIncrement(Atomic* pVariable);
 int32 AtomicDecrement(Atomic* pVariable);
 int32 AtomicAdd(Atomic* pVariable, int32 num);
 int32 AtomicSubtract(Atomic* pVariable, int32 num);
+int32 AtomicGet(const Atomic* pVariable);
+void  AtomicSet(Atomic* pVariable, int32 num);
 
 int64 AtomicIncrement(Atomic64* pVariable);
 int64 AtomicDecrement(Atomic64* pVariable);
 int64 AtomicAdd(Atomic64* pVariable, int64 num);
 int64 AtomicSubtract(Atomic64* pVariable, int64 num);
+int64 AtomicGet(const Atomic64* pVariable);
+void  AtomicSet(Atomic64* pVariable, int64 num);
 
 // A generic AllocCb that defers allocation to Platform::AllocateMemory()
 // Suitable for memory allocation if you don't care about it.
@@ -534,13 +539,36 @@ private:
     static_assert(kIncrement < kModulus,  "Invalid increment");
 };
 
+/// Controls which directories Windows searches when loading a DLL.
+/// On non-Windows platforms, this parameter is accepted but has no effect.
+/// Flags may be combined with bitwise OR.
+enum struct LibrarySearchPaths : uint32
+{
+    System         = 0x1,   ///< LOAD_LIBRARY_SEARCH_SYSTEM32
+    ApplicationDir = 0x2,   ///< LOAD_LIBRARY_SEARCH_APPLICATION_DIR
+    UserDirs       = 0x4,   ///< LOAD_LIBRARY_SEARCH_USER_DIRS (AddDllDirectory)
+    DllLoadDir     = 0x8,   ///< LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR (requires full path)
+    SafeDefault    = 0x3,   ///< System | ApplicationDir — safe default for system DLLs
+};
+
+inline LibrarySearchPaths operator|(LibrarySearchPaths a, LibrarySearchPaths b)
+{
+    return static_cast<LibrarySearchPaths>(static_cast<uint32>(a) | static_cast<uint32>(b));
+}
+
+inline LibrarySearchPaths operator&(LibrarySearchPaths a, LibrarySearchPaths b)
+{
+    return static_cast<LibrarySearchPaths>(static_cast<uint32>(a) & static_cast<uint32>(b));
+}
+
 class Library
 {
 public:
     Library();
     ~Library();
 
-    Result Load(const char* pLibraryName);
+    Result Load(const char* pLibraryName,
+                LibrarySearchPaths searchPaths = LibrarySearchPaths::SafeDefault);
 
     void Close();
 
@@ -616,6 +644,13 @@ void Strncat(char(&dst)[DstSize], const char* pSrc)
 void Memcpy_s(void* pDst, size_t dstSize, const void* pSrc, size_t srcSize);
 
 void Memmove_s(void* pDst, size_t dstSize, const void* pSrc, size_t srcSize);
+
+void Strerror_s(char* pBuf, size_t bufSize, int err);
+
+#if !DD_PLATFORM_IS_KM
+FILE* Tmpfile_s();
+FILE* Fopen_s(const char* pFilename, const char* pMode);
+#endif
 
 size_t Strlen_s(const char* pStr, size_t maxSize);
 

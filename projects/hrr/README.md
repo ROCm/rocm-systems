@@ -19,6 +19,8 @@ HRR Capture is now disabled by default on AMD platforms. The feature will be sec
 HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 ```
 
+A process that initialises HIP with capture on says so once on stderr, whatever `AMD_LOG_LEVEL` is set to: the line begins with `[HRR capture] Recording` and names the process's own directory in the archive, such as `./my_capture.hrr/pid-4242`. Child processes record to their own `pid-*` directories in the same archive. A child started with `exec` prints a line of its own; a child created with `fork()` after HIP has started does not.
+
 Use the in-tree `libamdhip64` from the **same source commit** when testing capture changes:
 
 ```bash
@@ -88,15 +90,17 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory |
-| `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance) |
+| `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
+| `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance). Only a Debug build of the HIP runtime (no `NDEBUG`) reads it; a release build ignores it. Either way capture says on stderr whether it reads it, whatever the log level |
+
+On Linux the archive is readable only by the user who captured it (directories 0700, files 0600). What an archive contains, which of it each capture mode records, and why replaying an archive means running its GPU code: [PRIVACY.md](PRIVACY.md). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
 
 ### `hrr-playback` CLI options
 
 | Option | Purpose |
 |--------|---------|
 | `--info` | Print archive summary and exit (no GPU) |
-| `--repair` | Rewrite a crash-truncated archive with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
+| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index. Repair writes through a checked directory descriptor to a new, unpredictably named file and renames it into place; it never follows a symbolic link, and refuses an archive whose `events.bin`, `manifest.json` or `pid-*` directory is one (a link in the path you name on the command line is resolved), and keeps the permissions of the files it replaces. The reader still follows links when it reads. On Windows a link or directory junction (any reparse point) is refused by checking the file attributes, but the write is not made through a checked directory handle, so a link swapped in between the check and the write is not caught |
 | `--events` | With `--info`: print the full event log |
 | `--verbose` | Print each event as it is replayed |
 | `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events |
@@ -108,12 +112,20 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--sync-after-event` | Sync after every event (slow; pinpoints faults/hangs) |
 | `--continue-on-error` | Report each HIP API error and keep replaying instead of aborting; for surveying which APIs fail, not for reproducing a fault |
 | `--sync-watchdog-ms N` | Abort if any device sync exceeds `N` ms (`0` = disabled) |
+| `--max-seq-waits N` | End the replay when an event's sequence number is still not reached after `N` waits with no progress and no HIP call in flight; a backstop, since a gap or duplicate in the recorded sequence is refused before the replay starts (default `5000000`, a few minutes) |
+| `--max-query-attempts N` | Stop retrying `hipEventQuery`/`hipStreamQuery` after `N` attempts that return `hipErrorNotReady` (default: no limit; the query waits for replayed work as a synchronize does) |
+| `--max-file-bytes N` | Refuse a blob or code object larger than `N` bytes (default `4294967296`, 4 GiB) |
+| `--max-threads N` | Refuse a `--multi-thread` replay of an archive that records more than `N` thread ids; checked before any thread is created (default `256`) |
+| `--max-events N` | Refuse an archive with more than `N` events; the reader stops loading at the first one past the cap. It counts events; each record's payload is separately limited in size (default `50000000`) |
+| `--max-host-bytes N` | End the replay when host memory held for the archive (blob and code-object caches, pinned and registered host buffers, graph operand buffers, D2H read-back buffers) would pass `N` bytes; a refusal ends the replay even under `--continue-on-error` (default `17179869184`, 16 GiB) |
+| `--max-wall-seconds S` | End the replay, with exit status 124, `S` seconds after the archive has loaded and replay starts (default `3600`; `0` = no limit; at most `31536000`, 365 days) |
 | `--trace-kernels` | One compact line before every kernel launch |
 | `--trace-sync` | Log sync begin/done around kernel syncs |
 | `--progress-kernels N` | Heartbeat every `N` launched kernels |
 | `--progress-seconds S` | Heartbeat at most every `S` seconds |
 | `--version` | Print the archive format version this build reads, the revision it was built from, and the HIP runtime it is linked against, then exit (no GPU) |
 | `--warn-untranslated-args` | Report kernel-arg pointers that resolve in no allocation, VMM reservation or region (they reach the GPU as null) — the measurement that says a capture lost allocations below the HIP API |
+| `--no-placement` | Let `hipMalloc`/`hipMallocAsync` return fresh addresses instead of the recorded ones (placement is on by default on Linux; see DESIGN.md) |
 | `--no-regions` | Ignore any external region annotations in the archive |
 | `--regions-strict` | Count intra-segment out-of-bounds findings toward the exit code (default: report only) |
 | `--guard-segments` | VMM-back every device allocation and leave an unmapped span after it (diagnostic) |
@@ -121,6 +133,27 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--guard-min-bytes N` / `--guard-max-bytes N` | Size window for `--guard-blocks` |
 | `--guard-budget-mb N` | Cap guarded memory per launch (default `4096`) |
 | `--guard-exact-align` | Reproduce each guarded pointer's offset within an allocation granule bit for bit, at the cost of a larger unguarded tail |
+
+### Archive integers reach HIP only through translation
+
+An archive is untrusted input, so replay never hands the runtime a recorded
+integer as a pointer or an opaque handle unless it was translated through the
+replay's own maps. The playback generator enforces this: an API with a pointer
+or handle argument that has no translation is refused as unreplayable, by name,
+with `hipErrorNotSupported`. That covers texture references, external memory and
+semaphores, execution contexts, graphics resources and `hipLibraryGetGlobal`/
+`hipLibraryGetManaged`. `hipLinkAddFile` is refused because the path would be one
+the archive chose, `hipLinkCreate` is refused when a JIT option carries a
+pointer (a log buffer or a symbol table), and `hipStreamSetAttribute` and
+`hipGraphKernelNodeSetAttribute` translate the base pointer of an access policy
+window like `hipLaunchKernelExC` does. A 2D device copy whose source or destination
+is in no replay map is refused instead of run against the recorded address; a
+zero-extent or host-to-host 2D copy is a no-op. A fixed-size string in a record is
+copied into a bounded, NUL-terminated buffer before it is used.
+`tools/tests/test_gen_raw_slots.py` regenerates the handlers and fails if a raw
+cast of a recorded pointer or handle remains.
+`tools/tests/test_generated_files_current.py` fails if a checked-in generated
+source or the matrix expectations header is stale against the generator.
 
 ### External region annotations
 
@@ -133,7 +166,8 @@ outside the runtime writes those ranges down as
 `pid-<pid>/regions/<name>.hrrr`; `hrr-playback` loads them automatically. See
 [`producers/README.md`](producers/README.md) for the format and
 [`producers/pytorch/hrr_torch_regions.py`](producers/pytorch/hrr_torch_regions.py)
-for the reference PyTorch producer.
+for the reference PyTorch producer. That producer is opt-in: set
+`HRR_REGIONS_AUTOSTART=1` or call its `start()`.
 
 **Fidelity.** With annotations present and no guard flag, replay's memory layout
 is exactly what it would have been without them; the annotations are read, not
@@ -162,7 +196,13 @@ the next event, so the divergence is confined to the launch under examination.
 | `HIP_HRR_REPLAY_NO_RESCAN` | off | Disable suballoc pointer rescan at replay |
 | `HIP_HRR_PTR_RELAX` | off | Disable replay-side stale-pointer guard (debug only) |
 | `HIP_HRR_REPLAY_FORCE_EXT_CIJK` | off | Force external Cijk kernel binding workaround (debug) |
-| `HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL` | `0` | Dump pointer translation map at event ordinal `N` (debug) |
+| `HIP_HRR_REPLAY_DUMP_PTRS_ORDINAL` | `0` | Dump pointer translation map, and the allocation each argument lands in, at kernel ordinal `N` (debug) |
+| `HIP_HRR_REPLAY_SCAN_ARGS_ORDINAL` | `0` | Before kernel `N`, read back each pointer argument's allocation and report words that are recorded addresses (debug) |
+| `HIP_HRR_REPLAY_SCAN_ARGS_BYTES` | `4096` | Per-allocation cap for the argument scan |
+| `HIP_HRR_REPLAY_SCAN_H2D` | off | Report recorded addresses inside replayed H2D payloads (debug) |
+| `HIP_HRR_REPLAY_AUDIT_HOST_ARGS` | off | Report kernels taking a pointer into host memory, whose contents replay cannot restore (debug) |
+| `HIP_HRR_REPLAY_FILL_BYTE` | `0` | Byte to fill fresh allocations with; set it to e.g. `0xa5` to expose kernels reading memory nothing wrote (debug) |
+| `HIP_HRR_REPLAY_EXPLAIN_ADDR` | unset | At the scan ordinal, report whether an address is recorded, live, or neither, and whether the GPU can read it (debug) |
 
 ### D2H validation
 
@@ -193,7 +233,7 @@ capture.hrr/
   capture itself
 - **blobs/** — host payloads referenced by the trace
 - **code_objects/** — code objects, content-addressed by hash (device images
-  extracted by the runtime, or the raw file for `hipModuleLoad`); a launch
+  extracted by the runtime, for `hipModuleLoad` too); a launch
   records the hash so kernels sharing a name (Triton emits many `triton_`)
   still resolve to the code object they came from
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
@@ -211,6 +251,11 @@ Optional Cursor/agent skill: [skills/decode-and-triage/SKILL.md](skills/decode-a
 **Windows:** full native replay via `triage_archive.ps1` + `ensure_playback.ps1`; Docker replay
 requires Linux or WSL2. Docker replay uses the image HRR stack by default; set
 `HRR_DOCKER_MOUNT_CLR=1` to overlay a host dev build (`CLR_BUILD` / `HRR_PLAYBACK`).
+
+For the other end, producing an archive in the first place:
+[skills/enable-recording/SKILL.md](skills/enable-recording/SKILL.md)
+checks that the runtime a workload loads can capture at all, runs it with capture
+enabled, and reports whether the archive holds anything.
 
 ## Copyright
 

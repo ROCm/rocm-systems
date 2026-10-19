@@ -17,7 +17,7 @@
 
 #include "signature-drift.h"
 
-#include "channel.h"            // rcclEffectiveP2pBatchEnable
+#include "channel.h"            // rcclEffectiveP2pBatchEnable, rcclP2pTaskParts
 #include "enqueue_fakes.h"
 #include "nccl_fakes.h"         // g_loadParam, for the NCCL_PARAM body this file stands in for
 #include "sym_kernels_fakes.h"  // g_symkAvailable and the sym_kernels.cc seams below's canonical home
@@ -31,6 +31,7 @@ ASSERT_HOOK_MATCHES_PROD(g_addProxyOpIfNeeded, ncclAddProxyOpIfNeeded);
 ASSERT_HOOK_MATCHES_PROD(g_getCollNetSupport, ncclGetCollNetSupport);
 ASSERT_HOOK_MATCHES_PROD(g_getRegBuff, ncclGetRegBuff);
 ASSERT_HOOK_MATCHES_PROD(g_rcclEffectiveP2pBatchEnable, rcclEffectiveP2pBatchEnable);
+ASSERT_HOOK_MATCHES_PROD(g_rcclP2pTaskParts, rcclP2pTaskParts);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // Generous default: a deny-everything default would make even a single small task look over budget.
@@ -59,9 +60,9 @@ std::function<void(struct ncclComm*, struct ncclKernelPlan*)> g_planSetDefaultKe
 
 // No-op default: nothing here inspects the plan's work-batch fifo directly.
 static void DefaultAddWorkBatchToPlan(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int,
-                                     uint32_t, int, int, bool) {}
-std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, uint32_t, int, int,
-                   bool)>
+                                     int, uint32_t, int, int, bool) {}
+std::function<void(struct ncclComm*, struct ncclKernelPlan*, int, enum ncclDevWorkType, int, int, uint32_t, int,
+                   int, bool)>
     g_addWorkBatchToPlan = DefaultAddWorkBatchToPlan;
 
 // Generous default: accepts every proxy op, matching an always-available proxy thread.
@@ -74,6 +75,10 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, struct nccl
 // enqueue.cc:1284. Default 0 is what the real one answers with RCCL_P2P_BATCH_ENABLE unset.
 static int DefaultEffectiveP2pBatchEnable(struct ncclComm*) { return 0; }
 std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable = DefaultEffectiveP2pBatchEnable;
+
+// enqueue.cc's answer for every task outside multi-node AINIC Scatter.
+static int DefaultP2pTaskParts(struct ncclComm* comm, ncclFunc_t) { return comm->p2pnChannelsPerPeer; }
+std::function<int(struct ncclComm*, ncclFunc_t)> g_rcclP2pTaskParts = DefaultP2pTaskParts;
 
 // enqueue.cc:437-441 splits the default on ROCm version; mirrored rather than pinned to one arm.
 #if ROCM_VERSION >= 71200
@@ -105,10 +110,14 @@ void ResetEnqueueFakes() {
   g_getCollNetSupport = DefaultGetCollNetSupport;
   g_getRegBuff = DefaultGetRegBuff;
   g_rcclEffectiveP2pBatchEnable = DefaultEffectiveP2pBatchEnable;
+  g_rcclP2pTaskParts = DefaultP2pTaskParts;
 }
 
 int rcclEffectiveP2pBatchEnable(struct ncclComm* comm) {
   return g_rcclEffectiveP2pBatchEnable(comm);
+}
+int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI) {
+  return g_rcclP2pTaskParts(comm, collAPI);
 }
 
 // src/enqueue/enqueue.cc
@@ -117,9 +126,10 @@ ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, i
   return g_ncclGetAlgoInfo(comm, task, collNetSupport, nvlsSupport, nTasksPerChannel, simInfo);
 }
 void ncclAddWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
-                            enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset, int p2pEpoch,
-                            int p2pRound, bool newBatch) {
-  g_addWorkBatchToPlan(comm, plan, channelId, workType, devFuncId, workOffset, p2pEpoch, p2pRound, newBatch);
+                            enum ncclDevWorkType workType, int devFuncId, int progressSlot, uint32_t workOffset,
+                            int p2pEpoch, int p2pRound, bool newBatch) {
+  g_addWorkBatchToPlan(comm, plan, channelId, workType, devFuncId, progressSlot, workOffset, p2pEpoch, p2pRound,
+                       newBatch);
 }
 void ncclPlanSetDefaultKernel(struct ncclComm* comm, struct ncclKernelPlan* plan) {
   g_planSetDefaultKernel(comm, plan);

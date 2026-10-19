@@ -17,7 +17,7 @@ This document does not define testing strategy for ROCm math libraries, communic
 
 ## Development workflow
 
-All tests are C++ built on Catch2 and discovered and run through CTest. Test executables are grouped by CMake `BUILD_*` options and by CTest labels generated from Catch2/YAML tags. Workload size is parameterized by level. Explicitly setting `HIP_TEST_LEVEL=level_N` (or a Catch2 filter such as `[level_0]`) both selects which tests run and their parameters; left unset, the default level (`level_2`) supplies parameters only and leaves test selection untouched.
+All tests are C++ built on Catch2 and discovered and run through CTest. Test executables are grouped by CMake `BUILD_*` options and by CTest labels generated from Catch2/YAML tags. Workload size is parameterized by level. `HIP_TEST_LEVEL=level_N` only sets the parameters (default `level_2`) and never filters; a Catch2 filter such as `[level_0]` or `ctest -L level_0` only selects tests and never changes the parameters. Set both to combine them, e.g. `HIP_TEST_LEVEL=level_0 ctest -L level_0`.
 
 | You changed | Run this before pushing | Needs GPU |
 |---|---|---|
@@ -46,7 +46,7 @@ Contract tests live in `catch/contract/` and are built ON by default through `BU
 
 ### Unit and functional testing
 
-Unit and functional tests live under `catch/unit/` feature-area directories and are built ON by default through `BUILD_UNIT_TESTS`. They validate functional correctness of individual HIP APIs and features across many feature areas, including memory, stream, graph, module, texture, cooperative groups, peer-to-peer, RTC, and virtual memory: arguments accepted or rejected, values returned, and observable side effects such as data movement and synchronization. Tests use the in-tree `HIP_CHECK` and `HIP_ASSERT` helpers, are discovered with `catch_discover_tests`, and run under CTest as one process per case. Workload size is parameterized by level. Explicitly setting `HIP_TEST_LEVEL=level_N` (or a Catch2 filter such as `[level_0]`) both selects which tests run and their parameters, while the unset default only sets parameters; `catch/config/configs/definitions.yaml` holds the generated per-level parameters and `catch/README.md` is the canonical reference for level semantics.
+Unit and functional tests live under `catch/unit/` feature-area directories and are built ON by default through `BUILD_UNIT_TESTS`. They validate functional correctness of individual HIP APIs and features across many feature areas, including memory, stream, graph, module, texture, cooperative groups, peer-to-peer, RTC, and virtual memory: arguments accepted or rejected, values returned, and observable side effects such as data movement and synchronization. Tests use the in-tree `HIP_CHECK` and `HIP_ASSERT` helpers, are discovered with `catch_discover_tests`, and run under CTest as one process per case. Workload size is parameterized by level. `HIP_TEST_LEVEL=level_N` sets the parameters and a `[level_N]` Catch2 filter or `ctest -L level_N` selects the tests, independently of each other; `catch/config/configs/definitions.yaml` holds the generated per-level parameters and `catch/README.md` is the canonical reference for level semantics.
 
 ### Integration testing
 
@@ -91,7 +91,7 @@ Code coverage and test coverage are different signals. Code coverage measures wh
 
 ## Nightly validation
 
-Nightly and multi-arch runs extend the per-PR build-and-test flow across a broader architecture set and longer-running suites. If `HIP_TEST_LEVEL` is unset, `main()` falls back to the default level (`level_2`) for workload parameters and leaves test selection alone. Setting `HIP_TEST_LEVEL=level_N` selects the tests as well as their parameters — under CTest the tests outside that level are reported as skipped — and is the single dial for level cadence. On-demand runs such as multi-arch sweeps, WSL runtime checks, and performance or stress runs are invoked explicitly rather than on every PR. CI level cadence is not yet fully wired to `HIP_TEST_LEVEL`.
+Nightly and multi-arch runs extend the per-PR build-and-test flow across a broader architecture set and longer-running suites. If `HIP_TEST_LEVEL` is unset, the workload parameters fall back to the default level (`level_2`). `HIP_TEST_LEVEL=level_N` only sets the workload parameters and runs every requested test; to restrict a run to one level's tests, add `ctest -L level_N` as well. An invalid `HIP_TEST_LEVEL` value fails the run rather than falling back to the default. On-demand runs such as multi-arch sweeps, WSL runtime checks, and performance or stress runs are invoked explicitly rather than on every PR. CI level cadence is not yet fully wired to `HIP_TEST_LEVEL`.
 
 ## Supported configurations
 
@@ -108,7 +108,7 @@ This table describes where the HIP runtime tests are validated. It is not a prod
 
 ## ASAN, TSAN, and sanitizer coverage
 
-AddressSanitizer builds are supported through `ENABLE_ADDRESS_SANITIZER` and through TheRock sanitizer settings such as `THEROCK_SANITIZER=ASAN` or `THEROCK_SANITIZER=HOST_ASAN`. Sanitizer builds can catch host-side memory errors in the test harness and runtime-facing code paths that execute on the host. Device-executed paths limit what host sanitizers observe, so sanitizer coverage of device-side behavior is inherently partial.
+AddressSanitizer builds are selected with `ENABLE_SANITIZER`, which takes `ASAN` for host and device instrumentation or `HOST_ASAN` for host only. Under TheRock it is set from `THEROCK_SANITIZER`. Sanitizer builds can catch host-side memory errors in the test harness and runtime-facing code paths that execute on the host. Device-executed paths limit what host sanitizers observe, so sanitizer coverage of device-side behavior is inherently partial.
 
 ThreadSanitizer and other sanitizer coverage are not part of the default per-PR gate for this component today. When sanitizer coverage is used, document the build option, architecture, tier, and limitations in the workflow that enables it rather than treating the sanitizer result as a complete substitute for device-executed testing.
 
@@ -129,7 +129,7 @@ Use `isQuickLevel()` inside the test function to trim workload size at `level_0`
 | Gap | Regression risk | Impact | Mitigation today |
 |---|---|---|---|
 | Integration tests are still distributed across directories rather than a separate top-level tier | Medium | Cross-component coverage is harder to audit independently from single-API unit coverage | Existing interop, multi-GPU, multiprocess, RTC, loader, and graph tests continue to run in their current locations |
-| CI level cadence is not fully wired to `HIP_TEST_LEVEL` | Medium | PR and nightly runs do not consistently select different workload levels through one global dial | Per-case generated `[level_N]` tags and on-demand overrides still provide level control; review after ROCm/rocm-systems#8932 lands |
+| CI level cadence is not fully wired to `HIP_TEST_LEVEL` | Medium | PR and nightly runs do not consistently select different workload levels | `HIP_TEST_LEVEL` sets the workload parameters and per-case generated `[level_N]` tags / `ctest -L` select tests; CI still needs to set them per cadence |
 | Level-based test parameters are defined but not broadly utilized today | Medium | Levels can select or label tests, but many cases do not yet scale workload sizes, iteration counts, or generated parameter sets based on the active level | Prefer adding level-aware parameter use when touching long-running tests; use `isQuickLevel()` and generated level parameters where practical |
 | No universal per-PR performance baseline gate | Medium | Throughput or latency regressions may be found after merge or by manual review | Performance tests exist and can run on demand or on a scheduled cadence |
 | Device-side code coverage is not fully captured by host coverage tools | Medium | A high host coverage number can still miss device-only behavior | Contract, functional, integration, and stress tests execute behavior on real devices |

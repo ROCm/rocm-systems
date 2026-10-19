@@ -97,7 +97,16 @@
 }
 
 .roofline-kernel-name {
-  font-family: var(--roofline-kernel-font, monospace);
+  font-family: var(--report-kernel-font, monospace);
+}
+
+.roofline-kernel-pct {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding-left: 8px;
+  color: var(--report-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .roofline-kernel-offplot {

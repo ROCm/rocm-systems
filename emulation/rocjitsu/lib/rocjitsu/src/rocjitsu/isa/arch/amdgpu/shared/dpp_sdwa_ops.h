@@ -24,11 +24,11 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/except.h"
 #include <array>
+#include <cassert>
 #include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 
 namespace rocjitsu {
 
@@ -64,6 +64,15 @@ public:
   void set_lane64(uint32_t lane, uint64_t value) {
     lo_[lane] = static_cast<uint32_t>(value);
     hi_[lane] = static_cast<uint32_t>(value >> 32);
+  }
+
+  void apply_float_sign_modifiers(uint64_t sign, bool absolute, bool negate) {
+    const uint64_t clear = absolute ? ~sign : ~uint64_t{0};
+    const uint64_t flip = negate ? sign : 0;
+    for (int lane = 0; lane < lane_count_; ++lane) {
+      const uint64_t value = uint64_t{lo_[lane]} | (uint64_t{hi_[lane]} << 32);
+      set_lane64(lane, (value & clear) ^ flip);
+    }
   }
 
 private:
@@ -409,11 +418,6 @@ private:
 
 inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel);
 
-inline uint8_t true16_source_byte_mask(uint32_t opsel, uint32_t source_index) {
-  return (opsel & (1u << source_index)) ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
-                                        : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
-}
-
 inline DppPlan make_dpp8_plan(uint32_t wf_size, uint32_t lane_sel, uint32_t fi,
                               uint64_t exec_mask) {
   DppPlan plan;
@@ -448,6 +452,18 @@ inline void stage_dpp_operand(const Operand &source, const DppPlan &plan,
       else if ((plan.zero_source_mask & lane_bit) == 0)
         storage->set_lane64(lane, src_view.lane(lane));
     }
+  } else if (!source.simd_capable()) {
+    // Packed half selectors return logical, right-aligned values. Gather only
+    // physical reads, once per lane, before applying the permutation.
+    assert(source_byte_mask == 0);
+    std::array<uint32_t, StagedOperand::MAX_LANES> values{};
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+      if (source_lane_mask & (uint64_t{1} << lane))
+        values[lane] = regs.read_lane(source, lane);
+    const uint64_t reads = read_destinations & plan.physical_read_dest_mask;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+      if (reads & (uint64_t{1} << lane))
+        storage->set_lane(lane, values[plan.source_lanes[lane]]);
   } else {
     if (source_byte_mask == 0)
       source_byte_mask = source.size_bits_ == 16 ? rocjitsu::ExecutionPlugin::kLowHalfByteMask
@@ -482,6 +498,37 @@ inline void apply_dpp(const Operand &source, const DppPlan &plan, uint64_t read_
   stage_dpp_operand(source, plan, read_destinations, storage, wf, source_byte_mask);
 }
 
+/// Apply the DPP16 extension's floating source modifiers after permutation.
+/// Stage an unpermuted second source only when it has a modifier.
+inline void apply_source_modifiers(const Operand &source, std::optional<StagedOperand> &storage,
+                                   amdgpu::Wavefront &wf, uint64_t sign, SourceModifiers modifiers,
+                                   uint32_t source_index) {
+  const bool absolute = modifiers.absolute & (1u << source_index);
+  const bool negate = modifiers.negate & (1u << source_index);
+  if (!absolute && !negate)
+    return;
+  if (!storage) {
+    RegisterAccess regs(wf);
+    storage.emplace(source, static_cast<int>(wf.wf_size()));
+    if (source.size_bits_ > 32) {
+      const auto values = regs.read_operand64(source, wf.exec());
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+        storage->set_lane64(lane, values.lane(lane));
+    } else if (!source.simd_capable()) {
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+        if (wf.exec() & (uint64_t{1} << lane))
+          storage->set_lane(lane, regs.read_lane(source, lane));
+    } else {
+      const uint8_t bytes = source.size_bits_ == 16 ? ExecutionPlugin::kLowHalfByteMask
+                                                    : ExecutionPlugin::kFullByteMask;
+      const auto values = regs.read_operand(source, wf.exec(), bytes);
+      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+        storage->set_lane(lane, values.lane(lane));
+    }
+  }
+  storage->apply_float_sign_modifiers(sign, absolute, negate);
+}
+
 inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel) {
   uint32_t sel = (lane_sel >> ((lane & 7u) * 3u)) & 7u;
   return (lane & ~7u) | sel;
@@ -499,6 +546,13 @@ inline void apply_dpp8(const Operand &source, uint32_t lane_sel, uint32_t fi,
 } // namespace dpp
 
 namespace sdwa {
+
+/// @brief Select the SDWA OMOD eligibility and F32 scaling policy.
+/// @details Selects the denormal mode used for OMOD eligibility, shared with VOP3.
+/// For F32, FLUSH_NEAREST uses apply_omod_f32 under the producer's nearest-rounding
+/// environment; MODE uses scale_f32 with guest rounding. F16 scaling order remains
+/// the producer helper's responsibility.
+enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST };
 
 /// @brief Return the architectural source bytes selected by an SDWA selector.
 inline uint8_t sdwa_src_byte_mask(uint32_t sel) {
@@ -535,77 +589,6 @@ inline uint32_t sdwa_src_select(uint32_t val, uint32_t sel, bool sign_ext) {
   if (sign_ext && (word_val & 0x8000))
     return word_val | 0xFFFF0000u;
   return word_val;
-}
-
-/// @brief Append an SDWA source, including modifiers encoded in the extension word.
-/// The semantic source format selects which modifier family is meaningful:
-/// integer-like sources use sign extension, while floating-point sources use
-/// negate and absolute-value modifiers.
-inline void append_source(std::string &out, const Operand &source, SourceModifierFormat format,
-                          bool sign_extend, bool negate, bool absolute) {
-  if (format == SourceModifierFormat::NONE && sign_extend)
-    out += "sext(";
-  if (format != SourceModifierFormat::NONE && negate)
-    out += '-';
-  if (format != SourceModifierFormat::NONE && absolute)
-    out += '|';
-  out += source.name();
-  if (format != SourceModifierFormat::NONE && absolute)
-    out += '|';
-  if (format == SourceModifierFormat::NONE && sign_extend)
-    out += ')';
-}
-
-inline std::string selection_name(uint32_t selection) {
-  constexpr std::array<std::string_view, 7> names = {"BYTE_0", "BYTE_1", "BYTE_2", "BYTE_3",
-                                                     "WORD_0", "WORD_1", "DWORD"};
-  if (selection < names.size())
-    return std::string(names[selection]);
-  return "invalid(" + std::to_string(selection) + ")";
-}
-
-inline std::string destination_unused_name(uint32_t unused) {
-  constexpr std::array<std::string_view, 3> names = {"UNUSED_PAD", "UNUSED_SEXT",
-                                                     "UNUSED_PRESERVE"};
-  if (unused < names.size())
-    return std::string(names[unused]);
-  return "invalid(" + std::to_string(unused) + ")";
-}
-
-inline void append_source_attributes(std::string &out, uint32_t src0_selection, const Operand *src1,
-                                     uint32_t src1_selection) {
-  out += " src0_sel:";
-  out += selection_name(src0_selection);
-  if (src1) {
-    out += " src1_sel:";
-    out += selection_name(src1_selection);
-  }
-}
-
-inline void append_destination_attributes(std::string &out, bool clamp, uint32_t omod,
-                                          uint32_t destination_selection,
-                                          uint32_t destination_unused, uint32_t src0_selection,
-                                          const Operand *src1, uint32_t src1_selection) {
-  if (clamp)
-    out += " clamp";
-  switch (omod) {
-  case 1:
-    out += " mul:2";
-    break;
-  case 2:
-    out += " mul:4";
-    break;
-  case 3:
-    out += " div:2";
-    break;
-  default:
-    break;
-  }
-  out += " dst_sel:";
-  out += selection_name(destination_selection);
-  out += " dst_unused:";
-  out += destination_unused_name(destination_unused);
-  append_source_attributes(out, src0_selection, src1, src1_selection);
 }
 
 inline uint32_t apply_source_modifiers(uint32_t value, SourceModifierFormat format, bool negate,
@@ -734,8 +717,9 @@ template <ResultFormat Format> inline uint32_t clamp_result(uint32_t result, con
 }
 
 /// @brief Return the enabled output modifier for the SDWA result format.
-template <ResultFormat Format, typename Inst>
+template <ResultFormat Format, OutputPolicy Policy = OutputPolicy::MODE, typename Inst>
 inline uint32_t output_modifier(const Inst &inst, const Wavefront &wf) {
+  static_assert(Policy == OutputPolicy::MODE || Format == ResultFormat::F32);
   if constexpr (Format != ResultFormat::NONE && requires {
                   inst.sdwa_omod_;
                   inst.inst_.src0;
@@ -748,12 +732,15 @@ inline uint32_t output_modifier(const Inst &inst, const Wavefront &wf) {
     if constexpr (Format == ResultFormat::F16 || Format == ResultFormat::PK_F16)
       return fp_mode::effective_f16_omod(wf.cu().arch(), denorm_mode, wf.ieee_mode(),
                                          Format == ResultFormat::PK_F16, inst.sdwa_omod_);
-    return fp_mode::effective_omod(wf.cu().arch(), denorm_mode, wf.ieee_mode(), inst.sdwa_omod_);
+    return fp_mode::effective_omod(wf.cu().arch(),
+                                   Policy == OutputPolicy::FLUSH_NEAREST ? 0u : denorm_mode,
+                                   wf.ieee_mode(), inst.sdwa_omod_);
   }
   return 0;
 }
 
 /// @brief Apply SDWA scaling before narrowing a semantic F16 result.
+/// @details Retained legacy ordering, without SDWA hardware validation.
 template <typename Inst>
 inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float value,
                                  bool fp16_ovfl) {
@@ -766,7 +753,18 @@ inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float va
                                     omod);
 }
 
+/// @brief Apply SDWA scaling to an already rounded half transcendental result.
+/// @details Retained legacy ordering, without SDWA hardware validation.
+template <typename Inst>
+inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float value,
+                                   bool fp16_ovfl) {
+  return util::f32_to_f16(
+      fp_mode::apply_omod_f16(value, output_modifier<ResultFormat::F16>(inst, wf), fp16_ovfl));
+}
+
 /// @brief Apply SDWA scaling before guest-mode rounding of a wide F16 arithmetic result.
+/// @details Retained legacy ordering, without SDWA hardware validation; migrated
+/// VOP3 arithmetic instead modifies the rounded half. See output_modifier.h.
 template <typename Inst>
 inline uint16_t finish_arithmetic_f16(const Inst &inst, const Wavefront &wf, double value,
                                       uint32_t round_mode, uint32_t denorm_mode, bool fp16_ovfl) {
@@ -819,19 +817,24 @@ inline uint32_t scale_f32(uint32_t value, uint32_t omod, uint32_t round_mode) {
 }
 
 /// @brief Scale a floating-point SDWA result before destination placement.
-template <ResultFormat Format, typename Inst>
+template <ResultFormat Format, OutputPolicy Policy = OutputPolicy::MODE, typename Inst>
 inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t value) {
-  const uint32_t omod = output_modifier<Format>(inst, wf);
+  const uint32_t omod = output_modifier<Format, Policy>(inst, wf);
   if (omod == 0)
     return value;
   if constexpr (Format == ResultFormat::F16) {
-    // F16 scaling precedes narrowing in the semantic result producer.
+    // The producer has already applied F16 scaling; finalize its encoded result.
     return fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);
   } else if constexpr (Format == ResultFormat::PK_F16) {
     const uint32_t low = fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);
     const uint32_t high = fp_mode::finalize_omod_f16(static_cast<uint16_t>(value >> 16), omod);
     return low | (high << 16);
   } else if constexpr (Format == ResultFormat::F32) {
+    if constexpr (Policy == OutputPolicy::FLUSH_NEAREST) {
+      // The generated LOG/EXP body protects the complete instruction with
+      // nearest rounding. Reuse its VOP3 finalizer, including NaN passthrough.
+      return std::bit_cast<uint32_t>(fp_mode::apply_omod_f32(std::bit_cast<float>(value), omod));
+    }
     return scale_f32(value, omod, wf.fp_round_mode_f32());
   }
   return value;
@@ -856,7 +859,7 @@ template <typename Inst> inline bool supports_direct_simd_store(const Inst &inst
 ///
 /// Scaling and clamp use the semantic result width before destination placement.
 /// Preserved destination bytes are neither clamped nor reported as architectural writes.
-template <ResultFormat Format, typename Inst, typename Op>
+template <ResultFormat Format, OutputPolicy Policy = OutputPolicy::MODE, typename Inst, typename Op>
 inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t lane,
                        uint32_t value) {
   if constexpr (requires {
@@ -868,7 +871,7 @@ inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t
                 }) {
     if (inst.inst_.src0 == amdgpu::SRC_SDWA && op.is_vgpr() &&
         inst.dst_operand(0) == static_cast<const Operand *>(&op)) {
-      value = scale_result<Format>(inst, wf, value);
+      value = scale_result<Format, Policy>(inst, wf, value);
       if (inst.sdwa_clamp_)
         value = clamp_result<Format>(value, wf);
       const uint8_t byte_mask = sdwa_dst_byte_mask(inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);

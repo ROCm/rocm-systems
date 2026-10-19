@@ -18,6 +18,19 @@
 // ncclDevr[_]: runtime implements for symmetric API.
 
 struct ncclDevrMemory;
+
+// No public NCCL_WIN_REGISTER_* flag means all capabilities. Specifying one or more
+// registration flags selects only those capabilities. Add future public flags here.
+enum ncclDevrRegisterCapability {
+  ncclDevrRegisterGin = 1 << 0,
+  ncclDevrRegisterLsa = 1 << 1,
+  ncclDevrRegisterCft = 1 << 2,
+  ncclDevrRegisterRma = 1 << 3,
+  ncclDevrRegisterAll = ncclDevrRegisterGin | ncclDevrRegisterLsa | ncclDevrRegisterCft | ncclDevrRegisterRma,
+};
+
+bool ncclDevrWinRegEnabled(int winFlags, enum ncclDevrRegisterCapability capability);
+
 struct ncclDevrWindow {
   struct ncclDevrMemory* memory;
   void* userPtr;
@@ -34,9 +47,27 @@ struct ncclDevrWindow {
   // RCCL: intra-node IPC peer table (NULL when inactive), sized to lsaSize.
   void** ipcPeerPtrs;
   void** ipcPeerPtrsAllocBase;
+  // A peer mapping is either a legacy IPC handle or a cuMem import, and the two unmap differently.
+  uint8_t* ipcPeerIsCuMem;
   int ipcPeerCount;
 #endif
 };
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+// All-gathered by windowRegisterNonSym. One record per LSA rank. Host tests
+// publish through this type, so a field added here cannot be reinterpreted by
+// a second copy in another translation unit.
+struct ncclDevrNonSymExchangeEntry {
+  cudaIpcMemHandle_t handle;
+  uint64_t cuMemHandle;
+  size_t allocSize;
+  int isCuMem;
+  uint64_t hostHash;
+  uint64_t pidHash;
+  size_t userOffset; // userPtr - allocBase
+  size_t userSize;
+};
+#endif
 
 struct ncclDevrWindowSorted;
 struct ncclDevrTeam;
@@ -73,12 +104,13 @@ struct ncclDevrState {
   int cftSize;
   int cftMcSelf;
   int cftMcSize;
-  struct ncclDevrStateCftUc le;
+  struct ncclDevrStateCftUc le[2]; // 0: UC LE ID base, 1: Counted UC LE ID base (rank_i le = base + i)
 
   size_t granularity; // cuMemGetAllocationGranularity
   bool ginEnabled;
   bool rmaProxyEnabled;
   struct ncclDevrMemory* memHead;
+  uint64_t nextRegistryId; // next value for ncclDevrMemory::registryId
   struct ncclDevrWindowSorted* winSorted;
   int winSortedCapacity, winSortedCount;
   struct ncclDevrTeam* teamHead;
@@ -108,7 +140,8 @@ bool ncclGinResourcesRequested(struct ncclDevCommRequirements const* reqs);
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm);
 
 // Returns the CUDA version supported by CFT on this GPU, or 0 when CFT is unsupported.
-ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport);
+ncclResult_t ncclGpuCftSupport(struct ncclComm* comm, int* gpuCftSupport, bool* gpuCftMulticastSupport,
+                               bool* gpuCftCountedSupport);
 
 // We assume ncclComm has a `ncclDevrState symState` member.
 ncclResult_t ncclDevrInitOnce(struct ncclComm* comm);

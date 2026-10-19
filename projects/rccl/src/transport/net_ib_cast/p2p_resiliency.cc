@@ -10,6 +10,7 @@
 #include "connect_cast.h" // For IbCastQpCreate()
 #include "p2p_resiliency_recovery_cast.h"
 #include "qp_sharing.h"
+#include "capability_cast.h"
 
 NCCL_PARAM(IbCastResiliencyPortFailover, "IB_RESILIENCY_PORT_FAILOVER", 0);
 NCCL_PARAM(IbCastResiliencyPortFailoverMaxAttempts, "IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS", 1);
@@ -681,6 +682,21 @@ ncclResult_t IbCastResiliencyDevInit(struct ncclIbResiliency* resCtx, uint devIn
   INFO(NCCL_NET, "NET/IB: %s: Created probing CQ (cq=%p) on device %d for resiliency context (%s comm=%p, cq_size=%d)",
        __func__, resDev->probingCq, devIndex, resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm, cqSize);
 
+  // Recovery keep-alive needs a UD QP. Check every device before the first recovery CQ is created.
+  if (resCtx->recoveryEnabled && devIndex == 0) {
+    struct ncclIbNetCommBase* base = resCtx->baseComm;
+    for (int i = 0; i < base->vProps.ndevs; i++) {
+      int phys = base->vProps.devs[i];
+      if (!IbCastCapUdSupported(&IbCastDevs[phys])) {
+        INFO(NCCL_NET, "NET/IB-CAST: device %s has no UD; port recovery off for comm %p", IbCastDevs[phys].devName,
+             base);
+        resCtx->recoveryEnabled = false;
+        resCtx->nPortRecoveryQps = 0;
+        break;
+      }
+    }
+  }
+
   if (resCtx->recoveryEnabled) {
     NCCLCHECK(IbCastPortRecoveryDevInit(resCtx, devIndex, ibDev));
   }
@@ -825,6 +841,7 @@ ncclResult_t IbCastResiliencySenderCreateQps(struct ncclIbResiliency* resCtx,
     qpCreateAttrs.pd = sendCommDev->base.pd;
     qpCreateAttrs.qpContext = qpContext;
     NCCLCHECK(IbCastQpCreate(localQp, &qpCreateAttrs));
+    localQp->devIndex = localDevIndex;
     // Populate the info that will be delivered to the remote receiver peer
     ncclIbQpInfo* localQpInfo = &localResiliencyInfo->probingQpsInfo[localQpIndex];
     localQpInfo->qpn = localQp->qp->qp_num;
@@ -845,6 +862,23 @@ ncclResult_t IbCastResiliencySenderCreateQps(struct ncclIbResiliency* resCtx,
                                                 resCtx->nPortRecoveryQps));
   }
 
+  return ncclSuccess;
+}
+
+// A peer without port recovery leaves its recovery QPNs zeroed. QPN 0 is never a user QP.
+static bool IbCastResiliencyPeerHasRecovery(struct ncclIbConnectionMetadata* remInfo) {
+  return remInfo->resiliencyInfo.portRecoveryQpsInfo[0].qpn != 0;
+}
+
+// Undo what DevInit (and, on the sender, QP creation) allocated for recovery.
+static ncclResult_t IbCastResiliencyRecoveryDisable(struct ncclIbResiliency* resCtx, int nCreatedQps) {
+  WARN("NET/IB-CAST: peer has no port recovery; port recovery off for %s comm %p",
+       resCtx->baseComm->isSend ? "send" : "recv", resCtx->baseComm);
+  NCCLCHECK(IbCastPortRecoveryQpsDestroy(resCtx, nCreatedQps));
+  for (int i = 0; i < nCreatedQps; i++) resCtx->portRecoveryQps[i].qp = NULL;
+  for (int i = 0; i < resCtx->ndevs; i++) NCCLCHECK(IbCastPortRecoveryDevDestroy(resCtx, i));
+  resCtx->recoveryEnabled = false;
+  resCtx->nPortRecoveryQps = 0;
   return ncclSuccess;
 }
 
@@ -887,6 +921,9 @@ ncclResult_t IbCastResiliencySenderQpsToRts(struct ncclIbResiliency* resCtx, str
          __func__, localQpIndex, localQp->qp->qp_num, rtrAttr->remoteQpNum, localDevIndex, resCtx->baseComm);
   }
 
+  if (resCtx->recoveryEnabled && !IbCastResiliencyPeerHasRecovery(remInfo)) {
+    NCCLCHECK(IbCastResiliencyRecoveryDisable(resCtx, resCtx->nPortRecoveryQps));
+  }
   if (resCtx->recoveryEnabled) {
     NCCLCHECK(IbCastPortRecoverySenderQpsToRts(resCtx, remInfo, resCtx->nPortRecoveryQps));
   }
@@ -916,8 +953,8 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
     qpCreateAttrs.cq = resCtx->devs[localDevIndex].probingCq;
     qpCreateAttrs.pd = recvCommDev->base.pd;
     qpCreateAttrs.qpContext = qpContext;
-    qpCreateAttrs.qpContext = qpContext;
     NCCLCHECK(IbCastQpCreate(localQp, &qpCreateAttrs));
+    localQp->devIndex = localDevIndex;
     localResiliencyInfo->probingQpsInfo[localQpIndex].qpn = localQp->qp->qp_num;
     localResiliencyInfo->probingQpsInfo[localQpIndex].devIndex = localDevIndex;
 
@@ -956,12 +993,92 @@ ncclResult_t IbCastResiliencyReceiverQpsCreateToRts(struct ncclIbResiliency* res
          __func__, localQpIndex, localQp->qp->qp_num, rtrAttr->remoteQpNum, localDevIndex, resCtx->baseComm);
   }
 
+  if (resCtx->recoveryEnabled && !IbCastResiliencyPeerHasRecovery(remInfo)) {
+    NCCLCHECK(IbCastResiliencyRecoveryDisable(resCtx, 0));
+  }
   if (resCtx->recoveryEnabled) {
     NCCLCHECK(IbCastPortRecoveryReceiverQpsCreateToRts(resCtx, remInfo, localResiliencyInfo->portRecoveryQpsInfo,
                                                        resCtx->nPortRecoveryQps));
   }
 
   return ncclSuccess;
+}
+
+ncclResult_t IbCastResiliencyQpReconfigure(struct ncclIbResiliency* resCtx, struct ncclIbQp* qp,
+                                           struct ncclIbNetCommDevBase* devBase, int devIndex, bool* success) {
+  if (resCtx == NULL || qp == NULL || qp->qp == NULL || devBase == NULL || success == NULL) return ncclInternalError;
+
+  *success = false;
+  const char* dir = resCtx->baseComm->isSend ? "send" : "recv";
+  ncclResult_t res;
+
+  NOWARN(res = IbCastQpReset(qp), NCCL_NET);
+  if (res != ncclSuccess) {
+    INFO(NCCL_NET, "NET/IB: %s: Reset failed (%d) for QP devIndex=%d qp_num=%u (%s comm=%p)", __func__, res, devIndex,
+         qp->qp->qp_num, dir, resCtx->baseComm);
+    return ncclSuccess;
+  }
+  NOWARN(res = IbCastQpInit(qp), NCCL_NET);
+  if (res != ncclSuccess) {
+    INFO(NCCL_NET, "NET/IB: %s: Init failed (%d) for QP devIndex=%d qp_num=%u (%s comm=%p)", __func__, res, devIndex,
+         qp->qp->qp_num, dir, resCtx->baseComm);
+    return ncclSuccess;
+  }
+  if (qp->eceSupported) {
+    NOWARN(res = wrap_ibv_set_ece(qp->qp, &qp->ece, &qp->eceSupported), NCCL_NET);
+    if (res != ncclSuccess) {
+      INFO(NCCL_NET, "NET/IB: %s: ECE failed (%d) for QP devIndex=%d qp_num=%u (%s comm=%p)", __func__, res, devIndex,
+           qp->qp->qp_num, dir, resCtx->baseComm);
+      return ncclSuccess;
+    }
+  }
+  qp->rtrAttr.localGid = devBase->gidInfo.localGid;
+  qp->rtrAttr.localGidIndex = devBase->gidInfo.localGidIndex;
+  NOWARN(res = IbCastQpRtr(qp), NCCL_NET);
+  if (res != ncclSuccess) {
+    INFO(NCCL_NET,
+         "NET/IB: %s: RTR failed (%d) for QP devIndex=%d qp_num=%u localGidIndex=%d (port still down or GID not yet "
+         "registered) (%s comm=%p)",
+         __func__, res, devIndex, qp->qp->qp_num, qp->rtrAttr.localGidIndex, dir, resCtx->baseComm);
+    return ncclSuccess;
+  }
+  NOWARN(res = IbCastQpRts(qp), NCCL_NET);
+  if (res != ncclSuccess) {
+    INFO(NCCL_NET, "NET/IB: %s: RTS failed (%d) for QP devIndex=%d qp_num=%u (%s comm=%p)", __func__, res, devIndex,
+         qp->qp->qp_num, dir, resCtx->baseComm);
+    return ncclSuccess;
+  }
+  *success = true;
+  return ncclSuccess;
+}
+
+ncclResult_t IbCastResiliencyQpsReconfigure(struct ncclIbResiliency* resCtx, int devIndex, bool* success) {
+  *success = false;
+  bool isSend = resCtx->baseComm->isSend;
+
+  struct ncclIbNetCommDevBase* devBase = IbCastGetNetCommDevBase(resCtx->baseComm, devIndex);
+  if (devBase == NULL) return ncclInternalError;
+
+  IbCastGidInfoSnapshot(devBase, &IbCastDevs[devBase->ibDevN]);
+
+  // AINIC cannot modify a QP to RESET, so its probing QPs keep their connect-time GID after a
+  // GID change. Data and flush QPs are recreated with the refreshed GID in IbCastPortRecoveryQpsToRtsAinic.
+  for (int i = 0; !IbCastAinicRoce && i < resCtx->nProbingQps; i++) {
+    struct ncclIbQp* qp = &resCtx->probingQps[i];
+    if (qp->qp == NULL || qp->devIndex != devIndex) continue;
+
+    INFO(NCCL_NET, "NET/IB: %s: Reconfiguring probing QP devIndex=%d qp_num=%u (%s comm=%p)", __func__, devIndex,
+         qp->qp->qp_num, isSend ? "send" : "recv", resCtx->baseComm);
+    bool qpReconfigured;
+    NCCLCHECK(IbCastResiliencyQpReconfigure(resCtx, qp, devBase, devIndex, &qpReconfigured));
+    if (!qpReconfigured) {
+      INFO(NCCL_NET, "NET/IB: %s: Failed to reconfigure probing QP devIndex=%d qp_num=%u (%s comm=%p)", __func__,
+           devIndex, qp->qp->qp_num, isSend ? "send" : "recv", resCtx->baseComm);
+      return ncclSuccess;
+    }
+  }
+
+  return IbCastPortRecoveryQpsReconfigure(resCtx, devIndex, success);
 }
 
 ncclResult_t IbCastResiliencyClose(struct ncclIbResiliency* resCtx) {

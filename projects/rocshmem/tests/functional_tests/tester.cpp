@@ -817,6 +817,18 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       test_name = "Wave Signal Fetch";
       testers.push_back(new SignalingOperationsTester(args));
       break;
+    case SignalAddTestType:
+      test_name = "Signal Add";
+      testers.push_back(new SignalingOperationsTester(args));
+      break;
+    case SignalSetTestType:
+      test_name = "Signal Set";
+      testers.push_back(new SignalingOperationsTester(args));
+      break;
+    case SignalWaitUntilTestType:
+      test_name = "Signal Wait Until";
+      testers.push_back(new SignalingOperationsTester(args));
+      break;
     case FloodPutTestType:
       test_name = "Flood Put (multidirectional)";
       testers.push_back(new FloodTester(args));
@@ -971,6 +983,30 @@ std::vector<Tester*> Tester::create(TesterArguments args) {
       break;
     case TileGetWGColumnMajorTestType:
       test_name = "Tile Get WG Column-Major";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutRowMajorStartCoordTestType:
+      test_name = "Tile Put Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetRowMajorStartCoordTestType:
+      test_name = "Tile Get Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWaveRowMajorStartCoordTestType:
+      test_name = "Tile Put Wave Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWaveRowMajorStartCoordTestType:
+      test_name = "Tile Get Wave Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TilePutWGRowMajorStartCoordTestType:
+      test_name = "Tile Put WG Row-Major (non-zero start_coord)";
+      testers.push_back(new TileRMATester(args));
+      break;
+    case TileGetWGRowMajorStartCoordTestType:
+      test_name = "Tile Get WG Row-Major (non-zero start_coord)";
       testers.push_back(new TileRMATester(args));
       break;
     case HostTeamSyncBarrierTestType:
@@ -1240,6 +1276,9 @@ bool Tester::peLaunchesKernel() {
     case PutmemOnStreamTestType:
     case PutmemSignalOnStreamTestType:
     case SignalWaitUntilOnStreamTestType:
+    case SignalAddTestType:
+    case SignalSetTestType:
+    case SignalWaitUntilTestType:
     case FloodPutTestType:
     case FloodPutNBITestType:
     case FloodPTestType:

@@ -562,10 +562,11 @@ TEST(Gfx1250ExecutionTest, Vop3Mad64ClampSaturatesAndPreservesCarryNormalAndDpp)
       TestCase{true, false, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX),
                static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN), false},
       TestCase{true, true, static_cast<uint32_t>(INT32_MAX), static_cast<uint32_t>(INT32_MAX),
-               static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX), true},
+               static_cast<uint64_t>(INT64_MAX), static_cast<uint64_t>(INT64_MAX), false},
       TestCase{true, true, static_cast<uint32_t>(INT32_MIN), static_cast<uint32_t>(INT32_MAX),
                static_cast<uint64_t>(INT64_MIN), static_cast<uint64_t>(INT64_MIN), true},
       TestCase{true, true, static_cast<uint32_t>(-2), 3u, 10u, 4u, false},
+      TestCase{true, true, 3u, static_cast<uint32_t>(-4), 0, 0xfffffffffffffff4, true},
   };
 
   for (bool dpp : {false, true}) {
@@ -928,7 +929,7 @@ TEST(FpModePolicyTest, F16ClampUsesSelectedNanPolicy) {
 
   const auto fma = [=](uint16_t src0, bool clamp_nan_to_zero) {
     return amdgpu::fp_mode::fma_f16(src0, kOne, kPositiveZero, false, false, false, false, false,
-                                    false, 0, 3, 0, true, false, clamp_nan_to_zero);
+                                    false, 0, 3, 0, true, false, clamp_nan_to_zero, true);
   };
 
   EXPECT_EQ(fma(kQuietNan, false), kQuietNan);

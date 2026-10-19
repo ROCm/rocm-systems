@@ -31,8 +31,7 @@ namespace dda::common {
 // slices, so a slot always begins on a slice boundary and the 16B wire accesses
 // stay aligned however nRanks divides the bank
 constexpr size_t ddaLL128ArSlotWords(size_t bankSize, int nRanks) {
-  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks,
-                       (size_t)kDdaLL128WireWordsPerSlice);
+  return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
 // LL128 flat all-reduce kernel. One warp owns one slice at a time; the grid is
@@ -135,7 +134,7 @@ __launch_bounds__(512)
     ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, acc, eltInSlice, lane, flagLane);
   }
 
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
   asm volatile("s_wait_storecnt 0x0" ::: "memory");
 #endif
 
