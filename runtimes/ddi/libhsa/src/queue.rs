@@ -36,7 +36,9 @@ use rocddi::topology::GpuInfo;
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
 use crate::queue_intercept::{InterceptQueue, QueueNotifier};
-use crate::runtime::{CallbackScope, VM_FAULT_CONDVAR, boundary, initialized_mut, lock, map_error};
+use crate::runtime::{
+    CallbackScope, InFlightGeneration, VM_FAULT_CONDVAR, boundary, initialized_mut, lock, map_error,
+};
 use crate::signal::{AmdSignal, AsyncCopyClock};
 
 const WRITE_INDEX_OFFSET: usize = 56;
@@ -2441,10 +2443,13 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
             return crate::queue_intercept::destroy(&intercept);
         }
         let key = queue as usize;
-        let (mut record, cooperative_agent) = {
+        let (mut record, cooperative_agent, in_flight) = {
             let mut guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
+            };
+            let Some(generation) = guard.active_generation() else {
+                return NOT_INITIALIZED;
             };
             let runtime = match initialized_mut(&mut guard) {
                 Ok(runtime) => runtime,
@@ -2464,6 +2469,10 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                 (record.cooperative_refs == 1).then_some(record.agent.handle)
             } else {
                 None
+            };
+            let in_flight = match InFlightGeneration::enter(generation, &runtime.inflight) {
+                Ok(in_flight) => in_flight,
+                Err(status) => return status,
             };
             if let Some(agent) = cooperative_agent {
                 if runtime
@@ -2490,7 +2499,7 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                     INVALID_QUEUE
                 };
             };
-            (record, cooperative_agent)
+            (record, cooperative_agent, in_flight)
         };
         let result = match &mut record {
             RemovedQueue::Aql(queue) => destroy_runtime_queue(queue),
@@ -2503,6 +2512,7 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                     RemovedQueue::Sdma(_) => "SDMA",
                 };
                 let log = lock().ok().and_then(|mut guard| {
+                    in_flight.is_current(&guard).then_some(())?;
                     guard.as_mut().and_then(|runtime| {
                         if let Some(agent) = cooperative_agent {
                             runtime.queue_state.cooperative_teardown.remove(&agent);
@@ -2521,10 +2531,17 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
             Err(error) => {
                 let status = map_error(error);
                 let Ok(mut guard) = lock() else {
+                    in_flight.quarantine();
                     std::mem::forget(record);
                     return status;
                 };
+                if !in_flight.is_current(&guard) {
+                    in_flight.quarantine();
+                    std::mem::forget(record);
+                    return status;
+                }
                 let Some(runtime) = guard.as_mut() else {
+                    in_flight.quarantine();
                     std::mem::forget(record);
                     return status;
                 };
