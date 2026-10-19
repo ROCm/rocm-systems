@@ -19,9 +19,11 @@ GPU, and nothing in the replay tool can check what it does. The tool refuses mal
 records and caps memory, events and run time, but it cannot make the code itself safe.
 Replay maps recorded pointers to the buffers it allocated so that the run can be rebuilt;
 this is reconstruction, not a safety boundary. Only a value that matches a recorded
-allocation is translated: a pointer argument that matches none is passed as null, and every
-other argument byte, including a pointer-sized word inside a struct that matches none, is
-passed as recorded, so a kernel can still receive addresses from the original process.
+allocation is translated. A pointer argument that matches none is passed as null if it could
+be a device address. A pointer argument that cannot be an address, such as a small sentinel,
+is passed as recorded. Every other argument byte is passed as recorded, including a
+pointer-sized word inside a struct that matches none. A kernel can therefore still receive
+addresses from the original process.
 
 Replay an archive only if you trust whoever produced it, as an unprivileged user, on a
 machine and GPU that hold no data you would not hand to that person. A container is a
