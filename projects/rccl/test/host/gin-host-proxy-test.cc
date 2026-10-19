@@ -84,6 +84,8 @@ hipError_t hipMemset(void* dst, int value, size_t sizeBytes) {
   return hipSuccess;
 }
 
+// hipMemGetHandleForAddressRange needs HIP >= 7.0; rma_proxy.cc guards it the same way.
+#if HIP_VERSION >= 70000000
 hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t, size_t size, hipMemRangeHandleType,
                                           unsigned long long) {
   g_exportSizes.push_back(size);
@@ -98,6 +100,7 @@ hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t, size_t s
   *static_cast<int*>(handle) = fd;
   return hipSuccess;
 }
+#endif
 
 // Device allocations: host memory standing in for GPU/GDR buffers.
 namespace {
@@ -195,9 +198,11 @@ ncclResult_t FakeCudaMemcpy(T* dst, T* src, size_t nelem) {
 #define ncclCudaFree FakeCudaFree
 #define ncclCudaMemcpy FakeCudaMemcpy
 
-// Builds against HIP >= 7.12 compile the DMA-BUF export arm; test it whatever HIP this host has.
+// Builds against HIP >= 7.12 compile the DMA-BUF export arm; test it on any HIP that has the export API.
+#if HIP_VERSION >= 70000000
 #undef NCCL_CUMEM_DMABUF_EXPORT_GATE
 #define NCCL_CUMEM_DMABUF_EXPORT_GATE 1
+#endif
 
 #include "fakes/param_redirect.h"
 
@@ -622,6 +627,7 @@ TEST_F(GinHostProxyRegMrMicrotest, Host_RegistersPlainWithoutDmaBuf) {
   EXPECT_TRUE(g_exportSizes.empty());
 }
 
+#if HIP_VERSION >= 70000000
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_RegistersThroughAnExportedDmaBufAndClosesIt) {
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
   ASSERT_EQ(1u, g_exportedFds.size());
@@ -633,6 +639,7 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_RegistersThroughAnExportedDmaBufAndClose
   EXPECT_EQ(mhandle_, ginHandle_);
   EXPECT_FALSE(FdIsOpen(g_exportedFds[0]));
 }
+#endif
 
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_DmaBufDisabledRegistersPlain) {
   g_dmaBufEnable = 0;
@@ -650,6 +657,7 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_PluginWithoutDmaBufSupportRegistersPlain
   EXPECT_EQ(-1, rma_.regs[0].fd);
 }
 
+#if HIP_VERSION >= 70000000
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_ExportFailureFallsBackToPlain) {
   g_exportResults = {hipErrorNotSupported};
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
@@ -689,6 +697,7 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_BothDmaBufRegistrationsRejected_LeaksThe
   EXPECT_TRUE(rma_.regs.empty());
   close(g_exportedFds[1]);
 }
+#endif
 
 TEST_F(GinHostProxyRegMrMicrotest, UnknownPointerTypeIsRejected) {
   ginHandle_ = kPluginCtx;
