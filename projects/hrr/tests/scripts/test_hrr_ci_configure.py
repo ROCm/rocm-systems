@@ -150,11 +150,14 @@ class RepoConfigTest(unittest.TestCase):
             self.assertEqual(family.triggers, cfg.EVENTS, key)
 
     def test_a_label_adds_a_simulator_family(self):
+        """A family outside simulator.default_families joins on its label."""
+        data = copy.deepcopy(REPO_CONFIG)
+        data["simulator"]["default_families"] = ["gfx950", "gfx125x"]
         d = decide(
             "pull_request",
             ["projects/hrr/playback/x.cpp"],
             ["ci:gfx110x"],
-            config=REPO,
+            config=cfg.parse_config(data),
         )
         self.assertEqual(family_keys(d), ["gfx950", "gfx110x", "gfx125x"])
         self.assertTrue(all(row["backend"] == "simulator" for row in d.families))
@@ -182,7 +185,7 @@ class PathClassificationTest(unittest.TestCase):
         self.assertTrue(cfg.touches_suite(paths, REPO))
         decision = decide("pull_request", paths, config=REPO)
         self.assertTrue(decision.run_gpu)
-        self.assertEqual(family_keys(decision), ["gfx950", "gfx125x"])
+        self.assertEqual(family_keys(decision), list(REPO.simulator.default_families))
 
     def test_public_header_is_cpu_only(self):
         paths = ["projects/hip/include/hip/hip_runtime_api.h"]
@@ -461,9 +464,52 @@ class DecideTest(unittest.TestCase):
 
 
 class SimulatorBackendTest(unittest.TestCase):
-    def test_default_event_is_the_two_rocjitsu_jobs(self):
+    def test_default_runs_no_real_gpu_job_on_any_event(self):
+        """Pull requests, pushes and the nightly run only rocJitsu jobs, on every
+        family that has a rocJitsu config; none queues on a GPU runner."""
+        for event in ("pull_request", "push", "schedule", "workflow_dispatch"):
+            decision = decide(event, ["projects/hrr/playback/x.cpp"], config=REPO)
+            self.assertTrue(decision.run_gpu, event)
+            self.assertEqual(
+                family_keys(decision),
+                [
+                    "gfx90a",
+                    "gfx94x",
+                    "gfx950",
+                    "gfx110x",
+                    "gfx1151",
+                    "gfx120x",
+                    "gfx125x",
+                ],
+                event,
+            )
+            self.assertEqual(
+                {row["backend"] for row in decision.families}, {"simulator"}, event
+            )
+            self.assertEqual(
+                {row["runner"] for row in decision.families}, {"ubuntu-24.04"}, event
+            )
+
+    def test_every_default_simulator_family_has_a_config_file(self):
+        root = Path(__file__).resolve().parents[4]
+        for key in REPO.simulator.default_families:
+            self.assertTrue((root / REPO.simulator.configs[key]).is_file(), key)
+
+    def test_the_label_does_not_move_a_run_to_a_real_gpu(self):
+        for label, path in (
+            ("ci:hrr-capture", "projects/hrr/README.md"),
+            ("ci:gfx94x", "projects/hrr/playback/x.cpp"),
+        ):
+            decision = decide("pull_request", [path], [label], config=REPO)
+            self.assertTrue(decision.run_gpu, label)
+            self.assertEqual(
+                {row["backend"] for row in decision.families}, {"simulator"}, label
+            )
+
+    def test_default_event_is_the_rocjitsu_jobs(self):
         decision = decide("pull_request", ["projects/hrr/playback/x.cpp"], config=REPO)
-        self.assertEqual(family_keys(decision), ["gfx950", "gfx125x"])
+        self.assertIn("gfx950", family_keys(decision))
+        self.assertIn("gfx125x", family_keys(decision))
         by_family = {row["family"]: row for row in decision.families}
         self.assertEqual(by_family["gfx950"]["runner"], "ubuntu-24.04")
         self.assertEqual(by_family["gfx950"]["backend"], "simulator")

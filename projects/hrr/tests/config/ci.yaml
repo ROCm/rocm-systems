@@ -57,17 +57,25 @@ capture_label: ci:hrr-capture
 
 # simulator runs rocJitsu on ubuntu-24.04. gpu runs TheRock's real runners.
 # workflow_dispatch passes its backend input. Any other event uses default,
-# unless the event is listed under backend.gpu.triggers.
+# unless the event is listed under backend.gpu.triggers. No event is, so a
+# pull request, a push and the nightly schedule never queue on a real GPU
+# runner; a person asks for one with workflow_dispatch (backend gpu).
 backend:
   default: simulator
   gpu:
     triggers: []
 
-# Default simulator jobs. These do not consult families.*.enabled: gfx125x
-# stays disabled for the real MI455 runner and still runs here.
+# Default simulator jobs. These do not consult families.*.enabled. Each row is
+# a rocJitsu KMD config that exposes the family's GPU to HIP, and the whole
+# integration suite passes on it, less the cases integration.yaml skips with
+# "emulator: true" (each names its reason). Checked 2026-10-19 on a
+# two-GPU gfx950 config and the single-GPU configs of the others.
+#
+# Not listed: gfx103x, gfx1150 and gfx1153, which rocJitsu has no config for.
+# A ci:gfx... label for one of them fails the configure job.
 simulator:
   runner: ubuntu-24.04
-  default_families: [gfx950, gfx125x]
+  default_families: [gfx90a, gfx94x, gfx950, gfx110x, gfx1151, gfx120x, gfx125x]
   configs:
     gfx94x: emulation/rocjitsu/configs/gfx942_cdna3_kmd.json
     gfx950: emulation/rocjitsu/configs/gfx950_mi355x_kmd_2gpu.json
@@ -99,11 +107,11 @@ simulator:
 # runner pool and the summary waits for all of them, so to reduce GPU load or
 # take a pool out, set enabled: false or narrow triggers here.
 #
-# Real GPUs: only gfx94x is enabled. The other families stay listed and
-# disabled, so a ci:gfx... label or the workflow_dispatch families input can
-# still request one when the backend is gpu. Delete an `enabled: false` line
-# to make that family eligible for the GPU backend; it does not add a
-# simulator job. Simulator membership is simulator.default_families.
+# Real GPUs run only when a person starts workflow_dispatch with backend gpu.
+# Then only gfx94x is enabled; the other families stay listed and disabled, so
+# the families input can still request one. Delete an `enabled: false` line to
+# make that family eligible for the GPU backend; it does not add a simulator
+# job. Simulator membership is simulator.default_families.
 # targets.arch in integration.yaml stays wide on purpose: configure fails
 # unless it covers every family listed here, and a requested family needs its
 # architecture compiled into the binary.
