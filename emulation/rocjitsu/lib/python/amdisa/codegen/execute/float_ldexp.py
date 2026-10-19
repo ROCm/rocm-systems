@@ -18,10 +18,12 @@ _EXPONENT_WIDTHS: dict[str, int] = {'f64': 32}
 POLICY = 'ldexp_policy'
 
 
-def policy_expr(dtype: str, omod: str = 'false') -> str:
+def policy_expr(dtype: str, omod: str) -> str:
     """Return the MODE policy; F16 saturates under FP16_OVFL.
 
-    ``omod`` is a C++ condition that holds when effective OMOD is enabled.
+    ``omod`` is a C++ condition that holds when effective OMOD is enabled: a
+    tiny result then flushes before OMOD, which cannot recover tininess from
+    the rounded bits. Every caller must decide it.
     """
     mode = input_policy.mode_field(dtype)
     saturate = 'wf.fp16_ovfl()' if dtype == 'f16' else 'false'
@@ -31,7 +33,7 @@ def policy_expr(dtype: str, omod: str = 'false') -> str:
     )
 
 
-def policy_decl(dtype: str, omod: str = 'false', indent: str = '  ') -> str:
+def policy_decl(dtype: str, omod: str, indent: str = '  ') -> str:
     return f'{indent}const auto {POLICY} = {policy_expr(dtype, omod)};'
 
 
@@ -43,7 +45,8 @@ def _template_args(dtype: str) -> str:
 
 
 def operation_expr(dtype: str, policy: str = POLICY) -> str:
-    """Capture the policy in an operation free of instruction modifiers."""
+    """Capture the policy in an operation; it applies no instruction modifiers,
+    but the policy's OMOD flag decides whether a tiny result flushes."""
     return f'amdgpu::ldexp::Operation<{_template_args(dtype)}>{{{policy}}}'
 
 
@@ -76,8 +79,12 @@ def ldexp_expr(
 
 
 def simd_functor(dtype: str) -> str:
-    """Return the VOP2 SIMD functor on raw lanes; it runs only without OMOD."""
-    return operation_expr(dtype, policy_expr(dtype))
+    """Return the VOP2 SIMD functor on raw lanes.
+
+    VOP2 has no OMOD of its own, and SDWA OMOD keeps the scalar body, so
+    effective OMOD is always off here.
+    """
+    return operation_expr(dtype, policy_expr(dtype, 'false'))
 
 
 def simd_probe(template_name: str, true16_vop3: bool = False) -> str | None:

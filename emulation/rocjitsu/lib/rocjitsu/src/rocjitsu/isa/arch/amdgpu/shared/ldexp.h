@@ -60,8 +60,10 @@ struct Policy {
   /// @param saturate Overflow gives the largest finite value (FP16_OVFL for F16).
   /// @param omod Effective OMOD is enabled: a tiny result flushes even with output
   /// denormals kept, so OMOD then gives +0 (gfx1201 probe, all three formats).
+  /// Callers must pass it: the OMOD stage sees only the rounded result, and a tiny
+  /// value that rounds up to the smallest normal no longer looks tiny there.
   static constexpr Policy make(uint32_t denorm_mode, uint32_t round_mode, bool saturate,
-                               bool omod = false) {
+                               bool omod) {
     return {input_denormal::Policy::make(denorm_mode), round_mode,
             omod || output_denormal::Policy::make(denorm_mode).flush_outputs, saturate};
   }
@@ -213,7 +215,9 @@ constexpr V evaluate(V bits, V exponent, const Policy &policy) {
   return choose(magnitude == Lane{0} || magnitude >= Fmt::kInfinity, special, numeric);
 }
 
-/// @brief LDEXP with its MODE policy, independent of instruction modifiers.
+/// @brief LDEXP with its MODE and effective-OMOD policy.
+/// @details Independent of ABS/NEG and CLAMP, and applies no OMOD scaling; the
+/// policy's omod flag only decides whether a tiny result flushes.
 template <typename Fmt, unsigned ExponentWidth = Fmt::kWidth> struct Operation {
   Policy policy;
 

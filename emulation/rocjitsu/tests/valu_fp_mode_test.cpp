@@ -3886,7 +3886,7 @@ TEST(ValuFpModeHelpers, HostFlushControlsDoNotOverrideGpuMode) {
   const bool native_matches = amdgpu::fp_mode::native_arithmetic_matches(0, 3);
   const uint32_t result = std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<Arithmetic::ADD>(
       std::bit_cast<float>(1u), std::bit_cast<float>(1u), 0.0f, 0, 3));
-  const auto ldexp_policy = amdgpu::ldexp::Policy::make(3, 1, false);
+  const auto ldexp_policy = amdgpu::ldexp::Policy::make(3, 1, false, false);
   const uint32_t scaled32 = amdgpu::ldexp::evaluate<amdgpu::fp_format::F32>(1u, 1u, ldexp_policy);
   const uint64_t scaled64 =
       amdgpu::ldexp::evaluate<amdgpu::fp_format::F64, 32>(uint64_t{1}, uint64_t{1}, ldexp_policy);

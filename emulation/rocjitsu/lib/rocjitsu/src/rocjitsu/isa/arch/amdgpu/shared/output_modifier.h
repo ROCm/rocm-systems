@@ -47,6 +47,9 @@
 ///   flush outputs via output_denormal.h.
 /// - FMA tininess and OMOD zero/subnormal rules keep their own handling.
 /// - F32 arithmetic with effective OMOD flushes output denormals before scaling.
+/// - LDEXP takes effective OMOD in its policy and flushes a tiny result before
+///   this stage, since a tiny value that rounds to the smallest normal is not
+///   recognizable afterward.
 ///
 /// Hardware evidence:
 /// - gfx1201 (RDNA4): every F16/F32/F64 min/max matches under all probed MODEs.

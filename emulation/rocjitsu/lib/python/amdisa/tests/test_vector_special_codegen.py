@@ -287,7 +287,7 @@ def test_ldexp_simd_probes_use_the_shared_raw_operation():
 @pytest.mark.parametrize('module', [float_fract, float_ldexp])
 def test_raw_operation_policies_reject_unknown_formats(module):
     with pytest.raises(ValueError, match='bf16'):
-        module.policy_expr('bf16')
+        module.policy_expr('bf16', *(['false'] if module is float_ldexp else []))
 
 
 def test_vop3_f16_simd_probes_split_true16_from_generic():
