@@ -13,6 +13,7 @@ from amdisa.codegen.execute.floating_policy import (
     F16_FLUSHED_SOURCE_CALLS,
     F16_TRANSCENDENTAL_CALLS,
     FLUSH_NEAREST_F32_OPS,
+    SDWA_ROUNDED_F16_OPS,
 )
 
 from dataclasses import dataclass, field, replace
@@ -149,6 +150,8 @@ class LoweringContext:
     mode_arithmetic: bool = True
     dx9_zero_fma: bool = False
     flush_nearest_f32: bool = False
+    # Instruction name, for errors raised while lowering its body.
+    instruction_name: str = ''
     arithmetic_flush_output: str | None = None
     integer_saturation_dtype: str | None = None
 
@@ -229,6 +232,7 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
         'V_FMAC_DX9_ZERO_F32',
     )
     ctx.flush_nearest_f32 = block.instruction_name in FLUSH_NEAREST_F32_OPS
+    ctx.instruction_name = block.instruction_name
     body_lines = _lower_stmt(block.body, ctx)
 
     if ctx.exec_model == ExecModel.VECTOR:
@@ -1157,20 +1161,15 @@ def _lower_dst_write(
         needs_bitcast = 0
     elif _is_vector_fract(selection_node, ctx):
         writes_bits = True
-        rhs = _fract_result(
-            selection_node,
-            ctx,
-            output_fields if selection_node is not rhs_node else None,
-        )
+        fields = output_fields if selection_node is not rhs_node else None
+        _require_sdwa_rounded_store(selection_node, ctx, fields)
+        rhs = _fract_result(selection_node, ctx, fields)
         needs_bitcast = 0
     elif _is_vector_ldexp(selection_node, ctx):
         writes_bits = True
-        rhs = _ldexp_result(
-            selection_node,
-            ctx,
-            output_fields if selection_node is not rhs_node else None,
-            destination=True,
-        )
+        fields = output_fields if selection_node is not rhs_node else None
+        _require_sdwa_rounded_store(selection_node, ctx, fields)
+        rhs = _ldexp_result(selection_node, ctx, fields, destination=True)
         needs_bitcast = 0
     elif selection_node is not rhs_node and (
         result := _destination_result(selection_node, ctx)
@@ -2448,6 +2447,26 @@ def _raw_operation_modifiers(
     if declaration not in ctx.body_preamble:
         ctx.body_preamble.append(declaration)
     return modifiers, vop3_modifiers.OUTPUT_POLICY
+
+
+def _require_sdwa_rounded_store(
+    node: SemaNode, ctx: LoweringContext, output_fields: tuple[str, str] | None
+) -> None:
+    """Reject a rounded F16 destination whose SDWA store would not scale it.
+
+    Without VOP3 output fields the result leaves OMOD to the SDWA store, which
+    scales a rounded half only for SDWA_ROUNDED_F16_OPS; any other store
+    assumes the producer already scaled.
+    """
+    if (
+        node.ty == SemaType.F16
+        and output_fields is None
+        and ctx.instruction_name not in SDWA_ROUNDED_F16_OPS
+    ):
+        raise ValueError(
+            f'{ctx.instruction_name or "instruction"} writes a rounded F16 result '
+            'without OMOD; add it to SDWA_ROUNDED_F16_OPS so its SDWA store scales it'
+        )
 
 
 def _fract_result(

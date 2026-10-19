@@ -38,6 +38,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/lane_select.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/round_increment.h"
 
 #include <cstdint>
 
@@ -73,8 +74,7 @@ template <typename Fmt, typename V> constexpr V encode_fraction(V significand, V
 }
 
 /// @brief Round value / 2^count to an integer, for a number of the given sign.
-/// @details `count` is in [1, lane width - 1]. MODE.FP_ROUND 1 and 2 round the
-/// magnitude up only for a number of that sign; 3 truncates.
+/// @details `count` is in [1, lane width - 1].
 template <typename Fmt, typename V, typename Mask>
 constexpr V shift_right(V value, V count, const Mask &negative, uint32_t round_mode) {
   using Lane = typename Fmt::Lane;
@@ -83,20 +83,7 @@ constexpr V shift_right(V value, V count, const Mask &negative, uint32_t round_m
   const V kept = value >> count;
   const V rest = value & ((one << count) - one);
   const V half = one << (count - one);
-  Mask up = rest != rest;
-  switch (round_mode & 3u) {
-  case 0:
-    up = rest > half || (rest == half && (kept & Lane{1}) != zero);
-    break;
-  case 1:
-    up = rest != zero && !negative;
-    break;
-  case 2:
-    up = rest != zero && negative;
-    break;
-  default:
-    break;
-  }
+  const auto up = round_increment::rounds_up<Fmt>(round_mode, negative, kept, rest, half);
   return kept + choose(up, one, zero);
 }
 

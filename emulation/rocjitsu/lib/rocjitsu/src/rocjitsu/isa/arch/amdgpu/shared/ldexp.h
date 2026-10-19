@@ -41,6 +41,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/lane_select.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/round_increment.h"
 
 #include <cstdint>
 
@@ -76,69 +77,47 @@ using lane::choose;
 /// @brief Offset added to biased exponents so values below the subnormal range stay unsigned.
 inline constexpr unsigned kExponentOrigin = 1024;
 
-/// @brief Whether discarding `rest` from `kept` rounds the magnitude up.
-/// @param half The weight of the most significant discarded bit.
-template <typename Fmt, typename V, typename Mask>
-constexpr Mask rounds_up(uint32_t round_mode, const Mask &negative, V kept, V rest, V half) {
-  using Lane = typename Fmt::Lane;
-  const V zero(Lane{0});
-  switch (round_mode & 3u) {
-  case 0:
-    return rest > half || (rest == half && (kept & Lane{1}) != zero);
-  case 1:
-    return rest != zero && !negative;
-  case 2:
-    return rest != zero && negative;
-  default:
-    return rest != rest;
-  }
-}
-
 /// @brief Round a finite nonzero magnitude, significand * 2^exponent, to `Fmt`.
-/// @details `significand` has its leading one at bit TopBit, above the format's
-/// fraction, and `exponent` is the biased exponent of that bit plus
-/// kExponentOrigin. Returns the rounded magnitude; the caller applies the sign.
+/// @details `significand` has its leading one at bit TopBit and at most
+/// kMantissaBits + 1 significant bits, as an LDEXP source does, so its bits
+/// below TopBit - kMantissaBits are zero. `exponent` is the biased exponent of
+/// the leading bit plus kExponentOrigin. Returns the rounded magnitude; the caller
+/// applies the sign.
 template <typename Fmt, unsigned TopBit, typename V, typename Mask>
 constexpr V round_significand(V significand, V exponent, const Mask &negative,
                               const Policy &policy) {
   using Lane = typename Fmt::Lane;
-  constexpr unsigned kM = Fmt::kMantissaBits;
-  static_assert(TopBit > kM && TopBit + 2 < 8 * sizeof(Lane));
+  constexpr unsigned kMantissaBits = Fmt::kMantissaBits;
+  static_assert(TopBit > kMantissaBits && TopBit + 2 < 8 * sizeof(Lane));
   constexpr Lane kOrigin = kExponentOrigin;
   const V zero(Lane{0});
   const V one(Lane{1});
   const auto normal = exponent > V(kOrigin);
 
-  // Round at full precision, as if a lane below the normal range had exponent
-  // one; the tininess check below reads that result. A carry out of the
-  // fraction increments the exponent field.
-  constexpr unsigned kDrop = TopBit - kM;
-  const V normal_kept = significand >> kDrop;
-  const V normal_rest = significand & V((Lane{1} << kDrop) - 1);
-  const auto normal_up = rounds_up<Fmt>(policy.round_mode, negative, normal_kept, normal_rest,
-                                        V(Lane{1} << (kDrop - 1)));
-  const V field = (choose(normal, exponent - V(kOrigin), one) - one) << kM;
-  const V normal_result = field + normal_kept + choose(normal_up, one, zero);
+  // A result in the normal range is exact: the source has no more significant
+  // bits than the format keeps.
+  constexpr unsigned kDrop = TopBit - kMantissaBits;
+  const V field = (choose(normal, exponent - V(kOrigin), one) - one) << kMantissaBits;
+  const V normal_result = field + (significand >> kDrop);
 
-  // A subnormal result keeps fewer bits: one fewer per exponent step below the minimum.
-  // Beyond kM + 2 extra positions every significand bit is below the rounding bit.
+  // A subnormal result keeps fewer bits: one fewer per exponent step below the
+  // minimum. Beyond kMantissaBits + 2 extra positions every significand bit is
+  // below the rounding bit.
   V extra = V(kOrigin + 1) - choose(normal, V(kOrigin + 1), exponent);
-  extra = choose(extra > V(Lane{kM + 2}), V(Lane{kM + 2}), extra);
+  extra = choose(extra > V(Lane{kMantissaBits + 2}), V(Lane{kMantissaBits + 2}), extra);
   const V drop = V(Lane{kDrop}) + extra;
   const V kept = significand >> drop;
   const V rest = significand & ((one << drop) - one);
-  const auto up = rounds_up<Fmt>(policy.round_mode, negative, kept, rest, one << (drop - one));
+  const auto up =
+      round_increment::rounds_up<Fmt>(policy.round_mode, negative, kept, rest, one << (drop - one));
   // Rounding up the largest subnormal carries into the smallest normal encoding.
   const V subnormal_result = kept + choose(up, one, zero);
 
   V result = choose(normal, normal_result, subnormal_result);
-  if (policy.flush_tiny) {
-    // Only a value one exponent step below the minimum can round up to it at
-    // full precision. Rounded with exponent one, that value carries into exponent two.
-    const auto reaches_normal =
-        exponent == V(kOrigin) && normal_result == V(Lane{Fmt::kMinNormal << 1});
-    result = choose(normal || reaches_normal, result, zero);
-  }
+  // A value below the normal range is exact at full precision, so it is tiny
+  // even when its subnormal encoding rounds up to the smallest normal.
+  if (policy.flush_tiny)
+    result = choose(normal, result, zero);
 
   // Nearest-even overflows to infinity; directed rounding only toward the value's sign.
   const auto overflows = result >= V(Fmt::kInfinity);

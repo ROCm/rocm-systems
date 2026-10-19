@@ -833,6 +833,21 @@ class TestLowerVectorAdd:
         assert flushes == (2 if operation == 'add' else 1)
         assert 'Policy::make(wf.fp_denorm_mode_f16_f64())' in result
 
+    @pytest.mark.parametrize('kind', [SemaNodeKind.FRACT, SemaNodeKind.LDEXP])
+    def test_rounded_f16_producer_requires_the_sdwa_rounded_store(self, kind):
+        sources = (_cast(_src(0), SemaType.F16),)
+        if kind == SemaNodeKind.LDEXP:
+            sources += (_cast(_src(1), SemaType.I32),)
+        value = SemaNode(kind, ty=SemaType.F16, children=sources)
+        body = SemaNode(
+            SemaNodeKind.ASSIGN, children=(_cast(_dst(0), SemaType.F16), value)
+        )
+        # The SDWA store would skip scaling for an instruction outside the list.
+        with pytest.raises(ValueError, match='SDWA_ROUNDED_F16_OPS'):
+            lower_sema_block(SemaBlock('V_UNLISTED_F16', ExecModel.VECTOR, body))
+        name = 'V_FRACT_F16' if kind == SemaNodeKind.FRACT else 'V_LDEXP_F16'
+        assert lower_sema_block(SemaBlock(name, ExecModel.VECTOR, body))
+
     @pytest.mark.parametrize(
         ('ty', 'template', 'policy'),
         [
@@ -863,7 +878,9 @@ class TestLowerVectorAdd:
             SemaNodeKind.LDEXP, ty=ty, children=(_cast(_src(0), ty), exponent)
         )
         body = SemaNode(SemaNodeKind.ASSIGN, children=(_cast(_dst(0), ty), value))
-        result = lower_sema_block(SemaBlock('V_LDEXP', ExecModel.VECTOR, body))
+        result = lower_sema_block(
+            SemaBlock(f'V_LDEXP_F{ty.size}', ExecModel.VECTOR, body)
+        )
 
         assert (
             f'const auto ldexp_policy = amdgpu::ldexp::Policy::make({policy});'

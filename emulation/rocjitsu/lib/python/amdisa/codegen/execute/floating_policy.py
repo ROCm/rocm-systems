@@ -26,7 +26,8 @@ FLUSH_NEAREST_F32_OPS = frozenset(
 )
 
 # F16 results rounded before SDWA OMOD, which the SDWA store applies, as VOP3
-# does. gfx1030 SDWA matches VOP3 for both bit for bit.
+# does. gfx1030 SDWA matches VOP3 for both bit for bit. sema_lower rejects a
+# rounded F16 FRACT/LDEXP destination whose instruction is missing here.
 SDWA_ROUNDED_F16_OPS = frozenset({'V_FRACT_F16', 'V_LDEXP_F16'})
 
 
