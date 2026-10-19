@@ -254,6 +254,45 @@ def test_normalization_fallback_reports_failure_when_formula_still_spans_passes(
     assert not relaxed
 
 
+def test_missing_pass_cell_is_nan_and_warned(monkeypatch) -> None:
+    rows = []
+    for dispatch_id, pass_key, value in (
+        (0, "pmc_perf_0", 100),
+        (0, "pmc_perf_1", 200),
+        (1, "pmc_perf_0", 50),
+    ):
+        rows.append({
+            "GPU_ID": 0,
+            "Dispatch_ID": dispatch_id,
+            "Grid_Size": 256,
+            "Workgroup_Size": 64,
+            "LDS_Per_Workgroup": 0,
+            "Scratch_Per_Workitem": 0,
+            "Arch_VGPR": 8,
+            "Accum_VGPR": 0,
+            "SGPR": 16,
+            "Kernel_Name": "k",
+            "Start_Timestamp": 10,
+            "End_Timestamp": 20,
+            "Kernel_ID": 0,
+            "Counter_Name": "GRBM_GUI_ACTIVE",
+            "Counter_Value": value,
+            "Pass_Key": pass_key,
+        })
+    long_df = pd.DataFrame(rows)
+    warnings = []
+    monkeypatch.setattr(
+        "utils.utils_analysis.console_warning",
+        lambda *args: warnings.append(args),
+    )
+    result = process_rocpd_csv(long_df, pass_layout=build_pass_layout(long_df))
+    missing = result.loc[
+        result["GRBM_GUI_ACTIVE"] == 50, "GRBM_GUI_ACTIVE@pass:pmc_perf_1"
+    ]
+    assert missing.isna().all()
+    assert warnings
+
+
 def test_process_rocpd_csv_skips_provenance_merge_without_duplicates(
     monkeypatch,
 ) -> None:

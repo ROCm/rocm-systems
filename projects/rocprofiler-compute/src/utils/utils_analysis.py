@@ -841,6 +841,7 @@ def process_rocpd_csv(
     )
 
     data: list[dict[str, Any]] = []
+    missing_dispatches: List[int] = []
 
     # Group by unique kernel and merge into a single row
     for _, group_df in df.groupby([
@@ -865,11 +866,22 @@ def process_rocpd_csv(
             "End_Timestamp": group_df["End_Timestamp"].iloc[0],
         }
         if use_provenance:
-            row.update(_merge_counters_with_pass_provenance(group_df, pass_layout))
+            row.update(
+                _merge_counters_with_pass_provenance(
+                    group_df, pass_layout, missing_dispatches
+                )
+            )
         else:
             # Each counter will become its own column (last write wins).
             row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
         data.append(row)
+    if missing_dispatches:
+        console_warning(
+            "pass_provenance",
+            f"{len(missing_dispatches)} dispatch(es) are missing a duplicated "
+            "counter from a profiling pass; those cells are NaN and drop out "
+            "of sums.",
+        )
     df = pd.DataFrame(data)
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(1, len(df) + 1)
@@ -956,9 +968,15 @@ def assign_native_ids(counter_set: pd.DataFrame) -> pd.DataFrame:
 def _merge_counters_with_pass_provenance(
     group_df: pd.DataFrame,
     pass_layout: "PassLayout",
+    missing_dispatches: List[int],
 ) -> dict[str, Any]:
-    """Build base + shadow counter columns for one dispatch group."""
+    """Build base + shadow counter columns for one dispatch group.
+
+    A duplicated counter gets a column for every layout pass that collects it.
+    A dispatch missing that pass stores NaN so later dispatches still align.
+    """
     merged: dict[str, Any] = {}
+    missing = 0
     for counter_name, counter_rows in group_df.groupby("Counter_Name", sort=False):
         values_by_pass: dict[str, Any] = {}
         for pass_key, value in zip(
@@ -967,12 +985,21 @@ def _merge_counters_with_pass_provenance(
             values_by_pass[str(pass_key)] = value
         ordered_passes = sorted(values_by_pass, key=natural_pass_sort_key)
         first_pass = ordered_passes[0]
-        merged[str(counter_name)] = values_by_pass[first_pass]
-        if str(counter_name) in pass_layout.duplicated:
-            for pass_key in ordered_passes:
-                merged[pass_layout.qualified_column(str(counter_name), pass_key)] = (
-                    values_by_pass[pass_key]
-                )
+        name = str(counter_name)
+        merged[name] = values_by_pass[first_pass]
+        if name not in pass_layout.duplicated:
+            continue
+        for pass_key in pass_layout.pass_keys:
+            if name not in pass_layout.counters_by_pass.get(pass_key, frozenset()):
+                continue
+            column = pass_layout.qualified_column(name, pass_key)
+            if pass_key in values_by_pass:
+                merged[column] = values_by_pass[pass_key]
+            else:
+                merged[column] = np.nan
+                missing += 1
+    if missing:
+        missing_dispatches.append(missing)
     return merged
 
 
