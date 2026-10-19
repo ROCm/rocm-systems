@@ -9,7 +9,10 @@
 # YAML metric label for that arch (documentation / review only - runtime uses
 # ids only).
 #
-# Semantics: listed metrics get coalescing tier 0 (packed before others).
+# Semantics: listed metrics get coalescing tier 0 (packed before others) on
+# the legacy fallback coalesce. The default single-pass allocator already
+# co-locates every single-pass metric set, then sorts those sets by size, so
+# this list does not change that layout.
 #
 # Use an empty mapping ``{}`` when an architecture has no extra policy.
 # =============================================================================
