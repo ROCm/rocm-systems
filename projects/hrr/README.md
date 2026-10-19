@@ -239,7 +239,7 @@ capture.hrr/
   `.debug*` sections, which hold the compiler build and build paths, are
   zeroed and retyped `SHT_NOBITS` before they are stored, as are those of
   uncompressed fat binaries, so a debugger on a replay sees no debug
-  information. Symbol names stay
+  information. The symbol table is not touched, so kernel names stay.
 - **manifest.json** — counts, versions and device properties; the GPU's PCI
   address, UUID and LUID are written blank
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
