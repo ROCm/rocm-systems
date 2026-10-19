@@ -10,6 +10,7 @@
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
+#include "rocjitsu/vm/topology_assembly.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "util/diagnostic.h"
@@ -76,55 +77,7 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
   s->engine_config = loaded.engine_config;
   s->engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
 
-  if (loaded.num_gpus > 1 && !loaded.extra_gpu_builds.empty()) {
-    std::vector<std::unique_ptr<SoC>> socs;
-    std::vector<uint32_t> gpu_ids;
-
-    auto root0 = loaded.take_root();
-    root0.release();
-    socs.push_back(std::unique_ptr<SoC>(s->soc));
-    gpu_ids.push_back(loaded.devices.empty() ? 0 : loaded.devices[0].gpu_id);
-
-    for (size_t i = 0; i < loaded.extra_gpu_builds.size(); ++i) {
-      auto &eb = loaded.extra_gpu_builds[i];
-      auto *extra_soc = dynamic_cast<SoC *>(eb.root.get());
-      if (!extra_soc)
-        continue;
-      eb.root.release();
-      socs.push_back(std::unique_ptr<SoC>(extra_soc));
-      gpu_ids.push_back(i + 1 < loaded.devices.size() ? loaded.devices[i + 1].gpu_id : 0);
-    }
-
-    auto vm_ptr = std::make_unique<VirtualMachine>(std::move(socs), std::move(gpu_ids), daemon);
-    s->vm = vm_ptr.get();
-    s->engine->topology().set_root(std::move(vm_ptr));
-
-    auto prefix_specs = [](std::vector<simdojo::LinkSpec> &specs, const std::string &pfx) {
-      for (auto &ls : specs) {
-        ls.src = pfx + ls.src;
-        ls.dst = pfx + ls.dst;
-      }
-    };
-    prefix_specs(loaded.build_result.link_specs, "gpu0.");
-    loaded.wire_links(s->engine->topology());
-    s->soc->wire_backing(s->engine->topology());
-    for (size_t i = 0; i < loaded.extra_gpu_builds.size(); ++i) {
-      auto &eb = loaded.extra_gpu_builds[i];
-      prefix_specs(eb.link_specs, "gpu" + std::to_string(i + 1) + ".");
-      s->engine->topology().wire_links(eb.link_specs, loaded.exec_mode);
-      auto *extra_soc = s->vm->soc(static_cast<uint32_t>(i + 1));
-      if (extra_soc)
-        extra_soc->wire_backing(s->engine->topology());
-    }
-  } else {
-    auto root = loaded.take_root();
-    root.release();
-    auto vm_ptr = std::make_unique<VirtualMachine>(std::unique_ptr<SoC>(s->soc), daemon);
-    s->vm = vm_ptr.get();
-    s->engine->topology().set_root(std::move(vm_ptr));
-    loaded.wire_links(s->engine->topology());
-    s->soc->wire_backing(s->engine->topology());
-  }
+  s->vm = assemble_virtual_machine_topology(loaded, s->engine->topology(), daemon);
   if (num_threads_used > 1 && !amdgpu::partition_topology_by_xcds(
                                   s->engine->topology(), partition_socs, num_threads_used)) {
     throw std::invalid_argument("multi-threaded VM requires at least one XCD");
@@ -144,8 +97,14 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
 
   if (serve) {
     s->engine->register_as_primary();
-    if (loaded.num_gpus > 1 && !loaded.devices.empty())
-      s->vm->driver()->setup_topology(loaded.devices, num_xcds);
+    // Legacy replicated-GPU configs keep their existing XGMI discovery
+    // metadata for compatibility. Manifest routes describe topology only;
+    // until peer execution is granted, they must not advertise KFD XGMI
+    // links, hive IDs, or XGMI SDMA engines to ROCr.
+    if (!loaded.devices.empty())
+      s->vm->driver()->setup_topology(loaded.devices, num_xcds,
+                                      !loaded.system_graph.explicit_manifest,
+                                      loaded.system_graph.explicit_manifest);
     else
       s->vm->driver()->setup_topology(loaded.device, num_xcds);
     s->vm->driver()->open();
@@ -254,36 +213,47 @@ bool reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
 } // namespace
 
 rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm) {
+  return rj_vm_create_for_node(json_path, nullptr, mode, vm);
+}
+
+rj_status_t rj_vm_create_for_node(const char *json_path, const char *node_id, rj_vm_mode_t mode,
+                                  rj_vm_t **vm) {
   if (!json_path || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
     util::StringDiagnostic diagnostic;
-    auto loaded = config::load_config(json_path, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    auto loaded = config::load_config_for_node(json_path, rocjitsu::kEmbeddedSchema,
+                                               node_id ? node_id : "", diagnostic.emitter());
     if (loaded.failed()) {
-      util::Logger::warn("rj_vm_create failed: ", diagnostic.message());
+      util::Logger::warn("rj_vm_create_for_node failed: ", diagnostic.message());
       return ROCJITSU_STATUS_INVALID_FILE;
     }
     return create_from_loaded(loaded.value(), mode, vm);
   } catch (const std::exception &e) {
-    util::Logger::warn("rj_vm_create failed: ", e.what());
+    util::Logger::warn("rj_vm_create_for_node failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
   }
 }
 
 rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode, rj_vm_t **vm) {
+  return rj_vm_create_from_string_for_node(json, nullptr, mode, vm);
+}
+
+rj_status_t rj_vm_create_from_string_for_node(const char *json, const char *node_id,
+                                              rj_vm_mode_t mode, rj_vm_t **vm) {
   if (!json || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
     util::StringDiagnostic diagnostic;
-    auto loaded =
-        config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    auto loaded = config::load_config_from_string_for_node(
+        json, rocjitsu::kEmbeddedSchema, node_id ? node_id : "", diagnostic.emitter());
     if (loaded.failed()) {
-      util::Logger::warn("rj_vm_create_from_string failed: ", diagnostic.message());
+      util::Logger::warn("rj_vm_create_from_string_for_node failed: ", diagnostic.message());
       return ROCJITSU_STATUS_INVALID_ARGUMENT;
     }
     return create_from_loaded(loaded.value(), mode, vm);
   } catch (const std::exception &e) {
-    util::Logger::warn("rj_vm_create_from_string failed: ", e.what());
+    util::Logger::warn("rj_vm_create_from_string_for_node failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
 }
@@ -372,6 +342,10 @@ rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t 
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
+  // The checkpoint format and restore path contain one SoC. Reject before
+  // opening the output file rather than silently dropping other GPU state.
+  if (vm->vm && vm->vm->num_socs() > 1)
+    return ROCJITSU_STATUS_UNSUPPORTED;
   try {
     auto engine_config = vm->engine_config;
     if (engine_config.num_threads == vm->loaded.execution_threads.engines)
@@ -571,10 +545,26 @@ rj_status_t rj_vm_drm_path(rj_vm_t *vm, const char **path) {
 }
 
 rj_status_t rj_vm_gpu_info(rj_vm_t *vm, rj_vm_gpu_info_t *info) {
+  return rj_vm_gpu_info_at(vm, 0, info);
+}
+
+rj_status_t rj_vm_gpu_count(rj_vm_t *vm, uint32_t *count) {
+  if (!vm || !count || !vm->vm || !vm->vm->driver())
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  *count = vm->vm->driver()->num_gpus();
+  return ROCJITSU_STATUS_SUCCESS;
+}
+
+rj_status_t rj_vm_gpu_info_at(rj_vm_t *vm, uint32_t ordinal, rj_vm_gpu_info_t *info) {
   if (!vm || !info || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
 
-  const auto &gpu = vm->vm->driver()->topology().gpu_info();
+  const auto *gpu_ptr = vm->vm->driver()->gpu_info_at(ordinal);
+  if (!gpu_ptr && ordinal == 0)
+    gpu_ptr = &vm->vm->driver()->topology().gpu_info();
+  if (!gpu_ptr)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  const auto &gpu = *gpu_ptr;
   *info = {};
   info->present = 1;
   info->gpu_id = gpu.gpu_id;
