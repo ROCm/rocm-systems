@@ -12,7 +12,8 @@
     "NCCL_DEBUG": "INFO",
     "RCCL_USE_AMD_SMI_LIB": "0",
     "HSA_NO_SCRATCH_RECLAIM": "1",
-    "RCCL_TDM_LL128_ENABLE": "1"
+    "RCCL_TDM_LL128_ENABLE": "1",
+    "RCCL_TEST_EXPECT_TDM_LL128": "1"
   },
   "mpi_args": [
     "--mca pml ob1",
@@ -160,6 +161,16 @@
           "name": "TDM_Capability",
           "description": "Fails when the SDK cannot build the tensor data mover, which would otherwise compile TDM_LL128_ON away and leave the suites below covering nothing",
           "test_filter": "TdmCopyTest.HostCapabilityMatchesArch"
+        },
+        {
+          "name": "TDM_LL128_PathCompiledIn",
+          "description": "Fails when --enable-tdm-prim-ll128 did not reach the device pass, which would leave every suite below exercising the scalar path under a TDM-named config",
+          "test_filter": "Ll128TdmStoreTest.Ll128TdmBuildFlagMatchesExpectation"
+        },
+        {
+          "name": "TDM_LL128_StoreLegDifferential",
+          "description": "Checks the staged store byte-for-byte against the scalar path it replaces, and that the slot indices tile the staged window exactly once",
+          "test_filter": "Ll128TdmStoreTest.Ll128SlotIndicesPackDensely:Ll128TdmStoreTest.Ll128StoreLegMatchesScalarPath"
         }
       ]
     }
