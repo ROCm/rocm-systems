@@ -265,12 +265,26 @@ base arch YAML files.
 
 ### Inheritance loader
 
-New module `src/utils/yaml_inherit_loader.py`. Implements a custom PyYAML loader
-for the `!inherit <path>` tag. The tag must appear as the first line of a YAML file.
+New module `src/utils/yaml_inherit_loader.py`. A metric library file names its parent
+with a top-level `inherit: <path>` key.
 
-GitLab CI's `extends` keyword uses the same approach -- deep merge across files,
-multi-level inheritance, later values override earlier ones.
-See [GitLab YAML optimization docs](https://docs.gitlab.com/ci/yaml/yaml_optimization/).
+The design follows GitLab CI
+([YAML optimization docs](https://docs.gitlab.com/ci/yaml/yaml_optimization/)), which
+uses two different mechanisms:
+
+- `extends:` is a key. A job names its parent template, and GitLab deep-merges the
+  parent under the job, with the job's own keys winning. `inherit:` works the same way,
+  except that it names the parent arch's file instead of a template in the same file.
+- `!reference [...]` is a custom tag on a value. `!remove` follows that pattern: it tags
+  a value (`key: !remove`), never a whole document.
+
+A first-line `!inherit <path>` tag, as first proposed, mixes the two and is not valid
+YAML: a document has one root node, so a tagged scalar cannot be followed by a mapping.
+Keeping a tag would need either a loader that strips the first line, which makes the
+files unreadable to other YAML tools (`check-yaml`, `format_yaml.py`, `safe_load`), or a
+tag on the whole root mapping, which needs a custom constructor and is harder to edit.
+With a key, any YAML tool reads the file, and the loader only removes one key.
+
 Native YAML anchors (`&`/`*`) and merge keys (`<<`) are insufficient -- they only
 perform shallow merge, do not work across files, and the merge key is semi-deprecated
 in the YAML spec.
@@ -282,14 +296,12 @@ which prohibits pip dependencies (`ProfileModeImportGuard` enforces stdlib-only
 imports). The vendored PyYAML is precedent for this approach. Import yaml from
 the vendored copy (`from vendored import yaml`) for profile-mode compatibility.
 
-`InheritLoader` subclasses `yaml.SafeLoader` and registers constructors for two
-custom tags:
-- `!inherit <path>` -- file-level inheritance (loads and merges the referenced file)
-- `!remove` -- marks a key for deletion during merge
+`InheritLoader` subclasses `yaml.SafeLoader` and registers one custom tag, `!remove`,
+which marks a key for deletion during the merge.
 
-When `!inherit` fires:
+To load a file:
 
-1. Resolve `<path>` relative to the current file's directory.
+1. Resolve the `inherit` path relative to the current file's directory.
 2. Load the base file recursively (supporting chains:
    `gfx950 -> gfx942 -> gfx940 -> gfx90a -> gfx908`).
 3. Deep-merge the current file's content on top of the base.
@@ -309,7 +321,7 @@ Example of all three operations:
 
 ```yaml
 # gfx90a/0200_system_speed_of_light.yaml
-!inherit ../gfx908/0200_system_speed_of_light.yaml
+inherit: ../gfx908/0200_system_speed_of_light.yaml
 
 metric:
   # Modify: change the formula for an existing metric
@@ -382,8 +394,8 @@ New module `src/utils/layer2_parser.py`.
    ```
    gfx1150-gfx1153 map to the `gfx115x` directory through `canonical_config_arch()`.
 2. Load YAML files from `{metric_dir}/{arch}/`. Each file either stands alone (base
-   arch) or begins with `!inherit` pointing to the parent arch's file.
-3. The `InheritLoader` (Stage 1) resolves the `!inherit` chain recursively and
+   arch) or has an `inherit` key pointing to the parent arch's file.
+3. The `InheritLoader` (Stage 1) resolves the `inherit` chain recursively and
    deep-merges overrides on top of the base.
 4. Validate each loaded metric definition against `layer2_schema`.
 5. Collect all metrics into `MetricLibrary.metrics: dict[str, MetricDefinition]`,
@@ -762,7 +774,7 @@ sets:
 - **References only.** A set entry references a metric id and carries no metric fields,
   so a metric is still defined exactly once per architecture. Every referenced id must
   exist on that architecture.
-- **Inheritance.** `sets.yaml` follows the same `!inherit` chain as the metric files; for
+- **Inheritance.** `sets.yaml` follows the same `inherit` chain as the metric files; for
   example, gfx941 and gfx942 use gfx940's sets unchanged.
 - **Single-pass check.** Validation uses `get_counters_for_metrics()` to confirm that each
   set's counters fit in one pass.
