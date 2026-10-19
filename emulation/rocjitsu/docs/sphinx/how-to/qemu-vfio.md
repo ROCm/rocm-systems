@@ -12,16 +12,19 @@ The single-GPU guest qualification recipe uses `configs/gfx1250_mi455x.json`.
 The launcher can also expose multiple local gfx1250 GPUs from a matching
 configuration, including `configs/gfx1250_mi455x_kmd_4gpu.json`. QEMU owns the
 guest, while rocJITsu supplies the emulated PCI devices and GPU models.
+For the maintained peer-transport prerequisites and QEMU PCIe fixes, see the
+[QEMU/VFIO guide](https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/docs/qemu-vfio.md).
 
 The repository provides the VFIO-user server and
 `scripts/run-vfio-guest.py`. It does not build or distribute a guest kernel,
 initramfs, AMDGPU package, ROCm runtime, or rocBLAS payload. Those inputs must
 come from one mutually compatible public release or nightly. Record their
 versions and SHA-256 digests when publishing a result.
-The [pod guest payload recipe](../../../tests/guest/README.md) pins the
-external QEMU, libvfio-user, driver, kernel, and ROCm inputs used by the
-same-host peer/RCCL gates. It also distinguishes the zero-patch final driver
-module from earlier diagnostic patch runs.
+For the external QEMU, libvfio-user, driver, kernel, and ROCm inputs, use the
+[pod guest payload recipe](https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/guest/README.md).
+The recipe records inputs used by the same-host peer/RCCL gates and
+distinguishes the zero-patch final driver module from earlier diagnostic patch
+runs.
 
 ## Host prerequisites
 
@@ -271,6 +274,13 @@ python3 scripts/run-vfio-guest.py \
   --append 'console=ttyS0 rdinit=/init panic=-1 amdgpu.discovery=2 amdgpu.emu_mode=1 amdgpu.fw_load_type=0 amdgpu.vm_update_mode=3 amdgpu.gpu_recovery=0 amdgpu.vramlimit=1024 amdgpu.ip_block_mask=0x3f rocjitsu.workload=sgemm'
 ```
 
+To use the explicit four-GPU scale-up schematic instead of the legacy replicated
+preset, replace the config argument above with
+`--config configs/gfx1250_mi455x_4gpu_scaleup.json` and add `--node node0`.
+Keep all four sockets and the same guest inputs. This graph projects local
+fabric routes but does not advertise KFD peer links. The per-GPU GEMM check
+validates local compute only; it does not qualify guest P2P or RCCL.
+
 Use `--node <id>` with a system manifest to select the local node served by
 this process; rocJITsu checks the selection. The launcher starts one rocJITsu
 server and waits for one readiness signal, then checks that every requested
@@ -283,6 +293,73 @@ The existing GEMM qualification contract covers one GPU. A multi-GPU launch
 does not by itself establish guest PCI enumeration, peer DMA, RCCL operation,
 or numerical correctness. Check the actual guest BDFs and validate the intended
 multi-GPU workload before reporting such a result.
+
+### Connect guest NICs for a NET/Socket control
+
+The launcher adds no NIC by default. To connect two independently launched
+guests over QEMU's socket Ethernet backend, add one of these option pairs to
+each otherwise complete launch command:
+
+```text
+node0: --net-socket-listen 127.0.0.1:17000 --net-mac 02:00:00:00:00:01
+node1: --net-socket-connect 127.0.0.1:17000 --net-mac 02:00:00:00:00:02
+```
+
+Start the listening launcher first. Wait until its QEMU process binds the
+host TCP port (for a local run, inspect the listening port with `ss -ltn`),
+then start the connector while the listener remains running. A TCP connect
+probe can consume QEMU's single peer connection. Use separate output
+directories and VFIO sockets. Select `--node node0` and `--node node1` with
+the two-node system manifest. On different hosts, bind the listener to an
+address reachable by the
+connector and open that TCP port. Each endpoint must be numeric IPv4 with a
+port from 1 to 65535, and each NIC needs a distinct unicast MAC. The NIC uses
+Q35 PCI slot `0x8`, leaving slots `0x4` through `0x7` for up to four GPU
+functions.
+
+The socket endpoint is a host transport address; it does not assign guest IP
+addresses. The guest image must bring up its virtio NIC, configure distinct
+addresses and a route, and check peer connectivity. RCCL also connects to its
+own advertised guest IP during bootstrap, so bring up loopback and check a
+local TCP connection. Give the two guests distinct hostnames or
+`NCCL_HOSTID` values so RCCL identifies them as separate nodes.
+
+After mounting `devtmpfs` on `/dev`, create and mount `/dev/shm` before
+starting RCCL:
+
+```sh
+mkdir -p /dev/shm
+mount -t tmpfs -o mode=1777,nodev,nosuid tmpfs /dev/shm
+ip link set lo up
+```
+
+The selected RCCL library checks `/dev/shm` during communicator setup even
+when `NCCL_SHM_DISABLE=1`; creating it in the staging root before the
+`devtmpfs` mount is insufficient.
+
+The `hip_rccl_gfx1250_test` rank binary supports a two-guest TCP bootstrap.
+Build it with
+`cmake --build build-vfio --target hip_rccl_gfx1250_test_target`, then
+package it with matched `librccl`, its transitive ELF dependencies, and the
+gfx1250 RCCL code object. Rank 0 uses `--rank=0 --world-size=2` and
+`--bootstrap-listen=GUEST_IP:PORT`; rank 1 uses `--rank=1 --world-size=2` and
+`--bootstrap-connect=RANK0_GUEST_IP:PORT`. Generate a fresh 128-bit
+hexadecimal run ID for each pair, for example with
+`python3 -c 'import secrets; print(secrets.token_hex(16))'`. Pass it to
+both ranks as `--bootstrap-run-id=ID`. Use the same seed, test filter, and
+`--bootstrap-timeout-ms`, and assert `--expected-devices=1` on each guest.
+These bootstrap addresses are guest IPs, separate from QEMU's host socket
+endpoints. Existing daemon tests still use `--shared-dir`.
+
+Set `NCCL_NET=Socket`, `NCCL_SOCKET_IFNAME` to the guest NIC, and disable IB,
+P2P, and SHM for the NET control. Require numerical GoogleTest success on
+both ranks and `NET/Socket` channel evidence. The bootstrap timeout covers
+only its handshake and case exchange; the paired guest controller must also
+bound the complete run and clean up both guest processes on failure.
+
+For the qualified four-node, two-GPU-per-node mixed P2P/NET workload, follow
+the [same-host RCCL gate](https://rocm.github.io/rocm-systems/rocjitsu/same-host-pod-rccl-gate/#run-this-gate). Its
+controllers launch the pod guests and the equivalent emulated KFD run.
 
 ## Results and reruns
 

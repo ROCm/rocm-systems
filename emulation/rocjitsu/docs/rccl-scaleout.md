@@ -1,5 +1,15 @@
 # Two-node RCCL NET smoke (unqualified control)
 
+This is a control only. The active exit gate is the four-node, two-GPU-per-node
+mixed P2P/IPC and NET workload in
+[Same-host pod RCCL gate](same-host-pod-rccl-gate.md), run in both VFIO and
+emulated KFD modes.
+The [2026-10-15 record](same-host-pod-rccl-result-20261015.md) reports a
+historical local pass with a zero-patch guest driver and standard VFIO-user
+peer transport. See
+[the gate's qualification status](same-host-pod-rccl-gate.md#qualification-status)
+for the current tree.
+
 `configs/gfx1250_mi455x_kmd_2node_net.json` is a schematic system
 manifest with one gfx1250 GPU on each of two nodes. Its network link records
 intended reachability. The GPUs have distinct KFD identities and each node
@@ -21,11 +31,10 @@ local mode and a gfx950 two-node NET control passed. A clean build of pre-PR
 ancestor `6d9350d62f` reproduced the single-daemon SIGBUS, so this is a known
 daemon prerequisite rather than evidence of a manifest regression. At that
 tested revision, `AMDKFD_IOC_EXPORT_DMABUF` returned a daemon-local descriptor
-number without transferring the descriptor to the client. This branch still
-does not transfer exported descriptors through the RPC `shared_handle` and
-SCM_RIGHTS path. Bypassing the bad close in the earlier run exposed a separate
-`hipHostMalloc` failure, so descriptor transfer alone cannot qualify this
-recipe. Treat the command below
+number without transferring the descriptor to the client. The current daemon
+transfers exported descriptors to clients through SCM_RIGHTS. Bypassing the
+bad close in the earlier run exposed a separate `hipHostMalloc` failure, so
+descriptor transfer alone cannot qualify this recipe. Treat the command below
 as a reproduction recipe until a passing gfx1250 NET rank run and its logs
 are recorded.
 
