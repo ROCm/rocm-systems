@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>${TITLE}</title>
+<style>
+${CSS}
+</style>
+<script>
+if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+  document.documentElement.classList.add("${DARK_THEME_CLASS}");
+}
+</script>
+</head>
+<body>
+${BODY_HTML}
+<script id="${MODEL_ID}" type="application/json">${MODEL_JSON}</script>
+<script>
+${BASE_JS}
+${PAGE_JS}
+</script>
+</body>
+</html>
