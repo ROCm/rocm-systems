@@ -229,12 +229,16 @@ get_kernel_symbol_device_name_map_from_metadata(amd_comgr_metadata_node_t kernel
     return kernel_sym_device_func_map;
 }
 
+// Both paths borrow the input only for this call and return independently owned
+// metadata. The optional API avoids importing the whole ELF into a data object.
 amd_comgr_status_t
 get_binary_metadata(size_t size, const void* bytes, amd_comgr_metadata_node_t* metadata)
 {
     using get_elf_metadata_t =
         amd_comgr_status_t (*)(size_t, const char*, amd_comgr_metadata_node_t*);
     static auto get_elf_metadata = []() -> get_elf_metadata_t {
+        // Resolve against the COMGR DSO already used by our linked APIs, not an
+        // unrelated version that might also be present in the global namespace.
         auto library_info = Dl_info{};
         if(dladdr(reinterpret_cast<const void*>(&amd_comgr_get_data_metadata), &library_info) ==
                0 ||
@@ -244,11 +248,15 @@ get_binary_metadata(size_t size, const void* bytes, amd_comgr_metadata_node_t* m
         if(library == nullptr) return nullptr;
         auto result =
             reinterpret_cast<get_elf_metadata_t>(dlsym(library, "amd_comgr_get_elf_metadata"));
+        // The SDK's direct COMGR dependency keeps the DSO (and cached function)
+        // alive after releasing this temporary dlopen reference.
         dlclose(library);
         return result;
     }();
     if(get_elf_metadata) return get_elf_metadata(size, static_cast<const char*>(bytes), metadata);
 
+    // Keep compatibility with older COMGR runtimes and headers: there is no new
+    // required link symbol, and a missing optional API retains the original copy.
     auto binary_data = amd_comgr_data_t{};
     CHECK_RETURN_COMGR(amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &binary_data));
     auto binary_data_fini =
