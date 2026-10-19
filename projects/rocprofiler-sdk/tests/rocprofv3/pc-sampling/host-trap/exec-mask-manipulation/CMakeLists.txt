@@ -19,14 +19,15 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-beta-enabled
-        --pc-sampling-unit time --pc-sampling-method host_trap --pc-sampling-interval 1 -d
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-unit time
+        --pc-sampling-method host_trap --pc-sampling-interval 1 -d
         ${CMAKE_CURRENT_BINARY_DIR}/pc_sampling_cmd_input -o out --output-format csv json
         -- $<TARGET_FILE:exec-mask-manipulation>
     DEPENDS exec-mask-manipulation
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling"
     PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "ROCPROFILER_PC_SAMPLING_BETA_ENABLED=on"
     SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
     FIXTURES_SETUP rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd
     DISABLED "${IS_PC_SAMPLING_DISABLED}")
