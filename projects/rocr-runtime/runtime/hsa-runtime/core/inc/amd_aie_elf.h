@@ -28,11 +28,6 @@ namespace rocr {
 namespace AMD {
 namespace aie_elf {
 
-/// @brief Size of an aie4 control-code page. Page N of a kernel's control code starts at
-/// N * kAie4PageSize, each page's ctrltext and ctrldata padded out to it, as aiebu's
-/// elf_reader_gen2plus lays it out; the firmware addresses pages by that position.
-constexpr uint32_t kAie4PageSize = 8192;
-
 /// @brief One place in the control code that takes an address.
 struct PatchSite {
   /// @brief Index into Kernel::pages naming which page's buffer @c offset is relative to.
@@ -70,8 +65,12 @@ struct Pdi {
 /// identified by the suffix aiecc gave its ctrltext/ctrldata section names, "<col>.<page>[.<id>]"
 /// (e.g. ".ctrltext.0.2.0" and ".ctrldata.0.2.0" share the page).
 struct Page {
+  /// @brief Size of an aie4 page. Each page's ctrltext and ctrldata are padded out to it, as
+  /// aiebu's elf_reader_gen2plus lays them out; the firmware addresses pages by that position.
+  static constexpr uint32_t kAie4Size = 8192;
+
   /// @brief Page number: the <page> of the section names' suffix on aie4, where it places the page
-  /// at number * kAie4PageSize; always 0 on aie2p.
+  /// at number * kAie4Size in the kernel's control code; always 0 on aie2p.
   uint32_t number = 0;
   /// @brief Control-code bytes.
   std::vector<uint8_t> ctrltext;

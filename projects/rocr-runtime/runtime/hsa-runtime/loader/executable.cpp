@@ -1909,13 +1909,14 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
         }
       }
 
-      // Lay the pages out as aiebu's elf_reader_gen2plus does: page N at N * kAie4PageSize, its
-      // ctrltext immediately followed by its ctrldata (matching the offsets aie_elf::Parse() gave
-      // that page's argument sites), padded out to the next page. The firmware addresses pages by
-      // that position. This becomes the pristine template a per-dispatch copy is patched from -- CERT does not patch argument addresses into the control
-      // code itself (confirmed on real hardware: leaving the ELF's placeholder offsets unpatched
-      // faults the IOMMU on tiny near-zero addresses), so the host still has to, exactly as aie2p
-      // does for its own (single-page) control code.
+      // Lay the pages out as aiebu's elf_reader_gen2plus does: page N at N * Page::kAie4Size,
+      // its ctrltext immediately followed by its ctrldata (matching the offsets aie_elf::Parse()
+      // gave that page's argument sites), padded out to the next page. The firmware addresses
+      // pages by that position. This becomes the pristine template a per-dispatch copy is patched
+      // from -- CERT does not patch argument addresses into the control code itself (confirmed on
+      // real hardware: leaving the ELF's placeholder offsets unpatched faults the IOMMU on tiny
+      // near-zero addresses), so the host still has to, exactly as aie2p does for its own
+      // (single-page) control code.
       if (!is_aie4) {
         // KMQ's dispatch-time patch (BuildFullElfCommand) only ever handles a single ctrltext
         // buffer: aie_elf::Parse() guarantees this shape for every arch but aie4 (confirmed here,
@@ -1934,7 +1935,7 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
         std::vector<uint8_t> ctrl_code;
         // Page index -> (ctrltext base, ctrldata base) in ctrl_code, for rebasing arg_sites below.
         std::vector<std::pair<uint32_t, uint32_t>> page_bases(kernel.pages.size());
-        constexpr size_t kPageSize = AMD::aie_elf::kAie4PageSize;
+        constexpr size_t kPageSize = AMD::aie_elf::Page::kAie4Size;
         for (size_t p = 0; p < kernel.pages.size(); ++p) {
           const AMD::aie_elf::Page& page = kernel.pages[p];
           // Pages come in increasing number, so each starts at or after the end of the last.
