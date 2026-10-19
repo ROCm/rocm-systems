@@ -19,6 +19,8 @@
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -163,8 +165,9 @@ public:
 
 // Routing tests supply a synthetic execution result, but wait tracking needs
 // decoded operands and the pre-execution address registers, as in the issuer.
-inline std::unique_ptr<Instruction> prepare_flat_load_for_routing(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wave,
-                                                           std::unique_ptr<amdgpu::VectorMemState> state) {
+inline std::unique_ptr<Instruction>
+prepare_flat_load_for_routing(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wave,
+                              std::unique_ptr<amdgpu::VectorMemState> state) {
   for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
     cu.write_vgpr(wave.vgpr_alloc().base, lane, state->per_lane_addr[lane]);
     cu.write_vgpr(wave.vgpr_alloc().base + 1, lane, state->per_lane_addr[lane] >> 32);
