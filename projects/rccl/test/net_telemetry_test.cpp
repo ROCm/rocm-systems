@@ -972,6 +972,19 @@ static void testEthtoolFallbackOrder(void) {
   CHECK_EQ(got, 7);
 }
 
+/* ---- HW counter delta ------------------------------------------------ */
+
+static void testCounterDelta(void) {
+  std::printf("testCounterDelta\n");
+  CHECK_EQ(rcclTelemetryCounterDelta(150, 100), 50);
+  CHECK_EQ(rcclTelemetryCounterDelta(-1, 100), -1);
+  CHECK_EQ(rcclTelemetryCounterDelta(100, -1), -1);
+  /* bnxt_re rx_bytes wrapped at 2^48 mid-run; the wire saw 60767380542 bytes. */
+  CHECK_EQ(rcclTelemetryCounterDelta(10669293278LL, 281424878623392LL), 60767380542LL);
+  /* Went down from above 2^48: not a 48-bit wrap, so unknown. */
+  CHECK_EQ(rcclTelemetryCounterDelta(5, ((int64_t)1 << 48) + 10), -1);
+}
+
 /* ---- One slot per shared QP ----------------------------------------- */
 
 /* A QP-sharing secondary maps qps[q] to shared QP q % primaryNqps. */
@@ -1183,6 +1196,7 @@ int main(void) {
   testSamplingDefaultIsIdentity();
   testConcurrent();
   testEthtoolFallbackOrder();
+  testCounterDelta();
   testSetupQpsSharedKeys();
   testSampledColRetry();
   testThor2SysfsNames(); /* flushes: keep last */
