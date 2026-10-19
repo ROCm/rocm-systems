@@ -4,7 +4,9 @@
 //! Driver-independent virtual-memory ownership and interval tests.
 
 use super::*;
-use crate::driver::{AddressSpaceInfo, CachedInfo, Driver, VirtualMemoryOperations};
+use crate::driver::{
+    AddressSpaceInfo, CachedInfo, Driver, DriverInstanceId, VirtualMemoryOperations,
+};
 use crate::memory::storage::{Owned, Shared};
 use crate::session::DriverContextLifetime;
 use crate::topology::Endpoint;
@@ -77,8 +79,8 @@ struct Mapping {
 impl Driver for FakeDriver {
     type DeviceState = State;
 
-    fn driver_instance(&self) -> u64 {
-        1
+    fn driver_instance(&self) -> DriverInstanceId {
+        DriverInstanceId::TEST
     }
 
     fn context_lifetime(&self) -> DriverContextLifetime {

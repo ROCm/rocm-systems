@@ -430,6 +430,7 @@ fn allocate_scratch(
         device_address: allocation.info().device_address,
         byte_length: plan.byte_length,
         maximum_private_segment_byte_length: plan.maximum_private_segment_byte_length,
+        lanes_per_wave,
         maximum_wave_count: plan.maximum_wave_count,
     };
     Ok((allocation, scratch))
