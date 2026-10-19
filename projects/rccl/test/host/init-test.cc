@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -1647,6 +1648,65 @@ TEST_F(InitMicrotest, GetAsyncError_GroupJobCompletes_AndClears) {
   EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
   EXPECT_EQ(ncclSuccess, e);
   EXPECT_EQ(nullptr, rc.get()->groupJob);  // completed -> cleared
+}
+
+// The shape that hung under NCCL_COMM_BLOCKING=0: a PyTorch watchdog and the application thread
+// both polling the same comm. Reading comm->groupJob and clearing it afterwards let both see the
+// same pointer and both reap it -- a second std::thread::join plus a second reference drop, which
+// freed the job under the thread still inside the first join. Claiming it with one exchange makes
+// the reap single-owner, so a link published N times is completed exactly N times. The link is
+// republished per round rather than once so a single run covers many interleavings.
+TEST_F(InitMicrotest, GetAsyncError_ConcurrentPollers_CompleteEachGroupJobLinkExactlyOnce) {
+  constexpr int kRounds = 2000;
+  ReadyComm rc;
+  auto gj = std::make_unique<ncclGroupJob>();
+
+  std::atomic<int> completions{0};
+  ScopedHook complete(g_ncclGroupJobComplete, [&](struct ncclGroupJob*) {
+    completions.fetch_add(1, std::memory_order_relaxed);
+    return ncclSuccess;
+  });
+
+  // Both pollers are released by the same round bump, so they enter the claim together. One call
+  // per release rather than a free-running loop keeps the recorder's label log bounded.
+  std::atomic<int> round{0};
+  std::atomic<bool> publishing{true};
+  auto poll = [&] {
+    int seen = 0;
+    while (true) {
+      while (round.load(std::memory_order_acquire) == seen) {
+        if (!publishing.load(std::memory_order_acquire)) return;
+      }
+      seen = round.load(std::memory_order_acquire);
+      ncclResult_t e = ncclInProgress;
+      (void)ncclCommGetAsyncError_impl(rc.get(), &e);
+    }
+  };
+  std::thread watchdog(poll);
+  std::thread application(poll);
+
+  // A lost claim shows up as a completion count above kRounds, not as a stall, but bound the wait
+  // anyway so a regression that stops clearing the link reports instead of hanging the suite.
+  int published = 0;
+  for (; published < kRounds; ++published) {
+    COMPILER_ATOMIC_STORE(&rc.get()->groupJob, gj.get(), std::memory_order_release);
+    round.fetch_add(1, std::memory_order_acq_rel);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (COMPILER_ATOMIC_LOAD(&rc.get()->groupJob, std::memory_order_acquire) != nullptr &&
+           std::chrono::steady_clock::now() < deadline) {
+    }
+    if (COMPILER_ATOMIC_LOAD(&rc.get()->groupJob, std::memory_order_acquire) != nullptr) break;
+  }
+  publishing.store(false, std::memory_order_release);
+  round.fetch_add(1, std::memory_order_acq_rel);  // release a poller parked on the round check
+  watchdog.join();
+  application.join();
+
+  ASSERT_EQ(kRounds, published) << "a published link was never claimed";
+  EXPECT_EQ(kRounds, completions.load(std::memory_order_acquire))
+    << "every published link must be reaped by exactly one poller";
+  EXPECT_EQ(nullptr, rc.get()->groupJob);
+  g_recorderLabels.clear();  // this test records thousands of labels; don't carry them forward
 }
 
 TEST_F(InitMicrotest, CheckHsaEnvSetting_AllSucceed_ReturnsSuccess) {
@@ -4679,7 +4739,9 @@ TEST_F(InitMicrotest, CommEnsureReady_AbortFlagSet_AbortsAndSkipsTheAsyncErrorQu
   EXPECT_EQ(ncclSuccess, ncclCommEnsureReady(rc.get()));
   EXPECT_EQ(1, abort.calls);
   EXPECT_EQ(gj.get(), aborted);
-  EXPECT_EQ(gj.get(), rc.get()->groupJob);
+  // The link is claimed, not merely read: abort consumes the reference it carries, so leaving the
+  // pointer behind would let a concurrent GetAsyncError reap the same link a second time.
+  EXPECT_EQ(nullptr, rc.get()->groupJob);
   // asyncResult is only ever read out (init.cc:4497), so it holds on both arms; the label is the discriminator.
   EXPECT_EQ(0, std::count(g_recorderLabels.begin(), g_recorderLabels.end(), "GetAsyncError"));
 }

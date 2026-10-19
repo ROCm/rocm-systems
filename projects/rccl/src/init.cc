@@ -778,8 +778,8 @@ ncclResult_t ncclCommEnsureReady(ncclComm_t comm) {
   /* comm must be ready, or error will be reported */
   ncclResult_t ret = ncclSuccess;
   if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire)) {
-    // Claim this comm's groupJob link before abort so concurrent GetAsyncError
-    // callers cannot reap the same link (ROCM-32626).
+    // Claim the link so only one thread ever reaps it, and so the comm is left
+    // without a pointer to a job that abort may destroy.
     struct ncclGroupJob* groupJob =
       COMPILER_ATOMIC_EXCHANGE(&comm->groupJob, static_cast<struct ncclGroupJob*>(nullptr), std::memory_order_acq_rel);
     ncclGroupJobAbort(groupJob);
@@ -5230,12 +5230,10 @@ ncclResult_t ncclCommGetAsyncError_impl(ncclComm_t comm, ncclResult_t* asyncErro
     }
   }
 
-  /* if there is linked group job, we should complete it.
-   * Atomically claim the link so concurrent GetAsyncError callers (e.g. a
-   * PyTorch watchdog + application thread) cannot both enter
-   * ncclGroupJobComplete for the same comm link. Without this, both threads
-   * decrement groupRefCount and one may delete the groupJob while the other
-   * is still inside std::thread::join (ROCM-32626). */
+  /* if there is linked group job, we should complete it. Claiming the link
+   * atomically makes exactly one caller the owner of that reference: two
+   * threads polling the same comm must not both reach ncclGroupJobComplete,
+   * or one can destroy the job while the other is inside std::thread::join. */
   if (*asyncError == ncclSuccess) {
     struct ncclGroupJob* groupJob =
       COMPILER_ATOMIC_EXCHANGE(&comm->groupJob, static_cast<struct ncclGroupJob*>(nullptr), std::memory_order_acq_rel);

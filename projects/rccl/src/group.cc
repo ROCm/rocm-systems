@@ -609,9 +609,9 @@ static void reclaimPlannerState(struct ncclComm* comm) {
   }
 }
 
-// Publish a per-comm groupJob link. Take the reference *before* making the
-// pointer visible so a concurrent GetAsyncError/abort claim always owns a
-// matching count (ROCM-32626 review: load/store + late increment was racy).
+// Publish a per-comm groupJob link, taking the reference that link owns before
+// the pointer becomes visible so every claimer of comm->groupJob owns a
+// matching count. Returns false when the comm already holds a link.
 static bool ncclGroupJobTryLinkComm(struct ncclGroupJob* groupJob, struct ncclComm* comm) {
   if (comm == nullptr) return false;
   ncclAtomicRefCountIncrement(&groupJob->groupRefCount);
@@ -623,11 +623,24 @@ static bool ncclGroupJobTryLinkComm(struct ncclGroupJob* groupJob, struct ncclCo
       return true;
     }
     if (expected != nullptr) {
-      // Lost the race (already linked or claimed); drop the speculative ref.
       (void)ncclAtomicRefCountDecrement(&groupJob->groupRefCount);
       return false;
     }
   }
+}
+
+// Clears comm->groupJob and drops the reference that link owned. Returns false
+// when the comm no longer points at this job, i.e. somebody else claimed it and
+// now owns that reference.
+static bool ncclGroupJobTryUnlinkComm(struct ncclGroupJob* groupJob, struct ncclComm* comm) {
+  if (comm == nullptr) return false;
+  struct ncclGroupJob* expected = groupJob;
+  if (!COMPILER_ATOMIC_COMPARE_EXCHANGE(&comm->groupJob, &expected, static_cast<struct ncclGroupJob*>(nullptr),
+                                        std::memory_order_acq_rel, std::memory_order_acquire)) {
+    return false;
+  }
+  (void)ncclAtomicRefCountDecrement(&groupJob->groupRefCount);
+  return true;
 }
 
 // Undo the comm->groupJob links published by the non-blocking branch of
@@ -636,25 +649,19 @@ static bool ncclGroupJobTryLinkComm(struct ncclGroupJob* groupJob, struct ncclCo
 // would dereference freed memory. An init/split comm is only reachable via
 // asyncJobs (it is never placed on the groupCommHead chains), so both lists
 // must be walked. Only clears comms that adopted this exact groupJob.
+// Callers must hold the owner reference, so the drops here cannot reach zero.
 static void groupJobUnlinkComms(struct ncclGroupJob* groupJob) {
   if (!ncclIntruQueueEmpty(&groupJob->asyncJobs)) {
     struct ncclAsyncJob* job = ncclIntruQueueHead(&groupJob->asyncJobs);
     do {
-      if (job->comm) {
-        struct ncclGroupJob* expected = groupJob;
-        (void)COMPILER_ATOMIC_COMPARE_EXCHANGE(&job->comm->groupJob, &expected,
-                                               static_cast<struct ncclGroupJob*>(nullptr),
-                                               std::memory_order_acq_rel, std::memory_order_acquire);
-      }
+      (void)ncclGroupJobTryUnlinkComm(groupJob, job->comm);
       job = job->next;
     } while (job);
   }
   for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
     struct ncclComm* comm = groupJob->groupCommHead[type];
     while (comm != nullptr) {
-      struct ncclGroupJob* expected = groupJob;
-      (void)COMPILER_ATOMIC_COMPARE_EXCHANGE(&comm->groupJob, &expected, static_cast<struct ncclGroupJob*>(nullptr),
-                                             std::memory_order_acq_rel, std::memory_order_acquire);
+      (void)ncclGroupJobTryUnlinkComm(groupJob, comm);
       comm = comm->groupNext[type];
     }
   }
@@ -1183,6 +1190,10 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
   size_t realSize = 0;
   bool hasCommHead = false;
   ncclGroupJob* groupJob = NULL;
+  // Set once the non-blocking branch takes its owner reference. From then on the
+  // refcount decides when groupJob dies, including on the fail path.
+  bool groupJobOwnerRef = false;
+  int linkedComms = 0;
   internalSimInfo.magic = 0;
 
   if (ncclGroupDepth == 0) {
@@ -1245,9 +1256,6 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
     // blocking path and hang when a peer rank is missing (ROCM-30165).
     if (ncclGroupBlocking == 0 && (ncclGroupCommPreconnectHead != nullptr || !ncclIntruQueueEmpty(&groupJob->asyncJobs))) {
       /* nonblocking group */
-      // Mark InProgress first, but publish comm->groupJob only after the async
-      // launch thread exists and nonBlockingInit is set, so a concurrent
-      // GetAsyncError/abort that claims the link can join/complete safely.
       if (!ncclIntruQueueEmpty(&groupJob->asyncJobs)) {
         ncclAsyncJob* job = ncclIntruQueueHead(&groupJob->asyncJobs);
         do {
@@ -1267,32 +1275,45 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t* simInfo) {
       }
 
       groupJob->base.func = groupLaunchNonBlocking;
-      // Owner ref keeps groupJob alive while we publish per-comm links; a
-      // concurrent GetAsyncError claim must not delete underneath GroupEnd.
-      ncclAtomicRefCountIncrement(&groupJob->groupRefCount);
-      STDTHREADCREATE_GOTO(groupJob->base.thread, ncclAsyncJobMain, ret, fail, &groupJob->base);
-      groupJob->nonBlockingInit = true;
-
-      /* link group job to communicators (CAS + ref taken before publish). */
-      if (!ncclIntruQueueEmpty(&groupJob->asyncJobs)) {
-        ncclAsyncJob* job = ncclIntruQueueHead(&groupJob->asyncJobs);
-        do {
-          (void)ncclGroupJobTryLinkComm(groupJob, job->comm);
-          job = job->next;
-        } while (job);
-      }
-      for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
-        if (ncclGroupCommHead[type]) {
-          ncclComm_t comm = ncclGroupCommHead[type];
+      {
+        // Publish the links before the launch thread exists: once it runs it
+        // destroys the queued jobs and rewrites groupNext, so walking either
+        // list alongside it would read freed memory. launchMutex covers the
+        // thread creation and the nonBlockingInit store as well, so a thread
+        // that claims a link mid-publish waits here instead of trying to join a
+        // thread that does not exist yet.
+        std::lock_guard<std::mutex> launchLock(groupJob->launchMutex);
+        // Owner reference: a claimer must not destroy groupJob while GroupEnd
+        // is still using it.
+        ncclAtomicRefCountIncrement(&groupJob->groupRefCount);
+        groupJobOwnerRef = true;
+        if (!ncclIntruQueueEmpty(&groupJob->asyncJobs)) {
+          ncclAsyncJob* job = ncclIntruQueueHead(&groupJob->asyncJobs);
           do {
-            (void)ncclGroupJobTryLinkComm(groupJob, comm);
-            comm = comm->groupNext[type];
-          } while (comm);
+            if (ncclGroupJobTryLinkComm(groupJob, job->comm)) linkedComms++;
+            job = job->next;
+          } while (job);
         }
+        for (int type = 0; type < ncclGroupTaskTypeNum; ++type) {
+          if (ncclGroupCommHead[type]) {
+            ncclComm_t comm = ncclGroupCommHead[type];
+            do {
+              if (ncclGroupJobTryLinkComm(groupJob, comm)) linkedComms++;
+              comm = comm->groupNext[type];
+            } while (comm);
+          }
+        }
+        STDTHREADCREATE_GOTO(groupJob->base.thread, ncclAsyncJobMain, ret, fail, &groupJob->base);
+        groupJob->nonBlockingInit = true;
       }
 
-      // Drop owner ref. If every linked comm already completed, destroy now.
-      if (ncclAtomicRefCountDecrement(&groupJob->groupRefCount) == 0) {
+      if (linkedComms == 0) {
+        // Every comm already held a link, so no reaper will ever see this job.
+        // Retire it here: dropping the last reference instead would destroy it
+        // while the launch thread is still reading it, leaving ~ncclAsyncJob's
+        // join as the only thing standing between that and a use-after-free.
+        (void)ncclGroupJobComplete(groupJob);
+      } else if (ncclAtomicRefCountDecrement(&groupJob->groupRefCount) == 0) {
         delete groupJob;
       }
 
@@ -1321,7 +1342,12 @@ fail:
   if (groupJob) {
     groupJobUnlinkComms(groupJob);
     groupCleanup(groupJob->groupCommHead, &groupJob->asyncJobs, ret);
-    delete groupJob;
+    // Reached from the non-blocking branch only when the launch thread failed
+    // to start, with links already published. A thread that claimed one of them
+    // first still holds its reference, so let the refcount pick the destroyer.
+    if (!groupJobOwnerRef || ncclAtomicRefCountDecrement(&groupJob->groupRefCount) == 0) {
+      delete groupJob;
+    }
   } else {
     groupCleanup(ncclGroupCommHead, &ncclAsyncJobs, ret);
   }
@@ -1329,37 +1355,37 @@ fail:
   goto exit;
 }
 
+// True once ncclGroupEndInternal has started the launch thread, i.e. once
+// base.thread is joinable. Reading nonBlockingInit under launchMutex is what
+// keeps a thread that claimed a link mid-publish from joining too early.
+static bool groupJobLaunched(struct ncclGroupJob* groupJob) {
+  std::lock_guard<std::mutex> launchLock(groupJob->launchMutex);
+  return groupJob->nonBlockingInit;
+}
+
+// Both reapers below consume the reference that came with the comm->groupJob
+// link their caller claimed, so the last one out destroys the job. The join
+// itself precedes the drop, so a job can never be freed from under it.
 ncclResult_t ncclGroupJobComplete(struct ncclGroupJob* groupJob) {
   ncclResult_t ret = ncclSuccess;
   if (groupJob == nullptr) return ret;
-  // Join only once the nonblocking launch thread is live. Always drop the
-  // claimed per-comm link ref so an early claim during publish cannot orphan
-  // a reference (ROCM-32626).
-  if (groupJob->nonBlockingInit) {
-    bool didJoin = !COMPILER_ATOMIC_EXCHANGE(&groupJob->joined, true, std::memory_order_acq_rel);
-    if (didJoin) {
-      ret = ncclAsyncJobComplete(&groupJob->base);
-    }
+  if (groupJobLaunched(groupJob) && !COMPILER_ATOMIC_EXCHANGE(&groupJob->joined, true, std::memory_order_acq_rel)) {
+    ret = ncclAsyncJobComplete(&groupJob->base);
   }
   if (ncclAtomicRefCountDecrement(&groupJob->groupRefCount) == 0) {
-    // Only destroy once the launch thread was started; otherwise GroupEnd
-    // still owns the object (fail/cleanup path).
-    if (groupJob->nonBlockingInit) delete groupJob;
+    delete groupJob;
   }
   return ret;
 }
 
 ncclResult_t ncclGroupJobAbort(struct ncclGroupJob* groupJob) {
   if (groupJob == nullptr) return ncclSuccess;
-  if (groupJob->nonBlockingInit) {
-    bool didJoin = !COMPILER_ATOMIC_EXCHANGE(&groupJob->joined, true, std::memory_order_acq_rel);
-    if (didJoin) {
-      COMPILER_ATOMIC_STORE(&groupJob->abortFlag, true, std::memory_order_relaxed);
-      ncclAsyncJobComplete(&groupJob->base);
-    }
+  if (groupJobLaunched(groupJob) && !COMPILER_ATOMIC_EXCHANGE(&groupJob->joined, true, std::memory_order_acq_rel)) {
+    COMPILER_ATOMIC_STORE(&groupJob->abortFlag, true, std::memory_order_relaxed);
+    ncclAsyncJobComplete(&groupJob->base);
   }
   if (ncclAtomicRefCountDecrement(&groupJob->groupRefCount) == 0) {
-    if (groupJob->nonBlockingInit) delete groupJob;
+    delete groupJob;
   }
   return ncclSuccess;
 }
