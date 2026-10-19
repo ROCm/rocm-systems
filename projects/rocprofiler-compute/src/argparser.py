@@ -133,6 +133,20 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
+def positive_pid(value: str) -> str:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"expected a positive process id, got {value!r}"
+        )
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(
+            f"process id must be a positive integer, got {parsed}"
+        )
+    return str(parsed)
+
+
 def add_general_group(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
@@ -300,7 +314,7 @@ Examples:
     )
     profile_group.add_argument(
         "--attach-pid",
-        type=str,
+        type=positive_pid,
         dest="attach_pid",
         metavar="",
         default=None,
