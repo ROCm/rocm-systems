@@ -67,6 +67,10 @@ FatBinaryInfo::~FatBinaryInfo() {
       dev_programs_[dev_id] = nullptr;
     }
   }
+  // Programs can still use borrowed code-object bytes during destruction.
+  for (const auto& entry : code_obj_data_) {
+    amd::Comgr::release_data(entry.second);
+  }
   // Release Code object allocations
   for (const auto& i : code_obj_allocations_) {
     if (kpack_params_.has_value()) {
@@ -264,9 +268,15 @@ static size_t GetUncompressedImageSize(const void* image, size_t image_bound) {
   return std::max(image_size, descriptor_size);
 }
 
+// retained_data owns borrowed output storage for the fat binary's lifetime.
+// In the copying fallback, reused_data only keeps COMGR objects alive through
+// device-program initialization so metadata/symbols need no second ELF import.
 static bool UncompressAndPopulateCodeObject(
     const void* image, size_t image_size, const std::set<std::string>& unique_isa_names,
-    std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
+    std::map<std::string, std::pair<const void*, size_t>>& code_obj_map,
+    std::unordered_set<const void*>& allocations,
+    std::unordered_map<const void*, amd_comgr_data_t>& retained_data,
+    std::map<const void*, std::unique_ptr<ComgrDataUniqueHandle>>* reused_data) {
   auto remove_file_extension = [](const std::string& input) -> std::string {
     size_t index = input.find_last_of(".");
     std::string ret = input.substr(0, index);
@@ -358,11 +368,11 @@ static bool UncompressAndPopulateCodeObject(
         LogError("Failed to get data unbundled code object");
         break;
       }
-      comgr_helper::ComgrDataUniqueHandle item_handle(item);
+      auto item_handle = std::make_unique<ComgrDataUniqueHandle>(item);
 
       size_t item_name_size = 0;
       if (auto comgr_status =
-              amd::Comgr::get_data_name(item_handle.get(), &item_name_size, nullptr);
+              amd::Comgr::get_data_name(item_handle->get(), &item_name_size, nullptr);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data size");
         break;
@@ -370,30 +380,50 @@ static bool UncompressAndPopulateCodeObject(
 
       std::string item_bundle_id(item_name_size, 0);
       if (auto comgr_status =
-              amd::Comgr::get_data_name(item_handle.get(), &item_name_size, item_bundle_id.data());
+              amd::Comgr::get_data_name(item_handle->get(), &item_name_size, item_bundle_id.data());
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data");
         break;
       }
 
       size_t item_size = 0;
-      if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, nullptr);
+      if (auto comgr_status = amd::Comgr::get_data(item_handle->get(), &item_size, nullptr);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data size");
         break;
       }
 
       if (item_size > 0) {
-        char* item_data = new char[item_size];
-        if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, item_data);
-            comgr_status != AMD_COMGR_STATUS_SUCCESS) {
-          LogError("Failed to get data");
-          break;
+        const char* image_data = nullptr;
+        if (amd::Comgr::has_data_pointer()) {
+          if (amd::Comgr::get_data_pointer(item_handle->get(), &item_size, &image_data) !=
+              AMD_COMGR_STATUS_SUCCESS) {
+            LogError("Failed to get data pointer");
+            return false;
+          }
+          // The getter acquires no reference. Transfer our existing reference
+          // only for a new address; duplicate addresses already have an owner,
+          // and the local wrapper releases the extra reference in that case.
+          if (retained_data.emplace(image_data, item_handle->get()).second) {
+            item_handle->release();
+          }
+        } else {
+          std::unique_ptr<char[]> item_data(new char[item_size]);
+          if (amd::Comgr::get_data(item_handle->get(), &item_size, item_data.get()) !=
+              AMD_COMGR_STATUS_SUCCESS) {
+            LogError("Failed to get data");
+            return false;
+          }
+          allocations.insert(item_data.get());
+          image_data = item_data.release();
+          if (reused_data != nullptr) {
+            reused_data->emplace(image_data, std::move(item_handle));
+          }
         }
 
         std::string bundle_entry = remove_file_extension(
             std::string(item_bundle_id.c_str() + sizeof(symbols::kOffloadHipV4FatBinName_) - 1));
-        code_obj_map[bundle_entry] = std::make_pair(item_data, item_size);
+        code_obj_map[bundle_entry] = std::make_pair(image_data, item_size);
       }
     }
     passed = true;
@@ -464,7 +494,8 @@ static bool PopulateCodeObjectMap(
 }
 
 hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices,
-                                                     std::vector<char>* image_storage) {
+                                                     std::vector<char>* image_storage,
+                                                     bool reuse_unbundled_data) {
   if (fname_.empty() && image_ == nullptr) {
     LogError("Both Filename and image cannot be null");
     return hipErrorInvalidValue;
@@ -592,19 +623,26 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   }
 
   std::map<std::string, std::pair<const void*, size_t>> code_obj_map;  //!< code object map
+  std::map<const void*, std::unique_ptr<ComgrDataUniqueHandle>> reused_data;
   if (is_compressed) {
-    if (!UncompressAndPopulateCodeObject(image_, image_size, unique_isa_names, code_obj_map)) {
+    if (!UncompressAndPopulateCodeObject(image_, image_size, unique_isa_names, code_obj_map,
+                                         code_obj_allocations_, code_obj_data_,
+                                         reuse_unbundled_data ? &reused_data : nullptr)) {
       return hipErrorInvalidImage;
     }
-    // For compressed code objects, we use comgr to extract and make a copy.
-    // Track these to release later
-    std::for_each(code_obj_map.begin(), code_obj_map.end(),
-                  [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
   } else {  // uncompressed code object
     if (!PopulateCodeObjectMap(image_, image_bound, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
     }
   }
+
+  auto get_reused_data = [&](const void* binary) {
+    if (!reuse_unbundled_data) return amd_comgr_data_t{0};
+    auto retained = code_obj_data_.find(binary);
+    if (retained != code_obj_data_.end()) return retained->second;
+    auto entry = reused_data.find(binary);
+    return entry == reused_data.end() ? amd_comgr_data_t{0} : entry->second->get();
+  };
 
   LogPrintfInfo("Forcing SPIRV: %s", (HIP_FORCE_SPIRV_CODEOBJECT != 0 ? "true" : "false"));
   hipError_t hip_status = hipErrorInvalidImage;
@@ -619,14 +657,14 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
       // If the size is not 0, that means we found the native isa code object
       if (native_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        hip_status =
-            AddDevProgram(device, native_co->second.first, native_co->second.second, fdesc);
+        hip_status = AddDevProgram(device, native_co->second.first, native_co->second.second, fdesc,
+                                   get_reused_data(native_co->second.first));
         if (hip_status != hipSuccess) {
           break;
         }
       } else if (generic_co != code_obj_map.end() && !HIP_FORCE_SPIRV_CODEOBJECT) {
-        hip_status =
-            AddDevProgram(device, generic_co->second.first, generic_co->second.second, fdesc);
+        hip_status = AddDevProgram(device, generic_co->second.first, generic_co->second.second,
+                                   fdesc, get_reused_data(generic_co->second.first));
         if (hip_status != hipSuccess) {
           break;
         }
@@ -917,7 +955,8 @@ hipError_t FatBinaryInfo::ExtractKpackBinary(const std::vector<hip::Device*>& de
 }
 
 hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_image,
-                                        size_t binary_size, amd::Os::FileDesc fdesc) {
+                                        size_t binary_size, amd::Os::FileDesc fdesc,
+                                        amd_comgr_data_t data) {
   int devID = device->deviceId();
   amd::Context* ctx = device->asContext();
   amd::Program* program = new amd::Program(*ctx);
@@ -930,13 +969,15 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
   //   - the caller passed an open fd for the source file,
   //   - the FatBinaryInfo did mmap that file as image_, and
   //   - the binary is not one of the freshly allocated buffers (compressed
-  //     bundle, SPIRV->native, kpack) tracked in code_obj_allocations_.
+  //     bundle, SPIRV->native, kpack) tracked in code_obj_allocations_ or a
+  //     borrowed COMGR output tracked in code_obj_data_.
   // In that case we dup the fd so the downstream setKernels owns and closes
   // its own copy.
   amd::Os::FileDesc out_fdesc = amd::Os::FDescInit();
   size_t out_foffset = 0;
   const bool is_file_backed = fdesc != amd::Os::FDescInit() && image_mapped_ &&
-                              code_obj_allocations_.count(binary_image) == 0;
+                              code_obj_allocations_.count(binary_image) == 0 &&
+                              code_obj_data_.count(binary_image) == 0;
   if (is_file_backed) {
     out_fdesc = amd::Os::DupFileHandle(fdesc);
     out_foffset = static_cast<size_t>(reinterpret_cast<const char*>(binary_image) -
@@ -948,6 +989,12 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
                                 nullptr, out_fdesc, out_foffset, uri_)) {
     if (out_fdesc != amd::Os::FDescInit()) amd::Os::CloseFileHandle(out_fdesc);
     return hipErrorInvalidKernelFile;
+  }
+  auto* device_program = program->getDeviceProgram(*ctx->devices()[0]);
+  if (data.handle != 0 && device_program->binary().first == binary_image &&
+      device_program->binary().second == binary_size &&
+      !device_program->initializeCodeObject(data, binary_image, binary_size)) {
+    return hipErrorNoBinaryForGpu;
   }
   return hipSuccess;
 }

@@ -63,10 +63,21 @@ Program::Program(amd::Device& device, amd::Program& owner)
 // ================================================================================================
 Program::~Program() {
   clear();
+  clearCodeObjectMetadata();
+}
+
+void Program::clearCodeObjectMetadata() {
   for (auto const& kernelMeta : kernelMetadataMap_) {
     amd::Comgr::destroy_metadata(kernelMeta.second);
   }
-  amd::Comgr::destroy_metadata(metadata_);
+  kernelMetadataMap_.clear();
+  if (metadata_.handle != 0) {
+    amd::Comgr::destroy_metadata(metadata_);
+    metadata_ = {};
+  }
+  codeObjectImage_ = nullptr;
+  codeObjectSize_ = 0;
+  codeObjectSymbols_.clear();
 }
 
 // ================================================================================================
@@ -1559,6 +1570,11 @@ bool Program::setBinary(const char* binaryIn, size_t size, const device::Program
   // Do not rely on amd::Elf to do validations here since it makes copies
   // and depending on the binary size, that might be costly.
   auto [binary, binSize] = clBinary()->data();
+  if (codeObjectImage_ != nullptr && (binary != codeObjectImage_ || binSize != codeObjectSize_)) {
+    codeObjectImage_ = nullptr;
+    codeObjectSize_ = 0;
+    codeObjectSymbols_.clear();
+  }
   if (binSize < sizeof(amd::Elf64_Ehdr)) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_KERN,
             "The elf size is way too small to validate: %d \n", binSize);
@@ -1762,23 +1778,31 @@ ComgrBinaryData::~ComgrBinaryData() {
 }
 
 bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
+  if (codeObjectImage_ != nullptr && binary == codeObjectImage_ && binSize == codeObjectSize_) {
+    return true;
+  }
+  clearCodeObjectMetadata();
   ComgrBinaryData binaryData;
   if (!binaryData.create(AMD_COMGR_DATA_KIND_EXECUTABLE, binary, binSize)) {
     buildLog_ += "Error: COMGR failed to create code object data object.\n";
     return false;
   }
 
+  return createKernelMetadataMap(binaryData.data());
+}
+
+bool Program::createKernelMetadataMap(amd_comgr_data_t data) {
   amd_comgr_status_t status;
   if (device().isOnline()) {
     size_t requiredSize = 0;
-    status = amd::Comgr::get_data_isa_name(binaryData.data(), &requiredSize, nullptr);
+    status = amd::Comgr::get_data_isa_name(data, &requiredSize, nullptr);
     if (status != AMD_COMGR_STATUS_SUCCESS) {
       buildLog_ += "Error: COMGR failed to get code object ISA name.\n";
       return false;
     }
 
     std::vector<char> binaryIsaName(requiredSize);
-    status = amd::Comgr::get_data_isa_name(binaryData.data(), &requiredSize, binaryIsaName.data());
+    status = amd::Comgr::get_data_isa_name(data, &requiredSize, binaryIsaName.data());
     if ((status != AMD_COMGR_STATUS_SUCCESS) || (requiredSize != binaryIsaName.size())) {
       buildLog_ += "Error: COMGR failed to get code object ISA name.\n";
       return false;
@@ -1798,7 +1822,7 @@ bool Program::createKernelMetadataMap(void* binary, size_t binSize) {
     }
   }
 
-  status = amd::Comgr::get_data_metadata(binaryData.data(), &metadata_);
+  status = amd::Comgr::get_data_metadata(data, &metadata_);
   if (status != AMD_COMGR_STATUS_SUCCESS) {
     buildLog_ += "Error: COMGR failed to get the metadata.\n";
     return false;
@@ -1990,6 +2014,50 @@ bool Program::FindGlobalVarSize(void* binary, size_t binSize) {
   return true;
 }
 
+static amd_comgr_status_t collectCodeObjectSymbol(amd_comgr_symbol_t symbol, void* userData) {
+  amd_comgr_symbol_type_t type;
+  auto status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_TYPE, &type);
+  if (status != AMD_COMGR_STATUS_SUCCESS ||
+      (type != AMD_COMGR_SYMBOL_TYPE_OBJECT && type != AMD_COMGR_SYMBOL_TYPE_FUNC)) {
+    return status;
+  }
+  size_t length = 0;
+  status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME_LENGTH, &length);
+  if (status != AMD_COMGR_STATUS_SUCCESS || length == 0) {
+    return status;
+  }
+  std::string name(length + 1, '\0');
+  status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME, name.data());
+  if (status != AMD_COMGR_STATUS_SUCCESS) {
+    return status;
+  }
+  name.resize(length);
+  auto& symbols =
+      *static_cast<std::map<amd_comgr_symbol_type_t, std::vector<std::string>>*>(userData);
+  symbols[type].push_back(std::move(name));
+  return AMD_COMGR_STATUS_SUCCESS;
+}
+
+bool Program::initializeCodeObject(amd_comgr_data_t data, const void* binary, size_t size) {
+  if (!amd::IS_HIP || clBinary_ == nullptr || binary == nullptr ||
+      clBinary_->data().first != binary || clBinary_->data().second != size) {
+    return false;
+  }
+  clearCodeObjectMetadata();
+  if (!createKernelMetadataMap(data)) {
+    return false;
+  }
+  if (amd::Comgr::iterate_symbols(data, collectCodeObjectSymbol, &codeObjectSymbols_) !=
+      AMD_COMGR_STATUS_SUCCESS) {
+    buildLog_ += "Error: COMGR failed to collect code object symbols.\n";
+    clearCodeObjectMetadata();
+    return false;
+  }
+  codeObjectImage_ = binary;
+  codeObjectSize_ = size;
+  return true;
+}
+
 amd_comgr_status_t getSymbolFromModule(amd_comgr_symbol_t symbol, void* userData) {
   size_t nlen = 0;
   size_t* userDataInfo = nullptr;
@@ -2034,6 +2102,15 @@ amd_comgr_status_t getSymbolFromModule(amd_comgr_symbol_t symbol, void* userData
 
 bool Program::getSymbolsFromCodeObj(std::vector<std::string>* var_names,
                                     amd_comgr_symbol_type_t sym_type) const {
+  if (codeObjectImage_ != nullptr && clBinary_->data().first == codeObjectImage_ &&
+      clBinary_->data().second == codeObjectSize_ &&
+      (sym_type == AMD_COMGR_SYMBOL_TYPE_OBJECT || sym_type == AMD_COMGR_SYMBOL_TYPE_FUNC)) {
+    auto symbols = codeObjectSymbols_.find(sym_type);
+    if (symbols != codeObjectSymbols_.end()) {
+      var_names->insert(var_names->end(), symbols->second.begin(), symbols->second.end());
+    }
+    return true;
+  }
   amd_comgr_status_t status = AMD_COMGR_STATUS_SUCCESS;
   amd_comgr_data_t dataObject;
   SymbolInfo sym_info;
