@@ -332,6 +332,60 @@ TEST(InstructionCacheTest, TranslatedHitRejectsARevokedSnapshot) {
   EXPECT_TRUE(std::ranges::all_of(revoked, [](uint8_t byte) { return byte == 0xcc; }));
 }
 
+TEST(InstructionCacheTest, TranslatedFetchMatchesEveryAlignedOffsetColdAndWarm) {
+  constexpr size_t kBytes = InstructionCache::kLineSize * 2;
+  std::array<uint32_t, kBytes / sizeof(uint32_t)> program;
+  for (size_t word = 0; word < program.size(); ++word)
+    program[word] = static_cast<uint32_t>(0x10203040u + word * 0x01030507u);
+  const auto expected = std::as_bytes(std::span(program));
+  GpuVm gpu_vm;
+  InstructionCache cache;
+  auto address_space = std::make_shared<ExecutableAddressSpace>(0, kBytes);
+  address_space->write_program(program);
+  const auto handle = gpu_vm.register_translated(7, address_space, address_space);
+  ASSERT_TRUE(handle);
+  const auto access = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(access);
+
+  for (size_t offset = 0; offset + InstructionCache::kFetchBytes <= kBytes;
+       offset += sizeof(uint32_t)) {
+    SCOPED_TRACE(offset);
+    for (unsigned resident_lines = 0; resident_lines <= 2; ++resident_lines) {
+      SCOPED_TRACE(resident_lines);
+      cache.invalidate_all();
+      for (unsigned line = 0; line < resident_lines; ++line)
+        fetch_at(cache, *access, kCodeBase + line * InstructionCache::kLineSize);
+      std::array<uint8_t, InstructionCache::kFetchBytes + 2> destination;
+      std::ranges::fill(destination, uint8_t{0xcc});
+      ASSERT_EQ(cache.fetch(*access, kCodeBase + offset, destination.data() + 1),
+                amdgpu::VmAccessOutcome::Complete);
+      EXPECT_TRUE(std::ranges::equal(
+          std::as_bytes(std::span(destination).subspan(1, InstructionCache::kFetchBytes)),
+          std::span(expected).subspan(offset, InstructionCache::kFetchBytes)));
+      EXPECT_EQ(destination.front(), 0xcc);
+      EXPECT_EQ(destination.back(), 0xcc);
+    }
+  }
+}
+
+TEST(InstructionCacheTest, TranslatedStraddleRejectsRevocationWithACachedFirstLine) {
+  GpuVm gpu_vm;
+  InstructionCache cache;
+  auto address_space = std::make_shared<ExecutableAddressSpace>(0x11);
+  const auto handle = gpu_vm.register_translated(7, address_space, address_space);
+  ASSERT_TRUE(handle);
+  const auto access = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(access);
+  fetch_at(cache, *access);
+  ASSERT_TRUE(gpu_vm.invalidate(handle));
+  std::array<uint8_t, InstructionCache::kFetchBytes> destination;
+  std::ranges::fill(destination, uint8_t{0xcc});
+  EXPECT_EQ(cache.fetch(*access, kCodeBase + InstructionCache::kLineSize - sizeof(uint32_t),
+                        destination.data()),
+            amdgpu::VmAccessOutcome::Revoked);
+  EXPECT_TRUE(std::ranges::all_of(destination, [](uint8_t byte) { return byte == 0xcc; }));
+}
+
 TEST(InstructionCacheTest, FetchBypassesAnIncompleteCacheLine) {
   GpuVm gpu_vm;
   InstructionCache icache;
