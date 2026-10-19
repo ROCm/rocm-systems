@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from rocprof_compute_soc.counter_file import flat_counters_in_perfmon_file
 from rocprof_compute_soc.counter_grouping_buckets import (
+    count_single_pass_metrics_split_across_buckets,
     counters_fit_one_bucket,
     rebuild_counter_file,
 )
@@ -141,6 +142,10 @@ def test_keep_copies_keeps_level_home_and_needed_request_copies():
     }
     # The request series stays in the pass that also holds its LEVEL.
     without_request_row = keep_copies_groups_still_need([atomic, latency], cfg)
+    assert channel_bases(without_request_row[0]) == {
+        "TCC_EA0_ATOMIC",
+        "TCC_EA0_ATOMIC_LEVEL",
+    }
     assert channel_bases(without_request_row[1]) == level_home
 
     # Panel 1805 stays complete in the pass that already holds the three
@@ -163,6 +168,35 @@ def test_keep_copies_keeps_level_home_and_needed_request_copies():
     }
     assert channel_bases(files[1]) == level_home
     assert group_is_in_some_bucket(files, request_row)
+
+
+def test_keep_copies_drops_a_bucket_that_only_held_orphan_requests():
+    cfg = gfx942_perfmon_config()
+    orphan = rebuild_counter_file(
+        "0",
+        cfg,
+        {"TCC_EA0_RDREQ[0]", "TCC_EA0_WRREQ[0]"},
+    )
+    home = rebuild_counter_file(
+        "1",
+        cfg,
+        {
+            "TCC_EA0_RDREQ[0]",
+            "TCC_EA0_RDREQ_LEVEL[0]",
+            "TCC_EA0_WRREQ[0]",
+            "TCC_EA0_WRREQ_LEVEL[0]",
+        },
+    )
+    assert orphan is not None and home is not None
+    files = keep_copies_groups_still_need([orphan, home], cfg)
+    assert len(files) == 1
+    assert files[0].name == "1"
+    assert channel_bases(files[0]) == {
+        "TCC_EA0_RDREQ",
+        "TCC_EA0_RDREQ_LEVEL",
+        "TCC_EA0_WRREQ",
+        "TCC_EA0_WRREQ_LEVEL",
+    }
 
 
 def test_keep_copies_leaves_request_series_without_a_level_home():
@@ -333,7 +367,7 @@ def test_gfx950_channels_follow_its_reported_die_count():
 def test_gfx942_offline_layout_stays_fourteen_buckets():
     config = gfx942_perfmon_config()
     with tempfile.TemporaryDirectory() as tmp:
-        _counters, files = run_soc_detect_and_coalesce(
+        counters, files, soc = run_soc_detect_and_coalesce(
             "gfx942",
             get_default_config_dir(),
             None,
@@ -341,6 +375,10 @@ def test_gfx942_offline_layout_stays_fourteen_buckets():
             Path(tmp),
         )
     assert len(files) == 14
+    assert (
+        count_single_pass_metrics_split_across_buckets(files, soc, counters, config)
+        == 0
+    )
     by_name = {bucket.name: tcc_channel_bases(bucket) for bucket in files}
     assert by_name["1"] == {
         "TCC_EA0_ATOMIC",
