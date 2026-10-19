@@ -349,6 +349,10 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     ASICShader compute_11;
     ASICShader compute_12;
     ASICShader compute_1250;
+    // Only populated where a gfx1250 revision 1 part needs a different blob.
+    // Left zeroed elsewhere, in which case compute_1250 is used for every
+    // revision.
+    ASICShader compute_1250_rev1;
   };
 
   std::map<std::string, CompiledShader> compiled_shaders = {
@@ -378,6 +382,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeTrapHandlerV2_11, sizeof(kCodeTrapHandlerV2_11), 2, 4},    // gfx11
            {kCodeTrapHandlerV2_12, sizeof(kCodeTrapHandlerV2_12), 2, 4},    // gfx12
            {kCodeTrapHandlerV2_1250, sizeof(kCodeTrapHandlerV2_1250), 2, 4},  // gfx1250
+           {kCodeTrapHandlerV2_1250_rev1, sizeof(kCodeTrapHandlerV2_1250_rev1), 2, 4},  // gfx1250 rev1
        }},
       {"CopyAligned",
        {
@@ -451,10 +456,17 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
         asic_shader = &compiled_shader_it->second.compute_11;
       break;
     case 12:
-        if(supported_isas()[0]->GetMinorVersion() >= 5)
-          asic_shader = &compiled_shader_it->second.compute_1250;
-        else
+        if (supported_isas()[0]->GetMinorVersion() >= 5) {
+          // The trap-during-VOP3PX PC fixup in the second-level trap handler
+          // applies to gfx1250 revision 0 only, so revision 1 and later get a
+          // blob assembled without it.
+          ASICShader& rev1 = compiled_shader_it->second.compute_1250_rev1;
+          asic_shader = (properties_.Capability.ui32.ASICRevision != 0 && rev1.code != NULL)
+                            ? &rev1
+                            : &compiled_shader_it->second.compute_1250;
+        } else {
           asic_shader = &compiled_shader_it->second.compute_12;
+        }
       break;
     default:
       assert(false && "Precompiled shader unavailable for target");
