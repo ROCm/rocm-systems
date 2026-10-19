@@ -211,6 +211,9 @@ pub(crate) const AMD_AGENT_INFO_MAX_DATA_PREFETCH_REGIONS: u32 = 0xa123;
 pub(crate) const AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED: u32 = 0xa124;
 pub(crate) const AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE: u32 = 0xa125;
 pub(crate) const AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE: u32 = 0xa126;
+pub(crate) const AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH: u32 = 0xa127;
+pub(crate) const AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED: u32 = 0xa128;
+pub(crate) const AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED: u32 = 0xa129;
 pub(crate) const AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE: u32 = 0;
 
 pub(crate) const EXT_AGENT_INFO_IMAGE_1D_MAX_ELEMENTS: u32 = 0x3000;
@@ -258,6 +261,7 @@ pub(crate) const POOL_INFO_ACCESSIBLE_BY_ALL: u32 = 15;
 pub(crate) const POOL_INFO_ALLOC_MAX_SIZE: u32 = 16;
 pub(crate) const POOL_INFO_LOCATION: u32 = 17;
 pub(crate) const POOL_INFO_RUNTIME_ALLOC_REC_GRANULE: u32 = 18;
+pub(crate) const POOL_INFO_SIGNAL_CAPABLE: u32 = 19;
 pub(crate) const POOL_ACCESS_NEVER: u32 = 0;
 pub(crate) const POOL_ACCESS_DEFAULT: u32 = 1;
 pub(crate) const POOL_ACCESS_DISALLOWED: u32 = 2;
@@ -317,6 +321,7 @@ pub(crate) const ACCESS_PERMISSION_NONE: u32 = 0;
 pub(crate) const ACCESS_PERMISSION_RO: u32 = 1;
 pub(crate) const ACCESS_PERMISSION_WO: u32 = 2;
 pub(crate) const ACCESS_PERMISSION_RW: u32 = 3;
+pub(crate) const ACCESS_PERMISSION_EX: u32 = 4;
 
 pub(crate) type HsaHandle = i32;
 
@@ -507,6 +512,24 @@ opaque_handle!(HsaRegion);
 opaque_handle!(HsaSignalGroup);
 opaque_handle!(HsaWavefront);
 opaque_handle!(HsaAmdVmemAllocHandle);
+opaque_handle!(HsaAmdSignalBatch);
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub(crate) struct HsaAmdVmemHandleInfo {
+    pub(crate) size: usize,
+    pub(crate) alloc_size: usize,
+    pub(crate) agent: HsaAgent,
+}
+
+const _: () = {
+    assert!(std::mem::offset_of!(HsaAmdVmemHandleInfo, alloc_size) == std::mem::size_of::<usize>());
+    assert!(std::mem::offset_of!(HsaAmdVmemHandleInfo, agent) == 2 * std::mem::size_of::<usize>());
+    assert!(
+        std::mem::size_of::<HsaAmdVmemHandleInfo>()
+            == 2 * std::mem::size_of::<usize>() + std::mem::size_of::<HsaAgent>()
+    );
+};
 opaque_handle!(HsaExtImage);
 opaque_handle!(HsaExtSampler);
 

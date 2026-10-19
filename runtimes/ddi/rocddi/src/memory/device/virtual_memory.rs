@@ -775,6 +775,7 @@ mod tests {
             size: 0x4000,
             mapping_granularity: 0x1000,
             physical_backing_id: [1, 2],
+            placement: None,
         };
         let reservation = VirtualAddressInfo {
             address: 0x1_0000,
@@ -806,6 +807,7 @@ mod tests {
             size: 0x2_0000,
             mapping_granularity: 0x1_0000,
             physical_backing_id: [1, 2],
+            placement: None,
         };
         let reservation = VirtualAddressInfo {
             address: 0x10_0000,

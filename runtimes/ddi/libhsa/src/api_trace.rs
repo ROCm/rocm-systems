@@ -114,7 +114,7 @@ impl ApiTables {
                 pc_sampling_ext: std::ptr::null_mut(),
             },
             core: ApiTable::new(2, 0, original.core),
-            amd_ext: ApiTable::new(2, 0x14, original.amd_ext),
+            amd_ext: ApiTable::new(2, generated::AMD_EXT_STEP, original.amd_ext),
             finalizer_ext: ApiTable::new(2, 0, original.finalizer_ext),
             image_ext: ApiTable::new(2, 1, original.image_ext),
             tools: ApiTable::new(1, 0, original.tools),

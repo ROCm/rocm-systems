@@ -153,6 +153,7 @@ impl VirtualMemoryOperations for FakeDriver {
                 size,
                 mapping_granularity: 0x1000,
                 physical_backing_id: [1, 2],
+                placement: None,
             },
             drops: self.drops.clone(),
         })?)
