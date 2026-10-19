@@ -59,6 +59,11 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
+      - test_counter_grouping_single_pass
+      - test_counter_grouping_tcc
+      - test_counter_grouping_buckets
+      - test_pass_provenance
+      - test_debug_row_tracker
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -150,6 +155,11 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
+      - test_counter_grouping_single_pass
+      - test_counter_grouping_tcc
+      - test_counter_grouping_buckets
+      - test_pass_provenance
+      - test_debug_row_tracker
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -255,6 +265,11 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
+      - test_counter_grouping_single_pass
+      - test_counter_grouping_tcc
+      - test_counter_grouping_buckets
+      - test_pass_provenance
+      - test_debug_row_tracker
       - test-pc-sampling-collector
       - test-compression
       - test-csv
@@ -360,6 +375,11 @@ test_categories:
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
+      - test_counter_grouping_single_pass
+      - test_counter_grouping_tcc
+      - test_counter_grouping_buckets
+      - test_pass_provenance
+      - test_debug_row_tracker
       - test-pc-sampling-collector
       - test-compression
       - test-csv
