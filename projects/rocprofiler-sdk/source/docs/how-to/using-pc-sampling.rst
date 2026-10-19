@@ -482,14 +482,17 @@ The following tables are written when PC sampling is enabled:
 
   - ``timestamp``: Sample timestamp in nanoseconds
   - ``dispatch_id``: Dispatch ID of the kernel being sampled
-  - ``correlation_id``: Internal correlation ID of the PC sample record (the
-    user-assigned external ID is on the linked ``rocpd_event`` row)
+  - ``correlation_id``: User-assigned external correlation ID, matching the linked
+    ``rocpd_event.correlation_id``. The internal ID is stored in that event's
+    ``stack_id``.
   - ``exec_mask``: Active SIMD lanes at sample time (stored as TEXT to preserve
     the full 64-bit mask)
   - ``code_object_id``: ID of the loaded code object
   - ``code_object_offset``: Byte offset within the code object (the PC value)
-  - ``agent_id``: GPU agent on which the sample was collected
-  - ``tid``: CPU thread that launched the parent dispatch
+  - ``agent_id``: GPU agent from the parent dispatch, or from the recorded code
+    object when dispatch context is unavailable; NULL when neither is known
+  - ``tid``: CPU thread that launched the parent dispatch; NULL when dispatch
+    context is unavailable
   - ``event_id``: Foreign key into ``rocpd_event`` (links to the parent dispatch via ``parent_id``)
   - ``wave_issued``, ``inst_type``, ``stall_reason``, ``wave_count``: Stochastic-only fields; NULL for host-trap
 
@@ -512,6 +515,8 @@ Each PC sample event in ``rocpd_event`` has its ``parent_id`` set to the
 ``NULL`` when the parent dispatch was not captured -- for example when
 ``--kernel-trace`` is not enabled or the sample was taken outside a tracked
 dispatch -- so filter on ``parent_id IS NOT NULL`` when linkage is required.
+The sample event's ``parent_stack_id`` contains the parent event's internal
+``stack_id`` when dispatch context is available, and is otherwise ``NULL``.
 When querying databases merged from multiple recordings, also match on ``guid``
 (for example ``... AND K.guid = S.guid``) because ``dispatch_id`` and event ids
 are only unique within a single ``guid``. This allows you to join samples to
@@ -520,24 +525,24 @@ dispatch metadata:
 .. code-block:: sql
 
   -- All PC samples for a named kernel
-  SELECT S.timestamp, S.exec_mask, S.code_object_offset
+    SELECT S.guid, S.timestamp, S.exec_mask, S.code_object_offset
   FROM rocpd_gpu_pc_sample S
-  JOIN rocpd_event      SE ON SE.id         = S.event_id
-  JOIN rocpd_event      DE ON DE.id         = SE.parent_id
-  JOIN rocpd_kernel_dispatch K ON K.event_id = DE.id
-  JOIN rocpd_info_kernel_symbol KS ON KS.id  = K.kernel_id
+    JOIN rocpd_event SE ON SE.id = S.event_id AND SE.guid = S.guid
+    JOIN rocpd_event DE ON DE.id = SE.parent_id AND DE.guid = SE.guid
+    JOIN rocpd_kernel_dispatch K ON K.event_id = DE.id AND K.guid = DE.guid
+    JOIN rocpd_info_kernel_symbol KS ON KS.id = K.kernel_id AND KS.guid = K.guid
   WHERE KS.display_name LIKE '%MatrixTranspose%';
 
   -- Count samples per dispatch
-  SELECT K.dispatch_id,
+    SELECT K.guid, K.dispatch_id,
          KS.display_name,
          COUNT(*) AS sample_count
   FROM rocpd_gpu_pc_sample S
-  JOIN rocpd_event SE ON SE.id = S.event_id
-  JOIN rocpd_event DE ON DE.id = SE.parent_id
-  JOIN rocpd_kernel_dispatch K ON K.event_id = DE.id
-  JOIN rocpd_info_kernel_symbol KS ON KS.id   = K.kernel_id
-  GROUP BY K.dispatch_id
+    JOIN rocpd_event SE ON SE.id = S.event_id AND SE.guid = S.guid
+    JOIN rocpd_event DE ON DE.id = SE.parent_id AND DE.guid = SE.guid
+    JOIN rocpd_kernel_dispatch K ON K.event_id = DE.id AND K.guid = DE.guid
+    JOIN rocpd_info_kernel_symbol KS ON KS.id = K.kernel_id AND KS.guid = K.guid
+    GROUP BY K.guid, K.dispatch_id, KS.display_name
   ORDER BY sample_count DESC;
 
 The ROCPD schema version containing PC sampling support is **3.0.6**. For the
