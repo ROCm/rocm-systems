@@ -39,12 +39,22 @@ downstream consumer of the library.
   bucket and sum that overlap. PMC tracks average the samples in each bucket
   and hold the previous value across empty buckets between samples. Bucket 0
   starts at the earliest track timestamp.
+- `ph_get_region_details()`, `ph_get_kernel_dispatch_details()`,
+  `ph_get_memory_copy_details()`, and `ph_get_memory_alloc_details()` return
+  the fields of `region_data_t`, `kernel_dispatch_data_t`, `memory_copy_data_t`,
+  and `memory_alloc_data_t`. A missing row returns `PH_RESULT_SUCCESS` with
+  `is_valid` 0. A mismatched event type returns `PH_RESULT_INVALID_ARGUMENT`.
+  String pointers remain valid until `ph_ctx_free()`.
 - `ph_get_correlated_events()` returns the events `reader_t::get_correlated_events()`
   finds for one duration event. The source event is identified by
   `ph_event_t::id` and `ph_event_t::type`. The source event is excluded, and
   an event with no stack id yields an empty list. `ph_event_t::nesting_depth`
   is the depth of that event on its own track. The track is loaded when the
-  depth is read.
+  depth is read. `ph_event_t::track_id` is `ph_track_t::id` of
+  `timeline_event_t::track`, or of the track that supplied the depth when that
+  pointer is null. A kernel, memory copy, or memory allocation uses its
+  agent+queue track when that track exists, then its stream track, instead of
+  the host thread track.
 - `probe_database()` and the C equivalent `ph_probe_database()` detect a SQLite
   database, its `rocpd_metadata_<uuid>` table, and the schema version before a
   reader is opened. A trace that only has the `schema_version` tag is accepted

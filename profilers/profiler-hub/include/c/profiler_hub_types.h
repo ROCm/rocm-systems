@@ -396,6 +396,8 @@ extern "C"
      *       included, that are active when this event starts (1 = not
      *       overlapped). It is relative to the whole track, also for a
      *       time-windowed request.
+     * @note track_id is ph_track_t::id of the event's track. Track ids start
+     *       at 0.
      */
     typedef struct
     {
@@ -405,6 +407,7 @@ extern "C"
         const char*     name;
         ph_event_type_t type;
         uint32_t        nesting_depth;
+        uint32_t        track_id;
     } ph_event_t;
 
     /** @brief A list of duration events; same lifetime rule as
@@ -414,6 +417,233 @@ extern "C"
         uint32_t    list_size;
         ph_event_t* events;
     } ph_event_list_t;
+
+    /** @brief Common event metadata from event_data_t.
+     *         Strings are owned by the producing ph_ctx_t. is_valid is 0 when
+     *         the event row had no event metadata. */
+    typedef struct
+    {
+        uint32_t    is_valid;
+        uint64_t    stack_id;
+        uint64_t    parent_stack_id;
+        uint64_t    correlation_id;
+        const char* event_category;
+        const char* extdata;
+    } ph_event_data_t;
+
+    /** @brief node_info_t fields. is_valid is 0 when the detail has no node. */
+    typedef struct
+    {
+        uint32_t    is_valid;
+        uint64_t    node_id;
+        uint64_t    hash;
+        const char* machine_id;
+        const char* system_name;
+        const char* hostname;
+        const char* release;
+        const char* version;
+        const char* hardware_name;
+        const char* domain_name;
+    } ph_detail_node_t;
+
+    /** @brief process_info_t fields. id is rocpd_info_process.id. pid is the
+     *         OS process id. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             id;
+        uint64_t             pid;
+        ph_optional_uint64_t ppid;
+        ph_optional_uint64_t init;
+        ph_optional_uint64_t fini;
+        ph_optional_uint64_t start;
+        ph_optional_uint64_t end;
+        const char*          command;
+        const char*          environment;
+        const char*          extdata;
+    } ph_detail_process_t;
+
+    /** @brief thread_info_t fields. id is rocpd_info_thread.id. thread_id is
+     *         the OS thread id. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             id;
+        uint64_t             thread_id;
+        ph_optional_uint64_t parent_process_id;
+        ph_optional_uint64_t start;
+        ph_optional_uint64_t end;
+        const char*          name;
+        const char*          extdata;
+    } ph_detail_thread_t;
+
+    /** @brief agent_info_t fields. id is rocpd_info_agent.id. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             id;
+        uint64_t             type_index;
+        ph_optional_uint64_t absolute_index;
+        ph_optional_uint64_t logical_index;
+        ph_optional_uint64_t uuid;
+        const char*          agent_type;
+        const char*          name;
+        const char*          model_name;
+        const char*          vendor_name;
+        const char*          product_name;
+        const char*          user_name;
+        const char*          extdata;
+    } ph_detail_agent_t;
+
+    /** @brief stream_info_t fields. pid is rocpd_info_process.id, not the OS pid. */
+    typedef struct
+    {
+        uint32_t    is_valid;
+        uint64_t    stream_id;
+        uint64_t    nid;
+        uint64_t    pid;
+        const char* name;
+        const char* extdata;
+    } ph_detail_stream_t;
+
+    /** @brief queue_info_t fields. pid is rocpd_info_process.id, not the OS pid. */
+    typedef struct
+    {
+        uint32_t    is_valid;
+        uint64_t    queue_id;
+        uint64_t    nid;
+        uint64_t    pid;
+        const char* name;
+        const char* extdata;
+    } ph_detail_queue_t;
+
+    /** @brief code_object_info_t fields. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             id;
+        ph_optional_uint64_t load_base;
+        ph_optional_uint64_t load_size;
+        ph_optional_uint64_t load_delta;
+        const char*          uri;
+        const char*          storage_type;
+        const char*          extdata;
+    } ph_detail_code_object_t;
+
+    /** @brief kernel_symbol_info_t fields. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             id;
+        ph_optional_uint64_t kernel_object;
+        ph_optional_uint64_t kernarg_segment_size;
+        ph_optional_uint64_t kernarg_segment_alignment;
+        ph_optional_uint64_t group_segment_size;
+        ph_optional_uint64_t private_segment_size;
+        ph_optional_uint64_t sgpr_count;
+        ph_optional_uint64_t arch_vgpr_count;
+        ph_optional_uint64_t accum_vgpr_count;
+        const char*          name;
+        const char*          display_name;
+        const char*          extdata;
+    } ph_detail_kernel_symbol_t;
+
+    /** @brief One arg_data_t. */
+    typedef struct
+    {
+        uint64_t    position;
+        const char* type;
+        const char* name;
+        const char* value;
+        const char* extdata;
+    } ph_arg_data_t;
+
+    /** @brief region_data_t. is_valid is 0 when the event is not a region or
+     *         the row was not found. args is null when list_size is 0. */
+    typedef struct
+    {
+        uint32_t        is_valid;
+        uint64_t        start_timestamp;
+        uint64_t        end_timestamp;
+        const char*     name;
+        const char*     extdata;
+        ph_event_data_t event;
+        uint32_t        arg_count;
+        ph_arg_data_t*  args;
+    } ph_region_details_t;
+
+    /** @brief kernel_dispatch_data_t. is_valid is 0 when the event is not a
+     *         kernel dispatch or the row was not found. */
+    typedef struct
+    {
+        uint32_t                  is_valid;
+        uint64_t                  dispatch_id;
+        uint64_t                  start_timestamp;
+        uint64_t                  end_timestamp;
+        uint64_t                  private_segment_size;
+        uint64_t                  group_segment_size;
+        uint64_t                  workgroup_size_x;
+        uint64_t                  workgroup_size_y;
+        uint64_t                  workgroup_size_z;
+        uint64_t                  grid_size_x;
+        uint64_t                  grid_size_y;
+        uint64_t                  grid_size_z;
+        const char*               name;
+        const char*               extdata;
+        ph_event_data_t           event;
+        ph_detail_node_t          node_info;
+        ph_detail_process_t       process_info;
+        ph_detail_thread_t        thread_info;
+        ph_detail_agent_t         agent_info;
+        ph_detail_kernel_symbol_t kernel_symbol_info;
+        ph_detail_code_object_t   code_object_info;
+        ph_detail_stream_t        stream_info;
+        ph_detail_queue_t         queue_info;
+    } ph_kernel_dispatch_details_t;
+
+    /** @brief memory_copy_data_t. is_valid is 0 when the event is not a memory
+     *         copy or the row was not found. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             start_timestamp;
+        uint64_t             end_timestamp;
+        ph_optional_uint64_t dst_address;
+        ph_optional_uint64_t src_address;
+        uint64_t             size;
+        const char*          name;
+        const char*          region_name;
+        const char*          extdata;
+        ph_event_data_t      event;
+        ph_detail_agent_t    dst_agent_id;
+        ph_detail_agent_t    src_agent_id;
+        ph_detail_node_t     node_info;
+        ph_detail_process_t  process_info;
+        ph_detail_thread_t   thread_info;
+        ph_detail_stream_t   stream_info;
+        ph_detail_queue_t    queue_info;
+    } ph_memory_copy_details_t;
+
+    /** @brief memory_alloc_data_t. is_valid is 0 when the event is not a memory
+     *         allocation or the row was not found. */
+    typedef struct
+    {
+        uint32_t             is_valid;
+        uint64_t             start_timestamp;
+        uint64_t             end_timestamp;
+        ph_optional_uint64_t address;
+        uint64_t             size;
+        const char*          type;
+        const char*          level;
+        const char*          extdata;
+        ph_event_data_t      event;
+        ph_detail_node_t     node_info;
+        ph_detail_process_t  process_info;
+        ph_detail_thread_t   thread_info;
+        ph_detail_agent_t    agent_info;
+        ph_detail_stream_t   stream_info;
+        ph_detail_queue_t    queue_info;
+    } ph_memory_alloc_details_t;
 
     /** @brief A single PMC/counter sample (instantaneous value). */
     typedef struct

@@ -72,15 +72,17 @@ to_ph_event_type(reader_types::event_type_t type)
 }
 
 ph_event_t
-to_ph_event(const reader_types::timeline_event_t& event)
+to_ph_event(const reader_types::timeline_event_t& event, uint32_t track_id)
 {
-    return ph_event_t{ .id    = event.unique_identifier.id,
-                       .start = event.start_timestamp,
-                       .end   = event.end_timestamp,
-                       .name =
-                           event.display_name.empty() ? "" : event.display_name.data(),
-                       .type          = to_ph_event_type(event.unique_identifier.type),
-                       .nesting_depth = 0 };
+    return ph_event_t{
+        .id            = event.unique_identifier.id,
+        .start         = event.start_timestamp,
+        .end           = event.end_timestamp,
+        .name          = event.display_name.empty() ? "" : event.display_name.data(),
+        .type          = to_ph_event_type(event.unique_identifier.type),
+        .nesting_depth = 0,
+        .track_id      = event.track ? static_cast<uint32_t>(event.track->id) : track_id
+    };
 }
 
 ph_sample_t
@@ -90,13 +92,13 @@ to_ph_sample(const reader_types::counter_timeline_event_t& sample)
 }
 
 std::vector<ph_event_t>
-to_ph_events(const reader_types::timeline_event_list_t& events)
+to_ph_events(const reader_types::timeline_event_list_t& events, uint32_t track_id)
 {
     std::vector<ph_event_t> converted;
     converted.reserve(events.size());
     for(const auto& event : events)
     {
-        converted.push_back(to_ph_event(event));
+        converted.push_back(to_ph_event(event, track_id));
     }
     return converted;
 }
@@ -326,7 +328,8 @@ cached_track_reader::build_sorted_events(track_row_reader&                     r
         return merged;
     }
 
-    auto sorted = to_ph_events(reader.events_for_track(track, {}));
+    auto sorted = to_ph_events(reader.events_for_track(track, {}),
+                               static_cast<uint32_t>(track->id));
     sort_by_start(sorted);
     assign_depths(sorted);
     return sorted;
@@ -359,18 +362,20 @@ cached_track_reader::read_thread_track_in_parts(
         return share + share / 8 + 16;
     };
 
-    const auto visitor = [](void*                                    context,
+    const uint32_t track_id = static_cast<uint32_t>(track->id);
+    const auto     visitor  = [](void*                                    context,
                             reader_types::unique_timeline_event_id_t id,
                             reader_types::timestamp_ns_t             start,
                             reader_types::timestamp_ns_t             end,
                             std::string_view                         name) {
         static_cast<std::vector<ph_event_t>*>(context)->push_back(
             ph_event_t{ .id            = id.id,
-                        .start         = start,
-                        .end           = end,
-                        .name          = name.empty() ? "" : name.data(),
-                        .type          = to_ph_event_type(id.type),
-                        .nesting_depth = 0 });
+                             .start         = start,
+                             .end           = end,
+                             .name          = name.empty() ? "" : name.data(),
+                             .type          = to_ph_event_type(id.type),
+                             .nesting_depth = 0,
+                             .track_id      = 0 });
     };
 
     std::atomic<size_t> next{ 0 };
@@ -391,6 +396,10 @@ cached_track_reader::read_thread_track_in_parts(
                                                        ranges[i].end,
                                                        visitor,
                                                        &events);
+                for(auto& event : events)
+                {
+                    event.track_id = track_id;
+                }
                 outputs[i] = std::move(events);
             }
         } catch(...)

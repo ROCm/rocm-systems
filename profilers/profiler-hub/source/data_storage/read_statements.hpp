@@ -189,6 +189,9 @@ struct timeline_event_result
     std::optional<size_t> pid;
     std::optional<size_t> tid;
     std::optional<size_t> track_id;
+    std::optional<size_t> agent_id;
+    std::optional<size_t> queue_id;
+    std::optional<size_t> stream_id;
 };
 
 inline constexpr auto timeline_event_columns =
@@ -200,7 +203,10 @@ inline constexpr auto timeline_event_columns =
                     &timeline_event_result::nid,
                     &timeline_event_result::pid,
                     &timeline_event_result::tid,
-                    &timeline_event_result::track_id);
+                    &timeline_event_result::track_id,
+                    &timeline_event_result::agent_id,
+                    &timeline_event_result::queue_id,
+                    &timeline_event_result::stream_id);
 
 // ----- Event detail result structs -----
 
@@ -1497,7 +1503,10 @@ private:
                                  "R.nid",
                                  "R.pid",
                                  "R.tid",
-                                 "S.track_id")
+                                 "S.track_id",
+                                 "NULL",
+                                 "NULL",
+                                 "NULL")
                          .from(fmt::format("rocpd_region_{}", m_uuid), "R")
                          .inner_join("rocpd_event", "E", "R.event_id = E.id")
                          .left_join("rocpd_sample", "S", "S.event_id = R.event_id");
@@ -1519,7 +1528,10 @@ private:
                                  "K.nid",
                                  "K.pid",
                                  "K.tid",
-                                 "S.track_id")
+                                 "S.track_id",
+                                 "K.agent_id",
+                                 "K.queue_id",
+                                 "K.stream_id")
                          .from(fmt::format("rocpd_kernel_dispatch_{}", m_uuid), "K")
                          .inner_join("rocpd_event", "E", "E.id = K.event_id")
                          .left_join("rocpd_sample", "S", "S.event_id = K.event_id");
@@ -1542,7 +1554,10 @@ private:
                                  "MA.nid",
                                  "MA.pid",
                                  "MA.tid",
-                                 "S.track_id")
+                                 "S.track_id",
+                                 "MA.agent_id",
+                                 "MA.queue_id",
+                                 "MA.stream_id")
                          .from(fmt::format("rocpd_memory_allocate_{}", m_uuid), "MA")
                          .inner_join("rocpd_event", "E", "E.id = MA.event_id")
                          .left_join("rocpd_sample", "S", "S.event_id = MA.event_id");
@@ -1568,7 +1583,10 @@ private:
                                  "MC.nid",
                                  "MC.pid",
                                  "MC.tid",
-                                 "S.track_id")
+                                 "S.track_id",
+                                 "MC.dst_agent_id",
+                                 "MC.queue_id",
+                                 "MC.stream_id")
                          .from(fmt::format("rocpd_memory_copy_{}", m_uuid), "MC")
                          .inner_join("rocpd_event", "E", "MC.event_id = E.id")
                          .left_join("rocpd_sample", "S", "S.event_id = MC.event_id");
@@ -1787,10 +1805,11 @@ private:
     {
         auto make_correlated_stmt = [&](const std::string_view table,
                                         const std::string_view alias,
-                                        const std::string_view display_name_col) {
+                                        const std::string_view display_name_col,
+                                        const std::string_view location_cols) {
             auto q =
                 fmt::format("SELECT {a}.id, {a}.start, {a}.end, {dn}, E.category_id, "
-                            "{a}.nid, {a}.pid, {a}.tid, S.track_id "
+                            "{a}.nid, {a}.pid, {a}.tid, S.track_id, {loc} "
                             "FROM {t} {a} "
                             "INNER JOIN rocpd_event_{u} E ON {a}.event_id = E.id "
                             "LEFT JOIN rocpd_sample_{u} S ON S.event_id = {a}.event_id "
@@ -1798,7 +1817,8 @@ private:
                             fmt::arg("a", alias),
                             fmt::arg("t", fmt::format("{}_{}", table, m_uuid)),
                             fmt::arg("u", m_uuid),
-                            fmt::arg("dn", display_name_col));
+                            fmt::arg("dn", display_name_col),
+                            fmt::arg("loc", location_cols));
 
             return m_backend->create_read_statement_executor<timeline_event_result,
                                                              bind_types<size_t, size_t>>(
@@ -1811,17 +1831,29 @@ private:
                 &timeline_event_result::nid,
                 &timeline_event_result::pid,
                 &timeline_event_result::tid,
-                &timeline_event_result::track_id);
+                &timeline_event_result::track_id,
+                &timeline_event_result::agent_id,
+                &timeline_event_result::queue_id,
+                &timeline_event_result::stream_id);
         };
 
         m_correlated_event_statements.region =
-            make_correlated_stmt("rocpd_region", "R", "R.name_id");
+            make_correlated_stmt("rocpd_region", "R", "R.name_id", "NULL, NULL, NULL");
         m_correlated_event_statements.kernel_dispatch =
-            make_correlated_stmt("rocpd_kernel_dispatch", "K", "K.region_name_id");
+            make_correlated_stmt("rocpd_kernel_dispatch",
+                                 "K",
+                                 "K.region_name_id",
+                                 "K.agent_id, K.queue_id, K.stream_id");
         m_correlated_event_statements.memory_copy =
-            make_correlated_stmt("rocpd_memory_copy", "MC", "MC.region_name_id");
+            make_correlated_stmt("rocpd_memory_copy",
+                                 "MC",
+                                 "MC.region_name_id",
+                                 "MC.dst_agent_id, MC.queue_id, MC.stream_id");
         m_correlated_event_statements.memory_allocate =
-            make_correlated_stmt("rocpd_memory_allocate", "MA", "E.category_id");
+            make_correlated_stmt("rocpd_memory_allocate",
+                                 "MA",
+                                 "E.category_id",
+                                 "MA.agent_id, MA.queue_id, MA.stream_id");
     }
 
     void initialize_count_statements()

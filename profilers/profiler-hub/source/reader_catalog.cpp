@@ -343,6 +343,8 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
         link_owner(*track_ptr, nid);
 
         tracks.push_back(track_ptr);
+        agent_queue_track_by_key.emplace(
+            agent_queue_track_key_t{ kind, nid, agent_id, queue_id }, track_ptr);
     };
 
     auto add_stream_track = [&](reader_types::track_kind_t kind,
@@ -366,6 +368,7 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
         link_owner(*track_ptr, nid, pid);
 
         tracks.push_back(track_ptr);
+        stream_track_by_key.emplace(stream_track_key_t{ nid, pid, stream_id }, track_ptr);
     };
 
     const auto& category_statements = stmts.track_category_statements();
@@ -425,51 +428,6 @@ reader_catalog_t::add_category_tracks(data_storage::schema_v3::read_statements& 
 
 namespace
 {
-
-struct stream_track_key_t
-{
-    size_t nid{};
-    size_t pid{};
-    size_t stream_id{};
-
-    bool operator==(const stream_track_key_t&) const = default;
-};
-
-struct stream_track_key_hash_t
-{
-    size_t operator()(const stream_track_key_t& key) const
-    {
-        size_t hash = std::hash<size_t>{}(key.nid);
-        hash ^= std::hash<size_t>{}(key.pid) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        hash ^=
-            std::hash<size_t>{}(key.stream_id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        return hash;
-    }
-};
-
-struct agent_queue_track_key_t
-{
-    reader_types::track_kind_t category{};
-    size_t                     nid{};
-    size_t                     agent_id{};
-    size_t                     queue_id{};
-
-    bool operator==(const agent_queue_track_key_t&) const = default;
-};
-
-struct agent_queue_track_key_hash_t
-{
-    size_t operator()(const agent_queue_track_key_t& key) const
-    {
-        size_t hash = std::hash<int>{}(static_cast<int>(key.category));
-        hash ^= std::hash<size_t>{}(key.nid) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        hash ^=
-            std::hash<size_t>{}(key.agent_id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        hash ^=
-            std::hash<size_t>{}(key.queue_id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
-        return hash;
-    }
-};
 
 bool
 is_agent_queue_track(reader_types::track_kind_t category)

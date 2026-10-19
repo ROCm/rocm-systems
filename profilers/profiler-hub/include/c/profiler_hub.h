@@ -236,7 +236,8 @@ extern "C"
      *       A later call does not invalidate an earlier result. Each call gets
      *       its own storage, safe to read concurrently.
      * @note ph_event_t::nesting_depth is the depth of that event on its own
-     *       track, the same value ph_get_track_events() reports. The track is
+     *       track, the same value ph_get_track_events() reports.
+     *       ph_event_t::track_id is ph_track_t::id of that track. The track is
      *       loaded if it was not loaded already. A result is not returned when
      *       an event cannot be placed on a track.
      */
@@ -244,6 +245,75 @@ extern "C"
                                          const ph_event_t* event,
                                          ph_event_list_t*  events,
                                          ph_future_t       future);
+
+    /**
+     * @brief Retrieves region_data_t for @p event.
+     * @param event Event returned by ph_get_track_events(). Only id and type
+     *        are used. The object does not need to stay alive after this call
+     *        returns.
+     * @param details Out parameter. is_valid is 0 before the call returns and
+     *        stays 0 when the event is not a region or the row is missing.
+     * @param future Same contract as ph_get_correlated_events().
+     * @return PH_RESULT_SUCCESS on success, including a missing row.
+     *         PH_RESULT_INVALID_CONTEXT if @p ctx is null.
+     *         PH_RESULT_INVALID_ARGUMENT if @p event or @p details is null or
+     *         @p event->type is not PH_EVENT_TYPE_REGION.
+     * @note String pointers and @p details->args point into memory owned by
+     *       @p ctx and remain valid until @p ctx is freed. A later call does
+     *       not invalidate an earlier result.
+     */
+    ph_result_t ph_get_region_details(ph_ctx_t             ctx,
+                                      const ph_event_t*    event,
+                                      ph_region_details_t* details,
+                                      ph_future_t          future);
+
+    /**
+     * @brief Retrieves kernel_dispatch_data_t for @p event.
+     * @param details Out parameter. is_valid stays 0 when the event is not a
+     *        kernel dispatch or the row is missing.
+     * @param future Same contract as ph_get_correlated_events().
+     * @return PH_RESULT_SUCCESS on success, including a missing row.
+     *         PH_RESULT_INVALID_ARGUMENT if @p event->type is not
+     *         PH_EVENT_TYPE_KERNEL_DISPATCH.
+     * @note String pointers point into memory owned by @p ctx until
+     *       ph_ctx_free(). A later call does not invalidate an earlier result.
+     */
+    ph_result_t ph_get_kernel_dispatch_details(ph_ctx_t                      ctx,
+                                               const ph_event_t*             event,
+                                               ph_kernel_dispatch_details_t* details,
+                                               ph_future_t                   future);
+
+    /**
+     * @brief Retrieves memory_copy_data_t for @p event.
+     * @param details Out parameter. is_valid stays 0 when the event is not a
+     *        memory copy or the row is missing.
+     * @param future Same contract as ph_get_correlated_events().
+     * @return PH_RESULT_SUCCESS on success, including a missing row.
+     *         PH_RESULT_INVALID_ARGUMENT if @p event->type is not
+     *         PH_EVENT_TYPE_MEMORY_COPY.
+     * @note String pointers point into memory owned by @p ctx until
+     *       ph_ctx_free(). A later call does not invalidate an earlier result.
+     */
+    ph_result_t ph_get_memory_copy_details(ph_ctx_t                  ctx,
+                                           const ph_event_t*         event,
+                                           ph_memory_copy_details_t* details,
+                                           ph_future_t               future);
+
+    /**
+     * @brief Retrieves memory_alloc_data_t for @p event.
+     * @param details Out parameter. is_valid stays 0 when the event is not a
+     *        memory allocation or the row is missing.
+     * @param future Same contract as ph_get_correlated_events().
+     * @return PH_RESULT_SUCCESS on success, including a missing row.
+     *         PH_RESULT_INVALID_ARGUMENT if @p event->type is not
+     *         PH_EVENT_TYPE_MEMORY_ALLOCATE.
+     * @note String pointers point into memory owned by @p ctx until
+     *       ph_ctx_free(). A later call does not invalidate an earlier result.
+     */
+    ph_result_t ph_get_memory_alloc_details(ph_ctx_t                   ctx,
+                                            const ph_event_t*          event,
+                                            ph_memory_alloc_details_t* details,
+                                            ph_future_t                future);
 
     /**
      * @brief Retrieves PMC/counter samples for a track within an optional

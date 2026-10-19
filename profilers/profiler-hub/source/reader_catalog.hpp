@@ -37,6 +37,51 @@ struct topology_key_hash_t
     }
 };
 
+struct stream_track_key_t
+{
+    size_t nid{};
+    size_t pid{};
+    size_t stream_id{};
+
+    bool operator==(const stream_track_key_t&) const = default;
+};
+
+struct stream_track_key_hash_t
+{
+    size_t operator()(const stream_track_key_t& key) const
+    {
+        size_t hash = std::hash<size_t>{}(key.nid);
+        hash ^= std::hash<size_t>{}(key.pid) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^=
+            std::hash<size_t>{}(key.stream_id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        return hash;
+    }
+};
+
+struct agent_queue_track_key_t
+{
+    reader_types::track_kind_t category{};
+    size_t                     nid{};
+    size_t                     agent_id{};
+    size_t                     queue_id{};
+
+    bool operator==(const agent_queue_track_key_t&) const = default;
+};
+
+struct agent_queue_track_key_hash_t
+{
+    size_t operator()(const agent_queue_track_key_t& key) const
+    {
+        size_t hash = std::hash<int>{}(static_cast<int>(key.category));
+        hash ^= std::hash<size_t>{}(key.nid) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^=
+            std::hash<size_t>{}(key.agent_id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        hash ^=
+            std::hash<size_t>{}(key.queue_id) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+        return hash;
+    }
+};
+
 /** @brief Accumulated event count plus [min start, max end] time span for
  *         a track being derived from one or more grouped event queries. */
 struct track_range_stats_t
@@ -143,6 +188,14 @@ struct reader_catalog_t
     std::unordered_map<reader_types::track_info_ptr_t, topology_key_t> topology_by_track;
     std::unordered_map<reader_types::track_info_ptr_t, size_t>         db_id_by_track;
     std::unordered_map<size_t, reader_types::track_info_ptr_t> sample_track_by_db_id;
+    std::unordered_map<stream_track_key_t,
+                       reader_types::track_info_ptr_t,
+                       stream_track_key_hash_t>
+        stream_track_by_key;
+    std::unordered_map<agent_queue_track_key_t,
+                       reader_types::track_info_ptr_t,
+                       agent_queue_track_key_hash_t>
+        agent_queue_track_by_key;
 
 private:
     void link_owner(reader_types::track_info_t& track,

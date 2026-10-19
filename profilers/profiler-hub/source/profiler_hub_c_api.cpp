@@ -117,6 +117,39 @@ is_duration_event_type(ph_event_type_t type)
     }
     return false;
 }
+
+template <typename Details, typename Fetch>
+ph_result_t
+get_event_details(ph_ctx_t          ctx,
+                  const ph_event_t* event,
+                  Details*          details,
+                  ph_future_t       future,
+                  ph_event_type_t   expected_type,
+                  Fetch             fetch)
+{
+    if(details != nullptr)
+    {
+        *details = {};
+    }
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+    if(details == nullptr || event == nullptr || event->type != expected_type)
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    const uint64_t event_id = event->id;
+    return run_operation(ctx, future, [ctx, event_id, details, fetch]() -> ph_result_t {
+        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+        {
+            return ready;
+        }
+        *details = fetch(ctx, event_id);
+        return PH_RESULT_SUCCESS;
+    });
+}
 }  // namespace
 
 ph_result_t
@@ -380,6 +413,69 @@ ph_get_correlated_events(ph_ctx_t          ctx,
             *events = correlated.value();
             return PH_RESULT_SUCCESS;
         });
+}
+
+ph_result_t
+ph_get_region_details(ph_ctx_t             ctx,
+                      const ph_event_t*    event,
+                      ph_region_details_t* details,
+                      ph_future_t          future)
+{
+    return get_event_details(
+        ctx,
+        event,
+        details,
+        future,
+        PH_EVENT_TYPE_REGION,
+        [](ph_ctx_t context, uint64_t id) { return context->get_region_details(id); });
+}
+
+ph_result_t
+ph_get_kernel_dispatch_details(ph_ctx_t                      ctx,
+                               const ph_event_t*             event,
+                               ph_kernel_dispatch_details_t* details,
+                               ph_future_t                   future)
+{
+    return get_event_details(ctx,
+                             event,
+                             details,
+                             future,
+                             PH_EVENT_TYPE_KERNEL_DISPATCH,
+                             [](ph_ctx_t context, uint64_t id) {
+                                 return context->get_kernel_dispatch_details(id);
+                             });
+}
+
+ph_result_t
+ph_get_memory_copy_details(ph_ctx_t                  ctx,
+                           const ph_event_t*         event,
+                           ph_memory_copy_details_t* details,
+                           ph_future_t               future)
+{
+    return get_event_details(ctx,
+                             event,
+                             details,
+                             future,
+                             PH_EVENT_TYPE_MEMORY_COPY,
+                             [](ph_ctx_t context, uint64_t id) {
+                                 return context->get_memory_copy_details(id);
+                             });
+}
+
+ph_result_t
+ph_get_memory_alloc_details(ph_ctx_t                   ctx,
+                            const ph_event_t*          event,
+                            ph_memory_alloc_details_t* details,
+                            ph_future_t                future)
+{
+    return get_event_details(ctx,
+                             event,
+                             details,
+                             future,
+                             PH_EVENT_TYPE_MEMORY_ALLOCATE,
+                             [](ph_ctx_t context, uint64_t id) {
+                                 return context->get_memory_alloc_details(id);
+                             });
 }
 
 ph_result_t

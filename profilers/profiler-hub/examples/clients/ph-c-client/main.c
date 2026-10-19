@@ -260,10 +260,11 @@ print_events(const ph_event_list_t* events, uint32_t limit)
 {
     for(uint32_t i = 0; i < events->list_size && i < limit; ++i)
     {
-        printf("id: %lu, type: %s, nesting_depth: %u, start: %lu, end: %lu, name: %s\n",
+        printf("id: %lu, type: %s, nesting_depth: %u, track_id: %u, start: %lu, end: %lu, name: %s\n",
                (unsigned long) events->events[i].id,
                event_type_name(events->events[i].type),
                (unsigned) events->events[i].nesting_depth,
+               (unsigned) events->events[i].track_id,
                (unsigned long) events->events[i].start,
                (unsigned long) events->events[i].end,
                events->events[i].name);

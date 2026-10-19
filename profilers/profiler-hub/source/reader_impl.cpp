@@ -39,7 +39,7 @@ public:
         event.end_timestamp     = row.end_timestamp;
         event.display_name      = resolve_string(row.display_name_id, m_display_name);
         event.category          = resolve_string(row.category_id, m_category);
-        event.track             = resolve_track(row);
+        event.track             = resolve_track(row, type);
         return event;
     }
 
@@ -64,8 +64,36 @@ private:
     }
 
     reader_types::track_info_ptr_t resolve_track(
-        const data_storage::schema_v3::timeline_event_result& row)
+        const data_storage::schema_v3::timeline_event_result& row,
+        reader_types::event_type_t                            type)
     {
+        if(row.agent_id.has_value() && row.queue_id.has_value())
+        {
+            const auto kind = agent_queue_kind(type);
+            if(kind.has_value())
+            {
+                const auto it = m_catalog.agent_queue_track_by_key.find(
+                    agent_queue_track_key_t{ kind.value(),
+                                             row.nid,
+                                             row.agent_id.value(),
+                                             row.queue_id.value() });
+                if(it != m_catalog.agent_queue_track_by_key.end() && it->second)
+                {
+                    return it->second;
+                }
+            }
+        }
+
+        if(type != reader_types::event_type_t::region && row.stream_id.has_value())
+        {
+            const auto it = m_catalog.stream_track_by_key.find(stream_track_key_t{
+                row.nid, row.pid.value_or(0), row.stream_id.value() });
+            if(it != m_catalog.stream_track_by_key.end() && it->second)
+            {
+                return it->second;
+            }
+        }
+
         if(row.track_id.has_value())
         {
             const auto it = m_catalog.sample_track_by_db_id.find(row.track_id.value());
@@ -86,6 +114,25 @@ private:
             m_last_topology = topology;
         }
         return m_last_topology_track;
+    }
+
+    static std::optional<reader_types::track_kind_t> agent_queue_kind(
+        reader_types::event_type_t type)
+    {
+        using reader_types::event_type_t;
+        using reader_types::track_kind_t;
+        switch(type)
+        {
+            case event_type_t::kernel_dispatch:
+                return track_kind_t::kernel_dispatch_agent_queue;
+            case event_type_t::memory_copy: return track_kind_t::memory_copy_agent_queue;
+            case event_type_t::memory_allocate:
+                return track_kind_t::memory_allocate_agent_queue;
+            case event_type_t::region:
+            case event_type_t::sample:
+            case event_type_t::pmc_event: break;
+        }
+        return std::nullopt;
     }
 
     const reader_catalog_t&        m_catalog;

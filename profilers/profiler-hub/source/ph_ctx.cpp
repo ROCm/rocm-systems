@@ -113,6 +113,185 @@ track_holds_event(const profiler_hub::reader_types::track_info_ptr_t& track,
     return false;
 }
 
+const char*
+text_or_empty(const std::string& text)
+{
+    return text.c_str();
+}
+
+ph_optional_uint64_t
+optional_size(const std::optional<size_t>& value)
+{
+    if(!value.has_value())
+    {
+        return ph_optional_uint64_t{ .value = 0, .is_valid = 0 };
+    }
+    return ph_optional_uint64_t{ .value    = static_cast<uint64_t>(value.value()),
+                                 .is_valid = 1 };
+}
+
+ph_event_data_t
+to_c_event_data(const profiler_hub::reader_types::event_data_ptr_t& event)
+{
+    ph_event_data_t view{};
+    if(!event) return view;
+    view.is_valid        = 1;
+    view.stack_id        = event->stack_id;
+    view.parent_stack_id = event->parent_stack_id;
+    view.correlation_id  = event->correlation_id;
+    view.event_category  = text_or_empty(event->event_category);
+    view.extdata         = text_or_empty(event->extdata);
+    return view;
+}
+
+ph_detail_node_t
+to_c_detail_node(const profiler_hub::reader_types::node_info_ptr_t& node)
+{
+    ph_detail_node_t view{};
+    if(!node) return view;
+    view.is_valid      = 1;
+    view.node_id       = node->node_id;
+    view.hash          = node->hash;
+    view.machine_id    = text_or_empty(node->machine_id);
+    view.system_name   = text_or_empty(node->system_name);
+    view.hostname      = text_or_empty(node->hostname);
+    view.release       = text_or_empty(node->release);
+    view.version       = text_or_empty(node->version);
+    view.hardware_name = text_or_empty(node->hardware_name);
+    view.domain_name   = text_or_empty(node->domain_name);
+    return view;
+}
+
+ph_detail_process_t
+to_c_detail_process(const profiler_hub::reader_types::process_info_ptr_t& process)
+{
+    ph_detail_process_t view{};
+    if(!process) return view;
+    view.is_valid    = 1;
+    view.id          = process->id;
+    view.pid         = process->pid;
+    view.ppid        = optional_size(process->ppid);
+    view.init        = optional_size(process->init);
+    view.fini        = optional_size(process->fini);
+    view.start       = optional_size(process->start);
+    view.end         = optional_size(process->end);
+    view.command     = text_or_empty(process->command);
+    view.environment = text_or_empty(process->environment);
+    view.extdata     = text_or_empty(process->extdata);
+    return view;
+}
+
+ph_detail_thread_t
+to_c_detail_thread(const profiler_hub::reader_types::thread_info_ptr_t& thread)
+{
+    ph_detail_thread_t view{};
+    if(!thread) return view;
+    view.is_valid          = 1;
+    view.id                = thread->id;
+    view.thread_id         = thread->thread_id;
+    view.parent_process_id = optional_size(thread->parent_process_id);
+    view.start             = optional_size(thread->start);
+    view.end               = optional_size(thread->end);
+    view.name              = text_or_empty(thread->name);
+    view.extdata           = text_or_empty(thread->extdata);
+    return view;
+}
+
+ph_detail_agent_t
+to_c_detail_agent(const profiler_hub::reader_types::agent_info_ptr_t& agent)
+{
+    ph_detail_agent_t view{};
+    if(!agent) return view;
+    view.is_valid       = 1;
+    view.id             = agent->id;
+    view.type_index     = agent->type_index;
+    view.absolute_index = optional_size(agent->absolute_index);
+    view.logical_index  = optional_size(agent->logical_index);
+    view.uuid           = optional_size(agent->uuid);
+    view.agent_type     = text_or_empty(agent->agent_type);
+    view.name           = text_or_empty(agent->name);
+    view.model_name     = text_or_empty(agent->model_name);
+    view.vendor_name    = text_or_empty(agent->vendor_name);
+    view.product_name   = text_or_empty(agent->product_name);
+    view.user_name      = text_or_empty(agent->user_name);
+    view.extdata        = text_or_empty(agent->extdata);
+    return view;
+}
+
+ph_detail_stream_t
+to_c_detail_stream(const profiler_hub::reader_types::stream_info_ptr_t& stream)
+{
+    ph_detail_stream_t view{};
+    if(!stream) return view;
+    view.is_valid  = 1;
+    view.stream_id = stream->stream_id;
+    view.nid       = stream->nid;
+    view.pid       = stream->pid;
+    view.name      = text_or_empty(stream->name);
+    view.extdata   = text_or_empty(stream->extdata);
+    return view;
+}
+
+ph_detail_queue_t
+to_c_detail_queue(const profiler_hub::reader_types::queue_info_ptr_t& queue)
+{
+    ph_detail_queue_t view{};
+    if(!queue) return view;
+    view.is_valid = 1;
+    view.queue_id = queue->queue_id;
+    view.nid      = queue->nid;
+    view.pid      = queue->pid;
+    view.name     = text_or_empty(queue->name);
+    view.extdata  = text_or_empty(queue->extdata);
+    return view;
+}
+
+ph_detail_code_object_t
+to_c_detail_code_object(const profiler_hub::reader_types::code_object_info_ptr_t& object)
+{
+    ph_detail_code_object_t view{};
+    if(!object) return view;
+    view.is_valid     = 1;
+    view.id           = object->id;
+    view.load_base    = optional_size(object->load_base);
+    view.load_size    = optional_size(object->load_size);
+    view.load_delta   = optional_size(object->load_delta);
+    view.uri          = text_or_empty(object->uri);
+    view.storage_type = text_or_empty(object->storage_type);
+    view.extdata      = text_or_empty(object->extdata);
+    return view;
+}
+
+ph_detail_kernel_symbol_t
+to_c_detail_kernel_symbol(
+    const profiler_hub::reader_types::kernel_symbol_info_ptr_t& symbol)
+{
+    ph_detail_kernel_symbol_t view{};
+    if(!symbol) return view;
+    view.is_valid                  = 1;
+    view.id                        = symbol->id;
+    view.kernel_object             = optional_size(symbol->kernel_object);
+    view.kernarg_segment_size      = optional_size(symbol->kernarg_segment_size);
+    view.kernarg_segment_alignment = optional_size(symbol->kernarg_segment_alignment);
+    view.group_segment_size        = optional_size(symbol->group_segment_size);
+    view.private_segment_size      = optional_size(symbol->private_segment_size);
+    view.sgpr_count                = optional_size(symbol->sgpr_count);
+    view.arch_vgpr_count           = optional_size(symbol->arch_vgpr_count);
+    view.accum_vgpr_count          = optional_size(symbol->accum_vgpr_count);
+    view.name                      = text_or_empty(symbol->name);
+    view.display_name              = text_or_empty(symbol->display_name);
+    view.extdata                   = text_or_empty(symbol->extdata);
+    return view;
+}
+
+profiler_hub::reader_types::timeline_event_t
+detail_source(uint64_t event_id, profiler_hub::reader_types::event_type_t type)
+{
+    profiler_hub::reader_types::timeline_event_t source;
+    source.unique_identifier = { .id = static_cast<size_t>(event_id), .type = type };
+    return source;
+}
+
 std::uint32_t
 to_list_size(std::size_t size)
 {
@@ -386,10 +565,12 @@ ph_ctx::get_correlated_events(uint64_t event_id, ph_event_type_t event_type)
             to_c_event_type(event.unique_identifier.type);
         const uint64_t          correlated_id = event.unique_identifier.id;
         std::optional<uint32_t> depth;
+        profiler_hub::reader_types::track_info_ptr_t placed_track;
         if(event.track)
         {
             depth = m_track_reader.nesting_depth_of(
                 event.track, correlated_id, correlated_type);
+            if(depth.has_value()) placed_track = event.track;
         }
         if(!depth.has_value())
         {
@@ -402,10 +583,14 @@ ph_ctx::get_correlated_events(uint64_t event_id, ph_event_type_t event_type)
                 }
                 depth = m_track_reader.nesting_depth_of(
                     track, correlated_id, correlated_type);
-                if(depth.has_value()) break;
+                if(depth.has_value())
+                {
+                    placed_track = track;
+                    break;
+                }
             }
         }
-        if(!depth.has_value())
+        if(!depth.has_value() || !placed_track)
         {
             return std::nullopt;
         }
@@ -417,6 +602,7 @@ ph_ctx::get_correlated_events(uint64_t event_id, ph_event_type_t event_type)
             .name          = event.display_name.empty() ? "" : event.display_name.data(),
             .type          = correlated_type,
             .nesting_depth = depth.value(),
+            .track_id      = static_cast<uint32_t>(placed_track->id),
         });
     }
 
@@ -430,6 +616,177 @@ ph_ctx::get_correlated_events(uint64_t event_id, ph_event_type_t event_type)
     auto& stored = m_correlated_events.back();
     return ph_event_list_t{ .list_size = to_list_size(stored.size()),
                             .events    = stored.data() };
+}
+
+ph_region_details_t
+ph_ctx::get_region_details(uint64_t event_id)
+{
+    const auto source =
+        detail_source(event_id, profiler_hub::reader_types::event_type_t::region);
+    auto details = m_connection_pool.with_connection(
+        [&source](profiler_hub::common::connection& connection) {
+            return connection.reader().get_region_details(source);
+        });
+    if(!details.has_value())
+    {
+        return ph_region_details_t{};
+    }
+
+    auto held  = std::make_unique<region_detail_hold>();
+    held->data = std::move(details.value());
+    held->args.reserve(held->data.args.size());
+    for(const auto& arg : held->data.args)
+    {
+        held->args.push_back(ph_arg_data_t{ .position = arg.position,
+                                            .type     = text_or_empty(arg.type),
+                                            .name     = text_or_empty(arg.name),
+                                            .value    = text_or_empty(arg.value),
+                                            .extdata  = text_or_empty(arg.extdata) });
+    }
+    held->view = ph_region_details_t{
+        .is_valid        = 1,
+        .start_timestamp = held->data.start_timestamp,
+        .end_timestamp   = held->data.end_timestamp,
+        .name            = text_or_empty(held->data.name),
+        .extdata         = text_or_empty(held->data.extdata),
+        .event           = to_c_event_data(held->data.event),
+        .arg_count       = to_list_size(held->args.size()),
+        .args            = held->args.empty() ? nullptr : held->args.data(),
+    };
+    const ph_region_details_t         view = held->view;
+    const std::lock_guard<std::mutex> lock{ m_detail_mutex };
+    m_region_details.push_back(std::move(held));
+    return view;
+}
+
+ph_kernel_dispatch_details_t
+ph_ctx::get_kernel_dispatch_details(uint64_t event_id)
+{
+    const auto source = detail_source(
+        event_id, profiler_hub::reader_types::event_type_t::kernel_dispatch);
+    auto details = m_connection_pool.with_connection(
+        [&source](profiler_hub::common::connection& connection) {
+            return connection.reader().get_kernel_dispatch_details(source);
+        });
+    if(!details.has_value())
+    {
+        return ph_kernel_dispatch_details_t{};
+    }
+
+    auto held        = std::make_unique<kernel_detail_hold>();
+    held->data       = std::move(details.value());
+    const auto& data = held->data;
+    held->view       = ph_kernel_dispatch_details_t{
+              .is_valid             = 1,
+              .dispatch_id          = data.dispatch_id,
+              .start_timestamp      = data.start_timestamp,
+              .end_timestamp        = data.end_timestamp,
+              .private_segment_size = data.private_segment_size.value_or(0),
+              .group_segment_size   = data.group_segment_size.value_or(0),
+              .workgroup_size_x     = data.workgroup_size_x,
+              .workgroup_size_y     = data.workgroup_size_y,
+              .workgroup_size_z     = data.workgroup_size_z,
+              .grid_size_x          = data.grid_size_x,
+              .grid_size_y          = data.grid_size_y,
+              .grid_size_z          = data.grid_size_z,
+              .name                 = text_or_empty(data.name),
+              .extdata              = text_or_empty(data.extdata),
+              .event                = to_c_event_data(data.event),
+              .node_info            = to_c_detail_node(data.node_info),
+              .process_info         = to_c_detail_process(data.process_info),
+              .thread_info          = to_c_detail_thread(data.thread_info),
+              .agent_info           = to_c_detail_agent(data.agent_info),
+              .kernel_symbol_info   = to_c_detail_kernel_symbol(data.kernel_symbol_info),
+              .code_object_info     = to_c_detail_code_object(data.code_object_info),
+              .stream_info          = to_c_detail_stream(data.stream_info),
+              .queue_info           = to_c_detail_queue(data.queue_info),
+    };
+    const ph_kernel_dispatch_details_t view = held->view;
+    const std::lock_guard<std::mutex>  lock{ m_detail_mutex };
+    m_kernel_details.push_back(std::move(held));
+    return view;
+}
+
+ph_memory_copy_details_t
+ph_ctx::get_memory_copy_details(uint64_t event_id)
+{
+    const auto source =
+        detail_source(event_id, profiler_hub::reader_types::event_type_t::memory_copy);
+    auto details = m_connection_pool.with_connection(
+        [&source](profiler_hub::common::connection& connection) {
+            return connection.reader().get_memory_copy_details(source);
+        });
+    if(!details.has_value())
+    {
+        return ph_memory_copy_details_t{};
+    }
+
+    auto held        = std::make_unique<copy_detail_hold>();
+    held->data       = std::move(details.value());
+    const auto& data = held->data;
+    held->view       = ph_memory_copy_details_t{
+              .is_valid        = 1,
+              .start_timestamp = data.start_timestamp,
+              .end_timestamp   = data.end_timestamp,
+              .dst_address     = optional_size(data.dst_address),
+              .src_address     = optional_size(data.src_address),
+              .size            = data.size,
+              .name            = text_or_empty(data.name),
+              .region_name     = text_or_empty(data.region_name),
+              .extdata         = text_or_empty(data.extdata),
+              .event           = to_c_event_data(data.event),
+              .dst_agent_id    = to_c_detail_agent(data.dst_agent_id),
+              .src_agent_id    = to_c_detail_agent(data.src_agent_id),
+              .node_info       = to_c_detail_node(data.node_info),
+              .process_info    = to_c_detail_process(data.process_info),
+              .thread_info     = to_c_detail_thread(data.thread_info),
+              .stream_info     = to_c_detail_stream(data.stream_info),
+              .queue_info      = to_c_detail_queue(data.queue_info),
+    };
+    const ph_memory_copy_details_t    view = held->view;
+    const std::lock_guard<std::mutex> lock{ m_detail_mutex };
+    m_copy_details.push_back(std::move(held));
+    return view;
+}
+
+ph_memory_alloc_details_t
+ph_ctx::get_memory_alloc_details(uint64_t event_id)
+{
+    const auto source = detail_source(
+        event_id, profiler_hub::reader_types::event_type_t::memory_allocate);
+    auto details = m_connection_pool.with_connection(
+        [&source](profiler_hub::common::connection& connection) {
+            return connection.reader().get_memory_alloc_details(source);
+        });
+    if(!details.has_value())
+    {
+        return ph_memory_alloc_details_t{};
+    }
+
+    auto held        = std::make_unique<alloc_detail_hold>();
+    held->data       = std::move(details.value());
+    const auto& data = held->data;
+    held->view       = ph_memory_alloc_details_t{
+              .is_valid        = 1,
+              .start_timestamp = data.start_timestamp,
+              .end_timestamp   = data.end_timestamp,
+              .address         = optional_size(data.address),
+              .size            = data.size,
+              .type            = text_or_empty(data.type),
+              .level           = text_or_empty(data.level),
+              .extdata         = text_or_empty(data.extdata),
+              .event           = to_c_event_data(data.event),
+              .node_info       = to_c_detail_node(data.node_info),
+              .process_info    = to_c_detail_process(data.process_info),
+              .thread_info     = to_c_detail_thread(data.thread_info),
+              .agent_info      = to_c_detail_agent(data.agent_info),
+              .stream_info     = to_c_detail_stream(data.stream_info),
+              .queue_info      = to_c_detail_queue(data.queue_info),
+    };
+    const ph_memory_alloc_details_t   view = held->view;
+    const std::lock_guard<std::mutex> lock{ m_detail_mutex };
+    m_alloc_details.push_back(std::move(held));
+    return view;
 }
 
 ph_sample_list_t

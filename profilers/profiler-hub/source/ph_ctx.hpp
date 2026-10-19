@@ -71,9 +71,14 @@ struct ph_ctx
     [[nodiscard]] std::optional<ph_event_list_t> get_correlated_events(
         uint64_t        event_id,
         ph_event_type_t event_type);
-    [[nodiscard]] ph_sample_list_t get_track_samples(uint32_t track_id,
-                                                     uint64_t start_ts,
-                                                     uint64_t end_ts);
+    [[nodiscard]] ph_region_details_t          get_region_details(uint64_t event_id);
+    [[nodiscard]] ph_kernel_dispatch_details_t get_kernel_dispatch_details(
+        uint64_t event_id);
+    [[nodiscard]] ph_memory_copy_details_t  get_memory_copy_details(uint64_t event_id);
+    [[nodiscard]] ph_memory_alloc_details_t get_memory_alloc_details(uint64_t event_id);
+    [[nodiscard]] ph_sample_list_t          get_track_samples(uint32_t track_id,
+                                                              uint64_t start_ts,
+                                                              uint64_t end_ts);
     void build_histogram(uint32_t desired_bins, ph_histogram_t& histogram);
 
     profiler_hub::common::thread_pool& get_thread_pool() { return m_thread_pool; }
@@ -166,6 +171,34 @@ private:
 
     std::mutex                          m_correlated_events_mutex;
     std::deque<std::vector<ph_event_t>> m_correlated_events;
+
+    struct region_detail_hold
+    {
+        profiler_hub::reader_types::region_data_t data;
+        std::vector<ph_arg_data_t>                args;
+        ph_region_details_t                       view{};
+    };
+    struct kernel_detail_hold
+    {
+        profiler_hub::reader_types::kernel_dispatch_data_t data;
+        ph_kernel_dispatch_details_t                       view{};
+    };
+    struct copy_detail_hold
+    {
+        profiler_hub::reader_types::memory_copy_data_t data;
+        ph_memory_copy_details_t                       view{};
+    };
+    struct alloc_detail_hold
+    {
+        profiler_hub::reader_types::memory_alloc_data_t data;
+        ph_memory_alloc_details_t                       view{};
+    };
+
+    std::mutex                                      m_detail_mutex;
+    std::deque<std::unique_ptr<region_detail_hold>> m_region_details;
+    std::deque<std::unique_ptr<kernel_detail_hold>> m_kernel_details;
+    std::deque<std::unique_ptr<copy_detail_hold>>   m_copy_details;
+    std::deque<std::unique_ptr<alloc_detail_hold>>  m_alloc_details;
 
     std::vector<std::shared_ptr<profiler_hub::reader_types::node_info_t>> m_nodes;
     std::shared_ptr<ph_node_t>                                            m_c_node;
