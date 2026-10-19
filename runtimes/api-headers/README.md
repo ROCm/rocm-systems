@@ -39,4 +39,14 @@ path, which points to the shared `uapi/linux/drm` location.
 It is copied verbatim from the Linux revision above; refresh it from that
 upstream file so the per-queue reset and CAP2 definitions remain in sync.
 
+The HSA headers and Rust `ddi/libhsa` provider expose AMD extension revision
+1.36. Signal batches are supported in fine-grained system pools and in
+qualified host-visible GPU pools. PCIe-backed GPU signal stores use a
+readback to flush posted writes. Async copy and SVM completion signals require
+host atomic support, so PCIe-backed batch members cannot serve as completions.
+Query `HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE` for each pool and
+`HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED` before using completion hints.
+The provider currently reports signal hints unsupported because it does not
+probe the CP firmware's queue capability bit.
+
 `abce` is not a mirror: `include/abce` is its primary location.

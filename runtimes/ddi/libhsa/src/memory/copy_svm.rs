@@ -804,6 +804,7 @@ fn finish_async_copy_signal(
             if let Some(profile) = profile {
                 signal.start_ts.store(profile.start, Ordering::Relaxed);
                 signal.end_ts.store(profile.end, Ordering::Relaxed);
+                crate::signal::flush_signal_timestamps(signal);
             }
             complete_async_signal_value(signal, success);
         })
@@ -905,6 +906,12 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
             || (completion.handle != 0 && !runtime.signal_state.owns_signal(completion))
         {
             return INVALID_SIGNAL;
+        }
+        if completion.handle != 0 {
+            let status = runtime.signal_state.async_completion_status(completion);
+            if status != SUCCESS {
+                return status;
+            }
         }
         let mut signal_handles = Vec::new();
         runtime.memory_state.reap_finished_workers();
@@ -1896,8 +1903,7 @@ fn execute_gpu_entries(
 
 fn system_copy_tick(device: Option<&Device>) -> Result<u64, CopyRouteFailure> {
     let device = device.ok_or_else(|| CopyRouteFailure::retired(ERROR))?;
-    let counters = copy_gpu(device)?
-        .clock_counters()
+    let counters = crate::runtime::clock_counters(device)
         .map_err(|error| CopyRouteFailure::retired(map_error(error)))?;
     if counters.system == 0 {
         return Err(CopyRouteFailure::retired(ERROR));
@@ -2037,6 +2043,14 @@ fn enqueue_copy_job(
     tasks: Vec<AsyncCopyTask>,
     dependency_slice: &[HsaSignal],
 ) -> Status {
+    for task in &tasks {
+        let status = runtime
+            .signal_state
+            .async_completion_status(task.completion);
+        if status != SUCCESS {
+            return status;
+        }
+    }
     runtime.memory_state.reap_finished_workers();
     let mut handles = Vec::new();
     let Some(handle_count) = dependency_slice.len().checked_add(tasks.len()) else {
