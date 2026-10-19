@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
 
 #include "rocjitsu/config/config_common.h"
+#include "rocjitsu/config/system_graph.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
@@ -955,7 +956,20 @@ ExecutionTopology execution_topology(const fb::ComponentDef *root) {
   return result;
 }
 
-ExecutionThreadSettings execution_thread_settings(const fb::SimulationConfig *config) {
+/// Resolve a requested selector against the launch copy as well as the caller.
+/// Keeping the two in agreement prevents a daemon or interposer from silently
+/// building a different node than a direct C API caller requested.
+const SystemNode &selected_node(const fb::SimulationConfig *config, const SystemGraph &graph,
+                                std::string_view requested_node) {
+  const std::string_view configured_node =
+      config->local_node() ? config->local_node()->string_view() : std::string_view{};
+  if (!requested_node.empty() && !configured_node.empty() && requested_node != configured_node)
+    throw std::invalid_argument("local node argument disagrees with config.local_node");
+  return graph.select_node(requested_node.empty() ? configured_node : requested_node);
+}
+
+ExecutionThreadSettings execution_thread_settings(const fb::SimulationConfig *config,
+                                                  uint32_t gpus) {
   ExecutionThreadSettings settings;
   settings.request = {
       config->cpu_thread_budget(), config->num_threads(),
@@ -969,9 +983,6 @@ ExecutionThreadSettings execution_thread_settings(const fb::SimulationConfig *co
   if (settings.arch == ROCJITSU_CODE_ARCH_INVALID)
     throw std::invalid_argument("Invalid vm.arch for thread allocation");
   const auto dimensions = execution_topology(config->topology()->root());
-  // Match build_from_fb(): extra SoCs require a device identity to replicate.
-  const auto *gpu = config->vm()->gpu();
-  const uint32_t gpus = gpu && gpu->device() ? std::max(1u, gpu->num_gpus()) : 1u;
   if (uint64_t{dimensions.xcds} * gpus > std::numeric_limits<uint32_t>::max())
     throw std::invalid_argument("Total XCD count exceeds uint32 range");
   settings.xcds = dimensions.xcds * gpus;
@@ -986,7 +997,7 @@ ExecutionThreadSettings execution_thread_settings(const fb::SimulationConfig *co
 }
 
 util::FailureOr<LoadedConfig> build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config,
-                                            uint32_t host_threads,
+                                            uint32_t host_threads, std::string_view node_id,
                                             util::DiagnosticEmitter emit_error,
                                             BuildMode build_mode = BuildMode::Full) {
   CfgMap cu_overrides;
@@ -998,6 +1009,15 @@ util::FailureOr<LoadedConfig> build_from_fb(const rocjitsu::fb::SimulationConfig
     cu_overrides["xcnt_diagnostics"] = *mode == WaitChecking::All ? "warn" : "off";
   }
   LoadedConfig result;
+  auto system_graph = system_graph_from_fb(fb_config, emit_error);
+  if (system_graph.failed())
+    return util::Result::failure();
+  result.system_graph = std::move(system_graph.value());
+  const SystemNode &node = selected_node(fb_config, result.system_graph, node_id);
+  result.local_node_id = node.id;
+  for (uint32_t ordinal = 0; ordinal < node.gpus.size(); ++ordinal)
+    result.global_to_local_ordinals.emplace(node.gpus[ordinal].id, ordinal);
+  const bool manifest = result.system_graph.explicit_manifest;
   result.engine_config = engine_config_from_fb(fb_config);
   result.exec_mode = exec_mode_from_fb(fb_config);
   result.cpu_dispatch_threads =
@@ -1038,14 +1058,20 @@ util::FailureOr<LoadedConfig> build_from_fb(const rocjitsu::fb::SimulationConfig
 
   // Extract KFD device identity before topology construction so target/version
   // mismatches fail before any simulator components are exposed.
-  if (fb_config->vm()->gpu() && fb_config->vm()->gpu()->device()) {
-    auto device = kfd_device_from_fb(fb_config->vm()->gpu()->device(), "vm.gpu.device", emit_error);
-    if (device.failed())
-      return util::Result::failure();
-    result.device = std::move(device.value());
-  }
-  if (result.device.present)
+  result.device = node.gpus.front().device;
+  if (manifest) {
+    result.num_gpus = static_cast<uint32_t>(node.gpus.size());
+    result.devices.reserve(node.gpus.size());
+    for (const auto &gpu : node.gpus) {
+      auto device = gpu.device;
+      if (device.present)
+        (void)resolve_gpu_generation_topology(device);
+      result.devices.push_back(std::move(device));
+    }
+    result.device = result.devices.front();
+  } else if (result.device.present) {
     (void)resolve_gpu_generation_topology(result.device);
+  }
   if (target != nullptr && target->gfx_target_version != 0 && result.device.present &&
       result.device.gfx_target_version != 0 &&
       result.device.gfx_target_version != target->gfx_target_version)
@@ -1059,9 +1085,13 @@ util::FailureOr<LoadedConfig> build_from_fb(const rocjitsu::fb::SimulationConfig
   if (!topo_def)
     throw std::runtime_error("Config missing 'topology' section");
 
-  if (fb_config->vm()->gpu())
-    result.num_gpus = std::max(1u, fb_config->vm()->gpu()->num_gpus());
-  const auto thread_settings = execution_thread_settings(fb_config);
+  // Legacy configs without device identity project one GPU even if num_gpus
+  // requests replication. Keep the built SoCs and the reported count aligned.
+  result.num_gpus = static_cast<uint32_t>(node.gpus.size());
+  // The node projection is fixed before accounting for engines, dispatch pools,
+  // async helpers, or any simulator components.
+  const auto thread_settings =
+      execution_thread_settings(fb_config, static_cast<uint32_t>(node.gpus.size()));
   result.thread_allocations = thread_settings.choices;
   result.execution_threads = thread_settings.resolve(host_threads);
   if (!result.engine_config.num_threads)
@@ -1071,6 +1101,8 @@ util::FailureOr<LoadedConfig> build_from_fb(const rocjitsu::fb::SimulationConfig
       build_topology(topo_def, result.exec_mode, arch, result.target, result.async_resources,
                      result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine,
                      cu_overrides, build_mode);
+  if (manifest && result.soc() == nullptr)
+    throw std::invalid_argument("system topology root must be an SoC");
   if (result.device.present)
     if (SoC *soc = result.soc())
       soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
@@ -1089,13 +1121,15 @@ util::FailureOr<LoadedConfig> build_from_fb(const rocjitsu::fb::SimulationConfig
   result.dbt_guest = std::move(dbt_guest.value());
 
   if (result.num_gpus > 1 && result.device.present) {
-    result.devices.resize(result.num_gpus);
-    for (uint32_t i = 0; i < result.num_gpus; ++i) {
-      result.devices[i] = result.device;
-      result.devices[i].gpu_id = result.device.gpu_id + i;
-      result.devices[i].location_id = 0x0300 + (i << 8);
-      result.devices[i].drm_render_minor = 128 + i;
-      result.devices[i].unique_id = result.device.unique_id + i;
+    if (!manifest) {
+      result.devices.resize(result.num_gpus);
+      for (uint32_t i = 0; i < result.num_gpus; ++i) {
+        result.devices[i] = result.device;
+        result.devices[i].gpu_id = result.device.gpu_id + i;
+        result.devices[i].location_id = 0x0300 + (i << 8);
+        result.devices[i].drm_render_minor = 128 + i;
+        result.devices[i].unique_id = result.device.unique_id + i;
+      }
     }
     for (uint32_t i = 1; i < result.num_gpus; ++i) {
       result.extra_gpu_builds.push_back(
@@ -1110,6 +1144,17 @@ util::FailureOr<LoadedConfig> build_from_fb(const rocjitsu::fb::SimulationConfig
   }
 
   return result;
+}
+
+template <typename Callback>
+auto with_config_json(const std::string &json, const std::string &schema_text,
+                      util::DiagnosticEmitter emit_error, Callback callback) {
+  return with_parsed_simulation_config_json(
+      json, schema_text, emit_error, [&](const fb::SimulationConfig *config) {
+        if (config->system())
+          return with_parsed_simulation_config_json(json, schema_text, emit_error, callback, false);
+        return callback(config);
+      });
 }
 
 } // namespace
@@ -1187,6 +1232,8 @@ util::FailureOr<DeviceIdentityConfig> load_device_identity(const std::string &js
   return with_parsed_simulation_config_json(
       json.value(), schema_text, emit_error,
       [emit_error](const fb::SimulationConfig *config) -> util::FailureOr<DeviceIdentityConfig> {
+        if (config->system())
+          throw std::invalid_argument("system device identity requires a selected local node");
         DeviceIdentityConfig identity;
         if (config->vm() == nullptr || config->vm()->gpu() == nullptr)
           return identity;
@@ -1214,10 +1261,32 @@ load_execution_thread_settings(const std::string &json_path, const std::string &
 util::FailureOr<ExecutionThreadSettings>
 load_execution_thread_settings_from_string(const std::string &json, const std::string &schema_text,
                                            util::DiagnosticEmitter emit_error) {
-  return with_parsed_simulation_config_json(
+  return load_execution_thread_settings_from_string_for_node(json, schema_text, {}, emit_error);
+}
+
+util::FailureOr<ExecutionThreadSettings>
+load_execution_thread_settings_for_node(const std::string &json_path,
+                                        const std::string &schema_text, std::string_view node_id,
+                                        util::DiagnosticEmitter emit_error) {
+  auto json = read_config_file(json_path, emit_error);
+  if (json.failed())
+    return util::Result::failure();
+  return load_execution_thread_settings_from_string_for_node(json.value(), schema_text, node_id,
+                                                             emit_error);
+}
+
+util::FailureOr<ExecutionThreadSettings> load_execution_thread_settings_from_string_for_node(
+    const std::string &json, const std::string &schema_text, std::string_view node_id,
+    util::DiagnosticEmitter emit_error) {
+  return with_config_json(
       json, schema_text, emit_error,
-      [](const fb::SimulationConfig *config) -> util::FailureOr<ExecutionThreadSettings> {
-        return execution_thread_settings(config);
+      [node_id,
+       emit_error](const fb::SimulationConfig *config) -> util::FailureOr<ExecutionThreadSettings> {
+        auto graph = system_graph_from_fb(config, emit_error);
+        if (graph.failed())
+          return util::Result::failure();
+        const SystemNode &node = selected_node(config, graph.value(), node_id);
+        return execution_thread_settings(config, static_cast<uint32_t>(node.gpus.size()));
       });
 }
 
@@ -1226,25 +1295,40 @@ util::Result validate_config(const std::string &json_path, const std::string &sc
   auto json = read_config_file(json_path, emit_error);
   if (json.failed())
     return util::Result::failure();
-  return with_parsed_simulation_config_json(
-      json.value(), schema_text, emit_error,
-      [emit_error](const fb::SimulationConfig *config) -> util::Result {
-        auto result = build_from_fb(config, amdgpu::available_host_threads(), emit_error,
-                                    BuildMode::Validate);
-        if (result.failed())
-          return util::Result::failure();
-        return util::Result::success();
-      });
+  return with_config_json(json.value(), schema_text, emit_error,
+                          [emit_error](const fb::SimulationConfig *config) -> util::Result {
+                            auto result = build_from_fb(config, amdgpu::available_host_threads(),
+                                                        {}, emit_error, BuildMode::Validate);
+                            return result.failed() ? util::Result::failure()
+                                                   : util::Result::success();
+                          });
+}
+
+util::FailureOr<LoadedConfig> load_config_for_node(const std::string &json_path,
+                                                   const std::string &schema_text,
+                                                   std::string_view node_id,
+                                                   util::DiagnosticEmitter emit_error,
+                                                   uint32_t host_threads) {
+  auto json = read_config_file(json_path, emit_error);
+  if (json.failed())
+    return util::Result::failure();
+  return load_config_from_string_for_node(json.value(), schema_text, node_id, emit_error,
+                                          host_threads);
+}
+
+util::FailureOr<LoadedConfig> load_config_for_node(const std::string &json_path,
+                                                   const std::string &schema_text,
+                                                   std::string_view node_id,
+                                                   util::DiagnosticEmitter emit_error) {
+  return load_config_for_node(json_path, schema_text, node_id, emit_error,
+                              amdgpu::available_host_threads());
 }
 
 util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
                                           const std::string &schema_text,
                                           util::DiagnosticEmitter emit_error,
                                           uint32_t host_threads) {
-  auto json = read_config_file(json_path, emit_error);
-  if (json.failed())
-    return util::Result::failure();
-  return load_config_from_string(json.value(), schema_text, emit_error, host_threads);
+  return load_config_for_node(json_path, schema_text, {}, emit_error, host_threads);
 }
 
 util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
@@ -1257,17 +1341,32 @@ util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
                                                       const std::string &schema_text,
                                                       util::DiagnosticEmitter emit_error,
                                                       uint32_t host_threads) {
-  return with_parsed_simulation_config_json(
-      json, schema_text, emit_error,
-      [host_threads, emit_error](const fb::SimulationConfig *fb_config) {
-        return build_from_fb(fb_config, host_threads, emit_error);
-      });
+  return load_config_from_string_for_node(json, schema_text, {}, emit_error, host_threads);
 }
 
 util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
                                                       const std::string &schema_text,
                                                       util::DiagnosticEmitter emit_error) {
   return load_config_from_string(json, schema_text, emit_error, amdgpu::available_host_threads());
+}
+
+util::FailureOr<LoadedConfig> load_config_from_string_for_node(const std::string &json,
+                                                               const std::string &schema_text,
+                                                               std::string_view node_id,
+                                                               util::DiagnosticEmitter emit_error,
+                                                               uint32_t host_threads) {
+  return with_config_json(json, schema_text, emit_error,
+                          [host_threads, node_id, emit_error](const fb::SimulationConfig *fb) {
+                            return build_from_fb(fb, host_threads, node_id, emit_error);
+                          });
+}
+
+util::FailureOr<LoadedConfig> load_config_from_string_for_node(const std::string &json,
+                                                               const std::string &schema_text,
+                                                               std::string_view node_id,
+                                                               util::DiagnosticEmitter emit_error) {
+  return load_config_from_string_for_node(json, schema_text, node_id, emit_error,
+                                          amdgpu::available_host_threads());
 }
 
 } // namespace config
