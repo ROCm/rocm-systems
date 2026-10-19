@@ -115,6 +115,14 @@ jobs:
       # ruby's per-job private /tmp is invisible to the Docker daemon, so a -v
       # bind mount of the workspace lands empty; /var/tmp is visible.
       SLURM_TMPDIR: "/var/tmp"
+      # pip, conda and every XDG-compliant tool cache under $HOME by default.
+      # The runner account's home is a 100 GB NFS allotment shared with
+      # everything else it runs, and nothing here prunes those caches, so they
+      # only ever grow -- across runs, workloads and branches alike. Put them
+      # under WORK_DIR instead, which the cleanup step below deletes.
+      XDG_CACHE_HOME: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache"
+      PIP_CACHE_DIR: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache/pip"
+      CONDA_PKGS_DIRS: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache/conda-pkgs"
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -134,6 +142,21 @@ jobs:
             echo "Unsupported arch for MADEngine: ${{ inputs.amdgpu_families }}"
             exit 1
           fi
+
+      # The runner account's home is a separate, much smaller allotment than
+      # /apps, and exhausting it fails the conda step below with a bare
+      # "[Errno 122] Disk quota exceeded" that names no path -- which reads as
+      # a full filesystem and sends you to df on the wrong mount. Report both
+      # mounts and the biggest entries in home up front, so the log says which
+      # one ran out and what is holding it.
+      - name: Report runner storage
+        run: |
+          echo "== home =="
+          df -h "${HOME}" || true
+          echo "== /apps =="
+          df -h /apps || true
+          echo "== largest entries in ${HOME} =="
+          du -shx "${HOME}"/* "${HOME}"/.[!.]* 2>/dev/null | sort -h | tail -25 || true
 
       # The pool is not uniform -- 3.10, 3.12, and one machine with no pip at
       # all -- and the compute nodes run another distro again, yet they run
@@ -305,6 +328,7 @@ jobs:
           # runner account is quota-bound on /apps.
           rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/conda" \
                  "${WORK_DIR}/env" "${WORK_DIR}/overlay_ctx" \
-                 "${WORK_DIR}/docker_builds" "${WORK_DIR}/ab" "${WORK_DIR}/repro"
+                 "${WORK_DIR}/docker_builds" "${WORK_DIR}/ab" "${WORK_DIR}/repro" \
+                 "${WORK_DIR}/cache"
           echo "Remaining in ${WORK_DIR}:"
           du -sh "${WORK_DIR}" 2>/dev/null || true
