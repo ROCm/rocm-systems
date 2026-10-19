@@ -382,6 +382,9 @@ set(_rj_process_grid_failure_script
 set(_rj_process_grid_signal_script
     "${CMAKE_CURRENT_SOURCE_DIR}/process_grid_signal_test.cmake"
 )
+set(_rj_process_grid_pid1_script
+    "${CMAKE_CURRENT_SOURCE_DIR}/process_grid_pid1_test.cmake"
+)
 add_test(NAME RocjitsuVersion COMMAND $<TARGET_FILE:rocjitsu_bin> --version)
 set_tests_properties(
     RocjitsuVersion
@@ -678,6 +681,13 @@ add_test(
         "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGridTerminatesRanksOnSignal"
         "-DTEST_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}/process-grid/RocjitsuProcessGridTerminatesRanksOnSignal"
         -P ${_rj_process_grid_signal_script}
+)
+add_test(
+    NAME RocjitsuProcessGridRunsAsPidOne
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuProcessGridRunsAsPidOne"
+        -P ${_rj_process_grid_pid1_script}
 )
 
 add_test(

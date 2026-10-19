@@ -816,13 +816,41 @@ int child_status_to_exit_code(int status) {
   return 1;
 }
 
-void signal_process_grid(const std::vector<pid_t> &children, int signal) {
-  for (pid_t pid : children)
-    if (pid > 0)
-      kill(pid, signal);
+struct ProcessGridRank {
+  pid_t pid = -1;
+  pid_t pgid = -1;
+  bool leader_running = true;
+  bool group_present = true;
+};
+
+bool process_group_exists(pid_t pgid) {
+  if (pgid <= 0)
+    return false;
+  errno = 0;
+  if (kill(-pgid, 0) == 0)
+    return true;
+  return errno != ESRCH;
 }
 
-int wait_for_process_grid(std::vector<pid_t> children, const sigset_t &shutdown_signals,
+void refresh_process_grid_groups(std::vector<ProcessGridRank> &ranks) {
+  for (ProcessGridRank &rank : ranks)
+    if (rank.group_present && !process_group_exists(rank.pgid))
+      rank.group_present = false;
+}
+
+bool process_grid_has_live_work(const std::vector<ProcessGridRank> &ranks, bool terminating) {
+  return std::ranges::any_of(ranks, [&](const ProcessGridRank &rank) {
+    return rank.leader_running || (terminating && rank.group_present);
+  });
+}
+
+void signal_process_grid(const std::vector<ProcessGridRank> &ranks, int signal) {
+  for (const ProcessGridRank &rank : ranks)
+    if (rank.pgid > 0 && (rank.group_present || rank.leader_running))
+      kill(-rank.pgid, signal);
+}
+
+int wait_for_process_grid(std::vector<ProcessGridRank> ranks, const sigset_t &shutdown_signals,
                           int initial_exit_code = 0, bool terminate_now = false) {
   int exit_code = initial_exit_code;
   bool terminating = false;
@@ -831,27 +859,32 @@ int wait_for_process_grid(std::vector<pid_t> children, const sigset_t &shutdown_
   auto begin_termination = [&](int signal) {
     if (terminating)
       return;
-    signal_process_grid(children, signal);
+    signal_process_grid(ranks, signal);
     termination_started = std::chrono::steady_clock::now();
     terminating = true;
+    refresh_process_grid_groups(ranks);
   };
   if (terminate_now)
     begin_termination(SIGTERM);
 
-  while (!children.empty()) {
+  while (process_grid_has_live_work(ranks, terminating)) {
     for (;;) {
       int status = 0;
       pid_t done = waitpid(-1, &status, WNOHANG);
       if (done > 0) {
-        auto found = std::ranges::find(children, done);
-        if (found == children.end())
+        auto found = std::ranges::find_if(ranks, [&](const ProcessGridRank &rank) {
+          return rank.leader_running && rank.pid == done;
+        });
+        if (found == ranks.end())
           continue;
-        children.erase(found);
+        found->leader_running = false;
         const int child_exit = child_status_to_exit_code(status);
         if (child_exit != 0) {
           if (exit_code == 0)
             exit_code = child_exit;
           begin_termination(SIGTERM);
+        } else if (!terminating) {
+          found->group_present = false;
         }
         continue;
       }
@@ -860,7 +893,11 @@ int wait_for_process_grid(std::vector<pid_t> children, const sigset_t &shutdown_
       if (errno == EINTR)
         continue;
       if (errno == ECHILD) {
-        children.clear();
+        for (ProcessGridRank &rank : ranks) {
+          rank.leader_running = false;
+          if (!terminating)
+            rank.group_present = false;
+        }
         break;
       }
       std::cerr << std::format("rocjitsu: waitpid failed: {}\n", strerror(errno));
@@ -870,12 +907,13 @@ int wait_for_process_grid(std::vector<pid_t> children, const sigset_t &shutdown_
       break;
     }
 
-    if (children.empty())
+    refresh_process_grid_groups(ranks);
+    if (!process_grid_has_live_work(ranks, terminating))
       break;
 
     if (terminating && !escalated &&
         std::chrono::steady_clock::now() - termination_started >= kProcessGridTerminateGrace) {
-      signal_process_grid(children, SIGKILL);
+      signal_process_grid(ranks, SIGKILL);
       escalated = true;
     }
 
@@ -912,7 +950,8 @@ int launch_process_grid(char *const app_argv[], rocjitsu::cli::LaunchEnvironment
 
   auto restore_signal_mask = [&]() { sigprocmask(SIG_SETMASK, &previous_signals, nullptr); };
 
-  std::vector<pid_t> children;
+  const pid_t launcher_pid = getpid();
+  std::vector<ProcessGridRank> children;
   children.reserve(grid.world_size());
   for (uint32_t node = 0; node < grid.num_nodes; ++node) {
     for (uint32_t local = 0; local < grid.nproc_per_node; ++local) {
@@ -930,14 +969,27 @@ int launch_process_grid(char *const app_argv[], rocjitsu::cli::LaunchEnvironment
                                    strerror(errno));
           _exit(127);
         }
-        if (getppid() == 1)
+        if (getppid() != launcher_pid)
           _exit(128 + SIGTERM);
+        if (setpgid(0, 0) != 0) {
+          std::cerr << std::format("rocjitsu: setpgid failed: {}\n", strerror(errno));
+          _exit(127);
+        }
         sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
         rocjitsu::cli::execvp_with_environment(app_argv[0], app_argv, environment);
         std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
         _exit(127);
       }
-      children.push_back(child);
+      const int setpgid_result = setpgid(child, child);
+      if (setpgid_result != 0 && errno != EACCES && errno != ESRCH) {
+        std::cerr << std::format("rocjitsu: setpgid failed: {}\n", strerror(errno));
+        kill(child, SIGTERM);
+        children.push_back(ProcessGridRank{.pid = child, .pgid = child});
+        const int exit_code = wait_for_process_grid(std::move(children), shutdown_signals, 1, true);
+        restore_signal_mask();
+        return exit_code;
+      }
+      children.push_back(ProcessGridRank{.pid = child, .pgid = child});
 
       const timespec no_wait{.tv_sec = 0, .tv_nsec = 0};
       const int pending_signal = sigtimedwait(&shutdown_signals, nullptr, &no_wait);
