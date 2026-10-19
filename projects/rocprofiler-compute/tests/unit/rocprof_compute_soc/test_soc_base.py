@@ -421,6 +421,18 @@ def test_allocate_first_fit_packing(perfmon_config):
     assert flat == counters
 
 
+def test_failed_single_pass_pack_exits(monkeypatch, perfmon_config):
+    """A failed pack stops in console_error and does not return a layout."""
+    monkeypatch.setattr(
+        "rocprof_compute_soc.soc_base.try_allocate_single_pass_metrics",
+        lambda *_args, **_kwargs: None,
+    )
+    soc = _make_soc(perfmon_config)
+    with pytest.raises(SystemExit) as exc_info:
+        soc._allocate_perfmon_counter_files({"SQ_WAVES"})
+    assert exc_info.value.code == 1
+
+
 def test_allocate_tcc_channel_coalescing(perfmon_config):
     soc = _make_soc(perfmon_config)
     # TCC channels with same base should land in the same bucket
