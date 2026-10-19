@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "ifoe_subsystem.h"
+#include "ualoe_subsystem.h"
 
 #include <cstdint>
 #include <filesystem>
@@ -12,13 +12,13 @@
 
 namespace fs = std::filesystem;
 
-SmiNicIfoe::SmiNicIfoe(const std::string& bdf, const std::string& sysfs_bus_path)
+SmiNicUALoE::SmiNicUALoE(const std::string& bdf, const std::string& sysfs_bus_path)
     : SmiNic("", bdf, NicType::Fabric, "", sysfs_bus_path, NicVendor::AMD, NicProduct::AINIC) {}
 
 // Prefix rather than a fixed index: N is per-function and its base is not
 // contractual, so pinning ifoe.cmd.0 would drop the bit on a card numbered
 // from anything else.
-uint32_t SmiNicIfoe::capabilities() const {
+uint32_t SmiNicUALoE::capabilities() const {
   const uint32_t caps = SmiNic::capabilities();
   std::error_code ec;
 
@@ -33,9 +33,9 @@ uint32_t SmiNicIfoe::capabilities() const {
   return caps;
 }
 
-NicVendor SmiNicSubsystemIfoe::vendor() const { return NicVendor::AMD; }
+NicVendor SmiNicSubsystemUALoE::vendor() const { return NicVendor::AMD; }
 
-bool SmiNicSubsystemIfoe::is_driver_loaded(const std::string& bdf, DriverType driver_type) const {
+bool SmiNicSubsystemUALoE::is_driver_loaded(const std::string& bdf, DriverType driver_type) const {
   // A fabric endpoint carries no RDMA auxiliary device, so only Main resolves.
   if (driver_type != DriverType::Main) {
     return false;
@@ -46,8 +46,8 @@ bool SmiNicSubsystemIfoe::is_driver_loaded(const std::string& bdf, DriverType dr
 
 // PCI ids alone identify the endpoint: it exposes no netdev, so a net-class
 // walk cannot see it, and it is worth listing whether or not ifoe is bound.
-void SmiNicSubsystemIfoe::discover(const std::string& pci_path, const std::string&,
-                                   std::shared_ptr<amd::smi::nic::transport::NicTransport>) {
+void SmiNicSubsystemUALoE::discover(const std::string& pci_path, const std::string&,
+                                    std::shared_ptr<amd::smi::nic::transport::NicTransport>) {
   nics_.clear();
   std::error_code ec;
 
@@ -58,9 +58,10 @@ void SmiNicSubsystemIfoe::discover(const std::string& pci_path, const std::strin
     const std::string sysfs_bus_path = it->path().string();
     auto [vendor_id, device_id] = read_pci_ids(sysfs_bus_path);
     if ((vendor_id == VENDOR_ID) && (device_id == DEVICE_ID)) {
-      nics_.push_back(std::make_unique<SmiNicIfoe>(it->path().filename().string(), sysfs_bus_path));
+      nics_.push_back(
+          std::make_unique<SmiNicUALoE>(it->path().filename().string(), sysfs_bus_path));
     }
   }
 }
 
-const std::vector<std::unique_ptr<SmiNic>>& SmiNicSubsystemIfoe::get_nics() const { return nics_; }
+const std::vector<std::unique_ptr<SmiNic>>& SmiNicSubsystemUALoE::get_nics() const { return nics_; }

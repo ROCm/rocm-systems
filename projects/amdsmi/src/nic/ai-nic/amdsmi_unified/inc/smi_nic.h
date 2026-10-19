@@ -31,7 +31,7 @@ enum class NicType {
   PCIBridge,
   Ethernet,
   InfiniBand,
-  Fabric,  // accelerator-fabric endpoint (IFoE), no host network port
+  Fabric,  // accelerator-fabric endpoint (UALoE), no host network port
 };
 
 enum class NicVendor { Unknown, AMD, Broadcom };
@@ -148,7 +148,7 @@ class SmiNicPort {
   // Returns the subset of the cached counters this port's stat_table_ allows
   // for `scope`: Default returns only Default-tier names present; Extended
   // returns every present name in the table (Default is a subset of Extended).
-  // Returns an empty map if this port has no table (e.g. IFoE has no ports).
+  // Returns an empty map if this port has no table (e.g. UALoE has no ports).
   std::map<std::string, uint64_t> get_vendor_stats_map(StatTier_t scope) const;
 
   void collect_standard_statistics() const;
