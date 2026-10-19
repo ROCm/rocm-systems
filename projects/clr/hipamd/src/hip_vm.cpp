@@ -347,8 +347,9 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
   phys_mem_obj->getUserData().deviceId = dev->deviceId();
   phys_mem_obj->getUserData().locationType = prop.location.type;
   phys_mem_obj->getUserData().numaNode = -1;   // not recoverable from the handle
+  // Flag the allocation as imported: prevents borrowed memory being released
   phys_mem_obj->getUserData().data =
-      new hip::GenericAllocation(*phys_mem_obj, alloc_size, prop);
+      new hip::GenericAllocation(*phys_mem_obj, alloc_size, prop, true /*is_imported*/);
   *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(phys_mem_obj->getUserData().data);
 
   if (!amd::MemObjMap::FindMemObj(phys_mem_obj->getSvmPtr())) {
