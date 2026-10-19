@@ -103,8 +103,26 @@ fn table_fields(header: &str, table: &str) -> Result<Vec<String>, io::Error> {
     Ok(fields)
 }
 
+fn macro_u32(header: &str, name: &str) -> Result<u32, io::Error> {
+    let value = header
+        .lines()
+        .find_map(|line| {
+            let mut words = line.split_whitespace();
+            (words.next() == Some("#define") && words.next() == Some(name))
+                .then(|| words.next())
+                .flatten()
+        })
+        .ok_or_else(|| invalid(format!("missing {name}")))?;
+    let parsed = if let Some(hex) = value.strip_prefix("0x") {
+        u32::from_str_radix(hex, 16)
+    } else {
+        value.parse()
+    };
+    parsed.map_err(|_| invalid(format!("invalid {name}")))
+}
+
 #[allow(clippy::too_many_lines)]
-fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)]) -> String {
+fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)], amd_step: u32) -> String {
     let runtime_functions: HashSet<&str> = exports
         .iter()
         .map(String::as_str)
@@ -124,6 +142,7 @@ fn generate_rust(exports: &[String], tables: &[(&str, Vec<String>)]) -> String {
         "use std::sync::atomic::{AtomicPtr, Ordering};".to_owned(),
         String::new(),
         format!("pub(super) const EXPORT_COUNT: usize = {};", exports.len()),
+        format!("pub(super) const AMD_EXT_STEP: u32 = {amd_step};"),
     ];
     for (member, fields) in tables {
         lines.push(format!(
@@ -291,11 +310,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let manifest = env::var("CARGO_MANIFEST_DIR")?;
     let manifest = Path::new(&manifest);
     let header = manifest.join("../../api-headers/include/hsa/hsa_api_trace.h");
+    let versions = manifest.join("../../api-headers/include/hsa/hsa_api_trace_version.h");
     let exports = manifest.join("src/exports_linux.S");
     println!("cargo:rerun-if-changed={}", header.display());
+    println!("cargo:rerun-if-changed={}", versions.display());
     println!("cargo:rerun-if-changed={}", exports.display());
 
     let header = fs::read_to_string(header)?;
+    let amd_step = macro_u32(
+        &fs::read_to_string(versions)?,
+        "HSA_AMD_EXT_API_TABLE_STEP_VERSION",
+    )?;
     let exports = exported_symbols(&fs::read_to_string(exports)?)?;
     let tables = TABLES
         .iter()
@@ -305,7 +330,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let out = Path::new(&out);
     fs::write(
         out.join("api_trace_generated.rs"),
-        generate_rust(&exports, &tables),
+        generate_rust(&exports, &tables, amd_step),
     )?;
     fs::write(
         out.join("api_trace_dispatch_linux.S"),

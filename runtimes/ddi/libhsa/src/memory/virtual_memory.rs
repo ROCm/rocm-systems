@@ -325,13 +325,14 @@ pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let uncached = flags & u64::from(ALLOC_UNCACHED) != 0;
+        let mut uncached = flags & u64::from(ALLOC_UNCACHED) != 0;
         let (device_index, kind) = if cpu_pool(pool) {
             (0, MemoryKind::System)
         } else if let Some((index, pool_kind)) = runtime.decode_gpu_pool(pool) {
             if pool_kind == GPU_POOL_GROUP {
                 return INVALID_ALLOCATION;
             }
+            uncached |= pool_kind == GPU_POOL_EXTENDED;
             (
                 index,
                 MemoryKind::DeviceLocal {
@@ -654,13 +655,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_set_access(
             if !runtime.is_agent(descriptor.agent_handle) {
                 return INVALID_AGENT;
             }
-            if !matches!(
-                descriptor.permissions,
-                ACCESS_PERMISSION_NONE
-                    | ACCESS_PERMISSION_RO
-                    | ACCESS_PERMISSION_WO
-                    | ACCESS_PERMISSION_RW
-            ) {
+            if !valid_access_permissions(descriptor.permissions) {
                 return INVALID_ARGUMENT;
             }
         }
@@ -810,17 +805,26 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
                 Ok(memory) => memory,
                 Err(error) => return map_error(error),
             };
+        let pool = match memory.info().placement {
+            Some(VirtualMemoryPlacement::System) => HsaMemoryPool {
+                handle: CPU_POOL_FINE,
+            },
+            Some(VirtualMemoryPlacement::Device(id)) => runtime
+                .gpus
+                .iter()
+                .position(|gpu| gpu.info.native_gpu_id == id)
+                .map_or(HsaMemoryPool { handle: 0 }, |index| {
+                    HsaState::gpu_pool(index, GPU_POOL_COARSE)
+                }),
+            None => HsaMemoryPool { handle: 0 },
+        };
         let handle = match runtime.allocate_handle() {
             Ok(handle) => handle,
             Err(status) => return status,
         };
         runtime.memory_state.vmem_handles.insert(
             handle,
-            VmemHandle::new(
-                VmemBacking::DmaBuf(memory),
-                HsaMemoryPool { handle: 0 },
-                MEMORY_TYPE_NONE,
-            ),
+            VmemHandle::new(VmemBacking::DmaBuf(memory), pool, MEMORY_TYPE_NONE),
         );
         // SAFETY: The caller supplied writable output storage.
         unsafe { memory_handle.write(HsaAmdVmemAllocHandle { handle }) };
@@ -897,6 +901,99 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_alloc_properties_from_handle(
         }
         SUCCESS
     })
+}
+
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_get_vmem_info")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+pub unsafe extern "C" fn hsa_amd_vmem_get_vmem_info(
+    memory_handle: HsaAmdVmemAllocHandle,
+    info: *mut HsaAmdVmemHandleInfo,
+) -> Status {
+    boundary(|| {
+        if info.is_null() {
+            return INVALID_ARGUMENT;
+        }
+        // SAFETY: Every accepted layout begins with a writable size_t.
+        let caller_size = unsafe { info.cast::<usize>().read() };
+        if caller_size < size_of::<usize>() {
+            return INVALID_ARGUMENT;
+        }
+        let guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        let Some(runtime) = guard.as_ref() else {
+            return NOT_INITIALIZED;
+        };
+        let Some(handle) = runtime.memory_state.vmem_handles.get(&memory_handle.handle) else {
+            return INVALID_ALLOCATION;
+        };
+        let (size, agent) = match &handle.backing {
+            VmemBacking::Owned(memory) => {
+                let agent = if cpu_pool(handle.pool) {
+                    HsaAgent { handle: CPU_AGENT }
+                } else if let Some((index, _)) = runtime.decode_gpu_pool(handle.pool) {
+                    HsaAgent {
+                        handle: GPU_AGENT_BASE + index as u64,
+                    }
+                } else {
+                    return INVALID_ALLOCATION;
+                };
+                (memory.info().size, agent)
+            }
+            VmemBacking::DmaBuf(memory) => {
+                let agent = match memory.info().placement {
+                    Some(VirtualMemoryPlacement::System) => HsaAgent { handle: CPU_AGENT },
+                    Some(VirtualMemoryPlacement::Device(id)) => {
+                        let Some(index) = runtime
+                            .gpus
+                            .iter()
+                            .position(|gpu| gpu.info.native_gpu_id == id)
+                        else {
+                            return INVALID_ALLOCATION;
+                        };
+                        HsaAgent {
+                            handle: GPU_AGENT_BASE + index as u64,
+                        }
+                    }
+                    None => return INVALID_ALLOCATION,
+                };
+                (memory.info().size, agent)
+            }
+            VmemBacking::Fabric { .. } => return INVALID_ALLOCATION,
+        };
+        let Ok(size) = usize::try_from(size) else {
+            return INVALID_ALLOCATION;
+        };
+        // SAFETY: The caller promises caller_size writable bytes.
+        unsafe { fill_vmem_handle_info(info, caller_size, size, agent) };
+        SUCCESS
+    })
+}
+
+/// # Safety
+/// `info` must point to at least `caller_size` writable bytes, beginning with
+/// an aligned `size_t`.
+unsafe fn fill_vmem_handle_info(
+    info: *mut HsaAmdVmemHandleInfo,
+    caller_size: usize,
+    size: usize,
+    agent: HsaAgent,
+) {
+    let returned_size = caller_size.min(size_of::<HsaAmdVmemHandleInfo>());
+    // SAFETY: Each field is written only when the caller's layout contains it.
+    unsafe {
+        info.cast::<usize>().write(returned_size);
+        if returned_size >= std::mem::offset_of!(HsaAmdVmemHandleInfo, agent) {
+            std::ptr::addr_of_mut!((*info).alloc_size).write(size);
+        }
+        if returned_size >= size_of::<HsaAmdVmemHandleInfo>() {
+            std::ptr::addr_of_mut!((*info).agent).write(agent);
+        }
+    }
 }
 
 #[cfg_attr(
@@ -994,4 +1091,37 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_fabric_handle(
         unsafe { memory_handle.write(HsaAmdVmemAllocHandle { handle }) };
         SUCCESS
     })
+}
+
+#[cfg(test)]
+mod handle_info_tests {
+    use super::*;
+
+    #[test]
+    fn old_layouts_leave_later_fields_and_guard_bytes_untouched() {
+        for caller_size in [8, 16, 20, 24, 32] {
+            let mut words = [0xabab_abab_abab_abab_u64; 4];
+            let info = words.as_mut_ptr().cast::<HsaAmdVmemHandleInfo>();
+            // SAFETY: The aligned buffer has 32 writable bytes.
+            unsafe { fill_vmem_handle_info(info, caller_size, 0x1234, HsaAgent { handle: 0x55 }) };
+            assert_eq!(words[0], caller_size.min(24) as u64);
+            assert_eq!(
+                words[1],
+                if caller_size >= 16 {
+                    0x1234
+                } else {
+                    0xabab_abab_abab_abab
+                }
+            );
+            assert_eq!(
+                words[2],
+                if caller_size >= 24 {
+                    0x55
+                } else {
+                    0xabab_abab_abab_abab
+                }
+            );
+            assert_eq!(words[3], 0xabab_abab_abab_abab);
+        }
+    }
 }

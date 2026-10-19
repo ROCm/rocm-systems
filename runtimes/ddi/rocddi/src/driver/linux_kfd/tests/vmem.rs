@@ -73,6 +73,42 @@ fn fixture() -> (
 }
 
 #[test]
+fn imported_vmem_placement_comes_from_kfd_dma_buf_info() {
+    let source = backing_file();
+    for (flags, expected) in [
+        (uapi::GTT, Some(VirtualMemoryPlacement::System)),
+        (uapi::VRAM, Some(VirtualMemoryPlacement::Device(42))),
+        (uapi::GTT | uapi::VRAM, None),
+    ] {
+        let kfd = sys::Kfd::with_hook(
+            File::open("/dev/null").unwrap(),
+            Arc::new(move |call| {
+                if let sys::Call::DmaBufInfo(args, _) = call {
+                    args.size = page();
+                    args.gpu_id = 42;
+                    args.flags = flags;
+                }
+                Ok(())
+            }),
+        );
+        let imported = KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &kfd).unwrap();
+        assert_eq!(imported.info().placement, expected);
+    }
+
+    let old_kfd = sys::Kfd::with_hook(
+        File::open("/dev/null").unwrap(),
+        Arc::new(|call| {
+            if matches!(call, sys::Call::DmaBufInfo(_, _)) {
+                return Err(std::io::Error::from_raw_os_error(errno::EINVAL));
+            }
+            Ok(())
+        }),
+    );
+    let imported = KfdVirtualMemory::import_with_kfd(source.as_raw_fd(), &old_kfd).unwrap();
+    assert_eq!(imported.info().placement, None);
+}
+
+#[test]
 fn ambiguous_map_retains_address_backing_gem_and_pending_point() {
     let (vm, mut address, mut physical) = fixture();
     drm::with_script(
