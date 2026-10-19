@@ -495,9 +495,10 @@ static inline ncclResult_t ncclIbCommBaseGetQpForRequest(struct ncclIbNetCommBas
   return ncclSuccess;
 }
 
-// Requests carrying the GDR flush flag all go on QP 0 (the flag needs one QP per request,
-// so qpIndex is 0): the flag is a single increasing counter, so every flag write must stay
-// queued behind the earlier flagged payloads. Other requests keep the rotation above.
+// Requests carrying the GDR flush flag go on QPs 0..n-1 (QP 0 alone unless the request is
+// split over all QPs): each QP's flag is a single increasing counter, so every flag write
+// must stay queued behind the earlier flagged payloads on that QP. Other requests keep the
+// rotation above.
 static inline ncclResult_t ncclIbCommBaseGetQpForFlagRequest(struct ncclIbNetCommBase* baseComm, const uint64_t id,
                                                              const uint8_t qpIndex, bool flagFlush, ncclIbQp** outQp,
                                                              int* outQpIndex) {
@@ -576,9 +577,9 @@ struct ncclIbSendComm {
   struct ncclIbRemoteSpeedBuf remoteSpeedBuf;
   struct ibv_mr* remoteSpeedMr;
   uint64_t remoteSpeedCounter;
-  // GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG): after the payload of a slot, the
-  // sender writes the slot sequence number from flagFlushSrc[slot] into the
-  // receiver's RO=0 GPU flag at flagFlushRemAddr, on the same single QP.
+  // GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG): after the payload of a slot, every
+  // QP that carried it writes the slot sequence number from flagFlushSrc[slot]
+  // into its own RO=0 GPU flag, at flagFlushRemAddr + qpIndex * 8.
   int flagFlush;
   uint64_t flagFlushRemAddr;
   uint32_t flagFlushRkey;
@@ -675,8 +676,9 @@ struct ncclIbRecvComm {
   uint64_t* flagFlushGpuMem;
   struct ibv_mr* flagFlushMr;
   int flagFlushDmabufFd;
-  // Highest sequence among completed receives that requested the flag.
-  uint64_t flagFlushLastSeq;
+  // Packed gdrFlushSeq entry of the receive that requested the flag and was
+  // completed last: its sequence and the per-QP flags that carried it.
+  uint64_t flagFlushLastDesc;
   bool prepostReceiveWorkRequests;
   // To avoid allocation and memset on the data-path a single structure is used
   // and only the wr_id is updated before posting a receive work request.
