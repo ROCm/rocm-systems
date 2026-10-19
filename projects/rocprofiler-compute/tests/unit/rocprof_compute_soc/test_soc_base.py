@@ -693,7 +693,7 @@ def test_allocate_allows_multiple_accum_counters_per_bucket(gfx1250_soc):
         )
         for counter_file in files
     ]
-    assert max(accum_bucket_counts) >= 1
+    assert max(accum_bucket_counts) >= 2
 
 
 @pytest.mark.parametrize("gpu_arch", ["gfx1151", "gfx1152", "gfx1153"])
