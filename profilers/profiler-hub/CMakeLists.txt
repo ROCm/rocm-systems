@@ -122,6 +122,7 @@ add_subdirectory(source)
 
 add_subdirectory(include/cpp)
 
+file(REMOVE_RECURSE ${CMAKE_BINARY_DIR}/include/profiler-hub)
 foreach(HEADER_FILE ${profiler-hub_public_headers})
     file(
         RELATIVE_PATH
