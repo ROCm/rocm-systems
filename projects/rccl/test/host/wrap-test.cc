@@ -4321,12 +4321,21 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SysmemSegmentBlocksCeRegistered) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllReduce_SysmemSegmentBlocksCeRegistered",
       []() {
+        // DDA IPC is the non-preferred fallback that makes bestFallbackFound=true,
+        // ensuring the EXPECT_NE proves the hasSysmemSegment gate rejected CE-registered
+        // rather than trivially passing because no candidate was ever evaluated.
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ncclComm* comm = MakeSelectComm();
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+        ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx942"); // gfx942: ddaVmmMax[AR]=8MiB, ceEnabledByArch=true
+        comm->nRanks = 1;
+        comm->nNodes = 1;
         int sendBuffer = 0, recvBuffer = 0;
         TestDevrWindows registered(comm, &sendBuffer, true, &recvBuffer, false);
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
@@ -4351,7 +4360,13 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_RecvWinSysmemSegmentBlocksCeRegister
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
                struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ncclComm* comm = MakeSelectComm();
+        ScopedHook shouldTakeDda(g_allReduceShouldTakeDdaPath,
+                                 [](const struct ncclComm*, size_t, ncclDataType_t, bool, bool, bool) { return true; });
+        ScopedHook ipcEligible(g_allReduceDdaIpcEligible,
+                               [](ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t) { return true; });
+        ncclComm* comm = MakeCommWithArch("gfx942"); // gfx942: ddaVmmMax[AR]=8MiB, ceEnabledByArch=true
+        comm->nRanks = 1;
+        comm->nNodes = 1;
         TestDevrWindows registered(comm, &sendSentinel, false, &recvSentinel, true);
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         rcclCollDecision decision{};
