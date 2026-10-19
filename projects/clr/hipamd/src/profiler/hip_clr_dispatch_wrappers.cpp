@@ -6102,16 +6102,18 @@ void HipProfilerBuildWrapperTableExt(HipDispatchTable* tbl) {
   // g_wrapper_tbl is fully written before any Install call stores its slots.
 }
 
+// Install and Remove leave alone a slot that another component changed since
+// the snapshot. A tool that chained to a wrapper while the profiler was on keeps
+// its slot across later enables and disables, and a hook that another component
+// took out is not put back.
 void HipProfilerInstallWrappersExt(HipDispatchTable* tbl) {
   if (g_wrapped.exchange(true)) return;
-  hip::InstallDispatchSlots(tbl, g_wrapper_tbl, g_next);
+  hip::ReplaceDispatchSlots(tbl, g_next, g_wrapper_tbl);
 }
 
-// A slot that another component changed while the wrappers were in keeps its
-// new value.
 void HipProfilerRemoveWrappersExt(HipDispatchTable* tbl) {
   if (!g_wrapped.exchange(false)) return;
-  hip::RemoveDispatchSlots(tbl, g_wrapper_tbl, g_next);
+  hip::ReplaceDispatchSlots(tbl, g_wrapper_tbl, g_next);
 }
 
 void HipProfilerInstallCompilerWrappersExt(HipCompilerDispatchTable* tbl) {
@@ -6125,10 +6127,10 @@ void HipProfilerInstallCompilerWrappersExt(HipCompilerDispatchTable* tbl) {
     g_compiler_wrapper_tbl.__hipPushCallConfiguration_fn = __hipPushCallConfigurationLayer;
     g_compiler_wrapper_tbl.__hipPopCallConfiguration_fn  = __hipPopCallConfigurationLayer;
   });
-  hip::InstallDispatchSlots(tbl, g_compiler_wrapper_tbl, g_compiler_next);
+  hip::ReplaceDispatchSlots(tbl, g_compiler_next, g_compiler_wrapper_tbl);
 }
 
 void HipProfilerRemoveCompilerWrappersExt(HipCompilerDispatchTable* tbl) {
   if (!g_compiler_wrapped.exchange(false)) return;
-  hip::RemoveDispatchSlots(tbl, g_compiler_wrapper_tbl, g_compiler_next);
+  hip::ReplaceDispatchSlots(tbl, g_compiler_wrapper_tbl, g_compiler_next);
 }

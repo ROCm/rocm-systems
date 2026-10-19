@@ -2528,11 +2528,11 @@ void hip_capture_install() {
 
 void hip_capture_uninstall() {
   if (!g_installed.exchange(false)) return;
-  hip::RemoveDispatchSlots(live_table(), g_cap_table, g_real_table);
+  hip::ReplaceDispatchSlots(live_table(), g_cap_table, g_real_table);
   // The compiler shims go as well, or a capture refused at init or in a forked
   // child keeps running them with capture off. Shutdown leaves them.
   if (g_compiler_installed.exchange(false))
-    hip::RemoveDispatchSlots(live_compiler_table(), g_cap_compiler_table, g_real_compiler_table);
+    hip::ReplaceDispatchSlots(live_compiler_table(), g_cap_compiler_table, g_real_compiler_table);
 }
 
 void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims) {
@@ -2713,7 +2713,7 @@ void hip_capture_shutdown() {
   // Only the runtime shims: the compiler table keeps its shims, so a fat binary
   // unregistered after this still goes through them, and the writer drops it.
   if (g_installed.exchange(false))
-    hip::RemoveDispatchSlots(live_table(), g_cap_table, g_real_table);
+    hip::ReplaceDispatchSlots(live_table(), g_cap_table, g_real_table);
   hrr_cap::writer::flush(hip_capture_output_dir());
   hrr_cap::writer::close();
 

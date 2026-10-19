@@ -77,7 +77,7 @@ template <typename Table> const Slot* Slots(const Table& table) {
 
 // Stores wrappers[i] in every slot of `live` where it differs from next[i], the
 // table the wrappers call on to. Neither the size field nor any other slot is
-// written. Unlike RemoveDispatchSlots() this does not compare first: a slot that
+// written. Unlike ReplaceDispatchSlots() this does not compare first: a slot that
 // changed since `next` was taken still gets its wrapper.
 template <typename Table>
 void InstallDispatchSlots(Table* live, const Table& wrappers, const Table& next) {
@@ -89,17 +89,18 @@ void InstallDispatchSlots(Table* live, const Table& wrappers, const Table& next)
   }
 }
 
-// Puts next[i] back in every slot InstallDispatchSlots() wrote, but only while
-// the slot still holds the wrapper. A slot that another component changed after
-// install keeps its new value.
+// Puts to[i] in every slot where from[i] and to[i] differ, but only while the
+// slot still holds from[i]. A slot that another component changed keeps its new
+// value. With from = wrappers and to = next it takes a layer out; the other way
+// round it puts one in.
 template <typename Table>
-void RemoveDispatchSlots(Table* live, const Table& wrappers, const Table& next) {
+void ReplaceDispatchSlots(Table* live, const Table& from, const Table& to) {
   dispatch_slot::Slot* slot = dispatch_slot::Slots(*live);
-  const dispatch_slot::Slot* wrapper = dispatch_slot::Slots(wrappers);
-  const dispatch_slot::Slot* orig = dispatch_slot::Slots(next);
+  const dispatch_slot::Slot* old_value = dispatch_slot::Slots(from);
+  const dispatch_slot::Slot* new_value = dispatch_slot::Slots(to);
   for (size_t i = 0; i < dispatch_slot::kSlots<Table>; ++i) {
-    if (wrapper[i].value != orig[i].value)
-      dispatch_slot::Replace(&slot[i], wrapper[i].value, orig[i].value);
+    if (old_value[i].value != new_value[i].value)
+      dispatch_slot::Replace(&slot[i], old_value[i].value, new_value[i].value);
   }
 }
 

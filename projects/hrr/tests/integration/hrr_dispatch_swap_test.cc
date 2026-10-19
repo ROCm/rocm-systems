@@ -41,7 +41,9 @@
  *     in place, restore every other slot, and not touch the size fields. Calls
  *     through the tool's wrappers then reach the profiler's but must add no
  *     record. Enabled again, the profiler must not call back into the tool's
- *     wrappers.
+ *     wrappers, and both stay in place after the second disable. A slot the
+ *     profiler does not wrap, changed by the tool before the first enable,
+ *     keeps the tool's value.
  *
  * The live dispatch table is reached through rocprofiler-register, the way a
  * profiler reaches it: hrr_dispatch_tool.cc is loaded as the tool library.
@@ -437,8 +439,10 @@ HipCompilerDispatchTable* tool_hip_compiler_table() {
 }
 
 using PushFn = decltype(HipCompilerDispatchTable::__hipPushCallConfiguration_fn);
+using LuidFn = decltype(HipDispatchTable::hipDeviceGetLuid_fn);
 std::atomic<MemcpyFn> g_prof_next_memcpy{nullptr};
 std::atomic<PushFn> g_prof_next_push{nullptr};
+std::atomic<LuidFn> g_prof_next_luid{nullptr};
 
 hipError_t tool_hipMemcpy(void* dst, const void* src, size_t bytes, hipMemcpyKind kind) {
   return g_prof_next_memcpy.load(std::memory_order_acquire)(dst, src, bytes, kind);
@@ -447,6 +451,11 @@ hipError_t tool_hipMemcpy(void* dst, const void* src, size_t bytes, hipMemcpyKin
 hipError_t tool_hipPushCallConfiguration(dim3 grid, dim3 block, size_t shared,
                                          hipStream_t stream) {
   return g_prof_next_push.load(std::memory_order_acquire)(grid, block, shared, stream);
+}
+
+// hipDeviceGetLuid is a slot the profiler does not wrap.
+hipError_t tool_hipDeviceGetLuid(char* luid, unsigned int* mask, hipDevice_t device) {
+  return g_prof_next_luid.load(std::memory_order_acquire)(luid, mask, device);
 }
 
 template <typename Table> std::vector<unsigned char> table_bytes(const Table& t) {
@@ -503,6 +512,9 @@ TEST_CASE("Unit_HRR_ProfilerSwap_Direct", "[.][hrr-direct]") {
 
   void* dev = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dev, 64));
+  const LuidFn luid_before = t->hipDeviceGetLuid_fn;
+  g_prof_next_luid.store(luid_before, std::memory_order_release);
+  t->hipDeviceGetLuid_fn = &tool_hipDeviceGetLuid;
   const std::vector<unsigned char> runtime_before = table_bytes(*t);
   const std::vector<unsigned char> compiler_before = table_bytes(*c);
   const MemcpyFn memcpy_before = t->hipMemcpy_fn;
@@ -514,6 +526,9 @@ TEST_CASE("Unit_HRR_ProfilerSwap_Direct", "[.][hrr-direct]") {
     REQUIRE(t->hipMemcpy_fn != memcpy_before);
     REQUIRE(c->__hipPushCallConfiguration_fn != push_before);
   }
+  printf(HRR_PROFILER_MARKER " unwrapped_kept=%d\n",
+         t->hipDeviceGetLuid_fn == &tool_hipDeviceGetLuid ? 1 : 0);
+  fflush(stdout);
   // A tool that attaches while the profiler is on chains to its wrappers.
   g_prof_next_memcpy.store(t->hipMemcpy_fn, std::memory_order_release);
   t->hipMemcpy_fn = &tool_hipMemcpy;
@@ -542,11 +557,14 @@ TEST_CASE("Unit_HRR_ProfilerSwap_Direct", "[.][hrr-direct]") {
 
   // Enabled again, the wrappers must call on to what they wrapped first, not to
   // the tool's slots that chain back to them.
+  // Neither must take the tool's slots out of the chain.
   HRR_HIP_CHECK(enable(nullptr, 0));
   REQUIRE(call_through(t, c, dev));
   HRR_HIP_CHECK(disable(nullptr));
-  printf(HRR_PROFILER_MARKER " reenabled\n");
+  printf(HRR_PROFILER_MARKER " reenabled kept=%d/%d\n", t->hipMemcpy_fn == &tool_hipMemcpy ? 1 : 0,
+         c->__hipPushCallConfiguration_fn == &tool_hipPushCallConfiguration ? 1 : 0);
   fflush(stdout);
+  t->hipDeviceGetLuid_fn = luid_before;
   HRR_HIP_CHECK(hipFree(dev));
 }
 
@@ -862,7 +880,10 @@ HRR_TEST_CASE(Unit_HRR_ProfilerSwap_ToolSlotOutlivesDisable) {
   REQUIRE(sscanf(out.c_str() + rec_at, HRR_PROFILER_MARKER " recorded_after_disable=%zu",
                  &recorded_after_disable) == 1);
   CHECK(recorded_after_disable == 0);
-  CHECK(out.find(HRR_PROFILER_MARKER " reenabled") != std::string::npos);
+  // Enable left alone the slot the profiler does not wrap.
+  CHECK(out.find(HRR_PROFILER_MARKER " unwrapped_kept=1") != std::string::npos);
+  // A second enable and disable left the tool's slots in place too.
+  CHECK(out.find(HRR_PROFILER_MARKER " reenabled kept=1/1") != std::string::npos);
 
   hrr::Archive ar;
   REQUIRE(hrr::load_archive(hrr_single_process_archive(cap.path).string(), ar));
