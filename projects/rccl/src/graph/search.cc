@@ -341,9 +341,10 @@ ncclResult_t ncclTopoSearchRec(struct ncclTopoSystem* system, struct ncclTopoGra
 #define FORCED_ORDER_PCI 1
 #define FORCED_ORDER_REPLAY 2
 
-// Pin eligible gfx1250 rings to the topology array's order. Visitation order only; path
-// validation is unchanged. 0 = off, 1 = on with fallback (default), 2 = on, fail if no
-// ordered ring validates.
+// Pin eligible gfx1250 rings to the topology array's order so every channel uses the same
+// ring, which holds fan-out to one peer per direction per device instead of a different
+// permutation per channel. Visitation order only; path validation is unchanged.
+// 0 = off, 1 = on with fallback (default), 2 = on, fail if no ordered ring validates.
 // Note this is topology-array order, not a busId sort: nodes[GPU] is XML-parse order
 // (ncclTopoSortSystem orders links, not that array). It is PCI order on gfx1250.
 RCCL_PARAM_NCCL_ALIAS(PcieOrderedRing, "PCIE_ORDERED_RING", 1);

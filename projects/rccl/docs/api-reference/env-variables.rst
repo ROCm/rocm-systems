@@ -591,7 +591,13 @@ in the following table.
 
     * - | ``RCCL_PCIE_ORDERED_RING``
         | Pins ring graph search to the order GPUs appear in the topology
-          array, instead of letting the permutation search replace it. This
+          array, so every channel uses the same ring. Without it the search
+          picks a different permutation per channel, so a device exchanges
+          with many different peers; pinning the order reduces fan-out to
+          one peer per direction per device across all rings. On
+          partitioned (DPX) GPUs the unpinned search also mixes scale-up
+          and scale-in hops between channels, though ring throughput is
+          bounded by its slowest hop either way. This
           constrains GPU visitation order only; path validation, bandwidth
           constraints, and backtracking are unchanged, and the ring still
           travels whatever paths the search validates. Applies to gfx1250
