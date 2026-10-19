@@ -3816,16 +3816,18 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 	/* Leave it unresolved when unset: the XNACK mode that decides the
 	 * default is bound by the client after this runs. Kernels older than
 	 * KFD ioctl 1.24 cannot unmap on NO_ACCESS, so the path stays off
-	 * there even if the debug variable asks for it.
+	 * there. That is silent unless the user set
+	 * HSA_SVM_HOST_UNREGISTER_DEBUG, which cannot be honored.
 	 */
 	svmHostUnregisterStr = getenv("HSA_SVM_HOST_UNREGISTER_DEBUG");
 	if (!kfd_supports_svm_no_access()) {
 		fmm_ctx->svm.svm_host_unregister = 0;
-		pr_warn("SVM host unregister disabled: KFD ioctl %u.%u "
-			"is older than 1.%u\n",
-			hsakmt_kfd_version_info.KernelInterfaceMajorVersion,
-			hsakmt_kfd_version_info.KernelInterfaceMinorVersion,
-			KFD_IOCTL_MINOR_SVM_NO_ACCESS);
+		if (svmHostUnregisterStr)
+			pr_warn("HSA_SVM_HOST_UNREGISTER_DEBUG ignored: KFD ioctl %u.%u "
+				"is older than 1.%u\n",
+				hsakmt_kfd_version_info.KernelInterfaceMajorVersion,
+				hsakmt_kfd_version_info.KernelInterfaceMinorVersion,
+				KFD_IOCTL_MINOR_SVM_NO_ACCESS);
 	} else {
 		fmm_ctx->svm.svm_host_unregister = svmHostUnregisterStr ?
 			!!strcmp(svmHostUnregisterStr, "0") : -1;
