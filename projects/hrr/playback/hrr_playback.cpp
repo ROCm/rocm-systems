@@ -860,32 +860,57 @@ static bool save_device_state(const char* label) {
 // One full pass through the archive (single- or multi-threaded)
 // ---------------------------------------------------------------------------
 
-// The device each registration-derived code object was loaded on at capture:
-// a register event names its code object with a blob size of 0, and capture
-// took it for the device current on the registering thread, which the
-// hipSetDevice events before it on that thread give, clamped as replaying
-// them clamps it. On a host with GPUs of more than one kind, that code object
-// may load on no other device. The first registration of a code object wins.
-static std::unordered_map<std::string, int> registered_code_object_devices(
+// The code-object hash a fat binary registration (one naming its code object:
+// blob hash set, blob size 0), a module load or a kernel launch uses, if any.
+template <class Args>
+static void used_code_object(const hrr::Event& ev, uint64_t& lo, uint64_t& hi) {
+  if (ev.raw_payload.size() < sizeof(Args)) return;
+  const auto* a = reinterpret_cast<const Args*>(ev.raw_payload.data());
+  lo = a->co_hash_lo;
+  hi = a->co_hash_hi;
+}
+
+// The devices each code object was used on at capture: by a registration
+// naming it, a module load or a kernel launch, each on the device current on
+// its thread, which the hipSetDevice events before it on that thread give,
+// clamped as replaying them clamps it. HIP builds a loaded code object for one
+// device, so the same code object used on two devices needs a module on each,
+// and on a host with GPUs of more than one kind it may load on no other.
+static std::unordered_map<std::string, std::vector<int>> code_object_devices(
     const hrr::Archive& archive, int device_count) {
-  std::unordered_map<std::string, int> devices;
+  std::unordered_map<std::string, std::vector<int>> devices;
   std::unordered_map<uint64_t, int> current;  // thread -> device
   for (const auto& ev : archive.events) {
     const uint16_t t = ev.header().event_type;
-    if (t == HRR_API_HIPSETDEVICE &&
-        ev.raw_payload.size() >= sizeof(hrr_args_hipSetDevice)) {
+    uint64_t lo = 0, hi = 0;
+    if (t == HRR_API_HIPSETDEVICE) {
+      if (ev.raw_payload.size() < sizeof(hrr_args_hipSetDevice)) continue;
       const auto* a = reinterpret_cast<const hrr_args_hipSetDevice*>(ev.raw_payload.data());
       const int dev = a->deviceId;
       current[ev.header().thread_id] = (dev >= 0 && dev < device_count) ? dev : 0;
-    } else if (t == HRR_API_HIPREGISTERFATBINARY &&
-               ev.raw_payload.size() >= sizeof(hrr_args___hipRegisterFatBinary)) {
+      continue;
+    } else if (t == HRR_API_HIPREGISTERFATBINARY) {
+      if (ev.raw_payload.size() < sizeof(hrr_args___hipRegisterFatBinary)) continue;
       const auto* a =
           reinterpret_cast<const hrr_args___hipRegisterFatBinary*>(ev.raw_payload.data());
-      if (a->blob_size || (!a->blob_hash_lo && !a->blob_hash_hi)) continue;
-      auto it = current.find(ev.header().thread_id);
-      devices.emplace(hrr::hash_hex(a->blob_hash_lo, a->blob_hash_hi),
-                      it == current.end() ? 0 : it->second);
+      if (a->blob_size) continue;
+      lo = a->blob_hash_lo;
+      hi = a->blob_hash_hi;
+    } else if (t == HRR_API_HIPMODULELOAD) {
+      used_code_object<hrr_args_hipModuleLoad>(ev, lo, hi);
+    } else if (t == HRR_API_HIPMODULELOADDATA) {
+      used_code_object<hrr_args_hipModuleLoadData>(ev, lo, hi);
+    } else if (t == HRR_API_HIPMODULELOADDATAEX) {
+      used_code_object<hrr_args_hipModuleLoadDataEx>(ev, lo, hi);
+    } else if (ev.kernel_launch) {
+      lo = ev.kernel_launch->co_hash_lo;
+      hi = ev.kernel_launch->co_hash_hi;
     }
+    if (!lo && !hi) continue;
+    auto it = current.find(ev.header().thread_id);
+    const int dev = it == current.end() ? 0 : it->second;
+    auto& used = devices[hrr::hash_hex(lo, hi)];
+    if (std::find(used.begin(), used.end(), dev) == used.end()) used.push_back(dev);
   }
   return devices;
 }
@@ -904,9 +929,10 @@ static bool run_pass(PlaybackContext& ctx,
   // any kernel launch, preventing error 719 from corrupting module loads.
   if (log) printf("[HRR] Pre-loading %zu code objects...\n", archive.code_objects.size());
   size_t preload_failures = 0;
-  int device_count = 0;
+  int device_count = 0, start_dev = 0;
   (void)hipGetDeviceCount(&device_count);
-  const auto load_devices = registered_code_object_devices(archive, device_count);
+  if (hipGetDevice(&start_dev) != hipSuccess) start_dev = 0;
+  const auto use_devices = code_object_devices(archive, device_count);
   for (const auto& [hex, fpath] : archive.code_objects) {
       // hex is "llllllllllllllllhhhhhhhhhhhhhhhh" (lo first, hi second)
       uint64_t lo = 0, hi = 0;
@@ -914,21 +940,22 @@ static bool run_pass(PlaybackContext& ctx,
           lo = strtoull(hex.substr(0,16).c_str(), nullptr, 16);
           hi = strtoull(hex.substr(16).c_str(), nullptr, 16);
       }
-      // A code object a fat binary registration loaded goes on the device it
-      // was loaded on at capture; the rest on the current one, as before.
-      int prev_dev = -1;
-      auto dev_it = load_devices.find(hex);
-      if (dev_it != load_devices.end() && hipGetDevice(&prev_dev) == hipSuccess &&
-          dev_it->second != prev_dev) {
-          if (log) printf("[HRR] Pre-loading code object %s on device %d, where its "
-                          "fat binary registration loaded it\n", hex.c_str(), dev_it->second);
-          if (hipSetDevice(dev_it->second) != hipSuccess) prev_dev = -1;
-      } else {
-          prev_dev = -1;
+      // A code object goes on every device capture used it on; one no event
+      // names, on the current device, as before.
+      auto dev_it = use_devices.find(hex);
+      const std::vector<int> devs = dev_it != use_devices.end()
+                                        ? dev_it->second : std::vector<int>{start_dev};
+      bool loaded = true;
+      for (int dev : devs) {
+          if (dev != start_dev && log)
+              printf("[HRR] Pre-loading code object %s on device %d, where capture "
+                     "used it\n", hex.c_str(), dev);
+          const bool moved = dev != start_dev && hipSetDevice(dev) == hipSuccess;
+          loaded = ctx.load_module(lo, hi) != nullptr;
+          if (moved) (void)hipSetDevice(start_dev);
+          if (!loaded) break;
       }
-      hipModule_t mod = ctx.load_module(lo, hi);
-      if (prev_dev >= 0) (void)hipSetDevice(prev_dev);
-      if (!mod) {
+      if (!loaded) {
           // An archive can hold an image this build cannot load at all: older
           // captures recorded a code object's bytes after the runtime had freed
           // the buffer, so the archive holds whatever the allocator put there

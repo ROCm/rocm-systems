@@ -703,9 +703,11 @@ from the header, which nothing bounds. It records the code object HIP extracted
 from the bundle for the current device, bounded by the ELF's own headers since the
 size HIP knows is the one the bundle entry declares, and the register event names
 that code object (blob hash set, blob size 0). Replay pre-loads every code object,
-so kernels and `__device__` globals resolve as they do for module loads; one a
-registration named goes on the device current on the registering thread at that
-event, which on a host with GPUs of more than one kind may be the only one it loads on. Archives from before this
+so kernels and `__device__` globals resolve as they do for module loads. HIP builds
+a loaded code object for one device, so replay keeps a module per code object and
+device, and pre-loads each code object on every device a registration naming it, a
+module load or a kernel launch used it on, the device current on that thread at
+that event; on a host with GPUs of more than one kind it may load on no other. Archives from before this
 change still carry a blob, which playback loads with `hipModuleLoadData`.
 
 ## Multi-Threaded Capture

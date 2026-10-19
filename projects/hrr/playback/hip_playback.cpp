@@ -339,11 +339,21 @@ const void* PlaybackContext::load_code_object(uint64_t hash_lo, uint64_t hash_hi
     return cache_file(key, co_path(archive_dir, hash_lo, hash_hi), sz_out, "code object cache");
 }
 
+// The device a module loaded now belongs to, and the suffix its co_modules key
+// carries: HIP builds the module for the current device only, so a code object
+// used on two devices is two modules.
+static std::string device_suffix() {
+    int dev = 0;
+    if (hipGetDevice(&dev) != hipSuccess) dev = 0;
+    return "@" + std::to_string(dev);
+}
+
 hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {
     std::string hex = hrr::hash_hex(hash_lo, hash_hi);
+    const std::string key = hex + device_suffix();
     {
         std::shared_lock lk(map_mutex);
-        auto it = co_modules.find(hex);
+        auto it = co_modules.find(key);
         if (it != co_modules.end()) return it->second;
     }
 
@@ -376,7 +386,7 @@ hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {
     // Re-acquire with exclusive lock; if a concurrent thread already loaded
     // this module, discard ours to avoid a double-load leak.
     std::unique_lock lk(map_mutex);
-    auto [it, inserted] = co_modules.emplace(hex, mod);
+    auto [it, inserted] = co_modules.emplace(key, mod);
     if (!inserted) {
         (void)hipModuleUnload(mod);
         return it->second;
@@ -603,6 +613,9 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
     // code objects, so caching/searching by name alone binds every "triton_"
     // launch to one arbitrary kernel and faults (HIP 719 / VM fault). The recorded
     // code-object hash disambiguates which code object this launch came from.
+    // A function belongs to the module of one device, so the key names the
+    // current device as well.
+    const std::string dev_sfx = device_suffix();
     std::string cache_key = kernel_name;
     if (co_hash_lo || co_hash_hi) {
         char hpfx[34];
@@ -611,6 +624,7 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
         cache_key.assign(hpfx);
         cache_key += kernel_name;
     }
+    cache_key += dev_sfx;
 
     if (!func) {
         std::shared_lock lk(ctx.map_mutex);
@@ -636,7 +650,10 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
                 func = nullptr;
             }
             if (!func) {
-                for (auto& [hex, mod] : ctx.co_modules) {
+                for (auto& [key, mod] : ctx.co_modules) {
+                    if (key.size() < dev_sfx.size() ||
+                        key.compare(key.size() - dev_sfx.size(), dev_sfx.size(), dev_sfx) != 0)
+                        continue;
                     if (hipModuleGetFunction(&func, mod, kernel_name.c_str()) == hipSuccess
                         && func) break;
                     func = nullptr;

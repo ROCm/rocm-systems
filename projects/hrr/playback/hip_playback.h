@@ -184,7 +184,8 @@ struct PlaybackContext {
     };
     std::unordered_map<uint64_t, SymbolEntry>    symbol_map;
 
-    // Code-object modules loaded by hash (not by recorded module handle)
+    // Code-object modules loaded by hash (not by recorded module handle), keyed
+    // "<hash>@<device>": HIP builds a loaded module for the current device only.
     std::unordered_map<std::string, hipModule_t> co_modules;
 
     // Fat binaries that carry no device code for the replay GPU, by blob hash.
@@ -866,7 +867,7 @@ struct PlaybackContext {
     // Read `path` into blob_cache_ under `key`, charged to the host budget.
     const void* cache_file(const std::string& key, const std::string& path,
                            size_t* sz_out, const char* what) const;
-    // Load a code object and cache the resulting hipModule_t
+    // Load a code object on the current device and cache the resulting hipModule_t
     hipModule_t load_module(uint64_t hash_lo, uint64_t hash_hi);
 
     // Resolve a playback-time replacement function for a recorded kernel name.

@@ -45,6 +45,10 @@
 // Exported by libamdhip64 and called by the module constructor clang emits for
 // every HIP translation unit; no header declares it.
 extern "C" void** __hipRegisterFatBinary(const void* data);
+extern "C" void __hipRegisterFunction(void** modules, const void* hostFunction,
+                                      char* deviceFunction, const char* deviceName,
+                                      unsigned int threadLimit, uint3* tid, uint3* bid,
+                                      dim3* blockDim, dim3* gridDim, int* wSize);
 
 #define HRR_HIPRTC_CHECK(expr)                                                 \
   do {                                                                         \
@@ -205,7 +209,7 @@ constexpr uint64_t kPreInitCompressedTag    = 0x4852524650524531ull;
 constexpr char     kLiveKernel[]            = "hrr_fatbin_live_probe";
 constexpr char     kFarEndKernel[]          = "hrr_fatbin_far_end_probe";
 constexpr char     kOversizedKernel[]       = "hrr_fatbin_oversized_probe";
-// Registered with device 1 current, to replay on that device.
+// Registered with device 1 current, launched on device 0.
 constexpr char     kDevice1Kernel[]         = "hrr_fatbin_device1_probe";
 constexpr char     kLiveForeignMarker[]     = "HRR fatbin live foreign";
 constexpr uint64_t kLiveCompressedTag       = 0x485252464C495631ull;
@@ -414,10 +418,11 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
 }
 
 // ===========================================================================
-// Which device replay loads a registration's code object on. HIP loaded it on
+// Which devices replay loads a registration's code object on. HIP loaded it on
 // the device current when the fat binary was registered, and on a host with
 // GPUs of more than one kind it may load on no other. The workload registers
-// with device 1 current, then makes device 0 current again.
+// with device 1 current, then launches the kernel on device 0, which on GPUs of
+// one kind uses the same code object.
 // ===========================================================================
 TEST_CASE("Unit_HRR_FatBinLoadDevice_Direct", "[.][hrr-direct]") {
   int n = 0;
@@ -428,14 +433,28 @@ TEST_CASE("Unit_HRR_FatBinLoadDevice_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipGetDeviceProperties(&prop, 1));
   const std::vector<uint8_t> co = compile_code_object(kDevice1Kernel);
   const std::string target = std::string(kTargetPrefix) + prop.gcnArchName;
-  REQUIRE(register_fat_binary(pin(valid_bundle(target, co))) != nullptr);
+  void** handle = register_fat_binary(pin(valid_bundle(target, co)));
+  REQUIRE(handle != nullptr);
+  // The host stub clang would emit: only its address matters.
+  static const char stub = 0;
+  __hipRegisterFunction(handle, &stub, const_cast<char*>(kDevice1Kernel), kDevice1Kernel,
+                        static_cast<unsigned>(-1), nullptr, nullptr, nullptr, nullptr,
+                        nullptr);
   HRR_HIP_CHECK(hipSetDevice(0));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, sizeof(int)));
+  HRR_HIP_CHECK(hipMemset(out, 0, sizeof(int)));
+  void* args[] = {&out};
+  HRR_HIP_CHECK(hipLaunchKernel(&stub, dim3(1), dim3(1), args, 0, nullptr));
+  int host = 0;
+  HRR_HIP_CHECK(hipMemcpy(&host, out, sizeof(int), hipMemcpyDeviceToHost));
+  CHECK(host == 1);
+  HRR_HIP_CHECK(hipFree(out));
 }
 
 // Replay pre-loads every code object before the first event, so it does not
-// replay the switch to device 1 first: it has to load this one there itself.
-// Run on GPUs of one kind, this shows where the load goes, not that a load
-// elsewhere fails.
+// replay the switch to device 1 first: it has to load this one there itself,
+// and on device 0 too, where the launch runs and a module on device 1 cannot.
 HRR_TEST_CASE(Unit_HRR_FatBinLoadDevice) {
   int n = 0;
   if (hipGetDeviceCount(&n) != hipSuccess || n < 2) HRR_SKIP("needs two GPUs");
@@ -461,6 +480,14 @@ HRR_TEST_CASE(Unit_HRR_FatBinLoadDevice) {
   }
   INFO("Code object: " << hex);
   REQUIRE(arc.code_objects.count(hex) == 1);
+  // The launch on device 0 names the code object the registration named.
+  size_t launches = 0;
+  for (const auto& ev : arc.events) {
+    if (!ev.kernel_launch || ev.kernel_launch->kernel_name != kDevice1Kernel) continue;
+    ++launches;
+    CHECK(hrr::hash_hex(ev.kernel_launch->co_hash_lo, ev.kernel_launch->co_hash_hi) == hex);
+  }
+  REQUIRE(launches == 1);
 
   auto [rc, out] = hrr_playback_merged(archive);
   INFO("Replay:\n" << out);
