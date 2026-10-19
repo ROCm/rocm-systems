@@ -1080,6 +1080,35 @@ HRR_TEST_CASE(Unit_HRR_MetadataManifest) {
   CHECK(pci.empty());
   CHECK(uuid.empty());
   CHECK(luid.empty());
+
+  // The workload hands hipChooseDevice the properties of device 0: the same
+  // identifiers are blanked in the copy events.bin keeps, and the rest stays.
+  uint16_t version = 0;
+  FILE* f = hrr::open_record_stream((archive_path / "events.bin").string(), HRR_MAGIC,
+                                    HRR_VERSION, &version);
+  REQUIRE(f != nullptr);
+  std::vector<uint8_t> raw;
+  int choose_records = 0;
+  while (hrr::read_raw_record(f, raw) == hrr::RecordStatus::Ok) {
+    const auto* hdr = reinterpret_cast<const hrr_event_header*>(raw.data());
+    if (hdr->event_type != HRR_API_HIPCHOOSEDEVICE) continue;
+    REQUIRE(raw.size() >= sizeof(hrr_args_hipChooseDevice));
+    const auto* a = reinterpret_cast<const hrr_args_hipChooseDevice*>(raw.data());
+    REQUIRE(a->prop_present == 1);
+    hipDeviceProp_t prop;
+    std::memcpy(&prop, a->prop_bytes, sizeof(prop));
+    ++choose_records;
+    CHECK(std::string(prop.name).size() > 0);
+    CHECK(prop.multiProcessorCount > 0);
+    CHECK(std::all_of(std::begin(prop.uuid.bytes), std::end(prop.uuid.bytes),
+                      [](char c) { return c == 0; }));
+    CHECK(std::all_of(std::begin(prop.luid), std::end(prop.luid), [](char c) { return c == 0; }));
+    CHECK(prop.pciDomainID == 0);
+    CHECK(prop.pciBusID == 0);
+    CHECK(prop.pciDeviceID == 0);
+  }
+  fclose(f);
+  CHECK(choose_records == 1);
 }
 
 HRR_TEST_CASE(Unit_HRR_StreamAdvancedRoundtrip) {

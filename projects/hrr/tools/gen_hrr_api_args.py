@@ -1160,6 +1160,9 @@ class Deref:
     # the bytes field zero and records only whether the pointer was non-null.
     # The field keeps its size, so archives from before still read.
     capability: bool = False
+    # Members of the pointee that name the individual machine and that the API
+    # never reads: capture zeroes them in its copy, so replay passes zeros.
+    blank_members: Tuple[str, ...] = ()
 
     @property
     def is_array(self) -> bool:
@@ -1261,12 +1264,15 @@ DEREF_FIELDS: Dict[str, List[Deref]] = {
     ],
     # The device properties being matched against are the whole question these
     # two ask. 1472 bytes is a large event, but a program calls hipChooseDevice
-    # once at startup, not in a loop.
+    # once at startup, not in a loop. CLR matches on numeric limits only, so
+    # the GPU's UUID, LUID and PCI location are blanked, as in the manifest.
     "hipChooseDevice": [
-        Deref("prop", "hipDeviceProp_t", 1472),
+        Deref("prop", "hipDeviceProp_t", 1472,
+              blank_members=("uuid", "luid", "pciDomainID", "pciBusID", "pciDeviceID")),
     ],
     "hipChooseDeviceR0000": [
-        Deref("properties", "hipDeviceProp_tR0000", 792),
+        Deref("properties", "hipDeviceProp_tR0000", 792,
+              blank_members=("pciDomainID", "pciBusID", "pciDeviceID")),
     ],
     # The format decides the answer: the maximum width depends on the element
     # size the caller asked about.
@@ -2380,6 +2386,7 @@ _CPP_PREAMBLE = """\
 #include "utils/debug.hpp"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -2578,6 +2585,9 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
         else:
             lines.append(f"    if ({d.param}) {{")
             lines.append(f"      std::memcpy(a.{d.bytes_field}, {d.param}, sizeof({d.ctype}));")
+            for m in d.blank_members:
+                lines.append(f"      std::memset(a.{d.bytes_field} + offsetof({d.ctype}, {m}), 0,"
+                             f" sizeof({d.param}->{m}));")
             lines.append(f"      a.{d.present_field} = 1;")
             lines.append(f"    }}")
 
