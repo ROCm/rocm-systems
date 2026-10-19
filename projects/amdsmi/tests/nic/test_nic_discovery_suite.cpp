@@ -26,7 +26,7 @@
 #include "smi_nic_log.h"
 #include "smi_nic_subsystem.h"
 #include "smi_nic_system.h"
-#include "vendors/amd/ifoe_subsystem.h"
+#include "vendors/amd/ualoe_subsystem.h"
 #include "vendors/broadcom/broadcom_subsystem.h"
 #include "vendors/pensando/pensando_subsystem.h"
 
@@ -544,28 +544,28 @@ int main() {
           has_one_novpd_nic && !novpd_nics[0]->is_vpd_readable());
   }
 
-  // ---- IFoE discovery: an AMD fabric endpoint (0x1022:0x1747) ----
+  // ---- UALoE discovery: an AMD fabric endpoint (0x1022:0x1747) ----
   // The endpoint is a function on a GPU package, with no netdev, no vpd and no
   // hwmon, so its PCI ids are the only thing that identifies it.
   {
-    fs::path ifoe_root = make_tmp_root();
-    TmpRootGuard_t ifoe_root_guard(ifoe_root);
-    make_fake_pci_device(ifoe_root, "0001:01:00.1", "0x1022", "0x1747");
+    fs::path ualoe_root = make_tmp_root();
+    TmpRootGuard_t ualoe_root_guard(ualoe_root);
+    make_fake_pci_device(ualoe_root, "0001:01:00.1", "0x1022", "0x1747");
     // Same vendor, a different function on the package -> not an endpoint.
-    make_fake_pci_device(ifoe_root, "0001:01:00.0", "0x1022", "0x14a0");
+    make_fake_pci_device(ualoe_root, "0001:01:00.0", "0x1022", "0x14a0");
     // The endpoint device id under another vendor -> ignore.
-    make_fake_pci_device(ifoe_root, "0001:02:00.1", "0x1dd8", "0x1747");
+    make_fake_pci_device(ualoe_root, "0001:02:00.1", "0x1dd8", "0x1747");
 
-    SmiNicSubsystemIfoe ifoe_disc;
-    ifoe_disc.discover((ifoe_root / "sys/bus/pci/devices").string(),
-                       (ifoe_root / "sys/class/net").string(), nullptr);
-    const auto& inics = ifoe_disc.get_nics();
-    const bool has_one_ifoe = (inics.size() == 1);
-    check("ifoe discover finds exactly one fabric endpoint", has_one_ifoe);
-    check("ifoe endpoint bdf correct", has_one_ifoe && (inics[0]->bdf() == "0001:01:00.1"));
-    check("ifoe endpoint vendor is AMD", has_one_ifoe && (inics[0]->vendor() == NicVendor::AMD));
-    check("ifoe endpoint product is AINIC",
-          has_one_ifoe && (inics[0]->product() == NicProduct::AINIC));
+    SmiNicSubsystemUALoE ualoe_disc;
+    ualoe_disc.discover((ualoe_root / "sys/bus/pci/devices").string(),
+                        (ualoe_root / "sys/class/net").string(), nullptr);
+    const auto& inics = ualoe_disc.get_nics();
+    const bool has_one_ualoe = (inics.size() == 1);
+    check("ualoe discover finds exactly one fabric endpoint", has_one_ualoe);
+    check("ualoe endpoint bdf correct", has_one_ualoe && (inics[0]->bdf() == "0001:01:00.1"));
+    check("ualoe endpoint vendor is AMD", has_one_ualoe && (inics[0]->vendor() == NicVendor::AMD));
+    check("ualoe endpoint product is AINIC",
+          has_one_ualoe && (inics[0]->product() == NicProduct::AINIC));
   }
 
   // ---- a fabric endpoint survives the AINIC-only filter ----
@@ -584,24 +584,24 @@ int main() {
     check("fabric endpoint survives ainic_only", filter_sys.get_nics().size() == 1);
   }
 
-  // ---- IFoE is_driver_loaded maps Main to the ifoe PCI driver dir ----
+  // ---- UALoE is_driver_loaded maps Main to the ifoe PCI driver dir ----
   // There is no RDMA auxiliary driver for a fabric endpoint, so that role must
   // stay negative rather than aliasing onto the Main path.
   {
-    fs::path ifoe_drv_root = make_tmp_root();
-    TmpRootGuard_t ifoe_drv_root_guard(ifoe_drv_root);
-    const std::string ifoe_bdf = "0001:01:00.1";
-    fs::path ifoe_dir = ifoe_drv_root / "sys/bus/pci/drivers/ifoe";
-    fs::create_directories(ifoe_dir);
-    fs::create_symlink("../../../devices/pci/" + ifoe_bdf, ifoe_dir / ifoe_bdf);
+    fs::path ualoe_drv_root = make_tmp_root();
+    TmpRootGuard_t ualoe_drv_root_guard(ualoe_drv_root);
+    const std::string ualoe_bdf = "0001:01:00.1";
+    fs::path ualoe_dir = ualoe_drv_root / "sys/bus/pci/drivers/ifoe";
+    fs::create_directories(ualoe_dir);
+    fs::create_symlink("../../../devices/pci/" + ualoe_bdf, ualoe_dir / ualoe_bdf);
 
-    SmiNicSubsystemIfoe ifoe_drv(ifoe_drv_root.string());
-    SmiNicSubsystem& ifoe_sub = ifoe_drv;
-    check("ifoe Main driver detected", ifoe_sub.is_driver_loaded(ifoe_bdf, DriverType::Main));
-    check("ifoe Main driver absent for other bdf",
-          !ifoe_sub.is_driver_loaded("0001:01:00.0", DriverType::Main));
-    check("ifoe Rdma driver absent (no rdma aux driver)",
-          !ifoe_sub.is_driver_loaded(ifoe_bdf, DriverType::Rdma));
+    SmiNicSubsystemUALoE ualoe_drv(ualoe_drv_root.string());
+    SmiNicSubsystem& ualoe_sub = ualoe_drv;
+    check("ualoe Main driver detected", ualoe_sub.is_driver_loaded(ualoe_bdf, DriverType::Main));
+    check("ualoe Main driver absent for other bdf",
+          !ualoe_sub.is_driver_loaded("0001:01:00.0", DriverType::Main));
+    check("ualoe Rdma driver absent (no rdma aux driver)",
+          !ualoe_sub.is_driver_loaded(ualoe_bdf, DriverType::Rdma));
   }
 
   // ---- hwmon resolves through the port, not the bridge ----
@@ -778,7 +778,7 @@ int main() {
 
   // ---- a NIC resolves to the plugin that discovered it, not the first plugin
   //      reporting its vendor ----
-  // Pensando and IFoE are both AMD, so keying the lookup on the vendor enum
+  // Pensando and UALoE are both AMD, so keying the lookup on the vendor enum
   // hands every AMD query to the Pensando plugin and its ionic driver path.
   {
     fs::path own_root = make_tmp_root();
@@ -894,40 +894,41 @@ int main() {
 
     // A fabric endpoint has no host port, so the ifoe.cmd.N nodes are the only
     // thing separating MODE: fwctl-only from MODE: unknown on the row.
-    fs::path ifoe_root = make_tmp_root();
-    TmpRootGuard_t ifoe_root_guard(ifoe_root);
-    fs::path with_cmd = ifoe_root / "0001:01:00.1";
+    fs::path ualoe_root = make_tmp_root();
+    TmpRootGuard_t ualoe_root_guard(ualoe_root);
+    fs::path with_cmd = ualoe_root / "0001:01:00.1";
     fs::create_directories(with_cmd);
     std::ofstream(with_cmd / "mcdi_logging") << "0\n";
     std::ofstream(with_cmd / "ifoe.cfg.0") << "\n";
     std::ofstream(with_cmd / "ifoe.cmd.0") << "\n";
 
-    fs::path without_cmd = ifoe_root / "0002:01:00.1";
+    fs::path without_cmd = ualoe_root / "0002:01:00.1";
     fs::create_directories(without_cmd);
     std::ofstream(without_cmd / "mcdi_logging") << "0\n";
     std::ofstream(without_cmd / "ifoe.cfg.0") << "\n";
 
-    SmiNicIfoe ifoe("0001:01:00.1", with_cmd.string());
-    check("ifoe endpoint capabilities == FWCTL", ifoe.capabilities() == SMI_NIC_CAP_FWCTL);
-    check("ifoe endpoint kind is UALOE", ifoe.kind() == SMI_NIC_KIND_UALOE);
+    SmiNicUALoE ualoe("0001:01:00.1", with_cmd.string());
+    check("ualoe endpoint capabilities == FWCTL", ualoe.capabilities() == SMI_NIC_CAP_FWCTL);
+    check("ualoe endpoint kind is UALOE", ualoe.kind() == SMI_NIC_KIND_UALOE);
 
-    SmiNicIfoe ifoe_no_cmd("0002:01:00.1", without_cmd.string());
-    check("ifoe endpoint without a command node lacks FWCTL",
-          (ifoe_no_cmd.capabilities() & SMI_NIC_CAP_FWCTL) == 0);
-    check("ifoe endpoint kind does not depend on FWCTL", ifoe_no_cmd.kind() == SMI_NIC_KIND_UALOE);
+    SmiNicUALoE ualoe_no_cmd("0002:01:00.1", without_cmd.string());
+    check("ualoe endpoint without a command node lacks FWCTL",
+          (ualoe_no_cmd.capabilities() & SMI_NIC_CAP_FWCTL) == 0);
+    check("ualoe endpoint kind does not depend on FWCTL",
+          ualoe_no_cmd.kind() == SMI_NIC_KIND_UALOE);
 
-    SmiNicIfoe ifoe_no_path("0003:01:00.1", "");
-    check("ifoe endpoint with no sysfs path lacks FWCTL",
-          (ifoe_no_path.capabilities() & SMI_NIC_CAP_FWCTL) == 0);
-    check("ifoe endpoint has zero ports", ifoe.nic_ports_num() == 0);
-    check("ifoe endpoint port type is Fabric", ifoe.port_type() == "Fabric");
+    SmiNicUALoE ualoe_no_path("0003:01:00.1", "");
+    check("ualoe endpoint with no sysfs path lacks FWCTL",
+          (ualoe_no_path.capabilities() & SMI_NIC_CAP_FWCTL) == 0);
+    check("ualoe endpoint has zero ports", ualoe.nic_ports_num() == 0);
+    check("ualoe endpoint port type is Fabric", ualoe.port_type() == "Fabric");
 
     // Identity falls back to port 0's VPD image. A fabric endpoint has no port,
     // so this is the only coverage of that empty case; without it the fallback
     // indexes an empty vector on every portless device.
-    check("ifoe endpoint product name is absent", !ifoe.product_name().has_value());
-    check("ifoe endpoint part number is absent", !ifoe.part_number().has_value());
-    check("ifoe endpoint serial number is absent", !ifoe.serial_number().has_value());
+    check("ualoe endpoint product name is absent", !ualoe.product_name().has_value());
+    check("ualoe endpoint part number is absent", !ualoe.part_number().has_value());
+    check("ualoe endpoint serial number is absent", !ualoe.serial_number().has_value());
   }
 
   // ---- The four identity accessors share one VPD read per NIC ----

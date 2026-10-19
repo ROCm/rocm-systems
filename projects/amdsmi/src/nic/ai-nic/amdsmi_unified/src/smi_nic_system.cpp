@@ -66,7 +66,7 @@ bool SmiNicSystem::is_driver_loaded(const std::string& bdf, DriverType driver_ty
 
   // Resolve to the plugin that discovered this NIC. Keying on the vendor enum
   // instead would hand the query to the first plugin reporting that vendor, so
-  // any later plugin sharing it (IFoE behind Pensando, both AMD) is shadowed
+  // any later plugin sharing it (UALoE behind Pensando, both AMD) is shadowed
   // and answers against the wrong driver path.
   for (const auto& subsystem : subsystems_) {
     for (const auto& owned : subsystem->get_nics()) {

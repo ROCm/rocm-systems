@@ -334,7 +334,7 @@ static void test_no_table_yields_empty_map() {
   auto transport = std::make_shared<FakeTransport>();
   transport->stats = {true, {{"tx_packets"}, {1}}, 0};
 
-  auto port = make_port(transport, nullptr);  // IFoE shape: no ports, no table
+  auto port = make_port(transport, nullptr);  // UALoE shape: no ports, no table
   port.collect_vendor_statistics();
   auto result = port.get_vendor_stats_map(StatTier_t::Extended);
 

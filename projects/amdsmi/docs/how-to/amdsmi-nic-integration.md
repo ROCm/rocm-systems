@@ -151,7 +151,7 @@ enumerate one vendor's hardware.
 
 1. **One registration point.** ``make_default_vendor_plugins()`` (in
    ``src/vendors/vendor_registry.{h,cpp}``) returns one plugin instance per
-   supported vendor, in this order: Pensando (AINIC), IFoE (UALoE endpoint),
+   supported vendor, in this order: Pensando (AINIC), UALoE endpoint,
    Broadcom. Adding a partner is a new ``src/vendors/<name>/`` subdirectory plus
    one ``push_back`` line in this function; nothing else in the core discovery path
    changes.
@@ -181,14 +181,14 @@ enumerate one vendor's hardware.
    reimplement sysfs PCI parsing or driver-binding checks. ``DriverType`` names a
    role (``Main`` for the netdev/PCI driver, ``Rdma`` for the RDMA auxiliary
    driver), and each plugin maps it to its own driver path. ``vendor()`` is
-   descriptive only: two plugins can report the same vendor (IFoE and Pensando are
+   descriptive only: two plugins can report the same vendor (UALoE and Pensando are
    both ``AMD``), so it never routes a query.
 
 3. **Discovery is id-match based.** ``SmiNicSystem::discover_nics()``
    (``src/smi_nic_system.cpp``) walks ``/sys/bus/pci/devices`` and ``/sys/class/net``
    and calls each registered plugin's ``discover()``. A plugin scans the PCI path,
    uses ``read_pci_ids()`` to match its own PCI ids, builds a ``SmiNic`` for each
-   match, then associates network ports with it (an IFoE endpoint has none). The system
+   match, then associates network ports with it (a UALoE endpoint has none). The system
    aggregates every plugin's ``get_nics()`` into one BDF-sorted list.
 
 4. **Ports reuse the shared ethtool transport.** ``SmiNicSystem`` creates one
@@ -250,8 +250,8 @@ and statistics on each accepted port. ``discover_mgmt_function()`` finds the
 ``MGMT_ID`` function under the same bridge. A ``1dd8`` PCI bridge that is neither
 listed nor ``MID_BRIDGE_ID`` is logged at debug level and not added.
 
-The other two plugins follow the same interface: IFoE
-(``src/vendors/amd/ifoe_subsystem.{h,cpp}``) matches PCI ids ``1022:1747``, has no
+The other two plugins follow the same interface: UALoE
+(``src/vendors/amd/ualoe_subsystem.{h,cpp}``) matches PCI ids ``1022:1747``, has no
 ports and no netdev, and reports ``FWCTL`` when an ``ifoe.cmd.*`` entry exists;
 Broadcom (``src/vendors/broadcom/broadcom_subsystem.{h,cpp}``) matches netdevs
 whose PCI function is bound to ``bnxt_en``.
@@ -264,7 +264,7 @@ flowchart LR
     NicLib --> System[SmiNicSystem<br/>discover_nics]
     System --> Registry[make_default_vendor_plugins]
     Registry --> Pensando[Pensando plugin<br/>src/vendors/pensando/]
-    Registry --> Ifoe[IFoE plugin<br/>src/vendors/amd/]
+    Registry --> UALoE[UALoE plugin<br/>src/vendors/amd/]
     Registry --> Broadcom[Broadcom plugin<br/>src/vendors/broadcom/]
     Registry --> VendorX[Other vendor plugin<br/>src/vendors/&lt;name&gt;/]
     Pensando --> Transport[Shared ethtool transport<br/>ioctl / netlink]
@@ -1107,7 +1107,7 @@ projects/amdsmi/
 │               │   ├── pensando_subsystem.{h,cpp}  # Reference vendor plugin (registered)
 │               │   └── pensando_stats.{h,cpp}      # kPensandoStatTable: counter names by tier
 │               ├── amd/
-│               │   └── ifoe_subsystem.{h,cpp}      # IFoE (UALoE) endpoint plugin (registered)
+│               │   └── ualoe_subsystem.{h,cpp}     # UALoE endpoint plugin (registered)
 │               └── broadcom/
 │                   ├── broadcom_subsystem.{h,cpp}  # Broadcom plugin (compiled and registered)
 │                   └── broadcom_stats.{h,cpp}      # kBroadcomStatTable
