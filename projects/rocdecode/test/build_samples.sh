@@ -29,7 +29,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$SCRIPT_DIR/.."
-JOBS="${1:-$(nproc)}"
+# Default the job count to the core count, but don't let a missing nproc abort the
+# script under `set -e`: fall back to Windows' NUMBER_OF_PROCESSORS, then to 4. An
+# explicit first arg always wins.
+JOBS="${1:-$(nproc 2>/dev/null || echo "${NUMBER_OF_PROCESSORS:-4}")}"
 
 # Under Git Bash on Windows, cmake auto-selects the MSVC multi-config (Visual
 # Studio) generator, so the build step needs an explicit --config Release; the
