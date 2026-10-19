@@ -87,10 +87,6 @@ typedef struct abce_ring_config_t {
   // control pointers when queue indices and publication are APIs.
   abce_ring_queue_ops_t queue_ops;
 
-  // Optional CPU/GPU-visible producer state. When null, the ring uses private
-  // host-only state. Shared host/device submission requires this.
-  abce_shared_ring_control_t* shared_control;
-
   // Pad every submission up to at least this many bytes (0 = no minimum). The
   // pad tail is left as zero DWORDs, which the engine interprets as NOPs.
   size_t min_submission_size;
@@ -148,8 +144,8 @@ typedef struct abce_ring_t {
   abce_doorbell_notify_fn_t notify;
   void* notify_user_data;
 
-  abce_shared_ring_control_t local_control;
-  abce_shared_ring_control_t* control;
+  // Host threads are the only producers, so the cursors live here.
+  abce_ring_control_t control;
 } abce_ring_t;
 
 // Orders every earlier store ahead of the doorbell, write-combined ones
@@ -226,11 +222,9 @@ static inline void abce_ring_initialize(const abce_ring_config_t* config,
   // the first acquire hand out bytes the engine still owns, corrupting the ring,
   // so start the cursors at the queue's write pointer.
   const uint64_t initial_write_index = abce_ring_load_write_index(out_ring);
-  out_ring->control =
-      out_ring->config.shared_control ? out_ring->config.shared_control : &out_ring->local_control;
-  abce_ring_atomic_store(&out_ring->control->reserve_cursor, initial_write_index);
-  abce_ring_atomic_store(&out_ring->control->commit_cursor, initial_write_index);
-  abce_ring_atomic_store(&out_ring->control->max_write_index, initial_write_index);
+  abce_ring_cursor_store(&out_ring->control.reserve_cursor, initial_write_index);
+  abce_ring_cursor_store(&out_ring->control.commit_cursor, initial_write_index);
+  abce_ring_cursor_store(&out_ring->control.max_write_index, initial_write_index);
 }
 
 // Total reservation size for a payload of |payload_bytes|, after applying the
@@ -269,7 +263,7 @@ static inline abce_status_t abce_ring_publish_padding_callback(
 static inline void abce_ring_publish_callback(void* user_data, uint64_t new_write_index) {
   abce_ring_t* ring = (abce_ring_t*)user_data;
   abce_ring_publish_write_index(ring, new_write_index);
-  abce_ring_atomic_store_release(&ring->control->max_write_index, new_write_index);
+  abce_ring_cursor_store_release(&ring->control.max_write_index, new_write_index);
   if (ring->notify) ring->notify(ring->notify_user_data, new_write_index);
 }
 
@@ -300,7 +294,8 @@ static inline abce_status_t abce_ring_acquire(abce_ring_t* ring, uint32_t reserv
   *out_buffer = NULL;
 
   abce_ring_producer_t producer;
-  producer.reserve_cursor = &ring->control->reserve_cursor;
+  producer.reserve_cursor = &ring->control.reserve_cursor;
+  producer.cached_read_index = NULL;
   producer.size = ring->config.size;
   producer.load_read_index = abce_ring_load_read_index_callback;
   producer.publish_padding = abce_ring_publish_padding_callback;
@@ -323,7 +318,7 @@ static inline abce_status_t abce_ring_acquire(abce_ring_t* ring, uint32_t reserv
 static inline abce_status_t abce_ring_release(abce_ring_t* ring,
                                               const abce_ring_reservation_t* reservation) {
   abce_ring_publisher_t publisher;
-  publisher.commit_cursor = &ring->control->commit_cursor;
+  publisher.commit_cursor = &ring->control.commit_cursor;
   publisher.publish = abce_ring_publish_callback;
   publisher.wait = abce_ring_commit_wait_callback;
   publisher.user_data = ring;
@@ -339,8 +334,7 @@ static inline abce_status_t abce_ring_cancel(abce_ring_t* ring,
 // Waits until the engine has consumed everything published when this call
 // snapshots the high-water mark.
 static inline abce_status_t abce_ring_drain(const abce_ring_t* ring) {
-  if (!ring->control) return ABCE_STATUS_INVALID_ARGUMENT;
-  const uint64_t target = abce_ring_atomic_load_acquire(&ring->control->max_write_index);
+  const uint64_t target = abce_ring_cursor_load_acquire(&ring->control.max_write_index);
   while (abce_ring_load_read_index(ring) < target) {
     abce_ring_pause();
   }

@@ -74,6 +74,9 @@ groups:
     - rocrtstFunc.GroupMemoryAllocationTest
     - rocrtstFunc.MemoryAllocateAndFreeTest
     - rocrtstFunc.MemoryAllocateContiguousTest
+    - rocrtstFunc.Memory_Fragment_Overlap_Test
+    - rocrtstFunc.Memory_Fragment_ZeroInit_Test
+    - rocrtstFunc.Memory_Fragment_Coherence_Test
     - rocrtstFunc.Concurrent_Init_Test
     - rocrtstFunc.Concurrent_Init_Shutdown_Test
     - rocrtstFunc.Concurrent_Shutdown
@@ -111,6 +114,14 @@ groups:
     - rocrtstFunc.GL2_PersistingCache_SetAndReadBack
     - rocrtstFunc.GL2_PersistingCache_NegativeInvalidSize
     - rocrtstFunc.GL2_PersistingCache_NegativeCPUAgent
+
+  SignalBatch:
+    - rocrtstFunc.Signal_Batch_Host_Pool
+    - rocrtstFunc.Signal_Batch_Device_Pools
+    - rocrtstFunc.Signal_Batch_Async_Copy_Completion
+    - rocrtstFunc.Signal_Batch_Negative
+    - rocrtstFunc.Signal_Batch_Agent_Queries
+    - rocrtstFunc.Signal_Handle_Hints
 
   Performance:
     - rocrtstPerf.Memory_Async_Copy_On_Engine

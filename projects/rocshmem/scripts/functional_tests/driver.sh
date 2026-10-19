@@ -428,7 +428,7 @@ ExecTest_SLR() {
     fi
   fi
 
-  unset ROCSHMEM_MAX_NUM_CONTEXTS
+  # Do not unset ROCSHMEM_MAX_NUM_CONTEXTS here — see ExecTest_MPI comment.
 }
 
 # MPI implementation (original ExecTest)
@@ -572,8 +572,10 @@ ExecTest_MPI() {
     fi
   fi
 
-  unset ROCSHMEM_MAX_NUM_CONTEXTS
-  unset ROCSHMEM_MAX_NUM_HOST_CONTEXTS
+  # Do not unset ROCSHMEM_MAX_NUM_CONTEXTS or ROCSHMEM_MAX_NUM_HOST_CONTEXTS
+  # here — the caller (TestTiles etc.) manages these with export/unset around
+  # groups of tests. Unsetting inside ExecTest_MPI caused the second test in
+  # a group to always fall back to NUM_WG instead of the caller's export.
 }
 
 TestRMAPut() {

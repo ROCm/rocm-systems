@@ -474,6 +474,12 @@ add_test(
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_test(
+        NAME CorpusRunnerUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/corpus/test-run-corpus-tests.py -v
+    )
+    add_test(
         NAME VfioGuestRunUnitTest
         COMMAND
             ${Python3_EXECUTABLE} -B
@@ -593,6 +599,7 @@ add_executable(
     cdna5_cluster_test.cpp
     cdna5_dispatch_memory_test.cpp
     cdna5_execution_test.cpp
+    numeric_encoding_regression_test.cpp
     cdna5_gfx1251_simulation_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
@@ -607,6 +614,9 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_memory_snapshot_test.cpp
+    ds_gws_test.cpp
+    buffer_lds_transfer_test.cpp
+    scalar_buffer_store_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
     l2_cache_test.cpp
@@ -630,6 +640,7 @@ add_executable(
     buffer_operand_test.cpp
     buffer_descriptor_vcc_test.cpp
     buffer_format_test.cpp
+    image_access_test.cpp
     image_resource_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
@@ -637,6 +648,13 @@ add_executable(
     scalar_cache_policy_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
+    denormal_test.cpp
+    floating_operation_test.cpp
+    input_denormal_test.cpp
+    minmax_test.cpp
+    output_denormal_test.cpp
+    output_modifier_test.cpp
+    source_modifier_test.cpp
     amdgpu_elf_test_support.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
@@ -658,6 +676,10 @@ add_executable(
     dbi/dbi_arg_sim_test.cpp
     dbi/dbi_mask_sim_test.cpp
     dbi/dbi_entry_prologue_sim_test.cpp
+    dbi/dbi_sim_memory_test.cpp
+    dbi/log_record_probe_test.cpp
+    dbi/scalar_builders_test.cpp
+    dbi/dbi_log_record_sim_test.cpp
     dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
     code/relocation_function_table_test.cpp
@@ -688,6 +710,7 @@ add_executable(
     gfx12_dot_test.cpp
     packed_wmma_test.cpp
     atomic_semantics_and_decode_test.cpp
+    scalar_atomic_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
@@ -762,13 +785,16 @@ add_executable(
     simd_correctness/vop3p_mov_b32_simd_correctness_test.cpp
     simd_correctness/vop3p_dot_simd_correctness_test.cpp
     execution_plugin_test.cpp
+    execution_plugin_register_test.cpp
+    execution_plugin_memory_test.cpp
+    execution_plugin_race_test.cpp
     plugin_config_resolver_test.cpp
     plugin_loader_test.cpp
     race-detector/race_detector_counter_capacity_tests.cpp
     race-detector/race_detector_event_registry_test.cpp
+    race-detector/race_detector_lds_history_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
-    race-detector/race_log_expectation_test.cpp
     big_int_test.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
@@ -848,6 +874,21 @@ target_link_libraries(
 )
 target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
+# GCC 14.3, GCC 15.2, and GCC 16.0.1 (20260322) emit a false-positive
+# -Wstringop-overflow for an unreachable copy in the LDS backing boundary
+# test with _FORTIFY_SOURCE=3. Keep the warning visible without letting
+# -Werror reject this source, and retain the fortified reads.
+if(
+    CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+    AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "14"
+)
+    set_property(
+        SOURCE lds_test.cpp
+        APPEND
+        PROPERTY COMPILE_OPTIONS -Wno-error=stringop-overflow
+    )
+endif()
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_compile_definitions(
         rocjitsu_tests
@@ -883,12 +924,23 @@ set(_rj_l2_mutex_cases
     PendingWriterClosesAdmissionAndWakesAfterLastReader
     CollidingReadersOverlapAndWriterWaitsForTheLastOwner
     ExclusiveUnlockWakesBlockingReaders
+    RepeatedMaintenanceWakesArrivingReaders
+)
+set(_rj_idle_wakeup_cases
+    TerminationTest.RequestExitRacingShutdownIsSafe
+    TerminationTest.IdleExitAndLastPrimaryReleaseWakeEveryWorkerMode
+    TerminationTest.QuiescentEngineDoesNotSpinTheHost
+    AsyncCausalityTest.StaleWakeDoesNotHideConcurrentPublication
+    AsyncCausalityTest.QuiescentPublicationsToEveryPartitionMakeProgress
 )
 # Exclude exactly the cases registered below, so future cases still participate
 # in normal discovery until they receive an explicit timeout registration.
 set(_rj_gtest_exclusions
-    "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+    "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
 )
+foreach(_idle_wakeup_case IN LISTS _rj_idle_wakeup_cases)
+    string(APPEND _rj_gtest_exclusions ":${_idle_wakeup_case}")
+endforeach()
 foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
     string(
         APPEND _rj_gtest_exclusions
@@ -898,10 +950,40 @@ endforeach()
 
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
-# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
-# and the concurrent-close wait test, plus the L2 mutex suite, are registered
-# separately so CTest can bound a deadlocked child process.
+# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The idle-wakeup, request-exit,
+# SharedPool handoff, concurrent-close, and L2 mutex tests are registered separately so
+# CTest can bound a deadlocked child process, including helper destruction.
 rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
+
+# Bound worker joins in the idle notification and CPU-use regressions.
+# Register explicitly so build-tree and installed tests have the same timeout.
+foreach(_idle_wakeup_case IN LISTS _rj_idle_wakeup_cases)
+    rj_add_test(
+        NAME "${_idle_wakeup_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=${_idle_wakeup_case}"
+        TIMEOUT 30
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=${_idle_wakeup_case}"
+    )
+endforeach()
+
+# Register separately to bound handoffs and shutdown with an external timeout.
+# The test stresses handoffs for 20 seconds; CTest also bounds a lost wake while
+# joining issuers or destroying idle helpers.
+rj_add_test(
+    NAME "MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
+    COMMAND
+        $<TARGET_FILE:rocjitsu_tests>
+        "--gtest_filter=MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
+    RUN_SERIAL
+    TIMEOUT 40
+    INSTALL_COMMAND
+        "bin/rocjitsu_tests"
+        "--gtest_filter=MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
+)
 
 # A failed assertion cannot bound a blocked join or jthread destructor. Give
 # each L2 mutex case its own process timeout in build-tree and installed tests.
@@ -2093,9 +2175,29 @@ rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 
 rj_add_interposer_test_suite(
     InterposerDrmTest
+    AllocationFailsWhenBackingDescriptorsAreExhausted
     CanonicalSysfsPathsRetainSimulatedDevice
+    CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary
     DeviceInfoReportsActiveCuCount
+    DmabufExportKeepsADriverCpuMapping
+    DmabufExportKeepsAReservedCpuMapping
+    DmabufExportKeepsStoresMadeDuringTheExport
+    DmabufExportLeavesPagesPastAPartialMapping
+    DupRacingTheCloseOfAPrimeExportKeepsTheBoState
+    ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone
+    GemMetadataRoundTripsOnABuffer
+    GemOpReportsTheCreateSize
+    GemOpSetPlacementChangesTheReportedDomain
+    IpcImportSharesThePagesOfTheExportedAllocation
+    KfdBufferKeepsItsMetadataAfterEveryHandleCloses
+    KfdExportFlagsSurviveDuplicationBeforeThePrimeImport
+    KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
+    KfdImportsRetainMetadataAfterTheOriginalOwnerCloses
     OpensWithinCurrentDescriptorLimit
+    PrimeHandleToFdReturnsTheBuffer
+    PrimeImportKeepsTheBoStateAfterTheHandleCloses
+    PrimeImportRejectsADescriptorThatIsNotADmabuf
+    PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
     TimestampUsesAdvertisedNanosecondClock
@@ -3971,6 +4073,13 @@ if(RJ_ENABLE_HIP_TESTS)
     endif()
 
     if(RJ_HIP_RUNTIME_SUPPORTS_GFX950)
+        rj_add_hip_test(hip_hw_id_test ARCH gfx950)
+        rj_add_hip_test_case(
+            hip_hw_id_test
+            "HipHwIdTest.FourWaveWorkgroupPreservesSimdIdsAcrossBarrier"
+            TIMEOUT 120
+        )
+
         # This test exercises CDNA ACCVGPR/DS transpose instructions directly
         # in inline assembly, so it must stay on a CDNA target even when the
         # generic HIP smoke tests are built for a local RDNA host such as
@@ -4099,8 +4208,6 @@ if(RJ_ENABLE_HIP_TESTS)
                 "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
                 "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
         )
-
-        add_subdirectory(race-detector)
     else()
         message(
             STATUS

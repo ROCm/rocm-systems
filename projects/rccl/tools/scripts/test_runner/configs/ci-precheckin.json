@@ -167,7 +167,25 @@
         {"name": "VersionInfoTests", "description": "HIP/ROCm version string formatting tests", "test_filter": "VersionInfoTests.*"},
         {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*:GinProxyFlushWaitTest.*:GinProxyPutTest.*"},
         {"name": "GinBackendMaskDispatchTest", "description": "GIN backend-mask put dispatch tests", "test_filter": "GinBackendMaskDispatchTest.*"},
+        {"name": "DdaVecElementAdd", "description": "DDA vecElementAdd float/half/bf16 lane arithmetic on device", "test_filter": "DdaVecElementAdd.*"},
+        {"name": "DdaIpcGpuBarrierOrdering", "description": "DDA IPC barrier release/acquire cross-GPU message passing (8 GPUs)", "test_filter": "DdaIpcGpuBarrierOrdering.*", "timeout": 600},
+        {"name": "NcclUtility", "description": "nccl::utility host tests: integer/pointer align, rcp division, rolling compares, order maps, Optional", "test_filter": "NcclUtility*-NcclUtilityDeviceTest.*"},
+        {"name": "NcclUtilityDeviceTest", "description": "nccl::utility device tests: loadConstLdg branches, testAbort, atomics, fences, lanes, rcp tables", "test_filter": "NcclUtilityDeviceTest.*"},
         {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"}
+      ]
+    },
+    "unit_tests_utility_host_only": {
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsUtilityHostOnly",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "env_variables": {
+        "UT_UTILITY_REQUIRE_PLAIN_CXX": "1"
+      },
+      "tests": [
+        {"name": "UtilityHostOnly_AllTests", "description": "nccl_device/utility.h compiled as plain C++ (host testAbort overload)", "test_filter": "*"}
       ]
     },
     "unit_tests_gdr": {
@@ -257,6 +275,28 @@
       "tests": [
         {"name": "GinHostMicrotests", "description": "Host-only gin/gin_host.cc microtests (no GPU, no HIP/RCCL runtime); covers GIN_PROXY_NTHREADS (NVIDIA/nccl#2279 / AICOMRCCL-2017) and proxy-thread CPU affinity (AICOMRCCL-1859)", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_dda_ipc": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroDdaIpc",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "DdaIpcMicrotests", "description": "Host-only dda_all_reduce_ipc.cu eligibility, datatype dispatch and flat/tree selection microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_rome_models": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroRomeModels",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "RomeModelsMicrotests", "description": "Host-only graph/rome_models.cc microtests (no GPU, no HIP/RCCL runtime); covers parseGraphLight RCCL_TREES input validation", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -270,6 +310,12 @@
       "name": "RCCL Unit Tests - Fixtures",
       "description": "rccl-UnitTestsFixtures (header-level tests including MiscTests.Sorter)",
       "config": "unit_tests_fixtures",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Unit Tests - nccl::utility plain-C++ build",
+      "description": "rccl-UnitTestsUtilityHostOnly (nccl_device/utility.h as plain C++, CPU-only)",
+      "config": "unit_tests_utility_host_only",
       "enabled": true
     },
     {
@@ -318,6 +364,18 @@
       "name": "RCCL Microtests - gin_host.cc",
       "description": "rccl-UnitTestsMicroGinHost (host-only gin/gin_host.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_gin_host",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - dda_all_reduce_ipc.cu",
+      "description": "rccl-UnitTestsMicroDdaIpc (host-only DDA IPC all-reduce eligibility/dispatch microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_dda_ipc",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - rome_models.cc",
+      "description": "rccl-UnitTestsMicroRomeModels (host-only rome_models.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_rome_models",
       "enabled": true
     }
   ]

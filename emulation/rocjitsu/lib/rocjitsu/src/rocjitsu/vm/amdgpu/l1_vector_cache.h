@@ -29,7 +29,9 @@ public:
   static constexpr uint32_t NUM_SETS = 64;
   static constexpr uint32_t ASSOCIATIVITY = 4;
 
-  using CacheStore = simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY>;
+  using CacheStore =
+      simdojo::Cache<LINE_SIZE_BITS, NUM_SETS, ASSOCIATIVITY,
+                     simdojo::LRUPolicy<NUM_SETS, ASSOCIATIVITY>, /*LazyStorage=*/true>;
   static constexpr uint32_t LINE_SIZE = CacheStore::LINE_SIZE;
 
   explicit L1VectorCache(L2Cache *l2 = nullptr);

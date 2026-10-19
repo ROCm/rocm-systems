@@ -65,8 +65,15 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <string>
+#ifdef _WIN32
+#  include <fcntl.h>
+#  include <io.h>
+#  include <random>
+#  include <windows.h>
+#endif
 #include <system_error>
 #include <thread>
 #include <unordered_map>
@@ -77,6 +84,8 @@
 #ifndef _WIN32
 #include <link.h>
 #endif
+
+#include "hrr_safe_fs.h"
 
 namespace fs = std::filesystem;
 
@@ -243,18 +252,16 @@ static std::vector<std::pair<fs::path, ProcessInfo>> collect_process_dirs(
 
   for (const auto& ent : fs::directory_iterator(root)) {
     if (!ent.is_directory()) continue;
-    const std::string name = ent.path().filename().string();
-    if (name.rfind("pid-", 0) != 0) continue;
+    const uint64_t dir_pid = hrr::pid_from_archive_dir_name(ent.path().filename().string());
+    if (dir_pid == 0) continue;
     // A pid-* directory with no events.bin is not a capture: leftover empty
     // dirs must not be treated as repair failures or listed in the root index.
     if (!fs::exists(ent.path() / "events.bin")) continue;
     ProcessInfo info{};
     if (!read_process_manifest(ent.path() / "manifest.json", info)) {
       // Keep incomplete/crashed directories visible even if their manifest was
-      // never written; derive pid from the directory name when possible.
-      char* end = nullptr;
-      unsigned long long pid = std::strtoull(name.c_str() + 4, &end, 10);
-      if (end && *end == '\0') info.pid = static_cast<uint64_t>(pid);
+      // never written; the pid comes from the directory name.
+      info.pid = dir_pid;
     }
     processes.emplace_back(ent.path(), info);
   }
@@ -633,22 +640,50 @@ static hipError_t dispatch_event(PlaybackContext& ctx, const hrr::Event& ev,
   hrr_dispatch_seq = ev.header().sequence_id;
   auto order = needs_ordering(etype);
 
-  // Spin-wait for our turn in global capture order.
+  // Wait for our turn in global capture order.
   // Also check fatal_error: if another thread failed and advanced next_seq
   // past our slot, we must not spin forever — bail out immediately.
-  // After ~1000 failed yields, sleep for 1 µs to avoid burning a full core
-  // while waiting for a slow ordering predecessor.
+  // The wait is bounded (hrr::wait_for_turn): a sequence number that is out
+  // of order on its thread (gaps and duplicates are refused in main) means
+  // next_seq never reaches ours, and the replay must end with a diagnostic
+  // instead of hanging.
   {
-    int spin = 0;
-    while (ctx.next_seq.load(std::memory_order_acquire) != ev.header().sequence_id) {
-      if (ctx.fatal_error.load(std::memory_order_acquire))
+    uint64_t observed = 0;
+    switch (hrr::wait_for_turn(ctx.next_seq, ev.header().sequence_id,
+                               ctx.fatal_error, ctx.max_seq_waits, &observed,
+                               &ctx.calls_in_flight)) {
+      case hrr::TurnResult::Turn:
+        break;
+      case hrr::TurnResult::Fatal:
         return hipErrorUnknown;
-      if (++spin < 1000)
-        std::this_thread::yield();
-      else
-        std::this_thread::sleep_for(std::chrono::microseconds(1));
+      case hrr::TurnResult::Stalled: {
+        const uint64_t seq = ev.header().sequence_id;
+        fprintf(stderr,
+                "[HRR] Fatal: malformed event stream: event (%s, thread %llu) has "
+                "sequence number %llu but the replay is at %llu (%s); no event "
+                "supplies the turn after %llu waits (--max-seq-waits)\n",
+                hrr::event_type_name(etype),
+                (unsigned long long)ev.header().thread_id,
+                (unsigned long long)seq, (unsigned long long)observed,
+                observed > seq ? "duplicate or out-of-order sequence number"
+                               : "out-of-order sequence number",
+                (unsigned long long)ctx.max_seq_waits);
+        ctx.fatal_error.store(true, std::memory_order_release);
+        return hipErrorUnknown;
+      }
     }
   }
+
+  // From here until this function returns the thread is inside its call. The
+  // sequence waits of the other threads do not count while it is (see
+  // hrr::wait_for_turn): a long recorded synchronize is not a missing event.
+  // Every call counts, ordered or not: an unordered synchronize hands the turn
+  // on before it blocks, and the next event may be this thread's own.
+  struct CallInFlight {
+    std::atomic<int>& n;
+    explicit CallInFlight(std::atomic<int>& c) : n(c) { n.fetch_add(1, std::memory_order_acq_rel); }
+    ~CallInFlight() { n.fetch_sub(1, std::memory_order_acq_rel); }
+  } call_in_flight{ctx.calls_in_flight};
 
   // If a fatal error was already flagged by another thread that ran before us,
   // advance next_seq so the thread waiting on the next event can also exit,
@@ -940,18 +975,205 @@ static bool write_u(FILE* f, const void* p, size_t n) {
 }
 
 static uint64_t pid_from_archive_dir(const fs::path& archive_dir) {
-  const std::string name = archive_dir.filename().string();
-  if (name.rfind("pid-", 0) != 0) return 0;
+  return hrr::pid_from_archive_dir_name(archive_dir.filename().string());
+}
 
-  char* end = nullptr;
-  unsigned long long pid = std::strtoull(name.c_str() + 4, &end, 10);
-  if (!end || *end != '\0') return 0;
-  return static_cast<uint64_t>(pid);
+// True when `p` is a symbolic link. On Windows a directory junction is a
+// reparse point that fs::is_symlink does not report, and a normal user can
+// create one, so any reparse point counts.
+static bool is_link(const fs::path& p) {
+#ifdef _WIN32
+  const DWORD attrs = GetFileAttributesW(p.c_str());
+  if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_REPARSE_POINT)) return true;
+#endif
+  std::error_code ec;
+  return fs::is_symlink(p, ec);
+}
+
+// Write `name` inside `dir` without following a symbolic link.
+//
+// The content goes to a new, unpredictably named file made with O_EXCL and
+// O_NOFOLLOW, is fsynced, and then renamed over `name`, all through a
+// descriptor for `dir` that was opened without following a link and checked.
+// A link planted at `name`, at the old predictable ".repair.tmp" name or in
+// place of `dir` is never written through (on Windows the temporary file is
+// created with CREATE_NEW under a random name). `fill` writes the content.
+// On failure the original file is untouched and *err says why.
+static bool write_file_in_dir(const fs::path& dir, const std::string& name,
+                              const std::function<bool(FILE*)>& fill, std::string* err) {
+#ifndef _WIN32
+  using namespace hrr::safefs;
+  Fd d = open_dir_nofollow_leaf(dir.string(), err);
+  if (!d.valid()) return false;
+  // Keep the permissions of the file being replaced (a group-readable archive
+  // stays group-readable); a new file gets the usual 0666 &~ umask.
+  mode_t new_mode = 0666;
+  bool have_old_mode = false;
+  switch (stat_entry(d.get(), name, err)) {
+    case Entry::Absent:
+      break;
+    case Entry::Regular: {
+      struct stat old_st;
+      if (::fstatat(d.get(), name.c_str(), &old_st, AT_SYMLINK_NOFOLLOW) == 0) {
+        new_mode = old_st.st_mode & 0777;
+        have_old_mode = true;
+      }
+      break;
+    }
+    case Entry::Other:
+      *err = "refusing " + (dir / name).string() + ": it is a symbolic link or not a regular file";
+      return false;
+    case Entry::Error:
+      return false;
+  }
+  std::string tmp_name;
+  Fd t = create_exclusive_temp(d.get(), name + ".repair", &tmp_name, err, new_mode);
+  if (!t.valid()) return false;
+  if (have_old_mode) (void)::fchmod(t.get(), new_mode);  // the umask must not narrow it
+  FILE* f = fdopen(t.get(), "wb");
+  if (!f) {
+    *err = errno_text("fdopen " + tmp_name);
+    t.reset();
+    unlink_at(d.get(), tmp_name);
+    return false;
+  }
+  t.release();  // owned by f now
+  bool ok = fill(f);
+  ok = (fflush(f) == 0) && ok;
+  ok = (::fsync(fileno(f)) == 0) && ok;
+  ok = (fclose(f) == 0) && ok;
+  if (!ok) {
+    *err = "write of " + (dir / name).string() + " failed";
+    unlink_at(d.get(), tmp_name);
+    return false;
+  }
+  if (!commit_replace(d.get(), tmp_name, name, err)) {
+    unlink_at(d.get(), tmp_name);
+    return false;
+  }
+  return true;
+#else
+  // Windows: no O_NOFOLLOW/openat. Refuse links, then write beside and replace.
+  std::error_code ec;
+  const fs::path target = dir / name;
+  if (is_link(dir) || is_link(target)) {
+    *err = "refusing " + target.string() + ": it is a symbolic link or junction";
+    return false;
+  }
+  // The temporary file has an unpredictable name and is made with CREATE_NEW,
+  // which fails when anything exists at that name, a link included, and
+  // FILE_FLAG_OPEN_REPARSE_POINT keeps a reparse point from being followed.
+  // A link planted at a guessed name is therefore never written through.
+  FILE* f = nullptr;
+  fs::path tmp;
+  std::random_device rd;
+  for (int attempt = 0; attempt < 16 && !f; ++attempt) {
+    char suffix[32];
+    snprintf(suffix, sizeof(suffix), ".repair.%08x%08x.tmp", rd(), rd());
+    tmp = target.string() + suffix;
+    HANDLE h = CreateFileW(tmp.wstring().c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                           FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+    if (h == INVALID_HANDLE_VALUE) {
+      if (GetLastError() == ERROR_FILE_EXISTS || GetLastError() == ERROR_ALREADY_EXISTS) continue;
+      break;
+    }
+    const int fd = _open_osfhandle(reinterpret_cast<intptr_t>(h), _O_BINARY);
+    if (fd < 0) {
+      CloseHandle(h);
+      fs::remove(tmp, ec);
+      break;
+    }
+    f = _fdopen(fd, "wb");
+    if (!f) {
+      _close(fd);
+      fs::remove(tmp, ec);
+      break;
+    }
+  }
+  if (!f) {
+    *err = "cannot create a temporary file beside " + target.string();
+    return false;
+  }
+  bool ok = fill(f);
+  ok = (fflush(f) == 0) && ok;
+  ok = (fclose(f) == 0) && ok;
+  if (!ok) {
+    fs::remove(tmp, ec);
+    *err = "write of " + target.string() + " failed";
+    return false;
+  }
+  // std::filesystem::rename replaces on Windows; fall back to remove + rename.
+  fs::rename(tmp, target, ec);
+  if (ec) {
+    fs::remove(target, ec);
+    fs::rename(tmp, target, ec);
+  }
+  if (ec) {
+    fs::remove(tmp, ec);
+    *err = "cannot replace " + target.string() + ": " + ec.message();
+    return false;
+  }
+  return true;
+#endif
+}
+
+// Refuse, before anything is written, an archive directory that is a link or
+// whose events.bin or manifest.json is a link or not a regular file, so repair
+// never ends half done on such an archive.
+static bool check_repair_targets(const fs::path& dir, std::string* err) {
+#ifndef _WIN32
+  using namespace hrr::safefs;
+  Fd d = open_dir_nofollow_leaf(dir.string(), err);
+  if (!d.valid()) return false;
+  const Entry ev = stat_entry(d.get(), "events.bin", err);
+  if (ev == Entry::Error) return false;
+  if (ev != Entry::Regular) {
+    *err = "refusing " + (dir / "events.bin").string() + ": it is a symbolic link or not a regular file";
+    return false;
+  }
+  const Entry mf = stat_entry(d.get(), "manifest.json", err);
+  if (mf == Entry::Error) return false;
+  if (mf == Entry::Other) {
+    *err = "refusing " + (dir / "manifest.json").string() + ": it is a symbolic link or not a regular file";
+    return false;
+  }
+  return true;
+#else
+  for (const char* n : {"", "events.bin", "manifest.json"}) {
+    if (is_link(dir / n)) {
+      *err = "refusing " + (dir / n).string() + ": it is a symbolic link or junction";
+      return false;
+    }
+  }
+  return true;
+#endif
+}
+
+// Refuse, before any process directory is touched, a root whose manifest.json
+// is a link or not a regular file, so a root repair never ends half done.
+static bool check_root_manifest_target(const fs::path& root, std::string* err) {
+#ifndef _WIN32
+  using namespace hrr::safefs;
+  Fd d = open_dir_nofollow_leaf(root.string(), err);
+  if (!d.valid()) return false;
+  const Entry mf = stat_entry(d.get(), "manifest.json", err);
+  if (mf == Entry::Error) return false;
+  if (mf == Entry::Other) {
+    *err = "refusing " + (root / "manifest.json").string() + ": it is a symbolic link or not a regular file";
+    return false;
+  }
+  return true;
+#else
+  if (is_link(root / "manifest.json")) {
+    *err = "refusing " + (root / "manifest.json").string() + ": it is a symbolic link or junction";
+    return false;
+  }
+  return true;
+#endif
 }
 
 static int repair_archive(const hrr::Archive& archive) {
-  std::string events_path = archive.path + "/events.bin";
-  std::string tmp_path    = events_path + ".repair.tmp";
+  const fs::path archive_dir(archive.path);
 
   if (archive.complete) {
     printf("[HRR] Archive already complete (%zu events); nothing to repair\n",
@@ -959,82 +1181,65 @@ static int repair_archive(const hrr::Archive& archive) {
     return 0;
   }
 
-  FILE* out = fopen(tmp_path.c_str(), "wb");
-  if (!out) {
-    fprintf(stderr, "[HRR] repair: cannot open %s for writing\n", tmp_path.c_str());
+  std::string err;
+  if (!check_repair_targets(archive_dir, &err)) {
+    fprintf(stderr, "[HRR] repair: %s\n", err.c_str());
     return 1;
   }
 
-  // The flags say how the blobs were laid out, and repair keeps every blob.
-  hrr_file_header fh{HRR_MAGIC, HRR_VERSION, archive.flags};
-  bool ok = write_u(out, &fh, sizeof(fh));
+  // Rewrite events.bin trimmed to the last complete record plus the trailer.
+  const bool events_ok = write_file_in_dir(archive_dir, "events.bin", [&](FILE* out) {
+    // The flags say how the blobs were laid out, and repair keeps every blob.
+    hrr_file_header fh{HRR_MAGIC, HRR_VERSION, archive.flags};
+    bool ok = write_u(out, &fh, sizeof(fh));
 
-  uint64_t max_seq = 0;
-  for (const auto& ev : archive.events) {
-    if (!ok) break;
-    // load_archive only ever stores complete records, so raw_payload always
-    // holds at least a full header. Assert it before ev.header() casts the
-    // bytes, so a future reader bug surfaces here instead of as silent UB.
-    assert(ev.raw_payload.size() >= sizeof(hrr_event_header) &&
-           "repair: event raw_payload smaller than hrr_event_header");
-    ok = write_u(out, ev.raw_payload.data(), ev.raw_payload.size());
-    if (ev.header().sequence_id > max_seq) max_seq = ev.header().sequence_id;
-  }
+    uint64_t max_seq = 0;
+    for (const auto& ev : archive.events) {
+      if (!ok) break;
+      // load_archive only ever stores complete records, so raw_payload always
+      // holds at least a full header. Assert it before ev.header() casts the
+      // bytes, so a future reader bug surfaces here instead of as silent UB.
+      assert(ev.raw_payload.size() >= sizeof(hrr_event_header) &&
+             "repair: event raw_payload smaller than hrr_event_header");
+      ok = write_u(out, ev.raw_payload.data(), ev.raw_payload.size());
+      if (ev.header().sequence_id > max_seq) max_seq = ev.header().sequence_id;
+    }
 
-  // Clean-shutdown trailer. Built via the shared hrr_make_eof_record() helper so
-  // the trailer layout cannot drift from the capture writer (writer::flush()).
-  // The offline tool leaves timestamp_ns / thread_id at 0.
-  if (ok) {
-    hrr_eof_record rec = hrr_make_eof_record(max_seq + 1, archive.events.size());
-    ok = write_u(out, &rec, sizeof(rec));
-  }
-  fflush(out);
-  fclose(out);
-
-  if (!ok) {
-    fprintf(stderr, "[HRR] repair: write failed; leaving original untouched\n");
-    remove(tmp_path.c_str());
+    // Clean-shutdown trailer. Built via the shared hrr_make_eof_record() helper
+    // so the trailer layout cannot drift from the capture writer
+    // (writer::flush()). The offline tool leaves timestamp_ns / thread_id at 0.
+    if (ok) {
+      hrr_eof_record rec = hrr_make_eof_record(max_seq + 1, archive.events.size());
+      ok = write_u(out, &rec, sizeof(rec));
+    }
+    return ok;
+  }, &err);
+  if (!events_ok) {
+    fprintf(stderr, "[HRR] repair: %s; leaving original untouched\n", err.c_str());
     return 1;
   }
 
-  // Atomically replace the original events.bin. POSIX rename() overwrites an
-  // existing destination, but Windows rename()/MoveFile without
-  // MOVEFILE_REPLACE_EXISTING fails when the target already exists. Use
-  // std::filesystem::rename (which maps to a replacing move on Windows) and, if
-  // that still fails, fall back to removing the destination first.
-  std::error_code ec;
-  fs::rename(tmp_path, events_path, ec);
-  if (ec) {
-    fs::remove(events_path, ec);
-    fs::rename(tmp_path, events_path, ec);
-  }
-  if (ec) {
-    fprintf(stderr, "[HRR] repair: cannot replace %s: %s\n",
-            events_path.c_str(), ec.message().c_str());
-    remove(tmp_path.c_str());
-    return 1;
-  }
-
-  fs::path archive_dir(archive.path);
-  std::string manifest_path = (archive_dir / "manifest.json").string();
+  const std::string manifest_path = (archive_dir / "manifest.json").string();
   ProcessInfo info{};
   if (!read_process_manifest(manifest_path, info))
     info.pid = pid_from_archive_dir(archive_dir);
 
-  FILE* mf = fopen(manifest_path.c_str(), "w");
-  if (mf) {
-    fprintf(mf,
-            "{\n"
-            "  \"pid\": %llu,\n"
-            "  \"parent_pid\": %llu,\n"
-            "  \"complete\": true,\n"
-            "  \"event_count\": %zu,\n"
-            "  \"blob_count\": %zu\n"
-            "}\n",
-            static_cast<unsigned long long>(info.pid),
-            static_cast<unsigned long long>(info.parent_pid),
-            archive.events.size(), archive.blob_count);
-    fclose(mf);
+  const bool manifest_ok = write_file_in_dir(archive_dir, "manifest.json", [&](FILE* mf) {
+    return fprintf(mf,
+                   "{\n"
+                   "  \"pid\": %llu,\n"
+                   "  \"parent_pid\": %llu,\n"
+                   "  \"complete\": true,\n"
+                   "  \"event_count\": %zu,\n"
+                   "  \"blob_count\": %zu\n"
+                   "}\n",
+                   static_cast<unsigned long long>(info.pid),
+                   static_cast<unsigned long long>(info.parent_pid),
+                   archive.events.size(), archive.blob_count) > 0;
+  }, &err);
+  if (!manifest_ok) {
+    fprintf(stderr, "[HRR] repair: %s\n", err.c_str());
+    return 1;
   }
 
   printf("[HRR] Repaired archive: %zu events kept, clean trailer + manifest written\n",
@@ -1047,6 +1252,10 @@ static int repair_archive(const hrr::Archive& archive) {
 // repaired archive is indistinguishable from a cleanly finalized one.
 static bool write_root_manifest(const fs::path& root,
                                 std::vector<std::pair<fs::path, ProcessInfo>> processes) {
+  // A pid-* entry that is a link is not listed in the index.
+  processes.erase(std::remove_if(processes.begin(), processes.end(),
+                                 [](const auto& p) { return is_link(p.first); }),
+                  processes.end());
   std::sort(processes.begin(), processes.end(),
             [](const auto& a, const auto& b) { return a.second.pid < b.second.pid; });
 
@@ -1056,31 +1265,31 @@ static bool write_root_manifest(const fs::path& root,
   if (!read_root_owner_pid(root, owner_pid))
     owner_pid = derive_owner_pid(processes);
 
-  FILE* f = fopen((root / "manifest.json").string().c_str(), "w");
-  if (!f) return false;
-
-  fprintf(f,
+  std::string err;
+  const bool ok = write_file_in_dir(root, "manifest.json", [&](FILE* f) {
+    bool good = fprintf(f,
           "{\n"
           "  \"version\": 1,\n"
           "  \"capture_mode\": \"in-tree\",\n"
           "  \"owner_pid\": %llu,\n"
           "  \"processes\": [\n",
-          static_cast<unsigned long long>(owner_pid));
-  for (size_t i = 0; i < processes.size(); ++i) {
-    const ProcessInfo& p = processes[i].second;
-    fprintf(f,
-            "    { \"pid\": %llu, \"parent_pid\": %llu, \"complete\": %s, "
-            "\"event_count\": %llu, \"blob_count\": %llu }%s\n",
-            static_cast<unsigned long long>(p.pid),
-            static_cast<unsigned long long>(p.parent_pid),
-            p.complete ? "true" : "false",
-            static_cast<unsigned long long>(p.event_count),
-            static_cast<unsigned long long>(p.blob_count),
-            (i + 1 == processes.size()) ? "" : ",");
-  }
-  fprintf(f, "  ]\n}\n");
-  fclose(f);
-  return true;
+          static_cast<unsigned long long>(owner_pid)) > 0;
+    for (size_t i = 0; i < processes.size(); ++i) {
+      const ProcessInfo& p = processes[i].second;
+      good = good && fprintf(f,
+              "    { \"pid\": %llu, \"parent_pid\": %llu, \"complete\": %s, "
+              "\"event_count\": %llu, \"blob_count\": %llu }%s\n",
+              static_cast<unsigned long long>(p.pid),
+              static_cast<unsigned long long>(p.parent_pid),
+              p.complete ? "true" : "false",
+              static_cast<unsigned long long>(p.event_count),
+              static_cast<unsigned long long>(p.blob_count),
+              (i + 1 == processes.size()) ? "" : ",") > 0;
+    }
+    return good && fprintf(f, "  ]\n}\n") > 0;
+  }, &err);
+  if (!ok) fprintf(stderr, "[HRR] repair: %s\n", err.c_str());
+  return ok;
 }
 
 // --repair on an archive root: repair every pid-<pid>/ sub-archive in turn,
@@ -1098,11 +1307,26 @@ static bool write_root_manifest(const fs::path& root,
 static bool repair_root(const std::string& archive_path, int& exit_code) {
   fs::path root(archive_path);
   if (fs::exists(root / "events.bin")) return false;
+  // The root is the path the user named, so any link in it is theirs and is
+  // resolved here. Everything below it is the archive's, and is opened without
+  // following a link (write_file_in_dir).
+  std::error_code canon_ec;
+  const fs::path canonical_root = fs::canonical(root, canon_ec);
+  if (!canon_ec) root = canonical_root;
 
   std::vector<std::pair<fs::path, ProcessInfo>> processes = collect_process_dirs(root);
   // Nothing to fan out to: a root holding a single sub-archive is auto-resolved
   // by the reader, and an empty one is not an archive at all.
   if (processes.size() < 2) return false;
+
+  {
+    std::string err;
+    if (!check_root_manifest_target(root, &err)) {
+      fprintf(stderr, "[HRR] repair: %s\n", err.c_str());
+      exit_code = 1;
+      return true;
+    }
+  }
 
   printf("[HRR] Repairing %zu process captures under %s\n",
          processes.size(), archive_path.c_str());
@@ -1111,6 +1335,14 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
   for (const auto& entry : processes) {
     const fs::path& dir = entry.first;
     printf("[HRR] --- %s ---\n", dir.filename().string().c_str());
+    // A pid-* entry that is a link is the archive's doing, not a capture of
+    // this process tree: it is not read, repaired or indexed.
+    if (is_link(dir)) {
+      fprintf(stderr, "[HRR] repair: refusing %s: it is a symbolic link or junction\n",
+              dir.string().c_str());
+      failed++;
+      continue;
+    }
     // The reader reports recovery diagnostics on stderr. Flush stdout first so
     // those land under the process they belong to instead of being reordered
     // ahead of the whole run by block buffering when output is piped.
@@ -1212,12 +1444,35 @@ static void print_usage(const char* argv0) {
     "  --sync-watchdog-ms N  Abort with a diagnostic if any device synchronize does\n"
     "                        not complete within N ms (catches hung/deadlocked\n"
     "                        kernels, e.g. StreamK flag spin-waits). 0 = disabled.\n"
+    "  --max-seq-waits N     End the replay when an event's sequence number is not\n"
+    "                        reached after N waits with no progress and no call in\n"
+    "                        flight (a backstop: a gap or duplicate in the recorded\n"
+    "                        sequence is refused before the replay starts).\n"
+    "                        Default 5000000.\n"
+    "  --max-query-attempts N\n"
+    "                        Stop retrying hipEventQuery/hipStreamQuery after N\n"
+    "                        attempts that return hipErrorNotReady. Default: no\n"
+    "                        limit (a query that spins is waiting for replayed work,\n"
+    "                        as a synchronize does).\n"
+    "  --max-file-bytes N    Refuse a blob or code object larger than N bytes.\n"
+    "                        Default 4294967296 (4 GiB).\n"
+    "  --max-threads N       Refuse a --multi-thread replay of an archive recording\n"
+    "                        more than N threads. Default 256.\n"
+    "  --max-events N        Refuse an archive with more than N events. Default 50000000.\n"
+    "  --max-host-bytes N    End the replay when host memory held for the archive\n"
+    "                        (blob caches, pinned buffers, read-backs) would pass N\n"
+    "                        bytes. Default 17179869184 (16 GiB).\n"
+    "  --max-wall-seconds S  End the replay after S seconds (0 = no limit; at most\n"
+    "                        31536000, 365 days).\n"
+    "                        Default 3600.\n"
     "  --trace-kernels       Print one compact line before every kernel launch\n"
     "  --trace-sync          Print sync begin/done markers around kernel syncs\n"
     "  --progress-kernels N  Print heartbeat every N launched kernels\n"
     "  --progress-seconds S  Print heartbeat at most every S seconds\n"
     "  --version             Print the archive format version this build reads and\n"
     "                        the revision it was built from, then exit\n"
+    "  --no-placement        Do not place hipMalloc/hipMallocAsync allocations at\n"
+    "                        their recorded addresses (see DESIGN.md)\n"
     "  --warn-untranslated-args\n"
     "                        Report kernel-argument pointers that resolve in no\n"
     "                        allocation, VMM reservation or annotated region.\n"
@@ -1282,6 +1537,9 @@ int main(int argc, char** argv) {
   bool show_events   = false;
   bool do_repair     = false;
   bool no_regions    = false;
+  uint64_t max_threads   = hrr::kDefaultMaxThreads;
+  uint64_t max_wall_secs = hrr::kDefaultMaxWallSecs;
+  bool no_placement  = false;
 
   for (int i = 1; i < argc; i++) {
     if      (!strcmp(argv[i], "--info"))              show_info              = true;
@@ -1303,9 +1561,45 @@ int main(int argc, char** argv) {
       }
       ctx.sync_watchdog_ms = static_cast<unsigned>(n);
     }
+    else if ((!strcmp(argv[i], "--max-threads") ||
+              !strcmp(argv[i], "--max-events") ||
+              !strcmp(argv[i], "--max-host-bytes") ||
+              !strcmp(argv[i], "--max-wall-seconds")) && i + 1 < argc) {
+      const char* flag = argv[i];
+      uint64_t n = 0;
+      if (!hrr::parse_u64(argv[++i], &n)) {
+        fprintf(stderr, "[HRR] %s expects a non-negative integer\n", flag);
+        return 1;
+      }
+      if      (!strcmp(flag, "--max-threads"))      max_threads   = n;
+      else if (!strcmp(flag, "--max-events"))       hrr::set_max_events(n);
+      else if (!strcmp(flag, "--max-host-bytes"))   ctx.host_budget.set_cap(n);
+      else {
+        if (n > hrr::kMaxWallSecs) {
+          fprintf(stderr, "[HRR] --max-wall-seconds accepts at most %llu (use 0 for no limit)\n",
+                  (unsigned long long)hrr::kMaxWallSecs);
+          return 1;
+        }
+        max_wall_secs = n;
+      }
+    }
+    else if ((!strcmp(argv[i], "--max-seq-waits") ||
+              !strcmp(argv[i], "--max-query-attempts") ||
+              !strcmp(argv[i], "--max-file-bytes")) && i + 1 < argc) {
+      const char* flag = argv[i];
+      uint64_t n = 0;
+      if (!hrr::parse_u64(argv[++i], &n)) {
+        fprintf(stderr, "[HRR] %s expects a non-negative integer\n", flag);
+        return 1;
+      }
+      if      (!strcmp(flag, "--max-seq-waits"))      ctx.max_seq_waits      = n;
+      else if (!strcmp(flag, "--max-query-attempts")) ctx.max_query_attempts = n;
+      else                                            hrr::set_max_file_bytes(n);
+    }
     else if (!strcmp(argv[i], "--trace-kernels"))     ctx.trace_kernels      = true;
     else if (!strcmp(argv[i], "--trace-sync"))        ctx.trace_sync         = true;
     else if (!strcmp(argv[i], "--no-regions"))        no_regions             = true;
+    else if (!strcmp(argv[i], "--no-placement"))      no_placement           = true;
     else if (!strcmp(argv[i], "--regions-strict"))    ctx.regions_strict     = true;
     else if (!strcmp(argv[i], "--warn-untranslated-args"))
       ctx.warn_untranslated_args = true;
@@ -1417,6 +1711,14 @@ int main(int argc, char** argv) {
 
   // --repair: rewrite an incomplete archive as a clean one and exit
   if (do_repair) {
+    // A path the user named directly may be a link of their own: resolve it.
+    // A directory the reader found by scanning a root (pid-*) is the archive's,
+    // so it is left as found and a link there is refused by repair_archive.
+    std::error_code ec;
+    if (fs::equivalent(archive.path, archive_path, ec) && !ec) {
+      const fs::path canon = fs::canonical(archive.path, ec);
+      if (!ec) archive.path = canon.string();
+    }
     return repair_archive(archive);
   }
 
@@ -1427,6 +1729,49 @@ int main(int argc, char** argv) {
          archive.event_count, archive.kernel_count,
          archive.blob_count, archive.code_object_count);
   printf("[HRR] Threads : %zu captured\n", archive.threads.size());
+
+  // One OS thread is created per recorded thread id in --multi-thread mode.
+  // Refuse before any is created, so the process stays within the cap.
+  if (!single_thread) {
+    std::string why;
+    if (!hrr::check_thread_cap(archive.threads.size(), max_threads, &why)) {
+      fprintf(stderr, "[HRR] Fatal: %s\n", why.c_str());
+      return 1;
+    }
+  }
+
+  // Wall-clock limit for the whole replay. The replay can be blocked inside a
+  // HIP call that no flag interrupts, so the watchdog ends the process.
+  hrr::WallClockWatchdog wall_watchdog(
+      std::chrono::milliseconds(max_wall_secs * 1000), [max_wall_secs] {
+        fprintf(stderr,
+                "[HRR] Fatal: replay still running after %llu s "
+                "(--max-wall-seconds); ending it\n",
+                (unsigned long long)max_wall_secs);
+        fflush(stdout);
+        fflush(stderr);
+        std::_Exit(124);
+      });
+
+  // Capture-address placement: hold every recorded hipMalloc and
+  // hipMallocAsync range before hipInit, so the runtime cannot take it.
+  if (!no_placement && !ctx.guard_segments) {
+    std::vector<HrrVaRange> allocs;
+    std::vector<uint64_t> exported;
+    for (const auto& ev : archive.events) {
+      const auto t = ev.header().event_type;
+      if (t == HRR_API_HIPMALLOC)
+        allocs.push_back({ev.malloc_ev.ptr_handle, ev.malloc_ev.ptr_handle + ev.malloc_ev.size});
+      else if (t == HRR_API_HIPMALLOCASYNC)
+        allocs.push_back({ev.malloc_async_ev.ptr_handle,
+                          ev.malloc_async_ev.ptr_handle + ev.malloc_async_ev.size});
+      else if (t == HRR_API_HIPIPCGETMEMHANDLE &&
+               ev.raw_payload.size() >= sizeof(hrr_args_hipIpcGetMemHandle))
+        exported.push_back(
+            reinterpret_cast<const hrr_args_hipIpcGetMemHandle*>(ev.raw_payload.data())->devPtr);
+    }
+    hrr_place_hold(ctx, hrr_place_plan(std::move(allocs), exported));
+  }
 
   HIP_CHECK(hipInit(0));
 
@@ -1444,6 +1789,27 @@ int main(int argc, char** argv) {
   for (uint64_t tid : archive.threads) thread_events[tid];
   for (const auto& ev : archive.events)
     thread_events[ev.header().thread_id].push_back(&ev);
+
+  {
+    std::vector<uint64_t> ids;
+    ids.reserve(archive.events.size());
+    for (const auto& ev : archive.events) ids.push_back(ev.header().sequence_id);
+    uint64_t dup = 0, missing = 0;
+    if (hrr::find_duplicate_seq(ids, &dup)) {
+      fprintf(stderr,
+              "[HRR] Fatal: malformed event stream: sequence number %llu occurs "
+              "more than once, so the replay order is not defined\n",
+              (unsigned long long)dup);
+      return 1;
+    }
+    if (hrr::find_seq_gap(std::move(ids), &missing)) {
+      fprintf(stderr,
+              "[HRR] Fatal: malformed event stream: sequence number %llu is "
+              "missing, so the replay would wait for it\n",
+              (unsigned long long)missing);
+      return 1;
+    }
+  }
 
   const bool use_mt = !single_thread && archive.threads.size() > 1;
   printf("[HRR] Mode    : %s\n", use_mt ? "multi-threaded" : "single-threaded");
@@ -1543,6 +1909,7 @@ int main(int argc, char** argv) {
     ctx.region_oob_ptrs.store(0, std::memory_order_relaxed);
     ctx.guard_blocks_relocated.store(0, std::memory_order_relaxed);
     ctx.guard_blind_max.store(0, std::memory_order_relaxed);
+    hrr_place_reset(ctx);
     printf("[HRR] Warm-up done. Running filtered pass...\n");
   }
 
@@ -1681,6 +2048,11 @@ int main(int argc, char** argv) {
     // when the caller asked for that.
     if (oob > 0 && ctx.regions_strict) ok = false;
   }
+
+  if (ctx.place)
+    printf("[HRR]   Placement      : %llu placed at capture address, %llu fell back\n",
+           (unsigned long long)ctx.placed.load(),
+           (unsigned long long)ctx.place_fell_back.load());
 
   if (ctx.guard_blocks || ctx.guard_segments) {
     printf("[HRR]   Guard          : %s%s%llu block relocation(s), largest "

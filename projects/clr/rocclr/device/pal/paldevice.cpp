@@ -1826,7 +1826,8 @@ pal::Memory* Device::createImage(amd::Memory& owner, bool directAccess) const {
 }
 
 // ================================================================================================
-device::Memory* Device::createMemory(amd::Memory& owner) const {
+device::Memory* Device::createMemory(
+    amd::Memory& owner, amd::Memory::ErrorCode*) const {
   bool directAccess = false;
   pal::Memory* memory = nullptr;
 
