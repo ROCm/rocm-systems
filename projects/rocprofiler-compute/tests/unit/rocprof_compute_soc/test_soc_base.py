@@ -182,7 +182,7 @@ def apply_cp_util_priority_patches(soc: OmniSoC_Base, patch_stack: ExitStack) ->
         patch.object(
             soc,
             "_iter_arch_analysis_yaml_metrics",
-            return_value=iter([
+            side_effect=lambda: iter([
                 ("1700", 1701, 1, "CP Utilization", CP_UTIL_METRIC_YAML)
             ]),
         )
@@ -626,7 +626,7 @@ def test_allocate_allows_multiple_accum_counters_per_bucket(gfx1250_soc):
         )
         for counter_file in files
     ]
-    assert max(accum_bucket_counts) >= 1
+    assert max(accum_bucket_counts) >= 2
 
 
 @pytest.mark.parametrize("gpu_arch", ["gfx1151", "gfx1152", "gfx1153"])
