@@ -10,8 +10,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
     - Library Management: support for API parity with corresponding CUDA API.
       * `hipLibraryGetModule` returns the module handle associated with a library.
-* Disable HRR capture feature
-* Support for recovering the allocation properties of an imported virtual memory handle. `hipMemGetAllocationPropertiesFromHandle()` now reports `hipMemLocationTypeHost` for a host-backed allocation obtained from `hipMemImportFromShareableHandle()`, instead of always reporting device memory. For a device-backed allocation it reports the owning device rather than whichever device was current when the handle was imported.
+      * `hipKernelSetAttributeForDevice` sets a device-wide attribute for a kernel on a specific device.
+* Disable HRR capture feature.
+* Support for recovering allocation properties from imported virtual memory handles. `hipMemGetAllocationPropertiesFromHandle` now correctly reports `hipMemLocationTypeHost` for host-backed allocations imported via `hipMemImportFromShareableHandle`, instead of always reporting device memory. For device-backed allocations, it reports the owning device rather than the device that was current when the handle was imported.
+* Support in WSL 2 to prevent indefinite application hangs and to report errors for device-side faults, including out-of-bounds writes, null pointer dereferences, and device asserts.
 
 ### Resolved issues
 
@@ -22,6 +24,10 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 ### Changed
 
 * Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
+
+### Known issues
+
+* A GPU Timeout Detection and Recovery (TDR) event may occur on ROCm 10.2 running under WSL 2 (Windows Subsystem for Linux 2) when executing the `vllm_rocm_gpt-oss-20b_default_inf_fp4` `vLLM` inference workload.
 
 ## HIP 7.16.0 for ROCm 10.1.0
 
