@@ -11,6 +11,7 @@ from pathlib import Path
 import signal
 import subprocess
 import sys
+from types import FrameType
 
 from cpu_policy import (
     BENCHMARK_CPUS,
@@ -26,7 +27,7 @@ PROC_CGROUP = Path('/proc/self/cgroup')
 SCHED_ROOT = Path('/sys/kernel/sched_ext')
 
 
-def check_cpus():
+def check_cpus() -> None:
     # A cgroup-v2 entry looks like: 0::/benchmark.slice/actions.runner.example.service
     # The "0::" prefix identifies v2; the rest is relative to the cgroup mount.
     membership = [
@@ -56,7 +57,7 @@ def check_cpus():
             )
 
 
-def check_scheduler():
+def check_scheduler() -> tuple[str, int]:
     sequence = int((SCHED_ROOT / 'enable_seq').read_text())
     state = (SCHED_ROOT / 'state').read_text().strip()
     name = (SCHED_ROOT / 'root/ops').read_text().strip()
@@ -65,7 +66,7 @@ def check_scheduler():
     return name, sequence
 
 
-def run(command):
+def run(command: list[str]) -> int:
     if os.geteuid() == 0:
         raise RuntimeError('benchmark commands must run as an unprivileged user')
     check_cpus()
@@ -76,7 +77,7 @@ def run(command):
     child = None
     pending = []
 
-    def forward(signum, frame):
+    def forward(signum: int, frame: FrameType | None) -> None:
         if child is None:
             pending.append(signum)
         else:
@@ -110,7 +111,7 @@ def run(command):
     return status if status >= 0 else 128 - status
 
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args()

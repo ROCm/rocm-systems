@@ -15,11 +15,11 @@ from cpu_policy import CPU_ROOT, FREQUENCY_KHZ, check_policy, policy_settings, r
 SCHED_ROOT = Path('/sys/kernel/sched_ext')
 
 
-def write(path, value):
+def write(path: Path, value: str | int) -> None:
     path.write_text(str(value) + '\n')
 
 
-def apply(cpu_root):
+def apply(cpu_root: Path) -> None:
     settings = policy_settings(cpu_root)
     for path, value in settings.items():
         # Lower min first when necessary to respect the kernel's min <= max rule.
@@ -31,7 +31,7 @@ def apply(cpu_root):
     check_policy(cpu_root)
 
 
-def wait_ready(sched_root):
+def wait_ready(sched_root: Path) -> None:
     deadline = time.monotonic() + 30
     while True:
         try:
@@ -44,7 +44,7 @@ def wait_ready(sched_root):
         time.sleep(0.1)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         '--wait-ready', action='store_true', help='wait for Bpfland readiness'

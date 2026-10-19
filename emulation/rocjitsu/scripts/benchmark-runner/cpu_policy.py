@@ -13,11 +13,11 @@ BENCHMARK_ALLOWED_CPUS = frozenset(range(64))
 FREQUENCY_KHZ = 3_200_000
 
 
-def read(path):
+def read(path: Path) -> str:
     return path.read_text().strip()
 
 
-def cpu_list(path):
+def cpu_list(path: Path) -> set[int]:
     cpus = set()
     for item in read(path).split(','):
         ends = item.split('-')
@@ -28,7 +28,7 @@ def cpu_list(path):
     return cpus
 
 
-def policy_settings(cpu_root):
+def policy_settings(cpu_root: Path) -> dict[Path, str]:
     """Validate the fixed layout and controls before returning settings to apply."""
     if cpu_list(cpu_root / 'online') != set(range(128)):
         raise ValueError('benchmark runner requires online CPUs 0-127')
@@ -76,7 +76,7 @@ def policy_settings(cpu_root):
     return settings
 
 
-def check_policy(cpu_root):
+def check_policy(cpu_root: Path) -> None:
     for path, expected in policy_settings(cpu_root).items():
         actual = read(path)
         if actual != expected:
