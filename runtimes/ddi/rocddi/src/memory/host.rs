@@ -32,13 +32,16 @@ pub struct HostAllocationInfo {
 /// still enforces its public scope and mapping lifetimes. Host cleanup is the
 /// same under both driver context lifetime policies.
 pub struct HostAllocation {
+    /// OS-owned mapping retained while device registrations borrow its pages.
     inner: Shared<os::HostAllocation>,
+    /// Host address and byte extent cached before cleanup.
     info: HostAllocationInfo,
 }
 
 /// Retains mapped host pages while a device driver may still reference them.
 /// The native mapping representation stays private to host memory.
 pub(crate) struct HostBackingLease {
+    /// Shared owner that prevents host unmapping during device registration.
     inner: Shared<os::HostAllocation>,
 }
 
