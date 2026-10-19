@@ -288,7 +288,8 @@ sysfs or the NIC counters.
   in `num_wqe_rcvd` but not in `num_wqe_completed` or the latency histogram.
 - thor2 (`bnxt_re`): counter names differ across driver versions, so the table
   falls back to older names. The IB sysfs byte counters can update late, so
-  `delta_*` is only reliable over the whole run. Some firmware reports
+  `delta_*` is only reliable over the whole run. Some are 48 bits wide; one
+  wrap during the run is accounted for. Some firmware reports
   `pfc_*_pause_us` as 0 while PFC frames are counted.
 - With QP sharing, each communicator has its own QP slots, so a shared QP is
   counted once per communicator using it.

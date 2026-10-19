@@ -1593,12 +1593,17 @@ static void rcclTelemetryCollectDebugfs(int64_t* hwc,
 /* Main hw-counter collection (HW-agnostic; driven by dev->hw_config)  */
 /* ------------------------------------------------------------------ */
 
-/* Replace eight absolute per-priority values with deltas vs. their baseline.
- * A -1 on either side means the counter or the baseline was unavailable, and
- * stays -1 rather than becoming a bogus difference. */
+int64_t rcclTelemetryCounterDelta(int64_t cur, int64_t init) {
+  const int64_t wrap48 = (int64_t)1 << 48;
+  if (cur < 0 || init < 0) return -1;
+  if (cur >= init) return cur - init;
+  if (init < wrap48) return cur + wrap48 - init;
+  return -1;
+}
+
+/* Replace eight absolute per-priority values with deltas vs. their baseline. */
 static void rcclTelemetryPfcDelta(int64_t* cur, const int64_t* init) {
-  for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++)
-    cur[p] = (cur[p] >= 0 && init[p] >= 0) ? (cur[p] - init[p]) : -1;
+  for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) cur[p] = rcclTelemetryCounterDelta(cur[p], init[p]);
 }
 
 static void rcclTelemetryCollectHwCounters(RcclDeviceStats* dev) {
@@ -1614,24 +1619,16 @@ static void rcclTelemetryCollectHwCounters(RcclDeviceStats* dev) {
                             &cur_tx_bytes, &cur_rx_bytes,
                             &cur_tx_packets, &cur_rx_packets);
 
-  /* Compute deltas: snap_init < 0 means snapshot was never taken -> delta = -1 */
-  dev->delta_tx_bytes   = (dev->snap_init_tx_bytes   >= 0 && cur_tx_bytes   >= 0)
-                          ? cur_tx_bytes   - dev->snap_init_tx_bytes   : -1;
-  dev->delta_rx_bytes   = (dev->snap_init_rx_bytes   >= 0 && cur_rx_bytes   >= 0)
-                          ? cur_rx_bytes   - dev->snap_init_rx_bytes   : -1;
-  dev->delta_tx_packets = (dev->snap_init_tx_packets >= 0 && cur_tx_packets >= 0)
-                          ? cur_tx_packets - dev->snap_init_tx_packets : -1;
-  dev->delta_rx_packets = (dev->snap_init_rx_packets >= 0 && cur_rx_packets >= 0)
-                          ? cur_rx_packets - dev->snap_init_rx_packets : -1;
+  /* snap_init < 0 means the baseline was never taken -> delta = -1 */
+  dev->delta_tx_bytes   = rcclTelemetryCounterDelta(cur_tx_bytes, dev->snap_init_tx_bytes);
+  dev->delta_rx_bytes   = rcclTelemetryCounterDelta(cur_rx_bytes, dev->snap_init_rx_bytes);
+  dev->delta_tx_packets = rcclTelemetryCounterDelta(cur_tx_packets, dev->snap_init_tx_packets);
+  dev->delta_rx_packets = rcclTelemetryCounterDelta(cur_rx_packets, dev->snap_init_rx_packets);
 
   /* 4. Transform absolute hw_counters/pfc_* values into deltas vs. the
-   *    baseline captured by rcclTelemetrySnapshotInit. If either end of the
-   *    pair is -1 (counter unavailable / baseline never taken), keep -1. */
-  for (int c = 0; c < hw->num_counters; c++) {
-    int64_t cur  = dev->hw_counters[c];
-    int64_t init = dev->snap_init_hw_counters[c];
-    dev->hw_counters[c] = (cur >= 0 && init >= 0) ? (cur - init) : -1;
-  }
+   *    baseline captured by rcclTelemetrySnapshotInit. */
+  for (int c = 0; c < hw->num_counters; c++)
+    dev->hw_counters[c] = rcclTelemetryCounterDelta(dev->hw_counters[c], dev->snap_init_hw_counters[c]);
   rcclTelemetryPfcDelta(dev->pfc_rx_frames, dev->snap_init_pfc_rx_frames);
   rcclTelemetryPfcDelta(dev->pfc_tx_frames, dev->snap_init_pfc_tx_frames);
   rcclTelemetryPfcDelta(dev->pfc_rx_pause_us, dev->snap_init_pfc_rx_pause_us);
