@@ -1134,6 +1134,11 @@ void rcclTelemetryEthtoolResolve(const char* names, size_t nameStride, const uin
 /* Root of the sysfs/debugfs tree telemetry reads, "/sys" outside tests. */
 extern const char* rcclTelemetrySysRoot;
 
+/* Delta of a HW counter vs. its baseline; -1 if either is unavailable. Some
+ * counters are 48 bits wide (e.g. bnxt_re rx_bytes), so a counter that went
+ * down is taken as one 48-bit wrap, and as unknown (-1) if it cannot be one. */
+int64_t rcclTelemetryCounterDelta(int64_t cur, int64_t init);
+
 /* Samples that retry a sampled column's primary row before it locks to the
  * alternate. */
 #define RCCL_TEL_SAMPLE_PRIMARY_TRIES 10
