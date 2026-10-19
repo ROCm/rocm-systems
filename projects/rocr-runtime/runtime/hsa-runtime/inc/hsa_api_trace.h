@@ -51,12 +51,14 @@
 #include "hsa_ext_finalize.h"
 #include "hsa_amd_tool.h"
 #include "hsa_ven_amd_pc_sampling.h"
+#include "hsa_ven_amd_launch_descriptor.h"
 #else
 #include "inc/hsa_ext_image.h"
 #include "inc/hsa_ext_amd.h"
 #include "inc/hsa_ext_finalize.h"
 #include "inc/hsa_amd_tool.h"
 #include "inc/hsa_ven_amd_pc_sampling.h"
+#include "inc/hsa_ven_amd_launch_descriptor.h"
 #endif
 
 #include <string.h>
@@ -196,6 +198,14 @@ struct PcSamplingExtTable {
   decltype(hsa_ven_amd_pcs_flush)* hsa_ven_amd_pcs_flush_fn;
 };
 
+// Table to export HSA Launch Descriptor Extension Apis
+struct LaunchDescriptorExtTable {
+  ApiTableVersion version;
+  decltype(hsa_ven_amd_launch_descriptor_create)* hsa_ven_amd_launch_descriptor_create_fn;
+  decltype(hsa_ven_amd_launch_descriptor_destroy)* hsa_ven_amd_launch_descriptor_destroy_fn;
+  decltype(hsa_ven_amd_launch_descriptor_set)* hsa_ven_amd_launch_descriptor_set_fn;
+  decltype(hsa_ven_amd_launch_descriptor_set_prefetch)* hsa_ven_amd_launch_descriptor_set_prefetch_fn;
+};
 
 // Table to export AMD Extension Apis
 struct AmdExtTable {
@@ -296,6 +306,8 @@ struct AmdExtTable {
   decltype(hsa_amd_agent_set_attribute)* hsa_amd_agent_set_attribute_fn;
   decltype(hsa_amd_vmem_get_vmem_info)* hsa_amd_vmem_get_vmem_info_fn;
   decltype(hsa_amd_enable_high_precision_timestamps)* hsa_amd_enable_high_precision_timestamps_fn;
+  decltype(hsa_amd_signal_batch_create)* hsa_amd_signal_batch_create_fn;
+  decltype(hsa_amd_signal_batch_destroy)* hsa_amd_signal_batch_destroy_fn;
 };
 
 // Table to export HSA Core Runtime Apis
@@ -500,6 +512,9 @@ struct HsaApiTable {
 
   // Table of function pointers to AMD PC Sampling Extension
   PcSamplingExtTable* pc_sampling_ext_;
+
+  // Table of function pointers to AMD Launch Descriptor Extension
+  LaunchDescriptorExtTable* launch_descriptor_ext_;
 };
 
 // Structure containing instances of different api tables
@@ -511,6 +526,7 @@ struct HsaApiTableContainer {
 	ImageExtTable image_ext;
 	ToolsApiTable tools;
   PcSamplingExtTable pc_sampling_ext;
+  LaunchDescriptorExtTable launch_descriptor_ext;
 
   // Default initialization of a container instance
   HsaApiTableContainer() {
@@ -547,6 +563,11 @@ struct HsaApiTableContainer {
     pc_sampling_ext.version.minor_id = sizeof(PcSamplingExtTable);
     pc_sampling_ext.version.step_id = HSA_PC_SAMPLING_API_TABLE_STEP_VERSION;
     root.pc_sampling_ext_ = &pc_sampling_ext;
+
+    launch_descriptor_ext.version.major_id = HSA_LAUNCH_DESCRIPTOR_API_TABLE_MAJOR_VERSION;
+    launch_descriptor_ext.version.minor_id = sizeof(LaunchDescriptorExtTable);
+    launch_descriptor_ext.version.step_id = HSA_LAUNCH_DESCRIPTOR_API_TABLE_STEP_VERSION;
+    root.launch_descriptor_ext_ = &launch_descriptor_ext;
   }
 };
 
@@ -606,5 +627,7 @@ static void inline copyTables(const HsaApiTable* src, HsaApiTable* dest) {
     copyElement(&dest->tools_->version, &src->tools_->version);
   if ((offsetof(HsaApiTable, pc_sampling_ext_) < dest->version.minor_id))
     copyElement(&dest->pc_sampling_ext_->version, &src->pc_sampling_ext_->version);
+  if ((offsetof(HsaApiTable, launch_descriptor_ext_) < dest->version.minor_id))
+    copyElement(&dest->launch_descriptor_ext_->version, &src->launch_descriptor_ext_->version);
 }
 #endif

@@ -64,7 +64,6 @@
 #include "core/inc/intercept_queue.h"
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/ipc_signal.h"
-#include "core/inc/launch_descriptor.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
 #include "core/inc/counted_queue_manager.h"
@@ -97,11 +96,6 @@ struct ValidityError<AMD::MemoryRegion*> {
 template <>
 struct ValidityError<core::Queue*> {
   enum { value = HSA_STATUS_ERROR_INVALID_QUEUE };
-};
-
-template <>
-struct ValidityError<core::LaunchDescriptor*> {
-  enum { value = HSA_STATUS_ERROR_INVALID_ARGUMENT };
 };
 
 template <class T>
@@ -998,24 +992,17 @@ hsa_status_t hsa_amd_profiling_convert_tick_to_system_domain(hsa_agent_t agent_h
   CATCH;
 }
 
-hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t num_consumers,
-                                   const hsa_agent_t* consumers, uint64_t attributes,
-                                   hsa_signal_t* hsa_signal) {
+// Interrupt signals are used only when interrupt waits are enabled and a CPU agent may wait.
+static hsa_status_t SelectInterruptSignal(uint32_t num_consumers, const hsa_agent_t* consumers,
+                                          uint64_t attributes, bool* use_interrupt) {
   struct AgentHandleCompare {
     bool operator()(const hsa_agent_t& lhs, const hsa_agent_t& rhs) const {
       return lhs.handle < rhs.handle;
     }
   };
 
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(hsa_signal);
-
-  core::Signal* ret;
-
-  bool enable_ipc = attributes & HSA_AMD_SIGNAL_IPC;
-  bool use_default =
-      enable_ipc || (attributes & HSA_AMD_SIGNAL_AMD_GPU_ONLY) || (!core::g_use_interrupt_wait);
+  bool use_default = (attributes & HSA_AMD_SIGNAL_IPC) ||
+      (attributes & HSA_AMD_SIGNAL_AMD_GPU_ONLY) || (!core::g_use_interrupt_wait);
 
   if ((!use_default) && (num_consumers != 0)) {
     IS_BAD_PTR(consumers);
@@ -1032,16 +1019,107 @@ hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t nu
     }
   }
 
-  if (use_default) {
-    ret = new core::DefaultSignal(initial_value, enable_ipc);
-  } else {
+  *use_interrupt = !use_default;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t hsa_amd_signal_create(hsa_signal_value_t initial_value, uint32_t num_consumers,
+                                   const hsa_agent_t* consumers, uint64_t attributes,
+                                   hsa_signal_t* hsa_signal) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(hsa_signal);
+
+  const bool enable_ipc = attributes & HSA_AMD_SIGNAL_IPC;
+
+  bool use_interrupt;
+  hsa_status_t status =
+      SelectInterruptSignal(num_consumers, consumers, attributes, &use_interrupt);
+  if (status != HSA_STATUS_SUCCESS) return status;
+
+  core::Signal* ret;
+  if (use_interrupt) {
     ret = new core::InterruptSignal(initial_value);
+  } else {
+    ret = new core::DefaultSignal(initial_value, enable_ipc);
   }
 
   if (ret == nullptr)
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   *hsa_signal = core::Signal::Convert(ret);
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_signal_batch_create(uint32_t count,
+                                         const hsa_signal_value_t* initial_values,
+                                         uint32_t num_consumers, const hsa_agent_t* consumers,
+                                         uint64_t attributes, hsa_amd_memory_pool_t pool,
+                                         hsa_amd_signal_batch_t* batch, hsa_signal_t* signals) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(initial_values);
+  IS_BAD_PTR(batch);
+  IS_BAD_PTR(signals);
+
+  if ((count == 0) || (attributes & HSA_AMD_SIGNAL_IPC)) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  const hsa_region_t region_handle = {pool.handle};
+  const core::MemoryRegion* region = core::MemoryRegion::Convert(region_handle);
+  if ((region == nullptr) || !region->IsValid()) {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_INVALID_MEMORY_POOL);
+  }
+  const uint32_t owner_type = region->owner()->device_type();
+  const bool device_pool = (owner_type == core::Agent::DeviceType::kAmdGpuDevice);
+  if ((!device_pool && (owner_type != core::Agent::DeviceType::kAmdCpuDevice)) ||
+      !static_cast<const AMD::MemoryRegion*>(region)->SignalCapable()) {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_INVALID_MEMORY_POOL);
+  }
+
+  const bool host_access_via_hdp =
+      device_pool && static_cast<const AMD::GpuAgent*>(region->owner())->PcieStoresNeedFlush();
+
+  bool use_interrupt;
+  hsa_status_t status =
+      SelectInterruptSignal(num_consumers, consumers, attributes, &use_interrupt);
+  if (status != HSA_STATUS_SUCCESS) return status;
+
+  // Device memory is only mapped for its owner; the host and every consumer need it too.
+  std::vector<hsa_agent_t> access_agents;
+  if (device_pool) {
+    for (core::Agent* cpu_agent : core::Runtime::runtime_singleton_->cpu_agents())
+      access_agents.push_back(cpu_agent->public_handle());
+    if (num_consumers == 0) {
+      for (core::Agent* gpu_agent : core::Runtime::runtime_singleton_->gpu_agents())
+        access_agents.push_back(gpu_agent->public_handle());
+    } else {
+      access_agents.insert(access_agents.end(), consumers, consumers + num_consumers);
+    }
+  }
+
+  core::SignalBatch* signal_batch;
+  status = core::SignalBatch::Create(count, initial_values, use_interrupt, region, access_agents,
+                                     host_access_via_hdp, &signal_batch, signals);
+  if (status != HSA_STATUS_SUCCESS) return status;
+
+  *batch = core::SignalBatch::Convert(signal_batch);
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_signal_batch_destroy(hsa_amd_signal_batch_t batch) {
+  TRY;
+  IS_OPEN();
+
+  core::SignalBatch* signal_batch = core::SignalBatch::Convert(batch);
+  if ((signal_batch == nullptr) || !signal_batch->IsValid()) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  signal_batch->ReleaseHandle();
   return HSA_STATUS_SUCCESS;
   CATCH;
 }
@@ -2662,75 +2740,6 @@ hsa_status_t hsa_amd_queue_create(hsa_agent_t agent_handle,
   }
 
   return first_error;
-  CATCH;
-}
-
-// ====================================================================================
-// Launch Descriptor API Implementation
-// ====================================================================================
-
-hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_create(
-    hsa_agent_t agent_handle,
-    amd_launch_descriptor_t* launch_descriptor) {
-  TRY;
-  IS_OPEN();
-  IS_BAD_PTR(launch_descriptor);
-
-  const core::Agent* agent = core::Agent::Convert(agent_handle);
-  IS_VALID(agent);
-
-  if (agent->device_type() != core::Agent::kAmdGpuDevice) {
-    return HSA_STATUS_ERROR_INVALID_AGENT;
-  }
-
-  uint8_t version = core::GetDescriptorVersion(agent);
-  if (version == AMD_LAUNCH_DESCRIPTOR_VERSION_NONE) {
-    return HSA_STATUS_ERROR_INVALID_AGENT;
-  }
-
-  core::LaunchDescriptor* desc = new (std::nothrow) core::LaunchDescriptor(version);
-  if (desc == nullptr) {
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
-  *launch_descriptor = core::LaunchDescriptor::Convert(desc);
-  return HSA_STATUS_SUCCESS;
-  CATCH;
-}
-
-hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_destroy(
-    amd_launch_descriptor_t launch_descriptor) {
-  TRY;
-  IS_OPEN();
-
-  core::LaunchDescriptor* desc = core::LaunchDescriptor::Convert(launch_descriptor);
-  delete desc;
-  return HSA_STATUS_SUCCESS;
-  CATCH;
-}
-
-hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_set(
-    amd_launch_descriptor_t launch_descriptor,
-    uint32_t field,
-    uint64_t value) {
-  TRY;
-  IS_OPEN();
-
-  core::LaunchDescriptor* desc = core::LaunchDescriptor::Convert(launch_descriptor);
-  core::SetDescriptorField(desc, field, value);
-  return HSA_STATUS_SUCCESS;
-  CATCH;
-}
-
-hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_set_prefetch(
-    amd_launch_descriptor_t launch_descriptor,
-    uint32_t index,
-    const amd_data_prefetch_t* prefetch) {
-  TRY;
-  IS_OPEN();
-
-  core::LaunchDescriptor* desc = core::LaunchDescriptor::Convert(launch_descriptor);
-  core::SetDescriptorPrefetch(desc, index, prefetch);
-  return HSA_STATUS_SUCCESS;
   CATCH;
 }
 

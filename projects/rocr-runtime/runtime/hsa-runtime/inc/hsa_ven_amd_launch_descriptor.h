@@ -1,44 +1,6 @@
-////////////////////////////////////////////////////////////////////////////////
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
 //
-// The University of Illinois/NCSA
-// Open Source License (NCSA)
-//
-// Copyright (c) 2024, Advanced Micro Devices, Inc. All rights reserved.
-//
-// Developed by:
-//
-//                 AMD Research and AMD HSA Software Development
-//
-//                 Advanced Micro Devices, Inc.
-//
-//                 www.amd.com
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to
-// deal with the Software without restriction, including without limitation
-// the rights to use, copy, modify, merge, publish, distribute, sublicense,
-// and/or sell copies of the Software, and to permit persons to whom the
-// Software is furnished to do so, subject to the following conditions:
-//
-//  - Redistributions of source code must retain the above copyright notice,
-//    this list of conditions and the following disclaimers.
-//  - Redistributions in binary form must reproduce the above copyright
-//    notice, this list of conditions and the following disclaimers in
-//    the documentation and/or other materials provided with the distribution.
-//  - Neither the names of Advanced Micro Devices, Inc,
-//    nor the names of its contributors may be used to endorse or promote
-//    products derived from this Software without specific prior written
-//    permission.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-// THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
-// OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-// ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-// DEALINGS WITH THE SOFTWARE.
-//
-////////////////////////////////////////////////////////////////////////////////
+// SPDX-License-Identifier: MIT
 
 /**
  * @file hsa_ven_amd_launch_descriptor.h
@@ -215,6 +177,34 @@ hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_set_prefetch(
     const amd_data_prefetch_t* prefetch);
 
 /** @} */
+
+/**
+ * @brief Version 1.00 function pointer table for the launch descriptor
+ * vendor extension.
+ *
+ * Obtained via hsa_system_get_major_extension_table() with
+ * HSA_EXTENSION_AMD_LAUNCH_DESCRIPTOR.
+ */
+#define hsa_ven_amd_launch_descriptor_1_00
+
+typedef struct hsa_ven_amd_launch_descriptor_1_00_pfn_s {
+  hsa_status_t (*hsa_ven_amd_launch_descriptor_create)(
+      hsa_agent_t agent,
+      amd_launch_descriptor_t* launch_descriptor);
+
+  hsa_status_t (*hsa_ven_amd_launch_descriptor_destroy)(
+      amd_launch_descriptor_t launch_descriptor);
+
+  hsa_status_t (*hsa_ven_amd_launch_descriptor_set)(
+      amd_launch_descriptor_t launch_descriptor,
+      uint32_t field,
+      uint64_t value);
+
+  hsa_status_t (*hsa_ven_amd_launch_descriptor_set_prefetch)(
+      amd_launch_descriptor_t launch_descriptor,
+      uint32_t index,
+      const amd_data_prefetch_t* prefetch);
+} hsa_ven_amd_launch_descriptor_1_00_pfn_t;
 
 #ifdef __cplusplus
 }  // extern "C"
