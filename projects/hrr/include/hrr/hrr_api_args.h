@@ -111,6 +111,12 @@ typedef struct {
  * still means that the call had no contents (a zero-size copy, say). */
 #define HRR_HASH_WITHHELD ((uint64_t)0xFFFFFFFFFFFFFFFFull)
 
+/* Stored in the present flag of an inline pointee that is application data
+ * (a hipSetupArgument value) when capture ran without HIP_HRR_CAPTURE_CONTENT:
+ * the pointer was non-null but its bytes were not recorded. 1 still means the
+ * bytes field holds them, zeros included. */
+#define HRR_PRESENT_WITHHELD ((uint8_t)2u)
+
 #ifdef __cplusplus
 static_assert(sizeof(hrr_file_header) == 8, "hrr_file_header must be 8 bytes");
 #endif
@@ -3573,7 +3579,7 @@ typedef struct {
     uint64_t size;
     uint64_t offset;
     uint8_t arg_bytes[256];  /* unsigned char[256] inline copy */
-    uint8_t arg_present;  /* 1 when arg was non-null */
+    uint8_t arg_present;  /* 1 when arg was non-null, HRR_PRESENT_WITHHELD when its bytes were not recorded */
     uint32_t arg_n;  /* elements copied from arg */
 } hrr_args_hipSetupArgument;
 #ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H

@@ -10,7 +10,8 @@
  * @ingroup HRRTest
  * Handler-level tests (hrr-handler-tests links hip_playback.cpp in): a blob the
  * file cap refuses ends the replay, a blob that is merely absent does not, and
- * contents a metadata-only capture withheld end it with the mode named.
+ * contents a metadata-only capture withheld, a blob or an inline argument value,
+ * end it with the mode named.
  * No HIP call is made and no GPU is needed.
  */
 
@@ -189,6 +190,33 @@ TEST_CASE("Unit_HRR_Blob_WithheldArgumentsRefuseReplacedKernel", "[hrr]") {
   INFO("stderr: " << err);
   CHECK(ctx.fatal_error.load());
   CHECK(err.find("needs a code object and its by-value kernel arguments") != std::string::npos);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A legacy hipSetupArgument whose argument value a metadata-only capture
+ *     withheld (present flag HRR_PRESENT_WITHHELD, zero bytes) is refused
+ *     through the generated handler before any HIP call: the replay ends and
+ *     the message names the kernel argument value and the capture mode.
+ */
+TEST_CASE("Unit_HRR_Blob_WithheldSetupArgumentIsRefused", "[hrr]") {
+  PlaybackContext ctx;
+  hrr_test::ExactRecord<hrr_args_hipSetupArgument> rec;
+  auto* a = rec.get();
+  a->size = 8;
+  a->arg_n = 8;
+  a->arg_present = HRR_PRESENT_WITHHELD;
+
+  REQUIRE(hrr_playback_dispatch[HRR_API_HIPSETUPARGUMENT] != nullptr);
+  hipError_t r = hipSuccess;
+  const std::string err = hrr_test::capture_stderr(
+      [&] { r = hrr_playback_dispatch[HRR_API_HIPSETUPARGUMENT](ctx, rec.bytes()); });
+  INFO("stderr: " << err);
+  CHECK(r == hipErrorNotSupported);
+  CHECK(ctx.fatal_error.load());
+  CHECK(err.find("needs a kernel argument value, which this archive does not hold because it "
+                 "was captured in metadata-only mode") != std::string::npos);
 }
 
 /** @} */

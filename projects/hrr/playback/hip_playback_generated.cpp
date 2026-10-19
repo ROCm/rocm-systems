@@ -3287,6 +3287,10 @@ static hipError_t playback_hipSetDeviceFlags(PlaybackContext& ctx, const uint8_t
 
 static hipError_t playback_hipSetupArgument(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipSetupArgument*>(payload);
+  if (a->arg_present == HRR_PRESENT_WITHHELD) {
+    ctx.refuse_withheld(HRR_HASH_WITHHELD, HRR_HASH_WITHHELD, "kernel argument value");
+    return hipErrorNotSupported;
+  }
   unsigned char _d_arg[256]{};
   uint32_t _d_arg_n = a->arg_n > 256u ? 256u : a->arg_n;
   (void)_d_arg_n;

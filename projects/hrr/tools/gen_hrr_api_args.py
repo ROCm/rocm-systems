@@ -1160,11 +1160,13 @@ class Deref:
     # the bytes field zero and records only whether the pointer was non-null.
     # The field keeps its size, so archives from before still read.
     capability: bool = False
-    # For a pointee that is application data, such as a kernel argument value:
-    # capture copies the bytes only when HIP_HRR_CAPTURE_CONTENT is set. In
-    # metadata-only mode the bytes field stays zero; the count and the
-    # present flag are recorded either way.
-    content: bool = False
+    # For a pointee that is application data, such as a kernel argument value,
+    # what it is: capture copies the bytes only when HIP_HRR_CAPTURE_CONTENT is
+    # set. In metadata-only mode the bytes field stays zero, the count is
+    # recorded and the present flag of a non-null pointer is
+    # HRR_PRESENT_WITHHELD, which replay refuses, naming this, rather than
+    # passing the zeros on.
+    content: str = ""
 
     @property
     def is_array(self) -> bool:
@@ -1230,7 +1232,7 @@ DEREF_FIELDS: Dict[str, List[Deref]] = {
     # them, as it does for a launch's by-value arguments.
     "hipSetupArgument": [
         Deref("arg", "unsigned char", 1, count="size", max_count=256,
-              content=True),
+              content="kernel argument value"),
     ],
     # The symbol name is the entire question these two ask, and it was recorded
     # as an address with none of the characters behind it: measured as a SIGSEGV
@@ -2109,6 +2111,12 @@ typedef struct {
  * still means that the call had no contents (a zero-size copy, say). */
 #define HRR_HASH_WITHHELD ((uint64_t)0xFFFFFFFFFFFFFFFFull)
 
+/* Stored in the present flag of an inline pointee that is application data
+ * (a hipSetupArgument value) when capture ran without HIP_HRR_CAPTURE_CONTENT:
+ * the pointer was non-null but its bytes were not recorded. 1 still means the
+ * bytes field holds them, zeros included. */
+#define HRR_PRESENT_WITHHELD ((uint8_t)2u)
+
 #ifdef __cplusplus
 static_assert(sizeof(hrr_file_header) == 8, "hrr_file_header must be 8 bytes");
 #endif
@@ -2247,7 +2255,11 @@ def generate_struct(entry: ApiEntry) -> str:
                 else f"{d.ctype} not recorded, zeros" if d.capability
                 else f"{d.ctype} inline copy")
         lines.append(f"    uint8_t {d.bytes_field}[{d.total_bytes}];  /* {what} */")
-        lines.append(f"    uint8_t {d.present_field};  /* 1 when {d.param} was non-null */")
+        if d.content:
+            lines.append(f"    uint8_t {d.present_field};  /* 1 when {d.param} was non-null, "
+                         f"HRR_PRESENT_WITHHELD when its bytes were not recorded */")
+        else:
+            lines.append(f"    uint8_t {d.present_field};  /* 1 when {d.param} was non-null */")
         if d.is_array:
             lines.append(f"    uint32_t {d.count_field};  /* elements copied from {d.param} */")
 
@@ -2536,6 +2548,17 @@ def _emit_copy(lines: List[str], d: Deref, stmt: str) -> None:
         lines.append(f"      {stmt}")
 
 
+def _present_value(d: Deref) -> str:
+    """The present flag capture records for a non-null pointee.
+
+    A content pointee whose bytes metadata-only capture did not copy is marked
+    HRR_PRESENT_WITHHELD, so that replay refuses it instead of passing zeros.
+    """
+    if d.content:
+        return "HIP_HRR_CAPTURE_CONTENT ? 1 : HRR_PRESENT_WITHHELD"
+    return "1"
+
+
 def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
     """Emit the memcpy that carries each dereferenced pointee into the event.
 
@@ -2577,7 +2600,7 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"      }}")
             _emit_copy(lines, d, f"std::memcpy(a.{d.bytes_field}, {d.param}, _n);")
             lines.append(f"      a.{d.bytes_field}[_n] = 0;")
-            lines.append(f"      a.{d.present_field} = 1;")
+            lines.append(f"      a.{d.present_field} = {_present_value(d)};")
             lines.append(f"    }}")
         elif d.is_array:
             lines.append(f"    if ({d.param} && {d.count} > 0) {{")
@@ -2599,7 +2622,7 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             _emit_copy(lines, d, f"std::memcpy(a.{d.bytes_field}, {d.param},"
                                  f" static_cast<size_t>(_n) * sizeof({d.ctype}));")
             lines.append(f"      a.{d.count_field}   = _n;")
-            lines.append(f"      a.{d.present_field} = 1;")
+            lines.append(f"      a.{d.present_field} = {_present_value(d)};")
             lines.append(f"    }}")
         elif d.capability:
             lines.append(f"    // *{d.param} is a capability and is not recorded.")
@@ -2607,7 +2630,7 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
         else:
             lines.append(f"    if ({d.param}) {{")
             _emit_copy(lines, d, f"std::memcpy(a.{d.bytes_field}, {d.param}, sizeof({d.ctype}));")
-            lines.append(f"      a.{d.present_field} = 1;")
+            lines.append(f"      a.{d.present_field} = {_present_value(d)};")
             lines.append(f"    }}")
 
 
@@ -3330,6 +3353,16 @@ def _playback_arg(entry: ApiEntry, p: Param, name: str,
     # rather than casting the recorded capture-time address back to a pointer.
     d = deref_for_param(entry.name, name)
     if d is not None and d.playback == "auto":
+        # Application data a metadata-only capture did not record: refuse the
+        # call and end the replay rather than pass the zeros in its place.
+        # refuse_withheld() reports and sets fatal_error for a withheld hash,
+        # which is what both halves of HRR_HASH_WITHHELD are.
+        if d.content:
+            pre_lines.append(f"  if (a->{d.present_field} == HRR_PRESENT_WITHHELD) {{")
+            pre_lines.append(f"    ctx.refuse_withheld(HRR_HASH_WITHHELD, HRR_HASH_WITHHELD,"
+                             f" \"{d.content}\");")
+            pre_lines.append(f"    return hipErrorNotSupported;")
+            pre_lines.append(f"  }}")
         if d.string:
             # The record holds a fixed-size character field. Nothing makes the
             # archive's bytes end in a NUL, so the string is copied into a local

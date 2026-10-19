@@ -362,13 +362,17 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlyCapture) {
  * Test Description
  * ----------------
  *   - Captures Unit_HRR_SetupArgument_Direct, which pushes a known eight-byte
- *     scalar through the legacy hipSetupArgument, once without and once with
- *     HIP_HRR_CAPTURE_CONTENT. Both archives record the push.
+ *     scalar and then a zero through the legacy hipSetupArgument, once without
+ *     and once with HIP_HRR_CAPTURE_CONTENT. Both archives record both pushes.
  *   - Without the opt-in no file in the archive holds the scalar's bytes. With
  *     it the archive does, which shows the search would find them.
+ *   - The workload launches nothing, so only the hipSetupArgument handler can
+ *     refuse. Replay of the metadata-only archive fails and names the withheld
+ *     kernel argument value; replay of the content archive, its genuine zero
+ *     included, succeeds.
  */
 HRR_TEST_CASE(Unit_HRR_MetadataOnlySetupArgument) {
-  // The scalar Unit_HRR_SetupArgument_Direct pushes.
+  // The scalar Unit_HRR_SetupArgument_Direct pushes first.
   constexpr uint64_t kMarker = 0x5e7a2c0ffee1d0a7ULL;
   const auto* marker = reinterpret_cast<const char*>(&kMarker);
 
@@ -389,8 +393,8 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlySetupArgument) {
     }
     const auto counts = hrr_info_api_counts(cap.path);
     const auto it = counts.find("hipSetupArgument");
-    REQUIRE(it != counts.end());  // the push was recorded
-    CHECK(it->second == 1);
+    REQUIRE(it != counts.end());  // the pushes were recorded
+    CHECK(it->second == 2);
 
     bool found = false;
     for (const auto& e : fs::recursive_directory_iterator(cap.path)) {
@@ -401,6 +405,19 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlySetupArgument) {
       if (std::search(bytes.begin(), bytes.end(), marker, marker + sizeof(kMarker)) !=
           bytes.end())
         found = true;
+    }
+
+    const auto [ret, out] = hrr_playback_merged(cap.path);
+    INFO("Playback output:\n" << out);
+    const bool refused =
+        out.find("needs a kernel argument value, which this archive does not hold because it "
+                 "was captured in metadata-only mode") != std::string::npos;
+    if (content) {
+      CHECK(ret == 0);
+      CHECK_FALSE(refused);
+    } else {
+      CHECK(ret != 0);
+      CHECK(refused);
     }
     return found;
   };

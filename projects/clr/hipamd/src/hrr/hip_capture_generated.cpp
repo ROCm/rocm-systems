@@ -4436,7 +4436,7 @@ static hipError_t capture_hipSetupArgument(const void* arg, size_t size, size_t 
       if (HIP_HRR_CAPTURE_CONTENT)
         std::memcpy(a.arg_bytes, arg, static_cast<size_t>(_n) * sizeof(unsigned char));
       a.arg_n   = _n;
-      a.arg_present = 1;
+      a.arg_present = HIP_HRR_CAPTURE_CONTENT ? 1 : HRR_PRESENT_WITHHELD;
     }
     hrr_cap::writer::write_event_raw(HRR_API_HIPSETUPARGUMENT, &a.hdr, sizeof(a));
   }

@@ -2073,13 +2073,13 @@ TEST_CASE("Unit_HRR_ConfigureCall_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
-// Workload: a legacy hipSetupArgument push of a known scalar
+// Workload: legacy hipSetupArgument pushes of a known scalar and of a zero
 //
 // hipSetupArgument copies a kernel argument value from host memory into the
 // pending kernarg buffer, and capture copies the same bytes into the event.
-// Unit_HRR_MetadataOnlySetupArgument looks for this scalar in the archive. As in
-// Unit_HRR_ConfigureCall_Direct, no hipLaunchByPtr consumes the configuration.
-// No final blob.
+// Unit_HRR_MetadataOnlySetupArgument looks for the scalar in the archive and
+// replays both pushes. As in Unit_HRR_ConfigureCall_Direct, no hipLaunchByPtr
+// consumes the configuration. No final blob.
 // ===========================================================================
 TEST_CASE("Unit_HRR_SetupArgument_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -2089,6 +2089,9 @@ TEST_CASE("Unit_HRR_SetupArgument_Direct", "[.][hrr-direct]") {
   // Unit_HRR_MetadataOnlySetupArgument searches the archive for these bytes.
   const uint64_t marker = 0x5e7a2c0ffee1d0a7ULL;
   HRR_HIP_CHECK(hipSetupArgument(&marker, sizeof(marker), 0));
+  // A genuine zero: content-mode replay must push it like any other value.
+  const uint64_t zero = 0;
+  HRR_HIP_CHECK(hipSetupArgument(&zero, sizeof(zero), sizeof(marker)));
   HRR_HIP_CHECK(hipStreamSynchronize(s));
   HRR_HIP_CHECK(hipStreamDestroy(s));
 }
