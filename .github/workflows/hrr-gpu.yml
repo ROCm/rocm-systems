@@ -198,6 +198,14 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python projects/hrr/tests/scripts/hrr_capture_build.py install-base
 
+      # The build job compiled the test binary in a container, where the
+      # workspace is /__w/<repo>/<repo>, and the binary spawns itself and the
+      # playback tool by those absolute paths. Make them resolve on this host.
+      - name: Map the container build path to the workspace
+        run: |
+          sudo mkdir -p /__w/rocm-systems
+          sudo ln -sfn "${GITHUB_WORKSPACE}" /__w/rocm-systems/rocm-systems
+
       - name: Run integration suite
         env:
           FAMILY: ${{ matrix.family }}

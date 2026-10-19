@@ -183,13 +183,14 @@ jobs:
           # Cone mode also checks out projects/clr/hipamd/src/amdhip.def.in,
           # which gen_hrr_api_args.py reads on import. A test reads hrr-ci.yml.
           # The generator-rule tests in tools/tests regenerate the handlers from
-          # the HIP headers.
+          # the HIP headers. A configure test checks the rocJitsu config files exist.
           sparse-checkout: |
             projects/hrr
             projects/hip/include
             projects/clr/hipamd/include
             projects/clr/hipamd/src/hrr
             .github/workflows
+            emulation/rocjitsu/configs
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
