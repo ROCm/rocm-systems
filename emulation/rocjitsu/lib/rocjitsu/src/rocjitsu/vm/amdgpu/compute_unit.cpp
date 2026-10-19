@@ -219,9 +219,37 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
   return std::make_unique<Base>(std::move(name), config, memory, l2);
 }
 
-std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
-                                                         GpuMemory *memory, L2Cache *l2,
-                                                         simdojo::ExecMode exec_mode) {
+namespace {
+template <typename F> decltype(auto) with_compute_unit_isa(rj_code_arch_t arch, F &&fn) {
+  switch (arch) {
+    // \NPI new ISA family: add its architecture-to-ISA mapping here.
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return fn.template operator()<cdna1::Isa>();
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return fn.template operator()<cdna2::Isa>();
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return fn.template operator()<cdna3::Isa>();
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return fn.template operator()<cdna4::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return fn.template operator()<rdna1::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return fn.template operator()<rdna2::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return fn.template operator()<rdna3::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return fn.template operator()<rdna3_5::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return fn.template operator()<rdna4::Isa>();
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return fn.template operator()<cdna5::Isa>();
+  default:
+    throw std::runtime_error("Unsupported architecture for ComputeUnit");
+  }
+}
+} // namespace
+
+void ComputeUnitCore::validate(const Config &config) {
   if (config.target != ROCJITSU_CODE_TARGET_INVALID) {
     const IsaTargetRegistry &registry = default_isa_target_registry();
     const IsaTargetDescriptor *target_descriptor = registry.find(config.target);
@@ -235,36 +263,25 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
       throw util::ConfigError("execution is not implemented for the concrete GPU target");
   }
 
-  // Helper: instantiate the ISA-specific CU for the given execution mode.
-#define ROCJITSU_CU_CASE(ARCH_ENUM, ISA_TYPE)                                                      \
-  case ARCH_ENUM:                                                                                  \
-    validate_compute_unit_config<ISA_TYPE>(config);                                                \
-    switch (exec_mode) {                                                                           \
-    case simdojo::ExecMode::FUNCTIONAL:                                                            \
-      return create_functional_cu<ISA_TYPE>(std::move(name), config, memory, l2);                  \
-    case simdojo::ExecMode::CLOCKED:                                                               \
-      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, ISA_TYPE>>(           \
-          std::move(name), config, memory, l2);                                                    \
-    }                                                                                              \
-    break
+  with_compute_unit_isa(config.arch,
+                        [&]<GpuIsa Isa>() { validate_compute_unit_config<Isa>(config); });
+}
 
-  switch (config.arch) {
-    // \NPI new ISA family: add ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_<NAME>, <isa>::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA1, cdna1::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA2, cdna2::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA3, cdna3::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA4, cdna4::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA1, rdna1::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA2, rdna2::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3, rdna3::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA4, rdna4::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA5, cdna5::Isa);
-  default:
-    break;
-  }
-#undef ROCJITSU_CU_CASE
-  throw std::runtime_error("Unsupported architecture for ComputeUnit");
+std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
+                                                         GpuMemory *memory, L2Cache *l2,
+                                                         simdojo::ExecMode exec_mode) {
+  validate(config);
+
+  return with_compute_unit_isa(config.arch, [&]<GpuIsa Isa>() -> std::unique_ptr<ComputeUnitCore> {
+    switch (exec_mode) {
+    case simdojo::ExecMode::FUNCTIONAL:
+      return create_functional_cu<Isa>(std::move(name), config, memory, l2);
+    case simdojo::ExecMode::CLOCKED:
+      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, Isa>>(
+          std::move(name), config, memory, l2);
+    }
+    throw std::runtime_error("Unsupported architecture for ComputeUnit");
+  });
 }
 
 Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
