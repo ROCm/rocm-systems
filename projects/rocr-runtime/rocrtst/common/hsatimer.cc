@@ -191,6 +191,11 @@ uint64_t PerfTimer::MeasureTSCFreqHz() {
 #elif defined(__powerpc64__) || defined(__PPC64__)
   // Frequency in units of 100 MHz
   return __ppc_get_timebase_freq() / 100000000;
+#elif defined(__riscv)
+  // RISC-V has no TSC; the timer path uses CLOCK_MONOTONIC, whose nanosecond
+  // ticks correspond to a nominal 1 GHz counter. Report that in the units of
+  // this field (100 MHz), as the aqlprofile timer does.
+  return 10;
 #else
 #error "Unsupported architecture"
 #endif
