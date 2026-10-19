@@ -161,3 +161,25 @@ def test_report_rejects_more_than_two_paths(
         report.main()
 
     assert "accepts at most two paths" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("arch", ["gfx940", "gfx941", "gfx942"])
+def test_cdna3_total_note_counts_reported_channels(arch: str) -> None:
+    """The CDNA3 total note describes the counted channel expansion."""
+    note = report.build_total_note(
+        arch,
+        arch,
+        {"vcopy": {"total": 12}},
+        12,
+        "Median",
+    )
+
+    assert "<code>$total_l2_chan</code>" in note
+    assert "l2_banks × num_xcd" in note
+    assert "profile sysinfo" in note
+    assert "expanded row count" in note
+    lowered = note.lower()
+    assert "reconcil" not in lowered
+    assert "16 channel" not in lowered
+    assert "cpx" not in lowered
+    assert "cu_per_gpu" not in lowered
