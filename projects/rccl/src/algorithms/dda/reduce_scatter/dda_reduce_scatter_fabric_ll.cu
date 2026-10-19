@@ -110,7 +110,7 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
   if (op != ncclSum) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -141,6 +141,10 @@ ncclResult_t ncclReduceScatterDdaFabricLL(const void* sendbuff, void* recvbuff, 
     return ncclReduceScatterDdaFabricLLTyped<half>(sendbuff, recvbuff, recvcount, comm, stream);
   case ncclBfloat16:
     return ncclReduceScatterDdaFabricLLTyped<bf16>(sendbuff, recvbuff, recvcount, comm, stream);
+  case ncclFloat8e4m3:
+    return ncclReduceScatterDdaFabricLLTyped<dda::common::fp8e4m3>(sendbuff, recvbuff, recvcount, comm, stream);
+  case ncclFloat8e5m2:
+    return ncclReduceScatterDdaFabricLLTyped<dda::common::fp8e5m2>(sendbuff, recvbuff, recvcount, comm, stream);
   default:
     return ncclInvalidArgument;
   }

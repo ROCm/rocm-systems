@@ -1201,7 +1201,19 @@ bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
   return ok;
 }
 
-
+bool rcclDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype) {
+  switch (datatype) {
+  case ncclFloat32:
+  case ncclFloat16:
+  case ncclBfloat16:
+    return true;
+  case ncclFloat8e4m3:
+  case ncclFloat8e5m2:
+    return comm != nullptr && IsArchMatch(comm->archName, "gfx1250");
+  default:
+    return false;
+  }
+}
 
 bool rcclUseAlltoAllGda(struct ncclComm* comm) {
 #ifdef ENABLE_ROCSHMEM

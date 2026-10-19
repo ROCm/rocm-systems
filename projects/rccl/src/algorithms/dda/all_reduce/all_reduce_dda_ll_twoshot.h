@@ -141,8 +141,7 @@ __launch_bounds__(1024)
       do {
         ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
       } while (f0 != flag || f1 != flag);
-      acc0 = vecElementAdd<T>(acc0, d0);
-      acc1 = vecElementAdd<T>(acc1, d1);
+      ddaLLAddPayload<T>(acc0, acc1, d0, d1);
     }
     out[2 * pk] = acc0;
     out[2 * pk + 1] = acc1;

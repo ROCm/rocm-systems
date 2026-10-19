@@ -386,6 +386,11 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm);
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
                     bool query = false, const char* prefix = nullptr);
 
+// Element types the DDA fabric kernels accept on this comm's arch: ncclSum for
+// the reducing collectives, a raw byte copy for AllGather and AlltoAll. fp8 is
+// gfx1250-only.
+bool rcclDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype);
+
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
 
