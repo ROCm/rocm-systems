@@ -9,6 +9,8 @@
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 
+#include <algorithm>
+
 namespace rocjitsu {
 namespace amdgpu {
 
@@ -25,6 +27,18 @@ void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
     return;
   const bool active = !is_halted();
   const bool runnable = active && !debug_paused();
+  if (active != was_active) {
+    if (active) {
+      cu_.active_slot_limit_ = std::max(cu_.active_slot_limit_, wf_id_ + 1);
+    } else if (wf_id_ + 1 == cu_.active_slot_limit_) {
+      while (cu_.active_slot_limit_ != 0) {
+        const auto &last = cu_.wfs_[cu_.active_slot_limit_ - 1];
+        if (last && !last->is_halted())
+          break;
+        --cu_.active_slot_limit_;
+      }
+    }
+  }
   const uint64_t delta = (uint64_t(active) - uint64_t(was_active)) +
                          ((uint64_t(runnable) - uint64_t(was_runnable)) << 32);
   const uint64_t previous = cu_.wave_activity_.fetch_add(delta, std::memory_order_release);
@@ -110,6 +124,20 @@ uint32_t Wavefront::barrier_state(int32_t barrier_id) const {
 void Wavefront::barrier_wait(int32_t barrier_id) { cu_.barrier_wait(*this, barrier_id); }
 
 bool Wavefront::barrier_leave() { return cu_.named_barrier_leave(*this); }
+
+void Wavefront::gws_init(uint32_t rid, uint32_t count) { cu_.gws_init(*this, rid, count); }
+
+void Wavefront::gws_barrier_arrive(uint32_t rid, uint32_t count) {
+  cu_.gws_barrier_arrive(*this, rid, count);
+}
+
+void Wavefront::gws_sema_v(uint32_t rid) { cu_.gws_sema_v(*this, rid); }
+
+void Wavefront::gws_sema_p(uint32_t rid) { cu_.gws_sema_p(*this, rid); }
+
+void Wavefront::gws_sema_br(uint32_t rid, uint32_t count) { cu_.gws_sema_br(*this, rid, count); }
+
+void Wavefront::gws_sema_release_all(uint32_t rid) { cu_.gws_sema_release_all(*this, rid); }
 
 bool Wavefront::fail_pm4_submission() {
   if (!pm4_failure_)

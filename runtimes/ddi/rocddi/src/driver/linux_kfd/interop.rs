@@ -38,7 +38,7 @@ impl LinuxKfdDriver {
         descriptor: BorrowedFd<'_>,
     ) -> Result<Owned<KfdVirtualMemory>, Error> {
         self.ensure_open()?;
-        KfdVirtualMemory::import(descriptor.as_raw_fd(), self.allocator)
+        KfdVirtualMemory::import(descriptor.as_raw_fd())
     }
 
     pub(crate) fn export_virtual_memory(memory: &KfdVirtualMemory) -> Result<DmaBuf, Error> {
@@ -206,12 +206,7 @@ impl LinuxKfdDriver {
         let event_page_handle = event_page
             .map(|page| page.signal_event_page_handle(&device.vm))
             .transpose()?;
-        KfdSignalEvent::create(
-            device.vm.kfd_owner(),
-            event_page_handle,
-            device.vm.allocator(),
-            page_offered,
-        )
+        KfdSignalEvent::create(device.vm.kfd_owner(), event_page_handle, page_offered)
     }
 
     pub(crate) fn destroy_kfd_signal_event(event: &mut KfdSignalEvent) -> Result<(), Error> {

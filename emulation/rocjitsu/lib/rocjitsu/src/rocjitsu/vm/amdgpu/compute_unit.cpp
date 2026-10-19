@@ -44,12 +44,13 @@
 
 namespace rocjitsu {
 namespace amdgpu {
-bool InstructionComputeUnitView::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
-                                                        uint64_t status,
-                                                        bool clear_debug_stop_on_success,
-                                                        bool retain_failure_for_debugger) {
-  return raw_cu().defer_queue_exception(&raw_wavefront(), queue_id, process_id, status,
-                                        clear_debug_stop_on_success, retain_failure_for_debugger);
+bool InstructionComputeUnitView::signal_queue_exception(
+    uint32_t queue_id, uint32_t process_id, uint64_t status, bool clear_debug_stop_on_success,
+    bool retain_failure_for_debugger, QueueExceptionDeliveryPolicy delivery_policy,
+    bool retain_wave) {
+  return raw_cu().defer_queue_exception(retain_wave ? &raw_wavefront() : nullptr, queue_id,
+                                        process_id, status, clear_debug_stop_on_success,
+                                        retain_failure_for_debugger, delivery_policy);
 }
 
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
@@ -187,6 +188,12 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
   scalar_mem_pipeline_.set_fault_handler(vm_fault_handler);
   global_mem_pipeline_.set_fault_handler(vm_fault_handler);
   tensor_dma_pipeline_.set_fault_handler(std::move(vm_fault_handler));
+}
+
+ComputeUnitCore::~ComputeUnitCore() {
+  for (const auto &wave : wfs_)
+    if (wave && wave->state() == WfState::GWS_WAIT)
+      gws_device_->notify_parked_wave_gone(*wave);
 }
 
 template <GpuIsa Isa>
@@ -377,6 +384,12 @@ void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
     sgpr_file_.free(wf.sgpr_alloc().base);
     free_vgprs(wf.vgpr_alloc().base);
   }
+  // A wave halted or aborted while parked at a GWS rendezvous never went through
+  // the store's wake path, so reconcile the device-global parked bookkeeping here
+  // while the wave is still in GWS_WAIT -- reset() below clears its park state and
+  // process id (see GwsDevice).
+  if (wf.state() == WfState::GWS_WAIT)
+    gws_device_->notify_parked_wave_gone(wf);
   wf.trace_inst_count_ = 0;
   wf.reset();
 }
@@ -386,22 +399,27 @@ void ComputeUnitCore::flush_cp_notifications() {
   // notification behind it; draining to empty keeps that from waiting for whatever
   // takes the wave-state lock next.
   for (;;) {
+    bool capacity_changed = false;
+    std::vector<PendingExecutionFailure> execution_failures;
     std::vector<PendingVmFault> faults;
     std::vector<PendingQueueException> exceptions;
     std::vector<std::pair<uint32_t, uint32_t>> ready;
     {
       std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
-      if (pending_vm_faults_.empty() && pending_queue_exceptions_.empty() &&
-          pending_wg_completions_.empty())
+      if (!has_pending_cp_notifications())
         return;
       faults.swap(pending_vm_faults_);
+      execution_failures.swap(pending_execution_failures_);
       exceptions.swap(pending_queue_exceptions_);
       ready.swap(pending_wg_completions_);
+      capacity_changed = std::exchange(pending_capacity_change_, false);
     }
     // The lock is released here, so taking hw_queue_mutex_ below cannot invert
     // against the CP's dispatch path.
     if (!cp_)
       return;
+    for (const auto &failure : execution_failures)
+      cp_->notify_execution_failure(failure.queue_id, failure.process_id, failure.reason);
     for (const PendingVmFault &fault : faults)
       cp_->notify_dispatch_vm_fault(fault.queue_id, fault.process_id, fault.dispatch_id,
                                     fault.outcome);
@@ -409,9 +427,21 @@ void ComputeUnitCore::flush_cp_notifications() {
       const bool delivered =
           queue_exception_handler_
               ? queue_exception_handler_(exception.queue_id, exception.process_id, exception.status,
-                                         exception.retain_failure_for_debugger)
+                                         exception.retain_failure_for_debugger,
+                                         exception.delivery_policy)
               : cp_->signal_queue_exception(exception.queue_id, exception.process_id,
-                                            exception.status);
+                                            exception.status, /*publish_interrupt=*/false) &&
+                    cp_->publish_queue_exception(
+                        exception.queue_id, exception.process_id, exception.status,
+                        exception.delivery_policy ==
+                            QueueExceptionDeliveryPolicy::WaitForAcknowledgment);
+      if (!delivered && exception.delivery_policy == QueueExceptionDeliveryPolicy::PublishOrFail) {
+        if (auto *sim_engine = engine())
+          sim_engine->request_exit(
+              std::format("Failed to deliver queue exception {:#x} for process {} queue {}",
+                          exception.status, exception.process_id, exception.queue_id),
+              /*code=*/1);
+      }
       if (delivered && exception.wave != nullptr) {
         std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
         // Queue teardown can reclaim this slot while the external handler is
@@ -429,6 +459,10 @@ void ComputeUnitCore::flush_cp_notifications() {
     }
     for (const auto &[dispatch_id, wg_id] : ready)
       cp_->notify_wg_complete(dispatch_id, wg_id);
+    // A wave can free enough registers/slots for another workgroup before its
+    // own workgroup retires. Retry only after dropping the wave-state lock.
+    if (capacity_changed && cp_->dispatch_threads() <= 1 && engine())
+      engine()->schedule_event_now(cp_->doorbell_event());
   }
 }
 
@@ -453,6 +487,31 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
                           /*retain_failure_for_debugger=*/false);
   }
   abort_dispatch(wf.dispatch_id());
+}
+
+void ComputeUnitCore::fail_gws_wait(Wavefront &wf, std::string_view reason) {
+  util::Logger::warn(reason, ": process=", wf.process_id(), " queue=", wf.queue_id(),
+                     " dispatch=", wf.dispatch_id(), " cu=", name(), " wave=", wf.wf_id(),
+                     " resource=", wf.gws_wait_rid_, " pc=", std::format("{:#x}", wf.pc),
+                     " gws_wait_limit=", config_.gws_wait_limit);
+  const uint32_t dispatch_id = wf.dispatch_id();
+  const bool pm4_failed = wf.fail_pm4_submission();
+  if (!pm4_failed &&
+      !(execution_failure_handler_ && execution_failure_handler_(wf, /*retain_wave=*/false))) {
+    defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueWaveAbort,
+                          /*clear_debug_stop_on_success=*/false,
+                          /*retain_failure_for_debugger=*/false,
+                          QueueExceptionDeliveryPolicy::PublishAndCancel);
+  }
+  if (cp_ && engine())
+    pending_execution_failures_.push_back({wf.queue_id(), wf.process_id(), std::string(reason)});
+  abort_dispatch(dispatch_id);
+  if (!cp_ || !engine()) {
+    if (engine())
+      engine()->request_exit(std::string(reason), 1);
+    else if (!pm4_failed)
+      throw std::runtime_error(std::string(reason));
+  }
 }
 
 void ComputeUnitCore::maybe_reset_lds_alloc() {
@@ -670,8 +729,41 @@ bool ComputeUnitCore::named_barrier_leave(Wavefront &wf) {
   return barrier.member_count == 0;
 }
 
+// Global Wave Sync (GWS) is device-global and shared across the CUs that run a
+// dispatch; all state and scheduling policy live in GwsDevice (see its class doc
+// in gws_device.h for the authoritative description). These forward to the store
+// this CU participates in.
+void ComputeUnitCore::gws_init(Wavefront &wf, uint32_t rid, uint32_t count) {
+  gws_device_->init(wf, rid, count);
+}
+
+void ComputeUnitCore::gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count) {
+  if (!gws_device_->barrier_arrive(*this, wf, rid, count)) {
+    wf.gws_wait_rid_ = rid;
+    fail_gws_wait(wf, "GWS barrier used before initialization");
+  }
+}
+
+void ComputeUnitCore::gws_sema_v(Wavefront &wf, uint32_t rid) {
+  gws_device_->sema_v(*this, wf, rid);
+}
+
+void ComputeUnitCore::gws_sema_p(Wavefront &wf, uint32_t rid) {
+  gws_device_->sema_p(*this, wf, rid);
+}
+
+void ComputeUnitCore::gws_sema_br(Wavefront &wf, uint32_t rid, uint32_t count) {
+  gws_device_->sema_br(*this, wf, rid, count);
+}
+
+void ComputeUnitCore::gws_sema_release_all(Wavefront &wf, uint32_t rid) {
+  gws_device_->sema_release_all(*this, wf, rid);
+}
+
 void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
                                  Wavefront::CpCompletionNotice notice) {
+  if (cp_ && notice == Wavefront::CpCompletionNotice::Send)
+    pending_capacity_change_ = true;
   auto key = wg_key(dispatch_id, wg_id);
   auto group = barrier_wgs_.find(key);
   if (group != barrier_wgs_.end()) {
@@ -797,10 +889,16 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes,
 }
 
 void ComputeUnitCore::tick_pipelines() {
-  scalar_mem_pipeline_.tick();
-  global_mem_pipeline_.tick();
-  local_mem_pipeline_.tick();
-  tensor_dma_pipeline_.tick();
+  // Functional accesses normally complete at issue. Retry only pipelines
+  // with retained work, avoiding four out-of-line calls on scalar-only steps.
+  if (!scalar_mem_pipeline_.empty())
+    scalar_mem_pipeline_.tick();
+  if (!global_mem_pipeline_.empty())
+    global_mem_pipeline_.tick();
+  if (!local_mem_pipeline_.empty())
+    local_mem_pipeline_.tick();
+  if (!tensor_dma_pipeline_.empty())
+    tensor_dma_pipeline_.tick();
 }
 
 VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
@@ -1114,8 +1212,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
     uint64_t lanes;
     uint8_t bytes;
   };
-  // Instruction has at most three explicit destinations, plus a special result.
-  std::array<Destination, 4> destinations;
+  // A block load can select any subset of its DWORD destinations.
+  std::array<Destination, kBlockDwordCount> destinations;
   size_t num_destinations = 0;
   auto append = [&](RegisterRef reg, uint64_t lanes, uint8_t bytes) {
     assert(num_destinations < destinations.size());
@@ -1142,11 +1240,22 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
     if (scalar_result) {
       append(*scalar_result, ~uint64_t{0}, MemoryWaitScoreboard::kFullDwordByteMask);
     } else {
-      std::array<RegisterRef, 3> registers{};
+      std::array<RegisterRef, kBlockDwordCount> registers{};
       unsigned count = 0;
       const RegisterAccess access(wf);
+      RegisterModifiers modifiers;
+      inst.amdgpu_register_modifiers(modifiers);
       for (int i = 0; i < inst.num_dst_operands(); ++i) {
         const auto &operand = *inst.dst_operand(i);
+        if (&operand == modifiers.block_data) {
+          for (uint32_t word = 0; word < kBlockDwordCount; ++word)
+            if (block_dword_enabled(wf.m0(), word))
+              if (const auto reg = access.block_data_register(operand, word, /*write=*/true)) {
+                assert(count < registers.size());
+                registers[count++] = *reg;
+              }
+          continue;
+        }
         const auto reg = access.destination_register(operand);
         if (operand.decoded_vgpr() && !reg) {
           // Completion validates every vector destination together.
@@ -1158,8 +1267,6 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
           registers[count++] = *reg;
         }
       }
-      RegisterModifiers modifiers;
-      inst.amdgpu_register_modifiers(modifiers);
       const uint8_t bytes =
           sram_ecc() ? MemoryWaitScoreboard::kFullDwordByteMask : modifiers.memory_result_bytes;
       const uint8_t tail = sram_ecc() ? MemoryWaitScoreboard::kFullDwordByteMask
@@ -1225,7 +1332,15 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
           inst.amdgpu_register_modifiers(modifiers);
           for (int i = 0; i < inst.num_src_operands(); ++i) {
             const auto *operand = inst.src_operand(i);
-            if (operand && operand == modifiers.buffer_resource) {
+            if (operand && operand == modifiers.block_data) {
+              // Resolve data before whole-operand ownership validation. Address
+              // operands remain separate, even when they overlap masked data.
+              for (uint32_t word = 0; word < kBlockDwordCount; ++word)
+                if (block_dword_enabled(wf.m0(), word))
+                  if (const auto reg =
+                          registers.block_data_register(*operand, word, /*write=*/false))
+                    add_source(*reg);
+            } else if (operand && operand == modifiers.buffer_resource) {
               for (const auto reg :
                    registers.buffer_resource_registers(*operand, modifiers.scalar_buffer_words))
                 if (reg)
@@ -1344,6 +1459,7 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     const auto &state = *inst.data_as<ScalarMemState>();
     access.route = MemoryRoute::SCALAR;
     access.is_load = state.is_load;
+    access.atomic_op = state.atomic_op;
     access.mtype = state.mtype;
     access.wait_counter = state.wait_counter_type;
     access.element_size_bytes = state.elem_size;
@@ -1404,46 +1520,97 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
 void ComputeUnitCore::update_wf_states() {
   ++cycle_counter_;
 
-  for (auto &w : wfs_) {
-    if (!w)
+#ifndef NDEBUG
+  // A missed activity transition would otherwise leave a wave outside every
+  // hot-path scan and silently prevent its dispatch from completing.
+  for (size_t slot = active_slot_limit_; slot < wfs_.size(); ++slot)
+    assert((!wfs_[slot] || wfs_[slot]->is_halted()) &&
+           "excluded wavefront slot must be halted or empty");
+#endif
+
+  for (uint32_t slot = 0; slot < active_slot_limit_; ++slot) {
+    auto &wf = wfs_[slot];
+    if (!wf)
       continue;
-    if (w->state() == WfState::WAITCNT && w->wait_satisfied()) {
-      w->set_state(WfState::RUNNING);
-      w->set_ready_cycle(cycle_counter_);
-    } else if (w->state() == WfState::ENDING && w->wait_counters().empty()) {
-      w->halt();
+    if (wf->state() == WfState::WAITCNT && wf->wait_satisfied()) {
+      wf->set_state(WfState::RUNNING);
+      wf->set_ready_cycle(cycle_counter_);
+    } else if (wf->state() == WfState::ENDING && wf->wait_counters().empty()) {
+      wf->halt();
     }
   }
 
-  for (auto &w : wfs_) {
-    if (!w)
+  for (uint32_t slot = 0; slot < active_slot_limit_; ++slot) {
+    auto &wf = wfs_[slot];
+    if (!wf)
       continue;
-    if (w->state() != WfState::BARRIER || w->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)
+    if (wf->state() != WfState::BARRIER || wf->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)
       continue;
-    uint32_t did = w->dispatch_id();
-    uint32_t wg = w->wg_id();
+    uint32_t did = wf->dispatch_id();
+    uint32_t wg = wf->wg_id();
     bool all_at_barrier = true;
-    for (auto &w2 : wfs_) {
-      if (w2 && w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() != WfState::HALTED &&
-          (w2->state() != WfState::BARRIER ||
-           w2->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)) {
+    for (uint32_t other = 0; other < active_slot_limit_; ++other) {
+      auto &other_wf = wfs_[other];
+      if (other_wf && other_wf->dispatch_id() == did && other_wf->wg_id() == wg &&
+          other_wf->state() != WfState::HALTED &&
+          (other_wf->state() != WfState::BARRIER ||
+           other_wf->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)) {
         all_at_barrier = false;
         break;
       }
     }
     if (all_at_barrier) {
       std::vector<Wavefront *> barrier_wfs;
-      for (auto &w2 : wfs_)
-        if (w2 && w2->dispatch_id() == did && w2->wg_id() == wg &&
-            w2->state() == WfState::BARRIER &&
-            w2->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
-          barrier_wfs.push_back(w2.get());
+      for (uint32_t other = 0; other < active_slot_limit_; ++other) {
+        auto &other_wf = wfs_[other];
+        if (other_wf && other_wf->dispatch_id() == did && other_wf->wg_id() == wg &&
+            other_wf->state() == WfState::BARRIER &&
+            other_wf->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
+          barrier_wfs.push_back(other_wf.get());
+      }
       notify_barrier_complete(barrier_wfs);
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
         bwf->set_ready_cycle(cycle_counter_);
       }
     }
+  }
+
+  // Ordinary kernels have no GWS waiters. Avoid an extra wavefront scan on
+  // every step until a synchronization operation actually parks a wave.
+  if (!gws_device_->any_parked()) {
+    gws_step_progress_processes_.clear();
+    return;
+  }
+
+  // Poll real releases before charging the wait budget. Neither quiescence nor
+  // insufficient residency is permission to release a synchronization operation.
+  gws_device_->poll_waits(*this);
+  bool has_waiter = false, has_other_wave = false;
+  for (const auto &wave : wfs_) {
+    if (!wave || wave->is_halted() || wave->debug_paused() || wave->status_halt())
+      continue;
+    if (wave->state() != WfState::GWS_WAIT) {
+      // Workgroup barriers cannot progress while all remaining waves are parked.
+      // In a cooperative grid, sibling waves wait here for wave 0's GWS arrival.
+      has_other_wave |= wave->state() != WfState::BARRIER;
+      continue;
+    }
+    has_waiter = true;
+    // Local progress is visible on the next step even before the quantum batch
+    // is published to peers, so small budgets do not reject co-resident producers.
+    if (std::ranges::find(gws_step_progress_processes_, wave->process_id()) !=
+        gws_step_progress_processes_.end())
+      wave->gws_wait_steps_ = 0;
+    if (config_.gws_wait_limit != 0 && ++wave->gws_wait_steps_ >= config_.gws_wait_limit)
+      fail_gws_wait(*wave, "GWS inactivity limit exceeded");
+  }
+  gws_step_progress_processes_.clear();
+  if (has_waiter && !has_other_wave) {
+    // Return even for unlimited quanta, without shortening a co-resident producer's
+    // quantum. The drivers poll a stalled CU at the normal quantum cadence.
+    gws_wait_yield_requested_ = true;
+    request_functional_yield();
   }
 }
 
@@ -1521,8 +1688,8 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
     async_execution::stats.flush();
 }
 
-thread_local ComputeUnitCore::InstructionVmSnapshot *ComputeUnitCore::instruction_vm_snapshot_ =
-    nullptr;
+constinit thread_local ComputeUnitCore::InstructionVmSnapshot
+    *ComputeUnitCore::instruction_vm_snapshot_ = nullptr;
 
 template <bool EnableAsync>
 [[gnu::always_inline]] inline void ComputeUnitCore::issue_instruction_impl(
@@ -1647,11 +1814,9 @@ template <bool EnableAsync>
     util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(decode rejection) pc=0x",
                      std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
                      ",0x", words[3], "]", std::dec, " what=", decode_error.message());
-    // Under a debugger, surface the undecodable instruction as an illegal-
-    // instruction exception (stops the wave at this PC) instead of silently
-    // retiring it. Without a debugger this halts as before.
-    active->fail_pm4_submission();
-    if (illegal_inst_handler_ && illegal_inst_handler_(*active))
+    // Let the queue owner observe the illegal instruction before retiring the
+    // wave. A debugger may claim the exception before the runtime sees it.
+    if (!active->fail_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active))
       return;
     active->halt();
     return;
@@ -1720,6 +1885,7 @@ template <bool EnableAsync>
         if (observes_async_instruction_issued_)
           plugin_group_->onAmdgpuAsyncInstructionIssued(active->pc, *inst, *active);
         active->pc += inst_size;
+        record_gws_instruction_progress(active->process_id());
         return;
       }
     }
@@ -1848,7 +2014,7 @@ template <bool EnableAsync>
     return;
   }
 
-  {
+  if (inst->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) {
     auto mn = std::string_view(inst->mnemonic());
     if (mn.find("s_setpc") != std::string_view::npos ||
         mn.find("s_swappc") != std::string_view::npos) {
@@ -1866,6 +2032,7 @@ template <bool EnableAsync>
   // transition rather than a per-ISA mnemonic list. See its use.
   const bool was_in_trap_handler = active->in_trap_handler();
 
+  const uint32_t executing_process = active->process_id();
   const util::Result execution_result = execute_instruction(inst, *active);
 
   if (execution_result.failed()) [[unlikely]] {
@@ -1880,12 +2047,21 @@ template <bool EnableAsync>
                                             active->pc, instruction_execution_error_name(error));
     util::Logger::warn(failure);
     if (!active->fail_pm4_submission()) {
+      // Notify the queue owner without hiding the simulator's failure status.
+      // WaveStateGuard flushes deferred notifications before this step returns,
+      // even after request_exit records the terminal engine result.
+      const bool claimed =
+          execution_failure_handler_ && execution_failure_handler_(*active, /*retain_wave=*/true);
       if (auto *sim_engine = this->engine())
         sim_engine->request_exit(failure, /*code=*/1);
+      if (claimed)
+        return;
     }
     active->halt();
     return;
   }
+
+  record_gws_instruction_progress(executing_process);
 
   // A terminating instruction (s_endpgm with no pending waits) halts the wave
   // inside execute_instruction, which frees and resets its slot. Its registers,
@@ -1954,7 +2130,8 @@ template <bool EnableAsync>
   if (debug_probe) {
     if (inst->data()->tag() == SCALAR_MEM) {
       auto &d = *inst->data_as<ScalarMemState>();
-      dbg_is_write = !d.is_load;
+      dbg_is_atomic = d.atomic_op != AtomicOp::NONE;
+      dbg_is_write = !d.is_load || dbg_is_atomic;
       dbg_bytes = std::max(1u, d.num_dwords * d.elem_size);
       dbg_addrs.push_back(d.addr);
     } else {
@@ -2086,10 +2263,12 @@ template <bool EnableAsync>
   // the generated call sites use. A local copy here would keep checking the
   // old bits if the EXCP set ever widened.
   const uint32_t new_alu_causes = active->pending_alu_causes() & kAluExceptionTrapstsMask;
-  const uint32_t enabled_alu_causes = alu_exception_trap_enables(*active);
-  if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
-      alu_exception_handler_(*active))
-    return;
+  if (new_alu_causes != 0) {
+    const uint32_t enabled_alu_causes = alu_exception_trap_enables(*active);
+    if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
+        alu_exception_handler_(*active))
+      return;
+  }
 
   // s_rfe follows the same target-minus-size convention as other control-flow
   // instructions. Publish the handler-driven stop only after the common PC
@@ -2125,7 +2304,8 @@ template <bool EnableAsync>
   tick_pipelines();
   update_wf_states();
 
-  for (auto &wf : wfs_) {
+  for (uint32_t slot = 0; slot < active_slot_limit_; ++slot) {
+    auto &wf = wfs_[slot];
     if (!wf)
       continue;
     if (wf->state() == WfState::RUNNING && !wf->debug_paused()) {
@@ -2154,6 +2334,9 @@ template <bool EnableAsync>
     }
   }
 
+  if (!gws_progress_batch_active_)
+    publish_gws_instruction_progress();
+
   ++step_count_;
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_CP)) {
     if ((step_count_ & 0xFFFFF) == 0) {
@@ -2163,11 +2346,15 @@ template <bool EnableAsync>
           if (!wf)
             continue;
           auto st = wf->state();
-          if (st == WfState::RUNNING || st == WfState::WAITCNT || st == WfState::BARRIER)
+          // Include GWS_WAIT: a CU keeps stepping with parked GWS waves, so omitting
+          // them hides their PCs exactly when a stalled rendezvous is being probed.
+          if (st == WfState::RUNNING || st == WfState::WAITCNT || st == WfState::BARRIER ||
+              st == WfState::GWS_WAIT)
             os << std::format(" wf{}:pc={:#x}:{}", wf->wf_id(), wf->pc,
-                              st == WfState::RUNNING   ? "R"
-                              : st == WfState::WAITCNT ? "W"
-                                                       : "B");
+                              st == WfState::RUNNING    ? "R"
+                              : st == WfState::WAITCNT  ? "W"
+                              : st == WfState::GWS_WAIT ? "G"
+                                                        : "B");
         }
       });
     }

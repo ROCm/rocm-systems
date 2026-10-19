@@ -107,6 +107,7 @@
 
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
+#include "scalar_builders.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -142,31 +143,10 @@ constexpr uint32_t kGuestKernargSize = 20;
 // descriptor grants (see dbi_arg_sim_test.cpp on the AGPR window at v4).
 constexpr uint16_t kVgprSrcBase = 256; // VGPR n is scalar-source code 256 + n.
 
-// s_cbranch_scc0 / s_cbranch_scc1, which the shared builders do not cover.
-uint32_t build_s_cbranch_scc(bool scc1, int16_t offset_dwords, rj_code_arch_t arch) {
-  uint16_t op = 0;
-  switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
-    op = scc1 ? cdna3::kSCbranchScc1Sopp : cdna3::kSCbranchScc0Sopp;
-    break;
-  case ROCJITSU_CODE_ARCH_CDNA4:
-    op = scc1 ? cdna4::kSCbranchScc1Sopp : cdna4::kSCbranchScc0Sopp;
-    break;
-  case ROCJITSU_CODE_ARCH_RDNA4:
-    op = scc1 ? rdna4::kSCbranchScc1Sopp : rdna4::kSCbranchScc0Sopp;
-    break;
-  default:
-    ADD_FAILURE() << "no s_cbranch_scc opcode for this target";
-    break;
-  }
-  return build_sopp_encoding(arch, op, static_cast<uint16_t>(offset_dwords));
-}
-
 // Scalar-source codes for inline integer constants.
 constexpr uint16_t kInline1 = 129;
 constexpr uint16_t kInline2 = 130;
 constexpr uint16_t kInlineMinus1 = 193;
-constexpr uint16_t kLiteral = 255;
 
 struct PrologueSimArch {
   const char *sim_arch;
@@ -253,7 +233,7 @@ protected:
     const uint32_t second_pass = build_s_cmp_lg_u32(6, kInline2, a_.arch);
     const uint32_t read_s0 = build_v_mov_b32_src(2, 0, a_.arch);
     const uint32_t read_s1 = build_v_mov_b32_src(3, 1, a_.arch);
-    const uint32_t loop_to_entry = build_s_cbranch_scc(/*scc1=*/true, -4, a_.arch);
+    const uint32_t loop_to_entry = test::build_s_cbranch_scc(/*scc1=*/true, -4, a_.arch);
     ASSERT_NO_FATAL_FAILURE(patch({count_pass, guest_anchor, second_pass, loop_to_entry, endpgm},
                                   /*anchor_offset=*/4, probe_obj, loop_delivery_));
     ASSERT_NO_FATAL_FAILURE(
@@ -262,13 +242,13 @@ protected:
 
     // The helper subtracts the call's return offset from the saved address, so
     // it returns to the entry instead of the continuation.
-    const std::vector<uint32_t> rewrite_return{build_s_add_u32(4, 4, kLiteral, a_.arch),
-                                               static_cast<uint32_t>(-20),
-                                               build_s_addc_u32(5, 5, kInlineMinus1, a_.arch), ret};
+    const std::vector<uint32_t> rewrite_return{
+        build_s_add_u32(4, 4, test::kScalarSrcLiteral, a_.arch), static_cast<uint32_t>(-20),
+        build_s_addc_u32(5, 5, kInlineMinus1, a_.arch), ret};
     std::vector<uint32_t> words{count_pass,
                                 guest_anchor,
                                 second_pass,
-                                build_s_cbranch_scc(/*scc1=*/false, 1, a_.arch),
+                                test::build_s_cbranch_scc(/*scc1=*/false, 1, a_.arch),
                                 build_s_call_b64(4, 1, a_.arch),
                                 endpgm};
     words.insert(words.end(), rewrite_return.begin(), rewrite_return.end());
@@ -276,7 +256,7 @@ protected:
     words = {count_pass,
              guest_anchor,
              second_pass,
-             build_s_cbranch_scc(/*scc1=*/false, 1, a_.arch),
+             test::build_s_cbranch_scc(/*scc1=*/false, 1, a_.arch),
              build_s_call_b64(4, 3, a_.arch),
              read_s0,
              read_s1,
@@ -286,13 +266,14 @@ protected:
 
     // A plain indirect jump to the entry: the address comes from s_getpc_b64,
     // not from a call's saved return address.
-    const std::vector<uint32_t> jump_to_entry{build_s_cmp_lg_u32(6, kInline2, a_.arch),
-                                              build_s_cbranch_scc(/*scc1=*/false, 5, a_.arch),
-                                              build_s_getpc_b64(4, a_.arch),
-                                              build_s_add_u32(4, 4, kLiteral, a_.arch),
-                                              static_cast<uint32_t>(-20),
-                                              build_s_addc_u32(5, 5, kInlineMinus1, a_.arch),
-                                              ret};
+    const std::vector<uint32_t> jump_to_entry{
+        build_s_cmp_lg_u32(6, kInline2, a_.arch),
+        test::build_s_cbranch_scc(/*scc1=*/false, 5, a_.arch),
+        build_s_getpc_b64(4, a_.arch),
+        build_s_add_u32(4, 4, test::kScalarSrcLiteral, a_.arch),
+        static_cast<uint32_t>(-20),
+        build_s_addc_u32(5, 5, kInlineMinus1, a_.arch),
+        ret};
     words = {count_pass, guest_anchor};
     words.insert(words.end(), jump_to_entry.begin(), jump_to_entry.end());
     words.push_back(endpgm);
@@ -460,7 +441,7 @@ protected:
     // The backedge is the fourth word; its branch base is offset 16.
     const auto to_stub = compute_sopp_branch_simm16(12, loop_restore_.entry);
     ASSERT_TRUE(to_stub.has_value());
-    sabotaged[3] = build_s_cbranch_scc(/*scc1=*/true, *to_stub, a_.arch);
+    sabotaged[3] = test::build_s_cbranch_scc(/*scc1=*/true, *to_stub, a_.arch);
 
     // The kernel has to finish and take both passes, or a fault or a hang
     // would pass this control as readily as a second prologue run.

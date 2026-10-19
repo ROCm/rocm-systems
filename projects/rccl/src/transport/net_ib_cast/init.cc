@@ -26,6 +26,7 @@ bool IbCastAinicCtsInlineData = 0;
 int IbCastGdrFlushDisable = 0;
 extern int64_t rcclParamAinicRoce();
 extern int64_t ncclParamIbCastUseInline();
+extern int64_t rcclParamIbCastUDMAPolicy();
 static int IbCastGetNumaNodeFromPath(const char* pciPath);
 static ncclResult_t IbCastGetPciRootFromPath(const char* pciPath, char* root, size_t rootLen);
 
@@ -386,8 +387,8 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     INFO(NCCL_NET, "NET/IB : Failed to open mlx5dv symbols. Advance features like CX-8 Direct-NIC will be disabled.");
   }
   if (wrap_ionicdv_symbols() != ncclSuccess) {
-    INFO(NCCL_NET,
-         "NET/IB : Failed to open ionicdv symbols. Advance features like AINIC UD load balancing will be disabled.");
+    WARN("NET/IB-CAST : libionic is missing or lacks ionic_dv_pd_set_udma_mask; IB-CAST is disabled; RCCL tries the "
+         "remaining network plugins, if any. Upgrade libionic, or set NCCL_NET=IB.");
     return ncclInternalError;
   }
 
@@ -623,7 +624,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
     }
     char addrline[SOCKET_NAME_MAXLEN + 1];
     INFO(NCCL_INIT | NCCL_NET, "NET/IB : Using%s %s; OOB %s:%s", line, IbCastRelaxedOrderingEnabled ? "[RO]" : "",
-         IbCastIfName, ncclSocketToString(&IbCastIfAddr, addrline));
+         IbCastIfName, ncclSocketToString(&IbCastIfAddr, addrline, sizeof(addrline)));
 
     IbCastQpSharingGlobalEnable = rcclParamIbCastQpSharingEnable() > 0;
     IbCastUseInline = ncclParamIbCastUseInline();
@@ -660,6 +661,15 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
            "IB Use Inline: %s; GDR Flush: %s",
            IbCastAinicCtsInlineData ? "Enabled" : "Disabled", IbCastOffloadEnabled ? "Enabled" : "Disabled",
            IbCastUseInline ? "Enabled" : "Disabled", IbCastGdrFlushDisable ? "Disabled" : "Enabled");
+
+      int64_t udmaPolicy = rcclParamIbCastUDMAPolicy();
+      if (udmaPolicy < (int64_t)ncclIbCastUDMAPolicy::First || udmaPolicy > (int64_t)ncclIbCastUDMAPolicy::Last) {
+        WARN("NET/IB : RCCL_IB_UDMA_POLICY=%ld is invalid (must be %d-%d). Using RCCL_IB_UDMA_POLICY=%d.", udmaPolicy,
+             (int)ncclIbCastUDMAPolicy::First, (int)ncclIbCastUDMAPolicy::Last,
+             (int)ncclIbCastUDMAPolicy::ChannelAffinity);
+        udmaPolicy = (int64_t)ncclIbCastUDMAPolicy::ChannelAffinity;
+      }
+      INFO(NCCL_INIT | NCCL_NET, "NET/IB : AINIC uDMA policy: %ld", udmaPolicy);
     }
   }
 exit:

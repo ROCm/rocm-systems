@@ -3,7 +3,19 @@
 Documentation for rocJPEG is available at
 [https://rocm.docs.amd.com/projects/rocJPEG/en/latest/](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/)
 
-## (unreleased) rocJPEG 1.12.0
+## (unreleased) rocJPEG 1.13.0
+
+### Added
+
+* Added the `rocJpegGetDecoderCaps` API and the `RocJpegDecodeCaps` structure to query the decode capabilities of a rocJPEG handle, including the number of JPEG cores, the supported JPEG coding processes, image resolutions, chroma subsamplings, and output formats, the native output surface format of each chroma subsampling as verified with the VA-API driver, and the hardware ROI decode and color conversion support.
+* Added the `RocJpegSurfaceFormat` enum to describe the layout of the decoded image produced by the VCN JPEG decoder, and the `RocJpegCodingProcess` enum to report the supported JPEG coding processes.
+* Added the `jpegDecodeCaps` sample to demonstrate the `rocJpegGetDecoderCaps` API.
+
+### Changed
+
+* The decode APIs (`rocJpegDecode`, `rocJpegDecodeAsync`, `rocJpegDecodeBatched`, and `rocJpegDecodeBatchedAsync`) now return `ROCJPEG_STATUS_INVALID_PARAMETER` when the crop rectangle in `RocJpegDecodeParams` does not lie within the image.
+
+## rocJPEG 1.12.0
 
 ### Added
 

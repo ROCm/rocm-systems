@@ -439,7 +439,7 @@ ncclResult_t IbCastIsend(void* sendComm, void* data, size_t size, int tag, void*
         union ncclSocketAddress addr;
         ncclSocketGetAddr(&comm->base.sock, &addr);
         WARN("NET/IB : req %d/%d tag %x peer %s posted incorrect receive info: size %ld addr %lx rkeys[0]=%x", r, nreqs,
-             tag, ncclSocketToString(&addr, line), ctsFifoSize(slots, r), ctsFifoAddr(slots, r),
+             tag, ncclSocketToString(&addr, line, sizeof(line)), ctsFifoSize(slots, r), ctsFifoAddr(slots, r),
              ctsFifoRkey(slots, r, 0));
         return ncclInternalError;
       }
@@ -785,8 +785,9 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
     // RCCL: fence the RO=1 bulk data through an RO=0 scratchpad - RDMA_WRITE a
     // dummy payload into it, then RDMA_READ it back. The WRITE needs REMOTE_WRITE
     // on the flush QP.
-    bool useGpuFlushMem = rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering() &&
-                          comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr && comm->devs[i].gpuFlush.gpuMr != nullptr;
+    const bool useGpuFlushMem = rcclParamIbCastGdrFlushGpuMemNoRelaxedOrdering() &&
+                                comm->devs[i].gpuFlush.gpuFlushGpuMem != nullptr &&
+                                comm->devs[i].gpuFlush.gpuMr != nullptr;
     memset(&wr, 0, sizeof(wr));
     wr.wr_id = (req - comm->base.reqs) + NCCL_IB_FLUSH_REQ_WR_ID_OFFSET;
     if (IbCastCommIsSharing(&comm->base)) {
@@ -805,8 +806,7 @@ ncclResult_t IbCastIflush(void* recvComm, int n, void** data, int* sizes, void**
       writeWr.send_flags = 0;
       struct ibv_send_wr* badWriteWr;
       NCCLCHECK(wrap_ibv_post_send(comm->devs[i].gpuFlush.qp.qp, &writeWr, &badWriteWr));
-    }
-    if (useGpuFlushMem) {
+
       wr.wr.rdma.remote_addr = (uint64_t)(comm->devs[i].gpuFlush.gpuFlushGpuMem);
       wr.wr.rdma.rkey = comm->devs[i].gpuFlush.gpuMr->rkey;
     } else {
@@ -983,7 +983,7 @@ static ncclResult_t IbCastLogCompletionWithError(struct ncclIbNetCommBase* commB
   char sockStr[SOCKET_NAME_MAXLEN + 1];
   union ncclSocketAddress addr;
   ncclSocketGetAddr(&commBase->sock, &addr);
-  ncclSocketToString(&addr, sockStr);
+  ncclSocketToString(&addr, sockStr, sizeof(sockStr));
   char* hcaName = devBase->pd->context->device->name;
   WARN("NET/IB: Got completion from peer %s with status=%s(%d) opcode=%s(%d) vendor_err=%u %s%s%s%s hca %s", sockStr,
        ibvWcStatusStr(wc->status), wc->status, ibvWcOpcodeStr(wc->opcode), wc->opcode, wc->vendor_err,
@@ -1041,7 +1041,7 @@ static ncclResult_t IbCastCompletionEventByOrder(struct ncclIbNetCommBase* commB
   TRACE(NCCL_NET,
         "Got completion from peer %s with status=%d opcode=%d len=%u wr_id=0x%lx r=%p type=%d events={%d,%d,%d,%d}, "
         "devIndex=%d",
-        ncclSocketToString(&addr, line), wc->status, wc->opcode, wc->byte_len, wc->wr_id, req, req->type,
+        ncclSocketToString(&addr, line, sizeof(line)), wc->status, wc->opcode, wc->byte_len, wc->wr_id, req, req->type,
         req->events[0], req->events[1], req->events[2], req->events[3], devIndex);
 #endif
 
@@ -1141,7 +1141,7 @@ static inline ncclResult_t IbCastCompletionEventProcess(struct ncclIbNetCommBase
   TRACE(NCCL_NET,
         "Got completion from peer %s with status=%d opcode=%d len=%u wr_id=0x%lx r=%p type=%d events={%d,%d,%d,%d}, "
         "devIndex=%d",
-        ncclSocketToString(&addr, line), wc->status, wc->opcode, wc->byte_len, wc->wr_id, req, req->type,
+        ncclSocketToString(&addr, line, sizeof(line)), wc->status, wc->opcode, wc->byte_len, wc->wr_id, req, req->type,
         req->events[0], req->events[1], req->events[2], req->events[3], devIndex);
 #endif
 
