@@ -186,6 +186,24 @@ def _is_collectable_metric_name(name: object) -> bool:
     return isinstance(name, str) and name.startswith("_collect.")
 
 
+def _metric_cell_text(value: object) -> str:
+    """Expression text for a metric cell.
+
+    The CLI shows a missing cell as empty. Strings are stripped.
+    """
+    if isinstance(value, str):
+        return value.strip()
+    if value is None:
+        return ""
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return str(value).strip()
+    if bool(missing):
+        return ""
+    return str(value).strip()
+
+
 def _visible_metric_rows(
     metric_df: pd.DataFrame,
 ) -> list[tuple[object, pd.Series]]:
@@ -1519,7 +1537,7 @@ class db_analysis(OmniAnalyze_Base):
                 ExpressionRow(
                     metric_id=metric_id,
                     value_name=value_name,
-                    value=row[value_name].strip(),
+                    value=_metric_cell_text(row[value_name]),
                 )
                 for _table_name, _sub_table_name, value_columns, rows in metric_tables
                 for metric_id, row in rows
