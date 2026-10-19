@@ -529,27 +529,6 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
   return HSA_STATUS_SUCCESS;
 }
 
-void PatchShimDma48(uint32_t* site, uint64_t addr) {
-  constexpr uint64_t kDdrAieAddrOffset = 0x80000000;
-  uint64_t base =
-      ((static_cast<uint64_t>(site[2]) & 0xFFFF) << 32) | static_cast<uint64_t>(site[1]);
-  base += addr + kDdrAieAddrOffset;
-  site[1] = static_cast<uint32_t>(base & 0xFFFFFFFC);
-  site[2] = (site[2] & 0xFFFF0000) | static_cast<uint32_t>(base >> 32);
-}
-
-void PatchShimDma57Aie4(uint32_t* site, uint64_t addr) {
-  // No aie4 equivalent of kDdrAieAddrOffset is added here: measured directly via
-  // hsa_amd_pointer_info on this agent's data pool, agentBaseAddress equals the host pointer
-  // exactly (no aperture shift), unlike aie2p. If a future aie4 memory model needs one, this is
-  // where it would go.
-  const uint64_t base =
-      ((static_cast<uint64_t>(site[0]) & 0x1FFFFFF) << 32) | static_cast<uint64_t>(site[1]);
-  const uint64_t sum = base + addr;
-  site[1] = static_cast<uint32_t>(sum & 0xFFFFFFFF);
-  site[0] = (site[0] & 0xFE000000) | static_cast<uint32_t>((sum >> 32) & 0x1FFFFFF);
-}
-
 }  // namespace aie_elf
 }  // namespace AMD
 }  // namespace rocr

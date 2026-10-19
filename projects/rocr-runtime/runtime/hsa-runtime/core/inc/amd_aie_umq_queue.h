@@ -81,7 +81,7 @@ class AieUmqQueue : public core::Queue,
     return rtti_id_;
   }
 
-  /// @brief Hands the ready range of packets to XdnaDriver::SubmitUmqCmdChain and settles the read
+  /// @brief Hands the ready range of packets to XdnaDriver::SubmitUmqPackets and settles the read
   /// index against however many it completed, mirroring AieKmqQueue::SubmitPackets: submission is
   /// synchronous to the caller either way, the driver call owns everything device-specific, and a
   /// failure suspends the queue and reports it through the per-queue error callback.
@@ -90,9 +90,9 @@ class AieUmqQueue : public core::Queue,
   /// @brief Queue size in bytes.
   uint32_t queue_size_bytes_ = 0;
   /// @brief Base of the queue's ring buffer storage. Handed to the device directly as the
-  /// hardware context's umq_bo. Opens with a HostQueueHeader (CERT's own read/write indices),
-  /// followed immediately by the packet ring the application writes into and CERT reads out of in
-  /// place (see amd_aie_umq_queue.cpp).
+  /// hardware context's umq_bo. Opens with a header of XdnaDriver::UmqHeaderBytes() (CERT's own
+  /// read/write indices, filled in by XdnaDriver::CreateUserModeQueue), followed immediately by
+  /// the packet ring the application writes into and CERT reads out of in place.
   void* ring_buf_ = nullptr;
   /// @brief User Mode Queue (UMQ) metadata associated with this queue.
   void* umq_metadata_ = nullptr;

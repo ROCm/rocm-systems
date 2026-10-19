@@ -79,11 +79,16 @@ public:
 
   /// @brief Matches aie4_host_queue.h's CTX_MAX_CMDS: the fixed slot count CERT itself validates
   /// write_index/read_index against (the kernel driver's get_read_index()/valid_queue_index()),
-  /// regardless of whatever HostQueueHeader::capacity a UMQ queue declares (see
-  /// amd_aie_umq_queue.cpp). A UMQ queue's ring must be sized for exactly this many packets, and no
-  /// HSA queue on a UMQ agent can be asked to hold more packets in flight than this at once (see
-  /// AieAgent's min_aql_size_/max_aql_size_, which this bounds).
+  /// regardless of whatever capacity a UMQ queue's header declares. A UMQ queue's ring must be
+  /// sized for exactly this many packets, and no HSA queue on a UMQ agent can be asked to hold more
+  /// packets in flight than this at once (see AieAgent's min_aql_size_/max_aql_size_, which this
+  /// bounds).
   static constexpr uint32_t UmqMaxCmds() { return 32; }
+
+  /// @brief Size of the header that opens a UMQ queue's buffer, ahead of its packet ring: sizeof
+  /// the host_queue_header the driver defines (checked where it is defined, in
+  /// amd_xdna_driver.cpp).
+  static constexpr size_t UmqHeaderBytes() { return 128; }
 
   hsa_status_t Init() override;
   hsa_status_t ShutDown() override;
@@ -144,11 +149,13 @@ public:
   /// @brief Create User Mode Queue (UMQ) metadata: the hardware context created against the
   /// queue's own ring, and the mapped doorbell, for an AIE4 agent dispatch queue.
   ///
-  /// Unlike KMQ, UMQ has no separate ring: @p ring_buf (the queue's own HSA-visible AQL packet
-  /// ring) is handed to the device directly, and dispatch is a single doorbell write with no
-  /// per-batch driver call -- the same model a GPU hardware queue uses.
+  /// Unlike KMQ, UMQ has no separate ring: @p ring_buf (a header followed by the queue's own
+  /// HSA-visible AQL packet ring) is handed to the device directly, and dispatch is a single
+  /// doorbell write with no per-batch driver call -- the same model a GPU hardware queue uses.
+  /// This fills in the header; the caller allocates the buffer zeroed.
   ///
-  /// @param[in] ring_buf the queue's AQL packet ring (hsa_queue_t::base_address)
+  /// @param[in] ring_buf the queue's buffer: @ref UmqHeaderBytes of header, then
+  /// @ref UmqMaxCmds packets, which are hsa_queue_t::base_address
   /// @param[in] agent agent the queue dispatches to, to resolve @p ring_buf's BO handle
   /// @param[in] num_cols number of columns to create the queue's hardware context with
   /// @param[in] num_core_rows number of core tiles in each column
@@ -163,64 +170,34 @@ public:
   /// @param[in] queue_metadata UMQ metadata to be destroyed
   hsa_status_t DestroyUserModeQueue(void* queue_metadata) const;
 
-  /// @brief Prepares a range of UMQ packets for CERT to execute.
-  ///
-  /// hsa_amd_aie_kernel_dispatch_packet_t was written to be binary-compatible with CERT's own
-  /// struct host_queue_packet / exec_buf: same bytes, reinterpreted. Every field the application
-  /// filled in already carries what CERT wants, except kernel_object -- the application treats it
-  /// as a host AieKernelDescriptor* (the same handle KMQ dispatch resolves it as), but CERT reads
-  /// the same bytes as a raw device address (struct exec_buf's dpu_control_code_host_addr_low/
-  /// high). CERT does not patch argument addresses into that control code itself either (confirmed
-  /// on real hardware: it faults on the IOMMU at the ELF's small placeholder offsets if nothing
-  /// else patches them first), so this allocates a fresh per-dispatch copy of each packet's
-  /// kernel's pristine control code, folds that dispatch's kernarg addresses into it (exactly like
-  /// @ref SubmitCmdChain's full-ELF path does for aie2p), and overwrites kernel_object with the
-  /// copy's address -- never the shared pristine one.
-  ///
-  /// Unlike @ref SubmitCmdChain, this never touches the device: there is no per-batch driver call
-  /// for UMQ, so the caller still owns publishing the new write index and ringing the doorbell.
-  ///
-  /// @param[in,out] ring the queue's packet ring; only kernel_object_low/high are modified
-  /// @param[in] ring_capacity number of packet slots in @p ring, for wrapping the index
-  /// @param[in] first_pkt_idx index of the first packet to translate
-  /// @param[in] num_pkts number of packets to translate, starting at @p first_pkt_idx. Must be
-  /// greater than 0.
-  /// @param[in] agent agent that owns the queue
-  /// @retval HSA_STATUS_ERROR_INVALID_CODE_OBJECT a packet's kernel_object does not name a loaded
-  /// descriptor
-  /// @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES a per-dispatch control-code copy could not be
-  /// allocated
-  hsa_status_t TranslateUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* ring,
-                                   uint32_t ring_capacity, uint64_t first_pkt_idx,
-                                   uint64_t num_pkts, const core::Agent& agent) const;
-
   /// @brief Submits a contiguous range of UMQ packets to CERT and blocks until they are retired.
   /// Mirrors @ref SubmitCmdChain's caller contract (a batch of packets in, @p num_completed
   /// packets' completion signals already released out, the failing packet and everything after it
   /// left untouched on a failure) even though UMQ has no equivalent of KMQ's single ioctl that
   /// chains a whole batch in the kernel: each packet gets its own doorbell ring and wait here,
-  /// one at a time. Confirmed necessary on real hardware -- CERT's own chain mechanism lets
-  /// packets chained under one doorbell run with less separation than a real hardware barrier,
-  /// which corrupted the second-and-later packets' output.
+  /// one at a time. Confirmed necessary on real hardware: a full ELF that starts right after the
+  /// previous one finished produces corrupted output, because its array configuration is not safe
+  /// to apply over a run that has just ended (XRT's runlist corrupts the same way).
   ///
-  /// @param[in,out] ring the queue's packet ring; translated in place, same as TranslateUmqPackets
+  /// @param[in,out] ring the queue's packet ring; each packet translated in place before it is
+  /// submitted
   /// @param[in] ring_capacity number of packet slots in @p ring
-  /// @param[in] queue_metadata this queue's UMQ metadata, as created by CreateUserModeQueue
+  /// @param[in] queue_metadata this queue's UMQ metadata, as created by CreateUserModeQueue; its
+  /// queue header's write_index is advanced as each packet is readied
   /// @param[in] doorbell the mapped hardware doorbell to ring per packet
-  /// @param[in,out] write_index CERT's own write_index field, in the queue's HostQueueHeader, kept
-  /// in sync with each packet as it is readied -- the convention CERT validates its read/write
-  /// indices against (see TranslateUmqPackets)
   /// @param[in] first_pkt_idx index of the first packet in the queue
   /// @param[in] num_pkts number of packets to submit, starting at @p first_pkt_idx. Must be
   /// greater than 0.
   /// @param[in] agent agent that owns the queue
   /// @param[out] num_completed how many packets, counting from @p first_pkt_idx, executed and had
   /// their completion signals released. @p num_pkts on success. On failure this is the prefix that
-  /// completed before the failure, so the caller can consume exactly those and leave the rest.
-  hsa_status_t SubmitUmqCmdChain(hsa_amd_aie_kernel_dispatch_packet_t* ring, uint32_t ring_capacity,
-                                 void* queue_metadata, volatile uint32_t* doorbell,
-                                 uint64_t* write_index, uint64_t first_pkt_idx, uint64_t num_pkts,
-                                 const core::Agent& agent, uint64_t* num_completed) const;
+  /// completed before the failure, so the caller can consume exactly those and leave the rest. If
+  /// the failure was the wait for a packet already handed to CERT, that packet may still run until
+  /// the hardware context is destroyed.
+  hsa_status_t SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* ring, uint32_t ring_capacity,
+                                void* queue_metadata, volatile uint32_t* doorbell,
+                                uint64_t first_pkt_idx, uint64_t num_pkts,
+                                const core::Agent& agent, uint64_t* num_completed) const;
 
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
                               uint32_t* queue_cu_mask) const override;

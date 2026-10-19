@@ -200,6 +200,112 @@ struct ert_cmd_chain_data {
   uint64_t data[];
 };
 
+/// @brief Header of a user-mode queue (UMQ), at the start of the buffer passed to the hardware
+/// context as its umq_bo. CERT reads the packets at @ref data_address and advances @ref read_index
+/// past each one it retires.
+///
+/// This is the queue header struct defined in xdna-driver (host_queue_header, aie4_host_queue.h)
+/// and XRT (host_queue_header).
+struct host_queue_header {
+  /// @brief Index of the next packet CERT will retire. Written by CERT.
+  uint64_t read_index;
+  /// @brief Version of the queue format.
+  struct {
+    uint16_t major;
+    uint16_t minor;
+  } version;
+  /// @brief Number of packet slots. Must be a power of two.
+  uint32_t capacity;
+  /// @brief Reserved. Keeps @ref write_index on a different cache line from @ref read_index.
+  uint64_t padding0[6];
+  /// @brief Index one past the last packet ready for CERT. Written by the host.
+  uint64_t write_index;
+  /// @brief Reserved.
+  uint64_t padding1[6];
+  /// @brief Address of the first packet slot.
+  uint64_t data_address;
+};
+static_assert(sizeof(host_queue_header) == XdnaDriver::UmqHeaderBytes());
+
+/// @brief Version of the queue format, from HOST_QUEUE_MAJOR_VERSION / HOST_QUEUE_MINOR_VERSION in
+/// xdna-driver (aie4_host_queue.h).
+constexpr uint16_t HOST_QUEUE_MAJOR_VERSION = 1;
+constexpr uint16_t HOST_QUEUE_MINOR_VERSION = 0;
+
+/// @brief Common header of a UMQ packet.
+///
+/// This is the packet header struct defined in xdna-driver (common_header, aie4_host_queue.h) and
+/// XRT (common_header).
+struct common_header {
+  /// @brief Packet type: 0 (vendor specific) is the only one CERT runs.
+  uint8_t type;
+  /// @brief Reserved.
+  uint8_t reserved;
+  /// @brief Packet opcode: 1 (exec_buf).
+  uint8_t opcode;
+  /// @brief 0 if this is the last packet of a chain, 1 if more follow.
+  uint8_t chain_flag;
+  /// @brief Bytes of payload after the 16-byte vendor-specific header.
+  uint16_t count;
+  /// @brief Whether the payload is distributed to several columns' microcontrollers.
+  uint8_t distribute;
+  /// @brief Whether the payload is a list of indirect entries rather than the payload itself.
+  uint8_t indirect;
+};
+
+/// @brief Payload of a direct exec_buf UMQ packet: the control code CERT runs.
+///
+/// This is the payload struct defined in xdna-driver (exec_buf, aie4_host_queue.h) and XRT
+/// (exec_buf).
+struct exec_buf {
+  /// @brief Low bits of the dtrace buffer's host address, or 0.
+  uint32_t dtrace_buf_host_addr_low;
+  /// @brief Host address of the control code.
+  uint32_t dpu_control_code_host_addr_low;
+  uint32_t dpu_control_code_host_addr_high;
+  /// @brief Length of the argument list at args_host_addr; CERT reads 3 KiB from it whenever this
+  /// is non-zero (measured).
+  uint16_t args_len;
+  /// @brief High bits of the dtrace buffer's host address, or 0.
+  uint16_t dtrace_buf_host_addr_high;
+  /// @brief Host address of the argument list, whose values APPLY_OFFSET_57 adds to buffer
+  /// descriptors.
+  uint32_t args_host_addr_low;
+  uint32_t args_host_addr_high;
+};
+
+/// @brief A UMQ packet slot holding a direct exec_buf, which
+/// hsa_amd_aie_kernel_dispatch_packet_t is laid over.
+///
+/// This is the packet struct defined in xdna-driver (host_queue_packet, aie4_host_queue.h) and XRT
+/// (host_queue_packet), with its data area spelled out as the exec_buf it holds.
+struct host_queue_packet {
+  struct common_header common_header;
+  /// @brief Address CERT writes the packet's return code to.
+  uint64_t completion_signal;
+  struct exec_buf exec_buf;
+  /// @brief Rest of the 64-byte slot; not read for a direct exec_buf.
+  uint8_t unused[24];
+};
+static_assert(sizeof(host_queue_packet) == sizeof(hsa_amd_aie_kernel_dispatch_packet_t));
+static_assert(offsetof(host_queue_packet, exec_buf) +
+                      offsetof(exec_buf, dpu_control_code_host_addr_low) ==
+                  offsetof(hsa_amd_aie_kernel_dispatch_packet_t, kernel_object_low),
+              "the control code address must replace the kernel object in place");
+static_assert(offsetof(host_queue_packet, common_header) + offsetof(common_header, count) ==
+                  offsetof(hsa_amd_aie_kernel_dispatch_packet_t, count),
+              "the application's count must be CERT's");
+static_assert(offsetof(hsa_amd_aie_kernel_dispatch_packet_t, completion_signal) >=
+                  offsetof(host_queue_packet, unused),
+              "the application's fields must be outside what CERT reads");
+
+/// @brief UMQ packet opcode for an exec_buf, from host_queue_packet_opcode in xdna-driver
+/// (aie4_host_queue.h).
+constexpr uint8_t HOST_QUEUE_PACKET_EXEC_BUF = 1;
+// The packet's 16-bit opcode is CERT's opcode byte followed by its chain_flag, so the UMQ opcode
+// reads as an exec_buf that ends its chain.
+static_assert(HSA_AMD_AIE_PACKET_OPCODE_UMQ == HOST_QUEUE_PACKET_EXEC_BUF);
+
 /// @brief XDNA device type.
 enum class XDNADeviceType {
   /// @brief Unknown device.
@@ -227,6 +333,10 @@ constexpr uint32_t devnode_max_minor_num = 64;
 /// @brief Used to transform an address into a device address
 constexpr uint32_t DEV_ADDR_BASE = 0x04000000;
 constexpr uint32_t DEV_ADDR_OFFSET_MASK = 0x02FFFFFF;
+
+/// @brief The shim DMA's DDR aperture: a buffer descriptor holds a device address plus this, on
+/// aie2p and aie4 alike (XRT's patch57/patch57_aie4 add the same get_ddr_aie_addr_offset()).
+constexpr uint64_t DDR_AIE_ADDR_OFFSET = 0x80000000;
 
 /// @brief Dwords of padding declared on a PDI + instruction sequence command's payload.
 ///
@@ -306,17 +416,9 @@ constexpr uint32_t ChainSlotBytesize(uint32_t arg_cnt) {
 /// @param[in] fd file descriptor
 /// @param[in] request ioctl request code
 /// @param[in] arg pointer to the argument for the ioctl call
-static hsa_status_t xdna_ioctl(int fd, unsigned long request, void* arg) {
-  int ret;
-  do {
-    ret = ioctl(fd, request, arg);
-    if (ret >= 0) {
-      return HSA_STATUS_SUCCESS;
-    }
-  } while (errno == EINTR || errno == EAGAIN);
-
-  // Map errno to appropriate HSA status code.
-  switch (errno) {
+/// @brief Maps the errno of a failed XDNA ioctl to an HSA status code.
+static hsa_status_t xdna_errno_status(int err) {
+  switch (err) {
     case EINVAL:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     case ENOENT:
@@ -327,6 +429,17 @@ static hsa_status_t xdna_ioctl(int fd, unsigned long request, void* arg) {
     default:
       return HSA_STATUS_ERROR;
   }
+}
+
+static hsa_status_t xdna_ioctl(int fd, unsigned long request, void* arg) {
+  int ret;
+  do {
+    ret = ioctl(fd, request, arg);
+    if (ret >= 0) {
+      return HSA_STATUS_SUCCESS;
+    }
+  } while (errno == EINTR || errno == EAGAIN);
+  return xdna_errno_status(errno);
 }
 
 /// @brief BO handle information.
@@ -832,10 +945,15 @@ struct KmqMetadata {
 struct UmqMetadata {
   /// @brief Hardware context the queue dispatches against.
   uint32_t hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
-  /// @brief DRM sync object the hardware context signals command completion on.
-  uint32_t syncobj_handle = 0;
   /// @brief Doorbell register, mapped for the lifetime of the queue.
   volatile uint32_t* doorbell = nullptr;
+  /// @brief Header at the start of the queue's buffer.
+  host_queue_header* header = nullptr;
+  /// @brief Control-code copies of packets whose wait failed. CERT may still run such a packet,
+  /// so its copy is only freed once the hardware context is destroyed.
+  std::vector<void*> orphaned_ctrl_copies;
+  /// @brief Frees @ref orphaned_ctrl_copies: the deallocator of the agent they came from.
+  std::function<void(void*)> free_ctrl_copy;
 };
 
 /// @brief Flushes the CPU cache for the packet's arguments.
@@ -853,34 +971,74 @@ static void FlushArguments(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
 }
 
 /// @brief Completes the first @p num_pkts packets of a batch: makes the kernels' writes visible
-/// and releases each packet's completion signal.
+/// where that takes a cache flush, and releases each packet's completion signal.
 ///
 /// Only ever called for packets that actually executed. A packet that was refused, or that the
 /// device never reached, must not be passed here: its completion signal stays untouched, because
 /// firing it would tell a waiter that output exists when nothing wrote any.
 ///
 /// Shared by KMQ's synchronous completion path (SubmitCmdChain, where the device is known to be
-/// done by the time the submitting ioctl returns) and UMQ's (SubmitUmqCmdChain, which confirms
+/// done by the time the submitting ioctl returns) and UMQ's (SubmitUmqPackets, which confirms
 /// completion separately via WaitUmqCmd before calling this).
 ///
 /// @param[in] queue base of the packet ring
 /// @param[in] mask ring index mask (queue size - 1)
 /// @param[in] first_pkt_idx ring index of the batch's first packet
 /// @param[in] num_pkts how many packets from @p first_pkt_idx completed
+/// @param[in] flush_arguments whether the device needs the CPU caches flushed to see its writes
 static void RetireCompletedPackets(hsa_amd_aie_kernel_dispatch_packet_t* queue, uint64_t mask,
-                                   uint64_t first_pkt_idx, uint64_t num_pkts) {
+                                   uint64_t first_pkt_idx, uint64_t num_pkts,
+                                   bool flush_arguments) {
   for (uint64_t i = 0; i < num_pkts; ++i) {
     auto* pkt = queue + ((first_pkt_idx + i) & mask);
 
     // Flush again after execution: the kernel's writes have to be visible before the signal that
     // announces them.
-    FlushArguments(pkt);
+    if (flush_arguments) {
+      FlushArguments(pkt);
+    }
 
     if (pkt->completion_signal.handle != 0) {
       core::Signal* sig = core::Signal::Convert(pkt->completion_signal);
       sig->SubRelease(1);
     }
   }
+}
+
+/// @brief Folds a buffer address into a shim DMA buffer descriptor, the scheme the NPU firmware
+/// defines. This *adds* to the descriptor already in place, so it must only ever be applied to a
+/// pristine copy of the control code.
+///
+/// @param [in,out] site Pointer to the three-dword patch site inside the control code.
+/// @param [in] addr Device address to fold in.
+static void PatchShimDma48(uint32_t* site, uint64_t addr) {
+  uint64_t base =
+      ((static_cast<uint64_t>(site[2]) & 0xFFFF) << 32) | static_cast<uint64_t>(site[1]);
+  base += addr + DDR_AIE_ADDR_OFFSET;
+  site[1] = static_cast<uint32_t>(base & 0xFFFFFFFC);
+  site[2] = (site[2] & 0xFFFF0000) | static_cast<uint32_t>(base >> 32);
+}
+
+/// @brief aie4's wider (57-bit) equivalent of PatchShimDma48, for kShimDma57Aie4 sites. Same
+/// additive contract: only ever apply to a pristine copy. The 57-bit field spans site[0]'s low 25
+/// bits (high part) and site[1] (low 32 bits), matching aiebu's own read57_aie4/write57_aie4
+/// (src/cpp/analyzer/transform_manager.cpp); confirmed against a real aie4 dispatch that faulted
+/// (IOMMU IO_PAGE_FAULT at small near-zero addresses) when this patch was skipped, matching the
+/// ELF's own small placeholder offsets left unpatched.
+///
+/// @param [in,out] site Pointer to the two-dword (site[0], site[1]) patch site inside the control
+/// code.
+/// @param [in] addr Device address to fold in.
+static void PatchShimDma57Aie4(uint32_t* site, uint64_t addr) {
+  // The aperture is part of the descriptor encoding, not of the device address: aie4's device
+  // address is the host pointer itself (hsa_amd_pointer_info's agentBaseAddress), and the
+  // descriptor still needs the aperture on top. Without it the dispatch completes but its DMA
+  // misses the buffer.
+  const uint64_t base =
+      ((static_cast<uint64_t>(site[0]) & 0x1FFFFFF) << 32) | static_cast<uint64_t>(site[1]);
+  const uint64_t sum = base + addr + DDR_AIE_ADDR_OFFSET;
+  site[1] = static_cast<uint32_t>(sum & 0xFFFFFFFF);
+  site[0] = (site[0] & 0xFE000000) | static_cast<uint32_t>((sum >> 32) & 0x1FFFFFF);
 }
 
 /// @brief Destroys the hardware context with the given handle.
@@ -1052,57 +1210,46 @@ static hsa_status_t WaitCommand(int fd, ert_start_kernel_cmd* cmd, uint32_t hw_c
   return HSA_STATUS_SUCCESS;
 }
 
-/// @brief Blocks until CERT has retired the UMQ command at index @p seq, or @p timeout_ms elapses.
+/// @brief Blocks until CERT has retired the UMQ command at index @p seq, the only one in flight.
 ///
-/// Wraps DRM_IOCTL_AMDXDNA_WAIT_CMD directly rather than through the shared xdna_ioctl helper:
-/// that helper collapses every unmapped errno to a generic error, which would make an ordinary
-/// timeout indistinguishable from a real driver failure. @p seq is the same absolute write-index
-/// convention CERT's own read_index/write_index already use (see TranslateUmqPackets); CERT
-/// retiring the command at @p seq means its read_index becomes greater than @p seq, not equal to
-/// it (see this ioctl's own kernel-side check_cmd_done()).
+/// @p seq is the same absolute write-index convention CERT's own read_index/write_index already
+/// use; CERT retiring the command at @p seq means its read_index becomes greater than @p seq, not
+/// equal to it (see this ioctl's own kernel-side check_cmd_done()). The wait has no timeout. The
+/// driver reports EAGAIN when the hardware context has no completion to wait on because it is
+/// being recovered from a disconnect or reset, and reports it at once rather than blocking, so
+/// this backs off for a second before retrying, as XRT does; xdna_ioctl would retry in a tight
+/// loop and spin a core for as long as the recovery takes.
 ///
 /// @param[in] fd driver file descriptor
 /// @param[in] queue_metadata this queue's UMQ metadata, as created by CreateUserModeQueue
 /// @param[in] seq absolute index of the command to wait for
-/// @param[in] timeout_ms how long to wait before returning, in milliseconds; 0 waits forever
-/// @param[out] completed set true if CERT retired the command before the timeout; false on an
-/// ordinary timeout -- not an error, the caller should simply call again
-/// @retval HSA_STATUS_SUCCESS the wait itself succeeded, whether or not @p completed ended up true
-/// @retval (other) a real driver failure, or the hardware context woke on a disconnect/reset
-/// rather than on real completion (EAGAIN) -- unlike a plain timeout, retrying is not expected to
-/// ever make progress
-static hsa_status_t WaitUmqCmd(int fd, void* queue_metadata, uint64_t seq, uint32_t timeout_ms,
-                               bool* completed) {
+/// @retval HSA_STATUS_SUCCESS CERT retired the command
+/// @retval (other) the driver failed the wait
+static hsa_status_t WaitUmqCmd(int fd, void* queue_metadata, uint64_t seq) {
   const auto* umq_metadata = static_cast<const UmqMetadata*>(queue_metadata);
 
   amdxdna_drm_wait_cmd args{};
   args.hwctx = umq_metadata->hw_ctx_handle;
-  args.timeout = timeout_ms;
+  args.timeout = 0;
   args.seq = seq;
 
-  // Not xdna_ioctl: it maps every errno it does not special-case to a single generic error, which
-  // would make an ordinary timeout indistinguishable from a real driver failure. The kernel driver
-  // (drivers/accel/amdxdna/aie4_ctx.c's aie4_cmd_wait, confirmed against the installed
-  // xrt-amdxdna-2.26.0 source) returns 0 once CERT's read_index has passed seq; ETIME when
-  // timeout_ms elapses first -- not an error, the caller should simply wait again. EAGAIN means the
-  // hardware context itself woke on a disconnect/reset rather than on real completion; unlike a
-  // plain timeout, waiting again on the same context is not expected to ever make progress, so this
-  // is treated as a real failure rather than something to retry.
-  int ret;
-  do {
-    ret = ioctl(fd, DRM_IOCTL_AMDXDNA_WAIT_CMD, &args);
-  } while (ret < 0 && errno == EINTR);
-
-  if (ret == 0) {
-    *completed = true;
-    return HSA_STATUS_SUCCESS;
+  while (true) {
+    // CERT may already have retired it, in which case the ioctl is skipped. With only this
+    // command in flight, seq + 1 is the one value read_index can hold once it has: CERT does not
+    // update the 64-bit field atomically, but a torn read mixes the halves of seq and seq + 1 and
+    // so can never equal seq + 1 itself, only fall back to the ioctl.
+    if (atomic::Load(&umq_metadata->header->read_index, std::memory_order_acquire) == seq + 1) {
+      return HSA_STATUS_SUCCESS;
+    }
+    if (ioctl(fd, DRM_IOCTL_AMDXDNA_WAIT_CMD, &args) == 0) {
+      return HSA_STATUS_SUCCESS;
+    }
+    if (errno == EAGAIN) {
+      os::Sleep(1000);
+    } else if (errno != EINTR) {
+      return xdna_errno_status(errno);
+    }
   }
-  if (errno == ETIME) {
-    *completed = false;
-    return HSA_STATUS_SUCCESS;
-  }
-  *completed = false;
-  return HSA_STATUS_ERROR;
 }
 
 /// @brief Creates a command BO with @p declared_dwords of payload and fills in its header.
@@ -1607,6 +1754,18 @@ hsa_status_t XdnaDriver::CreateUserModeQueue(void* ring_buf, const core::Agent& 
     return err;
   }
 
+  // CERT reads its read/write indices and the packet ring's address from the header opening the
+  // buffer. Under PASID/SVA the device walks the submitting process's own page tables, so the
+  // address CERT dereferences is this process's own -- no separate device-address translation,
+  // unlike a blob placed into the CODE_AGENT segment (e.g.
+  // AieKernelDescriptor::static_ctrl_code_dev_addr).
+  auto* header = static_cast<host_queue_header*>(ring_buf);
+  header->version.major = HOST_QUEUE_MAJOR_VERSION;
+  header->version.minor = HOST_QUEUE_MINOR_VERSION;
+  header->capacity = UmqMaxCmds();
+  header->data_address =
+      reinterpret_cast<uint64_t>(static_cast<uint8_t*>(ring_buf) + sizeof(host_queue_header));
+
   amdxdna_qos_info qos_info = {};
   qos_info.user_start_col = USER_START_COL_NOT_REQUESTED;
 
@@ -1639,8 +1798,9 @@ hsa_status_t XdnaDriver::CreateUserModeQueue(void* ring_buf, const core::Agent& 
 
   auto umq_metadata = std::make_unique<UmqMetadata>();
   umq_metadata->hw_ctx_handle = create_hwctx_args.handle;
-  umq_metadata->syncobj_handle = create_hwctx_args.syncobj_handle;
   umq_metadata->doorbell = doorbell_ptr;
+  umq_metadata->header = header;
+  umq_metadata->free_ctrl_copy = static_cast<const AieAgent&>(agent).system_deallocator();
 
   hwctx_guard.Dismiss();
   *queue_metadata = umq_metadata.release();
@@ -1661,105 +1821,135 @@ hsa_status_t XdnaDriver::DestroyUserModeQueue(void* queue_metadata) const {
     umq_metadata->doorbell = nullptr;
   }
 
-  if (umq_metadata->hw_ctx_handle == AMDXDNA_INVALID_CTX_HANDLE) {
-    return HSA_STATUS_SUCCESS;
+  hsa_status_t err = HSA_STATUS_SUCCESS;
+  if (umq_metadata->hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {
+    err = DestroyHwCtx(fd_, umq_metadata->hw_ctx_handle);
+    umq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
   }
-  const hsa_status_t err = DestroyHwCtx(fd_, umq_metadata->hw_ctx_handle);
-  umq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
-  umq_metadata->syncobj_handle = 0;
+
+  // Only once the hardware context is gone can CERT no longer be running the packets these
+  // belong to. A context that failed to destroy may still be, so they are leaked instead.
+  if (err == HSA_STATUS_SUCCESS) {
+    for (void* ctrl_copy : umq_metadata->orphaned_ctrl_copies) {
+      umq_metadata->free_ctrl_copy(ctrl_copy);
+    }
+  }
   return err;
 }
 
-hsa_status_t XdnaDriver::TranslateUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* ring,
-                                             uint32_t ring_capacity, uint64_t first_pkt_idx,
-                                             uint64_t num_pkts, const core::Agent& agent) const {
+/// @brief Prepares a UMQ packet for CERT to execute.
+///
+/// hsa_amd_aie_kernel_dispatch_packet_t is laid over CERT's own struct host_queue_packet /
+/// exec_buf: its reserved fields are the ones CERT reads, and the application's fields sit where
+/// CERT does not look. This fills in CERT's fields. kernel_object is the one field both use: the
+/// application writes a host AieKernelDescriptor* (the same handle KMQ dispatch resolves it as)
+/// where CERT reads the control code's address (exec_buf's dpu_control_code_host_addr_low/high).
+/// CERT does not patch argument addresses into that control code itself (confirmed on real
+/// hardware: it faults on the IOMMU at the ELF's small placeholder offsets if nothing else patches
+/// them first), so this allocates a fresh per-dispatch copy of the packet's kernel's pristine
+/// control code, folds that dispatch's kernarg addresses into it (exactly like
+/// @ref SubmitCmdChain's full-ELF path does for aie2p), and overwrites kernel_object with the
+/// copy's address -- never the shared pristine one.
+///
+/// Unlike @ref SubmitCmdChain, this never touches the device: there is no per-batch driver call
+/// for UMQ, so the caller still owns publishing the new write index and ringing the doorbell.
+///
+/// The opcode, the reserved fields CERT reads and the kernel arguments are the application's to
+/// get right, and are not checked here.
+///
+/// @param[in,out] pkt the packet, in the queue's ring; reserved2 and kernel_object_low/high are
+/// modified
+/// @param[in] agent agent that owns the queue
+/// @retval HSA_STATUS_ERROR_INVALID_PACKET_FORMAT the packet's kernel_object names no loaded
+/// kernel
+/// @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES the per-dispatch control-code copy could not be
+/// allocated
+static hsa_status_t TranslateUmqPacket(hsa_amd_aie_kernel_dispatch_packet_t& pkt,
+                                       const core::Agent& agent) {
   // Alignment for a per-dispatch control-code copy; no hardware requirement is known to need more
   // than this (also used for the kernel's one static pristine copy; see executable.cpp).
   constexpr size_t kCtrlCodeCopyAlign = 64;
 
   const auto& aie_agent = static_cast<const AieAgent&>(agent);
-  for (uint64_t idx = first_pkt_idx; idx < first_pkt_idx + num_pkts; ++idx) {
-    hsa_amd_aie_kernel_dispatch_packet_t& pkt = ring[idx % ring_capacity];
 
-    // Mirrors KMQ's ValidateBatchPacket: a packet this queue cannot possibly run is a malformed
-    // packet, caught here rather than left for CERT to reject less legibly.
-    if (static_cast<hsa_amd_aie_packet_opcode_t>(pkt.opcode) != HSA_AMD_AIE_PACKET_OPCODE_UMQ) {
-      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-    }
+  const uint64_t kernel_object =
+      (static_cast<uint64_t>(pkt.kernel_object_high) << 32) | pkt.kernel_object_low;
+  const auto* desc = reinterpret_cast<const AieKernelDescriptor*>(kernel_object);
 
-    const uint64_t kernel_object =
-        (static_cast<uint64_t>(pkt.kernel_object_high) << 32) | pkt.kernel_object_low;
-    const auto* desc = reinterpret_cast<const AieKernelDescriptor*>(kernel_object);
-
-    // Unlike the rest of this packet, kernel_object is not trusted blindly: a packet built by
-    // hand (or a confused caller) can carry one that names nothing the loader ever published, and
-    // dereferencing it would be undefined behavior rather than a clean, reportable failure. Mirrors
-    // the KMQ dispatch path's own ValidDescriptor check, including its error code: KMQ's
-    // ValidateBatchPacket reports an unresolvable kernel object as a malformed packet, not a bad
-    // code object, since from the queue's point of view that's what it is.
-    if (!ValidDescriptor(desc)) {
-      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-    }
-
-    // The arguments are patched into the control code rather than passed to the hardware, so
-    // nothing downstream would notice a short list: the dispatch would run with the ELF's
-    // placeholder addresses, or read past kernarg_address's declared buffer. Checked before
-    // anything is allocated, same as BuildFullElfCommand's KMQ counterpart.
-    if (pkt.num_kernargs != desc->arg_sites.size()) {
-      log_warning_n(10, "AIE: the packet's kernarg count does not match the kernel's.\n");
-      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
-    }
-
-    // Freed once CERT is confirmed done with it, by SubmitUmqCmdChain (it reads this address back
-    // out of kernel_object_low/high at retirement).
-    void* ctrl_copy = aie_agent.system_allocator()(desc->static_ctrl_code_size, kCtrlCodeCopyAlign,
-                                                   core::MemoryRegion::AllocateNoFlags);
-    if (ctrl_copy == nullptr) {
-      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-    }
-    std::memcpy(ctrl_copy, reinterpret_cast<const void*>(desc->static_ctrl_code_dev_addr),
-                desc->static_ctrl_code_size);
-
-    const auto* kernarg_address = static_cast<const uint64_t*>(pkt.kernarg_address);
-    for (uint32_t arg = 0; arg < desc->arg_sites.size(); ++arg) {
-      for (const aie_elf::PatchSite& site : desc->arg_sites[arg]) {
-        aie_elf::PatchShimDma57Aie4(
-            reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl_copy) + site.offset),
-            kernarg_address[arg] + site.addend);
-      }
-    }
-
-    const uint64_t ctrl_code_addr = reinterpret_cast<uint64_t>(ctrl_copy);
-    pkt.kernel_object_low = static_cast<uint32_t>(ctrl_code_addr & 0xFFFFFFFF);
-    pkt.kernel_object_high = static_cast<uint32_t>(ctrl_code_addr >> 32);
+  // Unlike the rest of this packet, kernel_object is not trusted blindly: a packet built by
+  // hand (or a confused caller) can carry one that names nothing the loader ever published, and
+  // dereferencing it would be undefined behavior rather than a clean, reportable failure. Mirrors
+  // the KMQ dispatch path's own ValidDescriptor check, including its error code: KMQ's
+  // ValidateBatchPacket reports an unresolvable kernel object as a malformed packet, not a bad
+  // code object, since from the queue's point of view that's what it is.
+  if (!ValidDescriptor(desc)) {
+    return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
+
+  // Freed once CERT is confirmed done with it, by SubmitUmqPackets (it reads this address back
+  // out of kernel_object_low/high at retirement).
+  void* ctrl_copy = aie_agent.system_allocator()(desc->static_ctrl_code_size, kCtrlCodeCopyAlign,
+                                                 core::MemoryRegion::AllocateNoFlags);
+  if (ctrl_copy == nullptr) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  std::memcpy(ctrl_copy, reinterpret_cast<const void*>(desc->static_ctrl_code_dev_addr),
+              desc->static_ctrl_code_size);
+
+  const auto* kernarg_address = static_cast<const uint64_t*>(pkt.kernarg_address);
+  for (uint32_t arg = 0; arg < desc->arg_sites.size(); ++arg) {
+    for (const aie_elf::PatchSite& site : desc->arg_sites[arg]) {
+      PatchShimDma57Aie4(
+          reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl_copy) + site.offset),
+          kernarg_address[arg] + site.addend);
+    }
+  }
+
+  // CERT's fields that only the runtime can fill in. The rest already hold what CERT expects,
+  // as the application must leave them: the header and opcode (type 0, opcode EXEC_BUF,
+  // chain_flag LAST_CMD: every packet is its own chain; the header's barrier and fence scope
+  // bits land in CERT's reserved byte, which it ignores), count (the exec_buf's size), and zeros
+  // for the remaining reserved fields -- notably no argument list, as with XRT, since the
+  // arguments are patched into the control code above. Given one (args_len non-zero), CERT reads
+  // 3 KiB from args_host_addr, stalling -- it never completes or fails the packet -- if that runs
+  // into an unmapped page, and adds its values to the argument buffer descriptors
+  // (APPLY_OFFSET_57).
+  //  - CERT writes the packet's return code, a 32-bit store (measured), to completion_signal's
+  //    address. Nothing reads it (completion is read_index passing the packet), so it goes into
+  //    completion_signal itself, which CERT has finished reading by then.
+  auto& cert = reinterpret_cast<host_queue_packet&>(pkt);
+  cert.completion_signal = reinterpret_cast<uint64_t>(&cert.completion_signal);
+  const uint64_t ctrl_code_addr = reinterpret_cast<uint64_t>(ctrl_copy);
+  cert.exec_buf.dpu_control_code_host_addr_low = static_cast<uint32_t>(ctrl_code_addr & 0xFFFFFFFF);
+  cert.exec_buf.dpu_control_code_host_addr_high = static_cast<uint32_t>(ctrl_code_addr >> 32);
+
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t XdnaDriver::SubmitUmqCmdChain(hsa_amd_aie_kernel_dispatch_packet_t* ring,
-                                           uint32_t ring_capacity, void* queue_metadata,
-                                           volatile uint32_t* doorbell, uint64_t* write_index,
-                                           uint64_t first_pkt_idx, uint64_t num_pkts,
-                                           const core::Agent& agent,
-                                           uint64_t* num_completed) const {
+hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* ring,
+                                          uint32_t ring_capacity, void* queue_metadata,
+                                          volatile uint32_t* doorbell, uint64_t first_pkt_idx,
+                                          uint64_t num_pkts, const core::Agent& agent,
+                                          uint64_t* num_completed) const {
   // Every early return below only happens between packets, so this always reflects exactly how
   // many of the batch's packets completed and were retired.
   *num_completed = 0;
 
   const auto& aie_agent = static_cast<const AieAgent&>(agent);
+  host_queue_header* header = static_cast<UmqMetadata*>(queue_metadata)->header;
 
-  // One packet at a time, each rung and waited on individually, rather than publishing the whole
-  // batch's write index and ringing the doorbell once: CERT's CHAIN_FLG_NOT_LAST_CMD mechanism
-  // lets chained commands run with less separation than a real hardware barrier between them, and
-  // this kernel's design was only confirmed safe for fully sequential invocation -- a chained
-  // multi-packet batch under one doorbell corrupted the second-and-later packets' output on real
-  // hardware (confirmed: the mismatch location moved between otherwise-identical runs, pointing at
-  // an execution race rather than a fixed addressing bug).
+  // One packet at a time, each rung and waited on individually, rather than the whole batch under
+  // one doorbell. A packet that starts right after the previous one finished gets corrupted output
+  // (stretches shifted by 128 elements, one memtile double buffer): each full ELF begins by
+  // configuring the array, and that configuration is not safe to apply on top of a run that has
+  // just ended -- it does not reset the memtile DMA channels. Measured on aie4 with vsadd: packets
+  // published 2 ms apart are correct, 200 us apart or closer are not, and XRT's runlist corrupts
+  // the same way, so this is the control code's property rather than this submission path's.
   for (uint64_t i = 0; i < num_pkts; ++i) {
     const uint64_t idx = first_pkt_idx + i;
     hsa_amd_aie_kernel_dispatch_packet_t& pkt = ring[idx % ring_capacity];
 
-    const hsa_status_t translate_err = TranslateUmqPackets(ring, ring_capacity, idx, 1, agent);
+    const hsa_status_t translate_err = TranslateUmqPacket(pkt, agent);
     if (translate_err != HSA_STATUS_SUCCESS) {
       // Rejected before reaching the device: nothing in this packet was readied, so it does not
       // count towards num_completed, and the doorbell is never rung.
@@ -1768,9 +1958,9 @@ hsa_status_t XdnaDriver::SubmitUmqCmdChain(hsa_amd_aie_kernel_dispatch_packet_t*
 
     // CERT's own write_index is a monotonic count of readied packets, i.e. idx+1 itself (an index
     // one past the last readied packet). Each packet is its own singleton chain, so chain_flag
-    // (packed into the high byte of this field -- see aie4_host_queue.h's common_header) stays
-    // CHAIN_FLG_LAST_CMD (0), the value the application already left it at.
-    atomic::Store(write_index, idx + 1, std::memory_order_release);
+    // stays 0, which the application's opcode already leaves it at (see
+    // HOST_QUEUE_PACKET_EXEC_BUF).
+    atomic::Store(&header->write_index, idx + 1, std::memory_order_release);
     store_fence();
     // Hardware doorbell supports AQL semantics, the same as a GPU queue: the value rung is the
     // index of the last readied packet, not a count.
@@ -1778,29 +1968,26 @@ hsa_status_t XdnaDriver::SubmitUmqCmdChain(hsa_amd_aie_kernel_dispatch_packet_t*
 
     // Block until CERT actually retires this packet -- submission is synchronous on the calling
     // thread here, same as KMQ's per-batch ioctl (which blocks inside the kernel driver instead of
-    // here, but the caller-visible contract is identical). A real device failure (not an ordinary
-    // timeout, which can't happen with an infinite wait) stops the chain the same way a rejected
-    // packet does.
-    bool completed = false;
-    hsa_status_t wait_err;
-    do {
-      wait_err = WaitUmqCmd(fd_, queue_metadata, idx, /*timeout_ms=*/0, &completed);
-    } while (wait_err == HSA_STATUS_SUCCESS && !completed);
+    // here, but the caller-visible contract is identical). A failed wait stops the chain the same
+    // way a rejected packet does.
+    //
+    // TranslateUmqPacket overwrote this packet's kernel_object with the address of a per-dispatch
+    // control-code copy it allocated through this same agent's system allocator. It is freed once
+    // CERT is confirmed done with it, before the ring slot is reused. If the wait fails instead,
+    // the packet cannot be recalled -- CERT may already be running it or still run it -- so the
+    // copy stays allocated until the hardware context is destroyed.
+    void* const ctrl_copy = reinterpret_cast<void*>(
+        (static_cast<uint64_t>(pkt.kernel_object_high) << 32) | pkt.kernel_object_low);
+    const hsa_status_t wait_err = WaitUmqCmd(fd_, queue_metadata, idx);
     if (wait_err != HSA_STATUS_SUCCESS) {
+      static_cast<UmqMetadata*>(queue_metadata)->orphaned_ctrl_copies.push_back(ctrl_copy);
       return wait_err;
     }
-
-    // TranslateUmqPackets overwrote this packet's kernel_object with the address of a per-dispatch
-    // control-code copy it allocated through this same agent's system allocator (see its own
-    // comment); CERT is confirmed done reading that copy now, so this is the one place that both
-    // knows it is safe to free and still has the address, before the ring slot is reused by a
-    // future submission.
-    const uint64_t ctrl_copy_addr =
-        (static_cast<uint64_t>(pkt.kernel_object_high) << 32) | pkt.kernel_object_low;
-    if (ctrl_copy_addr != 0) {
-      aie_agent.system_deallocator()(reinterpret_cast<void*>(ctrl_copy_addr));
-    }
-    RetireCompletedPackets(ring, ring_capacity - 1, idx, /*num_pkts=*/1);
+    aie_agent.system_deallocator()(ctrl_copy);
+    // A UMQ device (AMDXDNA_DEV_TYPE_UMQ) is cache-coherent with the CPU, which is why XRT's
+    // sync_bo does nothing for one and why UMQ submission never flushes before dispatch either.
+    RetireCompletedPackets(ring, ring_capacity - 1, idx, /*num_pkts=*/1,
+                           /*flush_arguments=*/false);
     *num_completed = i + 1;
   }
 
@@ -2171,7 +2358,7 @@ static hsa_status_t BuildPdiInstsCommand(const hsa_amd_aie_kernel_dispatch_packe
 ///
 /// Copies the kernel's control code into a fresh device buffer, patches this dispatch's argument
 /// addresses into the copy, and points the command at it. Every packet needs its
-/// own copy: @ref aie_elf::PatchShimDma48 adds to the buffer descriptor already in place, so
+/// own copy: @ref PatchShimDma48 adds to the buffer descriptor already in place, so
 /// patching a shared buffer would accumulate, and two packets of one kernel with different
 /// arguments would both run with whichever was patched last.
 ///
@@ -2208,7 +2395,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   // This path only ever runs through a KMQ hardware context, which aie4 (UMQ-only) never creates;
   // the loader has already refused to load a kernel here whose control code is not the single
   // ctrltext buffer this function's PatchShimDma48 patches (aie4's multi-page, ctrldata-bearing
-  // shape is patched a different way entirely, by TranslateUmqPackets's PatchShimDma57Aie4).
+  // shape is patched a different way entirely, by TranslateUmqPacket's PatchShimDma57Aie4).
   const std::vector<uint8_t>& ctrl_code = desc.pages[0].ctrltext;
 
   // Resolves the argument BOs and bounds-checks the kernarg buffer, which the patch loop below
@@ -2237,9 +2424,8 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   const auto* kernarg_address = static_cast<const uint64_t*>(pkt->kernarg_address);
   for (size_t arg = 0; arg < desc.arg_sites.size(); ++arg) {
     for (const aie_elf::PatchSite& site : desc.arg_sites[arg]) {
-      aie_elf::PatchShimDma48(
-          reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl.ptr()) + site.offset),
-          kernarg_address[arg] + site.addend);
+      PatchShimDma48(reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl.ptr()) + site.offset),
+                     kernarg_address[arg] + site.addend);
     }
   }
   FlushCpuCache(ctrl.ptr(), 0, ctrl_code.size());
@@ -2538,7 +2724,7 @@ static hsa_status_t SubmitBatchInChunks(int fd, std::vector<BOHandle>* cmd_bo_ha
       // output; retiring them here is what keeps a waiter on an earlier packet of a partially
       // failed batch from blocking forever. The rest never ran and get nothing.
       *num_completed = chunk_start + chunk_completed;
-      RetireCompletedPackets(queue, mask, first_pkt_idx, *num_completed);
+      RetireCompletedPackets(queue, mask, first_pkt_idx, *num_completed, /*flush_arguments=*/true);
       return status;
     }
 
@@ -2546,7 +2732,7 @@ static hsa_status_t SubmitBatchInChunks(int fd, std::vector<BOHandle>* cmd_bo_ha
   }
 
   *num_completed = num_pkts;
-  RetireCompletedPackets(queue, mask, first_pkt_idx, num_pkts);
+  RetireCompletedPackets(queue, mask, first_pkt_idx, num_pkts, /*flush_arguments=*/true);
 
   return HSA_STATUS_SUCCESS;
 }

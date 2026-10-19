@@ -23,31 +23,6 @@ namespace AMD {
 static_assert(sizeof(hsa_amd_aie_kernel_dispatch_packet_t) == sizeof(core::AqlPacket),
               "hsa_amd_aie_kernel_dispatch_packet_t must be the same size as core::AqlPacket");
 
-namespace {
-
-/// @brief Mirrors the AIE4 kernel driver's `struct host_queue_header`
-/// (drivers/accel/amdxdna/aie4_host_queue.h, confirmed against the installed xrt-amdxdna-2.26.0
-/// source), which must open the BO passed to CREATE_HWCTX as `umq_bo`; the packet ring follows
-/// immediately after, at @ref data_address. This layout is not a stable, versioned UAPI struct
-/// (unlike amdxdna_drm_create_hwctx) -- only observed in one driver build, so a future version
-/// could change it silently.
-struct HostQueueHeader {
-  uint64_t read_index;
-  uint16_t version_major;
-  uint16_t version_minor;
-  uint32_t capacity;
-  uint64_t padding0[6];
-  uint64_t write_index;
-  uint64_t padding1[6];
-  uint64_t data_address;
-};
-static_assert(sizeof(HostQueueHeader) == 128,
-              "HostQueueHeader must match the kernel driver's struct host_queue_header exactly");
-
-constexpr size_t kHostQueueHeaderSize = sizeof(HostQueueHeader);
-
-}  // namespace
-
 AieUmqQueue::AieUmqQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_t req_size_pkts,
                          uint32_t node_id, core::HsaEventCallback callback, void* err_data,
                          uint64_t flags)
@@ -55,9 +30,9 @@ AieUmqQueue::AieUmqQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
       LocalSignal(0, false),
       DoorbellSignal(signal()),
       // The ring the device reads is always XdnaDriver::UmqMaxCmds() packets, whatever
-      // req_size_pkts asks for (CERT's own read/write-index validity check hardcodes that count;
-      // see HostQueueHeader), plus the header the ring follows.
-      queue_size_bytes_(static_cast<uint32_t>(kHostQueueHeaderSize +
+      // req_size_pkts asks for (CERT's own read/write-index validity check hardcodes that count),
+      // plus the header the ring follows.
+      queue_size_bytes_(static_cast<uint32_t>(XdnaDriver::UmqHeaderBytes() +
                                               XdnaDriver::UmqMaxCmds() *
                                                   sizeof(hsa_amd_aie_kernel_dispatch_packet_t))),
       suspended_(false),
@@ -82,18 +57,9 @@ AieUmqQueue::AieUmqQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   std::memset(ring_buf_, 0, queue_size_bytes_);
 
   // CERT reads its read/write indices and the packet ring straight out of this BO (passed below
-  // as the hardware context's umq_bo); the header must open it, per HostQueueHeader. The packet
-  // ring -- what the application actually writes into -- starts right after.
-  auto* header = static_cast<HostQueueHeader*>(ring_buf_);
-  header->version_major = 1;
-  header->version_minor = 0;
-  header->capacity = XdnaDriver::UmqMaxCmds();
-  // Under PASID/SVA the device walks the submitting process's own page tables (see
-  // XdnaDriver::CreateUserModeQueue's comment), so the address CERT dereferences is this
-  // process's own -- no separate device-address translation, unlike a blob placed into the
-  // CODE_AGENT segment (e.g. AieKernelDescriptor::static_ctrl_code_dev_addr).
-  void* packet_ring = static_cast<uint8_t*>(ring_buf_) + kHostQueueHeaderSize;
-  header->data_address = reinterpret_cast<uint64_t>(packet_ring);
+  // as the hardware context's umq_bo); XdnaDriver::CreateUserModeQueue fills in the header that
+  // opens it. The packet ring -- what the application actually writes into -- starts right after.
+  void* packet_ring = static_cast<uint8_t*>(ring_buf_) + XdnaDriver::UmqHeaderBytes();
 
   // Populate hsa_queue_t fields.
   amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_SINGLE;
@@ -250,13 +216,12 @@ void AieUmqQueue::SubmitPackets() {
 
   auto* ring =
       static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(amd_queue_.hsa_queue.base_address);
-  auto* header = static_cast<HostQueueHeader*>(ring_buf_);
 
   const uint64_t num_pkts = last_pkt_idx - first_pkt_idx;
   uint64_t num_completed = 0;
-  hsa_status_t err = driver.SubmitUmqCmdChain(ring, XdnaDriver::UmqMaxCmds(), umq_metadata_,
-                                              doorbell_, &header->write_index, first_pkt_idx,
-                                              num_pkts, agent, &num_completed);
+  hsa_status_t err =
+      driver.SubmitUmqPackets(ring, XdnaDriver::UmqMaxCmds(), umq_metadata_, doorbell_,
+                              first_pkt_idx, num_pkts, agent, &num_completed);
 
   // Consume exactly the packets that executed. On success that is the whole batch. On a partial
   // failure it is the prefix the device got through, whose completion signals have already been

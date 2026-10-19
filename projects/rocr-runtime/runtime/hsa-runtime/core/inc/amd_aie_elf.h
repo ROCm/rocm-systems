@@ -109,26 +109,6 @@ struct Kernel {
 hsa_status_t Parse(const void* image, size_t size, std::string_view arch,
                    std::map<std::string, Kernel>* out, std::string* error);
 
-/// @brief Folds a buffer address into a shim DMA buffer descriptor, the scheme the NPU firmware
-/// defines. This *adds* to the descriptor already in place, so it must only ever be applied to a
-/// pristine copy of the control code.
-///
-/// @param [in,out] site Pointer to the three-dword patch site inside the control code.
-/// @param [in] addr Device address to fold in.
-void PatchShimDma48(uint32_t* site, uint64_t addr);
-
-/// @brief aie4's wider (57-bit) equivalent of PatchShimDma48, for kShimDma57Aie4 sites. Same
-/// additive contract: only ever apply to a pristine copy. The 57-bit field spans site[0]'s low 25
-/// bits (high part) and site[1] (low 32 bits), matching aiebu's own read57_aie4/write57_aie4
-/// (src/cpp/analyzer/transform_manager.cpp); confirmed against a real aie4 dispatch that faulted
-/// (IOMMU IO_PAGE_FAULT at small near-zero addresses) when this patch was skipped, matching the
-/// ELF's own small placeholder offsets left unpatched.
-///
-/// @param [in,out] site Pointer to the two-dword (site[0], site[1]) patch site inside the control
-/// code.
-/// @param [in] addr Device address to fold in.
-void PatchShimDma57Aie4(uint32_t* site, uint64_t addr);
-
 }  // namespace aie_elf
 }  // namespace AMD
 }  // namespace rocr
