@@ -589,6 +589,23 @@ in the following table.
       - | Remapping specification string
         | Used with Rome 4P2H topology
 
+    * - | ``RCCL_PCIE_ORDERED_RING``
+        | Pins ring graph search to the order GPUs appear in the topology
+          array, instead of letting the permutation search replace it. This
+          constrains GPU visitation order only; path validation, bandwidth
+          constraints, and backtracking are unchanged, and the ring still
+          travels whatever paths the search validates. Applies to gfx1250
+          ring graphs on a single host where every rank is a GPU of that
+          topology; trees, CollNet, other architectures, and multi-host
+          communicators are unaffected. ``NCCL_GRAPH_FILE`` and
+          ``NCCL_RINGS`` take precedence. Also accepted as
+          ``NCCL_PCIE_ORDERED_RING``.
+      - | ``0``: Disabled, use the unconstrained permutation search.
+        | ``1``: Enabled (default). If no ordered ring passes validation,
+          warn and fall back to the default ordering.
+        | ``2``: Enabled, strict. If no ordered ring passes validation,
+          fail communicator initialization instead of falling back.
+
     * - | ``NCCL_GIN_PLUGIN``
         | Selects external GIN (GPU-Initiated Networking) plugins.
       - | Comma-separated list of paths or short names

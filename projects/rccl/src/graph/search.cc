@@ -341,16 +341,22 @@ ncclResult_t ncclTopoSearchRec(struct ncclTopoSystem* system, struct ncclTopoGra
 #define FORCED_ORDER_PCI 1
 #define FORCED_ORDER_REPLAY 2
 
-// Opt-in: pin ring search to the topology array's PCI order. Visitation order only -- the ring
-// still travels whatever paths the search validates, and other patterns are untouched.
-RCCL_PARAM_NCCL_ALIAS(PcieOrderedRing, "PCIE_ORDERED_RING", 0);
+// Pin eligible gfx1250 rings to the topology array's order. Visitation order only; path
+// validation is unchanged. 0 = off, 1 = on with fallback (default), 2 = on, fail if no
+// ordered ring validates.
+// Note this is topology-array order, not a busId sort: nodes[GPU] is XML-parse order
+// (ncclTopoSortSystem orders links, not that array). It is PCI order on gfx1250.
+RCCL_PARAM_NCCL_ALIAS(PcieOrderedRing, "PCIE_ORDERED_RING", 1);
 
-// gfx1250 only, and only for a comm inside one MNNVL domain -- every rank is a GPU of this
-// topology (nNodes == 1; the domain may still span hosts). That is also the condition under
-// which the search stays on the intra-node path, so NET entry selection is left untouched.
+// nodes[GPU].count == nRanks keeps the search on the intra-node path, leaving NET entry
+// selection untouched. nHosts == 1 is needed because MNNVL clique peers fused from several
+// hosts carry PATH_DIS, so ncclTopoFollowPath rejects every cross-host hop and no ring can be
+// built; the fallback below already emits topology order there.
+// REVISIT if those peers gain real paths: nHosts == 1 is a proxy for "the search can validate
+// an ordered ring", and the search would then explore cross-host permutations this should pin.
 static int ringPcieOrdered(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
   return rcclParamPcieOrderedRing() && graph->pattern == NCCL_TOPO_PATTERN_RING && graph->collNet == 0 &&
-         system->nodes[GPU].count > 0 && system->nodes[GPU].count == system->nRanks &&
+         system->nodes[GPU].count > 0 && system->nodes[GPU].count == system->nRanks && system->nHosts == 1 &&
          IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
 }
 
@@ -1548,14 +1554,19 @@ done:
     int nets[NCCL_TOPO_MAX_NODES];
     int netCount;
 
-    // Reached only if no PCIe-ordered ring passed validation at any relaxation step. The fallback
-    // below is unvalidated, so fail instead of reporting success for a constraint we did not meet.
+    // No ordered ring validated at any relaxation step. The default degrades to the stock
+    // fallback, since failing init on a topology that worked before the default flipped would
+    // be a regression. Only strict (2) refuses.
     if (ringPcieOrdered(system, graph)) {
-      WARN("RCCL_PCIE_ORDERED_RING=1: no PCIe-ordered ring passed path validation for pattern %d (%d GPUs, "
-           "bwIntra %f typeIntra %s); unset it or relax the topology constraints",
-           graph->pattern, ngpus, graph->bwIntra, topoPathTypeStr[graph->typeIntra]);
-      ret = ncclInvalidUsage;
-      goto exit;
+      bool strict = rcclParamPcieOrderedRing() >= 2;
+      WARN("PCIE_ORDERED_RING: no PCIe-ordered ring passed path validation for pattern %d (%d GPUs, bwIntra %f "
+           "typeIntra %s); %s",
+           graph->pattern, ngpus, graph->bwIntra, topoPathTypeStr[graph->typeIntra],
+           strict ? "set PCIE_ORDERED_RING=0 or relax the topology constraints" : "falling back to topology order");
+      if (strict) {
+        ret = ncclInvalidUsage;
+        goto exit;
+      }
     }
     INFO(NCCL_GRAPH, "Could not find a path for pattern %d, falling back to simple order", graph->pattern);
     for (int i = 0; i < ngpus; i++) graph->intra[i] = system->nodes[GPU].nodes[i].gpu.rank;

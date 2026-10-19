@@ -256,14 +256,15 @@ ncclTopoGraph* makeGraph(int pattern, int collNet = 0)
     return g;
 }
 
-// nGpus == nRanks is the single-MNNVL-domain case the knob is scoped to; passing a smaller
-// nGpus models a comm whose ranks reach beyond the domain, where the search uses NET. The
+// nGpus == nRanks on a single host is the case the knob is scoped to; passing a smaller
+// nGpus models a comm whose ranks reach beyond the topology, where the search uses NET. The
 // gate also reads nodes[0]'s arch, so every GPU carries one.
 ncclTopoSystem* makeSystem(int nGpus, int nRanks, const char* gcn = "gfx1250")
 {
     auto* s             = new ncclTopoSystem{};
     s->nodes[GPU].count = nGpus;
     s->nRanks           = nRanks;
+    s->nHosts           = 1;
     for(int i = 0; i < nGpus; ++i)
     {
         auto& node = s->nodes[GPU].nodes[i];
@@ -275,15 +276,16 @@ ncclTopoSystem* makeSystem(int nGpus, int nRanks, const char* gcn = "gfx1250")
 
 } // namespace
 
-// Default off: an unset knob must leave ring search exactly as it is today.
-TEST(SearchPcieOrderedRing, Unset_RingNotForced)
+// Default on: an unset knob forces the order for an eligible ring. Guards the default value
+// itself -- flipping it back to 0 must fail here.
+TEST(SearchPcieOrderedRing, Unset_RingForcedByDefault)
 {
-    RUN_ISOLATED_TEST("Unset_RingNotForced",
+    RUN_ISOLATED_TEST("Unset_RingForcedByDefault",
                       []()
                       {
                           auto* s = makeSystem(8, 8);
                           auto* g = makeGraph(NCCL_TOPO_PATTERN_RING);
-                          EXPECT_FALSE(ringPcieOrdered(s, g));
+                          EXPECT_TRUE(ringPcieOrdered(s, g));
                           delete s;
                           delete g;
                       });
@@ -404,21 +406,239 @@ TEST(SearchPcieOrderedRing, Enabled_OtherArchNotForced)
                                {{"RCCL_PCIE_ORDERED_RING", "1"}});
 }
 
-// A domain spanning several hosts is still one domain: all 8 ranks are GPUs here, so the knob
-// applies even though the topology was fused from two hosts.
-TEST(SearchPcieOrderedRing, Enabled_MultiHostSingleDomainForced)
+// A topology fused from several hosts (an MNNVL clique) is out of scope even though all its
+// ranks are GPUs: the clique peers carry PATH_DIS between hosts, so the search cannot route a
+// ring in any order and the stock fallback -- which already emits topology order -- handles it.
+// Forcing there would buy nothing and previously failed communicator init outright.
+TEST(SearchPcieOrderedRing, Enabled_MultiHostNotForced)
 {
-    RUN_ISOLATED_TEST_WITH_ENV("Enabled_MultiHostSingleDomainForced",
+    RUN_ISOLATED_TEST_WITH_ENV("Enabled_MultiHostNotForced",
                                []()
                                {
-                                   auto* s = makeSystem(8, 8);
+                                   auto* s   = makeSystem(8, 8);
                                    s->nHosts = 2;
                                    auto* g   = makeGraph(NCCL_TOPO_PATTERN_RING);
-                                   EXPECT_TRUE(ringPcieOrdered(s, g));
+                                   EXPECT_FALSE(ringPcieOrdered(s, g));
                                    delete s;
                                    delete g;
                                },
                                {{"RCCL_PCIE_ORDERED_RING", "1"}});
+}
+
+// ---------------------------------------------------------------------------
+// Behaviour of the generated graph, not just the gate. These drive
+// ncclTopoCompute() end to end so a regression in the ring it produces (or in
+// whether it produces one at all) fails here rather than on a 16-rank cluster.
+// ---------------------------------------------------------------------------
+namespace
+{
+
+// Every node the search touches must carry a path table for every node type, or the
+// traversal dereferences a null table and segfaults. Default everything to unreachable;
+// callers then open up only the edges they want.
+void allocPaths(ncclTopoNode* node)
+{
+    for(int t = 0; t < NCCL_TOPO_NODE_TYPES; ++t)
+    {
+        node->paths[t] = static_cast<ncclTopoLinkList*>(calloc(NCCL_TOPO_MAX_NODES, sizeof(ncclTopoLinkList)));
+        for(int j = 0; j < NCCL_TOPO_MAX_NODES; ++j) node->paths[t][j].type = PATH_DIS;
+    }
+}
+
+// A system whose GPU-to-GPU paths are spelled out explicitly, so a case can model an
+// MNNVL clique: fused into one topology, but with no topology edge between hosts.
+// hostsSplit == 0 puts every GPU on one host; otherwise GPUs [0,hostsSplit) are host 0
+// and the rest host 1, and every cross-host pair is PATH_DIS.
+ncclTopoSystem* makePathSystem(int nGpus, int hostsSplit, const char* gcn = "gfx1250")
+{
+    auto* s                   = new ncclTopoSystem{};
+    s->nodes[GPU].count       = nGpus;
+    s->nRanks                 = nGpus;
+    s->nHosts                 = hostsSplit ? 2 : 1;
+    s->skipPresetTopoMatching = true; // gfx1250 bypasses preset matching
+    // ncclTopoGetCompCap() errors out on a system with no DEV nodes (topo.cc).
+    s->nodes[DEV].count = nGpus;
+    for(int i = 0; i < nGpus; ++i)
+    {
+        auto& d           = s->nodes[DEV].nodes[i];
+        d.type            = DEV;
+        d.id              = i;
+        d.dev.dev         = i;
+        d.dev.cudaCompCap = 90;
+        allocPaths(&d);
+    }
+    for(int i = 0; i < nGpus; ++i)
+    {
+        auto& node           = s->nodes[GPU].nodes[i];
+        node.type            = GPU;
+        node.id              = i;
+        node.gpu.dev         = i;
+        node.gpu.rank        = i;
+        node.gpu.cudaCompCap = 90;
+        snprintf(node.gpu.gcn, GCN_ARCH_NAME_LEN, "%s", gcn);
+        node.gpu.parent = &s->nodes[DEV].nodes[i]; // gpuPciBw() dereferences this
+        allocPaths(&node);
+        // No NICs in this model. A null NET table is also what a remote MNNVL GPU carries,
+        // and search.cc keys on exactly that ("Skip remote GPUs (MNNVL): paths[NET] is null").
+        free(node.paths[NET]);
+        node.paths[NET] = nullptr;
+    }
+    // GPU-to-GPU reachability.
+    for(int i = 0; i < nGpus; ++i)
+    {
+        for(int j = 0; j < nGpus; ++j)
+        {
+            bool sameHost = (hostsSplit == 0) || ((i < hostsSplit) == (j < hostsSplit));
+            auto& p       = s->nodes[GPU].nodes[i].paths[GPU][j];
+            p.type        = (i == j) ? PATH_LOC : (sameHost ? PATH_NVL : PATH_DIS);
+            p.bw          = (i == j) ? 0 : (sameHost ? 100.0f : 0);
+            // count stays 0: followPath() then has no hops to walk, so a reachable edge
+            // needs no link list. A nonzero count with a null list segfaults.
+            p.count = 0;
+        }
+    }
+    return s;
+}
+
+void freePathSystem(ncclTopoSystem* s)
+{
+    for(int nt = 0; nt < NCCL_TOPO_NODE_TYPES; ++nt)
+        for(int i = 0; i < s->nodes[nt].count; ++i)
+            for(int t = 0; t < NCCL_TOPO_NODE_TYPES; ++t) free(s->nodes[nt].nodes[i].paths[t]);
+    delete s;
+}
+
+ncclTopoGraph* makeRingGraph()
+{
+    auto* g          = new ncclTopoGraph{};
+    g->id            = 0;
+    g->pattern       = NCCL_TOPO_PATTERN_RING;
+    g->collNet       = 0;
+    g->minChannels   = 1;
+    g->maxChannels   = 8;
+    return g;
+}
+
+} // namespace
+
+// Single host, all GPUs mutually reachable: the forced ring must be built, and it must be
+// the topology-array order 0..n-1 -- not merely "some ring".
+TEST(SearchPcieOrderedRing, SingleHost_ProducesTopologyOrderedRing)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("SingleHost_ProducesTopologyOrderedRing",
+                               []()
+                               {
+                                   auto* s = makePathSystem(8, /*hostsSplit=*/0);
+                                   auto* g = makeRingGraph();
+                                   EXPECT_EQ(ncclTopoCompute(s, g), ncclSuccess);
+                                   ASSERT_GT(g->nChannels, 0);
+                                   for(int i = 0; i < 8; ++i) EXPECT_EQ(g->intra[i], i) << "ring position " << i;
+                                   delete g;
+                                   freePathSystem(s);
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "1"}});
+}
+
+// The regression: an MNNVL clique fused from two hosts has PATH_DIS between them, so the
+// graph search cannot route a ring. Stock falls back to topology order and succeeds; the
+// forced path must not turn that into a communicator-init failure.
+TEST(SearchPcieOrderedRing, MultiHostPathDis_StillInitialises)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("MultiHostPathDis_StillInitialises",
+                               []()
+                               {
+                                   auto* s = makePathSystem(16, /*hostsSplit=*/8);
+                                   auto* g = makeRingGraph();
+                                   EXPECT_EQ(ncclTopoCompute(s, g), ncclSuccess);
+                                   EXPECT_GT(g->nChannels, 0);
+                                   delete g;
+                                   freePathSystem(s);
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "1"}});
+}
+
+// The same topology with the knob off is the behaviour we must not change.
+TEST(SearchPcieOrderedRing, MultiHostPathDis_DisabledUnchanged)
+{
+    RUN_ISOLATED_TEST("MultiHostPathDis_DisabledUnchanged",
+                      []()
+                      {
+                          auto* s = makePathSystem(16, /*hostsSplit=*/8);
+                          auto* g = makeRingGraph();
+                          EXPECT_EQ(ncclTopoCompute(s, g), ncclSuccess);
+                          EXPECT_GT(g->nChannels, 0);
+                          delete g;
+                          freePathSystem(s);
+                      });
+}
+
+// In scope (single host) but genuinely unroutable: one GPU is cut off from the rest, so no
+// ring exists in any order. Here the constraint really was unsatisfiable, so the forced path
+// must say so rather than silently reporting an unvalidated fallback as success.
+TEST(SearchPcieOrderedRing, SingleHost_UnroutableFailsPredictably)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("SingleHost_UnroutableFailsPredictably",
+                               []()
+                               {
+                                   auto* s = makePathSystem(8, /*hostsSplit=*/0);
+                                   // Sever GPU 7 in both directions.
+                                   for(int j = 0; j < 8; ++j)
+                                   {
+                                       if(j == 7) continue;
+                                       s->nodes[GPU].nodes[7].paths[GPU][j].type = PATH_DIS;
+                                       s->nodes[GPU].nodes[j].paths[GPU][7].type = PATH_DIS;
+                                   }
+                                   auto* g = makeRingGraph();
+                                   EXPECT_EQ(ncclTopoCompute(s, g), ncclInvalidUsage);
+                                   delete g;
+                                   freePathSystem(s);
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "2"}});
+}
+
+// Same unroutable topology, knob left at its default: must degrade to the stock fallback
+// instead of failing init. Now that the default is on, hard-failing here would break
+// topologies that worked before the default flipped.
+TEST(SearchPcieOrderedRing, UnroutableUnsetDegradesInsteadOfFailing)
+{
+    RUN_ISOLATED_TEST("UnroutableUnsetDegradesInsteadOfFailing",
+                      []()
+                      {
+                          auto* s = makePathSystem(8, /*hostsSplit=*/0);
+                          // Sever GPU 7 in both directions, exactly as the explicit-request case.
+                          for(int j = 0; j < 8; ++j)
+                          {
+                              if(j == 7) continue;
+                              s->nodes[GPU].nodes[7].paths[GPU][j].type = PATH_DIS;
+                              s->nodes[GPU].nodes[j].paths[GPU][7].type = PATH_DIS;
+                          }
+                          auto* g = makeRingGraph();
+                          EXPECT_EQ(ncclTopoCompute(s, g), ncclSuccess);
+                          delete g;
+                          freePathSystem(s);
+                      });
+}
+
+// Explicit user ordering outranks the knob: NCCL_RINGS must still decide the ring, and the
+// run must succeed rather than trip the forced-path failure.
+TEST(SearchPcieOrderedRing, ExplicitNcclRingsWinsOverForcedOrder)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("ExplicitNcclRingsWinsOverForcedOrder",
+                               []()
+                               {
+                                   auto* s = makePathSystem(4, /*hostsSplit=*/0);
+                                   auto* g = makeRingGraph();
+                                   EXPECT_EQ(ncclTopoCompute(s, g), ncclSuccess);
+                                   ASSERT_GT(g->nChannels, 0);
+                                   // The explicit ring, not the topology order 0 1 2 3.
+                                   EXPECT_EQ(g->intra[0], 0);
+                                   EXPECT_EQ(g->intra[1], 2);
+                                   EXPECT_EQ(g->intra[2], 1);
+                                   EXPECT_EQ(g->intra[3], 3);
+                                   delete g;
+                                   freePathSystem(s);
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "1"}, {"NCCL_RINGS", "0 2 1 3"}});
 }
 
 } // namespace RcclUnitTesting
