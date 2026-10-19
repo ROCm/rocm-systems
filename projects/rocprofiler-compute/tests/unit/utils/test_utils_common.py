@@ -1347,3 +1347,22 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
 def test_roofline_selection(filter_blocks, selects):
     """4, 4.x and the roof alias all count as roofline."""
     assert utils_common.selects_roofline(filter_blocks) is selects
+
+
+@pytest.mark.misc
+def test_sdk_config_has_no_gfx115_definitions_or_empty_nodes():
+    """gfx115 counters are not defined in the local SDK fallback."""
+    config_path = (
+        Path(utils_common.config.rocprof_compute_home)
+        / "rocprof_compute_soc/profile_configs/sdk_config.yaml"
+    )
+    sdk_config = utils_common.yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    counters = sdk_config["rocprofiler-sdk"]["counters"]
+
+    assert counters
+    for counter in counters:
+        assert counter["definitions"]
+        for definition in counter["definitions"]:
+            architectures = definition["architectures"]
+            assert architectures
+            assert not any(str(arch).startswith("gfx115") for arch in architectures)
