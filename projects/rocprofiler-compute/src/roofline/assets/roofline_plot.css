@@ -23,7 +23,7 @@
   --roofline-marker-outline: #000000;
 }
 
-:root.roofline-theme-dark {
+:root.report-theme-dark {
   color-scheme: dark;
   --roofline-border: #363c45;
   --roofline-bg-soft: #16191e;
