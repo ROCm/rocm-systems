@@ -633,7 +633,7 @@ int main(int argc, char *argv[]) {
   try {
     dbt_guest_config = rocjitsu::config::load_dbt_guest_config_from_file(abs_config);
     if (!dbt_guest_config.enabled)
-      (void)rocjitsu::config::load_config(abs_config, rocjitsu::kEmbeddedSchema);
+      rocjitsu::config::validate_config(abs_config, rocjitsu::kEmbeddedSchema);
   } catch (const std::exception &e) {
     std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
     return 1;
