@@ -120,12 +120,22 @@ configuration used by the RCCL collective tests. To extend it:
 
 ## Create a VM from C code
 
-The rocJITsu C API provides two functions for creating a virtual machine from a configuration:
+The rocJITsu C API provides file and string creators, each with a node-aware
+variant:
 
 -   `rj_vm_create` --- accepts a file path to a JSON config.
 -   `rj_vm_create_from_string` --- accepts a JSON string directly.
+-   `rj_vm_create_for_node` --- accepts a file path and a node selector.
+-   `rj_vm_create_from_string_for_node` --- accepts JSON text and a node selector.
 
-Both functions take a `rj_vm_mode_t` parameter that controls initialization depth:
+A multi-node `system` manifest needs a selected node. Pass its ID to a
+node-aware creator, or set `local_node` in the JSON. A NULL or empty API
+selector uses `local_node`; if neither is present, the graph must contain
+exactly one node. Legacy one-node configs continue to work with the original
+creators.
+
+All four functions take a `rj_vm_mode_t` parameter that controls
+initialization depth:
 
 | Mode | Behavior |
 | --- | --- |

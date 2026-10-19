@@ -15,15 +15,16 @@ For details on how KMD emulation and the interposer layer work, see [GPU virtual
 
 ``` text
 rocjitsu --config <config.json> [--daemon|--attach] [--] <app> [args...]
-rocjitsu --config <config.json> --vfio-socket <path>
+rocjitsu --config <config.json> [--node <id>] --vfio-socket <path> [--vfio-socket <path> ...]
 ```
 
 | Option | Description |
 | --- | --- |
 | `--config <path>` | Path to the simulation configuration JSON file. Required for all modes. |
+| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only (no application is launched). |
 | `--attach` | Attach to a running daemon. The socket path is resolved as described in [Environment variables and socket path resolution](#socket-path-resolution). |
-| `--vfio-socket <path>` | Serve the configured GPU as a PCI function over VFIO-user. Requires a build configured with `ROCJITSU_ENABLE_VFIO=ON` and a VMM that shares guest RAM through mmap-able file descriptors. |
+| `--vfio-socket <path>` | Serve a local GPU as a PCI function over VFIO-user. Repeat once per local GPU in ordinal order for a multi-GPU node. The socket count must match the selected node's local GPU count, and paths must be distinct. Requires a build configured with `ROCJITSU_ENABLE_VFIO=ON` and a VMM that shares guest RAM through mmap-able file descriptors. |
 | `--check-vfio-user` | Exit successfully only when the selected binary includes VFIO-user support. |
 | `--help`, `-h` | Print usage information and exit. |
 | `--version`, `-v` | Print the version string and exit. |
@@ -70,9 +71,14 @@ Connects to an already-running daemon. The socket path is resolved using the env
 ``` bash
 rocjitsu --config configs/gfx1250_mi455x.json \
   --vfio-socket /tmp/rocjitsu-vfio/vfio-user.sock
+
+# Argument-order example: this fixture has synthetic PCI IDs and is not a guest profile
+rocjitsu --config tests/fixtures/fabric_node_projection.json --node tray7 \
+  --vfio-socket /tmp/rocjitsu-vfio/gpu0.sock \
+  --vfio-socket /tmp/rocjitsu-vfio/gpu1.sock
 ```
 
-rocJITsu exposes the configured gfx1250 GPU as a PCI function to an external
+rocJITsu exposes each configured local GPU as a PCI function to an external
 VMM. The guest AMDGPU driver owns queue setup through BAR and DMA operations;
 the PCI adapter routes that state into the same GPU VM, command processor, MES,
 SDMA scheduler, and compute units used by the other front ends. See

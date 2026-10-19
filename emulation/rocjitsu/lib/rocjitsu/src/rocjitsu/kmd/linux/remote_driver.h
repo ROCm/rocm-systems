@@ -99,8 +99,12 @@ public:
 
   /// @brief Get GPU metadata received from the daemon handshake.
   [[nodiscard]] const Sysfs::GpuInfo *gpu_info() const {
-    return has_gpu_info_ ? &gpu_info_ : nullptr;
+    return gpu_infos_.empty() ? nullptr : &gpu_infos_.front();
   }
+  /// @brief Match a configured minor, except for legacy one-GPU compatibility.
+  /// @details Manifest sessions never claim an unrelated host render node.
+  [[nodiscard]] const Sysfs::GpuInfo *gpu_info_for_render_minor(uint32_t minor) const;
+  [[nodiscard]] bool handles_drm_render_minor(uint32_t minor) const;
 
   /// @brief What the last open() decided about authorizing its peer.
   /// @details Reported because the decision is otherwise invisible: a refusal
@@ -206,12 +210,12 @@ private:
   /// @note Must be called with rpc_mutex_ held.
   int poison_stream();
 
-  int sock_ = -1;             ///< Unix socket connection to the daemon.
-  uint32_t next_id_ = 0;      ///< Monotonic request ID counter (for debugging).
-  std::string topology_path_; ///< Daemon's sysfs topology directory path.
-  std::string drm_path_;      ///< Daemon's DRM sysfs directory path.
-  Sysfs::GpuInfo gpu_info_{}; ///< GPU metadata received from daemon handshake.
-  bool has_gpu_info_ = false; ///< True when gpu_info_ is valid.
+  int sock_ = -1;                         ///< Unix socket connection to the daemon.
+  uint32_t next_id_ = 0;                  ///< Monotonic request ID counter (for debugging).
+  std::string topology_path_;             ///< Daemon's sysfs topology directory path.
+  std::string drm_path_;                  ///< Daemon's DRM sysfs directory path.
+  std::vector<Sysfs::GpuInfo> gpu_infos_; ///< Node-local metadata from the daemon handshake.
+  bool strict_render_minor_ = false;      ///< Manifest minors must match exactly.
   std::optional<PtracerGrantVerdict> ptracer_verdict_; ///< Last open()'s trust decision.
   std::atomic<bool> closing_{false}; ///< Set by close() to break WAIT_EVENTS loops.
   /// @brief Set when the RPC stream is known to be unusable.

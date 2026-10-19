@@ -393,6 +393,7 @@ TEST(ExecutionThreadBudgetTest, CountsOnlySocsThatTheLoaderConstructs) {
   config::LoadedConfig loaded;
   ASSERT_TRUE(test::load_valid_config_from_string(json, loaded, 4));
   ASSERT_TRUE(loaded.extra_gpu_builds.empty());
+  EXPECT_EQ(loaded.num_gpus, 1u);
   ASSERT_EQ(loaded.build_result.num_xcds, 2u);
   EXPECT_EQ(loaded.execution_threads.engines, 2u);
   EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{3}));
@@ -940,6 +941,7 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
   const std::set<std::string> kPinnedConfigs = {
       "gfx950_mi355x_kmd_2gpu.json",
       "gfx1250_mi455x_kmd_4gpu.json",
+      "gfx1250_mi455x_kmd_2node_net.json",
   };
   std::set<std::string> saw_pinned_configs;
   uint32_t configs_checked = 0;
@@ -969,7 +971,12 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
       // turns a pin of 0 -- which opts back into the default -- into 1 as
       // surely as a real pin does. At 64 the config has to carry the literal 1.
       config::LoadedConfig pinned;
-      ASSERT_TRUE(test::load_valid_config(entry.path().string(), pinned, /*host_threads=*/64));
+      if (entry.path().filename() == "gfx1250_mi455x_kmd_2node_net.json") {
+        ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), pinned, "node0",
+                                                     /*host_threads=*/64));
+      } else {
+        ASSERT_TRUE(test::load_valid_config(entry.path().string(), pinned, /*host_threads=*/64));
+      }
       EXPECT_EQ(pinned.engine_config.num_threads, 1u)
           << entry.path().filename() << " must pin num_threads to exactly 1";
     } else {
