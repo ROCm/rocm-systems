@@ -2453,10 +2453,11 @@ TEST(InstrumentorEntryPrologue, AWiderVgprAllocationAdmitsAFifthArgument) {
   const auto kernels = scan_kernel_descriptors(target, text->sectionOffset(), text->size());
   ASSERT_EQ(kernels.size(), 1u);
   const kd::kernel_descriptor_t &desc = kernels.front().descriptor;
-  EXPECT_EQ(
-      RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
-      1u);
-  EXPECT_EQ(RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc1,
+                               kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+            1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+            1u);
 
   const auto result = patch_five_log_buffer_args(target);
   ASSERT_TRUE(result.errors.empty()) << result.errors.front();

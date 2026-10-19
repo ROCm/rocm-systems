@@ -9721,9 +9721,10 @@ TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
         using namespace rocjitsu::amdhsa;
         kernel_descriptor_t kd{};
         kd.kernel_code_entry_byte_offset = sizeof(kd);
-        RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
+        RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                           31);
         RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                        12);
+                           12);
         mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), 0x1000);
         auto p = cdna3::build_ds(
             test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3,

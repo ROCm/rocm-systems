@@ -90,7 +90,7 @@ private:
   KD desc{};
   set_kernel_descriptor_user_sgpr_count(kArch, desc, 2);
   RJ_AMDHSA_BITS_SET(desc.kernel_code_properties,
-                  kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
   desc.kernarg_size = kernarg_size;
   return desc;
 }
@@ -100,7 +100,7 @@ private:
 [[nodiscard]] KD kernarg_descriptor_at_slot(uint16_t expected_slot) {
   KD desc = kernarg_descriptor();
   RJ_AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
-                  1);
+                     1);
   set_kernel_descriptor_user_sgpr_count(kArch, desc, 4);
   EXPECT_EQ(kernarg_segment_ptr_sgpr(desc).value_or(0xFFFF), expected_slot);
   return desc;

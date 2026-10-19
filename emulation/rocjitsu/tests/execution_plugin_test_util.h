@@ -708,7 +708,7 @@ struct PluginFixture {
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    granulated_sgpr_count);
+                       granulated_sgpr_count);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
     kd.group_segment_fixed_size = group_segment_fixed_size;
     mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);

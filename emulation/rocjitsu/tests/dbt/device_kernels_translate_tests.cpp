@@ -470,8 +470,9 @@ TEST(KernelDescriptorTranslator, Cdna1KeepsVgprAndAccumulatorAllocationsSeparate
     kd->compute_pgm_rsrc1 = 0;
     kd->compute_pgm_rsrc3 = 1u << 16; // Guest TG_SPLIT must not leak into reserved host bits.
     RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    full ? 63 : 13);
-    RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, full ? 63 : 23);
+                       full ? 63 : 13);
+    RJ_AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET,
+                       full ? 63 : 23);
     rocjitsu::KernelDescriptorTranslationOptions options;
     options.minimum_vgprs = full ? 256 : 128;
     const auto translations = translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4,

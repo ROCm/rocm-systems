@@ -134,9 +134,8 @@ struct DbiEntryProloguePlan {
 /// @throws util::UnimplementedInst for a non-AMDGPU architecture, from the
 ///         builders @ref build_dbi_entry_prologue emits through.
 [[nodiscard]] std::optional<DbiEntryProloguePlan>
-plan_dbi_entry_prologue(KernelBlockScope blocks,
-                        const amdhsa::kernel_descriptor_t &desc, rj_code_arch_t arch,
-                        uint32_t kernel_sgpr_count, const RegisterSet &reserved,
-                        std::string *error_out = nullptr);
+plan_dbi_entry_prologue(KernelBlockScope blocks, const amdhsa::kernel_descriptor_t &desc,
+                        rj_code_arch_t arch, uint32_t kernel_sgpr_count,
+                        const RegisterSet &reserved, std::string *error_out = nullptr);
 
 } // namespace rocjitsu

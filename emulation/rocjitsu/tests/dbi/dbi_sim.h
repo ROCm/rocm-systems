@@ -116,10 +116,10 @@ public:
   /// CP's fallback for internal test dispatches, the else branch of the enable-bit
   /// walk in CommandProcessor::init_wavefront_regs.
   /// That path writes nothing when the dispatch carries no kernarg address.
-  void set_kernarg(std::vector<uint8_t> bytes,
-                   uint32_t properties =
-                       rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
-                   uint32_t user_sgpr_count = 2) {
+  void set_kernarg(
+      std::vector<uint8_t> bytes,
+      uint32_t properties = rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+      uint32_t user_sgpr_count = 2) {
     kernarg_bytes_ = std::move(bytes);
     kernarg_properties_ = properties;
     user_sgpr_count_ = user_sgpr_count;
