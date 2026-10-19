@@ -150,7 +150,7 @@ static ncclResult_t postTuneP2pChannelBase(struct ncclComm* comm, int peer, bool
   return ncclSuccess;
 }
 
-static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer, bool isSendNotRecv,
+static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer, bool isSendNotRecv, ncclFunc_t collAPI,
                                                 bool* needPreconnect) {
   struct ncclKernelPlanner* planner = &comm->planner;
   uint8_t base;
@@ -162,9 +162,12 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
   NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
 
   // Mark channels that need pre-connect. planner->peers[peer].send/recvSeen is
-  // private to each comm, so we need to set it anyway.
-  (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
-  for (int c = 0; c < comm->p2pnChannelsPerPeer; c++) {
+  // private to each comm, so we need to set it anyway. Leave it clear when only
+  // some parts are connected, so a later task to this peer still connects the rest.
+  int nParts = rcclP2pTaskParts(comm, collAPI);
+  if (nParts == comm->p2pnChannelsPerPeer)
+    (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
+  for (int c = 0; c < nParts; c++) {
     int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
                                           comm->p2pChannelShiftSize);
 
@@ -901,7 +904,7 @@ static ncclResult_t postTuneP2pTasks(
     struct ncclRawTaskSendRecv* raw = &tInfo->raw->sendRecv;
     bool isSendNotRecv = raw->func == ncclFuncSend;
 
-    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, &needPreconnect));
+    NCCLCHECK(postTuneP2pRecordPreconnect(comm, raw->peer, isSendNotRecv, raw->collAPI, &needPreconnect));
   }
 
   if (needPreconnect) {

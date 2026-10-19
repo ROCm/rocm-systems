@@ -34,7 +34,7 @@ RUN zypper --non-interactive update -y && \
     python3 -m pip install --upgrade pip && \
     python3 -m pip install 'cmake==3.25' perfetto
 
-ARG PYTHON_VERSIONS="8 9 10 11 12 13"
+ARG PYTHON_VERSIONS="8 9 10 11 12 13 14 15"
 
 # Install pytest test dependencies into each conda env
 COPY requirements.txt /tmp/requirements.txt

@@ -78,7 +78,7 @@ void L1VectorCache::set_l2(L2Cache *l2) {
 void L1VectorCache::set_gpu_vm(GpuVm *gpu_vm) {
   invalidate_all_lines();
   gpu_vm_ = gpu_vm;
-  mtype_cache_ = {};
+  mtype_cache_.clear();
 }
 
 VmAccessOutcome L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss) {

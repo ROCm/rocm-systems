@@ -1289,7 +1289,7 @@ protected:
     inst_cache_debug_epoch_seen_ = epoch;
   }
 
-  /// @brief Tick all memory pipelines (called at the start of step in clocked mode).
+  /// @brief Tick memory pipelines that retain work.
   void tick_pipelines();
 
   /// @brief Route a memory instruction into the appropriate pipeline.
@@ -1346,6 +1346,10 @@ protected:
   SgprFile sgpr_file_{"sgpr"};
   /// Null slots are idle; materialized waves persist across dispatches.
   std::vector<std::unique_ptr<Wavefront>> wfs_;
+  /// One past the highest active slot. Wavefront state transitions maintain this
+  /// under @ref wave_state_mutex_, including checkpoint placement and slot reuse.
+  /// Waits and debugger stops remain active; only HALTED slots leave the range.
+  uint32_t active_slot_limit_ = 0;
   friend class Wavefront;
   // Low/high halves count active/runnable waves. Publish both in one update
   // so a pause or retirement cannot expose half of an activity transition.
@@ -1370,11 +1374,16 @@ protected:
       std::function<void()> notification_flush_hook;
       if (outermost)
         notification_flush_hook = std::exchange(cu_.notification_flush_hook_for_testing_, {});
+      // Inspect while locked. A later producer holds its own outer guard and
+      // will flush its notifications; an ordinary instruction has none to send.
+      const bool needs_flush =
+          outermost && (cu_.has_pending_cp_notifications() || notification_flush_hook);
       lock_.unlock();
       if (outermost) {
         if (notification_flush_hook)
           notification_flush_hook();
-        cu_.flush_cp_notifications();
+        if (needs_flush)
+          cu_.flush_cp_notifications();
       }
     }
 
@@ -1386,6 +1395,14 @@ protected:
   /// @brief Send command-processor notifications queued under the wave-state lock.
   /// @warning Must be called with that lock released; it takes hw_queue_mutex_.
   void flush_cp_notifications();
+
+  /// @brief Whether command-processor notifications are pending.
+  /// @details Inspected under @ref wave_state_mutex_.
+  bool has_pending_cp_notifications() const {
+    return !pending_vm_faults_.empty() || !pending_queue_exceptions_.empty() ||
+           !pending_wg_completions_.empty() || pending_capacity_change_ ||
+           !pending_execution_failures_.empty();
+  }
 
   struct PendingQueueException {
     uint32_t queue_id;
