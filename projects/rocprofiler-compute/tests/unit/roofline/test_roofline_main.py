@@ -41,7 +41,6 @@ def make_roofline(datatypes: List[str], **run_parameters: object) -> Roofline:
         "workload_dir": "",
         "device_id": 0,
         "sort_type": "kernels",
-        "mem_level": "ALL",
         "is_standalone": True,
         "roofline_data_type": datatypes,
     }
@@ -134,23 +133,6 @@ def test_generate_plot_draws_the_roofs_the_datatype_reaches(
     names = {trace.name for trace in fig.data}
     assert names.issuperset(drawn)
     assert names.isdisjoint(not_drawn)
-
-
-def test_generate_plot_filters_bandwidth_roofs_by_mem_level(
-    benchmarked_roofline,
-) -> None:
-    """The selected memory level reaches both the figure and client model."""
-    roofline = benchmarked_roofline(["FP64"], mem_level=["HBM"])
-    fig = roofline.generate_plot("FP64", fig=go.Figure())
-
-    bandwidth_levels = {"LDS", "L1", "L2", "HBM"}
-    drawn_bandwidth_levels = {
-        trace.name for trace in fig.data if trace.name in bandwidth_levels
-    }
-    assert drawn_bandwidth_levels == {"HBM"}
-
-    view_model = roofline._Roofline__view_models["FLOP"]
-    assert {roof["level"] for roof in view_model.roofline_traces} == {"HBM"}
 
 
 CEILING = {"hbm": [[0.01, 1.0], [1.0, 1500.0], 1500.0]}

@@ -64,13 +64,6 @@ WORKLOADS_BY_ARCH = {
     "MI200": CDNA_WORKLOADS
     + [
         "kernel_names",
-        "mem_levels_HBM",
-        "mem_levels_HBM_LDS",
-        "mem_levels_L2",
-        "mem_levels_L2_vL1d_LDS",
-        "mem_levels_LDS",
-        "mem_levels_vL1D",
-        "mem_levels_vL1d_LDS",
         "sort_dispatches",
         "sort_kernels",
         "vcopy",

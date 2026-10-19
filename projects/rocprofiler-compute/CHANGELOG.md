@@ -55,6 +55,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the `analyze --dependency` and `profile --target` options, which had no effect, and the undocumented `analyze --report-diff` and `profile --kokkos-trace` options.
 
+* Removed the `--mem-level` / `-m` analyze option. The roofline HTML plot already displays all memory-level bandwidth ceilings and lets users show or hide them interactively via the legend.
+
 ### Optimized
 
 ### Resolved issues

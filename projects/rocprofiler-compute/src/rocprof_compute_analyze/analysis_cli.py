@@ -209,7 +209,6 @@ class cli_analysis(OmniAnalyze_Base):
                                 "device_id": 0,
                                 "gpu_arch": gpu_arch,
                                 "sort_type": str(args.sort),
-                                "mem_level": args.mem_level,
                                 "roofline_data_type": args.roofline_data_type,
                                 "kernel_filter": bool(args.gpu_kernel),
                                 "iteration_multiplexing": self._profiling_config.get(

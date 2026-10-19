@@ -783,9 +783,7 @@ class Roofline:
         """
         is_new_figure = fig is None
 
-        sanitized_cache_hierarchy = sanitize_mem_level(
-            self.__run_parameters["mem_level"], self.__mspec.gpu_model
-        )
+        sanitized_cache_hierarchy = sanitize_mem_level(self.__mspec.gpu_model)
 
         self.__ceiling_data = self._ceiling_for_dtype(dtype)
         console_debug("roofline", f"Ceiling data:\n{self.__ceiling_data}")
@@ -1135,9 +1133,7 @@ class Roofline:
 
         self.roof_setup()
 
-        sanitized_cache_hierarchy = sanitize_mem_level(
-            self.__run_parameters["mem_level"], self.__mspec.gpu_model
-        )
+        sanitized_cache_hierarchy = sanitize_mem_level(self.__mspec.gpu_model)
 
         kernel_markers = {
             0: "star",

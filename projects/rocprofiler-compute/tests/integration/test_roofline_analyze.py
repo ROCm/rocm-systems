@@ -229,69 +229,6 @@ def test_roof_invalid_data_type(
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
-def test_roof_invalid_mem_level(
-    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """Invalid --mem-level should be rejected by the analyze argparser."""
-    workload_dir = integration_common.setup_workload_dir(roofline_dir)
-
-    assert (Path(workload_dir) / "roofline.csv").exists()
-
-    binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--mem-level",
-        "INVALID_LEVEL",
-    ])
-
-    err = capsys.readouterr().err
-    assert "--mem-level" in err
-    assert "invalid choice" in err
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-roofline_mem_level_dirs = {
-    "vL1D": "tests/workloads/mem_levels_vL1D/MI200",
-    "LDS": "tests/workloads/mem_levels_LDS/MI200",
-}
-
-
-@pytest.mark.parametrize(
-    "mem_level",
-    ["vL1D", "LDS"],
-    ids=["vL1D", "LDS"],
-)
-def test_roof_mem_levels(
-    binary_handler_analyze_rocprof_compute: Callable[[list[str]], int],
-    mem_level: str,
-) -> None:
-    """Analyze with --mem-level generates roofline HTML output."""
-    workload_src = roofline_mem_level_dirs[mem_level]
-    if not Path(workload_src).exists():
-        pytest.skip(f"Workload directory {workload_src} not found")
-
-    workload_dir = integration_common.setup_workload_dir(
-        workload_src, param_id=mem_level
-    )
-
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--path",
-        workload_dir,
-        "--mem-level",
-        mem_level,
-    ])
-    assert code == 0
-
-    html_files = list(Path(workload_dir).glob("empirRoof_*.html"))
-    assert len(html_files) > 0, "Analyze should generate roofline HTML files"
-
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
 # Per-datatype HTML output validation
 
 # Each datatype must take the correct roofline branch:

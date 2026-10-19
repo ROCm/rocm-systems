@@ -872,24 +872,6 @@ Examples:
         ),
     )
     roofline_group_analyze.add_argument(
-        "-m",
-        "--mem-level",
-        required=False,
-        choices=["HBM", "L2", "vL1D", "L0", "LDS"],
-        metavar="",
-        nargs="+",
-        type=str,
-        default="ALL",
-        help=(
-            "\t\tFilter by memory level: (DEFAULT: ALL)\n"
-            "\t\t   HBM\n"
-            "\t\t   L2\n"
-            "\t\t   vL1D\n"
-            "\t\t   L0\n"
-            "\t\t   LDS"
-        ),
-    )
-    roofline_group_analyze.add_argument(
         "-R",
         "--roofline-data-type",
         required=False,
