@@ -33,6 +33,43 @@ external_toc_path = "./sphinx/_toc.yml"
 
 docs_core = ROCmDocs(left_nav_title)
 docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/xml")
+
+
+def _fix_empty_sectiondef_kind(xml_dir: Path) -> None:
+    """Give friend/related group sections a kind breathe will accept.
+
+    Doxygen cannot assign a section kind to friend and related members that are
+    pulled into a group, so it writes `<sectiondef kind="">`. breathe 4.x
+    ignored the empty value; breathe 5.x validates it against DoxSectionKind and
+    aborts the whole build with
+
+        ParserError: group___cooperative_g.xml:279:
+            "" is not one of the allowed enumeration values
+
+    `friend` is a valid DoxSectionKind and is what these members are, so rewrite
+    the attribute before breathe reads the file. Checked against doxygen 1.9.8
+    (what Read the Docs installs), 1.12.0 and 1.14.0 - all three emit the empty
+    kind, so this is not fixed by moving to a newer doxygen. HIDE_FRIEND_COMPOUNDS
+    does not help either, as the same section also holds related functions.
+
+    Remove once breathe tolerates the value doxygen actually emits.
+    """
+    patched = 0
+    for xml_file in sorted(xml_dir.glob("*.xml")):
+        text = xml_file.read_text(encoding="utf-8")
+        if '<sectiondef kind="">' not in text:
+            continue
+        xml_file.write_text(
+            text.replace('<sectiondef kind="">', '<sectiondef kind="friend">'),
+            encoding="utf-8",
+        )
+        patched += 1
+    if patched:
+        print(f"conf.py: set a kind on empty <sectiondef> in {patched} doxygen XML file(s)")
+
+
+_fix_empty_sectiondef_kind(Path(__file__).parent / "doxygen" / "xml")
+
 docs_core.enable_api_reference()
 docs_core.setup()
 
