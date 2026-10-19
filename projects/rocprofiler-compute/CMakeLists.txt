@@ -1033,6 +1033,14 @@ add_test(
 )
 
 add_test(
+    NAME test_debug_row_tracker
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_debug_row_tracker.xml
+        ${COV_OPTION} tests/unit/utils/metrics/test_debug_row_tracker.py
+        ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_counter_grouping_buckets
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest
@@ -1201,6 +1209,7 @@ if(${ENABLE_COVERAGE})
         test_counter_grouping_single_pass
         test_counter_grouping_tcc
         test_pass_provenance
+        test_debug_row_tracker
         test_counter_grouping_buckets
         test_tty
         test_file_io
