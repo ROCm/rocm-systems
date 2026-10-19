@@ -78,8 +78,10 @@ runs in.
 Without ``HIP_HRR_CAPTURE_CONTENT`` the capture is
 metadata-only: the archive holds the call sequence, handles and sizes, but no
 host buffer, no by-value kernel argument (a struct argument is withheld whole,
-device pointers inside it included) and no code object. ``--info`` reads
-such an archive as usual; a replay stops at the first call that needs the
+device pointers inside it included) and no code object. Scalar values passed to
+a HIP call are kept in both modes, such as a memset fill value or the value
+``hipStreamWriteValue32`` writes. ``--info`` reads such an archive as usual and
+prints ``Contents: withheld``; a replay stops at the first call that needs the
 missing contents and says that content mode would have recorded them.
 
 The archive is a directory, not a single file, and it holds one ``pid-<pid>/``

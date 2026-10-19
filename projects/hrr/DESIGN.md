@@ -779,7 +779,9 @@ a value made only of whitespace as unset.
 `HIP_HRR_CAPTURE_CONTENT`, a `bool` release flag next to it and off by default, chooses
 what is recorded: with it, host buffers, by-value kernel argument values and code
 objects; without it the archive is metadata-only and replay refuses the first call that
-needs them.
+needs them. Scalar values passed to a HIP call (memset fill values, stream write and wait
+values, batch mem-op values, attribute values) are arguments of the call rather than data
+read from application memory, and are recorded in both modes.
 
 On Linux the kernel sets `AT_SECURE` in the auxiliary vector for a set-user-ID,
 set-group-ID or file-capability exec, and for an LSM transition. Such a process can hold
