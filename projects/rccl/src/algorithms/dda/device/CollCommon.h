@@ -269,6 +269,10 @@ constexpr size_t ddaLLSlotPkts(size_t bankSize, size_t div, size_t align) {
   return (slotUnits / align) * align;
 }
 
+// Peers staged in one pass. A runtime-sized array, or a runtime index into
+// one, is placed in scratch. 8 covers rank counts 4 and 8 in a single pass.
+constexpr int kDdaLLPeerBatch = 8;
+
 // 16-byte LL line: two (4B data, 4B flag) pairs carrying 8B of payload.
 union LLPacket16 {
   struct {

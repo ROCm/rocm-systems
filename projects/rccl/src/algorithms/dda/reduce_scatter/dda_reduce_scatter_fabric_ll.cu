@@ -24,13 +24,6 @@
 
 namespace {
 
-using dda::common::kDdaLLRsMaxBytes;
-
-// LL scratch footprint: two banks of ddaLLRsBankBytes.
-static inline size_t ddaLLRsScratchSize(int nRanks) {
-  return (size_t)2 * dda::common::ddaLLRsBankBytes(nRanks);
-}
-
 template <typename T>
 static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void* recvbuff, size_t recvcount,
                                                       ncclComm* comm, cudaStream_t stream) {
@@ -58,8 +51,7 @@ static ncclResult_t ncclReduceScatterDdaFabricLLTyped(const void* sendbuff, void
   T** peers = reinterpret_cast<T**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
-  // Same bank split as all-reduce / all-gather LL. Bank 1 must start at
-  // bankSize so this launch cannot overwrite a line those tiers are polling.
+  // Bank 1 starts at ddaBankSize, matching the other LL tiers on this scratch.
   const size_t bankSize = dda::common::ddaBankSize(comm->ddaScratchBytes);
 
   INFO(NCCL_COLL, "DDA fabric ReduceScatter LL: nRanks=%d shardBytes=%zu nPk=%zu grid=%u block=%u bankSize=%zu", nRanks,
@@ -121,10 +113,13 @@ bool ncclReduceScatterDdaFabricLLEligible(ncclComm* comm, const void* sendbuff, 
     return false;
   }
   // Slot holds kDdaLLRsMaxBytes of payload (stride = cap/8 packets).
-  if (bytes > kDdaLLRsMaxBytes) {
+  if (bytes > dda::common::kDdaLLRsMaxBytes) {
     return false;
   }
-  if (ddaLLRsScratchSize(comm->nRanks) > comm->ddaScratchBytes) {
+  // Bank 0 is [0, bankBytes). Bank 1 is [bankSize, bankSize + bankBytes).
+  const size_t bankBytes = dda::common::ddaLLRsBankBytes(comm->nRanks);
+  const size_t bankSize = dda::common::ddaBankSize(comm->ddaScratchBytes);
+  if (bankBytes > bankSize || bankSize + bankBytes > comm->ddaScratchBytes) {
     return false;
   }
 

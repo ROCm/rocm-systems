@@ -31,31 +31,23 @@
 
 namespace dda::common {
 
-// Per-shard staging slot capacity and hard per-shard cap (enforced in the
-// eligibility check). The slot stride is fixed so every rank addresses the
-// same geometry. Bank 1 starts at bankSize, the same byte offset as the other
-// DDA LL tiers that share this scratch and epoch counter.
-// One bank holds nRanks * (kDdaLLRsMaxBytes * 2) bytes for the 8B->16B
-// expansion; 8 MiB at 1 MiB/rank * 4 ranks * 2 (LL overhead).
+// Per-shard payload cap, enforced by eligibility. The slot stride is fixed so
+// every rank addresses the same geometry. One bank is nRanks slots with the
+// 8B payload expanded to 16B: 8 MiB at 1 MiB/rank and 4 ranks.
 constexpr size_t kDdaLLRsMaxBytes = 1ULL*1024*1024;         // 1 MiB per-rank (= 4 MiB total at 4 ranks)
 constexpr size_t kDdaLLRsSlotStridePkts = kDdaLLRsMaxBytes / 8;   // 131072
 
-// Bytes one bank occupies: nRanks slots at the fixed stride. The host passes
-// ddaBankSize() as bankSize; bank 1 starts there, not after this many bytes.
+// Bytes in one bank: nRanks slots at the fixed stride.
 constexpr size_t ddaLLRsBankBytes(int nRanks) {
   return (size_t)nRanks * kDdaLLRsSlotStridePkts * sizeof(LLPacket16);
 }
 
-// Packet offset of the bank selected by this epoch. Odd epochs start at
-// bankSize, the same byte as all-reduce and all-gather LL.
+// Packet offset of this epoch's bank. Odd epochs start at bankSize, where the
+// other LL tiers sharing this scratch put bank 1.
 constexpr size_t ddaLLRsBankOffsetPkts(uint32_t flag, size_t bankSize) {
   return (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
 }
 
-// Fixed-width peer staging for phase 1, same as the two-shot all-reduce.
-// A runtime-sized array, or a runtime index into one, is placed in scratch.
-// 8 covers rank counts 4 and 8 in a single pass.
-constexpr int kDdaLLRsPeerBatch = 8;
 // Phase-2 reads in flight at once. Each peer keeps two data words and two
 // flags, so 4 stays in registers; 8 matches the send batch but costs twice
 // the temporary values.
@@ -69,8 +61,7 @@ constexpr int kDdaLLRsRecvBatch = 4;
 // Phase 2 (reduce): rank selfRank seeds the accumulator with its own self-chunk
 // (sendbuff[selfRank]), polls its own scratch slot for each other rank (waiting
 // on the flag), and sums those into recvbuff. Flag polling provides cross-rank
-// ordering, so no GPU barrier is used. Scratch is double-buffered: bank = flag & 1,
-// and bank 1 starts at bankSize (half the scratch), matching the other LL tiers.
+// ordering, so no GPU barrier is used. Scratch is double-buffered: bank = flag & 1.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
@@ -91,8 +82,6 @@ __launch_bounds__(512)
   const size_t chunkWords = nPk * 2; // uint32 words per shard chunk
 
   const uint32_t flag = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
-  // ddaBankSize() floors the bank to a multiple of 16B, so this is a whole
-  // number of LL packets and bank 1 starts at the same byte as all-reduce LL.
   const size_t bankOffsetPkts = ddaLLRsBankOffsetPkts(flag, bankSize);
 
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
@@ -101,16 +90,12 @@ __launch_bounds__(512)
   const uint32_t* in = reinterpret_cast<const uint32_t*>(sendbuff);
   uint32_t* out = reinterpret_cast<uint32_t*>(recvbuff);
 
-  // Phase 1: scatter my chunk-for-peer (sendbuff[peer]) into peer's slot[self].
-  // Loads are gathered before the stores, matching the two-shot all-reduce.
-  // Interleaved, each store waits on the next load and the per-peer streams
-  // stop overlapping. The fixed trip count with the rank test as a predicate
-  // unrolls both loops and keeps d0/d1 in registers.
+  // Phase 1: scatter sendbuff[peer] into peer's slot[self]. Gather loads before stores.
   for (size_t pk = gtid; pk < nPk; pk += stride) {
-    for (int base = 1; base < nRanks; base += kDdaLLRsPeerBatch) {
-      uint32_t d0[kDdaLLRsPeerBatch], d1[kDdaLLRsPeerBatch];
+    for (int base = 1; base < nRanks; base += kDdaLLPeerBatch) {
+      uint32_t d0[kDdaLLPeerBatch], d1[kDdaLLPeerBatch];
 #pragma unroll
-      for (int i = 0; i < kDdaLLRsPeerBatch; ++i) {
+      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
@@ -120,7 +105,7 @@ __launch_bounds__(512)
         }
       }
 #pragma unroll
-      for (int i = 0; i < kDdaLLRsPeerBatch; ++i) {
+      for (int i = 0; i < kDdaLLPeerBatch; ++i) {
         const int r = base + i;
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;

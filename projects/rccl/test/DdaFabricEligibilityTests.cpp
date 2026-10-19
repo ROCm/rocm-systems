@@ -1792,22 +1792,27 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_PastThresholdRejected)
         mockComm_.get(), sendbuff_, recvbuff_, shardBytes / sizeof(float), ncclFloat32, ncclSum));
 }
 
-// Bank 1 used to start at nRanks * slotStride (8 MiB at 4 ranks, 16 MiB at 8).
-// That range sits inside bank 0 of the other LL tiers, which share this scratch
-// and place their bank 1 at ddaBankSize. The LL floor is what sizes scratch when
-// LL is on, so the check uses that allocation rather than the fixture's max.
-TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_BankOneMatchesSharedScratchMidpoint)
+// Bank 0 occupies [0, bankBytes) and bank 1 occupies [bankSize, bankSize + bankBytes).
+// 2 * bankBytes is the smallest scratch where both ranges fit.
+TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_ScratchBanksFit)
 {
+    const size_t recvcount = 4; // 16B, inside the per-rank cap
     for (const int nRanks : {4, 8}) {
-        const size_t scratch = nccl_dda_detail::ddaFabricScratchSizing(
-            nRanks, -1, 1, 8 * 1024 * 1024, 1, 0);
-        const size_t bank = dda::common::ddaBankSize(scratch);
-        const size_t packedBank = dda::common::ddaLLRsBankBytes(nRanks);
+        mockComm_.comm.nRanks = nRanks;
+        const size_t bankBytes = dda::common::ddaLLRsBankBytes(nRanks);
+        const size_t scratch = bankBytes * 2;
+        const size_t bankSize = dda::common::ddaBankSize(scratch);
+        ASSERT_LE(bankBytes, bankSize) << "nRanks=" << nRanks;
+        ASSERT_LE(bankSize + bankBytes, scratch) << "nRanks=" << nRanks;
 
-        EXPECT_LT(packedBank, bank) << "nRanks=" << nRanks;
-        EXPECT_EQ(dda::common::ddaLLRsBankOffsetPkts(0, bank), 0u) << "nRanks=" << nRanks;
-        EXPECT_EQ(dda::common::ddaLLRsBankOffsetPkts(1, bank) * sizeof(dda::common::LLPacket16),
-                  bank)
+        mockComm_.comm.ddaScratchBytes = scratch;
+        EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(
+            mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum))
+            << "nRanks=" << nRanks;
+
+        mockComm_.comm.ddaScratchBytes = scratch - 16;
+        EXPECT_FALSE(ncclReduceScatterDdaFabricLLEligible(
+            mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum))
             << "nRanks=" << nRanks;
     }
 }
