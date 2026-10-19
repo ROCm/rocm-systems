@@ -17,7 +17,7 @@ _ASSETS = Path(report_shell.__file__).parent / "assets"
 
 
 def test_build_document_places_fragments_in_one_shell() -> None:
-    """The base controller loads before the page controller and after the model."""
+    """Shared assets precede page assets inside one self-contained shell."""
     rendered = build_document(
         title="Report <one>",
         body_html='<main id="body-marker">body</main>',
@@ -29,13 +29,15 @@ def test_build_document_places_fragments_in_one_shell() -> None:
 
     assert "<title>Report &lt;one&gt;</title>" in rendered
     assert (
-        rendered.index(".page-marker")
+        rendered.index("--report-border")
+        < rendered.index(".page-marker")
         < rendered.index("body-marker")
         < rendered.index('id="sample-model"')
         < rendered.index("window.HtmlReport")
         < rendered.index("window.pageMarker")
     )
     assert f'classList.add("{DARK_THEME_CLASS}")' in rendered
+    assert f":root.{DARK_THEME_CLASS}" in read_asset(_ASSETS, "report_base.css")
     assert f'"{DARK_THEME_CLASS}"' in read_asset(_ASSETS, "report_base.js")
 
 
