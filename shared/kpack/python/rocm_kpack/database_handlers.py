@@ -117,8 +117,10 @@ class DatabaseHandler(ABC):
 
 
 # Regex matching a library/<arch>/ path component (for per-arch subdirectory layout).
+# A stepping suffix (library/gfx1250v0/ holds gfx1250 A0 kernels) is not a separate
+# target: the directory belongs to its base arch, matching the arch in the filenames.
 _LIBRARY_ARCH_DIR_PATTERN = re.compile(
-    r"/library/(" + _GFX_ARCH_PATTERN.pattern + r")/"
+    r"/library/(" + _GFX_ARCH_PATTERN.pattern + r")(?:v\d+)?/"
 )
 
 

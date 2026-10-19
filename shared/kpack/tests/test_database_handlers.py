@@ -335,6 +335,24 @@ class TestHipBLASLtHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx1100"
 
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            "TensileLibrary_lazy_gfx1250.dat.zlib",
+            "TensileLibrary_Type_HH_gfx1250.dat.zlib",
+            "TensileLibrary_Type_HH_gfx1250.co",
+            "Kernels.so-000-gfx1250.hsaco",
+        ],
+    )
+    def test_detect_arch_subdir_stepping(self, handler, prefix_root, filename):
+        """Stepping subdirectory library/gfx1250v0/ belongs to the gfx1250 bundle."""
+        file_path = prefix_root / "lib/hipblaslt/library/gfx1250v0" / filename
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx1250"
+
     def test_reject_wrong_directory(self, handler, prefix_root):
         """Test that files not in hipblaslt/library are rejected."""
         file_path = prefix_root / "lib/rocblas/library/TensileLibrary_gfx1100.dat"
@@ -423,6 +441,18 @@ class TestHipSparseLtHandler:
 
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx950"
+
+    def test_detect_arch_subdir_stepping(self, handler, prefix_root):
+        """Stepping subdirectory library/gfx1250v0/ belongs to the gfx1250 bundle."""
+        file_path = (
+            prefix_root
+            / "lib/hipsparselt/library/gfx1250v0/TensileLibrary_lazy_gfx1250.dat.zlib"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result == "gfx1250"
 
     def test_reject_wrong_directory(self, handler, prefix_root):
         file_path = prefix_root / "lib/rocblas/library/something_gfx942.co"
