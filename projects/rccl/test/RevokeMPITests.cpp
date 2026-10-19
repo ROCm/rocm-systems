@@ -820,6 +820,103 @@ TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaAlltoAllLl128)
                                  {ncclFuncAlltoAll, 1024, kDdaLL128, NCCL_PROTO_LL128, kDisableLL});
 }
 
+/**
+ * Incomplete DDA fabric collective + ncclCommAbort (gfx1250). Same setup as RevokeDdaMPITest,
+ * but every rank aborts instead of revoking: ncclCommAbort must return and the stream of each
+ * blocked rank must drain. This is the ProcessGroupNCCL watchdog / abort() path. Abort needs no
+ * shrink, so two ranks are enough.
+ */
+class AbortDdaMPITest : public MPITestBase
+{
+protected:
+    void SetUp() override
+    {
+        MPITestBase::SetUp();
+        const std::string skipReason
+            = mpiCoordinatedSkipReason(!isGfx1250Device(), "DDA fabric requires gfx1250");
+        if(!skipReason.empty())
+            GTEST_SKIP() << skipReason;
+        if(!validateTestPrerequisites(2, kNoProcessLimit, kNoPowerOfTwoRequired, 1, kNoNodeLimit))
+            GTEST_SKIP() << "Test requires at least 2 MPI processes";
+    }
+
+    void runIncompleteDdaAbort(const DdaRevokeCase& tc)
+    {
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+        ncclComm_t   comm      = getActiveCommunicator();
+        hipStream_t  stream    = getActiveStream();
+        const int    rank      = MPIEnvironment::world_rank;
+        const int    skipRank  = MPIEnvironment::world_size - 1;
+        const size_t sendElems = ddaSendElems(tc.func, tc.count, MPIEnvironment::world_size);
+        const size_t recvElems = ddaRecvElems(tc.func, tc.count, MPIEnvironment::world_size);
+
+        void* sendBuf = nullptr;
+        void* recvBuf = nullptr;
+        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&sendBuf, sendElems * sizeof(float)));
+        HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recvBuf, recvElems * sizeof(float)));
+        auto sendGuard = makeScopeGuard([&]() { if(sendBuf) (void)hipFree(sendBuf); });
+        auto recvGuard = makeScopeGuard([&]() { if(recvBuf) (void)hipFree(recvBuf); });
+
+        HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(sendBuf, sendElems));
+        HIP_TEST_CHECK_GTEST_FAIL(zeroInitializeBuffer<float>(recvBuf, recvElems));
+
+        int algo        = -1;
+        int protocol    = -1;
+        int maxChannels = -1;
+        ASSERT_MPI_EQ(ncclSuccess,
+                      rcclGetCollImplInfo(comm, tc.func, tc.count, ncclFloat32, ncclSum, sendBuf,
+                                          recvBuf, /*graphCapturing=*/0, &algo, &protocol,
+                                          &maxChannels));
+        ASSERT_MPI_TRUE(algo == tc.expectedAlgo && protocol == tc.expectedProtocol);
+
+        if(rank != skipRank)
+        {
+            ASSERT_EQ(ncclSuccess, ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, comm, stream));
+        }
+
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        // ncclCommAbort frees the communicator; keep TearDown from destroying it again.
+        test_comm_ = nullptr;
+        ASSERT_EQ(ncclSuccess, ncclCommAbort(comm));
+        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
+
+        MPI_Barrier(MPI_COMM_WORLD);
+    }
+};
+
+// 100 floats = 400 B: the default 2-rank AllReduce the PyTorch abort/timeout tests issue.
+TEST_F(AbortDdaMPITest, IncompleteCollective_DdaLlOneShot)
+{
+    runIncompleteDdaAbort({ncclFuncAllReduce, 100, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
+TEST_F(AbortDdaMPITest, IncompleteCollective_DdaLlTwoShot)
+{
+    if(!ddaLLSubThresholdsAtDefault())
+        GTEST_SKIP() << "count is sized against the default RCCL_DDA_LL_{ONESHOT,TWOSHOT}_THRESHOLD";
+    const size_t count = twoShotCountForRanks(MPIEnvironment::world_size);
+    if(count == 0)
+        GTEST_SKIP() << "Could not find a two-shot-aligned element count";
+    runIncompleteDdaAbort({ncclFuncAllReduce, count, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
+TEST_F(AbortDdaMPITest, IncompleteCollective_DdaAllGatherLl)
+{
+    runIncompleteDdaAbort({ncclFuncAllGather, 128, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
+TEST_F(AbortDdaMPITest, IncompleteCollective_DdaReduceScatterLl)
+{
+    runIncompleteDdaAbort({ncclFuncReduceScatter, 256, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
+TEST_F(AbortDdaMPITest, IncompleteCollective_DdaAlltoAllLl)
+{
+    runIncompleteDdaAbort({ncclFuncAlltoAll, 64, kDdaLL, NCCL_PROTO_LL, {}});
+}
+
 /** DDA IPC (gfx942/gfx950, one node, exactly 8 ranks): every collective waits in IpcGpuBarrier. */
 class RevokeDdaIpcMPITest : public MPITestBase
 {

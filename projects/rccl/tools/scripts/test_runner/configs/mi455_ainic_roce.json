@@ -3098,6 +3098,11 @@
           "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaAlltoAllLl128"
         },
         {
+          "name": "AbortDda_IncompleteCollective",
+          "description": "Rank np-1 skips a DDA fabric LL AllReduce/AllGather/ReduceScatter/AlltoAll; asserts LL via rcclGetCollImplInfo; ncclCommAbort must return and the blocked stream must drain",
+          "test_filter": "AbortDdaMPITest.*"
+        },
+        {
           "name": "ShrinkAbort_InFlight_ChildWorks_RankRenumbering",
           "description": "ncclCommShrink with NCCL_SHRINK_ABORT terminates in-flight collective and the child reports correct renumbered rank/size and runs AllReduce",
           "test_filter": "RevokeMPITest.ShrinkAbort_InFlight_ChildWorks_RankRenumbering"
