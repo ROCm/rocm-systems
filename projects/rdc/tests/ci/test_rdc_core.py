@@ -96,6 +96,20 @@ class TestCLIUsage:
         )
         assert result.returncode != 0
 
+    def test_topo_without_gpu_index(self, rdci_path):
+        # rdci checks the options before it connects, so no daemon is needed. MALLOC_PERTURB_
+        # fills new heap memory with nonzero bytes, which used to read as "index given".
+        env = dict(os.environ, MALLOC_PERTURB_="165")
+        result = subprocess.run(
+            [rdci_path, "topo", "--host", "127.0.0.1:1"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
+        )
+        assert result.returncode == 5  # RDC_ST_BAD_PARAMETER
+        assert "Need to specify the group index" in result.stdout + result.stderr
+
 
 # ---------------------------------------------------------------------------
 # Daemon startup (requires GPU)
