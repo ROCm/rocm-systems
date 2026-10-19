@@ -2545,6 +2545,16 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                     std::mem::forget(record);
                     return status;
                 };
+                // A native teardown may partially release an ID. Never
+                // replace a queue created under the same public key while
+                // this owner was outside the registry lock.
+                if runtime.queue_state.queues.contains_key(&key)
+                    || runtime.queue_state.sdma_queues.contains_key(&key)
+                {
+                    in_flight.quarantine();
+                    std::mem::forget(record);
+                    return INVALID_RUNTIME_STATE;
+                }
                 if let Some(agent) = cooperative_agent {
                     runtime.queue_state.cooperative_teardown.remove(&agent);
                 }
