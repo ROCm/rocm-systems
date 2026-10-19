@@ -8,10 +8,12 @@
 #include "profiler-hub/c/profiler_hub_types.h"
 #include "track_read_options.hpp"
 
+#include <array>
 #include <cstdint>
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -46,6 +48,16 @@ public:
      */
     [[nodiscard]] uint32_t nesting_depth(const reader_types::track_info_ptr_t& track);
 
+    /**
+     * Loads the whole track if needed and returns the nesting depth of the event
+     * with @p id and @p type. Empty when the track is null, a PMC track, or does
+     * not contain that event.
+     */
+    [[nodiscard]] std::optional<uint32_t> nesting_depth_of(
+        const reader_types::track_info_ptr_t& track,
+        uint64_t                              id,
+        ph_event_type_t                       type);
+
     [[nodiscard]] ph_sample_list_t samples(const reader_types::track_info_ptr_t& track,
                                            uint64_t                              start_ts,
                                            uint64_t                              end_ts);
@@ -78,9 +90,18 @@ private:
     common::thread_pool& m_workers;
     track_read_options   m_options;
 
+    struct event_depth_index
+    {
+        std::once_flag                                        once;
+        std::array<std::unordered_map<uint64_t, uint32_t>, 4> by_type;
+    };
+
     std::mutex           m_cache_mutex;
     cache_t<ph_event_t>  m_events_cache;
     cache_t<ph_sample_t> m_samples_cache;
+
+    std::mutex                                    m_depth_mutex;
+    std::unordered_map<size_t, event_depth_index> m_event_depths;
 
     std::mutex                           m_windowed_mutex;
     std::deque<std::vector<ph_event_t>>  m_windowed_events;

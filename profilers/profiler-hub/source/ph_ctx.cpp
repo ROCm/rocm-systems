@@ -60,6 +60,69 @@ optional_track_id(const profiler_hub::reader_types::track_info_ptr_t& track)
                                  .is_valid = 1 };
 }
 
+std::optional<profiler_hub::reader_types::event_type_t>
+to_reader_event_type(ph_event_type_t type)
+{
+    using profiler_hub::reader_types::event_type_t;
+    switch(type)
+    {
+        case PH_EVENT_TYPE_REGION: return event_type_t::region;
+        case PH_EVENT_TYPE_KERNEL_DISPATCH: return event_type_t::kernel_dispatch;
+        case PH_EVENT_TYPE_MEMORY_COPY: return event_type_t::memory_copy;
+        case PH_EVENT_TYPE_MEMORY_ALLOCATE: return event_type_t::memory_allocate;
+    }
+    return std::nullopt;
+}
+
+ph_event_type_t
+to_c_event_type(profiler_hub::reader_types::event_type_t type)
+{
+    using profiler_hub::reader_types::event_type_t;
+    switch(type)
+    {
+        case event_type_t::region: return PH_EVENT_TYPE_REGION;
+        case event_type_t::kernel_dispatch: return PH_EVENT_TYPE_KERNEL_DISPATCH;
+        case event_type_t::memory_copy: return PH_EVENT_TYPE_MEMORY_COPY;
+        case event_type_t::memory_allocate: return PH_EVENT_TYPE_MEMORY_ALLOCATE;
+        case event_type_t::sample:
+        case event_type_t::pmc_event: break;
+    }
+    throw std::invalid_argument{ "event type is not a duration event" };
+}
+
+bool
+track_holds_event(const profiler_hub::reader_types::track_info_ptr_t& track,
+                  profiler_hub::reader_types::event_type_t            type)
+{
+    using profiler_hub::reader_types::event_type_t;
+    using profiler_hub::reader_types::track_kind_t;
+    if(!track) return false;
+    switch(track->category)
+    {
+        case track_kind_t::kernel_dispatch_agent_queue:
+            return type == event_type_t::kernel_dispatch;
+        case track_kind_t::memory_allocate_agent_queue:
+            return type == event_type_t::memory_allocate;
+        case track_kind_t::memory_copy_agent_queue:
+            return type == event_type_t::memory_copy;
+        case track_kind_t::stream: return type != event_type_t::region;
+        case track_kind_t::thread:
+        case track_kind_t::thread_sample: return true;
+        case track_kind_t::pmc_agent: return false;
+    }
+    return false;
+}
+
+std::uint32_t
+to_list_size(std::size_t size)
+{
+    if(size > std::numeric_limits<std::uint32_t>::max())
+    {
+        throw std::length_error{ "result has more elements than the C API can report" };
+    }
+    return static_cast<std::uint32_t>(size);
+}
+
 }  // namespace
 
 size_t
@@ -291,6 +354,82 @@ ph_ctx::get_track_events(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
     }
 
     return m_track_reader.events(track_it->second, start_ts, end_ts);
+}
+
+std::optional<ph_event_list_t>
+ph_ctx::get_correlated_events(uint64_t event_id, ph_event_type_t event_type)
+{
+    LOG_DEBUG("[Profiler-Hub] Get correlated events. Event id {}, type {}",
+              event_id,
+              static_cast<int>(event_type));
+
+    const auto type = to_reader_event_type(event_type);
+    if(!type.has_value())
+    {
+        return std::nullopt;
+    }
+
+    profiler_hub::reader_types::timeline_event_t source;
+    source.unique_identifier = { .id   = static_cast<size_t>(event_id),
+                                 .type = type.value() };
+
+    const auto correlated = m_connection_pool.with_connection(
+        [&source](profiler_hub::common::connection& connection) {
+            return connection.reader().get_correlated_events(source);
+        });
+
+    std::vector<ph_event_t> converted;
+    converted.reserve(correlated.size());
+    for(const auto& event : correlated)
+    {
+        const ph_event_type_t correlated_type =
+            to_c_event_type(event.unique_identifier.type);
+        const uint64_t          correlated_id = event.unique_identifier.id;
+        std::optional<uint32_t> depth;
+        if(event.track)
+        {
+            depth = m_track_reader.nesting_depth_of(
+                event.track, correlated_id, correlated_type);
+        }
+        if(!depth.has_value())
+        {
+            for(const auto& track : m_catalog->tracks)
+            {
+                if(track == event.track ||
+                   !track_holds_event(track, event.unique_identifier.type))
+                {
+                    continue;
+                }
+                depth = m_track_reader.nesting_depth_of(
+                    track, correlated_id, correlated_type);
+                if(depth.has_value()) break;
+            }
+        }
+        if(!depth.has_value())
+        {
+            return std::nullopt;
+        }
+
+        converted.push_back(ph_event_t{
+            .id            = correlated_id,
+            .start         = event.start_timestamp,
+            .end           = event.end_timestamp,
+            .name          = event.display_name.empty() ? "" : event.display_name.data(),
+            .type          = correlated_type,
+            .nesting_depth = depth.value(),
+        });
+    }
+
+    if(converted.empty())
+    {
+        return ph_event_list_t{ .list_size = 0, .events = nullptr };
+    }
+
+    const std::lock_guard<std::mutex> lock{ m_correlated_events_mutex };
+    m_correlated_events.push_back(std::move(converted));
+    auto& stored = m_correlated_events.back();
+    return ph_event_list_t{ .list_size = to_list_size(stored.size()),
+                            .events    = stored.data() };
 }
 
 ph_sample_list_t

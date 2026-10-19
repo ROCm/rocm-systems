@@ -41,6 +41,19 @@ to_list_size(size_t size)
     return static_cast<std::uint32_t>(size);
 }
 
+std::optional<std::size_t>
+event_type_index(ph_event_type_t type)
+{
+    switch(type)
+    {
+        case PH_EVENT_TYPE_REGION: return 0;
+        case PH_EVENT_TYPE_KERNEL_DISPATCH: return 1;
+        case PH_EVENT_TYPE_MEMORY_COPY: return 2;
+        case PH_EVENT_TYPE_MEMORY_ALLOCATE: return 3;
+    }
+    return std::nullopt;
+}
+
 ph_event_type_t
 to_ph_event_type(reader_types::event_type_t type)
 {
@@ -237,6 +250,38 @@ cached_track_reader::nesting_depth(const reader_types::track_info_ptr_t& track)
             return lhs.nesting_depth < rhs.nesting_depth;
         });
     return deepest == whole.end() ? 0 : deepest->nesting_depth;
+}
+
+std::optional<uint32_t>
+cached_track_reader::nesting_depth_of(const reader_types::track_info_ptr_t& track,
+                                      uint64_t                              id,
+                                      ph_event_type_t                       type)
+{
+    const auto type_index = event_type_index(type);
+    if(!track || !type_index.has_value() ||
+       track->category == reader_types::track_kind_t::pmc_agent)
+    {
+        return std::nullopt;
+    }
+
+    const auto             whole = events(track, 0, 0);
+    const std::scoped_lock lock{ m_depth_mutex };
+    auto&                  index = m_event_depths[static_cast<size_t>(track->id)];
+    std::call_once(index.once, [&] {
+        if(whole.events == nullptr) return;
+        for(uint32_t event_index = 0; event_index < whole.list_size; ++event_index)
+        {
+            const auto& event      = whole.events[event_index];
+            const auto  event_slot = event_type_index(event.type);
+            if(!event_slot.has_value()) continue;
+            index.by_type[event_slot.value()].emplace(event.id, event.nesting_depth);
+        }
+    });
+
+    const auto& depths = index.by_type[type_index.value()];
+    const auto  found  = depths.find(id);
+    if(found == depths.end()) return std::nullopt;
+    return found->second;
 }
 
 ph_sample_list_t

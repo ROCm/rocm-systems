@@ -10,6 +10,7 @@
 #include "track_read_options.hpp"
 #include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -64,9 +65,12 @@ struct ph_ctx
     [[nodiscard]] ph_track_list_t     get_track_list();
     [[nodiscard]] ph_node_t           get_node();
     bool has_track(uint32_t track_id) const { return m_track_by_id.contains(track_id); }
-    [[nodiscard]] ph_event_list_t  get_track_events(uint32_t track_id,
-                                                    uint64_t start_ts,
-                                                    uint64_t end_ts);
+    [[nodiscard]] ph_event_list_t                get_track_events(uint32_t track_id,
+                                                                  uint64_t start_ts,
+                                                                  uint64_t end_ts);
+    [[nodiscard]] std::optional<ph_event_list_t> get_correlated_events(
+        uint64_t        event_id,
+        ph_event_type_t event_type);
     [[nodiscard]] ph_sample_list_t get_track_samples(uint32_t track_id,
                                                      uint64_t start_ts,
                                                      uint64_t end_ts);
@@ -159,6 +163,9 @@ private:
 
     std::mutex                                          m_histogram_mutex;
     std::vector<std::unique_ptr<c_histogram_storage_t>> m_histograms;
+
+    std::mutex                          m_correlated_events_mutex;
+    std::deque<std::vector<ph_event_t>> m_correlated_events;
 
     std::vector<std::shared_ptr<profiler_hub::reader_types::node_info_t>> m_nodes;
     std::shared_ptr<ph_node_t>                                            m_c_node;

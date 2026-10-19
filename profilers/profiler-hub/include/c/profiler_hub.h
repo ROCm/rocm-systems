@@ -210,6 +210,42 @@ extern "C"
                                     ph_future_t      future);
 
     /**
+     * @brief Retrieves events correlated with @p event by matching stack id.
+     *        The event itself is not included. An event with no stack id, or an
+     *        id that is not in the trace, yields an empty list.
+     * @param ctx Context to query.
+     * @param event Event returned by ph_get_track_events(). Only @p event->id and
+     *        @p event->type are used. The object does not need to stay alive
+     *        after this call returns.
+     * @param events Out parameter receiving the correlated events; it is set to
+     *        an empty list before any other work, so it is valid on failure.
+     * @param future Null to run the call before returning. Otherwise a future from
+     *        ph_future_create() that was not passed to an operation yet: the call
+     *        returns at once with PH_RESULT_SUCCESS, and the work runs in the
+     *        background. The future ends with the ph_result_t the call would have
+     *        returned (see ph_future_result()), or with PH_FUTURE_CANCELLED. The
+     *        out parameter may be read only after the future ended with
+     *        PH_FUTURE_FINISHED. A future that already serves an operation gives
+     *        PH_RESULT_INVALID_ARGUMENT.
+     * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
+     *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p event or
+     *         @p events is null or @p event->type is not a duration event,
+     *         PH_RESULT_INTERNAL_ERROR on failure.
+     * @note @p events->events and every ph_event_t::name in it point into
+     *       memory owned by @p ctx and remain valid until @p ctx is freed.
+     *       A later call does not invalidate an earlier result. Each call gets
+     *       its own storage, safe to read concurrently.
+     * @note ph_event_t::nesting_depth is the depth of that event on its own
+     *       track, the same value ph_get_track_events() reports. The track is
+     *       loaded if it was not loaded already. A result is not returned when
+     *       an event cannot be placed on a track.
+     */
+    ph_result_t ph_get_correlated_events(ph_ctx_t          ctx,
+                                         const ph_event_t* event,
+                                         ph_event_list_t*  events,
+                                         ph_future_t       future);
+
+    /**
      * @brief Retrieves PMC/counter samples for a track within an optional
      *        time window.
      * @param ctx Context to query.

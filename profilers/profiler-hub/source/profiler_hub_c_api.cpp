@@ -104,6 +104,19 @@ copy_probe_result(const profiler_hub::database_probe_result_t& result,
                               result.schema_version.minor,
                               result.schema_version.patch };
 }
+
+bool
+is_duration_event_type(ph_event_type_t type)
+{
+    switch(type)
+    {
+        case PH_EVENT_TYPE_REGION:
+        case PH_EVENT_TYPE_KERNEL_DISPATCH:
+        case PH_EVENT_TYPE_MEMORY_COPY:
+        case PH_EVENT_TYPE_MEMORY_ALLOCATE: return true;
+    }
+    return false;
+}
 }  // namespace
 
 ph_result_t
@@ -325,6 +338,46 @@ ph_get_track_events(ph_ctx_t         ctx,
 
             *events = ctx->get_track_events(track_id, start_ts, end_ts);
 
+            return PH_RESULT_SUCCESS;
+        });
+}
+
+ph_result_t
+ph_get_correlated_events(ph_ctx_t          ctx,
+                         const ph_event_t* event,
+                         ph_event_list_t*  events,
+                         ph_future_t       future)
+{
+    if(events != nullptr)
+    {
+        *events = ph_event_list_t{ .list_size = 0, .events = nullptr };
+    }
+
+    if(ctx == nullptr)
+    {
+        return PH_RESULT_INVALID_CONTEXT;
+    }
+
+    if(events == nullptr || event == nullptr || !is_duration_event_type(event->type))
+    {
+        return PH_RESULT_INVALID_ARGUMENT;
+    }
+
+    const uint64_t        event_id   = event->id;
+    const ph_event_type_t event_type = event->type;
+    return run_operation(
+        ctx, future, [ctx, event_id, event_type, events]() -> ph_result_t {
+            if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+            {
+                return ready;
+            }
+
+            const auto correlated = ctx->get_correlated_events(event_id, event_type);
+            if(!correlated.has_value())
+            {
+                return PH_RESULT_INTERNAL_ERROR;
+            }
+            *events = correlated.value();
             return PH_RESULT_SUCCESS;
         });
 }

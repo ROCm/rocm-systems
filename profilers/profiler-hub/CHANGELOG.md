@@ -39,6 +39,12 @@ downstream consumer of the library.
   bucket and sum that overlap. PMC tracks average the samples in each bucket
   and hold the previous value across empty buckets between samples. Bucket 0
   starts at the earliest track timestamp.
+- `ph_get_correlated_events()` returns the events `reader_t::get_correlated_events()`
+  finds for one duration event. The source event is identified by
+  `ph_event_t::id` and `ph_event_t::type`. The source event is excluded, and
+  an event with no stack id yields an empty list. `ph_event_t::nesting_depth`
+  is the depth of that event on its own track. The track is loaded when the
+  depth is read.
 - `probe_database()` and the C equivalent `ph_probe_database()` detect a SQLite
   database, its `rocpd_metadata_<uuid>` table, and the schema version before a
   reader is opened. A trace that only has the `schema_version` tag is accepted
