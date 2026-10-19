@@ -246,19 +246,16 @@ static std::mutex        g_reopen_mu;
 static std::mutex                      g_blob_mu;
 static std::unordered_set<std::string> g_written_blobs;
 // Descriptors of the archive directories open() checked, pid-<pid>, blobs/ and
-// code_objects/, and of each blobs/<xx> once write_blob claims it (xx is two hex
-// chars). Every file inside the archive is created, opened, renamed and removed
-// relative to them, never by path. All are O_CLOEXEC. open() replaces them and
-// atfork_child closes the parent's; the child's open() opens its own. -1 when
-// there is none, always on Windows, where files are opened by path. Atomic
-// because blob writers and the crash path read them without a lock.
+// code_objects/. Every file inside the archive is created, opened, renamed and
+// removed relative to them, or to a blobs/<xx> that write_blob opens relative to
+// blobs/ for one write, never by path. All are O_CLOEXEC. close() closes them,
+// open() replaces them and atfork_child closes the parent's; the child's open()
+// opens its own. -1 when there is none, always on Windows, where files are
+// opened by path. Atomic because blob writers and the crash path read them
+// without a lock.
 static std::atomic<int> g_dir_fd{-1};
 static std::atomic<int> g_blobs_fd{-1};
 static std::atomic<int> g_code_objects_fd{-1};
-#ifndef _WIN32
-// Valid only while g_dir_fd is: open() sets them all to -1 when it publishes.
-static std::atomic<int> g_blob_prefix_fd[256];
-#endif
 // Keys a thread is reserving space for or writing, also under g_blob_mu. Another
 // caller with the same bytes waits for the claim to end, so the reserve is
 // charged once per file, not once per caller.
@@ -417,8 +414,6 @@ static void close_dir_fds() {
   ::close(dir);
   for (std::atomic<int>* fd : {&g_blobs_fd, &g_code_objects_fd})
     if (const int d = fd->exchange(-1); d >= 0) ::close(d);
-  for (auto& fd : g_blob_prefix_fd)
-    if (const int d = fd.exchange(-1); d >= 0) ::close(d);
 }
 #endif
 
@@ -1223,7 +1218,6 @@ bool open(const char* output_dir) {
     // The previous archive's, if any. No blob writer is left on them: open() runs
     // only while no archive is open.
     close_dir_fds();
-    for (auto& prefix : g_blob_prefix_fd) prefix.store(-1, std::memory_order_relaxed);
 #endif
     g_blobs_fd.store(std::exchange(dirs.blobs, -1));
     g_code_objects_fd.store(std::exchange(dirs.code_objects, -1));
@@ -1388,6 +1382,19 @@ void close() {
     HRR_CLOSE(g_events_fd);
     g_events_fd = -1;
   }
+#ifndef _WIN32
+  // The archive's directory descriptors go with events.bin, so the application
+  // keeps none of them after the capture. Blob and code object writes use them
+  // without a lock: stop new ones and wait for those in flight, as flush() does,
+  // which it skips after a space stop. The crash path, which writes the manifest
+  // through g_dir_fd, has nothing left to do once flush() has written it.
+  {
+    std::unique_lock<std::mutex> blk(g_blob_mu);
+    g_events_finalized = true;
+    g_blob_writes_done.wait(blk, [] { return g_blob_writes_in_flight == 0; });
+  }
+  close_dir_fds();
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -1723,29 +1730,17 @@ Hash128 write_blob(const void* data, size_t len) {
   std::string subdir = g_output_dir + "/blobs/" + prefix;
   int subdir_fd = -1;
 #ifndef _WIN32
-  {
-    // hash_hex writes lowercase hex digits; two chars index 0..255.
-    const auto nibble = [](char c) -> unsigned {
-      return (c >= '0' && c <= '9') ? static_cast<unsigned>(c - '0')
-                                    : static_cast<unsigned>(c - 'a' + 10);
-    };
-    std::atomic<int>& claimed = g_blob_prefix_fd[(nibble(hex[0]) << 4) | nibble(hex[1])];
-    subdir_fd = claimed.load(std::memory_order_acquire);
-    if (subdir_fd < 0) {
-      int fd = -1;
-      if (!claim_sub_dir(g_blobs_fd.load(), subdir, prefix.c_str(), &fd)) {
-        // `claim` unpublishes the key and marks the capture incomplete.
-        LogPrintfWarning("[HRR capture] Failed to claim blob prefix %s", prefix.c_str());
-        return h;
-      }
-      // Another thread may have claimed it meanwhile; keep the first descriptor.
-      if (claimed.compare_exchange_strong(subdir_fd, fd, std::memory_order_acq_rel)) {
-        subdir_fd = fd;
-      } else {
-        ::close(fd);
-      }
-    }
+  // Checked and opened relative to blobs/ for this write only, so the capture
+  // holds no descriptor per prefix.
+  if (!claim_sub_dir(g_blobs_fd.load(), subdir, prefix.c_str(), &subdir_fd)) {
+    // `claim` unpublishes the key and marks the capture incomplete.
+    LogPrintfWarning("[HRR capture] Failed to claim blob prefix %s", prefix.c_str());
+    return h;
   }
+  struct CloseDir {
+    int fd;
+    ~CloseDir() { ::close(fd); }
+  } const subdir_close{subdir_fd};
 #else
   ensure_dir(subdir);
 #endif

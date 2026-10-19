@@ -124,8 +124,9 @@ above the base directory get 0777 minus the umask. The writer refuses a `pid-<pi
 `blobs/` or `code_objects/` that is a symbolic link or belongs to another user, and an
 existing `events.bin` that is not a regular file with a single link owned by that user.
 These directory checks run when the archive is opened, and the writer keeps a descriptor
-(`O_CLOEXEC`) for each directory it checked: `pid-<pid>/`, `blobs/`, `code_objects/` and
-each `blobs/<xx>/` once claimed. Every file inside the archive is created, opened, renamed
+(`O_CLOEXEC`) for each directory it checked, `pid-<pid>/`, `blobs/` and `code_objects/`,
+until the capture closes; a `blobs/<xx>/` is opened and checked relative to `blobs/` for
+each blob write and closed after it. Every file inside the archive is created, opened, renamed
 and removed relative to those descriptors with `openat`, `renameat` and `unlinkat`, the
 crash-path manifest included, so a directory renamed on the path after the check cannot
 redirect a write. Only finding `pid-<pid>/` when the archive opens, and the root

@@ -64,6 +64,11 @@
  *     pid-<pid> renamed while the capture runs, with a symbolic link planted in
  *     its place, is still where the blobs, the manifest and the active marker's
  *     removal go, and nothing is written through the link (POSIX).
+ *
+ *   Unit_HRR_CaptureClosesArchiveDirs:
+ *     a capture whose blobs span most blobs/<xx> prefixes holds at most three
+ *     archive directory descriptors while it runs, and none after it has shut
+ *     down (Linux).
  */
 
 #include "hrr_test_common.hh"
@@ -404,6 +409,61 @@ TEST_CASE("Unit_HRR_CaptureRenamedArchive_Direct", "[.][hrr-direct]") {
   }
   HRR_HIP_CHECK(hipFree(d));
 }
+
+#ifdef __linux__
+// ---------------------------------------------------------------------------
+// Hidden ([.]) workload for Unit_HRR_CaptureClosesArchiveDirs: copies 512
+// distinct host buffers to the device, blobs spread over most of the 256
+// blobs/<xx> prefixes, then prints how many of its descriptors are directories
+// in its pid-<pid>: once while the capture runs, and once from an exit handler
+// that runs after the capture has shut down. The handler is registered before
+// the first HIP call, which registers the capture's own, so it runs after it.
+// Run without HIP_HRR_CAPTURE_OUTPUT, it does nothing.
+// ---------------------------------------------------------------------------
+namespace {
+char g_fd_archive[4096];  // pid-<pid>, resolved
+
+int archive_dir_fds() {
+  DIR* fds = ::opendir("/proc/self/fd");
+  if (fds == nullptr) return -1;
+  const size_t len = strlen(g_fd_archive);
+  int n = 0;
+  while (const dirent* e = ::readdir(fds)) {
+    char target[4096];
+    const ssize_t got = ::readlinkat(::dirfd(fds), e->d_name, target, sizeof(target) - 1);
+    if (got <= 0) continue;
+    target[got] = '\0';
+    struct stat st{};
+    if (strncmp(target, g_fd_archive, len) == 0 && (target[len] == '\0' || target[len] == '/') &&
+        ::fstatat(::dirfd(fds), e->d_name, &st, 0) == 0 && S_ISDIR(st.st_mode))
+      ++n;
+  }
+  ::closedir(fds);
+  return n;
+}
+
+void report_archive_dir_fds_at_exit() {
+  fprintf(stderr, "archive directory descriptors after the capture: %d\n", archive_dir_fds());
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_CaptureClosesArchiveDirs_Direct", "[.][hrr-direct]") {
+  const char* base = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
+  if (base == nullptr) return;
+  REQUIRE(std::atexit(report_archive_dir_fds_at_exit) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  const std::string pid_dir = std::string(base) + "/pid-" + std::to_string(::getpid());
+  REQUIRE(::realpath(pid_dir.c_str(), g_fd_archive) != nullptr);
+  void* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, 256));
+  for (uint32_t i = 0; i < 512; ++i) {
+    const std::vector<uint32_t> host(64, i);
+    HRR_HIP_CHECK(hipMemcpy(d, host.data(), 256, hipMemcpyHostToDevice));
+  }
+  HRR_HIP_CHECK(hipFree(d));
+  fprintf(stderr, "archive directory descriptors during the capture: %d\n", archive_dir_fds());
+}
+#endif
 
 #endif
 
@@ -994,6 +1054,48 @@ HRR_TEST_CASE(Unit_HRR_CaptureWritesThroughCheckedDirs) {
   hrr::Archive archive;
   REQUIRE(hrr::load_archive(moved.string(), archive));
   CHECK(archive.complete);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_CaptureClosesArchiveDirs_Direct, which records 512
+ *     distinct blobs and reports how many of its descriptors are directories
+ *     in its archive, during the capture and after it has shut down.
+ *   - The blobs land in at least 128 blobs/<xx> prefixes, so a descriptor
+ *     kept per prefix would show.
+ *   - During the capture the writer holds at most pid-<pid>, blobs/ and
+ *     code_objects/; after it, none.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureClosesArchiveDirs) {
+#ifndef __linux__
+  HRR_SKIP("/proc/self/fd");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_dir_fds"};
+  const fs::path base = work.path / "capture";
+  fs::create_directories(base);
+  const PlantedRun run = capture_workload(base, "Unit_HRR_CaptureClosesArchiveDirs_Direct");
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  const std::vector<fs::path> archives = hrr_process_archives(base);
+  REQUIRE(archives.size() == 1);
+  size_t prefixes = 0;
+  for (const auto& ent : fs::directory_iterator(archives.front() / "blobs"))
+    if (ent.is_directory()) ++prefixes;
+  CHECK(prefixes >= 128);
+  CHECK(manifest_says_complete(archives.front(), true));
+  // -1 when the workload did not report it.
+  const auto reported = [&run](const std::string& when) {
+    const std::string head = "archive directory descriptors " + when + ": ";
+    const size_t at = run.output.find(head);
+    return at == std::string::npos ? -1 : std::atoi(run.output.c_str() + at + head.size());
+  };
+  const int during = reported("during the capture");
+  CHECK(during >= 0);
+  CHECK(during <= 3);
+  CHECK(reported("after the capture") == 0);
 #endif
 }
 
