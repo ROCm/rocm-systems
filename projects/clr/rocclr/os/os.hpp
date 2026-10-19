@@ -276,12 +276,14 @@ class Os : AllStatic {
   //! A callback runs inside a signal handler, so it must be async-signal-safe.
   //! It must also be reentrant and thread-safe: it runs again after a fault the
   //! earlier handler recovers from, and threads that fault together run it at
-  //! the same time.
+  //! the same time. It runs on the alternate signal stack when the earlier
+  //! handler asked for one, so it must use little stack.
+  //! Windows: one callback, which a later call replaces
   static bool installExceptionHandlers(CrashCallback callback = nullptr);
 
   //! Uninstall crash handlers
   //! POSIX: removes only `callback`, and restores the earlier handlers once no
-  //! callback remains
+  //! callback remains. Windows: removes the handler and its callback
   static void uninstallExceptionHandlers(CrashCallback callback);
 
   //! Return the current process id

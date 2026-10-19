@@ -184,15 +184,22 @@ static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
     return;
   }
 
-  // No earlier handler (an ignored crash signal, or a one-shot handler that has
-  // run, is treated the same): die with the default action, so a core dump
-  // still records the original fault.
+  // As without CLR's handler: a signal sent by a process to an ignored crash
+  // signal is dropped. Anything else gets the default action on this thread. A
+  // fault the kernel raised (si_code > 0) faults again on return, so the core
+  // dump records it with its own thread and address; a sent one is sent again.
+  const bool fault = info != nullptr && info->si_code > 0 && sig != SIGABRT;
+  if (old.sa_handler == SIG_IGN && !fault) {
+    return;
+  }
   struct sigaction dfl;
   memset(&dfl, 0, sizeof(dfl));
   sigemptyset(&dfl.sa_mask);
   dfl.sa_handler = SIG_DFL;
   sigaction(sig, &dfl, nullptr);
-  kill(getpid(), sig);
+  if (!fault) {
+    raise(sig);
+  }
 }
 
 bool Os::installExceptionHandlers(CrashCallback callback) {

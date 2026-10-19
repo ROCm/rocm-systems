@@ -83,7 +83,9 @@ fault aborts the host, or a host SIGSEGV):
   crash-truncated archive. On Linux CLR keeps every component's callback (CLR's
   asynchronous logging registers one too), then passes the signal to the handler
   installed before its own; it stays installed, so a later fault flushes again.
-  Orderly shutdown is handled by the existing
+  With no earlier handler, a hardware fault faults again with the default
+  action, so the core dump keeps its thread and address. On Windows CLR keeps
+  one callback, the last one registered. Orderly shutdown is handled by the existing
   `std::atexit(hip_capture_shutdown)` path, which writes the clean trailer and
   `complete:true`.
 - **Clean-shutdown trailer.** A normal `writer::flush` appends an
