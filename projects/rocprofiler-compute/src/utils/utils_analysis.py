@@ -633,16 +633,17 @@ def nest_marker_intervals(
 ) -> dict[str, list[CallTreeNode]]:
     """Nest marker intervals per Thread_Id using timestamp containment.
 
-    Rows are sorted by thread and start time so parents are visited before
-    children. The input frame is not mutated. Overlapping rows are skipped
-    and recorded in skipped_keys so later nest validation does not report
-    them again.
+    Rows are sorted by thread, start time, and descending end time so
+    parents are visited before children. The input frame is not mutated.
+    Overlapping rows are skipped and recorded in skipped_keys so later nest
+    validation does not report them again.
     """
     forest: dict[str, list[CallTreeNode]] = {}
     if trace_df.empty:
         return forest
     ordered = trace_df.sort_values(
-        by=["Thread_Id", "Start_Timestamp"],
+        by=["Thread_Id", "Start_Timestamp", "End_Timestamp"],
+        ascending=[True, True, False],
         kind="mergesort",
     )
     for thread_id, group in ordered.groupby("Thread_Id", sort=False):
