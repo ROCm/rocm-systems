@@ -263,7 +263,7 @@ read_schema_file(rocpd_db& db, rocpd_sql_schema_kind_t schema_kind)
 {
     auto _variables = common::init_public_api_struct(rocpd_sql_schema_jinja_variables_t{});
     auto _options   = ROCPD_SQL_OPTIONS_NONE;
-    auto _version   = rocpd_version_triplet_t{3, 0, 5};  // default schema version
+    auto _version   = rocpd_version_triplet_t{3, 0, 6};  // default schema version
 
     _variables.uuid = db.uuid.c_str();
     _variables.guid = db.guid.c_str();
@@ -2029,6 +2029,11 @@ write_rocpd(
                         ? std::optional<uint64_t>{tool_metadata.get_agent(itr.agent_id)->node_id}
                         : std::nullopt;
 
+                // Zero when the record a wait depends on was not seen
+                auto source_stack_id = (itr.source_correlation_id != 0)
+                                           ? std::optional<uint64_t>{itr.source_correlation_id}
+                                           : std::nullopt;
+
                 get_insert_statement(
                     db,
                     "rocpd_hip_event{{uuid}}",
@@ -2045,6 +2050,7 @@ write_rocpd(
                         insert_value("stream_id", get_stream_id(itr.stream_id)),
                         insert_value("hip_event_handle", itr.hip_event_handle),
                         insert_value("source_queue_id", get_queue_id(itr.source_queue_id)),
+                        insert_value("source_stack_id", source_stack_id),
                         insert_value("event_id", evt_id),
                     });
             }

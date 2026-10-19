@@ -1,4 +1,4 @@
--- RocPD schema version 3.0.5
+-- RocPD schema version 3.0.6
 
 CREATE TABLE IF NOT EXISTS
     "rocpd_metadata{{uuid}}" (
@@ -393,6 +393,7 @@ CREATE TABLE IF NOT EXISTS
         "stream_id" INTEGER,
         "hip_event_handle" BIGINT NOT NULL,
         "source_queue_id" INTEGER,
+        "source_stack_id" BIGINT,
         "event_id" INTEGER,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,

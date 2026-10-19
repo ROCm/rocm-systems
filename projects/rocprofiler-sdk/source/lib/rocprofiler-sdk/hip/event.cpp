@@ -126,6 +126,9 @@ struct active_event_context_t
     // hipStreamWaitEvent: queue of the record being waited on, from the same lookup as
     // wait_signal.
     rocprofiler_queue_id_t source_queue_id = {.handle = 0};
+    // hipStreamWaitEvent: internal correlation id of the record being waited on, from the same
+    // lookup as wait_signal.
+    uint64_t source_correlation_id = 0;
     // hipStreamWaitEvent: signal its deferred registration is keyed by, or zero when the wait
     // was not registered.
     uint64_t registered_signal = 0;
@@ -141,6 +144,9 @@ struct event_record_info_t
     rocprofiler_queue_id_t queue_id        = {.handle = 0};
     rocprofiler_agent_id_t agent_id        = {.handle = 0};
     uint64_t               original_signal = 0;
+    // Internal correlation id of the hipEventRecord call this generation reports. Updated when a
+    // later record is coalesced onto the same barrier, so a wait names the latest record call.
+    uint64_t correlation_id = 0;
     // Stream the event was recorded on. CLR short-circuits a wait issued on this same
     // stream, so a wait matching it produces no GPU dependency to trace.
     stream_key_t record_stream = {};
@@ -191,6 +197,11 @@ record_event_info(uint64_t hip_event_handle, event_record_info_t info);
 
 void
 mark_event_completed(uint64_t hip_event_handle, uint64_t generation);
+
+void
+update_event_record_correlation(uint64_t hip_event_handle,
+                                uint64_t generation,
+                                uint64_t correlation_id);
 
 event_record_info_t
 lookup_event_info(uint64_t hip_event_handle);
@@ -327,7 +338,8 @@ barrier_complete(tracing::tracing_data&                        tracing_data_v,
                                                      callback_record.agent_id,
                                                      callback_record.queue_id,
                                                      callback_record.hip_event_handle,
-                                                     callback_record.source_queue_id);
+                                                     callback_record.source_queue_id,
+                                                     callback_record.source_correlation_id);
 
         tracing::execute_buffer_record_emplace(tracing_data_v.buffered_contexts,
                                                tid,
@@ -717,13 +729,18 @@ check_coalesced_record(uint64_t hip_event_handle)
                                        event_info.agent_id,
                                        event_info.queue_id,
                                        hip_event_handle,
-                                       event_info.queue_id);
+                                       event_info.queue_id,
+                                       corr_id->internal);
     pending.tid              = thr_id;
     pending.internal_corr_id = corr_id->internal;
     pending.ancestor_corr_id = corr_id->ancestor;
     pending.corr_id_ref      = corr_id;
     corr_id->add_ref_count();
     corr_id->add_kern_count();
+
+    // A wait issued from here on depends on this record call, not on the one whose barrier it
+    // shares.
+    update_event_record_correlation(hip_event_handle, event_info.generation, corr_id->internal);
 
     auto already_completed = false;
     auto completed_time    = profiling_time{};
@@ -898,9 +915,10 @@ stream_wait_event_impl(hipStream_t stream, hipEvent_t event, unsigned int flags)
         // One lookup serves the wait's own barrier match, its source queue and the deferred
         // registration, so a concurrent re-record cannot leave them naming different record
         // generations.
-        const auto event_info = lookup_event_info(hip_event_handle);
-        ctx.wait_signal       = event_info.original_signal;
-        ctx.source_queue_id   = event_info.queue_id;
+        const auto event_info     = lookup_event_info(hip_event_handle);
+        ctx.wait_signal           = event_info.original_signal;
+        ctx.source_queue_id       = event_info.queue_id;
+        ctx.source_correlation_id = event_info.correlation_id;
 
         // Pre-register the pending wait BEFORE calling CLR. This ensures the entry
         // is in the map before CLR can enqueue any barrier carrying the dep_signal,
@@ -1032,6 +1050,22 @@ mark_event_completed(uint64_t hip_event_handle, uint64_t generation)
     map_v->wlock([&](auto& map) {
         auto it = map.find(hip_event_handle);
         if(it != map.end() && it->second.generation == generation) it->second.completed = true;
+    });
+}
+
+void
+update_event_record_correlation(uint64_t hip_event_handle,
+                                uint64_t generation,
+                                uint64_t correlation_id)
+{
+    auto* map_v = get_event_info_map();
+    if(!map_v) return;
+
+    // A re-record that took its own barrier in the meantime owns the entry.
+    map_v->wlock([&](auto& map) {
+        auto it = map.find(hip_event_handle);
+        if(it != map.end() && it->second.generation == generation)
+            it->second.correlation_id = correlation_id;
     });
 }
 
@@ -1445,7 +1479,8 @@ make_deferred_wait_data(const hsa::Queue& queue, pending_wait_t&& pw)
                                        queue.get_agent().get_rocp_agent()->id,
                                        queue.get_id(),
                                        pw.hip_event_handle,
-                                       pw.source_info.queue_id);
+                                       pw.source_info.queue_id,
+                                       pw.source_info.correlation_id);
     bdata.operation        = ROCPROFILER_HIP_EVENT_WAIT;
     bdata.tid              = pw.tid;
     bdata.internal_corr_id = pw.internal_corr_id;
@@ -1455,14 +1490,15 @@ make_deferred_wait_data(const hsa::Queue& queue, pending_wait_t&& pw)
 }
 
 // The callback record of the hipEventRecord or hipStreamWaitEvent executing on this thread,
-// for a barrier on queue. A wait's source queue is that of the record it waits for, zero when
-// the record was not seen.
+// for a barrier on queue. A wait's source queue and source correlation are those of the record
+// it waits for, zero when the record was not seen.
 rocprofiler_callback_tracing_hip_event_data_t
 make_event_callback_record(const hsa::Queue& queue, const active_event_context_t& event_ctx)
 {
-    const auto source_queue = (event_ctx.operation == ROCPROFILER_HIP_EVENT_WAIT)
-                                  ? event_ctx.source_queue_id
-                                  : queue.get_id();
+    const bool is_wait      = (event_ctx.operation == ROCPROFILER_HIP_EVENT_WAIT);
+    const auto source_queue = (is_wait) ? event_ctx.source_queue_id : queue.get_id();
+    const auto source_corr_id =
+        (is_wait) ? event_ctx.source_correlation_id : event_ctx.corr_id->internal;
 
     return common::init_public_api_struct(rocprofiler_callback_tracing_hip_event_data_t{},
                                           rocprofiler_timestamp_t{0},
@@ -1470,7 +1506,8 @@ make_event_callback_record(const hsa::Queue& queue, const active_event_context_t
                                           queue.get_agent().get_rocp_agent()->id,
                                           queue.get_id(),
                                           event_ctx.hip_event_handle,
-                                          source_queue);
+                                          source_queue,
+                                          source_corr_id);
 }
 
 // Builds the record for the hipEventRecord or hipStreamWaitEvent executing on this thread,
@@ -1615,6 +1652,7 @@ resolve_event_candidates(bool call_succeeded)
                               event_record_info_t{chosen->queue->get_id(),
                                                   chosen->queue->get_agent().get_rocp_agent()->id,
                                                   chosen->original_signal,
+                                                  event_ctx.corr_id->internal,
                                                   event_ctx.record_stream});
 
         auto group = std::make_shared<common::Synchronized<coalesce_group_t>>();

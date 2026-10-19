@@ -114,6 +114,59 @@ def test_no_hip_api_cross_stream(json_data):
     assert len(cross_stream) > 0, "No cross-stream WAIT records found"
 
 
+def test_no_hip_api_source_correlation(json_data):
+    """Verify source_correlation_id links each WAIT to the RECORD it depends on.
+
+    A RECORD reports its own internal correlation id. A WAIT reports the internal
+    correlation id of the RECORD that recorded the awaited event, or zero when that
+    record was not seen, in which case source_queue_id is zero too.
+    """
+    records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+
+    record_records = {
+        r.correlation_id.internal: r for r in records if r.operation == HIP_EVENT_RECORD
+    }
+    for r in record_records.values():
+        assert r.source_correlation_id == r.correlation_id.internal, (
+            f"RECORD (correlation {r.correlation_id.internal}) reports "
+            f"source_correlation_id {r.source_correlation_id}, expected its own"
+        )
+
+    linked = 0
+    for w in (r for r in records if r.operation == HIP_EVENT_WAIT):
+        if w.source_queue_id.handle == 0:
+            assert w.source_correlation_id == 0, (
+                f"WAIT (correlation {w.correlation_id.internal}) has no source queue but "
+                f"reports source_correlation_id {w.source_correlation_id}"
+            )
+            continue
+
+        rec = record_records.get(w.source_correlation_id)
+        assert rec is not None, (
+            f"WAIT (correlation {w.correlation_id.internal}) reports "
+            f"source_correlation_id {w.source_correlation_id}, which is not a RECORD"
+        )
+        assert rec.hip_event_handle == w.hip_event_handle, (
+            f"WAIT (correlation {w.correlation_id.internal}) on event "
+            f"{w.hip_event_handle:#x} links to a RECORD on event {rec.hip_event_handle:#x}"
+        )
+        assert rec.queue_id.handle == w.source_queue_id.handle, (
+            f"WAIT (correlation {w.correlation_id.internal}) source_queue_id "
+            f"{w.source_queue_id.handle} differs from its RECORD's queue {rec.queue_id.handle}"
+        )
+        assert rec.correlation_id.internal < w.correlation_id.internal, (
+            f"WAIT (correlation {w.correlation_id.internal}) links to a later RECORD "
+            f"(correlation {rec.correlation_id.internal})"
+        )
+        assert w.end_timestamp >= rec.end_timestamp, (
+            f"WAIT (correlation {w.correlation_id.internal}) ended at {w.end_timestamp}, "
+            f"before its RECORD ended at {rec.end_timestamp}"
+        )
+        linked += 1
+
+    assert linked > 0, "No WAIT record links to a RECORD through source_correlation_id"
+
+
 def test_no_hip_api_no_same_stream_wait(json_data):
     """Verify same-stream waits do not produce WAIT records without HIP API tracing."""
     records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
