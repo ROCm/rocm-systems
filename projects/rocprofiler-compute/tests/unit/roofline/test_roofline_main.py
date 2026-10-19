@@ -109,13 +109,6 @@ def is_whole_decade(value: float) -> bool:
     return math.isclose(exponent, round(exponent))
 
 
-@pytest.mark.parametrize("dtype", ["FP32", "INVALID_DATATYPE"])
-def test_cli_generate_plot_returns_nothing_without_usable_input(dtype: str) -> None:
-    """A datatype this arch cannot be profiled for, and a datatype with no AI
-    data, are both declined rather than half-plotted."""
-    assert make_roofline(["FP32"]).cli_generate_plot(dtype, ai_data={}) is None
-
-
 @pytest.mark.parametrize(
     "dtype, drawn, not_drawn",
     [

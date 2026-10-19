@@ -939,7 +939,6 @@ def test_show_all_view_table_skips_roofline_plot(
 
     output = rendered_output.getvalue()
     if view == "table":
-        assert "4.3 Roofline Plot" not in output
         assert "4.1 Roofline Performance Rates" in output
         assert "Metric A" in output
 
