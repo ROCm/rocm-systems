@@ -229,14 +229,8 @@ namespace rocshmem
       int32_t* tempBuffer;
 
       // Index CPU agents
-      // NOTE: numa_num_configured_nodes() counts every NUMA node configured
-      // on the host, which can include nodes outside this process's cpuset
-      // (e.g. containers with a restricted cpuset.mems). Probing one of
-      // those via numa_set_preferred()/CheckPages() in AllocateMemory()
-      // fails silently (EINVAL) and then hard-aborts on the resulting page
-      // mismatch, so skip any node this process isn't allowed to use and
-      // leave a sentinel agent (handle 0) that cannot match a real GPU's
-      // nearest-CPU agent.
+      // Skip nodes outside this process's cpuset (numa_set_preferred would
+      // fail silently and CheckPages() would then hard-abort on the mismatch).
       cpuAgents.assign(numCpus, hsa_agent_t{0});
       for (int i = 0; i < numCpus; i++) {
         if (!numa_bitmask_isbitset(numa_get_mems_allowed(), i)) {
@@ -1173,11 +1167,12 @@ namespace rocshmem
         if (numa_bitmask_isbitset(numa_get_mems_allowed(), node))
           remappingCpu.push_back(node);
     }
-    // origIdx can exceed remappingCpu.size() when numa_num_configured_nodes()
-    // (the loop bound callers use) counts more nodes than this process's
-    // cpuset/cgroup allows (numa_get_mems_allowed()). Fall back to the raw
-    // index rather than reading out of bounds.
-    if (origIdx < 0 || origIdx >= static_cast<int>(remappingCpu.size())) {
+    if (origIdx < 0) {
+      return -1;  // never a valid node, no sensible fallback
+    }
+    // Unmapped under cgroup restriction, but still a real node id for the
+    // read-only distance/CPU-count queries below, so keep it as-is.
+    if (origIdx >= static_cast<int>(remappingCpu.size())) {
       return origIdx;
     }
     return remappingCpu[origIdx];
