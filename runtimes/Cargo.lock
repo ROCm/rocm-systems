@@ -24,6 +24,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rocaddr3"
+version = "0.1.0"
+
+[[package]]
 name = "rocddi"
 version = "0.1.0"
 dependencies = [
