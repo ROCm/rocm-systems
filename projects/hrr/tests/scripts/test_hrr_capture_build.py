@@ -243,6 +243,19 @@ class StageRuntimeLibsTest(unittest.TestCase):
         self.assertEqual(sources, [Path("/work/build/clr/lib/librocm_kpack.so.0")])
 
 
+class StageCommandTest(unittest.TestCase):
+    def test_stage_is_a_command(self):
+        args = cb.parse_args(["stage"])
+        self.assertEqual(args.command, "stage")
+
+    def test_stage_without_a_binary_copies_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            args = cb.parse_args(
+                ["stage", "--dist", f"{tmp}/dist", "--build", f"{tmp}/build"]
+            )
+            self.assertEqual(cb.cmd_stage(args), 0)
+
+
 class CacheKeyTest(unittest.TestCase):
     def test_inputs_are_the_build_and_not_ci_yaml(self):
         paths = cb.CACHE_SOURCE_PATHS

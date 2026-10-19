@@ -308,12 +308,14 @@ def staged_library_sources(ldd_output: str, lib_dir: Path) -> list[Path]:
     return sources
 
 
-def stage_runtime_libs(binary: Path, lib_dir: Path) -> list[str]:
+def stage_runtime_libs(
+    binary: Path, lib_dir: Path, env: dict | None = None
+) -> list[str]:
     """Copy non-system libraries the binary loads into lib_dir. Returns names copied."""
     if not binary.is_file():
         return []
     out = subprocess.run(
-        ["ldd", str(binary)], check=True, capture_output=True, text=True
+        ["ldd", str(binary)], check=True, capture_output=True, text=True, env=env
     ).stdout
     lib_dir.mkdir(parents=True, exist_ok=True)
     copied: list[str] = []
@@ -372,6 +374,28 @@ def cmd_build(args: argparse.Namespace, runner: Runner = run) -> int:
     stage_runtime_libs(
         args.build / "hrr" / "tests" / "integration" / "hrr-integration-tests",
         args.dist / "lib",
+    )
+    return 0
+
+
+def cmd_stage(args: argparse.Namespace) -> int:
+    """Stage the runtime libraries again after a cache restore.
+
+    The cache keeps the binary but not the copies build staged into dist/lib.
+    Without the build tree, ldd finds the libraries only in the installed
+    subtrees (dist/lib/llvm/lib, dist/lib/rocm_sysdeps/lib), so put those on
+    its search path.
+    """
+    lib_dir = args.dist / "lib"
+    search = [str(p) for p in sorted(lib_dir.glob("*/lib")) if p.is_dir()]
+    env = dict(os.environ)
+    env["LD_LIBRARY_PATH"] = os.pathsep.join(
+        search + ([env["LD_LIBRARY_PATH"]] if env.get("LD_LIBRARY_PATH") else [])
+    )
+    stage_runtime_libs(
+        args.build / "hrr" / "tests" / "integration" / "hrr-integration-tests",
+        lib_dir,
+        env,
     )
     return 0
 
@@ -480,7 +504,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "command",
-        choices=("fetch-base", "build", "verify", "install-base", "cache-key"),
+        choices=("fetch-base", "build", "stage", "verify", "install-base", "cache-key"),
     )
     parser.add_argument("--therock", type=Path, default=Path("therock"))
     parser.add_argument("--src", type=Path, default=Path.cwd())
@@ -511,6 +535,7 @@ def main(argv: list[str] | None = None) -> int:
     return {
         "fetch-base": cmd_fetch_base,
         "build": cmd_build,
+        "stage": cmd_stage,
         "verify": cmd_verify,
         "install-base": cmd_install_base,
         "cache-key": cmd_cache_key,

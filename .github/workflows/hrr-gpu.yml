@@ -90,15 +90,20 @@ jobs:
           path: |
             build/capture-lib
             build/hrr
-            dist/lib/librocm_kpack.so
-            dist/lib/librocm_kpack.so.0
-          # v2 adds the HRR build tree and librocm_kpack. v1 restored the test
-          # binary without that library, and verify could not start it.
-          key: hrr-capture-v2-${{ steps.cache_key.outputs.digest }}
+            dist/lib/librocm_kpack*
+          # v2 added the HRR build tree and librocm_kpack. v3 caches every
+          # librocm_kpack file. A restore of v2 left librocm_kpack.so.0 missing.
+          key: hrr-capture-v3-${{ steps.cache_key.outputs.digest }}
 
       - name: Build
         if: steps.capture_cache.outputs.cache-hit != 'true'
         run: python3 projects/hrr/tests/scripts/hrr_capture_build.py build
+
+      # The build stages copies of libLLVM and the sysdeps into dist/lib, and
+      # the cache does not keep them.
+      - name: Stage runtime libraries
+        if: steps.capture_cache.outputs.cache-hit == 'true'
+        run: python3 projects/hrr/tests/scripts/hrr_capture_build.py stage
 
       - name: Verify
         run: python3 projects/hrr/tests/scripts/hrr_capture_build.py verify
