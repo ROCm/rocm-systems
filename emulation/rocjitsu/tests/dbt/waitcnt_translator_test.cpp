@@ -43,9 +43,12 @@ TEST(WaitcntTranslator, DecodeSplitVmBitsAndIgnoreReservedBits) {
   // Pin the GFX9 layout independently of the shared helper. Its result orders
   // EXP before LGKM, whereas WaitcntValues orders LGKM before EXP.
   const Case cases[] = {
-      {0x4000, {16, 0, 0}},  {0x8000, {32, 0, 0}}, {0x41a5, {21, 1, 2}},
-      {0xc978, {56, 9, 7}},  {0x3080, {0, 0, 0}}, // Bits 7, 12 and 13 are reserved on GFX9.
-      {0xffff, {63, 15, 7}},
+      {0x4000, {.vmcnt = 16, .lgkmcnt = 0, .expcnt = 0}},
+      {0x8000, {.vmcnt = 32, .lgkmcnt = 0, .expcnt = 0}},
+      {0x41a5, {.vmcnt = 21, .lgkmcnt = 1, .expcnt = 2}},
+      {0xc978, {.vmcnt = 56, .lgkmcnt = 9, .expcnt = 7}},
+      {0x3080, {.vmcnt = 0, .lgkmcnt = 0, .expcnt = 0}}, // Bits 7, 12 and 13 are reserved on GFX9.
+      {0xffff, {.vmcnt = 63, .lgkmcnt = 15, .expcnt = 7}},
   };
   for (const auto &c : cases) {
     SCOPED_TRACE(c.simm16);
