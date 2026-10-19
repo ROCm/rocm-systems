@@ -76,6 +76,7 @@ nav:
       - Command-line interface: rocjitsu-cli.md
       - Configuration: configuration.md
       - Two-node RCCL NET smoke: rccl-scaleout.md
+      - Same-host pod RCCL gate: same-host-pod-rccl-gate.md
       - Race detection: race-detector.md
       - GPU debugging: rocgdb-debugging.md
       - Benchmarking: benchmarking.md
@@ -107,6 +108,12 @@ nav:
   - Project:
       - Blog: blog/index.md
       - Performance dashboard: performance-dashboard.md
+      - Pod qualification:
+          - RCCL result (2026-10-14): same-host-pod-rccl-result-20261014.md
+          - RCCL result (2026-10-15): same-host-pod-rccl-result-20261015.md
+          - RCCL result (2026-10-19): same-host-pod-rccl-result-20261019.md
+          - Stock-driver hardware path: stock-driver-hardware-path-20261014.md
+          - Unpatched AMDGPU ablation: unpatched-amdgpu-pod-ablation-20261015.md
 extra:
   social:
     - icon: fontawesome/brands/github
