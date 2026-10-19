@@ -25,44 +25,14 @@
 #include "comm.h"
 #include "allocator.h"
 #include "debug.h"
-#include "fakes/fail_loud.h"
+#include "fakes/alloc_micro_fakes.h"
+#include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
-
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
-std::function<int64_t(const char*, int64_t)> g_loadParam;
-struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
+#include "fakes/rocmwrap_fakes.h"
 
 namespace {
-std::vector<std::string> g_warns;
-int g_cuMemEnable = 0;
-int g_rocmInitCalls = 0;
 bool g_hashToZero = false;
-
-bool Warned(const char* needle) {
-  for (const std::string& w : g_warns)
-    if (w.find(needle) != std::string::npos) return true;
-  return false;
-}
 }  // namespace
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long, const char*, int, const char* fmt, ...) {
-  if (level != NCCL_LOG_WARN) return;
-  char buf[512];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  g_warns.push_back(buf);
-}
-
-hipMemAllocationHandleType ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
-int ncclCuMemEnable() { return g_cuMemEnable; }
-ncclResult_t rocmLibraryInit() {
-  g_rocmInitCalls++;
-  return ncclSystemError;  // ignored by both callers
-}
 
 // utils.cc's hash; with hbits == 0 it returns bucket 0 instead of shifting by 64.
 uint64_t ncclHashPointer(int hbits, void* key) {
@@ -71,14 +41,6 @@ uint64_t ncclHashPointer(int hbits, void* key) {
   h ^= h >> 32;
   h *= 0x9e3779b97f4a7c13;
   return (uint64_t)h >> (64 - hbits);
-}
-
-// ncclMemFree passes no manager, so alloc.h's untrack calls are never reached.
-ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager*, void*, struct ncclMemUntrackInfo*) {
-  FailLoudUnfaked("allocator-test", "ncclMemUntrackDynamic");
-}
-ncclResult_t ncclMemUntrackPersist(struct ncclMemManager*, void*, size_t) {
-  FailLoudUnfaked("allocator-test", "ncclMemUntrackPersist");
 }
 
 #include "fakes/param_redirect.h"
@@ -118,11 +80,9 @@ class AllocatorMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     ResetHipFakes();
-    g_warns.clear();
-    g_cuMemEnable = 0;
-    g_rocmInitCalls = 0;
+    ResetAllocMicroFakes();
+    ResetRocmWrapFakes();
     g_hashToZero = false;
-    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
     params_.clear();
     g_loadParam = [this](const char* env, int64_t deftVal) {
       auto it = params_.find(env);
@@ -196,6 +156,7 @@ class AllocatorMicrotest : public ::testing::Test {
     EXPECT_TRUE(allocated_.empty()) << allocated_.size() << " fake device allocations leaked";
     for (void* p : allocated_) std::free(p);
     ResetHipFakes();
+    ResetAllocMicroFakes();  // g_loadParam captures this fixture
   }
 
   // Frees only what the fakes handed out, so a stray free of a made-up address fails the test.
@@ -298,26 +259,26 @@ TEST_F(AllocatorMicrotest, MemAlloc_FallsBackToHipMallocWithoutCuMem) {
   ASSERT_EQ(ncclMemAlloc_impl(&p, 100), ncclSuccess);
   EXPECT_NE(p, nullptr);
   EXPECT_EQ(mallocs_, std::vector<size_t>{100});
-  EXPECT_EQ(g_rocmInitCalls, 1);
+  EXPECT_EQ(g_rocmLibraryInitCalls, 1);
 
   // A null out-pointer or a zero size goes straight to hipMalloc, whose error is the caller's.
   mallocResult_ = hipErrorInvalidValue;
   g_cuMemEnable = 1;
   EXPECT_EQ(ncclMemAlloc_impl(nullptr, 100), ncclUnhandledCudaError);
   EXPECT_EQ(ncclMemAlloc_impl(&p, 0), ncclUnhandledCudaError);
-  EXPECT_EQ(g_rocmInitCalls, 1);
+  EXPECT_EQ(g_rocmLibraryInitCalls, 1);
   Release(p);
 }
 
 TEST_F(AllocatorMicrotest, MemAlloc_DeviceLookupFailures) {
   void* p = nullptr;
-  g_hipGetDevice = [](int*) { return hipErrorInvalidValue; };
+  ScopedHook hipGetDevice(g_hipGetDevice, [](int*) { return hipErrorInvalidValue; });
   EXPECT_EQ(ncclMemAlloc_impl(&p, 100), ncclUnhandledCudaError);
-  g_hipGetDevice = [](int* d) {
+  ScopedHook hipGetDevice2(g_hipGetDevice, [](int* d) {
     *d = kDev;
     return hipSuccess;
-  };
-  g_hipDeviceGet = [](hipDevice_t*, int) { return hipErrorInvalidValue; };
+  });
+  ScopedHook hipDeviceGet(g_hipDeviceGet, [](hipDevice_t*, int) { return hipErrorInvalidValue; });
   EXPECT_EQ(ncclMemAlloc_impl(&p, 100), ncclUnhandledCudaError);
   EXPECT_TRUE(mallocs_.empty());
 }
@@ -394,17 +355,18 @@ TEST_F(AllocatorMicrotest, MemFree_FreesThroughHipWithoutCuMemAndRestoresTheDevi
   void* p = std::malloc(8);
   allocated_.push_back(p);
   std::vector<int> sets;
-  g_hipPointerGetAttribute = [](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
+  ScopedHook ordinal(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
     EXPECT_EQ(attr, HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL);
     *static_cast<int*>(data) = 1;
     return hipSuccess;
-  };
-  g_hipSetDevice = [&](int dev) {
+  });
+  ScopedHook hipSetDevice(g_hipSetDevice, [&](int dev) {
     sets.push_back(dev);
     return hipSuccess;
-  };
+  });
   ASSERT_EQ(ncclMemFree_impl(p), ncclSuccess);
   EXPECT_EQ(frees_, std::vector<void*>{p});
+  EXPECT_EQ(g_rocmLibraryInitCalls, 1);
   EXPECT_EQ(sets, (std::vector<int>{1, kDev}));
 
   // A null pointer skips the ordinal lookup and goes to hipFree.
@@ -418,50 +380,52 @@ TEST_F(AllocatorMicrotest, MemFree_ReleasesVmmMemoryWithCuMem) {
   g_cuMemEnable = 1;
   InstallVmm();
   void* p = reinterpret_cast<void*>(0x40000);
-  g_hipPointerGetAttribute = [](void* data, hipPointer_attribute, hipDeviceptr_t) {
+  ScopedHook hipPointerGetAttribute(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute, hipDeviceptr_t) {
     *static_cast<int*>(data) = kDev;
     return hipSuccess;
-  };
-  g_hipMemRetainAllocationHandle = [](hipMemGenericAllocationHandle_t* h, void* addr) {
+  });
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t* h, void* addr) {
     EXPECT_EQ(addr, reinterpret_cast<void*>(0x40000));
     *h = Handle(0x77);
     return hipSuccess;
-  };
-  g_hipMemGetAddressRange = [](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
+  });
+  ScopedHook hipMemGetAddressRange(g_hipMemGetAddressRange, [](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
     *base = ptr;
     *size = kGran;
     return hipSuccess;
-  };
+  });
   ASSERT_EQ(ncclMemFree_impl(p), ncclSuccess);
   EXPECT_EQ(calls_, (std::vector<std::string>{"release", "unmap", "release", "addrfree"}));
   EXPECT_TRUE(frees_.empty());
 
   calls_.clear();
-  g_hipMemRetainAllocationHandle = [](hipMemGenericAllocationHandle_t*, void*) { return hipErrorInvalidValue; };
+  ScopedHook retainFails(g_hipMemRetainAllocationHandle,
+                         [](hipMemGenericAllocationHandle_t*, void*) { return hipErrorInvalidValue; });
   EXPECT_EQ(ncclMemFree_impl(p), ncclUnhandledCudaError);
 }
 
 TEST_F(AllocatorMicrotest, MemFree_LookupFailuresStillRestoreTheDevice) {
   void* p = reinterpret_cast<void*>(0x40000);
   std::vector<int> sets;
-  g_hipSetDevice = [&](int dev) {
+  ScopedHook hipSetDevice(g_hipSetDevice, [&](int dev) {
     sets.push_back(dev);
     return dev == kDev ? hipSuccess : hipErrorInvalidValue;
-  };
-  g_hipPointerGetAttribute = [](void*, hipPointer_attribute, hipDeviceptr_t) { return hipErrorInvalidValue; };
+  });
+  ScopedHook ordinal(g_hipPointerGetAttribute,
+                     [](void*, hipPointer_attribute, hipDeviceptr_t) { return hipErrorInvalidValue; });
   EXPECT_EQ(ncclMemFree_impl(p), ncclUnhandledCudaError);
   EXPECT_EQ(sets, std::vector<int>{kDev});
 
   sets.clear();
-  g_hipPointerGetAttribute = [](void* data, hipPointer_attribute, hipDeviceptr_t) {
+  ScopedHook hipPointerGetAttribute2(g_hipPointerGetAttribute, [](void* data, hipPointer_attribute, hipDeviceptr_t) {
     *static_cast<int*>(data) = 1;
     return hipSuccess;
-  };
+  });
   EXPECT_EQ(ncclMemFree_impl(p), ncclUnhandledCudaError);
   EXPECT_EQ(sets, (std::vector<int>{1, kDev}));
   EXPECT_TRUE(frees_.empty());
 
-  g_hipGetDevice = [](int*) { return hipErrorInvalidValue; };
+  ScopedHook hipGetDevice(g_hipGetDevice, [](int*) { return hipErrorInvalidValue; });
   EXPECT_EQ(ncclMemFree_impl(p), ncclUnhandledCudaError);
 }
 #else
@@ -473,7 +437,7 @@ TEST_F(AllocatorMicrotest, MemAllocAndFree_PlainHipBelowRocm7) {
   EXPECT_EQ(mallocs_, std::vector<size_t>{100});
   ASSERT_EQ(ncclMemFree_impl(p), ncclSuccess);
   EXPECT_EQ(frees_, std::vector<void*>{p});
-  EXPECT_EQ(g_rocmInitCalls, 0);
+  EXPECT_EQ(g_rocmLibraryInitCalls, 0);
 }
 #endif  // ROCM_VERSION >= 70000
 
@@ -593,7 +557,8 @@ TEST_F(AllocatorSpaceMicrotest, ManySegmentsGrowTheCutArray) {
   EXPECT_EQ(Cuts(), std::vector<int64_t>{40});
 }
 
-// Padding appended to a full segment is never freed, so the space never empties; a fix flips this pin.
+// Padding appended to a full segment is never freed, so the space never empties.
+// Pins AICOMRCCL-3039; a fix flips this pin.
 TEST_F(AllocatorSpaceMicrotest, Alloc_KnownBug_AlignmentPaddingIsNeverFreed) {
   EXPECT_EQ(Alloc(1), 0);
   EXPECT_EQ(Alloc(1, 16), 16);
@@ -688,12 +653,12 @@ TEST_F(AllocatorShadowPoolMicrotest, Alloc_WithoutPoolSupportUsesHipMalloc) {
 
 TEST_F(AllocatorShadowPoolMicrotest, Alloc_FirstUseFailures) {
   void* dev = nullptr;
-  g_hipGetDevice = [](int*) { return hipErrorInvalidValue; };
+  ScopedHook hipGetDevice(g_hipGetDevice, [](int*) { return hipErrorInvalidValue; });
   EXPECT_EQ(ncclShadowPoolAlloc(&pool_, 8, &dev, nullptr, kStream), ncclUnhandledCudaError);
-  g_hipGetDevice = [](int* d) {
+  ScopedHook hipGetDevice2(g_hipGetDevice, [](int* d) {
     *d = kDev;
     return hipSuccess;
-  };
+  });
   attrResult_ = hipErrorInvalidValue;
   EXPECT_EQ(ncclShadowPoolAlloc(&pool_, 8, &dev, nullptr, kStream), ncclUnhandledCudaError);
   attrResult_ = hipSuccess;
@@ -721,7 +686,8 @@ TEST_F(AllocatorShadowPoolMicrotest, Alloc_DeviceAllocationFailuresAreReported) 
   EXPECT_TRUE(allocated_.empty());
 }
 
-// A large object whose zeroing fails is neither returned nor tracked, so it leaks; a fix flips this pin.
+// A large object whose zeroing fails is neither returned nor tracked, so it leaks.
+// Pins AICOMRCCL-3040; a fix flips this pin.
 TEST_F(AllocatorShadowPoolMicrotest, Alloc_KnownBug_LargeObjectLeaksWhenZeroingFails) {
   memsetResult_ = hipErrorInvalidValue;
   void* dev = nullptr;
@@ -734,7 +700,8 @@ TEST_F(AllocatorShadowPoolMicrotest, Alloc_KnownBug_LargeObjectLeaksWhenZeroingF
   ncclShadowPoolConstruct(&pool_);
 }
 
-// A page whose device allocation failed stays listed and backs the next allocation; a fix flips this pin.
+// A page whose device allocation failed stays listed and backs the next allocation.
+// Pins AICOMRCCL-3040; a fix flips this pin.
 TEST_F(AllocatorShadowPoolMicrotest, Alloc_KnownBug_FailedPageIsReusedWithoutDeviceMemory) {
   void* dev = this;
   mallocResult_ = hipErrorOutOfMemory;
@@ -844,13 +811,16 @@ TEST_F(AllocatorShadowPoolMicrotest, UnknownObjectsAreRejected) {
 #define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
 #endif
 
-// With no table yet, an unknown object crashes the lookup instead of being rejected; a fix flips this pin.
+// With no table yet, an unknown object crashes the lookup instead of being rejected.
+// Pins AICOMRCCL-3041; a fix flips this pin.
 TEST_F(AllocatorShadowPoolMicrotest, FreeAndToHost_KnownBug_UnknownObjectOnAnEmptyPoolCrashes) {
-  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   int other = 0;
   void* h = nullptr;
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   EXPECT_EXIT(ncclShadowPoolToHost(&pool_, &other, &h), DEATH_BY_SEGV, "");
   EXPECT_EXIT(ncclShadowPoolFree(&pool_, &other, kStream), DEATH_BY_SEGV, "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
 TEST_F(AllocatorShadowPoolMicrotest, Destruct_FreesObjectsPagesAndPool) {

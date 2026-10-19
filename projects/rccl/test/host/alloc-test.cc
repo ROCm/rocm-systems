@@ -6,7 +6,7 @@
 
 // Host-only microtests for the helpers in src/include/alloc.h: shutdown and skip-free gates, side
 // streams, host/device/VMM allocation and free, and the allocation tracker. HIP goes through
-// hip_fakes; the memory-manager calls and getBusId are seamed in this TU.
+// hip_fakes.cc; the memory-manager calls and getBusId through alloc_micro_fakes.cc.
 
 #include <gtest/gtest.h>
 
@@ -28,6 +28,8 @@
 
 #include "alloc.h"
 #include "debug.h"
+#include "fakes/alloc_micro_fakes.h"
+#include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 
 // hipify renames the CUDA FABRIC names wherever HIP has them; p2p.h only defines them otherwise.
@@ -37,70 +39,8 @@ const hipMemAllocationHandleType kFabricHandle = CU_MEM_HANDLE_TYPE_FABRIC;
 const hipMemAllocationHandleType kFabricHandle = hipMemHandleTypeFabric;
 #endif
 
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
-struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
-hipMemAllocationHandleType ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
-
 // ASan aborts on an oversized malloc instead of returning NULL, which the malloc-failure test needs.
 extern "C" const char* __asan_default_options() { return "allocator_may_return_null=1"; }
-
-namespace {
-
-std::vector<std::string> g_warns;
-int g_cuMemEnable = 0;
-ncclResult_t g_busIdResult = ncclSuccess;
-
-struct TrackCall {
-  void* ptr;
-  size_t size;
-  hipMemAllocationHandleType type;
-  ncclMemType_t memType;
-};
-std::vector<TrackCall> g_tracked;
-ncclResult_t g_trackResult = ncclSuccess;
-ncclMemUntrackInfo g_untrackInfo{};
-ncclResult_t g_untrackResult = ncclSuccess;
-std::vector<std::pair<void*, size_t>> g_untrackedPersist;
-
-bool Warned(const char* needle) {
-  for (const std::string& w : g_warns)
-    if (w.find(needle) != std::string::npos) return true;
-  return false;
-}
-
-}  // namespace
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long, const char*, int, const char* fmt, ...) {
-  if (level != NCCL_LOG_WARN) return;
-  char buf[512];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  g_warns.push_back(buf);
-}
-
-int ncclCuMemEnable() { return g_cuMemEnable; }
-size_t ncclOsGetPageSize() { return 4096; }
-ncclResult_t getBusId(int cudaDev, int64_t* busId) {
-  *busId = 0x100 * cudaDev;
-  return g_busIdResult;
-}
-ncclResult_t ncclMemTrack(struct ncclMemManager*, void* ptr, size_t size, hipMemGenericAllocationHandle_t,
-                          hipMemAllocationHandleType type, ncclMemType_t memType) {
-  g_tracked.push_back({ptr, size, type, memType});
-  return g_trackResult;
-}
-ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager*, void*, struct ncclMemUntrackInfo* info) {
-  *info = g_untrackInfo;
-  return g_untrackResult;
-}
-ncclResult_t ncclMemUntrackPersist(struct ncclMemManager*, void* ptr, size_t size) {
-  g_untrackedPersist.push_back({ptr, size});
-  return ncclSuccess;
-}
 
 namespace {
 
@@ -130,16 +70,7 @@ class AllocMicrotest : public ::testing::Test {
     ASSERT_FALSE(rcclSkipLsaFlatAddressFree());
     rcclShutdownFlag().store(false);
     sideStream.clear();
-    std::memset(allocTracker, 0, sizeof(allocTracker));
-    g_warns.clear();
-    g_cuMemEnable = 0;
-    g_busIdResult = ncclSuccess;
-    g_tracked.clear();
-    g_trackResult = ncclSuccess;
-    g_untrackInfo = {};
-    g_untrackResult = ncclSuccess;
-    g_untrackedPersist.clear();
-    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+    ResetAllocMicroFakes();
 
     g_hipGetDevice = [this](int* d) {
       *d = kDev;
@@ -341,6 +272,7 @@ TEST_F(AllocMicrotest, Shutdown_FreesBecomeNoOps) {
 
 // atexit runs handlers in reverse order, so a checker registered first sees the flag.
 TEST_F(AllocMicrotest, Shutdown_RegisteredHandlerRunsAtExit) {
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   EXPECT_EXIT(
       {
@@ -350,6 +282,7 @@ TEST_F(AllocMicrotest, Shutdown_RegisteredHandlerRunsAtExit) {
         std::exit(0);
       },
       ::testing::ExitedWithCode(42), "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
   rcclRegisterShutdownHandler();  // here too: it only arms the flag for this process's own exit
   EXPECT_FALSE(rcclShutdownFlag().load());
 }
@@ -368,11 +301,11 @@ TEST_F(AllocMicrotest, SkipFree_ArchPredicates) {
 TEST_F(AllocMicrotest, QueryDeviceProp_ReportsHipFailures) {
   hipDeviceProp_t prop;
   std::vector<int> devs;
-  g_hipGetDeviceProperties = [&](hipDeviceProp_t* p, int dev) {
+  ScopedHook hipGetDeviceProperties(g_hipGetDeviceProperties, [&](hipDeviceProp_t* p, int dev) {
     devs.push_back(dev);
     std::snprintf(p->gcnArchName, sizeof(p->gcnArchName), "gfx950");
     return Call("properties");
-  };
+  });
   ASSERT_TRUE(rcclQueryDeviceProp(&prop));
   EXPECT_STREQ(prop.gcnArchName, "gfx950");
   EXPECT_EQ(devs, std::vector<int>{kDev});
@@ -386,6 +319,7 @@ TEST_F(AllocMicrotest, QueryDeviceProp_ReportsHipFailures) {
 // The decision is memoized per process, so each case runs in a fresh child (no fixture, which
 // settles it): the exit code is rcclSkipCuMemFree() * 2 + rcclSkipLsaFlatAddressFree().
 TEST(AllocSkipFreeMicrotest, EnvOverridesArchAndIsComputedOnce) {
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   ResetHipFakes();
   auto arch = [](const char* name) {
@@ -411,6 +345,7 @@ TEST(AllocSkipFreeMicrotest, EnvOverridesArchAndIsComputedOnce) {
         _exit(first == rcclSkipCuMemFree() ? 7 : 8);
       },
       ::testing::ExitedWithCode(7), "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
 // Host-side calloc/realloc and owning pointers
@@ -771,7 +706,8 @@ TEST_F(AllocMicrotest, FreeAddr_SkipsWhatSuspendReleased) {
   for (const char* call : {"free", "retain", "range", "unmap", "release", "addrfree"}) EXPECT_EQ(Count(call), 0);
 }
 
-// A failed step frees the range with only the size already unmapped (0 if the first failed); a fix flips this pin.
+// A failed step frees the range with only the size already unmapped (0 if the first failed).
+// Pins AICOMRCCL-3042; a fix flips this pin.
 TEST_F(AllocMicrotest, FreeAddr_KnownBug_FailureFreesTheRangeWithThePartialSize) {
   ranges_[Va()] = {Va(), kGran};
   failing_ = {"range"};
@@ -902,7 +838,8 @@ TEST_F(AllocMicrotest, CuMemFree_SuspendedDynamicEntryOnlyFreesTheRange) {
   EXPECT_TRUE(g_untrackedPersist.empty());
 }
 
-// Same shared exit as ncclCuMemFreeAddr, so a failed step frees the range with size 0; a fix flips this pin.
+// Same shared exit as ncclCuMemFreeAddr, so a failed step frees the range with size 0.
+// Pins AICOMRCCL-3042; a fix flips this pin.
 TEST_F(AllocMicrotest, CuMemFree_KnownBug_FailuresStillFreeTheRange) {
   for (const char* step : {"retain", "release", "range", "unmap"}) {
     SCOPED_TRACE(step);
@@ -977,7 +914,8 @@ TEST_F(AllocMicrotest, GetAddressRange_ProbesForSysmemUntilFound) {
   }
 }
 
-// A failed properties read never releases the handle retained to probe for sysmem; a fix flips this pin.
+// A failed properties read never releases the handle retained to probe for sysmem.
+// Pins AICOMRCCL-3043; a fix flips this pin.
 TEST_F(AllocMicrotest, GetAddressRange_KnownBug_PropertiesFailureLeaksTheRetainedHandle) {
   hipDeviceptr_t base = nullptr;
   size_t total = 0;
@@ -1096,7 +1034,8 @@ TEST_F(AllocMicrotest, CudaCalloc_ZeroingFailuresWithoutCuMem) {
   Unheap(p);
 }
 
-// Zero elements allocate nothing but count an allocation that freeing never takes back; a fix flips this pin.
+// Zero elements allocate nothing but count an allocation that freeing never takes back.
+// Pins AICOMRCCL-3044; a fix flips this pin.
 TEST_F(AllocMicrotest, CudaAllocs_KnownBug_ZeroElementsStillCountAnAllocation) {
   char* p = reinterpret_cast<char*>(this);
   ASSERT_EQ(ncclCudaMalloc(&p, 0, nullptr), ncclSuccess);
@@ -1109,7 +1048,8 @@ TEST_F(AllocMicrotest, CudaAllocs_KnownBug_ZeroElementsStillCountAnAllocation) {
   EXPECT_EQ(allocTracker[kDev].totalAlloc, 3u);
 }
 
-// With cuMem each allocation is counted twice and the byte total drifts by the padding; a fix flips this pin.
+// With cuMem each allocation is counted twice and the byte total drifts by the padding.
+// Pins AICOMRCCL-3044; a fix flips this pin.
 TEST_F(AllocMicrotest, CudaAllocs_KnownBug_CuMemCountsEveryAllocationTwice) {
   g_cuMemEnable = 1;
   char* p = nullptr;
@@ -1122,7 +1062,8 @@ TEST_F(AllocMicrotest, CudaAllocs_KnownBug_CuMemCountsEveryAllocationTwice) {
   EXPECT_EQ((int64_t)allocTracker[kDev].totalAllocSize, (int64_t)(100 - kGran));
 }
 
-// A zeroing failure keeps and counts a buffer the caller can't free, and leaks the stream; a fix flips this pin.
+// A zeroing failure keeps and counts a buffer the caller can't free, and leaks the stream.
+// Pins AICOMRCCL-3045; a fix flips this pin.
 TEST_F(AllocMicrotest, CudaCalloc_KnownBug_ZeroingFailureLeaksTheBuffer) {
   failing_ = {"memset"};
   char* p = nullptr;
@@ -1134,7 +1075,7 @@ TEST_F(AllocMicrotest, CudaCalloc_KnownBug_ZeroingFailureLeaksTheBuffer) {
   Unheap(p);
 }
 
-// A failed side-stream lookup returns with relaxed capture mode still set; a fix flips this pin.
+// A failed side-stream lookup returns with relaxed capture mode still set. Pins AICOMRCCL-3046; a fix flips this pin.
 TEST_F(AllocMicrotest, CudaCalloc_KnownBug_SideStreamFailureLeavesTheCaptureModeSwitched) {
   g_busIdResult = ncclSystemError;
   char* p = nullptr;
@@ -1180,7 +1121,7 @@ TEST_F(AllocMicrotest, CudaMemcpy_Failures) {
   EXPECT_TRUE(CaptureModeRestored());
 }
 
-// A failed copy never destroys the private stream ncclCudaMemcpy created; a fix flips this pin.
+// A failed copy never destroys the private stream ncclCudaMemcpy created. Pins AICOMRCCL-3045; a fix flips this pin.
 TEST_F(AllocMicrotest, CudaMemcpy_KnownBug_CopyFailureLeaksThePrivateStream) {
   uint32_t a[4], b[4];
   failing_ = {"memcpy"};

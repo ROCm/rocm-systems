@@ -5,8 +5,8 @@
  ************************************************************************/
 
 // Host-only microtests for src/mem_manager.cc: entry teardown, Suspend/Resume and the peer handle
-// exchange, and the public Suspend/Resume/MemStats entry points. Bootstrap, proxy and group calls
-// are seamed in this TU; the cuMem calls go through hip_fakes.
+// exchange, and the public Suspend/Resume/MemStats entry points. Bootstrap, proxy and group calls go
+// through fakes/mem_manager_micro_fakes.cc, the cuMem calls through hip_fakes.cc.
 
 #include <gtest/gtest.h>
 
@@ -30,110 +30,9 @@
 #include "comm.h"
 #include "debug.h"
 #include "group.h"
-#include "fakes/fail_loud.h"
+#include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
-
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
-std::function<int64_t(const char*, int64_t)> g_loadParam;
-
-namespace {
-std::vector<std::string> g_warns;
-}  // namespace
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long, const char*, int, const char* fmt, ...) {
-  if (level != NCCL_LOG_WARN) return;
-  char buf[512];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  g_warns.push_back(buf);
-}
-
-thread_local int ncclGroupDepth = 0;
-thread_local ncclResult_t ncclGroupError = ncclSuccess;
-thread_local struct ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {};
-thread_local int ncclGroupBlocking = -1;
-
-std::function<ncclResult_t(int, int)> g_barrier;
-std::function<ncclResult_t(void*, int)> g_allGather;
-std::function<ncclResult_t(int, int, void*, int)> g_send;
-std::function<ncclResult_t(int, int, void*, int)> g_recv;
-std::function<ncclResult_t(int, void*, ncclIpcFd*)> g_getFd;
-std::function<ncclResult_t(ncclComm*)> g_commCheck;
-std::function<ncclResult_t()> g_groupEnd;
-std::function<ncclResult_t(ncclAsyncJob*, ncclResult_t (*)(ncclAsyncJob*), void (*)(void*))> g_mgmtEnqueue;
-std::vector<int> g_closedFds;
-int64_t g_rearch = 0;
-ncclResult_t g_asyncError = ncclSuccess;
-ncclResult_t g_asyncErrorResult = ncclSuccess;
-
-// Counts deletes of one watched pointer and keeps its memory, so a double delete is observable.
-// new is replaced too so the pair stays malloc/free, which ASan expects.
-void* g_watchedDelete = nullptr;
-int g_watchedDeletes = 0;
-void* operator new(size_t n) {
-  void* p = std::malloc(n ? n : 1);
-  if (p == nullptr) throw std::bad_alloc();
-  return p;
-}
-void operator delete(void* p) noexcept {
-  if (p != nullptr && p == g_watchedDelete) {
-    g_watchedDeletes++;
-    return;
-  }
-  std::free(p);
-}
-void operator delete(void* p, size_t) noexcept {
-  operator delete(p);
-}
-// mem_manager.cc allocates its jobs with new (std::nothrow), so the nothrow and array forms are replaced too.
-void* operator new[](size_t n) { return ::operator new(n); }
-void* operator new(size_t n, const std::nothrow_t&) noexcept { return std::malloc(n ? n : 1); }
-void* operator new[](size_t n, const std::nothrow_t&) noexcept { return std::malloc(n ? n : 1); }
-void operator delete[](void* p) noexcept { operator delete(p); }
-void operator delete[](void* p, size_t) noexcept { operator delete(p); }
-void operator delete(void* p, const std::nothrow_t&) noexcept { operator delete(p); }
-void operator delete[](void* p, const std::nothrow_t&) noexcept { operator delete(p); }
-
-ncclResult_t bootstrapBarrier(void*, int, int, int tag) { return g_barrier(tag, 0); }
-ncclResult_t bootstrapAllGather(void*, void* data, int size) { return g_allGather(data, size); }
-ncclResult_t bootstrapSend(void*, int peer, int tag, void* data, int size) { return g_send(peer, tag, data, size); }
-ncclResult_t bootstrapRecv(void*, int peer, int tag, void* data, int size) { return g_recv(peer, tag, data, size); }
-ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm*, int rank, void* handle, ncclIpcFd* fd) {
-  return g_getFd(rank, handle, fd);
-}
-int ncclIpcFdClose(ncclIpcFd fd) {
-  g_closedFds.push_back(fd);
-  return 0;
-}
-ncclResult_t CommCheck(struct ncclComm* comm, const char*, const char*) { return g_commCheck(comm); }
-ncclResult_t ncclCommEnsureReady(ncclComm_t) { return ncclSuccess; }
-ncclResult_t ncclGroupStartInternal() {
-  ncclGroupDepth++;
-  return ncclSuccess;
-}
-ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) {
-  ncclGroupDepth--;
-  ncclResult_t ret = g_groupEnd();
-  ncclGroupError = ncclSuccess;
-  return ret;
-}
-ncclResult_t ncclCommGetAsyncError(ncclComm_t, ncclResult_t* asyncError) {
-  *asyncError = g_asyncError;
-  return g_asyncErrorResult;
-}
-int64_t ncclParamEnqueueRearchEnable() { return g_rearch; }
-// Only ncclGroupCommJoin's collective arm reaches this; Suspend/Resume join as SymRegister.
-void* ncclMemoryStack::allocateSpilled(ncclMemoryStack*, size_t, size_t) {
-  FailLoudUnfaked("mem-manager-test", "ncclMemoryStack::allocateSpilled");
-}
-ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob* job, ncclResult_t (*func)(struct ncclAsyncJob*),
-                                 void (*destructor)(void*), ncclComm_t) {
-  return g_mgmtEnqueue(job, func, destructor);
-}
+#include "fakes/mem_manager_micro_fakes.h"
 
 int g_mallocFailAt = 0;
 int g_mallocCalls = 0;
@@ -577,11 +476,11 @@ TEST_F(MemManagerMicrotest, Suspend_RejectsMissingOrSuspendedManager) {
 
 TEST_F(MemManagerMicrotest, Suspend_FailsBeforeTouchingEntriesWhenSyncOrBarrierFails) {
   Track(Addr(0x1000), ncclMemScratch, 0x11);
-  g_hipDeviceSynchronize = [] { return hipErrorInvalidValue; };
+  ScopedHook hipDeviceSynchronize(g_hipDeviceSynchronize, [] { return hipErrorInvalidValue; });
   EXPECT_EQ(ncclCommMemSuspend(comm_.get()), ncclUnhandledCudaError);
   EXPECT_TRUE(barriers_.empty());
 
-  g_hipDeviceSynchronize = [] { return hipSuccess; };
+  ScopedHook hipDeviceSynchronize2(g_hipDeviceSynchronize, [] { return hipSuccess; });
   barrierResult_[0xBEEF] = ncclRemoteError;
   EXPECT_EQ(ncclCommMemSuspend(comm_.get()), ncclRemoteError);
   EXPECT_EQ(barriers_, std::vector<int>{0xBEEF});
@@ -670,10 +569,10 @@ TEST_F(MemManagerMicrotest, Suspend_OffloadBackupFailureStopsAtThatEntry) {
   std::vector<char> device(kSize);
   ncclDynMemEntry* offload = Track(device.data(), ncclMemOffload, 0x12);
   ncclDynMemEntry* later = Track(Addr(0x5000), ncclMemOffload, 0x15);
-  g_hipHostMalloc = [](void** ptr, size_t, unsigned) {
+  ScopedHook hipHostMalloc(g_hipHostMalloc, [](void** ptr, size_t, unsigned) {
     *ptr = nullptr;
     return hipErrorOutOfMemory;
-  };
+  });
   EXPECT_EQ(ncclCommMemSuspend(comm_.get()), ncclUnhandledCudaError);
   EXPECT_EQ(later->state, ncclDynMemStateActive);
   EXPECT_EQ(offload->state, ncclDynMemStateActive);
@@ -702,7 +601,8 @@ TEST_F(MemManagerMicrotest, Suspend_OffloadCopyFailureFreesTheBackup) {
   EXPECT_TRUE(unmaps_.empty());
 }
 
-// The retry backs the entry up again, leaking the first backup and counting it twice; a fix flips this pin.
+// The retry backs the entry up again, leaking the first backup and counting it twice.
+// Pins AICOMRCCL-3036; a fix flips this pin.
 TEST_F(MemManagerMicrotest, Suspend_KnownBug_RetryAfterOffloadUnmapFailureLeaksTheFirstBackup) {
   std::vector<char> device(kSize);
   ncclDynMemEntry* offload = Track(device.data(), ncclMemOffload, 0x12);
@@ -819,7 +719,8 @@ TEST_F(MemManagerMicrotest, Resume_RestoresAccessOnlyForSameProcessExportedPeers
   EXPECT_EQ(accessDevs_, (std::vector<int>{kDev, 11}));
 }
 
-// A failed restore leaves the new handle mapped on a Released entry, so it is never released; a fix flips this pin.
+// A failed restore leaves the new handle mapped on a Released entry, so it is never released.
+// Pins AICOMRCCL-3037; a fix flips this pin.
 TEST_F(MemManagerMicrotest, Resume_KnownBug_BackupRestoreFailureKeepsTheMappingButStaysReleased) {
   std::vector<char> device(kSize);
   ncclDynMemEntry* offload = Track(device.data(), ncclMemOffload, 0x12);
@@ -1025,13 +926,13 @@ TEST_F(MemManagerMicrotest, Reimport_FabricPeerBufferFromTheExchangedHandle) {
   MarkSuspended({imported});
   inbox_[1] = {Info(1, Addr(0x9000), kFabricHandle, 0)};
   inbox_[1][0].fabricHandle.data[0] = 0x42;
-  g_hipMemImportFromShareableHandle = [this](hipMemGenericAllocationHandle_t* h, void* shareable,
-                                             hipMemAllocationHandleType type) {
+  ScopedHook import(g_hipMemImportFromShareableHandle, [this](hipMemGenericAllocationHandle_t* h, void* shareable,
+                                                              hipMemAllocationHandleType type) {
     EXPECT_EQ(type, kFabricHandle);
     EXPECT_EQ(static_cast<unsigned char*>(shareable)[0], 0x42);
     *h = Handle(0x200);
     return hipSuccess;
-  };
+  });
   ASSERT_EQ(ncclCommMemResume(comm_.get()), ncclSuccess);
   EXPECT_TRUE(fdRequests_.empty());
   EXPECT_EQ(imported->handle, Handle(0x200));
@@ -1122,12 +1023,12 @@ TEST_F(MemManagerMicrotest, Reimport_SkipsTheNodeCheckWithoutPeerInfo) {
 // Public Suspend/Resume entry points
 
 TEST_F(MemManagerMicrotest, SuspendImpl_RejectsBadCommAndFlagsBeforeTheGroup) {
-  g_commCheck = [](ncclComm*) { return ncclInvalidArgument; };
+  ScopedHook commCheck(g_commCheck, [](ncclComm*) { return ncclInvalidArgument; });
   EXPECT_EQ(ncclCommSuspend_impl(comm_.get(), NCCL_SUSPEND_MEM), ncclInvalidArgument);
   EXPECT_EQ(ncclCommResume_impl(comm_.get()), ncclInvalidArgument);
   uint64_t value = 0;
   EXPECT_EQ(ncclCommMemStats_impl(comm_.get(), ncclStatGpuMemTotal, &value), ncclInvalidArgument);
-  g_commCheck = [](ncclComm*) { return ncclSuccess; };
+  ScopedHook commCheck2(g_commCheck, [](ncclComm*) { return ncclSuccess; });
   EXPECT_EQ(ncclCommSuspend_impl(comm_.get(), 0), ncclInvalidArgument);
   EXPECT_EQ(ncclCommSuspend_impl(comm_.get(), NCCL_SUSPEND_MEM | 0x10), ncclInvalidArgument);
   EXPECT_EQ(ncclGroupDepth, 0);
@@ -1179,12 +1080,12 @@ TEST_F(MemManagerMicrotest, ResumeImpl_RearchEnqueuesAJobThatResumes) {
   ASSERT_EQ(jobs_.size(), 1u);
   EXPECT_EQ(jobs_[0].func(jobs_[0].job), ncclSuccess);
   EXPECT_EQ(mgr_->released, 0);
-  g_hipSetDevice = [](int) { return hipErrorInvalidValue; };
+  ScopedHook hipSetDevice(g_hipSetDevice, [](int) { return hipErrorInvalidValue; });
   EXPECT_EQ(jobs_[0].func(jobs_[0].job), ncclUnhandledCudaError);
-  g_hipSetDevice = [](int dev) {
+  ScopedHook hipSetDevice2(g_hipSetDevice, [](int dev) {
     g_currentDevice = dev;
     return hipSuccess;
-  };
+  });
   jobs_[0].destructor(jobs_[0].job);
 }
 
@@ -1192,20 +1093,21 @@ TEST_F(MemManagerMicrotest, SuspendImpl_JobReportsSetDeviceFailure) {
   g_rearch = 1;
   ASSERT_EQ(ncclCommSuspend_impl(comm_.get(), NCCL_SUSPEND_MEM), ncclSuccess);
   ASSERT_EQ(jobs_.size(), 1u);
-  g_hipSetDevice = [](int) { return hipErrorInvalidValue; };
+  ScopedHook hipSetDevice(g_hipSetDevice, [](int) { return hipErrorInvalidValue; });
   EXPECT_EQ(jobs_[0].func(jobs_[0].job), ncclUnhandledCudaError);
   EXPECT_EQ(mgr_->released, 0);
   jobs_[0].destructor(jobs_[0].job);
 }
 
-// Suspend deletes a job ncclMgmtTaskEnqueue already destroyed on rejecting it (Resume doesn't); a fix flips this pin.
+// Suspend deletes a job ncclMgmtTaskEnqueue already destroyed on rejecting it (Resume doesn't).
+// Pins AICOMRCCL-3038; a fix flips this pin.
 TEST_F(MemManagerMicrotest, Impl_KnownBug_RejectedJobIsDeletedTwiceBySuspend) {
   g_rearch = 1;
-  g_mgmtEnqueue = [](ncclAsyncJob* job, ncclResult_t (*)(ncclAsyncJob*), void (*destructor)(void*)) {
+  ScopedHook enqueue(g_mgmtEnqueue, [](ncclAsyncJob* job, ncclResult_t (*)(ncclAsyncJob*), void (*destructor)(void*)) {
     g_watchedDelete = job;
     destructor(job);
     return ncclInvalidArgument;
-  };
+  });
   g_watchedDeletes = 0;
   EXPECT_EQ(ncclCommSuspend_impl(comm_.get(), NCCL_SUSPEND_MEM), ncclInvalidArgument);
   EXPECT_EQ(g_watchedDeletes, 2);
@@ -1251,20 +1153,20 @@ TEST_F(MemManagerMicrotest, Impl_AcceptsAPendingOppositeTask) {
 }
 
 TEST_F(MemManagerMicrotest, Impl_DeviceSwitchFailures) {
-  g_hipGetDevice = [](int*) { return hipErrorInvalidValue; };
+  ScopedHook hipGetDevice(g_hipGetDevice, [](int*) { return hipErrorInvalidValue; });
   EXPECT_EQ(ncclCommSuspend_impl(comm_.get(), NCCL_SUSPEND_MEM), ncclUnhandledCudaError);
   EXPECT_EQ(ncclCommResume_impl(comm_.get()), ncclUnhandledCudaError);
   EXPECT_EQ(ncclGroupDepth, 0);
 
-  g_hipGetDevice = [](int* dev) {
+  ScopedHook hipGetDevice2(g_hipGetDevice, [](int* dev) {
     *dev = 6;
     return hipSuccess;
-  };
+  });
   std::vector<int> sets;
-  g_hipSetDevice = [&](int dev) {
+  ScopedHook hipSetDevice(g_hipSetDevice, [&](int dev) {
     sets.push_back(dev);
     return dev == kDev ? hipErrorInvalidValue : hipSuccess;
-  };
+  });
   EXPECT_EQ(ncclCommSuspend_impl(comm_.get(), NCCL_SUSPEND_MEM), ncclUnhandledCudaError);
   mgr_->released = 1;
   EXPECT_EQ(ncclCommResume_impl(comm_.get()), ncclUnhandledCudaError);
@@ -1275,22 +1177,22 @@ TEST_F(MemManagerMicrotest, Impl_DeviceSwitchFailures) {
 
 TEST_F(MemManagerMicrotest, Impl_RestoreFailureIsReportedAfterSuccess) {
   g_rearch = 1;
-  g_hipSetDevice = [](int dev) { return dev == kDev ? hipSuccess : hipErrorInvalidValue; };
+  ScopedHook hipSetDevice(g_hipSetDevice, [](int dev) { return dev == kDev ? hipSuccess : hipErrorInvalidValue; });
   EXPECT_EQ(ncclCommSuspend_impl(comm_.get(), NCCL_SUSPEND_MEM), ncclUnhandledCudaError);
   mgr_->released = 1;
   EXPECT_EQ(ncclCommResume_impl(comm_.get()), ncclUnhandledCudaError);
-  g_hipSetDevice = [](int) { return hipSuccess; };
+  ScopedHook hipSetDevice2(g_hipSetDevice, [](int) { return hipSuccess; });
   for (auto& j : jobs_) j.destructor(j.job);
 }
 
 TEST_F(MemManagerMicrotest, Impl_GroupEndAndAsyncErrorsPropagate) {
   g_rearch = 1;
-  g_groupEnd = [] { return ncclRemoteError; };
+  ScopedHook groupEnd(g_groupEnd, [] { return ncclRemoteError; });
   EXPECT_EQ(ncclCommSuspend_impl(comm_.get(), NCCL_SUSPEND_MEM), ncclRemoteError);
   mgr_->released = 1;
   EXPECT_EQ(ncclCommResume_impl(comm_.get()), ncclRemoteError);
 
-  g_groupEnd = [] { return ncclSuccess; };
+  ScopedHook groupEnd2(g_groupEnd, [] { return ncclSuccess; });
   comm_->config.blocking = 0;
   g_asyncError = ncclInProgress;
   EXPECT_EQ(ncclCommResume_impl(comm_.get()), ncclInProgress);

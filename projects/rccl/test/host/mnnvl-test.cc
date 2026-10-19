@@ -21,25 +21,13 @@
 
 #include "comm.h"
 #include "debug.h"
-#include "fakes/fail_loud.h"
+#include "fakes/alloc_micro_fakes.h"
+#include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
-struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
-
 namespace {
-std::vector<std::string> g_warns;
-int g_cuMemEnable = 1;
 int g_callocFailAt = 0;
 int g_callocCalls = 0;
-
-bool Warned(const char* needle) {
-  for (const std::string& w : g_warns)
-    if (w.find(needle) != std::string::npos) return true;
-  return false;
-}
 
 template <typename T>
 ncclResult_t MnnvlCalloc(T** ptr, size_t nelem) {
@@ -47,35 +35,6 @@ ncclResult_t MnnvlCalloc(T** ptr, size_t nelem) {
   return ncclCallocDebug(ptr, nelem, __FILE__, __LINE__, __func__, true);
 }
 }  // namespace
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long, const char*, int, const char* fmt, ...) {
-  if (level != NCCL_LOG_WARN) return;
-  char buf[512];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  g_warns.push_back(buf);
-}
-
-hipMemAllocationHandleType ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
-int ncclCuMemEnable() { return g_cuMemEnable; }
-
-// The FABRIC probe allocates with no memory manager, so alloc.h never reaches the tracker.
-ncclResult_t ncclMemTrack(struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
-                          hipMemAllocationHandleType, ncclMemType_t) {
-  FailLoudUnfaked("mnnvl-test", "ncclMemTrack");
-}
-ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager*, void*, struct ncclMemUntrackInfo*) {
-  FailLoudUnfaked("mnnvl-test", "ncclMemUntrackDynamic");
-}
-ncclResult_t ncclMemUntrackPersist(struct ncclMemManager*, void*, size_t) {
-  FailLoudUnfaked("mnnvl-test", "ncclMemUntrackPersist");
-}
-ncclResult_t getBusId(int cudaDev, int64_t* busId) {
-  *busId = cudaDev;
-  return ncclSuccess;
-}
 
 #ifdef HIP_FABRIC_API
 hipError_t hipDrvGetErrorString(hipError_t, const char** str) {
@@ -105,11 +64,10 @@ class MnnvlMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     ResetHipFakes();
-    g_warns.clear();
+    ResetAllocMicroFakes();
     g_cuMemEnable = 1;
     g_callocFailAt = 0;
     g_callocCalls = 0;
-    ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
     // With HIP_FABRIC_API the check ends in a FABRIC alloc/export/free probe: let it succeed.
     InstallHipVmmEmulator();
     g_hipGetLastError = [this] {
@@ -319,7 +277,8 @@ TEST_F(MnnvlMicrotest, Probe_ExportFailureFreesTheBufferAndFails) {
 
 TEST_F(MnnvlMicrotest, Probe_FreeFailureIsReturned) {
   Build(0, 2);
-  g_hipMemRetainAllocationHandle = [](hipMemGenericAllocationHandle_t*, void*) { return hipErrorInvalidValue; };
+  ScopedHook retain(g_hipMemRetainAllocationHandle,
+                    [](hipMemGenericAllocationHandle_t*, void*) { return hipErrorInvalidValue; });
   EXPECT_EQ(ncclMnnvlCheck(comm_.get()), ncclUnhandledCudaError);
   EXPECT_EQ(comm_->MNNVL, 0);
   exportResult_ = hipErrorNotSupported;
