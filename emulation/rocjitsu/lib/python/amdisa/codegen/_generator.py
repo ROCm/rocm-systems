@@ -7801,6 +7801,9 @@ class CodeGenerator:
             )
 
         if cls.startswith('dot4_'):
+            if cls == 'dot4_f32_fp8':
+                formats = sem.name.rsplit('_', 2)[1:]
+                return gen_dot4(dst_ops, src_ops, cls, input_formats=tuple(formats))
             return gen_dot4(dst_ops, src_ops, cls)
 
         if cls.startswith('dot8_'):

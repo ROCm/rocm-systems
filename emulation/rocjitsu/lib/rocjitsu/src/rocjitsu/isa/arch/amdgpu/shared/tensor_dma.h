@@ -479,6 +479,19 @@ inline TensorDmaLdsPadding tensor_dma_lds_padding(const TensorDmaDescriptor &des
 inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &desc,
                                                     const TensorDmaLayout &layout,
                                                     const Wavefront &wf, bool store_from_lds) {
+  const auto owned_end = util::checked_add(uint64_t{wf.lds_base()}, uint64_t{wf.lds_size()});
+  if (!owned_end) [[unlikely]]
+    return false;
+  const uint64_t allocation_end = std::min<uint64_t>(wf.lds().size_bytes(), *owned_end);
+  // Barrier completion writes eight bytes even when the transfer has no elements.
+  if (desc.atomic_barrier) {
+    const auto barrier_address =
+        util::checked_add(uint64_t{wf.lds_base()}, uint64_t{desc.atomic_barrier_addr});
+    const auto barrier_end =
+        barrier_address ? util::checked_add(*barrier_address, uint64_t{8}) : std::nullopt;
+    if (!barrier_end || *barrier_end > allocation_end) [[unlikely]]
+      return false;
+  }
   const auto total_elements = tensor_element_count(desc, layout);
   if (!total_elements)
     return false;
@@ -516,10 +529,8 @@ inline bool validate_materialization_address_ranges(const TensorDmaDescriptor &d
       descriptor_base ? util::checked_add(*descriptor_base, *max_lds_byte) : std::nullopt;
   const auto transfer_end =
       last_address ? util::checked_add(*last_address, uint64_t{desc.elem_size}) : std::nullopt;
-  const auto owned_end = util::checked_add(uint64_t{wf.lds_base()}, uint64_t{wf.lds_size()});
-  if (!descriptor_base || !transfer_end || !owned_end) [[unlikely]]
+  if (!descriptor_base || !transfer_end) [[unlikely]]
     return false;
-  const uint64_t allocation_end = std::min<uint64_t>(wf.lds().size_bytes(), *owned_end);
   return *descriptor_base >= wf.lds_base() && *transfer_end <= allocation_end;
 }
 

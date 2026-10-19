@@ -486,6 +486,65 @@ TEST(Gfx1250ExecutionTest, TensorDmaOverflowSkipsCopyAndBarrier) {
   }
 }
 
+TEST(Gfx1250ExecutionTest, TensorDmaBarrierMustFitOwnedLds) {
+  Gfx1250Sim sim;
+  auto *cu = sim.cu();
+  auto *wf = cu->dispatch_wf(0, 0, kGfx1250ScalarSlots, 32);
+  ASSERT_NE(wf, nullptr);
+  cu->allocate_lds(256);
+  wf->set_lds_base(cu->allocate_lds(256));
+  wf->set_lds_size(256);
+  const uint32_t neighbour = cu->allocate_lds(256);
+  ASSERT_EQ(neighbour, wf->lds_base() + wf->lds_size());
+  constexpr uint64_t kGlobal = 0x1b0000;
+  write_tensor_dma_d0(*cu, *wf, 0, kGlobal);
+  write_wave_sgpr(*cu, *wf, 12, (2u << 16) | (1u << 18));
+  write_wave_sgpr(*cu, *wf, 15, 1u << 16);
+  const std::array<uint32_t, 3> words = {0xd0710001u, 0x7c000000u, 0x7c7c0c00u};
+  for (bool store : {false, true}) {
+    auto encoding = words;
+    if (store)
+      encoding[0] = 0xd0714001u;
+    for (uint32_t barrier : {256u, 0x7fff8u}) {
+      SCOPED_TRACE(store);
+      SCOPED_TRACE(barrier);
+      write_wave_sgpr(*cu, *wf, 13, (1u << 16) | (barrier >> 3));
+      write_global_u32(*sim.memory, kGlobal, 0x12345678u);
+      cu->lds().write32(wf->lds_base(), 0xabcdef00u);
+      cu->lds().write64(neighbour, 0);
+      auto inst = decode_gfx1250(encoding, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
+      ASSERT_NE(inst, nullptr);
+      EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
+      EXPECT_EQ(cu->lds().read32(wf->lds_base()), 0xabcdef00u);
+      EXPECT_EQ(read_global_u32(*sim.memory, kGlobal), 0x12345678u);
+      EXPECT_EQ(cu->lds().read64(neighbour), 0u);
+      EXPECT_TRUE(wf->wait_counters().empty());
+    }
+    write_wave_sgpr(*cu, *wf, 13, (1u << 16) | (248u >> 3));
+    cu->lds().write64(wf->lds_base() + 248, 0);
+    auto valid = decode_gfx1250(encoding, store ? "tensor_store_from_lds" : "tensor_load_to_lds");
+    ASSERT_NE(valid, nullptr);
+    EXPECT_TRUE(cu->execute_instruction(valid.get(), *wf).succeeded());
+    EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(cu->lds().read64(wf->lds_base() + 248)));
+  }
+
+  using namespace amdgpu::tensor_dma_detail;
+  TensorDmaDescriptor empty;
+  empty.count = 1;
+  empty.elem_size = 4;
+  empty.atomic_barrier = true;
+  empty.atomic_barrier_addr = 256;
+  TensorDmaState invalid_empty(empty, false);
+  EXPECT_TRUE(prepare_tensor(invalid_empty, *wf).failed());
+  EXPECT_TRUE(invalid_empty.elements.empty());
+  empty.atomic_barrier_addr = 248;
+  TensorDmaState valid_empty(empty, false);
+  ASSERT_TRUE(prepare_tensor(valid_empty, *wf).succeeded());
+  cu->lds().write64(wf->lds_base() + 248, 0);
+  EXPECT_EQ(resume_tensor_dma_state(valid_empty, *wf), amdgpu::VmAccessOutcome::Complete);
+  EXPECT_TRUE(amdgpu::lds_barrier_cell_phase_parity(cu->lds().read64(wf->lds_base() + 248)));
+}
+
 TEST(Gfx1250ExecutionTest, TensorDmaObservationReportsCompletedDenseLoadAndStore) {
   Gfx1250Sim sim;
   auto &observer = install_tensor_dma_observer(sim);

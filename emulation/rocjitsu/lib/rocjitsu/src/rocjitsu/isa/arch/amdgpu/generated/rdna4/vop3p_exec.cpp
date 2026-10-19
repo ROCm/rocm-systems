@@ -1444,7 +1444,7 @@ void VDot4F32Fp8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     for (int i = 0; i < 4; ++i) {
       float a = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));
-      float b = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));
+      float b = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));
       acc += a * b;
     }
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
@@ -1477,7 +1477,7 @@ RJ_NOINLINE void VDot4F32Fp8Bf8Vop3p::execute_modifier_impl(amdgpu::Wavefront &w
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     for (int i = 0; i < 4; ++i) {
       float a = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));
-      float b = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));
+      float b = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));
       acc += a * b;
     }
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
@@ -1499,7 +1499,7 @@ void VDot4F32Bf8Fp8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     for (int i = 0; i < 4; ++i) {
-      float a = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));
+      float a = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));
       float b = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));
       acc += a * b;
     }
@@ -1532,7 +1532,7 @@ RJ_NOINLINE void VDot4F32Bf8Fp8Vop3p::execute_modifier_impl(amdgpu::Wavefront &w
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     for (int i = 0; i < 4; ++i) {
-      float a = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));
+      float a = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));
       float b = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));
       acc += a * b;
     }
@@ -1611,8 +1611,8 @@ void VDot4F32Bf8Bf8Vop3p::execute_impl(amdgpu::Wavefront &wf) {
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     for (int i = 0; i < 4; ++i) {
-      float a = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));
-      float b = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));
+      float a = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));
+      float b = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));
       acc += a * b;
     }
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
@@ -1644,8 +1644,8 @@ RJ_NOINLINE void VDot4F32Bf8Bf8Vop3p::execute_modifier_impl(amdgpu::Wavefront &w
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(src2, lane));
     for (int i = 0; i < 4; ++i) {
-      float a = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));
-      float b = util::fp8_e4m3_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));
+      float a = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));
+      float b = util::bf8_e5m2_to_f32(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));
       acc += a * b;
     }
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
