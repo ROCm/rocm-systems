@@ -57,3 +57,9 @@ Environment::async_buffer_size()
 {
     return Environment::get<size_t>(Environment::ASYNC_BUFFER_SIZE);
 }
+
+optional<size_t>
+Environment::device_stream_pool_size()
+{
+    return Environment::get<size_t>(Environment::DEVICE_STREAM_POOL_SIZE);
+}

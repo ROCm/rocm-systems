@@ -76,3 +76,14 @@ Configuration::asyncBufferSize() const noexcept
     }()};
     return async_buffer_size_env;
 }
+
+size_t
+Configuration::deviceStreamPoolSize() const noexcept
+{
+    static size_t device_stream_pool_size_env{[] {
+        constexpr size_t default_size{32};
+        auto             env = Environment::device_stream_pool_size();
+        return (env && *env > 0) ? *env : default_size;
+    }()};
+    return device_stream_pool_size_env;
+}
