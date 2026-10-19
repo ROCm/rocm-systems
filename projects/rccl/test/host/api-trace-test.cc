@@ -17,13 +17,10 @@
 
 #include "nccl.h"
 #include "fakes/debug_fakes.h"
+#include "fakes/recorder_fakes.h"
+#include "fakes/roctx_fakes.h"
 
 namespace {
-std::vector<std::string> g_recorded;
-std::vector<std::string> g_rangeNames;
-std::vector<size_t> g_rangeBytes;
-int g_rangesOpen = 0;
-
 struct Call {
   std::string name;
   std::vector<uintptr_t> args;
@@ -50,25 +47,6 @@ ncclResult_t Hit(const char* name, A... a) {
 }  // namespace
 
 #include API_TRACE_CC_PATH
-
-namespace rccl {
-Recorder::Recorder() {}
-Recorder::~Recorder() {}
-Recorder& Recorder::instance() {
-  static Recorder inst;
-  return inst;
-}
-void Recorder::record(const char* name) { g_recorded.push_back(name); }
-}  // namespace rccl
-
-roctx_scoped_range_in::roctx_scoped_range_in(const nvtxPayloadSchemaEntry_t* /*schema*/,
-                                             const nvtxPayloadData_t* data, const size_t /*numEntries*/,
-                                             const char* schemaName) noexcept {
-  g_rangeNames.push_back(schemaName);
-  g_rangeBytes.push_back(static_cast<const NcclNvtxParamsMSCCL*>(data[0].payload)->bytes);
-  ++g_rangesOpen;
-}
-roctx_scoped_range_in::~roctx_scoped_range_in() noexcept { --g_rangesOpen; }
 
 // clang-format off
 ncclResult_t ncclAllGather_impl(const void* s, void* r, size_t n, ncclDataType_t t, ncclComm_t c, hipStream_t st) {
@@ -215,9 +193,8 @@ class ApiTraceMicrotest : public ::testing::Test {
   void SetUp() override {
     g_calls.clear();
     ResetDebugLog();
-    g_recorded.clear();
-    g_rangeNames.clear();
-    g_rangeBytes.clear();
+    ResetRecorderFakes();
+    ResetRoctxFakes();
     g_result = kResult;
   }
 };
@@ -227,7 +204,9 @@ TEST_F(ApiTraceMicrotest, Table_IsBuiltOnceInPlace) {
   EXPECT_EQ(tbl, rccl::RcclGetFunctionTable());
   EXPECT_EQ(static_cast<const void*>(tbl), static_cast<const void*>(rccl::m_buffer.data()));
   EXPECT_EQ(tbl->size, sizeof(rcclApiFuncTable));
-  volatile size_t members = 52;  // evaluated at run time too, not only in the static_asserts
+  // Slot count from the layout itself; volatile so the helpers also run at run time, not only in the static_asserts.
+  volatile size_t members =
+    (offsetof(rcclApiFuncTable, ncclCommGrow_fn) - offsetof(rcclApiFuncTable, ncclAllGather_fn)) / sizeof(void*) + 1;
   EXPECT_EQ(rccl::compute_table_size(members), sizeof(rcclApiFuncTable));
   EXPECT_EQ(rccl::compute_table_offset(members - 1), offsetof(rcclApiFuncTable, ncclCommGrow_fn));
 }
@@ -431,7 +410,7 @@ TEST_F(ApiTraceMicrotest, Msccl_LoadAndUnloadAreRecordedNoOps) {
   EXPECT_EQ(mscclLoadAlgo("/no/such/algo.xml", &handle, 0), ncclSuccess);
   EXPECT_EQ(mscclUnloadAlgo(handle), ncclSuccess);
   EXPECT_EQ(handle, 77);
-  EXPECT_EQ(g_recorded, (std::vector<std::string>{"mscclLoadAlgo", "mscclUnloadAlgo"}));
+  EXPECT_EQ(g_recorderLabels, (std::vector<std::string>{"mscclLoadAlgo", "mscclUnloadAlgo"}));
   std::vector<std::string> warnings = DebugLogLines(NCCL_LOG_WARN);
   ASSERT_EQ(warnings.size(), 2u);
   EXPECT_NE(warnings[0].find("mscclLoadAlgo has no effect"), std::string::npos);
@@ -444,13 +423,18 @@ TEST_F(ApiTraceMicrotest, Msccl_RunIsARecordedNoOp) {
   EXPECT_EQ(mscclRunAlgo(kSend, counts, counts, kRecv, counts, counts, 64, ncclFloat32, 0, 1, ncclSum, 3, kComm,
                          kStream),
             ncclSuccess);
-  EXPECT_EQ(g_recorded, std::vector<std::string>{"mscclRunAlgo"});
+  EXPECT_EQ(g_recorderLabels, std::vector<std::string>{"mscclRunAlgo"});
   std::vector<std::string> warnings = DebugLogLines(NCCL_LOG_WARN);
   ASSERT_EQ(warnings.size(), 1u);
   EXPECT_NE(warnings[0].find("mscclRunAlgo has no effect"), std::string::npos);
-  EXPECT_EQ(g_rangeNames, std::vector<std::string>{"RCCL_MSCCL"});
-  EXPECT_EQ(g_rangeBytes, std::vector<size_t>{64 * sizeof(float)});
-  EXPECT_EQ(g_rangesOpen, 0);
+  std::vector<RoctxRange> ranges = RoctxRanges();
+  ASSERT_EQ(ranges.size(), 1u);
+  EXPECT_EQ(ranges[0].name, "RCCL_MSCCL");
+  NcclNvtxParamsMSCCL payload;
+  ASSERT_EQ(ranges[0].payload.size(), sizeof(payload));
+  std::memcpy(&payload, ranges[0].payload.data(), sizeof(payload));
+  EXPECT_EQ(payload.bytes, 64 * sizeof(float));
+  EXPECT_EQ(RoctxRangesOpen(), 0);
   EXPECT_TRUE(g_calls.empty());
 }
 

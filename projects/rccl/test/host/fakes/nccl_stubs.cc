@@ -132,7 +132,7 @@ uint8_t ncclProfilerDeviceMode(int eActivationMask) {
   return mode;
 }
 bool ncclProfilerProxyDiagEnabled(void) { return false; }
-void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { }
+// ncclProfilerProxyTraceDumpIfAny: fakes/profiler_fakes.cc.
 ncclResult_t ncclRasCommFini(const struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunRasDiagnostics(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRunDiagnostics(struct ncclComm* comm) { return ncclSuccess; }

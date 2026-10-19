@@ -5,7 +5,9 @@
  ************************************************************************/
 
 // Host-only microtests for src/include/timer.h built with ENABLE_TIMER: the rdtsc calibration and
-// the TIME_* accumulators.
+// the TIME_* accumulators. That arm needs <x86intrin.h> and __rdtsc, so the suite is x86-64 only.
+
+#if defined(__x86_64__)
 
 #define ENABLE_TIMER 1
 
@@ -74,3 +76,5 @@ TEST_F(TimerMicrotest, Print_ListsActiveSlotsAndResetsTheirCounts) {
 }
 
 }  // namespace
+
+#endif  // defined(__x86_64__)

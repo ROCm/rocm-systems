@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iomanip>
@@ -34,6 +35,7 @@
 #include <vector>
 
 #include "../common/LogCapture.hpp"
+#include "../common/ScopedEnv.hpp"
 #include "nccl.h"
 #include "fakes/debug_fakes.h"
 
@@ -76,11 +78,13 @@ hipError_t hipGraphAddHostNode(hipGraphNode_t*, hipGraph_t graph, const hipGraph
   return g_addHostNodeResult;
 }
 
-// Recorder's constructor and state are private and it reads the environment once per process, so the tests
-// open them up to re-run the constructor on the singleton and read what it chose.
+// Recorder's constructor and state are private and it reads the environment once per process, so the tests open
+// recorder.h up to re-run the constructor on the singleton and read what it chose. Its own includes are already in
+// above, so the define reaches nothing else.
 #define private public
-#include RECORDER_CC_PATH
+#include "recorder.h"
 #undef private
+#include RECORDER_CC_PATH
 
 namespace {
 
@@ -146,9 +150,6 @@ Context ParseContext(const std::string& line) {
 class RecorderMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    char dirTemplate[] = "/tmp/rccl-recorder-test-XXXXXX";
-    ASSERT_NE(mkdtemp(dirTemplate), nullptr);
-    dir_ = dirTemplate;
     ResetDebugLog();
     g_device = 2;
     g_addressRangeResult = hipSuccess;
@@ -169,38 +170,43 @@ class RecorderMicrotest : public ::testing::Test {
 
   void TearDown() override {
     Restart(nullptr);
-    std::system(("rm -rf " + dir_).c_str());
+    if (!dir_.empty()) std::filesystem::remove_all(dir_);
+  }
+
+  // A fresh directory for RCCL_REPLAY_FILE, made on first use.
+  const std::string& Dir() {
+    if (dir_.empty()) {
+      char dirTemplate[] = "/tmp/rccl-recorder-test-XXXXXX";
+      EXPECT_NE(mkdtemp(dirTemplate), nullptr);
+      dir_ = dirTemplate;
+    }
+    return dir_;
   }
 
   // Re-runs the singleton's constructor with RCCL_REPLAY_FILE (and optionally RCCL_LOG_LEVEL) set.
   Recorder& Restart(const char* file, const char* logLevel = nullptr) {
-    if (file) setenv("RCCL_REPLAY_FILE", file, 1);
-    else unsetenv("RCCL_REPLAY_FILE");
-    if (logLevel) setenv("RCCL_LOG_LEVEL", logLevel, 1);
-    else unsetenv("RCCL_LOG_LEVEL");
+    RcclUnitTesting::ScopedEnv replayFile("RCCL_REPLAY_FILE", file), level("RCCL_LOG_LEVEL", logLevel);
     Recorder& r = Recorder::instance();
     r.~Recorder();
     new (&r) Recorder();
     rccl::lastcall = rccl::rrGroupStart;
     Recorder::depth = 0;
-    unsetenv("RCCL_REPLAY_FILE");
-    unsetenv("RCCL_LOG_LEVEL");
     return r;
   }
 
   Recorder& StartJson(const char* logLevel = nullptr) {
-    Recorder& r = Restart((dir_ + "/trace.json").c_str(), logLevel);
+    Recorder& r = Restart((Dir() + "/trace.json").c_str(), logLevel);
     path_ = Output("/trace", ".json");
     return r;
   }
   Recorder& StartBinary() {
-    Recorder& r = Restart((dir_ + "/trace.bin").c_str());
+    Recorder& r = Restart((Dir() + "/trace.bin").c_str());
     path_ = Output("/trace", ".bin");
     return r;
   }
 
   std::string Output(const std::string& name, const std::string& ext) {
-    return dir_ + name + "." + std::to_string(getpid()) + "." + HostName() + ext;
+    return Dir() + name + "." + std::to_string(getpid()) + "." + HostName() + ext;
   }
 
   // JSON entries after the opening "{" and "  version : 1," lines.
@@ -286,7 +292,7 @@ TEST_F(RecorderMicrotest, FileName_OtherExtensionIsBinary) {
 }
 
 TEST_F(RecorderMicrotest, FileName_WithoutExtensionIsBinary) {
-  Recorder& r = Restart((dir_ + "/trace").c_str(), "3");
+  Recorder& r = Restart((Dir() + "/trace").c_str(), "3");
   EXPECT_EQ(r.output_json, 0);
   EXPECT_EQ(r.logLevel, 3);
   path_ = Output("/trace", "");
@@ -294,9 +300,10 @@ TEST_F(RecorderMicrotest, FileName_WithoutExtensionIsBinary) {
   EXPECT_EQ(ReadFile(path_), "");
 }
 
-// The extension starts at the first '.' in the whole path, so a dotted directory breaks it; a fix flips this pin.
+// The extension starts at the first '.' in the whole path, so a dotted directory breaks it. Pins AICOMRCCL-2955; a fix
+// flips this pin.
 TEST_F(RecorderMicrotest, FileName_KnownBug_DotInDirectorySplitsThePath) {
-  std::string dotted = dir_ + "/run.1";
+  std::string dotted = Dir() + "/run.1";
   ASSERT_EQ(mkdir(dotted.c_str(), 0700), 0);
   Recorder& r = Restart((dotted + "/trace.json").c_str());
   EXPECT_EQ(r.output_json, 0);
@@ -431,7 +438,8 @@ TEST_F(RecorderMicrotest, Json_ConfigIsAppendedToInitRankConfig) {
     << e[0];
 }
 
-// "color" prints the comm pointer's low bits, "key" the color and "newcomm" the key; a fix flips this pin.
+// "color" prints the comm pointer's low bits, "key" the color and "newcomm" the key. Pins AICOMRCCL-2956; a fix flips
+// this pin.
 TEST_F(RecorderMicrotest, Json_KnownBug_SplitFieldsAreShiftedByOne) {
   Recorder& r = StartJson();
   ncclComm_t parent = reinterpret_cast<ncclComm_t>(0x1234);
@@ -625,7 +633,7 @@ TEST_F(RecorderMicrotest, Binary_RecordFieldsPerOverload) {
 }
 
 TEST_F(RecorderMicrotest, Binary_JsonOnlyExtrasAreLeftOut) {
-  Recorder& r = Restart((dir_ + "/trace.bin").c_str(), "2");
+  Recorder& r = Restart((Dir() + "/trace.bin").c_str(), "2");
   path_ = Output("/trace", ".bin");
   ncclSimInfo_t sim = NCCL_SIM_INFO_INITIALIZER;
   ncclConfig_t config = NCCL_CONFIG_INITIALIZER;

@@ -19,6 +19,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <mutex>
@@ -28,9 +29,11 @@
 #include <thread>
 #include <vector>
 
-#include "utils.h"  // defines the real clockRealtime before the rename below
+#include "../common/ScopedEnv.hpp"
+#include "utils.h"
 
 namespace {
+// Not fakes/env_fakes.cc: DebugFile_KnownBug_TrailingPercentReadsPastTheName needs a value followed by a second NUL.
 std::map<std::string, std::string> g_env;
 bool g_envPluginReady = true;
 std::string g_hostName;
@@ -75,6 +78,7 @@ ncclResult_t ncclParamRegistry::add(std::string key, ncclParamInfo_t /*info*/, n
 extern "C" const char* ncclParamEnvPluginGet(const char* /*key*/, bool /*envInit*/) { return nullptr; }
 extern "C" bool ncclParamIsCacheDisabled(const char* /*key*/) { return false; }
 
+// utils.h, included above, declares and defines the real clockRealtime, so the rename reaches only debug.cc's calls.
 static void fakeClockRealtime(timespec* ts) { *ts = g_now; }
 #define clockRealtime fakeClockRealtime
 #include DEBUG_CC_PATH
@@ -112,9 +116,6 @@ class DebugMicrotest : public ::testing::Test {
     ncclDebugNoWarn = 0;
     ncclWarnSetDebugInfo = false;
     ncclLastError[0] = '\0';
-    char dirTemplate[] = "/tmp/rccl-debug-test-XXXXXX";
-    ASSERT_NE(mkdtemp(dirTemplate), nullptr);
-    dir_ = dirTemplate;
     capture_ = std::tmpfile();
     ASSERT_NE(capture_, nullptr);
   }
@@ -125,7 +126,17 @@ class DebugMicrotest : public ::testing::Test {
     std::fclose(capture_);
     ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
     ncclDebugMask = 0;
-    std::system(("rm -rf " + dir_).c_str());
+    if (!dir_.empty()) std::filesystem::remove_all(dir_);
+  }
+
+  // A fresh directory for NCCL_DEBUG_FILE, made on first use.
+  const std::string& Dir() {
+    if (dir_.empty()) {
+      char dirTemplate[] = "/tmp/rccl-debug-test-XXXXXX";
+      EXPECT_NE(mkdtemp(dirTemplate), nullptr);
+      dir_ = dirTemplate;
+    }
+    return dir_;
   }
 
   // Re-reads the environment the way a reset does, then captures output unless NCCL_DEBUG_FILE took it.
@@ -234,9 +245,15 @@ TEST_F(DebugMicrotest, Subsys_CaretExcludesTheListedNames) {
   EXPECT_EQ(SubsysFor("^INIT,NET"), ~(uint64_t)(NCCL_INIT | NCCL_NET));
 }
 
-// NCCL_DEBUG_SUBSYS documents ALLOC_HOST, but the runtime parser does not know it; a fix flips this pin.
+// The published NCCL_DEBUG_SUBSYS options have ALLOC_HOST but not VERBS; the runtime parser has VERBS but not
+// ALLOC_HOST. Pins AICOMRCCL-2950; a fix flips this pin.
 TEST_F(DebugMicrotest, Subsys_KnownBug_AllocHostIsIgnored) {
   EXPECT_EQ(SubsysFor("ALLOC_HOST"), 0u);
+  uint64_t published = 0;
+  EXPECT_EQ(ncclParamDebugSubsys.parser.resolve("ALLOC_HOST", published), ncclSuccess);
+  EXPECT_EQ(published, (uint64_t)NCCL_ALLOC_HOST);
+  EXPECT_EQ(SubsysFor("VERBS"), (uint64_t)NCCL_VERBS);
+  EXPECT_EQ(ncclParamDebugSubsys.parser.resolve("VERBS", published), ncclInvalidArgument);
 }
 
 TEST_F(DebugMicrotest, WarnEnableDebugInfo_ParsesAnInteger) {
@@ -259,7 +276,7 @@ TEST_F(DebugMicrotest, WarnEnableDebugInfo_EmptyOrOutOfRangeKeepsThePreviousValu
   EXPECT_FALSE(ncclWarnSetDebugInfo);
 }
 
-// An unset variable keeps the previous value instead of the default; a fix flips this pin.
+// An unset variable keeps the previous value instead of the default. Pins AICOMRCCL-2952; a fix flips this pin.
 TEST_F(DebugMicrotest, WarnEnableDebugInfo_KnownBug_SurvivesAResetWithoutIt) {
   g_env["NCCL_WARN_ENABLE_DEBUG_INFO"] = "1";
   Init();
@@ -268,7 +285,7 @@ TEST_F(DebugMicrotest, WarnEnableDebugInfo_KnownBug_SurvivesAResetWithoutIt) {
   EXPECT_TRUE(ncclWarnSetDebugInfo);
 }
 
-// The documented default is WARN,ATTN, but the runtime default is WARN only; a fix flips this pin.
+// The documented default is WARN,ATTN, but the runtime default is WARN only. Pins AICOMRCCL-2951; a fix flips this pin.
 TEST_F(DebugMicrotest, TimestampLevels_KnownBug_DefaultIsWarnOnly) {
   Init();
   EXPECT_EQ(ncclDebugTimestampLevels, kWarn);
@@ -288,7 +305,7 @@ TEST_F(DebugMicrotest, TimestampLevels_CaretExcludesTheListedLevels) {
   EXPECT_EQ(TimestampLevelsFor("^WARN,INFO"), ~(kWarn | kInfo));
 }
 
-// ATTN and ERROR are documented levels the runtime parser silently ignores; a fix flips this pin.
+// ATTN and ERROR are documented levels the runtime parser silently ignores. Pins AICOMRCCL-2951; a fix flips this pin.
 TEST_F(DebugMicrotest, TimestampLevels_KnownBug_AttnAndErrorAreIgnored) {
   EXPECT_EQ(TimestampLevelsFor("ATTN,ERROR"), 0u);
 }
@@ -383,34 +400,35 @@ TEST_F(DebugMicrotest, Tid_IsLookedUpOncePerThread) {
 
 TEST_F(DebugMicrotest, DebugFile_ExpandsHostPidAndPercent) {
   g_env["NCCL_DEBUG"] = "INFO";
-  g_env["NCCL_DEBUG_FILE"] = dir_ + "/log.%h.%p.%%.%x";
+  g_env["NCCL_DEBUG_FILE"] = Dir() + "/log.%h.%p.%%.%x";
   Init();
   ASSERT_NE(ncclDebugFile, stdout);
   ncclDebugLog(NCCL_LOG_INFO, NCCL_INIT, "f", 1, "to file");
-  EXPECT_EQ(ReadFile(dir_ + "/log.node1.4242.%.%x"), "node1:4242:77 [3] NCCL INFO to file\n");
+  EXPECT_EQ(ReadFile(Dir() + "/log.node1.4242.%.%x"), "node1:4242:77 [3] NCCL INFO to file\n");
 }
 
 TEST_F(DebugMicrotest, DebugFile_IsLineBuffered) {
   g_env["NCCL_DEBUG"] = "WARN";
-  g_env["NCCL_DEBUG_FILE"] = dir_ + "/log";
+  g_env["NCCL_DEBUG_FILE"] = Dir() + "/log";
   g_env["NCCL_DEBUG_TIMESTAMP_LEVELS"] = "";
   Init();
   ncclDebugLog(NCCL_LOG_WARN, NCCL_INIT, "f", 1, "w");
-  EXPECT_EQ(ReadFile(dir_ + "/log"), "\nnode1:4242:77 [3] f:1 NCCL WARN w\n");
+  EXPECT_EQ(ReadFile(Dir() + "/log"), "\nnode1:4242:77 [3] f:1 NCCL WARN w\n");
 }
 
-// A trailing '%' makes the loop read past the NUL (a second NUL keeps this in bounds); a fix flips this pin.
+// A trailing '%' makes the loop read past the NUL (a second NUL keeps this in bounds). Pins AICOMRCCL-2953; a fix
+// flips this pin.
 TEST_F(DebugMicrotest, DebugFile_KnownBug_TrailingPercentReadsPastTheName) {
   g_env["NCCL_DEBUG"] = "INFO";
-  g_env["NCCL_DEBUG_FILE"] = dir_ + "/log%";
+  g_env["NCCL_DEBUG_FILE"] = Dir() + "/log%";
   g_env["NCCL_DEBUG_FILE"].push_back('\0');
   Init();
   ncclDebugLog(NCCL_LOG_INFO, NCCL_INIT, "f", 1, "x");
-  EXPECT_EQ(ReadFile(dir_ + "/log%"), "node1:4242:77 [3] NCCL INFO x\n");
+  EXPECT_EQ(ReadFile(Dir() + "/log%"), "node1:4242:77 [3] NCCL INFO x\n");
 }
 
 TEST_F(DebugMicrotest, DebugFile_NotOpenedForErrorAndVersionOnly) {
-  g_env["NCCL_DEBUG_FILE"] = dir_ + "/log";
+  g_env["NCCL_DEBUG_FILE"] = Dir() + "/log";
   for (const char* level : {"VERSION", "NONE"}) {
     g_env["NCCL_DEBUG"] = level;
     Init();
@@ -424,7 +442,7 @@ TEST_F(DebugMicrotest, DebugFile_NotOpenedForErrorAndVersionOnly) {
   Init();
   EXPECT_NE(ncclDebugFile, capture_);
   struct stat st;
-  EXPECT_EQ(stat((dir_ + "/log").c_str(), &st), 0);
+  EXPECT_EQ(stat((Dir() + "/log").c_str(), &st), 0);
 }
 
 TEST_F(DebugMicrotest, DebugFile_EmptyOrUnopenableStaysOnStdout) {
@@ -433,7 +451,7 @@ TEST_F(DebugMicrotest, DebugFile_EmptyOrUnopenableStaysOnStdout) {
   ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_RESET_TRIGGERED;
   ncclDebugInit();
   EXPECT_EQ(ncclDebugFile, stdout);
-  g_env["NCCL_DEBUG_FILE"] = dir_ + "/missing/log";
+  g_env["NCCL_DEBUG_FILE"] = Dir() + "/missing/log";
   ncclDebugInit();
   EXPECT_EQ(ncclDebugFile, stdout);
 }
@@ -452,7 +470,7 @@ TEST_F(DebugMicrotest, DebugFile_LongNamesAreClampedToPathMax) {
 // "./" segments keep a path this long valid.
 TEST_F(DebugMicrotest, DebugFile_PathUpToPathMaxIsUsed) {
   g_env["NCCL_DEBUG"] = "INFO";
-  std::string head = dir_ + "/";
+  std::string head = Dir() + "/";
   while (head.size() < PATH_MAX - 200) head += "./";
   // The expanded name (".%p" becomes ".4242") is PATH_MAX - 1 chars.
   std::string expanded = head + std::string(PATH_MAX - 1 - head.size() - 5, 'L') + ".4242";
@@ -650,36 +668,36 @@ TEST_F(DebugMicrotest, Log_WarnEnablesInfoWhenRequested) {
 
 TEST_F(DebugMicrotest, LazyInit_FirstLogReadsTheEnvironment) {
   g_env["NCCL_DEBUG"] = "INFO";
-  g_env["NCCL_DEBUG_FILE"] = dir_ + "/lazy";
+  g_env["NCCL_DEBUG_FILE"] = Dir() + "/lazy";
   ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
   ncclDebugMask = 0;
   ncclDebugLog(NCCL_LOG_INFO, NCCL_INIT, "f", 1, "first");
   EXPECT_EQ(ncclDebugMask, kDefaultSubsys);
-  EXPECT_EQ(ReadFile(dir_ + "/lazy"), "node1:4242:77 [3] NCCL INFO first\n");
+  EXPECT_EQ(ReadFile(Dir() + "/lazy"), "node1:4242:77 [3] NCCL INFO first\n");
 }
 
 TEST_F(DebugMicrotest, LazyInit_RechecksAfterInit) {
   g_env["NCCL_DEBUG"] = "INFO";
-  g_env["NCCL_DEBUG_FILE"] = dir_ + "/lazy";
+  g_env["NCCL_DEBUG_FILE"] = Dir() + "/lazy";
   ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
   ncclDebugLog(NCCL_LOG_INFO, NCCL_NET, "f", 1, "net");
   EXPECT_EQ(ncclDebugLevelMask, kError | kVersion | kWarn | kAttn | kInfo);
-  EXPECT_EQ(ReadFile(dir_ + "/lazy"), "");
+  EXPECT_EQ(ReadFile(Dir() + "/lazy"), "");
 }
 
 TEST_F(DebugMicrotest, Reset_ClosesTheOldFileAndRereadsTheEnvironment) {
   g_env["NCCL_DEBUG"] = "INFO";
-  g_env["NCCL_DEBUG_FILE"] = dir_ + "/one";
+  g_env["NCCL_DEBUG_FILE"] = Dir() + "/one";
   Init();
   ncclDebugLog(NCCL_LOG_INFO, NCCL_INIT, "f", 1, "1");
   ncclResetDebugInitInternal();
   EXPECT_EQ(ncclDebugLevelMask, NCCL_DEBUG_LEVEL_MASK_RESET_TRIGGERED);
-  g_env["NCCL_DEBUG_FILE"] = dir_ + "/two";
+  g_env["NCCL_DEBUG_FILE"] = Dir() + "/two";
   g_env["NCCL_DEBUG_SUBSYS"] = "NET";
   ncclDebugLog(NCCL_LOG_INFO, NCCL_NET, "f", 1, "2");
   EXPECT_EQ(ncclDebugMask, (uint64_t)NCCL_NET);
-  EXPECT_EQ(ReadFile(dir_ + "/one"), "node1:4242:77 [3] NCCL INFO 1\n");
-  EXPECT_EQ(ReadFile(dir_ + "/two"), "node1:4242:77 [3] NCCL INFO 2\n");
+  EXPECT_EQ(ReadFile(Dir() + "/one"), "node1:4242:77 [3] NCCL INFO 1\n");
+  EXPECT_EQ(ReadFile(Dir() + "/two"), "node1:4242:77 [3] NCCL INFO 2\n");
 }
 
 TEST_F(DebugMicrotest, Reset_InitWithoutResetKeepsTheFileOpen) {
@@ -700,22 +718,16 @@ TEST_F(DebugMicrotest, Reset_DeprecatedPublicEntryPointStillResets) {
 #pragma clang diagnostic pop
 
 TEST_F(DebugMicrotest, Env_WithoutTheEnvPluginReadsTheProcessEnvironment) {
-  // Clear whatever NCCL_DEBUG* the test run inherited, and put it back afterwards.
-  std::map<std::string, std::string> saved;
-  for (const char* key : {"NCCL_DEBUG", "NCCL_DEBUG_LEVELS", "NCCL_DEBUG_SUBSYS", "NCCL_WARN_ENABLE_DEBUG_INFO",
-                          "NCCL_DEBUG_TIMESTAMP_LEVELS", "NCCL_DEBUG_TIMESTAMP_FORMAT", "NCCL_DEBUG_FILE"}) {
-    if (const char* value = std::getenv(key)) saved[key] = value;
-    unsetenv(key);
-  }
+  using RcclUnitTesting::ScopedEnv;
+  ScopedEnv debug("NCCL_DEBUG", "WARN"), levels("NCCL_DEBUG_LEVELS", nullptr), subsys("NCCL_DEBUG_SUBSYS", nullptr),
+    warnInfo("NCCL_WARN_ENABLE_DEBUG_INFO", nullptr), tsLevels("NCCL_DEBUG_TIMESTAMP_LEVELS", nullptr),
+    tsFormat("NCCL_DEBUG_TIMESTAMP_FORMAT", nullptr), file("NCCL_DEBUG_FILE", nullptr);
   g_envPluginReady = false;
   g_env["NCCL_DEBUG"] = "TRACE";  // ignored
   g_env["NCCL_DEBUG_SUBSYS"] = "NET";  // ignored
-  setenv("NCCL_DEBUG", "WARN", 1);
 
   Init();
 
-  unsetenv("NCCL_DEBUG");
-  for (const auto& kv : saved) setenv(kv.first.c_str(), kv.second.c_str(), 1);
   EXPECT_EQ(ncclDebugLevelMask, kError | kVersion | kWarn);
   EXPECT_EQ(ncclDebugMask, kDefaultSubsys);
 }
@@ -813,7 +825,8 @@ TEST_F(DebugThreadNameMicrotest, Pthread_NamedOnlyWhenEnabled) {
   EXPECT_EQ(NameOf([](std::thread& t) { ncclSetThreadName(t.native_handle(), "IB %s", "async"); }), initialName_);
 }
 
-// The overloads disagree on values other than 0 and 1: only std::thread treats them as enabled; a fix flips this pin.
+// The overloads disagree on values other than 0 and 1: only std::thread treats them as enabled. Pins AICOMRCCL-2954; a
+// fix flips this pin.
 TEST_F(DebugThreadNameMicrotest, SetThreadName_KnownBug_NonBinarySettingNamesOnlyStdThreads) {
   g_setThreadName = 2;
   EXPECT_EQ(NameOf([](std::thread& t) { ncclSetThreadName(t, "std"); }), "std");

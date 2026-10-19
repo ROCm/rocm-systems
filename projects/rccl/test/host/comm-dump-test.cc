@@ -15,12 +15,7 @@
 
 #include "../common/LogCapture.hpp"
 #include "comm.h"
-
-namespace {
-std::vector<void*> g_dumpedContexts;
-}  // namespace
-
-void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { g_dumpedContexts.push_back(profilerContext); }
+#include "fakes/profiler_fakes.h"
 
 #include COMM_DUMP_CC_PATH
 
@@ -32,7 +27,7 @@ using RcclUnitTesting::LogHas;
 class CommDumpMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    g_dumpedContexts.clear();
+    ResetProfilerFakes();
     comm_ = std::make_unique<ncclComm>();
     comm_->proxyState = reinterpret_cast<ncclProxyState*>(0x50);
     comm_->profilerContext = reinterpret_cast<void*>(0xc7);
@@ -47,7 +42,7 @@ TEST_F(CommDumpMicrotest, DumpsTheProfilerProxyTrace) {
   std::string log = CaptureLog([&] { res = ncclCommDump(comm_.get(), map_); });
 
   EXPECT_EQ(res, ncclSuccess);
-  EXPECT_EQ(g_dumpedContexts, std::vector<void*>{reinterpret_cast<void*>(0xc7)});
+  EXPECT_EQ(ProfilerProxyTraceDumps(), std::vector<void*>{reinterpret_cast<void*>(0xc7)});
   EXPECT_TRUE(LogHas(log, "ncclCommDump() proxy-trace (profiler plugin):")) << log;
   EXPECT_EQ(map_, (std::unordered_map<std::string, std::string>{{"key", "value"}}));
 }
@@ -57,7 +52,7 @@ TEST_F(CommDumpMicrotest, NullCommIsWarnedAndSkipped) {
   std::string log = CaptureLog([&] { res = ncclCommDump(nullptr, map_); });
 
   EXPECT_EQ(res, ncclSuccess);
-  EXPECT_TRUE(g_dumpedContexts.empty());
+  EXPECT_TRUE(ProfilerProxyTraceDumps().empty());
   EXPECT_TRUE(LogHas(log, "ncclCommDump comm is null")) << log;
 }
 
@@ -67,7 +62,7 @@ TEST_F(CommDumpMicrotest, MissingProxyStateIsWarnedAndSkipped) {
   std::string log = CaptureLog([&] { res = ncclCommDump(comm_.get(), map_); });
 
   EXPECT_EQ(res, ncclSuccess);
-  EXPECT_TRUE(g_dumpedContexts.empty());
+  EXPECT_TRUE(ProfilerProxyTraceDumps().empty());
   EXPECT_TRUE(LogHas(log, "ncclCommDump comm->proxyState is null")) << log;
   EXPECT_FALSE(LogHas(log, "proxy-trace")) << log;
 }

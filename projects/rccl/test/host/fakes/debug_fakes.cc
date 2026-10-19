@@ -15,8 +15,8 @@
 
 #include "debug.h"
 
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // INFO/TRACE macros always call in
-uint64_t ncclDebugMask = ~uint64_t(0);
+uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // INFO/TRACE always call in, any subsystem
+uint64_t ncclDebugMask = 0;
 thread_local int ncclDebugNoWarn = 0;
 
 namespace {
