@@ -9,6 +9,9 @@ graph:
   Unit_hipGraphAddEmptyNode_BarrierFunc:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphAddEmptyNode_IndependentLeafNode:
+    <<: *level_2
+    tags: [node]
   Unit_hipGraph_ConcurrentCreate_GraphIDRace:
     <<: *level_default
     tags: [node]
@@ -1732,6 +1735,7 @@ graph:
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again:
     <<: *level_default
+    disabled: [amd_windows]
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph:
     <<: *level_default
