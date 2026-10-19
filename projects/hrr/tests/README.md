@@ -116,6 +116,20 @@ as CI does.
 `HRR_TEST_IGNORE_CONFIG=1`, or `--ignore-config`, runs the cases the config would
 skip. `--arch gfx1100` (or several, comma-separated) stands in for detection.
 
+## Local Docker
+
+`projects/hrr/tests/scripts/hrr_dev.py` builds an `hrr-dev` image when it is
+missing and runs the suites inside it. The host needs Docker.
+
+```bash
+python3 projects/hrr/tests/scripts/hrr_dev.py emulator
+python3 projects/hrr/tests/scripts/hrr_dev.py gpu
+```
+
+`emulator` runs the integration drivers under rocJitsu (gfx950, two GPUs, and
+gfx1250, four GPUs). `gpu` passes `/dev/kfd` and `/dev/dri` into the container.
+The host unit binary runs once in either command.
+
 ## Testing the Python helpers
 
 `scripts/` holds both the helpers and their tests. The tests need only Python and
