@@ -4754,6 +4754,46 @@ TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel)
       });
 }
 
+// Ring Simple takes one slice per chunk wherever the comm-level flag says so, and on a comm that
+// one UALink domain covers up to the table's per-rank share, for the collectives that have one.
+TEST(WrapMicrotest, RingUseOneSlice_FabricDomainUpToPerRankShare) {
+  rcclArchThresholds table{};
+  table.ringOneSliceFabricMaxPerRank[ncclFuncAllGather] = 32 * kMiB;
+  auto oneSlice = [&table](ncclFunc_t func, size_t totalBytes, int domainSize, int mnnvl = 1, int commFlag = 0) {
+    ncclComm* comm = MakeCommWithArch("gfx1250");
+    comm->archThresholds = &table;
+    comm->nRanks = 8;
+    comm->nNodes = 2;
+    comm->MNNVL = mnnvl;
+    comm->nvlDomainSize = domainSize;
+    comm->rcclUseOneSlice = commFlag;
+    const bool oneSlice = rcclRingUseOneSlice(comm, func, totalBytes);
+    DeleteCommWithArch(comm);
+    return oneSlice;
+  };
+  EXPECT_TRUE(oneSlice(ncclFuncAllGather, 8 * 32 * kMiB, 8)) << "per-rank share at the cap";
+  EXPECT_FALSE(oneSlice(ncclFuncAllGather, 8 * 32 * kMiB + 8, 8)) << "just past it";
+  EXPECT_TRUE(oneSlice(ncclFuncAllGather, 8 * kKiB, 8)) << "small message";
+  EXPECT_FALSE(oneSlice(ncclFuncAllGather, 8 * kKiB, 4)) << "domain smaller than the comm";
+  EXPECT_FALSE(oneSlice(ncclFuncAllGather, 8 * kKiB, 8, /*mnnvl=*/0)) << "no UALink domain";
+  EXPECT_FALSE(oneSlice(ncclFuncReduceScatter, 8 * kKiB, 8)) << "no entry for the collective";
+  EXPECT_TRUE(oneSlice(ncclFuncReduceScatter, 4096 * kMiB, 1, /*mnnvl=*/0, /*commFlag=*/1)) << "comm-level flag";
+}
+
+// An arch without a table (rcclGetArchThresholds returns none) never takes one slice across trays,
+// and still honours the comm-level flag.
+TEST(WrapMicrotest, RingUseOneSlice_NoArchTableKeepsCommFlag) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->nRanks = 8;
+  comm->nNodes = 2;
+  comm->MNNVL = 1;
+  comm->nvlDomainSize = 8;
+  EXPECT_FALSE(rcclRingUseOneSlice(comm, ncclFuncAllGather, 8 * kKiB));
+  comm->rcclUseOneSlice = 1;
+  EXPECT_TRUE(rcclRingUseOneSlice(comm, ncclFuncAllGather, 8 * kKiB));
+  DeleteCommWithArch(comm);
+}
+
 // Hierarchical, live mode: the inner (query-only) inter/intra-comm
 // dereferencing never runs, so no sub-comms need to be set up here --
 // just the eligibility gates (outside a group, 8+ nodes, param enabled,

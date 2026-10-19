@@ -500,7 +500,8 @@ ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm) {
     devWork.redOpArg = task->opDev.scalarArg;
     devWork.redOpArgIsPtr = task->opDev.scalarArgIsPtr;
     devWork.oneNode = (comm->nNodes == 1);
-    devWork.rcclUseOneSlice = comm->rcclUseOneSlice;
+    devWork.rcclUseOneSlice = rcclRingUseOneSlice(
+      comm, task->func, ncclFuncMaxSendRecvCount(task->func, comm->nRanks, task->count) * ncclTypeSize(task->datatype));
     //[Added-comment] opCount is missing for collDevWork, adding here
     devWork.opCount = task->opCount;
 #ifdef ENABLE_ROCSHMEM

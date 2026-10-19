@@ -182,6 +182,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .symTdmMinR2 = {0, 0, 64ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   .symTdmMaxR2 = {0, 0, 4096ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   .symTdmFabricMaxR2 = {0, 0, 512ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  // ringOneSliceFabricMaxPerRank: [2] AllGather -- across trays, up to 32 MiB per rank each
+  // channel's share of a ring step is at most one chunk, and splitting it into two slices only
+  // adds a handshake over the fabric. Larger shares keep two slices.
+  .ringOneSliceFabricMaxPerRank = {0, 0, 32ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).
@@ -408,6 +412,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .symTdmMinR2 = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .symTdmMaxR2 = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   .symTdmFabricMaxR2 = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .ringOneSliceFabricMaxPerRank = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).

@@ -370,6 +370,13 @@ size_t rcclDdaEntryThreshold(const ncclComm* comm, ncclFunc_t func);
 bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes, ncclSymRegType_t winRegType,
                                      bool graphMode);
 
+// Whether Ring Simple runs one slice per chunk for this collective (ncclDevWorkColl::rcclUseOneSlice):
+// wherever rcclUseOneSlice says so, and on a comm that spans trays of one UALink domain up to
+// ringOneSliceFabricMaxPerRank. The host chunking and the proxy keep the comm-level choice, so a
+// table entry belongs only on an arch whose one-slice kernel keeps the chunk (gfx942, gfx1250; not
+// gfx950), and such a comm has no network ring steps for the proxy to slice.
+bool rcclRingUseOneSlice(const ncclComm* comm, ncclFunc_t func, size_t totalBytes);
+
 // Payload cap used to size comm->ddaScratch: max of every DDA protocol table
 // entry (LL / LL128 / VMM, including R2 and graph VMM variants) plus
 // ceNonRegMax for collectives that stage through ddaScratch (not AllReduce

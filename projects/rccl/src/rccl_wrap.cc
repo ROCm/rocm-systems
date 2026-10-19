@@ -994,6 +994,16 @@ bool rcclAllGatherCeRegisteredWindow(const ncclComm* comm, size_t totalBytes,
   return rcclAllGatherCeRegisteredWindowTab(extAlgoArchTable(comm), totalBytes, winRegType, graphMode);
 }
 
+bool rcclRingUseOneSlice(const ncclComm* comm, ncclFunc_t func, size_t totalBytes) {
+  if (comm->rcclUseOneSlice) return true;
+  // Every ring step of a comm that one UALink domain covers crosses the fabric, as it does on one node.
+  if (!comm->MNNVL || comm->nvlDomainSize != comm->nRanks || comm->nRanks <= 0) return false;
+  const rcclArchThresholds* table = extAlgoArchTable(comm);
+  if (table == nullptr) return false;
+  const size_t perRankMax = funcThresholdFromTable(table->ringOneSliceFabricMaxPerRank, func);
+  return perRankMax != 0 && totalBytes / comm->nRanks <= perRankMax;
+}
+
 
 // True when this arch scales its DDA tier caps by rank count and the comm is big enough.
 inline bool rcclDdaRankScaled(const rcclArchThresholds* table, int nRanks) {

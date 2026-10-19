@@ -94,6 +94,16 @@ bool rcclIsArchSupportedForFunc(struct ncclTaskColl*, char const*) {
 
 bool g_rcclCeArGraphSafe = false;
 bool rcclCeArGraphSafe(struct ncclComm*) { return g_rcclCeArGraphSafe; }
+
+// Defaults to the comm-level flag, which is what production returns on every comm
+// that does not span trays of one UALink domain.
+static bool DefaultRingUseOneSlice(const ncclComm* comm, ncclFunc_t, size_t) { return comm->rcclUseOneSlice; }
+std::function<bool(const ncclComm*, ncclFunc_t, size_t)> g_rcclRingUseOneSlice = DefaultRingUseOneSlice;
+int g_rcclRingUseOneSliceCalls = 0;
+bool rcclRingUseOneSlice(const ncclComm* comm, ncclFunc_t func, size_t totalBytes) {
+  ++g_rcclRingUseOneSliceCalls;
+  return g_rcclRingUseOneSlice(comm, func, totalBytes);
+}
 int g_rcclCeAllReduceGraphLatchTickCalls = 0;
 bool g_rcclCeAllReduceGraphLatchTickLastCapturing = false;
 void rcclCeAllReduceGraphLatchTick(struct ncclComm*, bool ceCapturing) {
@@ -186,6 +196,8 @@ void ResetRcclWrapFakes() {
   g_rcclOverrideAlgorithmCalls = 0;
   g_rcclOverrideProtocolCalls = 0;
   g_rcclCeArGraphSafe = false;
+  g_rcclRingUseOneSlice = DefaultRingUseOneSlice;
+  g_rcclRingUseOneSliceCalls = 0;
   g_rcclCeAllReduceGraphLatchTickCalls = 0;
   g_rcclCeAllReduceGraphLatchTickLastCapturing = false;
   g_rcclWarpSpeedSupported = false;

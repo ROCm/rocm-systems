@@ -87,6 +87,9 @@ struct rcclArchThresholds {
   // all-direct links), where Ring Simple overtakes the TDM kernel sooner. It can only lower
   // symTdmMaxR2; 0 = no cap.
   size_t symTdmFabricMaxR2[RCCL_DDA_FUNC_COUNT];
+  // Ring Simple takes one slice per chunk on one node (rcclUseOneSlice). On a comm that spans
+  // trays of one UALink domain, it also takes one slice up to this many bytes per rank; 0 = never.
+  size_t ringOneSliceFabricMaxPerRank[RCCL_DDA_FUNC_COUNT];
 
   // Rank-scaled tier caps, bytes per rank. On a comm of at least
   // rankScaledMinRanks ranks, a non-zero entry replaces the matching

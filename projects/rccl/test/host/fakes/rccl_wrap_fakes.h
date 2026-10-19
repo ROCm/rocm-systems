@@ -56,6 +56,10 @@ extern bool g_rcclCeArGraphSafe;  // UNDRIVEN
 extern int g_rcclCeAllReduceGraphLatchTickCalls;  // UNDRIVEN
 extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;  // UNDRIVEN
 
+// Ring Simple one-slice choice per collective (rccl_wrap.cc rcclRingUseOneSlice).
+extern std::function<bool(const struct ncclComm*, ncclFunc_t, size_t)> g_rcclRingUseOneSlice;  // UNDRIVEN
+extern int g_rcclRingUseOneSliceCalls;  // UNDRIVEN
+
 // -------------------------------------------------------------------------
 // WARP_SPEED seams (rccl_wrap.cc:1448+). enqueue.cc calls these from five sites
 // inside `#ifdef ENABLE_WARP_SPEED` (:318, :2221, :2615, :2736, :2738), two of
