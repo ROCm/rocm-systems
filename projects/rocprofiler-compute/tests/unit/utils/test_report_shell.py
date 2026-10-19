@@ -71,3 +71,11 @@ def test_read_asset_caches_utf8(tmp_path: Path) -> None:
     assert read_asset(tmp_path, "sample.txt") == "caf\u00e9"
     asset.write_text("changed", encoding="utf-8")
     assert read_asset(tmp_path, "sample.txt") == "caf\u00e9"
+
+
+def test_shared_assets_have_no_plotly_dependency() -> None:
+    shell = read_asset(_ASSETS, "report_shell.html")
+    controller = read_asset(_ASSETS, "report_base.js")
+
+    assert "Plotly" not in shell + controller
+    assert "<script src" not in shell + controller
