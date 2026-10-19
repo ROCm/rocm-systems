@@ -73,7 +73,8 @@ application as usual:
 Capture is off whenever ``HIP_HRR_CAPTURE_OUTPUT`` is unset, so nothing changes
 for an ordinary run. Without ``HIP_HRR_CAPTURE_CONTENT`` the capture is
 metadata-only: the archive holds the call sequence, handles and sizes, but no
-host buffer, no by-value kernel argument and no code object. ``--info`` reads
+host buffer, no by-value kernel argument (a struct argument is withheld whole,
+device pointers inside it included) and no code object. ``--info`` reads
 such an archive as usual; a replay stops at the first call that needs the
 missing contents and says that content mode would have recorded them. The
 notice the capture prints on stderr names the mode it runs in. The archive is a directory, not a single file, and it holds one

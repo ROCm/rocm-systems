@@ -22,9 +22,14 @@
 #include "hrr/hrr_api_args.h"
 
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
+
+// Defined in hip_playback.cpp; not declared in the public header.
+hipError_t playback_hipGraphAddKernelNode(PlaybackContext& ctx, const uint8_t* pl);
 
 namespace {
 
@@ -135,6 +140,55 @@ TEST_CASE("Unit_HRR_Blob_WithheldContentIsRefused", "[hrr]") {
     (void)hrr_test::capture_stderr([&] { (void)ctx.load_blob(HRR_HASH_WITHHELD, 2, &sz); });
     CHECK_FALSE(ctx.fatal_error.load());
   }
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - A kernel node whose code-object hash is HRR_HASH_WITHHELD carries zeros
+ *     for its by-value arguments. With --replace-kernel resolved for its
+ *     kernel, which skips the code-object load, it is still refused: the
+ *     replay ends and the message names the withheld arguments. The node also
+ *     has an incomplete dependency list, which would refuse it without ending
+ *     the replay had the kernel been resolved.
+ */
+TEST_CASE("Unit_HRR_Blob_WithheldArgumentsRefuseReplacedKernel", "[hrr]") {
+  const std::string kName = "hrr_scalar_kernel";
+  PlaybackContext ctx;
+  ctx.record_graph(0x1000, reinterpret_cast<hipGraph_t>(0x1));
+  ctx.kernel_replacements.emplace_back(kName, "/nonexistent/replacement.hsaco");
+  ctx.replacement_funcs[kName] = reinterpret_cast<hipFunction_t>(0x2);
+
+  hrr_args_hipGraphAddKernelNode a{};
+  a.graph = 0x1000;
+  a.pNodeParams_present = 1;
+  a.pDependencies_present = 1;
+  a.pDependencies_n = 1;
+  a.numDependencies = 2;
+  // Tail: name, code-object hash, one four-byte by-value argument of zeros.
+  std::vector<uint8_t> tail;
+  auto push = [&](const void* v, size_t n) {
+    tail.insert(tail.end(), static_cast<const uint8_t*>(v), static_cast<const uint8_t*>(v) + n);
+  };
+  const uint16_t name_len = static_cast<uint16_t>(kName.size());
+  const uint64_t withheld = HRR_HASH_WITHHELD;
+  const uint16_t num_args = 1, arg_size = 4;
+  const uint8_t kind = 0;
+  const uint32_t zero = 0;
+  push(&name_len, 2); push(kName.data(), kName.size());
+  push(&withheld, 8); push(&withheld, 8);
+  push(&num_args, 2); push(&kind, 1); push(&arg_size, 2); push(&zero, 4);
+  a.hdr.payload_length = static_cast<uint32_t>(sizeof(a) + tail.size());
+  std::vector<uint8_t> rec(sizeof(a));
+  std::memcpy(rec.data(), &a, sizeof(a));
+  rec.insert(rec.end(), tail.begin(), tail.end());
+
+  hipError_t r = hipErrorUnknown;
+  const std::string err =
+      hrr_test::capture_stderr([&] { r = playback_hipGraphAddKernelNode(ctx, rec.data()); });
+  INFO("stderr: " << err);
+  CHECK(ctx.fatal_error.load());
+  CHECK(err.find("needs a code object and its by-value kernel arguments") != std::string::npos);
 }
 
 /** @} */

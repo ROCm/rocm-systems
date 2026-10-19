@@ -607,6 +607,13 @@ static hipFunction_t resolve_kernel_function(PlaybackContext& ctx,
                                              uint64_t co_hash_hi) {
     hipFunction_t func = nullptr;
 
+    // A metadata-only capture withholds the code object and the by-value
+    // arguments of every launch together. Refuse before --replace-kernel could
+    // run a kernel on the zeros recorded in their place.
+    if (ctx.refuse_withheld(co_hash_lo, co_hash_hi,
+                            "code object and its by-value kernel arguments"))
+        return nullptr;
+
     // Playback-time kernel override: if this kernel matches a --replace-kernel
     // pattern, launch the user-supplied code object instead of the recorded one.
     // All recorded inputs (grid/block/shared/args/pointers) are still used below.

@@ -375,6 +375,10 @@ static void serialize_kernel_launch(
   uint16_t name_len = name_oversized ? 0 : static_cast<uint16_t>(kernel_name_len);
   push_u16(name_len);
   push_bytes(kernel_name, name_len);
+  // Metadata-only: the withheld code-object hash also marks this launch's
+  // by-value arguments as withheld, even where no code object was hashed, so
+  // replay refuses the launch on any path, --replace-kernel included.
+  if (!hrr_capture_content()) co_hash = {HRR_HASH_WITHHELD, HRR_HASH_WITHHELD};
   push_u64(co_hash.lo); push_u64(co_hash.hi);  // code object identity (0 = unknown)
   push_u32(gx); push_u32(gy); push_u32(gz);
   push_u32(bx); push_u32(by); push_u32(bz);
@@ -399,7 +403,9 @@ static void serialize_kernel_launch(
   const bool dbg = hrr_dbg_args_enabled();
 
   // A by-value argument is application data, so metadata-only capture records
-  // its size and zeros. A pointer argument is an address, recorded either way.
+  // its size and zeros. A struct is withheld whole, device pointers embedded in
+  // it included (kind 0, never 3). A whole-argument pointer (kind 1) is an
+  // address, recorded either way.
   const bool content = hrr_capture_content();
 
   // Serialize one argument: a whole-arg pointer (kind 1), or a scalar/struct
@@ -575,7 +581,10 @@ static void append_kernel_node_tail(std::vector<uint8_t>& payload,
   const std::string& name = kernel->name();
   push_u16(static_cast<uint16_t>(name.size()));
   push_bytes(name.data(), name.size());
-  const hrr_cap::Hash128 co = kernel_code_object_hash(kernel);
+  hrr_cap::Hash128 co = kernel_code_object_hash(kernel);
+  // As for a launch: in metadata-only mode the withheld hash marks the node's
+  // by-value arguments as withheld.
+  if (!hrr_capture_content()) co = {HRR_HASH_WITHHELD, HRR_HASH_WITHHELD};
   push_u64(co.lo); push_u64(co.hi);
 
   const void* kbuf = nullptr;
@@ -589,7 +598,8 @@ static void append_kernel_node_tail(std::vector<uint8_t>& payload,
       if (!sig.at(i).info_.hidden_) num_args++;
   push_u16(num_args);
 
-  // As for a launch: by-value arguments are recorded as zeros without contents.
+  // As for a launch: by-value arguments, structs with embedded device pointers
+  // included, are recorded as zeros without contents.
   const bool content = hrr_capture_content();
   auto emit_arg = [&](uint32_t idx, bool is_ptr, const uint8_t* bytes,
                       uint16_t sz) {
