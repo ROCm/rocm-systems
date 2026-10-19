@@ -229,11 +229,23 @@ namespace rocshmem
       int32_t* tempBuffer;
 
       // Index CPU agents
-      cpuAgents.clear();
+      // NOTE: numa_num_configured_nodes() counts every NUMA node configured
+      // on the host, which can include nodes outside this process's cpuset
+      // (e.g. containers with a restricted cpuset.mems). Probing one of
+      // those via numa_set_preferred()/CheckPages() in AllocateMemory()
+      // fails silently (EINVAL) and then hard-aborts on the resulting page
+      // mismatch, so skip any node this process isn't allowed to use and
+      // leave a sentinel agent (handle 0) that cannot match a real GPU's
+      // nearest-CPU agent.
+      cpuAgents.assign(numCpus, hsa_agent_t{0});
       for (int i = 0; i < numCpus; i++) {
+        if (!numa_bitmask_isbitset(numa_get_mems_allowed(), i)) {
+          LOG_WARN("Skipping CPU NUMA node %d: not in this process's allowed NUMA mems mask", i);
+          continue;
+        }
         ERR_CHECK(AllocateMemory({MEM_CPU, i}, 1024, (void**)&tempBuffer));
         CHECK_HSA(hsa_amd_pointer_info(tempBuffer, &info, NULL, NULL, NULL));
-        cpuAgents.push_back(info.agentOwner);
+        cpuAgents[i] = info.agentOwner;
         ERR_CHECK(DeallocateMemory(MEM_CPU, tempBuffer, 1024));
       }
 
@@ -1160,6 +1172,13 @@ namespace rocshmem
       for (int node = 0; node <= numa_max_node(); node++)
         if (numa_bitmask_isbitset(numa_get_mems_allowed(), node))
           remappingCpu.push_back(node);
+    }
+    // origIdx can exceed remappingCpu.size() when numa_num_configured_nodes()
+    // (the loop bound callers use) counts more nodes than this process's
+    // cpuset/cgroup allows (numa_get_mems_allowed()). Fall back to the raw
+    // index rather than reading out of bounds.
+    if (origIdx < 0 || origIdx >= static_cast<int>(remappingCpu.size())) {
+      return origIdx;
     }
     return remappingCpu[origIdx];
   }
