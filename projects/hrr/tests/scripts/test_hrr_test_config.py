@@ -110,6 +110,25 @@ class ResolveTest(unittest.TestCase):
         run, _ = cfg.resolve(suite(cases), ["Filtered"], "linux", [])
         self.assertEqual(run, ["Filtered"])
 
+    def test_emulator_rule_matches_only_an_emulated_run(self):
+        cases = {"Filtered": {"skip": [rule({"emulator": True, "arch": "gfx1151"})]}}
+        config = suite(cases)
+        run, skipped = cfg.resolve(
+            config, ["Filtered"], "linux", ["gfx1151"], emulated=True
+        )
+        self.assertEqual(run, [])
+        self.assertEqual(skipped[0]["archs"], ["gfx1151"])
+        run, _ = cfg.resolve(config, ["Filtered"], "linux", ["gfx1151"])
+        self.assertEqual(run, ["Filtered"])
+
+    def test_emulator_false_rule_matches_only_a_real_device(self):
+        cases = {"Filtered": {"skip": [rule({"emulator": False})]}}
+        config = suite(cases)
+        run, _ = cfg.resolve(config, ["Filtered"], "linux", ["gfx90a"], emulated=True)
+        self.assertEqual(run, ["Filtered"])
+        run, _ = cfg.resolve(config, ["Filtered"], "linux", ["gfx90a"])
+        self.assertEqual(run, [])
+
     def test_ignore_runs_everything(self):
         cases = {"Filtered": {"skip": [rule({"os": "linux"})]}}
         config = suite(cases, skip=[rule({"arch": "gfx90a"})])
@@ -124,6 +143,13 @@ class LintTest(unittest.TestCase):
             rule({"os": "linux", "arch": "gfx11*"}, "disabled", "npu",
                  "https://github.com/ROCm/rocm-systems/issues/1"),
         ]}}
+        self.assertEqual(cfg.lint(suite(cases)), [])
+
+    def test_emulator_must_be_a_bool(self):
+        cases = {"Filtered": {"skip": [rule({"emulator": "yes"})]}}
+        errors = cfg.lint(suite(cases))
+        self.assertTrue(any("emulator" in error for error in errors))
+        cases = {"Filtered": {"skip": [rule({"emulator": True, "arch": "gfx90a"})]}}
         self.assertEqual(cfg.lint(suite(cases)), [])
 
     def test_disabled_needs_an_issue_and_every_rule_needs_a_reason(self):

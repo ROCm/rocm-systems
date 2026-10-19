@@ -3,6 +3,8 @@
 #
 # A skip rule matches when every key under "when" matches (a list is OR, a
 # missing key matches anything, and a value may be a glob such as gfx11*).
+# "emulator: true" matches only a run under a GPU emulator (run_catch2.py
+# --launcher), "emulator: false" only a run on a real device.
 # kind: disabled is a temporary regression and requires a public issue URL.
 # kind: unsupported is permanent and needs only a reason.
 #

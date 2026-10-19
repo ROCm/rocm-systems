@@ -11,6 +11,8 @@ per suite lists every case, and a case with no rule runs on every OS and GPU.
 A rule matches when every key it sets matches. Keys in one ``when`` are ANDed;
 a list under a key is ORed; a missing key matches anything. Glob patterns
 (``gfx11*``) are allowed. Several visible GPUs match when any of them does.
+``emulator: true`` matches only a run under a GPU emulator (run_catch2.py
+``--launcher``), ``emulator: false`` only a run on a real device.
 ``kind: disabled`` is a temporary regression and needs a public issue URL.
 ``kind: unsupported`` is permanent and needs only a reason.
 
@@ -37,7 +39,7 @@ CASE_NAME = re.compile(r"^[A-Za-z0-9_]+$")
 ARCH_TOKEN = re.compile(r"gfx[0-9][0-9a-z]*")
 WORKLOAD_TAGS = {"hrr-direct", "direct"}
 KINDS = {"disabled", "unsupported"}
-WHEN_KEYS = {"os", "arch"}
+WHEN_KEYS = {"os", "arch", "emulator"}
 RULE_KEYS = {"when", "kind", "reason", "issue"}
 CASE_KEYS = {"skip"}
 TOP_KEYS = {"version", "suite", "binary", "select", "targets", "skip", "cases"}
@@ -47,6 +49,8 @@ HEADER = """\
 #
 # A skip rule matches when every key under "when" matches (a list is OR, a
 # missing key matches anything, and a value may be a glob such as gfx11*).
+# "emulator: true" matches only a run under a GPU emulator (run_catch2.py
+# --launcher), "emulator: false" only a run on a real device.
 # kind: disabled is a temporary regression and requires a public issue URL.
 # kind: unsupported is permanent and needs only a reason.
 #
@@ -96,15 +100,20 @@ def value_matches(pattern, value: str) -> bool:
     return any(fnmatch.fnmatchcase(value, str(item)) for item in _as_list(pattern))
 
 
-def rule_matches(rule: dict, os_name: str, archs: list[str]) -> list[str] | None:
+def rule_matches(
+    rule: dict, os_name: str, archs: list[str], emulated: bool = False
+) -> list[str] | None:
     """The architectures that made the rule match, or None.
 
     An ``arch`` key matches when any visible architecture matches, and does
-    not match when no architecture was supplied. An empty ``when`` matches
-    every machine.
+    not match when no architecture was supplied. An ``emulator`` key matches
+    a run under a GPU emulator (true) or on a real device (false). An empty
+    ``when`` matches every machine.
     """
     when = rule.get("when") or {}
     if "os" in when and not value_matches(when["os"], os_name):
+        return None
+    if "emulator" in when and when["emulator"] != emulated:
         return None
     matched = list(archs)
     if "arch" in when:
@@ -120,7 +129,7 @@ def _rules_for(config: dict, name: str) -> list[dict]:
 
 
 def resolve(config: dict, names: list[str], os_name: str, archs: list[str],
-            ignore: bool = False) -> tuple[list[str], list[dict]]:
+            ignore: bool = False, emulated: bool = False) -> tuple[list[str], list[dict]]:
     """Split ``names`` into cases to run and cases a rule skips.
 
     The first matching rule wins, suite rules before the case's own. Each
@@ -135,7 +144,7 @@ def resolve(config: dict, names: list[str], os_name: str, archs: list[str],
         hit = None
         matched: list[str] = []
         for rule in _rules_for(config, name):
-            matched = rule_matches(rule, os_name, archs)
+            matched = rule_matches(rule, os_name, archs, emulated)
             if matched is not None:
                 hit = rule
                 break
@@ -195,6 +204,8 @@ def _check_rule(errors: list[str], where: str, rule, targets: dict) -> None:
         for key in ("os", "arch"):
             if key in when:
                 _check_pattern(errors, where, key, when[key], targets.get(key, []))
+        if "emulator" in when and not isinstance(when["emulator"], bool):
+            _error(errors, where, "'emulator' must be true or false")
     kind = rule.get("kind")
     if kind not in KINDS:
         _error(errors, where, "'kind' must be disabled or unsupported")
@@ -345,6 +356,8 @@ def _yaml_pattern(value) -> str:
 def _emit_rule(lines: list[str], rule: dict, indent: str) -> None:
     when = rule.get("when") or {}
     parts = [f"{key}: {_yaml_pattern(when[key])}" for key in ("os", "arch") if key in when]
+    if "emulator" in when:
+        parts.append(f"emulator: {'true' if when['emulator'] else 'false'}")
     lines.append(f"{indent}- when: {{{', '.join(parts)}}}")
     lines.append(f"{indent}  kind: {rule['kind']}")
     lines.append(f"{indent}  reason: {_yaml_str(rule['reason'])}")

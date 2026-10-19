@@ -300,6 +300,41 @@ class MainTest(unittest.TestCase):
         self.assertIsNotNone(skipped)
         self.assertTrue(skipped.attrib["message"].startswith("hrr-config:"))
 
+    def test_emulator_rule_applies_only_with_a_launcher(self):
+        path = self._config(
+            {
+                "Keep": {},
+                "Drop": {
+                    "skip": [
+                        {
+                            "when": {"emulator": True},
+                            "kind": "unsupported",
+                            "reason": "emulator only",
+                        }
+                    ]
+                },
+            }
+        )
+        listed = [
+            {"name": "Keep", "tags": ["[hrr]"]},
+            {"name": "Drop", "tags": ["[hrr]"]},
+        ]
+        with mock.patch("hrr_test_config.list_cases", return_value=listed):
+            rc, out, _ = self.run_main(
+                {"xml": junit(record("Keep"))},
+                "--config", str(path), "--os", "linux", "--arch", "gfx1151",
+                "--launcher", "env",
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn("SKIP (config): Drop", out)
+        with mock.patch("hrr_test_config.list_cases", return_value=listed):
+            rc, out, _ = self.run_main(
+                {"xml": junit(record("Keep"), record("Drop"))},
+                "--config", str(path), "--os", "linux", "--arch", "gfx1151",
+            )
+        self.assertEqual(rc, 0)
+        self.assertNotIn("SKIP (config)", out)
+
     def test_config_runs_nothing_when_every_case_is_skipped(self):
         path = self._config(
             {

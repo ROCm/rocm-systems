@@ -247,7 +247,7 @@ def _apply_config(
     # in CI. Tests mock list_cases.
     names = [case["name"] for case in listed]
     _run, skipped = hrr_test_config.resolve(
-        config, names, os_name, archs, ignore=ignore
+        config, names, os_name, archs, ignore=ignore, emulated=bool(args.launcher)
     )
     records = [
         (
