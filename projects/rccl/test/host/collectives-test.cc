@@ -4,571 +4,30 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/collectives.cc and the alltoallv_meta.h helpers it includes. Every
-// dependency is seamed in this TU; ncclEnqueueCheck records the ncclInfo each entry point builds.
+// Host-only microtests for src/collectives.cc and the alltoallv_meta.h helpers it includes. Its externals
+// are in fakes/collectives_micro_fakes.cc; ncclEnqueueCheck records the ncclInfo each entry point builds.
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <climits>
-#include <cstdarg>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <deque>
 #include <functional>
-#include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <vector>
 
-#include "comm.h"
-#include "enqueue.h"
-#include "rccl_common.h"
-#include "ce_coll.h"
-#include "dev_runtime.h"
-#include "algorithms/gin/gin_all_reduce.h"
-#include "algorithms/gin/gin_alltoall.h"
-
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
-std::function<int64_t(const char*, int64_t)> g_loadParam;
-
-namespace {
-
-struct LogLine {
-  ncclDebugLogLevel level;
-  std::string text;
-};
-
-struct Enqueued {
-  ncclInfo info;
-  bool directReduceScatter;
-  std::vector<size_t> sizes;  // info.sizes points at the caller's stack, so snapshot it
-};
-
-struct Recorded {
-  rccl::rcclCall_t type;
-  const void* sendbuff;
-  void* recvbuff;
-  size_t count;
-  int root;
-  const size_t* sendcounts;
-  const size_t* rdispls;
-};
-
-struct Select {
-  std::string coll;
-  const void* sendbuff;
-  void* recvbuff;
-  size_t count;
-  ncclRedOp_t op;
-  hipStream_t stream;
-  bool query;
-  bool hint;
-};
-
-struct Addon {
-  std::string fn;
-  const void* sendbuff;
-  void* recvbuff;
-  size_t count;
-  ncclDataType_t datatype;
-  ncclRedOp_t op;
-  ncclComm* comm;
-  hipStream_t stream;
-};
-
-struct DdaEnabledCall {
-  size_t totalBytes;
-  size_t threshold;
-  bool query;
-};
-
-struct SymkQuery {
-  ncclFunc_t coll;
-  int red;
-  ncclDataType_t type;
-  size_t nElts;
-};
-
-struct CeEligibility {
-  ncclDataType_t datatype;
-  ncclSymRegType_t regType;
-  ncclDevrWindow* sendWin;
-  ncclDevrWindow* recvWin;
-  bool sysmem;
-  bool capturing;
-};
-
-struct Memcpy {
-  void* dst;
-  const void* src;
-  size_t bytes;
-  hipMemcpyKind kind;
-  hipStream_t stream;
-};
-
-struct P2p {
-  bool send;
-  const void* buff;
-  size_t count;
-  ncclDataType_t datatype;
-  int peer;
-};
-
-struct Bcast {
-  const void* sendbuff;
-  void* recvbuff;
-  size_t count;
-  int root;
-};
-
-struct CeAr {
-  const void* sendbuff;
-  void* recvbuff;
-  size_t count;
-  ncclDataType_t datatype;
-  ncclRedOp_t op;
-  ncclDevrWindow* win;
-  ncclCeCollArgs* args;
-};
-
-struct KernelLaunch {
-  const void* fn;
-  dim3 grid;
-  dim3 block;
-  size_t shmem;
-  hipStream_t stream;
-  hipEvent_t stopEvent;
-  const char* src;
-  char* dst;
-  size_t rankOffset;
-  int cols;
-  int rows;
-};
-
-// Every seam's knobs and observations; SetUp resets them with `fake = Fakes{}`.
-struct Fakes {
-  std::vector<LogLine> log;
-  std::vector<std::string> trace;  // dependency calls in issue order
-  std::vector<Enqueued> enqueued;
-  std::deque<ncclResult_t> enqueueResults;  // consumed per call; empty means success
-  const ncclCollConfig_t* parsedConfig = nullptr;
-  ncclResult_t parseResult = ncclSuccess;
-  std::vector<Recorded> recorded;
-  std::vector<bool> recorderSkips;
-  ncclResult_t recordResult = ncclSuccess;
-  std::vector<Select> selects;
-  rcclCollDecision decision{NCCL_ALGO_RING};
-  ncclResult_t selectResult = ncclSuccess;
-  ncclResult_t addonBeginResult = ncclSuccess;
-  ncclResult_t addonEndSeen = ncclInternalError;
-  std::vector<Addon> addons;
-  ncclResult_t addonResult = ncclSuccess;
-  std::vector<DdaEnabledCall> ddaEnabledCalls;
-  bool ddaEnabled = false;
-  size_t ddaThreshold = 0;
-  std::vector<ncclFunc_t> thresholdFuncs;
-  int64_t ddaEnableParam = 1;
-  const char* algoName = "ADDON";
-  std::function<bool(ncclComm*, size_t)> useAgDirect;
-  std::function<bool(ncclComm*, size_t)> useRsDirect;
-  ncclResult_t symkInitResult = ncclSuccess;
-  bool symkAvailable = true;
-  std::vector<SymkQuery> symkQueries;
-  std::map<const void*, ncclDevrWindow*> windows;
-  const void* findWindowFailPtr = nullptr;
-  std::set<ncclDevrWindow*> sysmemWindows;
-  ncclSymRegType_t regType = ncclSymSendNonregRecvNonreg;
-  ncclResult_t regTypeResult = ncclSuccess;
-  std::vector<std::pair<ncclDevrWindow*, ncclDevrWindow*>> regTypeArgs;
-  std::vector<CeEligibility> ceEligCalls;
-  std::vector<CeEligibility> hierEligCalls;
-  bool ceElig = false;
-  bool hierElig = false;
-  bool capturing = false;
-  ncclResult_t captureResult = ncclSuccess;
-  std::vector<int> captureModes;
-  std::vector<size_t> memAllocSizes;
-  std::vector<void*> memAllocs;
-  int memAllocFailAt = 0;
-  int currentDevice = 9;
-  hipError_t getDeviceResult = hipSuccess;
-  int setDeviceCalls = 0;
-  int setDeviceFailAt = 0;
-  std::vector<Memcpy> memcpys;
-  std::deque<hipError_t> memcpyResults;
-  hipError_t syncResult = hipSuccess;
-  hipError_t lastError = hipSuccess;
-  ncclResult_t groupStartResult = ncclSuccess;
-  ncclResult_t groupEndResult = ncclSuccess;
-  std::vector<P2p> p2ps;
-  int p2pFailAt = 0;
-  std::map<int, std::vector<size_t>> peerMeta;  // copied into an ncclRecv buffer from that peer
-  std::vector<Bcast> broadcasts;
-  ncclResult_t commCountResult = ncclSuccess;
-  ncclResult_t userRankResult = ncclSuccess;
-  ncclResult_t profStartResult = ncclSuccess;
-  ncclCeCollArgs profArgs{};
-  std::vector<CeAr> ceArs;
-  ncclResult_t ceArResult = ncclSuccess;
-  std::vector<uint8_t> peerFlags;
-  std::vector<uint8_t> gatheredOwnFlag;
-  ncclResult_t bootstrapResult = ncclSuccess;
-  std::vector<KernelLaunch> launches;
-  dim3 pushedGrid;
-  dim3 pushedBlock;
-  size_t pushedShmem = 0;
-  hipStream_t pushedStream = nullptr;
-};
-Fakes fake;
-
-ncclResult_t PopEnqueueResult() {
-  if (fake.enqueueResults.empty()) return ncclSuccess;
-  ncclResult_t res = fake.enqueueResults.front();
-  fake.enqueueResults.pop_front();
-  return res;
-}
-
-ncclResult_t RecordAddon(const char* fn, const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o,
-                         ncclComm* c, hipStream_t st) {
-  fake.trace.push_back(fn);
-  fake.addons.push_back({fn, s, r, n, t, o, c, st});
-  return fake.addonResult;
-}
-
-void RecordLaunch(const void* fn, dim3 grid, dim3 block, void** args, size_t shmem, hipStream_t stream,
-                  hipEvent_t stop) {
-  fake.trace.push_back("launch");
-  fake.launches.push_back({fn, grid, block, shmem, stream, stop, *static_cast<const char**>(args[0]),
-                           *static_cast<char**>(args[1]), *static_cast<size_t*>(args[2]),
-                           *static_cast<int*>(args[3]), *static_cast<int*>(args[4])});
-}
-
-}  // namespace
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long, const char*, int, const char* fmt, ...) {
-  char buf[1024];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  fake.log.push_back({level, buf});
-}
-
-ncclResult_t ncclEnqueueCheck(ncclInfo* info) {
-  fake.trace.push_back(std::string("enqueue ") + info->opName);
-  std::vector<size_t> sizes;
-  if (info->sizes != nullptr) {
-    const size_t n = info->comm->nRanks;
-    sizes.assign(info->sizes, info->sizes + 4 * n * n);
-  }
-  fake.enqueued.push_back({*info, info->comm != nullptr && info->comm->enableDirectReduceScatter, sizes});
-  return PopEnqueueResult();
-}
-
-ncclResult_t ncclParseCollConfig(const ncclCollConfig_t* config, ncclCollConfig_t* internal) {
-  fake.parsedConfig = config;
-  if (fake.parseResult != ncclSuccess) return fake.parseResult;
-  *internal = *config;
-  return ncclSuccess;
-}
-
-namespace rccl {
-Recorder::Recorder() {}
-Recorder::~Recorder() {}
-Recorder& Recorder::instance() {
-  static Recorder recorder;
-  return recorder;
-}
-void Recorder::skip(bool b) { fake.recorderSkips.push_back(b); }
-ncclResult_t Recorder::record(rcclCall_t type, const ncclInfo& info) {
-  fake.trace.push_back("record");
-  fake.recorded.push_back({type, info.sendbuff, info.recvbuff, info.count, info.root, nullptr, nullptr});
-  return fake.recordResult;
-}
-ncclResult_t Recorder::record(rcclCall_t type, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t,
-                              ncclComm_t, hipStream_t, int root, const size_t sendcounts[], const size_t[],
-                              const size_t[], const size_t rdispls[]) {
-  fake.trace.push_back("record");
-  fake.recorded.push_back({type, sendbuff, recvbuff, count, root, sendcounts, rdispls});
-  return fake.recordResult;
-}
-}  // namespace rccl
-
-ncclResult_t rcclSelectAllReduce(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t,
-                                 ncclRedOp_t op, hipStream_t stream, bool query, bool hint, rcclCollDecision* d) {
-  fake.trace.push_back("select");
-  fake.selects.push_back({"AllReduce", sendbuff, recvbuff, count, op, stream, query, hint});
-  *d = fake.decision;
-  return fake.selectResult;
-}
-ncclResult_t rcclSelectAllGather(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t,
-                                 hipStream_t stream, bool query, bool hint, rcclCollDecision* d) {
-  fake.trace.push_back("select");
-  fake.selects.push_back({"AllGather", sendbuff, recvbuff, count, ncclNumOps, stream, query, hint});
-  *d = fake.decision;
-  return fake.selectResult;
-}
-ncclResult_t rcclSelectReduceScatter(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
-                                     ncclDataType_t, ncclRedOp_t op, bool query, rcclCollDecision* d) {
-  fake.trace.push_back("select");
-  fake.selects.push_back({"ReduceScatter", sendbuff, recvbuff, count, op, nullptr, query, false});
-  *d = fake.decision;
-  return fake.selectResult;
-}
-ncclResult_t rcclSelectAlltoAll(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t,
-                                hipStream_t stream, bool query, bool hint, rcclCollDecision* d) {
-  fake.trace.push_back("select");
-  fake.selects.push_back({"AlltoAll", sendbuff, recvbuff, count, ncclNumOps, stream, query, hint});
-  *d = fake.decision;
-  return fake.selectResult;
-}
-
-ncclResult_t rcclAddonLaunchBegin(ncclComm*, hipStream_t, rcclAddonLaunchState*) {
-  fake.trace.push_back("begin");
-  return fake.addonBeginResult;
-}
-ncclResult_t rcclAddonLaunchEnd(ncclComm*, hipStream_t, const rcclAddonLaunchState&, ncclResult_t res) {
-  fake.trace.push_back("end");
-  fake.addonEndSeen = res;
-  return res;
-}
-
-#define FAKE_DDA(name)                                                                                   \
-  ncclResult_t name(const void* s, void* r, size_t n, ncclDataType_t t, ncclComm* c, hipStream_t st) { \
-    return RecordAddon(#name, s, r, n, t, ncclNumOps, c, st);                                           \
-  }
-#define FAKE_DDA_OP(name)                                                                                \
-  ncclResult_t name(const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o, ncclComm* c,      \
-                    hipStream_t st) {                                                                    \
-    return RecordAddon(#name, s, r, n, t, o, c, st);                                                     \
-  }
-FAKE_DDA(ncclAllGatherDdaFabricLL)
-FAKE_DDA(ncclAllGatherDdaFabricLL128)
-FAKE_DDA(ncclAllGatherDdaFabric)
-FAKE_DDA(ncclAllGatherDdaIpc)
-FAKE_DDA(ncclAllToAllDdaFabricLL)
-FAKE_DDA(ncclAllToAllDdaFabricLL128)
-FAKE_DDA(ncclAllToAllDdaFabric)
-FAKE_DDA(ncclAllToAllDdaIpc)
-FAKE_DDA_OP(ncclAllReduceDdaFabricLL)
-FAKE_DDA_OP(ncclAllReduceDdaFabricLL128)
-FAKE_DDA_OP(ncclAllReduceDdaFabric)
-FAKE_DDA_OP(ncclAllReduceDdaIpc)
-FAKE_DDA_OP(ncclReduceScatterDdaFabricLL)
-FAKE_DDA_OP(ncclReduceScatterDdaFabricLL128)
-FAKE_DDA_OP(ncclReduceScatterDdaFabric)
-FAKE_DDA_OP(ncclReduceScatterDdaIpc)
-#if defined(ENABLE_ROCSHMEM_GIN)
-FAKE_DDA(ncclAllToAllGinSdma)
-FAKE_DDA_OP(ncclAllReduceGinSdma)
-#endif
-#undef FAKE_DDA
-#undef FAKE_DDA_OP
-
-bool IsArchMatch(char const* arch, char const* target) {
-  if (arch == nullptr || target == nullptr) return false;
-  return std::strncmp(arch, target, std::strlen(target)) == 0;
-}
-
-bool rcclDdaEnabled(const ncclComm*, size_t totalBytes, size_t threshold, bool query, const char*) {
-  fake.ddaEnabledCalls.push_back({totalBytes, threshold, query});
-  return fake.ddaEnabled;
-}
-size_t rcclDdaEntryThreshold(const ncclComm*, ncclFunc_t func) {
-  fake.thresholdFuncs.push_back(func);
-  return fake.ddaThreshold;
-}
-int64_t rcclParamDdaEnable() { return fake.ddaEnableParam; }
-ncclResult_t rcclGetAlgoName(int, const char** algoName) {
-  *algoName = fake.algoName;
-  return ncclSuccess;
-}
-bool rcclUseAllGatherDirect(ncclComm* comm, size_t& msgSize) {
-  return fake.useAgDirect && fake.useAgDirect(comm, msgSize);
-}
-bool rcclUseReduceScatterDirect(ncclComm* comm, size_t& msgSize) {
-  return fake.useRsDirect && fake.useRsDirect(comm, msgSize);
-}
-
-ncclResult_t ncclSymkInitOnce(ncclComm*) { return fake.symkInitResult; }
-bool ncclSymkAvailable(ncclComm*, ncclFunc_t coll, int red, ncclDataType_t ty, size_t nElts) {
-  fake.symkQueries.push_back({coll, red, ty, nElts});
-  return fake.symkAvailable;
-}
-ncclResult_t ncclDevrFindWindow(ncclComm*, void const* userPtr, ncclDevrWindow** outWin) {
-  fake.trace.push_back("findWindow");
-  if (userPtr != nullptr && userPtr == fake.findWindowFailPtr) return ncclInternalError;
-  auto it = fake.windows.find(userPtr);
-  *outWin = it == fake.windows.end() ? nullptr : it->second;
-  return ncclSuccess;
-}
-bool ncclDevrWindowHasSysmemSegment(ncclDevrWindow* win) { return fake.sysmemWindows.count(win) != 0; }
-ncclResult_t ncclGetSymRegType(ncclDevrWindow* sendWin, ncclDevrWindow* recvWin, ncclSymRegType_t* winRegType) {
-  fake.regTypeArgs.push_back({sendWin, recvWin});
-  *winRegType = fake.regType;
-  return fake.regTypeResult;
-}
-bool ncclCeAlltoAllvEligible(ncclComm*, ncclDataType_t datatype, ncclSymRegType_t regType, bool sysmem,
-                             bool capturing) {
-  fake.ceEligCalls.push_back({datatype, regType, nullptr, nullptr, sysmem, capturing});
-  return fake.ceElig;
-}
-bool ncclHierCeAlltoAllvEligible(ncclComm*, ncclDataType_t datatype, ncclSymRegType_t regType, ncclDevrWindow* sendWin,
-                                 ncclDevrWindow* recvWin, bool sysmem, bool capturing) {
-  fake.hierEligCalls.push_back({datatype, regType, sendWin, recvWin, sysmem, capturing});
-  return fake.hierElig;
-}
-ncclResult_t ncclCudaGetCapturingGraph(ncclCudaGraph* graph, hipStream_t, int graphUsageMode) {
-  fake.captureModes.push_back(graphUsageMode);
-  graph->graphId = fake.capturing ? 7 : ULLONG_MAX;
-  return fake.captureResult;
-}
-
-ncclResult_t ncclMemAlloc(void** ptr, size_t size) {
-  fake.trace.push_back("memAlloc");
-  fake.memAllocSizes.push_back(size);
-  if (static_cast<int>(fake.memAllocSizes.size()) == fake.memAllocFailAt) return ncclSystemError;
-  *ptr = std::calloc(size, 1);
-  fake.memAllocs.push_back(*ptr);
-  return ncclSuccess;
-}
-
-hipError_t hipGetDevice(int* dev) {
-  *dev = fake.currentDevice;
-  return fake.getDeviceResult;
-}
-hipError_t hipSetDevice(int dev) {
-  fake.trace.push_back("setDevice " + std::to_string(dev));
-  if (++fake.setDeviceCalls == fake.setDeviceFailAt) return hipErrorInvalidDevice;
-  fake.currentDevice = dev;
-  return hipSuccess;
-}
-hipError_t hipMemcpyAsync(void* dst, const void* src, size_t bytes, hipMemcpyKind kind, hipStream_t stream) {
-  fake.trace.push_back("memcpy");
-  fake.memcpys.push_back({dst, src, bytes, kind, stream});
-  if (dst == nullptr || src == nullptr) {
-    ADD_FAILURE() << "hipMemcpyAsync with a null pointer";
-    return hipErrorInvalidValue;
-  }
-  if (!fake.memcpyResults.empty()) {
-    hipError_t res = fake.memcpyResults.front();
-    fake.memcpyResults.pop_front();
-    if (res != hipSuccess) return res;
-  }
-  std::memcpy(dst, src, bytes);
-  return hipSuccess;
-}
-hipError_t hipStreamSynchronize(hipStream_t) {
-  fake.trace.push_back("sync");
-  return fake.syncResult;
-}
-hipError_t hipGetLastError() { return fake.lastError; }
-const char* hipGetErrorString(hipError_t) { return "fake hip error"; }
-
-ncclResult_t ncclGroupStart() {
-  fake.trace.push_back("groupStart");
-  return fake.groupStartResult;
-}
-ncclResult_t ncclGroupEnd() {
-  fake.trace.push_back("groupEnd");
-  return fake.groupEndResult;
-}
-ncclResult_t ncclSend(const void* buff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t, hipStream_t) {
-  fake.p2ps.push_back({true, buff, count, datatype, peer});
-  return static_cast<int>(fake.p2ps.size()) == fake.p2pFailAt ? ncclInternalError : ncclSuccess;
-}
-ncclResult_t ncclRecv(void* buff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t, hipStream_t) {
-  fake.p2ps.push_back({false, buff, count, datatype, peer});
-  auto it = fake.peerMeta.find(peer);
-  if (it != fake.peerMeta.end()) std::memcpy(buff, it->second.data(), it->second.size() * sizeof(size_t));
-  return static_cast<int>(fake.p2ps.size()) == fake.p2pFailAt ? ncclInternalError : ncclSuccess;
-}
-ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t, int root, ncclComm_t,
-                           hipStream_t) {
-  fake.broadcasts.push_back({sendbuff, recvbuff, count, root});
-  return ncclSuccess;
-}
-ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) {
-  *count = comm->nRanks;
-  return fake.commCountResult;
-}
-ncclResult_t ncclCommUserRank(const ncclComm_t comm, int* rank) {
-  *rank = comm->rank;
-  return fake.userRankResult;
-}
-
-ncclResult_t ncclProfilerStartCeCollEvent(ncclComm*, ncclCeCollArgs* args, hipStream_t) {
-  fake.trace.push_back("profStart");
-  fake.profArgs = *args;
-  return fake.profStartResult;
-}
-ncclResult_t ncclProfilerStopCeCollEvent(ncclComm*, ncclCeCollArgs*, hipStream_t) {
-  fake.trace.push_back("profStop");
-  return ncclSuccess;
-}
-ncclResult_t ncclCeAllReduce(ncclComm*, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
-                             ncclRedOp_t op, hipStream_t, ncclDevrWindow* win, ncclCeCollArgs* args) {
-  fake.trace.push_back("ceAllReduce");
-  fake.ceArs.push_back({sendbuff, recvbuff, count, datatype, op, win, args});
-  return fake.ceArResult;
-}
-
-ncclResult_t bootstrapAllGather(void*, void* allData, int size) {
-  fake.trace.push_back("allGather");
-  uint8_t* flags = static_cast<uint8_t*>(allData);
-  for (size_t r = 0; r < fake.peerFlags.size(); r++) {
-    if (flags[r] == 0 || flags[r] == 1) fake.gatheredOwnFlag.push_back(flags[r]);
-  }
-  if (fake.bootstrapResult != ncclSuccess) return fake.bootstrapResult;
-  for (size_t r = 0; r < fake.peerFlags.size(); r++) {
-    if (fake.peerFlags[r] != 0xff) flags[r] = fake.peerFlags[r];
-  }
-  return ncclSuccess;
-}
-
-// The UUT defines hierarchicalShuffle; the target embeds an empty device binary, so its registration
-// and launches land here.
-extern "C" void** __hipRegisterFatBinary(const void*) {
-  static void* handle = nullptr;
-  return &handle;
-}
-extern "C" void __hipRegisterFunction(void**, const void*, char*, const char*, unsigned int, uint3*, uint3*, dim3*,
-                                      dim3*, int*) {}
-extern "C" void __hipUnregisterFatBinary(void**) {}
-// clang >= 23 registers per-kernel profile shadows under -fprofile-instr-generate; these keep the ROCm
-// profile runtime out.
-extern "C" void __hipRegisterVar(void**, char*, char*, const char*, int, size_t, int, int) {}
-extern "C" __attribute__((weak)) void __llvm_profile_offload_register_shadow_variable(void*) {}
-extern "C" __attribute__((weak)) void __llvm_profile_offload_register_section_shadow_variable(void*) {}
-hipError_t __hipPushCallConfiguration(dim3 grid, dim3 block, size_t shmem, hipStream_t stream) {
-  fake.pushedGrid = grid;
-  fake.pushedBlock = block;
-  fake.pushedShmem = shmem;
-  fake.pushedStream = stream;
-  return hipSuccess;
-}
-hipError_t __hipPopCallConfiguration(dim3* grid, dim3* block, size_t* shmem, hipStream_t* stream) {
-  *grid = fake.pushedGrid;
-  *block = fake.pushedBlock;
-  *shmem = fake.pushedShmem;
-  *stream = fake.pushedStream;
-  return hipSuccess;
-}
-hipError_t hipLaunchKernel(const void* fn, dim3 grid, dim3 block, void** args, size_t shmem, hipStream_t stream) {
-  RecordLaunch(fn, grid, block, args, shmem, stream, nullptr);
-  return hipSuccess;
-}
-hipError_t hipExtLaunchKernel(const void* fn, dim3 grid, dim3 block, void** args, size_t shmem, hipStream_t stream,
-                              hipEvent_t, hipEvent_t stop, int) {
-  RecordLaunch(fn, grid, block, args, shmem, stream, stop);
-  return hipSuccess;
-}
+#include "ScopedHook.h"
+#include "fakes/bootstrap_stubs.h"
+#include "fakes/collectives_micro_fakes.h"
+#include "fakes/dev_runtime_fakes.h"
+#include "fakes/hip_fakes.h"
+#include "fakes/nccl_stubs.h"
+#include "fakes/recorder_fakes.h"
+#include "fakes/strongstream_stubs.h"
+#include "fakes/sym_kernels_fakes.h"
 
 #include "fakes/param_redirect.h"
 #include "fakes/nvtx_redirect.h"
@@ -576,6 +35,8 @@ hipError_t hipExtLaunchKernel(const void* fn, dim3 grid, dim3 block, void** args
 #include COLLECTIVES_CC_PATH
 
 namespace {
+
+using namespace collectives_micro;
 
 constexpr int kRank = 1;
 constexpr int kNRanks = 4;
@@ -589,14 +50,111 @@ bool Logged(ncclDebugLogLevel level, const std::string& needle) {
   return false;
 }
 
+// The shared fakes' hooks, routed into `fake` for the life of a test.
+struct SharedHooks {
+  ScopedHook<hipError_t(int*)> getDevice{g_hipGetDevice, [](int* dev) {
+    *dev = fake.currentDevice;
+    return fake.getDeviceResult;
+  }};
+  ScopedHook<hipError_t(int)> setDevice{g_hipSetDevice, [](int dev) {
+    fake.trace.push_back("setDevice " + std::to_string(dev));
+    if (++fake.setDeviceCalls == fake.setDeviceFailAt) return hipErrorInvalidDevice;
+    fake.currentDevice = dev;
+    return hipSuccess;
+  }};
+  ScopedHook<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)> memcpyAsync{
+      g_hipMemcpyAsync, [](void* dst, const void* src, size_t bytes, hipMemcpyKind kind, hipStream_t stream) {
+        fake.trace.push_back("memcpy");
+        fake.memcpys.push_back({dst, src, bytes, kind, stream});
+        if (dst == nullptr || src == nullptr) {
+          ADD_FAILURE() << "hipMemcpyAsync with a null pointer";
+          return hipErrorInvalidValue;
+        }
+        if (!fake.memcpyResults.empty()) {
+          hipError_t res = fake.memcpyResults.front();
+          fake.memcpyResults.pop_front();
+          if (res != hipSuccess) return res;
+        }
+        std::memcpy(dst, src, bytes);
+        return hipSuccess;
+      }};
+  ScopedHook<hipError_t(hipStream_t)> streamSync{g_hipStreamSynchronize, [](hipStream_t) {
+    fake.trace.push_back("sync");
+    return fake.syncResult;
+  }};
+  ScopedHook<hipError_t()> lastError{g_hipGetLastError, [] { return fake.lastError; }};
+  ScopedHook<hipError_t(const void*, dim3, dim3, void**, size_t, hipStream_t)> launch{
+      g_hipLaunchKernel, [](const void* fn, dim3 grid, dim3 block, void** args, size_t shmem, hipStream_t stream) {
+        RecordLaunch(fn, grid, block, args, shmem, stream, nullptr);
+        return hipSuccess;
+      }};
+  ScopedHook<hipError_t(const void*, dim3, dim3, void**, size_t, hipStream_t, hipEvent_t, hipEvent_t, int)> extLaunch{
+      g_hipExtLaunchKernel, [](const void* fn, dim3 grid, dim3 block, void** args, size_t shmem, hipStream_t stream,
+                               hipEvent_t, hipEvent_t stop, int) {
+        RecordLaunch(fn, grid, block, args, shmem, stream, stop);
+        return hipSuccess;
+      }};
+  ScopedHook<ncclResult_t(const RecorderCall&)> record{g_recorderCall, [](const RecorderCall& c) {
+    fake.trace.push_back("record");
+    fake.recorded.push_back({static_cast<rccl::rcclCall_t>(c.type), c.sendbuff, c.recvbuff, c.count, c.root,
+                             c.sendcounts, c.rdispls});
+    return fake.recordResult;
+  }};
+  ScopedHook<ncclResult_t(ncclComm*)> symkInit{g_symkInitOnce, [](ncclComm*) { return fake.symkInitResult; }};
+  ScopedHook<bool(ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t)> symkAvailable{
+      g_symkAvailable, [](ncclComm*, ncclFunc_t coll, int red, ncclDataType_t ty, size_t nElts) {
+        fake.symkQueries.push_back({coll, red, ty, nElts});
+        return fake.symkAvailable;
+      }};
+  ScopedHook<ncclResult_t(ncclDevrWindow*, ncclDevrWindow*, ncclSymRegType_t*)> regType{
+      g_getSymRegType, [](ncclDevrWindow* sendWin, ncclDevrWindow* recvWin, ncclSymRegType_t* winRegType) {
+        fake.regTypeArgs.push_back({sendWin, recvWin});
+        *winRegType = fake.regType;
+        return fake.regTypeResult;
+      }};
+  ScopedHook<ncclResult_t(ncclComm*, void const*, ncclDevrWindow**)> findWindow{
+      g_devrFindWindow, [](ncclComm*, void const* userPtr, ncclDevrWindow** outWin) {
+        fake.trace.push_back("findWindow");
+        if (userPtr != nullptr && userPtr == fake.findWindowFailPtr) return ncclInternalError;
+        auto it = fake.windows.find(userPtr);
+        *outWin = it == fake.windows.end() ? nullptr : it->second;
+        return ncclSuccess;
+      }};
+  ScopedHook<bool(ncclDevrWindow*)> sysmem{g_devrWindowHasSysmemSegment,
+                                           [](ncclDevrWindow* win) { return fake.sysmemWindows.count(win) != 0; }};
+  ScopedHook<ncclResult_t(ncclCudaGraph*, hipStream_t, int)> capturing{
+      g_cudaGetCapturingGraph, [](ncclCudaGraph* graph, hipStream_t, int graphUsageMode) {
+        fake.captureModes.push_back(graphUsageMode);
+        graph->graphId = fake.capturing ? 7 : ULLONG_MAX;
+        return fake.captureResult;
+      }};
+  ScopedHook<ncclResult_t(void**, size_t)> memAlloc{g_ncclMemAlloc, [](void** ptr, size_t size) {
+    fake.trace.push_back("memAlloc");
+    fake.memAllocSizes.push_back(size);
+    if (static_cast<int>(fake.memAllocSizes.size()) == fake.memAllocFailAt) return ncclSystemError;
+    *ptr = std::calloc(size, 1);
+    fake.memAllocs.push_back(*ptr);
+    return ncclSuccess;
+  }};
+  ScopedHook<ncclResult_t(void*, void*, int)> allGather{g_bootstrapAllGather, [](void*, void* allData, int) {
+    fake.trace.push_back("allGather");
+    uint8_t* flags = static_cast<uint8_t*>(allData);
+    for (size_t r = 0; r < fake.peerFlags.size(); r++) {
+      if (flags[r] == 0 || flags[r] == 1) fake.gatheredOwnFlag.push_back(flags[r]);
+    }
+    if (fake.bootstrapResult != ncclSuccess) return fake.bootstrapResult;
+    for (size_t r = 0; r < fake.peerFlags.size(); r++) {
+      if (fake.peerFlags[r] != 0xff) flags[r] = fake.peerFlags[r];
+    }
+    return ncclSuccess;
+  }};
+};
+
 class CollectivesMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    fake = Fakes{};
-    g_loadParam = [this](const char* env, int64_t deftVal) {
-      params_.push_back(env);
-      return deftVal;
-    };
+    ResetCollectivesMicroFakes();
+    g_recorderSkips.clear();
 
     comm_ = MakeComm(kRank, kNRanks);
     comm_->nNodes = 1;
@@ -607,7 +165,6 @@ class CollectivesMicrotest : public ::testing::Test {
   void TearDown() override {
     for (void* p : fake.memAllocs) std::free(p);
     fake.memAllocs.clear();
-    g_loadParam = nullptr;
   }
 
   std::unique_ptr<ncclComm> MakeComm(int rank, int nRanks) {
@@ -672,10 +229,16 @@ class CollectivesMicrotest : public ::testing::Test {
   std::vector<float> send_ = std::vector<float>(kCount * kNRanks);
   std::vector<float> recv_ = std::vector<float>(kCount * kNRanks);
   std::vector<std::string> params_;
+  ScopedHook<int64_t(const char*, int64_t)> paramHook_{g_loadParam, [this](const char* env, int64_t deftVal) {
+    params_.push_back(env);
+    return deftVal;
+  }};
+  SharedHooks hooks_;
 };
 
 // String helpers
 
+// ncclFuncAlltoAllPivot is RCCL-only and has no case. Pins AICOMRCCL-2981; a fix flips this pin.
 TEST_F(CollectivesMicrotest, FuncToString_NamesEveryHostFunc) {
   const std::vector<std::pair<ncclFunc_t, const char*>> names = {
       {ncclFuncAllGather, "AllGather"}, {ncclFuncAllReduce, "AllReduce"},   {ncclFuncAlltoAll, "AlltoAll"},
@@ -696,7 +259,7 @@ TEST_F(CollectivesMicrotest, DevRedOpToString_NamesEveryDeviceOp) {
   EXPECT_STREQ("Unknown", ncclDevRedOpToString(ncclNumDevRedOps));
 }
 
-// ncclUint8 has no case, so it logs as "Unknown".
+// ncclUint8 has no case, so it logs as "Unknown". Pins AICOMRCCL-2981; a fix flips this pin.
 TEST_F(CollectivesMicrotest, DatatypeToString_NamesEveryTypeButUint8) {
   const std::vector<std::pair<ncclDataType_t, const char*>> names = {
       {ncclInt8, "ncclInt8"},       {ncclInt32, "ncclInt32"},           {ncclUint32, "ncclUint32"},
@@ -2063,7 +1626,7 @@ TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_PostsEveryPeerAtItsDisplacement
   EXPECT_EQ(0u, fake.recorded[0].count);
   EXPECT_EQ(sendcounts_, fake.recorded[0].sendcounts);
   EXPECT_EQ(rdispls_, fake.recorded[0].rdispls);
-  EXPECT_EQ((std::vector<bool>{true, false}), fake.recorderSkips);
+  EXPECT_EQ((std::vector<bool>{true, false}), g_recorderSkips);
   ASSERT_EQ(2u * kNRanks, fake.p2ps.size());
   for (int r = 0; r < kNRanks; r++) {
     SCOPED_TRACE(r);
@@ -2139,7 +1702,8 @@ TEST_F(CollectivesAlltoAllvMicrotest, SetupFailuresStopBeforeAnyTraffic) {
   EXPECT_TRUE(fake.p2ps.empty());
 }
 
-// A failed post returns without ncclGroupEnd or skip(false), so the caller's group stays open; a fix flips this pin.
+// A failed post returns without ncclGroupEnd or skip(false), so the caller's group stays open.
+// Pins AICOMRCCL-2980; a fix flips this pin.
 TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_KnownBug_FailureLeavesTheGroupOpen) {
   fake.groupStartResult = ncclInvalidUsage;
   EXPECT_EQ(ncclInvalidUsage, AlltoAllv());
@@ -2148,19 +1712,19 @@ TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_KnownBug_FailureLeavesTheGroupO
   for (int failAt : {3, 4}) {
     SCOPED_TRACE(failAt);
     fake.p2ps.clear();
-    fake.recorderSkips.clear();
+    g_recorderSkips.clear();
     fake.trace.clear();
     fake.p2pFailAt = failAt;
     EXPECT_EQ(ncclInternalError, AlltoAllv());
     EXPECT_EQ(static_cast<size_t>(failAt), fake.p2ps.size());
-    EXPECT_EQ(std::vector<bool>{true}, fake.recorderSkips);
+    EXPECT_EQ(std::vector<bool>{true}, g_recorderSkips);
     EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));
   }
   fake.p2pFailAt = 0;
-  fake.recorderSkips.clear();
+  g_recorderSkips.clear();
   fake.groupEndResult = ncclRemoteError;
   EXPECT_EQ(ncclRemoteError, AlltoAllv());
-  EXPECT_EQ(std::vector<bool>{true}, fake.recorderSkips);
+  EXPECT_EQ(std::vector<bool>{true}, g_recorderSkips);
 }
 
 TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangesTheSizeMatrixThenEnqueuesIt) {
@@ -2215,7 +1779,7 @@ TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangesTheSizeMatrixThenEnqueuesIt) {
   std::vector<size_t> expected;
   for (int r = 0; r < kNRanks; r++) expected.insert(expected.end(), fake.peerMeta[r].begin(), fake.peerMeta[r].end());
   EXPECT_EQ(expected, fake.enqueued[0].sizes);
-  EXPECT_TRUE(fake.recorderSkips.empty());
+  EXPECT_TRUE(g_recorderSkips.empty());
 }
 
 TEST_F(CollectivesAlltoAllvMicrotest, Ce_ReusesTheMetadataBuffers) {
@@ -2270,7 +1834,8 @@ TEST_F(CollectivesAlltoAllvMicrotest, Ce_DeviceSwitchFailuresStopTheCall) {
   EXPECT_TRUE(fake.p2ps.empty());
 }
 
-// A failed size-exchange post returns without ncclGroupEnd, so the caller's group stays open; a fix flips this pin.
+// A failed size-exchange post returns without ncclGroupEnd, so the caller's group stays open.
+// Pins AICOMRCCL-2980; a fix flips this pin.
 TEST_F(CollectivesAlltoAllvMicrotest, Ce_KnownBug_FailedExchangePostLeavesTheGroupOpen) {
   fake.ceElig = true;
   for (int failAt : {1, 2}) {

@@ -5,46 +5,22 @@
  ************************************************************************/
 
 // Host-only microtests for src/enqueue/mgmt_task_enq.cc: ncclMgmtTaskEnqueue's task setup, group join and
-// blocking-mode bookkeeping. The group thread-locals group.cc owns are defined in this TU.
+// blocking-mode bookkeeping.
 
 #include <gtest/gtest.h>
 
-#include <cstdarg>
 #include <cstdint>
-#include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "../common/LogCapture.hpp"
 #include "group.h"
 
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
+// group.cc's other thread-locals live in fakes/nccl_stubs.cc, which also fakes ncclMgmtTaskEnqueue.
 thread_local int ncclGroupDepth = 0;
 thread_local ncclResult_t ncclGroupError = ncclSuccess;
-thread_local ncclComm* ncclGroupCommHead[ncclGroupTaskTypeNum] = {};
 thread_local ncclComm* ncclGroupCommPreconnectHead = nullptr;
-thread_local int ncclGroupBlocking = -1;
-
-namespace {
-std::vector<std::string> g_warnings;
-}  // namespace
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long, const char*, int, const char* fmt, ...) {
-  char buf[512];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  if (level == NCCL_LOG_WARN) g_warnings.push_back(buf);
-}
-
-// Reached only when a collective or raw-task join pushes a memory scope, never for a management task.
-void* ncclMemoryStack::allocateSpilled(ncclMemoryStack*, size_t, size_t) {
-  ADD_FAILURE() << "management tasks must not push a memory scope";
-  return nullptr;
-}
 
 #include MGMT_TASK_ENQ_CC_PATH
 
@@ -57,7 +33,6 @@ void Destroy(void* task) { g_destroyed.push_back(task); }
 class MgmtTaskEnqMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    g_warnings.clear();
     g_destroyed.clear();
     for (ncclComm*& head : ncclGroupCommHead) head = nullptr;
     ncclGroupBlocking = -1;
@@ -141,18 +116,20 @@ TEST_F(MgmtTaskEnqMicrotest, Enqueue_JoinsCommsInCommHashOrder) {
   EXPECT_EQ(high.get(), low->groupNext[ncclGroupTaskTypeMgmtTask]);
 }
 
-// ncclGroupCommJoin already stored this comm's mode, so the mixed-mode check never fires; a fix flips this pin.
+// ncclGroupCommJoin already stored this comm's mode, so the mixed-mode check never fires.
+// Pins AICOMRCCL-2979; a fix flips this pin.
 TEST_F(MgmtTaskEnqMicrotest, Enqueue_KnownBug_MixedBlockingModesAreNotRejected) {
   auto blocking = MakeComm(3, 1);
   auto nonblocking = MakeComm(9, 0);
   ncclAsyncJob a{};
   ncclAsyncJob b{};
   EXPECT_EQ(ncclSuccess, ncclMgmtTaskEnqueue(&a, TaskFunc, Destroy, blocking.get()));
-  EXPECT_EQ(ncclSuccess, ncclMgmtTaskEnqueue(&b, TaskFunc, Destroy, nonblocking.get()));
+  std::string log = RcclUnitTesting::CaptureLog(
+      [&] { EXPECT_EQ(ncclSuccess, ncclMgmtTaskEnqueue(&b, TaskFunc, Destroy, nonblocking.get())); });
   EXPECT_EQ(0, ncclGroupBlocking);
   EXPECT_EQ(&b, ncclIntruQueueHead(&nonblocking->mgmtTaskQueue));
   EXPECT_TRUE(g_destroyed.empty());
-  EXPECT_TRUE(g_warnings.empty());
+  EXPECT_TRUE(log.empty()) << log;
 }
 
 }  // namespace

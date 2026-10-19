@@ -5,14 +5,11 @@
  ************************************************************************/
 
 // Host-only microtests for src/device/onerank.cu: ncclLaunchOneRank's copy-or-reduce choice, its kernel
-// table and launch geometry. The HIP launch and copy calls are seamed in this TU.
+// table and launch geometry, observed through hip_fakes.cc's launch and copy hooks.
 
 #include <gtest/gtest.h>
 
-#include <cstdarg>
 #include <cstdint>
-#include <cstdio>
-#include <deque>
 #include <string>
 #include <vector>
 
@@ -22,18 +19,21 @@
 #include "debug.h"
 #include "device.h"
 
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
+#include "../common/LogCapture.hpp"
+#include "ScopedHook.h"
+#include "fakes/hip_fakes.h"
+
+// device/common.h is the kernel-side runtime (shared memory, work batches) and does not compile host-only;
+// onerank.cu only needs the reduceCopy and RedOp templates common_kernel.h layers on top of it.
+#define NCCL_DEVICE_COMMON_H_
+#include ONERANK_CC_PATH
 
 namespace {
 
-struct LogLine {
-  ncclDebugLogLevel level;
-  std::string text;
-};
-std::vector<LogLine> g_log;
-std::vector<std::string> g_trace;
+using RcclUnitTesting::CaptureLog;
+using RcclUnitTesting::LogHas;
+
+constexpr size_t kElts = 100;
 
 struct Memcpy {
   void* dst;
@@ -42,11 +42,6 @@ struct Memcpy {
   hipMemcpyKind kind;
   hipStream_t stream;
 };
-std::vector<Memcpy> g_memcpys;
-hipError_t g_memcpyResult = hipSuccess;
-std::vector<hipStreamCaptureMode> g_captureModes;
-int g_exchangeFailAt = 0;
-
 struct Launch {
   const void* fn;
   dim3 grid;
@@ -60,78 +55,6 @@ struct Launch {
   uint64_t scalarArg;
   bool scalarArgIsPtr;
 };
-std::vector<Launch> g_launches;
-hipError_t g_launchResult = hipSuccess;
-std::vector<std::pair<hipEvent_t, hipStream_t>> g_eventRecords;
-hipError_t g_eventRecordResult = hipSuccess;
-
-}  // namespace
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long, const char*, int, const char* fmt, ...) {
-  char buf[512];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  g_log.push_back({level, buf});
-}
-
-hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) {
-  g_trace.push_back("exchange");
-  g_captureModes.push_back(*mode);
-  if (static_cast<int>(g_captureModes.size()) == g_exchangeFailAt) return hipErrorInvalidValue;
-  *mode = g_captureModes.size() % 2 ? hipStreamCaptureModeThreadLocal : hipStreamCaptureModeRelaxed;
-  return hipSuccess;
-}
-hipError_t hipMemcpyAsync(void* dst, const void* src, size_t bytes, hipMemcpyKind kind, hipStream_t stream) {
-  g_trace.push_back("memcpy");
-  g_memcpys.push_back({dst, src, bytes, kind, stream});
-  return g_memcpyResult;
-}
-hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) {
-  g_trace.push_back("record");
-  g_eventRecords.push_back({event, stream});
-  return g_eventRecordResult;
-}
-hipError_t hipLaunchKernel(const void* fn, dim3 grid, dim3 block, void** args, size_t shmem, hipStream_t stream) {
-  g_trace.push_back("launch");
-  g_launches.push_back({fn, grid, block, shmem, stream, *static_cast<void**>(args[0]), *static_cast<void**>(args[1]),
-                        *static_cast<void**>(args[2]), *static_cast<size_t*>(args[3]),
-                        *static_cast<uint64_t*>(args[4]), *static_cast<bool*>(args[5])});
-  return g_launchResult;
-}
-const char* hipGetErrorString(hipError_t) { return "fake hip error"; }
-
-// The UUT defines its kernels; the target embeds an empty device binary, so their registration lands here.
-extern "C" void** __hipRegisterFatBinary(const void*) {
-  static void* handle = nullptr;
-  return &handle;
-}
-extern "C" void __hipRegisterFunction(void**, const void*, char*, const char*, unsigned int, uint3*, uint3*, dim3*,
-                                      dim3*, int*) {}
-extern "C" void __hipUnregisterFatBinary(void**) {}
-// clang >= 23 registers per-kernel profile shadows under -fprofile-instr-generate; these keep the ROCm
-// profile runtime out.
-extern "C" void __hipRegisterVar(void**, char*, char*, const char*, int, size_t, int, int) {}
-extern "C" __attribute__((weak)) void __llvm_profile_offload_register_shadow_variable(void*) {}
-extern "C" __attribute__((weak)) void __llvm_profile_offload_register_section_shadow_variable(void*) {}
-hipError_t __hipPopCallConfiguration(dim3*, dim3*, size_t*, hipStream_t*) { return hipErrorNotSupported; }
-
-// device/common.h is the kernel-side runtime (shared memory, work batches) and does not compile host-only;
-// onerank.cu only needs the reduceCopy and RedOp templates common_kernel.h layers on top of it.
-#define NCCL_DEVICE_COMMON_H_
-#include ONERANK_CC_PATH
-
-namespace {
-
-constexpr size_t kElts = 100;
-
-bool Logged(ncclDebugLogLevel level, const std::string& needle) {
-  for (const LogLine& line : g_log) {
-    if (line.level == level && line.text.find(needle) != std::string::npos) return true;
-  }
-  return false;
-}
 
 ncclDevRedOpFull Op(ncclDevRedOp_t op, uint64_t scalarArg = 0, bool scalarArgIsPtr = false) {
   ncclDevRedOpFull full{};
@@ -148,19 +71,6 @@ const void* Kernel() {
 
 class OnerankMicrotest : public ::testing::Test {
  protected:
-  void SetUp() override {
-    g_log.clear();
-    g_trace.clear();
-    g_memcpys.clear();
-    g_memcpyResult = hipSuccess;
-    g_captureModes.clear();
-    g_exchangeFailAt = 0;
-    g_launches.clear();
-    g_launchResult = hipSuccess;
-    g_eventRecords.clear();
-    g_eventRecordResult = hipSuccess;
-  }
-
   ncclResult_t LaunchOneRank(ncclDevRedOpFull op, ncclDataType_t type, const void* acc = nullptr,
                              hipEvent_t event = nullptr, size_t nElts = kElts) {
     return ncclLaunchOneRank(dst_, src_, nElts, op, type, stream_, event, acc);
@@ -171,6 +81,44 @@ class OnerankMicrotest : public ::testing::Test {
   void* dst_ = dstStorage_;
   void* src_ = srcStorage_;
   hipStream_t stream_ = reinterpret_cast<hipStream_t>(0x5a);
+
+  std::vector<std::string> trace_;
+  std::vector<Memcpy> memcpys_;
+  hipError_t memcpyResult_ = hipSuccess;
+  std::vector<hipStreamCaptureMode> captureModes_;
+  int exchangeFailAt_ = 0;
+  std::vector<Launch> launches_;
+  hipError_t launchResult_ = hipSuccess;
+  std::vector<std::pair<hipEvent_t, hipStream_t>> eventRecords_;
+  hipError_t eventRecordResult_ = hipSuccess;
+
+  ScopedHook<hipError_t(hipStreamCaptureMode*)> exchange_{
+      g_hipThreadExchangeStreamCaptureMode, [this](hipStreamCaptureMode* mode) {
+        trace_.push_back("exchange");
+        captureModes_.push_back(*mode);
+        if (static_cast<int>(captureModes_.size()) == exchangeFailAt_) return hipErrorInvalidValue;
+        *mode = captureModes_.size() % 2 ? hipStreamCaptureModeThreadLocal : hipStreamCaptureModeRelaxed;
+        return hipSuccess;
+      }};
+  ScopedHook<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)> memcpy_{
+      g_hipMemcpyAsync, [this](void* dst, const void* src, size_t bytes, hipMemcpyKind kind, hipStream_t stream) {
+        trace_.push_back("memcpy");
+        memcpys_.push_back({dst, src, bytes, kind, stream});
+        return memcpyResult_;
+      }};
+  ScopedHook<hipError_t(hipEvent_t, hipStream_t)> record_{g_hipEventRecord, [this](hipEvent_t e, hipStream_t st) {
+    trace_.push_back("record");
+    eventRecords_.push_back({e, st});
+    return eventRecordResult_;
+  }};
+  ScopedHook<hipError_t(const void*, dim3, dim3, void**, size_t, hipStream_t)> launch_{
+      g_hipLaunchKernel, [this](const void* fn, dim3 grid, dim3 block, void** args, size_t shmem, hipStream_t st) {
+        trace_.push_back("launch");
+        launches_.push_back({fn, grid, block, shmem, st, *static_cast<void**>(args[0]), *static_cast<void**>(args[1]),
+                             *static_cast<void**>(args[2]), *static_cast<size_t*>(args[3]),
+                             *static_cast<uint64_t*>(args[4]), *static_cast<bool*>(args[5])});
+        return launchResult_;
+      }};
 };
 
 TEST_F(OnerankMicrotest, InPlaceWithoutBiasIsANoOp) {
@@ -178,45 +126,45 @@ TEST_F(OnerankMicrotest, InPlaceWithoutBiasIsANoOp) {
   for (ncclDevRedOp_t op : {ncclDevSum, ncclDevProd, ncclDevMinMax, ncclDevSumPostDiv, ncclNumDevRedOps}) {
     EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(op), ncclFloat32)) << op;
   }
-  EXPECT_TRUE(g_trace.empty());
+  EXPECT_TRUE(trace_.empty());
 }
 
 TEST_F(OnerankMicrotest, OutOfPlaceWithoutBiasIsOneRelaxedCopy) {
   EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevMinMax), ncclFloat64));
-  EXPECT_EQ((std::vector<std::string>{"exchange", "memcpy", "exchange"}), g_trace);
-  ASSERT_EQ(1u, g_memcpys.size());
-  EXPECT_EQ(dst_, g_memcpys[0].dst);
-  EXPECT_EQ(src_, g_memcpys[0].src);
-  EXPECT_EQ(kElts * sizeof(double), g_memcpys[0].bytes);
-  EXPECT_EQ(hipMemcpyDefault, g_memcpys[0].kind);
-  EXPECT_EQ(stream_, g_memcpys[0].stream);
+  EXPECT_EQ((std::vector<std::string>{"exchange", "memcpy", "exchange"}), trace_);
+  ASSERT_EQ(1u, memcpys_.size());
+  EXPECT_EQ(dst_, memcpys_[0].dst);
+  EXPECT_EQ(src_, memcpys_[0].src);
+  EXPECT_EQ(kElts * sizeof(double), memcpys_[0].bytes);
+  EXPECT_EQ(hipMemcpyDefault, memcpys_[0].kind);
+  EXPECT_EQ(stream_, memcpys_[0].stream);
   // Relaxed for the copy, then the caller's mode put back.
   EXPECT_EQ((std::vector<hipStreamCaptureMode>{hipStreamCaptureModeRelaxed, hipStreamCaptureModeThreadLocal}),
-            g_captureModes);
+            captureModes_);
 }
 
 TEST_F(OnerankMicrotest, CopyFailuresAreHipErrors) {
-  g_memcpyResult = hipErrorInvalidValue;
+  memcpyResult_ = hipErrorInvalidValue;
   EXPECT_EQ(ncclUnhandledCudaError, LaunchOneRank(Op(ncclDevSum), ncclInt8));
-  EXPECT_EQ(2u, g_captureModes.size());  // the mode is restored on the failure path too
-  g_memcpyResult = hipSuccess;
-  g_captureModes.clear();
-  g_memcpys.clear();
-  g_exchangeFailAt = 1;
+  EXPECT_EQ(2u, captureModes_.size());  // the mode is restored on the failure path too
+  memcpyResult_ = hipSuccess;
+  captureModes_.clear();
+  memcpys_.clear();
+  exchangeFailAt_ = 1;
   EXPECT_EQ(ncclUnhandledCudaError, LaunchOneRank(Op(ncclDevSum), ncclInt8));
-  EXPECT_TRUE(g_memcpys.empty());
-  g_captureModes.clear();
-  g_exchangeFailAt = 2;  // restoring the caller's mode fails after the copy was issued
+  EXPECT_TRUE(memcpys_.empty());
+  captureModes_.clear();
+  exchangeFailAt_ = 2;  // restoring the caller's mode fails after the copy was issued
   EXPECT_EQ(ncclUnhandledCudaError, LaunchOneRank(Op(ncclDevSum), ncclInt8));
-  EXPECT_EQ(1u, g_memcpys.size());
+  EXPECT_EQ(1u, memcpys_.size());
 }
 
 TEST_F(OnerankMicrotest, PreMulSumAlwaysReduces) {
   src_ = dst_;
   EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevPreMulSum, 0x3f800000u, true), ncclFloat32));
-  EXPECT_TRUE(g_memcpys.empty());
-  ASSERT_EQ(1u, g_launches.size());
-  const Launch& l = g_launches[0];
+  EXPECT_TRUE(memcpys_.empty());
+  ASSERT_EQ(1u, launches_.size());
+  const Launch& l = launches_[0];
   EXPECT_EQ((Kernel<FuncPreMulSum, float>()), l.fn);
   EXPECT_EQ(dst_, l.dst);
   EXPECT_EQ(dst_, l.src);
@@ -234,13 +182,13 @@ TEST_F(OnerankMicrotest, PreMulSumAlwaysReduces) {
 TEST_F(OnerankMicrotest, BiasReducesWithEveryOp) {
   int acc = 0;
   EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevSum, 7), ncclInt32, &acc));
-  ASSERT_EQ(1u, g_launches.size());
-  EXPECT_EQ((Kernel<FuncSum, int32_t>()), g_launches[0].fn);
-  EXPECT_EQ(&acc, g_launches[0].acc);
-  EXPECT_EQ(src_, g_launches[0].src);
-  EXPECT_EQ(7u, g_launches[0].scalarArg);
-  EXPECT_FALSE(g_launches[0].scalarArgIsPtr);
-  EXPECT_TRUE(g_memcpys.empty());
+  ASSERT_EQ(1u, launches_.size());
+  EXPECT_EQ((Kernel<FuncSum, int32_t>()), launches_[0].fn);
+  EXPECT_EQ(&acc, launches_[0].acc);
+  EXPECT_EQ(src_, launches_[0].src);
+  EXPECT_EQ(7u, launches_[0].scalarArg);
+  EXPECT_FALSE(launches_[0].scalarArgIsPtr);
+  EXPECT_TRUE(memcpys_.empty());
 }
 
 // SumPostDiv divides by nRanks == 1, so it runs as Sum.
@@ -271,10 +219,10 @@ TEST_F(OnerankMicrotest, KernelTableCoversEveryOpAndType) {
   for (const Case& tc : cases) {
     for (size_t i = 0; i < 5; i++) {
       SCOPED_TRACE(std::to_string(tc.type) + "/" + std::to_string(ops[i]));
-      g_launches.clear();
+      launches_.clear();
       ASSERT_EQ(ncclSuccess, LaunchOneRank(Op(ops[i]), tc.type, &acc));
-      ASSERT_EQ(1u, g_launches.size());
-      EXPECT_EQ(tc.kernels[i], g_launches[0].fn);
+      ASSERT_EQ(1u, launches_.size());
+      EXPECT_EQ(tc.kernels[i], launches_[0].fn);
     }
   }
   // The table maps to distinct instantiations, not one kernel for everything.
@@ -288,7 +236,7 @@ TEST_F(OnerankMicrotest, UnknownOpOrTypeIsInvalid) {
   EXPECT_EQ(ncclInvalidArgument, LaunchOneRank(Op(ncclNumDevRedOps), ncclInt8, &acc));
   EXPECT_EQ(ncclInvalidArgument, LaunchOneRank(Op(ncclDevSum), ncclNumTypes, &acc));
   EXPECT_EQ(ncclInvalidArgument, LaunchOneRank(Op(ncclDevPreMulSum), ncclNumTypes));
-  EXPECT_TRUE(g_launches.empty());
+  EXPECT_TRUE(launches_.empty());
 }
 
 // One block per 16 KiB, at most 32.
@@ -297,11 +245,11 @@ TEST_F(OnerankMicrotest, GridGrowsWithTheMessageUpTo32Blocks) {
   const std::vector<std::pair<size_t, unsigned>> cases = {
       {1, 1}, {4096, 1}, {4097, 2}, {32 * 4096, 32}, {32 * 4096 + 1, 32}, {size_t(1) << 30, 32}};
   for (const auto& [nElts, blocks] : cases) {
-    g_launches.clear();
+    launches_.clear();
     ASSERT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc, nullptr, nElts));
-    ASSERT_EQ(1u, g_launches.size());
-    EXPECT_EQ(blocks, g_launches[0].grid.x) << nElts;
-    EXPECT_EQ(nElts, g_launches[0].nElts);
+    ASSERT_EQ(1u, launches_.size());
+    EXPECT_EQ(blocks, launches_[0].grid.x) << nElts;
+    EXPECT_EQ(nElts, launches_[0].nElts);
   }
 }
 
@@ -309,31 +257,33 @@ TEST_F(OnerankMicrotest, GridGrowsWithTheMessageUpTo32Blocks) {
 TEST_F(OnerankMicrotest, CompletionEventIsRecordedBeforeTheLaunch) {
   int acc = 0;
   hipEvent_t event = reinterpret_cast<hipEvent_t>(0xe7);
-  EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc, event));
-  EXPECT_EQ((std::vector<std::string>{"record", "launch"}), g_trace);
-  ASSERT_EQ(1u, g_eventRecords.size());
-  EXPECT_EQ(event, g_eventRecords[0].first);
-  EXPECT_EQ(stream_, g_eventRecords[0].second);
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "launch-completion events require CUDA 12.3"));
+  std::string log = CaptureLog([&] { EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc, event)); });
+  EXPECT_EQ((std::vector<std::string>{"record", "launch"}), trace_);
+  ASSERT_EQ(1u, eventRecords_.size());
+  EXPECT_EQ(event, eventRecords_[0].first);
+  EXPECT_EQ(stream_, eventRecords_[0].second);
+  EXPECT_TRUE(LogHas(log, "launch-completion events require CUDA 12.3"));
 
-  g_trace.clear();
-  g_eventRecordResult = hipErrorInvalidHandle;
+  trace_.clear();
+  eventRecordResult_ = hipErrorInvalidHandle;
   EXPECT_EQ(ncclUnhandledCudaError, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc, event));
-  EXPECT_EQ(std::vector<std::string>{"record"}, g_trace);
+  EXPECT_EQ(std::vector<std::string>{"record"}, trace_);
 }
 
 TEST_F(OnerankMicrotest, NoCompletionEventNoRecord) {
   int acc = 0;
-  EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc));
-  EXPECT_TRUE(g_eventRecords.empty());
-  EXPECT_TRUE(g_log.empty());
+  RcclUnitTesting::ScopedDebugLogging all(-1, ~uint64_t(0));
+  std::string log = CaptureLog([&] { EXPECT_EQ(ncclSuccess, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc)); });
+  EXPECT_TRUE(eventRecords_.empty());
+  EXPECT_TRUE(log.empty()) << log;
 }
 
 TEST_F(OnerankMicrotest, LaunchFailureIsAHipError) {
   int acc = 0;
-  g_launchResult = hipErrorLaunchFailure;
-  EXPECT_EQ(ncclUnhandledCudaError, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc));
-  EXPECT_TRUE(Logged(NCCL_LOG_ERROR, "HIP failure"));
+  launchResult_ = hipErrorLaunchFailure;
+  std::string log =
+      CaptureLog([&] { EXPECT_EQ(ncclUnhandledCudaError, LaunchOneRank(Op(ncclDevSum), ncclFloat32, &acc)); });
+  EXPECT_TRUE(LogHas(log, "HIP failure"));
 }
 
 }  // namespace

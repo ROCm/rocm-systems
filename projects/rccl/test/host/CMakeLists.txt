@@ -186,20 +186,34 @@ function(rccl_define_micro_source_lists)
   # most targets link, defines this file's string helpers.
   set(TEST_MICRO_COLLECTIVES_SOURCE_FILES
     collectives-test.cc
+    fakes/collectives_micro_fakes.cc
+    fakes/bootstrap_stubs.cc
+    fakes/dev_runtime_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_stubs.cc
+    fakes/recorder_fakes.cc
+    fakes/strongstream_stubs.cc
+    fakes/sym_kernels_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
   # rccl-UnitTestsMicroOnerank -- src/device/onerank.cu. Own binary: fakes/sched_stubs.cc fakes
-  # ncclLaunchOneRank, and this test seams the HIP launch calls itself.
+  # ncclLaunchOneRank.
   set(TEST_MICRO_ONERANK_SOURCE_FILES
     onerank-test.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
   # rccl-UnitTestsMicroMgmtTaskEnq -- src/enqueue/mgmt_task_enq.cc. Own binary: fakes/nccl_stubs.cc
-  # fakes ncclMgmtTaskEnqueue, and this test defines group.cc's thread-locals itself.
+  # fakes ncclMgmtTaskEnqueue, so this test defines the group thread-locals that file owns.
   set(TEST_MICRO_MGMT_TASK_ENQ_SOURCE_FILES
     mgmt-task-enq-test.cc
+    fakes/group_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/utils_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 

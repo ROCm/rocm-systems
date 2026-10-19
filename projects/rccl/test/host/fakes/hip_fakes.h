@@ -187,6 +187,10 @@ extern std::function<hipError_t(const void* /*function*/, dim3 /*grid*/, dim3 /*
                                 size_t /*sharedMemBytes*/, hipStream_t /*stream*/, hipEvent_t /*startEvent*/,
                                 hipEvent_t /*stopEvent*/, int /*flags*/)>
     g_hipExtLaunchKernel;
+// The <<<>>> launch path. Same fail-loud default as g_hipExtLaunchKernel.
+extern std::function<hipError_t(const void* /*fn*/, dim3 /*grid*/, dim3 /*block*/, void** /*args*/,
+                                size_t /*shmem*/, hipStream_t /*stream*/)>
+    g_hipLaunchKernel;
 
 // Event-record seam. The default delegates to g_hipAsyncOpsResult so the CE
 // proxy-progress tests keep the existing behaviour, but exposing it as a hook

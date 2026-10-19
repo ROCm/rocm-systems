@@ -234,17 +234,18 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `test_categories_micro_enqueue.yaml`.
 - **`rccl-UnitTestsMicroCollectives`** — `collectives.cc` (via `COLLECTIVES_CC_PATH`, from
   `collectives-test.cc`), with the `include/collectives.h` ring/PAT generators and
-  `include/alltoallv_meta.h`; suite `Collectives*`. Its own binary because
-  `fakes/collectives_fakes.cc`, which most targets link, defines this file's string helpers.
-  See `test_categories_micro_collectives.yaml`.
+  `include/alltoallv_meta.h`; suite `Collectives*`. Its externals without a shared owner are in
+  `fakes/collectives_micro_fakes.cc`. Its own binary because `fakes/collectives_fakes.cc`, which
+  most targets link, defines this file's string helpers. See
+  `test_categories_micro_collectives.yaml`.
 - **`rccl-UnitTestsMicroOnerank`** — `device/onerank.cu` (via `ONERANK_CC_PATH`, from
-  `onerank-test.cc`); suite `Onerank*`. Its own binary because `fakes/sched_stubs.cc` fakes
-  `ncclLaunchOneRank`, and this test seams the HIP launch calls itself. See
+  `onerank-test.cc`); suite `Onerank*`, driving `fakes/hip_fakes.cc`'s launch and copy hooks.
+  Its own binary because `fakes/sched_stubs.cc` fakes `ncclLaunchOneRank`. See
   `test_categories_micro_onerank.yaml`.
 - **`rccl-UnitTestsMicroMgmtTaskEnq`** — `enqueue/mgmt_task_enq.cc` (via `MGMT_TASK_ENQ_CC_PATH`,
   from `mgmt-task-enq-test.cc`); suite `MgmtTaskEnq*`. Its own binary because
-  `fakes/nccl_stubs.cc` fakes `ncclMgmtTaskEnqueue`, and this test defines `group.cc`'s
-  thread-locals itself. See `test_categories_micro_mgmt_task_enq.yaml`.
+  `fakes/nccl_stubs.cc` fakes `ncclMgmtTaskEnqueue`, so the test defines the three group
+  thread-locals that file owns. See `test_categories_micro_mgmt_task_enq.yaml`.
 - **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suite
   `CeCollMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`, both in
   `ce-coll-test.cc`. Its own binary because every other target links
@@ -506,6 +507,7 @@ symbol.
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | `src/ce_coll.cc` (targets that do not compile the real file) | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
+| externals `src/collectives.cc` reaches (`rccl-UnitTestsMicroCollectives`, which compiles it) | `fakes/collectives_micro_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
 | `src/diagnostics.cc` (`ncclDiagChildRun*` external-tool runners) | `fakes/diagnostics_fakes.cc` |
 | externals `src/dev_runtime.cc` reaches (`rccl-UnitTestsMicro`, which compiles it) | `fakes/dev_runtime_micro_fakes.cc` |
