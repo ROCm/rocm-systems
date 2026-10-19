@@ -1,5 +1,8 @@
 ---
 module:
+  Unit_hipModuleLoad_Compressed_Lifetime:
+    <<: *level_default
+    tags: [load, function, global]
   Unit_hipModuleLaunchCooperativeKernel_Positive_Basic:
     <<: *level_default
     # Rock_Window_Failures_on_gfx1151

@@ -991,10 +991,12 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
     return hipErrorInvalidKernelFile;
   }
   auto* device_program = program->getDeviceProgram(*ctx->devices()[0]);
-  if (data.handle != 0 && device_program->binary().first == binary_image &&
+  if (data.handle != 0 && device_program != nullptr &&
+      device_program->binary().first == binary_image &&
       device_program->binary().second == binary_size &&
       !device_program->initializeCodeObject(data, binary_image, binary_size)) {
-    return hipErrorNoBinaryForGpu;
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
+            "Code object reuse failed; falling back to lazy metadata and symbol loading.");
   }
   return hipSuccess;
 }

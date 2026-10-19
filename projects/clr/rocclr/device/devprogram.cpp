@@ -2045,6 +2045,7 @@ bool Program::initializeCodeObject(amd_comgr_data_t data, const void* binary, si
   }
   clearCodeObjectMetadata();
   if (!createKernelMetadataMap(data)) {
+    clearCodeObjectMetadata();
     return false;
   }
   if (amd::Comgr::iterate_symbols(data, collectCodeObjectSymbol, &codeObjectSymbols_) !=

@@ -25,6 +25,19 @@ set(TEST_SRC
 )
 
 if (HIP_PLATFORM MATCHES "amd")
+  list(APPEND TEST_SRC hipModuleLoadCompressed.cc)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/compressed_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
+                   -mcode-object-version=5 --offload-compress --cuda-device-only
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/compressed_module.cc
+                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                   -o ${CMAKE_CURRENT_BINARY_DIR}/compressed_module.code
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compressed_module.cc)
+  add_custom_target(compressed_module_code
+                    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/compressed_module.code)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+               ${CMAKE_CURRENT_BINARY_DIR}/compressed_module.code)
+
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/get_function_module.cc
@@ -429,6 +442,11 @@ hip_add_exe_to_target(NAME ModuleTest
   LINKER_LIBS ${RTCLIB}
   COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
+if(TARGET hipModuleLoadCompressed)
+  target_sources(hipModuleLoadCompressed PRIVATE hip_module_common.cc)
+  add_dependencies(hipModuleLoadCompressed compressed_module_code)
+endif()
+
 if(NOT WIN32)
   add_dependencies(ModuleTest coopKernel_code)
   add_dependencies(ModuleTest launch_kernel_module)
@@ -462,6 +480,7 @@ if(HIP_PLATFORM MATCHES "amd")
     add_dependencies(ModuleTest addKernel-bundle_spv)
   endif()
   add_dependencies(ModuleTest copyKernelCompressed_code)
+  add_dependencies(ModuleTest compressed_module_code)
   add_dependencies(ModuleTest copyKernelGenericTarget_code)
   add_dependencies(ModuleTest copyKernelGenericTargetCompressed_code)
   add_dependencies(ModuleTest anyOrderLaunch_code)
