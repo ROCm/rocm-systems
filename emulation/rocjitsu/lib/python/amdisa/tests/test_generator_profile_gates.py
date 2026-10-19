@@ -4826,13 +4826,35 @@ def test_generated_encoding_rendering_overrides_are_inline(
 
     if 'amdgpu::sdwa::append_' in encodings_h:
         assert (
-            '#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"' in encodings_h
+            '#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"'
+            in encodings_h
         )
     if 'amdgpu::append_gfx12_cache_policy' in encodings_h:
         assert (
             '#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"'
             in encodings_h
         )
+
+
+@pytest.mark.parametrize('split_execution_sources', [False, True])
+def test_generated_sdwa_formatting_has_direct_header_dependency(
+    tmp_path: Path,
+    split_execution_sources: bool,
+) -> None:
+    class Profile(Cdna4Profile):
+        @property
+        def split_execution_sources(self) -> bool:
+            return split_execution_sources
+
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Profile()).parse()
+    CodeGenerator(spec, str(tmp_path), derive_all_semantics(spec)).gen_encodings()
+    header = (tmp_path / 'cdna4' / 'encodings.h').read_text()
+    source = (tmp_path / 'cdna4' / 'encodings.cpp').read_text()
+    include = '#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"'
+
+    assert 'amdgpu::sdwa::append_' in header
+    assert include in header
+    assert include not in source
 
 
 @pytest.mark.parametrize('arch', ['cdna4', 'rdna4', 'gfx1250'])
@@ -4978,8 +5000,10 @@ def test_generated_sdwa_uses_shared_source_staging(
             assert 'amdgpu::sdwa::stage_source(' in generated
             assert 'sdwa_src_select(' not in generated
             assert 'std::make_unique<DppOperand>' not in generated
-        encodings = (amdgpu_generated_root / arch / 'encodings.cpp').read_text()
-        assert '#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"' in encodings
+        encodings = (amdgpu_generated_root / arch / 'encodings.h').read_text()
+        assert (
+            '#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"' in encodings
+        )
     assert checked_sdwa_files > 0
 
 
