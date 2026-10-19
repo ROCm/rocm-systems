@@ -21,6 +21,7 @@ from utils.tty import (
     format_table_output,
     has_time_data,
     print_operator_node,
+    process_table_data,
     resolve_hidden_columns,
     show_all,
     show_call_tree,
@@ -1043,3 +1044,22 @@ class TestRenderMembwGuidance:
         output = _render_membw_guidance(result)
         assert "No bottlenecks detected" not in output
         assert "Bottlenecks detected" in output
+
+
+def test_process_table_data_omits_collectable_rows():
+    """CLI table rows hide ``_collect.*`` and keep a normal metric."""
+    frame = pd.DataFrame({
+        "Metric": ["VALU FLOPs", "_collect.flops"],
+        "Value": ["1.0", "2.0"],
+    })
+    runs = {"run": SimpleNamespace(dfs={201: frame})}
+    args = SimpleNamespace(time_unit=None, cols=None, decimal=2, verbose=0)
+    result = process_table_data(
+        args,
+        runs,
+        {"id": 201},
+        "metric_table",
+        ["Value"],
+        [],
+    )
+    assert list(result["Metric"]) == ["VALU FLOPs"]
