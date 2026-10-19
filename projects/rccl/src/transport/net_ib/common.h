@@ -281,15 +281,18 @@ static inline void ncclIbGidInfoSnapshot(struct ncclIbNetCommDevBase* base, stru
   base->gidInfo = ibDev->gidInfo;
 }
 
+// The sender polls idx and then reads the other fields, so every field must share
+// idx's 64-byte line: a field in a second line can still be stale when idx is seen.
 struct alignas(64) ncclIbSendFifo {
   uint64_t addr;
   uint64_t size;
   uint32_t rkeys[NCCL_IB_MAX_DEVS_PER_NIC];
-  uint32_t nreqs;
+  uint16_t nreqs;
+  uint16_t flagFlush; // Receiver asks for the GDR flush flag write after this payload
   uint32_t tag;
   uint64_t idx;
-  uint32_t flagFlush; // Receiver asks for the GDR flush flag write after this payload
 };
+static_assert(sizeof(struct ncclIbSendFifo) == 64, "ncclIbSendFifo must fit in one 64-byte line");
 
 struct ncclIbQpInitAttr {
   ibv_qp_state state;
