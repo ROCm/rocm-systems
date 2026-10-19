@@ -23,11 +23,17 @@ Capture also needs your consent, given once per user: write the line `yes` to
 `${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent` (`%APPDATA%\hrr\capture-consent`
 on Windows). Where no such file can be kept, as in CI or a container, set
 `HIP_HRR_CAPTURE_CONSENT=yes` for the run instead. Without either, the process runs
-unrecorded and says why in one line on stderr. The manifest metadata records which
-of the two gave consent as `capture_consent`.
+unrecorded and says why in one line on stderr. A set `HIP_HRR_CAPTURE_CONSENT` decides
+the run either way: any value other than `yes`, such as `no`, withholds consent even
+when the file says yes. The manifest metadata records which of the two gave consent as
+`capture_consent`.
 
 ```bash
-mkdir -p ~/.config/hrr && echo yes > ~/.config/hrr/capture-consent
+d="${XDG_CONFIG_HOME:-$HOME/.config}/hrr" && mkdir -p "$d" && echo yes > "$d/capture-consent"
+```
+
+```powershell
+New-Item -ItemType Directory -Force "$env:APPDATA\hrr" | Out-Null; Set-Content "$env:APPDATA\hrr\capture-consent" yes
 ```
 
 A process that initialises HIP with capture on says so once on stderr, whatever `AMD_LOG_LEVEL` is set to: the line begins with `[HRR capture] Recording` and names the process's own directory in the archive, such as `./my_capture.hrr/pid-4242`. Child processes record to their own `pid-*` directories in the same archive. A child started with `exec` prints a line of its own; a child created with `fork()` after HIP has started does not.
@@ -101,7 +107,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `HIP_HRR_CAPTURE_CONSENT` | *(unset)* | `yes` consents to capture for this run without the per-user consent file; any other value does not |
+| `HIP_HRR_CAPTURE_CONSENT` | *(unset)* | `yes` consents to capture for this run without the per-user consent file; any other value, such as `no`, withholds consent for this run even when the file says yes. Blank counts as unset |
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance). Only a Debug build of the HIP runtime (no `NDEBUG`) reads it; a release build ignores it. Either way capture says on stderr whether it reads it, whatever the log level |
 
