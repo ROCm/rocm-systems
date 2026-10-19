@@ -114,7 +114,7 @@ __launch_bounds__(512)
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
       if (!ddaLLWaitLineFlags(&src[pk], flag, abortFlag, d0, f0, d1, f1)) {
-        break;
+        break; // poll is the outermost loop; the ddaSetLLEpoch below still runs
       }
       out[2 * pk] = d0;
       out[2 * pk + 1] = d1;

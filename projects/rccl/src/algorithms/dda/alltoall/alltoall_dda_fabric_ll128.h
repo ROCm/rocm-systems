@@ -136,7 +136,7 @@ __launch_bounds__(1024)
       const size_t base = ln * (size_t)kDdaLL128DataElems;
       // all 16 lanes poll the shared flag word (broadcast); unfenced.
       if (!ddaLL128WaitFlag(&src[ln].w[kDdaLL128FlagElem], (uint64_t)flag, abortFlag)) {
-        break;
+        break; // poll is the outermost loop; the ddaSetLLEpoch below still runs
       }
       if (lane < kDdaLL128DataElems) {
         const size_t e = base + (size_t)lane;
