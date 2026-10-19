@@ -609,6 +609,16 @@ bool ddaLLSubThresholdsAtDefault()
                   == kDefaultTwoShot;
 }
 
+/// True when RCCL_DDA_LL128_ONESHOT_THRESHOLD is at its default. rcclGetCollImplInfo
+/// reports the LL128 tier, not the variant, so a lowered value would silently run the
+/// two-shot kernel in the one-shot case.
+bool ddaLL128OneShotThresholdAtDefault()
+{
+    constexpr int64_t kDefaultLL128OneShot = int64_t(4) * 1024 * 1024;
+    return MPIHelpers::getEnvParam<int64_t>("RCCL_DDA_LL128_ONESHOT_THRESHOLD", kDefaultLL128OneShot)
+           == kDefaultLL128OneShot;
+}
+
 /// Shared body: GTEST_SKIP() returns from here, so call it as the last statement of a test.
 void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
 {
@@ -763,6 +773,11 @@ TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLlOneShot)
 
 TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaLl128OneShot)
 {
+    const std::string skipReason = mpiCoordinatedSkipReason(
+        !ddaLL128OneShotThresholdAtDefault(),
+        "count is sized against the default RCCL_DDA_LL128_ONESHOT_THRESHOLD");
+    if(!skipReason.empty())
+        GTEST_SKIP() << skipReason;
     runIncompleteDdaRevokeShrink(
         *this, {ncclFuncAllReduce, kOneShotCount, kDdaLL128, NCCL_PROTO_LL128, kDisableAllReduceLL});
 }
