@@ -88,6 +88,11 @@ class ScriptTest(unittest.TestCase):
         self.assertIn("GH_TOKEN", command)
         self.assertIn("HOME=/tmp", command)
 
+    def test_gpu_detection_looks_in_the_sdk_and_fails_closed(self):
+        script = hrr_dev.container_script(Path("/repo"), "gpu")
+        self.assertIn('ROCM_SDK="$ROCM_PATH" python3 -c', script)
+        self.assertIn('[ -n "$targets" ] || {', script)
+
     def test_user_install_scripts_on_path_before_sdk_use(self):
         script = hrr_dev.container_script(Path("/repo"), "emulator")
         self.assertLess(

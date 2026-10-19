@@ -104,7 +104,7 @@ def container_script(repo: Path, backend: str) -> str:
     if backend == "gpu":
         # Build for the GPUs actually present, not the emulator targets.
         targets = (
-            "$(python3 -c 'import sys; sys.path.insert(0, \"projects/hrr/tests/scripts\"); "
+            "$(ROCM_SDK=\"$ROCM_PATH\" python3 -c 'import sys; sys.path.insert(0, \"projects/hrr/tests/scripts\"); "
             "import hrr_test_config as c; print(\";\".join(c.detect_archs()))')"
         )
     else:
@@ -131,6 +131,7 @@ def container_script(repo: Path, backend: str) -> str:
         "-DHIP_PLATFORM=amd -DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF",
         "cmake --build build/hrr-dev/clr --target amdhip64 -j",
         f'targets="{targets}"',
+        '[ -n "$targets" ] || { echo "error: no GPU architecture detected" >&2; exit 1; }',
         "cmake -S projects/hrr -B build/hrr-dev/integration -G Ninja "
         "-DCMAKE_BUILD_TYPE=Release "
         '-DROCM_PATH="$ROCM_PATH" -DCMAKE_PREFIX_PATH="$ROCM_PATH" '
