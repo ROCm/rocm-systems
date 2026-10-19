@@ -7,20 +7,68 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added a *Limited by* mode to the *AI axis* selector in the standalone roofline HTML. It shows each kernel at its limiting memory-level point, falling back to the leftmost point for compute-bound or unknown kernels.
+
+* Added Data Fabric to MALL bandwidth arrows to the CDNA (gfx9) Memory Chart. On gfx940–gfx942 these report estimated HBM bandwidth, derived from a 64B-per-request approximation, through the new `Estimated HBM Read BW` and `Estimated HBM Write and Atomic BW` metrics. On gfx950 they use the existing `HBM Read BW` and the new `HBM Write and Atomic BW` metric.
+
+* Added the `VL1 Coalesce` metric to the VL1D panel of the CDNA (gfx9) Memory Chart.
+
+* Added the xGMI block to the gfx908, gfx90a, and gfx940–gfx942 Memory Charts, which previously showed it only on gfx950. The block is drawn without bandwidth counters on these architectures.
+
+* Added metrics to the gfx1250 Memory Chart:
+  * Instruction cache utilization, latency, and stall rate.
+  * Scalar data cache utilization, latency, stall rate, and bandwidth.
+  * GL1 request latency.
+
 ### Changed
 
 * Merged the metric listing options into `--list-metrics`, which now shows the alias of each block and the unit and description of each metric. Per-channel metrics are no longer listed.
   * The GPU architecture is optional. Without it, `--list-metrics` lists the metrics of the current GPU.
   * Use `-b/--block` to list only some blocks or metrics, for example `rocprof-compute --list-metrics gfx950 -b sol 12.1`.
 
+* Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.
+
+* The roofline benchmark now reports the peak measured sample across runs instead of the mean.
+
+* The roofline benchmark now reports higher FP16 and BF16 MFMA peaks on gfx950 (MI350 series), closer to the hardware's theoretical peak.
+
+* Renamed the Memory Chart left-hand panel from "Kernel" to "Compute Units" on CDNA (gfx9) and to "WGPs" on gfx115x and gfx1250. The panel now shows resource allocation stats: Wave Occupancy as a percent of the maximum wavefronts per CU (gfx9) or per WGP (gfx115x, gfx1250), vGPRs, sGPRs, Scratch in KB per wave, LDS Allocation, and Workgroups per active CU (gfx9) or per WGP (gfx115x, gfx1250).
+
+* All Memory Chart bandwidth values now use uniform fixed-point GB/s formatting (3 decimal places) for easy cross-level comparison.
+
+* Memory Chart consistency improvements across architectures.
+  * Panel and arrow sizes now follow their content.
+  * The gfx115x SQC panel shows separate instruction and scalar data cache read bandwidth to GL1.
+  * The LDS instruction arrow uses the default color.
+  * Block labels such as the memory type are part of the block title, for example `DRAM (DDR5/LPDDR5)` on gfx115x and `HDM (CXL)` on gfx1250.
+  * Percent values, including stall rates, show a progress bar, and missing values show `N/A`, on every architecture.
+
+* Every CDNA (gfx9) Memory Chart metric now reports a unit, and the Memory Chart metric descriptions in the documentation link to the related hardware sections.
+
+* `GPU_ID` in analyze output and the `--gpu-id` filter count every GPU on the node in topology order, not only the GPUs that ran kernels. A run on only the fourth GPU now reports and filters as `GPU_ID` 3 instead of 0.
+
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.
   * The `dash`, `dash-bootstrap-components`, `dash-svg`, `textual`, and `textual_plotext` dependencies are no longer installed.
+* Removed the unused `compute_workload_roofline_data` table from the analysis database.
+
+* Removed the HBM and remote traffic percentage metrics from the gfx908–gfx942 Memory Chart. On gfx940–gfx942 the new Data Fabric to MALL arrows report estimated HBM bandwidth instead.
+
+* Removed Memory Chart metrics that the panel YAMLs defined but never rendered, across all CDNA architectures. The remaining Memory Chart metrics are renumbered, so `3.1.N` metric IDs used with `--block` now refer to different metrics.
+
+* Removed the `analyze --dependency` and `profile --target` options, which had no effect, and the undocumented `analyze --report-diff` and `profile --kokkos-trace` options.
 
 ### Optimized
 
 ### Resolved issues
+
+* Fixed a `KeyError: 'title'` when combining `analyze --list-stats` with `--output-format csv` or `--output-format db`. These unsupported combinations now report a clear error during option validation.
+
+* Fixed measured zero HBM bandwidth rendering as `N/A` on the CDNA (gfx9) Memory Chart Data Fabric to MALL arrows. It now reports `0.000 GB/s`.
+* Fixed dispatch IDs not always following kernel launch order.
+
+* Fixed the Memory Chart tables printing without their titles or panel heading when analyzing more than one workload (baseline comparison).
 
 ### Upcoming changes
 
@@ -52,6 +100,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added `rocprof-compute analyze --verify-deps`, which reports any missing analysis dependencies.
 
 * Added Memory Bandwidth Analysis for gfx950 under `--experimental --membw-analysis`. Profile with the flag to collect block 30 counters; analyze detects the data automatically and annotates active GL1/GL2/EA stall bottlenecks on the memory chart with a guidance panel.
+
+* Added the rocprof-compute Agent Skills and the documentation they link to to the install under `share/rocprofiler-compute/`, with an `install-skills.sh` script that installs or removes them for Claude Code, Codex, or Cursor. `rocprof-compute --help` shows where to find them.
 
 ### Changed
 
@@ -121,7 +171,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed `profile -b 3 --experimental --membw-analysis` not collecting memory bandwidth analysis counters.
 
+* Fixed `analyze -b` crashing when only the gfx950 LDS bandwidth metrics are selected.
+
 ### Upcoming changes
+
+* The analyze-mode `--gui` and `--tui` options are deprecated and will be removed in a future release. Use the default CLI analysis instead.
 
 ### Known issues
 

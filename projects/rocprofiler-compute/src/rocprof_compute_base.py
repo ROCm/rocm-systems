@@ -320,6 +320,13 @@ class RocProfCompute:
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
+        if args.list_stats and args.output_format in ("csv", "db"):
+            console_error(
+                "--list-stats cannot be used with --output-format "
+                f"{args.output_format}. "
+                "Use --output-format stdout or txt, or remove --list-stats."
+            )
+
         operator_filter = (
             args.torch_operator is not None or args.triton_operator is not None
         )
@@ -515,9 +522,6 @@ class RocProfCompute:
                 "rocprofiler_sdk_profiler",
             ),
         }
-
-        if self.__profiler_mode not in profiler_classes:
-            console_error("Unsupported profiler")
 
         module_name, class_name = profiler_classes[self.__profiler_mode]
         module = importlib.import_module(module_name)

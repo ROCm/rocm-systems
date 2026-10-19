@@ -28,6 +28,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -38,6 +39,8 @@ const std::string CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x.json";
 const std::string CONFIG_KMD_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd.json";
 const std::string CONFIG_2GPU_PATH = std::string(CONFIG_DIR) + "/gfx950_mi355x_kmd_2gpu.json";
 const std::string CONFIG_1XCD_PATH = std::string(CONFIG_DIR) + "/gfx1100_w7900.json";
+const std::string CONFIG_CDNA5_PATH = std::string(CONFIG_DIR) + "/gfx1250_mi455x.json";
+const std::string CONFIG_RDNA4_PATH = std::string(CONFIG_DIR) + "/gfx1201_r9700.json";
 
 // Most shipped configs omit num_threads so they pick up the default; the 2-GPU
 // KMD config pins it. Replace the pin when there is one, otherwise insert an
@@ -186,11 +189,11 @@ TEST(CpuDispatchBudgetTest, JsonDistinguishesOmittedZeroAndExplicitSchemaDefault
 }
 
 using Choice = config::ExecutionThreadChoice;
-constexpr Choice kCdna4Choices[] = {{1, 1, 0},  {1, 2, 0},  {1, 4, 0},  {2, 7, 0},
-                                    {8, 9, 0},  {8, 17, 0}, {8, 25, 0}, {8, 25, 2},
-                                    {8, 25, 4}, {8, 25, 8}, {8, 25, 16}};
+constexpr Choice kAdditiveHelperChoices[] = {{1, 1, 0},  {1, 2, 0},  {1, 4, 0},  {2, 7, 0},
+                                             {8, 9, 0},  {8, 17, 0}, {8, 25, 0}, {8, 25, 2},
+                                             {8, 25, 4}, {8, 25, 8}, {8, 25, 16}};
 
-TEST(ExecutionThreadBudgetTest, SelectsLargestFittingGranuleAndCapsAutomaticBudget) {
+TEST(ExecutionThreadBudgetTest, SelectsLargestFittingGranule) {
   struct Case {
     uint32_t budget, engines, dispatch, helpers;
   };
@@ -206,23 +209,25 @@ TEST(ExecutionThreadBudgetTest, SelectsLargestFittingGranuleAndCapsAutomaticBudg
     for (bool explicit_budget : {false, true}) {
       auto plan = config::resolve_execution_threads({.budget = explicit_budget ? c.budget : 0},
                                                     explicit_budget ? 128 : c.budget, 8, capacities,
-                                                    true, kCdna4Choices);
+                                                    true, kAdditiveHelperChoices);
       EXPECT_EQ(plan.engines, c.engines);
       EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{c.dispatch}));
       EXPECT_EQ(plan.helpers, c.helpers);
     }
   }
-  auto unknown = config::resolve_execution_threads({}, 0, 8, capacities, true, kCdna4Choices);
+  auto unknown =
+      config::resolve_execution_threads({}, 0, 8, capacities, true, kAdditiveHelperChoices);
   EXPECT_EQ(unknown.engines, 1u);
   EXPECT_EQ(unknown.dispatch, (std::vector<uint32_t>{1}));
   EXPECT_EQ(unknown.helpers, 0u);
   const Choice larger[] = {{8, 25, 0}, {8, 33, 8}};
   auto automatic = config::resolve_execution_threads({}, 64, 8, capacities, true, larger);
-  EXPECT_EQ(automatic.dispatch, (std::vector<uint32_t>{25}));
+  EXPECT_EQ(automatic.dispatch, (std::vector<uint32_t>{33}));
+  EXPECT_EQ(automatic.helpers, 8u);
   auto explicit_plan =
-      config::resolve_execution_threads({.budget = 48}, 64, 8, capacities, true, larger);
-  EXPECT_EQ(explicit_plan.dispatch, (std::vector<uint32_t>{33}));
-  EXPECT_EQ(explicit_plan.helpers, 8u);
+      config::resolve_execution_threads({.budget = 40}, 64, 8, capacities, true, larger);
+  EXPECT_EQ(explicit_plan.dispatch, (std::vector<uint32_t>{25}));
+  EXPECT_EQ(explicit_plan.helpers, 0u);
 }
 
 TEST(ExecutionThreadBudgetTest, ConfigCanStopAtAFewThreads) {
@@ -251,12 +256,12 @@ TEST(ExecutionThreadBudgetTest, AccountsForEveryGpuAndTopologyClamps) {
 TEST(ExecutionThreadBudgetTest, ExplicitOverridesAndSafeFallback) {
   const std::array capacities{64u};
   auto plan = config::resolve_execution_threads({.engines = 8, .dispatch = 33, .helpers = 8}, 4, 8,
-                                                capacities, true, kCdna4Choices);
+                                                capacities, true, kAdditiveHelperChoices);
   EXPECT_EQ(plan.engines, 8u);
   EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{33}));
   EXPECT_EQ(plan.helpers, 8u);
   plan = config::resolve_execution_threads({.dispatch = 1, .helpers = 0}, 32, 8, capacities, true,
-                                           kCdna4Choices);
+                                           kAdditiveHelperChoices);
   EXPECT_EQ(plan.engines, 8u);
   EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{1}));
   EXPECT_EQ(plan.helpers, 0u);
@@ -264,7 +269,8 @@ TEST(ExecutionThreadBudgetTest, ExplicitOverridesAndSafeFallback) {
   EXPECT_EQ(plan.engines, 1u);
   EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{1}));
   EXPECT_EQ(plan.helpers, 0u);
-  plan = config::resolve_execution_threads({}, 4, 8, capacities, true, kCdna4Choices, true);
+  plan =
+      config::resolve_execution_threads({}, 4, 8, capacities, true, kAdditiveHelperChoices, true);
   EXPECT_EQ(plan.engines, 4u);
   EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{1}));
   EXPECT_EQ(plan.helpers, 0u);
@@ -287,8 +293,8 @@ TEST(ExecutionThreadBudgetTest, AutomaticPlansStayWithinAffinityAndCapacity) {
     for (uint32_t xcds : {1u, 2u, 3u, 4u, 7u, 8u, 16u, 32u})
       for (bool async : {false, true}) {
         const std::array capacities{2u, 36u};
-        auto plan =
-            config::resolve_execution_threads({}, host, xcds, capacities, async, kCdna4Choices);
+        auto plan = config::resolve_execution_threads({}, host, xcds, capacities, async,
+                                                      kAdditiveHelperChoices);
         uint64_t used = plan.engines + plan.helpers;
         for (size_t i = 0; i < capacities.size(); ++i) {
           EXPECT_GE(plan.dispatch[i], 1u);
@@ -296,20 +302,22 @@ TEST(ExecutionThreadBudgetTest, AutomaticPlansStayWithinAffinityAndCapacity) {
           used += plan.dispatch[i] - 1;
         }
         EXPECT_LE(used, std::max(host, 1u));
-        EXPECT_LE(used - plan.helpers, 32u);
         EXPECT_LE(plan.engines, xcds);
       }
 }
 
 TEST(ExecutionThreadBudgetTest, MetadataMatchesBuiltTopology) {
-  for (const auto &path : {CONFIG_PATH, CONFIG_2GPU_PATH, CONFIG_1XCD_PATH}) {
+  for (const auto &path :
+       {CONFIG_PATH, CONFIG_2GPU_PATH, CONFIG_1XCD_PATH, CONFIG_CDNA5_PATH, CONFIG_RDNA4_PATH}) {
     auto settings = config::load_execution_thread_settings(path, rocjitsu::kEmbeddedSchema);
-    auto loaded = config::load_config(path, rocjitsu::kEmbeddedSchema, 32);
-    auto plan = settings.resolve(32);
+    auto loaded = config::load_config(path, rocjitsu::kEmbeddedSchema, 48);
+    auto plan = settings.resolve(48);
     EXPECT_EQ(plan.engines, loaded.execution_threads.engines);
     EXPECT_EQ(plan.dispatch, loaded.execution_threads.dispatch);
     EXPECT_EQ(plan.helpers, loaded.execution_threads.helpers);
     EXPECT_EQ(settings.xcds, loaded.build_result.num_xcds * (1 + loaded.extra_gpu_builds.size()));
+    loaded.apply_cpu_dispatch_threads();
+    EXPECT_EQ(loaded.soc()->dispatch_threads(), plan.dispatch.front());
   }
 }
 
@@ -379,9 +387,9 @@ TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
   json.insert(json.find('{') + 1, R"("cpu_thread_budget":32,)");
   auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 64);
   EXPECT_EQ(loaded.execution_threads.engines, 8u);
-  EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{25}));
-  EXPECT_EQ(loaded.execution_threads.helpers, 0u);
-  EXPECT_EQ(loaded.async_resources->helpers(), 0u);
+  EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{17}));
+  EXPECT_EQ(loaded.execution_threads.helpers, 8u);
+  EXPECT_EQ(loaded.async_resources->helpers(), 8u);
   json.insert(json.find('{') + 1, R"("cpu_dispatch_threads":1,"async_helper_threads":0,)");
   auto serial = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 64);
   EXPECT_EQ(serial.cpu_dispatch_threads, 1u);
@@ -395,10 +403,11 @@ TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
 TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
   std::string json = config_json_with_num_threads(CONFIG_PATH, 0);
   json.insert(json.find('{') + 1, R"("cpu_thread_budget":32,)");
-  const std::string relaunched = config::json_with_cpu_thread_budget(json, 4);
+  FailureOr<std::string> relaunched = config::json_with_cpu_thread_budget(json, 4);
+  ASSERT_TRUE(relaunched.succeeded());
 
   const config::LoadedConfig loaded =
-      config::load_config_from_string(relaunched, rocjitsu::kEmbeddedSchema, 64);
+      config::load_config_from_string(relaunched.value(), rocjitsu::kEmbeddedSchema, 64);
   EXPECT_EQ(loaded.cpu_thread_budget, 4u);
   EXPECT_EQ(loaded.execution_threads.engines, 2u);
   EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{3}));
@@ -408,7 +417,8 @@ TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
       config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 64);
   EXPECT_EQ(untouched.cpu_thread_budget, 32u);
   EXPECT_EQ(untouched.execution_threads.engines, 8u);
-  EXPECT_EQ(untouched.execution_threads.dispatch, (std::vector<uint32_t>{25}));
+  EXPECT_EQ(untouched.execution_threads.dispatch, (std::vector<uint32_t>{17}));
+  EXPECT_EQ(untouched.execution_threads.helpers, 8u);
 }
 
 TEST(ExecutionThreadBudgetTest, PresetsKeepSiblingTablesConsistent) {
@@ -467,7 +477,7 @@ TEST(ExecutionThreadBudgetTest, OlderCdnaPresetsUseDispatchWorkers) {
     settings.request.budget = 32;
     auto parallel = settings.resolve(64);
     EXPECT_EQ(parallel.engines, settings.xcds);
-    EXPECT_EQ(parallel.dispatch, (std::vector<uint32_t>{33 - parallel.engines}));
+    EXPECT_EQ(parallel.dispatch, (std::vector<uint32_t>{25 - parallel.engines}));
   }
 }
 
@@ -475,11 +485,11 @@ TEST(ExecutionThreadBudgetTest, DesktopTablesStopAtTheMeasuredCeiling) {
   for (const auto *name : {"gfx1100_w7900", "gfx1151", "gfx1201_r9700"}) {
     auto settings = config::load_execution_thread_settings(
         std::string(CONFIG_DIR) + "/" + name + ".json", rocjitsu::kEmbeddedSchema);
-    for (uint32_t budget : {32u, 64u}) {
+    for (uint32_t budget : {24u, 32u, 64u}) {
       settings.request.budget = budget;
       auto plan = settings.resolve(128);
       EXPECT_EQ(plan.engines, 1u);
-      EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{32}));
+      EXPECT_EQ(plan.dispatch, (std::vector<uint32_t>{24}));
     }
   }
 }
@@ -489,11 +499,13 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
     uint32_t budget, engines, dispatch;
   };
   for (const auto *name : {"gfx950_mi355x.json", "gfx1250_mi455x.json"}) {
+    const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
     auto settings = config::load_execution_thread_settings(std::string(CONFIG_DIR) + "/" + name,
                                                            rocjitsu::kEmbeddedSchema);
     settings.request.helpers = 0;
-    for (Case c : {Case{1, 1, 1}, Case{2, 1, 2}, Case{8, 2, 7}, Case{16, 8, 9}, Case{24, 8, 17},
-                   Case{32, 8, 25}}) {
+    for (Case c : {Case{1, 1, 1}, Case{2, 1, 2}, Case{4, cdna5 ? 1u : 2u, cdna5 ? 4u : 3u},
+                   Case{8, 2, 7}, Case{16, 8, 9}, Case{24, 8, 17}, Case{32, 8, cdna5 ? 25u : 17u},
+                   Case{40, 8, cdna5 ? 33u : 17u}, Case{48, 8, cdna5 ? 33u : 17u}}) {
       SCOPED_TRACE(name);
       SCOPED_TRACE(c.budget);
       settings.request.budget = c.budget;
@@ -507,33 +519,32 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
 
 TEST(ExecutionThreadBudgetTest, ServerPresetsAddHelpersWithoutDisplacingCpuWorkers) {
   for (const char *name : {"gfx950_mi355x.json", "gfx950_mi355x_kmd.json", "gfx1250_mi455x.json"}) {
+    SCOPED_TRACE(name);
+    const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
+    const uint32_t max_cpu = cdna5 ? 40 : 24;
     auto settings = config::load_execution_thread_settings(std::string(CONFIG_DIR) + "/" + name,
                                                            rocjitsu::kEmbeddedSchema);
     for (uint32_t affinity = 1; affinity <= 128; ++affinity) {
       const auto plan = settings.resolve(affinity);
       ASSERT_EQ(plan.dispatch.size(), 1u);
       const auto cpu = plan.engines + plan.dispatch[0] - 1;
-      EXPECT_LE(cpu, std::min(affinity, 32u));
-      EXPECT_LE(cpu + plan.helpers, std::min(affinity, 48u));
-      const unsigned expected = affinity >= 48   ? 16
-                                : affinity >= 40 ? 8
-                                : affinity >= 36 ? 4
-                                : affinity >= 34 ? 2
-                                                 : 0;
-      EXPECT_EQ(plan.helpers, expected) << name << " affinity=" << affinity;
-      if (affinity >= 32) {
+      EXPECT_LE(cpu, std::min(affinity, max_cpu));
+      EXPECT_LE(cpu + plan.helpers, std::min(affinity, max_cpu + 8));
+      EXPECT_EQ(plan.helpers, affinity >= max_cpu + 8 ? 8u : 0u);
+      if (affinity >= 24) {
         EXPECT_EQ(plan.engines, 8u);
-        EXPECT_EQ(plan.dispatch[0], 25u);
+        const uint32_t expected_cpu = cdna5 && affinity >= 32 ? (affinity >= 40 ? 40 : 32) : 24;
+        EXPECT_EQ(cpu, expected_cpu);
       }
     }
-    settings.request.budget = 32;
+    settings.request.budget = max_cpu;
     EXPECT_EQ(settings.resolve(128).helpers, 0u);
-    settings.request.budget = 48;
-    EXPECT_EQ(settings.resolve(128).helpers, 16u);
+    settings.request.budget = max_cpu + 8;
+    EXPECT_EQ(settings.resolve(128).helpers, 8u);
     settings.request.helpers = 0;
     const auto disabled = settings.resolve(128);
     EXPECT_EQ(disabled.engines, 8u);
-    EXPECT_EQ(disabled.dispatch, (std::vector<uint32_t>{25}));
+    EXPECT_EQ(disabled.dispatch, (std::vector<uint32_t>{max_cpu - 7}));
     EXPECT_EQ(disabled.helpers, 0u);
   }
 }

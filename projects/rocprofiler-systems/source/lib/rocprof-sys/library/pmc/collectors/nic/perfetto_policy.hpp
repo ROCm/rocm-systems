@@ -106,7 +106,7 @@ resolve_nic_track(const enabled_metrics& effective_metrics, std::uint32_t bit_ke
     {
         return -1;
     }
-    auto it = device_tracks.find(bit_key);
+    auto const it = device_tracks.find(bit_key);
     if(it == device_tracks.end())
     {
         return -1;
@@ -163,7 +163,7 @@ struct perfetto_policy
     static void setup_counter_tracks(size_t device_index, const std::string& device_name,
                                      const enabled_metrics& enabled_metric_config)
     {
-        auto addendum = [&](const char* metric_name) {
+        auto const addendum = [&](const char* metric_name) {
             return fmt::format("NIC {} {} [{}] (S)", device_name, metric_name,
                                device_index);
         };
@@ -193,7 +193,7 @@ struct perfetto_policy
     static void store_sample(size_t device_index, const metrics& metric_values,
                              std::uint64_t timestamp)
     {
-        auto it = perfetto_policy::bundle.find(device_index);
+        auto const it = perfetto_policy::bundle.find(device_index);
         if(it != perfetto_policy::bundle.end())
         {
             it->second->emplace_back(nic_perfetto_sample{
@@ -226,13 +226,13 @@ struct perfetto_policy
         size_t device_index, ::rocprofsys::pmc::collectors::nic::enabled_metrics enabled,
         ::rocprofsys::pmc::collectors::nic::enabled_metrics supported)
     {
-        auto bundle_it = perfetto_policy::bundle.find(device_index);
+        auto const bundle_it = perfetto_policy::bundle.find(device_index);
         if(bundle_it == perfetto_policy::bundle.end() || !bundle_it->second)
         {
             return;
         }
 
-        auto& samples = *bundle_it->second;
+        auto const& samples = *bundle_it->second;
 
         const auto& tinfo = thread_info::get(0, InternalTID);
         if(!tinfo)
@@ -249,13 +249,13 @@ struct perfetto_policy
             return;
         }
 
-        auto tracks_it = perfetto_policy::tracks.find(device_index);
+        auto const tracks_it = perfetto_policy::tracks.find(device_index);
         if(tracks_it == perfetto_policy::tracks.end())
         {
             return;
         }
 
-        auto& device_tracks = tracks_it->second;
+        auto const& device_tracks = tracks_it->second;
 
         // Resolve each enabled metric's track index once; device_tracks is fixed
         // after setup, so there is no need to look it up per sample.

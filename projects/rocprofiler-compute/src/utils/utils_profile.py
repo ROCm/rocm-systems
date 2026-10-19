@@ -27,6 +27,10 @@ from utils.logger import (
     demarcate,
 )
 from utils.utils_common import (
+    NATIVE_AGENTS_PREFIX,
+    NATIVE_COUNTERS_PREFIX,
+    NATIVE_DISPATCH_PREFIX,
+    NATIVE_KERNEL_SYMBOLS_PREFIX,
     capture_subprocess_output,
     create_temp_rocprofiler_metrics_path,
     get_rocprof_cmd,
@@ -154,13 +158,34 @@ def _duplicate_rocm_install_message(output: str) -> Optional[str]:
     return None
 
 
+def keep_native_artifacts(source_dir: Path, workload_dir: Path, fbase: str) -> None:
+    """Move the native tool's per-pid CSVs out of source_dir, which is deleted.
+
+    The counter set is in the name because each set is its own run, with its
+    own processes and dispatch ids.
+    """
+    for prefix, suffix in (
+        (NATIVE_COUNTERS_PREFIX, "_native_counter_collection.csv"),
+        (NATIVE_DISPATCH_PREFIX, "_dispatch.csv"),
+        (NATIVE_KERNEL_SYMBOLS_PREFIX, "_kernel_symbols.csv"),
+        (NATIVE_AGENTS_PREFIX, "_agents.csv"),
+    ):
+        pattern = f"*{suffix}{csv_compression.GZIP_SUFFIX}"
+        for source in sorted(source_dir.glob(pattern)):
+            pid = source.name.split("_")[0]
+            destination = csv_compression.compressed_name(
+                workload_dir / f"{prefix}_{fbase}_{pid}.csv"
+            )
+            shutil.move(str(source), str(destination))
+            console_debug(f"Kept native profiling data: {destination}")
+
+
 def run_prof(
     fnames: Union[list[str], str],
     profiler_options: ProfilerOptions,
     workload_dir: str,
     ml_api_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
-    extra_env: Optional[dict[str, str]] = None,
 ) -> None:
     multiple_files = isinstance(fnames, list)
     if multiple_files and (
@@ -207,8 +232,6 @@ def run_prof(
         options = ["-A", "absolute"] + options
 
     new_env = os.environ.copy()
-    if extra_env:
-        new_env.update(extra_env)
 
     # Counter definitions
     with open(
@@ -332,6 +355,10 @@ def run_prof(
                 str(db_name),
             )
             console_debug(f"Updated rocpd db {db_name} with native tool counters.")
+
+        # out_pmc_1 is deleted at the end of this function, so move the files
+        # analyze needs into the workload directory first.
+        keep_native_artifacts(out_pmc_1, Path(workload_dir), fbase)
     # Write results_fbase.csv
     counter_csv = csv_compression.compressed_name(
         out_pmc_1 / f"{fbase}_counter_collection.csv"
@@ -340,7 +367,7 @@ def run_prof(
         out_pmc_1 / f"{fbase}_marker_api_trace.csv"
     )
     kernel_symbols_csv = csv_compression.compressed_name(
-        Path(workload_dir) / f"kernel_symbols_{fbase}.csv"
+        Path(workload_dir) / f"rocpd_kernel_symbols_{fbase}.csv"
     )
     rocpd_data.convert_dbs_to_csv(
         [str(p) for p in db_paths],
@@ -420,7 +447,6 @@ def gen_sysinfo(
     app_cmd: str,
     skip_roof: bool,
     mspec: Any,  # noqa: ANN401
-    soc: Any,  # noqa: ANN401
 ) -> None:
     data = mspec.get_class_members()
 

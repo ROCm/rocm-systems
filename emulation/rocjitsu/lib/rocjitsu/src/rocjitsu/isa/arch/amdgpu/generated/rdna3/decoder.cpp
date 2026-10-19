@@ -5461,7 +5461,7 @@ const std::array<DecoderImpl::DecodeFunc, 256> DecoderImpl::sub_decode_mimg = {
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
-    &DecoderImpl::decodeInvalid,
+    &detail::decodeImageGather4hMimg,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,
     &DecoderImpl::decodeInvalid,

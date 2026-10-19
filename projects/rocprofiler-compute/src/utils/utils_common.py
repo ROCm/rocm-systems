@@ -36,6 +36,12 @@ from vendored import yaml
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 PROFILE_OUTPUT_FORMAT = "rocpd"
+# Profile names the native tool's per-pid CSVs <prefix>_<fbase>_<pid>.csv.gz
+# in the workload directory, and analyze reads them back by these prefixes.
+NATIVE_COUNTERS_PREFIX = "counters"
+NATIVE_DISPATCH_PREFIX = "dispatch"
+NATIVE_KERNEL_SYMBOLS_PREFIX = "kernel_symbols"
+NATIVE_AGENTS_PREFIX = "agents"
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
 
@@ -470,7 +476,6 @@ def capture_subprocess_output(
     subprocess_args: list[str],
     new_env: Optional[dict[str, str]] = None,
     profileMode: bool = False,
-    enable_logging: bool = True,
 ) -> tuple[bool, str]:
     sanitized_env = (
         None
@@ -569,8 +574,6 @@ def capture_subprocess_output(
         if not line:
             break
         buf.write(line)
-        if not enable_logging:
-            continue
         if profileMode:
             console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
         else:
@@ -629,6 +632,11 @@ def format_time(seconds: float) -> str:
         return parts[0] if parts else "0 seconds"
 
     return ", ".join(parts[:-1]) + f" and {parts[-1]}"
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences."""
+    return re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", text)
 
 
 def parse_sets_yaml(arch: str) -> dict[str, Any]:
@@ -835,8 +843,8 @@ def filter_metric_ids(
     ]
 
 
-def get_uuid(length: int = 8) -> str:
-    return uuid.uuid4().hex[:length]
+def get_uuid() -> str:
+    return uuid.uuid4().hex[:8]
 
 
 def convert_filter_blocks_to_panel_ids(
@@ -917,10 +925,7 @@ def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
     """Return panel_id_str -> alias from the *_config_template.yaml whose
     filename prefix matches arch. Empty/None aliases stay as "".
     Returns {} when no template matches the arch."""
-    analysis_dir = (
-        config.rocprof_compute_home / "rocprof_compute_soc" / "analysis_configs"
-    )
-    for path in sorted(analysis_dir.glob("*_config_template.yaml")):
+    for path in sorted(config.analysis_configs_dir.glob("*_config_template.yaml")):
         m = re.match(r"(gfx\d+)_config_template\.yaml$", path.name)
         if m and arch.startswith(m.group(1)):
             panel_yaml = load_yaml(path) or {}

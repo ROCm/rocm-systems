@@ -171,7 +171,7 @@ filter_sort_unique(
              _v.end());
     std::sort(_v.begin(), _v.end());
 
-    auto _last = std::unique(_v.begin(), _v.end());
+    auto const _last = std::unique(_v.begin(), _v.end());
     if(std::distance(_v.begin(), _last) > 0)
     {
         _v.erase(_last, _v.end());

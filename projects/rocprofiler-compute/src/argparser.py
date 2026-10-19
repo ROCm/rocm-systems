@@ -231,6 +231,9 @@ def omniarg_parser(
     )
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
+    skills_note = _skills_note(rocprof_compute_home)
+    if skills_note is not None:
+        parser.description = f"{parser.description}\n\n{skills_note}"
 
     subparsers = parser.add_subparsers(
         dest="mode", help="Select mode of interaction with the target application:"
@@ -241,6 +244,7 @@ def omniarg_parser(
     profile_parser = subparsers.add_parser(
         "profile",
         help="Profile the target application",
+        description=skills_note,
         usage="""
 
 `rocprof-compute profile --name <workload_name> [profile options] [roofline options] -- <workload_cmd>`
@@ -283,9 +287,6 @@ Examples:
             "\t\t\t--name will be ignored if used together with --output-directory.\n"
             "\t\t\tUse --overwrite to re-profile into an existing directory."
         ),
-    )
-    profile_group.add_argument(
-        "--target", type=str, default=None, help=argparse.SUPPRESS
     )
     profile_group.add_argument(
         "--attach-pid",
@@ -344,15 +345,6 @@ Examples:
             "\t\t\tinstead of mixing runs. Use a fresh directory per run;\n"
             "\t\t\tpass this flag only to re-profile in place."
         ),
-    )
-    profile_group.add_argument(
-        "--kokkos-trace",
-        dest="kokkos_trace",
-        required=False,
-        default=False,
-        action="store_true",
-        help=argparse.SUPPRESS,
-        # help="\t\t\tKokkos trace, traces Kokkos API calls.",
     )
     profile_group.add_argument(
         "--torch-trace",
@@ -659,6 +651,7 @@ Examples:
     analyze_parser = subparsers.add_parser(
         "analyze",
         help="Analyze existing profiling results at command line",
+        description=skills_note,
         usage="""
 rocprof-compute analyze --path <workload_path> [analyze options]
 
@@ -704,7 +697,10 @@ Examples:
     analyze_group.add_argument(
         "--list-stats",
         action="store_true",
-        help="\t\tList all detected kernels and kernel dispatches.",
+        help=(
+            "\t\tList all detected kernels and kernel dispatches.\n"
+            "\t\tCannot be used with --output-format csv or db."
+        ),
     )
     analyze_group.add_argument(
         "--list-available-metrics",
@@ -1037,14 +1033,6 @@ Examples:
         ),
     )
     analyze_advanced_group.add_argument(
-        "--dependency",
-        action="store_true",
-        help="\t\tList the installation dependency.",
-    )
-    analyze_advanced_group.add_argument(
-        "--report-diff", default=0, nargs="?", type=int, help=argparse.SUPPRESS
-    )
-    analyze_advanced_group.add_argument(
         "--specs-correction",
         type=str,
         metavar="",
@@ -1055,3 +1043,16 @@ Examples:
     ## ----------------------------
     # Experimental Features
     ## ----------------------------
+
+
+def _skills_note(rocprof_compute_home: Path) -> Optional[str]:
+    """Return the help line that points to the Agent Skills README, if shipped."""
+    # Source checkout first, then the install's share directory.
+    for skills_dir in (
+        rocprof_compute_home.parent / "skills",
+        rocprof_compute_home.parent.parent / "share" / "rocprofiler-compute" / "skills",
+    ):
+        readme = skills_dir / "README.md"
+        if readme.is_file():
+            return f"Agent Skills: see {readme} to install them."
+    return None

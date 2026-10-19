@@ -245,11 +245,12 @@ public:
   ///
   /// @details This controls host acceleration rather than modeled GPU
   /// resources or timing. The count includes the command-processor thread that
-  /// calls the pool. The effective width is clamped to the largest CU count of
-  /// any command processor in the SoC. One pool retains width-1 workers shared
-  /// across the SoC. CPs can submit and execute concurrently; each submission
-  /// uses its caller and at most width-1 workers, and joins only its own work.
-  /// With E engine threads, the total CU execution capacity is E + width - 1.
+  /// calls the pool. The effective width is clamped to one plus the sum of
+  /// CUs-1 across nonempty XCDs. One pool retains width-1 workers shared across
+  /// the SoC. CPs can submit and execute concurrently; each submission uses its
+  /// caller and at most min(width, active CUs)-1 workers, and joins only its own
+  /// work. With E engine threads, the total engine/CU thread count is
+  /// E + width - 1; fewer concurrent XCDs can leave some workers idle.
   void set_dispatch_threads(uint32_t threads);
   /// @returns The effective functional dispatch width after mode and CU-capacity clamps.
   uint32_t dispatch_threads() const { return dispatch_threads_; }

@@ -157,9 +157,9 @@ causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
         const auto* _bt_causal = _bundle.get<causal::component::backtrace>();
         if(_bt_causal)
         {
-            auto _stack = _bt_causal->get_stack();
+            auto const _stack = _bt_causal->get_stack();
 
-            for(auto itr : _stack)
+            for(auto const itr : _stack)
             {
                 if(itr > 0)
                 {
@@ -175,7 +175,7 @@ causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
 
             for(const auto& ditr : _stack)
             {
-                for(auto aitr : ditr)
+                for(auto const aitr : ditr)
                 {
                     if(aitr > 0)
                     {
@@ -190,7 +190,7 @@ causal_offload_buffer(std::int64_t, causal_sampler_buffer_t&& _buf)
     if(!_processed.empty())
     {
         static auto _mutex = locking::atomic_mutex{};
-        auto        _lk    = locking::atomic_lock{ _mutex };
+        auto const  _lk    = locking::atomic_lock{ _mutex };
         for(const auto& itr : _processed)
         {
             add_samples(itr.first, itr.second);
@@ -258,11 +258,11 @@ configure(bool _setup, std::int64_t _tid)
         (void) get_debug_sampling();  // make sure query in sampler does not allocate
         assert(_tid == threading::get_id());
 
-        auto _causal_alloc = get_causal_sampler_allocator(true);
+        auto const _causal_alloc = get_causal_sampler_allocator(true);
         _causal = std::make_unique<causal_sampler_t>(_causal_alloc, "rocprofsys", _tid,
                                                      _verbose);
 
-        auto _activate_perf_backend = [&_causal, &_causal_perf, &_info, &_tid]() {
+        auto const _activate_perf_backend = [&_causal, &_causal_perf, &_info, &_tid]() {
             _causal_perf = std::make_unique<perf::perf_event>();
             auto _open_error =
                 _causal_perf->open(1000.0, 10, _info->index_data->system_value);
@@ -297,7 +297,7 @@ configure(bool _setup, std::int64_t _tid)
             return _open_error;
         };
 
-        auto _activate_timer_backend = [&_causal, &_tid]() {
+        auto const _activate_timer_backend = [&_causal, &_tid]() {
             backtrace_enabled::set(true);
             backtrace_enabled::set(scope::thread_scope{}, true);
             overflow_enabled::set(false);
@@ -481,7 +481,7 @@ namespace signals                                = ::tim::signals;
 const auto&
 sampling_signals()
 {
-    static thread_local auto _v = get_signal_types(threading::get_id());
+    static thread_local auto const _v = get_signal_types(threading::get_id());
     return _v;
 }
 }  // namespace
@@ -621,7 +621,7 @@ unblock_signals(std::set<int> _signals)
 void
 post_process()
 {
-    auto _thread_state_guard = state::thread::scoped(state::thread::Internal);
+    auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(get_debug_sampling())
     {
@@ -654,8 +654,8 @@ post_process()
 
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
     {
-        auto& _causal = get_causal_sampler(i);
-        auto  _causal_data =
+        auto&      _causal = get_causal_sampler(i);
+        auto const _causal_data =
             _causal ? _causal->get_data() : std::vector<sampling::causal_bundle_t>{};
 
         if(!_causal_data.empty())
@@ -691,7 +691,7 @@ post_process_causal(std::int64_t, const std::vector<causal_bundle_t>& _data)
         const auto* _bt_causal = itr.get<causal::component::backtrace>();
         if(_bt_causal)
         {
-            auto _stack = _bt_causal->get_stack();
+            auto const _stack = _bt_causal->get_stack();
             for(auto&& ditr : _stack)
             {
                 if(ditr > 0)
@@ -708,7 +708,7 @@ post_process_causal(std::int64_t, const std::vector<causal_bundle_t>& _data)
 
             for(const auto& ditr : _stack)
             {
-                for(auto aitr : ditr)
+                for(auto const aitr : ditr)
                 {
                     if(aitr > 0)
                     {
