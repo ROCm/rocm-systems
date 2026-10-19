@@ -257,9 +257,10 @@ QueueCloseResult GpuQueueRegistry::unregister_queue(QueueHandle handle, QueueClo
     condition_.wait(lock, [&queue]() { return queue->active_operations == 0; });
   }
 
-  const QueuePrepareCloseStatus prepared = mode == QueueCloseMode::ForceCancel
-                                               ? QueuePrepareCloseStatus::Ready
-                                               : queue->binding->prepare_close();
+  const QueuePrepareCloseStatus prepared =
+      mode == QueueCloseMode::ForceCancel ? QueuePrepareCloseStatus::Ready
+      : mode == QueueCloseMode::Preempt   ? queue->binding->prepare_preempt_close()
+                                          : queue->binding->prepare_close();
   if (prepared != QueuePrepareCloseStatus::Ready) {
     std::lock_guard lock(mutex_);
     queue->state = QueueState::Open;

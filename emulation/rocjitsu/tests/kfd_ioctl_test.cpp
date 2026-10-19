@@ -3,13 +3,17 @@
 
 #include "aql_queue.h"
 #include "config_test_util.h"
+#include "decode_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/tensor_dma.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/remote_driver.h"
 #include "rocjitsu/kmd/linux/rpc.h"
@@ -17,9 +21,20 @@
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
+#include "rocjitsu/vm/amdgpu/iod.h"
+#include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
+#include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/memory_side_cache.h"
+#include "rocjitsu/vm/amdgpu/xcd.h"
+#include "rocjitsu/vm/fabric_backing_kfd.h"
+#include "rocjitsu/vm/fabric_endpoint.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
+#include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/virtual_machine.h"
 #include "scoped_temp.h"
 #include "util/diagnostic.h"
@@ -41,6 +56,8 @@ RJ_DIAGNOSTIC_POP
 
 #include <cerrno>
 #include <csignal>
+#include <cstdio>
+#include <cstdlib>
 #include <fcntl.h>
 #include <poll.h>
 #include <spawn.h>
@@ -51,6 +68,7 @@ RJ_DIAGNOSTIC_POP
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/time.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -58,9 +76,11 @@ RJ_DIAGNOSTIC_POP
 #include <array>
 #include <atomic>
 #include <barrier>
+#include <cassert>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <future>
@@ -70,13 +90,156 @@ RJ_DIAGNOSTIC_POP
 #include <optional>
 #include <ostream>
 #include <shared_mutex>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 extern char **environ;
+
+namespace rocjitsu::amdgpu {
+
+class KfdPreparedProviderTestAccess {
+public:
+  static auto ordinary_resolver(SimulatedKfd &driver) { return driver.cache_writeback_resolver(); }
+
+  static auto witness_resolver(SimulatedKfd &driver) {
+    return [&driver](uint32_t gpu_id, uint32_t vmid, uint64_t line_address, size_t line_size,
+                     uint64_t cache_identity, uint64_t admission_generation) {
+      return driver.witness_gpu_alias_line_for_vmid(gpu_id, vmid, line_address, line_size,
+                                                    cache_identity, admission_generation);
+    };
+  }
+
+  static VmPrivateUcGttCopySourceAdmission
+  admit_private_uc_gtt_copy_source(SimulatedKfd &driver, uint32_t process_id, uint32_t gpu_id,
+                                   const GpuVmAccess &access, uint64_t address, size_t size) {
+    return driver.admit_private_uc_gtt_copy_source(process_id, gpu_id, access, address, size);
+  }
+
+  static bool can_reserve_peer_line(SimulatedKfd &driver, uint64_t backing_id, uint64_t offset,
+                                    size_t size) {
+    return driver.peer_line_gate_->try_acquire(backing_id, offset, size).has_value();
+  }
+
+  static void store_dirty_l2_bytes(L2Cache &cache, uint64_t line_address, uint32_t vmid,
+                                   uint64_t cache_identity, uint64_t generation,
+                                   std::span<const std::pair<uint32_t, uint8_t>> dirty_bytes) {
+    std::array<uint8_t, L2Cache::LINE_SIZE> bytes{};
+    for (const auto &[offset, value] : dirty_bytes) {
+      assert(offset < L2Cache::LINE_SIZE);
+      bytes[offset] = value;
+    }
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    simdojo::CacheTag *tag = cache.cache_.allocate(line_address, vmid);
+    cache.cache_.write_line(line_address, bytes.data(), 0, L2Cache::LINE_SIZE, vmid);
+    tag->cache_identity = cache_identity;
+    tag->admission_generation = generation;
+    tag->dirty = true;
+    tag->coherence = simdojo::CoherenceState::MODIFIED;
+    for (const auto &dirty_byte : dirty_bytes)
+      cache.mark_dirty_bytes(line_address, dirty_byte.first, 1, vmid);
+  }
+
+  static bool dirty_l2_byte(L2Cache &cache, uint64_t line_address, uint32_t vmid, uint32_t offset) {
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    std::lock_guard mask_lock(cache.dirty_bytes_mutex_);
+    const auto found = cache.dirty_bytes_.find({vmid, line_address});
+    return found != cache.dirty_bytes_.end() &&
+           (found->second[offset / 64] & (uint64_t{1} << (offset % 64))) != 0;
+  }
+
+  static void discard_dirty_l2_line(L2Cache &cache, uint64_t line_address, uint32_t vmid) {
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    std::lock_guard mask_lock(cache.dirty_bytes_mutex_);
+    cache.cache_.invalidate(line_address, vmid);
+    cache.dirty_bytes_.erase({vmid, line_address});
+    cache.has_dirty_lines_.store(!cache.dirty_bytes_.empty(), std::memory_order_relaxed);
+  }
+
+  static bool line_clean_or_invalid(L2Cache &cache, uint64_t line_address, uint32_t vmid) {
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    simdojo::CacheTag *tag = nullptr;
+    return !cache.cache_.lookup(line_address, &tag, vmid) || !tag->dirty;
+  }
+
+  static std::optional<uint64_t> line_generation(L2Cache &cache, uint64_t line_address,
+                                                 uint32_t vmid) {
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    simdojo::CacheTag *tag = nullptr;
+    if (!cache.cache_.lookup(line_address, &tag, vmid))
+      return std::nullopt;
+    return tag->admission_generation;
+  }
+
+  static std::optional<simdojo::CacheTag> line_tag(L2Cache &cache, uint64_t line_address,
+                                                   uint32_t vmid) {
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    simdojo::CacheTag *tag = nullptr;
+    if (!cache.cache_.lookup(line_address, &tag, vmid))
+      return std::nullopt;
+    return *tag;
+  }
+
+  static bool set_line_generation(L2Cache &cache, uint64_t line_address, uint32_t vmid,
+                                  uint64_t generation) {
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    simdojo::CacheTag *tag = nullptr;
+    if (!cache.cache_.lookup(line_address, &tag, vmid))
+      return false;
+    tag->admission_generation = generation;
+    return true;
+  }
+
+  static void store_dirty_msc_line(MemorySideCache &cache, uint64_t line_address, uint32_t vmid,
+                                   uint64_t cache_identity, uint64_t generation,
+                                   std::span<const uint8_t> bytes) {
+    assert(bytes.size() == MemorySideCache::LINE_SIZE);
+    std::unique_lock access_lock(cache.access_gate_);
+    std::lock_guard stripe_lock(cache.stripes_[cache.stripe_index(line_address)]);
+    simdojo::CacheTag *tag = cache.cache_.allocate(line_address, vmid);
+    cache.cache_.write_line(line_address, bytes.data(), 0, MemorySideCache::LINE_SIZE, vmid);
+    tag->cache_identity = cache_identity;
+    tag->admission_generation = generation;
+    tag->coherence_epoch = cache.coherence_->current_epoch();
+    tag->coherence = simdojo::CoherenceState::MODIFIED;
+    cache.mark_line_dirty(*tag);
+  }
+
+  static bool dirty_msc_line(MemorySideCache &cache, uint64_t line_address, uint32_t vmid) {
+    std::unique_lock access_lock(cache.access_gate_);
+    std::lock_guard stripe_lock(cache.stripes_[cache.stripe_index(line_address)]);
+    simdojo::CacheTag *tag = nullptr;
+    return cache.cache_.lookup(line_address, &tag, vmid) && tag->dirty;
+  }
+};
+
+} // namespace rocjitsu::amdgpu
+
+namespace rocjitsu::test {
+
+class KfdCuAtomicTestAccess {
+public:
+  static amdgpu::VmAccessOutcome route(amdgpu::ComputeUnitCore &cu, Instruction *instruction,
+                                       amdgpu::Wavefront &wave) {
+    return cu.route_memory_inst(instruction, wave);
+  }
+
+  static void retry(amdgpu::ComputeUnitCore &cu) { cu.global_mem_pipeline_.tick(); }
+};
+
+} // namespace rocjitsu::test
 
 namespace {
 
@@ -286,11 +449,677 @@ TEST(InterruptSinkTest, QueueHeldSinkIsSafeAfterOwnerReset) {
   EXPECT_EQ(calls, 0u);
 }
 
+TEST(InterruptSinkTest, FrontendResetRevokesAProcessFaultRoute) {
+  uint32_t calls = 0;
+  rocjitsu::amdgpu::InterruptSubscription frontend(
+      {}, [&](uint32_t, uint64_t, rocjitsu::amdgpu::VmAccessKind) { ++calls; });
+  const auto frontend_sink = frontend.sink();
+  rocjitsu::amdgpu::InterruptSubscription process(
+      {}, [frontend_sink](uint32_t process_id, uint64_t address,
+                          rocjitsu::amdgpu::VmAccessKind access) {
+        frontend_sink.report_vm_fault(process_id, address, access);
+      });
+  const auto process_sink = process.sink();
+
+  process_sink.report_vm_fault(7, 0x4000, rocjitsu::amdgpu::VmAccessKind::Write);
+  EXPECT_EQ(calls, 1u);
+  frontend.reset();
+  process_sink.report_vm_fault(7, 0x4000, rocjitsu::amdgpu::VmAccessKind::Write);
+  EXPECT_EQ(calls, 1u);
+}
+
 // A part with no modelled CWSR record layout. gfx1100 is not a debug target:
 // kmd::cwsr_layout_modelled() covers gfx942/gfx950/gfx1250, and the driver has to
 // decline stops there rather than publish a record rocm-dbgapi would misparse.
 const std::string RDNA3_CONFIG_PATH = std::string(CONFIG_DIR) + "/gfx1100_w7900.json";
 constexpr uint32_t kRdna3GpuId = 7019;
+
+TEST(KfdProcessGrantIndexTest, LooksUpDisjointRetiredRanges) {
+  rocjitsu::KfdProcess process(123);
+  constexpr uint64_t kRetiredBase = 0x10000000;
+  constexpr uint64_t kRetiredStride = 0x2000;
+  constexpr uint64_t kRetiredCount = 4096;
+  for (uint64_t index = 0; index < kRetiredCount; ++index)
+    process.retire_gpu_range_locked(kRetiredBase + index * kRetiredStride, 0x1000);
+  process.publish_gpu_grants_locked();
+
+  uint64_t permitted = 0;
+  for (uint32_t attempt = 0; attempt < 10000; ++attempt)
+    permitted += process.gpu_access_grant(42, 0x30000000, sizeof(uint32_t)).allowed;
+  EXPECT_EQ(permitted, 10000u);
+  EXPECT_FALSE(process.gpu_access_grant(42, kRetiredBase + 0x4000, sizeof(uint32_t)).allowed);
+}
+
+TEST(KfdProcessGrantIndexTest, FindsLongOverlapsAndCoalescesOnlyRetiredRanges) {
+  rocjitsu::KfdProcess process(123);
+  rocjitsu::KfdProcess::GpuAllocation long_range{};
+  long_range.gpu_va = 0x10000;
+  long_range.size = 0x10000;
+  long_range.admission_generations[42] = 7;
+  process.allocations_[1] = long_range;
+
+  rocjitsu::KfdProcess::GpuAllocation short_range{};
+  short_range.gpu_va = 0x14000;
+  short_range.size = 0x1000;
+  short_range.admission_generations[42] = 8;
+  process.allocations_[2] = short_range;
+
+  process.retire_gpu_range_locked(0x30000, 0x1000);
+  process.retire_gpu_range_locked(0x31000, 0x1000);
+  process.retire_gpu_range_locked(0x30800, 0x1000);
+  ASSERT_EQ(process.retired_gpu_ranges_.size(), 1u);
+  EXPECT_EQ(process.retired_gpu_ranges_[0].size, 0x2000u);
+  process.publish_gpu_grants_locked();
+
+  const auto long_tail = process.gpu_access_grant(42, 0x19000, sizeof(uint32_t));
+  EXPECT_TRUE(long_tail.allowed);
+  EXPECT_EQ(long_tail.generation, 7u);
+  EXPECT_FALSE(process.gpu_access_grant(42, 0x14800, sizeof(uint32_t)).allowed);
+  EXPECT_FALSE(process.gpu_access_grant(42, 0x30000, sizeof(uint32_t)).allowed);
+
+  process.claim_gpu_range_locked(0x30800, 0x800);
+  ASSERT_EQ(process.retired_gpu_ranges_.size(), 2u);
+  process.publish_gpu_grants_locked();
+  EXPECT_TRUE(process.gpu_access_grant(42, 0x30800, sizeof(uint32_t)).allowed);
+  EXPECT_FALSE(process.gpu_access_grant(42, 0x31000, sizeof(uint32_t)).allowed);
+}
+
+TEST(KfdProcessGrantIndexTest, PreservesOtherGpuSvmGrantsAcrossRetireAndPartialClaim) {
+  rocjitsu::KfdProcess process(123);
+  constexpr uint64_t kBase = 0x30000;
+  process.retire_gpu_range_locked(kBase, 0x2000);
+  process.set_retired_gpu_access_locked(kBase, 0x1000, 42, true);
+  process.set_retired_gpu_access_locked(kBase + 0x800, 0x1000, 43, true);
+  process.publish_gpu_grants_locked();
+  EXPECT_TRUE(process.gpu_access_grant(42, kBase, 1).allowed);
+  EXPECT_FALSE(process.gpu_access_grant(43, kBase, 1).allowed);
+  EXPECT_TRUE(process.gpu_access_grant(43, kBase + 0x1000, 1).allowed);
+
+  process.retire_gpu_range_locked(kBase + 0x2000, 0x1000);
+  process.publish_gpu_grants_locked();
+  EXPECT_TRUE(process.gpu_access_grant(42, kBase, 1).allowed);
+  EXPECT_TRUE(process.gpu_access_grant(43, kBase + 0x1000, 1).allowed);
+  EXPECT_FALSE(process.gpu_access_grant(42, kBase + 0x2000, 1).allowed);
+
+  process.claim_gpu_range_locked(kBase + 0x800, 0x800);
+  process.publish_gpu_grants_locked();
+  EXPECT_TRUE(process.gpu_access_grant(42, kBase, 1).allowed);
+  EXPECT_TRUE(process.gpu_access_grant(43, kBase + 0x1000, 1).allowed);
+  EXPECT_FALSE(process.gpu_access_grant(42, kBase + 0x1000, 1).allowed);
+
+  process.retire_gpu_range_locked(kBase + 0x1000, 0x1000);
+  process.publish_gpu_grants_locked();
+  EXPECT_TRUE(process.gpu_access_grant(42, kBase, 1).allowed);
+  EXPECT_FALSE(process.gpu_access_grant(43, kBase + 0x1000, 1).allowed);
+}
+
+TEST(KfdProcessGrantIndexTest, ScopesLiveSvmDenialsByGpuAndClearsClaimedBytes) {
+  rocjitsu::KfdProcess process(123);
+  constexpr uint64_t kBase = 0x30000;
+  process.set_svm_gpu_access_locked(kBase, 0x3000, 42,
+                                    rocjitsu::KfdProcess::SvmAccessMode::NoAccess);
+  process.set_svm_gpu_access_locked(kBase + 0x1000, 0x1000, 43,
+                                    rocjitsu::KfdProcess::SvmAccessMode::NoAccess);
+  process.publish_gpu_grants_locked();
+  EXPECT_FALSE(process.gpu_access_grant(42, kBase, 1).allowed);
+  EXPECT_FALSE(process.gpu_access_grant(42, kBase + 0x2fff, 1).allowed);
+  EXPECT_FALSE(process.gpu_access_grant(43, kBase + 0x1000, 1).allowed);
+  EXPECT_TRUE(process.gpu_access_grant(43, kBase, 1).allowed);
+  EXPECT_TRUE(process.gpu_access_grant(44, kBase + 0x1000, 1).allowed);
+
+  process.set_svm_gpu_access_locked(kBase + 0x800, 0x1800, 42,
+                                    rocjitsu::KfdProcess::SvmAccessMode::Access);
+  process.publish_gpu_grants_locked();
+  EXPECT_FALSE(process.gpu_access_grant(42, kBase + 0x7ff, 2).allowed);
+  EXPECT_TRUE(process.gpu_access_grant(42, kBase + 0x800, 1).allowed);
+  EXPECT_FALSE(process.gpu_access_grant(42, kBase + 0x2000, 1).allowed);
+  EXPECT_FALSE(process.gpu_access_grant(43, kBase + 0x1000, 1).allowed);
+
+  process.claim_gpu_range_locked(kBase + 0x1000, 0x2000);
+  process.publish_gpu_grants_locked();
+  EXPECT_FALSE(process.gpu_access_grant(42, kBase, 1).allowed);
+  EXPECT_TRUE(process.gpu_access_grant(42, kBase + 0x2000, 1).allowed);
+  EXPECT_TRUE(process.gpu_access_grant(43, kBase + 0x1000, 1).allowed);
+}
+
+TEST(KfdProcessGrantIndexTest, CopiesVramOwnershipWithoutRetainingBackingForLocalAccess) {
+  constexpr uint32_t kRequester = 101;
+  constexpr uint32_t kOwner = 202;
+  rocjitsu::KfdProcess process(123);
+  rocjitsu::KfdProcess::GpuAllocation vram{};
+  vram.gpu_va = 0x20000;
+  vram.size = 0x1000;
+  vram.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM;
+  vram.domain = rocjitsu::KfdProcess::GpuGrantDomain::Vram;
+  vram.gpu_id = kOwner;
+  vram.admission_generations[kRequester] = 7;
+  vram.admission_generations[kOwner] = 8;
+  process.allocations_[1] = vram;
+  process.publish_gpu_grants_locked();
+
+  const auto requester = process.gpu_access_grant(kRequester, vram.gpu_va + 16, 8);
+  EXPECT_TRUE(requester.allowed);
+  EXPECT_TRUE(requester.peer_candidate);
+  EXPECT_TRUE(requester.first_peer_candidate);
+  EXPECT_EQ(requester.domain, rocjitsu::KfdProcess::GpuGrantDomain::Vram);
+  EXPECT_EQ(requester.owner_gpu_id, kOwner);
+  EXPECT_EQ(requester.first_extent_bytes, 8u);
+  EXPECT_FALSE(process.gpu_peer_backing_grant(kRequester, vram.gpu_va + 16, 8).backing);
+
+  const auto owner = process.gpu_access_grant(kOwner, vram.gpu_va + 16, 8);
+  EXPECT_TRUE(owner.allowed);
+  EXPECT_FALSE(owner.peer_candidate);
+  EXPECT_EQ(owner.owner_gpu_id, kOwner);
+
+  process.allocations_[1].admission_generations.erase(kRequester);
+  process.publish_gpu_grants_locked();
+  const auto denied = process.gpu_access_grant(kRequester, vram.gpu_va + 16, 8);
+  EXPECT_FALSE(denied.allowed);
+  EXPECT_TRUE(denied.first_peer_candidate);
+}
+
+TEST(KfdProcessGrantIndexTest, AliasSnapshotDistinguishesReusedProcessIdentity) {
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kProcessId = 123;
+  constexpr uint32_t kOwner = 202;
+  constexpr uint64_t kVa = 0x20000;
+  rocjitsu::libc_passthrough().resolve();
+  int memfd = static_cast<int>(
+      syscall(SYS_memfd_create, "kfd_alias_identity", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+  ASSERT_GE(memfd, 0);
+  ASSERT_EQ(ftruncate(memfd, kBytes), 0);
+  ASSERT_EQ(fcntl(memfd, F_ADD_SEALS, F_SEAL_SHRINK), 0);
+  const auto backing = rocjitsu::KfdProcess::GpuBacking::create_memfd_alias(memfd, kBytes, kOwner);
+  ASSERT_TRUE(backing);
+  ASSERT_EQ(rocjitsu::libc_passthrough().close(memfd), 0);
+
+  const auto snapshot_for = [&] {
+    rocjitsu::KfdProcess process(kProcessId);
+    rocjitsu::KfdProcess::GpuAllocation allocation{};
+    allocation.gpu_va = kVa;
+    allocation.size = kBytes;
+    allocation.domain = rocjitsu::KfdProcess::GpuGrantDomain::Vram;
+    allocation.gpu_id = kOwner;
+    allocation.backing_owner = backing;
+    allocation.admission_generations[kOwner] = 7;
+    process.allocations_[1] = std::move(allocation);
+    process.publish_gpu_grants_locked();
+    return process.gpu_alias_snapshot();
+  };
+  const auto first = snapshot_for();
+  const auto reused = snapshot_for();
+  ASSERT_EQ(first->size(), 1u);
+  ASSERT_EQ(reused->size(), 1u);
+  EXPECT_EQ(first->front().process_id, kProcessId);
+  EXPECT_EQ(reused->front().process_id, kProcessId);
+  EXPECT_EQ(first->front().admission_generation, 7u);
+  EXPECT_EQ(reused->front().admission_generation, 7u);
+  EXPECT_EQ(first->front().backing_id, backing->backing_id());
+  EXPECT_EQ(reused->front().backing_id, backing->backing_id());
+  EXPECT_NE(first->front().process_incarnation, reused->front().process_incarnation);
+}
+
+TEST(GpuAliasIngressGateTest, MultiAliasAdmissionClosesAndDrainsOnOwnerContinuation) {
+  auto gate = std::make_shared<rocjitsu::GpuAliasIngressGate>();
+  const rocjitsu::GpuAliasIngressGate::Key first{1, 101, 0x1000, 7, 11};
+  const rocjitsu::GpuAliasIngressGate::Key second{1, 202, 0x2000, 7, 12};
+  const rocjitsu::GpuAliasIngressGate::Key idle{1, 303, 0x3000, 7, 13};
+  const std::array keys{first, second};
+  auto held = gate->try_acquire(keys);
+  ASSERT_TRUE(held);
+  ASSERT_TRUE(*held);
+  std::vector<std::function<void()>> owner_queue;
+  const auto post = [&](std::function<void()> continuation) {
+    owner_queue.push_back(std::move(continuation));
+  };
+  uint32_t drained = 0;
+  ASSERT_TRUE(gate->close_batch(keys, post, [&] { ++drained; }));
+  EXPECT_TRUE(gate->closed(first));
+  EXPECT_FALSE(gate->discard_failed(first));
+  EXPECT_FALSE(gate->try_acquire(keys));
+  EXPECT_TRUE(owner_queue.empty());
+  held->reset();
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_EQ(drained, 0u);
+  EXPECT_FALSE(gate->reopen(first));
+  EXPECT_FALSE(gate->reopen(second));
+  for (auto &continuation : owner_queue)
+    continuation();
+  owner_queue.clear();
+  EXPECT_EQ(drained, 1u);
+  ASSERT_TRUE(gate->reopen_batch(keys));
+  EXPECT_FALSE(gate->closed(first));
+  EXPECT_TRUE(gate->try_acquire(keys));
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+
+  for (uint64_t generation = 100; generation < 300; ++generation) {
+    auto churn = first;
+    churn.admission_generation = generation;
+    const std::array one{churn};
+    auto permit = gate->try_acquire(one);
+    ASSERT_TRUE(permit);
+    permit->reset();
+  }
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+
+  ASSERT_TRUE(gate->close(idle, post, [&] { ++drained; }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_FALSE(gate->reopen(idle));
+  owner_queue.back()();
+  owner_queue.clear();
+  EXPECT_EQ(drained, 2u);
+  EXPECT_TRUE(gate->reopen(idle));
+
+  const rocjitsu::GpuAliasIngressGate::Key failed{1, 404, 0x4000, 7, 14};
+  ASSERT_TRUE(gate->close(failed, post, [] { throw std::runtime_error("maintenance failed"); }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_FALSE(gate->retry_closed(failed, post, [&] { ++drained; }));
+  EXPECT_FALSE(gate->discard_failed(failed));
+  EXPECT_THROW(owner_queue.back()(), std::runtime_error);
+  EXPECT_FALSE(gate->reopen(failed));
+  EXPECT_EQ(gate->tracked_generation_count(), 1u);
+  owner_queue.clear();
+  ASSERT_TRUE(gate->retry_closed(failed, post, [&] { ++drained; }));
+  EXPECT_FALSE(gate->retry_closed(failed, post, [&] { ++drained; }));
+  EXPECT_FALSE(gate->discard_failed(failed));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  owner_queue.back()();
+  owner_queue.clear();
+  EXPECT_EQ(drained, 3u);
+  EXPECT_TRUE(gate->reopen(failed));
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+
+  const rocjitsu::GpuAliasIngressGate::Key abandoned{1, 505, 0x5000, 7, 15};
+  ASSERT_TRUE(gate->close(abandoned, post, [] { throw std::runtime_error("abandoned"); }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_THROW(owner_queue.back()(), std::runtime_error);
+  owner_queue.clear();
+  EXPECT_TRUE(gate->closed(abandoned));
+  EXPECT_TRUE(gate->discard_failed(abandoned));
+  EXPECT_FALSE(gate->discard_failed(abandoned));
+  EXPECT_FALSE(gate->closed(abandoned));
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+}
+
+TEST(GpuAliasIngressGateTest, CopiedDrainAuthorityExpiresAfterOwnerContinuation) {
+  using Gate = rocjitsu::GpuAliasIngressGate;
+  auto gate = std::make_shared<Gate>();
+  const Gate::Key alias{1, 101, 0x1000, 7, 11};
+  const std::array keys{alias};
+  std::vector<std::function<void()>> owner_queue;
+  const auto post = [&](std::function<void()> continuation) {
+    owner_queue.push_back(std::move(continuation));
+  };
+  std::optional<Gate::DrainAuthority> retained;
+  bool owner_admitted = false;
+  ASSERT_TRUE(gate->close_with_drain_authority(alias, post, [&](const auto &authority) {
+    retained = authority;
+    EXPECT_FALSE(gate->try_acquire(keys));
+    auto permit = gate->try_acquire_for_drained_owner(keys, authority);
+    ASSERT_TRUE(permit);
+    owner_admitted = true;
+    permit->reset();
+  }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_TRUE(gate->closed(alias));
+  EXPECT_FALSE(gate->try_acquire(keys));
+  owner_queue.front()();
+  EXPECT_TRUE(owner_admitted);
+  ASSERT_TRUE(retained);
+  EXPECT_TRUE(gate->closed(alias));
+  EXPECT_FALSE(gate->try_acquire_for_drained_owner(keys, *retained));
+  EXPECT_FALSE(gate->mark_final_writeback_done(*retained));
+  EXPECT_TRUE(gate->reopen(alias));
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+}
+
+TEST(GpuAliasIngressGateTest, ExclusiveCloseClaimBlocksIndependentKeysThroughRetry) {
+  auto gate = std::make_shared<rocjitsu::GpuAliasIngressGate>();
+  const rocjitsu::GpuAliasIngressGate::Key first{1, 101, 0x1000, 7, 11};
+  const rocjitsu::GpuAliasIngressGate::Key other_process{2, 202, 0x2000, 8, 12};
+  const std::array first_key{first};
+  const std::array other_key{other_process};
+  std::vector<std::function<void()>> owner_queue;
+  const auto post = [&](std::function<void()> continuation) {
+    owner_queue.push_back(std::move(continuation));
+  };
+
+  ASSERT_TRUE(gate->close(first, post, [] { throw std::runtime_error("first failed"); }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_FALSE(gate->close(other_process, post, [] {}));
+  EXPECT_FALSE(gate->closed(other_process));
+  EXPECT_EQ(gate->tracked_generation_count(), 1u);
+  EXPECT_TRUE(gate->try_acquire(other_key));
+  EXPECT_THROW(owner_queue.front()(), std::runtime_error);
+  owner_queue.clear();
+  EXPECT_TRUE(gate->closed(first));
+  EXPECT_FALSE(gate->close(other_process, post, [] {}));
+  EXPECT_FALSE(gate->closed(other_process));
+
+  ASSERT_TRUE(gate->retry_closed(first, post, [] {}));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_FALSE(gate->close(other_process, post, [] {}));
+  owner_queue.front()();
+  owner_queue.clear();
+  EXPECT_FALSE(gate->close(other_process, post, [] {}));
+  ASSERT_TRUE(gate->reopen(first));
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+  ASSERT_TRUE(gate->close(other_process, post, [] {}));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_TRUE(gate->closed(other_process));
+  owner_queue.front()();
+  EXPECT_TRUE(gate->reopen(other_process));
+  EXPECT_TRUE(gate->try_acquire(first_key));
+}
+
+TEST(GpuAliasIngressGateTest, BatchAdoptsFailedSingleCloseClaim) {
+  auto gate = std::make_shared<rocjitsu::GpuAliasIngressGate>();
+  const rocjitsu::GpuAliasIngressGate::Key failed{1, 101, 0x1000, 7, 11};
+  const rocjitsu::GpuAliasIngressGate::Key sibling{1, 202, 0x2000, 7, 12};
+  const rocjitsu::GpuAliasIngressGate::Key unrelated{2, 303, 0x3000, 8, 13};
+  const std::array keys{failed, sibling};
+  std::vector<std::function<void()>> owner_queue;
+  const auto post = [&](std::function<void()> continuation) {
+    owner_queue.push_back(std::move(continuation));
+  };
+
+  ASSERT_TRUE(gate->close(failed, post, [] { throw std::runtime_error("failed"); }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_THROW(owner_queue.front()(), std::runtime_error);
+  owner_queue.clear();
+  EXPECT_TRUE(gate->closed(failed));
+  EXPECT_FALSE(gate->closed(sibling));
+  ASSERT_TRUE(gate->close_batch(keys, post, [] {}));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_TRUE(gate->closed(failed));
+  EXPECT_TRUE(gate->closed(sibling));
+  EXPECT_FALSE(gate->close(unrelated, post, [] {}));
+  owner_queue.front()();
+  owner_queue.clear();
+  EXPECT_FALSE(gate->close(unrelated, post, [] {}));
+  ASSERT_TRUE(gate->reopen_batch(keys));
+  ASSERT_TRUE(gate->close(unrelated, post, [] {}));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  owner_queue.front()();
+  EXPECT_TRUE(gate->reopen(unrelated));
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+}
+
+TEST(GpuAliasIngressGateTest, DiscardFailedCloseReleasesExclusiveClaim) {
+  auto gate = std::make_shared<rocjitsu::GpuAliasIngressGate>();
+  const rocjitsu::GpuAliasIngressGate::Key failed{1, 101, 0x1000, 7, 11};
+  const rocjitsu::GpuAliasIngressGate::Key other_process{2, 202, 0x2000, 8, 12};
+  std::vector<std::function<void()>> owner_queue;
+  const auto post = [&](std::function<void()> continuation) {
+    owner_queue.push_back(std::move(continuation));
+  };
+
+  ASSERT_TRUE(gate->close(failed, post, [] { throw std::runtime_error("failed"); }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_THROW(owner_queue.front()(), std::runtime_error);
+  owner_queue.clear();
+  EXPECT_FALSE(gate->close(other_process, post, [] {}));
+  EXPECT_TRUE(gate->discard_failed(failed));
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+  ASSERT_TRUE(gate->close(other_process, post, [] {}));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  owner_queue.front()();
+  EXPECT_TRUE(gate->reopen(other_process));
+}
+
+TEST(GpuAliasIngressGateTest, BatchClosesAtomicallyAndRetriesFailedMaintenance) {
+  auto gate = std::make_shared<rocjitsu::GpuAliasIngressGate>();
+  const rocjitsu::GpuAliasIngressGate::Key owner{1, 101, 0x1000, 7, 11};
+  const rocjitsu::GpuAliasIngressGate::Key requester{1, 202, 0x1000, 7, 12};
+  const rocjitsu::GpuAliasIngressGate::Key unrelated{1, 303, 0x3000, 8, 13};
+  const std::array keys{requester, owner};
+  const std::array owner_key{owner};
+  const std::array requester_key{requester};
+  const std::array unrelated_key{unrelated};
+  auto held_owner = gate->try_acquire(owner_key);
+  auto held_requester = gate->try_acquire(requester_key);
+  ASSERT_TRUE(held_owner);
+  ASSERT_TRUE(held_requester);
+  std::vector<std::function<void()>> owner_queue;
+  const auto post = [&](std::function<void()> continuation) {
+    owner_queue.push_back(std::move(continuation));
+  };
+  uint32_t drained = 0;
+  ASSERT_TRUE(gate->close_batch(keys, post, [&] { ++drained; }));
+  EXPECT_TRUE(gate->closed(owner));
+  EXPECT_TRUE(gate->closed(requester));
+  EXPECT_FALSE(gate->closed(unrelated));
+  EXPECT_FALSE(gate->try_acquire(keys));
+  EXPECT_TRUE(gate->try_acquire(unrelated_key));
+  held_owner->reset();
+  EXPECT_TRUE(owner_queue.empty());
+  held_requester->reset();
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_FALSE(gate->reopen_batch(keys));
+  owner_queue.back()();
+  owner_queue.clear();
+  EXPECT_EQ(drained, 1u);
+  ASSERT_TRUE(gate->reopen_batch(keys));
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+
+  ASSERT_TRUE(
+      gate->close_batch(keys, post, [] { throw std::runtime_error("maintenance failed"); }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_THROW(owner_queue.back()(), std::runtime_error);
+  owner_queue.clear();
+  EXPECT_FALSE(gate->reopen_batch(keys));
+  EXPECT_FALSE(gate->close_batch(keys, post, [&] { ++drained; }));
+  ASSERT_TRUE(gate->retry_closed_batch(keys, post, [&] { ++drained; }));
+  EXPECT_FALSE(gate->retry_closed_batch(keys, post, [&] { ++drained; }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  owner_queue.back()();
+  owner_queue.clear();
+  EXPECT_EQ(drained, 2u);
+  ASSERT_TRUE(gate->reopen_batch(keys));
+
+  const auto failed_post = [](std::function<void()>) { throw std::runtime_error("post failed"); };
+  EXPECT_FALSE(gate->close_batch(keys, failed_post, [&] { ++drained; }));
+  EXPECT_TRUE(gate->closed(owner));
+  EXPECT_TRUE(gate->closed(requester));
+  ASSERT_TRUE(gate->retry_closed_batch(keys, post, [&] { ++drained; }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  owner_queue.back()();
+  owner_queue.clear();
+  EXPECT_EQ(drained, 3u);
+  EXPECT_TRUE(gate->reopen_batch(keys));
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+
+  ASSERT_TRUE(gate->close(owner, post, [] { throw std::runtime_error("single failed"); }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_THROW(owner_queue.back()(), std::runtime_error);
+  owner_queue.clear();
+  ASSERT_TRUE(gate->close_batch(keys, post, [&] { ++drained; }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  owner_queue.back()();
+  owner_queue.clear();
+  EXPECT_EQ(drained, 4u);
+  EXPECT_TRUE(gate->reopen_batch(keys));
+
+  ASSERT_TRUE(gate->close(owner, post, [] {}));
+  EXPECT_FALSE(gate->close_batch(keys, post, [] {}));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  owner_queue.back()();
+  owner_queue.clear();
+  ASSERT_TRUE(gate->reopen(owner));
+  std::weak_ptr<rocjitsu::GpuAliasIngressGate> weak_gate = gate;
+  gate.reset();
+  EXPECT_TRUE(weak_gate.expired());
+}
+
+TEST(GpuAliasIngressGateTest, BatchDrainAuthorityAdmitsItsKeysOnlyDuringOwnerContinuation) {
+  using Gate = rocjitsu::GpuAliasIngressGate;
+  auto gate = std::make_shared<Gate>();
+  const Gate::Key owner{1, 101, 0x1000, 7, 11};
+  const Gate::Key requester{1, 202, 0x1000, 7, 12};
+  const Gate::Key unrelated{1, 303, 0x3000, 8, 13};
+  const std::array keys{owner, requester};
+  const std::array owner_key{owner};
+  const std::array requester_key{requester};
+  const std::array unrelated_key{unrelated};
+  const std::array mixed_keys{owner, unrelated};
+  std::vector<std::function<void()>> owner_queue;
+  const auto post = [&](std::function<void()> continuation) {
+    owner_queue.push_back(std::move(continuation));
+  };
+  std::optional<Gate::DrainAuthority> retained;
+  bool owner_admitted = false;
+  ASSERT_TRUE(gate->close_batch_with_drain_authority(keys, post, [&](const auto &authority) {
+    retained = authority;
+    EXPECT_FALSE(gate->try_acquire(owner_key));
+    EXPECT_FALSE(gate->try_acquire(requester_key));
+    EXPECT_TRUE(gate->try_acquire(unrelated_key));
+    auto permit = gate->try_acquire_for_drained_owner(keys, authority);
+    ASSERT_TRUE(permit);
+    owner_admitted = true;
+    permit->reset();
+    auto mixed_permit = gate->try_acquire_for_drained_owner(mixed_keys, authority);
+    ASSERT_TRUE(mixed_permit);
+    mixed_permit->reset();
+    EXPECT_FALSE(gate->final_writeback_done(authority).value_or(true));
+    EXPECT_TRUE(gate->mark_final_writeback_done(authority));
+    EXPECT_TRUE(gate->final_writeback_done(authority).value_or(false));
+  }));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_TRUE(gate->closed(owner));
+  EXPECT_TRUE(gate->closed(requester));
+  EXPECT_FALSE(gate->try_acquire(keys));
+  owner_queue.front()();
+  EXPECT_TRUE(owner_admitted);
+  ASSERT_TRUE(retained);
+  EXPECT_FALSE(gate->try_acquire_for_drained_owner(keys, *retained));
+  EXPECT_FALSE(gate->mark_final_writeback_done(*retained));
+  EXPECT_FALSE(gate->final_writeback_done(*retained));
+  EXPECT_TRUE(gate->reopen_batch(keys));
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+}
+
+TEST(GpuAliasIngressGateTest, EffectFreezeRejectsBusySelectionAtomically) {
+  using Gate = rocjitsu::GpuAliasIngressGate;
+  auto gate = std::make_shared<Gate>();
+  const Gate::Key owner{1, 101, 0x1000, 7, 11};
+  const Gate::Key importer{1, 202, 0x2000, 7, 12};
+  const Gate::Key unrelated{2, 303, 0x3000, 8, 13};
+  const std::array selected{owner, importer, owner};
+  const std::array owner_key{owner};
+  const std::array importer_key{importer};
+  const std::array unrelated_key{unrelated};
+
+  auto held = gate->try_acquire(importer_key);
+  ASSERT_TRUE(held);
+  EXPECT_FALSE(gate->try_freeze_for_effect(selected));
+  EXPECT_FALSE(gate->closed(owner));
+  EXPECT_FALSE(gate->closed(importer));
+  EXPECT_TRUE(gate->try_acquire(owner_key));
+  EXPECT_EQ(gate->tracked_generation_count(), 1u);
+  held->reset();
+
+  auto window = gate->try_freeze_for_effect(selected);
+  ASSERT_TRUE(window);
+  EXPECT_EQ(gate->tracked_generation_count(), 2u);
+  EXPECT_TRUE(gate->closed(owner));
+  EXPECT_TRUE(gate->closed(importer));
+  EXPECT_FALSE(gate->close_claimed());
+  EXPECT_FALSE(gate->close_claimed_by_process(1));
+  EXPECT_FALSE(gate->close_claimed_by_process(2));
+  EXPECT_FALSE(gate->try_acquire(owner_key));
+  EXPECT_FALSE(gate->try_acquire(importer_key));
+  EXPECT_TRUE(gate->try_acquire(unrelated_key));
+  EXPECT_FALSE(gate->try_freeze_for_effect(unrelated_key));
+  window.reset();
+  EXPECT_FALSE(gate->closed(owner));
+  EXPECT_FALSE(gate->closed(importer));
+  EXPECT_FALSE(gate->close_claimed());
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+  EXPECT_TRUE(gate->try_acquire(owner_key));
+}
+
+TEST(GpuAliasIngressGateTest, EffectBypassRequiresLiveExactWindow) {
+  using Gate = rocjitsu::GpuAliasIngressGate;
+  auto gate = std::make_shared<Gate>();
+  auto other_gate = std::make_shared<Gate>();
+  const Gate::Key owner{1, 101, 0x1000, 7, 11};
+  const Gate::Key importer{1, 202, 0x2000, 7, 12};
+  const Gate::Key unrelated{2, 303, 0x3000, 8, 13};
+  const std::array selected{owner, importer};
+  const std::array owner_key{owner};
+  const std::array importer_key{importer};
+  const std::array unrelated_key{unrelated};
+  const std::array mixed{owner, unrelated};
+
+  EXPECT_FALSE(gate->try_freeze_for_effect({}));
+  auto window = gate->try_freeze_for_effect(selected);
+  ASSERT_TRUE(window);
+  Gate::EffectWindow moved = std::move(*window);
+  EXPECT_FALSE(*window);
+  EXPECT_FALSE(gate->try_acquire_for_effect(owner_key, *window));
+  EXPECT_FALSE(other_gate->try_acquire_for_effect(owner_key, moved));
+  EXPECT_FALSE(gate->try_acquire_for_effect({}, moved));
+  EXPECT_FALSE(gate->try_acquire_for_effect(unrelated_key, moved));
+  EXPECT_FALSE(gate->try_acquire_for_effect(mixed, moved));
+
+  auto owner_bypass = gate->try_acquire_for_effect(owner_key, moved);
+  auto importer_bypass = gate->try_acquire_for_effect(importer_key, moved);
+  ASSERT_TRUE(owner_bypass);
+  ASSERT_TRUE(importer_bypass);
+  EXPECT_FALSE(gate->try_acquire(selected));
+  importer_bypass->reset();
+  owner_bypass->reset();
+  moved.reset();
+  EXPECT_FALSE(gate->try_acquire_for_effect(owner_key, moved));
+  EXPECT_FALSE(gate->close_claimed());
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+}
+
+TEST(GpuAliasIngressGateTest, EffectReleaseWaitsForBypassAndExcludesRetirement) {
+  using Gate = rocjitsu::GpuAliasIngressGate;
+  auto gate = std::make_shared<Gate>();
+  const Gate::Key owner{1, 101, 0x1000, 7, 11};
+  const Gate::Key importer{1, 202, 0x2000, 7, 12};
+  const Gate::Key unrelated{2, 303, 0x3000, 8, 13};
+  const std::array selected{owner, importer};
+  const std::array owner_key{owner};
+  const std::array unrelated_key{unrelated};
+  std::function<void()> pending;
+  const auto post = [&](std::function<void()> continuation) { pending = std::move(continuation); };
+
+  ASSERT_TRUE(gate->close(owner, post, [] {}));
+  EXPECT_FALSE(gate->try_freeze_for_effect(selected));
+  ASSERT_TRUE(pending);
+  pending();
+  pending = {};
+  ASSERT_TRUE(gate->reopen(owner));
+
+  auto window = gate->try_freeze_for_effect(selected);
+  ASSERT_TRUE(window);
+  auto bypass = gate->try_acquire_for_effect(owner_key, *window);
+  ASSERT_TRUE(bypass);
+  EXPECT_FALSE(gate->close(unrelated, post, [] {}));
+  EXPECT_FALSE(gate->close_batch(selected, post, [] {}));
+  EXPECT_FALSE(gate->closed(unrelated));
+  window->reset();
+  EXPECT_FALSE(gate->try_acquire_for_effect(owner_key, *window));
+  EXPECT_TRUE(gate->closed(owner));
+  EXPECT_TRUE(gate->closed(importer));
+  EXPECT_FALSE(gate->close_claimed());
+  EXPECT_FALSE(gate->close(unrelated, post, [] {}));
+  EXPECT_FALSE(gate->try_freeze_for_effect(unrelated_key));
+  EXPECT_TRUE(gate->try_acquire(unrelated_key));
+
+  bypass->reset();
+  EXPECT_FALSE(gate->closed(owner));
+  EXPECT_FALSE(gate->closed(importer));
+  EXPECT_FALSE(gate->close_claimed());
+  EXPECT_EQ(gate->tracked_generation_count(), 0u);
+  ASSERT_TRUE(gate->close(unrelated, post, [] {}));
+  ASSERT_TRUE(pending);
+  pending();
+  EXPECT_TRUE(gate->reopen(unrelated));
+}
 
 class ChildProcessGuard {
 public:
@@ -1692,6 +2521,12 @@ TEST_F(KfdIoctlTest, SmallAllocationsMapTheWholeTailPage) {
                               static_cast<off_t>(allocation.mmap_offset));
       ASSERT_NE(mapping, MAP_FAILED);
     }
+    uint32_t gpu_id = kGpuId;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
     static_cast<std::byte *>(mapping)[4095] = std::byte{0x5a};
     const auto access = soc_->gpu_vm().snapshot_vmid(driver_->local_process_id());
     ASSERT_TRUE(access);
@@ -1710,6 +2545,14418 @@ TEST_F(KfdIoctlTest, SmallAllocationsMapTheWholeTailPage) {
     invalid.size = size;
     EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &invalid), -EINVAL);
   }
+}
+
+TEST_F(KfdIoctlTest, MapAndUnmapMemoryReportOrderedProgress) {
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 4096;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  std::array<uint32_t, 2> ids{kGpuId, kGpuId + 1};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  map.n_devices = ids.size();
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EINVAL);
+  EXPECT_EQ(map.n_success, 1u);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EINVAL);
+  EXPECT_EQ(map.n_success, 1u);
+
+  // The completed prefix is a retry cursor. Repeating the valid ID is also
+  // idempotent; neither path adds a second mapping for that GPU.
+  ids[1] = kGpuId;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(map.n_success, ids.size());
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(map.n_success, ids.size());
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.device_ids_array_ptr = map.device_ids_array_ptr;
+  unmap.n_devices = ids.size();
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -EINVAL);
+  EXPECT_EQ(unmap.n_success, 1u);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -EINVAL);
+  EXPECT_EQ(unmap.n_success, 1u);
+
+  // A caller-supplied prefix does not grant access to an ID it skipped.
+  map.n_devices = 1;
+  map.n_success = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  unmap.n_devices = 1;
+  unmap.n_success = 0;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -EINVAL);
+  EXPECT_EQ(unmap.n_success, 0u);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, MapMemoryChecksArrayCursorAndUserptrSentinel) {
+  alignas(4096) std::array<std::byte, 4096> host{};
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reinterpret_cast<uint64_t>(host.data());
+  allocation.mmap_offset = allocation.va_addr;
+  allocation.size = host.size();
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = 1;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EFAULT);
+  EXPECT_EQ(map.n_success, 0u);
+  map.n_success = 2;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EINVAL);
+  EXPECT_EQ(map.n_success, 2u);
+  map.n_devices = 0;
+  map.n_success = 0;
+  map.device_ids_array_ptr = 0;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(map.n_success, 0u);
+
+  uint32_t sentinel_id = 0;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&sentinel_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(map.n_success, 1u);
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.device_ids_array_ptr = map.device_ids_array_ptr;
+  unmap.n_devices = 1;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_TRUE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  // ALLOC itself may install a shared process page table entry. FREE must
+  // revoke that entry even after the MAP/UNMAP grant cycle has ended.
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+}
+
+TEST_F(KfdIoctlTest, UserptrIpcExportPreservesTheGpuViewOfCallerMemory) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  alignas(4096) std::array<uint32_t, 4096 / sizeof(uint32_t)> host{};
+  host[0] = 0x1111u;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reinterpret_cast<uint64_t>(host.data());
+  allocation.mmap_offset = allocation.va_addr;
+  allocation.size = 4096;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto access = soc_->gpu_vm().snapshot_vmid(driver_->local_process_id());
+  ASSERT_TRUE(access);
+  uint32_t observed = 0;
+  const auto read_gpu = [&] {
+    return access->read(allocation.va_addr, std::as_writable_bytes(std::span(&observed, 1)));
+  };
+  ASSERT_EQ(read_gpu(), VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, 0x1111u);
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = gpu_id;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), -EPERM);
+  host[0] = 0x2222u;
+  ASSERT_EQ(read_gpu(), VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, 0x2222u);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, VramMapRejectsPeerAtTheCurrentPrefix) {
+  constexpr uint32_t kPeerGpuId = kGpuId + 1;
+  auto first_soc = load_standalone_soc(CONFIG_PATH);
+  auto second_soc = load_standalone_soc(CONFIG_PATH);
+  ASSERT_NE(first_soc, nullptr);
+  ASSERT_NE(second_soc, nullptr);
+  rocjitsu::SimulatedKfd multi_gpu_driver({first_soc.get(), second_soc.get()},
+                                          {kGpuId, kPeerGpuId});
+  ASSERT_GE(multi_gpu_driver.open(), 0);
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 4096;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  std::array<uint32_t, 2> ids{kPeerGpuId, kGpuId};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  map.n_devices = ids.size();
+  EXPECT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EINVAL);
+  EXPECT_EQ(map.n_success, 0u);
+  std::swap(ids[0], ids[1]);
+  EXPECT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EINVAL);
+  EXPECT_EQ(map.n_success, 1u);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.device_ids_array_ptr = map.device_ids_array_ptr;
+  unmap.n_devices = ids.size();
+  EXPECT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -EINVAL);
+  EXPECT_EQ(unmap.n_success, 1u);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(multi_gpu_driver.close(), 0);
+}
+
+struct alignas(4096) KfdPeerAqlArena {
+  std::array<uint8_t, 4 * 4096> bytes{};
+};
+
+struct alignas(4096) KfdPeerCuCodePage {
+  std::array<uint32_t, 4096 / sizeof(uint32_t)> words{};
+};
+
+class KfdPeerBindingTest : public ::testing::Test {
+protected:
+  static constexpr uint32_t kRequester = kGpuId + 1;
+  static constexpr uint32_t kOwner = kGpuId;
+  static constexpr size_t kAqlPage = 4096;
+  static constexpr size_t kAqlRingOffset = kAqlPage;
+  static constexpr size_t kAqlDescriptorOffset = 2 * kAqlPage;
+  static constexpr size_t kAqlSignalOffset = 3 * kAqlPage;
+  static constexpr uint32_t kAqlSignalValueIndex = 1;
+
+  bool prepare_aql_queue(uint32_t process_id, const std::shared_ptr<rocjitsu::KfdProcess> &process,
+                         KfdPeerAqlArena &arena, kfd_ioctl_create_queue_args &queue,
+                         void *&doorbell_page) {
+    using namespace rocjitsu::amdhsa;
+    using rocjitsu::amdgpu::Mtype;
+    static_assert(sizeof(amd_queue_t) <= kAqlPage);
+    const uint64_t address = reinterpret_cast<uint64_t>(arena.bytes.data());
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      rocjitsu::KfdProcess::GpuAllocation allocation{};
+      allocation.gpu_va = address;
+      allocation.size = arena.bytes.size();
+      allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+      allocation.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+      allocation.handle = process->next_handle_++;
+      allocation.admission_generations[kOwner] = process->next_gpu_admission_generation_locked();
+      process->allocations_[allocation.handle] = allocation;
+      process->publish_gpu_grants_locked();
+    }
+    if (process->map_pages(address, arena.bytes.data(), arena.bytes.size(), Mtype::UC,
+                           rocjitsu::KfdProcess::HostExtentOwner::Driver) !=
+        rocjitsu::KfdProcess::PageTableMutationResult::Applied)
+      return false;
+
+    kernel_descriptor_t descriptor{};
+    descriptor.kernel_code_entry_byte_offset = sizeof(descriptor);
+    std::memcpy(arena.bytes.data(), &descriptor, sizeof(descriptor));
+    const uint32_t endpgm = rocjitsu::build_s_endpgm(machine_->soc(1)->arch());
+    std::memcpy(arena.bytes.data() + sizeof(descriptor), &endpgm, sizeof(endpgm));
+    auto *signal = reinterpret_cast<uint64_t *>(arena.bytes.data() + kAqlSignalOffset);
+    std::atomic_ref<uint64_t>(signal[kAqlSignalValueIndex]).store(1, std::memory_order_release);
+
+    const off_t offset =
+        static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(kOwner));
+    doorbell_page =
+        driver_->mmap(process_id, nullptr, kAqlPage, PROT_READ | PROT_WRITE, MAP_SHARED, offset);
+    if (doorbell_page == MAP_FAILED)
+      return false;
+    auto *queue_descriptor =
+        reinterpret_cast<amd_queue_t *>(arena.bytes.data() + kAqlDescriptorOffset);
+    queue.gpu_id = kOwner;
+    queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+    queue.ring_base_address = reinterpret_cast<uint64_t>(arena.bytes.data() + kAqlRingOffset);
+    queue.ring_size = kAqlPage;
+    queue.read_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor->read_dispatch_id);
+    queue.write_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor->write_dispatch_id);
+    queue.queue_percentage = 100;
+    return driver_->ioctl(process_id, AMDKFD_IOC_CREATE_QUEUE, &queue) == 0;
+  }
+
+  static uint64_t aql_signal_value(const KfdPeerAqlArena &arena) {
+    auto *signal = reinterpret_cast<const uint64_t *>(arena.bytes.data() + kAqlSignalOffset);
+    return std::atomic_ref<uint64_t>(const_cast<uint64_t &>(signal[kAqlSignalValueIndex]))
+        .load(std::memory_order_acquire);
+  }
+
+  static uint64_t aql_read_pointer(const KfdPeerAqlArena &arena) {
+    auto *descriptor =
+        reinterpret_cast<const amd_queue_t *>(arena.bytes.data() + kAqlDescriptorOffset);
+    return std::atomic_ref<uint64_t>(const_cast<uint64_t &>(descriptor->read_dispatch_id))
+        .load(std::memory_order_acquire);
+  }
+
+  static void submit_aql_one_wave(KfdPeerAqlArena &arena, const kfd_ioctl_create_queue_args &queue,
+                                  void *doorbell_page, uint32_t wave_size = 64) {
+    auto *packet =
+        reinterpret_cast<hsa_kernel_dispatch_packet_t *>(arena.bytes.data() + kAqlRingOffset);
+    packet->setup = 1;
+    packet->workgroup_size_x = wave_size;
+    packet->workgroup_size_y = packet->workgroup_size_z = 1;
+    packet->grid_size_x = wave_size;
+    packet->grid_size_y = packet->grid_size_z = 1;
+    packet->kernel_object = reinterpret_cast<uint64_t>(arena.bytes.data());
+    packet->completion_signal.handle =
+        reinterpret_cast<uint64_t>(arena.bytes.data() + kAqlSignalOffset);
+    // No acquire flush may consume the deliberately blocked line before the wave runs.
+    constexpr uint16_t kHeader = HSA_PACKET_TYPE_KERNEL_DISPATCH |
+                                 (HSA_FENCE_SCOPE_NONE << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                                 (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    std::atomic_ref<uint16_t>(packet->header).store(kHeader, std::memory_order_release);
+    auto *descriptor = reinterpret_cast<amd_queue_t *>(arena.bytes.data() + kAqlDescriptorOffset);
+    std::atomic_ref<uint64_t>(const_cast<uint64_t &>(descriptor->write_dispatch_id))
+        .store(1, std::memory_order_release);
+    auto *doorbell = reinterpret_cast<uint64_t *>(static_cast<uint8_t *>(doorbell_page) +
+                                                  queue.doorbell_offset % kAqlPage);
+    std::atomic_ref<uint64_t>(*doorbell).store(0, std::memory_order_release);
+  }
+
+  enum class SelectedRetirement { Unmap, Free, Close };
+
+  void verify_completion_blocked_by_selected_retirement(SelectedRetirement operation) {
+    using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+    using rocjitsu::amdgpu::L2Cache;
+    constexpr uint32_t kDirtyOffset = 16;
+
+    kfd_ioctl_alloc_memory_of_gpu_args controlled{};
+    controlled.size = kAqlPage;
+    controlled.gpu_id = kOwner;
+    controlled.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &controlled), 0);
+    ASSERT_TRUE(
+        driver_->enable_cacheable_peer_allocation_for_testing(process_id_, controlled.handle));
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = controlled.handle;
+    exported.gpu_id = kOwner;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    for (uint32_t gpu_id : {kOwner, kRequester}) {
+      kfd_ioctl_map_memory_to_gpu_args map{};
+      map.handle = controlled.handle;
+      map.n_devices = 1;
+      map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+      ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    }
+
+    const auto process = driver_->find_process(process_id_);
+    ASSERT_NE(process, nullptr);
+    const auto aliases = process->gpu_alias_snapshot();
+    const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+      return alias.gpu_va == controlled.va_addr && alias.gpu_id == kOwner;
+    });
+    ASSERT_NE(found, aliases->end());
+    const auto owner_alias = *found;
+    const auto backing =
+        process->gpu_peer_backing_grant(kOwner, controlled.va_addr, L2Cache::LINE_SIZE);
+    ASSERT_TRUE(backing.admission.allowed);
+    ASSERT_TRUE(backing.backing);
+    backing.backing.bytes()[kDirtyOffset] = std::byte{0x13};
+
+    blocked_arena_ = std::make_unique<KfdPeerAqlArena>();
+    kfd_ioctl_create_queue_args queue{};
+    void *doorbell_page = nullptr;
+    ASSERT_TRUE(prepare_aql_queue(process_id_, process, *blocked_arena_, queue, doorbell_page));
+    const auto owner_access = machine_->soc(1)->gpu_vm().snapshot_vmid(process_id_);
+    ASSERT_TRUE(owner_access);
+    auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+    ASSERT_NE(owner_l2, nullptr);
+    const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+    KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+        *owner_l2, controlled.va_addr, process_id_, owner_access->cache_identity(),
+        owner_alias.admission_generation, dirty_bytes);
+    const uint64_t before_writes = owner_l2->backing_write_transactions();
+    auto *owner_cp = machine_->soc(1)->xcd(0)->command_processor();
+    ASSERT_NE(owner_cp, nullptr);
+    const auto dispatched_workgroups = [&] {
+      uint64_t total = 0;
+      for (uint32_t xcd = 0; xcd < machine_->soc(1)->num_xcds(); ++xcd)
+        total += machine_->soc(1)->xcd(xcd)->command_processor()->dispatched_workgroups();
+      return total;
+    };
+    const uint64_t before_dispatch = dispatched_workgroups();
+    submit_aql_one_wave(*blocked_arena_, queue, doorbell_page);
+    for (unsigned attempt = 0;
+         attempt < 10000 &&
+         (owner_cp->accepted_entry_count_for_test(queue.queue_id, process_id_) != 1 ||
+          dispatched_workgroups() != before_dispatch + 1 ||
+          !owner_cp->completion_flush_retry_pending_for_test(queue.queue_id, process_id_));
+         ++attempt) {
+      (void)engine_.step();
+      std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+    ASSERT_EQ(owner_cp->accepted_entry_count_for_test(queue.queue_id, process_id_), 1u);
+    ASSERT_EQ(dispatched_workgroups(), before_dispatch + 1);
+    // The public consumer stays on this live packet until retirement completes.
+    ASSERT_EQ(aql_read_pointer(*blocked_arena_), 0u);
+    ASSERT_TRUE(owner_cp->completion_flush_retry_pending_for_test(queue.queue_id, process_id_));
+    ASSERT_EQ(aql_signal_value(*blocked_arena_), 1u);
+    ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, controlled.va_addr,
+                                                             process_id_, kDirtyOffset));
+
+    auto held = driver_->hold_alias_ingress_for_testing(owner_alias);
+    ASSERT_TRUE(held);
+    uint32_t owner_id = kOwner;
+    kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+    unmap.handle = controlled.handle;
+    unmap.n_devices = 1;
+    unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = controlled.handle;
+    auto pending = std::async(std::launch::async, [&] {
+      if (operation == SelectedRetirement::Unmap)
+        return driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
+      if (operation == SelectedRetirement::Free)
+        return driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free);
+      return driver_->close(process_id_);
+    });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    const bool process_close = operation == SelectedRetirement::Close;
+    bool checkpoint_reached = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+      checkpoint_reached = process_close ? process->event_state_.is_closing() &&
+                                               driver_->find_process(process_id_) == nullptr
+                                         : driver_->alias_ingress_closed_for_testing(owner_alias);
+      if (checkpoint_reached ||
+          pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+        break;
+      std::this_thread::yield();
+    }
+    EXPECT_TRUE(checkpoint_reached);
+    EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+    if (checkpoint_reached) {
+      // Process close waits for this permit before it can close the alias gate.
+      EXPECT_EQ(driver_->alias_ingress_closed_for_testing(owner_alias), !process_close);
+      const uint64_t before_retry_passes = owner_cp->doorbell_handle_count_for_test();
+      (void)owner_cp->schedule_retry_event_for_test();
+      for (unsigned attempt = 0;
+           attempt < 10000 && owner_cp->doorbell_handle_count_for_test() == before_retry_passes;
+           ++attempt) {
+        (void)engine_.step();
+        std::this_thread::sleep_for(std::chrono::microseconds(50));
+      }
+      EXPECT_GT(owner_cp->doorbell_handle_count_for_test(), before_retry_passes);
+      // The queue-head probe also proves its grid share has not been published.
+      EXPECT_EQ(driver_->alias_ingress_closed_for_testing(owner_alias), !process_close);
+      EXPECT_TRUE(owner_cp->completion_flush_retry_pending_for_test(queue.queue_id, process_id_));
+      EXPECT_EQ(aql_signal_value(*blocked_arena_), 1u);
+      EXPECT_FALSE(owner_cp->queue_faulted_for_test(queue.queue_id, process_id_));
+      EXPECT_TRUE(process->gpu_alias_grant_current(owner_alias));
+      EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, controlled.va_addr,
+                                                               process_id_, kDirtyOffset));
+      EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0x13});
+      EXPECT_EQ(owner_l2->backing_write_transactions(), before_writes);
+      EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+    }
+
+    held->reset();
+    if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+      std::fputs("selected retirement did not finish after releasing ingress permit\n", stderr);
+      std::fflush(stderr);
+      std::_Exit(124);
+    }
+    const int result = pending.get();
+    EXPECT_EQ(result, 0);
+    EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+    EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, controlled.va_addr,
+                                                              process_id_, kDirtyOffset));
+    if (operation == SelectedRetirement::Unmap) {
+      EXPECT_EQ(unmap.n_success, 1u);
+    }
+    if (process_close) {
+      EXPECT_EQ(owner_cp->queue_uses_kfd_abi_for_test(queue.queue_id, process_id_), std::nullopt);
+      for (unsigned attempt = 0; attempt < 200; ++attempt)
+        (void)engine_.step();
+      EXPECT_EQ(aql_signal_value(*blocked_arena_), 1u);
+      EXPECT_EQ(aql_read_pointer(*blocked_arena_), 0u);
+    } else {
+      for (unsigned attempt = 0; attempt < 10000 && aql_signal_value(*blocked_arena_) != 0;
+           ++attempt) {
+        (void)engine_.step();
+        std::this_thread::sleep_for(std::chrono::microseconds(50));
+      }
+      EXPECT_EQ(aql_signal_value(*blocked_arena_), 0u);
+      EXPECT_EQ(aql_read_pointer(*blocked_arena_), 1u);
+      EXPECT_FALSE(owner_cp->completion_flush_retry_pending_for_test(queue.queue_id, process_id_));
+      EXPECT_FALSE(owner_cp->queue_faulted_for_test(queue.queue_id, process_id_));
+    }
+    if (process_close && result == 0)
+      process_id_ = 0;
+  }
+
+  virtual const std::string &soc_config_path() const { return CONFIG_PATH; }
+  virtual bool daemon_mode() const { return true; }
+  virtual bool install_peer_route() const { return true; }
+
+  void SetUp() override {
+    auto requester = load_standalone_soc(soc_config_path());
+    auto owner = load_standalone_soc(soc_config_path());
+    ASSERT_NE(requester, nullptr);
+    ASSERT_NE(owner, nullptr);
+    std::vector<std::unique_ptr<rocjitsu::SoC>> socs;
+    socs.push_back(std::move(requester));
+    socs.push_back(std::move(owner));
+    auto machine = std::make_unique<rocjitsu::VirtualMachine>(
+        std::move(socs), std::vector<uint32_t>{kRequester, kOwner}, daemon_mode());
+    machine_ = machine.get();
+    engine_.topology().set_root(std::move(machine));
+    rocjitsu::config::SystemGraph graph;
+    graph.explicit_manifest = true;
+    rocjitsu::config::SystemGpuInstance requester_gpu;
+    requester_gpu.id = "requester";
+    requester_gpu.device.gpu_id = kRequester;
+    rocjitsu::config::SystemGpuInstance owner_gpu;
+    owner_gpu.id = "owner";
+    owner_gpu.device.gpu_id = kOwner;
+    graph.nodes.push_back({"local", {std::move(requester_gpu), std::move(owner_gpu)}});
+    if (install_peer_route()) {
+      graph.endpoints = {{"e0", rocjitsu::config::SystemEndpointKind::Gpu, "requester", ""},
+                         {"sw", rocjitsu::config::SystemEndpointKind::Switch, "", ""},
+                         {"e1", rocjitsu::config::SystemEndpointKind::Gpu, "owner", ""}};
+      graph.links = {{"e0", "sw", rocjitsu::config::SystemLinkClass::ScaleUp},
+                     {"e1", "sw", rocjitsu::config::SystemLinkClass::ScaleUp}};
+    }
+    auto routes = graph.local_peer_routes("local");
+    ASSERT_EQ(routes.routes().size(), install_peer_route() ? 1u : 0u);
+    machine_->install_peer_routes(std::move(routes), engine_.topology(),
+                                  simdojo::ExecMode::FUNCTIONAL);
+    engine_.create();
+    engine_.register_as_primary();
+    started_ = true;
+    driver_ = machine_->driver();
+    ASSERT_NE(driver_, nullptr);
+    process_id_ = driver_->open_process(/*client_pid=*/4242);
+    ASSERT_NE(process_id_, 0u);
+  }
+
+  void TearDown() override {
+    for (uint32_t process_id : additional_process_ids_)
+      if (driver_)
+        driver_->close(process_id);
+    if (driver_ && process_id_ != 0)
+      driver_->close(process_id_);
+    if (started_) {
+      engine_.primary_release();
+      engine_.shutdown();
+    }
+  }
+
+  simdojo::SimulationEngine engine_{{.num_threads = 1}};
+  rocjitsu::VirtualMachine *machine_ = nullptr;
+  rocjitsu::SimulatedKfd *driver_ = nullptr;
+  uint32_t process_id_ = 0;
+  std::vector<uint32_t> additional_process_ids_;
+  std::unique_ptr<KfdPeerAqlArena> blocked_arena_;
+  std::unique_ptr<KfdPeerAqlArena> independent_arena_;
+  std::unique_ptr<KfdPeerCuCodePage> controlled_code_page_;
+  bool started_ = false;
+};
+
+class KfdCdna5PeerBindingTest : public KfdPeerBindingTest {
+protected:
+  const std::string &soc_config_path() const override { return CDNA5_CONFIG_PATH; }
+};
+
+// Ordinary CPU unmap tests need a client-owned view. Daemon mode instead maps
+// the server's retained GPU backing, whose direct munmap is prohibited.
+class KfdPeerClientMappingTest : public KfdPeerBindingTest {
+protected:
+  bool daemon_mode() const override { return false; }
+};
+
+class KfdCdna5PeerClientMappingTest : public KfdCdna5PeerBindingTest {
+protected:
+  bool daemon_mode() const override { return false; }
+};
+
+class KfdOwnerNoPeerRouteTest : public KfdPeerBindingTest {
+protected:
+  bool install_peer_route() const override { return false; }
+};
+
+TEST_F(KfdPeerBindingTest, ProductionProviderPublishesTwoDirtyPeerRunsBeforeFabricRead) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kFirstDirtyOffset = 65;
+  constexpr uint32_t kSecondDirtyOffset = 112;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_EQ(allocation.va_addr % rocjitsu::amdgpu::L2Cache::LINE_SIZE, 0u);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  for (uint32_t gpu_id : {kOwner, kRequester}) {
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0) << gpu_id;
+  }
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto alias = std::ranges::find_if(*aliases, [&](const auto &candidate) {
+    return candidate.gpu_va == allocation.va_addr && candidate.gpu_id == kRequester;
+  });
+  ASSERT_NE(alias, aliases->end());
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  const auto full_grant = process->gpu_peer_backing_grant(kRequester, allocation.va_addr,
+                                                          rocjitsu::amdgpu::L2Cache::LINE_SIZE);
+  ASSERT_TRUE(full_grant.admission.allowed);
+  ASSERT_TRUE(full_grant.backing);
+  full_grant.backing.bytes()[kFirstDirtyOffset] = std::byte{0x11};
+  full_grant.backing.bytes()[kSecondDirtyOffset] = std::byte{0x22};
+  auto *requester_l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(requester_l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kFirstDirtyOffset, 0x5a},
+                               std::pair<uint32_t, uint8_t>{kSecondDirtyOffset, 0x6b}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*requester_l2, allocation.va_addr,
+                                                      process_id_, access->cache_identity(),
+                                                      alias->admission_generation, dirty_bytes);
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*requester_l2, allocation.va_addr,
+                                                           process_id_, kFirstDirtyOffset));
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*requester_l2, allocation.va_addr,
+                                                           process_id_, kSecondDirtyOffset));
+  const uint64_t epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+
+  auto effect_backing = rocjitsu::make_fabric_backing(
+      process->gpu_peer_backing_grant(kRequester, allocation.va_addr + kFirstDirtyOffset, 1)
+          .backing);
+  ASSERT_TRUE(effect_backing);
+  auto read = machine_->fabric_endpoint()->prepare_read(
+      kRequester, kOwner, std::move(effect_backing), access->retain_effect_gate());
+  ASSERT_TRUE(read);
+  read.operation->submit();
+  std::array<std::byte, 1> result{};
+  VmAccessOutcome outcome = VmAccessOutcome::Unavailable;
+  for (int step = 0; step < 8 && outcome == VmAccessOutcome::Unavailable; ++step) {
+    ASSERT_TRUE(engine_.step());
+    outcome = read.operation->poll(result);
+  }
+  EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(result[0], std::byte{0x5a});
+  EXPECT_EQ(full_grant.backing.bytes()[kFirstDirtyOffset], std::byte{0x5a});
+  EXPECT_EQ(full_grant.backing.bytes()[kSecondDirtyOffset], std::byte{0x6b});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*requester_l2, allocation.va_addr,
+                                                            process_id_, kFirstDirtyOffset));
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*requester_l2, allocation.va_addr,
+                                                            process_id_, kSecondDirtyOffset));
+  EXPECT_GT(machine_->soc(0)->cache_coherence()->current_epoch(), epoch);
+}
+
+TEST_F(KfdPeerBindingTest, QueuedPeerWriteRejectsRetiredAndReboundRequesterGrant) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 32;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t owner = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args owner_map{};
+  owner_map.handle = allocation.handle;
+  owner_map.n_devices = 1;
+  owner_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &owner_map), 0);
+  uint32_t requester = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot_pinned(*handle);
+  const auto ordinary = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  ASSERT_TRUE(ordinary);
+  EXPECT_NE(access->cache_identity(), ordinary->cache_identity());
+  auto backing =
+      process->gpu_peer_backing_grant(kRequester, allocation.va_addr + kOffset, 4).backing;
+  ASSERT_TRUE(backing);
+  backing.bytes()[0] = std::byte{0x12};
+  const std::array<std::byte, 4> payload{std::byte{0x61}, std::byte{0x62}, std::byte{0x63},
+                                         std::byte{0x64}};
+  size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  EXPECT_EQ(access->write(allocation.va_addr + kOffset, payload, progress, token),
+            VmAccessOutcome::Unavailable);
+  ASSERT_TRUE(token.pending());
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  VmAccessOutcome outcome = VmAccessOutcome::Unavailable;
+  for (int attempt = 0; attempt < 8 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = access->write(allocation.va_addr + kOffset, payload, progress, token);
+  }
+  EXPECT_EQ(outcome, VmAccessOutcome::Revoked);
+  EXPECT_EQ(progress, 0u);
+  EXPECT_EQ(backing.bytes()[0], std::byte{0x12});
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+}
+
+TEST_F(KfdPeerBindingTest, QueuedPeerReadRejectsIncompleteRequesterHostExtent) {
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  using rocjitsu::amdgpu::VmDataRoute;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 96;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  for (uint32_t gpu_id : {kOwner, kRequester}) {
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot_pinned(*handle);
+  ASSERT_TRUE(access);
+  auto backing =
+      process->gpu_peer_backing_grant(kRequester, allocation.va_addr + kOffset, 4).backing;
+  ASSERT_TRUE(backing);
+  const std::array<std::byte, 4> payload{std::byte{0x11}, std::byte{0x22}, std::byte{0x33},
+                                         std::byte{0x44}};
+  std::ranges::copy(payload, backing.bytes().begin());
+  std::array<std::byte, 4> result{std::byte{0xa5}, std::byte{0xa5}, std::byte{0xa5},
+                                  std::byte{0xa5}};
+  const auto unchanged_result = result;
+  size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  ASSERT_EQ(access->read(allocation.va_addr + kOffset, result, progress, token),
+            VmAccessOutcome::Unavailable);
+  ASSERT_TRUE(token.pending());
+  EXPECT_EQ(progress, 0u);
+
+  // Leave the raw grant and page-table entry present, but remove two host
+  // bytes from the queued read before the fabric owner admits its effect.
+  ASSERT_EQ(process->unmap_pages(allocation.va_addr + kOffset + 1, 2),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_TRUE(process->page_table_.contains((allocation.va_addr + kOffset) / kBytes));
+  }
+  EXPECT_TRUE(process->gpu_access_grant(kRequester, allocation.va_addr + kOffset, 4).allowed);
+  EXPECT_EQ(access->classify_data_route(allocation.va_addr + kOffset, 4, VmAccessKind::Read,
+                                        /*report_fault=*/false),
+            VmDataRoute::Deferred);
+  EXPECT_TRUE(process->gpu_peer_backing_grant(kRequester, allocation.va_addr + kOffset, 4).backing);
+
+  VmAccessOutcome outcome = VmAccessOutcome::Unavailable;
+  for (int attempt = 0; attempt < 8 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = access->read(allocation.va_addr + kOffset, result, progress, token);
+  }
+  EXPECT_EQ(outcome, VmAccessOutcome::Revoked);
+  EXPECT_EQ(progress, 0u);
+  EXPECT_EQ(result, unchanged_result);
+  EXPECT_TRUE(std::ranges::equal(backing.bytes(), payload));
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 1u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+}
+
+TEST_F(KfdPeerBindingTest, AdmittedPeerWriteDrainsBeforeRequesterUnmap) {
+  using namespace std::chrono_literals;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 48;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t owner_gpu = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args owner_map{};
+  owner_map.handle = allocation.handle;
+  owner_map.n_devices = 1;
+  owner_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_gpu);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &owner_map), 0);
+  uint32_t requester = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto alias = *found;
+  auto backing =
+      process->gpu_peer_backing_grant(kRequester, allocation.va_addr + kOffset, 4).backing;
+  ASSERT_TRUE(backing);
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot_pinned(*handle);
+  ASSERT_TRUE(access);
+  const std::array<std::byte, 4> payload{std::byte{0x75}, std::byte{0x76}, std::byte{0x77},
+                                         std::byte{0x78}};
+  size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  EXPECT_EQ(access->write(allocation.va_addr + kOffset, payload, progress, token),
+            VmAccessOutcome::Unavailable);
+  ASSERT_TRUE(token.pending());
+
+  std::promise<void> entered;
+  auto entered_future = entered.get_future();
+  std::promise<void> release;
+  auto release_future = release.get_future().share();
+  auto *endpoint = machine_->fabric_endpoint();
+  endpoint->set_effect_probe_for_testing([&] {
+    entered.set_value();
+    release_future.wait();
+  });
+  auto owner = std::async(std::launch::async, [&] { return engine_.step(); });
+  if (entered_future.wait_for(5s) != std::future_status::ready) {
+    release.set_value();
+    owner.wait();
+    FAIL() << "peer owner did not admit the effect";
+  }
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester);
+  auto retiring = std::async(std::launch::async, [&] {
+    return driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
+  });
+  const auto deadline = std::chrono::steady_clock::now() + 5s;
+  while (!driver_->alias_ingress_closed_for_testing(alias) &&
+         std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_EQ(retiring.wait_for(20ms), std::future_status::timeout);
+  EXPECT_EQ(backing.bytes()[0], std::byte{0});
+  release.set_value();
+  EXPECT_TRUE(owner.get());
+  endpoint->set_effect_probe_for_testing({});
+  for (int attempt = 0; attempt < 8 && retiring.wait_for(0ms) != std::future_status::ready;
+       ++attempt)
+    ASSERT_TRUE(engine_.step());
+  EXPECT_EQ(retiring.wait_for(5s), std::future_status::ready);
+  EXPECT_EQ(retiring.get(), 0);
+  EXPECT_EQ(access->write(allocation.va_addr + kOffset, payload, progress, token),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, payload.size());
+  EXPECT_EQ(backing.bytes()[0], payload[0]);
+  EXPECT_EQ(endpoint->diagnostics().effects, 1u);
+}
+
+TEST_F(KfdPeerBindingTest, ImportedPeerRemainsLiveAfterExporterFreeAndClose) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 64;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t owner = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args owner_map{};
+  owner_map.handle = allocation.handle;
+  owner_map.n_devices = 1;
+  owner_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &owner_map), 0);
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = allocation.va_addr + 2 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  uint32_t requester = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = imported.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester);
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  auto backing =
+      importer->gpu_peer_backing_grant(kRequester, imported.va_addr + kOffset, 4).backing;
+  ASSERT_TRUE(backing);
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(importer_id);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot_pinned(*handle);
+  ASSERT_TRUE(access);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  ASSERT_EQ(driver_->close(process_id_), 0);
+  process_id_ = 0;
+  const std::array<std::byte, 4> payload{std::byte{0x31}, std::byte{0x32}, std::byte{0x33},
+                                         std::byte{0x34}};
+  size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  VmAccessOutcome outcome = access->write(imported.va_addr + kOffset, payload, progress, token);
+  for (int attempt = 0; attempt < 8 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = access->write(imported.va_addr + kOffset, payload, progress, token);
+  }
+  EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, payload.size());
+  EXPECT_EQ(backing.bytes()[0], payload[0]);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 1u);
+  EXPECT_EQ(driver_->close(importer_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, UnmapPreservesUnrelatedDirtyCanonicalLine) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kSelectedByte = 16;
+  constexpr uint32_t kOtherByte = 40;
+  std::array<kfd_ioctl_alloc_memory_of_gpu_args, 2> allocations{};
+  for (auto &allocation : allocations) {
+    allocation.size = kBytes;
+    allocation.gpu_id = kOwner;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kOwner;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    uint32_t requester_id = kRequester;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto alias_for = [&](const auto &allocation) {
+    return std::ranges::find_if(*aliases, [&](const auto &candidate) {
+      return candidate.gpu_id == kRequester && candidate.gpu_va == allocation.va_addr;
+    });
+  };
+  const auto selected_alias = alias_for(allocations[0]);
+  const auto other_alias = alias_for(allocations[1]);
+  ASSERT_NE(selected_alias, aliases->end());
+  ASSERT_NE(other_alias, aliases->end());
+  ASSERT_NE(selected_alias->backing_id, other_alias->backing_id);
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  auto selected =
+      process->gpu_peer_backing_grant(kRequester, allocations[0].va_addr, L2Cache::LINE_SIZE);
+  auto other =
+      process->gpu_peer_backing_grant(kRequester, allocations[1].va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(selected.backing);
+  ASSERT_TRUE(other.backing);
+  selected.backing.bytes()[kSelectedByte] = std::byte{0x11};
+  other.backing.bytes()[kOtherByte] = std::byte{0x22};
+  auto *l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array selected_dirty{std::pair<uint32_t, uint8_t>{kSelectedByte, 0xa1}};
+  const std::array other_dirty{std::pair<uint32_t, uint8_t>{kOtherByte, 0xb2}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, allocations[0].va_addr, process_id_, access->cache_identity(),
+      selected_alias->admission_generation, selected_dirty);
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, allocations[1].va_addr, process_id_, access->cache_identity(),
+      other_alias->admission_generation, other_dirty);
+  const uint64_t epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+  const uint64_t writes = l2->backing_write_transactions();
+
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocations[0].handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(selected.backing.bytes()[kSelectedByte], std::byte{0xa1});
+  EXPECT_EQ(other.backing.bytes()[kOtherByte], std::byte{0x22});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocations[0].va_addr,
+                                                            process_id_, kSelectedByte));
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocations[1].va_addr, process_id_,
+                                                           kOtherByte));
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), epoch);
+
+  unmap.handle = allocations[1].handle;
+  unmap.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(other.backing.bytes()[kOtherByte], std::byte{0xb2});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocations[1].va_addr,
+                                                            process_id_, kOtherByte));
+}
+
+TEST_F(KfdPeerBindingTest, LocalOnlyRetirementLeavesOtherGpuDirtyResidencyUntouched) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kDirtyOffset = 64;
+  const std::array gpu_ids{kOwner, kOwner, kRequester};
+  const std::array initial_bytes{uint8_t{0x11}, uint8_t{0x22}, uint8_t{0x33}};
+  const std::array dirty_bytes{uint8_t{0xa1}, uint8_t{0xa2}, uint8_t{0xb3}};
+  std::array<kfd_ioctl_alloc_memory_of_gpu_args, 3> allocations{};
+  std::array<uint8_t *, 3> hosts{};
+  std::array<int, 3> retained_fds{};
+
+  for (size_t i = 0; i < allocations.size(); ++i) {
+    auto &allocation = allocations[i];
+    allocation.size = kBytes;
+    allocation.gpu_id = gpu_ids[i];
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    hosts[i] = static_cast<uint8_t *>(driver_->mmap(process_id_, nullptr, kBytes,
+                                                    PROT_READ | PROT_WRITE, MAP_SHARED,
+                                                    static_cast<off_t>(allocation.mmap_offset)));
+    ASSERT_NE(hosts[i], MAP_FAILED);
+    hosts[i][kDirtyOffset] = initial_bytes[i];
+    uint32_t gpu_id = gpu_ids[i];
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_local_alias_snapshot();
+  const auto alias_for = [&](size_t index) {
+    return std::ranges::find_if(*aliases, [&](const auto &alias) {
+      return alias.gpu_va == allocations[index].va_addr && alias.gpu_id == gpu_ids[index];
+    });
+  };
+  const auto first = alias_for(0);
+  const auto second = alias_for(1);
+  const auto other = alias_for(2);
+  ASSERT_NE(first, aliases->end());
+  ASSERT_NE(second, aliases->end());
+  ASSERT_NE(other, aliases->end());
+  const auto first_alias = *first;
+  const auto second_alias = *second;
+  const auto other_alias = *other;
+  for (size_t i = 0; i < allocations.size(); ++i) {
+    int fd = -1;
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocations[i].handle);
+      ASSERT_TRUE(record.local_backing_owner);
+      EXPECT_FALSE(record.backing_owner);
+      fd = record.memfd;
+    }
+    ASSERT_GE(fd, 0);
+    retained_fds[i] = ::fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    ASSERT_GE(retained_fds[i], 0);
+  }
+  const auto owner_vmid = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  const auto other_vmid = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(owner_vmid);
+  ASSERT_TRUE(other_vmid);
+  const auto owner_access = machine_->soc(1)->gpu_vm().snapshot(*owner_vmid);
+  const auto other_access = machine_->soc(0)->gpu_vm().snapshot(*other_vmid);
+  ASSERT_TRUE(owner_access);
+  ASSERT_TRUE(other_access);
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  auto *other_l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  ASSERT_NE(other_l2, nullptr);
+  for (size_t i : {size_t{0}, size_t{2}}) {
+    auto *l2 = i < 2 ? owner_l2 : other_l2;
+    const auto &access = i < 2 ? owner_access : other_access;
+    const auto &alias = i == 0 ? first_alias : other_alias;
+    const std::array dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, dirty_bytes[i]}};
+    KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocations[i].va_addr, process_id_,
+                                                        access->cache_identity(),
+                                                        alias.admission_generation, dirty);
+  }
+  const uint64_t owner_writes = owner_l2->backing_write_transactions();
+  const uint64_t other_writes = other_l2->backing_write_transactions();
+  const uint64_t other_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+  const auto read_byte = [&](size_t index) {
+    uint8_t byte = 0;
+    EXPECT_EQ(::pread(retained_fds[index], &byte, 1, kDirtyOffset), 1);
+    return byte;
+  };
+  const auto expect_other_unchanged = [&] {
+    EXPECT_EQ(read_byte(2), initial_bytes[2]);
+    EXPECT_EQ(hosts[2][kDirtyOffset], initial_bytes[2]);
+    EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*other_l2, allocations[2].va_addr,
+                                                             process_id_, kDirtyOffset));
+    EXPECT_EQ(other_l2->backing_write_transactions(), other_writes);
+    EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), other_epoch);
+    EXPECT_TRUE(process->gpu_alias_grant_current(other_alias));
+    EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(other_alias));
+  };
+  EXPECT_EQ(read_byte(0), initial_bytes[0]);
+  EXPECT_EQ(read_byte(1), initial_bytes[1]);
+  expect_other_unchanged();
+
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocations[0].handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+  EXPECT_EQ(read_byte(0), dirty_bytes[0]);
+  EXPECT_EQ(hosts[0][kDirtyOffset], dirty_bytes[0]);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocations[0].va_addr,
+                                                            process_id_, kDirtyOffset));
+  EXPECT_FALSE(process->gpu_alias_grant_current(first_alias));
+  EXPECT_TRUE(process->gpu_alias_grant_current(second_alias));
+  EXPECT_EQ(owner_l2->backing_write_transactions(), owner_writes + 1);
+  expect_other_unchanged();
+
+  const std::array second_dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, dirty_bytes[1]}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *owner_l2, allocations[1].va_addr, process_id_, owner_access->cache_identity(),
+      second_alias.admission_generation, second_dirty);
+  EXPECT_EQ(read_byte(1), initial_bytes[1]);
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocations[1].va_addr,
+                                                           process_id_, kDirtyOffset));
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocations[1].handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(read_byte(1), dirty_bytes[1]);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocations[1].va_addr,
+                                                            process_id_, kDirtyOffset));
+  EXPECT_FALSE(process->gpu_alias_grant_current(second_alias));
+  EXPECT_EQ(owner_l2->backing_write_transactions(), owner_writes + 2);
+  expect_other_unchanged();
+
+  free.handle = allocations[0].handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  expect_other_unchanged();
+  free.handle = allocations[2].handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(read_byte(2), dirty_bytes[2]);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*other_l2, allocations[2].va_addr,
+                                                            process_id_, kDirtyOffset));
+  EXPECT_EQ(other_l2->backing_write_transactions(), other_writes + 1);
+  for (int fd : retained_fds)
+    EXPECT_EQ(::close(fd), 0);
+}
+
+TEST_F(KfdPeerClientMappingTest, LocalOrdinaryMunmapLeavesOtherGpuDirtyResidencyUntouched) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 48;
+  const std::array gpu_ids{kOwner, kRequester};
+  std::array<kfd_ioctl_alloc_memory_of_gpu_args, 2> allocations{};
+  std::array<uint8_t *, 2> hosts{};
+  std::array<int, 2> backing_fds{};
+  for (size_t i = 0; i < allocations.size(); ++i) {
+    auto &allocation = allocations[i];
+    allocation.size = kPage;
+    allocation.gpu_id = gpu_ids[i];
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                       KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    hosts[i] = static_cast<uint8_t *>(driver_->mmap(process_id_, nullptr, kPage,
+                                                    PROT_READ | PROT_WRITE, MAP_SHARED,
+                                                    static_cast<off_t>(allocation.mmap_offset)));
+    ASSERT_NE(hosts[i], MAP_FAILED);
+    hosts[i][kDirtyOffset] = i == 0 ? 0x11 : 0x22;
+    uint32_t gpu_id = gpu_ids[i];
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_local_alias_snapshot();
+  const auto alias_for = [&](size_t i) {
+    return std::ranges::find_if(*aliases, [&](const auto &alias) {
+      return alias.gpu_va == allocations[i].va_addr && alias.gpu_id == gpu_ids[i];
+    });
+  };
+  const auto owner = alias_for(0);
+  const auto other = alias_for(1);
+  ASSERT_NE(owner, aliases->end());
+  ASSERT_NE(other, aliases->end());
+  for (size_t i = 0; i < backing_fds.size(); ++i) {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocations[i].handle);
+    ASSERT_TRUE(record.local_backing_owner);
+    ASSERT_FALSE(record.backing_owner);
+    backing_fds[i] = ::fcntl(record.memfd, F_DUPFD_CLOEXEC, 0);
+    ASSERT_GE(backing_fds[i], 0);
+  }
+  const auto owner_vmid = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  const auto other_vmid = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(owner_vmid);
+  ASSERT_TRUE(other_vmid);
+  const auto owner_access = machine_->soc(1)->gpu_vm().snapshot(*owner_vmid);
+  const auto other_access = machine_->soc(0)->gpu_vm().snapshot(*other_vmid);
+  ASSERT_TRUE(owner_access);
+  ASSERT_TRUE(other_access);
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  auto *other_l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  ASSERT_NE(other_l2, nullptr);
+  const std::array owner_dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa1}};
+  const std::array other_dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xb2}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*owner_l2, allocations[0].va_addr,
+                                                      process_id_, owner_access->cache_identity(),
+                                                      owner->admission_generation, owner_dirty);
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*other_l2, allocations[1].va_addr,
+                                                      process_id_, other_access->cache_identity(),
+                                                      other->admission_generation, other_dirty);
+  const uint64_t other_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+  const uint64_t other_writes = other_l2->backing_write_transactions();
+  const auto read_backing = [&](size_t i) {
+    uint8_t byte = 0;
+    EXPECT_EQ(::pread(backing_fds[i], &byte, 1, kDirtyOffset), 1);
+    return byte;
+  };
+  const auto expect_other_unchanged = [&] {
+    EXPECT_EQ(read_backing(1), 0x22);
+    EXPECT_EQ(hosts[1][kDirtyOffset], 0x22);
+    EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*other_l2, allocations[1].va_addr,
+                                                             process_id_, kDirtyOffset));
+    EXPECT_EQ(other_l2->backing_write_transactions(), other_writes);
+    EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), other_epoch);
+    EXPECT_TRUE(process->gpu_alias_grant_current(*other));
+    EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(*other));
+  };
+  expect_other_unchanged();
+  EXPECT_EQ(driver_->munmap(process_id_, hosts[0], kPage), 0);
+  EXPECT_EQ(read_backing(0), 0xa1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocations[0].va_addr,
+                                                            process_id_, kDirtyOffset));
+  EXPECT_TRUE(process->gpu_alias_grant_current(*owner));
+  expect_other_unchanged();
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocations[0].handle;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  expect_other_unchanged();
+  free.handle = allocations[1].handle;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(read_backing(1), 0xb2);
+  EXPECT_EQ(other_l2->backing_write_transactions(), other_writes + 1);
+  for (int fd : backing_fds)
+    EXPECT_EQ(::close(fd), 0);
+}
+
+TEST_F(KfdPeerBindingTest, PreparedCanonicalWritebackPinsRawGrantAndExactVmGate) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 64;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  const auto map_gpu = [&](uint32_t gpu_id) {
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    return driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map);
+  };
+  ASSERT_EQ(map_gpu(kOwner), 0);
+  ASSERT_EQ(map_gpu(kRequester), 0);
+  const std::shared_ptr<rocjitsu::KfdProcess> process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const std::shared_ptr<const rocjitsu::KfdProcess::GpuAliasSnapshot> aliases =
+      process->gpu_alias_snapshot();
+  const auto alias = std::ranges::find_if(*aliases, [&](const auto &candidate) {
+    return candidate.gpu_va == allocation.va_addr && candidate.gpu_id == kRequester;
+  });
+  ASSERT_NE(alias, aliases->end());
+  ASSERT_NE(alias->admission_generation, 0u);
+
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  const auto full_backing = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, 128);
+  EXPECT_TRUE(full_backing.admission.allowed);
+  EXPECT_TRUE(full_backing.backing);
+  EXPECT_EQ(access->classify_data_route(allocation.va_addr, 128,
+                                        rocjitsu::amdgpu::VmAccessKind::Write,
+                                        /*report_fault=*/false),
+            rocjitsu::amdgpu::VmDataRoute::Deferred);
+  auto prepared = driver_->prepare_gpu_alias_writeback(process_id_, kRequester, *access,
+                                                       allocation.va_addr + kOffset, 4);
+  ASSERT_EQ(prepared.outcome(), VmAccessOutcome::Complete);
+  EXPECT_TRUE(prepared.covers(allocation.va_addr, 128, access->info().vmid,
+                              access->cache_identity(), alias->admission_generation));
+  EXPECT_FALSE(prepared.covers(allocation.va_addr + 128, 1, access->info().vmid,
+                               access->cache_identity(), alias->admission_generation));
+
+  const auto lease =
+      process->gpu_peer_backing_grant(kRequester, allocation.va_addr + kOffset, 4).backing;
+  ASSERT_TRUE(lease);
+  const std::array<std::byte, 4> payload{std::byte{0x11}, std::byte{0x22}, std::byte{0x33},
+                                         std::byte{0x44}};
+  const std::array<std::byte, 4> unchanged{lease.bytes()[0], lease.bytes()[1], lease.bytes()[2],
+                                           lease.bytes()[3]};
+  EXPECT_EQ(prepared.write(allocation.va_addr + kOffset, payload, access->info().vmid,
+                           access->cache_identity(), 0),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(prepared.write(allocation.va_addr + kOffset, payload, access->info().vmid,
+                           access->cache_identity() + 1, alias->admission_generation),
+            VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(std::ranges::equal(lease.bytes(), unchanged));
+  EXPECT_EQ(prepared.write(allocation.va_addr + kOffset, payload, access->info().vmid,
+                           access->cache_identity(), alias->admission_generation),
+            VmAccessOutcome::Complete);
+  EXPECT_TRUE(std::ranges::equal(lease.bytes(), payload));
+
+  const std::array<std::byte, 4> second{std::byte{0xaa}, std::byte{0xbb}, std::byte{0xcc},
+                                        std::byte{0xdd}};
+  access->retain_effect_gate()->revoke();
+  EXPECT_EQ(prepared.write(allocation.va_addr + kOffset, second, access->info().vmid,
+                           access->cache_identity(), alias->admission_generation),
+            VmAccessOutcome::Revoked);
+  EXPECT_TRUE(std::ranges::equal(lease.bytes(), payload));
+}
+
+TEST_F(KfdPeerBindingTest, PreparedCanonicalWritebackRejectsIncompleteRequesterPte) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  ASSERT_EQ(driver_
+                ->prepare_gpu_alias_writeback(process_id_, kRequester, *access,
+                                              allocation.va_addr + 192, 4)
+                .outcome(),
+            VmAccessOutcome::Complete);
+
+  // Model an incomplete resident PTE while the metadata grant remains open.
+  // A write to byte 192 prepares the whole 128-byte cache-line envelope.
+  ASSERT_EQ(process->unmap_pages(allocation.va_addr + 224, 16),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  EXPECT_EQ(driver_
+                ->prepare_gpu_alias_writeback(process_id_, kRequester, *access,
+                                              allocation.va_addr + 192, 4)
+                .outcome(),
+            VmAccessOutcome::Unavailable);
+}
+
+TEST_F(KfdPeerBindingTest, PreparedCanonicalWritebackPermitDrainsBeforeUnmapPublication) {
+  using rocjitsu::amdgpu::PreparedCanonicalWriteback;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const std::shared_ptr<rocjitsu::KfdProcess> process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const std::shared_ptr<const rocjitsu::KfdProcess::GpuAliasSnapshot> aliases =
+      process->gpu_alias_snapshot();
+  const auto alias = std::ranges::find_if(*aliases, [&](const auto &candidate) {
+    return candidate.gpu_va == allocation.va_addr && candidate.gpu_id == kOwner;
+  });
+  ASSERT_NE(alias, aliases->end());
+  const auto handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(1)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  std::optional<PreparedCanonicalWriteback> held;
+  held.emplace(driver_->prepare_gpu_alias_writeback(process_id_, kOwner, *access,
+                                                    allocation.va_addr + 64, 4));
+  ASSERT_EQ(held->outcome(), VmAccessOutcome::Complete);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  auto pending = std::async(std::launch::async, [&] {
+    return driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
+  });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool closed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    closed = driver_->alias_ingress_closed_for_testing(*alias);
+    if (closed)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  EXPECT_TRUE(process->gpu_alias_grant_current(*alias));
+  const std::array<std::byte, 4> payload{std::byte{0x51}, std::byte{0x52}, std::byte{0x53},
+                                         std::byte{0x54}};
+  if (closed) {
+    EXPECT_EQ(held->write(allocation.va_addr + 64, payload, access->info().vmid,
+                          access->cache_identity(), alias->admission_generation),
+              VmAccessOutcome::Complete);
+  }
+
+  held.reset();
+  if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("UNMAP did not finish after prepared writeback released its permit\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending.get(), 0);
+  EXPECT_FALSE(process->gpu_alias_grant_current(*alias));
+  EXPECT_FALSE(driver_->prepare_gpu_alias_writeback(process_id_, kOwner, *access,
+                                                    allocation.va_addr + 64, 4));
+}
+
+class KfdTwoRequesterBindingTest : public ::testing::Test {
+protected:
+  static constexpr uint32_t kOwner = kGpuId;
+  static constexpr uint32_t kFirstRequester = kGpuId + 1;
+  static constexpr uint32_t kSecondRequester = kGpuId + 2;
+  virtual bool connect_second_requester() const { return true; }
+
+  void SetUp() override {
+    std::vector<std::unique_ptr<rocjitsu::SoC>> socs;
+    for (int i = 0; i < 3; ++i) {
+      auto soc = load_standalone_soc(CONFIG_PATH);
+      ASSERT_NE(soc, nullptr);
+      socs.push_back(std::move(soc));
+    }
+    auto machine = std::make_unique<rocjitsu::VirtualMachine>(
+        std::move(socs), std::vector<uint32_t>{kFirstRequester, kSecondRequester, kOwner},
+        /*daemon_mode=*/true);
+    machine_ = machine.get();
+    engine_.topology().set_root(std::move(machine));
+
+    rocjitsu::config::SystemGraph graph;
+    graph.explicit_manifest = true;
+    rocjitsu::config::SystemGpuInstance first;
+    first.id = "first";
+    first.device.gpu_id = kFirstRequester;
+    rocjitsu::config::SystemGpuInstance second;
+    second.id = "second";
+    second.device.gpu_id = kSecondRequester;
+    rocjitsu::config::SystemGpuInstance owner;
+    owner.id = "owner";
+    owner.device.gpu_id = kOwner;
+    graph.nodes.push_back({"local", {std::move(first), std::move(second), std::move(owner)}});
+    graph.endpoints = {{"first_ep", rocjitsu::config::SystemEndpointKind::Gpu, "first", ""},
+                       {"second_ep", rocjitsu::config::SystemEndpointKind::Gpu, "second", ""},
+                       {"owner_ep", rocjitsu::config::SystemEndpointKind::Gpu, "owner", ""},
+                       {"switch", rocjitsu::config::SystemEndpointKind::Switch, "", ""}};
+    graph.links = {{"first_ep", "switch", rocjitsu::config::SystemLinkClass::ScaleUp},
+                   {"owner_ep", "switch", rocjitsu::config::SystemLinkClass::ScaleUp}};
+    if (connect_second_requester())
+      graph.links.push_back({"second_ep", "switch", rocjitsu::config::SystemLinkClass::ScaleUp});
+    auto routes = graph.local_peer_routes("local");
+    ASSERT_EQ(routes.routes().size(), connect_second_requester() ? 3u : 1u);
+    machine_->install_peer_routes(std::move(routes), engine_.topology(),
+                                  simdojo::ExecMode::FUNCTIONAL);
+    engine_.create();
+    engine_.register_as_primary();
+    started_ = true;
+    driver_ = machine_->driver();
+    ASSERT_NE(driver_, nullptr);
+    process_id_ = driver_->open_process(/*client_pid=*/4242);
+    ASSERT_NE(process_id_, 0u);
+  }
+
+  void TearDown() override {
+    if (driver_ && process_id_ != 0)
+      driver_->close(process_id_);
+    if (started_) {
+      engine_.primary_release();
+      engine_.shutdown();
+    }
+  }
+
+  simdojo::SimulationEngine engine_{{.num_threads = 1}};
+  rocjitsu::VirtualMachine *machine_ = nullptr;
+  rocjitsu::SimulatedKfd *driver_ = nullptr;
+  uint32_t process_id_ = 0;
+  bool started_ = false;
+};
+
+TEST_F(KfdPeerBindingTest, CanonicalOwnerCuIngressRetriesAndRechecksLiveBinding) {
+  using rocjitsu::amdgpu::MemoryIngressSpan;
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr uint64_t kOffset = 32;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_id == kOwner && alias.gpu_va == allocation.va_addr;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto alias = *found;
+  const auto handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(1)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  const std::array spans{
+      MemoryIngressSpan{allocation.va_addr + kOffset, sizeof(uint32_t), VmAccessKind::Write}};
+  const auto joined = driver_->join_gpu_aliases(process_id_, kOwner, *access, spans);
+  ASSERT_EQ(joined.outcome, VmAccessOutcome::Complete);
+  ASSERT_EQ(joined.aliases.size(), 1u);
+  EXPECT_EQ(joined.aliases.front().alias.admission_generation, alias.admission_generation);
+  EXPECT_EQ(joined.aliases.front().cache_namespace, access->cache_namespace());
+  EXPECT_EQ(joined.aliases.front().cache_identity, access->cache_identity());
+  EXPECT_TRUE(process->gpu_alias_grant_current(alias));
+  const auto pinned = machine_->soc(1)->gpu_vm().snapshot_pinned(*handle);
+  ASSERT_TRUE(pinned);
+  EXPECT_NE(pinned->cache_identity(), joined.aliases.front().cache_identity);
+  EXPECT_EQ(driver_->join_gpu_aliases(process_id_, kOwner, *pinned, spans).outcome,
+            VmAccessOutcome::Complete);
+
+  std::vector<std::function<void()>> owner_queue;
+  const auto post = [&](std::function<void()> continuation) {
+    owner_queue.push_back(std::move(continuation));
+  };
+  bool drained = false;
+  auto held = driver_->admit_gpu_alias_ingress(process_id_, kOwner, *access, spans);
+  ASSERT_EQ(held.outcome, VmAccessOutcome::Complete);
+  ASSERT_TRUE(held.permit);
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(alias, post, [&] { drained = true; }));
+  EXPECT_TRUE(owner_queue.empty());
+  EXPECT_EQ(driver_->admit_gpu_alias_ingress(process_id_, kOwner, *access, spans).outcome,
+            VmAccessOutcome::Unavailable);
+  held.permit.reset();
+  ASSERT_EQ(owner_queue.size(), 1u);
+  EXPECT_FALSE(drained);
+  EXPECT_FALSE(driver_->reopen_gpu_alias_ingress(alias));
+  owner_queue.back()();
+  owner_queue.clear();
+  EXPECT_TRUE(drained);
+  ASSERT_TRUE(driver_->reopen_gpu_alias_ingress(alias));
+
+  // Fetch real SMEM instructions from this KFD binding, with the canonical
+  // owner data using its UC local path. A closed gate must leave both the
+  // register destination and backing untouched until the retry is admitted.
+  const uint64_t code_va = allocation.va_addr - kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> code{};
+  code[0] = 0xC0020000u; // s_load_dword s0, s[0:1], 0x0
+  code[1] = 0;
+  code[2] = 0xBF800000u;
+  code[3] = 0xC0420080u; // s_store_dword s2, s[0:1], 0x0
+  code[4] = 0;
+  code[5] = 0xBF800000u;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kOwner] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  process->map_pages(code_va, code.data(), kBytes, rocjitsu::amdgpu::Mtype::RW,
+                     rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  auto backing = process->gpu_peer_backing_grant(kOwner, allocation.va_addr + kOffset, 4).backing;
+  ASSERT_TRUE(backing);
+  constexpr uint32_t kInitial = 0x12345678u;
+  constexpr uint32_t kWritten = 0xfedcba98u;
+  std::memcpy(backing.data(), &kInitial, sizeof(kInitial));
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  machine_->soc(1)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id_);
+  wave->set_address_space(*handle);
+  const auto address_regs = [&] {
+    cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(allocation.va_addr + kOffset));
+    cu->write_sgpr(wave->sgpr_alloc().base + 1,
+                   static_cast<uint32_t>((allocation.va_addr + kOffset) >> 32));
+  };
+  address_regs();
+  drained = false;
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(alias, post, [&] { drained = true; }));
+  ASSERT_EQ(owner_queue.size(), 1u); // No admitted effect remains.
+  EXPECT_FALSE(driver_->reopen_gpu_alias_ingress(alias));
+  cu->step();
+  ASSERT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+  EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base),
+            static_cast<uint32_t>(allocation.va_addr + kOffset));
+  uint32_t observed = 0;
+  std::memcpy(&observed, backing.data(), sizeof(observed));
+  EXPECT_EQ(observed, kInitial);
+  owner_queue.back()();
+  owner_queue.clear();
+  ASSERT_TRUE(drained);
+  ASSERT_TRUE(driver_->reopen_gpu_alias_ingress(alias));
+  cu->step();
+  EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base), kInitial);
+
+  wave->pc = code_va + 12;
+  address_regs();
+  cu->write_sgpr(wave->sgpr_alloc().base + 2, kWritten);
+  drained = false;
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(alias, post, [&] { drained = true; }));
+  cu->step();
+  ASSERT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+  std::memcpy(&observed, backing.data(), sizeof(observed));
+  EXPECT_EQ(observed, kInitial);
+  ASSERT_EQ(owner_queue.size(), 1u);
+  owner_queue.back()();
+  owner_queue.clear();
+  ASSERT_TRUE(drained);
+  ASSERT_TRUE(driver_->reopen_gpu_alias_ingress(alias));
+  cu->step();
+  std::memcpy(&observed, backing.data(), sizeof(observed));
+  EXPECT_EQ(observed, kWritten);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_FALSE(process->gpu_alias_grant_current(alias));
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto remapped = driver_->join_gpu_aliases(process_id_, kOwner, *access, spans);
+  ASSERT_EQ(remapped.outcome, VmAccessOutcome::Complete);
+  ASSERT_EQ(remapped.aliases.size(), 1u);
+  EXPECT_NE(remapped.aliases.front().alias.admission_generation, alias.admission_generation);
+  ASSERT_TRUE(machine_->soc(1)->gpu_vm().invalidate(*handle));
+  EXPECT_EQ(driver_->join_gpu_aliases(process_id_, kOwner, *access, spans).outcome,
+            VmAccessOutcome::Revoked);
+  const auto fresh = machine_->soc(1)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(fresh);
+  EXPECT_EQ(driver_->join_gpu_aliases(process_id_, kOwner, *fresh, spans).outcome,
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(driver_->join_gpu_aliases(process_id_, kRequester, *fresh, spans).outcome,
+            VmAccessOutcome::Revoked);
+  EXPECT_EQ(
+      driver_->join_gpu_aliases(process_id_, /*unknown GPU=*/UINT32_MAX, *fresh, spans).outcome,
+      VmAccessOutcome::Faulted);
+}
+
+TEST_F(KfdPeerBindingTest, CanonicalOwnerSdmaWriteRetriesClosedIngressAndNewAliasGeneration) {
+  using rocjitsu::amdgpu::Mtype;
+  constexpr size_t kBytes = 4096;
+  constexpr uint64_t kOffset = 64;
+  constexpr uint32_t kInitial = 0x12345678u;
+  constexpr uint32_t kFirst = 0xabcdef01u;
+  constexpr uint32_t kSecond = 0x13579bdfu;
+
+  const std::shared_ptr<rocjitsu::KfdProcess> process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  const auto alias_snapshot = process->gpu_alias_snapshot();
+  const auto alias_it = std::ranges::find_if(*alias_snapshot, [&](const auto &candidate) {
+    return candidate.gpu_id == kOwner && candidate.gpu_va == allocation.va_addr;
+  });
+  ASSERT_NE(alias_it, alias_snapshot->end());
+  const auto old_alias = *alias_it;
+  const auto backing =
+      process->gpu_peer_backing_grant(kOwner, allocation.va_addr + kOffset, sizeof(uint32_t));
+  ASSERT_TRUE(backing.backing);
+  std::memcpy(backing.backing.data(), &kInitial, sizeof(kInitial));
+
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> ring{};
+  alignas(4096) std::array<uint64_t, kBytes / sizeof(uint64_t)> pointers{};
+  const auto map_system_page = [&](void *page) {
+    const uint64_t address = reinterpret_cast<uint64_t>(page);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      rocjitsu::KfdProcess::GpuAllocation control{};
+      control.gpu_va = address;
+      control.size = kBytes;
+      control.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+      control.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+      control.handle = process->next_handle_++;
+      control.admission_generations[kOwner] = process->next_gpu_admission_generation_locked();
+      process->allocations_[control.handle] = control;
+      process->publish_gpu_grants_locked();
+    }
+    process->map_pages(address, page, kBytes, Mtype::UC,
+                       rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  };
+  map_system_page(ring.data());
+  map_system_page(pointers.data());
+
+  const off_t doorbell_offset =
+      static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(kOwner));
+  void *doorbell_page = driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE,
+                                      MAP_SHARED, doorbell_offset);
+  ASSERT_NE(doorbell_page, MAP_FAILED);
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = kOwner;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = kBytes;
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  auto *doorbell = reinterpret_cast<uint64_t *>(static_cast<std::byte *>(doorbell_page) +
+                                                queue.doorbell_offset % kBytes);
+  auto &scheduler = machine_->soc(1)->sdma_queue_scheduler();
+  const auto publish_write = [&](size_t word_offset, uint32_t value) {
+    ring[word_offset] = 2; // SDMA_OP_WRITE, linear form.
+    ring[word_offset + 1] = static_cast<uint32_t>(allocation.va_addr + kOffset);
+    ring[word_offset + 2] = static_cast<uint32_t>((allocation.va_addr + kOffset) >> 32);
+    ring[word_offset + 3] = 0; // One DWORD.
+    ring[word_offset + 4] = value;
+    const uint64_t producer = (word_offset + 5) * sizeof(uint32_t);
+    std::atomic_ref<uint64_t>(pointers[1]).store(producer, std::memory_order_release);
+    std::atomic_ref<uint64_t>(*doorbell).store(producer, std::memory_order_release);
+    return producer;
+  };
+  const auto value_at_alias = [&] {
+    uint32_t value = 0;
+    std::memcpy(&value, backing.backing.data(), sizeof(value));
+    return value;
+  };
+
+  std::vector<std::function<void()>> owner_queue;
+  const auto post = [&](std::function<void()> continuation) {
+    owner_queue.push_back(std::move(continuation));
+  };
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(old_alias, post, [] {}));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  const uint64_t first_cursor = publish_write(0, kFirst);
+  ASSERT_TRUE(scheduler.wait_for_blocked_packet_for_test(process_id_, queue.queue_id,
+                                                         std::chrono::seconds(1)));
+  EXPECT_EQ(value_at_alias(), kInitial);
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), 0u);
+  owner_queue.back()();
+  owner_queue.clear();
+  ASSERT_TRUE(driver_->reopen_gpu_alias_ingress(old_alias));
+  ASSERT_TRUE(scheduler.synchronize_queue_for_test(process_id_, queue.queue_id));
+  EXPECT_EQ(value_at_alias(), kFirst);
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), first_cursor);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto remapped = process->gpu_alias_snapshot();
+  const auto new_alias_it = std::ranges::find_if(*remapped, [&](const auto &candidate) {
+    return candidate.gpu_id == kOwner && candidate.gpu_va == allocation.va_addr;
+  });
+  ASSERT_NE(new_alias_it, remapped->end());
+  EXPECT_NE(new_alias_it->admission_generation, old_alias.admission_generation);
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(old_alias, post, [] {}));
+  ASSERT_EQ(owner_queue.size(), 1u);
+  const uint64_t second_cursor = publish_write(5, kSecond);
+  ASSERT_TRUE(scheduler.synchronize_host_queue_for_test(process_id_, queue.queue_id));
+  EXPECT_EQ(value_at_alias(), kSecond);
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), second_cursor);
+  owner_queue.back()();
+  owner_queue.clear();
+  EXPECT_TRUE(driver_->reopen_gpu_alias_ingress(old_alias));
+
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  process->unmap_pages(reinterpret_cast<uint64_t>(ring.data()), kBytes);
+  process->unmap_pages(reinterpret_cast<uint64_t>(pointers.data()), kBytes);
+}
+
+TEST_F(KfdPeerBindingTest, UnmapWaitsForExactAliasIngressBeforeRetiringGrant) {
+  using rocjitsu::amdgpu::MemoryIngressSpan;
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr uint64_t kOffset = 64;
+  constexpr uint32_t kInitial = 0x12345678u;
+  constexpr uint32_t kWritten = 0xabcdef01u;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  ASSERT_EQ(map.n_success, 1u);
+
+  // A second canonical BO keeps a different GPU's grant live while UNMAP
+  // removes the last grant and PTE of the first BO.
+  kfd_ioctl_alloc_memory_of_gpu_args unaffected{};
+  unaffected.size = kBytes;
+  unaffected.gpu_id = kOwner;
+  unaffected.flags = allocation.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &unaffected), 0);
+  kfd_ioctl_ipc_export_handle_args other_export{};
+  other_export.handle = unaffected.handle;
+  other_export.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &other_export), 0);
+  kfd_ioctl_map_memory_to_gpu_args other_map{};
+  other_map.handle = unaffected.handle;
+  other_map.n_devices = 1;
+  other_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&ids[1]);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &other_map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto owner = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  const auto requester = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == unaffected.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(owner, aliases->end());
+  ASSERT_NE(requester, aliases->end());
+  const auto old_owner = *owner;
+  const auto other_gpu = *requester;
+  const auto backing =
+      process->gpu_peer_backing_grant(kOwner, allocation.va_addr + kOffset, 4).backing;
+  ASSERT_TRUE(backing);
+  std::memcpy(backing.data(), &kInitial, sizeof(kInitial));
+  const auto value_at_alias = [&] {
+    uint32_t value = 0;
+    std::memcpy(&value, backing.data(), sizeof(value));
+    return value;
+  };
+
+  const auto handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+
+  // The real CU store must retry while the ioctl is waiting for the held
+  // permit. Its destination is the exported canonical alias, not a gate stub.
+  const uint64_t code_va = allocation.va_addr - kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> code{};
+  code[0] = 0xC0420080u; // s_store_dword s2, s[0:1], 0x0
+  code[1] = 0;
+  code[2] = 0xBF800000u;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kOwner] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  process->map_pages(code_va, code.data(), kBytes, rocjitsu::amdgpu::Mtype::RW,
+                     rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  machine_->soc(1)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id_);
+  wave->set_address_space(*handle);
+  cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(allocation.va_addr + kOffset));
+  cu->write_sgpr(wave->sgpr_alloc().base + 1,
+                 static_cast<uint32_t>((allocation.va_addr + kOffset) >> 32));
+  cu->write_sgpr(wave->sgpr_alloc().base + 2, kWritten);
+
+  const auto access = machine_->soc(1)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  const std::array spans{
+      MemoryIngressSpan{allocation.va_addr + kOffset, sizeof(uint32_t), VmAccessKind::Write}};
+  auto held = driver_->admit_gpu_alias_ingress(process_id_, kOwner, *access, spans);
+  ASSERT_EQ(held.outcome, VmAccessOutcome::Complete);
+  ASSERT_TRUE(held.permit);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  auto pending = std::async(std::launch::async, [&] {
+    return driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
+  });
+  bool closed = false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (driver_->admit_gpu_alias_ingress(process_id_, kOwner, *access, spans).outcome ==
+        VmAccessOutcome::Unavailable) {
+      closed = true;
+      break;
+    }
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  EXPECT_TRUE(process->gpu_alias_grant_current(old_owner));
+  EXPECT_TRUE(process->gpu_alias_grant_current(other_gpu));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_TRUE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  if (closed) {
+    EXPECT_EQ(driver_->admit_gpu_alias_ingress(process_id_, kOwner, *access, spans).outcome,
+              VmAccessOutcome::Unavailable);
+    cu->step();
+    EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+    EXPECT_EQ(value_at_alias(), kInitial);
+  }
+
+  held.permit.reset();
+  if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("UNMAP did not finish after releasing the alias ingress permit\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124); // std::async's future destructor would otherwise wait forever.
+  }
+  EXPECT_EQ(pending.get(), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+  EXPECT_FALSE(process->gpu_alias_grant_current(old_owner));
+  EXPECT_TRUE(process->gpu_alias_grant_current(other_gpu));
+  EXPECT_TRUE(process->gpu_access_grant(kRequester, unaffected.va_addr, 4).allowed);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_EQ(value_at_alias(), kInitial);
+
+  map.n_success = 0;
+  map.n_devices = 1;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto remapped = process->gpu_alias_snapshot();
+  const auto fresh = std::ranges::find_if(*remapped, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  ASSERT_NE(fresh, remapped->end());
+  EXPECT_NE(fresh->admission_generation, old_owner.admission_generation);
+  EXPECT_TRUE(process->gpu_alias_grant_current(*fresh));
+  EXPECT_TRUE(process->gpu_alias_grant_current(other_gpu));
+  process->unmap_pages(code_va, kBytes);
+}
+
+TEST_F(KfdPeerBindingTest, LastAliasUnmapPublishesDirtyRequesterLineBeforeRetirement) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kFirst = 8;
+  constexpr uint32_t kSibling = 9;
+  constexpr uint32_t kSecond = 112;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_EQ(allocation.va_addr % L2Cache::LINE_SIZE, 0u);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  for (uint32_t gpu_id : {kOwner, kRequester}) {
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+
+  // Leave the requester as the last grant so its UNMAP also retires the PTE.
+  kfd_ioctl_unmap_memory_from_gpu_args unmap_owner{};
+  uint32_t owner_id = kOwner;
+  unmap_owner.handle = allocation.handle;
+  unmap_owner.n_devices = 1;
+  unmap_owner.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap_owner), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &candidate) {
+    return candidate.gpu_va == allocation.va_addr && candidate.gpu_id == kRequester;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto alias = *found;
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  auto grant = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(grant.admission.allowed);
+  ASSERT_TRUE(grant.backing);
+  grant.backing.bytes()[kFirst] = std::byte{0x11};
+  grant.backing.bytes()[kSibling] = std::byte{0x33};
+  grant.backing.bytes()[kSecond] = std::byte{0x22};
+  auto *l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kFirst, 0x5a},
+                               std::pair<uint32_t, uint8_t>{kSecond, 0x6b}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id_,
+                                                      access->cache_identity(),
+                                                      alias.admission_generation, dirty_bytes);
+  const uint64_t epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+  const uint64_t writes = l2->backing_write_transactions();
+  auto held = driver_->hold_alias_ingress_for_testing(alias);
+  ASSERT_TRUE(held);
+
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  auto pending = std::async(std::launch::async, [&] {
+    return driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
+  });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool closed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    closed = driver_->alias_ingress_closed_for_testing(alias);
+    if (closed || pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  if (closed) {
+    EXPECT_TRUE(process->gpu_alias_grant_current(alias));
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      EXPECT_TRUE(
+          process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+    }
+    EXPECT_EQ(grant.backing.bytes()[kFirst], std::byte{0x11});
+    EXPECT_EQ(grant.backing.bytes()[kSecond], std::byte{0x22});
+    EXPECT_EQ(grant.backing.bytes()[kSibling], std::byte{0x33});
+    EXPECT_TRUE(
+        KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id_, kFirst));
+    EXPECT_EQ(l2->backing_write_transactions(), writes);
+    EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), epoch);
+  }
+
+  held->reset();
+  if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("last-alias UNMAP did not finish after releasing ingress permit\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending.get(), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+  EXPECT_EQ(grant.backing.bytes()[kFirst], std::byte{0x5a});
+  EXPECT_EQ(grant.backing.bytes()[kSecond], std::byte{0x6b});
+  EXPECT_EQ(grant.backing.bytes()[kSibling], std::byte{0x33});
+  EXPECT_FALSE(
+      KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id_, kFirst));
+  EXPECT_FALSE(
+      KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id_, kSecond));
+  EXPECT_TRUE(
+      KfdPreparedProviderTestAccess::line_clean_or_invalid(*l2, allocation.va_addr, process_id_));
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 2);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), epoch);
+  EXPECT_FALSE(process->gpu_alias_grant_current(alias));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+}
+
+TEST_F(KfdPeerBindingTest, UnmapRetryAfterFinalMaintenanceDoesNotWriteBackTwice) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kDirtyOffset = 48;
+  constexpr uint32_t kSiblingOffset = 49;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  for (uint32_t gpu_id : {kOwner, kRequester}) {
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_unmap_memory_from_gpu_args unmap_owner{};
+  unmap_owner.handle = allocation.handle;
+  unmap_owner.n_devices = 1;
+  unmap_owner.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap_owner), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &candidate) {
+    return candidate.gpu_va == allocation.va_addr && candidate.gpu_id == kRequester;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto alias = *found;
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  auto grant = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(grant.backing);
+  grant.backing.bytes()[kDirtyOffset] = std::byte{0x13};
+  grant.backing.bytes()[kSiblingOffset] = std::byte{0x37};
+  auto *l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id_,
+                                                      access->cache_identity(),
+                                                      alias.admission_generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+  const uint64_t epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  driver_->fail_next_alias_unmap_publish_for_testing();
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -ENOMEM);
+  EXPECT_EQ(unmap.n_success, 0u);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_FALSE(driver_->hold_alias_ingress_for_testing(alias));
+  EXPECT_TRUE(process->gpu_alias_grant_current(alias));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_EQ(grant.backing.bytes()[kSiblingOffset], std::byte{0x37});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id_,
+                                                            kDirtyOffset));
+  EXPECT_TRUE(
+      KfdPreparedProviderTestAccess::line_clean_or_invalid(*l2, allocation.va_addr, process_id_));
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), epoch);
+
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_EQ(grant.backing.bytes()[kSiblingOffset], std::byte{0x37});
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(process->gpu_alias_grant_current(alias));
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+}
+
+TEST_F(KfdPeerBindingTest, UnmapRetriesClosedAliasAfterPreMaintenanceFailure) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kDirtyOffset = 72;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &candidate) {
+    return candidate.gpu_va == allocation.va_addr && candidate.gpu_id == kOwner;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto alias = *found;
+  const auto handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(1)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  auto grant = process->gpu_peer_backing_grant(kOwner, allocation.va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(grant.backing);
+  grant.backing.bytes()[kDirtyOffset] = std::byte{0x21};
+  auto *l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x91}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id_,
+                                                      access->cache_identity(),
+                                                      alias.admission_generation + 1, dirty_bytes);
+  const uint64_t epoch = machine_->soc(1)->cache_coherence()->current_epoch();
+  const uint64_t writes = l2->backing_write_transactions();
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -EIO);
+  EXPECT_EQ(unmap.n_success, 0u);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_TRUE(process->gpu_alias_grant_current(alias));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_TRUE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0x21});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id_,
+                                                           kDirtyOffset));
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  EXPECT_EQ(machine_->soc(1)->cache_coherence()->current_epoch(), epoch);
+
+  // Correct the resident tag while the old generation remains closed, then
+  // retry the same UNMAP generation without admitting new GPU ingress.
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::set_line_generation(
+      *l2, allocation.va_addr, process_id_, alias.admission_generation));
+  ASSERT_EQ(KfdPreparedProviderTestAccess::line_generation(*l2, allocation.va_addr, process_id_),
+            alias.admission_generation);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0x91});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id_,
+                                                            kDirtyOffset));
+  EXPECT_EQ(machine_->soc(1)->cache_coherence()->current_epoch(), epoch);
+  EXPECT_FALSE(process->gpu_alias_grant_current(alias));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+}
+
+TEST_F(KfdPeerBindingTest, OrdinaryUnmapBypassesUnrelatedPublicationReader) {
+  constexpr size_t kBytes = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  auto publication_reader = driver_->hold_alias_publication_for_testing();
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  auto pending = std::async(std::launch::async, [&] {
+    return driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
+  });
+  const auto status = pending.wait_for(std::chrono::seconds(5));
+  EXPECT_EQ(status, std::future_status::ready);
+  publication_reader.unlock();
+  if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("ordinary UNMAP did not resume after publication reader left\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending.get(), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+}
+
+TEST_F(KfdPeerBindingTest, CanonicalFreeCloseDoesNotBlockOrdinaryGttRetirement) {
+  constexpr size_t kBytes = 4096;
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_alloc_memory_of_gpu_args canonical{};
+  canonical.size = kBytes;
+  canonical.gpu_id = kOwner;
+  canonical.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &canonical), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = canonical.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  kfd_ioctl_map_memory_to_gpu_args canonical_map{};
+  canonical_map.handle = canonical.handle;
+  canonical_map.n_devices = 1;
+  canonical_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &canonical_map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == canonical.va_addr && alias.gpu_id == kOwner;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto alias = *found;
+  auto held = driver_->hold_alias_ingress_for_testing(alias);
+  ASSERT_TRUE(held);
+
+  const uint32_t other_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(other_id, 0u);
+  kfd_ioctl_alloc_memory_of_gpu_args ordinary{};
+  ordinary.size = kBytes;
+  ordinary.gpu_id = kOwner;
+  ordinary.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(other_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &ordinary), 0);
+  kfd_ioctl_map_memory_to_gpu_args ordinary_map{};
+  ordinary_map.handle = ordinary.handle;
+  ordinary_map.n_devices = 1;
+  ordinary_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(other_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &ordinary_map), 0);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = canonical.handle;
+  auto pending_free = std::async(std::launch::async, [&] {
+    return driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free);
+  });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool closed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    closed = driver_->alias_ingress_closed_for_testing(alias);
+    if (closed || pending_free.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(pending_free.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = ordinary.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  auto pending_unmap = std::async(std::launch::async, [&] {
+    return driver_->ioctl(other_id, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
+  });
+  const auto unmap_status = pending_unmap.wait_for(std::chrono::seconds(5));
+  EXPECT_EQ(unmap_status, std::future_status::ready);
+  kfd_ioctl_free_memory_of_gpu_args ordinary_free{};
+  ordinary_free.handle = ordinary.handle;
+  auto pending_ordinary_free = std::async(std::launch::async, [&] {
+    return driver_->ioctl(other_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &ordinary_free);
+  });
+  const auto ordinary_free_status = pending_ordinary_free.wait_for(std::chrono::seconds(5));
+  EXPECT_EQ(ordinary_free_status, std::future_status::ready);
+  EXPECT_EQ(pending_free.wait_for(std::chrono::milliseconds(0)), std::future_status::timeout);
+
+  held->reset();
+  if (pending_free.wait_for(std::chrono::seconds(5)) != std::future_status::ready ||
+      pending_unmap.wait_for(std::chrono::seconds(5)) != std::future_status::ready ||
+      pending_ordinary_free.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("canonical FREE or ordinary GTT retirement did not finish\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending_free.get(), 0);
+  EXPECT_EQ(pending_unmap.get(), 0);
+  EXPECT_EQ(pending_ordinary_free.get(), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+  EXPECT_EQ(driver_->close(other_id), 0);
+}
+
+TEST_F(KfdPeerClientMappingTest, CanonicalFreeBlocksImportedAliasPublicationUntilRetirement) {
+  constexpr size_t kBytes = 4096;
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_alloc_memory_of_gpu_args source{};
+  source.size = kBytes;
+  source.gpu_id = kOwner;
+  source.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                 KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &source), 0);
+  ASSERT_NE(driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                          static_cast<off_t>(source.mmap_offset)),
+            MAP_FAILED);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = source.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  kfd_ioctl_map_memory_to_gpu_args source_map{};
+  source_map.handle = source.handle;
+  source_map.n_devices = 1;
+  source_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &source_map), 0);
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &candidate) {
+    return candidate.gpu_va == source.va_addr && candidate.gpu_id == kOwner;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto source_alias = *found;
+  auto held = driver_->hold_alias_ingress_for_testing(source_alias);
+  ASSERT_TRUE(held);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = source.va_addr + 2 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  const auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  kfd_ioctl_map_memory_to_gpu_args imported_map{};
+  imported_map.handle = imported.handle;
+  imported_map.n_devices = 1;
+  imported_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  std::array<kfd_ioctl_alloc_memory_of_gpu_args, 2> unrelated{};
+  for (auto &allocation : unrelated) {
+    allocation.size = kBytes;
+    allocation.gpu_id = kOwner;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  }
+  void *const mapped = driver_->mmap(importer_id, nullptr, kBytes, PROT_READ | PROT_WRITE,
+                                     MAP_SHARED, static_cast<off_t>(unrelated[0].mmap_offset));
+  ASSERT_NE(mapped, MAP_FAILED);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = source.handle;
+  auto pending_free = std::async(std::launch::async, [&] {
+    return driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free);
+  });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool closed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    closed = driver_->alias_ingress_closed_for_testing(source_alias);
+    if (closed || pending_free.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(pending_free.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+
+  auto pending_map = std::async(std::launch::async, [&] {
+    return driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &imported_map);
+  });
+  auto pending_mmap = std::async(std::launch::async, [&] {
+    return driver_->mmap(importer_id, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                         static_cast<off_t>(unrelated[1].mmap_offset));
+  });
+  auto pending_munmap =
+      std::async(std::launch::async, [&] { return driver_->munmap(importer_id, mapped, kBytes); });
+  EXPECT_EQ(pending_map.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  EXPECT_EQ(pending_mmap.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  EXPECT_EQ(pending_munmap.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  EXPECT_TRUE(importer->gpu_alias_snapshot()->empty());
+  held->reset();
+  if (pending_free.wait_for(std::chrono::seconds(5)) != std::future_status::ready ||
+      pending_map.wait_for(std::chrono::seconds(5)) != std::future_status::ready ||
+      pending_mmap.wait_for(std::chrono::seconds(5)) != std::future_status::ready ||
+      pending_munmap.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("FREE or unrelated importer work did not finish after releasing alias ingress\n",
+               stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending_free.get(), 0);
+  EXPECT_EQ(pending_map.get(), 0);
+  void *const mapped_after = pending_mmap.get();
+  EXPECT_NE(mapped_after, MAP_FAILED);
+  EXPECT_EQ(pending_munmap.get(), 0);
+  EXPECT_EQ(imported_map.n_success, 1u);
+  EXPECT_FALSE(process->gpu_alias_grant_current(source_alias));
+  EXPECT_TRUE(importer->gpu_peer_backing_grant(kOwner, imported.va_addr, 4).backing);
+  if (mapped_after != MAP_FAILED) {
+    EXPECT_EQ(driver_->munmap(importer_id, mapped_after, kBytes), 0);
+  }
+  for (const auto &allocation : unrelated) {
+    free.handle = allocation.handle;
+    EXPECT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  }
+  free.handle = imported.handle;
+  EXPECT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(driver_->close(importer_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, ConcurrentProcessUnmapWaitsForExclusiveCloseClaim) {
+  constexpr size_t kBytes = 4096;
+  const uint32_t other_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(other_id, 0u);
+  const std::array process_ids{process_id_, other_id};
+  std::array<kfd_ioctl_alloc_memory_of_gpu_args, 2> allocations{};
+  uint32_t owner_id = kOwner;
+  for (size_t index = 0; index < process_ids.size(); ++index) {
+    auto &allocation = allocations[index];
+    allocation.size = kBytes;
+    allocation.gpu_id = kOwner;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(process_ids[index], AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kOwner;
+    ASSERT_EQ(driver_->ioctl(process_ids[index], AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+    ASSERT_EQ(driver_->ioctl(process_ids[index], AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+  kfd_ioctl_alloc_memory_of_gpu_args free_allocation{};
+  free_allocation.size = kBytes;
+  free_allocation.gpu_id = kOwner;
+  free_allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(other_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &free_allocation), 0);
+  kfd_ioctl_ipc_export_handle_args free_export{};
+  free_export.handle = free_allocation.handle;
+  free_export.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(other_id, AMDKFD_IOC_IPC_EXPORT_HANDLE, &free_export), 0);
+  kfd_ioctl_map_memory_to_gpu_args free_map{};
+  free_map.handle = free_allocation.handle;
+  free_map.n_devices = 1;
+  free_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(other_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &free_map), 0);
+
+  const auto first_process = driver_->find_process(process_id_);
+  const auto other_process = driver_->find_process(other_id);
+  ASSERT_NE(first_process, nullptr);
+  ASSERT_NE(other_process, nullptr);
+  const auto alias_for = [&](const auto &process, const auto &allocation) {
+    const auto aliases = process->gpu_alias_snapshot();
+    const auto found = std::ranges::find_if(*aliases, [&](const auto &candidate) {
+      return candidate.gpu_va == allocation.va_addr && candidate.gpu_id == kOwner;
+    });
+    EXPECT_NE(found, aliases->end());
+    return found == aliases->end() ? rocjitsu::KfdProcess::GpuAliasRecord{} : *found;
+  };
+  const auto first_alias = alias_for(first_process, allocations[0]);
+  const auto other_alias = alias_for(other_process, allocations[1]);
+  const auto free_alias = alias_for(other_process, free_allocation);
+  ASSERT_NE(first_alias.admission_generation, 0u);
+  ASSERT_NE(other_alias.admission_generation, 0u);
+  ASSERT_NE(free_alias.admission_generation, 0u);
+  auto held = driver_->hold_alias_ingress_for_testing(first_alias);
+  ASSERT_TRUE(held);
+
+  kfd_ioctl_unmap_memory_from_gpu_args first_unmap{};
+  first_unmap.handle = allocations[0].handle;
+  first_unmap.n_devices = 1;
+  first_unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  auto pending = std::async(std::launch::async, [&] {
+    return driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &first_unmap);
+  });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool closed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    closed = driver_->alias_ingress_closed_for_testing(first_alias);
+    if (closed || pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+
+  kfd_ioctl_free_memory_of_gpu_args unrelated_free{};
+  unrelated_free.handle = free_allocation.handle;
+  EXPECT_EQ(driver_->ioctl(other_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &unrelated_free), -EAGAIN);
+  {
+    std::lock_guard lock(other_process->alloc_mutex_);
+    const auto found = other_process->allocations_.find(free_allocation.handle);
+    EXPECT_NE(found, other_process->allocations_.end());
+    if (found != other_process->allocations_.end()) {
+      EXPECT_FALSE(found->second.retirement_in_progress);
+      EXPECT_FALSE(found->second.grants_retired);
+    }
+  }
+  EXPECT_TRUE(other_process->gpu_alias_grant_current(free_alias));
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(free_alias));
+  EXPECT_TRUE(driver_->hold_alias_ingress_for_testing(free_alias));
+
+  kfd_ioctl_unmap_memory_from_gpu_args other_unmap{};
+  other_unmap.handle = allocations[1].handle;
+  other_unmap.n_devices = 1;
+  other_unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  EXPECT_EQ(driver_->ioctl(other_id, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &other_unmap), -EAGAIN);
+  EXPECT_EQ(other_unmap.n_success, 0u);
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(other_alias));
+  EXPECT_TRUE(other_process->gpu_alias_grant_current(other_alias));
+  EXPECT_TRUE(driver_->hold_alias_ingress_for_testing(other_alias));
+  {
+    std::shared_lock lock(other_process->page_table_mutex_);
+    EXPECT_TRUE(other_process->page_table_.contains(allocations[1].va_addr >>
+                                                    rocjitsu::KfdProcess::kPageShift));
+  }
+
+  held->reset();
+  if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("first UNMAP did not finish after releasing its alias permit\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending.get(), 0);
+  EXPECT_FALSE(first_process->gpu_alias_grant_current(first_alias));
+  ASSERT_EQ(driver_->ioctl(other_id, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &other_unmap), 0);
+  EXPECT_EQ(other_unmap.n_success, 1u);
+  EXPECT_FALSE(other_process->gpu_alias_grant_current(other_alias));
+  EXPECT_EQ(driver_->ioctl(other_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &unrelated_free), 0);
+  EXPECT_FALSE(other_process->gpu_alias_grant_current(free_alias));
+  EXPECT_EQ(driver_->close(other_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, FreeWaitsForEveryCanonicalAliasPermitBeforeRetiringBacking) {
+  using rocjitsu::amdgpu::MemoryIngressSpan;
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = ids.size();
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  kfd_ioctl_alloc_memory_of_gpu_args unrelated{};
+  unrelated.size = kBytes;
+  unrelated.gpu_id = kOwner;
+  unrelated.flags = allocation.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &unrelated), 0);
+  kfd_ioctl_ipc_export_handle_args unrelated_export{};
+  unrelated_export.handle = unrelated.handle;
+  unrelated_export.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &unrelated_export), 0);
+  kfd_ioctl_map_memory_to_gpu_args unrelated_map{};
+  unrelated_map.handle = unrelated.handle;
+  unrelated_map.n_devices = 1;
+  unrelated_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &unrelated_map), 0);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = allocation.va_addr + 2 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  kfd_ioctl_map_memory_to_gpu_args imported_map{};
+  imported_map.handle = imported.handle;
+  imported_map.n_devices = 1;
+  imported_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &imported_map), 0);
+  const auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  const auto retained_import =
+      importer->gpu_peer_backing_grant(kOwner, imported.va_addr, 4).backing;
+  ASSERT_TRUE(retained_import);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto owner = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  const auto requester = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(owner, aliases->end());
+  ASSERT_NE(requester, aliases->end());
+  const auto owner_alias = *owner;
+  const auto requester_alias = *requester;
+  void *host_ptr = nullptr;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    host_ptr = process->allocations_.at(allocation.handle).host_ptr;
+  }
+  ASSERT_NE(host_ptr, nullptr);
+  const std::array spans{MemoryIngressSpan{allocation.va_addr, 4, VmAccessKind::Write}};
+  const auto owner_handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(owner_handle);
+  const auto owner_access = machine_->soc(1)->gpu_vm().snapshot(*owner_handle);
+  ASSERT_TRUE(owner_access);
+  auto held_owner = driver_->admit_gpu_alias_ingress(process_id_, kOwner, *owner_access, spans);
+  // Requester CU traffic takes the deferred fabric route, so hold its real
+  // published gate key directly to exercise the same permit release path.
+  auto held_requester = driver_->hold_alias_ingress_for_testing(requester_alias);
+  ASSERT_EQ(held_owner.outcome, VmAccessOutcome::Complete);
+  ASSERT_TRUE(held_owner.permit);
+  ASSERT_TRUE(held_requester);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  auto pending = std::async(std::launch::async, [&] {
+    return driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free);
+  });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool both_closed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    both_closed = driver_->alias_ingress_closed_for_testing(owner_alias) &&
+                  driver_->alias_ingress_closed_for_testing(requester_alias);
+    if (both_closed || pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(both_closed);
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  if (both_closed) {
+    EXPECT_TRUE(process->gpu_alias_grant_current(owner_alias));
+    EXPECT_TRUE(process->gpu_alias_grant_current(requester_alias));
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      EXPECT_TRUE(
+          process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+    }
+    const std::array unrelated_span{MemoryIngressSpan{unrelated.va_addr, 4, VmAccessKind::Write}};
+    EXPECT_EQ(driver_->admit_gpu_alias_ingress(process_id_, kOwner, *owner_access, unrelated_span)
+                  .outcome,
+              VmAccessOutcome::Complete);
+    EXPECT_EQ(driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                            static_cast<off_t>(allocation.mmap_offset)),
+              MAP_FAILED);
+    EXPECT_EQ(errno, EAGAIN);
+    EXPECT_EQ(driver_->munmap(process_id_, host_ptr, kBytes), -EAGAIN);
+  }
+
+  held_owner.permit.reset();
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  held_requester->reset();
+  if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("FREE did not finish after releasing both alias ingress permits\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending.get(), 0);
+  EXPECT_FALSE(process->gpu_alias_grant_current(owner_alias));
+  EXPECT_FALSE(process->gpu_alias_grant_current(requester_alias));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_TRUE(importer->gpu_peer_backing_grant(kOwner, imported.va_addr, 4)
+                  .backing.same_backing(retained_import));
+  const auto imported_owner_handle = machine_->soc(1)->gpu_vm().find_vmid(importer_id);
+  ASSERT_TRUE(imported_owner_handle);
+  const auto imported_access = machine_->soc(1)->gpu_vm().snapshot(*imported_owner_handle);
+  ASSERT_TRUE(imported_access);
+  EXPECT_EQ(imported_access->probe(imported.va_addr, 4, VmAccessKind::Read),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+  free.handle = unrelated.handle;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  free.handle = imported.handle;
+  EXPECT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(driver_->close(importer_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, FreePublishesDirtyOwnerAndRequesterBytesBeforeRetirement) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kOwnerOffset = 8;
+  constexpr uint32_t kRequesterOffset = L2Cache::LINE_SIZE + 48;
+  constexpr uint32_t kRequesterLineOffset = kRequesterOffset - L2Cache::LINE_SIZE;
+  constexpr uint32_t kUnrelatedOffset = 80;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_EQ(allocation.va_addr % L2Cache::LINE_SIZE, 0u);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = ids.size();
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  kfd_ioctl_alloc_memory_of_gpu_args unrelated{};
+  unrelated.size = kBytes;
+  unrelated.gpu_id = kOwner;
+  unrelated.flags = allocation.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &unrelated), 0);
+  kfd_ioctl_ipc_export_handle_args unrelated_export{};
+  unrelated_export.handle = unrelated.handle;
+  unrelated_export.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &unrelated_export), 0);
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args unrelated_map{};
+  unrelated_map.handle = unrelated.handle;
+  unrelated_map.n_devices = 1;
+  unrelated_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &unrelated_map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto owner = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  const auto requester = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kRequester;
+  });
+  const auto unrelated_alias = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == unrelated.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(owner, aliases->end());
+  ASSERT_NE(requester, aliases->end());
+  ASSERT_NE(unrelated_alias, aliases->end());
+  const auto owner_alias = *owner;
+  const auto requester_alias = *requester;
+  const auto owner_handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(owner_handle);
+  ASSERT_TRUE(requester_handle);
+  const auto owner_access = machine_->soc(1)->gpu_vm().snapshot(*owner_handle);
+  const auto requester_access = machine_->soc(0)->gpu_vm().snapshot(*requester_handle);
+  ASSERT_TRUE(owner_access);
+  ASSERT_TRUE(requester_access);
+  auto grant =
+      process->gpu_peer_backing_grant(kRequester, allocation.va_addr, 2 * L2Cache::LINE_SIZE);
+  auto unrelated_grant =
+      process->gpu_peer_backing_grant(kRequester, unrelated.va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(grant.admission.allowed);
+  ASSERT_TRUE(grant.backing);
+  ASSERT_TRUE(unrelated_grant.backing);
+  grant.backing.bytes()[kOwnerOffset] = std::byte{0x11};
+  grant.backing.bytes()[kRequesterOffset] = std::byte{0x22};
+  unrelated_grant.backing.bytes()[kUnrelatedOffset] = std::byte{0x33};
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  auto *requester_l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  ASSERT_NE(requester_l2, nullptr);
+  const std::array owner_dirty{std::pair<uint32_t, uint8_t>{kOwnerOffset, 0xa1}};
+  const std::array requester_dirty{std::pair<uint32_t, uint8_t>{kRequesterLineOffset, 0xb2}};
+  const std::array unrelated_dirty{std::pair<uint32_t, uint8_t>{kUnrelatedOffset, 0xc3}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *owner_l2, allocation.va_addr, process_id_, owner_access->cache_identity(),
+      owner_alias.admission_generation, owner_dirty);
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *requester_l2, allocation.va_addr + L2Cache::LINE_SIZE, process_id_,
+      requester_access->cache_identity(), requester_alias.admission_generation, requester_dirty);
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *requester_l2, unrelated.va_addr, process_id_, requester_access->cache_identity(),
+      unrelated_alias->admission_generation, unrelated_dirty);
+  const uint64_t owner_writes = owner_l2->backing_write_transactions();
+  const uint64_t requester_writes = requester_l2->backing_write_transactions();
+  const uint64_t owner_epoch = machine_->soc(1)->cache_coherence()->current_epoch();
+  const uint64_t requester_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+  auto held = driver_->hold_alias_ingress_for_testing(requester_alias);
+  ASSERT_TRUE(held);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  auto pending = std::async(std::launch::async, [&] {
+    return driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free);
+  });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool closed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    closed = driver_->alias_ingress_closed_for_testing(owner_alias) &&
+             driver_->alias_ingress_closed_for_testing(requester_alias);
+    if (closed || pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  if (closed) {
+    EXPECT_TRUE(process->gpu_alias_grant_current(owner_alias));
+    EXPECT_TRUE(process->gpu_alias_grant_current(requester_alias));
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      EXPECT_TRUE(
+          process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+    }
+    EXPECT_EQ(grant.backing.bytes()[kOwnerOffset], std::byte{0x11});
+    EXPECT_EQ(grant.backing.bytes()[kRequesterOffset], std::byte{0x22});
+    EXPECT_EQ(unrelated_grant.backing.bytes()[kUnrelatedOffset], std::byte{0x33});
+    EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocation.va_addr,
+                                                             process_id_, kOwnerOffset));
+    EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(
+        *requester_l2, allocation.va_addr + L2Cache::LINE_SIZE, process_id_, kRequesterLineOffset));
+    EXPECT_EQ(owner_l2->backing_write_transactions(), owner_writes);
+    EXPECT_EQ(requester_l2->backing_write_transactions(), requester_writes);
+  }
+
+  held->reset();
+  if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("FREE did not finish after releasing requester ingress permit\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending.get(), 0);
+  EXPECT_EQ(grant.backing.bytes()[kOwnerOffset], std::byte{0xa1});
+  EXPECT_EQ(grant.backing.bytes()[kRequesterOffset], std::byte{0xb2});
+  EXPECT_EQ(unrelated_grant.backing.bytes()[kUnrelatedOffset], std::byte{0x33});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocation.va_addr,
+                                                            process_id_, kOwnerOffset));
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *requester_l2, allocation.va_addr + L2Cache::LINE_SIZE, process_id_, kRequesterLineOffset));
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*requester_l2, unrelated.va_addr,
+                                                           process_id_, kUnrelatedOffset));
+  EXPECT_EQ(owner_l2->backing_write_transactions(), owner_writes + 1);
+  EXPECT_EQ(requester_l2->backing_write_transactions(), requester_writes + 1);
+  EXPECT_EQ(machine_->soc(1)->cache_coherence()->current_epoch(), owner_epoch);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), requester_epoch);
+  EXPECT_FALSE(process->gpu_alias_grant_current(owner_alias));
+  EXPECT_FALSE(process->gpu_alias_grant_current(requester_alias));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_TRUE(process->gpu_alias_grant_current(*unrelated_alias));
+  free.handle = unrelated.handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(unrelated_grant.backing.bytes()[kUnrelatedOffset], std::byte{0xc3});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*requester_l2, unrelated.va_addr,
+                                                            process_id_, kUnrelatedOffset));
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+}
+
+TEST_F(KfdPeerBindingTest, FreeRefusesOverlappingDirtyWritersInRetiringBatch) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kDirtyOffset = 32;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = ids.size();
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto alias_for = [&](uint32_t gpu_id) {
+    return std::ranges::find_if(*aliases, [&](const auto &alias) {
+      return alias.gpu_va == allocation.va_addr && alias.gpu_id == gpu_id;
+    });
+  };
+  const auto owner = alias_for(kOwner);
+  const auto requester = alias_for(kRequester);
+  ASSERT_NE(owner, aliases->end());
+  ASSERT_NE(requester, aliases->end());
+  const auto owner_handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(owner_handle);
+  ASSERT_TRUE(requester_handle);
+  const auto owner_access = machine_->soc(1)->gpu_vm().snapshot(*owner_handle);
+  const auto requester_access = machine_->soc(0)->gpu_vm().snapshot(*requester_handle);
+  ASSERT_TRUE(owner_access);
+  ASSERT_TRUE(requester_access);
+  auto backing =
+      process->gpu_peer_backing_grant(kOwner, allocation.va_addr, L2Cache::LINE_SIZE).backing;
+  ASSERT_TRUE(backing);
+  backing.bytes()[kDirtyOffset] = std::byte{0x11};
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  auto *requester_l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  ASSERT_NE(requester_l2, nullptr);
+  const std::array owner_dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa1}};
+  const std::array requester_dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xb2}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*owner_l2, allocation.va_addr, process_id_,
+                                                      owner_access->cache_identity(),
+                                                      owner->admission_generation, owner_dirty);
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *requester_l2, allocation.va_addr, process_id_, requester_access->cache_identity(),
+      requester->admission_generation, requester_dirty);
+  const uint64_t owner_writes = owner_l2->backing_write_transactions();
+  const uint64_t requester_writes = requester_l2->backing_write_transactions();
+  const uint64_t owner_epoch = machine_->soc(1)->cache_coherence()->current_epoch();
+  const uint64_t requester_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), -EIO);
+  EXPECT_EQ(backing.bytes()[kDirtyOffset], std::byte{0x11});
+  EXPECT_EQ(owner_l2->backing_write_transactions(), owner_writes);
+  EXPECT_EQ(requester_l2->backing_write_transactions(), requester_writes);
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocation.va_addr,
+                                                           process_id_, kDirtyOffset));
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*requester_l2, allocation.va_addr,
+                                                           process_id_, kDirtyOffset));
+  EXPECT_EQ(machine_->soc(1)->cache_coherence()->current_epoch(), owner_epoch);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), requester_epoch);
+  EXPECT_TRUE(process->gpu_alias_grant_current(*owner));
+  EXPECT_TRUE(process->gpu_alias_grant_current(*requester));
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(*owner));
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(*requester));
+}
+
+TEST_F(KfdPeerBindingTest, FreeRetriesClosedBatchAfterPreMaintenanceFailure) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kOwnerOffset = 16;
+  constexpr uint32_t kRequesterOffset = L2Cache::LINE_SIZE + 96;
+  constexpr uint32_t kRequesterLineOffset = kRequesterOffset - L2Cache::LINE_SIZE;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = ids.size();
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto owner = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  const auto requester = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(owner, aliases->end());
+  ASSERT_NE(requester, aliases->end());
+  const auto owner_alias = *owner;
+  const auto requester_alias = *requester;
+  const auto owner_handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(owner_handle);
+  ASSERT_TRUE(requester_handle);
+  const auto owner_access = machine_->soc(1)->gpu_vm().snapshot(*owner_handle);
+  const auto requester_access = machine_->soc(0)->gpu_vm().snapshot(*requester_handle);
+  ASSERT_TRUE(owner_access);
+  ASSERT_TRUE(requester_access);
+  auto grant =
+      process->gpu_peer_backing_grant(kRequester, allocation.va_addr, 2 * L2Cache::LINE_SIZE);
+  ASSERT_TRUE(grant.backing);
+  grant.backing.bytes()[kOwnerOffset] = std::byte{0x21};
+  grant.backing.bytes()[kRequesterOffset] = std::byte{0x32};
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  auto *requester_l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  ASSERT_NE(requester_l2, nullptr);
+  const std::array owner_dirty{std::pair<uint32_t, uint8_t>{kOwnerOffset, 0xa4}};
+  const std::array requester_dirty{std::pair<uint32_t, uint8_t>{kRequesterLineOffset, 0xb5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *owner_l2, allocation.va_addr, process_id_, owner_access->cache_identity(),
+      owner_alias.admission_generation, owner_dirty);
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *requester_l2, allocation.va_addr + L2Cache::LINE_SIZE, process_id_,
+      requester_access->cache_identity(), requester_alias.admission_generation + 1,
+      requester_dirty);
+  const uint64_t owner_writes = owner_l2->backing_write_transactions();
+  const uint64_t requester_writes = requester_l2->backing_write_transactions();
+  const uint64_t owner_epoch = machine_->soc(1)->cache_coherence()->current_epoch();
+  const uint64_t requester_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), -EIO);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(owner_alias));
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(requester_alias));
+  EXPECT_FALSE(driver_->hold_alias_ingress_for_testing(owner_alias));
+  EXPECT_FALSE(driver_->hold_alias_ingress_for_testing(requester_alias));
+  EXPECT_TRUE(process->gpu_alias_grant_current(owner_alias));
+  EXPECT_TRUE(process->gpu_alias_grant_current(requester_alias));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_TRUE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_EQ(grant.backing.bytes()[kOwnerOffset], std::byte{0x21});
+  EXPECT_EQ(grant.backing.bytes()[kRequesterOffset], std::byte{0x32});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocation.va_addr,
+                                                           process_id_, kOwnerOffset));
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *requester_l2, allocation.va_addr + L2Cache::LINE_SIZE, process_id_, kRequesterLineOffset));
+  EXPECT_EQ(owner_l2->backing_write_transactions(), owner_writes);
+  EXPECT_EQ(requester_l2->backing_write_transactions(), requester_writes);
+  EXPECT_EQ(machine_->soc(1)->cache_coherence()->current_epoch(), owner_epoch);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), requester_epoch);
+
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::set_line_generation(
+      *requester_l2, allocation.va_addr + L2Cache::LINE_SIZE, process_id_,
+      requester_alias.admission_generation));
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(grant.backing.bytes()[kOwnerOffset], std::byte{0xa4});
+  EXPECT_EQ(grant.backing.bytes()[kRequesterOffset], std::byte{0xb5});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocation.va_addr,
+                                                            process_id_, kOwnerOffset));
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *requester_l2, allocation.va_addr + L2Cache::LINE_SIZE, process_id_, kRequesterLineOffset));
+  EXPECT_EQ(owner_l2->backing_write_transactions(), owner_writes + 1);
+  EXPECT_EQ(requester_l2->backing_write_transactions(), requester_writes + 1);
+  EXPECT_FALSE(process->gpu_alias_grant_current(owner_alias));
+  EXPECT_FALSE(process->gpu_alias_grant_current(requester_alias));
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+}
+
+TEST_F(KfdPeerBindingTest, FreeAdoptsFailedUnmapAndPublishesItsDirtyRequesterByte) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kDirtyOffset = 72;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = ids.size();
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto owner = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  const auto requester = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(owner, aliases->end());
+  ASSERT_NE(requester, aliases->end());
+  const auto owner_alias = *owner;
+  const auto requester_alias = *requester;
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  auto grant = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(grant.backing);
+  grant.backing.bytes()[kDirtyOffset] = std::byte{0x18};
+  auto *l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xc9}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, allocation.va_addr, process_id_, access->cache_identity(),
+      requester_alias.admission_generation + 1, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -EIO);
+  EXPECT_EQ(unmap.n_success, 0u);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(requester_alias));
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(owner_alias));
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0x18});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id_,
+                                                           kDirtyOffset));
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::set_line_generation(
+      *l2, allocation.va_addr, process_id_, requester_alias.admission_generation));
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0xc9});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id_,
+                                                            kDirtyOffset));
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(process->gpu_alias_grant_current(owner_alias));
+  EXPECT_FALSE(process->gpu_alias_grant_current(requester_alias));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+}
+
+TEST_F(KfdPeerClientMappingTest, FreeRetriesClosedAliasBatchAfterGrantPublicationFailure) {
+  constexpr size_t kBytes = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                     KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_NE(driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = ids.size();
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto owner = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  const auto requester = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(owner, aliases->end());
+  ASSERT_NE(requester, aliases->end());
+  const auto owner_alias = *owner;
+  const auto requester_alias = *requester;
+  void *host_ptr = nullptr;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    host_ptr = process->allocations_.at(allocation.handle).host_ptr;
+  }
+  ASSERT_NE(host_ptr, nullptr);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  driver_->fail_next_alias_free_publish_for_testing();
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), -ENOMEM);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(owner_alias));
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(requester_alias));
+  EXPECT_TRUE(process->gpu_alias_grant_current(owner_alias));
+  EXPECT_TRUE(process->gpu_alias_grant_current(requester_alias));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_TRUE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  map.n_success = 0;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EAGAIN);
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -EAGAIN);
+  EXPECT_EQ(driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EAGAIN);
+  EXPECT_EQ(driver_->munmap(process_id_, host_ptr, kBytes), -EAGAIN);
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), -EAGAIN);
+
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_FALSE(process->gpu_alias_grant_current(owner_alias));
+  EXPECT_FALSE(process->gpu_alias_grant_current(requester_alias));
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  EXPECT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), -EINVAL);
+  EXPECT_EQ(driver_->close(importer_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, FreeRetriesAfterFinalGrantPublicationFailure) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kDirtyOffset = 48;
+  constexpr uint32_t kSiblingOffset = 49;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = ids.size();
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto owner = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  const auto requester = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(owner, aliases->end());
+  ASSERT_NE(requester, aliases->end());
+  const auto owner_alias = *owner;
+  const auto requester_alias = *requester;
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  auto grant = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(grant.backing);
+  grant.backing.bytes()[kDirtyOffset] = std::byte{0x13};
+  grant.backing.bytes()[kSiblingOffset] = std::byte{0x37};
+  auto *l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, allocation.va_addr, process_id_, access->cache_identity(),
+      requester_alias.admission_generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+  const uint64_t epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  driver_->fail_next_alias_free_final_publish_for_testing();
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), -ENOMEM);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(owner_alias));
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(requester_alias));
+  EXPECT_FALSE(process->gpu_alias_grant_current(owner_alias));
+  EXPECT_FALSE(process->gpu_alias_grant_current(requester_alias));
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_EQ(grant.backing.bytes()[kSiblingOffset], std::byte{0x37});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id_,
+                                                            kDirtyOffset));
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), epoch);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &retiring = process->allocations_.at(allocation.handle);
+    EXPECT_TRUE(retiring.retirement_in_progress);
+    EXPECT_TRUE(retiring.grants_retired);
+    EXPECT_EQ(retiring.page_table_mapped_bytes, 0u);
+    EXPECT_GE(retiring.memfd, 0);
+    EXPECT_NE(retiring.host_ptr, nullptr);
+  }
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), -EAGAIN);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_EQ(grant.backing.bytes()[kSiblingOffset], std::byte{0x37});
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    EXPECT_FALSE(process->allocations_.contains(allocation.handle));
+  }
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdPeerBindingTest, ProcessClosePublishesDirtyRequesterLineBeforeRetirement) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr uint32_t kDirtyOffset = 48;
+
+  const uint32_t closing_id = driver_->open_process(/*client_pid=*/4245);
+  ASSERT_NE(closing_id, 0u);
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 4096;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(closing_id);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto requester = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(requester, aliases->end());
+  const auto alias = *requester;
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(closing_id);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  auto grant = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(grant.backing);
+  grant.backing.bytes()[kDirtyOffset] = std::byte{0x21};
+  auto *l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, closing_id,
+                                                      access->cache_identity(),
+                                                      alias.admission_generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+
+  driver_->fail_next_alias_close_writeback_for_testing();
+  EXPECT_EQ(driver_->close(closing_id), -ENOMEM);
+  EXPECT_EQ(driver_->find_process(closing_id), nullptr);
+  EXPECT_TRUE(process->gpu_alias_grant_current(alias));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_TRUE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0x21});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, closing_id,
+                                                           kDirtyOffset));
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  driver_->fail_next_alias_close_retire_for_testing();
+  EXPECT_EQ(driver_->close(closing_id), -ENOMEM);
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, closing_id,
+                                                            kDirtyOffset));
+  EXPECT_TRUE(process->gpu_alias_grant_current(alias));
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_EQ(driver_->close(closing_id), 0);
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, closing_id,
+                                                            kDirtyOffset));
+  EXPECT_FALSE(process->gpu_alias_grant_current(alias));
+  EXPECT_EQ(driver_->find_process(closing_id), nullptr);
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+}
+
+TEST_F(KfdPeerBindingTest, CloseAllRetainsAndRetriesFailedProcessClose) {
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 4096;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto owner = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  ASSERT_NE(owner, aliases->end());
+  const auto alias = *owner;
+
+  driver_->fail_next_alias_close_writeback_for_testing();
+  EXPECT_EQ(driver_->close_all_processes(), -ENOMEM);
+  EXPECT_EQ(driver_->find_process(process_id_), nullptr);
+  EXPECT_TRUE(process->gpu_alias_grant_current(alias));
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_EQ(driver_->close_all_processes(), 0);
+  EXPECT_FALSE(process->gpu_alias_grant_current(alias));
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+}
+
+TEST_F(KfdPeerBindingTest, FailedCloseKeepsOtherDirtyProcessResolverVisible) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr uint32_t kSourceOffset = 16;
+  constexpr uint32_t kImportedOffset = L2Cache::LINE_SIZE + 32;
+
+  kfd_ioctl_alloc_memory_of_gpu_args source{};
+  source.size = 4096;
+  source.gpu_id = kOwner;
+  source.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &source), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = source.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args source_map{};
+  source_map.handle = source.handle;
+  source_map.n_devices = 1;
+  source_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &source_map), 0);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4248);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = source.va_addr + 2 * source.size;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  kfd_ioctl_map_memory_to_gpu_args imported_map{};
+  imported_map.handle = imported.handle;
+  imported_map.n_devices = 1;
+  imported_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &imported_map), 0);
+
+  const auto source_process = driver_->find_process(process_id_);
+  const auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(source_process, nullptr);
+  ASSERT_NE(importer, nullptr);
+  const auto source_aliases = source_process->gpu_alias_snapshot();
+  const auto imported_aliases = importer->gpu_alias_snapshot();
+  const auto source_alias = std::ranges::find_if(*source_aliases, [&](const auto &alias) {
+    return alias.gpu_va == source.va_addr && alias.gpu_id == kOwner;
+  });
+  const auto imported_alias = std::ranges::find_if(*imported_aliases, [&](const auto &alias) {
+    return alias.gpu_va == imported.va_addr && alias.gpu_id == kOwner;
+  });
+  ASSERT_NE(source_alias, source_aliases->end());
+  ASSERT_NE(imported_alias, imported_aliases->end());
+  const auto source_handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  const auto imported_handle = machine_->soc(1)->gpu_vm().find_vmid(importer_id);
+  ASSERT_TRUE(source_handle);
+  ASSERT_TRUE(imported_handle);
+  const auto source_access = machine_->soc(1)->gpu_vm().snapshot(*source_handle);
+  const auto imported_access = machine_->soc(1)->gpu_vm().snapshot(*imported_handle);
+  ASSERT_TRUE(source_access);
+  ASSERT_TRUE(imported_access);
+  auto backing =
+      source_process->gpu_peer_backing_grant(kOwner, source.va_addr, source.size).backing;
+  ASSERT_TRUE(backing);
+  EXPECT_TRUE(importer->gpu_peer_backing_grant(kOwner, imported.va_addr, source.size)
+                  .backing.same_backing(backing));
+  backing.bytes()[kSourceOffset] = std::byte{0x11};
+  backing.bytes()[kImportedOffset] = std::byte{0x22};
+  auto *l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array source_dirty{std::pair<uint32_t, uint8_t>{kSourceOffset, 0xa1}};
+  const std::array imported_dirty{std::pair<uint32_t, uint8_t>{32, 0xb2}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, source.va_addr, process_id_, source_access->cache_identity(),
+      source_alias->admission_generation, source_dirty);
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, imported.va_addr + L2Cache::LINE_SIZE, importer_id, imported_access->cache_identity(),
+      imported_alias->admission_generation, imported_dirty);
+
+  driver_->fail_next_alias_close_writeback_for_testing();
+  EXPECT_EQ(driver_->close(process_id_), -ENOMEM);
+  EXPECT_EQ(driver_->find_process(process_id_), nullptr);
+  EXPECT_EQ(driver_->close(importer_id), -EAGAIN);
+  EXPECT_EQ(driver_->find_process(importer_id), importer);
+  EXPECT_EQ(importer->open_ref_count(), 1u);
+  EXPECT_TRUE(importer->gpu_alias_grant_current(*imported_alias));
+  EXPECT_EQ(backing.bytes()[kSourceOffset], std::byte{0x11});
+  EXPECT_EQ(backing.bytes()[kImportedOffset], std::byte{0x22});
+
+  EXPECT_EQ(driver_->close(process_id_), 0);
+  EXPECT_EQ(backing.bytes()[kSourceOffset], std::byte{0xa1});
+  EXPECT_EQ(backing.bytes()[kImportedOffset], std::byte{0xb2});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, source.va_addr, process_id_,
+                                                            kSourceOffset));
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *l2, imported.va_addr + L2Cache::LINE_SIZE, importer_id, 32));
+  EXPECT_EQ(driver_->close(importer_id), 0);
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+}
+
+TEST_F(KfdPeerBindingTest, CloseFlushesOpenDirtyAliasOfPreclaimPendingProcess) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr uint32_t kDirtyOffset = 32;
+
+  kfd_ioctl_alloc_memory_of_gpu_args source{};
+  source.size = 4096;
+  source.gpu_id = kOwner;
+  source.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &source), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = source.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args source_map{};
+  source_map.handle = source.handle;
+  source_map.n_devices = 1;
+  source_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &source_map), 0);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4249);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = source.va_addr + 2 * source.size;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  kfd_ioctl_map_memory_to_gpu_args imported_map{};
+  imported_map.handle = imported.handle;
+  imported_map.n_devices = 1;
+  imported_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &imported_map), 0);
+
+  const auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  const auto aliases = importer->gpu_alias_snapshot();
+  const auto alias = std::ranges::find_if(*aliases, [&](const auto &candidate) {
+    return candidate.gpu_va == imported.va_addr && candidate.gpu_id == kOwner;
+  });
+  ASSERT_NE(alias, aliases->end());
+  const auto handle = machine_->soc(1)->gpu_vm().find_vmid(importer_id);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(1)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  auto backing = importer->gpu_peer_backing_grant(kOwner, imported.va_addr, source.size).backing;
+  ASSERT_TRUE(backing);
+  backing.bytes()[kDirtyOffset] = std::byte{0x21};
+  auto *l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xb2}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, imported.va_addr, importer_id,
+                                                      access->cache_identity(),
+                                                      alias->admission_generation, dirty_bytes);
+
+  driver_->fail_next_alias_close_prepare_for_testing();
+  EXPECT_EQ(driver_->close(importer_id), -ENOMEM);
+  EXPECT_EQ(driver_->find_process(importer_id), nullptr);
+  EXPECT_TRUE(importer->gpu_alias_grant_current(*alias));
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(*alias));
+  EXPECT_EQ(backing.bytes()[kDirtyOffset], std::byte{0x21});
+
+  EXPECT_EQ(driver_->close(process_id_), 0);
+  EXPECT_EQ(backing.bytes()[kDirtyOffset], std::byte{0xb2});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, imported.va_addr, importer_id,
+                                                            kDirtyOffset));
+  EXPECT_EQ(driver_->close(importer_id), 0);
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+}
+
+TEST_F(KfdPeerBindingTest, CApiCloseReportsFailureAndRetainsCheckedDestroy) {
+  const auto map_alias = [&](uint32_t process_id) {
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.size = 4096;
+    allocation.gpu_id = kOwner;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    if (driver_->ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation) != 0)
+      return false;
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kOwner;
+    if (driver_->ioctl(process_id, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported) != 0)
+      return false;
+    uint32_t owner_id = kOwner;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+    return driver_->ioctl(process_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map) == 0;
+  };
+
+  rj_vm_t api{};
+  api.vm = machine_;
+  ASSERT_TRUE(map_alias(process_id_));
+  driver_->fail_next_alias_close_writeback_for_testing();
+  EXPECT_EQ(rj_vm_device_close(&api, process_id_), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_EQ(rj_vm_device_close(&api, process_id_), ROCJITSU_STATUS_SUCCESS);
+
+  const uint32_t other_id = driver_->open_process(/*client_pid=*/4246);
+  ASSERT_NE(other_id, 0u);
+  ASSERT_TRUE(map_alias(other_id));
+  driver_->fail_next_alias_close_writeback_for_testing();
+  EXPECT_EQ(rj_vm_close_all_devices(&api), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_EQ(rj_vm_close_all_devices(&api), ROCJITSU_STATUS_SUCCESS);
+
+  const uint32_t final_id = driver_->open_process(/*client_pid=*/4247);
+  ASSERT_NE(final_id, 0u);
+  ASSERT_TRUE(map_alias(final_id));
+  auto *checked = new rj_vm_t;
+  checked->vm = machine_;
+  rj_vm_retain(checked);
+  driver_->fail_next_alias_close_writeback_for_testing();
+  EXPECT_EQ(rj_vm_destroy_checked(checked), ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_FALSE(checked->is_destroyed());
+  EXPECT_EQ(rj_vm_destroy_checked(checked), ROCJITSU_STATUS_SUCCESS);
+  EXPECT_TRUE(checked->is_destroyed());
+  rj_vm_release(checked);
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+}
+
+TEST_F(KfdPeerBindingTest, ProcessCloseSettlesFailedFreeAliasBatch) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr uint32_t kDirtyOffset = 48;
+  const uint32_t closing_id = driver_->open_process(/*client_pid=*/4244);
+  ASSERT_NE(closing_id, 0u);
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 4096;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = ids.size();
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto process = driver_->find_process(closing_id);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto requester = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(requester, aliases->end());
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(closing_id);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  auto grant = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(grant.backing);
+  grant.backing.bytes()[kDirtyOffset] = std::byte{0x13};
+  auto *l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, closing_id,
+                                                      access->cache_identity(),
+                                                      requester->admission_generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  driver_->fail_next_alias_free_final_publish_for_testing();
+  EXPECT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), -ENOMEM);
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 2u);
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_EQ(driver_->close(closing_id), 0);
+  EXPECT_EQ(grant.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+}
+
+TEST_F(KfdPeerBindingTest, FreeImportedAllocationDrainsItsAliasesButRetainsSourceBacking) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  using rocjitsu::amdgpu::MemoryIngressSpan;
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kDirtyOffset = 96;
+  kfd_ioctl_alloc_memory_of_gpu_args source{};
+  source.size = kBytes;
+  source.gpu_id = kOwner;
+  source.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &source), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = source.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args source_map{};
+  source_map.handle = source.handle;
+  source_map.n_devices = 1;
+  source_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &source_map), 0);
+  const auto source_process = driver_->find_process(process_id_);
+  ASSERT_NE(source_process, nullptr);
+  auto source_backing =
+      source_process->gpu_peer_backing_grant(kOwner, source.va_addr, L2Cache::LINE_SIZE).backing;
+  ASSERT_TRUE(source_backing);
+  const auto source_aliases = source_process->gpu_alias_snapshot();
+  const auto source_alias = std::ranges::find_if(*source_aliases, [&](const auto &alias) {
+    return alias.gpu_va == source.va_addr && alias.gpu_id == kOwner;
+  });
+  ASSERT_NE(source_alias, source_aliases->end());
+  const auto source_handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(source_handle);
+  const auto source_access = machine_->soc(1)->gpu_vm().snapshot(*source_handle);
+  ASSERT_TRUE(source_access);
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  source_backing.bytes()[kDirtyOffset] = std::byte{0x21};
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *owner_l2, source.va_addr, process_id_, source_access->cache_identity(),
+      source_alias->admission_generation, dirty_bytes);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = source.va_addr + 2 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args imported_map{};
+  imported_map.handle = imported.handle;
+  imported_map.n_devices = ids.size();
+  imported_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &imported_map), 0);
+  const auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  const auto aliases = importer->gpu_alias_snapshot();
+  const auto owner = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == imported.va_addr && alias.gpu_id == kOwner;
+  });
+  const auto requester = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == imported.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(owner, aliases->end());
+  ASSERT_NE(requester, aliases->end());
+  const auto owner_alias = *owner;
+  const auto requester_alias = *requester;
+  const auto imported_backing =
+      importer->gpu_peer_backing_grant(kOwner, imported.va_addr, 4).backing;
+  ASSERT_TRUE(imported_backing);
+  EXPECT_TRUE(imported_backing.same_backing(source_backing));
+  const auto owner_handle = machine_->soc(1)->gpu_vm().find_vmid(importer_id);
+  ASSERT_TRUE(owner_handle);
+  const auto access = machine_->soc(1)->gpu_vm().snapshot(*owner_handle);
+  ASSERT_TRUE(access);
+  const std::array spans{MemoryIngressSpan{imported.va_addr, 4, VmAccessKind::Write}};
+  auto held_owner = driver_->admit_gpu_alias_ingress(importer_id, kOwner, *access, spans);
+  auto held_requester = driver_->hold_alias_ingress_for_testing(requester_alias);
+  ASSERT_EQ(held_owner.outcome, VmAccessOutcome::Complete);
+  ASSERT_TRUE(held_owner.permit);
+  ASSERT_TRUE(held_requester);
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, source.va_addr, process_id_,
+                                                           kDirtyOffset));
+  const uint64_t epoch = machine_->soc(1)->cache_coherence()->current_epoch();
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = imported.handle;
+  auto pending = std::async(std::launch::async, [&] {
+    return driver_->ioctl(importer_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free);
+  });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool closed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    closed = driver_->alias_ingress_closed_for_testing(owner_alias) &&
+             driver_->alias_ingress_closed_for_testing(requester_alias);
+    if (closed || pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  EXPECT_TRUE(source_process->gpu_peer_backing_grant(kOwner, source.va_addr, 4)
+                  .backing.same_backing(imported_backing));
+  held_owner.permit.reset();
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  held_requester->reset();
+  if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("imported FREE did not finish after both alias permits left\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending.get(), 0);
+  EXPECT_EQ(source_backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, source.va_addr, process_id_,
+                                                            kDirtyOffset));
+  EXPECT_GT(machine_->soc(1)->cache_coherence()->current_epoch(), epoch);
+  EXPECT_FALSE(importer->gpu_alias_grant_current(owner_alias));
+  EXPECT_FALSE(importer->gpu_alias_grant_current(requester_alias));
+  EXPECT_TRUE(source_process->gpu_peer_backing_grant(kOwner, source.va_addr, 4)
+                  .backing.same_backing(imported_backing));
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+  free.handle = source.handle;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(driver_->close(importer_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, ProcessCloseWaitsForImportedOwnerAndRequesterAliasPermits) {
+  using rocjitsu::amdgpu::MemoryIngressSpan;
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+
+  kfd_ioctl_alloc_memory_of_gpu_args source{};
+  source.size = kBytes;
+  source.gpu_id = kOwner;
+  source.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &source), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = source.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args source_map{};
+  source_map.handle = source.handle;
+  source_map.n_devices = 1;
+  source_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &source_map), 0);
+  const auto source_process = driver_->find_process(process_id_);
+  ASSERT_NE(source_process, nullptr);
+  const auto source_backing =
+      source_process->gpu_peer_backing_grant(kOwner, source.va_addr, 4).backing;
+  ASSERT_TRUE(source_backing);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = source.va_addr + 2 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args imported_map{};
+  imported_map.handle = imported.handle;
+  imported_map.n_devices = ids.size();
+  imported_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &imported_map), 0);
+  const auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  const auto aliases = importer->gpu_alias_snapshot();
+  const auto owner = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == imported.va_addr && alias.gpu_id == kOwner;
+  });
+  const auto requester = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == imported.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(owner, aliases->end());
+  ASSERT_NE(requester, aliases->end());
+  const auto owner_alias = *owner;
+  const auto requester_alias = *requester;
+  const auto imported_backing =
+      importer->gpu_peer_backing_grant(kOwner, imported.va_addr, 4).backing;
+  ASSERT_TRUE(imported_backing);
+  ASSERT_TRUE(imported_backing.same_backing(source_backing));
+  const auto owner_handle = machine_->soc(1)->gpu_vm().find_vmid(importer_id);
+  ASSERT_TRUE(owner_handle);
+  const auto access = machine_->soc(1)->gpu_vm().snapshot(*owner_handle);
+  ASSERT_TRUE(access);
+  const std::array spans{MemoryIngressSpan{imported.va_addr, 4, VmAccessKind::Write}};
+  auto held_owner = driver_->admit_gpu_alias_ingress(importer_id, kOwner, *access, spans);
+  auto held_requester = driver_->hold_alias_ingress_for_testing(requester_alias);
+  ASSERT_EQ(held_owner.outcome, VmAccessOutcome::Complete);
+  ASSERT_TRUE(held_owner.permit);
+  ASSERT_TRUE(held_requester);
+
+  auto pending = std::async(std::launch::async, [&] { return driver_->close(importer_id); });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool closing = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    closing = importer->event_state_.is_closing() && driver_->find_process(importer_id) == nullptr;
+    if (closing || pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closing);
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  if (closing) {
+    bool op_released = false;
+    const auto lock_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < lock_deadline) {
+      std::unique_lock op_try(importer->op_mutex_, std::try_to_lock);
+      if (op_try.owns_lock()) {
+        op_released = true;
+        break;
+      }
+      std::this_thread::yield();
+    }
+    EXPECT_TRUE(op_released);
+    EXPECT_TRUE(importer->gpu_alias_grant_current(owner_alias));
+    EXPECT_TRUE(importer->gpu_alias_grant_current(requester_alias));
+    EXPECT_TRUE(importer->gpu_peer_backing_grant(kOwner, imported.va_addr, 4)
+                    .backing.same_backing(imported_backing));
+    {
+      std::shared_lock lock(importer->page_table_mutex_);
+      EXPECT_TRUE(
+          importer->page_table_.contains(imported.va_addr >> rocjitsu::KfdProcess::kPageShift));
+    }
+  }
+
+  held_owner.permit.reset();
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  held_requester->reset();
+  if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("process close did not finish after both alias permits left\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending.get(), 0);
+  EXPECT_FALSE(importer->gpu_alias_grant_current(owner_alias));
+  EXPECT_FALSE(importer->gpu_alias_grant_current(requester_alias));
+  {
+    std::shared_lock lock(importer->page_table_mutex_);
+    EXPECT_FALSE(
+        importer->page_table_.contains(imported.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_TRUE(source_process->gpu_peer_backing_grant(kOwner, source.va_addr, 4)
+                  .backing.same_backing(imported_backing));
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = source.handle;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdPeerClientMappingTest, OrdinaryMunmapAndMmapDrainEveryLiveAlias) {
+  constexpr size_t kBytes = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                     KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_NE(driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = ids.size();
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_alloc_memory_of_gpu_args unrelated{};
+  unrelated.size = kBytes;
+  unrelated.gpu_id = kOwner;
+  unrelated.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &unrelated), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto owner = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  const auto requester = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(owner, aliases->end());
+  ASSERT_NE(requester, aliases->end());
+  const auto owner_alias = *owner;
+  const auto requester_alias = *requester;
+  void *host_ptr = nullptr;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    host_ptr = process->allocations_.at(allocation.handle).host_ptr;
+  }
+  ASSERT_NE(host_ptr, nullptr);
+  void *untracked =
+      ::mmap(nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(untracked, MAP_FAILED);
+
+  const auto wait_for_both_closed = [&] {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+      if (driver_->alias_ingress_closed_for_testing(owner_alias) &&
+          driver_->alias_ingress_closed_for_testing(requester_alias))
+        return true;
+      std::this_thread::yield();
+    }
+    return false;
+  };
+  const auto page_is_mapped = [&] {
+    std::shared_lock lock(process->page_table_mutex_);
+    return process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+  };
+
+  auto held_owner = driver_->hold_alias_ingress_for_testing(owner_alias);
+  auto held_requester = driver_->hold_alias_ingress_for_testing(requester_alias);
+  ASSERT_TRUE(held_owner);
+  ASSERT_TRUE(held_requester);
+  auto pending_unmap = std::async(std::launch::async,
+                                  [&] { return driver_->munmap(process_id_, host_ptr, kBytes); });
+  const bool unmap_closed = wait_for_both_closed();
+  EXPECT_TRUE(unmap_closed);
+  EXPECT_EQ(pending_unmap.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  if (unmap_closed) {
+    EXPECT_TRUE(page_is_mapped());
+    std::lock_guard lock(process->alloc_mutex_);
+    EXPECT_EQ(process->allocations_.at(allocation.handle).host_ptr, host_ptr);
+  }
+  auto other_map = std::async(std::launch::async, [&] {
+    void *mapped = driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                 static_cast<off_t>(unrelated.mmap_offset));
+    return std::pair{mapped, errno};
+  });
+  // Client mapping completes on another thread after the CU/SDMA permit owner
+  // releases its permit. An unrelated allocation waits for op_mutex_, rather
+  // than inheriting the first allocation's closed alias as a retryable error.
+  EXPECT_EQ(other_map.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  auto untracked_unmap = std::async(
+      std::launch::async, [&] { return driver_->munmap(process_id_, untracked, kBytes); });
+  EXPECT_EQ(untracked_unmap.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  held_owner->reset();
+  EXPECT_EQ(pending_unmap.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  held_requester->reset();
+  if (pending_unmap.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("ordinary munmap did not finish after alias permits left\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending_unmap.get(), 0);
+  if (other_map.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("unrelated mmap did not finish after alias permits left\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  const auto [other_host_ptr, other_map_errno] = other_map.get();
+  EXPECT_NE(other_host_ptr, MAP_FAILED) << other_map_errno;
+  if (untracked_unmap.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("untracked munmap did not finish after alias permits left\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(untracked_unmap.get(), -ENOENT);
+  EXPECT_EQ(::munmap(untracked, kBytes), 0);
+  EXPECT_FALSE(page_is_mapped());
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(owner_alias));
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(requester_alias));
+
+  held_owner = driver_->hold_alias_ingress_for_testing(owner_alias);
+  held_requester = driver_->hold_alias_ingress_for_testing(requester_alias);
+  ASSERT_TRUE(held_owner);
+  ASSERT_TRUE(held_requester);
+  auto pending_map = std::async(std::launch::async, [&] {
+    return driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                         static_cast<off_t>(allocation.mmap_offset));
+  });
+  const bool map_closed = wait_for_both_closed();
+  EXPECT_TRUE(map_closed);
+  EXPECT_EQ(pending_map.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  if (map_closed) {
+    EXPECT_FALSE(page_is_mapped());
+  }
+  auto other_unmap = std::async(
+      std::launch::async, [&] { return driver_->munmap(process_id_, other_host_ptr, kBytes); });
+  EXPECT_EQ(other_unmap.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  held_owner->reset();
+  EXPECT_EQ(pending_map.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  held_requester->reset();
+  if (pending_map.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("ordinary mmap did not finish after alias permits left\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_NE(pending_map.get(), MAP_FAILED);
+  if (other_unmap.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("unrelated munmap did not finish after alias permits left\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(other_unmap.get(), 0);
+  EXPECT_TRUE(page_is_mapped());
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(owner_alias));
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(requester_alias));
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = unrelated.handle;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdPeerClientMappingTest, OrdinaryMunmapPublishesDirtyRequesterByteAndRetries) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kDirtyOffset = 48;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                     KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_NE(driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kRequester;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto alias = *found;
+  const auto vmid = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(vmid);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  auto backing = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, kBytes);
+  ASSERT_TRUE(backing.backing);
+  backing.backing.bytes()[kDirtyOffset] = std::byte{0x21};
+  auto *l2 = machine_->soc(0)->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id_,
+                                                      access->cache_identity(),
+                                                      alias.admission_generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+  void *host_ptr = nullptr;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    host_ptr = process->allocations_.at(allocation.handle).host_ptr;
+  }
+  ASSERT_NE(host_ptr, nullptr);
+  const auto page_is_mapped = [&] {
+    std::shared_lock lock(process->page_table_mutex_);
+    return process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+  };
+
+  driver_->fail_next_alias_mapping_writeback_for_testing();
+  EXPECT_EQ(driver_->munmap(process_id_, host_ptr, kBytes), -ENOMEM);
+  EXPECT_TRUE(page_is_mapped());
+  EXPECT_TRUE(process->gpu_alias_grant_current(alias));
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0x21});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id_,
+                                                           kDirtyOffset));
+  EXPECT_EQ(driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EAGAIN);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+
+  driver_->fail_next_alias_mapping_retire_for_testing();
+  EXPECT_EQ(driver_->munmap(process_id_, host_ptr, kBytes), -ENOMEM);
+  EXPECT_TRUE(page_is_mapped());
+  EXPECT_TRUE(process->gpu_alias_grant_current(alias));
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id_,
+                                                            kDirtyOffset));
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+
+  EXPECT_EQ(driver_->munmap(process_id_, host_ptr, kBytes), 0);
+  EXPECT_FALSE(page_is_mapped());
+  EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(alias));
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdPeerClientMappingTest, FreeAndCloseSettleFailedOrdinaryMunmap) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kDirtyOffset = 48;
+
+  for (bool final_close : {false, true}) {
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.size = kBytes;
+    allocation.gpu_id = kOwner;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                       KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    ASSERT_NE(driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                            static_cast<off_t>(allocation.mmap_offset)),
+              MAP_FAILED);
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kOwner;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    uint32_t requester_id = kRequester;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+    const auto process = driver_->find_process(process_id_);
+    ASSERT_NE(process, nullptr);
+    const auto aliases = process->gpu_alias_snapshot();
+    const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+      return alias.gpu_va == allocation.va_addr && alias.gpu_id == kRequester;
+    });
+    ASSERT_NE(found, aliases->end());
+    const auto alias = *found;
+    const auto vmid = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+    ASSERT_TRUE(vmid);
+    const auto access = machine_->soc(0)->gpu_vm().snapshot(*vmid);
+    ASSERT_TRUE(access);
+    auto backing = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, kBytes);
+    ASSERT_TRUE(backing.backing);
+    backing.backing.bytes()[kDirtyOffset] = std::byte{0x21};
+    auto *l2 = machine_->soc(0)->xcd(0)->l2_cache();
+    ASSERT_NE(l2, nullptr);
+    const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+    KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id_,
+                                                        access->cache_identity(),
+                                                        alias.admission_generation, dirty_bytes);
+    const uint64_t writes = l2->backing_write_transactions();
+    void *host_ptr = nullptr;
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      host_ptr = process->allocations_.at(allocation.handle).host_ptr;
+    }
+    ASSERT_NE(host_ptr, nullptr);
+
+    driver_->fail_next_alias_mapping_retire_for_testing();
+    EXPECT_EQ(driver_->munmap(process_id_, host_ptr, kBytes), -ENOMEM);
+    EXPECT_TRUE(process->gpu_alias_grant_current(alias));
+    EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+    EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+    EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id_,
+                                                              kDirtyOffset));
+    EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+
+    if (final_close) {
+      ASSERT_EQ(driver_->close(process_id_), 0);
+      process_id_ = 0;
+    } else {
+      kfd_ioctl_free_memory_of_gpu_args free{};
+      free.handle = allocation.handle;
+      ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+    }
+    EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+    EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+    EXPECT_FALSE(process->gpu_alias_grant_current(alias));
+    EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(alias));
+    EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+  }
+}
+
+TEST_F(KfdPeerClientMappingTest, UnmapRetriesClosedGenerationAfterPublicationFailure) {
+  using rocjitsu::amdgpu::MemoryIngressSpan;
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
+                     KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_NE(driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto old_alias = *found;
+  const auto handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(1)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  const std::array spans{MemoryIngressSpan{allocation.va_addr, 4, VmAccessKind::Write}};
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  driver_->fail_next_alias_unmap_publish_for_testing();
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -ENOMEM);
+  EXPECT_EQ(unmap.n_success, 0u);
+  EXPECT_TRUE(process->gpu_alias_grant_current(old_alias));
+  EXPECT_EQ(driver_->admit_gpu_alias_ingress(process_id_, kOwner, *access, spans).outcome,
+            VmAccessOutcome::Unavailable);
+  EXPECT_FALSE(driver_->reopen_gpu_alias_ingress(old_alias));
+  EXPECT_EQ(driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EAGAIN);
+  void *host_ptr = nullptr;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    EXPECT_EQ(process->allocations_.at(allocation.handle).page_table_mapped_bytes, 0u);
+    host_ptr = process->allocations_.at(allocation.handle).host_ptr;
+  }
+  EXPECT_EQ(driver_->munmap(process_id_, host_ptr, kBytes), -EAGAIN);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+
+  // A duplicate MAP must not restore the PTE while the old grant's gate is
+  // closed; UNMAP still needs to retire that same generation on retry.
+  map.n_success = 0;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EAGAIN);
+  EXPECT_EQ(map.n_success, 0u);
+  EXPECT_TRUE(process->gpu_alias_grant_current(old_alias));
+  EXPECT_EQ(driver_->admit_gpu_alias_ingress(process_id_, kOwner, *access, spans).outcome,
+            VmAccessOutcome::Unavailable);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+  EXPECT_FALSE(process->gpu_alias_grant_current(old_alias));
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto remapped = process->gpu_alias_snapshot();
+  const auto fresh = std::ranges::find_if(*remapped, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  ASSERT_NE(fresh, remapped->end());
+  EXPECT_NE(fresh->admission_generation, old_alias.admission_generation);
+  EXPECT_EQ(driver_->admit_gpu_alias_ingress(process_id_, kOwner, *access, spans).outcome,
+            VmAccessOutcome::Complete);
+}
+
+TEST_F(KfdPeerBindingTest, FreeDiscardsAbandonedFailedUnmapGeneration) {
+  constexpr size_t kBytes = 4096;
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.size = kBytes;
+    allocation.gpu_id = kOwner;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kOwner;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    uint32_t owner_id = kOwner;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    const auto aliases = process->gpu_alias_snapshot();
+    const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+      return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+    });
+    ASSERT_NE(found, aliases->end());
+    const auto old_alias = *found;
+
+    kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+    unmap.handle = allocation.handle;
+    unmap.n_devices = 1;
+    unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+    driver_->fail_next_alias_unmap_publish_for_testing();
+    EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -ENOMEM);
+    EXPECT_EQ(unmap.n_success, 0u);
+    EXPECT_TRUE(process->gpu_alias_grant_current(old_alias));
+    EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 1u);
+
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = allocation.handle;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+    EXPECT_FALSE(process->gpu_alias_grant_current(old_alias));
+    EXPECT_FALSE(process->gpu_access_grant(kOwner, allocation.va_addr, 4).allowed);
+    EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+  }
+}
+
+TEST_F(KfdPeerBindingTest, ProcessCloseSettlesFailedUnmapGeneration) {
+  constexpr size_t kBytes = 4096;
+
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    const uint32_t closing_id = driver_->open_process(/*client_pid=*/4243 + attempt);
+    ASSERT_NE(closing_id, 0u);
+    const auto process = driver_->find_process(closing_id);
+    ASSERT_NE(process, nullptr);
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.size = kBytes;
+    allocation.gpu_id = kOwner;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kOwner;
+    ASSERT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    uint32_t owner_id = kOwner;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+    ASSERT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    const auto aliases = process->gpu_alias_snapshot();
+    const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+      return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+    });
+    ASSERT_NE(found, aliases->end());
+    const auto old_alias = *found;
+
+    kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+    unmap.handle = allocation.handle;
+    unmap.n_devices = 1;
+    unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+    driver_->fail_next_alias_unmap_publish_for_testing();
+    EXPECT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -ENOMEM);
+    EXPECT_EQ(unmap.n_success, 0u);
+    EXPECT_TRUE(process->gpu_alias_grant_current(old_alias));
+    EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 1u);
+
+    ASSERT_EQ(driver_->close(closing_id), 0);
+    EXPECT_EQ(driver_->find_process(closing_id), nullptr);
+    EXPECT_FALSE(process->gpu_alias_grant_current(old_alias));
+    EXPECT_FALSE(process->gpu_access_grant(kOwner, allocation.va_addr, 4).allowed);
+    EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+  }
+}
+
+class KfdMissingPeerRouteTest : public KfdTwoRequesterBindingTest {
+protected:
+  bool connect_second_requester() const override { return false; }
+};
+
+TEST_F(KfdTwoRequesterBindingTest, CanonicalAliasSnapshotFollowsGpuGrantsAndBackingLifetime) {
+  constexpr size_t kBytes = 4096;
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto find_alias =
+      [](const rocjitsu::KfdProcess::GpuAliasSnapshot &snapshot, uint64_t va,
+         uint32_t gpu_id) -> std::optional<rocjitsu::KfdProcess::GpuAliasRecord> {
+    const auto it = std::ranges::find_if(
+        snapshot, [&](const auto &alias) { return alias.gpu_va == va && alias.gpu_id == gpu_id; });
+    if (it == snapshot.end())
+      return std::nullopt;
+    return *it;
+  };
+  const auto map_gpu = [&](uint32_t pid, uint64_t handle, uint32_t gpu_id) {
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    return driver_->ioctl(pid, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map);
+  };
+  const auto unmap_gpu = [&](uint32_t pid, uint64_t handle, uint32_t gpu_id) {
+    kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+    unmap.handle = handle;
+    unmap.n_devices = 1;
+    unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    return driver_->ioctl(pid, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
+  };
+
+  kfd_ioctl_alloc_memory_of_gpu_args first{};
+  first.size = kBytes;
+  first.gpu_id = kOwner;
+  first.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &first), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = first.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  EXPECT_TRUE(process->gpu_alias_snapshot()->empty()); // Export alone is not a MAP grant.
+  EXPECT_FALSE(process->gpu_peer_backing_grant(kOwner, first.va_addr, 1).backing);
+
+  ASSERT_EQ(map_gpu(process_id_, first.handle, kOwner), 0);
+  const auto owner_alias = find_alias(*process->gpu_alias_snapshot(), first.va_addr, kOwner);
+  ASSERT_TRUE(owner_alias);
+  EXPECT_NE(owner_alias->backing_id, 0u);
+  const auto owner_lease = process->gpu_peer_backing_grant(kOwner, first.va_addr, kBytes).backing;
+  ASSERT_TRUE(owner_lease);
+  EXPECT_EQ(owner_alias->backing_id, owner_lease.backing_id());
+  EXPECT_EQ(owner_alias->process_id, process_id_);
+  EXPECT_NE(owner_alias->process_incarnation, 0u);
+  EXPECT_EQ(owner_alias->backing_offset, 0u);
+  EXPECT_EQ(owner_alias->extent, kBytes);
+  EXPECT_EQ(owner_lease.file_offset(), 0u);
+  EXPECT_EQ(owner_lease.size(), kBytes);
+  EXPECT_NE(owner_alias->admission_generation, 0u);
+
+  kfd_ioctl_ipc_export_handle_args exported_again{};
+  exported_again.handle = first.handle;
+  exported_again.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported_again), 0);
+  const auto repeated_alias = find_alias(*process->gpu_alias_snapshot(), first.va_addr, kOwner);
+  ASSERT_TRUE(repeated_alias);
+  EXPECT_EQ(repeated_alias->backing_id, owner_alias->backing_id);
+  EXPECT_EQ(repeated_alias->admission_generation, owner_alias->admission_generation);
+
+  kfd_ioctl_alloc_memory_of_gpu_args second{};
+  second.size = kBytes;
+  second.gpu_id = kOwner;
+  second.flags = first.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &second), 0);
+  ASSERT_EQ(map_gpu(process_id_, second.handle, kOwner), 0);
+  kfd_ioctl_ipc_export_handle_args second_export{};
+  second_export.handle = second.handle;
+  second_export.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &second_export), 0);
+  const auto second_alias = find_alias(*process->gpu_alias_snapshot(), second.va_addr, kOwner);
+  ASSERT_TRUE(second_alias);
+  EXPECT_NE(second_alias->backing_id, owner_alias->backing_id);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  const auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = first.va_addr + 4 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  ASSERT_NE(imported.va_addr, first.va_addr);
+  EXPECT_TRUE(importer->gpu_alias_snapshot()->empty());
+  ASSERT_EQ(map_gpu(importer_id, imported.handle, kOwner), 0);
+  const auto imported_alias = find_alias(*importer->gpu_alias_snapshot(), imported.va_addr, kOwner);
+  ASSERT_TRUE(imported_alias);
+  EXPECT_EQ(imported_alias->backing_id, owner_alias->backing_id);
+  EXPECT_NE(imported_alias->process_incarnation, owner_alias->process_incarnation);
+  EXPECT_NE(imported_alias->admission_generation, 0u);
+  kfd_ioctl_ipc_import_handle_args imported_again{};
+  std::copy(std::begin(exported_again.share_handle), std::end(exported_again.share_handle),
+            std::begin(imported_again.share_handle));
+  imported_again.gpu_id = kOwner;
+  imported_again.va_addr = first.va_addr + 5 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported_again), 0);
+  EXPECT_FALSE(find_alias(*importer->gpu_alias_snapshot(), imported_again.va_addr, kOwner));
+  ASSERT_EQ(map_gpu(importer_id, imported_again.handle, kOwner), 0);
+  const auto second_import =
+      find_alias(*importer->gpu_alias_snapshot(), imported_again.va_addr, kOwner);
+  ASSERT_TRUE(second_import);
+  EXPECT_EQ(second_import->backing_id, owner_alias->backing_id);
+  EXPECT_NE(second_import->admission_generation, imported_alias->admission_generation);
+  const auto first_view = rocjitsu::make_fabric_backing(
+      process->gpu_peer_backing_grant(kOwner, first.va_addr, 1).backing);
+  const auto imported_view = rocjitsu::make_fabric_backing(
+      importer->gpu_peer_backing_grant(kOwner, imported.va_addr, 1).backing);
+  EXPECT_EQ(first_view.backing_id(), owner_alias->backing_id);
+  EXPECT_EQ(imported_view.backing_id(), owner_alias->backing_id);
+
+  ASSERT_EQ(map_gpu(process_id_, first.handle, kFirstRequester), 0);
+  ASSERT_EQ(map_gpu(process_id_, first.handle, kSecondRequester), 0);
+  const auto old_snapshot = process->gpu_alias_snapshot();
+  const auto first_peer = find_alias(*old_snapshot, first.va_addr, kFirstRequester);
+  const auto second_peer = find_alias(*old_snapshot, first.va_addr, kSecondRequester);
+  ASSERT_TRUE(first_peer);
+  ASSERT_TRUE(second_peer);
+  EXPECT_NE(first_peer->admission_generation, second_peer->admission_generation);
+  ASSERT_EQ(unmap_gpu(process_id_, first.handle, kFirstRequester), 0);
+  const auto after_unmap = process->gpu_alias_snapshot();
+  EXPECT_FALSE(find_alias(*after_unmap, first.va_addr, kFirstRequester));
+  EXPECT_TRUE(find_alias(*after_unmap, first.va_addr, kSecondRequester));
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    EXPECT_EQ(process->allocations_.at(first.handle).page_table_mapped_bytes, kBytes);
+  }
+  EXPECT_TRUE(find_alias(*old_snapshot, first.va_addr, kFirstRequester));
+  ASSERT_EQ(map_gpu(process_id_, first.handle, kFirstRequester), 0);
+  const auto remapped = find_alias(*process->gpu_alias_snapshot(), first.va_addr, kFirstRequester);
+  ASSERT_TRUE(remapped);
+  EXPECT_EQ(remapped->backing_id, owner_alias->backing_id);
+  EXPECT_NE(remapped->admission_generation, first_peer->admission_generation);
+
+  kfd_ioctl_alloc_memory_of_gpu_args ineligible{};
+  ineligible.size = kBytes;
+  ineligible.gpu_id = kOwner;
+  ineligible.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &ineligible), 0);
+  ASSERT_EQ(map_gpu(process_id_, ineligible.handle, kOwner), 0);
+  kfd_ioctl_ipc_export_handle_args ineligible_export{};
+  ineligible_export.handle = ineligible.handle;
+  ineligible_export.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &ineligible_export), 0);
+  EXPECT_FALSE(find_alias(*process->gpu_alias_snapshot(), ineligible.va_addr, kOwner));
+
+  auto retained = owner_lease;
+  ASSERT_TRUE(retained);
+  retained.bytes()[0] = std::byte{0x5a};
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = first.handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_FALSE(find_alias(*process->gpu_alias_snapshot(), first.va_addr, kOwner));
+  EXPECT_FALSE(find_alias(*process->gpu_alias_snapshot(), first.va_addr, kFirstRequester));
+  EXPECT_TRUE(find_alias(*old_snapshot, first.va_addr, kFirstRequester));
+  EXPECT_TRUE(find_alias(*importer->gpu_alias_snapshot(), imported.va_addr, kOwner));
+  EXPECT_EQ(retained.bytes()[0], std::byte{0x5a});
+
+  kfd_ioctl_alloc_memory_of_gpu_args reused{};
+  reused.va_addr = first.va_addr;
+  reused.size = kBytes;
+  reused.gpu_id = kOwner;
+  reused.flags = first.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &reused), 0);
+  ASSERT_EQ(reused.va_addr, first.va_addr);
+  EXPECT_FALSE(find_alias(*process->gpu_alias_snapshot(), reused.va_addr, kOwner));
+  ASSERT_EQ(map_gpu(process_id_, reused.handle, kOwner), 0);
+  kfd_ioctl_ipc_export_handle_args reused_export{};
+  reused_export.handle = reused.handle;
+  reused_export.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &reused_export), 0);
+  const auto reused_alias = find_alias(*process->gpu_alias_snapshot(), reused.va_addr, kOwner);
+  ASSERT_TRUE(reused_alias);
+  EXPECT_NE(reused_alias->backing_id, owner_alias->backing_id);
+  EXPECT_NE(reused_alias->admission_generation, owner_alias->admission_generation);
+  const auto old_owner_alias = find_alias(*old_snapshot, first.va_addr, kOwner);
+  ASSERT_TRUE(old_owner_alias);
+  EXPECT_EQ(old_owner_alias->backing_id, owner_alias->backing_id);
+
+  free.handle = imported.handle;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_FALSE(find_alias(*importer->gpu_alias_snapshot(), imported.va_addr, kOwner));
+  EXPECT_TRUE(find_alias(*importer->gpu_alias_snapshot(), imported_again.va_addr, kOwner));
+  free.handle = imported_again.handle;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_TRUE(importer->gpu_alias_snapshot()->empty());
+  ASSERT_EQ(driver_->close(importer_id), 0);
+  ASSERT_EQ(driver_->close(process_id_), 0);
+  EXPECT_TRUE(process->gpu_alias_snapshot()->empty());
+  EXPECT_TRUE(find_alias(*old_snapshot, first.va_addr, kFirstRequester));
+  EXPECT_EQ(retained.backing_id(), owner_alias->backing_id);
+  EXPECT_EQ(retained.bytes()[0], std::byte{0x5a});
+}
+
+TEST_F(KfdMissingPeerRouteTest, PublicPeerMapRejectsAbsentSameNodeRouteBeforePublishingGrant) {
+  constexpr size_t kBytes = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  ASSERT_TRUE(process->gpu_peer_backing_grant(kOwner, allocation.va_addr, 4).backing);
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  ASSERT_TRUE(endpoint->can_route(kFirstRequester, kOwner));
+  ASSERT_FALSE(endpoint->can_route(kSecondRequester, kOwner));
+
+  uint32_t requester_id = kSecondRequester;
+  map.n_success = 0;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EINVAL);
+  EXPECT_EQ(map.n_success, 0u);
+  EXPECT_FALSE(process->gpu_access_grant(kSecondRequester, allocation.va_addr, 4).allowed);
+  EXPECT_FALSE(process->gpu_peer_backing_grant(kSecondRequester, allocation.va_addr, 4).backing);
+  EXPECT_TRUE(process->gpu_access_grant(kOwner, allocation.va_addr, 4).allowed);
+
+  requester_id = kFirstRequester;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(map.n_success, 1u);
+  EXPECT_TRUE(process->gpu_peer_backing_grant(kFirstRequester, allocation.va_addr, 4).backing);
+  EXPECT_FALSE(process->gpu_access_grant(kSecondRequester, allocation.va_addr, 4).allowed);
+}
+
+TEST_F(KfdTwoRequesterBindingTest, PublicPeerMapsRemainIndependentAcrossRequesterUnmap) {
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  using rocjitsu::amdgpu::VmDataRoute;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 32;
+  const std::array<std::byte, 4> initial{std::byte{0x12}, std::byte{0x34}, std::byte{0x56},
+                                         std::byte{0x78}};
+  const std::array<std::byte, 4> updated{std::byte{0x87}, std::byte{0x65}, std::byte{0x43},
+                                         std::byte{0x21}};
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto generation_for = [&](uint32_t gpu_id) -> uint64_t {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &generations = process->allocations_.at(allocation.handle).admission_generations;
+    const auto it = generations.find(gpu_id);
+    return it == generations.end() ? 0 : it->second;
+  };
+  const auto owner_backing =
+      process->gpu_peer_backing_grant(kOwner, allocation.va_addr + kOffset, initial.size()).backing;
+  ASSERT_TRUE(owner_backing);
+  std::ranges::copy(initial, owner_backing.bytes().begin());
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  ASSERT_TRUE(endpoint->can_route(kFirstRequester, kOwner));
+  ASSERT_TRUE(endpoint->can_route(kSecondRequester, kOwner));
+
+  const auto first_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  const auto second_handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(first_handle);
+  ASSERT_TRUE(second_handle);
+  const auto first_access = machine_->soc(0)->gpu_vm().snapshot_pinned(*first_handle);
+  const auto second_access = machine_->soc(1)->gpu_vm().snapshot_pinned(*second_handle);
+  ASSERT_TRUE(first_access);
+  ASSERT_TRUE(second_access);
+  const auto route = [&](const rocjitsu::amdgpu::GpuVmAccess &access) {
+    return access.classify_data_route(allocation.va_addr + kOffset, initial.size(),
+                                      VmAccessKind::Read);
+  };
+  EXPECT_EQ(route(*first_access), VmDataRoute::Faulted);
+  EXPECT_EQ(route(*second_access), VmDataRoute::Faulted);
+
+  uint32_t requester_id = kFirstRequester;
+  map.n_success = 0;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const uint64_t first_generation = generation_for(kFirstRequester);
+  ASSERT_NE(first_generation, 0u);
+  EXPECT_EQ(route(*first_access), VmDataRoute::Deferred);
+  EXPECT_EQ(route(*second_access), VmDataRoute::Faulted);
+
+  requester_id = kSecondRequester;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const uint64_t second_generation = generation_for(kSecondRequester);
+  ASSERT_NE(second_generation, 0u);
+  EXPECT_EQ(route(*first_access), VmDataRoute::Deferred);
+  EXPECT_EQ(route(*second_access), VmDataRoute::Deferred);
+
+  const auto read_peer = [&](const rocjitsu::amdgpu::GpuVmAccess &access) {
+    std::array<std::byte, 4> observed{};
+    std::size_t progress = 0;
+    rocjitsu::amdgpu::VmTransferToken token;
+    VmAccessOutcome outcome = access.read(allocation.va_addr + kOffset, observed, progress, token);
+    for (int attempt = 0; attempt < 8 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+      EXPECT_TRUE(engine_.step());
+      outcome = access.read(allocation.va_addr + kOffset, observed, progress, token);
+    }
+    EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+    EXPECT_EQ(progress, observed.size());
+    return observed;
+  };
+  EXPECT_EQ(read_peer(*first_access), initial);
+  EXPECT_EQ(read_peer(*second_access), initial);
+  EXPECT_EQ(endpoint->diagnostics().effects, 2u);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  requester_id = kFirstRequester;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(route(*first_access), VmDataRoute::Faulted);
+  EXPECT_EQ(route(*second_access), VmDataRoute::Deferred);
+  EXPECT_EQ(generation_for(kFirstRequester), 0u);
+  EXPECT_EQ(generation_for(kSecondRequester), second_generation);
+
+  std::size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  VmAccessOutcome outcome =
+      second_access->write(allocation.va_addr + kOffset, updated, progress, token);
+  for (int attempt = 0; attempt < 8 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = second_access->write(allocation.va_addr + kOffset, updated, progress, token);
+  }
+  EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, updated.size());
+  EXPECT_TRUE(std::ranges::equal(owner_backing.bytes(), updated));
+  EXPECT_EQ(endpoint->diagnostics().effects, 3u);
+
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_NE(generation_for(kFirstRequester), first_generation);
+  EXPECT_EQ(generation_for(kSecondRequester), second_generation);
+  EXPECT_EQ(route(*first_access), VmDataRoute::Deferred);
+  EXPECT_EQ(read_peer(*first_access), updated);
+  EXPECT_EQ(endpoint->diagnostics().effects, 4u);
+}
+
+TEST_F(KfdPeerBindingTest, IpcExportPublishesDirtyOwnerBytesBeforeUncachedPeerAlias) {
+  using rocjitsu::amdgpu::L2Cache;
+  using rocjitsu::amdgpu::Mtype;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 8;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  auto *owner_soc = machine_->soc(1);
+  ASSERT_NE(owner_soc, nullptr);
+  auto *owner_l2 = owner_soc->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  const uint64_t owner_epoch = owner_soc->cache_coherence()->current_epoch();
+  const uint64_t requester_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty_line{};
+  dirty_line[kOffset] = 0x7a;
+  ASSERT_EQ(owner_l2->writeback_line(allocation.va_addr, dirty_line.data(), kOffset, 1, Mtype::RW,
+                                     process_id_),
+            VmAccessOutcome::Complete);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    ASSERT_NE(process->allocations_.at(allocation.handle).host_ptr, nullptr);
+    EXPECT_EQ(static_cast<uint8_t *>(process->allocations_.at(allocation.handle).host_ptr)[kOffset],
+              0u);
+  }
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  const auto backing = process->gpu_peer_backing_grant(kOwner, allocation.va_addr + kOffset, 1);
+  ASSERT_TRUE(backing.backing);
+  EXPECT_EQ(backing.backing.bytes()[0], std::byte{0x7a});
+  EXPECT_FALSE(backing.admission.cacheable);
+  EXPECT_GT(owner_soc->cache_coherence()->current_epoch(), owner_epoch);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), requester_epoch);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page =
+        process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, process->page_table_.end());
+    EXPECT_EQ(page->second.mtype, Mtype::UC);
+  }
+  uint8_t owner_value = 0;
+  ASSERT_EQ(owner_l2->read(allocation.va_addr + kOffset, &owner_value, 1, Mtype::UC, process_id_),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(owner_value, 0x7a);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = allocation.va_addr + 2 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  {
+    std::shared_lock lock(importer->page_table_mutex_);
+    const auto page =
+        importer->page_table_.find(imported.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, importer->page_table_.end());
+    EXPECT_EQ(page->second.mtype, Mtype::UC);
+  }
+  map.handle = imported.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto imported_backing =
+      importer->gpu_peer_backing_grant(kOwner, imported.va_addr + kOffset, 1);
+  ASSERT_TRUE(imported_backing.backing);
+  EXPECT_FALSE(imported_backing.admission.cacheable);
+  uint8_t imported_value = 0;
+  ASSERT_EQ(owner_l2->read(imported.va_addr + kOffset, &imported_value, 1, Mtype::UC, importer_id),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(imported_value, 0x7a);
+
+  // Public peer MAP is closed until P2C6. Admit this single directed fixture
+  // grant and drive the registered requester binding through the endpoint.
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    auto &source = process->allocations_.at(allocation.handle);
+    source.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->publish_gpu_grants_locked();
+  }
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(requester_handle);
+  const auto requester_access = machine_->soc(0)->gpu_vm().snapshot_pinned(*requester_handle);
+  ASSERT_TRUE(requester_access);
+  const std::array<std::byte, 1> updated{std::byte{0x5c}};
+  std::size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  VmAccessOutcome outcome =
+      requester_access->write(allocation.va_addr + kOffset, updated, progress, token);
+  for (int attempt = 0; attempt < 8 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = requester_access->write(allocation.va_addr + kOffset, updated, progress, token);
+  }
+  ASSERT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, updated.size());
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 1u);
+  owner_value = 0;
+  imported_value = 0;
+  EXPECT_EQ(owner_l2->read(allocation.va_addr + kOffset, &owner_value, 1, Mtype::UC, process_id_),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(owner_l2->read(imported.va_addr + kOffset, &imported_value, 1, Mtype::UC, importer_id),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(owner_value, 0x5c);
+  EXPECT_EQ(imported_value, 0x5c);
+  EXPECT_EQ(driver_->close(importer_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, IpcExportRetriesWhenOwnerCacheCannotWriteBack) {
+  constexpr size_t kBytes = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  {
+    rocjitsu::amdgpu::L2Cache missing_backing("peer_export_missing_backing",
+                                              machine_->soc(1)->cache_coherence());
+    EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), -EIO);
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &source = process->allocations_.at(allocation.handle);
+    EXPECT_FALSE(source.backing_promotion_attempted);
+    EXPECT_FALSE(source.backing_owner);
+  }
+
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    EXPECT_TRUE(process->allocations_.at(allocation.handle).backing_owner);
+  }
+}
+
+TEST_F(KfdPeerBindingTest, PublicPeerMapAdmitsImportedAliasAndUnmapRejectsQueuedWrite) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  using rocjitsu::amdgpu::VmDataRoute;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kReadOffset = 16;
+  constexpr size_t kStoreOffset = 20;
+  constexpr size_t kPendingOffset = 24;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args owner_map{};
+  owner_map.handle = allocation.handle;
+  owner_map.n_devices = 1;
+  owner_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &owner_map), 0);
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = allocation.va_addr + 2 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  ASSERT_NE(imported.va_addr, allocation.va_addr);
+  auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(importer_id);
+  ASSERT_TRUE(requester_handle);
+  const auto requester_access = machine_->soc(0)->gpu_vm().snapshot_pinned(*requester_handle);
+  ASSERT_TRUE(requester_access);
+
+  std::array<std::byte, 4> denied{};
+  std::size_t denied_progress = 0;
+  rocjitsu::amdgpu::VmTransferToken denied_token;
+  EXPECT_EQ(requester_access->classify_data_route(imported.va_addr + kReadOffset, denied.size(),
+                                                  rocjitsu::amdgpu::VmAccessKind::Read),
+            VmDataRoute::Faulted);
+  EXPECT_EQ(
+      requester_access->read(imported.va_addr + kReadOffset, denied, denied_progress, denied_token),
+      VmAccessOutcome::Faulted);
+  EXPECT_EQ(denied_progress, 0u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 0u);
+
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args requester_map{};
+  requester_map.handle = imported.handle;
+  requester_map.n_devices = 1;
+  requester_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &requester_map), 0);
+  EXPECT_EQ(requester_map.n_success, 1u);
+  const auto imported_backing =
+      importer->gpu_peer_backing_grant(kRequester, imported.va_addr + kReadOffset, 4).backing;
+  ASSERT_TRUE(imported_backing);
+  auto exporter = driver_->find_process(process_id_);
+  ASSERT_NE(exporter, nullptr);
+  const auto exported_backing =
+      exporter->gpu_peer_backing_grant(kOwner, allocation.va_addr + kReadOffset, 4).backing;
+  ASSERT_TRUE(exported_backing);
+  EXPECT_TRUE(imported_backing.same_backing(exported_backing));
+  EXPECT_EQ(requester_access->classify_data_route(imported.va_addr + kReadOffset, 4,
+                                                  rocjitsu::amdgpu::VmAccessKind::Read),
+            VmDataRoute::Deferred);
+
+  const uint64_t code_va = imported.va_addr - kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> code{};
+  code[0] = 0xC0020000u; // s_load_dword s0, s[0:1], 0x0
+  code[1] = 0;
+  code[2] = 0xBF800000u; // s_nop 0
+  code[3] = 0xC0420080u; // s_store_dword s2, s[0:1], 0x0
+  code[4] = 0;
+  code[5] = 0xBF800000u;
+  {
+    std::lock_guard lock(importer->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = importer->next_handle_++;
+    instruction.admission_generations[kRequester] =
+        importer->next_gpu_admission_generation_locked();
+    importer->allocations_[instruction.handle] = instruction;
+    importer->publish_gpu_grants_locked();
+  }
+  importer->map_pages(code_va, code.data(), kBytes, rocjitsu::amdgpu::Mtype::RW,
+                      rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  constexpr uint32_t kPeerWord = 0x12345678u;
+  std::memcpy(imported_backing.data(), &kPeerWord, sizeof(kPeerWord));
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  machine_->soc(0)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(importer_id);
+  wave->set_address_space(*requester_handle);
+  cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(imported.va_addr + kReadOffset));
+  cu->write_sgpr(wave->sgpr_alloc().base + 1,
+                 static_cast<uint32_t>((imported.va_addr + kReadOffset) >> 32));
+  cu->step();
+  ASSERT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+  ASSERT_TRUE(engine_.step());
+  for (int attempt = 0; attempt < 8 && wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY;
+       ++attempt)
+    cu->step();
+  EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base), kPeerWord);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 1u);
+
+  constexpr uint32_t kStoredWord = 0xfedcba98u;
+  wave->pc = code_va + 12;
+  cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(imported.va_addr + kStoreOffset));
+  cu->write_sgpr(wave->sgpr_alloc().base + 1,
+                 static_cast<uint32_t>((imported.va_addr + kStoreOffset) >> 32));
+  cu->write_sgpr(wave->sgpr_alloc().base + 2, kStoredWord);
+  cu->step();
+  ASSERT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+  ASSERT_TRUE(engine_.step());
+  for (int attempt = 0; attempt < 8 && wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY;
+       ++attempt)
+    cu->step();
+  uint32_t observed_store = 0;
+  const auto stored_backing =
+      importer->gpu_peer_backing_grant(kRequester, imported.va_addr + kStoreOffset, 4).backing;
+  ASSERT_TRUE(stored_backing);
+  std::memcpy(&observed_store, stored_backing.data(), sizeof(observed_store));
+  EXPECT_EQ(observed_store, kStoredWord);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+
+  // Stop accepting endpoint work while the public peer grant remains live.
+  // Restore the endpoint before the remaining transfer and fixture teardown.
+  auto *endpoint = machine_->fabric_endpoint();
+  endpoint->shutdown();
+  std::array<std::byte, 4> disconnected{};
+  std::size_t disconnected_progress = 0;
+  rocjitsu::amdgpu::VmTransferToken disconnected_token;
+  const VmAccessOutcome disconnected_outcome = requester_access->read(
+      imported.va_addr + kReadOffset, disconnected, disconnected_progress, disconnected_token);
+  const auto disconnected_submissions = endpoint->diagnostics().submissions;
+  endpoint->initialize();
+  EXPECT_EQ(disconnected_outcome, VmAccessOutcome::Faulted);
+  EXPECT_EQ(disconnected_progress, 0u);
+  EXPECT_EQ(disconnected_submissions, 2u);
+
+  const std::array<std::byte, 4> pending_payload{std::byte{0x11}, std::byte{0x22}, std::byte{0x33},
+                                                 std::byte{0x44}};
+  const auto pending_backing =
+      importer->gpu_peer_backing_grant(kRequester, imported.va_addr + kPendingOffset, 4).backing;
+  ASSERT_TRUE(pending_backing);
+  std::array<std::byte, 4> before_pending{};
+  std::ranges::copy(pending_backing.bytes(), before_pending.begin());
+  std::size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  EXPECT_EQ(
+      requester_access->write(imported.va_addr + kPendingOffset, pending_payload, progress, token),
+      VmAccessOutcome::Unavailable);
+  ASSERT_TRUE(token.pending());
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 3u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = imported.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+  EXPECT_EQ(requester_access->classify_data_route(imported.va_addr + kPendingOffset, 4,
+                                                  rocjitsu::amdgpu::VmAccessKind::Read),
+            VmDataRoute::Faulted);
+  denied_progress = 0;
+  EXPECT_EQ(requester_access->read(imported.va_addr + kPendingOffset, denied, denied_progress,
+                                   denied_token),
+            VmAccessOutcome::Faulted);
+  EXPECT_EQ(denied_progress, 0u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 3u);
+
+  VmAccessOutcome pending_outcome = VmAccessOutcome::Unavailable;
+  for (int attempt = 0; attempt < 8 && pending_outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    pending_outcome = requester_access->write(imported.va_addr + kPendingOffset, pending_payload,
+                                              progress, token);
+  }
+  EXPECT_EQ(pending_outcome, VmAccessOutcome::Revoked);
+  EXPECT_EQ(progress, 0u);
+  EXPECT_TRUE(std::ranges::equal(pending_backing.bytes(), before_pending));
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 3u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+  importer->unmap_pages(code_va, kBytes);
+  EXPECT_EQ(driver_->close(importer_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, LivePeerEffectSelectsDistinctVaAliasesWithoutFlushingDirtySibling) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr uint64_t kEffectOffset = 24;
+  constexpr uint64_t kSiblingLineOffset = 256;
+  constexpr uint32_t kDirtyByteOffset = 7;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = allocation.va_addr + 2 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  ASSERT_NE(imported.va_addr, allocation.va_addr);
+  uint32_t requester_id = kRequester;
+  map.handle = imported.handle;
+  map.n_success = 0;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  kfd_ioctl_alloc_memory_of_gpu_args unrelated{};
+  unrelated.size = kBytes;
+  unrelated.gpu_id = kOwner;
+  unrelated.flags = allocation.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &unrelated), 0);
+  map.handle = unrelated.handle;
+  map.n_success = 0;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto owner_process = driver_->find_process(process_id_);
+  const auto importer_process = driver_->find_process(importer_id);
+  ASSERT_NE(owner_process, nullptr);
+  ASSERT_NE(importer_process, nullptr);
+  const auto owner_aliases = owner_process->gpu_alias_snapshot();
+  const auto owner_alias = std::ranges::find_if(*owner_aliases, [&](const auto &candidate) {
+    return candidate.gpu_id == kOwner && candidate.gpu_va == allocation.va_addr;
+  });
+  ASSERT_NE(owner_alias, owner_aliases->end());
+  const auto owner_handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(owner_handle);
+  const auto owner_access = machine_->soc(1)->gpu_vm().snapshot(*owner_handle);
+  ASSERT_TRUE(owner_access);
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  const auto sibling_backing = owner_process->gpu_peer_backing_grant(
+      kOwner, allocation.va_addr + kSiblingLineOffset + kDirtyByteOffset, 1);
+  ASSERT_TRUE(sibling_backing.backing);
+  sibling_backing.backing.bytes()[0] = std::byte{0x11};
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyByteOffset, 0x7a}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *owner_l2, allocation.va_addr + kSiblingLineOffset, process_id_,
+      owner_access->cache_identity(), owner_alias->admission_generation, dirty_bytes);
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *owner_l2, allocation.va_addr + kSiblingLineOffset, process_id_, kDirtyByteOffset));
+  const auto local_aliases = owner_process->gpu_local_alias_snapshot();
+  const auto local_alias = std::ranges::find_if(*local_aliases, [&](const auto &candidate) {
+    return candidate.gpu_id == kOwner && candidate.gpu_va == unrelated.va_addr;
+  });
+  ASSERT_NE(local_alias, local_aliases->end());
+  const auto unrelated_backing =
+      owner_process->gpu_local_backing_grant(kOwner, unrelated.va_addr + kDirtyByteOffset, 1);
+  ASSERT_TRUE(unrelated_backing.backing);
+  unrelated_backing.backing.bytes()[0] = std::byte{0x13};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *owner_l2, unrelated.va_addr, process_id_, owner_access->cache_identity(),
+      local_alias->admission_generation, dirty_bytes);
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, unrelated.va_addr,
+                                                           process_id_, kDirtyByteOffset));
+
+  const uint64_t owner_epoch = machine_->soc(1)->cache_coherence()->current_epoch();
+  const uint64_t requester_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(importer_id);
+  ASSERT_TRUE(requester_handle);
+  const auto requester_access = machine_->soc(0)->gpu_vm().snapshot_pinned(*requester_handle);
+  ASSERT_TRUE(requester_access);
+  const std::array payload{std::byte{0x5c}};
+  ASSERT_EQ(requester_access->classify_data_route(imported.va_addr + kEffectOffset, payload.size(),
+                                                  rocjitsu::amdgpu::VmAccessKind::Write),
+            rocjitsu::amdgpu::VmDataRoute::Deferred);
+  size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  VmAccessOutcome outcome =
+      requester_access->write(imported.va_addr + kEffectOffset, payload, progress, token);
+  EXPECT_EQ(outcome, VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(token.pending());
+  for (int attempt = 0; attempt < 8 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = requester_access->write(imported.va_addr + kEffectOffset, payload, progress, token);
+  }
+  ASSERT_EQ(outcome, VmAccessOutcome::Complete)
+      << "submissions=" << machine_->fabric_endpoint()->diagnostics().submissions
+      << " effects=" << machine_->fabric_endpoint()->diagnostics().effects;
+  EXPECT_EQ(progress, payload.size());
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 1u);
+  const auto written = owner_process->gpu_peer_backing_grant(
+      kOwner, allocation.va_addr + kEffectOffset, payload.size());
+  ASSERT_TRUE(written.backing);
+  EXPECT_EQ(written.backing.bytes()[0], payload[0]);
+  EXPECT_EQ(sibling_backing.backing.bytes()[0], std::byte{0x11});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *owner_l2, allocation.va_addr + kSiblingLineOffset, process_id_, kDirtyByteOffset));
+  EXPECT_EQ(unrelated_backing.backing.bytes()[0], std::byte{0x13});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, unrelated.va_addr,
+                                                           process_id_, kDirtyByteOffset));
+  EXPECT_EQ(machine_->soc(1)->cache_coherence()->current_epoch(), owner_epoch);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), requester_epoch);
+  EXPECT_EQ(driver_->close(importer_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, ImportedPeerFreeAndVaReuseRejectQueuedWriteWithoutEffect) {
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  using rocjitsu::amdgpu::VmDataRoute;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 40;
+  const std::array<std::byte, 4> pending_payload{std::byte{0x11}, std::byte{0x22}, std::byte{0x33},
+                                                 std::byte{0x44}};
+  const std::array<std::byte, 4> replacement_value{std::byte{0xa1}, std::byte{0xb2},
+                                                   std::byte{0xc3}, std::byte{0xd4}};
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = allocation.va_addr + 2 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  const uint64_t import_va = imported.va_addr;
+  uint32_t requester_id = kRequester;
+  map.handle = imported.handle;
+  map.n_success = 0;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  const auto old_backing =
+      importer->gpu_peer_backing_grant(kRequester, import_va + kOffset, pending_payload.size())
+          .backing;
+  ASSERT_TRUE(old_backing);
+  std::array<std::byte, 4> old_before{};
+  std::ranges::copy(old_backing.bytes(), old_before.begin());
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(importer_id);
+  ASSERT_TRUE(requester_handle);
+  const auto requester_access = machine_->soc(0)->gpu_vm().snapshot_pinned(*requester_handle);
+  ASSERT_TRUE(requester_access);
+  ASSERT_EQ(requester_access->classify_data_route(import_va + kOffset, pending_payload.size(),
+                                                  VmAccessKind::Write),
+            VmDataRoute::Deferred);
+  std::size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  ASSERT_EQ(requester_access->write(import_va + kOffset, pending_payload, progress, token),
+            VmAccessOutcome::Unavailable);
+  ASSERT_TRUE(token.pending());
+  EXPECT_EQ(progress, 0u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 1u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = imported.handle;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_FALSE(
+      importer->gpu_access_grant(kRequester, import_va + kOffset, pending_payload.size()).allowed);
+
+  kfd_ioctl_alloc_memory_of_gpu_args reused{};
+  reused.va_addr = import_va;
+  reused.size = kBytes;
+  reused.gpu_id = kRequester;
+  reused.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &reused), 0);
+  ASSERT_EQ(reused.va_addr, import_va);
+  void *replacement_host = nullptr;
+  {
+    std::lock_guard lock(importer->alloc_mutex_);
+    replacement_host = importer->allocations_.at(reused.handle).host_ptr;
+  }
+  ASSERT_NE(replacement_host, nullptr);
+  auto *replacement_bytes = static_cast<std::byte *>(replacement_host) + kOffset;
+  std::ranges::copy(replacement_value, replacement_bytes);
+  map.handle = reused.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(requester_access->classify_data_route(import_va + kOffset, replacement_value.size(),
+                                                  VmAccessKind::Read),
+            VmDataRoute::Local);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+
+  VmAccessOutcome outcome = VmAccessOutcome::Unavailable;
+  for (int attempt = 0; attempt < 8 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = requester_access->write(import_va + kOffset, pending_payload, progress, token);
+  }
+  EXPECT_EQ(outcome, VmAccessOutcome::Revoked);
+  EXPECT_EQ(progress, 0u);
+  EXPECT_TRUE(std::ranges::equal(old_backing.bytes(), old_before));
+  EXPECT_TRUE(std::ranges::equal(std::span(replacement_bytes, replacement_value.size()),
+                                 replacement_value));
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 1u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+
+  std::array<std::byte, 4> observed{};
+  EXPECT_EQ(requester_access->read(import_va + kOffset, observed), VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, replacement_value);
+  EXPECT_EQ(driver_->close(importer_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, PublicPeerMapAndUnmapKeepOrderedPrefixAcrossBackingRetry) {
+  constexpr size_t kBytes = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+
+  std::array<uint32_t, 2> ids{kOwner, kRequester};
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = ids.size();
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EINVAL);
+  EXPECT_EQ(map.n_success, 1u);
+  EXPECT_TRUE(process->gpu_access_grant(kOwner, allocation.va_addr, 4).allowed);
+  EXPECT_FALSE(process->gpu_access_grant(kRequester, allocation.va_addr, 4).allowed);
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EINVAL);
+  EXPECT_EQ(map.n_success, 1u);
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(map.n_success, 2u);
+  EXPECT_TRUE(process->gpu_peer_backing_grant(kRequester, allocation.va_addr, 4).backing);
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(map.n_success, 2u);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = ids.size();
+  ids[1] = kOwner + 2;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(ids.data());
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -EINVAL);
+  EXPECT_EQ(unmap.n_success, 1u);
+  EXPECT_FALSE(process->gpu_access_grant(kOwner, allocation.va_addr, 4).allowed);
+  EXPECT_TRUE(process->gpu_access_grant(kRequester, allocation.va_addr, 4).allowed);
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -EINVAL);
+  EXPECT_EQ(unmap.n_success, 1u);
+  ids[1] = kRequester;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(unmap.n_success, 2u);
+  EXPECT_FALSE(process->gpu_access_grant(kRequester, allocation.va_addr, 4).allowed);
+}
+
+TEST_F(KfdPeerBindingTest, ProductionSdmaCopiesBetweenLocalAndPeerBacking) {
+  using rocjitsu::amdgpu::Mtype;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kPayloadBytes = 4;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> ring{};
+  alignas(4096) std::array<uint64_t, kBytes / sizeof(uint64_t)> pointers{};
+  alignas(4096) std::array<std::byte, kBytes> local{};
+  const std::array<std::byte, kPayloadBytes> payload{std::byte{0x11}, std::byte{0x22},
+                                                     std::byte{0x33}, std::byte{0x44}};
+  std::ranges::copy(payload, local.begin());
+  auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+
+  const auto map_system_page = [&](void *page) {
+    const uint64_t address = reinterpret_cast<uint64_t>(page);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      rocjitsu::KfdProcess::GpuAllocation allocation{};
+      allocation.gpu_va = address;
+      allocation.size = kBytes;
+      allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+      allocation.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+      allocation.handle = process->next_handle_++;
+      allocation.admission_generations[kRequester] =
+          process->next_gpu_admission_generation_locked();
+      process->allocations_[allocation.handle] = allocation;
+      process->publish_gpu_grants_locked();
+    }
+    process->map_pages(address, page, kBytes, Mtype::UC,
+                       rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  };
+  map_system_page(ring.data());
+  map_system_page(pointers.data());
+  map_system_page(local.data());
+
+  kfd_ioctl_alloc_memory_of_gpu_args peer{};
+  peer.size = kBytes;
+  peer.gpu_id = kOwner;
+  peer.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &peer), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = peer.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = peer.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    auto &allocation = process->allocations_.at(peer.handle);
+    allocation.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->publish_gpu_grants_locked();
+  }
+  const auto backing = process->gpu_peer_backing_grant(kRequester, peer.va_addr, kPayloadBytes);
+  ASSERT_TRUE(backing.backing);
+
+  const off_t doorbell_offset =
+      static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(kRequester));
+  void *doorbell_page = driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE,
+                                      MAP_SHARED, doorbell_offset);
+  ASSERT_NE(doorbell_page, MAP_FAILED);
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = kRequester;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = kBytes;
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  auto *doorbell = reinterpret_cast<uint64_t *>(static_cast<std::byte *>(doorbell_page) +
+                                                queue.doorbell_offset % kBytes);
+
+  const auto submit_copy = [&](uint64_t source, uint64_t destination, size_t word_offset) {
+    uint32_t *packet = ring.data() + word_offset;
+    packet[0] = 1; // SDMA_OP_COPY, linear form.
+    packet[1] = kPayloadBytes - 1;
+    packet[2] = 0;
+    packet[3] = static_cast<uint32_t>(source);
+    packet[4] = static_cast<uint32_t>(source >> 32);
+    packet[5] = static_cast<uint32_t>(destination);
+    packet[6] = static_cast<uint32_t>(destination >> 32);
+    const uint64_t producer = (word_offset + 7) * sizeof(uint32_t);
+    std::atomic_ref<uint64_t>(pointers[1]).store(producer, std::memory_order_release);
+    std::atomic_ref<uint64_t>(*doorbell).store(producer, std::memory_order_release);
+    auto &scheduler = machine_->soc(0)->sdma_queue_scheduler();
+    if (!scheduler.wait_for_blocked_packet_for_test(process_id_, queue.queue_id,
+                                                    std::chrono::seconds(1)))
+      return false;
+    if (!scheduler.synchronize_queue_for_test(process_id_, queue.queue_id,
+                                              [&] { EXPECT_TRUE(engine_.step()); }))
+      return false;
+    return std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire) == producer;
+  };
+
+  ASSERT_TRUE(submit_copy(reinterpret_cast<uint64_t>(local.data()), peer.va_addr, 0));
+  EXPECT_TRUE(std::ranges::equal(backing.backing.bytes(), payload));
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 1u);
+  ASSERT_TRUE(submit_copy(peer.va_addr, reinterpret_cast<uint64_t>(local.data() + 16), 7));
+  EXPECT_TRUE(std::ranges::equal(std::span(local).subspan(16, kPayloadBytes), payload));
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+
+  // Peer MAP is intentionally closed in this phase. Revoke the directed
+  // fixture grant after the queue has posted its endpoint request but before
+  // fabric admission. The queued write must fault without changing backing.
+  std::array<std::byte, kPayloadBytes> retained_before_revocation{};
+  std::ranges::copy(backing.backing.bytes().subspan(32, kPayloadBytes),
+                    retained_before_revocation.begin());
+  std::ranges::copy(payload, local.begin() + 32);
+  uint32_t *revoked_packet = ring.data() + 14;
+  revoked_packet[0] = 1;
+  revoked_packet[1] = kPayloadBytes - 1;
+  revoked_packet[2] = 0;
+  revoked_packet[3] = static_cast<uint32_t>(reinterpret_cast<uint64_t>(local.data() + 32));
+  revoked_packet[4] = static_cast<uint32_t>(reinterpret_cast<uint64_t>(local.data() + 32) >> 32);
+  revoked_packet[5] = static_cast<uint32_t>(peer.va_addr + 32);
+  revoked_packet[6] = static_cast<uint32_t>((peer.va_addr + 32) >> 32);
+  constexpr uint64_t kRevokedProducer = 21 * sizeof(uint32_t);
+  std::atomic_ref<uint64_t>(pointers[1]).store(kRevokedProducer, std::memory_order_release);
+  std::atomic_ref<uint64_t>(*doorbell).store(kRevokedProducer, std::memory_order_release);
+  auto &scheduler = machine_->soc(0)->sdma_queue_scheduler();
+  ASSERT_TRUE(scheduler.wait_for_blocked_packet_for_test(process_id_, queue.queue_id,
+                                                         std::chrono::seconds(1)));
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    auto &allocation = process->allocations_.at(peer.handle);
+    allocation.admission_generations.erase(kRequester);
+    process->publish_gpu_grants_locked();
+  }
+  EXPECT_FALSE(scheduler.synchronize_queue_for_test(process_id_, queue.queue_id,
+                                                    [&] { EXPECT_TRUE(engine_.step()); }));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire),
+            kRevokedProducer);
+  EXPECT_TRUE(std::ranges::equal(backing.backing.bytes().subspan(32, kPayloadBytes),
+                                 retained_before_revocation));
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(requester_handle);
+  const auto requester_access = machine_->soc(0)->gpu_vm().snapshot_pinned(*requester_handle);
+  ASSERT_TRUE(requester_access);
+  std::array<std::byte, kPayloadBytes> denied{};
+  std::size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  EXPECT_EQ(requester_access->read(peer.va_addr + 32, denied, progress, token),
+            rocjitsu::amdgpu::VmAccessOutcome::Faulted);
+  EXPECT_EQ(progress, 0u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  process->unmap_pages(reinterpret_cast<uint64_t>(ring.data()), kBytes);
+  process->unmap_pages(reinterpret_cast<uint64_t>(pointers.data()), kBytes);
+  process->unmap_pages(reinterpret_cast<uint64_t>(local.data()), kBytes);
+}
+
+TEST_F(KfdPeerBindingTest, ImportedPeerAliasCopiesBothDirectionsThroughKfdSdmaQueue) {
+  using rocjitsu::amdgpu::Mtype;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kPayloadBytes = 4;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> ring{};
+  alignas(4096) std::array<uint64_t, kBytes / sizeof(uint64_t)> pointers{};
+  alignas(4096) std::array<std::byte, kBytes> local{};
+  const std::array<std::byte, kPayloadBytes> payload{std::byte{0x11}, std::byte{0x22},
+                                                     std::byte{0x33}, std::byte{0x44}};
+  std::ranges::copy(payload, local.begin());
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args owner_map{};
+  owner_map.handle = allocation.handle;
+  owner_map.n_devices = 1;
+  owner_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &owner_map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kRequester;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), -EINVAL);
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = allocation.va_addr + 2 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  ASSERT_NE(imported.va_addr, allocation.va_addr);
+  auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+
+  const auto map_system_page = [&](void *page) {
+    const uint64_t address = reinterpret_cast<uint64_t>(page);
+    {
+      std::lock_guard lock(importer->alloc_mutex_);
+      rocjitsu::KfdProcess::GpuAllocation system{};
+      system.gpu_va = address;
+      system.size = kBytes;
+      system.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+      system.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+      system.handle = importer->next_handle_++;
+      system.admission_generations[kRequester] = importer->next_gpu_admission_generation_locked();
+      importer->allocations_[system.handle] = system;
+      importer->publish_gpu_grants_locked();
+    }
+    importer->map_pages(address, page, kBytes, Mtype::UC,
+                        rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  };
+  map_system_page(ring.data());
+  map_system_page(pointers.data());
+  map_system_page(local.data());
+
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args peer_map{};
+  peer_map.handle = imported.handle;
+  peer_map.n_devices = 1;
+  peer_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &peer_map), 0);
+  EXPECT_EQ(peer_map.n_success, 1u);
+  const auto imported_backing =
+      importer->gpu_peer_backing_grant(kRequester, imported.va_addr, kPayloadBytes).backing;
+  ASSERT_TRUE(imported_backing);
+  auto exporter = driver_->find_process(process_id_);
+  ASSERT_NE(exporter, nullptr);
+  const auto owner_backing =
+      exporter->gpu_peer_backing_grant(kOwner, allocation.va_addr, kPayloadBytes).backing;
+  ASSERT_TRUE(owner_backing);
+  EXPECT_TRUE(imported_backing.same_backing(owner_backing));
+
+  const off_t doorbell_offset =
+      static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(kRequester));
+  void *doorbell_page = driver_->mmap(importer_id, nullptr, kBytes, PROT_READ | PROT_WRITE,
+                                      MAP_SHARED, doorbell_offset);
+  ASSERT_NE(doorbell_page, MAP_FAILED);
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = kRequester;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = kBytes;
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  auto *doorbell = reinterpret_cast<uint64_t *>(static_cast<std::byte *>(doorbell_page) +
+                                                queue.doorbell_offset % kBytes);
+
+  const auto submit_copy = [&](uint64_t source, uint64_t destination, size_t word_offset) {
+    uint32_t *packet = ring.data() + word_offset;
+    packet[0] = 1; // SDMA_OP_COPY, linear form.
+    packet[1] = kPayloadBytes - 1;
+    packet[2] = 0;
+    packet[3] = static_cast<uint32_t>(source);
+    packet[4] = static_cast<uint32_t>(source >> 32);
+    packet[5] = static_cast<uint32_t>(destination);
+    packet[6] = static_cast<uint32_t>(destination >> 32);
+    const uint64_t producer = (word_offset + 7) * sizeof(uint32_t);
+    std::atomic_ref<uint64_t>(pointers[1]).store(producer, std::memory_order_release);
+    std::atomic_ref<uint64_t>(*doorbell).store(producer, std::memory_order_release);
+    auto &scheduler = machine_->soc(0)->sdma_queue_scheduler();
+    if (!scheduler.wait_for_blocked_packet_for_test(importer_id, queue.queue_id,
+                                                    std::chrono::seconds(1)))
+      return false;
+    if (!scheduler.synchronize_queue_for_test(importer_id, queue.queue_id,
+                                              [&] { EXPECT_TRUE(engine_.step()); }))
+      return false;
+    return std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire) == producer;
+  };
+
+  ASSERT_TRUE(submit_copy(reinterpret_cast<uint64_t>(local.data()), imported.va_addr, 0));
+  EXPECT_TRUE(std::ranges::equal(imported_backing.bytes(), payload));
+  EXPECT_TRUE(std::ranges::equal(owner_backing.bytes(), payload));
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 1u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 1u);
+  ASSERT_TRUE(submit_copy(imported.va_addr, reinterpret_cast<uint64_t>(local.data() + 16), 7));
+  EXPECT_TRUE(std::ranges::equal(std::span(local).subspan(16, kPayloadBytes), payload));
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 2u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  EXPECT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  importer->unmap_pages(reinterpret_cast<uint64_t>(ring.data()), kBytes);
+  importer->unmap_pages(reinterpret_cast<uint64_t>(pointers.data()), kBytes);
+  importer->unmap_pages(reinterpret_cast<uint64_t>(local.data()), kBytes);
+  EXPECT_EQ(driver_->close(importer_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, CuScalarAndVectorPeerReadsReuseRequesterCache) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kScalarWord = 0x12345678u;
+  constexpr uint32_t kVectorWord = 0x87654321u;
+  constexpr size_t kScalarOffset = 16;
+  constexpr size_t kVectorOffset = 256; // A different 128-byte cache line.
+  constexpr size_t kDelayedOffset = 512;
+  constexpr uint32_t kDelayedBefore = 0x31415926u;
+  constexpr uint32_t kDelayedAfter = 0x27182818u;
+  constexpr size_t kVmInvalidateOffset = 768;
+  constexpr uint32_t kVmInvalidateWord = 0x13579bdfu;
+  constexpr size_t kMixedPeerOffset = 1024;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  uint32_t gpu_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  gpu_id = kRequester;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto backing = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, kBytes);
+  ASSERT_TRUE(backing.admission.allowed);
+  ASSERT_TRUE(backing.admission.cacheable);
+  ASSERT_NE(backing.admission.generation, 0u);
+  ASSERT_TRUE(backing.backing);
+  std::memcpy(backing.backing.data() + kScalarOffset, &kScalarWord, sizeof(kScalarWord));
+  std::memcpy(backing.backing.data() + kVectorOffset, &kVectorWord, sizeof(kVectorWord));
+  std::memcpy(backing.backing.data() + kDelayedOffset, &kDelayedBefore, sizeof(kDelayedBefore));
+  std::memcpy(backing.backing.data() + kVmInvalidateOffset, &kVmInvalidateWord,
+              sizeof(kVmInvalidateWord));
+
+  // The instruction page is local to the requester. Only the data reads take
+  // the KFD peer route; no cache tags are installed by the test.
+  const uint64_t code_va = allocation.va_addr + 16 * kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> code{};
+  code.fill(0xBF800000u); // s_nop 0 after either load while its pipeline drains.
+  code[0] = 0xC0020000u;  // s_load_dword s0, s[0:1], 0x0
+  code[1] = 0;
+  code[4] = 0xDC500000u; // flat_load_dword v2, v[0:1]
+  code[5] = 0x027F0000u;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  process->map_pages(code_va, code.data(), kBytes, rocjitsu::amdgpu::Mtype::RW,
+                     rocjitsu::KfdProcess::HostExtentOwner::Driver);
+
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  EXPECT_EQ(access->query_mtype(allocation.va_addr), rocjitsu::amdgpu::Mtype::RW);
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  machine_->soc(0)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id_);
+  wave->set_address_space(*handle);
+  wave->set_exec(1);
+
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  auto issue_scalar = [&](size_t offset) {
+    wave->pc = code_va;
+    const uint64_t address = allocation.va_addr + offset;
+    cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(address));
+    cu->write_sgpr(wave->sgpr_alloc().base + 1, static_cast<uint32_t>(address >> 32));
+    cu->step();
+  };
+  auto finish_scalar = [&](uint32_t expected) {
+    for (int attempt = 0; attempt < 8 && wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY;
+         ++attempt) {
+      cu->step();
+      if (wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY)
+        (void)engine_.step();
+    }
+    EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+    EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base), expected);
+  };
+  auto run_scalar = [&](size_t offset, uint32_t expected) {
+    issue_scalar(offset);
+    finish_scalar(expected);
+  };
+  auto run_vector = [&] {
+    wave->pc = code_va + 16;
+    const uint64_t address = allocation.va_addr + kVectorOffset;
+    cu->write_vgpr(wave->vgpr_alloc().base, 0, static_cast<uint32_t>(address));
+    cu->write_vgpr(wave->vgpr_alloc().base + 1, 0, static_cast<uint32_t>(address >> 32));
+    cu->write_vgpr(wave->vgpr_alloc().base + 2, 0, 0);
+    cu->step();
+    for (int attempt = 0;
+         attempt < 8 && cu->read_vgpr(wave->vgpr_alloc().base + 2, 0) != kVectorWord; ++attempt) {
+      (void)engine_.step();
+      cu->step();
+    }
+    EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 2, 0), kVectorWord);
+  };
+
+  run_scalar(kScalarOffset, kScalarWord);
+  const uint64_t after_scalar = endpoint->diagnostics().effects;
+  ASSERT_GT(after_scalar, 0u);
+  run_scalar(kScalarOffset, kScalarWord);
+  EXPECT_EQ(endpoint->diagnostics().effects, after_scalar)
+      << "the second scalar read should hit the requester cache";
+
+  run_vector();
+  const uint64_t after_vector = endpoint->diagnostics().effects;
+  ASSERT_GT(after_vector, after_scalar);
+  run_vector();
+  EXPECT_EQ(endpoint->diagnostics().effects, after_vector)
+      << "the second vector read should hit the requester cache";
+
+  // A selected peer effect must leave an unrelated owner's dirty line and
+  // both cache-coherence epochs untouched.
+  kfd_ioctl_alloc_memory_of_gpu_args unrelated{};
+  unrelated.size = kBytes;
+  unrelated.gpu_id = kOwner;
+  unrelated.flags = allocation.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &unrelated), 0);
+  gpu_id = kOwner;
+  map.handle = unrelated.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  gpu_id = kRequester;
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  constexpr uint32_t kUnrelatedOffset = 8;
+  std::array<uint8_t, rocjitsu::amdgpu::L2Cache::LINE_SIZE> dirty_line{};
+  dirty_line[kUnrelatedOffset] = 0x6d;
+  ASSERT_EQ(owner_l2->writeback_line(unrelated.va_addr, dirty_line.data(), kUnrelatedOffset, 1,
+                                     rocjitsu::amdgpu::Mtype::RW, process_id_),
+            VmAccessOutcome::Complete);
+  const auto unrelated_backing =
+      process->gpu_local_backing_grant(kOwner, unrelated.va_addr + kUnrelatedOffset, 1);
+  ASSERT_TRUE(unrelated_backing.backing);
+  ASSERT_EQ(unrelated_backing.backing.bytes()[0], std::byte{0});
+  ASSERT_TRUE(rocjitsu::amdgpu::KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *owner_l2, unrelated.va_addr, process_id_, kUnrelatedOffset));
+  const uint64_t owner_epoch = machine_->soc(1)->cache_coherence()->current_epoch();
+  const uint64_t requester_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+
+  // The imported alias has another VA and process but the same canonical
+  // backing. Let the first read effect finish without polling its CU reply,
+  // then advance that backing through a selected peer write.
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = allocation.va_addr + 4 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  ASSERT_NE(imported.va_addr, allocation.va_addr);
+  map.handle = imported.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  const auto imported_backing =
+      importer->gpu_peer_backing_grant(kRequester, imported.va_addr, kBytes);
+  ASSERT_TRUE(imported_backing.backing);
+  ASSERT_TRUE(imported_backing.backing.same_backing(backing.backing));
+  const auto imported_handle = machine_->soc(0)->gpu_vm().find_vmid(importer_id);
+  ASSERT_TRUE(imported_handle);
+  const auto imported_access = machine_->soc(0)->gpu_vm().snapshot_pinned(*imported_handle);
+  ASSERT_TRUE(imported_access);
+  const auto write_alias = [&](size_t offset, uint32_t word) {
+    std::array<std::byte, sizeof(word)> payload{};
+    std::memcpy(payload.data(), &word, sizeof(word));
+    size_t progress = 0;
+    rocjitsu::amdgpu::VmTransferToken token;
+    VmAccessOutcome outcome =
+        imported_access->write(imported.va_addr + offset, payload, progress, token);
+    for (int attempt = 0; attempt < 8 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+      EXPECT_TRUE(engine_.step());
+      outcome = imported_access->write(imported.va_addr + offset, payload, progress, token);
+    }
+    EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+    EXPECT_EQ(progress, payload.size());
+  };
+
+  issue_scalar(kDelayedOffset);
+  ASSERT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+  const uint64_t before_delayed = endpoint->diagnostics().effects;
+  ASSERT_TRUE(engine_.step());
+  ASSERT_EQ(endpoint->diagnostics().effects, before_delayed + 1);
+  write_alias(kDelayedOffset, kDelayedAfter);
+  EXPECT_EQ(unrelated_backing.backing.bytes()[0], std::byte{0});
+  EXPECT_TRUE(rocjitsu::amdgpu::KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *owner_l2, unrelated.va_addr, process_id_, kUnrelatedOffset));
+  EXPECT_EQ(machine_->soc(1)->cache_coherence()->current_epoch(), owner_epoch);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), requester_epoch);
+  finish_scalar(kDelayedBefore); // The committed result is still architectural.
+  const uint64_t before_refetch = endpoint->diagnostics().effects;
+  run_scalar(kDelayedOffset, kDelayedAfter);
+  EXPECT_GT(endpoint->diagnostics().effects, before_refetch)
+      << "a stale reply must not install a requester cache line";
+
+  // A completed peer read keeps its architectural result if its VM access is
+  // invalidated before CU polling, but its old cache namespace cannot receive
+  // the optional fill.
+  issue_scalar(kVmInvalidateOffset);
+  ASSERT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+  const uint64_t before_vm_invalidate = endpoint->diagnostics().effects;
+  ASSERT_TRUE(engine_.step());
+  ASSERT_EQ(endpoint->diagnostics().effects, before_vm_invalidate + 1);
+  ASSERT_TRUE(machine_->soc(0)->gpu_vm().invalidate(*handle));
+  const auto fresh_access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(fresh_access);
+  ASSERT_NE(fresh_access->info().translation_epoch, access->info().translation_epoch);
+  finish_scalar(kVmInvalidateWord);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_vm_invalidate + 1)
+      << "CU polling must preserve the completed read without replaying it";
+  const uint64_t before_vm_refetch = endpoint->diagnostics().effects;
+  run_scalar(kVmInvalidateOffset, kVmInvalidateWord);
+  EXPECT_GT(endpoint->diagnostics().effects, before_vm_refetch)
+      << "a reply from the old VM namespace must not fill the requester cache";
+
+  // Retire and restore only the requester's grant. Its old resident line
+  // cannot satisfy the new admission generation after an alias write.
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  const uint32_t kRemappedWord = 0xabcdef12u;
+  write_alias(kDelayedOffset, kRemappedWord);
+  map.handle = allocation.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const uint64_t before_remapped_read = endpoint->diagnostics().effects;
+  run_scalar(kDelayedOffset, kRemappedWord);
+  EXPECT_GT(endpoint->diagnostics().effects, before_remapped_read)
+      << "UNMAP and MAP must discard the old requester cache line";
+
+  // A cacheable peer lane must not divert its local neighbor around V$/L2.
+  wave->set_exec(0b11);
+  wave->pc = code_va + 16;
+  const uint64_t local_address = code_va + 128;
+  const uint64_t peer_address = allocation.va_addr + kMixedPeerOffset;
+  constexpr uint32_t kMixedPeerWord = 0x654321abu;
+  std::memcpy(backing.backing.data() + kMixedPeerOffset, &kMixedPeerWord, sizeof(kMixedPeerWord));
+  for (const auto &[lane, address] :
+       {std::pair<uint32_t, uint64_t>{0, local_address}, {1, peer_address}}) {
+    cu->write_vgpr(wave->vgpr_alloc().base, lane, static_cast<uint32_t>(address));
+    cu->write_vgpr(wave->vgpr_alloc().base + 1, lane, static_cast<uint32_t>(address >> 32));
+    cu->write_vgpr(wave->vgpr_alloc().base + 2, lane, 0xeeeeeeeeu);
+  }
+  const uint64_t before_mixed_submissions = endpoint->diagnostics().submissions;
+  const uint64_t before_mixed_effects = endpoint->diagnostics().effects;
+  cu->step();
+  for (unsigned attempt = 0;
+       attempt < 16 && (cu->read_vgpr(wave->vgpr_alloc().base + 2, 0) != code[32] ||
+                        cu->read_vgpr(wave->vgpr_alloc().base + 2, 1) != kMixedPeerWord);
+       ++attempt) {
+    (void)engine_.step();
+    cu->step();
+  }
+  EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 2, 0), code[32]);
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 2, 1), kMixedPeerWord);
+  EXPECT_GT(endpoint->diagnostics().submissions, before_mixed_submissions);
+  EXPECT_GT(endpoint->diagnostics().effects, before_mixed_effects);
+
+  process->unmap_pages(code_va, kBytes);
+  EXPECT_EQ(driver_->close(importer_id), 0);
+}
+
+class KfdPeerPipelineInstruction final : public rocjitsu::Instruction {
+public:
+  explicit KfdPeerPipelineInstruction(std::unique_ptr<rocjitsu::DynamicInstState> state)
+      : Instruction("peer_pipeline_test", nullptr) {
+    flags_ |= rocjitsu::MEMORY_OP;
+    set_data(std::move(state));
+  }
+};
+
+TEST_F(KfdPeerBindingTest, MixedLocalAndUcPeerRequestsKeepRequesterCacheSemantics) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  namespace amdgpu = rocjitsu::amdgpu;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kVectorOffset = 128;
+  constexpr size_t kScalarOffset = kBytes - sizeof(uint32_t);
+  constexpr uint32_t kBackingLocal = 0x11111111u;
+  constexpr uint32_t kDirtyVector = 0x22222222u;
+  constexpr uint32_t kDirtyScalar = 0x44444444u;
+  constexpr uint32_t kPeerVector = 0x77777777u;
+  constexpr uint32_t kPeerScalar = 0x88888888u;
+
+  kfd_ioctl_alloc_memory_of_gpu_args local{};
+  local.size = kBytes;
+  local.gpu_id = kRequester;
+  local.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &local), 0);
+  kfd_ioctl_alloc_memory_of_gpu_args peer{};
+  peer.size = kBytes;
+  peer.gpu_id = kOwner;
+  peer.flags = local.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &peer), 0);
+  ASSERT_EQ(peer.va_addr, local.va_addr + kBytes);
+  uint32_t gpu_id = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = local.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  gpu_id = kOwner;
+  map.handle = peer.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = peer.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  gpu_id = kRequester;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto local_backing = process->gpu_local_backing_grant(kRequester, local.va_addr, kBytes);
+  const auto peer_backing = process->gpu_peer_backing_grant(kRequester, peer.va_addr, kBytes);
+  ASSERT_TRUE(local_backing.backing);
+  ASSERT_TRUE(peer_backing.backing);
+  ASSERT_FALSE(peer_backing.admission.cacheable);
+  const auto put = [](std::byte *bytes, size_t offset, uint32_t word) {
+    std::memcpy(bytes + offset, &word, sizeof(word));
+  };
+  put(local_backing.backing.data(), kVectorOffset, kBackingLocal);
+  put(local_backing.backing.data(), kScalarOffset, kBackingLocal);
+  put(peer_backing.backing.data(), kVectorOffset, kPeerVector);
+  put(peer_backing.backing.data(), 0, kPeerScalar);
+
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(access);
+  EXPECT_EQ(
+      access->classify_data_route(local.va_addr + kVectorOffset, 4, amdgpu::VmAccessKind::Read),
+      amdgpu::VmDataRoute::Local);
+  EXPECT_EQ(
+      access->classify_data_route(peer.va_addr + kVectorOffset, 4, amdgpu::VmAccessKind::Read),
+      amdgpu::VmDataRoute::Deferred);
+  amdgpu::ComputeUnitCore *cu = nullptr;
+  machine_->soc(0)->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(0, 0, 16, 16);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id_);
+  wave->set_address_space(*handle);
+  wave->set_exec(3);
+  auto *l2 = cu->l2();
+  ASSERT_NE(l2, nullptr);
+  std::array<uint8_t, amdgpu::L2Cache::LINE_SIZE> line{};
+  put(reinterpret_cast<std::byte *>(line.data()), 0, kDirtyVector);
+  ASSERT_EQ(l2->writeback_line(local.va_addr + kVectorOffset, line.data(), 0, 4, amdgpu::Mtype::RW,
+                               process_id_),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(local_backing.backing.bytes()[kVectorOffset], std::byte{0x11});
+
+  auto complete = [&](auto &pipeline) {
+    for (unsigned attempt = 0; attempt < 32 && !pipeline.empty(); ++attempt) {
+      (void)engine_.step();
+      pipeline.tick();
+    }
+    EXPECT_TRUE(pipeline.empty());
+    EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
+  };
+  amdgpu::GlobalMemPipeline vector(&cu->l1_vector(), l2);
+  const auto vector_state = [&](bool load, uint32_t local_word, uint32_t peer_word) {
+    auto state = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    state->elem_size = 4;
+    state->num_elems = 1;
+    state->wf_size = wave->wf_size();
+    state->exec_mask = 3;
+    state->lane_mask = 3;
+    state->is_load = load;
+    state->dst_reg_base = wave->vgpr_alloc().base + 2;
+    state->per_lane_addr[0] = local.va_addr + kVectorOffset;
+    state->per_lane_addr[1] = peer.va_addr + kVectorOffset;
+    state->store_data.resize(state->wf_size * sizeof(uint32_t));
+    put(reinterpret_cast<std::byte *>(state->store_data.data()), 0, local_word);
+    put(reinterpret_cast<std::byte *>(state->store_data.data()), 4, peer_word);
+    return state;
+  };
+  ASSERT_EQ(vector.issue_deferred(new KfdPeerPipelineInstruction(vector_state(true, 0, 0)), *wave),
+            VmAccessOutcome::Complete);
+  complete(vector);
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 2, 0), kDirtyVector);
+  EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 2, 1), kPeerVector);
+
+  constexpr uint32_t kVectorStoredLocal = 0x33333333u;
+  constexpr uint32_t kVectorStoredPeer = 0x99999999u;
+  ASSERT_EQ(vector.issue_deferred(new KfdPeerPipelineInstruction(
+                                      vector_state(false, kVectorStoredLocal, kVectorStoredPeer)),
+                                  *wave),
+            VmAccessOutcome::Complete);
+  complete(vector);
+  uint32_t cached = 0;
+  ASSERT_EQ(l2->read(local.va_addr + kVectorOffset, reinterpret_cast<uint8_t *>(&cached), 4,
+                     amdgpu::Mtype::RW, process_id_),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(cached, kVectorStoredLocal);
+  uint32_t peer_stored = 0;
+  std::memcpy(&peer_stored, peer_backing.backing.data() + kVectorOffset, 4);
+  EXPECT_EQ(peer_stored, kVectorStoredPeer);
+
+  line.fill(0);
+  put(reinterpret_cast<std::byte *>(line.data()), amdgpu::L2Cache::LINE_SIZE - 4, kDirtyScalar);
+  ASSERT_EQ(l2->writeback_line(local.va_addr + kBytes - amdgpu::L2Cache::LINE_SIZE, line.data(),
+                               amdgpu::L2Cache::LINE_SIZE - 4, 4, amdgpu::Mtype::RW, process_id_),
+            VmAccessOutcome::Complete);
+  amdgpu::ScalarMemPipeline scalar(&cu->l1_scalar());
+  auto scalar_load = std::make_unique<amdgpu::ScalarMemState>();
+  scalar_load->addr = local.va_addr + kScalarOffset;
+  scalar_load->num_dwords = 2;
+  scalar_load->dst_register = {amdgpu::ScalarRegisterStorage::SGPR, 4, 2};
+  ASSERT_EQ(scalar.issue_deferred(new KfdPeerPipelineInstruction(std::move(scalar_load)), *wave),
+            VmAccessOutcome::Complete);
+  complete(scalar);
+  EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base + 4), kDirtyScalar);
+  EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base + 5), kPeerScalar);
+
+  auto scalar_store = std::make_unique<amdgpu::ScalarMemState>();
+  scalar_store->addr = local.va_addr + kScalarOffset;
+  scalar_store->num_dwords = 2;
+  scalar_store->is_load = false;
+  scalar_store->store_data[0] = 0x55555555u;
+  scalar_store->store_data[1] = 0xaaaaaaaau;
+  ASSERT_EQ(scalar.issue_deferred(new KfdPeerPipelineInstruction(std::move(scalar_store)), *wave),
+            VmAccessOutcome::Complete);
+  complete(scalar);
+  ASSERT_EQ(cu->l1_scalar().load(local.va_addr + kScalarOffset, 1, &cached, process_id_),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(cached, 0x55555555u);
+  std::memcpy(&peer_stored, peer_backing.backing.data(), 4);
+  EXPECT_EQ(peer_stored, 0xaaaaaaaau);
+}
+
+TEST_F(KfdPeerBindingTest, ControlledRequesterCuStoreRefreshesCachedPeerLine) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  using rocjitsu::amdgpu::VmDataRoute;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 16;
+  constexpr size_t kVectorOffset = 256;
+  constexpr uint32_t kBefore = 0x12345678u;
+  constexpr uint32_t kAfter = 0x87654321u;
+  constexpr uint32_t kVectorBefore = 0x55667788u;
+  constexpr uint32_t kVectorAfter = 0xa5b6c7d8u;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  uint32_t gpu_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  gpu_id = kRequester;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  additional_process_ids_.push_back(importer_id);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = allocation.va_addr + 4 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  ASSERT_NE(imported.va_addr, allocation.va_addr);
+  map.handle = imported.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  auto owner = driver_->find_process(process_id_);
+  auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(owner, nullptr);
+  ASSERT_NE(importer, nullptr);
+  const auto owner_backing = owner->gpu_peer_backing_grant(kRequester, allocation.va_addr, kBytes);
+  const auto imported_backing =
+      importer->gpu_peer_backing_grant(kRequester, imported.va_addr, kBytes);
+  ASSERT_TRUE(owner_backing.admission.cacheable);
+  ASSERT_FALSE(imported_backing.admission.cacheable);
+  ASSERT_TRUE(owner_backing.backing);
+  ASSERT_TRUE(imported_backing.backing.same_backing(owner_backing.backing));
+  std::memcpy(owner_backing.backing.data() + kOffset, &kBefore, sizeof(kBefore));
+  std::memcpy(owner_backing.backing.data() + kVectorOffset, &kVectorBefore, sizeof(kVectorBefore));
+
+  const uint64_t owner_code_va = allocation.va_addr + 16 * kBytes;
+  controlled_code_page_ = std::make_unique<KfdPeerCuCodePage>();
+  auto &owner_code = controlled_code_page_->words;
+  owner_code.fill(0xBF800000u);
+  owner_code[0] = 0xC0020000u; // s_load_dword s0, s[0:1], 0x0
+  owner_code[1] = 0;
+  owner_code[4] = 0xC0420080u; // s_store_dword s2, s[0:1], 0x0
+  owner_code[5] = 0;
+  owner_code[8] = 0xDC500000u; // flat_load_dword v2, v[0:1]
+  owner_code[9] = 0x027F0000u;
+  owner_code[12] = 0xDC700000u; // flat_store_dword v[0:1], v2
+  owner_code[13] = 0x007F0200u;
+  {
+    {
+      std::lock_guard lock(owner->alloc_mutex_);
+      rocjitsu::KfdProcess::GpuAllocation instruction{};
+      instruction.gpu_va = owner_code_va;
+      instruction.size = kBytes;
+      instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+      instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+      instruction.handle = owner->next_handle_++;
+      instruction.admission_generations[kRequester] = owner->next_gpu_admission_generation_locked();
+      owner->allocations_[instruction.handle] = instruction;
+      owner->publish_gpu_grants_locked();
+    }
+    ASSERT_EQ(owner->map_pages(owner_code_va, owner_code.data(), kBytes,
+                               rocjitsu::amdgpu::Mtype::RW,
+                               rocjitsu::KfdProcess::HostExtentOwner::Driver),
+              rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  }
+
+  const auto owner_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  const auto importer_handle = machine_->soc(0)->gpu_vm().find_vmid(importer_id);
+  ASSERT_TRUE(owner_handle);
+  ASSERT_TRUE(importer_handle);
+  const auto owner_access = machine_->soc(0)->gpu_vm().snapshot_pinned(*owner_handle);
+  const auto importer_access = machine_->soc(0)->gpu_vm().snapshot_pinned(*importer_handle);
+  ASSERT_TRUE(owner_access);
+  ASSERT_TRUE(importer_access);
+  EXPECT_EQ(owner_access->classify_data_route(allocation.va_addr + kOffset, sizeof(kAfter),
+                                              rocjitsu::amdgpu::VmAccessKind::Write),
+            VmDataRoute::Deferred);
+  EXPECT_EQ(importer_access->classify_data_route(imported.va_addr + kOffset, sizeof(kAfter),
+                                                 rocjitsu::amdgpu::VmAccessKind::Read),
+            VmDataRoute::Deferred);
+
+  std::array<rocjitsu::amdgpu::ComputeUnitCore *, 2> units{};
+  machine_->soc(0)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    for (auto *candidate : cp->compute_units()) {
+      if (!units[0])
+        units[0] = candidate;
+      else if (!units[1] && candidate != units[0])
+        units[1] = candidate;
+    }
+  });
+  ASSERT_NE(units[0], nullptr);
+  ASSERT_NE(units[1], nullptr);
+  auto *reader_wave = units[0]->dispatch_wf(/*wg_id=*/0, owner_code_va, /*sgprs=*/16,
+                                            /*vgprs=*/4);
+  auto *writer_wave = units[1]->dispatch_wf(/*wg_id=*/1, owner_code_va, /*sgprs=*/16,
+                                            /*vgprs=*/4);
+  ASSERT_NE(reader_wave, nullptr);
+  ASSERT_NE(writer_wave, nullptr);
+  reader_wave->set_process_id(process_id_);
+  reader_wave->set_address_space(*owner_handle);
+  reader_wave->set_exec(1);
+  writer_wave->set_process_id(process_id_);
+  writer_wave->set_address_space(*owner_handle);
+  writer_wave->set_exec(1);
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+
+  const auto read_peer = [&](rocjitsu::amdgpu::ComputeUnitCore *cu, auto *wave, uint64_t code_va,
+                             uint64_t address, uint32_t expected) {
+    wave->pc = code_va;
+    cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(address));
+    cu->write_sgpr(wave->sgpr_alloc().base + 1, static_cast<uint32_t>(address >> 32));
+    cu->step();
+    for (int attempt = 0; attempt < 8 && wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY;
+         ++attempt) {
+      cu->step();
+      if (wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY)
+        (void)engine_.step();
+    }
+    EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+    EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base), expected);
+  };
+  read_peer(units[0], reader_wave, owner_code_va, allocation.va_addr + kOffset, kBefore);
+  const uint64_t after_fills = endpoint->diagnostics().effects;
+  ASSERT_EQ(after_fills, 1u);
+  read_peer(units[0], reader_wave, owner_code_va, allocation.va_addr + kOffset, kBefore);
+  ASSERT_EQ(endpoint->diagnostics().effects, after_fills)
+      << "the requester CU must hold a real scalar cache hit";
+
+  kfd_ioctl_alloc_memory_of_gpu_args unrelated{};
+  unrelated.size = kBytes;
+  unrelated.gpu_id = kOwner;
+  unrelated.flags = allocation.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &unrelated), 0);
+  gpu_id = kOwner;
+  map.handle = unrelated.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  constexpr uint32_t kUnrelatedOffset = 8;
+  std::array<uint8_t, rocjitsu::amdgpu::L2Cache::LINE_SIZE> dirty_line{};
+  dirty_line[kUnrelatedOffset] = 0x6d;
+  ASSERT_EQ(owner_l2->writeback_line(unrelated.va_addr, dirty_line.data(), kUnrelatedOffset, 1,
+                                     rocjitsu::amdgpu::Mtype::RW, process_id_),
+            VmAccessOutcome::Complete);
+  const auto unrelated_backing =
+      owner->gpu_local_backing_grant(kOwner, unrelated.va_addr + kUnrelatedOffset, 1);
+  ASSERT_TRUE(unrelated_backing.backing);
+  ASSERT_EQ(unrelated_backing.backing.bytes()[0], std::byte{0});
+  ASSERT_TRUE(rocjitsu::amdgpu::KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *owner_l2, unrelated.va_addr, process_id_, kUnrelatedOffset));
+  const uint64_t owner_epoch = machine_->soc(1)->cache_coherence()->current_epoch();
+  const uint64_t requester_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+
+  writer_wave->pc = owner_code_va + 16;
+  const uint64_t store_address = allocation.va_addr + kOffset;
+  units[1]->write_sgpr(writer_wave->sgpr_alloc().base, static_cast<uint32_t>(store_address));
+  units[1]->write_sgpr(writer_wave->sgpr_alloc().base + 1,
+                       static_cast<uint32_t>(store_address >> 32));
+  units[1]->write_sgpr(writer_wave->sgpr_alloc().base + 2, kAfter);
+  const auto before_store = endpoint->diagnostics();
+  units[1]->step();
+  for (int attempt = 0; attempt < 8 && writer_wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY;
+       ++attempt) {
+    (void)engine_.step();
+    units[1]->step();
+  }
+  ASSERT_EQ(endpoint->diagnostics().submissions, before_store.submissions + 1)
+      << "the cacheable CU store must submit through the deferred peer route";
+  ASSERT_EQ(writer_wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+  ASSERT_EQ(endpoint->diagnostics().effects, before_store.effects + 1)
+      << "the store must commit one fabric effect";
+  uint32_t observed = 0;
+  std::memcpy(&observed, owner_backing.backing.data() + kOffset, sizeof(observed));
+  EXPECT_EQ(observed, kAfter);
+  EXPECT_EQ(unrelated_backing.backing.bytes()[0], std::byte{0});
+  EXPECT_TRUE(rocjitsu::amdgpu::KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *owner_l2, unrelated.va_addr, process_id_, kUnrelatedOffset));
+  EXPECT_EQ(machine_->soc(1)->cache_coherence()->current_epoch(), owner_epoch);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), requester_epoch);
+
+  read_peer(units[0], reader_wave, owner_code_va, allocation.va_addr + kOffset, kAfter);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_store.effects + 2)
+      << "the other CU must refetch the new word";
+
+  const auto read_vector_peer = [&](uint32_t expected) {
+    reader_wave->pc = owner_code_va + 32;
+    const uint64_t vector_address = allocation.va_addr + kVectorOffset;
+    units[0]->write_vgpr(reader_wave->vgpr_alloc().base, 0, static_cast<uint32_t>(vector_address));
+    units[0]->write_vgpr(reader_wave->vgpr_alloc().base + 1, 0,
+                         static_cast<uint32_t>(vector_address >> 32));
+    units[0]->write_vgpr(reader_wave->vgpr_alloc().base + 2, 0, 0);
+    units[0]->step();
+    for (int attempt = 0;
+         attempt < 16 && units[0]->read_vgpr(reader_wave->vgpr_alloc().base + 2, 0) != expected;
+         ++attempt) {
+      (void)engine_.step();
+      units[0]->step();
+    }
+    EXPECT_EQ(reader_wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+    EXPECT_EQ(units[0]->read_vgpr(reader_wave->vgpr_alloc().base + 2, 0), expected);
+  };
+  read_vector_peer(kVectorBefore);
+  const uint64_t after_vector_fill = endpoint->diagnostics().effects;
+  ASSERT_EQ(after_vector_fill, before_store.effects + 3);
+  read_vector_peer(kVectorBefore);
+  ASSERT_EQ(endpoint->diagnostics().effects, after_vector_fill)
+      << "the requester CU must hold a real vector cache hit";
+  const auto vector_access = machine_->soc(0)->gpu_vm().snapshot(*owner_handle);
+  ASSERT_TRUE(vector_access);
+  std::array<uint8_t, sizeof(kVectorBefore)> cached_vector{};
+  const uint64_t vector_address = allocation.va_addr + kVectorOffset;
+  ASSERT_TRUE(units[0]->l1_vector().try_read_peer_cached(vector_address, cached_vector, process_id_,
+                                                         owner_backing.admission.generation,
+                                                         vector_access->cache_identity()));
+  uint32_t cached_word = 0;
+  std::memcpy(&cached_word, cached_vector.data(), sizeof(cached_word));
+  EXPECT_EQ(cached_word, kVectorBefore);
+
+  writer_wave->pc = owner_code_va + 48;
+  units[1]->write_vgpr(writer_wave->vgpr_alloc().base, 0, static_cast<uint32_t>(vector_address));
+  units[1]->write_vgpr(writer_wave->vgpr_alloc().base + 1, 0,
+                       static_cast<uint32_t>(vector_address >> 32));
+  units[1]->write_vgpr(writer_wave->vgpr_alloc().base + 2, 0, kVectorAfter);
+  const auto before_vector_store = endpoint->diagnostics();
+  units[1]->step();
+  for (int attempt = 0;
+       attempt < 16 && endpoint->diagnostics().effects == before_vector_store.effects; ++attempt) {
+    (void)engine_.step();
+    units[1]->step();
+  }
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_vector_store.submissions + 1);
+  ASSERT_EQ(endpoint->diagnostics().effects, before_vector_store.effects + 1);
+  ASSERT_EQ(writer_wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+  std::memcpy(&observed, owner_backing.backing.data() + kVectorOffset, sizeof(observed));
+  EXPECT_EQ(observed, kVectorAfter);
+  EXPECT_EQ(unrelated_backing.backing.bytes()[0], std::byte{0});
+  EXPECT_TRUE(rocjitsu::amdgpu::KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *owner_l2, unrelated.va_addr, process_id_, kUnrelatedOffset));
+  EXPECT_EQ(machine_->soc(1)->cache_coherence()->current_epoch(), owner_epoch);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), requester_epoch);
+  EXPECT_FALSE(units[0]->l1_vector().try_read_peer_cached(
+      vector_address, cached_vector, process_id_, owner_backing.admission.generation,
+      vector_access->cache_identity()));
+
+  read_vector_peer(kVectorAfter);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_vector_store.effects + 2)
+      << "the previously cached requester CU must refetch the vector word";
+  const auto read_imported = [&](size_t offset, uint32_t expected) {
+    std::array<std::byte, sizeof(expected)> imported_word{};
+    size_t progress = 0;
+    rocjitsu::amdgpu::VmTransferToken token;
+    VmAccessOutcome outcome =
+        importer_access->read(imported.va_addr + offset, imported_word, progress, token);
+    for (int attempt = 0; attempt < 8 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+      (void)engine_.step();
+      outcome = importer_access->read(imported.va_addr + offset, imported_word, progress, token);
+    }
+    EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+    EXPECT_EQ(progress, imported_word.size());
+    uint32_t imported_observed = 0;
+    std::memcpy(&imported_observed, imported_word.data(), sizeof(imported_observed));
+    EXPECT_EQ(imported_observed, expected);
+  };
+  read_imported(kOffset, kAfter);
+  read_imported(kVectorOffset, kVectorAfter);
+
+  owner->unmap_pages(owner_code_va, kBytes);
+  const int close_result = driver_->close(importer_id);
+  EXPECT_EQ(close_result, 0);
+  if (close_result == 0)
+    std::erase(additional_process_ids_, importer_id);
+}
+
+TEST_F(KfdPeerBindingTest, ControlledRequesterWriteRetriesBusyCanonicalAlias) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 16;
+  constexpr uint32_t kBefore = 0x10203040u;
+  constexpr uint32_t kAfter = 0x50607080u;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  uint32_t gpu_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  gpu_id = kRequester;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto backing = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, kBytes);
+  ASSERT_TRUE(backing.admission.cacheable);
+  ASSERT_TRUE(backing.backing);
+  std::memcpy(backing.backing.data() + kOffset, &kBefore, sizeof(kBefore));
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto owner_alias = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kOwner;
+  });
+  ASSERT_NE(owner_alias, aliases->end());
+  auto held = driver_->hold_alias_ingress_for_testing(*owner_alias);
+  ASSERT_TRUE(held);
+
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot_pinned(*handle);
+  ASSERT_TRUE(access);
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  const auto before = endpoint->diagnostics();
+  std::array<std::byte, sizeof(kAfter)> payload{};
+  std::memcpy(payload.data(), &kAfter, sizeof(kAfter));
+  size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  ASSERT_EQ(access->write(allocation.va_addr + kOffset, payload, progress, token),
+            VmAccessOutcome::Unavailable);
+  ASSERT_TRUE(token.pending());
+  ASSERT_EQ(endpoint->diagnostics().submissions, before.submissions + 1);
+
+  for (int attempt = 0; attempt < 128; ++attempt)
+    (void)engine_.step();
+  const auto blocked = endpoint->diagnostics();
+  EXPECT_GT(blocked.request_messages, before.request_messages)
+      << "the selected effect must reach the busy owner alias";
+  EXPECT_EQ(blocked.effects, before.effects);
+  EXPECT_EQ(access->write(allocation.va_addr + kOffset, payload, progress, token),
+            VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(token.pending());
+  EXPECT_EQ(progress, 0u);
+  uint32_t observed = 0;
+  std::memcpy(&observed, backing.backing.data() + kOffset, sizeof(observed));
+  EXPECT_EQ(observed, kBefore);
+  EXPECT_FALSE(rocjitsu::amdgpu::KfdPreparedProviderTestAccess::can_reserve_peer_line(
+      *driver_, backing.backing.backing_id(), backing.backing.file_offset() + kOffset,
+      payload.size()))
+      << "a busy selection must retain its canonical line reservation";
+
+  held->reset();
+  VmAccessOutcome outcome = VmAccessOutcome::Unavailable;
+  for (int attempt = 0; attempt < 128 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    (void)engine_.step();
+    outcome = access->write(allocation.va_addr + kOffset, payload, progress, token);
+  }
+  EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, payload.size());
+  EXPECT_FALSE(token.pending());
+  EXPECT_EQ(endpoint->diagnostics().effects, before.effects + 1);
+  std::memcpy(&observed, backing.backing.data() + kOffset, sizeof(observed));
+  EXPECT_EQ(observed, kAfter);
+  EXPECT_TRUE(rocjitsu::amdgpu::KfdPreparedProviderTestAccess::can_reserve_peer_line(
+      *driver_, backing.backing.backing_id(), backing.backing.file_offset() + kOffset,
+      payload.size()));
+}
+
+TEST_F(KfdCdna5PeerBindingTest, ControlledRequesterVectorStoreRefreshesCachedPeerLine) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 256;
+  constexpr uint32_t kBefore = 0x12345678u;
+  constexpr uint32_t kAfter = 0xa5b6c7d8u;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  uint32_t gpu_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  gpu_id = kRequester;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto backing = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, kBytes);
+  ASSERT_TRUE(backing.admission.cacheable);
+  ASSERT_TRUE(backing.backing);
+  std::memcpy(backing.backing.data() + kOffset, &kBefore, sizeof(kBefore));
+
+  const uint64_t code_va = allocation.va_addr + 16 * kBytes;
+  controlled_code_page_ = std::make_unique<KfdPeerCuCodePage>();
+  auto &code = controlled_code_page_->words;
+  code.fill(0xBF800000u);
+  // gfx1250 VGLOBAL: global_load_b32 v1, v0, s[4:5].
+  code[0] = 0xEE050004u;
+  code[1] = 0x00000001u;
+  code[2] = 0x00000000u;
+  // The store encoding is also exercised by Gfx1250SimulationTest.
+  code[4] = 0xEE068004u; // global_store_b32 v0, v1, s[4:5]
+  code[5] = 0x00800000u;
+  code[6] = 0x00000000u;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  ASSERT_EQ(process->map_pages(code_va, code.data(), kBytes, rocjitsu::amdgpu::Mtype::RW,
+                               rocjitsu::KfdProcess::HostExtentOwner::Driver),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+
+  kfd_ioctl_alloc_memory_of_gpu_args unrelated{};
+  unrelated.size = kBytes;
+  unrelated.gpu_id = kOwner;
+  unrelated.flags = allocation.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &unrelated), 0);
+  gpu_id = kOwner;
+  map.handle = unrelated.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  constexpr uint32_t kUnrelatedOffset = 8;
+  std::array<uint8_t, rocjitsu::amdgpu::L2Cache::LINE_SIZE> dirty_line{};
+  dirty_line[kUnrelatedOffset] = 0x6d;
+  ASSERT_EQ(owner_l2->writeback_line(unrelated.va_addr, dirty_line.data(), kUnrelatedOffset, 1,
+                                     rocjitsu::amdgpu::Mtype::RW, process_id_),
+            VmAccessOutcome::Complete);
+  const auto unrelated_backing =
+      process->gpu_local_backing_grant(kOwner, unrelated.va_addr + kUnrelatedOffset, 1);
+  ASSERT_TRUE(unrelated_backing.backing);
+  ASSERT_EQ(unrelated_backing.backing.bytes()[0], std::byte{0});
+  ASSERT_TRUE(rocjitsu::amdgpu::KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *owner_l2, unrelated.va_addr, process_id_, kUnrelatedOffset));
+
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot_pinned(*handle);
+  ASSERT_TRUE(access);
+  const uint64_t address = allocation.va_addr + kOffset;
+  EXPECT_EQ(
+      access->classify_data_route(address, sizeof(kAfter), rocjitsu::amdgpu::VmAccessKind::Write),
+      rocjitsu::amdgpu::VmDataRoute::Deferred);
+  std::array<rocjitsu::amdgpu::ComputeUnitCore *, 2> units{};
+  machine_->soc(0)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    for (auto *candidate : cp->compute_units()) {
+      if (!units[0])
+        units[0] = candidate;
+      else if (!units[1] && candidate != units[0])
+        units[1] = candidate;
+    }
+  });
+  ASSERT_NE(units[0], nullptr);
+  ASSERT_NE(units[1], nullptr);
+  auto *reader_wave = units[0]->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  auto *writer_wave = units[1]->dispatch_wf(/*wg_id=*/1, code_va + 16, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(reader_wave, nullptr);
+  ASSERT_NE(writer_wave, nullptr);
+  for (auto *wave : {reader_wave, writer_wave}) {
+    wave->set_process_id(process_id_);
+    wave->set_address_space(*handle);
+    wave->set_exec(1);
+  }
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  const auto read_vector = [&](uint32_t expected) {
+    reader_wave->pc = code_va;
+    units[0]->write_sgpr(reader_wave->sgpr_alloc().base + 4, static_cast<uint32_t>(address));
+    units[0]->write_sgpr(reader_wave->sgpr_alloc().base + 5, static_cast<uint32_t>(address >> 32));
+    units[0]->write_vgpr(reader_wave->vgpr_alloc().base, 0, 0);
+    units[0]->write_vgpr(reader_wave->vgpr_alloc().base + 1, 0, 0);
+    units[0]->step();
+    for (int attempt = 0;
+         attempt < 32 && units[0]->read_vgpr(reader_wave->vgpr_alloc().base + 1, 0) != expected;
+         ++attempt) {
+      (void)engine_.step();
+      units[0]->step();
+    }
+    EXPECT_EQ(reader_wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+    EXPECT_EQ(units[0]->read_vgpr(reader_wave->vgpr_alloc().base + 1, 0), expected);
+  };
+  const auto before = endpoint->diagnostics();
+  read_vector(kBefore);
+  ASSERT_EQ(endpoint->diagnostics().effects, before.effects + 1);
+  read_vector(kBefore);
+  ASSERT_EQ(endpoint->diagnostics().effects, before.effects + 1)
+      << "the gfx1250 requester vector read must hit its cache";
+  const auto resident_access = machine_->soc(0)->gpu_vm().snapshot(*handle);
+  ASSERT_TRUE(resident_access);
+  std::array<uint8_t, sizeof(kBefore)> cached{};
+  uint32_t observed = 0;
+  const auto expect_cached_before = [&](auto &cache) {
+    cached.fill(0);
+    ASSERT_TRUE(cache.try_read_peer_cached(address, cached, process_id_,
+                                           backing.admission.generation,
+                                           resident_access->cache_identity()));
+    std::memcpy(&observed, cached.data(), sizeof(observed));
+    EXPECT_EQ(observed, kBefore);
+  };
+  expect_cached_before(units[0]->l1_vector());
+  ASSERT_NE(units[0]->l2(), nullptr);
+  expect_cached_before(*units[0]->l2());
+  ASSERT_GT(machine_->soc(0)->num_iods(), 0u);
+  for (uint32_t iod = 0; iod < machine_->soc(0)->num_iods(); ++iod)
+    expect_cached_before(*machine_->soc(0)->iod(iod)->msc());
+  const uint64_t owner_epoch = machine_->soc(1)->cache_coherence()->current_epoch();
+  const uint64_t requester_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+
+  units[1]->write_sgpr(writer_wave->sgpr_alloc().base + 4, static_cast<uint32_t>(address));
+  units[1]->write_sgpr(writer_wave->sgpr_alloc().base + 5, static_cast<uint32_t>(address >> 32));
+  units[1]->write_vgpr(writer_wave->vgpr_alloc().base, 0, 0);
+  units[1]->write_vgpr(writer_wave->vgpr_alloc().base + 1, 0, kAfter);
+  const auto before_store = endpoint->diagnostics();
+  units[1]->step();
+  for (int attempt = 0; attempt < 32 && endpoint->diagnostics().effects == before_store.effects;
+       ++attempt) {
+    (void)engine_.step();
+    units[1]->step();
+  }
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_store.submissions + 1);
+  ASSERT_EQ(endpoint->diagnostics().effects, before_store.effects + 1);
+  EXPECT_EQ(writer_wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+  std::memcpy(&observed, backing.backing.data() + kOffset, sizeof(observed));
+  EXPECT_EQ(observed, kAfter);
+  EXPECT_EQ(unrelated_backing.backing.bytes()[0], std::byte{0});
+  EXPECT_TRUE(rocjitsu::amdgpu::KfdPreparedProviderTestAccess::dirty_l2_byte(
+      *owner_l2, unrelated.va_addr, process_id_, kUnrelatedOffset));
+  EXPECT_EQ(machine_->soc(1)->cache_coherence()->current_epoch(), owner_epoch);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), requester_epoch);
+  const auto expect_selected_invalidated = [&](auto &cache) {
+    EXPECT_FALSE(cache.try_read_peer_cached(address, cached, process_id_,
+                                            backing.admission.generation,
+                                            resident_access->cache_identity()));
+  };
+  expect_selected_invalidated(units[0]->l1_vector());
+  expect_selected_invalidated(*units[0]->l2());
+  for (uint32_t iod = 0; iod < machine_->soc(0)->num_iods(); ++iod)
+    expect_selected_invalidated(*machine_->soc(0)->iod(iod)->msc());
+
+  read_vector(kAfter);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_store.effects + 2);
+  process->unmap_pages(code_va, kBytes);
+}
+
+TEST_F(KfdPeerBindingTest, QueuedSameLinePeerWriteFollowsFirstEffect) {
+  using namespace std::chrono_literals;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 16;
+  constexpr uint32_t kInitial = 0x10203040u;
+  constexpr uint32_t kFirst = 0x11223344u;
+  constexpr uint32_t kLater = 0x55667788u;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  uint32_t gpu_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  gpu_id = kRequester;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto backing = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, kBytes);
+  ASSERT_TRUE(backing.admission.cacheable);
+  ASSERT_TRUE(backing.backing);
+  std::memcpy(backing.backing.data() + kOffset, &kInitial, sizeof(kInitial));
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(0)->gpu_vm().snapshot_pinned(*handle);
+  ASSERT_TRUE(access);
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+
+  std::array<std::byte, sizeof(kFirst)> first_bytes{};
+  std::array<std::byte, sizeof(kLater)> later_bytes{};
+  std::memcpy(first_bytes.data(), &kFirst, sizeof(kFirst));
+  std::memcpy(later_bytes.data(), &kLater, sizeof(kLater));
+  size_t first_progress = 0;
+  size_t later_progress = 0;
+  rocjitsu::amdgpu::VmTransferToken first_token;
+  rocjitsu::amdgpu::VmTransferToken later_token;
+  ASSERT_EQ(access->write(allocation.va_addr + kOffset, first_bytes, first_progress, first_token),
+            VmAccessOutcome::Unavailable);
+  ASSERT_TRUE(first_token.pending());
+  ASSERT_EQ(access->write(allocation.va_addr + kOffset, later_bytes, later_progress, later_token),
+            VmAccessOutcome::Unavailable);
+  ASSERT_TRUE(later_token.pending());
+  ASSERT_EQ(endpoint->diagnostics().submissions, 2u);
+
+  std::promise<void> entered;
+  auto entered_future = entered.get_future();
+  std::promise<void> release;
+  auto release_future = release.get_future().share();
+  std::atomic<uint32_t> later_probe_backing{0};
+  std::atomic<uint32_t> probe_calls{0};
+  endpoint->set_effect_probe_for_testing([&] {
+    const uint32_t call = probe_calls.fetch_add(1, std::memory_order_acq_rel);
+    if (call == 0) {
+      entered.set_value();
+      release_future.wait();
+    } else if (call == 1) {
+      uint32_t word = 0;
+      std::memcpy(&word, backing.backing.data() + kOffset, sizeof(word));
+      later_probe_backing.store(word, std::memory_order_release);
+    }
+  });
+  std::promise<bool> first_step_done;
+  auto first_step_result = first_step_done.get_future();
+  std::promise<bool> resume_steps;
+  auto resume_result = resume_steps.get_future();
+  struct DrainResult {
+    VmAccessOutcome first = VmAccessOutcome::Unavailable;
+    VmAccessOutcome later = VmAccessOutcome::Unavailable;
+    bool step_failed = false;
+  };
+  auto engine_owner = std::async(std::launch::async, [&] {
+    for (int attempt = 0; attempt < 32 && probe_calls.load(std::memory_order_acquire) == 0;
+         ++attempt)
+      if (!engine_.step())
+        break;
+    first_step_done.set_value(probe_calls.load(std::memory_order_acquire) != 0);
+    DrainResult result;
+    if (!resume_result.get())
+      return result;
+    for (int attempt = 0; attempt < 32 && (result.first == VmAccessOutcome::Unavailable ||
+                                           result.later == VmAccessOutcome::Unavailable);
+         ++attempt) {
+      if (result.first == VmAccessOutcome::Unavailable)
+        result.first =
+            access->write(allocation.va_addr + kOffset, first_bytes, first_progress, first_token);
+      if (result.later == VmAccessOutcome::Unavailable)
+        result.later =
+            access->write(allocation.va_addr + kOffset, later_bytes, later_progress, later_token);
+      if (result.first != VmAccessOutcome::Unavailable &&
+          result.later != VmAccessOutcome::Unavailable)
+        break;
+      if (!engine_.step()) {
+        result.step_failed = true;
+        break;
+      }
+    }
+    return result;
+  });
+  const auto wait_for_ready = [](auto &future, const char *failure) {
+    if (future.wait_for(5s) == std::future_status::ready)
+      return;
+    std::fputs(failure, stderr);
+    std::fputc('\n', stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  };
+  if (entered_future.wait_for(5s) != std::future_status::ready) {
+    release.set_value();
+    wait_for_ready(first_step_result, "first KFD write did not drain after probe release");
+    endpoint->set_effect_probe_for_testing({});
+    resume_steps.set_value(false);
+    wait_for_ready(engine_owner, "KFD engine owner did not stop after a missed probe");
+    engine_owner.get();
+    FAIL() << "the first production KFD write did not enter its target effect";
+  }
+
+  const uint64_t backing_id = backing.backing.backing_id();
+  const uint64_t line_offset = backing.backing.file_offset() + kOffset;
+  EXPECT_FALSE(rocjitsu::amdgpu::KfdPreparedProviderTestAccess::can_reserve_peer_line(
+      *driver_, backing_id, line_offset, later_bytes.size()));
+  const auto during_first = endpoint->diagnostics();
+  EXPECT_EQ(during_first.effects, 0u);
+  uint32_t observed = 0;
+  std::memcpy(&observed, backing.backing.data() + kOffset, sizeof(observed));
+  EXPECT_EQ(observed, kInitial);
+
+  release.set_value();
+  wait_for_ready(first_step_result, "first KFD write did not drain after probe release");
+  const bool first_step_ok = first_step_result.get();
+  EXPECT_TRUE(first_step_ok);
+
+  resume_steps.set_value(first_step_ok);
+  wait_for_ready(engine_owner, "queued KFD writes did not finish on the engine owner");
+  const DrainResult drained = engine_owner.get();
+  endpoint->set_effect_probe_for_testing({});
+  EXPECT_FALSE(drained.step_failed);
+  EXPECT_EQ(drained.first, VmAccessOutcome::Complete);
+  EXPECT_EQ(drained.later, VmAccessOutcome::Complete);
+  EXPECT_EQ(probe_calls.load(std::memory_order_acquire), 2u);
+  EXPECT_EQ(later_probe_backing.load(std::memory_order_acquire), kFirst)
+      << "the later effect must observe the first committed word";
+  EXPECT_TRUE(rocjitsu::amdgpu::KfdPreparedProviderTestAccess::can_reserve_peer_line(
+      *driver_, backing_id, line_offset, later_bytes.size()));
+  EXPECT_EQ(first_progress, first_bytes.size());
+  EXPECT_EQ(later_progress, later_bytes.size());
+  EXPECT_EQ(endpoint->diagnostics().submissions, 2u);
+  EXPECT_EQ(endpoint->diagnostics().effects, 2u);
+  std::memcpy(&observed, backing.backing.data() + kOffset, sizeof(observed));
+  EXPECT_EQ(observed, kLater);
+}
+
+TEST_F(KfdPeerBindingTest, ControlledOwnerWriteUsesSelectedLocalEffectForCanonicalAliases) {
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  using rocjitsu::amdgpu::VmDataRoute;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 64;
+  const std::array<std::byte, 4> original{std::byte{0x12}, std::byte{0x34}, std::byte{0x56},
+                                          std::byte{0x78}};
+  const std::array<std::byte, 4> owner_bytes{std::byte{0x87}, std::byte{0x65}, std::byte{0x43},
+                                             std::byte{0x21}};
+  const std::array<std::byte, 4> imported_bytes{std::byte{0x11}, std::byte{0x22}, std::byte{0x33},
+                                                std::byte{0x44}};
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const uint64_t address = allocation.va_addr + kOffset;
+  const auto grant = process->gpu_peer_backing_grant(kOwner, address, original.size());
+  ASSERT_TRUE(grant.admission.allowed);
+  ASSERT_TRUE(grant.admission.first_controlled_local_write_candidate);
+  EXPECT_FALSE(grant.admission.first_peer_candidate);
+  EXPECT_FALSE(grant.admission.direct_backing_write_allowed);
+  ASSERT_TRUE(grant.backing);
+  std::ranges::copy(original, grant.backing.bytes().begin());
+  const auto handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(1)->gpu_vm().snapshot_pinned(*handle);
+  ASSERT_TRUE(access);
+  EXPECT_EQ(access->classify_data_route(address, original.size(), VmAccessKind::Write),
+            VmDataRoute::Deferred);
+  EXPECT_EQ(access->classify_data_route(address, original.size(), VmAccessKind::Read),
+            VmDataRoute::Local);
+  EXPECT_EQ(access->resolve_host_pointer(address, original.size()), nullptr);
+  EXPECT_FALSE(access->try_write_contiguous(address, owner_bytes));
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  const auto before = endpoint->diagnostics();
+  std::size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  VmAccessOutcome outcome = access->write(address, owner_bytes, progress, token);
+  ASSERT_EQ(outcome, VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(token.pending());
+  EXPECT_EQ(progress, 0u);
+  EXPECT_TRUE(std::ranges::equal(grant.backing.bytes(), original));
+  for (unsigned attempt = 0; attempt < 16 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = access->write(address, owner_bytes, progress, token);
+  }
+  ASSERT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, owner_bytes.size());
+  EXPECT_TRUE(std::ranges::equal(grant.backing.bytes(), owner_bytes));
+  EXPECT_EQ(endpoint->diagnostics().effects, before.effects + 1);
+
+  // A distinct-VA IPC import has a UC PTE but retains the controlled backing.
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  additional_process_ids_.push_back(importer_id);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = allocation.va_addr + 32 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  map.handle = imported.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  const uint64_t imported_address = imported.va_addr + kOffset;
+  const auto imported_grant =
+      importer->gpu_peer_backing_grant(kOwner, imported_address, imported_bytes.size());
+  ASSERT_TRUE(imported_grant.admission.allowed);
+  ASSERT_TRUE(imported_grant.admission.first_controlled_local_write_candidate);
+  EXPECT_FALSE(imported_grant.admission.cacheable);
+  EXPECT_FALSE(imported_grant.admission.direct_backing_write_allowed);
+  ASSERT_TRUE(imported_grant.backing);
+  EXPECT_TRUE(imported_grant.backing.same_backing(grant.backing));
+  const auto imported_handle = machine_->soc(1)->gpu_vm().find_vmid(importer_id);
+  ASSERT_TRUE(imported_handle);
+  const auto imported_access = machine_->soc(1)->gpu_vm().snapshot_pinned(*imported_handle);
+  ASSERT_TRUE(imported_access);
+  EXPECT_EQ(imported_access->classify_data_route(imported_address, imported_bytes.size(),
+                                                 VmAccessKind::Write),
+            VmDataRoute::Deferred);
+  EXPECT_EQ(imported_access->resolve_host_pointer(imported_address, imported_bytes.size()),
+            nullptr);
+  EXPECT_FALSE(imported_access->try_write_contiguous(imported_address, imported_bytes));
+  progress = 0;
+  token = {};
+  outcome = imported_access->write(imported_address, imported_bytes, progress, token);
+  ASSERT_EQ(outcome, VmAccessOutcome::Unavailable);
+  EXPECT_EQ(progress, 0u);
+  EXPECT_TRUE(std::ranges::equal(grant.backing.bytes(), owner_bytes));
+  for (unsigned attempt = 0; attempt < 16 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = imported_access->write(imported_address, imported_bytes, progress, token);
+  }
+  ASSERT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, imported_bytes.size());
+  EXPECT_TRUE(std::ranges::equal(grant.backing.bytes(), imported_bytes));
+  EXPECT_EQ(endpoint->diagnostics().effects, before.effects + 2);
+
+  // A request crossing a cache line must submit two bounded local effects.
+  const uint64_t crossing_address = allocation.va_addr + rocjitsu::amdgpu::L2Cache::LINE_SIZE - 2;
+  const std::array<std::byte, 4> crossing_bytes{std::byte{0xa1}, std::byte{0xb2}, std::byte{0xc3},
+                                                std::byte{0xd4}};
+  const auto crossing =
+      process->gpu_peer_backing_grant(kOwner, crossing_address, crossing_bytes.size());
+  ASSERT_TRUE(crossing.backing);
+  progress = 0;
+  token = {};
+  outcome = access->write(crossing_address, crossing_bytes, progress, token);
+  ASSERT_EQ(outcome, VmAccessOutcome::Unavailable);
+  for (unsigned attempt = 0; attempt < 32 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = access->write(crossing_address, crossing_bytes, progress, token);
+  }
+  ASSERT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, crossing_bytes.size());
+  EXPECT_TRUE(std::ranges::equal(crossing.backing.bytes(), crossing_bytes));
+  EXPECT_EQ(endpoint->diagnostics().effects, before.effects + 4);
+  EXPECT_EQ(endpoint->diagnostics().request_messages, before.request_messages);
+  EXPECT_EQ(endpoint->diagnostics().response_messages, before.response_messages);
+}
+
+TEST_F(KfdPeerBindingTest, ControlledOwnerWritePreservesDisjointDirtyLocalLine) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kOtherByte = 40;
+  const std::array<std::byte, 4> initial{std::byte{0x12}, std::byte{0x34}, std::byte{0x56},
+                                         std::byte{0x78}};
+  const std::array<std::byte, 4> effect{std::byte{0x87}, std::byte{0x65}, std::byte{0x43},
+                                        std::byte{0x21}};
+  std::array<kfd_ioctl_alloc_memory_of_gpu_args, 2> allocations{};
+  for (auto &allocation : allocations) {
+    allocation.size = kBytes;
+    allocation.gpu_id = kOwner;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    ASSERT_TRUE(
+        driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kOwner;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    uint32_t owner_id = kOwner;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args requester_map{};
+  requester_map.handle = allocations[0].handle;
+  requester_map.n_devices = 1;
+  requester_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &requester_map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto other_alias = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_id == kOwner && alias.gpu_va == allocations[1].va_addr;
+  });
+  ASSERT_NE(other_alias, aliases->end());
+  const auto selected =
+      process->gpu_peer_backing_grant(kOwner, allocations[0].va_addr, L2Cache::LINE_SIZE);
+  const auto other =
+      process->gpu_peer_backing_grant(kOwner, allocations[1].va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(selected.backing);
+  ASSERT_TRUE(other.backing);
+  ASSERT_NE(selected.backing.backing_id(), other.backing.backing_id());
+  std::ranges::copy(initial, selected.backing.bytes().begin());
+  other.backing.bytes()[kOtherByte] = std::byte{0x22};
+
+  // Fill a real requester CU cache line before the owner effect so the
+  // selected maintenance must invalidate it for the later reread.
+  const uint64_t code_va = allocations[0].va_addr + 16 * kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> code{};
+  code.fill(0xBF800000u); // s_nop 0 while the peer read drains.
+  code[0] = 0xC0020000u;  // s_load_dword s0, s[0:1], 0x0
+  code[1] = 0;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  ASSERT_EQ(process->map_pages(code_va, code.data(), kBytes, rocjitsu::amdgpu::Mtype::RW,
+                               rocjitsu::KfdProcess::HostExtentOwner::Driver),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(requester_handle);
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  machine_->soc(0)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id_);
+  wave->set_address_space(*requester_handle);
+  wave->set_exec(1);
+  const auto read_requester = [&](uint32_t expected) {
+    wave->pc = code_va;
+    cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(allocations[0].va_addr));
+    cu->write_sgpr(wave->sgpr_alloc().base + 1,
+                   static_cast<uint32_t>(allocations[0].va_addr >> 32));
+    cu->step();
+    for (int attempt = 0; attempt < 16 && wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY;
+         ++attempt) {
+      cu->step();
+      if (wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY)
+        (void)engine_.step();
+    }
+    EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+    EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base), expected);
+  };
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  const uint64_t before_fill = endpoint->diagnostics().effects;
+  read_requester(0x78563412u);
+  ASSERT_EQ(endpoint->diagnostics().effects, before_fill + 1);
+  read_requester(0x78563412u);
+  ASSERT_EQ(endpoint->diagnostics().effects, before_fill + 1)
+      << "the requester CU must hold a real cache hit";
+
+  const auto handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(1)->gpu_vm().snapshot_pinned(*handle);
+  const auto owner_live = machine_->soc(1)->gpu_vm().snapshot_vmid(process_id_);
+  ASSERT_TRUE(access);
+  ASSERT_TRUE(owner_live);
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kOtherByte, 0xb2}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *owner_l2, allocations[1].va_addr, process_id_, owner_live->cache_identity(),
+      other_alias->admission_generation, dirty_bytes);
+  const uint64_t before_writes = owner_l2->backing_write_transactions();
+  const uint64_t owner_epoch = machine_->soc(1)->cache_coherence()->current_epoch();
+  const uint64_t requester_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+  const auto before = endpoint->diagnostics();
+
+  size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  VmAccessOutcome outcome = access->write(allocations[0].va_addr, effect, progress, token);
+  ASSERT_EQ(outcome, VmAccessOutcome::Unavailable);
+  for (unsigned attempt = 0; attempt < 16 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = access->write(allocations[0].va_addr, effect, progress, token);
+  }
+  ASSERT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, effect.size());
+  EXPECT_TRUE(std::ranges::equal(selected.backing.bytes().first(effect.size()), effect));
+  EXPECT_EQ(other.backing.bytes()[kOtherByte], std::byte{0x22});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocations[1].va_addr,
+                                                           process_id_, kOtherByte));
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::line_clean_or_invalid(
+      *owner_l2, allocations[1].va_addr, process_id_));
+  EXPECT_EQ(owner_l2->backing_write_transactions(), before_writes);
+  EXPECT_EQ(owner_epoch, machine_->soc(1)->cache_coherence()->current_epoch());
+  EXPECT_EQ(requester_epoch, machine_->soc(0)->cache_coherence()->current_epoch());
+  EXPECT_EQ(endpoint->diagnostics().effects, before.effects + 1);
+  read_requester(0x21436587u);
+  EXPECT_EQ(endpoint->diagnostics().effects, before.effects + 2)
+      << "the requester CU must refetch the new owner word";
+}
+
+TEST_F(KfdPeerBindingTest, ScopedMaintenanceRejectsOmittedDirtyImportedAlias) {
+  using rocjitsu::amdgpu::CacheMaintenanceUnavailable;
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kDirtyByte = 48;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  additional_process_ids_.push_back(importer_id);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = allocation.va_addr + 32 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  map.handle = imported.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  const auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(process, nullptr);
+  ASSERT_NE(importer, nullptr);
+  const auto owner_aliases = process->gpu_alias_snapshot();
+  const auto owner_alias = std::ranges::find_if(*owner_aliases, [&](const auto &alias) {
+    return alias.gpu_id == kOwner && alias.gpu_va == allocation.va_addr;
+  });
+  ASSERT_NE(owner_alias, owner_aliases->end());
+  const auto imported_aliases = importer->gpu_alias_snapshot();
+  const auto imported_alias = std::ranges::find_if(*imported_aliases, [&](const auto &alias) {
+    return alias.gpu_id == kOwner && alias.gpu_va == imported.va_addr;
+  });
+  ASSERT_NE(imported_alias, imported_aliases->end());
+  ASSERT_EQ(owner_alias->backing_id, imported_alias->backing_id);
+  ASSERT_EQ(owner_alias->backing_offset, imported_alias->backing_offset);
+  const auto owner_grant =
+      process->gpu_peer_backing_grant(kOwner, allocation.va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(owner_grant.backing);
+  owner_grant.backing.bytes()[kDirtyByte] = std::byte{0x31};
+  const auto owner_access = machine_->soc(1)->gpu_vm().snapshot_vmid(process_id_);
+  const auto imported_access = machine_->soc(1)->gpu_vm().snapshot_vmid(importer_id);
+  ASSERT_TRUE(owner_access);
+  ASSERT_TRUE(imported_access);
+  auto *l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyByte, 0xa7}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, imported.va_addr, importer_id, imported_access->cache_identity(),
+      imported_alias->admission_generation, dirty_bytes);
+
+  const std::array domains{DeviceCacheDomain{machine_->soc(1)->cache_coherence(), kOwner}};
+  const std::array scopes{
+      DeviceCacheAliasScope{.domain = domains[0],
+                            .vmid = process_id_,
+                            .address = allocation.va_addr,
+                            .size = L2Cache::LINE_SIZE,
+                            .admission_generation = owner_alias->admission_generation,
+                            .cache_identity = owner_access->cache_identity(),
+                            .backing_id = owner_alias->backing_id,
+                            .backing_offset = owner_alias->backing_offset}};
+  auto resolve_witness = KfdPreparedProviderTestAccess::witness_resolver(*driver_);
+  const auto witness =
+      resolve_witness(kOwner, importer_id, imported.va_addr, L2Cache::LINE_SIZE,
+                      imported_access->cache_identity(), imported_alias->admission_generation);
+  ASSERT_TRUE(witness);
+  ASSERT_TRUE(witness->retention);
+  ASSERT_EQ(witness->backing_id, scopes[0].backing_id);
+  ASSERT_EQ(witness->backing_offset, scopes[0].backing_offset);
+  const uint64_t epoch = domains[0].coherence->current_epoch();
+  const uint64_t writes = l2->backing_write_transactions();
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+            domains, scopes,
+            [&](uint32_t, uint32_t, uint64_t,
+                size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+              ADD_FAILURE() << "an absent selected line must not resolve a writeback";
+              throw util::Exception(std::string_view("unexpected selected dirty line"));
+            },
+            resolve_witness);
+      },
+      CacheMaintenanceUnavailable);
+  EXPECT_EQ(owner_grant.backing.bytes()[kDirtyByte], std::byte{0x31});
+  EXPECT_TRUE(
+      KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, imported.va_addr, importer_id, kDirtyByte));
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  EXPECT_EQ(domains[0].coherence->current_epoch(), epoch);
+}
+
+TEST_F(KfdOwnerNoPeerRouteTest, ControlledOwnerWriteUsesEndpointWithoutPeerRoute) {
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  using rocjitsu::amdgpu::VmDataRoute;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 32;
+  const std::array<std::byte, 4> bytes{std::byte{0x11}, std::byte{0x22}, std::byte{0x33},
+                                       std::byte{0x44}};
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  EXPECT_FALSE(endpoint->can_route(kRequester, kOwner));
+  EXPECT_TRUE(endpoint->routes().empty());
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto backing =
+      process->gpu_peer_backing_grant(kOwner, allocation.va_addr + kOffset, bytes.size());
+  ASSERT_TRUE(backing.admission.first_controlled_local_write_candidate);
+  ASSERT_TRUE(backing.backing);
+  const auto handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  const auto access = machine_->soc(1)->gpu_vm().snapshot_pinned(*handle);
+  ASSERT_TRUE(access);
+  EXPECT_EQ(
+      access->classify_data_route(allocation.va_addr + kOffset, bytes.size(), VmAccessKind::Write),
+      VmDataRoute::Deferred);
+  const auto before = endpoint->diagnostics();
+  std::size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  VmAccessOutcome outcome = access->write(allocation.va_addr + kOffset, bytes, progress, token);
+  ASSERT_EQ(outcome, VmAccessOutcome::Unavailable);
+  for (unsigned attempt = 0; attempt < 16 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = access->write(allocation.va_addr + kOffset, bytes, progress, token);
+  }
+  ASSERT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, bytes.size());
+  EXPECT_TRUE(std::ranges::equal(backing.backing.bytes(), bytes));
+  const auto after = endpoint->diagnostics();
+  EXPECT_EQ(after.submissions, before.submissions + 1);
+  EXPECT_EQ(after.effects, before.effects + 1);
+  EXPECT_EQ(after.request_messages, before.request_messages);
+  EXPECT_EQ(after.response_messages, before.response_messages);
+}
+
+TEST_F(KfdPeerBindingTest, ControlledOwnerCuStoreUsesLocalEffect) {
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kInitialWord = 0x12345678u;
+  constexpr uint32_t kStoredWord = 0x87654321u;
+  constexpr size_t kOffset = 32;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto backing = process->gpu_peer_backing_grant(kOwner, allocation.va_addr + kOffset, 4);
+  ASSERT_TRUE(backing.admission.cacheable);
+  ASSERT_TRUE(backing.backing);
+  std::memcpy(backing.backing.data(), &kInitialWord, sizeof(kInitialWord));
+
+  const uint64_t code_va = allocation.va_addr + 16 * kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> code{};
+  code.fill(0xBF800000u);
+  code[0] = 0xC0420080u; // s_store_dword s2, s[0:1], 0x0
+  code[1] = 0;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kOwner] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  process->map_pages(code_va, code.data(), kBytes, rocjitsu::amdgpu::Mtype::RW,
+                     rocjitsu::KfdProcess::HostExtentOwner::Driver);
+
+  const auto handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  machine_->soc(1)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id_);
+  wave->set_address_space(*handle);
+  const uint64_t address = allocation.va_addr + kOffset;
+  cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(address));
+  cu->write_sgpr(wave->sgpr_alloc().base + 1, static_cast<uint32_t>(address >> 32));
+  cu->write_sgpr(wave->sgpr_alloc().base + 2, kStoredWord);
+  const auto before = machine_->fabric_endpoint()->diagnostics();
+  cu->step();
+  ASSERT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, before.submissions + 1);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, before.effects);
+  uint32_t observed = 0;
+  std::memcpy(&observed, backing.backing.data(), sizeof(observed));
+  EXPECT_EQ(observed, kInitialWord);
+  for (unsigned attempt = 0; attempt < 16 && wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY;
+       ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    cu->step();
+  }
+  EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+  std::memcpy(&observed, backing.backing.data(), sizeof(observed));
+  EXPECT_EQ(observed, kStoredWord);
+  const auto after = machine_->fabric_endpoint()->diagnostics();
+  EXPECT_EQ(after.effects, before.effects + 1);
+  EXPECT_EQ(after.request_messages, before.request_messages);
+  EXPECT_EQ(after.response_messages, before.response_messages);
+  process->unmap_pages(code_va, kBytes);
+}
+
+TEST_F(KfdCdna5PeerBindingTest, ControlledOwnerSdmaWriteAndFillPreserveDisjointDirtyLine) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  using rocjitsu::amdgpu::Mtype;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 64;
+  constexpr size_t kCancelledOffset = 256;
+  constexpr uint32_t kInitial = 0x12345678u;
+  constexpr uint32_t kWritten = 0x87654321u;
+  constexpr uint32_t kFilled = 0xa1b2c3d4u;
+  constexpr uint32_t kCancelledInitial = 0x13579bdfu;
+  constexpr uint32_t kCancelledWrite = 0x2468ace0u;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  uint32_t gpu_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  gpu_id = kRequester;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto owner_backing = process->gpu_peer_backing_grant(kOwner, allocation.va_addr, kBytes);
+  ASSERT_TRUE(owner_backing.admission.first_controlled_local_write_candidate);
+  ASSERT_TRUE(owner_backing.backing);
+  const auto requester_backing =
+      process->gpu_peer_backing_grant(kRequester, allocation.va_addr, kBytes);
+  ASSERT_TRUE(requester_backing.admission.cacheable);
+  ASSERT_TRUE(requester_backing.backing.same_backing(owner_backing.backing));
+  std::memcpy(owner_backing.backing.data() + kOffset, &kInitial, sizeof(kInitial));
+  std::memcpy(owner_backing.backing.data() + kCancelledOffset, &kCancelledInitial,
+              sizeof(kCancelledInitial));
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::line_clean_or_invalid(*owner_l2, allocation.va_addr,
+                                                                   process_id_));
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::line_clean_or_invalid(
+      *owner_l2, allocation.va_addr + kCancelledOffset, process_id_));
+
+  const uint64_t code_va = allocation.va_addr + 16 * kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> code{};
+  code.fill(0xBF800000u);
+  code[0] = 0xEE050004u; // gfx1250 global_load_b32 v1, v0, s[4:5].
+  code[1] = 0x00000001u;
+  code[2] = 0x00000000u;
+  // Keep the requester wave in mapped code while the engine services SDMA.
+  code[3] = rocjitsu::build_s_branch(-1, machine_->soc(0)->arch());
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  ASSERT_EQ(process->map_pages(code_va, code.data(), kBytes, Mtype::RW,
+                               rocjitsu::KfdProcess::HostExtentOwner::Driver),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(requester_handle);
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  machine_->soc(0)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id_);
+  wave->set_address_space(*requester_handle);
+  wave->set_exec(1);
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  const auto read_requester = [&](uint32_t expected) {
+    wave->pc = code_va;
+    const uint64_t address = allocation.va_addr + kOffset;
+    cu->write_sgpr(wave->sgpr_alloc().base + 4, static_cast<uint32_t>(address));
+    cu->write_sgpr(wave->sgpr_alloc().base + 5, static_cast<uint32_t>(address >> 32));
+    cu->write_vgpr(wave->vgpr_alloc().base, 0, 0);
+    cu->write_vgpr(wave->vgpr_alloc().base + 1, 0, 0);
+    cu->step();
+    for (unsigned attempt = 0;
+         attempt < 32 && cu->read_vgpr(wave->vgpr_alloc().base + 1, 0) != expected; ++attempt) {
+      (void)engine_.step();
+      cu->step();
+    }
+    EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+    EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 1, 0), expected);
+  };
+  read_requester(kInitial);
+  const uint64_t after_fill = endpoint->diagnostics().effects;
+  ASSERT_EQ(after_fill, 1u);
+  read_requester(kInitial);
+  ASSERT_EQ(endpoint->diagnostics().effects, after_fill)
+      << "the requester CU must hold a real vector cache hit";
+
+  kfd_ioctl_alloc_memory_of_gpu_args unrelated{};
+  unrelated.size = kBytes;
+  unrelated.gpu_id = kOwner;
+  unrelated.flags = allocation.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &unrelated), 0);
+  ASSERT_TRUE(driver_->enable_cacheable_peer_allocation_for_testing(process_id_, unrelated.handle));
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args unrelated_map{};
+  unrelated_map.handle = unrelated.handle;
+  unrelated_map.n_devices = 1;
+  unrelated_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &unrelated_map), 0);
+  kfd_ioctl_ipc_export_handle_args unrelated_export{};
+  unrelated_export.handle = unrelated.handle;
+  unrelated_export.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &unrelated_export), 0);
+  const auto unrelated_grant =
+      process->gpu_peer_backing_grant(kOwner, unrelated.va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(unrelated_grant.admission.first_controlled_local_write_candidate);
+  ASSERT_TRUE(unrelated_grant.backing);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto unrelated_alias = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_id == kOwner && alias.gpu_va == unrelated.va_addr;
+  });
+  ASSERT_NE(unrelated_alias, aliases->end());
+  const auto owner_live = machine_->soc(1)->gpu_vm().snapshot_vmid(process_id_);
+  ASSERT_TRUE(owner_live);
+  constexpr uint32_t kUnrelatedOffset = 8;
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kUnrelatedOffset, 0x6d}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *owner_l2, unrelated.va_addr, process_id_, owner_live->cache_identity(),
+      unrelated_alias->admission_generation, dirty_bytes);
+  ASSERT_EQ(unrelated_grant.backing.bytes()[kUnrelatedOffset], std::byte{0});
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, unrelated.va_addr,
+                                                           process_id_, kUnrelatedOffset));
+  const uint64_t backing_writes = owner_l2->backing_write_transactions();
+  const uint64_t owner_epoch = machine_->soc(1)->cache_coherence()->current_epoch();
+  const uint64_t requester_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> ring{};
+  alignas(4096) std::array<uint64_t, kBytes / sizeof(uint64_t)> pointers{};
+  const auto map_system_page = [&](void *page) {
+    const uint64_t address = reinterpret_cast<uint64_t>(page);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      rocjitsu::KfdProcess::GpuAllocation control{};
+      control.gpu_va = address;
+      control.size = kBytes;
+      control.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+      control.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+      control.handle = process->next_handle_++;
+      control.admission_generations[kOwner] = process->next_gpu_admission_generation_locked();
+      process->allocations_[control.handle] = control;
+      process->publish_gpu_grants_locked();
+    }
+    ASSERT_EQ(process->map_pages(address, page, kBytes, Mtype::UC,
+                                 rocjitsu::KfdProcess::HostExtentOwner::Driver),
+              rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  };
+  map_system_page(ring.data());
+  map_system_page(pointers.data());
+
+  const off_t doorbell_offset =
+      static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(kOwner));
+  void *doorbell_page = driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE,
+                                      MAP_SHARED, doorbell_offset);
+  ASSERT_NE(doorbell_page, MAP_FAILED);
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = kOwner;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = kBytes;
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  auto *doorbell = reinterpret_cast<uint64_t *>(static_cast<std::byte *>(doorbell_page) +
+                                                queue.doorbell_offset % kBytes);
+  auto &scheduler = machine_->soc(1)->sdma_queue_scheduler();
+  const auto publish_write = [&](size_t word_offset, size_t offset, uint32_t value) {
+    const uint64_t address = allocation.va_addr + offset;
+    ring[word_offset] = 2; // SDMA_OP_WRITE, linear form.
+    ring[word_offset + 1] = static_cast<uint32_t>(address);
+    ring[word_offset + 2] = static_cast<uint32_t>(address >> 32);
+    ring[word_offset + 3] = 0; // One DWORD.
+    ring[word_offset + 4] = value;
+    const uint64_t producer = (word_offset + 5) * sizeof(uint32_t);
+    std::atomic_ref<uint64_t>(pointers[1]).store(producer, std::memory_order_release);
+    std::atomic_ref<uint64_t>(*doorbell).store(producer, std::memory_order_release);
+    return producer;
+  };
+  const auto publish_fill = [&](size_t word_offset, size_t offset, uint32_t pattern) {
+    const uint64_t address = allocation.va_addr + offset;
+    ring[word_offset] = 11; // SDMA_OP_CONST_FILL.
+    ring[word_offset + 1] = static_cast<uint32_t>(address);
+    ring[word_offset + 2] = static_cast<uint32_t>(address >> 32);
+    ring[word_offset + 3] = pattern;
+    ring[word_offset + 4] = sizeof(uint32_t) - 1;
+    const uint64_t producer = (word_offset + 5) * sizeof(uint32_t);
+    std::atomic_ref<uint64_t>(pointers[1]).store(producer, std::memory_order_release);
+    std::atomic_ref<uint64_t>(*doorbell).store(producer, std::memory_order_release);
+    return producer;
+  };
+  const auto backing_word = [&](size_t offset) {
+    uint32_t word = 0;
+    std::memcpy(&word, owner_backing.backing.data() + offset, sizeof(word));
+    return word;
+  };
+
+  const auto before = endpoint->diagnostics();
+  const uint64_t first_cursor = publish_write(0, kOffset, kWritten);
+  ASSERT_TRUE(scheduler.wait_for_blocked_packet_for_test(process_id_, queue.queue_id,
+                                                         std::chrono::seconds(1)));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), 0u);
+  EXPECT_EQ(backing_word(kOffset), kInitial);
+  ASSERT_EQ(endpoint->diagnostics().submissions, before.submissions + 1);
+  EXPECT_EQ(endpoint->diagnostics().effects, before.effects);
+  ASSERT_TRUE(scheduler.synchronize_queue_for_test(process_id_, queue.queue_id,
+                                                   [&] { EXPECT_TRUE(engine_.step()); }));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), first_cursor);
+  EXPECT_EQ(backing_word(kOffset), kWritten);
+  const auto after_write = endpoint->diagnostics();
+  EXPECT_EQ(after_write.submissions, before.submissions + 1);
+  EXPECT_EQ(after_write.effects, before.effects + 1);
+  EXPECT_EQ(after_write.request_messages, before.request_messages);
+  EXPECT_EQ(after_write.response_messages, before.response_messages);
+  EXPECT_EQ(unrelated_grant.backing.bytes()[kUnrelatedOffset], std::byte{0});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, unrelated.va_addr,
+                                                           process_id_, kUnrelatedOffset));
+  EXPECT_EQ(owner_l2->backing_write_transactions(), backing_writes);
+  EXPECT_EQ(machine_->soc(1)->cache_coherence()->current_epoch(), owner_epoch);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), requester_epoch);
+  ASSERT_TRUE(scheduler.synchronize_host_queue_for_test(process_id_, queue.queue_id));
+  EXPECT_EQ(endpoint->diagnostics().effects, after_write.effects);
+  EXPECT_EQ(backing_word(kOffset), kWritten);
+
+  read_requester(kWritten);
+  EXPECT_EQ(endpoint->diagnostics().effects, after_write.effects + 1)
+      << "the requester CU must refetch the new canonical word";
+
+  const auto before_fill_packet = endpoint->diagnostics();
+  const uint64_t fill_cursor = publish_fill(5, kOffset, kFilled);
+  ASSERT_TRUE(scheduler.wait_for_blocked_packet_for_test(process_id_, queue.queue_id,
+                                                         std::chrono::seconds(1)));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), first_cursor);
+  EXPECT_EQ(backing_word(kOffset), kWritten);
+  ASSERT_EQ(endpoint->diagnostics().submissions, before_fill_packet.submissions + 1);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_fill_packet.effects);
+  ASSERT_TRUE(scheduler.synchronize_queue_for_test(process_id_, queue.queue_id,
+                                                   [&] { EXPECT_TRUE(engine_.step()); }));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), fill_cursor);
+  EXPECT_EQ(backing_word(kOffset), kFilled);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_fill_packet.effects + 1);
+  EXPECT_EQ(unrelated_grant.backing.bytes()[kUnrelatedOffset], std::byte{0});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, unrelated.va_addr,
+                                                           process_id_, kUnrelatedOffset));
+  EXPECT_EQ(owner_l2->backing_write_transactions(), backing_writes);
+  EXPECT_EQ(machine_->soc(1)->cache_coherence()->current_epoch(), owner_epoch);
+  EXPECT_EQ(machine_->soc(0)->cache_coherence()->current_epoch(), requester_epoch);
+  read_requester(kFilled);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_fill_packet.effects + 2)
+      << "the requester CU must refetch the filled word";
+
+  const auto before_cancel = endpoint->diagnostics();
+  publish_write(10, kCancelledOffset, kCancelledWrite);
+  ASSERT_TRUE(scheduler.wait_for_blocked_packet_for_test(process_id_, queue.queue_id,
+                                                         std::chrono::seconds(1)));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), fill_cursor);
+  EXPECT_EQ(backing_word(kCancelledOffset), kCancelledInitial);
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_cancel.submissions + 1);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_cancel.effects);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  for (unsigned step = 0; step < 4; ++step)
+    ASSERT_TRUE(engine_.step());
+  EXPECT_EQ(endpoint->diagnostics().effects, before_cancel.effects);
+  EXPECT_EQ(endpoint->diagnostics().request_messages, before_cancel.request_messages);
+  EXPECT_EQ(endpoint->diagnostics().response_messages, before_cancel.response_messages);
+  EXPECT_EQ(backing_word(kCancelledOffset), kCancelledInitial);
+  EXPECT_EQ(backing_word(kOffset), kFilled);
+  EXPECT_EQ(unrelated_grant.backing.bytes()[kUnrelatedOffset], std::byte{0});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, unrelated.va_addr,
+                                                           process_id_, kUnrelatedOffset));
+  EXPECT_EQ(owner_l2->backing_write_transactions(), backing_writes);
+  process->unmap_pages(code_va, kBytes);
+  process->unmap_pages(reinterpret_cast<uint64_t>(ring.data()), kBytes);
+  process->unmap_pages(reinterpret_cast<uint64_t>(pointers.data()), kBytes);
+}
+
+TEST_F(KfdCdna5PeerBindingTest, ControlledOwnerSdmaCopyAndFillRefreshCachedRequester) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  using rocjitsu::amdgpu::Mtype;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 64;
+  constexpr size_t kCancelledOffset = 256;
+  constexpr uint32_t kFillPattern = 0x87654321u;
+  constexpr uint32_t kMutatedSource = 0x0badf00du;
+  constexpr uint32_t kCancelledPattern = 0xdeadbeefu;
+  constexpr uint32_t kCancelledInitial = 0x13579bdfu;
+  constexpr std::array<uint32_t, 4> kInitial{0x12345678u, 0x23456789u, 0x3456789au, 0x456789abu};
+  constexpr std::array<uint32_t, 4> kCopied{0xa1b2c3d4u, 0xb2c3d4e5u, 0xc3d4e5f6u, 0xd4e5f607u};
+  constexpr size_t kPayloadBytes = sizeof(kCopied);
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  uint32_t gpu_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  gpu_id = kRequester;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto owner_backing = process->gpu_peer_backing_grant(kOwner, allocation.va_addr, kBytes);
+  ASSERT_TRUE(owner_backing.admission.first_controlled_local_write_candidate);
+  ASSERT_TRUE(owner_backing.backing);
+  const auto requester_backing =
+      process->gpu_peer_backing_grant(kRequester, allocation.va_addr, kBytes);
+  ASSERT_TRUE(requester_backing.admission.cacheable);
+  ASSERT_TRUE(requester_backing.backing.same_backing(owner_backing.backing));
+  std::memcpy(owner_backing.backing.data() + kOffset, kInitial.data(), kPayloadBytes);
+  std::memcpy(owner_backing.backing.data() + kCancelledOffset, &kCancelledInitial,
+              sizeof(kCancelledInitial));
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  const auto controlled_line_clean = [&](size_t offset) {
+    return KfdPreparedProviderTestAccess::line_clean_or_invalid(
+        *owner_l2, allocation.va_addr + offset / L2Cache::LINE_SIZE * L2Cache::LINE_SIZE,
+        process_id_);
+  };
+  ASSERT_TRUE(controlled_line_clean(kOffset));
+  ASSERT_TRUE(controlled_line_clean(kCancelledOffset));
+
+  const uint64_t code_va = allocation.va_addr + 16 * kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> code{};
+  code.fill(0xBF800000u);
+  code[0] = 0xEE050004u; // gfx1250 global_load_b32 v1, v0, s[4:5].
+  code[1] = 0x00000001u;
+  code[2] = 0x00000000u;
+  code[3] = rocjitsu::build_s_branch(-1, machine_->soc(0)->arch());
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  ASSERT_EQ(process->map_pages(code_va, code.data(), kBytes, Mtype::RW,
+                               rocjitsu::KfdProcess::HostExtentOwner::Driver),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(requester_handle);
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  machine_->soc(0)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id_);
+  wave->set_address_space(*requester_handle);
+  wave->set_exec(1);
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  const auto read_requester = [&](uint32_t expected) {
+    wave->pc = code_va;
+    const uint64_t address = allocation.va_addr + kOffset;
+    cu->write_sgpr(wave->sgpr_alloc().base + 4, static_cast<uint32_t>(address));
+    cu->write_sgpr(wave->sgpr_alloc().base + 5, static_cast<uint32_t>(address >> 32));
+    cu->write_vgpr(wave->vgpr_alloc().base, 0, 0);
+    cu->write_vgpr(wave->vgpr_alloc().base + 1, 0, 0);
+    cu->step();
+    for (unsigned attempt = 0;
+         attempt < 32 && cu->read_vgpr(wave->vgpr_alloc().base + 1, 0) != expected; ++attempt) {
+      (void)engine_.step();
+      cu->step();
+    }
+    EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+    EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 1, 0), expected);
+  };
+  read_requester(kInitial[0]);
+  const uint64_t after_fill = endpoint->diagnostics().effects;
+  ASSERT_EQ(after_fill, 1u);
+  read_requester(kInitial[0]);
+  ASSERT_EQ(endpoint->diagnostics().effects, after_fill);
+
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> ring{};
+  alignas(4096) std::array<uint64_t, kBytes / sizeof(uint64_t)> pointers{};
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> source{};
+  std::ranges::copy(kCopied, source.begin());
+  const auto map_system_page = [&](void *page) {
+    const uint64_t address = reinterpret_cast<uint64_t>(page);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      rocjitsu::KfdProcess::GpuAllocation control{};
+      control.gpu_va = address;
+      control.size = kBytes;
+      control.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+      control.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+      control.handle = process->next_handle_++;
+      control.admission_generations[kOwner] = process->next_gpu_admission_generation_locked();
+      process->allocations_[control.handle] = control;
+      process->publish_gpu_grants_locked();
+    }
+    ASSERT_EQ(process->map_pages(address, page, kBytes, Mtype::UC,
+                                 rocjitsu::KfdProcess::HostExtentOwner::Driver),
+              rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  };
+  map_system_page(ring.data());
+  map_system_page(pointers.data());
+  map_system_page(source.data());
+
+  const off_t doorbell_offset =
+      static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(kOwner));
+  void *doorbell_page = driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE,
+                                      MAP_SHARED, doorbell_offset);
+  ASSERT_NE(doorbell_page, MAP_FAILED);
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = kOwner;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = kBytes;
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  auto *doorbell = reinterpret_cast<uint64_t *>(static_cast<std::byte *>(doorbell_page) +
+                                                queue.doorbell_offset % kBytes);
+  auto &scheduler = machine_->soc(1)->sdma_queue_scheduler();
+  const auto publish = [&](size_t end_word) {
+    const uint64_t producer = end_word * sizeof(uint32_t);
+    std::atomic_ref<uint64_t>(pointers[1]).store(producer, std::memory_order_release);
+    std::atomic_ref<uint64_t>(*doorbell).store(producer, std::memory_order_release);
+    return producer;
+  };
+  const auto publish_copy = [&](size_t word_offset) {
+    const uint64_t source_address = reinterpret_cast<uint64_t>(source.data());
+    const uint64_t destination = allocation.va_addr + kOffset;
+    ring[word_offset] = 1; // SDMA_OP_COPY, linear form.
+    ring[word_offset + 1] = kPayloadBytes - 1;
+    ring[word_offset + 2] = 0;
+    ring[word_offset + 3] = static_cast<uint32_t>(source_address);
+    ring[word_offset + 4] = static_cast<uint32_t>(source_address >> 32);
+    ring[word_offset + 5] = static_cast<uint32_t>(destination);
+    ring[word_offset + 6] = static_cast<uint32_t>(destination >> 32);
+    return publish(word_offset + 7);
+  };
+  const auto publish_fill = [&](size_t word_offset, size_t offset, uint32_t pattern, size_t bytes) {
+    const uint64_t destination = allocation.va_addr + offset;
+    ring[word_offset] = 11; // SDMA_OP_CONST_FILL.
+    ring[word_offset + 1] = static_cast<uint32_t>(destination);
+    ring[word_offset + 2] = static_cast<uint32_t>(destination >> 32);
+    ring[word_offset + 3] = pattern;
+    ring[word_offset + 4] = bytes - 1;
+    return publish(word_offset + 5);
+  };
+  const auto backing_words = [&] {
+    std::array<uint32_t, kInitial.size()> words{};
+    std::memcpy(words.data(), owner_backing.backing.data() + kOffset, kPayloadBytes);
+    return words;
+  };
+  const auto backing_word = [&](size_t offset) {
+    uint32_t word = 0;
+    std::memcpy(&word, owner_backing.backing.data() + offset, sizeof(word));
+    return word;
+  };
+
+  // Prepared SDMA data maintenance uses whole-domain writeback/invalidate.
+  // These controlled destination lines must be clean before each packet.
+  ASSERT_TRUE(controlled_line_clean(kOffset));
+  const auto before_copy = endpoint->diagnostics();
+  const uint64_t copy_cursor = publish_copy(0);
+  ASSERT_TRUE(scheduler.wait_for_blocked_packet_for_test(process_id_, queue.queue_id,
+                                                         std::chrono::seconds(1)));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), 0u);
+  EXPECT_EQ(backing_words(), kInitial);
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_copy.submissions + 1);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_copy.effects);
+  // The read payload is retained while the controlled destination waits.
+  source[0] = kMutatedSource;
+  ASSERT_TRUE(scheduler.synchronize_queue_for_test(process_id_, queue.queue_id,
+                                                   [&] { EXPECT_TRUE(engine_.step()); }));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), copy_cursor);
+  EXPECT_EQ(backing_words(), kCopied);
+  EXPECT_EQ(source[0], kMutatedSource);
+  const auto after_copy = endpoint->diagnostics();
+  EXPECT_EQ(after_copy.submissions, before_copy.submissions + 1);
+  EXPECT_EQ(after_copy.effects, before_copy.effects + 1);
+  EXPECT_EQ(after_copy.request_messages, before_copy.request_messages);
+  EXPECT_EQ(after_copy.response_messages, before_copy.response_messages);
+  ASSERT_TRUE(scheduler.synchronize_host_queue_for_test(process_id_, queue.queue_id));
+  EXPECT_EQ(endpoint->diagnostics().effects, after_copy.effects);
+  read_requester(kCopied[0]);
+  EXPECT_EQ(endpoint->diagnostics().effects, after_copy.effects + 1);
+  read_requester(kCopied[0]);
+  EXPECT_EQ(endpoint->diagnostics().effects, after_copy.effects + 1);
+
+  ASSERT_TRUE(controlled_line_clean(kOffset));
+  const auto before_fill = endpoint->diagnostics();
+  const uint64_t fill_cursor = publish_fill(7, kOffset, kFillPattern, kPayloadBytes);
+  ASSERT_TRUE(scheduler.wait_for_blocked_packet_for_test(process_id_, queue.queue_id,
+                                                         std::chrono::seconds(1)));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), copy_cursor);
+  EXPECT_EQ(backing_words(), kCopied);
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_fill.submissions + 1);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_fill.effects);
+  ASSERT_TRUE(scheduler.synchronize_queue_for_test(process_id_, queue.queue_id,
+                                                   [&] { EXPECT_TRUE(engine_.step()); }));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), fill_cursor);
+  EXPECT_EQ(backing_words(),
+            (std::array<uint32_t, 4>{kFillPattern, kFillPattern, kFillPattern, kFillPattern}));
+  const auto after_fill_packet = endpoint->diagnostics();
+  EXPECT_EQ(after_fill_packet.submissions, before_fill.submissions + 1);
+  EXPECT_EQ(after_fill_packet.effects, before_fill.effects + 1);
+  EXPECT_EQ(after_fill_packet.request_messages, before_fill.request_messages);
+  EXPECT_EQ(after_fill_packet.response_messages, before_fill.response_messages);
+  ASSERT_TRUE(scheduler.synchronize_host_queue_for_test(process_id_, queue.queue_id));
+  EXPECT_EQ(endpoint->diagnostics().effects, after_fill_packet.effects);
+  read_requester(kFillPattern);
+  EXPECT_EQ(endpoint->diagnostics().effects, after_fill_packet.effects + 1);
+
+  ASSERT_TRUE(controlled_line_clean(kCancelledOffset));
+  const auto before_cancel = endpoint->diagnostics();
+  publish_fill(12, kCancelledOffset, kCancelledPattern, sizeof(uint32_t));
+  ASSERT_TRUE(scheduler.wait_for_blocked_packet_for_test(process_id_, queue.queue_id,
+                                                         std::chrono::seconds(1)));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), fill_cursor);
+  EXPECT_EQ(backing_word(kCancelledOffset), kCancelledInitial);
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_cancel.submissions + 1);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_cancel.effects);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  for (unsigned step = 0; step < 4; ++step)
+    ASSERT_TRUE(engine_.step());
+  EXPECT_EQ(endpoint->diagnostics().effects, before_cancel.effects);
+  EXPECT_EQ(endpoint->diagnostics().request_messages, before_cancel.request_messages);
+  EXPECT_EQ(endpoint->diagnostics().response_messages, before_cancel.response_messages);
+  EXPECT_EQ(backing_word(kCancelledOffset), kCancelledInitial);
+  EXPECT_EQ(backing_words(),
+            (std::array<uint32_t, 4>{kFillPattern, kFillPattern, kFillPattern, kFillPattern}));
+  process->unmap_pages(code_va, kBytes);
+  process->unmap_pages(reinterpret_cast<uint64_t>(ring.data()), kBytes);
+  process->unmap_pages(reinterpret_cast<uint64_t>(pointers.data()), kBytes);
+  process->unmap_pages(reinterpret_cast<uint64_t>(source.data()), kBytes);
+}
+
+TEST_F(KfdCdna5PeerClientMappingTest,
+       ControlledOwnerSdmaCopyFromPrivateGttPreservesDisjointDirtyLine) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  using rocjitsu::amdgpu::Mtype;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kSourceBytes = 2 * kBytes;
+  constexpr size_t kSourceOffset = kBytes - 8;
+  constexpr size_t kOffset = 64;
+  constexpr uint32_t kDirtyOffset = 8;
+  constexpr std::array<uint32_t, 4> kInitial{0x12345678u, 0x23456789u, 0x3456789au, 0x456789abu};
+  constexpr std::array<uint32_t, 4> kCopied{0xa1b2c3d4u, 0xb2c3d4e5u, 0xc3d4e5f6u, 0xd4e5f607u};
+
+  kfd_ioctl_alloc_memory_of_gpu_args destination{};
+  destination.size = kBytes;
+  destination.gpu_id = kOwner;
+  destination.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &destination), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, destination.handle));
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args destination_map{};
+  destination_map.handle = destination.handle;
+  destination_map.n_devices = 1;
+  destination_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &destination_map), 0);
+  kfd_ioctl_ipc_export_handle_args destination_export{};
+  destination_export.handle = destination.handle;
+  destination_export.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &destination_export), 0);
+  uint32_t requester_id = kRequester;
+  destination_map.n_success = 0;
+  destination_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &destination_map), 0);
+
+  kfd_ioctl_alloc_memory_of_gpu_args unrelated{};
+  unrelated.size = kBytes;
+  unrelated.gpu_id = kOwner;
+  unrelated.flags = destination.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &unrelated), 0);
+  ASSERT_TRUE(driver_->enable_cacheable_peer_allocation_for_testing(process_id_, unrelated.handle));
+  kfd_ioctl_map_memory_to_gpu_args unrelated_map{};
+  unrelated_map.handle = unrelated.handle;
+  unrelated_map.n_devices = 1;
+  unrelated_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &unrelated_map), 0);
+  kfd_ioctl_ipc_export_handle_args unrelated_export{};
+  unrelated_export.handle = unrelated.handle;
+  unrelated_export.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &unrelated_export), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto destination_backing =
+      process->gpu_peer_backing_grant(kOwner, destination.va_addr, kBytes);
+  ASSERT_TRUE(destination_backing.admission.first_controlled_local_write_candidate);
+  ASSERT_TRUE(destination_backing.backing);
+  const auto requester_backing =
+      process->gpu_peer_backing_grant(kRequester, destination.va_addr, kBytes);
+  ASSERT_TRUE(requester_backing.admission.cacheable);
+  ASSERT_TRUE(requester_backing.backing.same_backing(destination_backing.backing));
+  std::memcpy(destination_backing.backing.data() + kOffset, kInitial.data(), sizeof(kInitial));
+  const auto unrelated_backing =
+      process->gpu_peer_backing_grant(kOwner, unrelated.va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(unrelated_backing.admission.first_controlled_local_write_candidate);
+  ASSERT_TRUE(unrelated_backing.backing);
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::line_clean_or_invalid(
+      *owner_l2, destination.va_addr + kOffset, process_id_));
+
+  const uint64_t code_va = destination.va_addr + 16 * kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> code{};
+  code.fill(0xBF800000u);
+  code[0] = 0xEE050004u; // gfx1250 global_load_b32 v1, v0, s[4:5].
+  code[1] = 0x00000001u;
+  code[2] = 0x00000000u;
+  code[3] = rocjitsu::build_s_branch(-1, machine_->soc(0)->arch());
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  ASSERT_EQ(process->map_pages(code_va, code.data(), kBytes, Mtype::RW,
+                               rocjitsu::KfdProcess::HostExtentOwner::Driver),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(requester_handle);
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  machine_->soc(0)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id_);
+  wave->set_address_space(*requester_handle);
+  wave->set_exec(1);
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  const auto read_requester = [&](uint32_t expected) {
+    wave->pc = code_va;
+    const uint64_t address = destination.va_addr + kOffset;
+    cu->write_sgpr(wave->sgpr_alloc().base + 4, static_cast<uint32_t>(address));
+    cu->write_sgpr(wave->sgpr_alloc().base + 5, static_cast<uint32_t>(address >> 32));
+    cu->write_vgpr(wave->vgpr_alloc().base, 0, 0);
+    cu->write_vgpr(wave->vgpr_alloc().base + 1, 0, 0);
+    cu->step();
+    for (unsigned attempt = 0;
+         attempt < 32 && cu->read_vgpr(wave->vgpr_alloc().base + 1, 0) != expected; ++attempt) {
+      (void)engine_.step();
+      cu->step();
+    }
+    EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+    EXPECT_EQ(cu->read_vgpr(wave->vgpr_alloc().base + 1, 0), expected);
+  };
+  read_requester(kInitial[0]);
+  const auto cached = endpoint->diagnostics();
+  ASSERT_EQ(cached.effects, 1u);
+  read_requester(kInitial[0]);
+  ASSERT_EQ(endpoint->diagnostics().effects, cached.effects)
+      << "the requester must hold a real vector cache hit";
+
+  kfd_ioctl_alloc_memory_of_gpu_args source{};
+  source.size = kSourceBytes;
+  source.gpu_id = kOwner;
+  source.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &source), 0);
+  kfd_ioctl_map_memory_to_gpu_args source_map{};
+  source_map.handle = source.handle;
+  source_map.n_devices = 1;
+  source_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &source_map), 0);
+  auto *source_host = static_cast<std::byte *>(
+      driver_->mmap(process_id_, nullptr, kSourceBytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                    static_cast<off_t>(source.mmap_offset)));
+  ASSERT_NE(source_host, MAP_FAILED);
+  std::memcpy(source_host + kSourceOffset, kCopied.data(), sizeof(kCopied));
+
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> ring{};
+  alignas(4096) std::array<uint64_t, kBytes / sizeof(uint64_t)> pointers{};
+  const auto map_system_page = [&](void *page) {
+    const uint64_t address = reinterpret_cast<uint64_t>(page);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      rocjitsu::KfdProcess::GpuAllocation control{};
+      control.gpu_va = address;
+      control.size = kBytes;
+      control.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+      control.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+      control.handle = process->next_handle_++;
+      control.admission_generations[kOwner] = process->next_gpu_admission_generation_locked();
+      process->allocations_[control.handle] = control;
+      process->publish_gpu_grants_locked();
+    }
+    ASSERT_EQ(process->map_pages(address, page, kBytes, Mtype::UC,
+                                 rocjitsu::KfdProcess::HostExtentOwner::Driver),
+              rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  };
+  map_system_page(ring.data());
+  map_system_page(pointers.data());
+  const off_t doorbell_offset =
+      static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(kOwner));
+  void *doorbell_page = driver_->mmap(process_id_, nullptr, kBytes, PROT_READ | PROT_WRITE,
+                                      MAP_SHARED, doorbell_offset);
+  ASSERT_NE(doorbell_page, MAP_FAILED);
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = kOwner;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = kBytes;
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  auto *doorbell = reinterpret_cast<uint64_t *>(static_cast<std::byte *>(doorbell_page) +
+                                                queue.doorbell_offset % kBytes);
+  auto &scheduler = machine_->soc(1)->sdma_queue_scheduler();
+
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto unrelated_alias = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_id == kOwner && alias.gpu_va == unrelated.va_addr;
+  });
+  ASSERT_NE(unrelated_alias, aliases->end());
+  const auto owner_live = machine_->soc(1)->gpu_vm().snapshot_vmid(process_id_);
+  ASSERT_TRUE(owner_live);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x6d}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *owner_l2, unrelated.va_addr, process_id_, owner_live->cache_identity(),
+      unrelated_alias->admission_generation, dirty_bytes);
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, unrelated.va_addr,
+                                                           process_id_, kDirtyOffset));
+  const auto unrelated_tag =
+      KfdPreparedProviderTestAccess::line_tag(*owner_l2, unrelated.va_addr, process_id_);
+  ASSERT_TRUE(unrelated_tag);
+  ASSERT_TRUE(unrelated_tag->valid);
+  ASSERT_TRUE(unrelated_tag->dirty);
+  std::array<std::byte, L2Cache::LINE_SIZE> unrelated_bytes{};
+  std::memcpy(unrelated_bytes.data(), unrelated_backing.backing.data(), unrelated_bytes.size());
+  const uint64_t backing_writes = owner_l2->backing_write_transactions();
+  const uint64_t owner_epoch = machine_->soc(1)->cache_coherence()->current_epoch();
+  const uint64_t requester_epoch = machine_->soc(0)->cache_coherence()->current_epoch();
+  const auto unrelated_unchanged = [&] {
+    const auto tag =
+        KfdPreparedProviderTestAccess::line_tag(*owner_l2, unrelated.va_addr, process_id_);
+    return tag && tag->tag == unrelated_tag->tag &&
+           tag->coherence_epoch == unrelated_tag->coherence_epoch &&
+           tag->admission_generation == unrelated_tag->admission_generation &&
+           tag->cache_identity == unrelated_tag->cache_identity &&
+           tag->valid_bytes == unrelated_tag->valid_bytes && tag->vmid == unrelated_tag->vmid &&
+           tag->valid == unrelated_tag->valid && tag->dirty == unrelated_tag->dirty &&
+           tag->coherence == unrelated_tag->coherence &&
+           KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, unrelated.va_addr, process_id_,
+                                                        kDirtyOffset) &&
+           std::ranges::equal(unrelated_bytes,
+                              unrelated_backing.backing.bytes().first(L2Cache::LINE_SIZE)) &&
+           owner_l2->backing_write_transactions() == backing_writes &&
+           machine_->soc(1)->cache_coherence()->current_epoch() == owner_epoch &&
+           machine_->soc(0)->cache_coherence()->current_epoch() == requester_epoch;
+  };
+  ASSERT_TRUE(unrelated_unchanged());
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::line_clean_or_invalid(
+      *owner_l2, destination.va_addr + kOffset, process_id_));
+  const auto destination_words = [&] {
+    std::array<uint32_t, kCopied.size()> words{};
+    std::memcpy(words.data(), destination_backing.backing.data() + kOffset, sizeof(words));
+    return words;
+  };
+  ASSERT_EQ(destination_words(), kInitial);
+
+  ring[0] = 1; // SDMA_OP_COPY, linear form.
+  ring[1] = sizeof(kCopied) - 1;
+  ring[2] = 0;
+  const uint64_t source_address = source.va_addr + kSourceOffset;
+  ring[3] = static_cast<uint32_t>(source_address);
+  ring[4] = static_cast<uint32_t>(source_address >> 32);
+  const uint64_t destination_address = destination.va_addr + kOffset;
+  ring[5] = static_cast<uint32_t>(destination_address);
+  ring[6] = static_cast<uint32_t>(destination_address >> 32);
+  const uint64_t producer = 7 * sizeof(uint32_t);
+  const auto before_copy = endpoint->diagnostics();
+  std::atomic_ref<uint64_t>(pointers[1]).store(producer, std::memory_order_release);
+  std::atomic_ref<uint64_t>(*doorbell).store(producer, std::memory_order_release);
+  ASSERT_TRUE(scheduler.wait_for_blocked_packet_for_test(process_id_, queue.queue_id,
+                                                         std::chrono::seconds(1)))
+      << "COPY must reach the owner-local destination within the bounded wait";
+  ASSERT_EQ(endpoint->diagnostics().submissions, before_copy.submissions + 1);
+  ASSERT_EQ(endpoint->diagnostics().effects, before_copy.effects);
+  ASSERT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), 0u);
+  ASSERT_TRUE(unrelated_unchanged())
+      << "reading the private GTT source must not maintain the disjoint owner line";
+  ASSERT_TRUE(scheduler.synchronize_queue_for_test(process_id_, queue.queue_id,
+                                                   [&] { EXPECT_TRUE(engine_.step()); }));
+  ASSERT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), producer);
+  EXPECT_EQ(destination_words(), kCopied);
+  const auto after_copy = endpoint->diagnostics();
+  EXPECT_EQ(after_copy.submissions, before_copy.submissions + 1);
+  EXPECT_EQ(after_copy.effects, before_copy.effects + 1);
+  EXPECT_EQ(after_copy.request_messages, before_copy.request_messages);
+  EXPECT_EQ(after_copy.response_messages, before_copy.response_messages);
+  ASSERT_TRUE(unrelated_unchanged())
+      << "the owner-local COPY effect must preserve the disjoint dirty line";
+  ASSERT_TRUE(scheduler.synchronize_host_queue_for_test(process_id_, queue.queue_id));
+  read_requester(kCopied[0]);
+  const auto after_refetch = endpoint->diagnostics();
+  EXPECT_EQ(after_refetch.effects, after_copy.effects + 1)
+      << "the requester must refetch the copied canonical word";
+  EXPECT_GT(after_refetch.request_messages, after_copy.request_messages);
+  EXPECT_GT(after_refetch.response_messages, after_copy.response_messages);
+  read_requester(kCopied[0]);
+  EXPECT_EQ(endpoint->diagnostics().effects, after_copy.effects + 1);
+  EXPECT_EQ(endpoint->diagnostics().request_messages, after_refetch.request_messages);
+  EXPECT_EQ(endpoint->diagnostics().response_messages, after_refetch.response_messages);
+  EXPECT_TRUE(unrelated_unchanged());
+
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  process->unmap_pages(code_va, kBytes);
+  process->unmap_pages(reinterpret_cast<uint64_t>(ring.data()), kBytes);
+  process->unmap_pages(reinterpret_cast<uint64_t>(pointers.data()), kBytes);
+  ASSERT_EQ(driver_->munmap(process_id_, source_host, kSourceBytes), 0);
+}
+
+TEST_F(KfdCdna5PeerBindingTest, ProductionAqlTensorStoreRefreshesCachedRequester) {
+  using namespace rocjitsu::amdhsa;
+  using rocjitsu::amdgpu::WfState;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 128;
+  constexpr uint32_t kOriginal = 0x12345678u;
+  constexpr std::array<uint32_t, 4> kStored{0x87654321u, 0x13579bdfu, 0x2468ace0u, 0xfedcba98u};
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args owner_map{};
+  owner_map.handle = allocation.handle;
+  owner_map.n_devices = 1;
+  owner_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &owner_map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args requester_map{};
+  requester_map.handle = allocation.handle;
+  requester_map.n_devices = 1;
+  requester_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &requester_map), 0);
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto backing = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, kBytes);
+  ASSERT_TRUE(backing.admission.allowed);
+  ASSERT_TRUE(backing.admission.cacheable);
+  ASSERT_TRUE(backing.backing);
+  std::memcpy(backing.backing.data() + kOffset, &kOriginal, sizeof(kOriginal));
+  const auto backing_word = [&](size_t offset) {
+    uint32_t value = 0;
+    std::memcpy(&value, backing.backing.data() + offset, sizeof(value));
+    return value;
+  };
+
+  // Fill the requester scalar cache before the owner submits its store.
+  const uint64_t requester_code_va = allocation.va_addr + 16 * kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> requester_code{};
+  requester_code.fill(0xBF800000u);
+  const auto load_words = rocjitsu::cdna5::build_smem(
+      rocjitsu::cdna5::kSLoadB32Smem, {.sbase = 0,
+                                       .sdata = 4,
+                                       .scale_offset = 1,
+                                       .soffset = rocjitsu::amdgpu::kModernNullSelector});
+  std::copy(load_words.begin(), load_words.end(), requester_code.begin());
+  requester_code[load_words.size()] = rocjitsu::build_s_branch(-1, machine_->soc(0)->arch());
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = requester_code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  ASSERT_EQ(process->map_pages(requester_code_va, requester_code.data(), kBytes,
+                               rocjitsu::amdgpu::Mtype::RW,
+                               rocjitsu::KfdProcess::HostExtentOwner::Driver),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(requester_handle);
+  rocjitsu::amdgpu::ComputeUnitCore *requester_cu = nullptr;
+  machine_->soc(0)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!requester_cu && !cp->compute_units().empty())
+      requester_cu = cp->compute_units().front();
+  });
+  ASSERT_NE(requester_cu, nullptr);
+  auto *requester_wave = requester_cu->dispatch_wf(/*wg_id=*/0, requester_code_va,
+                                                   /*sgprs=*/128, /*vgprs=*/32);
+  ASSERT_NE(requester_wave, nullptr);
+  requester_wave->set_process_id(process_id_);
+  requester_wave->set_address_space(*requester_handle);
+  requester_wave->set_exec(1);
+  const auto load_scalar = [&] {
+    requester_wave->pc = requester_code_va;
+    const uint64_t address = allocation.va_addr + kOffset;
+    requester_cu->write_sgpr(requester_wave->sgpr_alloc().base, static_cast<uint32_t>(address));
+    requester_cu->write_sgpr(requester_wave->sgpr_alloc().base + 1,
+                             static_cast<uint32_t>(address >> 32));
+    requester_cu->step();
+    for (unsigned attempt = 0; attempt < 8 && requester_wave->state() == WfState::VM_RETRY;
+         ++attempt) {
+      requester_cu->step();
+      if (requester_wave->state() == WfState::VM_RETRY)
+        (void)engine_.step();
+    }
+    EXPECT_EQ(requester_wave->state(), WfState::RUNNING);
+    return requester_cu->read_sgpr_storage(requester_wave->sgpr_alloc().base + 4);
+  };
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  EXPECT_EQ(load_scalar(), kOriginal);
+  const auto filled = endpoint->diagnostics();
+  ASSERT_GT(filled.effects, 0u);
+  EXPECT_EQ(load_scalar(), kOriginal);
+  ASSERT_EQ(endpoint->diagnostics().effects, filled.effects);
+
+  blocked_arena_ = std::make_unique<KfdPeerAqlArena>();
+  kfd_ioctl_create_queue_args queue{};
+  void *doorbell_page = nullptr;
+  ASSERT_TRUE(prepare_aql_queue(process_id_, process, *blocked_arena_, queue, doorbell_page));
+  auto *descriptor = reinterpret_cast<kernel_descriptor_t *>(blocked_arena_->bytes.data());
+  descriptor->group_segment_fixed_size = 256;
+  RJ_AMDHSA_BITS_SET(descriptor->compute_pgm_rsrc1,
+                     COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 3);
+  const std::array<uint32_t, 4> program{0xd0714001u, 0x7c000000u, 0x7c7c0c00u,
+                                        rocjitsu::build_s_endpgm(machine_->soc(1)->arch())};
+  std::memcpy(blocked_arena_->bytes.data() + sizeof(*descriptor), program.data(), sizeof(program));
+
+  class InitializeTensorStore final : public rocjitsu::ExecutionPlugin {
+  public:
+    InitializeTensorStore(uint32_t process_id, uint64_t address, std::array<uint32_t, 4> values,
+                          rocjitsu::FabricEndpoint &endpoint, const void *backing_word)
+        : ExecutionPlugin("initialize-tensor-store"), process_id_(process_id), address_(address),
+          values_(values), endpoint_(endpoint), backing_word_(backing_word) {}
+
+    void onAmdgpuWavefrontDispatched(rocjitsu::amdgpu::Wavefront &wf) override {
+      EXPECT_EQ(wf.process_id(), process_id_);
+      wave = &wf;
+      ++dispatches;
+      const auto write_sgpr = [&](uint32_t reg, uint32_t value) {
+        wf.debug_write_sgpr(reg, value);
+      };
+      write_sgpr(0, 1);
+      write_sgpr(1, 0);
+      write_sgpr(2, static_cast<uint32_t>(address_));
+      write_sgpr(3, static_cast<uint32_t>(address_ >> 32) | 0x80000000u);
+      write_sgpr(12, 2u << 16);
+      write_sgpr(13, static_cast<uint32_t>(values_.size()) << 16);
+      write_sgpr(14, 0);
+      write_sgpr(15, static_cast<uint32_t>(values_.size()) << 16);
+      for (uint32_t reg = 16; reg <= 19; ++reg)
+        write_sgpr(reg, 0);
+      for (size_t index = 0; index < values_.size(); ++index)
+        wf.lds().write32(wf.lds_base() + index * sizeof(uint32_t), values_[index]);
+    }
+
+    void onAmdgpuAfterExecuteInstruction(uint64_t, const rocjitsu::Instruction &inst,
+                                         rocjitsu::amdgpu::Wavefront &) override {
+      if (inst.mnemonic() != "tensor_store_from_lds")
+        return;
+      ++issues;
+      issue_outcome = rocjitsu::amdgpu::tensor_dma_outcome(inst);
+      const auto diagnostics = endpoint_.diagnostics();
+      issue_submissions = diagnostics.submissions;
+      issue_effects = diagnostics.effects;
+      std::memcpy(&issue_backing_word, backing_word_, sizeof(issue_backing_word));
+    }
+
+    rocjitsu::amdgpu::Wavefront *wave = nullptr;
+    uint32_t dispatches = 0;
+    uint32_t issues = 0;
+    rocjitsu::amdgpu::VmAccessOutcome issue_outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete;
+    uint64_t issue_submissions = 0;
+    uint64_t issue_effects = 0;
+    uint32_t issue_backing_word = 0;
+
+  private:
+    uint32_t process_id_;
+    uint64_t address_;
+    std::array<uint32_t, 4> values_;
+    rocjitsu::FabricEndpoint &endpoint_;
+    const void *backing_word_;
+  };
+  auto group = std::make_shared<rocjitsu::ExecutionPluginGroup>(rocjitsu::PluginSinkConfig{});
+  auto initializer =
+      std::make_unique<InitializeTensorStore>(process_id_, allocation.va_addr + kOffset, kStored,
+                                              *endpoint, backing.backing.data() + kOffset);
+  auto *initializer_view = initializer.get();
+  ASSERT_TRUE(group->add(std::move(initializer)));
+  machine_->soc(1)->set_plugin_group(group);
+  for (auto *cu : machine_->soc(1)->all_cus())
+    cu->set_functional_quantum(1);
+
+  auto *owner_cp = machine_->soc(1)->xcd(0)->command_processor();
+  ASSERT_NE(owner_cp, nullptr);
+  const auto before_store = endpoint->diagnostics();
+  submit_aql_one_wave(*blocked_arena_, queue, doorbell_page, /*wave_size=*/32);
+  for (unsigned attempt = 0;
+       attempt < 10000 && endpoint->diagnostics().submissions == before_store.submissions;
+       ++attempt)
+    (void)engine_.step();
+  ASSERT_EQ(initializer_view->dispatches, 1u);
+  ASSERT_NE(initializer_view->wave, nullptr);
+  ASSERT_EQ(owner_cp->accepted_entry_count_for_test(queue.queue_id, process_id_), 1u);
+  ASSERT_EQ(initializer_view->issues, 1u);
+  EXPECT_EQ(initializer_view->issue_outcome, rocjitsu::amdgpu::VmAccessOutcome::Unavailable);
+  EXPECT_EQ(initializer_view->issue_submissions, before_store.submissions + 1);
+  EXPECT_EQ(initializer_view->issue_effects, before_store.effects);
+  EXPECT_EQ(initializer_view->issue_backing_word, kOriginal);
+  EXPECT_EQ(initializer_view->wave->state(), WfState::VM_RETRY);
+  EXPECT_EQ(aql_signal_value(*blocked_arena_), 1u);
+
+  for (unsigned attempt = 0; attempt < 10000 && aql_signal_value(*blocked_arena_) != 0; ++attempt)
+    (void)engine_.step();
+  ASSERT_EQ(aql_signal_value(*blocked_arena_), 0u);
+  EXPECT_EQ(aql_read_pointer(*blocked_arena_), 1u);
+  EXPECT_FALSE(owner_cp->queue_faulted_for_test(queue.queue_id, process_id_));
+  EXPECT_EQ(initializer_view->dispatches, 1u);
+  const auto after_store = endpoint->diagnostics();
+  EXPECT_EQ(after_store.submissions, before_store.submissions + kStored.size());
+  EXPECT_EQ(after_store.effects, before_store.effects + kStored.size());
+  for (size_t index = 0; index < kStored.size(); ++index)
+    EXPECT_EQ(backing_word(kOffset + index * sizeof(uint32_t)), kStored[index]);
+  EXPECT_EQ(load_scalar(), kStored[0]);
+  EXPECT_EQ(endpoint->diagnostics().effects, after_store.effects + 1);
+  EXPECT_EQ(load_scalar(), kStored[0]);
+  EXPECT_EQ(endpoint->diagnostics().effects, after_store.effects + 1);
+  process->unmap_pages(requester_code_va, kBytes);
+}
+
+TEST_F(KfdCdna5PeerBindingTest, ControlledOwnerTensorDmaStoresRefreshCachedRequester) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kCoalescedOffset = 128;
+  constexpr size_t kSingleOffset = 256;
+  constexpr size_t kRawOffset = 384;
+  constexpr size_t kCancelledOffset = 512;
+  constexpr size_t kRevokedOffset = 640;
+  constexpr uint32_t kCoalescedOriginal = 0x12345678u;
+  constexpr uint32_t kSingleOriginal = 0xabcdef01u;
+  constexpr uint32_t kCancelledOriginal = 0x1a2b3c4du;
+  constexpr uint32_t kRevokedOriginal = 0x5e6f7081u;
+  constexpr uint32_t kReplacementOriginal = 0x82a3c4e5u;
+  constexpr std::array<uint32_t, 5> kRawOriginal{0x10203040u, 0x11223344u, 0x55667788u, 0x99aabbccu,
+                                                 0xddeeff00u};
+  constexpr uint32_t kRawStored = 0xdecafbadu;
+  constexpr std::array<uint32_t, 4> kCoalescedStored{0x87654321u, 0x13579bdfu, 0x2468ace0u,
+                                                     0xfedcba98u};
+  constexpr std::array<uint32_t, 1> kSingleStored{0x31415926u};
+  constexpr std::array<uint32_t, 1> kCancelledStored{0x11223344u};
+  constexpr std::array<uint32_t, 4> kRevokedStored{0x22334455u, 0x33445566u, 0x44556677u,
+                                                   0x55667788u};
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args owner_map{};
+  owner_map.handle = allocation.handle;
+  owner_map.n_devices = 1;
+  owner_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &owner_map), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t requester_id = kRequester;
+  kfd_ioctl_map_memory_to_gpu_args requester_map{};
+  requester_map.handle = allocation.handle;
+  requester_map.n_devices = 1;
+  requester_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &requester_map), 0);
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page =
+        process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, process->page_table_.end());
+    EXPECT_EQ(page->second.mtype, rocjitsu::amdgpu::Mtype::RW);
+  }
+  for (uint32_t ordinal : {0u, 1u})
+    ASSERT_TRUE(machine_->soc(ordinal)->gpu_vm().controlled_cache_backing_overlaps(
+        process_id_, allocation.va_addr + kCoalescedOffset, sizeof(kCoalescedStored)));
+  const auto backing = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, kBytes);
+  ASSERT_TRUE(backing.admission.allowed);
+  ASSERT_TRUE(backing.admission.cacheable);
+  ASSERT_TRUE(backing.backing);
+  std::memcpy(backing.backing.data() + kCoalescedOffset, &kCoalescedOriginal,
+              sizeof(kCoalescedOriginal));
+  std::memcpy(backing.backing.data() + kSingleOffset, &kSingleOriginal, sizeof(kSingleOriginal));
+  std::memcpy(backing.backing.data() + kRawOffset, kRawOriginal.data(), sizeof(kRawOriginal));
+  std::memcpy(backing.backing.data() + kCancelledOffset, &kCancelledOriginal,
+              sizeof(kCancelledOriginal));
+  std::memcpy(backing.backing.data() + kRevokedOffset, &kRevokedOriginal, sizeof(kRevokedOriginal));
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  const auto controlled_line_clean = [&](size_t offset) {
+    return rocjitsu::amdgpu::KfdPreparedProviderTestAccess::line_clean_or_invalid(
+        *owner_l2,
+        allocation.va_addr +
+            offset / rocjitsu::amdgpu::L2Cache::LINE_SIZE * rocjitsu::amdgpu::L2Cache::LINE_SIZE,
+        process_id_);
+  };
+  for (size_t offset : {kCoalescedOffset, kSingleOffset, kCancelledOffset, kRevokedOffset})
+    ASSERT_TRUE(controlled_line_clean(offset));
+  const auto read_backing_word = [&](const auto &lease, size_t offset) {
+    uint32_t word = 0;
+    std::memcpy(&word, lease.data() + offset, sizeof(word));
+    return word;
+  };
+
+  // The requester fetches through its scalar cache. Its instruction page is
+  // local, so only these data reads contribute fabric effects.
+  const uint64_t code_va = allocation.va_addr + 16 * kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> code{};
+  code.fill(0xBF800000u);
+  const auto load_words = rocjitsu::cdna5::build_smem(
+      rocjitsu::cdna5::kSLoadB32Smem, {.sbase = 0,
+                                       .sdata = 4,
+                                       .scale_offset = 1,
+                                       .soffset = rocjitsu::amdgpu::kModernNullSelector});
+  std::copy(load_words.begin(), load_words.end(), code.begin());
+  code[load_words.size()] = rocjitsu::build_s_branch(-1, machine_->soc(0)->arch());
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    instruction.admission_generations[kOwner] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  process->map_pages(code_va, code.data(), kBytes, rocjitsu::amdgpu::Mtype::RW,
+                     rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(requester_handle);
+  rocjitsu::amdgpu::ComputeUnitCore *requester_cu = nullptr;
+  machine_->soc(0)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!requester_cu && !cp->compute_units().empty())
+      requester_cu = cp->compute_units().front();
+  });
+  ASSERT_NE(requester_cu, nullptr);
+  auto *requester_wave = requester_cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/128,
+                                                   /*vgprs=*/32);
+  ASSERT_NE(requester_wave, nullptr);
+  requester_wave->set_process_id(process_id_);
+  requester_wave->set_address_space(*requester_handle);
+  requester_wave->set_exec(1);
+  const auto load_scalar = [&](size_t offset) {
+    requester_wave->pc = code_va;
+    const uint64_t address = allocation.va_addr + offset;
+    requester_cu->write_sgpr(requester_wave->sgpr_alloc().base, static_cast<uint32_t>(address));
+    requester_cu->write_sgpr(requester_wave->sgpr_alloc().base + 1,
+                             static_cast<uint32_t>(address >> 32));
+    requester_cu->step();
+    for (int attempt = 0;
+         attempt < 8 && requester_wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY; ++attempt) {
+      requester_cu->step();
+      if (requester_wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY)
+        (void)engine_.step();
+    }
+    EXPECT_EQ(requester_wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+    return requester_cu->read_sgpr_storage(requester_wave->sgpr_alloc().base + 4);
+  };
+
+  auto *endpoint = machine_->fabric_endpoint();
+  ASSERT_NE(endpoint, nullptr);
+  EXPECT_EQ(load_scalar(kCoalescedOffset), kCoalescedOriginal);
+  EXPECT_EQ(load_scalar(kSingleOffset), kSingleOriginal);
+  EXPECT_EQ(load_scalar(kRawOffset), kRawOriginal.front());
+  EXPECT_EQ(load_scalar(kCancelledOffset), kCancelledOriginal);
+  EXPECT_EQ(load_scalar(kRevokedOffset), kRevokedOriginal);
+  const auto filled = endpoint->diagnostics();
+  ASSERT_GE(filled.effects, 5u);
+  EXPECT_EQ(load_scalar(kCoalescedOffset), kCoalescedOriginal);
+  EXPECT_EQ(load_scalar(kSingleOffset), kSingleOriginal);
+  EXPECT_EQ(load_scalar(kRawOffset), kRawOriginal.front());
+  EXPECT_EQ(load_scalar(kCancelledOffset), kCancelledOriginal);
+  EXPECT_EQ(load_scalar(kRevokedOffset), kRevokedOriginal);
+  ASSERT_EQ(endpoint->diagnostics().effects, filled.effects);
+
+  // IPC imports keep UC PTEs but retain the backing's controlled write
+  // policy, even when the owner uses a different process and GPU VA.
+  const uint32_t importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kOwner;
+  imported.va_addr = allocation.va_addr + 32 * kBytes;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  const auto importer = driver_->find_process(importer_id);
+  ASSERT_NE(importer, nullptr);
+  {
+    std::shared_lock lock(importer->page_table_mutex_);
+    const auto page =
+        importer->page_table_.find(imported.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, importer->page_table_.end());
+    EXPECT_EQ(page->second.mtype, rocjitsu::amdgpu::Mtype::UC);
+  }
+  kfd_ioctl_map_memory_to_gpu_args imported_map{};
+  imported_map.handle = imported.handle;
+  imported_map.n_devices = 1;
+  imported_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &imported_map), 0);
+  imported_map.n_success = 0;
+  imported_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&requester_id);
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &imported_map), 0);
+  const auto imported_grant =
+      importer->gpu_peer_backing_grant(kOwner, imported.va_addr + kRawOffset, 4);
+  ASSERT_TRUE(imported_grant.admission.allowed);
+  ASSERT_TRUE(imported_grant.backing);
+  EXPECT_FALSE(imported_grant.admission.cacheable);
+  EXPECT_FALSE(imported_grant.admission.direct_backing_write_allowed);
+  EXPECT_TRUE(imported_grant.backing.same_backing(backing.backing));
+  ASSERT_TRUE(machine_->soc(1)->gpu_vm().controlled_cache_backing_overlaps(
+      importer_id, imported.va_addr + kRawOffset, 4));
+  EXPECT_EQ(read_backing_word(imported_grant.backing, 0), kRawOriginal.front());
+  EXPECT_EQ(endpoint->diagnostics().effects, filled.effects);
+
+  const auto owner_handle = machine_->soc(1)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(owner_handle);
+  rocjitsu::amdgpu::ComputeUnitCore *owner_cu = nullptr;
+  machine_->soc(1)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!owner_cu && !cp->compute_units().empty())
+      owner_cu = cp->compute_units().front();
+  });
+  ASSERT_NE(owner_cu, nullptr);
+  auto *owner_wave = owner_cu->dispatch_wf(
+      /*wg_id=*/0, code_va + load_words.size() * sizeof(uint32_t), /*sgprs=*/128, /*vgprs=*/32);
+  ASSERT_NE(owner_wave, nullptr);
+  owner_wave->set_process_id(process_id_);
+  owner_wave->set_address_space(*owner_handle);
+  owner_wave->set_lds_base(owner_cu->allocate_lds(256));
+  owner_wave->set_lds_size(256);
+  const std::array<uint32_t, 3> store_words{0xd0714001u, 0x7c000000u, 0x7c7c0c00u};
+  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<rocjitsu::Instruction> store(
+      rocjitsu::decode_valid(*decoder, store_words.data()));
+  ASSERT_NE(store, nullptr);
+  ASSERT_EQ(store->mnemonic(), "tensor_store_from_lds");
+  const auto run_store = [&](uint64_t address, std::span<const uint32_t> words) {
+    const auto write_sgpr = [&](uint32_t reg, uint32_t value) {
+      owner_cu->write_sgpr(owner_wave->sgpr_alloc().base + reg, value);
+    };
+    write_sgpr(0, 1); // Active count.
+    write_sgpr(1, 0); // LDS base.
+    write_sgpr(2, static_cast<uint32_t>(address));
+    write_sgpr(3, static_cast<uint32_t>(address >> 32) | 0x80000000u);
+    write_sgpr(12, 2u << 16); // i32 elements.
+    write_sgpr(13, static_cast<uint32_t>(words.size()) << 16);
+    write_sgpr(14, 0);
+    write_sgpr(15, static_cast<uint32_t>(words.size()) << 16);
+    for (uint32_t reg = 16; reg <= 19; ++reg)
+      write_sgpr(reg, 0);
+    for (size_t index = 0; index < words.size(); ++index)
+      owner_cu->lds().write32(owner_wave->lds_base() + index * sizeof(uint32_t), words[index]);
+    EXPECT_TRUE(owner_cu->execute_instruction(store.get(), *owner_wave).succeeded());
+    return rocjitsu::amdgpu::tensor_dma_outcome(*store);
+  };
+  const auto finish_store = [&] {
+    VmAccessOutcome outcome = rocjitsu::amdgpu::tensor_dma_outcome(*store);
+    for (int attempt = 0; attempt < 64 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+      EXPECT_TRUE(engine_.step());
+      outcome = rocjitsu::amdgpu::resume_tensor_dma(*store, *owner_wave);
+    }
+    return outcome;
+  };
+
+  ASSERT_TRUE(controlled_line_clean(kCoalescedOffset));
+  const auto before_coalesced = endpoint->diagnostics();
+  ASSERT_EQ(run_store(allocation.va_addr + kCoalescedOffset, kCoalescedStored),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(read_backing_word(backing.backing, kCoalescedOffset), kCoalescedOriginal);
+  for (size_t index = 1; index < kCoalescedStored.size(); ++index)
+    EXPECT_EQ(read_backing_word(backing.backing, kCoalescedOffset + index * sizeof(uint32_t)), 0u);
+  EXPECT_EQ(load_scalar(kCoalescedOffset), kCoalescedOriginal);
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_coalesced.submissions + 1);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_coalesced.effects);
+  EXPECT_EQ(rocjitsu::amdgpu::resume_tensor_dma(*store, *owner_wave), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_coalesced.submissions + 1);
+  ASSERT_EQ(finish_store(), VmAccessOutcome::Complete);
+  const auto after_coalesced = endpoint->diagnostics();
+  EXPECT_EQ(after_coalesced.submissions, before_coalesced.submissions + kCoalescedStored.size());
+  EXPECT_EQ(after_coalesced.effects, before_coalesced.effects + kCoalescedStored.size());
+  EXPECT_EQ(after_coalesced.request_messages, before_coalesced.request_messages);
+  EXPECT_EQ(after_coalesced.response_messages, before_coalesced.response_messages);
+  for (size_t index = 0; index < kCoalescedStored.size(); ++index)
+    EXPECT_EQ(read_backing_word(backing.backing, kCoalescedOffset + index * sizeof(uint32_t)),
+              kCoalescedStored[index]);
+  EXPECT_EQ(load_scalar(kCoalescedOffset), kCoalescedStored[0]);
+  const auto after_coalesced_refetch = endpoint->diagnostics();
+  EXPECT_EQ(after_coalesced_refetch.effects, after_coalesced.effects + 1);
+
+  ASSERT_TRUE(controlled_line_clean(kSingleOffset));
+  const auto before_single = endpoint->diagnostics();
+  ASSERT_EQ(run_store(allocation.va_addr + kSingleOffset, kSingleStored),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(read_backing_word(backing.backing, kSingleOffset), kSingleOriginal);
+  EXPECT_EQ(load_scalar(kSingleOffset), kSingleOriginal);
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_single.submissions + 1);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_single.effects);
+  EXPECT_EQ(rocjitsu::amdgpu::resume_tensor_dma(*store, *owner_wave), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_single.submissions + 1);
+  ASSERT_EQ(finish_store(), VmAccessOutcome::Complete);
+  const auto after_single = endpoint->diagnostics();
+  EXPECT_EQ(after_single.submissions, before_single.submissions + 1);
+  EXPECT_EQ(after_single.effects, before_single.effects + 1);
+  EXPECT_EQ(after_single.request_messages, before_single.request_messages);
+  EXPECT_EQ(after_single.response_messages, before_single.response_messages);
+  EXPECT_EQ(read_backing_word(backing.backing, kSingleOffset), kSingleStored[0]);
+  EXPECT_EQ(load_scalar(kSingleOffset), kSingleStored[0]);
+  EXPECT_EQ(endpoint->diagnostics().effects, after_single.effects + 1);
+  EXPECT_EQ(load_scalar(kSingleOffset), kSingleStored[0]);
+  const auto after_refetch = endpoint->diagnostics();
+
+  // Each raw owner accessor targets a distinct word. Refusal must happen
+  // before its backing write or a coherence effect reaches the requester.
+  const auto owner_access = machine_->soc(1)->gpu_vm().snapshot_vmid(process_id_);
+  ASSERT_TRUE(owner_access);
+  const auto payload = std::as_bytes(std::span(&kRawStored, 1));
+  EXPECT_FALSE(owner_access->try_write_contiguous(allocation.va_addr + kRawOffset, payload));
+  size_t completed_bytes = 0;
+  EXPECT_EQ(owner_access->write(allocation.va_addr + kRawOffset + 4, payload, completed_bytes),
+            VmAccessOutcome::Malformed);
+  EXPECT_EQ(completed_bytes, 0u);
+  EXPECT_EQ(owner_access->atomic_store(allocation.va_addr + kRawOffset + 8, 4, kRawStored),
+            VmAccessOutcome::Faulted);
+  EXPECT_EQ(
+      owner_access
+          ->compare_exchange(allocation.va_addr + kRawOffset + 12, 4, kRawOriginal[3], kRawStored)
+          .outcome,
+      VmAccessOutcome::Faulted);
+  bool mutation_called = false;
+  EXPECT_EQ(owner_access->atomic_modify(allocation.va_addr + kRawOffset + 16, 4,
+                                        [&](std::span<std::byte> bytes) {
+                                          mutation_called = true;
+                                          std::memcpy(bytes.data(), &kRawStored,
+                                                      sizeof(kRawStored));
+                                        }),
+            VmAccessOutcome::Faulted);
+  EXPECT_FALSE(mutation_called);
+  const auto imported_access = machine_->soc(1)->gpu_vm().snapshot_vmid(importer_id);
+  ASSERT_TRUE(imported_access);
+  EXPECT_FALSE(imported_access->try_write_contiguous(imported.va_addr + kRawOffset, payload));
+  EXPECT_EQ(imported_access->atomic_store(imported.va_addr + kRawOffset, 4, kRawStored),
+            VmAccessOutcome::Faulted);
+  for (size_t index = 0; index < kRawOriginal.size(); ++index)
+    EXPECT_EQ(read_backing_word(backing.backing, kRawOffset + index * sizeof(uint32_t)),
+              kRawOriginal[index]);
+  EXPECT_EQ(load_scalar(kRawOffset), kRawOriginal.front());
+  EXPECT_EQ(endpoint->diagnostics().submissions, after_refetch.submissions);
+  EXPECT_EQ(endpoint->diagnostics().effects, after_refetch.effects);
+
+  // Dropping the instruction state cancels a selected store before its owner
+  // event can publish either backing bytes or a coherence effect.
+  ASSERT_TRUE(controlled_line_clean(kCancelledOffset));
+  const auto before_cancel = endpoint->diagnostics();
+  ASSERT_EQ(run_store(allocation.va_addr + kCancelledOffset, kCancelledStored),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_cancel.submissions + 1);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_cancel.effects);
+  store->set_data(nullptr);
+  for (int step = 0; step < 4; ++step)
+    EXPECT_TRUE(engine_.step());
+  EXPECT_EQ(read_backing_word(backing.backing, kCancelledOffset), kCancelledOriginal);
+  EXPECT_EQ(load_scalar(kCancelledOffset), kCancelledOriginal);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_cancel.effects);
+
+  // Rebind the same VA while a multi-element store is pending. Its captured
+  // VM and token must reconcile with the retired BO, not write the new BO.
+  ASSERT_TRUE(controlled_line_clean(kRevokedOffset));
+  const auto before_revoke = endpoint->diagnostics();
+  ASSERT_EQ(run_store(allocation.va_addr + kRevokedOffset, kRevokedStored),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_revoke.submissions + 1);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_revoke.effects);
+  EXPECT_EQ(read_backing_word(backing.backing, kRevokedOffset), kRevokedOriginal);
+
+  // Retiring this BO releases the guard. A new, ordinary BO at the same VA
+  // must accept the same tensor DMA instruction through both copy paths.
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  // The source's retirement must not drop an importer's guard or policy.
+  EXPECT_FALSE(imported_access->try_write_contiguous(imported.va_addr + kRawOffset, payload));
+  EXPECT_EQ(read_backing_word(imported_grant.backing, 0), kRawOriginal.front());
+  EXPECT_TRUE(machine_->soc(1)->gpu_vm().controlled_cache_backing_overlaps(
+      importer_id, imported.va_addr + kRawOffset, 4));
+  for (uint32_t ordinal : {0u, 1u})
+    EXPECT_FALSE(machine_->soc(ordinal)->gpu_vm().controlled_cache_backing_overlaps(
+        process_id_, allocation.va_addr + kCoalescedOffset, sizeof(kCoalescedStored)));
+  kfd_ioctl_alloc_memory_of_gpu_args reused{};
+  reused.va_addr = allocation.va_addr;
+  reused.size = kBytes;
+  reused.gpu_id = kOwner;
+  reused.flags = allocation.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &reused), 0);
+  ASSERT_EQ(reused.va_addr, allocation.va_addr);
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = reused.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto ordinary = process->gpu_local_backing_grant(kOwner, reused.va_addr, kBytes);
+  ASSERT_TRUE(ordinary.backing);
+  std::memcpy(ordinary.backing.data() + kRevokedOffset, &kReplacementOriginal,
+              sizeof(kReplacementOriginal));
+  ASSERT_EQ(finish_store(), VmAccessOutcome::Revoked);
+  for (int step = 0; step < 4; ++step)
+    EXPECT_TRUE(engine_.step());
+  EXPECT_EQ(read_backing_word(backing.backing, kRevokedOffset), kRevokedOriginal);
+  EXPECT_EQ(read_backing_word(ordinary.backing, kRevokedOffset), kReplacementOriginal);
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_revoke.submissions + 1);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_revoke.effects);
+  const auto before_ordinary = endpoint->diagnostics();
+  EXPECT_EQ(run_store(reused.va_addr + kCoalescedOffset, kCoalescedStored),
+            VmAccessOutcome::Complete);
+  for (size_t index = 0; index < kCoalescedStored.size(); ++index)
+    EXPECT_EQ(read_backing_word(ordinary.backing, kCoalescedOffset + index * sizeof(uint32_t)),
+              kCoalescedStored[index]);
+  EXPECT_EQ(run_store(reused.va_addr + kSingleOffset, kSingleStored), VmAccessOutcome::Complete);
+  EXPECT_EQ(read_backing_word(ordinary.backing, kSingleOffset), kSingleStored[0]);
+  EXPECT_EQ(endpoint->diagnostics().submissions, before_ordinary.submissions);
+  EXPECT_EQ(endpoint->diagnostics().effects, before_ordinary.effects);
+  process->unmap_pages(code_va, kBytes);
+  ASSERT_EQ(driver_->close(process_id_), 0);
+  process_id_ = 0;
+  EXPECT_FALSE(imported_access->try_write_contiguous(imported.va_addr + kRawOffset, payload));
+  EXPECT_EQ(read_backing_word(imported_grant.backing, 0), kRawOriginal.front());
+  kfd_ioctl_free_memory_of_gpu_args free_import{};
+  free_import.handle = imported.handle;
+  ASSERT_EQ(driver_->ioctl(importer_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_import), 0);
+  EXPECT_FALSE(machine_->soc(1)->gpu_vm().controlled_cache_backing_overlaps(
+      importer_id, imported.va_addr + kRawOffset, 4));
+  EXPECT_EQ(driver_->close(importer_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, ControlledBackingRejectsDmabufAliasesAndSurvivesIpcReexport) {
+  constexpr size_t kBytes = 4096;
+  const auto allocate = [&]() {
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.size = kBytes;
+    allocation.gpu_id = kOwner;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    return allocation;
+  };
+
+  const auto prior_export = allocate();
+  ASSERT_NE(prior_export.handle, 0u);
+  kfd_ioctl_export_dmabuf_args dmabuf{};
+  dmabuf.handle = prior_export.handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_EXPORT_DMABUF, &dmabuf), 0);
+  ASSERT_GE(static_cast<int>(dmabuf.dmabuf_fd), 0);
+  EXPECT_FALSE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, prior_export.handle));
+  EXPECT_EQ(::close(static_cast<int>(dmabuf.dmabuf_fd)), 0);
+
+  const auto controlled = allocate();
+  ASSERT_NE(controlled.handle, 0u);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, controlled.handle));
+  dmabuf = {};
+  dmabuf.handle = controlled.handle;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_EXPORT_DMABUF, &dmabuf), -EOPNOTSUPP);
+
+  kfd_ioctl_ipc_export_handle_args first_export{};
+  first_export.handle = controlled.handle;
+  first_export.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &first_export), 0);
+  const uint32_t first_importer_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(first_importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args first_import{};
+  std::copy(std::begin(first_export.share_handle), std::end(first_export.share_handle),
+            std::begin(first_import.share_handle));
+  first_import.gpu_id = kOwner;
+  first_import.va_addr = controlled.va_addr + 8 * kBytes;
+  kfd_ioctl_alloc_memory_of_gpu_args old_alias{};
+  old_alias.va_addr = first_import.va_addr;
+  old_alias.size = kBytes;
+  old_alias.gpu_id = kOwner;
+  old_alias.flags = controlled.flags;
+  ASSERT_EQ(driver_->ioctl(first_importer_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &old_alias), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args old_map{};
+  old_map.handle = old_alias.handle;
+  old_map.n_devices = 1;
+  old_map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(first_importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &old_map), 0);
+  const auto first_importer = driver_->find_process(first_importer_id);
+  ASSERT_NE(first_importer, nullptr);
+  const auto old_access = machine_->soc(1)->gpu_vm().snapshot_vmid(first_importer_id);
+  ASSERT_TRUE(old_access);
+  constexpr uint32_t kOldWord = 0x12345678u;
+  constexpr uint32_t kAfterRefusal = 0x87654321u;
+  ASSERT_EQ(old_access->atomic_store(old_alias.va_addr, 4, kOldWord),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(driver_->ioctl(first_importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &first_import),
+            -EINVAL);
+  EXPECT_EQ(old_access->atomic_store(old_alias.va_addr, 4, kAfterRefusal),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  const auto old_backing = first_importer->gpu_local_backing_grant(kOwner, old_alias.va_addr, 4);
+  ASSERT_TRUE(old_backing.backing);
+  uint32_t old_observed = 0;
+  std::memcpy(&old_observed, old_backing.backing.data(), sizeof(old_observed));
+  EXPECT_EQ(old_observed, kAfterRefusal);
+  EXPECT_FALSE(machine_->soc(1)->gpu_vm().controlled_cache_backing_overlaps(
+      first_importer_id, first_import.va_addr, 4));
+  kfd_ioctl_free_memory_of_gpu_args free_old{};
+  free_old.handle = old_alias.handle;
+  ASSERT_EQ(driver_->ioctl(first_importer_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_old), 0);
+  alignas(4096) std::array<std::byte, kBytes> resident_page{};
+  ASSERT_EQ(first_importer->map_pages(first_import.va_addr, resident_page.data(), kBytes,
+                                      rocjitsu::amdgpu::Mtype::RW,
+                                      rocjitsu::KfdProcess::HostExtentOwner::Driver),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  EXPECT_EQ(driver_->ioctl(first_importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &first_import),
+            -EINVAL);
+  {
+    std::shared_lock lock(first_importer->page_table_mutex_);
+    const auto page =
+        first_importer->page_table_.find(first_import.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, first_importer->page_table_.end());
+    EXPECT_EQ(page->second.mtype, rocjitsu::amdgpu::Mtype::RW);
+  }
+  ASSERT_EQ(first_importer->unmap_pages(first_import.va_addr, kBytes),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  auto busy_writer = first_importer->raw_write_gate_->try_acquire(first_import.va_addr, kBytes);
+  ASSERT_TRUE(busy_writer);
+  EXPECT_EQ(driver_->ioctl(first_importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &first_import),
+            -EAGAIN);
+  EXPECT_FALSE(machine_->soc(1)->gpu_vm().controlled_cache_backing_overlaps(
+      first_importer_id, first_import.va_addr, 4));
+  busy_writer.reset();
+  ASSERT_EQ(driver_->ioctl(first_importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &first_import), 0);
+  dmabuf = {};
+  dmabuf.handle = first_import.handle;
+  EXPECT_EQ(driver_->ioctl(first_importer_id, AMDKFD_IOC_EXPORT_DMABUF, &dmabuf), -EOPNOTSUPP);
+
+  kfd_ioctl_ipc_export_handle_args second_export{};
+  second_export.handle = first_import.handle;
+  second_export.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(first_importer_id, AMDKFD_IOC_IPC_EXPORT_HANDLE, &second_export), 0);
+  const uint32_t second_importer_id = driver_->open_process(/*client_pid=*/4244);
+  ASSERT_NE(second_importer_id, 0u);
+  kfd_ioctl_ipc_import_handle_args second_import{};
+  std::copy(std::begin(second_export.share_handle), std::end(second_export.share_handle),
+            std::begin(second_import.share_handle));
+  second_import.gpu_id = kOwner;
+  second_import.va_addr = controlled.va_addr + 16 * kBytes;
+  ASSERT_EQ(driver_->ioctl(second_importer_id, AMDKFD_IOC_IPC_IMPORT_HANDLE, &second_import), 0);
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = second_import.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(second_importer_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto second_importer = driver_->find_process(second_importer_id);
+  ASSERT_NE(second_importer, nullptr);
+  const auto reexported = second_importer->gpu_peer_backing_grant(kOwner, second_import.va_addr, 4);
+  EXPECT_TRUE(reexported.admission.allowed);
+  EXPECT_FALSE(reexported.admission.direct_backing_write_allowed);
+  EXPECT_TRUE(machine_->soc(1)->gpu_vm().controlled_cache_backing_overlaps(
+      second_importer_id, second_import.va_addr, 4));
+
+  EXPECT_EQ(driver_->close(second_importer_id), 0);
+  EXPECT_EQ(driver_->close(first_importer_id), 0);
+}
+
+TEST_F(KfdPeerBindingTest, ControlledPeerEnableRetriesWhileRawWriterActive) {
+  constexpr size_t kBytes = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args ordinary{};
+  ordinary.size = kBytes;
+  ordinary.gpu_id = kOwner;
+  ordinary.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &ordinary), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = ordinary.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  ASSERT_TRUE(process->gpu_access_grant(kOwner, ordinary.va_addr, 4).allowed);
+  auto raw_writer = process->raw_write_gate_->try_acquire(ordinary.va_addr, ordinary.size);
+  ASSERT_TRUE(raw_writer);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = ordinary.handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  kfd_ioctl_alloc_memory_of_gpu_args controlled{};
+  controlled.va_addr = ordinary.va_addr;
+  controlled.size = kBytes;
+  controlled.gpu_id = kOwner;
+  controlled.flags = ordinary.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &controlled), 0);
+  ASSERT_EQ(controlled.va_addr, ordinary.va_addr);
+  EXPECT_FALSE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, controlled.handle));
+  for (uint32_t ordinal : {0u, 1u})
+    EXPECT_FALSE(machine_->soc(ordinal)->gpu_vm().controlled_cache_backing_overlaps(
+        process_id_, controlled.va_addr, 4));
+
+  raw_writer.reset();
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, controlled.handle));
+  for (uint32_t ordinal : {0u, 1u})
+    EXPECT_TRUE(machine_->soc(ordinal)->gpu_vm().controlled_cache_backing_overlaps(
+        process_id_, controlled.va_addr, 4));
+  map.handle = controlled.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto grant = process->gpu_access_grant(kOwner, controlled.va_addr, 4);
+  ASSERT_TRUE(grant.allowed);
+  EXPECT_FALSE(grant.direct_backing_write_allowed);
+}
+
+TEST_F(KfdPeerBindingTest, ControlledPeerCacheHitSurvivesRefusedOwnerDirtyWriteback) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::Mtype;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 16;
+  constexpr size_t kMscOffset = 256;
+  constexpr uint32_t kOriginal = 0x12345678u;
+  constexpr uint32_t kDirty = 0x87654321u;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  for (uint32_t gpu_id : {kOwner, kRequester}) {
+    if (gpu_id == kRequester) {
+      kfd_ioctl_ipc_export_handle_args exported{};
+      exported.handle = allocation.handle;
+      exported.gpu_id = kOwner;
+      ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    }
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  // This process has one page table: both MAP grants name the same VA and
+  // canonical BO, so both GPU-local cache sinks must see the guard.
+  EXPECT_TRUE(machine_->soc(0)->gpu_vm().controlled_cache_backing_overlaps(
+      process_id_, allocation.va_addr + kOffset, sizeof(kOriginal)));
+  EXPECT_TRUE(machine_->soc(1)->gpu_vm().controlled_cache_backing_overlaps(
+      process_id_, allocation.va_addr + kOffset, sizeof(kOriginal)));
+  const auto backing = process->gpu_peer_backing_grant(kRequester, allocation.va_addr, kBytes);
+  ASSERT_TRUE(backing.backing);
+  std::memcpy(backing.backing.data() + kOffset, &kOriginal, sizeof(kOriginal));
+  const uint64_t code_va = allocation.va_addr + 16 * kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> code{};
+  code.fill(0xBF800000u);
+  code[0] = 0xC0020000u; // s_load_dword s0, s[0:1], 0x0
+  code[1] = 0;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  process->map_pages(code_va, code.data(), kBytes, Mtype::RW,
+                     rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(handle);
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  machine_->soc(0)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id_);
+  wave->set_address_space(*handle);
+  wave->set_exec(1);
+  const auto load_scalar = [&] {
+    wave->pc = code_va;
+    const uint64_t address = allocation.va_addr + kOffset;
+    cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(address));
+    cu->write_sgpr(wave->sgpr_alloc().base + 1, static_cast<uint32_t>(address >> 32));
+    cu->step();
+    for (int attempt = 0; attempt < 8 && wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY;
+         ++attempt) {
+      cu->step();
+      if (wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY)
+        (void)engine_.step();
+    }
+    EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+    EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base), kOriginal);
+  };
+
+  load_scalar();
+  const uint64_t filled_effects = machine_->fabric_endpoint()->diagnostics().effects;
+  ASSERT_GT(filled_effects, 0u);
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  const auto owner_access = machine_->soc(1)->gpu_vm().snapshot_vmid(process_id_);
+  ASSERT_TRUE(owner_access);
+  const auto dirty_grant =
+      process->gpu_peer_backing_grant(kOwner, allocation.va_addr + kOffset, sizeof(kDirty));
+  ASSERT_TRUE(dirty_grant.admission.allowed);
+  ASSERT_NE(dirty_grant.admission.generation, 0u);
+  std::array<std::pair<uint32_t, uint8_t>, sizeof(kDirty)> dirty_bytes{};
+  const auto *dirty_source = reinterpret_cast<const uint8_t *>(&kDirty);
+  for (size_t index = 0; index < dirty_bytes.size(); ++index)
+    dirty_bytes[index] = {kOffset + static_cast<uint32_t>(index), dirty_source[index]};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *owner_l2, allocation.va_addr, process_id_, owner_access->cache_identity(),
+      dirty_grant.admission.generation, dirty_bytes);
+  EXPECT_EQ(owner_l2->flush_line(allocation.va_addr, process_id_), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(owner_l2->invalidate_range(allocation.va_addr + kOffset, sizeof(kDirty), process_id_),
+            VmAccessOutcome::Unavailable);
+  auto *owner_msc = machine_->soc(1)->iod(0)->msc();
+  ASSERT_NE(owner_msc, nullptr);
+  const auto owner_grant = process->gpu_peer_backing_grant(
+      kOwner, allocation.va_addr + kMscOffset, rocjitsu::amdgpu::MemorySideCache::LINE_SIZE);
+  ASSERT_TRUE(owner_grant.admission.allowed);
+  ASSERT_NE(owner_grant.admission.generation, 0u);
+  std::array<uint8_t, rocjitsu::amdgpu::MemorySideCache::LINE_SIZE> msc_dirty{};
+  msc_dirty.fill(0x6b);
+  KfdPreparedProviderTestAccess::store_dirty_msc_line(*owner_msc, allocation.va_addr + kMscOffset,
+                                                      process_id_, owner_access->cache_identity(),
+                                                      owner_grant.admission.generation, msc_dirty);
+  EXPECT_EQ(owner_msc->flush_range(allocation.va_addr + kMscOffset, 4, process_id_),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(owner_msc->flush_all(), VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_msc_line(
+      *owner_msc, allocation.va_addr + kMscOffset, process_id_));
+  const std::array domains{
+      rocjitsu::amdgpu::DeviceCacheDomain{machine_->soc(1)->cache_coherence(), kOwner}};
+  EXPECT_THROW((void)rocjitsu::amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
+                   domains, rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate,
+                   KfdPreparedProviderTestAccess::ordinary_resolver(*driver_)),
+               rocjitsu::amdgpu::CacheMaintenanceUnavailable);
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocation.va_addr,
+                                                           process_id_, kOffset));
+  uint32_t canonical = 0;
+  std::memcpy(&canonical, backing.backing.data() + kOffset, sizeof(canonical));
+  EXPECT_EQ(canonical, kOriginal);
+  EXPECT_EQ(backing.backing.bytes()[kMscOffset], std::byte{0});
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, filled_effects);
+  load_scalar();
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, filled_effects);
+
+  process->unmap_pages(code_va, kBytes);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_FALSE(machine_->soc(0)->gpu_vm().controlled_cache_backing_overlaps(
+      process_id_, allocation.va_addr + kOffset, sizeof(kOriginal)));
+  EXPECT_FALSE(machine_->soc(1)->gpu_vm().controlled_cache_backing_overlaps(
+      process_id_, allocation.va_addr + kOffset, sizeof(kOriginal)));
+  std::memcpy(&canonical, backing.backing.data() + kOffset, sizeof(canonical));
+  EXPECT_EQ(canonical, kDirty);
+  EXPECT_EQ(backing.backing.bytes()[kMscOffset], std::byte{0x6b});
+}
+
+TEST_F(KfdPeerBindingTest, UnrelatedDrainCannotPublishControlledDirtyLine) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kBytes = 4096;
+  constexpr uint32_t kDirtyOffset = 16;
+  std::array<kfd_ioctl_alloc_memory_of_gpu_args, 2> allocations{};
+  for (size_t index = 0; index < allocations.size(); ++index) {
+    auto &allocation = allocations[index];
+    allocation.size = kBytes;
+    allocation.gpu_id = kOwner;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    if (index == 1) {
+      ASSERT_TRUE(
+          driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+    }
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kOwner;
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    for (uint32_t gpu_id : {kOwner, kRequester}) {
+      kfd_ioctl_map_memory_to_gpu_args map{};
+      map.handle = allocation.handle;
+      map.n_devices = 1;
+      map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+      ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    }
+  }
+
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  const auto owner_access = machine_->soc(1)->gpu_vm().snapshot_vmid(process_id_);
+  ASSERT_TRUE(owner_access);
+  const auto protected_grant =
+      process->gpu_peer_backing_grant(kOwner, allocations[1].va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(protected_grant.admission.allowed);
+  ASSERT_TRUE(protected_grant.backing);
+  protected_grant.backing.bytes()[kDirtyOffset] = std::byte{0x13};
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *owner_l2, allocations[1].va_addr, process_id_, owner_access->cache_identity(),
+      protected_grant.admission.generation, dirty_bytes);
+  const uint64_t before_writes = owner_l2->backing_write_transactions();
+  const uint64_t before_effects = machine_->fabric_endpoint()->diagnostics().effects;
+
+  kfd_ioctl_free_memory_of_gpu_args free_a{};
+  free_a.handle = allocations[0].handle;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_a), -EIO);
+  EXPECT_EQ(protected_grant.backing.bytes()[kDirtyOffset], std::byte{0x13});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocations[1].va_addr,
+                                                           process_id_, kDirtyOffset));
+  EXPECT_EQ(owner_l2->backing_write_transactions(), before_writes);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, before_effects);
+
+  // The failed A drain remains closed. Remove only the test-created B writer,
+  // then retry A and retire B through their ordinary KFD ownership paths.
+  KfdPreparedProviderTestAccess::discard_dirty_l2_line(*owner_l2, allocations[1].va_addr,
+                                                       process_id_);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_a), 0);
+  kfd_ioctl_free_memory_of_gpu_args free_b{};
+  free_b.handle = allocations[1].handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_b), 0);
+}
+
+TEST_F(KfdPeerBindingTest, ProductionAqlCompletionRetriesAfterSelectedPeerWriteback) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kDirtyOffset = 16;
+
+  kfd_ioctl_alloc_memory_of_gpu_args controlled{};
+  controlled.size = kAqlPage;
+  controlled.gpu_id = kOwner;
+  controlled.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &controlled), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, controlled.handle));
+  for (uint32_t gpu_id : {kOwner, kRequester}) {
+    if (gpu_id == kRequester) {
+      kfd_ioctl_ipc_export_handle_args exported{};
+      exported.handle = controlled.handle;
+      exported.gpu_id = kOwner;
+      ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    }
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = controlled.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0) << gpu_id;
+  }
+
+  const auto owner_process = driver_->find_process(process_id_);
+  ASSERT_NE(owner_process, nullptr);
+  const auto backing =
+      owner_process->gpu_peer_backing_grant(kOwner, controlled.va_addr, L2Cache::LINE_SIZE);
+  ASSERT_TRUE(backing.admission.allowed);
+  ASSERT_TRUE(backing.backing);
+  backing.backing.bytes()[kDirtyOffset] = std::byte{0x13};
+
+  const uint32_t other_process_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(other_process_id, 0u);
+  additional_process_ids_.push_back(other_process_id);
+  const auto other_process = driver_->find_process(other_process_id);
+  ASSERT_NE(other_process, nullptr);
+  blocked_arena_ = std::make_unique<KfdPeerAqlArena>();
+  independent_arena_ = std::make_unique<KfdPeerAqlArena>();
+  kfd_ioctl_create_queue_args blocked_queue{};
+  kfd_ioctl_create_queue_args independent_queue{};
+  void *blocked_doorbell_page = nullptr;
+  void *independent_doorbell_page = nullptr;
+  ASSERT_TRUE(prepare_aql_queue(process_id_, owner_process, *blocked_arena_, blocked_queue,
+                                blocked_doorbell_page));
+  ASSERT_TRUE(prepare_aql_queue(other_process_id, other_process, *independent_arena_,
+                                independent_queue, independent_doorbell_page));
+
+  const auto owner_access = machine_->soc(1)->gpu_vm().snapshot_vmid(process_id_);
+  ASSERT_TRUE(owner_access);
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*owner_l2, controlled.va_addr, process_id_,
+                                                      owner_access->cache_identity(),
+                                                      backing.admission.generation, dirty_bytes);
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, controlled.va_addr,
+                                                           process_id_, kDirtyOffset));
+
+  auto *owner_cp = machine_->soc(1)->xcd(0)->command_processor();
+  ASSERT_NE(owner_cp, nullptr);
+  const auto dispatched_workgroups = [&] {
+    uint64_t total = 0;
+    for (uint32_t xcd = 0; xcd < machine_->soc(1)->num_xcds(); ++xcd)
+      total += machine_->soc(1)->xcd(xcd)->command_processor()->dispatched_workgroups();
+    return total;
+  };
+  const uint64_t before_dispatch = dispatched_workgroups();
+  submit_aql_one_wave(*blocked_arena_, blocked_queue, blocked_doorbell_page);
+  for (unsigned attempt = 0;
+       attempt < 10000 &&
+       (owner_cp->accepted_entry_count_for_test(blocked_queue.queue_id, process_id_) != 1 ||
+        dispatched_workgroups() != before_dispatch + 1 ||
+        !owner_cp->completion_flush_retry_pending_for_test(blocked_queue.queue_id, process_id_));
+       ++attempt) {
+    (void)engine_.step();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
+  ASSERT_EQ(owner_cp->accepted_entry_count_for_test(blocked_queue.queue_id, process_id_), 1u);
+  ASSERT_EQ(dispatched_workgroups(), before_dispatch + 1);
+  // The retained completion still owns its ring slot while its flush retries.
+  ASSERT_EQ(aql_read_pointer(*blocked_arena_), 0u);
+  ASSERT_TRUE(
+      owner_cp->completion_flush_retry_pending_for_test(blocked_queue.queue_id, process_id_));
+  for (unsigned attempt = 0; attempt < 200; ++attempt)
+    (void)engine_.step();
+  ASSERT_EQ(aql_signal_value(*blocked_arena_), 1u);
+  ASSERT_FALSE(owner_cp->queue_faulted_for_test(blocked_queue.queue_id, process_id_));
+  ASSERT_TRUE(
+      owner_cp->completion_flush_retry_pending_for_test(blocked_queue.queue_id, process_id_));
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, controlled.va_addr,
+                                                           process_id_, kDirtyOffset));
+  EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0x13});
+
+  submit_aql_one_wave(*independent_arena_, independent_queue, independent_doorbell_page);
+  for (unsigned attempt = 0; attempt < 10000 && aql_signal_value(*independent_arena_) != 0;
+       ++attempt) {
+    (void)engine_.step();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
+  ASSERT_EQ(aql_signal_value(*independent_arena_), 0u);
+  ASSERT_EQ(aql_signal_value(*blocked_arena_), 1u);
+  EXPECT_TRUE(
+      owner_cp->completion_flush_retry_pending_for_test(blocked_queue.queue_id, process_id_));
+  EXPECT_EQ(aql_read_pointer(*independent_arena_), 1u);
+  EXPECT_EQ(owner_cp->accepted_entry_count_for_test(independent_queue.queue_id, other_process_id),
+            1u);
+  EXPECT_EQ(owner_cp->accepted_entry_count_for_test(blocked_queue.queue_id, process_id_), 1u);
+  EXPECT_EQ(dispatched_workgroups(), before_dispatch + 2);
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, controlled.va_addr,
+                                                           process_id_, kDirtyOffset));
+  EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0x13});
+
+  // The unrelated process can retire its ordinary GTT queue while the owner's
+  // retained completion snapshot and controlled writer remain live.
+  ASSERT_EQ(driver_->close(other_process_id), 0);
+  additional_process_ids_.clear();
+  EXPECT_EQ(aql_signal_value(*blocked_arena_), 1u);
+  EXPECT_TRUE(
+      owner_cp->completion_flush_retry_pending_for_test(blocked_queue.queue_id, process_id_));
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, controlled.va_addr,
+                                                           process_id_, kDirtyOffset));
+  EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0x13});
+
+  const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(requester_handle);
+  const auto requester_access = machine_->soc(0)->gpu_vm().snapshot_pinned(*requester_handle);
+  ASSERT_TRUE(requester_access);
+  ASSERT_EQ(requester_access->classify_data_route(controlled.va_addr + kDirtyOffset, 1,
+                                                  rocjitsu::amdgpu::VmAccessKind::Read),
+            rocjitsu::amdgpu::VmDataRoute::Deferred);
+  const uint64_t before_peer_effects = machine_->fabric_endpoint()->diagnostics().effects;
+  std::array<std::byte, 1> observed{};
+  std::size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  VmAccessOutcome outcome =
+      requester_access->read(controlled.va_addr + kDirtyOffset, observed, progress, token);
+  for (unsigned attempt = 0; attempt < 32 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = requester_access->read(controlled.va_addr + kDirtyOffset, observed, progress, token);
+  }
+  ASSERT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, observed.size());
+  EXPECT_EQ(observed[0], std::byte{0xa5});
+  EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, before_peer_effects + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, controlled.va_addr,
+                                                            process_id_, kDirtyOffset));
+
+  for (unsigned attempt = 0; attempt < 10000 && aql_signal_value(*blocked_arena_) != 0; ++attempt) {
+    (void)engine_.step();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
+  ASSERT_EQ(aql_signal_value(*blocked_arena_), 0u);
+  for (unsigned attempt = 0; attempt < 200; ++attempt)
+    (void)engine_.step();
+  EXPECT_EQ(aql_signal_value(*blocked_arena_), 0u);
+  EXPECT_EQ(aql_read_pointer(*blocked_arena_), 1u);
+  EXPECT_EQ(owner_cp->accepted_entry_count_for_test(blocked_queue.queue_id, process_id_), 1u);
+  EXPECT_EQ(dispatched_workgroups(), before_dispatch + 2);
+  EXPECT_FALSE(owner_cp->queue_faulted_for_test(blocked_queue.queue_id, process_id_));
+}
+
+TEST_F(KfdPeerBindingTest, SelectedUnmapCannotPublishPendingAqlCompletion) {
+  verify_completion_blocked_by_selected_retirement(SelectedRetirement::Unmap);
+}
+
+TEST_F(KfdPeerBindingTest, SelectedFreeCannotPublishPendingAqlCompletion) {
+  verify_completion_blocked_by_selected_retirement(SelectedRetirement::Free);
+}
+
+TEST_F(KfdPeerBindingTest, ProcessCloseCannotPublishPendingAqlCompletion) {
+  verify_completion_blocked_by_selected_retirement(SelectedRetirement::Close);
+}
+
+TEST_F(KfdPeerBindingTest, ControlledGuardSurvivesFailedFreeThenReleasesReusedVa) {
+  using rocjitsu::amdgpu::Mtype;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_TRUE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  for (uint32_t gpu_id : {kOwner, kRequester}) {
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+  auto &owner_vm = machine_->soc(1)->gpu_vm();
+  ASSERT_TRUE(owner_vm.controlled_cache_backing_overlaps(process_id_, allocation.va_addr, 4));
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  driver_->fail_next_alias_free_final_publish_for_testing();
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), -ENOMEM);
+  EXPECT_TRUE(owner_vm.controlled_cache_backing_overlaps(process_id_, allocation.va_addr, 4));
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_FALSE(owner_vm.controlled_cache_backing_overlaps(process_id_, allocation.va_addr, 4));
+
+  kfd_ioctl_alloc_memory_of_gpu_args reused{};
+  reused.va_addr = allocation.va_addr;
+  reused.size = kBytes;
+  reused.gpu_id = kOwner;
+  reused.flags = allocation.flags;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &reused), 0);
+  ASSERT_EQ(reused.va_addr, allocation.va_addr);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = reused.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  constexpr uint32_t kValue = 0xabcdef12u;
+  EXPECT_EQ(owner_l2->write(reused.va_addr, reinterpret_cast<const uint8_t *>(&kValue),
+                            sizeof(kValue), Mtype::RW, process_id_),
+            VmAccessOutcome::Complete);
+  auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  void *host_ptr = nullptr;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    host_ptr = process->allocations_.at(reused.handle).host_ptr;
+  }
+  ASSERT_NE(host_ptr, nullptr);
+  uint32_t observed = 0;
+  std::memcpy(&observed, host_ptr, sizeof(observed));
+  EXPECT_EQ(observed, kValue);
+}
+
+TEST_F(KfdPeerBindingTest, RejectedEnableLeavesOrdinaryOwnerBackingUnguarded) {
+  using rocjitsu::amdgpu::Mtype;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kBytes = 4096;
+  constexpr size_t kOffset = 16;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t owner_id = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&owner_id);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_FALSE(
+      driver_->enable_cacheable_peer_allocation_for_testing(process_id_, allocation.handle));
+  for (uint32_t ordinal : {0u, 1u})
+    EXPECT_FALSE(machine_->soc(ordinal)->gpu_vm().controlled_cache_backing_overlaps(
+        process_id_, allocation.va_addr + kOffset, 4));
+
+  auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
+  ASSERT_NE(owner_l2, nullptr);
+  constexpr uint32_t kValue = 0xabcdef12u;
+  EXPECT_EQ(owner_l2->write(allocation.va_addr + kOffset,
+                            reinterpret_cast<const uint8_t *>(&kValue), sizeof(kValue), Mtype::RW,
+                            process_id_),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(owner_l2->flush_line(allocation.va_addr, process_id_), VmAccessOutcome::Complete);
+  const auto process = driver_->find_process(process_id_);
+  ASSERT_NE(process, nullptr);
+  void *host_ptr = nullptr;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    host_ptr = process->allocations_.at(allocation.handle).host_ptr;
+  }
+  ASSERT_NE(host_ptr, nullptr);
+  uint32_t observed = 0;
+  std::memcpy(&observed, static_cast<uint8_t *>(host_ptr) + kOffset, sizeof(observed));
+  EXPECT_EQ(observed, kValue);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdPeerBindingTest, RoutesOnlyGrantedLeasedPeerChunksAndRetainsPreparedBacking) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  using rocjitsu::amdgpu::VmDataRoute;
+  constexpr size_t kBytes = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBytes;
+  allocation.gpu_id = kOwner;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  uint32_t mapped_gpu = kOwner;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&mapped_gpu);
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  mapped_gpu = kRequester;
+  map.n_success = 0;
+  EXPECT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EINVAL);
+
+  const uint32_t pid = process_id_;
+  auto process = driver_->find_process(pid);
+  ASSERT_NE(process, nullptr);
+  const uint64_t local_va = allocation.va_addr - kBytes;
+  alignas(4096) std::array<std::byte, kBytes> local_bytes{};
+  local_bytes[kBytes - 2] = std::byte{0xa1};
+  local_bytes[kBytes - 1] = std::byte{0xb2};
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation local{};
+    local.gpu_va = local_va;
+    local.size = kBytes;
+    local.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    local.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    local.handle = process->next_handle_++;
+    local.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->allocations_[local.handle] = local;
+    process->publish_gpu_grants_locked();
+  }
+  process->map_pages(local_va, local_bytes.data(), local_bytes.size(), rocjitsu::amdgpu::Mtype::RW,
+                     rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  const auto handle = machine_->soc(0)->gpu_vm().find_vmid(pid);
+  ASSERT_TRUE(handle);
+  auto access = machine_->soc(0)->gpu_vm().snapshot_pinned(*handle);
+  ASSERT_TRUE(access);
+  EXPECT_EQ(
+      access->classify_data_route(allocation.va_addr, 4, rocjitsu::amdgpu::VmAccessKind::Read),
+      VmDataRoute::Faulted);
+
+  // Public peer MAP is still closed. Publish only the directed fixture grant
+  // to exercise the already registered requester's live binding.
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    auto &record = process->allocations_.at(allocation.handle);
+    record.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->publish_gpu_grants_locked();
+  }
+  EXPECT_EQ(
+      access->classify_data_route(allocation.va_addr, 4, rocjitsu::amdgpu::VmAccessKind::Read),
+      VmDataRoute::Deferred);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    process->allocations_.at(allocation.handle).gpu_id = kOwner + 2;
+    process->publish_gpu_grants_locked();
+  }
+  EXPECT_EQ(
+      access->classify_data_route(allocation.va_addr, 4, rocjitsu::amdgpu::VmAccessKind::Read),
+      VmDataRoute::Faulted);
+  std::array<std::byte, 4> denied_bytes{};
+  std::size_t denied_progress = 0;
+  rocjitsu::amdgpu::VmTransferToken denied_token;
+  EXPECT_EQ(access->read(allocation.va_addr, denied_bytes, denied_progress, denied_token),
+            VmAccessOutcome::Faulted);
+  EXPECT_EQ(denied_progress, 0u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    process->allocations_.at(allocation.handle).gpu_id = kOwner;
+    process->publish_gpu_grants_locked();
+  }
+  EXPECT_EQ(
+      access->classify_data_route(allocation.va_addr, 4, rocjitsu::amdgpu::VmAccessKind::Execute),
+      VmDataRoute::Faulted);
+  EXPECT_EQ(
+      access->classify_data_route(local_va + kBytes - 2, 4, rocjitsu::amdgpu::VmAccessKind::Read),
+      VmDataRoute::Deferred);
+  EXPECT_EQ(access->resolve_host_pointer(allocation.va_addr, 4), nullptr);
+
+  std::array<std::byte, 4> value{};
+  std::size_t progress = 0;
+  rocjitsu::amdgpu::VmTransferToken token;
+  // A grant without canonical export backing cannot read through the process
+  // page table, even though that host mapping is present.
+  EXPECT_EQ(access->read(allocation.va_addr, value, progress, token), VmAccessOutcome::Faulted);
+  EXPECT_EQ(progress, 0u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kOwner;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  auto retained = process->gpu_peer_backing_grant(kRequester, allocation.va_addr + 8, 4).backing;
+  ASSERT_TRUE(retained);
+  std::array<std::byte, 4> retained_before{};
+  std::ranges::copy(retained.bytes(), retained_before.begin());
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    process->allocations_.at(allocation.handle).gpu_id = kOwner + 2;
+    process->publish_gpu_grants_locked();
+  }
+  EXPECT_EQ(
+      access->classify_data_route(allocation.va_addr, 4, rocjitsu::amdgpu::VmAccessKind::Read),
+      VmDataRoute::Faulted);
+  denied_progress = 0;
+  EXPECT_EQ(access->read(allocation.va_addr, denied_bytes, denied_progress, denied_token),
+            VmAccessOutcome::Faulted);
+  EXPECT_EQ(denied_progress, 0u);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    process->allocations_.at(allocation.handle).gpu_id = kOwner;
+    process->publish_gpu_grants_locked();
+  }
+
+  const std::array<std::byte, 4> mixed_payload{std::byte{0x51}, std::byte{0x62}, std::byte{0x73},
+                                               std::byte{0x84}};
+  progress = 0;
+  VmAccessOutcome mixed_outcome =
+      access->write(local_va + kBytes - 2, mixed_payload, progress, token);
+  EXPECT_EQ(mixed_outcome, VmAccessOutcome::Unavailable);
+  EXPECT_EQ(progress, 2u);
+  for (int attempt = 0; attempt < 8 && mixed_outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    mixed_outcome = access->write(local_va + kBytes - 2, mixed_payload, progress, token);
+  }
+  ASSERT_EQ(mixed_outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, mixed_payload.size());
+  EXPECT_EQ(local_bytes[kBytes - 2], mixed_payload[0]);
+  EXPECT_EQ(local_bytes[kBytes - 1], mixed_payload[1]);
+
+  std::array<std::byte, 4> mixed_result{};
+  progress = 0;
+  mixed_outcome = access->read(local_va + kBytes - 2, mixed_result, progress, token);
+  EXPECT_EQ(mixed_outcome, VmAccessOutcome::Unavailable);
+  EXPECT_EQ(progress, 2u);
+  for (int attempt = 0; attempt < 8 && mixed_outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    mixed_outcome = access->read(local_va + kBytes - 2, mixed_result, progress, token);
+  }
+  ASSERT_EQ(mixed_outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(mixed_result, mixed_payload);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+
+  // Fetch a real gfx9 scalar load from the requester's KFD binding. The
+  // instruction must wait for the endpoint, while a second load from the
+  // system page retains the ordinary scalar-cache path.
+  const uint64_t code_va = local_va - kBytes;
+  alignas(4096) std::array<uint32_t, kBytes / sizeof(uint32_t)> code{};
+  code[0] = 0xC0020000u; // s_load_dword s0, s[0:1], 0x0
+  code[1] = 0;
+  code[2] = 0xBF800000u; // s_nop 0
+  code[3] = 0xC0420080u; // s_store_dword s2, s[0:1], 0x0
+  code[4] = 0;
+  code[5] = 0xBF800000u;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kBytes;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kRequester] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  process->map_pages(code_va, code.data(), kBytes, rocjitsu::amdgpu::Mtype::RW,
+                     rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  auto peer_word = process->gpu_peer_backing_grant(kRequester, allocation.va_addr + 16, 4).backing;
+  ASSERT_TRUE(peer_word);
+  constexpr uint32_t kPeerWord = 0x12345678u;
+  std::memcpy(peer_word.data(), &kPeerWord, sizeof(kPeerWord));
+  constexpr uint32_t kLocalWord = 0xa5b6c7d8u;
+  std::memcpy(local_bytes.data() + kBytes - 8, &kLocalWord, sizeof(kLocalWord));
+
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  machine_->soc(0)->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(pid);
+  wave->set_address_space(*handle);
+  cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(allocation.va_addr + 16));
+  cu->write_sgpr(wave->sgpr_alloc().base + 1,
+                 static_cast<uint32_t>((allocation.va_addr + 16) >> 32));
+  cu->step();
+  ASSERT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+  ASSERT_TRUE(engine_.step());
+  for (int attempt = 0; attempt < 8 && wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY;
+       ++attempt)
+    cu->step();
+  EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base), kPeerWord);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 3u);
+
+  wave->pc = code_va;
+  cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(local_va + kBytes - 8));
+  cu->write_sgpr(wave->sgpr_alloc().base + 1, static_cast<uint32_t>((local_va + kBytes - 8) >> 32));
+  cu->step();
+  EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base), kLocalWord);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 3u);
+
+  auto peer_store = process->gpu_peer_backing_grant(kRequester, allocation.va_addr + 20, 4).backing;
+  ASSERT_TRUE(peer_store);
+  constexpr uint32_t kStoredPeerWord = 0xfedcba98u;
+  wave->pc = code_va + 12;
+  cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(allocation.va_addr + 20));
+  cu->write_sgpr(wave->sgpr_alloc().base + 1,
+                 static_cast<uint32_t>((allocation.va_addr + 20) >> 32));
+  cu->write_sgpr(wave->sgpr_alloc().base + 2, kStoredPeerWord);
+  cu->step();
+  ASSERT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+  ASSERT_TRUE(engine_.step());
+  for (int attempt = 0; attempt < 8 && wave->state() == rocjitsu::amdgpu::WfState::VM_RETRY;
+       ++attempt)
+    cu->step();
+  uint32_t observed_peer_store = 0;
+  std::memcpy(&observed_peer_store, peer_store.data(), sizeof(observed_peer_store));
+  EXPECT_EQ(observed_peer_store, kStoredPeerWord);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 4u);
+
+  constexpr uint32_t kStoredLocalWord = 0x10203040u;
+  wave->pc = code_va + 12;
+  cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(local_va + kBytes - 8));
+  cu->write_sgpr(wave->sgpr_alloc().base + 1, static_cast<uint32_t>((local_va + kBytes - 8) >> 32));
+  cu->write_sgpr(wave->sgpr_alloc().base + 2, kStoredLocalWord);
+  cu->step();
+  uint32_t observed_local_store = 0;
+  std::memcpy(&observed_local_store, local_bytes.data() + kBytes - 8, sizeof(observed_local_store));
+  EXPECT_EQ(observed_local_store, kStoredLocalWord);
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 4u);
+
+  const std::array<std::byte, 4> payload{std::byte{0x11}, std::byte{0x22}, std::byte{0x33},
+                                         std::byte{0x44}};
+  progress = 0;
+  EXPECT_EQ(access->write(allocation.va_addr + 8, payload, progress, token),
+            VmAccessOutcome::Unavailable);
+  ASSERT_TRUE(token.pending());
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(process_id_, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  VmAccessOutcome outcome = VmAccessOutcome::Unavailable;
+  for (int attempt = 0; attempt < 8 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
+    ASSERT_TRUE(engine_.step());
+    outcome = access->write(allocation.va_addr + 8, payload, progress, token);
+  }
+  EXPECT_EQ(outcome, VmAccessOutcome::Revoked);
+  EXPECT_EQ(progress, 0u);
+  EXPECT_TRUE(std::ranges::equal(retained.bytes(), retained_before));
+  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 4u);
+  process->unmap_pages(local_va, kBytes);
+  process->unmap_pages(code_va, kBytes);
+}
+
+TEST_F(KfdIoctlTest, KfdGpuMapGrantsGatePinnedVmAccess) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kPeerGpuId = kGpuId + 1;
+  auto first_soc = load_standalone_soc(CONFIG_PATH);
+  auto second_soc = load_standalone_soc(CONFIG_PATH);
+  ASSERT_NE(first_soc, nullptr);
+  ASSERT_NE(second_soc, nullptr);
+  rocjitsu::SimulatedKfd multi_gpu_driver({first_soc.get(), second_soc.get()},
+                                          {kGpuId, kPeerGpuId});
+  ASSERT_GE(multi_gpu_driver.open(), 0);
+
+  alignas(4096) std::array<std::byte, 4096> host{};
+  host[0] = std::byte{0x5a};
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reinterpret_cast<uint64_t>(host.data());
+  allocation.mmap_offset = allocation.va_addr;
+  allocation.size = host.size();
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  const uint32_t pid = multi_gpu_driver.local_process_id();
+  const auto first_handle = first_soc->gpu_vm().find_vmid(pid);
+  const auto second_handle = second_soc->gpu_vm().find_vmid(pid);
+  ASSERT_TRUE(first_handle);
+  ASSERT_TRUE(second_handle);
+  {
+    const auto first = first_soc->gpu_vm().snapshot_pinned(*first_handle);
+    const auto second = second_soc->gpu_vm().snapshot_pinned(*second_handle);
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(second);
+    std::byte value{};
+    const auto read = [&](const rocjitsu::amdgpu::GpuVmAccess &access) {
+      return access.read(allocation.va_addr, std::span(&value, 1));
+    };
+    EXPECT_EQ(read(*first), VmAccessOutcome::Faulted);
+    EXPECT_EQ(read(*second), VmAccessOutcome::Faulted);
+
+    uint32_t gpu_id = kGpuId;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    EXPECT_EQ(read(*first), VmAccessOutcome::Complete);
+    EXPECT_EQ(value, std::byte{0x5a});
+    EXPECT_EQ(read(*second), VmAccessOutcome::Faulted);
+
+    gpu_id = kPeerGpuId;
+    map.n_success = 0;
+    ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    EXPECT_EQ(read(*second), VmAccessOutcome::Complete);
+
+    kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+    unmap.handle = allocation.handle;
+    unmap.n_devices = 1;
+    unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    gpu_id = kGpuId;
+    ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+    EXPECT_EQ(read(*first), VmAccessOutcome::Faulted);
+    EXPECT_EQ(read(*second), VmAccessOutcome::Complete);
+    gpu_id = kPeerGpuId;
+    unmap.n_success = 0;
+    ASSERT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+    EXPECT_EQ(read(*second), VmAccessOutcome::Faulted);
+  }
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(multi_gpu_driver.ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(multi_gpu_driver.close(), 0);
+}
+
+TEST_F(KfdIoctlTest, AdjacentGrantedBosPermitCoalescedVectorReadAndWrite) {
+  using namespace rocjitsu::amdgpu;
+  auto *cp = soc_->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  L1VectorCache &vector = cp->compute_units().front()->l1_vector();
+
+  alignas(4096) std::array<uint8_t, 8192> host{};
+  std::fill_n(host.data() + 4092, 4, 0x11);
+  std::fill_n(host.data() + 4096, 4, 0x22);
+  const uint64_t base = reinterpret_cast<uint64_t>(host.data());
+  std::array<kfd_ioctl_alloc_memory_of_gpu_args, 2> allocations{};
+  uint32_t gpu_id = kGpuId;
+  for (size_t index = 0; index < allocations.size(); ++index) {
+    auto &allocation = allocations[index];
+    allocation.va_addr = base + index * 4096;
+    allocation.mmap_offset = allocation.va_addr;
+    allocation.size = 4096;
+    allocation.gpu_id = kGpuId;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+
+  const uint64_t lane_addresses[2] = {base + 4092, base + 4096};
+  std::array<uint8_t, 8> read_bytes{};
+  const uint32_t pid = driver_->local_process_id();
+  EXPECT_EQ(vector.load(lane_addresses, 0b11, 4, 1, read_bytes.data(), Mtype::RW,
+                        /*non_temporal=*/false, /*request_l1_bypass=*/false, 2, pid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(read_bytes, (std::array<uint8_t, 8>{0x11, 0x11, 0x11, 0x11, 0x22, 0x22, 0x22, 0x22}));
+
+  const std::array<uint8_t, 8> write_bytes{1, 2, 3, 4, 5, 6, 7, 8};
+  EXPECT_EQ(vector.store(lane_addresses, 0b11, 4, 1, write_bytes.data(), Mtype::RW,
+                         /*non_temporal=*/false, 2, pid),
+            VmAccessOutcome::Complete);
+  EXPECT_TRUE(std::ranges::equal(write_bytes, std::span(host).subspan(4092, 8)));
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocations[1].handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  read_bytes.fill(0xee);
+  EXPECT_EQ(vector.load(lane_addresses, 0b11, 4, 1, read_bytes.data(), Mtype::RW,
+                        /*non_temporal=*/false, /*request_l1_bypass=*/false, 2, pid),
+            VmAccessOutcome::Faulted);
+  EXPECT_TRUE(std::ranges::all_of(read_bytes, [](uint8_t byte) { return byte == 0xee; }));
+
+  for (const auto &allocation : allocations) {
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = allocation.handle;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  }
+}
+
+TEST_F(KfdIoctlTest, AdjacentUnalignedImportsShareCacheLineSafely) {
+  using namespace rocjitsu::amdgpu;
+  auto *cp = soc_->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  L1VectorCache &vector = cp->compute_units().front()->l1_vector();
+
+  alignas(4096) std::array<uint8_t, 4096> host{};
+  const uint64_t line = reinterpret_cast<uint64_t>(host.data()) + 128;
+  std::fill_n(host.data() + 188, 4, 0x31);
+  std::fill_n(host.data() + 192, 4, 0x42);
+  std::array<int, 2> fds{-1, -1};
+  std::array<kfd_ioctl_import_dmabuf_args, 2> imports{};
+  uint32_t gpu_id = kGpuId;
+  for (size_t index = 0; index < imports.size(); ++index) {
+    fds[index] = static_cast<int>(syscall(SYS_memfd_create, "kfd_split_line", MFD_CLOEXEC));
+    ASSERT_GE(fds[index], 0);
+    ASSERT_EQ(ftruncate(fds[index], 64), 0);
+    auto &import = imports[index];
+    import.dmabuf_fd = fds[index];
+    import.gpu_id = kGpuId;
+    import.va_addr = line + index * 64;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IMPORT_DMABUF, &import), 0);
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = import.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  }
+
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const auto grant = process->gpu_access_grant(kGpuId, line + 60, 8);
+  ASSERT_TRUE(grant.allowed);
+  EXPECT_FALSE(grant.cacheable);
+  const uint64_t lane_addresses[2] = {line + 60, line + 64};
+  std::array<uint8_t, 8> read_bytes{};
+  const uint32_t pid = driver_->local_process_id();
+  EXPECT_EQ(vector.load(lane_addresses, 0b11, 4, 1, read_bytes.data(), Mtype::RW,
+                        /*non_temporal=*/false, /*request_l1_bypass=*/false, 2, pid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(read_bytes, (std::array<uint8_t, 8>{0x31, 0x31, 0x31, 0x31, 0x42, 0x42, 0x42, 0x42}));
+
+  const std::array<uint8_t, 8> write_bytes{1, 2, 3, 4, 5, 6, 7, 8};
+  EXPECT_EQ(vector.store(lane_addresses, 0b11, 4, 1, write_bytes.data(), Mtype::RW,
+                         /*non_temporal=*/false, 2, pid),
+            VmAccessOutcome::Complete);
+  EXPECT_TRUE(std::ranges::equal(write_bytes, std::span(host).subspan(188, 8)));
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = imports[1].handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  read_bytes.fill(0xee);
+  EXPECT_EQ(vector.load(lane_addresses, 0b01, 4, 1, read_bytes.data(), Mtype::RW,
+                        /*non_temporal=*/false, /*request_l1_bypass=*/false, 2, pid),
+            VmAccessOutcome::Complete);
+  EXPECT_TRUE(std::ranges::equal(std::span(write_bytes).first(4), std::span(read_bytes).first(4)));
+  read_bytes.fill(0xee);
+  EXPECT_EQ(vector.load(lane_addresses, 0b11, 4, 1, read_bytes.data(), Mtype::RW,
+                        /*non_temporal=*/false, /*request_l1_bypass=*/false, 2, pid),
+            VmAccessOutcome::Faulted);
+  EXPECT_TRUE(std::ranges::all_of(read_bytes, [](uint8_t byte) { return byte == 0xee; }));
+
+  for (size_t index = 0; index < imports.size(); ++index) {
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = imports[index].handle;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+    EXPECT_EQ(close(fds[index]), 0);
+  }
+}
+
+TEST_F(KfdIoctlTest, SplitGrantLinePreservesDirtyBytesAndBypassesCache) {
+  using namespace rocjitsu::amdgpu;
+  auto *cp = soc_->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  auto *cu = cp->compute_units().front();
+  auto *l2 = cu->l2();
+  ASSERT_NE(l2, nullptr);
+  L1VectorCache &vector = cu->l1_vector();
+
+  alignas(4096) std::array<uint8_t, 4096> host{};
+  const uint64_t base = reinterpret_cast<uint64_t>(host.data());
+  const uint64_t line = base + 128;
+  std::fill_n(host.data() + 192, 4, 0x22);
+  const uint32_t pid = driver_->local_process_id();
+  auto process = driver_->find_process(pid);
+  ASSERT_NE(process, nullptr);
+  process->map_pages(base, host.data(), host.size());
+
+  uint64_t first_handle = 0;
+  uint64_t second_handle = 0;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation first{};
+    first.gpu_va = line;
+    first.size = 128;
+    first.handle = process->next_handle_++;
+    first.admission_generations[kGpuId] = process->next_gpu_admission_generation_locked();
+    first_handle = first.handle;
+    process->allocations_[first_handle] = first;
+    process->publish_gpu_grants_locked();
+  }
+
+  std::array<uint8_t, 128> dirty_line{};
+  std::fill_n(dirty_line.data() + 60, 4, 0x7a);
+  ASSERT_EQ(l2->writeback_line(line, dirty_line.data(), 60, 4, Mtype::RW, pid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(host[188], 0u);
+
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    process->allocations_[first_handle].size = 64;
+    rocjitsu::KfdProcess::GpuAllocation second{};
+    second.gpu_va = line + 64;
+    second.size = 64;
+    second.handle = process->next_handle_++;
+    second.admission_generations[kGpuId] = process->next_gpu_admission_generation_locked();
+    second_handle = second.handle;
+    process->allocations_[second_handle] = second;
+    process->publish_gpu_grants_locked();
+  }
+  const auto split_grant = process->gpu_access_grant(kGpuId, line + 60, 8);
+  ASSERT_TRUE(split_grant.allowed);
+  EXPECT_FALSE(split_grant.cacheable);
+
+  const uint64_t lane_addresses[2] = {line + 60, line + 64};
+  std::array<uint8_t, 8> read_bytes{};
+  EXPECT_EQ(vector.load(lane_addresses, 0b11, 4, 1, read_bytes.data(), Mtype::RW,
+                        /*non_temporal=*/false, /*request_l1_bypass=*/false, 2, pid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(read_bytes, (std::array<uint8_t, 8>{0x7a, 0x7a, 0x7a, 0x7a, 0x22, 0x22, 0x22, 0x22}));
+  EXPECT_TRUE(std::ranges::all_of(std::span(host).subspan(188, 4),
+                                  [](uint8_t byte) { return byte == 0x7a; }));
+
+  const std::array<uint8_t, 8> write_bytes{1, 2, 3, 4, 5, 6, 7, 8};
+  EXPECT_EQ(vector.store(lane_addresses, 0b11, 4, 1, write_bytes.data(), Mtype::RW,
+                         /*non_temporal=*/false, 2, pid),
+            VmAccessOutcome::Complete);
+  EXPECT_TRUE(std::ranges::equal(write_bytes, std::span(host).subspan(188, 8)));
+
+  // Recreate a dirty line under the first grant, then split the line again
+  // and revoke only the second grant. The surviving grant's dirty bytes must
+  // reach backing when its now-uncacheable line is read.
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    process->allocations_[first_handle].size = 128;
+    process->allocations_.erase(second_handle);
+    process->publish_gpu_grants_locked();
+  }
+  std::fill_n(dirty_line.data() + 60, 4, 0x6b);
+  std::fill_n(dirty_line.data() + 64, 4, 0x9c);
+  ASSERT_EQ(l2->writeback_line(line, dirty_line.data(), 60, 8, Mtype::RW, pid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(host[188], 1u);
+  EXPECT_EQ(host[192], 5u);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    process->allocations_[first_handle].size = 64;
+    rocjitsu::KfdProcess::GpuAllocation second{};
+    second.gpu_va = line + 64;
+    second.size = 64;
+    second.handle = second_handle;
+    second.admission_generations[kGpuId] = process->next_gpu_admission_generation_locked();
+    process->allocations_[second_handle] = second;
+    process->publish_gpu_grants_locked();
+    process->allocations_[second_handle].admission_generations.clear();
+    process->publish_gpu_grants_locked();
+  }
+  std::array<uint8_t, 8> remaining_bytes{};
+  EXPECT_EQ(vector.load(lane_addresses, 0b01, 4, 1, remaining_bytes.data(), Mtype::RW,
+                        /*non_temporal=*/false, /*request_l1_bypass=*/false, 2, pid),
+            VmAccessOutcome::Complete);
+  EXPECT_TRUE(std::ranges::all_of(std::span(remaining_bytes).first(4),
+                                  [](uint8_t byte) { return byte == 0x6b; }));
+  EXPECT_TRUE(std::ranges::all_of(std::span(host).subspan(188, 4),
+                                  [](uint8_t byte) { return byte == 0x6b; }));
+  EXPECT_TRUE(
+      std::ranges::equal(std::span(write_bytes).subspan(4, 4), std::span(host).subspan(192, 4)));
+  remaining_bytes.fill(0xee);
+  EXPECT_EQ(vector.load(lane_addresses, 0b11, 4, 1, remaining_bytes.data(), Mtype::RW,
+                        /*non_temporal=*/false, /*request_l1_bypass=*/false, 2, pid),
+            VmAccessOutcome::Faulted);
+  EXPECT_TRUE(std::ranges::all_of(remaining_bytes, [](uint8_t byte) { return byte == 0xee; }));
+
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    process->allocations_.erase(first_handle);
+    process->allocations_.erase(second_handle);
+    process->publish_gpu_grants_locked();
+  }
+  process->unmap_pages(base, host.size());
+}
+
+TEST_F(KfdIoctlTest, SplitResidentVramAliasesRefuseDirtyLineWitness) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kHalfLine = L2Cache::LINE_SIZE / 2;
+  constexpr uint32_t kDirtyByte = 17;
+
+  alignas(4096) std::array<std::byte, 4096> host{};
+  const uint64_t line = reinterpret_cast<uint64_t>(host.data()) + L2Cache::LINE_SIZE;
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+
+  std::array<std::shared_ptr<const rocjitsu::KfdProcess::GpuBacking>, 2> backings;
+  for (auto &backing : backings) {
+    const int fd = static_cast<int>(
+        syscall(SYS_memfd_create, "kfd_split_witness", MFD_CLOEXEC | MFD_ALLOW_SEALING));
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(ftruncate(fd, kHalfLine), 0);
+    ASSERT_EQ(fcntl(fd, F_ADD_SEALS, F_SEAL_SHRINK), 0);
+    backing = rocjitsu::KfdProcess::GpuBacking::create_memfd_alias(fd, kHalfLine, kGpuId);
+    ASSERT_EQ(rocjitsu::libc_passthrough().close(fd), 0);
+    ASSERT_TRUE(backing);
+  }
+  backings[0]->data()[kDirtyByte] = std::byte{0x31};
+  backings[1]->data()[0] = std::byte{0x42};
+  std::array<std::array<std::byte, kHalfLine>, 2> original_bytes{};
+  for (size_t index = 0; index < backings.size(); ++index)
+    std::ranges::copy(std::span(backings[index]->data(), kHalfLine), original_bytes[index].begin());
+
+  std::array<uint64_t, 2> handles{};
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    for (size_t index = 0; index < backings.size(); ++index) {
+      rocjitsu::KfdProcess::GpuAllocation allocation{};
+      allocation.gpu_va = line + index * kHalfLine;
+      allocation.size = kHalfLine;
+      allocation.handle = process->next_handle_++;
+      allocation.domain = rocjitsu::KfdProcess::GpuGrantDomain::Vram;
+      allocation.gpu_id = kGpuId;
+      allocation.local_backing_owner = backings[index];
+      allocation.admission_generations[kGpuId] = process->next_gpu_admission_generation_locked();
+      handles[index] = allocation.handle;
+      process->allocations_[allocation.handle] = std::move(allocation);
+    }
+    process->publish_gpu_grants_locked();
+  }
+  for (size_t index = 0; index < backings.size(); ++index)
+    ASSERT_EQ(process->map_pages(line + index * kHalfLine, backings[index]->data(), kHalfLine,
+                                 rocjitsu::amdgpu::Mtype::RW,
+                                 rocjitsu::KfdProcess::HostExtentOwner::Driver),
+              rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+
+  const auto aliases = process->gpu_local_alias_snapshot();
+  ASSERT_EQ(aliases->size(), 2u);
+  const auto first = std::ranges::find_if(
+      *aliases, [&](const auto &alias) { return alias.gpu_id == kGpuId && alias.gpu_va == line; });
+  const auto second = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_id == kGpuId && alias.gpu_va == line + kHalfLine;
+  });
+  ASSERT_NE(first, aliases->end());
+  ASSERT_NE(second, aliases->end());
+  ASSERT_NE(first->backing_id, second->backing_id);
+  ASSERT_NE(first->admission_generation, second->admission_generation);
+  const auto access = soc_->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  {
+    auto prepared = driver_->prepare_gpu_alias_writeback(process_id, kGpuId, *access, line, 1);
+    ASSERT_EQ(prepared.outcome(), VmAccessOutcome::Complete);
+    EXPECT_TRUE(prepared.covers(line, kHalfLine, process_id, access->cache_identity(),
+                                first->admission_generation));
+    EXPECT_TRUE(prepared.covers(line + kHalfLine, kHalfLine, process_id, access->cache_identity(),
+                                second->admission_generation));
+  }
+
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyByte, 0xa7}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, line, process_id, access->cache_identity(), first->admission_generation, dirty_bytes);
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, line, process_id, kDirtyByte));
+  const uint64_t writes = l2->backing_write_transactions();
+  auto resolve_witness = KfdPreparedProviderTestAccess::witness_resolver(*driver_);
+  EXPECT_FALSE(resolve_witness(kGpuId, process_id, line, L2Cache::LINE_SIZE,
+                               access->cache_identity(), first->admission_generation));
+  EXPECT_FALSE(resolve_witness(kGpuId, process_id, line, L2Cache::LINE_SIZE,
+                               access->cache_identity(), second->admission_generation));
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, line, process_id, kDirtyByte));
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::line_clean_or_invalid(*l2, line, process_id));
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  for (size_t index = 0; index < backings.size(); ++index)
+    EXPECT_TRUE(
+        std::ranges::equal(std::span(backings[index]->data(), kHalfLine), original_bytes[index]));
+
+  KfdPreparedProviderTestAccess::discard_dirty_l2_line(*l2, line, process_id);
+  for (size_t index = 0; index < backings.size(); ++index)
+    EXPECT_EQ(process->unmap_pages(line + index * kHalfLine, kHalfLine),
+              rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    for (uint64_t handle : handles)
+      process->allocations_.erase(handle);
+    process->publish_gpu_grants_locked();
+  }
+}
+
+TEST_F(KfdIoctlTest, HostRangeTrimsKfdGrantBesideUntrackedAndDeniedPages) {
+  constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
+  constexpr uint64_t kGpuVa = 0x2000000020000ULL;
+  alignas(kPage) std::array<uint8_t, 3 * kPage> backing{};
+  backing[0] = 0x7f;
+  backing[1] = 'E';
+  backing[2] = 'L';
+  backing[3] = 'F';
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  ASSERT_EQ(process->map_pages(kGpuVa, backing.data(), backing.size()),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+
+  uint64_t granted_handle = 0;
+  uint64_t denied_handle = 0;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation granted{};
+    granted.gpu_va = kGpuVa;
+    granted.size = kPage;
+    granted.gpu_id = kGpuId;
+    granted.handle = process->next_handle_++;
+    granted.admission_generations[kGpuId] = process->next_gpu_admission_generation_locked();
+    granted_handle = granted.handle;
+    process->allocations_[granted_handle] = granted;
+
+    auto denied = granted;
+    denied.gpu_va += 2 * kPage;
+    denied.handle = process->next_handle_++;
+    denied.admission_generations.clear();
+    denied_handle = denied.handle;
+    process->allocations_[denied_handle] = denied;
+    process->publish_gpu_grants_locked();
+  }
+
+  // KFD rejects the aggregate span after the first tracked allocation, but
+  // the middle driver PTE has no allocation and is admitted on its own.
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, kGpuVa, backing.size()).allowed);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, kGpuVa, kPage).allowed);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, kGpuVa + kPage, kPage).allowed);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, kGpuVa + 2 * kPage, kPage).allowed);
+
+  const auto access = soc_->gpu_vm().snapshot_vmid(driver_->local_process_id());
+  ASSERT_TRUE(access);
+  const uint64_t host_base = reinterpret_cast<uint64_t>(backing.data());
+  EXPECT_EQ(access->host_range(kGpuVa + 0x180),
+            (std::pair<uint64_t, uint64_t>{host_base, 2 * kPage}));
+  EXPECT_EQ(access->host_range(kGpuVa + kPage + 0x180),
+            (std::pair<uint64_t, uint64_t>{host_base, 2 * kPage}));
+  EXPECT_EQ(access->host_range(kGpuVa + 2 * kPage + 0x180), (std::pair<uint64_t, uint64_t>{0, 0}));
+  auto *kernel_object_host = access->resolve_host_pointer(kGpuVa + 0x180);
+  ASSERT_NE(kernel_object_host, nullptr);
+  EXPECT_EQ(reinterpret_cast<uint64_t>(kernel_object_host), host_base + 0x180);
+
+  EXPECT_EQ(process->unmap_pages(kGpuVa, backing.size()),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    process->allocations_.erase(granted_handle);
+    process->allocations_.erase(denied_handle);
+    process->publish_gpu_grants_locked();
+  }
+}
+
+TEST_F(KfdIoctlTest, DriverScratchGrantRevokesBeforeFreeUnmapsBacking) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint64_t kScratchVa = 0x2000000010000ULL;
+  const uint32_t pid = driver_->local_process_id();
+  auto process = driver_->find_process(pid);
+  ASSERT_NE(process, nullptr);
+
+  void *backing = ::mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(backing, MAP_FAILED);
+  uint64_t scratch_handle = 0;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation allocation{};
+    allocation.gpu_va = kScratchVa;
+    allocation.size = 4096;
+    allocation.host_ptr = backing;
+    allocation.host_mapping_kind =
+        rocjitsu::KfdProcess::GpuAllocation::HostMappingKind::InternalBacking;
+    allocation.host_mapping_size = 4096;
+    allocation.page_table_mapped_bytes = 4096;
+    allocation.handle = process->next_handle_++;
+    allocation.driver_gpu_mapping = true;
+    allocation.driver_admission_generation = process->next_gpu_admission_generation_locked();
+    scratch_handle = allocation.handle;
+    process->claim_gpu_range_locked(allocation.gpu_va, allocation.size);
+    process->allocations_[scratch_handle] = allocation;
+    process->publish_gpu_grants_locked();
+  }
+  process->map_pages(kScratchVa, backing, 4096, rocjitsu::amdgpu::Mtype::RW,
+                     rocjitsu::KfdProcess::HostExtentOwner::Driver);
+
+  auto *cp = soc_->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  auto &scalar = cp->compute_units().front()->l1_scalar();
+  uint32_t value = 0xffffffffu;
+  ASSERT_EQ(scalar.load(kScratchVa, 1, &value, pid), VmAccessOutcome::Complete);
+  EXPECT_EQ(value, 0u);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = scratch_handle;
+  int free_result = -1;
+  bool denied_before_unmap = false;
+  bool page_still_mapped = false;
+  std::thread freeing;
+  {
+    // Hold the PTE reader side so FREE pauses after publishing denial and
+    // before it can unmap the scratch backing. Do not reenter the page-table
+    // reader from scalar.load while an exclusive FREE is waiting for this lock.
+    std::shared_lock page_lock(process->page_table_mutex_);
+    freeing =
+        std::thread([&] { free_result = driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free); });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (process->gpu_access_grant(kGpuId, kScratchVa, sizeof(value)).allowed &&
+           std::chrono::steady_clock::now() < deadline)
+      std::this_thread::yield();
+    denied_before_unmap = !process->gpu_access_grant(kGpuId, kScratchVa, sizeof(value)).allowed;
+    page_still_mapped =
+        process->page_table_.contains(kScratchVa >> rocjitsu::KfdProcess::kPageShift);
+  }
+  freeing.join();
+
+  value = 0xffffffffu;
+  const VmAccessOutcome cached_read = scalar.load(kScratchVa, 1, &value, pid);
+
+  EXPECT_TRUE(denied_before_unmap);
+  EXPECT_TRUE(page_still_mapped);
+  EXPECT_EQ(cached_read, VmAccessOutcome::Faulted);
+  EXPECT_EQ(value, 0xffffffffu);
+  EXPECT_EQ(free_result, 0);
+}
+
+TEST_F(KfdIoctlTest, FreedFixedBoViewPermitsLaterHostIdentityReuse) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kPage = 4096;
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto access = soc_->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+
+  for (uint32_t kind : {KFD_IOC_ALLOC_MEM_FLAGS_VRAM, KFD_IOC_ALLOC_MEM_FLAGS_GTT}) {
+    void *reserved = ::mmap(nullptr, kPage, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    ASSERT_NE(reserved, MAP_FAILED);
+    const uint64_t address = reinterpret_cast<uint64_t>(reserved);
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.va_addr = address;
+    allocation.size = kPage;
+    allocation.gpu_id = kGpuId;
+    allocation.flags = kind | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    ASSERT_EQ(driver_->mmap(process_id, reserved, kPage, PROT_READ | PROT_WRITE,
+                            MAP_SHARED | MAP_FIXED, static_cast<off_t>(allocation.mmap_offset)),
+              reserved);
+    *static_cast<std::byte *>(reserved) = std::byte{0x42};
+    uint32_t gpu_id = kGpuId;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &bo = process->allocations_.at(allocation.handle);
+      EXPECT_TRUE(bo.user_va);
+      if (kind == KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
+        EXPECT_NE(bo.host_ptr, reserved);
+        EXPECT_EQ(bo.host_mapping_kind,
+                  rocjitsu::KfdProcess::GpuAllocation::HostMappingKind::InternalBacking);
+        EXPECT_TRUE(std::ranges::any_of(bo.client_views, [&](const auto &view) {
+          return view.ptr == reserved && view.size == kPage &&
+                 view.kind == rocjitsu::KfdProcess::GpuAllocation::HostMappingKind::CallerMapped;
+        }));
+      } else {
+        EXPECT_EQ(bo.host_ptr, reserved);
+        EXPECT_TRUE(bo.host_mapping_caller_reserved());
+      }
+      EXPECT_FALSE(bo.imported);
+    }
+    std::byte value{};
+    ASSERT_EQ(access->read(address, std::span(&value, 1)), VmAccessOutcome::Complete);
+    EXPECT_EQ(value, std::byte{0x42});
+
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = allocation.handle;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+    EXPECT_FALSE(process->gpu_access_grant(kGpuId, address, 1).allowed);
+    EXPECT_EQ(access->read(address, std::span(&value, 1)), VmAccessOutcome::Faulted);
+    alignas(kfd_ioctl_svm_args)
+        std::array<std::byte, sizeof(kfd_ioctl_svm_args) + sizeof(kfd_ioctl_svm_attribute)>
+            svm_buffer{};
+    auto *svm = reinterpret_cast<kfd_ioctl_svm_args *>(svm_buffer.data());
+    auto *attr = reinterpret_cast<kfd_ioctl_svm_attribute *>(svm + 1);
+    svm->start_addr = address;
+    svm->size = kPage;
+    svm->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+    svm->nattr = 1;
+    attr->type = KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE;
+    attr->value = kGpuId;
+    EXPECT_EQ(driver_->ioctl(rocjitsu::ioctl_with_size(AMDKFD_IOC_SVM, svm_buffer.size()), svm),
+              -EINVAL);
+    EXPECT_FALSE(process->gpu_access_grant(kGpuId, address, 1).allowed);
+    ASSERT_EQ(driver_->munmap(process_id, reserved, kPage), 0);
+    EXPECT_TRUE(process->gpu_access_grant(kGpuId, address, 1).allowed);
+    EXPECT_EQ(access->read(address, std::span(&value, 1)), VmAccessOutcome::Faulted);
+
+    void *reused = ::mmap(reserved, kPage, PROT_READ | PROT_WRITE,
+                          MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    ASSERT_EQ(reused, reserved);
+    *static_cast<std::byte *>(reused) = std::byte{0x7b};
+    EXPECT_EQ(access->read(address, std::span(&value, 1)), VmAccessOutcome::Complete);
+    EXPECT_EQ(value, std::byte{0x7b});
+    EXPECT_EQ(::munmap(reused, kPage), 0);
+  }
+
+  // A freed USERPTR allocation keeps its caller-owned host pages. Its GPU VA
+  // must stay denied even though those pages remain addressable.
+  alignas(kPage) std::array<std::byte, kPage> user_pages{};
+  kfd_ioctl_alloc_memory_of_gpu_args userptr{};
+  userptr.va_addr = reinterpret_cast<uint64_t>(user_pages.data());
+  userptr.mmap_offset = userptr.va_addr;
+  userptr.size = user_pages.size();
+  userptr.gpu_id = kGpuId;
+  userptr.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &userptr), 0);
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = userptr.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = userptr.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, userptr.va_addr, 1).allowed);
+  std::byte value{};
+  EXPECT_EQ(access->read(userptr.va_addr, std::span(&value, 1)), VmAccessOutcome::Faulted);
+}
+
+TEST_F(KfdIoctlTest, NewSvmHostGrantClaimsOnlyItsFreedUserptrSpan) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kPage = 4096;
+  alignas(kPage) std::array<std::byte, 3 * kPage> pages{};
+  const uint64_t base = reinterpret_cast<uint64_t>(pages.data());
+  const auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const auto access = soc_->gpu_vm().snapshot_vmid(driver_->local_process_id());
+  ASSERT_TRUE(access);
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = base;
+  allocation.mmap_offset = base;
+  allocation.size = pages.size();
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+
+  std::byte value{};
+  EXPECT_EQ(access->read(base + kPage, std::span(&value, 1)), VmAccessOutcome::Faulted);
+
+  alignas(kfd_ioctl_svm_args)
+      std::array<std::byte, sizeof(kfd_ioctl_svm_args) + sizeof(kfd_ioctl_svm_attribute)>
+          buffer{};
+  auto *svm = reinterpret_cast<kfd_ioctl_svm_args *>(buffer.data());
+  auto *attr = reinterpret_cast<kfd_ioctl_svm_attribute *>(svm + 1);
+  svm->start_addr = base + kPage;
+  svm->size = kPage;
+  svm->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+  svm->nattr = 1;
+  attr->type = KFD_IOCTL_SVM_ATTR_SET_FLAGS;
+  attr->value = KFD_IOCTL_SVM_FLAG_COHERENT;
+  const auto request = rocjitsu::ioctl_with_size(AMDKFD_IOC_SVM, buffer.size());
+  ASSERT_EQ(driver_->ioctl(request, svm), 0);
+  EXPECT_EQ(access->read(base + kPage, std::span(&value, 1)), VmAccessOutcome::Faulted);
+
+  pages[kPage] = std::byte{0x5a};
+  attr->type = KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE;
+  attr->value = 0xdeadbeef;
+  EXPECT_EQ(driver_->ioctl(request, svm), -EINVAL);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, base + kPage, 1).allowed);
+  EXPECT_EQ(access->read(base + kPage, std::span(&value, 1)), VmAccessOutcome::Faulted);
+
+  attr->value = kGpuId;
+  ASSERT_EQ(driver_->ioctl(request, svm), 0);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, base + kPage, 1).allowed);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId + 1, base + kPage, 1).allowed);
+  EXPECT_EQ(access->read(base + kPage, std::span(&value, 1)), VmAccessOutcome::Complete);
+  EXPECT_EQ(value, std::byte{0x5a});
+  EXPECT_EQ(access->read(base, std::span(&value, 1)), VmAccessOutcome::Faulted);
+  EXPECT_EQ(access->read(base + 2 * kPage, std::span(&value, 1)), VmAccessOutcome::Faulted);
+
+  attr->type = KFD_IOCTL_SVM_ATTR_NO_ACCESS;
+  ASSERT_EQ(driver_->ioctl(request, svm), 0);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, base + kPage, 1).allowed);
+  EXPECT_EQ(access->read(base + kPage, std::span(&value, 1)), VmAccessOutcome::Faulted);
+}
+
+TEST_F(KfdIoctlTest, FreedUserptrSvmGrantEndsOnHostVmaReplacement) {
+  constexpr size_t kPage = 4096;
+  void *pages =
+      ::mmap(nullptr, 2 * kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(pages, MAP_FAILED);
+  const uint64_t base = reinterpret_cast<uint64_t>(pages);
+  const auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = base;
+  allocation.mmap_offset = base;
+  allocation.size = 2 * kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+
+  alignas(kfd_ioctl_svm_args)
+      std::array<std::byte, sizeof(kfd_ioctl_svm_args) + sizeof(kfd_ioctl_svm_attribute)>
+          buffer{};
+  auto *svm = reinterpret_cast<kfd_ioctl_svm_args *>(buffer.data());
+  auto *attr = reinterpret_cast<kfd_ioctl_svm_attribute *>(svm + 1);
+  svm->start_addr = base;
+  svm->size = 2 * kPage;
+  svm->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+  svm->nattr = 1;
+  attr->type = KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE;
+  attr->value = kGpuId;
+  ASSERT_EQ(driver_->ioctl(rocjitsu::ioctl_with_size(AMDKFD_IOC_SVM, buffer.size()), svm), 0);
+  ASSERT_TRUE(process->gpu_access_grant(kGpuId, base, 1).allowed);
+  ASSERT_TRUE(process->gpu_access_grant(kGpuId, base + kPage, 1).allowed);
+  ASSERT_FALSE(process->gpu_access_grant(kGpuId + 1, base, 1).allowed);
+
+  const std::array replaced{std::pair<uint64_t, uint64_t>{base, kPage}};
+  void *mapped = MAP_FAILED;
+  driver_->run_host_vma_replacement(replaced, [&] {
+    mapped = ::mmap(pages, kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
+                    -1, 0);
+    return mapped != MAP_FAILED;
+  });
+  ASSERT_EQ(mapped, pages);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, base, 1).allowed);
+  EXPECT_EQ(process->gpu_access_grant(kGpuId, base, 1).generation, 0u);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId + 1, base, 1).allowed);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, base + kPage, 1).allowed);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId + 1, base + kPage, 1).allowed);
+  EXPECT_EQ(::munmap(pages, 2 * kPage), 0);
+}
+
+TEST_F(KfdIoctlTest, UserptrFreeRetiresOnlySurvivingHostVmaBytes) {
+  constexpr size_t kPage = 4096;
+  void *pages =
+      ::mmap(nullptr, 2 * kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(pages, MAP_FAILED);
+  const uint64_t base = reinterpret_cast<uint64_t>(pages);
+  const auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = base;
+  allocation.mmap_offset = base;
+  allocation.size = 2 * kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const std::array removed{std::pair<uint64_t, uint64_t>{base, kPage}};
+  int unmap_result = -1;
+  driver_->run_host_vma_replacement(removed, [&] {
+    unmap_result = ::munmap(pages, kPage);
+    return unmap_result == 0;
+  });
+  ASSERT_EQ(unmap_result, 0);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+
+  void *reused = ::mmap(pages, kPage, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+  ASSERT_EQ(reused, pages);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, base, 1).allowed);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, base + kPage, 1).allowed);
+  EXPECT_EQ(::munmap(pages, 2 * kPage), 0);
+}
+
+TEST_F(KfdIoctlTest, UserptrPromotionKeepsTheNewHostViewUntilItsRemoval) {
+  constexpr size_t kPage = 4096;
+  void *page = ::mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(page, MAP_FAILED);
+  const uint64_t base = reinterpret_cast<uint64_t>(page);
+  const auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = base;
+  allocation.mmap_offset = base;
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_EQ(
+      driver_->clear_host_svm_policy(driver_->local_process_id(), base, kPage, allocation.handle),
+      0);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, base, 1).allowed);
+
+  const std::array removed{std::pair<uint64_t, uint64_t>{base, kPage}};
+  int unmap_result = -1;
+  driver_->run_host_vma_replacement(removed, [&] {
+    unmap_result = ::munmap(page, kPage);
+    return unmap_result == 0;
+  });
+  ASSERT_EQ(unmap_result, 0);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, base, 1).allowed);
+}
+
+TEST_F(KfdIoctlTest, LiveHostSvmNoAccessRevokesOnlyRequestedGpuSpan) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kPage = 4096;
+  alignas(kPage) std::array<std::byte, 3 * kPage> pages{};
+  const uint64_t base = reinterpret_cast<uint64_t>(pages.data());
+  const auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const auto access = soc_->gpu_vm().snapshot_vmid(driver_->local_process_id());
+  ASSERT_TRUE(access);
+
+  pages[kPage] = std::byte{0x5a};
+  std::byte value{};
+  ASSERT_EQ(access->read(base + kPage, std::span(&value, 1)), VmAccessOutcome::Complete);
+  EXPECT_EQ(value, std::byte{0x5a});
+
+  alignas(kfd_ioctl_svm_args)
+      std::array<std::byte, sizeof(kfd_ioctl_svm_args) + sizeof(kfd_ioctl_svm_attribute)>
+          buffer{};
+  auto *svm = reinterpret_cast<kfd_ioctl_svm_args *>(buffer.data());
+  auto *attr = reinterpret_cast<kfd_ioctl_svm_attribute *>(svm + 1);
+  svm->start_addr = base + kPage;
+  svm->size = kPage;
+  svm->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+  svm->nattr = 1;
+  attr->type = KFD_IOCTL_SVM_ATTR_NO_ACCESS;
+  attr->value = kGpuId;
+  const auto request = rocjitsu::ioctl_with_size(AMDKFD_IOC_SVM, buffer.size());
+  ASSERT_EQ(driver_->ioctl(request, svm), 0);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, base + kPage, 1).allowed);
+  EXPECT_EQ(access->read(base + kPage, std::span(&value, 1)), VmAccessOutcome::Faulted);
+  EXPECT_EQ(access->read(base, std::span(&value, 1)), VmAccessOutcome::Complete);
+  EXPECT_EQ(access->read(base + 2 * kPage, std::span(&value, 1)), VmAccessOutcome::Complete);
+
+  attr->type = KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE;
+  ASSERT_EQ(driver_->ioctl(request, svm), 0);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, base + kPage, 1).allowed);
+  EXPECT_EQ(access->read(base + kPage, std::span(&value, 1)), VmAccessOutcome::Complete);
+  EXPECT_EQ(value, std::byte{0x5a});
+}
+
+TEST_F(KfdIoctlTest, DriverScratchFreeRetainsBackingForForeignPteOwnerAndRetries) {
+  constexpr uint64_t kScratchVa = 0x2000000011000ULL;
+  constexpr uint32_t kBackingValue = 0x12345678;
+  const uint32_t pid = driver_->local_process_id();
+  auto process = driver_->find_process(pid);
+  ASSERT_NE(process, nullptr);
+
+  void *backing = ::mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(backing, MAP_FAILED);
+  *static_cast<uint32_t *>(backing) = kBackingValue;
+  uint64_t scratch_handle = 0;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation allocation{};
+    allocation.gpu_va = kScratchVa;
+    allocation.size = 4096;
+    allocation.host_ptr = backing;
+    allocation.host_mapping_kind =
+        rocjitsu::KfdProcess::GpuAllocation::HostMappingKind::InternalBacking;
+    allocation.host_mapping_size = 4096;
+    allocation.page_table_mapped_bytes = 4096;
+    allocation.handle = process->next_handle_++;
+    allocation.driver_gpu_mapping = true;
+    allocation.driver_admission_generation = process->next_gpu_admission_generation_locked();
+    scratch_handle = allocation.handle;
+    process->claim_gpu_range_locked(allocation.gpu_va, allocation.size);
+    process->allocations_[scratch_handle] = allocation;
+    process->publish_gpu_grants_locked();
+  }
+  ASSERT_EQ(process->map_pages(kScratchVa, backing, 4096, rocjitsu::amdgpu::Mtype::RW,
+                               rocjitsu::KfdProcess::HostExtentOwner::Driver),
+            rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+
+  // Inject a conflicting owner after admission; GEM mapping normally rejects
+  // this overlap. FREE must refuse its PTE while retaining its own backing.
+  {
+    std::unique_lock page_lock(process->page_table_mutex_);
+    auto page = process->page_table_.find(kScratchVa >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, process->page_table_.end());
+    ASSERT_FALSE(page->second.host_extents.empty());
+    page->second.host_extents.front().va_owner = {rocjitsu::KfdProcess::VaOwnerKind::Gem, 17};
+  }
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = scratch_handle;
+  std::future<int> freeing;
+  bool denied_before_owner_check = false;
+  bool page_still_mapped = false;
+  {
+    std::shared_lock page_lock(process->page_table_mutex_);
+    freeing = std::async(std::launch::async,
+                         [&] { return driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free); });
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (process->gpu_access_grant(kGpuId, kScratchVa, sizeof(kBackingValue)).allowed &&
+           std::chrono::steady_clock::now() < deadline)
+      std::this_thread::yield();
+    denied_before_owner_check =
+        !process->gpu_access_grant(kGpuId, kScratchVa, sizeof(kBackingValue)).allowed;
+    page_still_mapped =
+        process->page_table_.contains(kScratchVa >> rocjitsu::KfdProcess::kPageShift);
+  }
+  EXPECT_TRUE(denied_before_owner_check);
+  EXPECT_TRUE(page_still_mapped);
+  EXPECT_EQ(freeing.get(), -EIO);
+  EXPECT_EQ(*static_cast<uint32_t *>(backing), kBackingValue);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto it = process->allocations_.find(scratch_handle);
+    ASSERT_NE(it, process->allocations_.end());
+    EXPECT_TRUE(it->second.retirement_in_progress);
+    EXPECT_TRUE(it->second.grants_retired);
+    EXPECT_EQ(it->second.page_table_mapped_bytes, 4096u);
+    EXPECT_EQ(it->second.host_ptr, backing);
+  }
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), -EIO);
+
+  {
+    std::unique_lock page_lock(process->page_table_mutex_);
+    auto page = process->page_table_.find(kScratchVa >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, process->page_table_.end());
+    ASSERT_FALSE(page->second.host_extents.empty());
+    EXPECT_EQ(page->second.host_extents.front().va_owner.kind,
+              rocjitsu::KfdProcess::VaOwnerKind::Gem);
+    page->second.host_extents.front().va_owner = {};
+  }
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    EXPECT_FALSE(process->allocations_.contains(scratch_handle));
+  }
+  {
+    std::shared_lock page_lock(process->page_table_mutex_);
+    EXPECT_FALSE(process->page_table_.contains(kScratchVa >> rocjitsu::KfdProcess::kPageShift));
+  }
+}
+
+TEST_F(KfdIoctlTest, KfdGpuGrantsGateResidentCachesAndHostPointers) {
+  using namespace rocjitsu::amdgpu;
+  ASSERT_NE(soc_->memory(), nullptr);
+  ASSERT_GT(soc_->num_iods(), 0u);
+  MemorySideCache *msc = soc_->iod(0)->msc();
+  ASSERT_NE(msc, nullptr);
+  auto *cp = soc_->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  auto *cu = cp->compute_units().front();
+
+  alignas(4096) std::array<std::byte, 4096> host{};
+  host.fill(std::byte{0x31});
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reinterpret_cast<uint64_t>(host.data());
+  allocation.mmap_offset = allocation.va_addr;
+  allocation.size = host.size();
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  const uint32_t pid = driver_->local_process_id();
+  const auto handle = soc_->gpu_vm().find_vmid(pid);
+  ASSERT_TRUE(handle);
+  const auto access = soc_->gpu_vm().snapshot_pinned(*handle);
+  ASSERT_TRUE(access);
+
+  L2Cache l2("grant_test_l2", soc_->cache_coherence());
+  l2.set_backing_memory(soc_->memory());
+  l2.set_gpu_vm(&soc_->gpu_vm());
+  L1ScalarCache &scalar = cu->l1_scalar();
+  L1VectorCache &vector = cu->l1_vector();
+  InstructionCache instruction;
+  instruction.set_l2(&l2);
+
+  const uint64_t va = allocation.va_addr;
+  const uint64_t lane_address[1] = {va};
+  kfd_ioctl_create_event_args no_op_event{};
+  no_op_event.event_type = KFD_IOC_EVENT_MEMORY;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_EVENT, &no_op_event), 0);
+  uint8_t no_op_byte = 0xa5;
+  EXPECT_EQ(l2.read(va, &no_op_byte, 0, Mtype::RW, pid), VmAccessOutcome::Complete);
+  EXPECT_EQ(l2.write(va, &no_op_byte, 0, Mtype::RW, pid), VmAccessOutcome::Complete);
+  EXPECT_EQ(msc->read(va, &no_op_byte, 0, pid), VmAccessOutcome::Complete);
+  EXPECT_EQ(msc->write(va, &no_op_byte, 0, pid), VmAccessOutcome::Complete);
+  EXPECT_EQ(no_op_byte, 0xa5);
+  kfd_event_data no_op_fault{};
+  no_op_fault.event_id = no_op_event.event_id;
+  kfd_ioctl_wait_events_args no_op_wait{};
+  no_op_wait.events_ptr = reinterpret_cast<uint64_t>(&no_op_fault);
+  no_op_wait.num_events = 1;
+  no_op_wait.wait_for_all = 1;
+  no_op_wait.timeout = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_WAIT_EVENTS, &no_op_wait), 0);
+  EXPECT_EQ(no_op_wait.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
+  kfd_ioctl_destroy_event_args destroy_no_op_event{};
+  destroy_no_op_event.event_id = no_op_event.event_id;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_EVENT, &destroy_no_op_event), 0);
+
+  const auto check = [&](VmAccessOutcome wanted, uint8_t expected) {
+    std::array<uint8_t, 4> l2_bytes{};
+    l2_bytes.fill(0xee);
+    EXPECT_EQ(l2.read(va, l2_bytes.data(), l2_bytes.size(), Mtype::RW, pid), wanted);
+    EXPECT_TRUE(std::ranges::all_of(l2_bytes, [wanted, expected](uint8_t value) {
+      return value == (wanted == VmAccessOutcome::Complete ? expected : 0xee);
+    }));
+
+    uint32_t scalar_word = 0xeeeeeeee;
+    EXPECT_EQ(scalar.load(va, 1, &scalar_word, pid), wanted);
+    if (wanted == VmAccessOutcome::Complete)
+      EXPECT_EQ(scalar_word, uint32_t{expected} * 0x01010101u);
+    else
+      EXPECT_EQ(scalar_word, 0xeeeeeeeeu);
+
+    std::array<uint8_t, 4> vector_bytes{};
+    vector_bytes.fill(0xee);
+    EXPECT_EQ(vector.load(lane_address, 1, 4, 1, vector_bytes.data(), Mtype::RW,
+                          /*non_temporal=*/false, /*request_l1_bypass=*/false, 1, pid),
+              wanted);
+    EXPECT_TRUE(std::ranges::all_of(vector_bytes, [wanted, expected](uint8_t value) {
+      return value == (wanted == VmAccessOutcome::Complete ? expected : 0xee);
+    }));
+
+    uint8_t msc_byte = 0xee;
+    EXPECT_EQ(msc->read(va, &msc_byte, 1, pid), wanted);
+    EXPECT_EQ(msc_byte, wanted == VmAccessOutcome::Complete ? expected : 0xee);
+
+    std::array<uint8_t, InstructionCache::kFetchBytes> code{};
+    code.fill(0xee);
+    EXPECT_EQ(instruction.fetch(*access, va, code.data()), wanted);
+    EXPECT_TRUE(std::ranges::all_of(code, [wanted, expected](uint8_t value) {
+      return value == (wanted == VmAccessOutcome::Complete ? expected : 0xee);
+    }));
+
+    EXPECT_EQ(access->probe(va, 4, VmAccessKind::Read), wanted);
+    EXPECT_EQ(access->atomic_load(va, 4).outcome, wanted);
+    EXPECT_EQ(access->resolve_host_pointer(va, 4) != nullptr, wanted == VmAccessOutcome::Complete);
+  };
+
+  uint32_t gpu_id = 0;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  check(VmAccessOutcome::Faulted, 0);
+
+  gpu_id = kGpuId;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  check(VmAccessOutcome::Complete, 0x31);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  check(VmAccessOutcome::Faulted, 0);
+
+  host.fill(std::byte{0x72});
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  check(VmAccessOutcome::Complete, 0x72);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  check(VmAccessOutcome::Faulted, 0);
+
+  host.fill(std::byte{0x19});
+  allocation.handle = 0;
+  allocation.mmap_offset = allocation.va_addr;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  map.handle = allocation.handle;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  check(VmAccessOutcome::Complete, 0x19);
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, PrivateUcGttCopySourceRequiresWholeUnexportedDriverView) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kPage = 4096;
+  const uint32_t process_id = driver_->local_process_id();
+  const auto access = soc_->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+
+  kfd_ioctl_alloc_memory_of_gpu_args source{};
+  source.size = 2 * kPage;
+  source.gpu_id = kGpuId;
+  source.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &source), 0);
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = source.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  void *host = driver_->mmap(nullptr, source.size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                             static_cast<off_t>(source.mmap_offset));
+  ASSERT_NE(host, MAP_FAILED);
+  auto crossing = KfdPreparedProviderTestAccess::admit_private_uc_gtt_copy_source(
+      *driver_, process_id, kGpuId, *access, source.va_addr + kPage - 8, 16);
+  EXPECT_EQ(crossing.outcome, VmAccessOutcome::Complete);
+  EXPECT_TRUE(crossing.permit);
+  crossing.permit.reset();
+
+  kfd_ioctl_alloc_memory_of_gpu_args partial{};
+  partial.size = 2 * kPage;
+  partial.gpu_id = kGpuId;
+  partial.flags = source.flags;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &partial), 0);
+  map = {};
+  map.handle = partial.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  void *partial_host = driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                     static_cast<off_t>(partial.mmap_offset));
+  ASSERT_NE(partial_host, MAP_FAILED);
+  auto partial_admission = KfdPreparedProviderTestAccess::admit_private_uc_gtt_copy_source(
+      *driver_, process_id, kGpuId, *access, partial.va_addr + 64, sizeof(uint32_t));
+  EXPECT_EQ(partial_admission.outcome, VmAccessOutcome::Complete);
+  EXPECT_FALSE(partial_admission.permit);
+
+  alignas(4096) std::array<std::byte, 2 * kPage> user_pages{};
+  kfd_ioctl_alloc_memory_of_gpu_args userptr{};
+  userptr.va_addr = reinterpret_cast<uint64_t>(user_pages.data());
+  userptr.mmap_offset = userptr.va_addr;
+  userptr.size = user_pages.size();
+  userptr.gpu_id = kGpuId;
+  userptr.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &userptr), 0);
+  map = {};
+  map.handle = userptr.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  auto user_admission = KfdPreparedProviderTestAccess::admit_private_uc_gtt_copy_source(
+      *driver_, process_id, kGpuId, *access, userptr.va_addr, sizeof(uint32_t));
+  EXPECT_EQ(user_admission.outcome, VmAccessOutcome::Complete);
+  EXPECT_FALSE(user_admission.permit);
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = source.handle;
+  exported.gpu_id = kGpuId;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  auto exported_admission = KfdPreparedProviderTestAccess::admit_private_uc_gtt_copy_source(
+      *driver_, process_id, kGpuId, *access, source.va_addr + kPage - 8, 16);
+  EXPECT_EQ(exported_admission.outcome, VmAccessOutcome::Complete);
+  EXPECT_FALSE(exported_admission.permit);
+
+  // IPC export retains the allocation's host view until FREE retires it.
+  EXPECT_EQ(driver_->munmap(partial_host, kPage), 0);
+  for (const uint64_t handle : {source.handle, partial.handle, userptr.handle}) {
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = handle;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  }
+}
+
+TEST_F(KfdIoctlTest, PrivateUcGttCopySourceRetirementWaitsForReadPermit) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kPage = 4096;
+  enum class Mutation { Unmap, Mmap, Munmap, DmaBufExport, IpcExport, Free };
+  const uint32_t process_id = driver_->local_process_id();
+  const auto access = soc_->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+
+  for (const Mutation mutation : {Mutation::Unmap, Mutation::Mmap, Mutation::Munmap,
+                                  Mutation::DmaBufExport, Mutation::IpcExport, Mutation::Free}) {
+    kfd_ioctl_alloc_memory_of_gpu_args source{};
+    source.size = kPage;
+    source.gpu_id = kGpuId;
+    source.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &source), 0);
+    uint32_t gpu_id = kGpuId;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = source.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    void *host = driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                               static_cast<off_t>(source.mmap_offset));
+    ASSERT_NE(host, MAP_FAILED);
+
+    auto held = KfdPreparedProviderTestAccess::admit_private_uc_gtt_copy_source(
+        *driver_, process_id, kGpuId, *access, source.va_addr + 64, sizeof(uint32_t));
+    ASSERT_EQ(held.outcome, VmAccessOutcome::Complete);
+    ASSERT_TRUE(held.permit);
+    int exported_fd = -1;
+    auto pending = std::async(std::launch::async, [&] {
+      switch (mutation) {
+      case Mutation::Unmap: {
+        kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+        unmap.handle = source.handle;
+        unmap.n_devices = 1;
+        unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+        return driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap);
+      }
+      case Mutation::Mmap:
+        return driver_->mmap(host, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                             static_cast<off_t>(source.mmap_offset)) == host
+                   ? 0
+                   : -errno;
+      case Mutation::Munmap:
+        return driver_->munmap(host, kPage);
+      case Mutation::DmaBufExport: {
+        kfd_ioctl_export_dmabuf_args exported{};
+        exported.handle = source.handle;
+        const int result = driver_->ioctl(AMDKFD_IOC_EXPORT_DMABUF, &exported);
+        if (result == 0)
+          exported_fd = static_cast<int>(exported.dmabuf_fd);
+        return result;
+      }
+      case Mutation::IpcExport: {
+        kfd_ioctl_ipc_export_handle_args exported{};
+        exported.handle = source.handle;
+        exported.gpu_id = kGpuId;
+        return driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported);
+      }
+      case Mutation::Free: {
+        kfd_ioctl_free_memory_of_gpu_args free{};
+        free.handle = source.handle;
+        return driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free);
+      }
+      }
+      return -EINVAL;
+    });
+
+    bool closed = false;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+      auto refused = KfdPreparedProviderTestAccess::admit_private_uc_gtt_copy_source(
+          *driver_, process_id, kGpuId, *access, source.va_addr + 64, sizeof(uint32_t));
+      if (refused.outcome == VmAccessOutcome::Unavailable ||
+          refused.outcome == VmAccessOutcome::Revoked) {
+        EXPECT_FALSE(refused.permit);
+        closed = true;
+        break;
+      }
+      if (pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+        break;
+      std::this_thread::yield();
+    }
+    EXPECT_TRUE(closed);
+    EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+    held.permit.reset();
+    if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+      std::fputs("private GTT source retirement did not drain\n", stderr);
+      std::fflush(stderr);
+      std::_Exit(124);
+    }
+    EXPECT_EQ(pending.get(), 0);
+    if (exported_fd >= 0) {
+      EXPECT_EQ(::close(exported_fd), 0);
+    }
+
+    if (mutation != Mutation::Free) {
+      if (mutation != Mutation::Munmap && mutation != Mutation::IpcExport) {
+        EXPECT_EQ(driver_->munmap(host, kPage), 0);
+      }
+      kfd_ioctl_free_memory_of_gpu_args free{};
+      free.handle = source.handle;
+      EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+    }
+  }
+}
+
+TEST_F(KfdIoctlTest, PrivateUcGttCopySourceFinalCloseDrainsReadPermit) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kPage = 4096;
+  const uint32_t process_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(process_id, 0u);
+
+  kfd_ioctl_alloc_memory_of_gpu_args source{};
+  source.size = kPage;
+  source.gpu_id = kGpuId;
+  source.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &source), 0);
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = source.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(process_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  void *host = driver_->mmap(process_id, nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                             static_cast<off_t>(source.mmap_offset));
+  ASSERT_NE(host, MAP_FAILED);
+  const auto access = soc_->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  auto held = KfdPreparedProviderTestAccess::admit_private_uc_gtt_copy_source(
+      *driver_, process_id, kGpuId, *access, source.va_addr + 64, sizeof(uint32_t));
+  ASSERT_EQ(held.outcome, VmAccessOutcome::Complete);
+  ASSERT_TRUE(held.permit);
+
+  auto pending_close = std::async(std::launch::async, [&] { return driver_->close(process_id); });
+  bool revoked = false;
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (std::chrono::steady_clock::now() < deadline) {
+    auto refused = KfdPreparedProviderTestAccess::admit_private_uc_gtt_copy_source(
+        *driver_, process_id, kGpuId, *access, source.va_addr + 64, sizeof(uint32_t));
+    if (refused.outcome == VmAccessOutcome::Revoked) {
+      EXPECT_FALSE(refused.permit);
+      revoked = true;
+      break;
+    }
+    if (pending_close.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(revoked);
+  EXPECT_EQ(pending_close.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  held.permit.reset();
+  if (pending_close.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("private GTT source close did not drain\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending_close.get(), 0);
+}
+
+TEST_F(KfdIoctlTest, PreEffectGttFailuresPreserveAndFullRemapRepairsCopySource) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kPage = 4096;
+  const uint32_t process_id = driver_->local_process_id();
+  auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+
+  kfd_ioctl_alloc_memory_of_gpu_args source{};
+  source.size = kPage;
+  source.gpu_id = kGpuId;
+  source.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &source), 0);
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = source.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  void *host = driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                             static_cast<off_t>(source.mmap_offset));
+  ASSERT_NE(host, MAP_FAILED);
+  const auto access = soc_->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  const auto admit = [&] {
+    return KfdPreparedProviderTestAccess::admit_private_uc_gtt_copy_source(
+        *driver_, process_id, kGpuId, *access, source.va_addr + 64, sizeof(uint32_t));
+  };
+  auto initial = admit();
+  ASSERT_EQ(initial.outcome, VmAccessOutcome::Complete);
+  ASSERT_TRUE(initial.permit);
+  initial.permit.reset();
+
+  // Casting this length to the signed ftruncate offset fails before any view
+  // or PTE mutation. The existing source must remain admissible.
+  constexpr size_t kOversized = size_t{1} << 63;
+  EXPECT_EQ(driver_->mmap(nullptr, kOversized, PROT_READ | PROT_WRITE, MAP_SHARED,
+                          static_cast<off_t>(source.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, ENOMEM);
+  auto after_early_failure = admit();
+  EXPECT_EQ(after_early_failure.outcome, VmAccessOutcome::Complete);
+  EXPECT_TRUE(after_early_failure.permit);
+  after_early_failure.permit.reset();
+
+  // A redundant MAP has no grant or PTE change. Failure before the atomic
+  // grant-index publication must likewise preserve the admitted source.
+  driver_->fail_next_private_gtt_map_publish_for_testing();
+  map = {};
+  map.handle = source.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -ENOMEM);
+  EXPECT_EQ(map.n_success, 0u);
+  auto after_publish_failure = admit();
+  EXPECT_EQ(after_publish_failure.outcome, VmAccessOutcome::Complete);
+  EXPECT_TRUE(after_publish_failure.permit);
+  after_publish_failure.permit.reset();
+  map = {};
+  map.handle = source.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(map.n_success, 1u);
+
+  // Simulate a prior partial view change. Replacing the complete driver-owned
+  // view and its PTEs is sufficient to clear its fail-closed marker.
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    process->allocations_.at(source.handle).private_gtt_copy_source_unstable = true;
+  }
+  auto unavailable = admit();
+  EXPECT_EQ(unavailable.outcome, VmAccessOutcome::Unavailable);
+  EXPECT_FALSE(unavailable.permit);
+  EXPECT_EQ(driver_->mmap(host, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(source.mmap_offset)),
+            host);
+  auto repaired = admit();
+  EXPECT_EQ(repaired.outcome, VmAccessOutcome::Complete);
+  EXPECT_TRUE(repaired.permit);
+  repaired.permit.reset();
+
+  EXPECT_EQ(driver_->munmap(host, kPage), 0);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = source.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, FailedPrivateUcGttSourceFreeStaysUnavailableUntilRetired) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kPage = 4096;
+  const uint32_t process_id = driver_->local_process_id();
+  auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+
+  kfd_ioctl_alloc_memory_of_gpu_args source{};
+  source.size = kPage;
+  source.gpu_id = kGpuId;
+  source.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &source), 0);
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = source.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  void *host = driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                             static_cast<off_t>(source.mmap_offset));
+  ASSERT_NE(host, MAP_FAILED);
+  const auto access = soc_->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  auto initial = KfdPreparedProviderTestAccess::admit_private_uc_gtt_copy_source(
+      *driver_, process_id, kGpuId, *access, source.va_addr + 64, sizeof(uint32_t));
+  ASSERT_EQ(initial.outcome, VmAccessOutcome::Complete);
+  ASSERT_TRUE(initial.permit);
+  initial.permit.reset();
+
+  const uint64_t page_number = source.va_addr >> rocjitsu::KfdProcess::kPageShift;
+  {
+    std::unique_lock page_lock(process->page_table_mutex_);
+    auto page = process->page_table_.find(page_number);
+    ASSERT_NE(page, process->page_table_.end());
+    ASSERT_FALSE(page->second.host_extents.empty());
+    page->second.host_extents.front().va_owner = {rocjitsu::KfdProcess::VaOwnerKind::Gem, 17};
+  }
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = source.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), -EIO);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto allocation = process->allocations_.find(source.handle);
+    ASSERT_NE(allocation, process->allocations_.end());
+    EXPECT_TRUE(allocation->second.retirement_in_progress);
+    EXPECT_TRUE(allocation->second.grants_retired);
+    EXPECT_EQ(allocation->second.host_ptr, host);
+  }
+  auto refused = KfdPreparedProviderTestAccess::admit_private_uc_gtt_copy_source(
+      *driver_, process_id, kGpuId, *access, source.va_addr + 64, sizeof(uint32_t));
+  EXPECT_EQ(refused.outcome, VmAccessOutcome::Unavailable);
+  EXPECT_FALSE(refused.permit);
+
+  {
+    std::unique_lock page_lock(process->page_table_mutex_);
+    auto page = process->page_table_.find(page_number);
+    ASSERT_NE(page, process->page_table_.end());
+    ASSERT_FALSE(page->second.host_extents.empty());
+    page->second.host_extents.front().va_owner = {};
+  }
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    EXPECT_FALSE(process->allocations_.contains(source.handle));
+  }
+}
+
+TEST_F(KfdIoctlTest, FreeOfPartiallyMappedBoPreservesAdjacentHostPage) {
+  constexpr size_t kPage = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 2 * kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  void *reserved = ::mmap(nullptr, 3 * kPage, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(reserved, MAP_FAILED);
+  auto *neighbor = static_cast<uint8_t *>(reserved) + kPage;
+  ASSERT_EQ(::mprotect(neighbor, kPage, PROT_READ | PROT_WRITE), 0);
+  *neighbor = 0x5a;
+  void *mapped = driver_->mmap(reserved, kPage, PROT_READ, MAP_SHARED | MAP_FIXED,
+                               static_cast<off_t>(allocation.mmap_offset));
+  ASSERT_EQ(mapped, reserved);
+
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page =
+        process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, process->page_table_.end());
+    ASSERT_FALSE(page->second.host_extents.empty());
+    EXPECT_EQ(page->second.host_extents.front().owner,
+              rocjitsu::KfdProcess::HostExtentOwner::Application);
+  }
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  unsigned char residency = 0;
+  ASSERT_EQ(::mincore(neighbor, kPage, &residency), 0)
+      << "FREE must unmap only the BO's actual CPU mapping";
+  EXPECT_EQ(*neighbor, 0x5a);
+  EXPECT_EQ(::munmap(reserved, 3 * kPage), 0);
+}
+
+TEST_F(KfdIoctlTest, AllocationMapFixedRejectsAnotherTrackedCpuView) {
+  constexpr size_t kPage = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args first{};
+  first.size = kPage;
+  first.gpu_id = kGpuId;
+  first.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &first), 0);
+  kfd_ioctl_alloc_memory_of_gpu_args second = first;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &second), 0);
+
+  void *second_view = driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                    static_cast<off_t>(second.mmap_offset));
+  ASSERT_NE(second_view, MAP_FAILED);
+  *static_cast<uint32_t *>(second_view) = 0x12345678;
+  EXPECT_EQ(driver_->mmap(second_view, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(first.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EINVAL);
+  EXPECT_EQ(*static_cast<uint32_t *>(second_view), 0x12345678u);
+
+  const auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    EXPECT_EQ(process->allocations_.at(second.handle).host_ptr, second_view);
+    EXPECT_EQ(process->allocations_.at(first.handle).host_ptr, nullptr);
+  }
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page = process->page_table_.find(second.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, process->page_table_.end());
+    ASSERT_FALSE(page->second.host_extents.empty());
+    EXPECT_EQ(page->second.host_extents.front().host_ptr, second_view);
+  }
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = first.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  free.handle = second.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, MunmapWaitsForInFlightFixedAllocationMmap) {
+  constexpr size_t kPage = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                     KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  void *initial = driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                static_cast<off_t>(allocation.mmap_offset));
+  ASSERT_NE(initial, MAP_FAILED);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kGpuId;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto alias = std::ranges::find_if(*aliases, [&](const auto &candidate) {
+    return candidate.gpu_va == allocation.va_addr && candidate.gpu_id == kGpuId;
+  });
+  ASSERT_NE(alias, aliases->end());
+  ASSERT_EQ(driver_->munmap(initial, kPage), 0);
+  void *fixed = ::mmap(nullptr, kPage, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(fixed, MAP_FAILED);
+  auto held = driver_->hold_alias_ingress_for_testing(*alias);
+  ASSERT_TRUE(held);
+
+  auto pending_map = std::async(std::launch::async, [&] {
+    return driver_->mmap(fixed, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                         static_cast<off_t>(allocation.mmap_offset));
+  });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool closed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    closed = driver_->alias_ingress_closed_for_testing(*alias);
+    if (closed)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closed);
+  if (closed) {
+    auto pending_unmap =
+        std::async(std::launch::async, [&] { return driver_->munmap(fixed, kPage); });
+    // Before the fixed mmap publishes, fixed is only an anonymous reservation.
+    // It must not be classified as untracked while mmap owns op_mutex_: the
+    // interposer's libc fallback would then remove the newly published view.
+    EXPECT_EQ(pending_unmap.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+    held->reset();
+    if (pending_map.wait_for(std::chrono::seconds(5)) != std::future_status::ready ||
+        pending_unmap.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+      std::fputs("fixed mmap or concurrent munmap did not finish after alias permit left\n",
+                 stderr);
+      std::fflush(stderr);
+      std::_Exit(124);
+    }
+    EXPECT_EQ(pending_map.get(), fixed);
+    EXPECT_EQ(pending_unmap.get(), 0);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_EQ(record.host_ptr, nullptr);
+      EXPECT_EQ(record.page_table_mapped_bytes, 0u);
+    }
+  } else {
+    held->reset();
+    (void)pending_map.get();
+  }
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(::munmap(fixed, kPage), 0);
+}
+
+TEST_F(KfdIoctlTest, FixedAllocationRemapPublishesDirtyAliasAndRetries) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 48;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                     KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *initial =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(initial, MAP_FAILED);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kGpuId;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto alias = *found;
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  auto backing = process->gpu_peer_backing_grant(kGpuId, allocation.va_addr, kPage);
+  ASSERT_TRUE(backing.backing);
+  backing.backing.bytes()[kDirtyOffset] = std::byte{0x21};
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id,
+                                                      access->cache_identity(),
+                                                      alias.admission_generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+  const auto page_keeps_initial_view = [&] {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page =
+        process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    return page != process->page_table_.end() && !page->second.host_extents.empty() &&
+           page->second.host_extents.front().host_ptr == initial;
+  };
+  ASSERT_TRUE(page_keeps_initial_view());
+  ASSERT_EQ(initial[kDirtyOffset], 0x21);
+
+  driver_->fail_next_alias_mapping_writeback_for_testing();
+  EXPECT_EQ(driver_->mmap(initial, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_TRUE(page_keeps_initial_view());
+  EXPECT_EQ(initial[kDirtyOffset], 0x21);
+  EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0x21});
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kDirtyOffset));
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+
+  driver_->fail_next_alias_mapping_retire_for_testing();
+  EXPECT_EQ(driver_->mmap(initial, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_TRUE(page_keeps_initial_view());
+  EXPECT_EQ(initial[kDirtyOffset], 0xa5);
+  EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kDirtyOffset));
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+
+  EXPECT_EQ(driver_->mmap(initial, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            initial);
+  EXPECT_TRUE(page_keeps_initial_view());
+  EXPECT_EQ(initial[kDirtyOffset], 0xa5);
+  EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0xa5});
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(alias));
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalCacheableAllocationAllowsViewChangesBeforeFirstGrant) {
+  constexpr size_t kPage = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  void *initial = driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                static_cast<off_t>(allocation.mmap_offset));
+  ASSERT_NE(initial, MAP_FAILED);
+  *static_cast<uint8_t *>(initial) = 0x5a;
+  EXPECT_EQ(driver_->mmap(initial, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            initial);
+  EXPECT_EQ(*static_cast<uint8_t *>(initial), 0x5a);
+  EXPECT_EQ(driver_->munmap(initial, kPage), 0);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, CallerOwnedVramMapAllowsUcButRejectsCacheableWithoutLocalSink) {
+  constexpr size_t kPage = 4096;
+  alignas(4096) std::array<std::byte, kPage> uncached_pages{};
+  alignas(4096) std::array<std::byte, kPage> cacheable_pages{};
+  const auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+
+  for (const auto &[pages, flags, expected] :
+       {std::tuple{uncached_pages.data(), static_cast<uint32_t>(KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED),
+                   0},
+        std::tuple{cacheable_pages.data(), uint32_t{0}, -EOPNOTSUPP}}) {
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.va_addr = reinterpret_cast<uint64_t>(pages);
+    allocation.size = kPage;
+    allocation.gpu_id = kGpuId;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                       KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | flags;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    uint32_t gpu_id = kGpuId;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), expected);
+    EXPECT_EQ(map.n_success, expected == 0 ? 1u : 0u);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_GE(record.memfd, 0);
+      EXPECT_FALSE(record.local_backing_owner);
+      EXPECT_EQ(record.mapped_device_ids.contains(kGpuId), expected == 0);
+      EXPECT_EQ(record.admission_generations.contains(kGpuId), expected == 0);
+      EXPECT_EQ(record.page_table_mapped_bytes, 0u);
+    }
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      EXPECT_FALSE(
+          process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+    }
+    if (expected == 0) {
+      kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+      unmap.handle = allocation.handle;
+      unmap.n_devices = 1;
+      unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+      EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+      EXPECT_EQ(unmap.n_success, 1u);
+    }
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = allocation.handle;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  }
+}
+
+TEST_F(KfdIoctlTest, LocalCacheableFixedRemapPublishesDirtyOwnerL2AndMsc) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::MemorySideCache;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 48;
+  constexpr uint32_t kMscLineOffset = MemorySideCache::LINE_SIZE;
+  constexpr uint32_t kMscDirtyOffset = kMscLineOffset + 16;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                     KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  void *initial = driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                static_cast<off_t>(allocation.mmap_offset));
+  ASSERT_NE(initial, MAP_FAILED);
+  *static_cast<uint8_t *>(initial) = 0x5a;
+  static_cast<uint8_t *>(initial)[kDirtyOffset] = 0x21;
+  static_cast<uint8_t *>(initial)[kMscDirtyOffset] = 0x37;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const uint32_t process_id = driver_->local_process_id();
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  const auto aliases = process->gpu_local_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto alias = *found;
+  uint64_t generation = 0;
+  int backing_fd = -1;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    generation = record.admission_generations.at(kGpuId);
+    backing_fd = record.memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, allocation.va_addr, process_id, access->cache_identity(), generation, dirty_bytes);
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kDirtyOffset));
+  ASSERT_GT(soc_->num_iods(), 0u);
+  MemorySideCache *msc = soc_->iod(0)->msc();
+  ASSERT_NE(msc, nullptr);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> msc_line{};
+  std::copy_n(static_cast<uint8_t *>(initial) + kMscLineOffset, msc_line.size(), msc_line.begin());
+  msc_line[16] = 0x7b;
+  KfdPreparedProviderTestAccess::store_dirty_msc_line(*msc, allocation.va_addr + kMscLineOffset,
+                                                      process_id, access->cache_identity(),
+                                                      generation, msc_line);
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_msc_line(
+      *msc, allocation.va_addr + kMscLineOffset, process_id));
+  const uint64_t writes = l2->backing_write_transactions();
+  const auto page_keeps_initial_view = [&] {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page =
+        process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    return page != process->page_table_.end() && !page->second.host_extents.empty() &&
+           page->second.host_extents.front().host_ptr == initial;
+  };
+  ASSERT_TRUE(page_keeps_initial_view());
+  uint8_t fd_byte = 0;
+  ASSERT_EQ(::pread(backing_fd, &fd_byte, 1, kDirtyOffset), 1);
+  ASSERT_EQ(fd_byte, 0x21);
+  ASSERT_EQ(::pread(backing_fd, &fd_byte, 1, kMscDirtyOffset), 1);
+  ASSERT_EQ(fd_byte, 0x37);
+
+  driver_->fail_next_alias_mapping_writeback_for_testing();
+  EXPECT_EQ(driver_->mmap(initial, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_TRUE(page_keeps_initial_view());
+  EXPECT_EQ(static_cast<uint8_t *>(initial)[kDirtyOffset], 0x21);
+  EXPECT_EQ(static_cast<uint8_t *>(initial)[kMscDirtyOffset], 0x37);
+  ASSERT_EQ(::pread(backing_fd, &fd_byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(fd_byte, 0x21);
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kDirtyOffset));
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_msc_line(
+      *msc, allocation.va_addr + kMscLineOffset, process_id));
+
+  driver_->fail_next_alias_mapping_retire_for_testing();
+  EXPECT_EQ(driver_->mmap(initial, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_TRUE(page_keeps_initial_view());
+  EXPECT_EQ(static_cast<uint8_t *>(initial)[kDirtyOffset], 0xa5);
+  EXPECT_EQ(static_cast<uint8_t *>(initial)[kMscDirtyOffset], 0x7b);
+  ASSERT_EQ(::pread(backing_fd, &fd_byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(fd_byte, 0xa5);
+  ASSERT_EQ(::pread(backing_fd, &fd_byte, 1, kMscDirtyOffset), 1);
+  EXPECT_EQ(fd_byte, 0x7b);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kDirtyOffset));
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_msc_line(
+      *msc, allocation.va_addr + kMscLineOffset, process_id));
+
+  driver_->fail_next_alias_mapping_after_host_map_for_testing();
+  EXPECT_EQ(driver_->mmap(initial, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, ENOMEM);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  // The remap has replaced the host view, but the failed publication leaves
+  // its GPU PTE absent until the retry completes.
+  EXPECT_FALSE(page_keeps_initial_view());
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    EXPECT_EQ(record.host_ptr, initial);
+    EXPECT_EQ(record.host_mapping_size, kPage);
+    EXPECT_EQ(record.page_table_mapped_bytes, kPage);
+  }
+  EXPECT_EQ(static_cast<uint8_t *>(initial)[kDirtyOffset], 0xa5);
+  EXPECT_EQ(static_cast<uint8_t *>(initial)[kMscDirtyOffset], 0x7b);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+
+  void *remapped = driver_->mmap(initial, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                                 static_cast<off_t>(allocation.mmap_offset));
+  EXPECT_EQ(remapped, initial) << errno;
+  if (remapped == MAP_FAILED) {
+    kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+    unmap.handle = allocation.handle;
+    unmap.n_devices = 1;
+    unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = allocation.handle;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+    return;
+  }
+  EXPECT_TRUE(page_keeps_initial_view());
+  EXPECT_EQ(*static_cast<uint8_t *>(initial), 0x5a);
+  EXPECT_EQ(static_cast<uint8_t *>(initial)[kDirtyOffset], 0xa5);
+  ASSERT_EQ(::pread(backing_fd, &fd_byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(fd_byte, 0xa5);
+  EXPECT_EQ(static_cast<uint8_t *>(initial)[kMscDirtyOffset], 0x7b);
+  ASSERT_EQ(::pread(backing_fd, &fd_byte, 1, kMscDirtyOffset), 1);
+  EXPECT_EQ(fd_byte, 0x7b);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kDirtyOffset));
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_msc_line(
+      *msc, allocation.va_addr + kMscLineOffset, process_id));
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(alias));
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  ASSERT_EQ(unmap.n_success, 1u);
+  ASSERT_FALSE(page_keeps_initial_view());
+  EXPECT_EQ(static_cast<uint8_t *>(initial)[kDirtyOffset], 0xa5);
+  EXPECT_EQ(static_cast<uint8_t *>(initial)[kMscDirtyOffset], 0x7b);
+
+  // The local backing still owns the CPU view after the last GPU grant retires.
+  EXPECT_EQ(driver_->mmap(initial, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            initial);
+  EXPECT_TRUE(page_keeps_initial_view());
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  EXPECT_EQ(static_cast<uint8_t *>(initial)[kDirtyOffset], 0xa5);
+  EXPECT_EQ(static_cast<uint8_t *>(initial)[kMscDirtyOffset], 0x7b);
+  EXPECT_EQ(driver_->munmap(initial, kPage), 0);
+  EXPECT_FALSE(page_keeps_initial_view());
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalCacheableMapRefusesOversizedHostViewWithoutExactBacking) {
+  constexpr size_t kPage = 4096;
+  constexpr size_t kHostView = 2 * kPage;
+  constexpr uint32_t kTailOffset = kPage + 64;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                     KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kHostView, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kTailOffset] = 0x42;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), -EOPNOTSUPP);
+  EXPECT_EQ(map.n_success, 0u);
+
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    EXPECT_EQ(record.host_ptr, host);
+    EXPECT_EQ(record.host_mapping_size, kHostView);
+    EXPECT_EQ(record.page_table_mapped_bytes, kPage);
+    EXPECT_FALSE(record.local_backing_owner);
+    EXPECT_TRUE(record.admission_generations.empty());
+    EXPECT_TRUE(record.mapped_device_ids.empty());
+    struct stat statbuf {};
+    ASSERT_EQ(::fstat(record.memfd, &statbuf), 0);
+    EXPECT_EQ(statbuf.st_size, static_cast<off_t>(kHostView));
+  }
+  EXPECT_EQ(host[kTailOffset], 0x42);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalCacheableViewChangeWritesBackBeforeRejectingPartialRemap) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr size_t kPage = 4096;
+  constexpr size_t kExtent = 2 * kPage;
+  constexpr uint32_t kDirtyOffset = 48;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kExtent;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                     KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kExtent, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kDirtyOffset] = 0x21;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  uint64_t generation = 0;
+  int backing_fd = -1;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    generation = record.admission_generations.at(kGpuId);
+    backing_fd = record.memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, allocation.va_addr, process_id, access->cache_identity(), generation, dirty_bytes);
+  const auto expect_original_view = [&] {
+    EXPECT_EQ(host[kDirtyOffset], 0x21);
+    uint8_t byte = 0;
+    EXPECT_EQ(::pread(backing_fd, &byte, 1, kDirtyOffset), 1);
+    EXPECT_EQ(byte, 0x21);
+    EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                             kDirtyOffset));
+    EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_EQ(record.host_ptr, host);
+      EXPECT_EQ(record.host_mapping_size, kExtent);
+      EXPECT_EQ(record.page_table_mapped_bytes, kExtent);
+    }
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      const auto page =
+          process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+      ASSERT_NE(page, process->page_table_.end());
+      ASSERT_FALSE(page->second.host_extents.empty());
+      EXPECT_EQ(page->second.host_extents.front().host_ptr, host);
+    }
+  };
+  expect_original_view();
+
+  void *wrong_address = ::mmap(nullptr, kExtent, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(wrong_address, MAP_FAILED);
+  // A full view change is permitted once the old alias has been drained and
+  // its dirty line reaches the retained backing.
+  ASSERT_EQ(driver_->mmap(wrong_address, kExtent, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            wrong_address);
+  EXPECT_EQ(host[kDirtyOffset], 0xa5);
+  EXPECT_EQ(static_cast<uint8_t *>(wrong_address)[kDirtyOffset], 0xa5);
+  uint8_t byte = 0;
+  ASSERT_EQ(::pread(backing_fd, &byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(byte, 0xa5);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kDirtyOffset));
+  const auto expect_new_view = [&] {
+    EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_EQ(record.host_ptr, wrong_address);
+      EXPECT_EQ(record.host_mapping_size, kExtent);
+      EXPECT_EQ(record.page_table_mapped_bytes, kExtent);
+    }
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      const auto page =
+          process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+      ASSERT_NE(page, process->page_table_.end());
+      ASSERT_FALSE(page->second.host_extents.empty());
+      EXPECT_EQ(page->second.host_extents.front().host_ptr, wrong_address);
+    }
+  };
+  expect_new_view();
+  EXPECT_EQ(driver_->mmap(host, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EINVAL);
+  expect_new_view();
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalCacheableMunmapRetriesBeforeAndAfterWriteback) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 48;
+  constexpr uint32_t kCleanOffset = 49;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                     KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kDirtyOffset] = 0x21;
+  host[kCleanOffset] = 0x42;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_local_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto alias = *found;
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  int backing_fd = -1;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    ASSERT_TRUE(record.local_backing_owner);
+    EXPECT_FALSE(record.backing_owner);
+    backing_fd = record.memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xa5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id,
+                                                      access->cache_identity(),
+                                                      alias.admission_generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+  const auto read_backing = [&](uint32_t offset) {
+    uint8_t byte = 0;
+    EXPECT_EQ(::pread(backing_fd, &byte, 1, offset), 1);
+    return byte;
+  };
+  const auto expect_live_view = [&] {
+    EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_EQ(record.host_ptr, host);
+      EXPECT_EQ(record.page_table_mapped_bytes, kPage);
+    }
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      const auto page =
+          process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+      ASSERT_NE(page, process->page_table_.end());
+      ASSERT_FALSE(page->second.host_extents.empty());
+      EXPECT_EQ(page->second.host_extents.front().host_ptr, host);
+    }
+  };
+  EXPECT_EQ(read_backing(kDirtyOffset), 0x21);
+  expect_live_view();
+  EXPECT_EQ(driver_->munmap(host, 0), -EINVAL);
+  EXPECT_EQ(errno, EINVAL);
+  expect_live_view();
+
+  driver_->fail_next_alias_mapping_writeback_for_testing();
+  EXPECT_EQ(driver_->munmap(host, kPage), -ENOMEM);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_EQ(read_backing(kDirtyOffset), 0x21);
+  EXPECT_EQ(host[kDirtyOffset], 0x21);
+  EXPECT_EQ(host[kCleanOffset], 0x42);
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kDirtyOffset));
+  expect_live_view();
+  EXPECT_EQ(driver_->mmap(host, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EAGAIN);
+
+  driver_->fail_next_alias_mapping_retire_for_testing();
+  EXPECT_EQ(driver_->munmap(host, kPage), -ENOMEM);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_EQ(read_backing(kDirtyOffset), 0xa5);
+  EXPECT_EQ(read_backing(kCleanOffset), 0x42);
+  EXPECT_EQ(host[kDirtyOffset], 0xa5);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kDirtyOffset));
+  expect_live_view();
+
+  driver_->fail_next_alias_mapping_after_pte_unmap_for_testing();
+  EXPECT_EQ(driver_->munmap(host, kPage), -ENOMEM);
+  EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_EQ(read_backing(kDirtyOffset), 0xa5);
+  EXPECT_EQ(host[kDirtyOffset], 0xa5);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    EXPECT_EQ(record.host_ptr, host);
+    EXPECT_EQ(record.host_mapping_size, kPage);
+    EXPECT_EQ(record.page_table_mapped_bytes, kPage);
+  }
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+
+  EXPECT_EQ(driver_->munmap(host, kPage), 0);
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(alias));
+  EXPECT_EQ(read_backing(kDirtyOffset), 0xa5);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    EXPECT_EQ(record.host_ptr, nullptr);
+    EXPECT_EQ(record.page_table_mapped_bytes, 0u);
+  }
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_EQ(driver_->mmap(host, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            host);
+  EXPECT_EQ(host[kDirtyOffset], 0xa5);
+  EXPECT_EQ(host[kCleanOffset], 0x42);
+  expect_live_view();
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalCacheableFreeAndCloseAdoptFailedOrdinaryViewChange) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 48;
+
+  for (uint32_t scenario = 0; scenario < 12; ++scenario) {
+    const bool fixed_remap = scenario >= 6;
+    const bool final_close = (scenario / 3u) % 2u != 0;
+    const uint32_t failure_phase = scenario % 3u;
+    const uint32_t process_id = driver_->open_process(4243 + scenario);
+    ASSERT_NE(process_id, 0u);
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.size = kPage;
+    allocation.gpu_id = kGpuId;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                       KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    auto *host = static_cast<uint8_t *>(driver_->mmap(process_id, nullptr, kPage,
+                                                      PROT_READ | PROT_WRITE, MAP_SHARED,
+                                                      static_cast<off_t>(allocation.mmap_offset)));
+    ASSERT_NE(host, MAP_FAILED);
+    host[kDirtyOffset] = 0x23;
+    uint32_t gpu_id = kGpuId;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(process_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+    const auto process = driver_->find_process(process_id);
+    ASSERT_NE(process, nullptr);
+    const auto aliases = process->gpu_local_alias_snapshot();
+    const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+      return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+    });
+    ASSERT_NE(found, aliases->end());
+    const auto alias = *found;
+    const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+    ASSERT_TRUE(vmid);
+    const auto access = soc_->gpu_vm().snapshot(*vmid);
+    ASSERT_TRUE(access);
+    int backing_fd = -1;
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      backing_fd = process->allocations_.at(allocation.handle).memfd;
+    }
+    ASSERT_GE(backing_fd, 0);
+    const int retained_fd = ::fcntl(backing_fd, F_DUPFD_CLOEXEC, 0);
+    ASSERT_GE(retained_fd, 0);
+    auto *l2 = soc_->xcd(0)->l2_cache();
+    ASSERT_NE(l2, nullptr);
+    const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xe7}};
+    KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id,
+                                                        access->cache_identity(),
+                                                        alias.admission_generation, dirty_bytes);
+    const uint64_t writes = l2->backing_write_transactions();
+    const auto read_backing = [&] {
+      uint8_t byte = 0;
+      EXPECT_EQ(::pread(retained_fd, &byte, 1, kDirtyOffset), 1);
+      return byte;
+    };
+    ASSERT_EQ(read_backing(), 0x23);
+
+    if (failure_phase == 0)
+      driver_->fail_next_alias_mapping_writeback_for_testing();
+    else if (failure_phase == 1)
+      driver_->fail_next_alias_mapping_retire_for_testing();
+    else if (fixed_remap)
+      driver_->fail_next_alias_mapping_after_host_map_for_testing();
+    else
+      driver_->fail_next_alias_mapping_after_pte_unmap_for_testing();
+    if (fixed_remap) {
+      EXPECT_EQ(driver_->mmap(process_id, host, kPage, PROT_READ | PROT_WRITE,
+                              MAP_SHARED | MAP_FIXED, static_cast<off_t>(allocation.mmap_offset)),
+                MAP_FAILED);
+      EXPECT_EQ(errno, ENOMEM);
+    } else {
+      EXPECT_EQ(driver_->munmap(process_id, host, kPage), -ENOMEM);
+    }
+    EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(alias));
+    EXPECT_TRUE(process->gpu_alias_grant_current(alias));
+    EXPECT_EQ(read_backing(), failure_phase == 0 ? 0x23 : 0xe7);
+    EXPECT_EQ(l2->backing_write_transactions(), writes + (failure_phase == 0 ? 0 : 1));
+    EXPECT_EQ(host[kDirtyOffset], failure_phase == 0 ? 0x23 : 0xe7);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_EQ(record.host_ptr, host);
+      EXPECT_EQ(record.page_table_mapped_bytes, kPage);
+    }
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      EXPECT_EQ(
+          process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift),
+          failure_phase != 2);
+    }
+
+    if (final_close) {
+      ASSERT_EQ(driver_->close(process_id), 0);
+      EXPECT_EQ(driver_->find_process(process_id), nullptr);
+    } else {
+      kfd_ioctl_free_memory_of_gpu_args free{};
+      free.handle = allocation.handle;
+      ASSERT_EQ(driver_->ioctl(process_id, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+      EXPECT_EQ(driver_->close(process_id), 0);
+    }
+    EXPECT_EQ(read_backing(), 0xe7);
+    EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+    EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                              kDirtyOffset));
+    EXPECT_FALSE(process->gpu_alias_grant_current(alias));
+    EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(alias));
+    EXPECT_EQ(::close(retained_fd), 0);
+  }
+}
+
+TEST_F(KfdIoctlTest, LocalCacheableMunmapWaitsForIngressBeforeCpuViewRemoval) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::MemoryIngressSpan;
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 48;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                     KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kDirtyOffset] = 0x31;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_local_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto alias = *found;
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  int backing_fd = -1;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    backing_fd = process->allocations_.at(allocation.handle).memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x9a}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id,
+                                                      access->cache_identity(),
+                                                      alias.admission_generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+  const std::array spans{
+      MemoryIngressSpan{allocation.va_addr + kDirtyOffset, sizeof(uint32_t), VmAccessKind::Write}};
+  auto held = driver_->admit_gpu_alias_ingress(process_id, kGpuId, *access, spans);
+  ASSERT_EQ(held.outcome, VmAccessOutcome::Complete);
+  ASSERT_TRUE(held.permit);
+
+  auto pending = std::async(std::launch::async, [&] { return driver_->munmap(host, kPage); });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool closed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    closed = driver_->alias_ingress_closed_for_testing(alias);
+    if (closed || pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  if (closed) {
+    EXPECT_EQ(driver_->admit_gpu_alias_ingress(process_id, kGpuId, *access, spans).outcome,
+              VmAccessOutcome::Unavailable);
+    EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      EXPECT_TRUE(
+          process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+    }
+    uint8_t byte = 0;
+    EXPECT_EQ(::pread(backing_fd, &byte, 1, kDirtyOffset), 1);
+    EXPECT_EQ(byte, 0x31);
+    EXPECT_EQ(host[kDirtyOffset], 0x31);
+    EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                             kDirtyOffset));
+    EXPECT_EQ(l2->backing_write_transactions(), writes);
+  }
+
+  held.permit.reset();
+  if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("local ordinary munmap did not finish after releasing ingress permit\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending.get(), 0);
+  uint8_t byte = 0;
+  ASSERT_EQ(::pread(backing_fd, &byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(byte, 0x9a);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kDirtyOffset));
+  EXPECT_FALSE(driver_->alias_ingress_closed_for_testing(alias));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalNoncanonicalUnmapWritesBackDirtyOwnerL2BeforeRetirement) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  using rocjitsu::amdgpu::MemorySideCache;
+  using rocjitsu::amdgpu::Mtype;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kFirstDirtyOffset = 48;
+  constexpr uint32_t kSecondDirtyOffset = 112;
+  constexpr uint32_t kCleanOffset = 49;
+  constexpr uint32_t kMscLineOffset = MemorySideCache::LINE_SIZE;
+  constexpr uint32_t kMscDirtyOffset = kMscLineOffset + 16;
+  constexpr uint32_t kMscCleanOffset = kMscLineOffset + 17;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kFirstDirtyOffset] = 0x21;
+  host[kSecondDirtyOffset] = 0x22;
+  host[kCleanOffset] = 0x37;
+  host[kMscDirtyOffset] = 0x2d;
+  host[kMscCleanOffset] = 0x3f;
+
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  uint64_t generation = 0;
+  int backing_fd = -1;
+  void *gpu_backing_ptr = nullptr;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    ASSERT_FALSE(record.backing_owner);
+    ASSERT_NE(record.host_ptr, host);
+    ASSERT_EQ(record.host_mapping_kind,
+              rocjitsu::KfdProcess::GpuAllocation::HostMappingKind::InternalBacking);
+    gpu_backing_ptr = record.host_ptr;
+    generation = record.admission_generations.at(kGpuId);
+    backing_fd = record.memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{
+      std::pair<uint32_t, uint8_t>{kFirstDirtyOffset, 0xa5},
+      std::pair<uint32_t, uint8_t>{kSecondDirtyOffset, 0xc6},
+  };
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, allocation.va_addr, process_id, access->cache_identity(), generation, dirty_bytes);
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kFirstDirtyOffset));
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kSecondDirtyOffset));
+  ASSERT_GT(soc_->num_iods(), 0u);
+  MemorySideCache *msc = soc_->iod(0)->msc();
+  ASSERT_NE(msc, nullptr);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> msc_line{};
+  std::copy_n(host + kMscLineOffset, msc_line.size(), msc_line.begin());
+  msc_line[16] = 0x7b;
+  KfdPreparedProviderTestAccess::store_dirty_msc_line(*msc, allocation.va_addr + kMscLineOffset,
+                                                      process_id, access->cache_identity(),
+                                                      generation, msc_line);
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_msc_line(
+      *msc, allocation.va_addr + kMscLineOffset, process_id));
+  const uint64_t writes = l2->backing_write_transactions();
+  std::array<uint8_t, L2Cache::LINE_SIZE> fd_bytes{};
+  ASSERT_EQ(::pread(backing_fd, fd_bytes.data(), fd_bytes.size(), 0),
+            static_cast<ssize_t>(fd_bytes.size()));
+  EXPECT_EQ(fd_bytes[kFirstDirtyOffset], 0x21);
+  EXPECT_EQ(fd_bytes[kSecondDirtyOffset], 0x22);
+  EXPECT_EQ(fd_bytes[kCleanOffset], 0x37);
+  std::array<uint8_t, 2> msc_fd_bytes{};
+  ASSERT_EQ(::pread(backing_fd, msc_fd_bytes.data(), msc_fd_bytes.size(), kMscDirtyOffset),
+            static_cast<ssize_t>(msc_fd_bytes.size()));
+  EXPECT_EQ(msc_fd_bytes, (std::array<uint8_t, 2>{0x2d, 0x3f}));
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page =
+        process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, process->page_table_.end());
+    EXPECT_EQ(page->second.mtype, Mtype::RW);
+    ASSERT_FALSE(page->second.host_extents.empty());
+    EXPECT_EQ(page->second.host_extents.front().host_ptr, gpu_backing_ptr);
+  }
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+  ASSERT_EQ(::pread(backing_fd, fd_bytes.data(), fd_bytes.size(), 0),
+            static_cast<ssize_t>(fd_bytes.size()));
+  EXPECT_EQ(fd_bytes[kFirstDirtyOffset], 0xa5);
+  EXPECT_EQ(fd_bytes[kSecondDirtyOffset], 0xc6);
+  EXPECT_EQ(fd_bytes[kCleanOffset], 0x37);
+  ASSERT_EQ(::pread(backing_fd, msc_fd_bytes.data(), msc_fd_bytes.size(), kMscDirtyOffset),
+            static_cast<ssize_t>(msc_fd_bytes.size()));
+  EXPECT_EQ(msc_fd_bytes, (std::array<uint8_t, 2>{0x7b, 0x3f}));
+  EXPECT_EQ(host[kFirstDirtyOffset], 0xa5);
+  EXPECT_EQ(host[kSecondDirtyOffset], 0xc6);
+  EXPECT_EQ(host[kCleanOffset], 0x37);
+  EXPECT_EQ(host[kMscDirtyOffset], 0x7b);
+  EXPECT_EQ(host[kMscCleanOffset], 0x3f);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 2);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kFirstDirtyOffset));
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kSecondDirtyOffset));
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_msc_line(
+      *msc, allocation.va_addr + kMscLineOffset, process_id));
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    EXPECT_EQ(record.host_ptr, gpu_backing_ptr);
+    EXPECT_EQ(record.memfd, backing_fd);
+    EXPECT_TRUE(record.mapped_device_ids.empty());
+    EXPECT_TRUE(record.admission_generations.empty());
+    EXPECT_EQ(record.page_table_mapped_bytes, 0u);
+  }
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+
+  l2->invalidate_all();
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalNoncanonicalUnmapRetriesBeforeAndAfterWriteback) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::Mtype;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 56;
+  constexpr uint32_t kCleanOffset = 57;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kDirtyOffset] = 0x31;
+  host[kCleanOffset] = 0x42;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  uint64_t generation = 0;
+  int backing_fd = -1;
+  void *gpu_backing_ptr = nullptr;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    ASSERT_FALSE(record.backing_owner);
+    ASSERT_NE(record.host_ptr, host);
+    ASSERT_EQ(record.host_mapping_kind,
+              rocjitsu::KfdProcess::GpuAllocation::HostMappingKind::InternalBacking);
+    gpu_backing_ptr = record.host_ptr;
+    generation = record.admission_generations.at(kGpuId);
+    backing_fd = record.memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xb5}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, allocation.va_addr, process_id, access->cache_identity(), generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+  const auto expect_retained_grant_and_view = [&] {
+    EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_EQ(record.host_ptr, gpu_backing_ptr);
+      EXPECT_EQ(record.memfd, backing_fd);
+      EXPECT_TRUE(record.mapped_device_ids.contains(kGpuId));
+      EXPECT_EQ(record.admission_generations.at(kGpuId), generation);
+      EXPECT_EQ(record.page_table_mapped_bytes, kPage);
+    }
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      const auto page =
+          process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+      ASSERT_NE(page, process->page_table_.end());
+      EXPECT_EQ(page->second.mtype, Mtype::RW);
+      ASSERT_FALSE(page->second.host_extents.empty());
+      EXPECT_EQ(page->second.host_extents.front().host_ptr, gpu_backing_ptr);
+    }
+  };
+  const auto read_backing_byte = [&] {
+    uint8_t byte = 0;
+    EXPECT_EQ(::pread(backing_fd, &byte, 1, kDirtyOffset), 1);
+    return byte;
+  };
+  ASSERT_EQ(read_backing_byte(), 0x31);
+  expect_retained_grant_and_view();
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  driver_->fail_next_local_unmap_writeback_for_testing();
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -ENOMEM);
+  EXPECT_EQ(unmap.n_success, 0u);
+  EXPECT_EQ(read_backing_byte(), 0x31);
+  EXPECT_EQ(host[kDirtyOffset], 0x31);
+  EXPECT_EQ(host[kCleanOffset], 0x42);
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kDirtyOffset));
+  EXPECT_EQ(KfdPreparedProviderTestAccess::line_generation(*l2, allocation.va_addr, process_id),
+            generation);
+  expect_retained_grant_and_view();
+
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::set_line_generation(*l2, allocation.va_addr,
+                                                                 process_id, generation + 1));
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -EIO);
+  EXPECT_EQ(unmap.n_success, 0u);
+  EXPECT_EQ(read_backing_byte(), 0x31);
+  EXPECT_EQ(host[kDirtyOffset], 0x31);
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kDirtyOffset));
+  expect_retained_grant_and_view();
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::set_line_generation(*l2, allocation.va_addr,
+                                                                 process_id, generation));
+
+  driver_->fail_next_local_unmap_retire_for_testing();
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -ENOMEM);
+  EXPECT_EQ(unmap.n_success, 0u);
+  EXPECT_EQ(read_backing_byte(), 0xb5);
+  EXPECT_EQ(host[kDirtyOffset], 0xb5);
+  EXPECT_EQ(host[kCleanOffset], 0x42);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kDirtyOffset));
+  EXPECT_TRUE(
+      KfdPreparedProviderTestAccess::line_clean_or_invalid(*l2, allocation.va_addr, process_id));
+  expect_retained_grant_and_view();
+
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+  EXPECT_EQ(read_backing_byte(), 0xb5);
+  EXPECT_EQ(host[kDirtyOffset], 0xb5);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalNoncanonicalUnmapWaitsForIngressBeforeWritebackAndRetirement) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::MemoryIngressSpan;
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 60;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kDirtyOffset] = 0x27;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_local_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &candidate) {
+    return candidate.gpu_va == allocation.va_addr && candidate.gpu_id == kGpuId;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto alias = *found;
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  int backing_fd = -1;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    backing_fd = process->allocations_.at(allocation.handle).memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x9a}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id,
+                                                      access->cache_identity(),
+                                                      alias.admission_generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+
+  const uint64_t code_va = allocation.va_addr - kPage;
+  alignas(4096) std::array<uint32_t, kPage / sizeof(uint32_t)> code{};
+  code[0] = 0xC0420080u; // s_store_dword s2, s[0:1], 0x0
+  code[1] = 0;
+  code[2] = 0xBF800000u;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    rocjitsu::KfdProcess::GpuAllocation instruction{};
+    instruction.gpu_va = code_va;
+    instruction.size = kPage;
+    instruction.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+    instruction.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+    instruction.handle = process->next_handle_++;
+    instruction.admission_generations[kGpuId] = process->next_gpu_admission_generation_locked();
+    process->allocations_[instruction.handle] = instruction;
+    process->publish_gpu_grants_locked();
+  }
+  process->map_pages(code_va, code.data(), kPage, rocjitsu::amdgpu::Mtype::RW,
+                     rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    if (!cu && !cp->compute_units().empty())
+      cu = cp->compute_units().front();
+  });
+  ASSERT_NE(cu, nullptr);
+  auto *wave = cu->dispatch_wf(/*wg_id=*/0, code_va, /*sgprs=*/16, /*vgprs=*/4);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id);
+  wave->set_address_space(*vmid);
+  cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(allocation.va_addr + kDirtyOffset));
+  cu->write_sgpr(wave->sgpr_alloc().base + 1,
+                 static_cast<uint32_t>((allocation.va_addr + kDirtyOffset) >> 32));
+  cu->write_sgpr(wave->sgpr_alloc().base + 2, 0x12345678u);
+
+  const std::array spans{
+      MemoryIngressSpan{allocation.va_addr + kDirtyOffset, sizeof(uint32_t), VmAccessKind::Write}};
+  auto held = driver_->admit_gpu_alias_ingress(process_id, kGpuId, *access, spans);
+  ASSERT_EQ(held.outcome, VmAccessOutcome::Complete);
+  ASSERT_TRUE(held.permit);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  auto pending = std::async(
+      std::launch::async, [&] { return driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap); });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool closed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    closed = driver_->alias_ingress_closed_for_testing(alias);
+    if (closed || pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  if (closed) {
+    EXPECT_EQ(driver_->admit_gpu_alias_ingress(process_id, kGpuId, *access, spans).outcome,
+              VmAccessOutcome::Unavailable);
+    cu->step();
+    EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+    EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      EXPECT_TRUE(
+          process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+    }
+    uint8_t fd_byte = 0;
+    EXPECT_EQ(::pread(backing_fd, &fd_byte, 1, kDirtyOffset), 1);
+    EXPECT_EQ(fd_byte, 0x27);
+    EXPECT_EQ(host[kDirtyOffset], 0x27);
+    EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                             kDirtyOffset));
+    EXPECT_EQ(l2->backing_write_transactions(), writes);
+  }
+
+  held.permit.reset();
+  if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("local UNMAP did not finish after releasing ingress permit\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending.get(), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+  uint8_t fd_byte = 0;
+  ASSERT_EQ(::pread(backing_fd, &fd_byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(fd_byte, 0x9a);
+  EXPECT_EQ(host[kDirtyOffset], 0x9a);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kDirtyOffset));
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  process->unmap_pages(code_va, kPage);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalNoncanonicalFreePublishesDirtyOwnerL2BeforeBackingRelease) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 64;
+  constexpr uint32_t kCleanOffset = 65;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kDirtyOffset] = 0x11;
+  host[kCleanOffset] = 0x2b;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  uint64_t generation = 0;
+  int backing_fd = -1;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    ASSERT_FALSE(record.backing_owner);
+    generation = record.admission_generations.at(kGpuId);
+    backing_fd = record.memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  const int retained_fd = ::fcntl(backing_fd, F_DUPFD_CLOEXEC, 0);
+  ASSERT_GE(retained_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xd4}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, allocation.va_addr, process_id, access->cache_identity(), generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+  ASSERT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kDirtyOffset));
+  std::array<uint8_t, 2> fd_bytes{};
+  ASSERT_EQ(::pread(retained_fd, fd_bytes.data(), fd_bytes.size(), kDirtyOffset),
+            static_cast<ssize_t>(fd_bytes.size()));
+  EXPECT_EQ(fd_bytes, (std::array<uint8_t, 2>{0x11, 0x2b}));
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  ASSERT_EQ(::pread(retained_fd, fd_bytes.data(), fd_bytes.size(), kDirtyOffset),
+            static_cast<ssize_t>(fd_bytes.size()));
+  EXPECT_EQ(fd_bytes, (std::array<uint8_t, 2>{0xd4, 0x2b}));
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kDirtyOffset));
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    EXPECT_FALSE(process->allocations_.contains(allocation.handle));
+  }
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_EQ(::close(retained_fd), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalNoncanonicalFreeAdoptsFailedUnmapWriteback) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 72;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kDirtyOffset] = 0x23;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  uint64_t generation = 0;
+  int backing_fd = -1;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    generation = record.admission_generations.at(kGpuId);
+    backing_fd = record.memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  const int retained_fd = ::fcntl(backing_fd, F_DUPFD_CLOEXEC, 0);
+  ASSERT_GE(retained_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xe7}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, allocation.va_addr, process_id, access->cache_identity(), generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  driver_->fail_next_local_unmap_writeback_for_testing();
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), -ENOMEM);
+  EXPECT_EQ(unmap.n_success, 0u);
+  EXPECT_EQ(host[kDirtyOffset], 0x23);
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kDirtyOffset));
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_TRUE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  uint8_t fd_byte = 0;
+  ASSERT_EQ(::pread(retained_fd, &fd_byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(fd_byte, 0xe7);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kDirtyOffset));
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    EXPECT_FALSE(process->allocations_.contains(allocation.handle));
+  }
+  EXPECT_EQ(::close(retained_fd), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalNoncanonicalClosePublishesDirtyOwnerL2BeforeBackingRelease) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 80;
+  constexpr uint32_t kCleanOffset = 81;
+  const uint32_t closing_id = driver_->open_process(/*client_pid=*/4243);
+  ASSERT_NE(closing_id, 0u);
+  const auto process = driver_->find_process(closing_id);
+  ASSERT_NE(process, nullptr);
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(closing_id, nullptr, kPage, PROT_READ | PROT_WRITE,
+                                           MAP_SHARED, static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kDirtyOffset] = 0x41;
+  host[kCleanOffset] = 0x52;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(closing_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const auto vmid = soc_->gpu_vm().find_vmid(closing_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  uint64_t generation = 0;
+  int backing_fd = -1;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    ASSERT_FALSE(record.backing_owner);
+    generation = record.admission_generations.at(kGpuId);
+    backing_fd = record.memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  const int retained_fd = ::fcntl(backing_fd, F_DUPFD_CLOEXEC, 0);
+  ASSERT_GE(retained_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xf6}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, allocation.va_addr, closing_id, access->cache_identity(), generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+  std::array<uint8_t, 2> fd_bytes{};
+  ASSERT_EQ(::pread(retained_fd, fd_bytes.data(), fd_bytes.size(), kDirtyOffset),
+            static_cast<ssize_t>(fd_bytes.size()));
+  EXPECT_EQ(fd_bytes, (std::array<uint8_t, 2>{0x41, 0x52}));
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+
+  ASSERT_EQ(driver_->close(closing_id), 0);
+  EXPECT_EQ(driver_->find_process(closing_id), nullptr);
+  ASSERT_EQ(::pread(retained_fd, fd_bytes.data(), fd_bytes.size(), kDirtyOffset),
+            static_cast<ssize_t>(fd_bytes.size()));
+  EXPECT_EQ(fd_bytes, (std::array<uint8_t, 2>{0xf6, 0x52}));
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, closing_id,
+                                                            kDirtyOffset));
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    EXPECT_TRUE(process->allocations_.empty());
+  }
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_EQ(::close(retained_fd), 0);
+}
+
+TEST_F(KfdIoctlTest, LocalCacheableVramSdmaWriteCompletesBeforeAliasRetirement) {
+  using rocjitsu::amdgpu::MemoryIngressSpan;
+  using rocjitsu::amdgpu::Mtype;
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kOffset = 64;
+  constexpr uint32_t kValue = 0xabcdef01u;
+  alignas(4096) std::array<uint32_t, kPage / sizeof(uint32_t)> ring{};
+  alignas(4096) std::array<uint64_t, kPage / sizeof(uint64_t)> pointers{};
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto aliases = process->gpu_local_alias_snapshot();
+  const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+  });
+  ASSERT_NE(found, aliases->end());
+  const auto local = *found;
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto pinned = soc_->gpu_vm().snapshot_pinned(*vmid);
+  ASSERT_TRUE(pinned);
+  const std::array spans{
+      MemoryIngressSpan{allocation.va_addr + kOffset, sizeof(uint32_t), VmAccessKind::Write}};
+  auto admitted = driver_->admit_gpu_alias_ingress(process_id, kGpuId, *pinned, spans);
+  ASSERT_EQ(admitted.outcome, VmAccessOutcome::Complete);
+  ASSERT_TRUE(admitted.permit);
+  admitted.permit.reset();
+
+  const auto map_system_page = [&](void *page) {
+    const uint64_t address = reinterpret_cast<uint64_t>(page);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      rocjitsu::KfdProcess::GpuAllocation control{};
+      control.gpu_va = address;
+      control.size = kPage;
+      control.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+      control.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+      control.handle = process->next_handle_++;
+      control.admission_generations[kGpuId] = process->next_gpu_admission_generation_locked();
+      process->allocations_[control.handle] = control;
+      process->publish_gpu_grants_locked();
+    }
+    process->map_pages(address, page, kPage, Mtype::UC,
+                       rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  };
+  map_system_page(ring.data());
+  map_system_page(pointers.data());
+
+  const off_t doorbell_offset =
+      static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(kGpuId));
+  void *doorbell_page =
+      driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED, doorbell_offset);
+  ASSERT_NE(doorbell_page, MAP_FAILED);
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = kGpuId;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = kPage;
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  auto *doorbell = reinterpret_cast<uint64_t *>(static_cast<std::byte *>(doorbell_page) +
+                                                queue.doorbell_offset % kPage);
+  ring[0] = 2; // SDMA_OP_WRITE, linear form.
+  ring[1] = static_cast<uint32_t>(allocation.va_addr + kOffset);
+  ring[2] = static_cast<uint32_t>((allocation.va_addr + kOffset) >> 32);
+  ring[3] = 0; // One DWORD.
+  ring[4] = kValue;
+  constexpr uint64_t kProducer = 5 * sizeof(uint32_t);
+  std::atomic_ref<uint64_t>(pointers[1]).store(kProducer, std::memory_order_release);
+  std::atomic_ref<uint64_t>(*doorbell).store(kProducer, std::memory_order_release);
+  auto &scheduler = soc_->sdma_queue_scheduler();
+  ASSERT_TRUE(scheduler.synchronize_host_queue_for_test(process_id, queue.queue_id));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers[0]).load(std::memory_order_acquire), kProducer);
+  uint32_t observed = 0;
+  std::memcpy(&observed, host + kOffset, sizeof(observed));
+  EXPECT_EQ(observed, kValue);
+  int backing_fd = -1;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    backing_fd = process->allocations_.at(allocation.handle).memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  ASSERT_EQ(::pread(backing_fd, &observed, sizeof(observed), kOffset),
+            static_cast<ssize_t>(sizeof(observed)));
+  EXPECT_EQ(observed, kValue);
+  EXPECT_TRUE(process->gpu_alias_grant_current(local));
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+  EXPECT_EQ(unmap.n_success, 1u);
+  EXPECT_FALSE(process->gpu_alias_grant_current(local));
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  EXPECT_EQ(driver_->tracked_alias_ingress_generations_for_testing(), 0u);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  process->unmap_pages(reinterpret_cast<uint64_t>(ring.data()), kPage);
+  process->unmap_pages(reinterpret_cast<uint64_t>(pointers.data()), kPage);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+struct KfdPreparedSdmaConfig {
+  const std::string *path;
+  uint32_t gpu_id;
+  const char *name;
+};
+
+void PrintTo(const KfdPreparedSdmaConfig &config, std::ostream *stream) {
+  *stream << config.name << " gpu_id=" << config.gpu_id;
+}
+
+class KfdPreparedSdmaTest : public KfdIoctlTest,
+                            public ::testing::WithParamInterface<KfdPreparedSdmaConfig> {
+protected:
+  static constexpr size_t kPage = 4096;
+
+  struct LocalAlias {
+    uint64_t va = 0;
+    uint64_t handle = 0;
+    uint8_t *host = nullptr;
+    rocjitsu::KfdProcess::GpuAliasRecord record;
+    uint64_t cache_identity = 0;
+    int backing_fd = -1;
+  };
+
+  bool create_local_alias(LocalAlias &out) {
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.size = kPage;
+    allocation.gpu_id = gpu_id_;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    if (driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation) != 0)
+      return false;
+    out.va = allocation.va_addr;
+    out.handle = allocation.handle;
+    out.host =
+        static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                             static_cast<off_t>(allocation.mmap_offset)));
+    if (out.host == MAP_FAILED)
+      return false;
+    uint32_t gpu_id = gpu_id_;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    if (driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map) != 0)
+      return false;
+    const auto aliases = process_->gpu_local_alias_snapshot();
+    const auto found = std::ranges::find_if(*aliases, [&](const auto &alias) {
+      return alias.gpu_va == out.va && alias.gpu_id == gpu_id_;
+    });
+    if (found == aliases->end())
+      return false;
+    out.record = *found;
+    const auto handle = soc_->gpu_vm().find_vmid(process_id_);
+    const auto access = handle ? soc_->gpu_vm().snapshot(*handle) : std::nullopt;
+    if (!access)
+      return false;
+    out.cache_identity = access->cache_identity();
+    std::lock_guard lock(process_->alloc_mutex_);
+    out.backing_fd = process_->allocations_.at(out.handle).memfd;
+    return out.backing_fd >= 0;
+  }
+
+  void SetUp() override {
+    gpu_id_ = GetParam().gpu_id;
+    SetUpWithConfig(*GetParam().path);
+    if (!driver_)
+      return;
+    process_id_ = driver_->local_process_id();
+    process_ = driver_->find_process(process_id_);
+    ASSERT_NE(process_, nullptr);
+    map_control(ring_.data());
+    if (HasFatalFailure())
+      return;
+    map_control(pointers_.data());
+    if (HasFatalFailure())
+      return;
+    map_control(target_.data());
+    if (HasFatalFailure())
+      return;
+
+    const off_t doorbell_offset =
+        static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(gpu_id_));
+    void *doorbell_page =
+        driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED, doorbell_offset);
+    ASSERT_NE(doorbell_page, MAP_FAILED);
+    kfd_ioctl_create_queue_args queue{};
+    queue.gpu_id = gpu_id_;
+    queue.queue_type = KFD_IOC_QUEUE_TYPE_SDMA;
+    queue.ring_base_address = reinterpret_cast<uint64_t>(ring_.data());
+    queue.ring_size = kPage;
+    queue.read_pointer_address = reinterpret_cast<uint64_t>(&pointers_[0]);
+    queue.write_pointer_address = reinterpret_cast<uint64_t>(&pointers_[1]);
+    queue.queue_percentage = 100;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+    queue_id_ = queue.queue_id;
+    doorbell_ = reinterpret_cast<uint64_t *>(static_cast<std::byte *>(doorbell_page) +
+                                             queue.doorbell_offset % kPage);
+  }
+
+  void TearDown() override {
+    if (queue_id_ != 0) {
+      kfd_ioctl_destroy_queue_args destroy{};
+      destroy.queue_id = queue_id_;
+      EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+    }
+    if (process_) {
+      for (void *page : mapped_controls_)
+        EXPECT_EQ(process_->unmap_pages(reinterpret_cast<uint64_t>(page), kPage),
+                  rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+    }
+    KfdIoctlTest::TearDown();
+  }
+
+  void map_control(void *page) {
+    const uint64_t address = reinterpret_cast<uint64_t>(page);
+    {
+      std::lock_guard lock(process_->alloc_mutex_);
+      rocjitsu::KfdProcess::GpuAllocation control{};
+      control.gpu_va = address;
+      control.size = kPage;
+      control.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT;
+      control.domain = rocjitsu::KfdProcess::GpuGrantDomain::System;
+      control.handle = process_->next_handle_++;
+      control.admission_generations[gpu_id_] = process_->next_gpu_admission_generation_locked();
+      process_->allocations_[control.handle] = control;
+      process_->publish_gpu_grants_locked();
+    }
+    ASSERT_EQ(process_->map_pages(address, page, kPage, rocjitsu::amdgpu::Mtype::UC,
+                                  rocjitsu::KfdProcess::HostExtentOwner::Driver),
+              rocjitsu::KfdProcess::PageTableMutationResult::Applied);
+    mapped_controls_.push_back(page);
+  }
+
+  uint64_t submit_fence(size_t word_offset, size_t target_index, uint32_t value) {
+    ring_[word_offset] = 5; // SDMA_OP_FENCE.
+    const uint64_t destination = reinterpret_cast<uint64_t>(&target_[target_index]);
+    ring_[word_offset + 1] = static_cast<uint32_t>(destination);
+    ring_[word_offset + 2] = static_cast<uint32_t>(destination >> 32);
+    ring_[word_offset + 3] = value;
+    const uint64_t producer = (word_offset + 4) * sizeof(uint32_t);
+    std::atomic_ref<uint64_t>(pointers_[1]).store(producer, std::memory_order_release);
+    std::atomic_ref<uint64_t>(*doorbell_).store(producer, std::memory_order_release);
+    return producer;
+  }
+
+  alignas(4096) std::array<uint32_t, kPage / sizeof(uint32_t)> ring_{};
+  alignas(4096) std::array<uint64_t, kPage / sizeof(uint64_t)> pointers_{};
+  alignas(4096) std::array<uint32_t, kPage / sizeof(uint32_t)> target_{};
+  std::shared_ptr<rocjitsu::KfdProcess> process_;
+  std::vector<void *> mapped_controls_;
+  uint32_t gpu_id_ = 0;
+  uint32_t process_id_ = 0;
+  uint32_t queue_id_ = 0;
+  uint64_t *doorbell_ = nullptr;
+};
+
+TEST_P(KfdPreparedSdmaTest, FencePublishesDirtyLocalAliasToRetainedBacking) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr uint32_t kDirtyOffset = 48;
+  LocalAlias local;
+  ASSERT_TRUE(create_local_alias(local));
+  local.host[kDirtyOffset] = 0x31;
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x9a}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, local.va, process_id_, local.cache_identity, local.record.admission_generation, dirty);
+  const uint64_t writes = l2->backing_write_transactions();
+  uint8_t byte = 0;
+  ASSERT_EQ(::pread(local.backing_fd, &byte, 1, kDirtyOffset), 1);
+  ASSERT_EQ(byte, 0x31);
+
+  const uint64_t producer = submit_fence(0, 0, 0x11223344u);
+  ASSERT_TRUE(soc_->sdma_queue_scheduler().synchronize_host_queue_for_test(process_id_, queue_id_));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers_[0]).load(std::memory_order_acquire), producer);
+  EXPECT_EQ(target_[0], 0x11223344u);
+  ASSERT_EQ(::pread(local.backing_fd, &byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(byte, 0x9a);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(
+      KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, local.va, process_id_, kDirtyOffset));
+}
+
+TEST_P(KfdPreparedSdmaTest, ClosedUnrelatedDirtyAliasRetriesFenceWithoutEffect) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr uint32_t kDirtyOffset = 48;
+  LocalAlias local;
+  ASSERT_TRUE(create_local_alias(local));
+  local.host[kDirtyOffset] = 0x31;
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x9a}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, local.va, process_id_, local.cache_identity, local.record.admission_generation, dirty);
+  const uint64_t writes = l2->backing_write_transactions();
+
+  std::vector<std::function<void()>> owner_queue;
+  const auto post = [&](std::function<void()> continuation) {
+    owner_queue.push_back(std::move(continuation));
+  };
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(local.record, post, [] {}));
+  struct ClosureGuard {
+    std::function<void()> cleanup;
+    ~ClosureGuard() {
+      if (cleanup)
+        cleanup();
+    }
+  } closure{[&] {
+    if (!owner_queue.empty())
+      owner_queue.back()();
+    (void)driver_->reopen_gpu_alias_ingress(local.record);
+  }};
+  ASSERT_EQ(owner_queue.size(), 1u);
+  const uint64_t producer = submit_fence(0, 0, 0x55667788u);
+  const bool blocked = soc_->sdma_queue_scheduler().wait_for_blocked_packet_for_test(
+      process_id_, queue_id_, std::chrono::seconds(1));
+  EXPECT_TRUE(blocked);
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers_[0]).load(std::memory_order_acquire), 0u);
+  EXPECT_EQ(target_[0], 0u);
+  uint8_t byte = 0;
+  EXPECT_EQ(::pread(local.backing_fd, &byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(byte, 0x31);
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  EXPECT_TRUE(
+      KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, local.va, process_id_, kDirtyOffset));
+
+  owner_queue.back()();
+  owner_queue.clear();
+  const bool reopened = driver_->reopen_gpu_alias_ingress(local.record);
+  EXPECT_TRUE(reopened);
+  if (!reopened)
+    return;
+  closure.cleanup = {};
+  ASSERT_TRUE(soc_->sdma_queue_scheduler().synchronize_queue_for_test(process_id_, queue_id_));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers_[0]).load(std::memory_order_acquire), producer);
+  EXPECT_EQ(target_[0], 0x55667788u);
+  ASSERT_EQ(::pread(local.backing_fd, &byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(byte, 0x9a);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+}
+
+TEST_P(KfdPreparedSdmaTest, FencePublishesDirtyPromotedCanonicalAlias) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr uint32_t kDirtyOffset = 48;
+  LocalAlias local;
+  ASSERT_TRUE(create_local_alias(local));
+  local.host[kDirtyOffset] = 0x31;
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = local.handle;
+  exported.gpu_id = gpu_id_;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  const auto canonical = process_->gpu_alias_snapshot();
+  const auto found = std::ranges::find_if(*canonical, [&](const auto &alias) {
+    return alias.gpu_va == local.va && alias.gpu_id == gpu_id_;
+  });
+  ASSERT_NE(found, canonical->end());
+  EXPECT_FALSE(found->local);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x9a}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, local.va, process_id_, local.cache_identity, found->admission_generation, dirty);
+  const uint64_t writes = l2->backing_write_transactions();
+  uint8_t byte = 0;
+  ASSERT_EQ(::pread(local.backing_fd, &byte, 1, kDirtyOffset), 1);
+  ASSERT_EQ(byte, 0x31);
+
+  const uint64_t producer = submit_fence(0, 0, 0x11223344u);
+  ASSERT_TRUE(soc_->sdma_queue_scheduler().synchronize_host_queue_for_test(process_id_, queue_id_));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers_[0]).load(std::memory_order_acquire), producer);
+  EXPECT_EQ(target_[0], 0x11223344u);
+  ASSERT_EQ(::pread(local.backing_fd, &byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(byte, 0x9a);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(
+      KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, local.va, process_id_, kDirtyOffset));
+}
+
+TEST_P(KfdPreparedSdmaTest, MixedVmidWritersRefuseFenceWithoutEffect) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  constexpr uint32_t kDirtyOffset = 48;
+  LocalAlias local;
+  ASSERT_TRUE(create_local_alias(local));
+  local.host[kDirtyOffset] = 0x31;
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x9a}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, local.va, process_id_, local.cache_identity, local.record.admission_generation, dirty);
+  const uint64_t zero_line = local.va + L2Cache::LINE_SIZE;
+  const std::array zero_dirty{std::pair<uint32_t, uint8_t>{0, 0x5c}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, zero_line, 0, 0, 0, zero_dirty);
+  const uint64_t writes = l2->backing_write_transactions();
+
+  const uint64_t producer = submit_fence(0, 0, 0x11223344u);
+  EXPECT_TRUE(soc_->sdma_queue_scheduler().wait_for_blocked_packet_for_test(
+      process_id_, queue_id_, std::chrono::seconds(1)));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers_[0]).load(std::memory_order_acquire), 0u);
+  EXPECT_EQ(target_[0], 0u);
+  uint8_t byte = 0;
+  ASSERT_EQ(::pread(local.backing_fd, &byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(byte, 0x31);
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  EXPECT_TRUE(
+      KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, local.va, process_id_, kDirtyOffset));
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, zero_line, 0, 0));
+
+  KfdPreparedProviderTestAccess::discard_dirty_l2_line(*l2, zero_line, 0);
+  ASSERT_TRUE(soc_->sdma_queue_scheduler().synchronize_queue_for_test(process_id_, queue_id_));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers_[0]).load(std::memory_order_acquire), producer);
+  EXPECT_EQ(target_[0], 0x11223344u);
+  ASSERT_EQ(::pread(local.backing_fd, &byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(byte, 0x9a);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+}
+
+TEST_P(KfdPreparedSdmaTest, StaleDirtyGenerationFaultsFenceBeforeEffect) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr uint32_t kDirtyOffset = 48;
+  LocalAlias local;
+  ASSERT_TRUE(create_local_alias(local));
+  local.host[kDirtyOffset] = 0x31;
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x9a}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, local.va, process_id_,
+                                                      local.cache_identity,
+                                                      local.record.admission_generation + 1, dirty);
+  const uint64_t writes = l2->backing_write_transactions();
+  submit_fence(0, 0, 0x11223344u);
+  EXPECT_FALSE(
+      soc_->sdma_queue_scheduler().synchronize_host_queue_for_test(process_id_, queue_id_));
+  EXPECT_EQ(std::atomic_ref<uint64_t>(pointers_[0]).load(std::memory_order_acquire), 0u);
+  EXPECT_EQ(target_[0], 0u);
+  uint8_t byte = 0;
+  ASSERT_EQ(::pread(local.backing_fd, &byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(byte, 0x31);
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  EXPECT_TRUE(
+      KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, local.va, process_id_, kDirtyOffset));
+  KfdPreparedProviderTestAccess::discard_dirty_l2_line(*l2, local.va, process_id_);
+}
+
+class KfdCuAtomicInstruction final : public rocjitsu::Instruction {
+public:
+  explicit KfdCuAtomicInstruction(std::unique_ptr<rocjitsu::DynamicInstState> state)
+      : Instruction("global_atomic_add", nullptr) {
+    flags_ |= rocjitsu::MEMORY_OP;
+    set_data(std::move(state));
+  }
+};
+
+TEST(KfdCuAtomicTest, VmidZeroAtomicSurvivesKfdFrontendTeardown) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  auto soc = load_standalone_soc(CONFIG_PATH);
+  ASSERT_NE(soc, nullptr);
+  {
+    rocjitsu::SimulatedKfd driver(*soc);
+    ASSERT_GE(driver.open(), 0);
+  }
+
+  auto *cp = soc->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  auto *cu = cp->compute_units().front();
+  auto *wave = cu->dispatch_wf(0, 0, cu->sgpr_allocation_block_size(), 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(0);
+  wave->set_exec(1);
+
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kInitial = 10;
+  constexpr uint32_t kIncrement = 7;
+  soc->memory()->write32(kAddress, kInitial);
+  auto atomic = std::make_unique<rocjitsu::amdgpu::VectorMemState>(rocjitsu::amdgpu::GLOBAL_MEM);
+  atomic->elem_size = sizeof(uint32_t);
+  atomic->num_elems = 1;
+  atomic->is_load = true;
+  atomic->atomic_op = rocjitsu::amdgpu::AtomicOp::ADD;
+  atomic->wf_size = wave->wf_size();
+  atomic->exec_mask = 1;
+  atomic->lane_mask = 1;
+  atomic->per_lane_addr[0] = kAddress;
+  atomic->dst_reg_base = wave->vgpr_alloc().base + 8;
+  atomic->store_data.resize(atomic->wf_size * sizeof(uint32_t));
+  std::memcpy(atomic->store_data.data(), &kIncrement, sizeof(kIncrement));
+
+  EXPECT_EQ(rocjitsu::test::KfdCuAtomicTestAccess::route(
+                *cu, new KfdCuAtomicInstruction(std::move(atomic)), *wave),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(soc->memory()->read32(kAddress), kInitial + kIncrement);
+}
+
+TEST_P(KfdPreparedSdmaTest, CuVmidZeroAtomicRetainsKfdDirtyGrantBoundary) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  LocalAlias closed;
+  ASSERT_TRUE(create_local_alias(closed));
+  constexpr uint32_t kDirtyOffset = 48;
+  closed.host[kDirtyOffset] = 0x31;
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x9a}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, closed.va, process_id_,
+                                                      closed.cache_identity,
+                                                      closed.record.admission_generation, dirty);
+
+  std::vector<std::function<void()>> owner_queue;
+  const auto post = [&](std::function<void()> continuation) {
+    owner_queue.push_back(std::move(continuation));
+  };
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(closed.record, post, [] {}));
+  struct ClosureGuard {
+    std::function<void()> cleanup;
+    ~ClosureGuard() {
+      if (cleanup)
+        cleanup();
+    }
+  } closure{[&] {
+    if (!owner_queue.empty())
+      owner_queue.back()();
+    (void)driver_->reopen_gpu_alias_ingress(closed.record);
+  }};
+  ASSERT_EQ(owner_queue.size(), 1u);
+
+  auto *cp = soc_->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  auto *cu = cp->compute_units().front();
+  auto *wave = cu->dispatch_wf(0, 0, cu->sgpr_allocation_block_size(), 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(0);
+  wave->set_exec(1);
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kInitial = 10;
+  constexpr uint32_t kIncrement = 7;
+  soc_->memory()->write32(kAddress, kInitial);
+  auto atomic = std::make_unique<rocjitsu::amdgpu::VectorMemState>(rocjitsu::amdgpu::GLOBAL_MEM);
+  atomic->elem_size = sizeof(uint32_t);
+  atomic->num_elems = 1;
+  atomic->is_load = true;
+  atomic->atomic_op = rocjitsu::amdgpu::AtomicOp::ADD;
+  atomic->wf_size = wave->wf_size();
+  atomic->exec_mask = 1;
+  atomic->lane_mask = 1;
+  atomic->per_lane_addr[0] = kAddress;
+  atomic->dst_reg_base = wave->vgpr_alloc().base + 8;
+  atomic->store_data.resize(atomic->wf_size * sizeof(uint32_t));
+  std::memcpy(atomic->store_data.data(), &kIncrement, sizeof(kIncrement));
+
+  EXPECT_EQ(rocjitsu::test::KfdCuAtomicTestAccess::route(
+                *cu, new KfdCuAtomicInstruction(std::move(atomic)), *wave),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+  EXPECT_EQ(soc_->memory()->read32(kAddress), kInitial);
+  EXPECT_TRUE(
+      KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, closed.va, process_id_, kDirtyOffset));
+
+  owner_queue.back()();
+  owner_queue.clear();
+  ASSERT_TRUE(driver_->reopen_gpu_alias_ingress(closed.record));
+  closure.cleanup = {};
+  rocjitsu::test::KfdCuAtomicTestAccess::retry(*cu);
+  EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+  EXPECT_EQ(soc_->memory()->read32(kAddress), kInitial + kIncrement);
+  EXPECT_EQ(closed.host[kDirtyOffset], 0x9a);
+}
+
+TEST_P(KfdPreparedSdmaTest, CuAtomicRetriesClosedDirtyAliasBeforeAnyEffect) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  LocalAlias target;
+  LocalAlias closed;
+  ASSERT_TRUE(create_local_alias(target));
+  ASSERT_TRUE(create_local_alias(closed));
+  constexpr uint32_t kInitial = 10;
+  constexpr uint32_t kIncrement = 7;
+  constexpr uint32_t kSecondInitial = 20;
+  constexpr uint32_t kSecondIncrement = 3;
+  constexpr uint32_t kMscSiblingOffset = 32;
+  constexpr uint32_t kSiblingOffset = 48;
+  constexpr uint32_t kClosedOffset = 64;
+  std::memcpy(target.host, &kInitial, sizeof(kInitial));
+  std::memcpy(target.host + sizeof(uint32_t), &kSecondInitial, sizeof(kSecondInitial));
+  target.host[kMscSiblingOffset] = 0x23;
+  target.host[kSiblingOffset] = 0x31;
+  closed.host[kClosedOffset] = 0x42;
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array sibling_dirty{std::pair<uint32_t, uint8_t>{kSiblingOffset, 0x9a}};
+  const std::array closed_dirty{std::pair<uint32_t, uint8_t>{kClosedOffset, 0xbc}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, target.va, process_id_, target.cache_identity, target.record.admission_generation,
+      sibling_dirty);
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, closed.va, process_id_, closed.cache_identity, closed.record.admission_generation,
+      closed_dirty);
+  ASSERT_GT(soc_->num_iods(), 0u);
+  auto *msc = soc_->iod(0)->msc();
+  ASSERT_NE(msc, nullptr);
+  std::array<uint8_t, rocjitsu::amdgpu::MemorySideCache::LINE_SIZE> msc_line{};
+  std::copy_n(target.host, msc_line.size(), msc_line.begin());
+  msc_line[kMscSiblingOffset] = 0x5e;
+  KfdPreparedProviderTestAccess::store_dirty_msc_line(*msc, target.va, process_id_,
+                                                      target.cache_identity,
+                                                      target.record.admission_generation, msc_line);
+
+  std::vector<std::function<void()>> owner_queue;
+  const auto post = [&](std::function<void()> continuation) {
+    owner_queue.push_back(std::move(continuation));
+  };
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(closed.record, post, [] {}));
+  struct ClosureGuard {
+    std::function<void()> cleanup;
+    ~ClosureGuard() {
+      if (cleanup)
+        cleanup();
+    }
+  } closure{[&] {
+    if (!owner_queue.empty())
+      owner_queue.back()();
+    (void)driver_->reopen_gpu_alias_ingress(closed.record);
+  }};
+  ASSERT_EQ(owner_queue.size(), 1u);
+
+  auto *cp = soc_->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  auto *cu = cp->compute_units().front();
+  auto *wave = cu->dispatch_wf(0, 0, cu->sgpr_allocation_block_size(), 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id_);
+  const auto address_space = soc_->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(address_space);
+  wave->set_address_space(*address_space);
+  const auto ordinary_access = soc_->gpu_vm().snapshot(*address_space);
+  const auto pinned_access = soc_->gpu_vm().snapshot_pinned(*address_space);
+  ASSERT_TRUE(ordinary_access);
+  ASSERT_TRUE(pinned_access);
+  ASSERT_EQ(pinned_access->cache_namespace(), ordinary_access->cache_namespace());
+  ASSERT_NE(pinned_access->cache_identity(), ordinary_access->cache_identity());
+  wave->set_vm_access(std::make_shared<const rocjitsu::amdgpu::GpuVmAccess>(*pinned_access));
+  wave->set_exec(3);
+  auto atomic = std::make_unique<rocjitsu::amdgpu::VectorMemState>(rocjitsu::amdgpu::GLOBAL_MEM);
+  atomic->elem_size = sizeof(uint32_t);
+  atomic->num_elems = 1;
+  atomic->is_load = true;
+  atomic->atomic_op = rocjitsu::amdgpu::AtomicOp::ADD;
+  atomic->wf_size = wave->wf_size();
+  atomic->exec_mask = 3;
+  atomic->lane_mask = 3;
+  atomic->per_lane_addr[0] = target.va;
+  atomic->per_lane_addr[1] = target.va + sizeof(uint32_t);
+  atomic->dst_reg_base = wave->vgpr_alloc().base + 8;
+  atomic->store_data.resize(atomic->wf_size * sizeof(uint32_t));
+  std::memcpy(atomic->store_data.data(), &kIncrement, sizeof(kIncrement));
+  std::memcpy(atomic->store_data.data() + sizeof(uint32_t), &kSecondIncrement,
+              sizeof(kSecondIncrement));
+  const uint64_t epoch = l2->coherence_domain()->current_epoch();
+  const uint64_t writes = l2->backing_write_transactions();
+  EXPECT_EQ(rocjitsu::test::KfdCuAtomicTestAccess::route(
+                *cu, new KfdCuAtomicInstruction(std::move(atomic)), *wave),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
+  uint32_t observed = 0;
+  std::memcpy(&observed, target.host, sizeof(observed));
+  EXPECT_EQ(observed, kInitial);
+  std::memcpy(&observed, target.host + sizeof(uint32_t), sizeof(observed));
+  EXPECT_EQ(observed, kSecondInitial);
+  EXPECT_EQ(target.host[kMscSiblingOffset], 0x23);
+  EXPECT_EQ(target.host[kSiblingOffset], 0x31);
+  EXPECT_EQ(closed.host[kClosedOffset], 0x42);
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  EXPECT_EQ(l2->coherence_domain()->current_epoch(), epoch);
+  EXPECT_TRUE(
+      KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, target.va, process_id_, kSiblingOffset));
+  EXPECT_TRUE(
+      KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, closed.va, process_id_, kClosedOffset));
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_msc_line(*msc, target.va, process_id_));
+
+  owner_queue.back()();
+  owner_queue.clear();
+  ASSERT_TRUE(driver_->reopen_gpu_alias_ingress(closed.record));
+  closure.cleanup = {};
+  rocjitsu::test::KfdCuAtomicTestAccess::retry(*cu);
+  EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
+  EXPECT_EQ(cu->read_vgpr_storage(wave->vgpr_alloc().base + 8, 0), kInitial);
+  EXPECT_EQ(cu->read_vgpr_storage(wave->vgpr_alloc().base + 8, 1), kSecondInitial);
+  std::memcpy(&observed, target.host, sizeof(observed));
+  EXPECT_EQ(observed, kInitial + kIncrement);
+  std::memcpy(&observed, target.host + sizeof(uint32_t), sizeof(observed));
+  EXPECT_EQ(observed, kSecondInitial + kSecondIncrement);
+  EXPECT_EQ(target.host[kMscSiblingOffset], 0x5e);
+  EXPECT_EQ(target.host[kSiblingOffset], 0x9a);
+  EXPECT_EQ(closed.host[kClosedOffset], 0xbc);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_msc_line(*msc, target.va, process_id_));
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 4);
+  EXPECT_EQ(l2->coherence_domain()->current_epoch(), epoch + 1);
+}
+
+TEST_P(KfdPreparedSdmaTest, CuAtomicRejectsStaleDirtyGenerationBeforeAnyEffect) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  LocalAlias target;
+  ASSERT_TRUE(create_local_alias(target));
+  constexpr uint32_t kInitial = 10;
+  constexpr uint32_t kIncrement = 7;
+  constexpr uint32_t kDirtyOffset = 48;
+  std::memcpy(target.host, &kInitial, sizeof(kInitial));
+  target.host[kDirtyOffset] = 0x31;
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x9a}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, target.va, process_id_, target.cache_identity, target.record.admission_generation + 1,
+      dirty);
+
+  auto *cp = soc_->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  auto *cu = cp->compute_units().front();
+  auto *wave = cu->dispatch_wf(0, 0, cu->sgpr_allocation_block_size(), 32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(process_id_);
+  const auto address_space = soc_->gpu_vm().find_vmid(process_id_);
+  ASSERT_TRUE(address_space);
+  wave->set_address_space(*address_space);
+  wave->set_exec(1);
+  auto atomic = std::make_unique<rocjitsu::amdgpu::VectorMemState>(rocjitsu::amdgpu::GLOBAL_MEM);
+  atomic->elem_size = sizeof(uint32_t);
+  atomic->num_elems = 1;
+  atomic->is_load = true;
+  atomic->atomic_op = rocjitsu::amdgpu::AtomicOp::ADD;
+  atomic->wf_size = wave->wf_size();
+  atomic->exec_mask = 1;
+  atomic->lane_mask = 1;
+  atomic->per_lane_addr[0] = target.va;
+  atomic->dst_reg_base = wave->vgpr_alloc().base + 8;
+  atomic->store_data.resize(atomic->wf_size * sizeof(uint32_t));
+  std::memcpy(atomic->store_data.data(), &kIncrement, sizeof(kIncrement));
+  const uint64_t epoch = l2->coherence_domain()->current_epoch();
+  const uint64_t writes = l2->backing_write_transactions();
+  EXPECT_EQ(rocjitsu::test::KfdCuAtomicTestAccess::route(
+                *cu, new KfdCuAtomicInstruction(std::move(atomic)), *wave),
+            VmAccessOutcome::Revoked);
+  uint32_t observed = 0;
+  std::memcpy(&observed, target.host, sizeof(observed));
+  EXPECT_EQ(observed, kInitial);
+  EXPECT_EQ(target.host[kDirtyOffset], 0x31);
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  EXPECT_EQ(l2->coherence_domain()->current_epoch(), epoch);
+  EXPECT_TRUE(
+      KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, target.va, process_id_, kDirtyOffset));
+  KfdPreparedProviderTestAccess::discard_dirty_l2_line(*l2, target.va, process_id_);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Architecture, KfdPreparedSdmaTest,
+    ::testing::Values(KfdPreparedSdmaConfig{&CONFIG_PATH, kGpuId, "Gfx950"},
+                      KfdPreparedSdmaConfig{&CDNA5_CONFIG_PATH, kCdna5GpuId, "Gfx1250"}),
+    [](const ::testing::TestParamInfo<KfdPreparedSdmaConfig> &info) { return info.param.name; });
+
+TEST_F(KfdIoctlTest, FixedSpecialMmapsAndAllocationMmapPreserveTrackedViews) {
+  constexpr size_t kPage = 4096;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  void *allocation_view = driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                        static_cast<off_t>(allocation.mmap_offset));
+  ASSERT_NE(allocation_view, MAP_FAILED);
+  *static_cast<uint32_t *>(allocation_view) = 0xabcdef01;
+
+  const off_t events_offset =
+      static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_EVENTS | rocjitsu::kfd_mmap_gpu_id(kGpuId));
+  const off_t doorbell_offset =
+      static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(kGpuId));
+  EXPECT_EQ(driver_->mmap(allocation_view, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          events_offset),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EINVAL);
+  EXPECT_EQ(driver_->mmap(allocation_view, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          doorbell_offset),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EINVAL);
+  EXPECT_EQ(*static_cast<uint32_t *>(allocation_view), 0xabcdef01u);
+
+  void *event_page =
+      driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED, events_offset);
+  ASSERT_NE(event_page, MAP_FAILED);
+  EXPECT_TRUE(driver_->find_process(driver_->local_process_id())->event_state_.has_page());
+  EXPECT_EQ(driver_->mmap(event_page, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                          static_cast<off_t>(allocation.mmap_offset)),
+            MAP_FAILED);
+  EXPECT_EQ(errno, EINVAL);
+  EXPECT_TRUE(driver_->find_process(driver_->local_process_id())->event_state_.has_page());
+  EXPECT_EQ(*static_cast<uint32_t *>(allocation_view), 0xabcdef01u);
+
+  EXPECT_EQ(driver_->munmap(event_page, kPage), 0);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, FixedDoorbellMmapRejectsGemVaBeforeReplacingHostMapping) {
+  constexpr size_t kPage = 4096;
+  constexpr uint64_t kDrmFileId = 17;
+  constexpr uint32_t kHostMarker = 0x12345678;
+  constexpr uint32_t kGemMarker = 0x87654321;
+  void *fixed = ::mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(fixed, MAP_FAILED);
+  *static_cast<uint32_t *>(fixed) = kHostMarker;
+  alignas(4096) std::array<uint32_t, kPage / sizeof(uint32_t)> gem_backing{};
+  gem_backing[0] = kGemMarker;
+  const uint64_t gpu_va = reinterpret_cast<uint64_t>(fixed);
+  {
+    auto transaction = driver_->begin_gem_va_transaction();
+    ASSERT_NE(transaction, nullptr);
+    ASSERT_EQ(transaction->map(gpu_va, gem_backing.data(), kPage,
+                               KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE,
+                               false, kDrmFileId),
+              0);
+  }
+
+  const off_t doorbell_offset =
+      static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(kGpuId));
+  errno = 0;
+  EXPECT_EQ(
+      driver_->mmap(fixed, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, doorbell_offset),
+      MAP_FAILED);
+  EXPECT_EQ(errno, EINVAL);
+  unsigned char residency = 0;
+  ASSERT_EQ(::mincore(fixed, kPage, &residency), 0)
+      << "rejected MAP_FIXED must retain the original host mapping";
+  EXPECT_EQ(*static_cast<uint32_t *>(fixed), kHostMarker);
+
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page = process->page_table_.find(gpu_va >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, process->page_table_.end());
+    ASSERT_FALSE(page->second.host_extents.empty());
+    const auto &extent = page->second.host_extents.front();
+    EXPECT_EQ(extent.host_ptr, reinterpret_cast<uint8_t *>(gem_backing.data()));
+    EXPECT_EQ(extent.va_owner.kind, rocjitsu::KfdProcess::VaOwnerKind::Gem);
+    EXPECT_EQ(extent.va_owner.identity, kDrmFileId);
+    EXPECT_EQ(*gem_backing.data(), kGemMarker);
+  }
+
+  {
+    auto transaction = driver_->begin_gem_va_transaction();
+    ASSERT_NE(transaction, nullptr);
+    EXPECT_TRUE(transaction->unmap(gpu_va, kPage, kDrmFileId));
+  }
+  EXPECT_EQ(::munmap(fixed, kPage), 0);
 }
 
 // Both compute formats share queue ownership; a native PM4 queue stays on one XCD.
@@ -3901,6 +19148,7 @@ TEST_F(KfdIoctlTest, DaemonQueueControlUsesSharedUserptrBacking) {
   constexpr size_t kPageSize = 4096;
   kfd_ioctl_alloc_memory_of_gpu_args allocation{};
   allocation.va_addr = kQueueVa;
+  allocation.mmap_offset = kQueueVa;
   allocation.size = kPageSize;
   allocation.gpu_id = 0;
   allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
@@ -3977,8 +19225,15 @@ TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {
   import_args.va_addr = reinterpret_cast<uint64_t>(addr);
 
   int rc = driver_->ioctl(AMDKFD_IOC_IMPORT_DMABUF, &import_args);
-  EXPECT_EQ(rc, 0);
+  ASSERT_EQ(rc, 0);
   EXPECT_NE(import_args.handle, 0u);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_TRUE(
+        process->page_table_.contains(import_args.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
 
   kfd_ioctl_get_dmabuf_info_args info_args{};
   info_args.dmabuf_fd = memfd;
@@ -3994,9 +19249,1119 @@ TEST_F(KfdIoctlTest, ImportDmabufAndQueryInfo) {
   kfd_ioctl_free_memory_of_gpu_args free_args{};
   free_args.handle = import_args.handle;
   EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    EXPECT_FALSE(
+        process->page_table_.contains(import_args.va_addr >> rocjitsu::KfdProcess::kPageShift));
+  }
+  unsigned char residency = 0;
+  ASSERT_EQ(::mincore(addr, kSize, &residency), 0)
+      << "the imported CPU mapping remains owned by its caller";
+  EXPECT_EQ(*static_cast<uint8_t *>(addr), 0xAB);
 
   munmap(addr, kSize);
   close(memfd);
+}
+
+TEST_F(KfdIoctlTest, ImportDmabufRejectsInvalidRangesWithoutPoisoningGpuGrants) {
+  int memfd = static_cast<int>(syscall(SYS_memfd_create, "kfd_dmabuf_range", MFD_CLOEXEC));
+  ASSERT_GE(memfd, 0);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const auto grant_before = process->gpu_access_grant(kGpuId, 0x50000000, 4);
+
+  kfd_ioctl_import_dmabuf_args imported{};
+  imported.dmabuf_fd = memfd;
+  imported.gpu_id = kGpuId;
+  imported.va_addr = 0x60000000;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_IMPORT_DMABUF, &imported), -EINVAL);
+
+  ASSERT_EQ(ftruncate(memfd, 4096), 0);
+  imported.va_addr = UINT64_MAX - 2048;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_IMPORT_DMABUF, &imported), -EINVAL);
+  EXPECT_EQ(process->gpu_access_grant(kGpuId, 0x50000000, 4).allowed, grant_before.allowed);
+  EXPECT_EQ(::close(memfd), 0);
+}
+
+TEST_F(KfdIoctlTest, IpcImportRejectsInvalidGpuAndOverflowingVaWithoutLeakingBackingFd) {
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 4096;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kGpuId;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  auto open_fd_count = [] {
+    return std::distance(std::filesystem::directory_iterator("/proc/self/fd"),
+                         std::filesystem::directory_iterator{});
+  };
+  const auto before = open_fd_count();
+  for (int attempt = 0; attempt < 32; ++attempt) {
+    kfd_ioctl_ipc_import_handle_args imported{};
+    std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+              std::begin(imported.share_handle));
+    imported.gpu_id = kGpuId + 1;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), -EINVAL);
+  }
+
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kGpuId;
+  imported.va_addr = UINT64_MAX - 2048;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), -EINVAL);
+
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  uint64_t saved_next_va = 0;
+  {
+    std::lock_guard<std::mutex> lock(process->alloc_mutex_);
+    saved_next_va = process->next_gpu_va_;
+    process->next_gpu_va_ = UINT64_MAX - 2048;
+  }
+  imported.va_addr = 0;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), -EINVAL);
+  {
+    std::lock_guard<std::mutex> lock(process->alloc_mutex_);
+    EXPECT_EQ(process->next_gpu_va_, UINT64_MAX - 2048);
+    process->next_gpu_va_ = saved_next_va;
+  }
+  EXPECT_EQ(open_fd_count(), before);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, ClosingExporterRevokesHandlesButKeepsExistingImports) {
+  const uint32_t exporter = driver_->open_process();
+  const uint32_t importer = driver_->open_process();
+  ASSERT_NE(exporter, 0u);
+  ASSERT_NE(importer, 0u);
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 4096;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(exporter, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kGpuId;
+  ASSERT_EQ(driver_->ioctl(exporter, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kGpuId;
+  ASSERT_EQ(driver_->ioctl(importer, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+
+  const int imported_fd = driver_->get_mmap_memfd(importer, imported.mmap_offset);
+  ASSERT_GE(imported_fd, 0);
+  struct stat backing {};
+  ASSERT_EQ(::fstat(imported_fd, &backing), 0);
+  auto backing_fd_count = [&] {
+    size_t count = 0;
+    for (const auto &entry : std::filesystem::directory_iterator("/proc/self/fd")) {
+      const int fd = std::stoi(entry.path().filename().string());
+      struct stat candidate {};
+      if (::fstat(fd, &candidate) == 0 && candidate.st_dev == backing.st_dev &&
+          candidate.st_ino == backing.st_ino)
+        ++count;
+    }
+    return count;
+  };
+  EXPECT_EQ(backing_fd_count(), 3u);
+
+  ASSERT_EQ(driver_->close(exporter), 0);
+  EXPECT_EQ(backing_fd_count(), 1u)
+      << "closing the exporter must release its allocation and export-store descriptors";
+  EXPECT_EQ(driver_->ioctl(importer, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), -EINVAL);
+
+  void *mapping =
+      ::mmap(nullptr, allocation.size, PROT_READ | PROT_WRITE, MAP_SHARED, imported_fd, 0);
+  ASSERT_NE(mapping, MAP_FAILED);
+  *static_cast<uint8_t *>(mapping) = 0xA5;
+  EXPECT_EQ(*static_cast<uint8_t *>(mapping), 0xA5);
+  EXPECT_EQ(::munmap(mapping, allocation.size), 0);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = imported.handle;
+  EXPECT_EQ(driver_->ioctl(importer, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_EQ(backing_fd_count(), 0u);
+  EXPECT_EQ(driver_->close(importer), 0);
+}
+
+TEST_F(KfdIoctlTest, IpcVramGrantLeasesCanonicalBytesAcrossVaReuseAndClose) {
+  constexpr size_t kBoSize = 4096;
+  constexpr uint64_t kImportVa = 0x6000000000ULL;
+  constexpr size_t kOffset = 37;
+  rocjitsu::SimulatedKfd daemon_driver({soc_}, {kGpuId}, /*daemon_mode=*/true);
+  const uint32_t exporter = daemon_driver.open_process(/*client_pid=*/4242);
+  const uint32_t importer = daemon_driver.open_process(/*client_pid=*/4243);
+  ASSERT_NE(exporter, 0u);
+  ASSERT_NE(importer, 0u);
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kBoSize;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(daemon_driver.ioctl(exporter, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  ASSERT_NE(allocation.va_addr, kImportVa);
+
+  auto map_grant = [&](uint32_t process_id, uint64_t handle) {
+    uint32_t gpu_id = kGpuId;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    return daemon_driver.ioctl(process_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map);
+  };
+  ASSERT_EQ(map_grant(exporter, allocation.handle), 0);
+
+  auto source_process = daemon_driver.find_process(exporter);
+  ASSERT_NE(source_process, nullptr);
+  const auto before_export = source_process->gpu_peer_backing_grant(kGpuId, allocation.va_addr, 1);
+  ASSERT_TRUE(before_export.admission.allowed);
+  EXPECT_FALSE(before_export.backing);
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kGpuId;
+  ASSERT_EQ(daemon_driver.ioctl(exporter, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kGpuId;
+  imported.va_addr = kImportVa;
+  ASSERT_EQ(daemon_driver.ioctl(importer, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+  ASSERT_EQ(map_grant(importer, imported.handle), 0);
+
+  auto importer_process = daemon_driver.find_process(importer);
+  ASSERT_NE(importer_process, nullptr);
+  const auto source_grant =
+      source_process->gpu_peer_backing_grant(kGpuId, allocation.va_addr + kOffset, 8);
+  const auto imported_grant =
+      importer_process->gpu_peer_backing_grant(kGpuId, kImportVa + kOffset, 8);
+  ASSERT_TRUE(source_grant.admission.allowed);
+  ASSERT_TRUE(imported_grant.admission.allowed);
+  ASSERT_TRUE(source_grant.backing);
+  ASSERT_TRUE(imported_grant.backing);
+  EXPECT_TRUE(source_process->gpu_access_grant(kGpuId, allocation.va_addr + kOffset, 8).allowed);
+  EXPECT_TRUE(source_grant.backing.same_backing(imported_grant.backing));
+  EXPECT_EQ(source_grant.backing.data(), imported_grant.backing.data());
+  EXPECT_EQ(source_grant.backing.file_offset(), kOffset);
+  EXPECT_EQ(imported_grant.backing.file_offset(), kOffset);
+  EXPECT_EQ(imported_grant.backing.size(), 8u);
+  EXPECT_EQ(imported_grant.backing.owner_gpu_id(), kGpuId);
+
+  void *source_host_ptr = nullptr;
+  void *import_host_ptr = nullptr;
+  {
+    std::lock_guard lock(source_process->alloc_mutex_);
+    source_host_ptr = source_process->allocations_.at(allocation.handle).host_ptr;
+  }
+  {
+    std::lock_guard lock(importer_process->alloc_mutex_);
+    import_host_ptr = importer_process->allocations_.at(imported.handle).host_ptr;
+  }
+  EXPECT_NE(source_host_ptr, import_host_ptr);
+  EXPECT_NE(source_grant.backing.data() - kOffset, source_host_ptr);
+  EXPECT_NE(imported_grant.backing.data() - kOffset, import_host_ptr);
+
+  source_grant.backing.bytes()[0] = std::byte{0x5a};
+  EXPECT_EQ(imported_grant.backing.bytes()[0], std::byte{0x5a});
+  EXPECT_EQ(static_cast<std::byte *>(import_host_ptr)[kOffset], std::byte{0x5a});
+  EXPECT_FALSE(importer_process->gpu_peer_backing_grant(kGpuId, kImportVa + kBoSize - 1, 2)
+                   .admission.allowed);
+  EXPECT_FALSE(importer_process->gpu_peer_backing_grant(kGpuId, kImportVa, 0).admission.allowed);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(daemon_driver.ioctl(exporter, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_FALSE(source_process->gpu_peer_backing_grant(kGpuId, allocation.va_addr + kOffset, 8)
+                   .admission.allowed);
+  imported.va_addr = kImportVa + 2 * kBoSize;
+  EXPECT_EQ(daemon_driver.ioctl(importer, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), -EINVAL);
+  ASSERT_EQ(daemon_driver.close(exporter), 0);
+  EXPECT_TRUE(
+      importer_process->gpu_peer_backing_grant(kGpuId, kImportVa + kOffset, 8).admission.allowed);
+
+  free.handle = imported.handle;
+  ASSERT_EQ(daemon_driver.ioctl(importer, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_FALSE(
+      importer_process->gpu_peer_backing_grant(kGpuId, kImportVa + kOffset, 8).admission.allowed);
+
+  kfd_ioctl_alloc_memory_of_gpu_args reused{};
+  reused.va_addr = kImportVa;
+  reused.size = kBoSize;
+  reused.gpu_id = kGpuId;
+  reused.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(daemon_driver.ioctl(importer, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &reused), 0);
+  ASSERT_EQ(map_grant(importer, reused.handle), 0);
+  const auto reused_grant =
+      importer_process->gpu_peer_backing_grant(kGpuId, kImportVa + kOffset, 8);
+  EXPECT_TRUE(reused_grant.admission.allowed);
+  EXPECT_FALSE(reused_grant.backing);
+  source_grant.backing.bytes()[0] = std::byte{0xa7};
+  {
+    std::lock_guard lock(importer_process->alloc_mutex_);
+    EXPECT_NE(static_cast<std::byte *>(
+                  importer_process->allocations_.at(reused.handle).host_ptr)[kOffset],
+              std::byte{0xa7});
+  }
+
+  ASSERT_EQ(daemon_driver.close(importer), 0);
+  EXPECT_EQ(source_grant.backing.bytes()[0], std::byte{0xa7});
+  EXPECT_EQ(imported_grant.backing.bytes()[0], std::byte{0xa7});
+}
+
+TEST_F(KfdIoctlTest, IpcPeerBackingDeniesIneligibleAndResizedBos) {
+  rocjitsu::SimulatedKfd daemon_driver({soc_}, {kGpuId}, /*daemon_mode=*/true);
+  const uint32_t process_id = daemon_driver.open_process(/*client_pid=*/4242);
+  ASSERT_NE(process_id, 0u);
+  auto process = daemon_driver.find_process(process_id);
+  ASSERT_NE(process, nullptr);
+
+  alignas(4096) std::array<std::byte, 4096> userptr_page{};
+  for (uint32_t kind : {KFD_IOC_ALLOC_MEM_FLAGS_GTT, KFD_IOC_ALLOC_MEM_FLAGS_USERPTR,
+                        KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL}) {
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    if (kind == KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
+      allocation.mmap_offset = reinterpret_cast<uint64_t>(userptr_page.data());
+    allocation.size = 4096;
+    allocation.gpu_id = kGpuId;
+    allocation.flags = kind | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kGpuId;
+    const int export_result =
+        daemon_driver.ioctl(process_id, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported);
+    if (kind == KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL)
+      EXPECT_EQ(export_result, -EINVAL);
+    else if (kind == KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
+      EXPECT_EQ(export_result, -EPERM);
+    else
+      ASSERT_EQ(export_result, 0);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      EXPECT_FALSE(process->allocations_.at(allocation.handle).backing_owner);
+    }
+    if (kind == KFD_IOC_ALLOC_MEM_FLAGS_GTT) {
+      uint32_t gpu_id = kGpuId;
+      kfd_ioctl_map_memory_to_gpu_args map{};
+      map.handle = allocation.handle;
+      map.n_devices = 1;
+      map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+      ASSERT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+      const auto grant = process->gpu_peer_backing_grant(kGpuId, allocation.va_addr, 1);
+      EXPECT_TRUE(grant.admission.allowed);
+      EXPECT_FALSE(grant.backing);
+    }
+  }
+
+  kfd_ioctl_alloc_memory_of_gpu_args grown{};
+  grown.size = 4096;
+  grown.gpu_id = kGpuId;
+  grown.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &grown), 0);
+  const int fd = daemon_driver.get_mmap_memfd(process_id, grown.mmap_offset);
+  ASSERT_GE(fd, 0);
+  ASSERT_EQ(ftruncate(fd, 8192), 0);
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = grown.handle;
+  exported.gpu_id = kGpuId;
+  EXPECT_EQ(daemon_driver.ioctl(process_id, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    EXPECT_FALSE(process->allocations_.at(grown.handle).backing_owner);
+  }
+  EXPECT_EQ(daemon_driver.close(process_id), 0);
+
+  kfd_ioctl_alloc_memory_of_gpu_args unbacked{};
+  unbacked.va_addr = 0x7600000000ULL;
+  unbacked.size = 4096;
+  unbacked.gpu_id = kGpuId;
+  unbacked.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                   KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &unbacked), 0);
+  auto local_process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(local_process, nullptr);
+  {
+    std::lock_guard lock(local_process->alloc_mutex_);
+    EXPECT_EQ(local_process->allocations_.at(unbacked.handle).host_ptr, nullptr);
+  }
+  exported.handle = unbacked.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  {
+    std::lock_guard lock(local_process->alloc_mutex_);
+    EXPECT_FALSE(local_process->allocations_.at(unbacked.handle).backing_owner);
+  }
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = unbacked.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, IpcPeerBackingDeniesMissingAndPartialSourceMappings) {
+  constexpr size_t kBoSize = 8192;
+  for (size_t mapped_bytes : {size_t{0}, kBoSize / 2}) {
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.size = kBoSize;
+    allocation.gpu_id = kGpuId;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                       KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    if (mapped_bytes != 0) {
+      void *mapped = driver_->mmap(nullptr, mapped_bytes, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                   static_cast<off_t>(allocation.mmap_offset));
+      ASSERT_NE(mapped, MAP_FAILED);
+    }
+
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kGpuId;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+    auto process = driver_->find_process(driver_->local_process_id());
+    ASSERT_NE(process, nullptr);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &source = process->allocations_.at(allocation.handle);
+      ASSERT_GE(source.memfd, 0);
+      EXPECT_EQ(source.host_mapping_size, mapped_bytes);
+      EXPECT_FALSE(source.backing_owner);
+    }
+
+    uint32_t gpu_id = kGpuId;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    const auto grant = process->gpu_peer_backing_grant(kGpuId, allocation.va_addr, 1);
+    EXPECT_TRUE(grant.admission.allowed);
+    EXPECT_FALSE(grant.backing);
+    uint64_t local_backing_id = 0;
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &source = process->allocations_.at(allocation.handle);
+      ASSERT_TRUE(source.local_backing_owner);
+      local_backing_id = source.local_backing_owner->backing_id();
+    }
+    kfd_ioctl_ipc_export_handle_args repeated{};
+    repeated.handle = allocation.handle;
+    repeated.gpu_id = kGpuId;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &repeated), 0);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &source = process->allocations_.at(allocation.handle);
+      EXPECT_FALSE(source.backing_owner);
+      ASSERT_TRUE(source.local_backing_owner);
+      EXPECT_EQ(source.local_backing_owner->backing_id(), local_backing_id);
+      EXPECT_EQ(source.host_mapping_size, mapped_bytes);
+    }
+
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = allocation.handle;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  }
+}
+
+TEST_F(KfdIoctlTest, UncachedVramExportKeepsUcPolicyAcrossUnmapAndRemap) {
+  using rocjitsu::amdgpu::Mtype;
+  constexpr size_t kPage = 4096;
+  constexpr size_t kBoSize = 2 * kPage;
+  for (const size_t mapped_bytes : {kBoSize, kPage}) {
+    SCOPED_TRACE(mapped_bytes);
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.size = kBoSize;
+    allocation.gpu_id = kGpuId;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC |
+                       KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE | KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    auto *host = static_cast<uint8_t *>(driver_->mmap(nullptr, mapped_bytes, PROT_READ | PROT_WRITE,
+                                                      MAP_SHARED,
+                                                      static_cast<off_t>(allocation.mmap_offset)));
+    ASSERT_NE(host, MAP_FAILED);
+    host[0] = 0xa6;
+    uint32_t gpu_id = kGpuId;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    const auto process = driver_->find_process(driver_->local_process_id());
+    ASSERT_NE(process, nullptr);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_FALSE(record.backing_owner);
+      EXPECT_FALSE(record.local_backing_owner);
+      EXPECT_EQ(record.host_mapping_size, mapped_bytes);
+    }
+
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kGpuId;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_EQ(static_cast<bool>(record.backing_owner), mapped_bytes == kBoSize);
+      EXPECT_FALSE(record.local_backing_owner);
+      EXPECT_TRUE(record.ipc_shared);
+      EXPECT_EQ(record.ipc_export_retains_local_policy, mapped_bytes != kBoSize);
+    }
+    const auto peer = process->gpu_peer_backing_grant(kGpuId, allocation.va_addr, 1);
+    EXPECT_TRUE(peer.admission.allowed);
+    EXPECT_EQ(static_cast<bool>(peer.backing), mapped_bytes == kBoSize);
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      const auto page =
+          process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+      ASSERT_NE(page, process->page_table_.end());
+      EXPECT_EQ(page->second.mtype, Mtype::UC);
+    }
+
+    kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+    unmap.handle = allocation.handle;
+    unmap.n_devices = 1;
+    unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+    EXPECT_EQ(unmap.n_success, 1u);
+    EXPECT_FALSE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+    map.n_success = 0;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    EXPECT_EQ(map.n_success, 1u);
+    EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_FALSE(record.local_backing_owner);
+      EXPECT_EQ(record.host_mapping_size, mapped_bytes);
+      EXPECT_EQ(static_cast<bool>(record.backing_owner), mapped_bytes == kBoSize);
+    }
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      const auto page =
+          process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+      ASSERT_NE(page, process->page_table_.end());
+      EXPECT_EQ(page->second.mtype, Mtype::UC);
+    }
+    EXPECT_EQ(host[0], 0xa6);
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = allocation.handle;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  }
+}
+
+TEST_F(KfdIoctlTest, IpcPromotionPublishesDirtyLocalL2AndMscBeforeCanonicalAlias) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::L2Cache;
+  using rocjitsu::amdgpu::MemorySideCache;
+  using rocjitsu::amdgpu::Mtype;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kFirstL2Offset = 48;
+  constexpr uint32_t kSecondL2Offset = 112;
+  constexpr uint32_t kL2CleanOffset = 49;
+  constexpr uint32_t kMscLineOffset = MemorySideCache::LINE_SIZE;
+  constexpr uint32_t kMscDirtyOffset = kMscLineOffset + 16;
+  constexpr uint32_t kMscCleanOffset = kMscLineOffset + 17;
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kFirstL2Offset] = 0x11;
+  host[kSecondL2Offset] = 0x22;
+  host[kL2CleanOffset] = 0x33;
+  host[kMscDirtyOffset] = 0x44;
+  host[kMscCleanOffset] = 0x55;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  const auto local_aliases = process->gpu_local_alias_snapshot();
+  const auto local = std::ranges::find_if(*local_aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+  });
+  ASSERT_NE(local, local_aliases->end());
+  const uint64_t local_backing_id = local->backing_id;
+  const uint64_t generation = local->admission_generation;
+  int backing_fd = -1;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    ASSERT_FALSE(record.backing_owner);
+    ASSERT_TRUE(record.local_backing_owner);
+    EXPECT_EQ(record.local_backing_owner->backing_id(), local_backing_id);
+    backing_fd = record.memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_l2{
+      std::pair<uint32_t, uint8_t>{kFirstL2Offset, 0xa1},
+      std::pair<uint32_t, uint8_t>{kSecondL2Offset, 0xb2},
+  };
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(
+      *l2, allocation.va_addr, process_id, access->cache_identity(), generation, dirty_l2);
+  ASSERT_GT(soc_->num_iods(), 0u);
+  MemorySideCache *msc = soc_->iod(0)->msc();
+  ASSERT_NE(msc, nullptr);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> msc_line{};
+  std::copy_n(host + kMscLineOffset, msc_line.size(), msc_line.begin());
+  msc_line[16] = 0xc4;
+  KfdPreparedProviderTestAccess::store_dirty_msc_line(*msc, allocation.va_addr + kMscLineOffset,
+                                                      process_id, access->cache_identity(),
+                                                      generation, msc_line);
+  const uint64_t writes = l2->backing_write_transactions();
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kFirstL2Offset));
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kSecondL2Offset));
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_msc_line(
+      *msc, allocation.va_addr + kMscLineOffset, process_id));
+  std::array<uint8_t, L2Cache::LINE_SIZE> fd_l2{};
+  ASSERT_EQ(::pread(backing_fd, fd_l2.data(), fd_l2.size(), 0), static_cast<ssize_t>(fd_l2.size()));
+  EXPECT_EQ(fd_l2[kFirstL2Offset], 0x11);
+  EXPECT_EQ(fd_l2[kSecondL2Offset], 0x22);
+  EXPECT_EQ(fd_l2[kL2CleanOffset], 0x33);
+  std::array<uint8_t, 2> fd_msc{};
+  ASSERT_EQ(::pread(backing_fd, fd_msc.data(), fd_msc.size(), kMscDirtyOffset),
+            static_cast<ssize_t>(fd_msc.size()));
+  EXPECT_EQ(fd_msc, (std::array<uint8_t, 2>{0x44, 0x55}));
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page =
+        process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, process->page_table_.end());
+    EXPECT_EQ(page->second.mtype, Mtype::RW);
+  }
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kGpuId;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  ASSERT_EQ(::pread(backing_fd, fd_l2.data(), fd_l2.size(), 0), static_cast<ssize_t>(fd_l2.size()));
+  EXPECT_EQ(fd_l2[kFirstL2Offset], 0xa1);
+  EXPECT_EQ(fd_l2[kSecondL2Offset], 0xb2);
+  EXPECT_EQ(fd_l2[kL2CleanOffset], 0x33);
+  ASSERT_EQ(::pread(backing_fd, fd_msc.data(), fd_msc.size(), kMscDirtyOffset),
+            static_cast<ssize_t>(fd_msc.size()));
+  EXPECT_EQ(fd_msc, (std::array<uint8_t, 2>{0xc4, 0x55}));
+  EXPECT_EQ(host[kFirstL2Offset], 0xa1);
+  EXPECT_EQ(host[kSecondL2Offset], 0xb2);
+  EXPECT_EQ(host[kMscDirtyOffset], 0xc4);
+  EXPECT_EQ(host[kMscCleanOffset], 0x55);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 2);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kFirstL2Offset));
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_msc_line(
+      *msc, allocation.va_addr + kMscLineOffset, process_id));
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+  const auto canonical_aliases = process->gpu_alias_snapshot();
+  const auto canonical = std::ranges::find_if(*canonical_aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+  });
+  ASSERT_NE(canonical, canonical_aliases->end());
+  EXPECT_EQ(canonical->backing_id, local_backing_id);
+  EXPECT_EQ(canonical->admission_generation, generation);
+  const auto backing = process->gpu_peer_backing_grant(kGpuId, allocation.va_addr, 1).backing;
+  ASSERT_TRUE(backing);
+  EXPECT_EQ(backing.backing_id(), local_backing_id);
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    ASSERT_TRUE(record.backing_owner);
+    EXPECT_EQ(record.backing_owner->backing_id(), local_backing_id);
+    EXPECT_TRUE(record.ipc_shared);
+  }
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page =
+        process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, process->page_table_.end());
+    EXPECT_EQ(page->second.mtype, Mtype::UC);
+  }
+
+  kfd_ioctl_ipc_export_handle_args repeated{};
+  repeated.handle = allocation.handle;
+  repeated.gpu_id = kGpuId;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &repeated), 0);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 2);
+  EXPECT_EQ(process->gpu_peer_backing_grant(kGpuId, allocation.va_addr, 1).backing.backing_id(),
+            local_backing_id);
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, IpcPromotionRetriesBeforeAndAfterLocalWriteback) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::Mtype;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 56;
+  constexpr uint32_t kCleanOffset = 57;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kDirtyOffset] = 0x12;
+  host[kCleanOffset] = 0x34;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  const auto local_aliases = process->gpu_local_alias_snapshot();
+  const auto found = std::ranges::find_if(*local_aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+  });
+  ASSERT_NE(found, local_aliases->end());
+  const auto local = *found;
+  int backing_fd = -1;
+  void *gpu_backing_ptr = nullptr;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &record = process->allocations_.at(allocation.handle);
+    backing_fd = record.memfd;
+    gpu_backing_ptr = record.host_ptr;
+    ASSERT_NE(gpu_backing_ptr, host);
+    ASSERT_EQ(record.host_mapping_kind,
+              rocjitsu::KfdProcess::GpuAllocation::HostMappingKind::InternalBacking);
+  }
+  ASSERT_GE(backing_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x9a}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id,
+                                                      access->cache_identity(),
+                                                      local.admission_generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+  const auto read_backing = [&] {
+    std::array<uint8_t, 2> bytes{};
+    EXPECT_EQ(::pread(backing_fd, bytes.data(), bytes.size(), kDirtyOffset),
+              static_cast<ssize_t>(bytes.size()));
+    return bytes;
+  };
+  const auto expect_local_publication = [&] {
+    EXPECT_TRUE(process->gpu_alias_grant_current(local));
+    EXPECT_TRUE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+    const auto canonical = process->gpu_alias_snapshot();
+    EXPECT_TRUE(std::ranges::none_of(*canonical, [&](const auto &alias) {
+      return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+    }));
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_EQ(record.host_ptr, gpu_backing_ptr);
+      EXPECT_EQ(record.memfd, backing_fd);
+      EXPECT_TRUE(record.mapped_device_ids.contains(kGpuId));
+      EXPECT_EQ(record.admission_generations.at(kGpuId), local.admission_generation);
+      ASSERT_TRUE(record.local_backing_owner);
+      EXPECT_EQ(record.local_backing_owner->backing_id(), local.backing_id);
+      EXPECT_FALSE(record.backing_promotion_attempted);
+    }
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      const auto page =
+          process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+      ASSERT_NE(page, process->page_table_.end());
+      EXPECT_EQ(page->second.mtype, Mtype::RW);
+      ASSERT_FALSE(page->second.host_extents.empty());
+      EXPECT_EQ(page->second.host_extents.front().host_ptr, gpu_backing_ptr);
+    }
+  };
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kGpuId;
+  driver_->fail_next_alias_export_writeback_for_testing();
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), -ENOMEM);
+  EXPECT_EQ(read_backing(), (std::array<uint8_t, 2>{0x12, 0x34}));
+  EXPECT_EQ(host[kDirtyOffset], 0x12);
+  EXPECT_EQ(l2->backing_write_transactions(), writes);
+  EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                           kDirtyOffset));
+  expect_local_publication();
+
+  driver_->fail_next_alias_export_publish_for_testing();
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), -ENOMEM);
+  EXPECT_EQ(read_backing(), (std::array<uint8_t, 2>{0x9a, 0x34}));
+  EXPECT_EQ(host[kDirtyOffset], 0x9a);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kDirtyOffset));
+  expect_local_publication();
+
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+  EXPECT_EQ(read_backing(), (std::array<uint8_t, 2>{0x9a, 0x34}));
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  const auto canonical = process->gpu_alias_snapshot();
+  const auto promoted = std::ranges::find_if(*canonical, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+  });
+  ASSERT_NE(promoted, canonical->end());
+  EXPECT_EQ(promoted->backing_id, local.backing_id);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page =
+        process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, process->page_table_.end());
+    EXPECT_EQ(page->second.mtype, Mtype::UC);
+  }
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, IpcPromotionWaitsForLocalIngressBeforeChangingPolicy) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  using rocjitsu::amdgpu::MemoryIngressSpan;
+  using rocjitsu::amdgpu::Mtype;
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 64;
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = kPage;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  auto *host =
+      static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                           static_cast<off_t>(allocation.mmap_offset)));
+  ASSERT_NE(host, MAP_FAILED);
+  host[kDirtyOffset] = 0x26;
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  const uint32_t process_id = driver_->local_process_id();
+  const auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto local_aliases = process->gpu_local_alias_snapshot();
+  const auto found = std::ranges::find_if(*local_aliases, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+  });
+  ASSERT_NE(found, local_aliases->end());
+  const auto local = *found;
+  const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+  ASSERT_TRUE(vmid);
+  const auto access = soc_->gpu_vm().snapshot(*vmid);
+  ASSERT_TRUE(access);
+  int backing_fd = -1;
+  {
+    std::lock_guard lock(process->alloc_mutex_);
+    backing_fd = process->allocations_.at(allocation.handle).memfd;
+  }
+  ASSERT_GE(backing_fd, 0);
+  auto *l2 = soc_->xcd(0)->l2_cache();
+  ASSERT_NE(l2, nullptr);
+  const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0x8c}};
+  KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id,
+                                                      access->cache_identity(),
+                                                      local.admission_generation, dirty_bytes);
+  const uint64_t writes = l2->backing_write_transactions();
+  const std::array spans{
+      MemoryIngressSpan{allocation.va_addr + kDirtyOffset, 1, VmAccessKind::Write}};
+  auto held = driver_->admit_gpu_alias_ingress(process_id, kGpuId, *access, spans);
+  ASSERT_EQ(held.outcome, VmAccessOutcome::Complete);
+  ASSERT_TRUE(held.permit);
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kGpuId;
+  auto pending = std::async(
+      std::launch::async, [&] { return driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported); });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  bool closed = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    closed = driver_->alias_ingress_closed_for_testing(local);
+    if (closed || pending.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::yield();
+  }
+  EXPECT_TRUE(closed);
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  if (closed) {
+    EXPECT_EQ(driver_->admit_gpu_alias_ingress(process_id, kGpuId, *access, spans).outcome,
+              VmAccessOutcome::Unavailable);
+    uint8_t fd_byte = 0;
+    EXPECT_EQ(::pread(backing_fd, &fd_byte, 1, kDirtyOffset), 1);
+    EXPECT_EQ(fd_byte, 0x26);
+    EXPECT_EQ(host[kDirtyOffset], 0x26);
+    EXPECT_EQ(l2->backing_write_transactions(), writes);
+    EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                             kDirtyOffset));
+    EXPECT_TRUE(process->gpu_alias_grant_current(local));
+    {
+      std::shared_lock lock(process->page_table_mutex_);
+      const auto page =
+          process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+      EXPECT_NE(page, process->page_table_.end());
+      if (page != process->page_table_.end()) {
+        EXPECT_EQ(page->second.mtype, Mtype::RW);
+      }
+    }
+    const auto canonical = process->gpu_alias_snapshot();
+    EXPECT_TRUE(std::ranges::none_of(*canonical, [&](const auto &alias) {
+      return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+    }));
+  }
+
+  held.permit.reset();
+  if (pending.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    std::fputs("IPC promotion did not finish after releasing local ingress permit\n", stderr);
+    std::fflush(stderr);
+    std::_Exit(124);
+  }
+  EXPECT_EQ(pending.get(), 0);
+  uint8_t fd_byte = 0;
+  ASSERT_EQ(::pread(backing_fd, &fd_byte, 1, kDirtyOffset), 1);
+  EXPECT_EQ(fd_byte, 0x8c);
+  EXPECT_EQ(host[kDirtyOffset], 0x8c);
+  EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+  EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                            kDirtyOffset));
+  EXPECT_FALSE(process->gpu_alias_grant_current(local));
+  const auto canonical = process->gpu_alias_snapshot();
+  const auto promoted = std::ranges::find_if(*canonical, [&](const auto &alias) {
+    return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+  });
+  ASSERT_NE(promoted, canonical->end());
+  EXPECT_EQ(promoted->backing_id, local.backing_id);
+  {
+    std::shared_lock lock(process->page_table_mutex_);
+    const auto page =
+        process->page_table_.find(allocation.va_addr >> rocjitsu::KfdProcess::kPageShift);
+    ASSERT_NE(page, process->page_table_.end());
+    EXPECT_EQ(page->second.mtype, Mtype::UC);
+  }
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
+
+TEST_F(KfdIoctlTest, IpcExportAfterLocalUnmapPromotesRetiredDriverBacking) {
+  using rocjitsu::amdgpu::KfdPreparedProviderTestAccess;
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kDirtyOffset = 72;
+  constexpr uint32_t kCleanOffset = 73;
+
+  for (const bool failed_promotion : {false, true}) {
+    SCOPED_TRACE(failed_promotion ? "failed promotion before UNMAP" : "first export after UNMAP");
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.size = kPage;
+    allocation.gpu_id = kGpuId;
+    allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    auto *host =
+        static_cast<uint8_t *>(driver_->mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                             static_cast<off_t>(allocation.mmap_offset)));
+    ASSERT_NE(host, MAP_FAILED);
+    host[kDirtyOffset] = 0x31;
+    host[kCleanOffset] = 0x42;
+    uint32_t gpu_id = kGpuId;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+    const uint32_t process_id = driver_->local_process_id();
+    const auto process = driver_->find_process(process_id);
+    ASSERT_NE(process, nullptr);
+    const auto vmid = soc_->gpu_vm().find_vmid(process_id);
+    ASSERT_TRUE(vmid);
+    const auto access = soc_->gpu_vm().snapshot(*vmid);
+    ASSERT_TRUE(access);
+    const auto local_aliases = process->gpu_local_alias_snapshot();
+    const auto found = std::ranges::find_if(*local_aliases, [&](const auto &alias) {
+      return alias.gpu_va == allocation.va_addr && alias.gpu_id == kGpuId;
+    });
+    ASSERT_NE(found, local_aliases->end());
+    const auto local = *found;
+    int backing_fd = -1;
+    void *gpu_backing_ptr = nullptr;
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_NE(record.host_ptr, host);
+      EXPECT_EQ(record.host_mapping_kind,
+                rocjitsu::KfdProcess::GpuAllocation::HostMappingKind::InternalBacking);
+      gpu_backing_ptr = record.host_ptr;
+      EXPECT_EQ(record.host_mapping_size, kPage);
+      EXPECT_FALSE(record.backing_owner);
+      ASSERT_TRUE(record.local_backing_owner);
+      backing_fd = record.memfd;
+    }
+    ASSERT_GE(backing_fd, 0);
+    auto *l2 = soc_->xcd(0)->l2_cache();
+    ASSERT_NE(l2, nullptr);
+    const std::array dirty_bytes{std::pair<uint32_t, uint8_t>{kDirtyOffset, 0xb5}};
+    KfdPreparedProviderTestAccess::store_dirty_l2_bytes(*l2, allocation.va_addr, process_id,
+                                                        access->cache_identity(),
+                                                        local.admission_generation, dirty_bytes);
+    const uint64_t writes = l2->backing_write_transactions();
+    uint8_t fd_byte = 0;
+    ASSERT_EQ(::pread(backing_fd, &fd_byte, 1, kDirtyOffset), 1);
+    EXPECT_EQ(fd_byte, 0x31);
+
+    kfd_ioctl_ipc_export_handle_args exported{};
+    exported.handle = allocation.handle;
+    exported.gpu_id = kGpuId;
+    if (failed_promotion) {
+      driver_->fail_next_alias_export_writeback_for_testing();
+      EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), -ENOMEM);
+      EXPECT_TRUE(driver_->alias_ingress_closed_for_testing(local));
+      EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                               kDirtyOffset));
+    }
+
+    kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+    unmap.handle = allocation.handle;
+    unmap.n_devices = 1;
+    unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+    EXPECT_EQ(unmap.n_success, 1u);
+    ASSERT_EQ(::pread(backing_fd, &fd_byte, 1, kDirtyOffset), 1);
+    EXPECT_EQ(fd_byte, 0xb5);
+    EXPECT_EQ(host[kDirtyOffset], 0xb5);
+    EXPECT_EQ(host[kCleanOffset], 0x42);
+    EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+    EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, allocation.va_addr, process_id,
+                                                              kDirtyOffset));
+    EXPECT_FALSE(process->gpu_alias_grant_current(local));
+    EXPECT_FALSE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      EXPECT_TRUE(record.mapped_device_ids.empty());
+      EXPECT_FALSE(record.backing_promotion_attempted);
+      EXPECT_EQ(record.memfd, backing_fd);
+      EXPECT_EQ(record.host_ptr, gpu_backing_ptr);
+    }
+
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    {
+      std::lock_guard lock(process->alloc_mutex_);
+      const auto &record = process->allocations_.at(allocation.handle);
+      ASSERT_TRUE(record.backing_owner);
+      EXPECT_TRUE(record.backing_promotion_attempted);
+      EXPECT_EQ(record.memfd, backing_fd);
+      EXPECT_EQ(record.host_ptr, gpu_backing_ptr);
+      EXPECT_TRUE(record.mapped_device_ids.empty());
+    }
+    EXPECT_EQ(l2->backing_write_transactions(), writes + 1);
+    EXPECT_FALSE(process->gpu_access_grant(kGpuId, allocation.va_addr, 1).allowed);
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = allocation.handle;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  }
+}
+
+TEST_F(KfdIoctlTest, IpcExportSurvivesAnIntermediateSourceClose) {
+  rocjitsu::SimulatedKfd daemon_driver(*soc_, /*daemon_mode=*/true);
+  const uint32_t exporter = daemon_driver.open_process(/*client_pid=*/4242);
+  ASSERT_NE(exporter, 0u);
+  ASSERT_EQ(daemon_driver.open_process(/*client_pid=*/4242), exporter);
+  const uint32_t importer = daemon_driver.open_process(/*client_pid=*/4243);
+  ASSERT_NE(importer, 0u);
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 4096;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(daemon_driver.ioctl(exporter, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  kfd_ioctl_ipc_export_handle_args exported{};
+  exported.handle = allocation.handle;
+  exported.gpu_id = kGpuId;
+  ASSERT_EQ(daemon_driver.ioctl(exporter, AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+
+  ASSERT_EQ(daemon_driver.close(exporter), 0);
+  kfd_ioctl_ipc_import_handle_args imported{};
+  std::copy(std::begin(exported.share_handle), std::end(exported.share_handle),
+            std::begin(imported.share_handle));
+  imported.gpu_id = kGpuId;
+  ASSERT_EQ(daemon_driver.ioctl(importer, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), 0);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = imported.handle;
+  EXPECT_EQ(daemon_driver.ioctl(importer, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  ASSERT_EQ(daemon_driver.close(exporter), 0);
+  EXPECT_EQ(daemon_driver.ioctl(importer, AMDKFD_IOC_IPC_IMPORT_HANDLE, &imported), -EINVAL);
+  EXPECT_EQ(daemon_driver.close(importer), 0);
+}
+
+TEST_F(KfdIoctlTest, DuplicatedMmapBackingOutlivesAllocationFree) {
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 4096;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+
+  const int borrowed = driver_->get_mmap_memfd(allocation.mmap_offset);
+  const auto owned = driver_->dup_mmap_memfd(driver_->local_process_id(), allocation.mmap_offset);
+  ASSERT_GE(borrowed, 0);
+  ASSERT_TRUE(owned.has_value());
+  ASSERT_GE(*owned, 0);
+  EXPECT_NE(*owned, borrowed);
+  EXPECT_GE(::fcntl(borrowed, F_GETFD), 0);
+  EXPECT_GE(::fcntl(*owned, F_GETFD), 0);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+  EXPECT_FALSE(driver_->dup_mmap_memfd(driver_->local_process_id(), allocation.mmap_offset));
+
+  void *mapping = ::mmap(nullptr, allocation.size, PROT_READ | PROT_WRITE, MAP_SHARED, *owned, 0);
+  ASSERT_NE(mapping, MAP_FAILED);
+  *static_cast<uint8_t *>(mapping) = 0x5A;
+  EXPECT_EQ(*static_cast<uint8_t *>(mapping), 0x5A);
+  EXPECT_EQ(::munmap(mapping, allocation.size), 0);
+  EXPECT_EQ(::close(*owned), 0);
 }
 
 TEST_F(KfdIoctlTest, SvmSetAndGetAttributes) {
@@ -4427,6 +20792,90 @@ TEST_P(KfdFatalTrapSaveTest, RuntimeImageContainsTheInterruptedApplicationPc) {
 }
 
 INSTANTIATE_TEST_SUITE_P(CdnaLayouts, KfdFatalTrapSaveTest, ::testing::Bool());
+
+TEST_F(KfdIoctlTest, SvmAccessGetTracksEachGpuAndHostVmaReplacement) {
+  constexpr size_t kPage = 4096;
+  constexpr uint32_t kOtherGpuId = kGpuId + 1;
+  auto first_soc = load_standalone_soc(CONFIG_PATH);
+  auto second_soc = load_standalone_soc(CONFIG_PATH);
+  ASSERT_NE(first_soc, nullptr);
+  ASSERT_NE(second_soc, nullptr);
+  rocjitsu::SimulatedKfd multi_gpu_driver({first_soc.get(), second_soc.get()},
+                                          {kGpuId, kOtherGpuId});
+  ASSERT_GE(multi_gpu_driver.open(), 0);
+  const auto process = multi_gpu_driver.find_process(multi_gpu_driver.local_process_id());
+  ASSERT_NE(process, nullptr);
+  void *pages =
+      ::mmap(nullptr, 2 * kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(pages, MAP_FAILED);
+  const uint64_t base = reinterpret_cast<uint64_t>(pages);
+
+  alignas(kfd_ioctl_svm_args)
+      std::array<std::byte, sizeof(kfd_ioctl_svm_args) + 2 * sizeof(kfd_ioctl_svm_attribute)>
+          buffer{};
+  auto *svm = reinterpret_cast<kfd_ioctl_svm_args *>(buffer.data());
+  auto *attrs = reinterpret_cast<kfd_ioctl_svm_attribute *>(svm + 1);
+  const auto request = rocjitsu::ioctl_with_size(AMDKFD_IOC_SVM, buffer.size());
+  svm->start_addr = base;
+  svm->size = 2 * kPage;
+  svm->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+  svm->nattr = 2;
+  attrs[0] = {KFD_IOCTL_SVM_ATTR_NO_ACCESS, kGpuId};
+  attrs[1] = {KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE, kOtherGpuId};
+  ASSERT_EQ(multi_gpu_driver.ioctl(request, svm), 0);
+
+  const auto query = [&](uint64_t address, size_t size, uint32_t first_mode, uint32_t second_mode) {
+    svm->start_addr = address;
+    svm->size = size;
+    svm->op = KFD_IOCTL_SVM_OP_GET_ATTR;
+    svm->nattr = 2;
+    attrs[0] = {KFD_IOCTL_SVM_ATTR_ACCESS, kGpuId};
+    attrs[1] = {KFD_IOCTL_SVM_ATTR_ACCESS, kOtherGpuId};
+    ASSERT_EQ(multi_gpu_driver.ioctl(request, svm), 0);
+    EXPECT_EQ(attrs[0].type, first_mode);
+    EXPECT_EQ(attrs[0].value, kGpuId);
+    EXPECT_EQ(attrs[1].type, second_mode);
+    EXPECT_EQ(attrs[1].value, kOtherGpuId);
+  };
+  query(base + kPage, kPage, KFD_IOCTL_SVM_ATTR_NO_ACCESS, KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, base + kPage, 1).allowed);
+  EXPECT_TRUE(process->gpu_access_grant(kOtherGpuId, base + kPage, 1).allowed);
+
+  const std::array replaced{std::pair<uint64_t, uint64_t>{base, kPage}};
+  void *mapped = MAP_FAILED;
+  multi_gpu_driver.run_host_vma_replacement(replaced, [&] {
+    mapped = ::mmap(pages, kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED,
+                    -1, 0);
+    return mapped != MAP_FAILED;
+  });
+  ASSERT_EQ(mapped, pages);
+  query(base, kPage, KFD_IOCTL_SVM_ATTR_ACCESS, KFD_IOCTL_SVM_ATTR_ACCESS);
+  query(base + kPage, kPage, KFD_IOCTL_SVM_ATTR_NO_ACCESS, KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE);
+  // The first page is an unregistered gap. Only the second page contributes
+  // to this aggregate, so its ACCESS_IN_PLACE survives.
+  query(base, 2 * kPage, KFD_IOCTL_SVM_ATTR_NO_ACCESS, KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE);
+  // ACCESS_IN_PLACE and NO_ACCESS are result types, not query selectors.
+  svm->start_addr = base;
+  svm->size = kPage;
+  svm->nattr = 1;
+  for (uint32_t type : {KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE, KFD_IOCTL_SVM_ATTR_NO_ACCESS}) {
+    attrs[0] = {type, kGpuId};
+    EXPECT_EQ(multi_gpu_driver.ioctl(request, svm), -EINVAL);
+  }
+  // Separate ACCESS and ACCESS_IN_PLACE pages have no shared access mode.
+  svm->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+  attrs[0] = {KFD_IOCTL_SVM_ATTR_ACCESS, kOtherGpuId};
+  ASSERT_EQ(multi_gpu_driver.ioctl(request, svm), 0);
+  // GET_ATTR describes SVM registration: another GPU's registered range has
+  // no ACCESS bit for this GPU, even while its raw host-page admission remains
+  // permissive until an explicit target-GPU denial is installed.
+  query(base, kPage, KFD_IOCTL_SVM_ATTR_NO_ACCESS, KFD_IOCTL_SVM_ATTR_ACCESS);
+  query(base, 2 * kPage, KFD_IOCTL_SVM_ATTR_NO_ACCESS, KFD_IOCTL_SVM_ATTR_NO_ACCESS);
+  EXPECT_TRUE(process->gpu_access_grant(kGpuId, base, 1).allowed);
+  EXPECT_FALSE(process->gpu_access_grant(kGpuId, base + kPage, 1).allowed);
+  EXPECT_EQ(::munmap(pages, 2 * kPage), 0);
+  multi_gpu_driver.close();
+}
 
 TEST_F(KfdIoctlTest, RuntimeEnableAndDisable) {
   kfd_ioctl_runtime_enable_args args{};
@@ -6212,6 +22661,29 @@ TEST(RemoteDriverEmbeddedArrayTest, MapMemorySerializesDeviceIdsAcrossBufferGrow
   EXPECT_EQ(driver.ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &args), -EINVAL);
 }
 
+TEST(RemoteDriverEmbeddedArrayTest, MapAndUnmapRejectBadArraysBeforeSending) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+  rocjitsu::RemoteDriver driver(sv[0]);
+
+  for (const unsigned long request :
+       {AMDKFD_IOC_MAP_MEMORY_TO_GPU, AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU}) {
+    kfd_ioctl_map_memory_to_gpu_args args{};
+    args.handle = 1;
+    args.device_ids_array_ptr = 1;
+    args.n_devices = 1;
+    EXPECT_EQ(driver.ioctl(request, &args), -EFAULT);
+    EXPECT_EQ(args.device_ids_array_ptr, 1u);
+
+    // The wire payload is bounded before any allocation or pointer read.
+    args.n_devices = std::numeric_limits<uint32_t>::max();
+    EXPECT_EQ(driver.ioctl(request, &args), -E2BIG);
+  }
+  pollfd pending{sv[1], POLLIN, 0};
+  EXPECT_EQ(::poll(&pending, 1, 0), 0);
+  ::close(sv[1]);
+}
+
 TEST(RemoteDriverEmbeddedArrayTest, CuMaskClipsInlineArrayAndPreservesCallerPointer) {
   int sv[2];
   ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
@@ -6457,6 +22929,34 @@ protected:
         rj_vm_device_close(vm_, process_id_);
       rj_vm_destroy(vm_);
     }
+    if (queue_view_ != MAP_FAILED) {
+      EXPECT_EQ(munmap(queue_view_, queue_view_size_), 0);
+    }
+    if (queue_memfd_ >= 0) {
+      EXPECT_EQ(::close(queue_memfd_), 0);
+    }
+  }
+
+  bool map_queue_allocation(const kfd_ioctl_alloc_memory_of_gpu_args &allocation) {
+    if (rj_vm_dup_shared_mem_as(vm_, process_id_, allocation.mmap_offset, &queue_memfd_) !=
+            ROCJITSU_STATUS_SUCCESS ||
+        queue_memfd_ < 0)
+      return false;
+    queue_view_size_ = static_cast<size_t>(allocation.size);
+    queue_view_ =
+        mmap(nullptr, queue_view_size_, PROT_READ | PROT_WRITE, MAP_SHARED, queue_memfd_, 0);
+    if (queue_view_ == MAP_FAILED)
+      return false;
+    struct MapPayload {
+      kfd_ioctl_map_memory_to_gpu_args args{};
+      uint32_t gpu_id = 0;
+    } map;
+    static_assert(offsetof(MapPayload, gpu_id) == sizeof(kfd_ioctl_map_memory_to_gpu_args));
+    map.args.handle = allocation.handle;
+    map.args.n_devices = 1;
+    map.gpu_id = allocation.gpu_id;
+    return execute(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map, sizeof(map), -1, nullptr) == 0 &&
+           map.args.n_success == 1;
   }
 
   // Runs one ioctl through rj_vm_execute_as() (the daemon dispatch path), with
@@ -6518,7 +23018,40 @@ protected:
   rj_vm_t *vm_ = nullptr;
   uint32_t process_id_ = 0;
   std::string mem_mismatch_path_;
+  int queue_memfd_ = -1;
+  void *queue_view_ = MAP_FAILED;
+  size_t queue_view_size_ = 0;
 };
+
+TEST_F(DbgTrapDaemonTest, SharedMemDupFailureIsNotReportedAsMissingBacking) {
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.size = 4096;
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(execute(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation, sizeof(allocation), -1, nullptr),
+            0);
+
+  auto *driver = vm_->vm->driver();
+  ASSERT_NE(driver, nullptr);
+  driver->fail_next_mmap_memfd_dup_for_testing();
+  rj_handle_t owned = -1;
+  EXPECT_EQ(rj_vm_dup_shared_mem_as(vm_, process_id_, allocation.mmap_offset, &owned),
+            ROCJITSU_STATUS_ERROR);
+  EXPECT_EQ(owned, -1);
+
+  ASSERT_EQ(rj_vm_dup_shared_mem_as(vm_, process_id_, allocation.mmap_offset, &owned),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_GE(owned, 0);
+  EXPECT_GE(::fcntl(owned, F_GETFD), 0);
+  EXPECT_EQ(::close(owned), 0);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  ASSERT_EQ(execute(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free, sizeof(free), -1, nullptr), 0);
+  EXPECT_EQ(rj_vm_dup_shared_mem_as(vm_, process_id_, allocation.mmap_offset, &owned),
+            ROCJITSU_STATUS_SUCCESS);
+  EXPECT_EQ(owned, -1);
+}
 
 // The transferred mem fd becomes authoritative for guest reads and CWSR writes,
 // so O_RDWR is not enough to accept it -- it also has to name the memory of the
@@ -7036,6 +23569,7 @@ TEST_F(DbgTrapDaemonTest, QueueSnapshotReconstructsInlineBufferAndValidatesError
   constexpr uint32_t kCtxSaveSize = 0x8000;
   kfd_ioctl_alloc_memory_of_gpu_args allocation{};
   allocation.va_addr = kQueueMemoryBase;
+  allocation.mmap_offset = kQueueMemoryBase;
   allocation.size = 0xA000;
   allocation.gpu_id = kGpuId;
   allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
@@ -7043,6 +23577,7 @@ TEST_F(DbgTrapDaemonTest, QueueSnapshotReconstructsInlineBufferAndValidatesError
                      KFD_IOC_ALLOC_MEM_FLAGS_COHERENT;
   ASSERT_EQ(execute(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation, sizeof(allocation), -1, nullptr),
             0);
+  ASSERT_TRUE(map_queue_allocation(allocation));
 
   kfd_ioctl_create_queue_args queue{};
   queue.gpu_id = kGpuId;
@@ -7154,6 +23689,7 @@ TEST_F(DbgTrapDaemonTest, CreateQueueReadsClientOwnedContextSaveFields) {
   constexpr uint32_t kCtxSaveSize = 0x8000;
   kfd_ioctl_alloc_memory_of_gpu_args allocation{};
   allocation.va_addr = kQueueMemoryBase;
+  allocation.mmap_offset = kQueueMemoryBase;
   allocation.size = 0x2000;
   allocation.gpu_id = kGpuId;
   allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
@@ -7196,8 +23732,10 @@ TEST_F(DbgTrapDaemonTest, VmDestructionDrainsAnOpenProcessWithALiveQueue) {
   constexpr uint64_t kQueueMemoryBase = 0x100000;
   constexpr uint64_t kQueueDescriptorAddress = kQueueMemoryBase + 0x1000;
   constexpr uint64_t kCtxSaveAddress = kQueueMemoryBase + 0x2000;
+  constexpr uint32_t kCtxSaveSize = 0x8000;
   kfd_ioctl_alloc_memory_of_gpu_args allocation{};
   allocation.va_addr = kQueueMemoryBase;
+  allocation.mmap_offset = kQueueMemoryBase;
   allocation.size = 0xA000;
   allocation.gpu_id = kGpuId;
   allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
@@ -7205,6 +23743,7 @@ TEST_F(DbgTrapDaemonTest, VmDestructionDrainsAnOpenProcessWithALiveQueue) {
                      KFD_IOC_ALLOC_MEM_FLAGS_COHERENT;
   ASSERT_EQ(execute(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation, sizeof(allocation), -1, nullptr),
             0);
+  ASSERT_TRUE(map_queue_allocation(allocation));
 
   kfd_ioctl_create_queue_args queue{};
   queue.gpu_id = kGpuId;
@@ -7214,7 +23753,7 @@ TEST_F(DbgTrapDaemonTest, VmDestructionDrainsAnOpenProcessWithALiveQueue) {
   queue.read_pointer_address = kQueueDescriptorAddress + offsetof(amd_queue_t, read_dispatch_id);
   queue.write_pointer_address = kQueueDescriptorAddress + offsetof(amd_queue_t, write_dispatch_id);
   queue.ctx_save_restore_address = kCtxSaveAddress;
-  queue.ctx_save_restore_size = 0x8000;
+  queue.ctx_save_restore_size = kCtxSaveSize;
   ASSERT_EQ(execute(AMDKFD_IOC_CREATE_QUEUE, &queue, sizeof(queue), -1, nullptr), 0);
 
   // Leave both the process and queue live. TearDown must destroy the KFD
@@ -7233,6 +23772,7 @@ TEST_F(DbgTrapDaemonTest, QueueControlReconstructsRequestedIdsAndReportsInvalidQ
   constexpr uint32_t kCtxSaveSize = 0x8000;
   kfd_ioctl_alloc_memory_of_gpu_args allocation{};
   allocation.va_addr = kQueueMemoryBase;
+  allocation.mmap_offset = kQueueMemoryBase;
   allocation.size = 0xA000;
   allocation.gpu_id = kGpuId;
   allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
@@ -7240,6 +23780,7 @@ TEST_F(DbgTrapDaemonTest, QueueControlReconstructsRequestedIdsAndReportsInvalidQ
                      KFD_IOC_ALLOC_MEM_FLAGS_COHERENT;
   ASSERT_EQ(execute(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation, sizeof(allocation), -1, nullptr),
             0);
+  ASSERT_TRUE(map_queue_allocation(allocation));
 
   kfd_ioctl_create_queue_args queue{};
   queue.gpu_id = kGpuId;
@@ -8182,6 +24723,256 @@ TEST(RemoteDriverDbgEnableTest, FailedEnableLeavesCallerRuntimeInfoUntouched) {
 // inline tail.
 constexpr size_t framed_ioctl_request_bytes(size_t arg_bytes) {
   return sizeof(rocjitsu::RpcHeader) + sizeof(rocjitsu::RpcIoctlRequest) + arg_bytes;
+}
+
+TEST(RemoteDriverSvmTest, HostVmaReplacementReportsEachRangeAfterTheLocalChange) {
+  int sockets[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);
+  const timeval timeout{.tv_sec = 5, .tv_usec = 0};
+  ASSERT_EQ(::setsockopt(sockets[0], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)), 0);
+  ASSERT_EQ(::setsockopt(sockets[1], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)), 0);
+  const CloseOnScopeExit server_closer{sockets[1]};
+  std::array<rocjitsu::RpcHostVmaReplacedRequest, 2> observed{};
+  std::atomic<bool> local_change_complete{false};
+  bool valid_frames = true;
+  std::jthread server([&] {
+    serve_one_ioctl_reply(sockets[1], 0,
+                          sizeof(kfd_ioctl_svm_args) + sizeof(kfd_ioctl_svm_attribute), 0, 0);
+    for (auto &range : observed) {
+      rocjitsu::RpcHeader request{};
+      if (!rocjitsu::rpc_recv_exact(sockets[1], &request, sizeof(request)) ||
+          !rocjitsu::rpc_recv_exact(sockets[1], &range, sizeof(range))) {
+        valid_frames = false;
+        return;
+      }
+      valid_frames &= local_change_complete.load() &&
+                      request.opcode == rocjitsu::RPC_HOST_VMA_REPLACED &&
+                      request.payload_bytes == sizeof(range) && range.preserve_userptr_handle == 0;
+      rocjitsu::RpcHeader response{};
+      response.opcode = request.opcode;
+      response.request_id = request.request_id;
+      if (!rocjitsu::rpc_send_exact(sockets[1], &response, sizeof(response))) {
+        valid_frames = false;
+        return;
+      }
+    }
+  });
+
+  rocjitsu::RemoteDriver driver(sockets[0]);
+  const std::array unrelated{std::pair<uint64_t, uint64_t>{0x10000, 4096}};
+  driver.run_host_vma_replacement(unrelated, [] { return true; });
+  alignas(kfd_ioctl_svm_args)
+      std::array<std::byte, sizeof(kfd_ioctl_svm_args) + sizeof(kfd_ioctl_svm_attribute)>
+          buffer{};
+  auto *svm = reinterpret_cast<kfd_ioctl_svm_args *>(buffer.data());
+  auto *attr = reinterpret_cast<kfd_ioctl_svm_attribute *>(svm + 1);
+  svm->start_addr = 0x20000;
+  svm->size = 0x12000;
+  svm->op = KFD_IOCTL_SVM_OP_SET_ATTR;
+  svm->nattr = 1;
+  attr->type = KFD_IOCTL_SVM_ATTR_NO_ACCESS;
+  attr->value = 38144;
+  ASSERT_EQ(driver.ioctl(rocjitsu::ioctl_with_size(AMDKFD_IOC_SVM, buffer.size()), svm), 0);
+  driver.run_host_vma_replacement(unrelated, [] { return true; });
+  const std::array ranges{std::pair<uint64_t, uint64_t>{0x20000, 4096},
+                          std::pair<uint64_t, uint64_t>{0x30000, 8192}};
+  driver.run_host_vma_replacement(ranges, [&] {
+    local_change_complete = true;
+    return true;
+  });
+  server.join();
+  EXPECT_TRUE(valid_frames);
+  EXPECT_EQ(observed[0].addr, ranges[0].first);
+  EXPECT_EQ(observed[0].length, ranges[0].second);
+  EXPECT_EQ(observed[1].addr, ranges[1].first);
+  EXPECT_EQ(observed[1].length, ranges[1].second);
+}
+
+TEST(RemoteDriverSvmTest, KfdFixedMappingAndUnmapNotifyHostVmaReplacement) {
+  int sockets[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);
+  const timeval timeout{.tv_sec = 5, .tv_usec = 0};
+  ASSERT_EQ(::setsockopt(sockets[0], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)), 0);
+  ASSERT_EQ(::setsockopt(sockets[1], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)), 0);
+  const CloseOnScopeExit server_closer{sockets[1]};
+  constexpr size_t kPage = 4096;
+  void *page = ::mmap(nullptr, kPage, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(page, MAP_FAILED);
+  bool valid_frames = true;
+  std::jthread server([&] {
+    rocjitsu::RpcHeader mmap_header{};
+    rocjitsu::RpcMmapRequest mmap_request{};
+    if (!rocjitsu::rpc_recv_exact(sockets[1], &mmap_header, sizeof(mmap_header)) ||
+        !rocjitsu::rpc_recv_exact(sockets[1], &mmap_request, sizeof(mmap_request))) {
+      valid_frames = false;
+      return;
+    }
+    valid_frames &= mmap_header.opcode == rocjitsu::RPC_MMAP &&
+                    mmap_header.payload_bytes == sizeof(mmap_request) &&
+                    mmap_request.addr == reinterpret_cast<uint64_t>(page) &&
+                    (mmap_request.flags & MAP_FIXED);
+    rocjitsu::RpcHeader mmap_response{};
+    mmap_response.opcode = mmap_header.opcode;
+    mmap_response.request_id = mmap_header.request_id;
+    mmap_response.payload_bytes = sizeof(rocjitsu::RpcMmapResponse);
+    const rocjitsu::RpcMmapResponse mapping{.mapped_addr = reinterpret_cast<uint64_t>(page)};
+    std::array<std::byte, sizeof(mmap_response) + sizeof(mapping)> frame{};
+    std::memcpy(frame.data(), &mmap_response, sizeof(mmap_response));
+    std::memcpy(frame.data() + sizeof(mmap_response), &mapping, sizeof(mapping));
+    if (!rocjitsu::rpc_send_exact(sockets[1], frame.data(), frame.size())) {
+      valid_frames = false;
+      return;
+    }
+
+    const auto respond = [&](rocjitsu::RpcOpcode expected) {
+      rocjitsu::RpcHeader request{};
+      if (!rocjitsu::rpc_recv_exact(sockets[1], &request, sizeof(request))) {
+        valid_frames = false;
+        return false;
+      }
+      rocjitsu::RpcHostVmaReplacedRequest changed{};
+      const size_t expected_bytes =
+          expected == rocjitsu::RPC_MUNMAP ? sizeof(rocjitsu::RpcMunmapRequest) : sizeof(changed);
+      if (request.payload_bytes != expected_bytes ||
+          !rocjitsu::rpc_recv_exact(sockets[1], &changed, expected_bytes)) {
+        valid_frames = false;
+        return false;
+      }
+      valid_frames &= request.opcode == expected &&
+                      changed.addr == reinterpret_cast<uint64_t>(page) && changed.length == kPage;
+      if (expected == rocjitsu::RPC_HOST_VMA_REPLACED)
+        valid_frames &= changed.preserve_userptr_handle == 0;
+      rocjitsu::RpcHeader response{};
+      response.opcode = request.opcode;
+      response.request_id = request.request_id;
+      if (!rocjitsu::rpc_send_exact(sockets[1], &response, sizeof(response))) {
+        valid_frames = false;
+        return false;
+      }
+      return true;
+    };
+    if (!respond(rocjitsu::RPC_HOST_VMA_REPLACED) || !respond(rocjitsu::RPC_MUNMAP))
+      return;
+    (void)respond(rocjitsu::RPC_HOST_VMA_REPLACED);
+  });
+
+  rocjitsu::RemoteDriver driver(sockets[0]);
+  constexpr off_t kEventsOffset = static_cast<off_t>(uint64_t{2} << 62);
+  void *mapped =
+      driver.mmap(page, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, kEventsOffset);
+  EXPECT_EQ(mapped, page);
+  if (mapped == page)
+    EXPECT_EQ(driver.munmap(page, kPage), 0);
+  else
+    EXPECT_EQ(::munmap(page, kPage), 0);
+  server.join();
+  EXPECT_TRUE(valid_frames);
+}
+
+TEST(RemoteDriverSvmTest, UserptrPromotionNotifiesAfterClientReplacement) {
+  int sockets[2];
+  ASSERT_EQ(::socketpair(AF_UNIX, SOCK_STREAM, 0, sockets), 0);
+  const timeval timeout{.tv_sec = 5, .tv_usec = 0};
+  ASSERT_EQ(::setsockopt(sockets[0], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)), 0);
+  ASSERT_EQ(::setsockopt(sockets[1], SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)), 0);
+  const CloseOnScopeExit server_closer{sockets[1]};
+  constexpr size_t kPage = 4096;
+  void *page = ::mmap(nullptr, kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(page, MAP_FAILED);
+  *static_cast<uint8_t *>(page) = 0x5a;
+  const int backing = ::memfd_create("remote_userptr_promotion_test", MFD_CLOEXEC);
+  ASSERT_GE(backing, 0);
+  const CloseOnScopeExit backing_closer{backing};
+  ASSERT_EQ(::ftruncate(backing, kPage), 0);
+  bool valid_frames = true;
+  std::jthread server([&] {
+    rocjitsu::RpcHeader request{};
+    if (!rocjitsu::rpc_recv_exact(sockets[1], &request, sizeof(request))) {
+      valid_frames = false;
+      return;
+    }
+    std::vector<std::byte> payload(request.payload_bytes);
+    if (!rocjitsu::rpc_recv_exact(sockets[1], payload.data(), payload.size())) {
+      valid_frames = false;
+      return;
+    }
+    rocjitsu::RpcIoctlRequest ioctl_request{};
+    if (payload.size() < sizeof(ioctl_request) + sizeof(kfd_ioctl_alloc_memory_of_gpu_args)) {
+      valid_frames = false;
+      return;
+    }
+    std::memcpy(&ioctl_request, payload.data(), sizeof(ioctl_request));
+    valid_frames &= request.opcode == rocjitsu::RPC_IOCTL &&
+                    ioctl_request.ioctl_cmd == AMDKFD_IOC_ALLOC_MEMORY_OF_GPU;
+
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    std::memcpy(&allocation, payload.data() + sizeof(ioctl_request), sizeof(allocation));
+    valid_frames &= allocation.va_addr == reinterpret_cast<uint64_t>(page) &&
+                    allocation.mmap_offset == reinterpret_cast<uint64_t>(page) &&
+                    allocation.size == kPage &&
+                    (allocation.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR);
+    allocation.handle = 17;
+    allocation.mmap_offset = allocation.handle << 12;
+    rocjitsu::RpcHeader response{};
+    response.opcode = request.opcode;
+    response.request_id = request.request_id;
+    response.payload_bytes = sizeof(allocation);
+    if (rocjitsu::rpc_send_msg(sockets[1], &response, sizeof(response), &backing, 1) !=
+            static_cast<ssize_t>(sizeof(response)) ||
+        !rocjitsu::rpc_send_exact(sockets[1], &allocation, sizeof(allocation))) {
+      valid_frames = false;
+      return;
+    }
+
+    rocjitsu::RpcHeader notification{};
+    rocjitsu::RpcHostVmaReplacedRequest changed{};
+    if (!rocjitsu::rpc_recv_exact(sockets[1], &notification, sizeof(notification)) ||
+        !rocjitsu::rpc_recv_exact(sockets[1], &changed, sizeof(changed))) {
+      valid_frames = false;
+      return;
+    }
+    valid_frames &= notification.opcode == rocjitsu::RPC_HOST_VMA_REPLACED &&
+                    notification.payload_bytes == sizeof(changed) &&
+                    changed.addr == reinterpret_cast<uint64_t>(page) && changed.length == kPage &&
+                    changed.preserve_userptr_handle == 17;
+    rocjitsu::RpcHeader acknowledgement{};
+    acknowledgement.opcode = notification.opcode;
+    acknowledgement.request_id = notification.request_id;
+    if (!rocjitsu::rpc_send_exact(sockets[1], &acknowledgement, sizeof(acknowledgement))) {
+      valid_frames = false;
+      return;
+    }
+    rocjitsu::RpcHeader later{};
+    changed = {};
+    if (!rocjitsu::rpc_recv_exact(sockets[1], &later, sizeof(later)) ||
+        !rocjitsu::rpc_recv_exact(sockets[1], &changed, sizeof(changed))) {
+      valid_frames = false;
+      return;
+    }
+    valid_frames &= later.opcode == rocjitsu::RPC_HOST_VMA_REPLACED &&
+                    changed.addr == reinterpret_cast<uint64_t>(page) && changed.length == kPage &&
+                    changed.preserve_userptr_handle == 0;
+    acknowledgement.opcode = later.opcode;
+    acknowledgement.request_id = later.request_id;
+    valid_frames &= rocjitsu::rpc_send_exact(sockets[1], &acknowledgement, sizeof(acknowledgement));
+  });
+
+  rocjitsu::RemoteDriver driver(sockets[0]);
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reinterpret_cast<uint64_t>(page);
+  allocation.mmap_offset = allocation.va_addr;
+  allocation.size = kPage;
+  allocation.gpu_id = 38144;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  EXPECT_EQ(allocation.handle, 17u);
+  EXPECT_EQ(*static_cast<uint8_t *>(page), 0x5a);
+  const std::array replaced{
+      std::pair{reinterpret_cast<uint64_t>(page), static_cast<uint64_t>(kPage)}};
+  driver.run_host_vma_replacement(replaced, [] { return true; });
+  server.join();
+  EXPECT_TRUE(valid_frames);
+  EXPECT_EQ(::munmap(page, kPage), 0);
 }
 
 // A reply header cut in half, then EOF on the daemon's write half. The client's
@@ -10109,14 +26900,13 @@ rocjitsu::amdgpu::Wavefront *fault_a_wave_on_an_unmapped_pc(rocjitsu::SoC *soc,
   return wave;
 }
 
-// A data-side fault instead: s_load_dword through a null sbase. A declined
+// A data-side fault instead: s_load_dword through the selected sbase. A declined
 // fault leaves this wave running -- the access is re-issued at its own PC and
 // retires -- which is what makes it able to tell a stop that was rolled back
 // from one that was never attempted. gfx9 encodings, so CDNA fixtures only.
-rocjitsu::amdgpu::Wavefront *
-fault_a_wave_on_a_scalar_load(rocjitsu::SoC *soc, rocjitsu::SimulatedKfd *driver,
-                              uint64_t kernel_pc, uint32_t queue_id,
-                              rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr) {
+rocjitsu::amdgpu::Wavefront *fault_a_wave_on_a_scalar_load(
+    rocjitsu::SoC *soc, rocjitsu::SimulatedKfd *driver, uint64_t kernel_pc, uint32_t queue_id,
+    rocjitsu::amdgpu::ComputeUnitCore *cu = nullptr, uint64_t data_va = 0) {
   const uint32_t pid = driver->local_process_id();
   const std::optional<rocjitsu::amdgpu::GpuVmAccess> memory = soc->gpu_vm().snapshot_vmid(pid);
   if (!memory)
@@ -10138,9 +26928,8 @@ fault_a_wave_on_a_scalar_load(rocjitsu::SoC *soc, rocjitsu::SimulatedKfd *driver
   wave->set_process_id(pid);
   wave->set_queue_id(queue_id);
   wave->set_dispatch_id(7);
-  // sbase = s[0:1] = 0, an address nothing is mapped at.
-  cu->write_sgpr(wave->sgpr_alloc().base, 0);
-  cu->write_sgpr(wave->sgpr_alloc().base + 1, 0);
+  cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(data_va));
+  cu->write_sgpr(wave->sgpr_alloc().base + 1, static_cast<uint32_t>(data_va >> 32));
   cu->step();
   return wave;
 }
@@ -10842,6 +27631,94 @@ TEST_P(KfdMemoryFaultPcTest, RuntimeReceivesEveryFaultWithoutRepeatedAcknowledgm
 }
 
 INSTANTIATE_TEST_SUITE_P(XnackModes, KfdMemoryFaultPcTest, ::testing::Bool());
+
+TEST_F(KfdIoctlTest, RevokedGpuGrantFaultsResidentCuScalarHit) {
+  constexpr uint64_t kKernelAddress = 0x610000000ULL;
+  constexpr uint64_t kCwsrAddress = 0x610100000ULL;
+  constexpr uint32_t kCwsrSize = 0x40000;
+  alignas(4096) std::array<std::byte, 4096> data{};
+  data.fill(std::byte{0x3a});
+  std::array<uint8_t, 4096> code_page{};
+  std::vector<uint8_t> cwsr(static_cast<size_t>(kCwsrSize) * soc_->num_xcds());
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(kKernelAddress, code_page.data(), code_page.size());
+  process->map_pages(kCwsrAddress, cwsr.data(), cwsr.size());
+
+  kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+  allocation.va_addr = reinterpret_cast<uint64_t>(data.data());
+  allocation.mmap_offset = allocation.va_addr;
+  allocation.size = data.size();
+  allocation.gpu_id = kGpuId;
+  allocation.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+  uint32_t gpu_id = 0;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = allocation.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  gpu_id = kGpuId;
+  map.n_success = 0;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+
+  kfd_ioctl_runtime_enable_args runtime{};
+  runtime.mode_mask = KFD_RUNTIME_ENABLE_MODE_ENABLE_MASK;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_RUNTIME_ENABLE, &runtime), 0);
+  const int notifier = make_debug_fd();
+  ASSERT_GE(notifier, 0);
+  kfd_ioctl_dbg_trap_args enable{};
+  enable.pid = static_cast<uint32_t>(getpid());
+  enable.op = KFD_IOC_DBG_TRAP_ENABLE;
+  enable.enable.dbg_fd = notifier;
+  enable.enable.exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_MEMORY_VIOLATION);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &enable), 0);
+
+  alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kGpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  create.ctx_save_restore_address = kCwsrAddress;
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+
+  auto *cp = soc_->xcd(0)->command_processor();
+  ASSERT_NE(cp, nullptr);
+  ASSERT_FALSE(cp->compute_units().empty());
+  auto *cu = cp->compute_units().front();
+  uint32_t warmed = 0;
+  ASSERT_EQ(cu->l1_scalar().load(allocation.va_addr, 1, &warmed, driver_->local_process_id()),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(warmed, 0x3a3a3a3au);
+
+  kfd_ioctl_unmap_memory_from_gpu_args unmap{};
+  unmap.handle = allocation.handle;
+  unmap.n_devices = 1;
+  unmap.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU, &unmap), 0);
+
+  auto *wave = fault_a_wave_on_a_scalar_load(soc_, driver_, kKernelAddress, create.queue_id,
+                                             nullptr, allocation.va_addr);
+  ASSERT_NE(wave, nullptr);
+  EXPECT_TRUE(wave->debug_halted());
+  EXPECT_NE(wave->trapsts() & (1u << 28), 0u);
+  EXPECT_EQ(wave->pc, kKernelAddress + 8);
+  EXPECT_EQ(vm_read32(kCwsrAddress, driver_->local_process_id()), 0x100u);
+  uint64_t notifications = 0;
+  ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
+            static_cast<ssize_t>(sizeof(notifications)));
+  EXPECT_EQ(notifications, 1u);
+
+  kfd_ioctl_free_memory_of_gpu_args free{};
+  free.handle = allocation.handle;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+}
 
 TEST_F(KfdIoctlTest, DbgTrapRejectedMemoryViolationFallsBackToRuntime) {
   constexpr uint64_t kKernelAddress = 0x600000000ULL;

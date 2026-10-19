@@ -17,14 +17,20 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <sys/types.h>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
+
+class LinuxKfd;
 
 /// @brief What Yama's ptrace_scope implies for the daemon's cross-process reads.
 /// @details Only one of these states makes the grant both necessary and
@@ -156,9 +162,10 @@ public:
   /// @retval >=0 A new synthetic KFD fd. @retval -1 eventfd creation failed.
   [[nodiscard]] int reissue_synthetic_kfd_fd();
 
-  /// @brief Send RPC_CLOSE to the daemon.
-  /// @retval 0 Success.
-  /// @retval -1 Socket error.
+  /// @brief Send RPC_CLOSE, receive its result, and release local RPC resources.
+  /// @retval 0 Daemon close completed, or this driver was already closed.
+  /// @retval -errno Daemon close or RPC transport failed. The socket is still
+  /// released; the daemon owns any retryable pending process close.
   int close() override;
 
   /// @brief Forward a KFD ioctl to the daemon via RPC_IOCTL.
@@ -170,6 +177,8 @@ public:
   /// @retval negative Negative errno from the daemon's ioctl dispatch, or from
   /// the transport when the request never reached the wire.
   int ioctl(unsigned long request, void *arg) override;
+  int ioctl(unsigned long request, void *arg,
+            const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver);
 
   /// @brief Forward an mmap request to the daemon via RPC_MMAP.
   /// @param addr Requested mapping address (may include MAP_FIXED).
@@ -181,6 +190,9 @@ public:
   /// @retval MAP_FAILED Mapping failed; errno is set, and is EPROTO when the RPC
   /// stream has been made terminal by a framing failure.
   void *mmap(void *addr, size_t length, int prot, int flags, off_t offset) override;
+  /// @brief Also retire a live local simulator policy for a replaced client VMA.
+  void *mmap(void *addr, size_t length, int prot, int flags, off_t offset,
+             const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver);
 
   /// @brief Forward a munmap request to the daemon via RPC_MUNMAP.
   /// @param addr Address of the mapping to unmap.
@@ -192,10 +204,31 @@ public:
   /// @retval negative Negative transport errno when the request never reached
   /// the wire.
   int munmap(void *addr, size_t length) override;
+  int munmap(void *addr, size_t length,
+             const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver);
+
+  /// @brief Order a bare client VMA change and its SVM cleanup with KFD ioctls.
+  /// @details The callback holds host_mapping_lock only during the syscall.
+  /// Report a successful replacement when it overlaps a range that could
+  /// still carry daemon SVM policy; the range index is conservative.
+  void run_host_vma_replacement(std::span<const std::pair<uint64_t, uint64_t>> ranges,
+                                const std::function<bool()> &bare_mapping_change);
 
 private:
-  int send_ioctl(unsigned long request, void *arg);
+  int send_ioctl(unsigned long request, void *arg,
+                 const std::function<std::shared_ptr<LinuxKfd>()> &current_local_driver = {});
   int send_mmap(void *addr, size_t length, int prot, int flags, off_t offset, int *memfd_out);
+  /// @pre The caller holds rpc_mutex_.
+  int send_host_vma_replaced_locked(uint64_t address, uint64_t length,
+                                    uint64_t preserve_userptr_handle = 0);
+  /// @brief Conservatively remember a host address that can acquire SVM policy.
+  /// @pre The caller holds rpc_mutex_.
+  void remember_host_svm_range_locked(uint64_t address, uint64_t length) noexcept;
+  /// @brief Decide whether a replacement may need daemon SVM cleanup.
+  /// @details A true result may reflect a remembered range or the unbounded
+  /// fallback after range tracking failed; it does not prove live policy.
+  /// @pre The caller holds rpc_mutex_.
+  [[nodiscard]] bool may_have_host_svm_policy_locked(uint64_t address, uint64_t length) const;
 
   /// @brief Mark the RPC stream unusable and make the connection terminal.
   /// @details Called from every framing failure — a half-written request, a
@@ -234,6 +267,10 @@ private:
   /// @details ROCR is multithreaded — concurrent ioctl/mmap calls interleave
   /// socket writes without this lock, corrupting the RPC stream.
   std::mutex rpc_mutex_;
+  // Sorted, merged end-exclusive ranges. A failed update sets the unbounded
+  // fallback so skipping a cleanup RPC can never leave daemon policy stale.
+  std::vector<std::pair<uint64_t, uint64_t>> potential_host_svm_ranges_;
+  bool unbounded_host_svm_policy_ = false;
 
   /// @brief Memfds received from the daemon during ALLOC_MEMORY, keyed by handle.
   std::unordered_map<uint64_t, int> handle_memfds_;

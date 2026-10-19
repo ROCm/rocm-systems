@@ -110,6 +110,7 @@ void CommandProcessor::set_gpu_vm(GpuVm *gpu_vm, AddressSpaceHandle default_addr
 uint64_t CommandProcessor::register_pm4_queue(Pm4QueueConfig config) {
   // Compatibility entry point: PM4 is initial state of the same compute queue.
   return register_queue({.address_space = config.address_space,
+                         .process_identity_kind = ProcessIdentityKind::Vmid,
                          .ring_base_va = config.ring_base,
                          .ring_size = config.ring_size_bytes,
                          .read_ptr_va = config.consumer_pointer_address,
@@ -1455,21 +1456,33 @@ bool CommandProcessor::publish_queue_exception(uint32_t queue_id, uint32_t proce
 
 QueuePrepareCloseStatus
 CommandProcessor::prepare_unregister_queue_registration(uint64_t registration_id) noexcept {
+  return prepare_close_queue_registration(registration_id, QueueCloseMode::Graceful);
+}
+
+QueuePrepareCloseStatus
+CommandProcessor::prepare_preempt_queue_registration(uint64_t registration_id) noexcept {
+  return prepare_close_queue_registration(registration_id, QueueCloseMode::Preempt);
+}
+
+QueuePrepareCloseStatus
+CommandProcessor::prepare_close_queue_registration(uint64_t registration_id,
+                                                   QueueCloseMode mode) noexcept {
   if (!engine()) {
     std::lock_guard lock(hw_queue_mutex_);
     for (auto &queue : compute_queues_)
       queue.command_retry_pending = false;
     service_command_streams(0);
   }
-  return close_queue_registration(registration_id, false);
+  return close_queue_registration(registration_id, mode);
 }
 
 bool CommandProcessor::unregister_queue_registration(uint64_t registration_id) {
-  return close_queue_registration(registration_id, true) == QueuePrepareCloseStatus::Ready;
+  return close_queue_registration(registration_id, QueueCloseMode::ForceCancel) ==
+         QueuePrepareCloseStatus::Ready;
 }
 
 QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t registration_id,
-                                                                   bool force) noexcept {
+                                                                   QueueCloseMode mode) noexcept {
   if (registration_id == 0)
     return QueuePrepareCloseStatus::Faulted;
 
@@ -1491,7 +1504,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
         std::ranges::find(compute_queues_, registration_id, &ComputeQueueRecord::registration_id);
     if (queue == compute_queues_.end())
       return QueuePrepareCloseStatus::Faulted;
-    if (!force) {
+    if (mode != QueueCloseMode::ForceCancel) {
       if (queue->publication_faulted || queue->command_fault_pending ||
           (queue->faulted && (!queue->entries.empty() || !queue->dispatches.entries.empty())))
         return QueuePrepareCloseStatus::Faulted;
@@ -1501,7 +1514,8 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
                     // while allocating backing. Only an unfinished notification publication
                     // must delay that removal.
                     queue->scratch_request.publication_pending() ||
-                    queue->scratch_reclaim.active() || queue->has_pending_commands();
+                    queue->scratch_reclaim.active() ||
+                    (mode == QueueCloseMode::Graceful && queue->has_pending_commands());
     }
     if (!retry_close) {
       queue_id = queue->queue_id;
@@ -2045,12 +2059,10 @@ bool CommandProcessor::barrier_satisfied(const ComputeQueueRecord &qs, size_t id
   if (idx == 0 && !qs.implicit_barrier_next)
     return true;
 
-  // Barrier bit: all prior entries must be fully completed, device-wide. A prior
-  // entry that is one XCD's share of a fanned-out dispatch is not done just
-  // because this XCD finished it, so gate on the whole grid or this XCD would run
-  // the next packet while a peer is still executing the previous one.
+  // A predecessor's workgroups can retire before its cache flush or signal
+  // publication. A barrier bit waits for those effects on every XCD too.
   for (size_t i = 0; i < idx; ++i) {
-    if (!qs.entries[i].grid_fully_completed())
+    if (completion_ ? !qs.entries[i].completion_notified : !qs.entries[i].grid_fully_completed())
       return false;
   }
   return true;
@@ -2364,11 +2376,22 @@ CommandProcessor::DispatchWorkgroupResult
 CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   assert(!cus_.empty() && "command processor has no compute units");
 
-  // A dispatch may remain queued after its admission snapshot is invalidated.
-  // Fall back to current operation snapshots for subsequent wave setup rather
-  // than retrying the permanently revoked snapshot forever.
-  if (entry.execution_access && entry.execution_access->revoked())
-    entry.execution_access.reset();
+  // An unexecuted dispatch may retry after its admission snapshot is revoked.
+  // Recapture one generation for both its waves and completion; mixing the
+  // original generation with a later workgroup would not be recoverable.
+  if (!entry.pm4_abi && entry.execution_translation_epoch != 0 &&
+      (!entry.execution_access || entry.execution_access->revoked())) {
+    if (entry.dispatched_wgs != 0)
+      return {.dispatched = 0, .outcome = VmAccessOutcome::Revoked};
+    std::optional<GpuVmAccess> replacement =
+        gpu_vm_ != nullptr ? gpu_vm_->snapshot_pinned(entry.address_space) : std::nullopt;
+    if (!replacement)
+      return {.dispatched = 0, .outcome = VmAccessOutcome::Faulted};
+    if (entry.execution_access && !entry.execution_access->same_root_lineage(*replacement))
+      return {.dispatched = 0, .outcome = VmAccessOutcome::Revoked};
+    entry.execution_translation_epoch = replacement->info().translation_epoch;
+    entry.execution_access = std::make_shared<GpuVmAccess>(std::move(*replacement));
+  }
 
   // A peer can publish the shared terminal-fault latch before this CP drains
   // its fault inbox. Stop placement as soon as that publication is visible;
@@ -2472,7 +2495,8 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       wf->set_wave_in_group(w);
       wf->set_address_space(entry.address_space);
       wf->set_vm_access(entry.execution_access);
-      wf->set_process_id(entry.process_id);
+      wf->set_execution_effect_guard(entry.execution_effect_possible);
+      wf->set_process_id(entry.process_id, entry.process_identity_kind);
       // Live PM4 applications share the host monotonic clock with DRM query
       // timestamps. Internal simulation workloads retain the modeled clock.
       wf->set_system_clock(entry.pm4_abi);
@@ -2488,11 +2512,11 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       if (initialization != VmAccessOutcome::Complete) {
         free_reserved();
         if (initialization == VmAccessOutcome::Revoked && !entry.pm4_abi) {
-          // No wave in this workgroup has executed. Discard its partial register
-          // setup and recapture access on retry; scratch provisioning is idempotent.
-          // Keep a retry scheduled even when releasing these reservations left
-          // every CU idle. PM4 retains its submission-failure path.
-          entry.execution_access.reset();
+          // No wave in this workgroup has executed. Keep the revoked snapshot
+          // as the lineage witness when recapturing access on retry; scratch
+          // provisioning is idempotent. Keep a retry scheduled even when
+          // releasing these reservations left every CU idle. PM4 retains its
+          // submission-failure path.
           if (engine())
             arm_stall_recheck(engine()->context(partition_id()).current_tick());
           return VmAccessOutcome::Unavailable;
@@ -3214,6 +3238,7 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   dp.dispatch_id = allocate_dispatch_id();
   dp.address_space = queue.address_space;
   dp.process_id = queue.process_id;
+  dp.process_identity_kind = queue.process_identity_kind;
   dp.queue_id = queue.queue_id;
   dp.interrupt_sink = queue.interrupt_sink;
   dp.enabled_cus = queue.enabled_cus;
@@ -4043,10 +4068,14 @@ AqlAdmissionResult CommandProcessor::admit_kernel_dispatch(
   dp.queue_packet_id = queue_packet_id;
   dp.address_space = queue.address_space;
   dp.execution_access = std::make_shared<GpuVmAccess>(transaction_access);
+  dp.execution_translation_epoch = transaction_access.info().translation_epoch;
+  dp.execution_cache_write_sequence = transaction_access.cache_write_sequence();
+  dp.execution_effect_possible = std::make_shared<std::atomic_bool>(false);
   if (!uses_kfd_queue_abi && private_segment_fixed_size > 0 && scratch_resolver_)
     dp.scratch_backing_addr = scratch_resolver_(queue.process_id);
   dp.interrupt_sink = queue.interrupt_sink;
   dp.process_id = queue.process_id;
+  dp.process_identity_kind = queue.process_identity_kind;
   dp.aql_packet_id = aql_packet_id;
   dp.aql_packet_address = pkt_addr;
   dp.owns_aql_ring_slot = true;
@@ -4305,8 +4334,12 @@ AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequ
       .queue_id = queue->queue_id,
       .address_space = queue->address_space,
       .execution_access = std::make_shared<GpuVmAccess>(request.access),
+      .execution_translation_epoch = request.access.info().translation_epoch,
+      .execution_cache_write_sequence = UINT64_MAX,
+      .execution_effect_possible = {},
       .interrupt_sink = queue->interrupt_sink,
       .process_id = queue->process_id,
+      .process_identity_kind = queue->process_identity_kind,
       .aql_packet_id = request.packet_index,
       .aql_packet_address = request.packet_address,
       .owns_aql_ring_slot = true,
@@ -4316,6 +4349,7 @@ AqlAdmissionResult CommandProcessor::admit_aql_packet(const AqlPacketProcessRequ
       .blocks_following = prepared.blocks_following,
       .aql_pm4_ib_address = prepared.pm4_ib_address,
       .aql_pm4_ib_dwords = prepared.pm4_ib_dwords,
+      .no_fence_aql_barrier = prepared.no_fence_aql_barrier,
   };
   if (prepared.kind == AqlPreparedPacketKind::Pm4Ib) {
     // One completion token per XCD prevents automatic retirement of an unexecuted

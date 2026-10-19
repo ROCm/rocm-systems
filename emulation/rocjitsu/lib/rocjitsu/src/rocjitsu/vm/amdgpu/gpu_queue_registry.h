@@ -53,6 +53,8 @@ enum class QueueReconfigureStatus : uint8_t {
 enum class QueueCloseMode : uint8_t {
   /// Preserve committed state that still needs externally visible publication.
   Graceful,
+  /// Stop unfinished execution after committed publication state is clear.
+  Preempt,
   /// Cancel all retained execution state during reset or frontend teardown.
   ForceCancel,
 };
@@ -111,6 +113,7 @@ struct QueueIdentity {
   AddressSpaceHandle address_space;
   InterruptSink interrupt_sink{};
   uint32_t process_id = 0;
+  ProcessIdentityKind process_identity_kind = ProcessIdentityKind::Pasid;
   uint32_t queue_id = 0;
 };
 
@@ -161,6 +164,12 @@ public:
   /// complete. Busy and Faulted keep the handle live for a retry or forced close.
   [[nodiscard]] virtual QueuePrepareCloseStatus prepare_close() noexcept {
     return QueuePrepareCloseStatus::Ready;
+  }
+
+  /// @brief Prepare explicit queue preemption without losing committed publication.
+  /// @details Bindings without preemption support retain graceful close behavior.
+  [[nodiscard]] virtual QueuePrepareCloseStatus prepare_preempt_close() noexcept {
+    return prepare_close();
   }
 
   /// @brief Apply a queue configuration update and report its status.

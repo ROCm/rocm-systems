@@ -939,9 +939,9 @@ TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
 // than in a CI grep keeps every config covered as new ones are added.
 TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
   const std::set<std::string> kPinnedConfigs = {
-      "gfx950_mi355x_kmd_2gpu.json",
-      "gfx1250_mi455x_kmd_4gpu.json",
-      "gfx1250_mi455x_kmd_2node_net.json",
+      "gfx950_mi355x_kmd_2gpu.json",           "gfx1250_mi455x_kmd_4gpu.json",
+      "gfx1250_mi455x_kmd_2node_net.json",     "gfx1250_mi455x_4gpu_scaleup.json",
+      "gfx1250_mi455x_kmd_4node_2gpu_if.json",
   };
   std::set<std::string> saw_pinned_configs;
   uint32_t configs_checked = 0;
@@ -971,7 +971,8 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
       // turns a pin of 0 -- which opts back into the default -- into 1 as
       // surely as a real pin does. At 64 the config has to carry the literal 1.
       config::LoadedConfig pinned;
-      if (entry.path().filename() == "gfx1250_mi455x_kmd_2node_net.json") {
+      if (entry.path().filename() == "gfx1250_mi455x_kmd_2node_net.json" ||
+          entry.path().filename() == "gfx1250_mi455x_kmd_4node_2gpu_if.json") {
         ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), pinned, "node0",
                                                      /*host_threads=*/64));
       } else {

@@ -75,6 +75,8 @@ public:
   [[nodiscard]] bool reconfigure(Config config);
   /// @brief Discard retry and terminal state while preserving the configuration.
   void reset();
+  /// @brief Cancel deferred packet work when its queue is force-closed.
+  void cancel_in_flight() noexcept;
   /// @brief Convert an escaped packet callback into durable terminal queue state.
   void latch_callback_failure() noexcept;
 
@@ -88,6 +90,8 @@ private:
   [[nodiscard]] SdmaRingStatus initialize_cursor();
   [[nodiscard]] SdmaRingStatus ensure_packet_bytes(uint64_t producer, std::size_t required_bytes);
   [[nodiscard]] SdmaRingStatus publish_cursor();
+  [[nodiscard]] MemoryIngressAdmission admit_control(uint64_t address, std::size_t size,
+                                                     VmAccessKind access) const;
   [[nodiscard]] SdmaRingStatus latch(SdmaRingStatus outcome);
   void clear_packet();
   void clear_in_flight();
@@ -96,11 +100,12 @@ private:
   SdmaRingConfig config_;
   CircularRingReader ring_reader_;
   ConsumerCursorJournal cursor_journal_;
+  SdmaMemoryIngressHandler ingress_handler_;
   SdmaPacketProcessor packet_processor_;
   SdmaPacketContinuation continuation_;
   std::optional<GpuVmAccess> access_;
   std::vector<std::byte> packet_bytes_;
-  std::size_t packet_fetch_progress_ = 0;
+  CircularRingReadProgress packet_fetch_progress_;
   std::vector<uint32_t> packet_words_;
   std::optional<SdmaPacketProcessResult> pending_retirement_;
   std::optional<SdmaRingStatus> terminal_after_publication_;

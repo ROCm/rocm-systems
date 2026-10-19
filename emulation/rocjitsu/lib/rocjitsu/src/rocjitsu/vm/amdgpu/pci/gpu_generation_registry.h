@@ -28,6 +28,7 @@
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery.h"
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery_profile.h"
+#include "simdojo/components/pci_device.h"
 
 #include <array>
 #include <cstddef>
@@ -69,6 +70,9 @@ public:
 
   /// @brief Topology used when configuration supplies no per-field override.
   GpuDiscoveryTopology topology_defaults;
+
+  /// PCIe link the generation's endpoint presents to the guest.
+  simdojo::PcieSpec pcie = {};
 };
 
 /// @brief Recoverable composition error; ``std::nullopt`` means success.

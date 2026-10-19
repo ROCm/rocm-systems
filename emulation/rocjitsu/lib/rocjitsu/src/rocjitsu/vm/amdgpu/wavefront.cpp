@@ -22,6 +22,15 @@ Wavefront::Wavefront(ComputeUnitCore &cu, uint32_t wf_id, uint32_t default_wf_si
       max_vgprs_(max_vgprs), mode_has_gpr_idx_en_(mode_has_gpr_idx_en),
       memory_wait_checks_enabled_(cu.config().memory_wait_checks_enabled()) {}
 
+void Wavefront::set_process_id(uint32_t id, ProcessIdentityKind kind) {
+  process_id_ = id;
+  if (const auto apertures = cu_.resolve_shader_apertures(id, kind))
+    set_apertures(apertures->shared_base, apertures->shared_limit, apertures->private_base,
+                  apertures->private_limit);
+  else
+    cu_.report_unresolved_apertures(id, kind);
+}
+
 void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
   if (!activity_tracked_)
     return;
@@ -67,7 +76,9 @@ std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
   GpuVm *gpu_vm = cu_.gpu_vm();
   if (gpu_vm == nullptr)
     return std::nullopt;
-  return address_space_ ? gpu_vm->snapshot(address_space_) : gpu_vm->snapshot_vmid(process_id_);
+  std::optional<GpuVmAccess> access =
+      address_space_ ? gpu_vm->snapshot(address_space_) : gpu_vm->snapshot_vmid(process_id_);
+  return access && same_execution_root(*access) ? std::move(access) : std::nullopt;
 }
 
 VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const {

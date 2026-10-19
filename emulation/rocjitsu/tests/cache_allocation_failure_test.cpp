@@ -158,6 +158,19 @@ TEST_P(CacheAllocationFailureTest, LazyAllocationFailureLeavesNoResidentLine) {
     EXPECT_EQ(line.data[byte], 0);
 }
 
+TEST_P(CacheAllocationFailureTest, LazyCleanVictimAllocationMaterializesOnFirstFill) {
+  LazyCache store;
+  failures_remaining = 1;
+  EXPECT_THROW(store.allocate_clean_victim_with_data(0, /*vmid=*/7), std::bad_alloc);
+  EXPECT_FALSE(store.lookup(0, nullptr, /*vmid=*/7));
+  auto line = store.allocate_clean_victim_with_data(0, /*vmid=*/7);
+  ASSERT_NE(line.tag, nullptr);
+  ASSERT_NE(line.data, nullptr);
+  EXPECT_TRUE(store.lookup(0, nullptr, /*vmid=*/7));
+  for (uint32_t byte = 0; byte < LazyCache::LINE_SIZE; ++byte)
+    EXPECT_EQ(line.data[byte], 0);
+}
+
 TEST_P(CacheAllocationFailureTest, LazyReturningHandlerRetriesWithZeroContents) {
   LazyCache store;
   std::set_new_handler([] { ++handler_calls; });

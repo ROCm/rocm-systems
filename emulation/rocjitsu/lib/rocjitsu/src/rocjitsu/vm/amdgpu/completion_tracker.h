@@ -77,14 +77,14 @@ public:
   /// @brief Deliver an out-of-order-ready non-kernel packet's completion.
   [[nodiscard]] VmAccessOutcome complete_non_kernel(DispatchEntry &entry);
 
-  /// @brief Flush L1/L2 caches before firing a completion signal.
-  void flush_caches(uint32_t vmid = 0);
-
   /// @brief Check if all queues have no pending entries.
   bool all_complete(const std::vector<ComputeQueueRecord> &queues) const;
 
 private:
   [[nodiscard]] VmAccessOutcome deliver_completion(DispatchEntry &entry);
+  [[nodiscard]] VmAccessOutcome prepare_completion_access(DispatchEntry &entry,
+                                                          bool &flush_required);
+  [[nodiscard]] VmAccessOutcome flush_caches(uint32_t vmid, const GpuVmAccess *access);
   [[nodiscard]] VmAccessOutcome advance_signal_publication(DispatchEntry &entry);
   [[nodiscard]] VmAccessOutcome advance_queue_idle_publication(QueueIdlePublicationState &state);
   [[nodiscard]] VmAccessOutcome read_gpu(const GpuVmAccess &access, uint64_t address,

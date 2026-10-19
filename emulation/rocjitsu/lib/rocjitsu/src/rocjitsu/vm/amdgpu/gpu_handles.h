@@ -11,6 +11,9 @@
 
 namespace rocjitsu::amdgpu {
 
+/// @brief Namespace of a queue's process selector, not its numeric range.
+enum class ProcessIdentityKind : uint8_t { Pasid, Vmid };
+
 /// @brief Lifetime-safe reference to one GPU address space.
 class AddressSpaceHandle {
 public:

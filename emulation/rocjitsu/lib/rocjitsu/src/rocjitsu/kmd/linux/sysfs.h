@@ -137,8 +137,9 @@ public:
 
   /// @brief Generate the sysfs topology directory for multiple GPUs.
   /// @param gpus Per-GPU configurations. Each gets its own topology node.
-  /// @param publish_peer_links Whether the GPU peers have qualified executable routes.
-  /// An explicit false writes zero P2P counts so libhsakmt cannot infer peers.
+  /// @param publish_peer_links Whether to publish legacy XGMI discovery metadata.
+  /// Explicit manifests leave this false even when their modeled local routes
+  /// execute; zero P2P counts prevent libhsakmt from inferring native XGMI.
   std::string generate(const std::vector<GpuInfo> &gpus, bool publish_peer_links = true);
 
   /// @brief Get the generated KFD topology path (empty if not yet generated).

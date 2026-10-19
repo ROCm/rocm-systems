@@ -4,6 +4,7 @@
 #include "legacy_gpu_memory_fixture.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/completion_tracker.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
@@ -12,7 +13,9 @@
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
+#include "rocjitsu/vm/amdgpu/prepared_canonical_writeback.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
+#include "rocjitsu/vm/fabric_backing.h"
 #include "rocjitsu/vm/soc.h"
 #include "simdojo/sim/exec_mode.h"
 #include "util/except.h"
@@ -29,6 +32,7 @@
 #include <cstdint>
 #include <cstring>
 #include <format>
+#include <functional>
 #include <future>
 #include <iomanip>
 #include <iostream>
@@ -36,7 +40,9 @@
 #include <linux/memfd.h>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <random>
+#include <shared_mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -44,42 +50,364 @@
 #include <sys/syscall.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
 
+class L2CacheTestAccess {
+public:
+  static void
+  store_prepared_dirty_line(L2Cache &cache, uint64_t line_address, std::span<const uint8_t> data,
+                            uint32_t vmid, uint64_t cache_identity, uint64_t generation,
+                            std::span<const std::pair<uint32_t, uint32_t>> dirty_ranges) {
+    assert(L2Cache::CacheStore::line_address(line_address) == line_address);
+    assert(data.size() == L2Cache::LINE_SIZE);
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    simdojo::CacheTag *tag = cache.cache_.allocate(line_address, vmid);
+    cache.cache_.write_line(line_address, data.data(), 0, L2Cache::LINE_SIZE, vmid);
+    tag->cache_identity = cache_identity;
+    tag->admission_generation = generation;
+    tag->dirty = true;
+    tag->coherence = simdojo::CoherenceState::MODIFIED;
+    for (const auto &[offset, size] : dirty_ranges)
+      cache.mark_dirty_bytes(line_address, offset, size, vmid);
+  }
+
+  static void store_prepared_clean_line(L2Cache &cache, uint64_t line_address,
+                                        std::span<const uint8_t> data, uint32_t vmid,
+                                        uint64_t cache_identity, uint64_t generation) {
+    assert(L2Cache::CacheStore::line_address(line_address) == line_address);
+    assert(data.size() == L2Cache::LINE_SIZE);
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    simdojo::CacheTag *tag = cache.cache_.allocate(line_address, vmid);
+    cache.cache_.write_line(line_address, data.data(), 0, L2Cache::LINE_SIZE, vmid);
+    tag->cache_identity = cache_identity;
+    tag->admission_generation = generation;
+    tag->coherence = simdojo::CoherenceState::SHARED;
+  }
+
+  static void rebind_prepared_dirty_line(L2Cache &cache, uint64_t line_address,
+                                         std::span<const uint8_t> data, uint32_t vmid,
+                                         uint64_t cache_identity, uint64_t generation) {
+    assert(L2Cache::CacheStore::line_address(line_address) == line_address);
+    assert(data.size() == L2Cache::LINE_SIZE);
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    simdojo::CacheTag *tag = nullptr;
+    ASSERT_TRUE(cache.cache_.lookup(line_address, &tag, vmid));
+    ASSERT_NE(tag, nullptr);
+    cache.cache_.write_line(line_address, data.data(), 0, L2Cache::LINE_SIZE, vmid);
+    tag->cache_identity = cache_identity;
+    tag->admission_generation = generation;
+  }
+
+  static void replace_prepared_dirty_line_bytes(L2Cache &cache, uint64_t line_address,
+                                                std::span<const uint8_t> data, uint32_t vmid) {
+    assert(L2Cache::CacheStore::line_address(line_address) == line_address);
+    assert(data.size() == L2Cache::LINE_SIZE);
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    simdojo::CacheTag *tag = nullptr;
+    ASSERT_TRUE(cache.cache_.lookup(line_address, &tag, vmid));
+    ASSERT_NE(tag, nullptr);
+    const simdojo::CacheTag original = *tag;
+    cache.cache_.write_line(line_address, data.data(), 0, L2Cache::LINE_SIZE, vmid);
+    EXPECT_EQ(tag->cache_identity, original.cache_identity);
+    EXPECT_EQ(tag->admission_generation, original.admission_generation);
+    EXPECT_EQ(tag->coherence_epoch, original.coherence_epoch);
+    EXPECT_EQ(tag->valid_bytes, original.valid_bytes);
+    EXPECT_EQ(tag->coherence, original.coherence);
+    EXPECT_EQ(tag->dirty, original.dirty);
+  }
+
+  static bool dirty_byte(L2Cache &cache, uint64_t line_address, uint32_t vmid, uint32_t offset) {
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    std::lock_guard mask_lock(cache.dirty_bytes_mutex_);
+    const auto position = cache.dirty_bytes_.find({vmid, line_address});
+    return position != cache.dirty_bytes_.end() &&
+           (position->second[offset / 64] & (uint64_t{1} << (offset % 64))) != 0;
+  }
+
+  static bool dirty_byte_without_epoch_reconciliation(L2Cache &cache, uint64_t line_address,
+                                                      uint32_t vmid, uint32_t offset) {
+    std::shared_lock maintenance_lock(cache.maintenance_mutex_);
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    std::lock_guard mask_lock(cache.dirty_bytes_mutex_);
+    const auto position = cache.dirty_bytes_.find({vmid, line_address});
+    return position != cache.dirty_bytes_.end() &&
+           (position->second[offset / 64] & (uint64_t{1} << (offset % 64))) != 0;
+  }
+
+  static bool resident(L2Cache &cache, uint64_t line_address, uint32_t vmid) {
+    auto maintenance_lock = cache.acquire_cache_access();
+    std::lock_guard set_lock(cache.set_mutex(line_address));
+    return cache.cache_.peek(line_address, vmid) != nullptr;
+  }
+
+  static uint64_t recorded_epoch(L2Cache &cache) {
+    std::shared_lock lock(cache.maintenance_mutex_);
+    return cache.coherence_epoch_;
+  }
+
+  static bool cache_access_available(L2Cache &cache) {
+    if (!cache.maintenance_mutex_.try_lock_shared())
+      return false;
+    cache.maintenance_mutex_.unlock_shared();
+    return true;
+  }
+
+  static auto hold_cache_access(L2Cache &cache) { return cache.acquire_cache_access(); }
+};
+
+class L1ScalarCacheTestAccess {
+public:
+  static void store_clean_line(L1ScalarCache &cache, uint64_t address, uint32_t vmid,
+                               uint64_t generation, uint64_t identity) {
+    std::lock_guard lock(cache.maintenance_mutex_);
+    simdojo::CacheTag *tag = cache.cache_.allocate(address, vmid);
+    tag->admission_generation = generation;
+    tag->cache_identity = identity;
+  }
+
+  static bool resident(L1ScalarCache &cache, uint64_t address, uint32_t vmid) {
+    std::lock_guard lock(cache.maintenance_mutex_);
+    return cache.cache_.peek(address, vmid) != nullptr;
+  }
+
+  static bool cache_access_available(L1ScalarCache &cache) {
+    auto gate = DeviceCacheCoherence::try_acquire_l1_access(cache.registered_domain_.get());
+    if (cache.registered_domain_ && !gate.owns_lock())
+      return false;
+    const bool available = cache.maintenance_mutex_.try_lock();
+    if (available)
+      cache.maintenance_mutex_.unlock();
+    return available;
+  }
+
+  static std::shared_lock<util::DistributedSharedMutex>
+  hold_l1_access(const DeviceCacheCoherence &domain) {
+    return DeviceCacheCoherence::acquire_l1_access(&domain);
+  }
+};
+
+class L1VectorCacheTestAccess {
+public:
+  static void store_clean_line(L1VectorCache &cache, uint64_t address, uint32_t vmid,
+                               uint64_t generation, uint64_t identity) {
+    std::lock_guard lock(cache.maintenance_mutex_);
+    simdojo::CacheTag *tag = cache.cache_.allocate(address, vmid);
+    tag->admission_generation = generation;
+    tag->cache_identity = identity;
+  }
+
+  static bool resident(L1VectorCache &cache, uint64_t address, uint32_t vmid) {
+    std::lock_guard lock(cache.maintenance_mutex_);
+    return cache.cache_.peek(address, vmid) != nullptr;
+  }
+
+  static bool cache_access_available(L1VectorCache &cache) {
+    auto gate = DeviceCacheCoherence::try_acquire_l1_access(cache.registered_domain_.get());
+    if (cache.registered_domain_ && !gate.owns_lock())
+      return false;
+    const bool available = cache.maintenance_mutex_.try_lock();
+    if (available)
+      cache.maintenance_mutex_.unlock();
+    return available;
+  }
+};
+
+class PreparedBackingOwner final : public FabricBacking::Owner {
+public:
+  static constexpr uint64_t kBaseOffset = 0x2000;
+  static constexpr uint64_t kBackingId = 57;
+
+  [[nodiscard]] uint64_t base_offset() const noexcept override { return kBaseOffset; }
+  [[nodiscard]] size_t extent() const noexcept override { return bytes_.size(); }
+  [[nodiscard]] uint64_t backing_id() const noexcept override { return kBackingId; }
+
+  [[nodiscard]] bool read(uint64_t offset, std::span<std::byte> result) noexcept override {
+    if (!contains(offset, result.size()))
+      return false;
+    std::copy_n(bytes_.begin() + (offset - kBaseOffset), result.size(), result.begin());
+    return true;
+  }
+
+  [[nodiscard]] bool write(uint64_t offset, std::span<const std::byte> data) noexcept override {
+    ++write_attempts;
+    if (!contains(offset, data.size()) || write_attempts == fail_on_attempt)
+      return false;
+    std::copy(data.begin(), data.end(), bytes_.begin() + (offset - kBaseOffset));
+    return true;
+  }
+
+  std::array<std::byte, 256> bytes_{};
+  size_t write_attempts = 0;
+  size_t fail_on_attempt = 0;
+
+private:
+  [[nodiscard]] bool contains(uint64_t offset, size_t size) const noexcept {
+    if (offset < kBaseOffset)
+      return false;
+    const uint64_t relative = offset - kBaseOffset;
+    return relative <= bytes_.size() && size <= bytes_.size() - relative;
+  }
+};
+
+class PreparedCanonicalWritebackTestAccess {
+public:
+  static PreparedCanonicalWriteback make(
+      uint64_t address, size_t extent, uint32_t vmid, uint64_t cache_identity, uint64_t generation,
+      FabricBacking backing,
+      std::shared_ptr<VmTransferEffectGate> gate = std::make_shared<VmTransferEffectGate>(),
+      std::function<void()> release = [] {}, std::span<std::byte> direct_bytes = {}) {
+    std::vector<PreparedCanonicalWriteback::Entry> entries;
+    entries.emplace_back(
+        address, extent, vmid,
+        VmCacheNamespace{.address_space = {.slot = 1, .generation = 1}, .translation_epoch = 1},
+        cache_identity, generation, backing.backing_id(), backing.offset(), std::move(backing),
+        direct_bytes);
+    return PreparedCanonicalWriteback(std::move(entries), MemoryIngressPermit(std::move(release)),
+                                      std::move(gate));
+  }
+};
+
 class MemorySideCacheTestAccess {
 public:
+  static void store_prepared_dirty_line(MemorySideCache &cache, uint64_t line_address,
+                                        std::span<const uint8_t> data, uint32_t vmid,
+                                        uint64_t cache_identity, uint64_t generation) {
+    assert(CacheStore::line_address(line_address) == line_address);
+    assert(data.size() == MemorySideCache::LINE_SIZE);
+    std::unique_lock access_lock(cache.access_gate_);
+    std::lock_guard stripe_lock(cache.stripes_[cache.stripe_index(line_address)]);
+    simdojo::CacheTag *tag = cache.cache_.allocate(line_address, vmid);
+    cache.cache_.write_line(line_address, data.data(), 0, MemorySideCache::LINE_SIZE, vmid);
+    tag->cache_identity = cache_identity;
+    tag->admission_generation = generation;
+    tag->coherence = simdojo::CoherenceState::MODIFIED;
+    cache.mark_line_dirty(*tag);
+  }
+
+  static void set_byte_valid(MemorySideCache &cache, uint64_t line_address, uint32_t vmid,
+                             uint32_t offset, bool valid) {
+    std::unique_lock access_lock(cache.access_gate_);
+    std::lock_guard stripe_lock(cache.stripes_[cache.stripe_index(line_address)]);
+    simdojo::CacheTag *tag = nullptr;
+    ASSERT_TRUE(cache.cache_.lookup(line_address, &tag, vmid));
+    const uint64_t bit = uint64_t{1} << (offset % 64);
+    if (valid)
+      tag->valid_bytes[offset / 64] |= bit;
+    else
+      tag->valid_bytes[offset / 64] &= ~bit;
+  }
+
   static void store_dirty_line(MemorySideCache &cache, uint64_t line_address,
                                std::span<const uint8_t> data, uint32_t vmid) {
     assert(CacheStore::line_address(line_address) == line_address);
     assert(data.size() == MemorySideCache::LINE_SIZE);
     std::unique_lock access_lock(cache.access_gate_);
     std::lock_guard stripe_lock(cache.stripes_[cache.stripe_index(line_address)]);
-    ASSERT_EQ(cache.ensure_line(line_address, vmid), VmAccessOutcome::Complete);
+    const std::optional<GpuVmAccess> access = vmid != 0 && cache.cache_vm() != nullptr
+                                                  ? cache.cache_vm()->snapshot_vmid(vmid)
+                                                  : std::nullopt;
+    if (vmid != 0) {
+      ASSERT_TRUE(access);
+    }
+    const VmAccessAdmission admission =
+        access ? access->admit_access(line_address, CacheStore::LINE_SIZE, VmAccessKind::Write,
+                                      /*report_fault=*/false)
+               : cache.admit_access(line_address, CacheStore::LINE_SIZE, vmid, VmAccessKind::Write,
+                                    /*report_fault=*/false);
+    ASSERT_TRUE(admission);
+    ASSERT_EQ(
+        cache.ensure_line(line_address, vmid, admission.generation, access ? &*access : nullptr),
+        VmAccessOutcome::Complete);
     cache.cache_.write_line(line_address, data.data(), 0, static_cast<uint32_t>(data.size()), vmid);
     simdojo::CacheTag *tag = nullptr;
     cache.cache_.lookup(line_address, &tag, vmid);
     assert(tag != nullptr);
-    tag->dirty = true;
     tag->coherence = simdojo::CoherenceState::MODIFIED;
+    cache.mark_line_dirty(*tag);
+  }
+
+  static void mark_resident_dirty_after_barrier(MemorySideCache &cache, uint64_t line_address,
+                                                std::span<const uint8_t> data,
+                                                std::barrier<> &ready, std::barrier<> &release) {
+    std::shared_lock access_lock(cache.access_gate_);
+    std::lock_guard stripe_lock(cache.stripes_[cache.stripe_index(line_address)]);
+    simdojo::CacheTag *tag = nullptr;
+    const bool resident = cache.cache_.lookup(line_address, &tag, 0);
+    ready.arrive_and_wait();
+    release.arrive_and_wait();
+    if (!resident)
+      return;
+    cache.cache_.write_line(line_address, data.data(), 0, static_cast<uint32_t>(data.size()), 0);
+    tag->coherence = simdojo::CoherenceState::MODIFIED;
+    cache.mark_line_dirty(*tag);
+  }
+
+  static std::pair<uint64_t, uint64_t> scan_counts(MemorySideCache &cache) {
+    std::unique_lock access_lock(cache.access_gate_);
+    return {cache.full_dirty_scans_, cache.skipped_clean_scans_};
+  }
+
+  static bool may_have_dirty_lines(MemorySideCache &cache) {
+    std::unique_lock access_lock(cache.access_gate_);
+    return cache.may_have_dirty_lines_.load(std::memory_order_relaxed);
+  }
+
+  static bool exclusive_maintenance_queued(MemorySideCache &cache) {
+    if (!cache.access_gate_.try_lock_shared())
+      return true;
+    cache.access_gate_.unlock_shared();
+    return false;
   }
 
   static bool line_is_dirty(MemorySideCache &cache, uint64_t line_address, uint32_t vmid) {
     std::unique_lock access_lock(cache.access_gate_);
     std::lock_guard stripe_lock(cache.stripes_[cache.stripe_index(line_address)]);
-    simdojo::CacheTag *tag = nullptr;
-    return cache.cache_.lookup(line_address, &tag, vmid) && tag->dirty;
+    const simdojo::CacheTag *tag = cache.cache_.peek(line_address, vmid);
+    return tag != nullptr && tag->dirty;
+  }
+
+  static bool line_is_resident(MemorySideCache &cache, uint64_t line_address, uint32_t vmid) {
+    std::unique_lock access_lock(cache.access_gate_);
+    return cache.cache_.peek(line_address, vmid) != nullptr;
+  }
+
+  static uint64_t line_cache_identity(MemorySideCache &cache, uint64_t line_address,
+                                      uint32_t vmid) {
+    std::unique_lock access_lock(cache.access_gate_);
+    const simdojo::CacheTag *tag = cache.cache_.peek(line_address, vmid);
+    return tag != nullptr ? tag->cache_identity : 0;
   }
 
 private:
   using CacheStore = MemorySideCache::CacheStore;
 };
 
+class DeviceCacheCoherenceTestAccess {
+public:
+  static std::vector<DeviceCacheMaintenanceLease>
+  acquire_scoped_alias_maintenance_group(std::span<const DeviceCacheDomain> domains,
+                                         std::span<const DeviceCacheAliasScope> aliases,
+                                         const PreparedWritebackResolver &resolve_writeback,
+                                         const CanonicalLineWitnessResolver &resolve_witness,
+                                         std::chrono::milliseconds admission_retry_budget) {
+    return DeviceCacheCoherence::acquire_scoped_alias_maintenance_group_with_budget(
+        domains, aliases, resolve_writeback, resolve_witness, admission_retry_budget);
+  }
+};
+
 } // namespace rocjitsu::amdgpu
 
 namespace {
 
+using rocjitsu::amdgpu::DeviceCacheCoherenceTestAccess;
 using rocjitsu::amdgpu::GpuMemory;
 using rocjitsu::amdgpu::HbmController;
 using rocjitsu::amdgpu::L1ScalarCache;
@@ -89,10 +417,71 @@ using rocjitsu::amdgpu::MemorySideCache;
 using rocjitsu::amdgpu::Mtype;
 using rocjitsu::amdgpu::RequestMtypeResolver;
 
+template <typename Attempt> void expect_terminal_maintenance_failure(Attempt &&attempt) {
+  try {
+    std::forward<Attempt>(attempt)();
+    FAIL() << "expected terminal cache-maintenance failure";
+  } catch (const rocjitsu::amdgpu::CacheMaintenanceUnavailable &error) {
+    FAIL() << "unexpected retryable cache-maintenance refusal: " << error.what();
+  } catch (const util::Exception &) {
+  }
+}
+
 class IdentityAddressSpace final : public rocjitsu::amdgpu::AddressSpaceTranslator {
 public:
-  explicit IdentityAddressSpace(uint64_t size, Mtype mtype = Mtype::RW)
-      : size_(size), mtype_(mtype) {}
+  explicit IdentityAddressSpace(uint64_t size, Mtype mtype = Mtype::RW,
+                                uint64_t admission_generation = 0, uint64_t translation_span = 0)
+      : size_(size), mtype_(mtype), admission_generation_(admission_generation),
+        translation_span_(translation_span) {}
+
+  rocjitsu::amdgpu::VmAccessAdmission admit_access(uint64_t, std::size_t,
+                                                   rocjitsu::amdgpu::VmAccessKind) const override {
+    return {.generation = admission_generation_,
+            .direct_backing_write_allowed = direct_backing_write_allowed};
+  }
+
+  rocjitsu::amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                                  rocjitsu::amdgpu::VmAccessKind) const override {
+    if (size == 0 || address > size_ || size > size_ - address)
+      return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    const uint64_t contiguous_bytes =
+        translation_span_ == 0
+            ? size_ - address
+            : std::min(size_ - address, translation_span_ - address % translation_span_);
+    return {
+        .outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete,
+        .translation = {.domain = rocjitsu::amdgpu::VmMemoryDomain::System,
+                        .address = address,
+                        .contiguous_bytes = contiguous_bytes,
+                        .mtype = mtype_,
+                        .permissions = {.readable = true, .writable = true, .executable = true}}};
+  }
+
+  bool direct_backing_write_allowed = true;
+
+private:
+  uint64_t size_;
+  Mtype mtype_;
+  uint64_t admission_generation_;
+  uint64_t translation_span_;
+};
+
+class DeferredSwitchAddressSpace final : public rocjitsu::amdgpu::AddressSpaceTranslator {
+public:
+  explicit DeferredSwitchAddressSpace(uint64_t size) : size_(size) {}
+
+  rocjitsu::amdgpu::VmDataRoute classify_data_route(uint64_t, std::size_t,
+                                                    rocjitsu::amdgpu::VmAccessKind) const override {
+    return route.load();
+  }
+
+  rocjitsu::amdgpu::VmAccessAdmission admit_access(uint64_t, std::size_t,
+                                                   rocjitsu::amdgpu::VmAccessKind) const override {
+    return route.load() != rocjitsu::amdgpu::VmDataRoute::Local
+               ? rocjitsu::amdgpu::VmAccessAdmission{.outcome =
+                                                         rocjitsu::amdgpu::VmAccessOutcome::Faulted}
+               : rocjitsu::amdgpu::VmAccessAdmission{};
+  }
 
   rocjitsu::amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
                                                   rocjitsu::amdgpu::VmAccessKind) const override {
@@ -103,13 +492,14 @@ public:
         .translation = {.domain = rocjitsu::amdgpu::VmMemoryDomain::System,
                         .address = address,
                         .contiguous_bytes = size_ - address,
-                        .mtype = mtype_,
+                        .mtype = Mtype::RW,
                         .permissions = {.readable = true, .writable = true, .executable = true}}};
   }
 
+  std::atomic<rocjitsu::amdgpu::VmDataRoute> route{rocjitsu::amdgpu::VmDataRoute::Local};
+
 private:
   uint64_t size_;
-  Mtype mtype_;
 };
 
 class ConfigurablePhysicalMemory final : public rocjitsu::amdgpu::PhysicalMemoryAccess {
@@ -131,6 +521,10 @@ public:
   rocjitsu::amdgpu::VmAccessOutcome write(rocjitsu::amdgpu::VmMemoryDomain domain, uint64_t address,
                                           std::span<const std::byte> bytes) override {
     ++write_calls;
+    if (before_write)
+      before_write();
+    if (write_calls == fail_on_write_call)
+      return fail_write_outcome;
     if (write_outcome != rocjitsu::amdgpu::VmAccessOutcome::Complete)
       return write_outcome;
     if (domain != rocjitsu::amdgpu::VmMemoryDomain::System || !contains(address, bytes.size()))
@@ -168,9 +562,13 @@ public:
 
   rocjitsu::amdgpu::VmAccessOutcome read_outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete;
   rocjitsu::amdgpu::VmAccessOutcome write_outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete;
+  rocjitsu::amdgpu::VmAccessOutcome fail_write_outcome =
+      rocjitsu::amdgpu::VmAccessOutcome::Unavailable;
   rocjitsu::amdgpu::VmAccessOutcome atomic_outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete;
+  std::function<void()> before_write;
   uint32_t read_calls = 0;
   uint32_t write_calls = 0;
+  uint32_t fail_on_write_call = 0;
   uint32_t atomic_calls = 0;
 
 private:
@@ -183,8 +581,8 @@ private:
 
 class LinkedCacheHierarchy {
 public:
-  explicit LinkedCacheHierarchy(std::size_t size)
-      : translator(std::make_shared<IdentityAddressSpace>(size)),
+  explicit LinkedCacheHierarchy(std::size_t size, uint64_t admission_generation = 0)
+      : translator(std::make_shared<IdentityAddressSpace>(size, Mtype::RW, admission_generation)),
         physical(std::make_shared<ConfigurablePhysicalMemory>(size)), hbm("hbm", &memory, &gpu_vm),
         memory_side_cache("memory_side_cache", coherence, &memory), l2("l2", coherence),
         memory_side_port(memory_side_cache.create_cpl_port("l2")),
@@ -216,6 +614,631 @@ public:
   simdojo::Link memory_side_hbm_link;
   simdojo::Link l2_memory_side_link;
 };
+
+TEST(MemorySideCacheTest, CleanFullScanSkipsThenNewDirtyLinePublishes) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  constexpr uint64_t kAddress = 0x1000;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  EXPECT_EQ(hierarchy.memory_side_cache.flush_all(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(MemorySideCacheTestAccess::scan_counts(hierarchy.memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{0, 1}));
+
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  MemorySideCacheTestAccess::store_dirty_line(hierarchy.memory_side_cache, kAddress, dirty,
+                                              LinkedCacheHierarchy::kVmid);
+  EXPECT_TRUE(MemorySideCacheTestAccess::may_have_dirty_lines(hierarchy.memory_side_cache));
+  EXPECT_EQ(hierarchy.physical->load<uint8_t>(kAddress), 0u);
+
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_all(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(hierarchy.physical->load<uint8_t>(kAddress), dirty[0]);
+  EXPECT_FALSE(MemorySideCacheTestAccess::may_have_dirty_lines(hierarchy.memory_side_cache));
+  EXPECT_EQ(MemorySideCacheTestAccess::scan_counts(hierarchy.memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{1, 1}));
+  EXPECT_EQ(hierarchy.memory_side_cache.flush_all(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(MemorySideCacheTestAccess::scan_counts(hierarchy.memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{1, 2}));
+}
+
+TEST(MemorySideCacheTest, FailedFullScanRetainsDirtyHintForRetry) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  constexpr uint64_t kAddress = 0x1000;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty{};
+  dirty.fill(0x6d);
+  MemorySideCacheTestAccess::store_dirty_line(hierarchy.memory_side_cache, kAddress, dirty,
+                                              LinkedCacheHierarchy::kVmid);
+
+  hierarchy.physical->write_outcome = rocjitsu::amdgpu::VmAccessOutcome::Unavailable;
+  EXPECT_EQ(hierarchy.memory_side_cache.flush_all(),
+            rocjitsu::amdgpu::VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(MemorySideCacheTestAccess::may_have_dirty_lines(hierarchy.memory_side_cache));
+  EXPECT_TRUE(MemorySideCacheTestAccess::line_is_dirty(hierarchy.memory_side_cache, kAddress,
+                                                       LinkedCacheHierarchy::kVmid));
+  EXPECT_EQ(MemorySideCacheTestAccess::scan_counts(hierarchy.memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{1, 0}));
+  EXPECT_EQ(hierarchy.physical->load<uint8_t>(kAddress), 0u);
+
+  hierarchy.physical->write_outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete;
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_all(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(hierarchy.physical->load<uint8_t>(kAddress), dirty[0]);
+  EXPECT_FALSE(MemorySideCacheTestAccess::may_have_dirty_lines(hierarchy.memory_side_cache));
+  EXPECT_EQ(MemorySideCacheTestAccess::scan_counts(hierarchy.memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{2, 0}));
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_all(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(MemorySideCacheTestAccess::scan_counts(hierarchy.memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{2, 1}));
+}
+
+TEST(MemorySideCacheTest, PartialRangeMaintenanceKeepsOtherVmidDirtyForFullScan) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  constexpr uint32_t kOtherVmid = LinkedCacheHierarchy::kVmid + 1;
+  constexpr uint64_t kTargetAddress = 0x1000;
+  constexpr uint64_t kOtherAddress = 0x1100;
+  constexpr uint32_t kExternalOffset = 32;
+  constexpr uint32_t kExternalValue = 0x12345678;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  ASSERT_TRUE(
+      hierarchy.gpu_vm.register_translated(kOtherVmid, hierarchy.translator, hierarchy.physical));
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> target_dirty{};
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> other_dirty{};
+  target_dirty.fill(0x5a);
+  other_dirty.fill(0x6d);
+  MemorySideCacheTestAccess::store_dirty_line(hierarchy.memory_side_cache, kTargetAddress,
+                                              target_dirty, LinkedCacheHierarchy::kVmid);
+  MemorySideCacheTestAccess::store_dirty_line(hierarchy.memory_side_cache, kOtherAddress,
+                                              other_dirty, kOtherVmid);
+
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_range(kTargetAddress + kExternalOffset,
+                                                    sizeof(kExternalValue),
+                                                    LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  hierarchy.physical->store(kTargetAddress + kExternalOffset, kExternalValue);
+  hierarchy.memory_side_cache.invalidate_range_after_external_write(
+      kTargetAddress + kExternalOffset, sizeof(kExternalValue), LinkedCacheHierarchy::kVmid);
+  EXPECT_TRUE(MemorySideCacheTestAccess::may_have_dirty_lines(hierarchy.memory_side_cache));
+  EXPECT_EQ(MemorySideCacheTestAccess::scan_counts(hierarchy.memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{0, 0}));
+  EXPECT_EQ(hierarchy.physical->load<uint8_t>(kTargetAddress), target_dirty[0]);
+  EXPECT_EQ(hierarchy.physical->load<uint32_t>(kTargetAddress + kExternalOffset), kExternalValue);
+  EXPECT_EQ(hierarchy.physical->load<uint8_t>(kOtherAddress), 0u);
+
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_all(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(hierarchy.physical->load<uint8_t>(kOtherAddress), other_dirty[0]);
+  EXPECT_EQ(MemorySideCacheTestAccess::scan_counts(hierarchy.memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{1, 0}));
+}
+
+TEST(MemorySideCacheTest, FullScanDropsRetiredBindingAndPublishesReplacementDirtyLine) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kNewBackingValue = 0x11223344;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> old_dirty{};
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> new_dirty{};
+  old_dirty.fill(0x5a);
+  new_dirty.fill(0x6d);
+  MemorySideCacheTestAccess::store_dirty_line(hierarchy.memory_side_cache, kAddress, old_dirty,
+                                              LinkedCacheHierarchy::kVmid);
+  auto new_backing = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  new_backing->store(kAddress, kNewBackingValue);
+  ASSERT_TRUE(hierarchy.gpu_vm.replace_translated(hierarchy.address_space, hierarchy.translator,
+                                                  new_backing));
+
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_all(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(new_backing->load<uint32_t>(kAddress), kNewBackingValue);
+  EXPECT_EQ(hierarchy.physical->write_calls, 0u);
+  EXPECT_EQ(new_backing->write_calls, 0u);
+  EXPECT_FALSE(MemorySideCacheTestAccess::may_have_dirty_lines(hierarchy.memory_side_cache));
+  EXPECT_EQ(MemorySideCacheTestAccess::scan_counts(hierarchy.memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{1, 0}));
+
+  MemorySideCacheTestAccess::store_dirty_line(hierarchy.memory_side_cache, kAddress, new_dirty,
+                                              LinkedCacheHierarchy::kVmid);
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_all(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(new_backing->load<uint8_t>(kAddress), new_dirty[0]);
+  EXPECT_EQ(MemorySideCacheTestAccess::scan_counts(hierarchy.memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{2, 0}));
+}
+
+TEST(MemorySideCacheTest, ConcurrentSharedAdmissionsKeepDirtyHintSetUntilFullScan) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  constexpr uint64_t kFirstAddress = 0x1000;
+  constexpr uint64_t kSecondAddress = kFirstAddress + MemorySideCache::LINE_SIZE;
+  GpuMemory memory("memory");
+  HbmController hbm("hbm", &memory);
+  MemorySideCache cache("memory_side_cache");
+  simdojo::Link link(/*id=*/0, cache.req_port(), hbm.cpl_port(), /*latency=*/0);
+  link.set_exec_mode(simdojo::ExecMode::FUNCTIONAL);
+  cache.req_port()->set_link(&link);
+  hbm.cpl_port()->set_link(&link);
+
+  for (uint64_t address : {kFirstAddress, kSecondAddress}) {
+    uint32_t observed = 0;
+    ASSERT_EQ(cache.read(address, reinterpret_cast<uint8_t *>(&observed), sizeof(observed)),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  }
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> first_dirty{};
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> second_dirty{};
+  first_dirty.fill(0x5a);
+  second_dirty.fill(0x6d);
+  std::barrier ready(3);
+  std::barrier release(3);
+  auto first = std::async(std::launch::async, [&] {
+    MemorySideCacheTestAccess::mark_resident_dirty_after_barrier(cache, kFirstAddress, first_dirty,
+                                                                 ready, release);
+  });
+  auto second = std::async(std::launch::async, [&] {
+    MemorySideCacheTestAccess::mark_resident_dirty_after_barrier(cache, kSecondAddress,
+                                                                 second_dirty, ready, release);
+  });
+  ready.arrive_and_wait();
+  auto flush = std::async(std::launch::async, [&] { return cache.flush_all(); });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  bool flush_queued = false;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (MemorySideCacheTestAccess::exclusive_maintenance_queued(cache)) {
+      flush_queued = true;
+      break;
+    }
+    std::this_thread::yield();
+  }
+  release.arrive_and_wait();
+  first.get();
+  second.get();
+  EXPECT_TRUE(flush_queued);
+  EXPECT_EQ(flush.get(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(memory.read8(kFirstAddress), first_dirty[0]);
+  EXPECT_EQ(memory.read8(kSecondAddress), second_dirty[0]);
+  EXPECT_EQ(MemorySideCacheTestAccess::scan_counts(cache), (std::pair<uint64_t, uint64_t>{1, 0}));
+  EXPECT_FALSE(MemorySideCacheTestAccess::may_have_dirty_lines(cache));
+}
+
+TEST(MemorySideCacheTest, FlushRangeInvalidatesOnlyOverlappingLinesInRequestedVmid) {
+  constexpr uint32_t kOtherVmid = LinkedCacheHierarchy::kVmid + 1;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kOtherAddress = kAddress + MemorySideCache::LINE_SIZE;
+  constexpr uint32_t kInitial = 0x11223344;
+  constexpr uint32_t kReplacement = 0xaabbccdd;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  ASSERT_TRUE(
+      hierarchy.gpu_vm.register_translated(kOtherVmid, hierarchy.translator, hierarchy.physical));
+  hierarchy.physical->store(kAddress, kInitial);
+  hierarchy.physical->store(kOtherAddress, kInitial);
+
+  uint32_t observed = 0;
+  for (const auto &[address, vmid] :
+       {std::pair{kAddress, LinkedCacheHierarchy::kVmid},
+        std::pair{kOtherAddress, LinkedCacheHierarchy::kVmid}, std::pair{kAddress, kOtherVmid}}) {
+    ASSERT_EQ(hierarchy.memory_side_cache.read(address, reinterpret_cast<uint8_t *>(&observed),
+                                               sizeof(observed), vmid),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    ASSERT_EQ(observed, kInitial);
+  }
+  ASSERT_EQ(hierarchy.physical->read_calls, 3u);
+
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_range(kAddress, sizeof(kReplacement),
+                                                    LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kOtherAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kAddress, kOtherVmid));
+
+  hierarchy.physical->store(kAddress, kReplacement);
+  hierarchy.physical->store(kOtherAddress, kReplacement);
+
+  ASSERT_EQ(hierarchy.memory_side_cache.read(kAddress, reinterpret_cast<uint8_t *>(&observed),
+                                             sizeof(observed), LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kReplacement);
+  ASSERT_EQ(hierarchy.memory_side_cache.read(kOtherAddress, reinterpret_cast<uint8_t *>(&observed),
+                                             sizeof(observed), LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kInitial);
+  ASSERT_EQ(hierarchy.memory_side_cache.read(kAddress, reinterpret_cast<uint8_t *>(&observed),
+                                             sizeof(observed), kOtherVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kInitial);
+  EXPECT_EQ(hierarchy.physical->read_calls, 4u);
+
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_range(kAddress, 0, LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kAddress, LinkedCacheHierarchy::kVmid));
+
+  // The large-range path visits resident tags rather than the entire span.
+  constexpr uint32_t kThirdValue = 0x55667788;
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_range(0, std::numeric_limits<uint32_t>::max(),
+                                                    LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kAddress, kOtherVmid));
+  hierarchy.physical->store(kAddress, kThirdValue);
+  ASSERT_EQ(hierarchy.memory_side_cache.read(kAddress, reinterpret_cast<uint8_t *>(&observed),
+                                             sizeof(observed), LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kThirdValue);
+}
+
+TEST(MemorySideCacheTest, PreWriteFlushRangePreservesDirtySiblingBytes) {
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kExternalOffset = 32;
+  constexpr uint32_t kExternalValue = 0xaabbccdd;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty{};
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> observed{};
+  dirty.fill(0x5a);
+  rocjitsu::amdgpu::MemorySideCacheTestAccess::store_dirty_line(
+      hierarchy.memory_side_cache, kAddress, dirty, LinkedCacheHierarchy::kVmid);
+
+  // The external writer has not committed yet. Publish the complete dirty
+  // line first, then let the external write replace only its target bytes.
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_range(
+                kAddress + kExternalOffset, sizeof(kExternalValue), LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_EQ(hierarchy.physical->write_calls, 1u);
+  hierarchy.physical->store(kAddress + kExternalOffset, kExternalValue);
+  hierarchy.memory_side_cache.invalidate_range_after_external_write(
+      kAddress + kExternalOffset, sizeof(kExternalValue), LinkedCacheHierarchy::kVmid);
+  EXPECT_EQ(hierarchy.physical->write_calls, 1u);
+
+  ASSERT_EQ(hierarchy.memory_side_cache.read(kAddress, observed.data(), observed.size(),
+                                             LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  std::memcpy(dirty.data() + kExternalOffset, &kExternalValue, sizeof(kExternalValue));
+  EXPECT_EQ(observed, dirty);
+}
+
+TEST(MemorySideCacheTest, PostWriteInvalidationPreservesExternalBytesWithoutBackingWrite) {
+  constexpr uint64_t kDirtyAddress = 0x1000;
+  constexpr uint64_t kCleanAddress = kDirtyAddress + MemorySideCache::LINE_SIZE;
+  constexpr uint64_t kUnrelatedAddress = kCleanAddress + MemorySideCache::LINE_SIZE;
+  constexpr uint32_t kOtherVmid = LinkedCacheHierarchy::kVmid + 1;
+  constexpr uint32_t kFirstExternalValue = 0xaabbccdd;
+  constexpr uint32_t kSecondExternalValue = 0x12345678;
+  constexpr uint32_t kInitial = 0x11223344;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  ASSERT_TRUE(
+      hierarchy.gpu_vm.register_translated(kOtherVmid, hierarchy.translator, hierarchy.physical));
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  rocjitsu::amdgpu::MemorySideCacheTestAccess::store_dirty_line(
+      hierarchy.memory_side_cache, kDirtyAddress, dirty, LinkedCacheHierarchy::kVmid);
+  hierarchy.physical->store(kCleanAddress, kInitial);
+  hierarchy.physical->store(kUnrelatedAddress, kInitial);
+  uint32_t observed = 0;
+  for (const auto &[address, vmid] : {std::pair{kCleanAddress, LinkedCacheHierarchy::kVmid},
+                                      std::pair{kUnrelatedAddress, LinkedCacheHierarchy::kVmid},
+                                      std::pair{kDirtyAddress, kOtherVmid}}) {
+    ASSERT_EQ(hierarchy.memory_side_cache.read(address, reinterpret_cast<uint8_t *>(&observed),
+                                               sizeof(observed), vmid),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  }
+
+  const uint64_t external_address = kCleanAddress - sizeof(kFirstExternalValue);
+  hierarchy.memory_side_cache.invalidate_range_after_external_write(external_address, 0,
+                                                                    LinkedCacheHierarchy::kVmid);
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_dirty(
+      hierarchy.memory_side_cache, kDirtyAddress, LinkedCacheHierarchy::kVmid));
+  const uint32_t reads_before_invalidation = hierarchy.physical->read_calls;
+  hierarchy.physical->store(external_address, kFirstExternalValue);
+  hierarchy.physical->store(kCleanAddress, kSecondExternalValue);
+  hierarchy.memory_side_cache.invalidate_range_after_external_write(
+      external_address, 2 * sizeof(uint32_t), LinkedCacheHierarchy::kVmid);
+
+  EXPECT_EQ(hierarchy.physical->load<uint32_t>(external_address), kFirstExternalValue);
+  EXPECT_EQ(hierarchy.physical->load<uint32_t>(kCleanAddress), kSecondExternalValue);
+  EXPECT_EQ(hierarchy.physical->read_calls, reads_before_invalidation);
+  EXPECT_EQ(hierarchy.physical->write_calls, 0u);
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kDirtyAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kCleanAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kUnrelatedAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kDirtyAddress, kOtherVmid));
+
+  ASSERT_EQ(hierarchy.memory_side_cache.read(external_address,
+                                             reinterpret_cast<uint8_t *>(&observed),
+                                             sizeof(observed), LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kFirstExternalValue);
+  ASSERT_EQ(hierarchy.memory_side_cache.read(kCleanAddress, reinterpret_cast<uint8_t *>(&observed),
+                                             sizeof(observed), LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kSecondExternalValue);
+
+  // The large-range walk is bounded by cache storage and still selects one VMID.
+  hierarchy.memory_side_cache.invalidate_range_after_external_write(
+      0, std::numeric_limits<uint32_t>::max(), LinkedCacheHierarchy::kVmid);
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kUnrelatedAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kDirtyAddress, kOtherVmid));
+  EXPECT_EQ(hierarchy.physical->write_calls, 0u);
+}
+
+TEST(MemorySideCacheTest, PostWriteInvalidationClampsOverflowingRange) {
+  GpuMemory memory("memory");
+  HbmController hbm("hbm", &memory);
+  MemorySideCache cache("memory_side_cache");
+  simdojo::Link link(/*id=*/0, cache.req_port(), hbm.cpl_port(), /*latency=*/0);
+  link.set_exec_mode(simdojo::ExecMode::FUNCTIONAL);
+  cache.req_port()->set_link(&link);
+  hbm.cpl_port()->set_link(&link);
+
+  constexpr uint64_t kLastLine =
+      std::numeric_limits<uint64_t>::max() - (MemorySideCache::LINE_SIZE - 1);
+  constexpr uint64_t kHighAddress = kLastLine + MemorySideCache::LINE_SIZE / 2;
+  constexpr uint32_t kReplacement = 0xaabbccdd;
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  rocjitsu::amdgpu::MemorySideCacheTestAccess::store_dirty_line(cache, kLastLine, dirty, 0);
+  uint32_t observed = 0;
+  ASSERT_EQ(cache.read(0, reinterpret_cast<uint8_t *>(&observed), sizeof(observed)),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+
+  cache.invalidate_range_after_external_write(kHighAddress, 0, 0);
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_dirty(cache, kLastLine, 0));
+  memory.write32(kHighAddress, kReplacement);
+  cache.invalidate_range_after_external_write(kHighAddress, MemorySideCache::LINE_SIZE, 0);
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(cache, kLastLine, 0));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(cache, 0, 0));
+  ASSERT_EQ(cache.read(kHighAddress, reinterpret_cast<uint8_t *>(&observed), sizeof(observed)),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kReplacement);
+}
+
+TEST(MemorySideCacheTest, FailedRangeWritebackRetainsDirtyLineForRetry) {
+  constexpr uint64_t kAddress = 0x1000;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty{};
+  dirty.fill(0x6d);
+  rocjitsu::amdgpu::MemorySideCacheTestAccess::store_dirty_line(
+      hierarchy.memory_side_cache, kAddress, dirty, LinkedCacheHierarchy::kVmid);
+
+  hierarchy.physical->write_outcome = rocjitsu::amdgpu::VmAccessOutcome::Unavailable;
+  EXPECT_EQ(hierarchy.memory_side_cache.flush_range(kAddress + 1, 1, LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_dirty(
+      hierarchy.memory_side_cache, kAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::may_have_dirty_lines(
+      hierarchy.memory_side_cache));
+  EXPECT_EQ(hierarchy.physical->load<uint8_t>(kAddress), 0u);
+
+  hierarchy.physical->write_outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete;
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_range(kAddress + 1, 1, LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::may_have_dirty_lines(
+      hierarchy.memory_side_cache));
+  EXPECT_EQ(hierarchy.physical->load<uint8_t>(kAddress), dirty[0]);
+  EXPECT_EQ(hierarchy.physical->write_calls, 2u);
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_all(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::may_have_dirty_lines(
+      hierarchy.memory_side_cache));
+  EXPECT_EQ(rocjitsu::amdgpu::MemorySideCacheTestAccess::scan_counts(hierarchy.memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{1, 0}));
+}
+
+TEST(MemorySideCacheTest, RangeMaintenanceDropsDirtyLineAfterAdmissionRevocation) {
+  constexpr uint64_t kAddress = 0x1000;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty{};
+  dirty.fill(0x6d);
+  rocjitsu::amdgpu::MemorySideCacheTestAccess::store_dirty_line(
+      hierarchy.memory_side_cache, kAddress, dirty, LinkedCacheHierarchy::kVmid);
+
+  ASSERT_TRUE(hierarchy.gpu_vm.unregister_address_space(hierarchy.address_space));
+  ASSERT_EQ(
+      hierarchy.memory_side_cache.flush_range(kAddress, dirty.size(), LinkedCacheHierarchy::kVmid),
+      rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_EQ(hierarchy.physical->write_calls, 0u);
+  EXPECT_EQ(hierarchy.physical->load<uint8_t>(kAddress), 0u);
+}
+
+TEST(MemorySideCacheTest, RangeMaintenanceDoesNotPublishOldDirtyLineToReusedVmid) {
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kNewBackingValue = 0x11223344;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty{};
+  dirty.fill(0x6d);
+  rocjitsu::amdgpu::MemorySideCacheTestAccess::store_dirty_line(
+      hierarchy.memory_side_cache, kAddress, dirty, LinkedCacheHierarchy::kVmid);
+  const auto old_access = hierarchy.gpu_vm.snapshot_vmid(LinkedCacheHierarchy::kVmid);
+  ASSERT_TRUE(old_access);
+  ASSERT_EQ(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_cache_identity(
+                hierarchy.memory_side_cache, kAddress, LinkedCacheHierarchy::kVmid),
+            old_access->cache_identity());
+  const auto admitted =
+      old_access->admit_access(kAddress, dirty.size(), rocjitsu::amdgpu::VmAccessKind::Write);
+  ASSERT_TRUE(admitted);
+
+  ASSERT_TRUE(hierarchy.gpu_vm.unregister_address_space(hierarchy.address_space));
+  auto new_backing = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  new_backing->store(kAddress, kNewBackingValue);
+  const auto new_handle = hierarchy.gpu_vm.register_translated(LinkedCacheHierarchy::kVmid,
+                                                               hierarchy.translator, new_backing);
+  ASSERT_TRUE(new_handle);
+  const auto new_access = hierarchy.gpu_vm.snapshot_vmid(LinkedCacheHierarchy::kVmid);
+  ASSERT_TRUE(new_access);
+  ASSERT_NE(old_access->cache_namespace(), new_access->cache_namespace());
+  ASSERT_NE(old_access->cache_identity(), new_access->cache_identity());
+  EXPECT_EQ(old_access->write(kAddress, std::as_bytes(std::span<const uint8_t>(dirty))),
+            rocjitsu::amdgpu::VmAccessOutcome::Revoked);
+
+  ASSERT_EQ(
+      hierarchy.memory_side_cache.flush_range(kAddress, dirty.size(), LinkedCacheHierarchy::kVmid),
+      rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_EQ(hierarchy.physical->write_calls, 0u);
+  EXPECT_EQ(new_backing->write_calls, 0u);
+  EXPECT_EQ(new_backing->load<uint32_t>(kAddress), kNewBackingValue);
+
+  uint32_t observed = 0;
+  ASSERT_EQ(hierarchy.memory_side_cache.read(kAddress, reinterpret_cast<uint8_t *>(&observed),
+                                             sizeof(observed), LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kNewBackingValue);
+  EXPECT_EQ(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_cache_identity(
+                hierarchy.memory_side_cache, kAddress, LinkedCacheHierarchy::kVmid),
+            new_access->cache_identity());
+}
+
+TEST(MemorySideCacheTest, RangeMaintenanceDoesNotPublishOldDirtyLineAfterRootReplacement) {
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kNewBackingValue = 0x11223344;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty{};
+  dirty.fill(0x6d);
+  rocjitsu::amdgpu::MemorySideCacheTestAccess::store_dirty_line(
+      hierarchy.memory_side_cache, kAddress, dirty, LinkedCacheHierarchy::kVmid);
+  const auto old_access = hierarchy.gpu_vm.snapshot_vmid(LinkedCacheHierarchy::kVmid);
+  ASSERT_TRUE(old_access);
+
+  auto new_backing = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  new_backing->store(kAddress, kNewBackingValue);
+  ASSERT_TRUE(hierarchy.gpu_vm.replace_translated(hierarchy.address_space, hierarchy.translator,
+                                                  new_backing));
+  const auto new_access = hierarchy.gpu_vm.snapshot_vmid(LinkedCacheHierarchy::kVmid);
+  ASSERT_TRUE(new_access);
+  ASSERT_NE(old_access->cache_namespace(), new_access->cache_namespace());
+  ASSERT_NE(old_access->cache_identity(), new_access->cache_identity());
+
+  ASSERT_EQ(
+      hierarchy.memory_side_cache.flush_range(kAddress, dirty.size(), LinkedCacheHierarchy::kVmid),
+      rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(
+      hierarchy.memory_side_cache, kAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_EQ(new_backing->write_calls, 0u);
+  EXPECT_EQ(new_backing->load<uint32_t>(kAddress), kNewBackingValue);
+}
+
+TEST(MemorySideCacheTest, RangeMaintenanceRetainsBindingDuringConcurrentRootReplacement) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kNewBackingValue = 0xaabbccdd;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  auto new_backing = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  new_backing->store(kAddress, kNewBackingValue);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty{};
+  dirty.fill(0x6d);
+  MemorySideCacheTestAccess::store_dirty_line(hierarchy.memory_side_cache, kAddress, dirty,
+                                              LinkedCacheHierarchy::kVmid);
+  MemorySideCacheTestAccess::store_dirty_line(hierarchy.memory_side_cache,
+                                              kAddress + MemorySideCache::LINE_SIZE, dirty,
+                                              LinkedCacheHierarchy::kVmid);
+
+  std::mutex mutex;
+  std::condition_variable condition;
+  bool write_entered = false;
+  bool release_write = false;
+  hierarchy.physical->before_write = [&] {
+    std::unique_lock lock(mutex);
+    write_entered = true;
+    condition.notify_all();
+    condition.wait(lock, [&] { return release_write; });
+  };
+  auto flush = std::async(std::launch::async, [&] {
+    return hierarchy.memory_side_cache.flush_range(kAddress, 2 * MemorySideCache::LINE_SIZE,
+                                                   LinkedCacheHierarchy::kVmid);
+  });
+  bool entered = false;
+  {
+    std::unique_lock lock(mutex);
+    entered = condition.wait_for(lock, std::chrono::seconds(2), [&] { return write_entered; });
+  }
+  std::promise<void> replacement_started;
+  std::future<void> replacement_running = replacement_started.get_future();
+  auto replacement = std::async(std::launch::async, [&] {
+    replacement_started.set_value();
+    return hierarchy.gpu_vm.replace_translated(hierarchy.address_space, hierarchy.translator,
+                                               new_backing);
+  });
+  replacement_running.wait();
+  EXPECT_EQ(replacement.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  {
+    std::lock_guard lock(mutex);
+    release_write = true;
+  }
+  condition.notify_all();
+  EXPECT_TRUE(entered);
+  EXPECT_EQ(flush.get(), VmAccessOutcome::Complete);
+  ASSERT_TRUE(replacement.get());
+  hierarchy.physical->before_write = {};
+  EXPECT_EQ(new_backing->write_calls, 0u);
+  EXPECT_EQ(new_backing->load<uint32_t>(kAddress), kNewBackingValue);
+}
+
+TEST(MemorySideCacheTest, OverflowingRangeStopsAtLastAddressableLine) {
+  GpuMemory memory("memory");
+  HbmController hbm("hbm", &memory);
+  MemorySideCache cache("memory_side_cache");
+  simdojo::Link link(/*id=*/0, cache.req_port(), hbm.cpl_port(), /*latency=*/0);
+  link.set_exec_mode(simdojo::ExecMode::FUNCTIONAL);
+  cache.req_port()->set_link(&link);
+  hbm.cpl_port()->set_link(&link);
+
+  constexpr uint64_t kLastLine =
+      std::numeric_limits<uint64_t>::max() - (MemorySideCache::LINE_SIZE - 1);
+  constexpr uint64_t kHighAddress = kLastLine + MemorySideCache::LINE_SIZE / 2;
+  constexpr uint32_t kInitial = 0x11223344;
+  constexpr uint32_t kReplacement = 0xaabbccdd;
+  memory.write32(kHighAddress, kInitial);
+  memory.write32(0, kInitial);
+  uint32_t observed = 0;
+  ASSERT_EQ(cache.read(kHighAddress, reinterpret_cast<uint8_t *>(&observed), sizeof(observed)),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(cache.read(0, reinterpret_cast<uint8_t *>(&observed), sizeof(observed)),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(cache.flush_range(kHighAddress, MemorySideCache::LINE_SIZE, 0),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(cache, kLastLine, 0));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_resident(cache, 0, 0));
+  memory.write32(kHighAddress, kReplacement);
+  memory.write32(0, kReplacement);
+  ASSERT_EQ(cache.read(kHighAddress, reinterpret_cast<uint8_t *>(&observed), sizeof(observed)),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kReplacement);
+  ASSERT_EQ(cache.read(0, reinterpret_cast<uint8_t *>(&observed), sizeof(observed)),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kInitial);
+}
+
+TEST(MemorySideCacheTest, WithoutRangeMaintenanceExternalWriteLeavesStaleLine) {
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kInitial = 0x11223344;
+  constexpr uint32_t kReplacement = 0xaabbccdd;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  hierarchy.physical->store(kAddress, kInitial);
+  uint32_t observed = 0;
+  ASSERT_EQ(hierarchy.memory_side_cache.read(kAddress, reinterpret_cast<uint8_t *>(&observed),
+                                             sizeof(observed), LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(observed, kInitial);
+
+  hierarchy.physical->store(kAddress, kReplacement);
+  ASSERT_EQ(hierarchy.memory_side_cache.read(kAddress, reinterpret_cast<uint8_t *>(&observed),
+                                             sizeof(observed), LinkedCacheHierarchy::kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kInitial);
+  EXPECT_EQ(hierarchy.physical->read_calls, 1u);
+}
 
 TEST(L2CacheTest, LinkedHierarchyCachesOnlyAccessibleBytesOfIncompleteLines) {
   constexpr uint64_t kValidAddress = 20;
@@ -628,6 +1651,2012 @@ TEST(DeviceCacheCoherenceTest, MaintenanceRefreshesMemorySideCacheAfterDirectWri
   uint32_t refreshed = 0;
   memory_side_cache.read(kAddress, reinterpret_cast<uint8_t *>(&refreshed), sizeof(refreshed));
   EXPECT_EQ(refreshed, kReplacement);
+}
+
+TEST(DeviceCacheCoherenceTest, WritebackMaintenancePublishesMemorySideBeforeL2DirtyBytes) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+
+  auto coherence = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  L2Cache l2("l2", coherence);
+  MemorySideCache memory_side_cache("memory_side_cache", coherence, &memory);
+  l2.set_backing_memory(&memory);
+  l2.set_legacy_maintenance_memory(&memory);
+  l2.set_legacy_maintenance_vm(&gpu_vm);
+  memory_side_cache.set_legacy_maintenance_vm(&gpu_vm);
+
+  constexpr uint64_t kAddress = 0x9180;
+  constexpr uint32_t kDirtyOffset = 32;
+  constexpr uint32_t kDirtyBytes = 4;
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> memory_side_line{};
+  memory_side_line.fill(0x11);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(memory_side_cache, kAddress,
+                                                       memory_side_line, 0, 0, 0);
+  std::array<uint8_t, L2Cache::LINE_SIZE> l2_line{};
+  l2_line.fill(0x22);
+  ASSERT_EQ(l2.writeback_line(kAddress, l2_line.data(), kDirtyOffset, kDirtyBytes, Mtype::RW),
+            VmAccessOutcome::Complete);
+
+  {
+    [[maybe_unused]] auto maintenance = coherence->acquire_cache_maintenance(
+        rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+  }
+  EXPECT_EQ(memory.read8(kAddress + kDirtyOffset - 1), 0x11u);
+  for (uint32_t byte = 0; byte < kDirtyBytes; ++byte)
+    EXPECT_EQ(memory.read8(kAddress + kDirtyOffset + byte), 0x22u);
+  EXPECT_EQ(memory.read8(kAddress + kDirtyOffset + kDirtyBytes), 0x11u);
+}
+
+TEST(DeviceCacheCoherenceTest, GroupMaintenanceRejectsOverlappingDirtyDomains) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+
+  auto first_domain = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
+  auto second_domain = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
+  GpuMemory memory("shared_memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  L2Cache first_l2("first_l2", first_domain);
+  MemorySideCache second_msc("second_msc", second_domain, &memory);
+  first_l2.set_backing_memory(&memory);
+  first_l2.set_legacy_maintenance_memory(&memory);
+  first_l2.set_legacy_maintenance_vm(&gpu_vm);
+  second_msc.set_legacy_maintenance_vm(&gpu_vm);
+
+  constexpr uint64_t kAddress = 0x9200;
+  constexpr uint32_t kDirtyOffset = 32;
+  constexpr uint32_t kDirtyBytes = 4;
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> old_line{};
+  old_line.fill(0x11);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(second_msc, kAddress, old_line, 0, 0, 0);
+  std::array<uint8_t, L2Cache::LINE_SIZE> newer_line{};
+  newer_line.fill(0x22);
+  ASSERT_EQ(
+      first_l2.writeback_line(kAddress, newer_line.data(), kDirtyOffset, kDirtyBytes, Mtype::RW),
+      VmAccessOutcome::Complete);
+  ASSERT_EQ(memory.read8(kAddress + kDirtyOffset), 0u);
+
+  const uint64_t first_epoch = first_domain->current_epoch();
+  const uint64_t second_epoch = second_domain->current_epoch();
+  const std::array domains{first_domain, second_domain};
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto maintenance =
+            rocjitsu::amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
+                domains, rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+      },
+      util::Exception);
+  EXPECT_EQ(memory.read8(kAddress + kDirtyOffset), 0u);
+  EXPECT_EQ(first_domain->current_epoch(), first_epoch);
+  EXPECT_EQ(second_domain->current_epoch(), second_epoch);
+  EXPECT_TRUE(rocjitsu::amdgpu::L2CacheTestAccess::dirty_byte(first_l2, kAddress, 0, kDirtyOffset));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupMaintenanceWritesDisjointDirtyDomains) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+
+  auto first_domain = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
+  auto second_domain = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
+  GpuMemory memory("shared_memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  MemorySideCache first_msc("first_msc", first_domain, &memory);
+  MemorySideCache second_msc("second_msc", second_domain, &memory);
+  first_msc.set_legacy_maintenance_vm(&gpu_vm);
+  second_msc.set_legacy_maintenance_vm(&gpu_vm);
+
+  constexpr uint64_t kFirstAddress = 0x9200;
+  constexpr uint64_t kSecondAddress = 0x9300;
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> first_dirty{};
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> second_dirty{};
+  first_dirty.fill(0x33);
+  second_dirty.fill(0x44);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(first_msc, kFirstAddress, first_dirty, 0, 0,
+                                                       0);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(second_msc, kSecondAddress, second_dirty, 0,
+                                                       0, 0);
+
+  const std::array domains{first_domain, second_domain};
+  {
+    [[maybe_unused]] auto maintenance =
+        rocjitsu::amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
+            domains, rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+  }
+  EXPECT_EQ(memory.read8(kFirstAddress), 0x33u);
+  EXPECT_EQ(memory.read8(kSecondAddress), 0x44u);
+}
+
+TEST(DeviceCacheCoherenceTest, GroupMaintenanceDistinguishesSeparateBackingMemory) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+
+  auto first_domain = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
+  auto second_domain = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
+  GpuMemory first_memory("first_memory");
+  GpuMemory second_memory("second_memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  MemorySideCache first_msc("first_msc", first_domain, &first_memory);
+  MemorySideCache second_msc("second_msc", second_domain, &second_memory);
+  first_msc.set_legacy_maintenance_vm(&gpu_vm);
+  second_msc.set_legacy_maintenance_vm(&gpu_vm);
+
+  constexpr uint64_t kAddress = 0x9400;
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> first_dirty{};
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> second_dirty{};
+  first_dirty.fill(0x55);
+  second_dirty.fill(0x66);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(first_msc, kAddress, first_dirty, 0, 0, 0);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(second_msc, kAddress, second_dirty, 0, 0, 0);
+
+  const std::array domains{first_domain, second_domain};
+  {
+    [[maybe_unused]] auto maintenance =
+        rocjitsu::amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
+            domains, rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+  }
+  EXPECT_EQ(first_memory.read8(kAddress), 0x55u);
+  EXPECT_EQ(second_memory.read8(kAddress), 0x66u);
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreflightRejectsDirtyNonzeroVmidBeforeAnyWrite) {
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+
+  auto first_domain = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
+  auto second_domain = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
+  GpuMemory memory("shared_memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  MemorySideCache first_msc("first_msc", first_domain, &memory);
+  L2Cache second_l2("second_l2", second_domain);
+  first_msc.set_legacy_maintenance_vm(&gpu_vm);
+  second_l2.set_legacy_maintenance_memory(&memory);
+  second_l2.set_legacy_maintenance_vm(&gpu_vm);
+
+  constexpr uint64_t kFirstAddress = 0xa000;
+  constexpr uint64_t kSecondAddress = 0xb000;
+  constexpr uint32_t kNonzeroVmid = 42;
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> first_dirty{};
+  first_dirty.fill(0x77);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(first_msc, kFirstAddress, first_dirty, 0, 0,
+                                                       0);
+  std::array<uint8_t, L2Cache::LINE_SIZE> second_dirty{};
+  second_dirty.fill(0x99);
+  const std::array dirty_range{std::pair<uint32_t, uint32_t>{0, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(second_l2, kSecondAddress, second_dirty,
+                                               kNonzeroVmid, 0, 0, dirty_range);
+
+  const uint64_t first_epoch = first_domain->current_epoch();
+  const uint64_t second_epoch = second_domain->current_epoch();
+  const std::array domains{first_domain, second_domain};
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto maintenance =
+            rocjitsu::amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
+                domains, rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+      },
+      util::Exception);
+  EXPECT_EQ(memory.read8(kFirstAddress), 0u);
+  EXPECT_EQ(first_domain->current_epoch(), first_epoch);
+  EXPECT_EQ(second_domain->current_epoch(), second_epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(second_l2, kSecondAddress, kNonzeroVmid, 0));
+
+  const std::array retry_domains{first_domain};
+  {
+    [[maybe_unused]] auto maintenance =
+        rocjitsu::amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
+            retry_domains, rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+  }
+  EXPECT_EQ(memory.read8(kFirstAddress), 0x77u);
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedSingleL2RunCommitsBeforeLeaseEpochs) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kGpuId = 11;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kIdentity = 101;
+  constexpr uint64_t kGeneration = 23;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array dirty_ranges{std::pair<uint32_t, uint32_t>{4, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, kIdentity, kGeneration,
+                                               dirty_ranges);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{coherence, kGpuId}};
+  size_t resolver_calls = 0;
+  const uint64_t data_epoch = coherence->current_epoch();
+  const uint64_t instruction_epoch = coherence->current_instruction_epoch();
+  auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+      domains, DeviceCacheOperation::WritebackInvalidate,
+      [&](uint32_t gpu_id, uint32_t vmid, uint64_t line_address, size_t line_size) {
+        ++resolver_calls;
+        EXPECT_EQ(gpu_id, kGpuId);
+        EXPECT_EQ(vmid, kVmid);
+        EXPECT_EQ(line_address, kAddress);
+        EXPECT_EQ(line_size, L2Cache::LINE_SIZE);
+        return PreparedCanonicalWritebackTestAccess::make(
+            kAddress, dirty.size(), kVmid, kIdentity, kGeneration,
+            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()));
+      });
+  ASSERT_EQ(leases.size(), 1u);
+  EXPECT_EQ(resolver_calls, 1u);
+  EXPECT_EQ(owner->write_attempts, 1u);
+  EXPECT_EQ(owner->bytes_[3], std::byte{0});
+  EXPECT_EQ(owner->bytes_[4], std::byte{0x5a});
+  EXPECT_EQ(owner->bytes_[7], std::byte{0x5a});
+  EXPECT_EQ(owner->bytes_[8], std::byte{0});
+  EXPECT_EQ(coherence->current_epoch(), data_epoch);
+  EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
+  leases.clear();
+  EXPECT_EQ(coherence->current_epoch(), data_epoch + 1);
+  EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch + 1);
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 4));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedCompleteGrantWithWrongIdentityIsTerminal) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kIdentity = 101;
+  constexpr uint64_t kGeneration = 23;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array dirty_ranges{std::pair<uint32_t, uint32_t>{8, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, kIdentity, kGeneration,
+                                               dirty_ranges);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const uint64_t epoch = coherence->current_epoch();
+  size_t resolver_calls = 0;
+  expect_terminal_maintenance_failure([&] {
+    [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+        domains, DeviceCacheOperation::WritebackInvalidate,
+        [&](uint32_t, uint32_t, uint64_t address, size_t line_size) {
+          ++resolver_calls;
+          return PreparedCanonicalWritebackTestAccess::make(
+              address, line_size, kVmid, kIdentity + 1, kGeneration,
+              rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, line_size));
+        });
+  });
+  EXPECT_EQ(resolver_calls, 1u);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0});
+  EXPECT_EQ(coherence->current_epoch(), epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedRevokedGateRetainsDirtyL2Run) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+  using rocjitsu::amdgpu::VmTransferEffectGate;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kIdentity = 101;
+  constexpr uint64_t kGeneration = 23;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array dirty_ranges{std::pair<uint32_t, uint32_t>{8, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, kIdentity, kGeneration,
+                                               dirty_ranges);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  auto gate = std::make_shared<VmTransferEffectGate>();
+  gate->revoke();
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const uint64_t data_epoch = coherence->current_epoch();
+  const uint64_t instruction_epoch = coherence->current_instruction_epoch();
+  expect_terminal_maintenance_failure([&] {
+    [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+        domains, DeviceCacheOperation::WritebackInvalidate,
+        [&](uint32_t, uint32_t, uint64_t, size_t) {
+          return PreparedCanonicalWritebackTestAccess::make(
+              kAddress, dirty.size(), kVmid, kIdentity, kGeneration,
+              rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()),
+              gate);
+        });
+  });
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0});
+  EXPECT_EQ(coherence->current_epoch(), data_epoch);
+  EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedFailedBackingRetainsDirtyL2Run) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kIdentity = 101;
+  constexpr uint64_t kGeneration = 23;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array dirty_ranges{std::pair<uint32_t, uint32_t>{8, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, kIdentity, kGeneration,
+                                               dirty_ranges);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  owner->fail_on_attempt = 1;
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const uint64_t data_epoch = coherence->current_epoch();
+  const uint64_t instruction_epoch = coherence->current_instruction_epoch();
+  const auto resolve = [&](uint32_t, uint32_t, uint64_t, size_t) {
+    return PreparedCanonicalWritebackTestAccess::make(
+        kAddress, dirty.size(), kVmid, kIdentity, kGeneration,
+        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()));
+  };
+  expect_terminal_maintenance_failure([&] {
+    [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+        domains, DeviceCacheOperation::WritebackInvalidate, resolve);
+  });
+  EXPECT_EQ(owner->write_attempts, 1u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0});
+  EXPECT_EQ(coherence->current_epoch(), data_epoch);
+  EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+
+  owner->fail_on_attempt = 0;
+  {
+    [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+        domains, DeviceCacheOperation::WritebackInvalidate, resolve);
+  }
+  EXPECT_EQ(owner->write_attempts, 2u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0x5a});
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedDirectViewCommitsTwoDisjointL2Runs) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array<std::pair<uint32_t, uint32_t>, 2> dirty_ranges{{{4, 4}, {112, 4}}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, 101, 23, dirty_ranges);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  size_t resolver_calls = 0;
+  const uint64_t epoch = coherence->current_epoch();
+  auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+      domains, DeviceCacheOperation::WritebackInvalidate,
+      [&](uint32_t gpu_id, uint32_t vmid, uint64_t address, size_t line_size) {
+        ++resolver_calls;
+        EXPECT_EQ(gpu_id, 11u);
+        EXPECT_EQ(vmid, kVmid);
+        EXPECT_EQ(address, kAddress);
+        EXPECT_EQ(line_size, L2Cache::LINE_SIZE);
+        return PreparedCanonicalWritebackTestAccess::make(
+            kAddress, dirty.size(), kVmid, 101, 23,
+            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()),
+            std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
+            std::span<std::byte>(owner->bytes_).first(dirty.size()));
+      });
+  ASSERT_EQ(leases.size(), 1u);
+  EXPECT_EQ(resolver_calls, 1u);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[3], std::byte{0});
+  EXPECT_EQ(owner->bytes_[4], std::byte{0x5a});
+  EXPECT_EQ(owner->bytes_[7], std::byte{0x5a});
+  EXPECT_EQ(owner->bytes_[8], std::byte{0});
+  EXPECT_EQ(owner->bytes_[111], std::byte{0});
+  EXPECT_EQ(owner->bytes_[112], std::byte{0x5a});
+  EXPECT_EQ(owner->bytes_[115], std::byte{0x5a});
+  EXPECT_EQ(owner->bytes_[116], std::byte{0});
+  EXPECT_EQ(coherence->current_epoch(), epoch);
+  leases.clear();
+  EXPECT_EQ(coherence->current_epoch(), epoch + 1);
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 4));
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 112));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedFallibleOwnerRejectsTwoRunsBeforeAnyWrite) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array<std::pair<uint32_t, uint32_t>, 2> dirty_ranges{{{4, 4}, {112, 4}}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, 101, 23, dirty_ranges);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  owner->fail_on_attempt = 2;
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  size_t resolver_calls = 0;
+  const uint64_t data_epoch = coherence->current_epoch();
+  const uint64_t instruction_epoch = coherence->current_instruction_epoch();
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+            domains, DeviceCacheOperation::WritebackInvalidate,
+            [&](uint32_t, uint32_t, uint64_t, size_t) {
+              ++resolver_calls;
+              return PreparedCanonicalWritebackTestAccess::make(
+                  kAddress, dirty.size(), kVmid, 101, 23,
+                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset,
+                                          dirty.size()));
+            });
+      },
+      util::Exception);
+  EXPECT_EQ(resolver_calls, 1u);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[4], std::byte{0});
+  EXPECT_EQ(owner->bytes_[112], std::byte{0});
+  EXPECT_EQ(coherence->current_epoch(), data_epoch);
+  EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 4));
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 112));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedTwoLinesAcrossDomainsRetainEveryPermit) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kFirstAddress = 0x1000;
+  constexpr uint64_t kSecondAddress = kFirstAddress + L2Cache::LINE_SIZE;
+  constexpr uint32_t kFirstOffset = 8;
+  constexpr uint32_t kSecondOffset = 16;
+  auto first_domain = std::make_shared<DeviceCacheCoherence>();
+  auto second_domain = std::make_shared<DeviceCacheCoherence>();
+  L2Cache first_l2("first_l2", first_domain);
+  L2Cache second_l2("second_l2", second_domain);
+  std::array<uint8_t, L2Cache::LINE_SIZE> first_dirty{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> second_dirty{};
+  first_dirty.fill(0x5a);
+  second_dirty.fill(0x6b);
+  const std::array first_range{std::pair<uint32_t, uint32_t>{kFirstOffset, 4}};
+  const std::array second_range{std::pair<uint32_t, uint32_t>{kSecondOffset, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(first_l2, kFirstAddress, first_dirty, kVmid, 101, 23,
+                                               first_range);
+  L2CacheTestAccess::store_prepared_dirty_line(second_l2, kSecondAddress, second_dirty, kVmid, 102,
+                                               24, second_range);
+
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{first_domain, 11},
+                           DeviceCacheDomain{second_domain, 12}};
+  const uint64_t first_epoch = first_domain->current_epoch();
+  const uint64_t second_epoch = second_domain->current_epoch();
+  size_t resolver_calls = 0;
+  size_t permit_releases = 0;
+  bool caches_unlocked_at_release = true;
+  auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+      domains, DeviceCacheOperation::WritebackInvalidate,
+      [&](uint32_t gpu_id, uint32_t vmid, uint64_t address, size_t line_size) {
+        ++resolver_calls;
+        EXPECT_EQ(vmid, kVmid);
+        EXPECT_EQ(line_size, L2Cache::LINE_SIZE);
+        const bool first = address == kFirstAddress;
+        EXPECT_EQ(gpu_id, first ? 11u : 12u);
+        const size_t backing_offset = first ? 0 : L2Cache::LINE_SIZE;
+        return PreparedCanonicalWritebackTestAccess::make(
+            address, line_size, kVmid, first ? 101 : 102, first ? 23 : 24,
+            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset + backing_offset,
+                                    line_size),
+            std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(),
+            [&] {
+              ++permit_releases;
+              caches_unlocked_at_release &= L2CacheTestAccess::cache_access_available(first_l2) &&
+                                            L2CacheTestAccess::cache_access_available(second_l2);
+            },
+            std::span<std::byte>(owner->bytes_).subspan(backing_offset, line_size));
+      });
+  ASSERT_EQ(leases.size(), 2u);
+  EXPECT_EQ(resolver_calls, 2u);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[kFirstOffset], std::byte{0x5a});
+  EXPECT_EQ(owner->bytes_[L2Cache::LINE_SIZE + kSecondOffset], std::byte{0x6b});
+  EXPECT_EQ(first_domain->current_epoch(), first_epoch);
+  EXPECT_EQ(second_domain->current_epoch(), second_epoch);
+  EXPECT_EQ(permit_releases, 0u);
+  leases.pop_back();
+  EXPECT_EQ(permit_releases, 0u);
+  leases.clear();
+  EXPECT_EQ(permit_releases, 2u);
+  EXPECT_TRUE(caches_unlocked_at_release);
+  EXPECT_EQ(first_domain->current_epoch(), first_epoch + 1);
+  EXPECT_EQ(second_domain->current_epoch(), second_epoch + 1);
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(first_l2, kFirstAddress, kVmid, kFirstOffset));
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(second_l2, kSecondAddress, kVmid, kSecondOffset));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedSameLineMemorySidePrecedesL2Overlay) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kL2Offset = 32;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  MemorySideCache memory_side_cache("msc", coherence);
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> memory_side_dirty{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> l2_dirty{};
+  memory_side_dirty.fill(0x11);
+  l2_dirty.fill(0x22);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(memory_side_cache, kAddress,
+                                                       memory_side_dirty, kVmid, 101, 23);
+  const std::array l2_range{std::pair<uint32_t, uint32_t>{kL2Offset, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, l2_dirty, kVmid, 101, 23, l2_range);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  size_t resolver_calls = 0;
+  const uint64_t epoch = coherence->current_epoch();
+  auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+      domains, DeviceCacheOperation::WritebackInvalidate,
+      [&](uint32_t gpu_id, uint32_t vmid, uint64_t address, size_t line_size) {
+        ++resolver_calls;
+        EXPECT_EQ(gpu_id, 11u);
+        EXPECT_EQ(vmid, kVmid);
+        EXPECT_EQ(address, kAddress);
+        EXPECT_EQ(line_size, L2Cache::LINE_SIZE);
+        return PreparedCanonicalWritebackTestAccess::make(
+            kAddress, line_size, kVmid, 101, 23,
+            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, line_size),
+            std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
+            std::span<std::byte>(owner->bytes_).first(line_size));
+      });
+  ASSERT_EQ(leases.size(), 1u);
+  EXPECT_EQ(resolver_calls, 2u);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[kL2Offset - 1], std::byte{0x11});
+  EXPECT_EQ(owner->bytes_[kL2Offset], std::byte{0x22});
+  EXPECT_EQ(owner->bytes_[kL2Offset + 3], std::byte{0x22});
+  EXPECT_EQ(owner->bytes_[kL2Offset + 4], std::byte{0x11});
+  EXPECT_EQ(coherence->current_epoch(), epoch);
+  leases.clear();
+  EXPECT_EQ(coherence->current_epoch(), epoch + 1);
+  EXPECT_FALSE(MemorySideCacheTestAccess::line_is_dirty(memory_side_cache, kAddress, kVmid));
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, kL2Offset));
+}
+
+void check_group_prepared_rejects_distinct_va_canonical_overlap(bool separate_domains) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kFirstAddress = 0x1000;
+  constexpr uint64_t kSecondAddress = 0x2000;
+  constexpr uint32_t kDirtyOffset = 8;
+  {
+    auto first_domain = std::make_shared<DeviceCacheCoherence>();
+    std::shared_ptr<DeviceCacheCoherence> second_domain =
+        separate_domains ? std::make_shared<DeviceCacheCoherence>() : first_domain;
+    L2Cache first_l2("first_l2", first_domain);
+    L2Cache second_l2("second_l2", second_domain);
+    std::array<uint8_t, L2Cache::LINE_SIZE> first_dirty{};
+    std::array<uint8_t, L2Cache::LINE_SIZE> second_dirty{};
+    first_dirty.fill(0x5a);
+    second_dirty.fill(0x6b);
+    const std::array dirty_range{std::pair<uint32_t, uint32_t>{kDirtyOffset, 4}};
+    L2CacheTestAccess::store_prepared_dirty_line(first_l2, kFirstAddress, first_dirty, kVmid, 101,
+                                                 23, dirty_range);
+    L2CacheTestAccess::store_prepared_dirty_line(second_l2, kSecondAddress, second_dirty, kVmid,
+                                                 102, 24, dirty_range);
+    auto owner = std::make_shared<PreparedBackingOwner>();
+    std::vector<DeviceCacheDomain> domains{{first_domain, 11}};
+    if (separate_domains)
+      domains.push_back({second_domain, 12});
+    const uint64_t first_epoch = first_domain->current_epoch();
+    const uint64_t second_epoch = second_domain->current_epoch();
+    size_t resolver_calls = 0;
+    expect_terminal_maintenance_failure([&] {
+      [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+          domains, DeviceCacheOperation::WritebackInvalidate,
+          [&](uint32_t, uint32_t vmid, uint64_t address, size_t line_size) {
+            ++resolver_calls;
+            const bool first = address == kFirstAddress;
+            EXPECT_EQ(vmid, kVmid);
+            return PreparedCanonicalWritebackTestAccess::make(
+                address, line_size, kVmid, first ? 101 : 102, first ? 23 : 24,
+                rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, line_size),
+                std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
+                std::span<std::byte>(owner->bytes_).first(line_size));
+          });
+    });
+    EXPECT_EQ(resolver_calls, 2u);
+    EXPECT_EQ(owner->write_attempts, 0u);
+    EXPECT_EQ(owner->bytes_[kDirtyOffset], std::byte{0});
+    EXPECT_EQ(first_domain->current_epoch(), first_epoch);
+    EXPECT_EQ(second_domain->current_epoch(), second_epoch);
+    EXPECT_TRUE(L2CacheTestAccess::dirty_byte(first_l2, kFirstAddress, kVmid, kDirtyOffset));
+    EXPECT_TRUE(L2CacheTestAccess::dirty_byte(second_l2, kSecondAddress, kVmid, kDirtyOffset));
+  }
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedRejectsDistinctVaCanonicalOverlapInOneDomain) {
+  check_group_prepared_rejects_distinct_va_canonical_overlap(false);
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedRejectsDistinctVaCanonicalOverlapAcrossDomains) {
+  check_group_prepared_rejects_distinct_va_canonical_overlap(true);
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedInvalidatesSelectedCleanLineWithoutEpoch) {
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> clean_bytes{};
+  clean_bytes.fill(0x5a);
+  L2CacheTestAccess::store_prepared_clean_line(l2, kAddress, clean_bytes, kVmid, 101, 23);
+  ASSERT_TRUE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const std::array scopes{
+      DeviceCacheAliasScope{domains[0], kVmid, kAddress, L2Cache::LINE_SIZE, 23, 101}};
+  const uint64_t data_epoch = coherence->current_epoch();
+  const uint64_t instruction_epoch = coherence->current_instruction_epoch();
+  auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+      domains, scopes,
+      [&](uint32_t, uint32_t, uint64_t, size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+        ADD_FAILURE() << "clean scoped maintenance must not resolve a dirty writer";
+        throw util::Exception(std::string_view("unexpected dirty writer"));
+      });
+  leases.clear();
+  EXPECT_FALSE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
+  EXPECT_EQ(coherence->current_epoch(), data_epoch);
+  EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedGroupKeepsL1GateUntilLastDomainLeaseLeaves) {
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+
+  auto first_domain = std::make_shared<DeviceCacheCoherence>();
+  auto second_domain = std::make_shared<DeviceCacheCoherence>();
+  L2Cache first_l2("first_l2", first_domain);
+  L2Cache second_l2("second_l2", second_domain);
+  L1ScalarCache first_l1(&first_l2);
+  L1ScalarCache second_l1(&second_l2);
+  const std::array domains{DeviceCacheDomain{first_domain, 11},
+                           DeviceCacheDomain{second_domain, 12}};
+  const std::array scopes{
+      DeviceCacheAliasScope{domains[0], 73, 0x1000, L2Cache::LINE_SIZE, 23, 101},
+      DeviceCacheAliasScope{domains[1], 73, 0x1000, L2Cache::LINE_SIZE, 24, 102}};
+  auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+      domains, scopes,
+      [&](uint32_t, uint32_t, uint64_t, size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+        ADD_FAILURE() << "clean scoped maintenance must not resolve a dirty writer";
+        throw util::Exception(std::string_view("unexpected dirty writer"));
+      });
+  ASSERT_EQ(leases.size(), 2u);
+  leases.pop_back();
+
+  std::promise<void> worker_started;
+  auto started = worker_started.get_future();
+  auto pending = std::async(std::launch::async, [&] {
+    worker_started.set_value();
+    first_l1.invalidate_all();
+  });
+  started.wait();
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(25)), std::future_status::timeout);
+  leases.clear();
+  EXPECT_EQ(pending.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+  pending.get();
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedGroupRetainsEveryDomainUntilLastGateUnlock) {
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+
+  std::weak_ptr<DeviceCacheCoherence> first_weak;
+  std::weak_ptr<DeviceCacheCoherence> second_weak;
+  auto leases = [&] {
+    auto first = std::make_shared<DeviceCacheCoherence>();
+    auto second = std::make_shared<DeviceCacheCoherence>();
+    first_weak = first;
+    second_weak = second;
+    const std::array domains{DeviceCacheDomain{first, 11}, DeviceCacheDomain{second, 12}};
+    const std::array scopes{
+        DeviceCacheAliasScope{domains[0], 73, 0x1000, L2Cache::LINE_SIZE, 23, 101},
+        DeviceCacheAliasScope{domains[1], 73, 0x2000, L2Cache::LINE_SIZE, 24, 102}};
+    return DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+        domains, scopes,
+        [&](uint32_t, uint32_t, uint64_t, size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+          ADD_FAILURE() << "empty domains must not resolve a dirty writer";
+          throw util::Exception(std::string_view("unexpected dirty writer"));
+        });
+  }();
+  ASSERT_EQ(leases.size(), 2u);
+  leases.pop_back();
+  EXPECT_FALSE(first_weak.expired());
+  EXPECT_FALSE(second_weak.expired());
+  leases.clear();
+  EXPECT_TRUE(first_weak.expired());
+  EXPECT_TRUE(second_weak.expired());
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedMaintenanceLeavesUnrelatedDomainL1Available) {
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L1ScalarCacheTestAccess;
+
+  auto selected = std::make_shared<DeviceCacheCoherence>();
+  auto unrelated = std::make_shared<DeviceCacheCoherence>();
+  L2Cache selected_l2("selected_l2", selected);
+  L2Cache unrelated_l2("unrelated_l2", unrelated);
+  L1ScalarCache selected_l1(&selected_l2);
+  L1ScalarCache unrelated_l1(&unrelated_l2);
+  const std::array domains{DeviceCacheDomain{selected, 11}};
+  const std::array scopes{
+      DeviceCacheAliasScope{domains[0], 73, 0x1000, L2Cache::LINE_SIZE, 23, 101}};
+  auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+      domains, scopes,
+      [&](uint32_t, uint32_t, uint64_t, size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+        ADD_FAILURE() << "clean scoped maintenance must not resolve a dirty writer";
+        throw util::Exception(std::string_view("unexpected dirty writer"));
+      });
+  EXPECT_FALSE(L1ScalarCacheTestAccess::cache_access_available(selected_l1));
+  EXPECT_TRUE(L1ScalarCacheTestAccess::cache_access_available(unrelated_l1));
+  EXPECT_EQ(selected->scoped_maintenance_success_count(), 1u);
+  EXPECT_EQ(selected->scoped_admission_timeout_count(), 0u);
+  EXPECT_EQ(unrelated->scoped_maintenance_success_count(), 0u);
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedAdmissionIsBoundedWithOverlappingL1Readers) {
+  using rocjitsu::amdgpu::CacheMaintenanceUnavailable;
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L1ScalarCacheTestAccess;
+
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  L1ScalarCache l1(&l2);
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const std::array scopes{
+      DeviceCacheAliasScope{domains[0], 73, 0x1000, L2Cache::LINE_SIZE, 23, 101}};
+  const auto resolve = [&](uint32_t, uint32_t, uint64_t,
+                           size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+    ADD_FAILURE() << "clean scoped maintenance must not resolve a dirty writer";
+    throw util::Exception(std::string_view("unexpected dirty writer"));
+  };
+  auto first_reader = L1ScalarCacheTestAccess::hold_l1_access(*coherence);
+  std::promise<void> second_ready;
+  std::promise<void> release_second;
+  auto second_release = release_second.get_future();
+  auto second_reader = std::async(std::launch::async, [&] {
+    auto held = L1ScalarCacheTestAccess::hold_l1_access(*coherence);
+    second_ready.set_value();
+    second_release.wait();
+  });
+  second_ready.get_future().wait();
+  auto pending = std::async(std::launch::async, [&] {
+    try {
+      auto leases = DeviceCacheCoherenceTestAccess::acquire_scoped_alias_maintenance_group(
+          domains, scopes, resolve, {}, std::chrono::milliseconds(10));
+      return false;
+    } catch (const CacheMaintenanceUnavailable &) {
+      return true;
+    }
+  });
+  const auto status = pending.wait_for(std::chrono::seconds(1));
+  first_reader.unlock();
+  release_second.set_value();
+  second_reader.get();
+  EXPECT_EQ(status, std::future_status::ready);
+  EXPECT_TRUE(pending.get());
+  EXPECT_EQ(coherence->scoped_maintenance_success_count(), 0u);
+  EXPECT_EQ(coherence->scoped_admission_timeout_count(), 1u);
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedWaitsForCoordinatorWithoutHoldingL1Gate) {
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L1ScalarCacheTestAccess;
+
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  L1ScalarCache l1(&l2);
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const std::array scopes{
+      DeviceCacheAliasScope{domains[0], 73, 0x1000, L2Cache::LINE_SIZE, 23, 101}};
+  std::optional<rocjitsu::amdgpu::DeviceCacheMaintenanceLease> full;
+  full.emplace(coherence->acquire_cache_maintenance(DeviceCacheOperation::Invalidate));
+
+  std::promise<void> worker_started;
+  auto started = worker_started.get_future();
+  auto pending = std::async(std::launch::async, [&] {
+    worker_started.set_value();
+    auto leases = DeviceCacheCoherenceTestAccess::acquire_scoped_alias_maintenance_group(
+        domains, scopes,
+        [&](uint32_t, uint32_t, uint64_t, size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+          ADD_FAILURE() << "clean scoped maintenance must not resolve a dirty writer";
+          throw util::Exception(std::string_view("unexpected dirty writer"));
+        },
+        {}, std::chrono::seconds(2));
+    leases.clear();
+  });
+  started.wait();
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(100)), std::future_status::timeout);
+  // A peer reader can hold a page-table lease before reaching L1. If scoped
+  // maintenance held the L1 gate while waiting here, that reader could not
+  // release the lease needed by the full-domain owner.
+  EXPECT_TRUE(L1ScalarCacheTestAccess::cache_access_available(l1));
+  full.reset();
+  EXPECT_EQ(pending.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+  pending.get();
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedReleasesCoordinatorWhileL1ReaderIsActive) {
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L1ScalarCacheTestAccess;
+
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  L1ScalarCache l1(&l2);
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const std::array scopes{
+      DeviceCacheAliasScope{domains[0], 73, 0x1000, L2Cache::LINE_SIZE, 23, 101}};
+  auto active_reader = L1ScalarCacheTestAccess::hold_l1_access(*coherence);
+
+  std::promise<void> worker_started;
+  auto started = worker_started.get_future();
+  auto scoped = std::async(std::launch::async, [&] {
+    worker_started.set_value();
+    auto leases = DeviceCacheCoherenceTestAccess::acquire_scoped_alias_maintenance_group(
+        domains, scopes,
+        [&](uint32_t, uint32_t, uint64_t, size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+          ADD_FAILURE() << "clean scoped maintenance must not resolve a dirty writer";
+          throw util::Exception(std::string_view("unexpected dirty writer"));
+        },
+        {}, std::chrono::seconds(2));
+    leases.clear();
+  });
+  started.wait();
+  EXPECT_EQ(scoped.wait_for(std::chrono::milliseconds(50)), std::future_status::timeout);
+  auto full = std::async(std::launch::async, [&] {
+    auto lease = coherence->acquire_cache_maintenance(DeviceCacheOperation::Invalidate);
+  });
+  const auto full_status = full.wait_for(std::chrono::seconds(2));
+  // Release the reader even after a failed expectation so both workers can
+  // complete and the test cannot strand an async destructor.
+  active_reader.unlock();
+  EXPECT_EQ(full_status, std::future_status::ready);
+  full.get();
+  EXPECT_EQ(scoped.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+  scoped.get();
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedReleasesL1GateWhileL2ReaderIsActive) {
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L1ScalarCacheTestAccess;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  L1ScalarCache l1(&l2);
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const std::array scopes{
+      DeviceCacheAliasScope{domains[0], 73, 0x1000, L2Cache::LINE_SIZE, 23, 101}};
+  auto active_reader = L2CacheTestAccess::hold_cache_access(l2);
+
+  std::promise<void> worker_started;
+  auto started = worker_started.get_future();
+  auto pending = std::async(std::launch::async, [&] {
+    worker_started.set_value();
+    auto leases = DeviceCacheCoherenceTestAccess::acquire_scoped_alias_maintenance_group(
+        domains, scopes,
+        [&](uint32_t, uint32_t, uint64_t, size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+          ADD_FAILURE() << "clean scoped maintenance must not resolve a dirty writer";
+          throw util::Exception(std::string_view("unexpected dirty writer"));
+        },
+        {}, std::chrono::seconds(2));
+    leases.clear();
+  });
+  started.wait();
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(100)), std::future_status::timeout);
+  std::promise<void> l1_started;
+  auto l1_start = l1_started.get_future();
+  auto l1_access = std::async(std::launch::async, [&] {
+    l1_started.set_value();
+    l1.invalidate_all();
+  });
+  l1_start.wait();
+  const auto l1_status = l1_access.wait_for(std::chrono::seconds(2));
+  // Release the L2 reader even on a failed expectation so both workers can
+  // finish without leaving a blocked async destructor.
+  active_reader.unlock();
+  EXPECT_EQ(l1_status, std::future_status::ready);
+  l1_access.get();
+  EXPECT_EQ(pending.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+  pending.get();
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedInvalidatesPrivateLinesAndAcknowledgesExternalEffect) {
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L1ScalarCacheTestAccess;
+  using rocjitsu::amdgpu::L1VectorCacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessKind;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+
+  constexpr uint64_t kSelected = 0x1000;
+  constexpr uint64_t kOther = 0x1100;
+  constexpr uint32_t kOld = 0x11223344;
+  constexpr uint32_t kNew = 0x55667788;
+  LinkedCacheHierarchy hierarchy(0x2000, 23);
+  L1ScalarCache scalar(&hierarchy.l2);
+  L1VectorCache vector(&hierarchy.l2);
+  scalar.set_gpu_vm(&hierarchy.gpu_vm);
+  vector.set_gpu_vm(&hierarchy.gpu_vm);
+  hierarchy.physical->store(kSelected, kOld);
+  hierarchy.physical->store(kOther, kOld);
+  const uint64_t selected_address[] = {kSelected};
+  const uint64_t other_address[] = {kOther};
+  uint32_t observed = 0;
+  ASSERT_EQ(scalar.load(kSelected, 1, &observed, LinkedCacheHierarchy::kVmid),
+            VmAccessOutcome::Complete);
+  ASSERT_EQ(observed, kOld);
+  ASSERT_EQ(scalar.load(kOther, 1, &observed, LinkedCacheHierarchy::kVmid),
+            VmAccessOutcome::Complete);
+  ASSERT_EQ(vector.load(selected_address, 1, sizeof(observed), 1,
+                        reinterpret_cast<uint8_t *>(&observed), Mtype::RW, false, false, 1,
+                        LinkedCacheHierarchy::kVmid),
+            VmAccessOutcome::Complete);
+  ASSERT_EQ(observed, kOld);
+  ASSERT_EQ(vector.load(other_address, 1, sizeof(observed), 1,
+                        reinterpret_cast<uint8_t *>(&observed), Mtype::RW, false, false, 1,
+                        LinkedCacheHierarchy::kVmid),
+            VmAccessOutcome::Complete);
+  ASSERT_EQ(observed, kOld);
+
+  const auto [identity, generation] = hierarchy.gpu_vm.with_vmid_snapshot(
+      LinkedCacheHierarchy::kVmid, [&](const rocjitsu::amdgpu::GpuVmAccess *access) {
+        EXPECT_NE(access, nullptr);
+        const auto admission =
+            access->admit_access(kSelected, L2Cache::LINE_SIZE, VmAccessKind::Read);
+        EXPECT_EQ(admission.outcome, VmAccessOutcome::Complete);
+        return std::pair{access->cache_identity(), admission.generation};
+      });
+  ASSERT_NE(identity, 0u);
+  ASSERT_NE(generation, 0u);
+  const std::array domains{DeviceCacheDomain{hierarchy.coherence, 11}};
+  const std::array scopes{DeviceCacheAliasScope{domains[0], LinkedCacheHierarchy::kVmid, kSelected,
+                                                L2Cache::LINE_SIZE, generation, identity}};
+  const uint64_t epoch = hierarchy.coherence->current_epoch();
+  auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+      domains, scopes,
+      [&](uint32_t, uint32_t, uint64_t, size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+        ADD_FAILURE() << "clean scoped maintenance must not resolve a dirty writer";
+        throw util::Exception(std::string_view("unexpected dirty writer"));
+      });
+  EXPECT_FALSE(std::async(std::launch::async, [&] {
+                 return L1ScalarCacheTestAccess::cache_access_available(scalar);
+               }).get());
+  EXPECT_FALSE(std::async(std::launch::async, [&] {
+                 return L1VectorCacheTestAccess::cache_access_available(vector);
+               }).get());
+  hierarchy.physical->store(kSelected, kNew);
+  std::promise<void> worker_started;
+  auto started = worker_started.get_future();
+  auto pending = std::async(std::launch::async, [&] {
+    worker_started.set_value();
+    uint32_t value = 0;
+    const auto outcome =
+        vector.load(selected_address, 1, sizeof(value), 1, reinterpret_cast<uint8_t *>(&value),
+                    Mtype::RW, false, false, 1, LinkedCacheHierarchy::kVmid);
+    return std::pair{outcome, value};
+  });
+  started.wait();
+  EXPECT_EQ(pending.wait_for(std::chrono::milliseconds(25)), std::future_status::timeout);
+  leases.clear();
+  const auto [outcome, value] = pending.get();
+  EXPECT_TRUE(L1ScalarCacheTestAccess::cache_access_available(scalar));
+  EXPECT_TRUE(L1VectorCacheTestAccess::cache_access_available(vector));
+  EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(value, kNew);
+  EXPECT_EQ(hierarchy.coherence->current_epoch(), epoch);
+  EXPECT_FALSE(L1ScalarCacheTestAccess::resident(scalar, kSelected, LinkedCacheHierarchy::kVmid));
+  EXPECT_TRUE(L1ScalarCacheTestAccess::resident(scalar, kOther, LinkedCacheHierarchy::kVmid));
+  EXPECT_TRUE(L1VectorCacheTestAccess::resident(vector, kOther, LinkedCacheHierarchy::kVmid));
+  ASSERT_EQ(scalar.load(kSelected, 1, &observed, LinkedCacheHierarchy::kVmid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kNew);
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedPrivateSelectionMatchesVmidAddressGrantAndIdentity) {
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L1ScalarCacheTestAccess;
+  using rocjitsu::amdgpu::L1VectorCacheTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kGeneration = 23;
+  constexpr uint64_t kIdentity = 101;
+  struct Resident {
+    uint64_t address;
+    uint32_t vmid;
+    uint64_t generation;
+    uint64_t identity;
+  };
+  const std::array residents{
+      Resident{kAddress, kVmid, kGeneration, kIdentity},
+      Resident{kAddress + L2Cache::LINE_SIZE, kVmid, kGeneration, kIdentity},
+      Resident{kAddress, kVmid + 1, kGeneration, kIdentity},
+      Resident{kAddress, kVmid, kGeneration + 1, kIdentity},
+      Resident{kAddress, kVmid, kGeneration, kIdentity + 1},
+  };
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::vector<std::unique_ptr<L1ScalarCache>> scalars;
+  std::vector<std::unique_ptr<L1VectorCache>> vectors;
+  for (const Resident &resident : residents) {
+    scalars.push_back(std::make_unique<L1ScalarCache>(&l2));
+    vectors.push_back(std::make_unique<L1VectorCache>(&l2));
+    L1ScalarCacheTestAccess::store_clean_line(*scalars.back(), resident.address, resident.vmid,
+                                              resident.generation, resident.identity);
+    L1VectorCacheTestAccess::store_clean_line(*vectors.back(), resident.address, resident.vmid,
+                                              resident.generation, resident.identity);
+  }
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const std::array scopes{DeviceCacheAliasScope{domains[0], kVmid, kAddress, L2Cache::LINE_SIZE,
+                                                kGeneration, kIdentity}};
+  auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+      domains, scopes,
+      [&](uint32_t, uint32_t, uint64_t, size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+        ADD_FAILURE() << "clean scoped maintenance must not resolve a dirty writer";
+        throw util::Exception(std::string_view("unexpected dirty writer"));
+      });
+  leases.clear();
+  for (size_t index = 0; index < residents.size(); ++index) {
+    const Resident &resident = residents[index];
+    EXPECT_EQ(L1ScalarCacheTestAccess::resident(*scalars[index], resident.address, resident.vmid),
+              index != 0);
+    EXPECT_EQ(L1VectorCacheTestAccess::resident(*vectors[index], resident.address, resident.vmid),
+              index != 0);
+  }
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedRefusesUnidentifiedPrivateLineAndReleasesLocks) {
+  using rocjitsu::amdgpu::CacheMaintenanceUnavailable;
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L1ScalarCacheTestAccess;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kValue = 0x11223344;
+  LinkedCacheHierarchy hierarchy(0x2000, 23);
+  L1ScalarCache scalar(&hierarchy.l2);
+  // This synthetic client has no VM service, so its nonzero-VMID L1 tag
+  // cannot identify the backing generation selected by scoped maintenance.
+  hierarchy.physical->store(kAddress, kValue);
+  uint32_t observed = 0;
+  ASSERT_EQ(scalar.load(kAddress, 1, &observed, LinkedCacheHierarchy::kVmid),
+            VmAccessOutcome::Complete);
+  ASSERT_EQ(observed, kValue);
+  const uint64_t identity = hierarchy.gpu_vm.with_vmid_snapshot(
+      LinkedCacheHierarchy::kVmid, [](const rocjitsu::amdgpu::GpuVmAccess *access) {
+        return access != nullptr ? access->cache_identity() : uint64_t{0};
+      });
+  ASSERT_NE(identity, 0u);
+  const std::array domains{DeviceCacheDomain{hierarchy.coherence, 11}};
+  const std::array scopes{DeviceCacheAliasScope{domains[0], LinkedCacheHierarchy::kVmid, kAddress,
+                                                L2Cache::LINE_SIZE, 23, identity}};
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+            domains, scopes,
+            [&](uint32_t, uint32_t, uint64_t,
+                size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+              ADD_FAILURE() << "clean scoped maintenance must not resolve a dirty writer";
+              throw util::Exception(std::string_view("unexpected dirty writer"));
+            });
+      },
+      CacheMaintenanceUnavailable);
+  EXPECT_TRUE(std::async(std::launch::async, [&] {
+                return L1ScalarCacheTestAccess::cache_access_available(scalar);
+              }).get());
+  EXPECT_TRUE(L1ScalarCacheTestAccess::resident(scalar, kAddress, LinkedCacheHierarchy::kVmid));
+  EXPECT_TRUE(L2CacheTestAccess::resident(hierarchy.l2, kAddress, LinkedCacheHierarchy::kVmid));
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedWritebackPreservesOtherDirtyMemorySideDomain) {
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kSelectedAddress = 0x1000;
+  constexpr uint64_t kOtherAddress = 0x2000;
+  auto selected_domain = std::make_shared<DeviceCacheCoherence>();
+  auto other_domain = std::make_shared<DeviceCacheCoherence>();
+  L2Cache selected_l2("selected_l2", selected_domain);
+  MemorySideCache other_msc("other_msc", other_domain);
+  std::array<uint8_t, L2Cache::LINE_SIZE> selected_bytes{};
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> other_bytes{};
+  selected_bytes.fill(0x5a);
+  other_bytes.fill(0x6b);
+  const std::array selected_range{std::pair<uint32_t, uint32_t>{8, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(selected_l2, kSelectedAddress, selected_bytes, kVmid,
+                                               101, 23, selected_range);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(other_msc, kOtherAddress, other_bytes, kVmid,
+                                                       102, 24);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{selected_domain, 11},
+                           DeviceCacheDomain{other_domain, 12}};
+  const std::array scopes{
+      DeviceCacheAliasScope{domains[0], kVmid, kSelectedAddress, L2Cache::LINE_SIZE, 23, 101}};
+  const uint64_t selected_epoch = selected_domain->current_epoch();
+  const uint64_t other_epoch = other_domain->current_epoch();
+  size_t permit_releases = 0;
+  auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+      domains, scopes, [&](uint32_t gpu_id, uint32_t vmid, uint64_t address, size_t size) {
+        EXPECT_EQ(vmid, kVmid);
+        EXPECT_EQ(size, L2Cache::LINE_SIZE);
+        const bool selected = gpu_id == 11;
+        EXPECT_EQ(address, selected ? kSelectedAddress : kOtherAddress);
+        const size_t offset = selected ? 0 : L2Cache::LINE_SIZE;
+        return PreparedCanonicalWritebackTestAccess::make(
+            address, size, kVmid, selected ? 101 : 102, selected ? 23 : 24,
+            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset + offset, size),
+            std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [&] { ++permit_releases; });
+      });
+  ASSERT_EQ(leases.size(), 2u);
+  EXPECT_EQ(owner->write_attempts, 1u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0x5a});
+  EXPECT_EQ(owner->bytes_[L2Cache::LINE_SIZE], std::byte{0});
+  EXPECT_EQ(permit_releases, 0u);
+  leases.clear();
+  EXPECT_EQ(permit_releases, 2u);
+  EXPECT_EQ(selected_domain->current_epoch(), selected_epoch);
+  EXPECT_EQ(other_domain->current_epoch(), other_epoch);
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(selected_l2, kSelectedAddress, kVmid, 8));
+  EXPECT_TRUE(MemorySideCacheTestAccess::line_is_dirty(other_msc, kOtherAddress, kVmid));
+  EXPECT_TRUE(MemorySideCacheTestAccess::line_is_resident(other_msc, kOtherAddress, kVmid));
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedRefusesUnresolvedOrphanDirtyWitnessBeforeWrite) {
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kSelectedAddress = 0x1000;
+  constexpr uint64_t kOrphanAddress = 0x2000;
+  auto selected_domain = std::make_shared<DeviceCacheCoherence>();
+  auto orphan_domain = std::make_shared<DeviceCacheCoherence>();
+  L2Cache selected_l2("selected_l2", selected_domain);
+  L2Cache orphan_l2("orphan_l2", orphan_domain);
+  std::array<uint8_t, L2Cache::LINE_SIZE> selected_bytes{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> orphan_bytes{};
+  selected_bytes.fill(0x5a);
+  orphan_bytes.fill(0x6b);
+  const std::array dirty_range{std::pair<uint32_t, uint32_t>{8, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(selected_l2, kSelectedAddress, selected_bytes, kVmid,
+                                               101, 23, dirty_range);
+  L2CacheTestAccess::store_prepared_dirty_line(orphan_l2, kOrphanAddress, orphan_bytes, kVmid, 102,
+                                               24, dirty_range);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{selected_domain, 11},
+                           DeviceCacheDomain{orphan_domain, 12}};
+  const std::array scopes{
+      DeviceCacheAliasScope{domains[0], kVmid, kSelectedAddress, L2Cache::LINE_SIZE, 23, 101}};
+  const uint64_t selected_epoch = selected_domain->current_epoch();
+  const uint64_t orphan_epoch = orphan_domain->current_epoch();
+  bool orphan_witness_seen = false;
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+            domains, scopes, [&](uint32_t gpu_id, uint32_t vmid, uint64_t address, size_t size) {
+              EXPECT_EQ(vmid, kVmid);
+              EXPECT_EQ(size, L2Cache::LINE_SIZE);
+              if (gpu_id == 12 && address == kOrphanAddress) {
+                orphan_witness_seen = true;
+                throw util::Exception(std::string_view("orphan dirty writer has no live grant"));
+              }
+              EXPECT_EQ(gpu_id, 11u);
+              EXPECT_EQ(address, kSelectedAddress);
+              return PreparedCanonicalWritebackTestAccess::make(
+                  address, size, kVmid, 101, 23,
+                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size),
+                  std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
+                  std::span<std::byte>(owner->bytes_).first(size));
+            });
+      },
+      util::Exception);
+  EXPECT_TRUE(orphan_witness_seen);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0});
+  EXPECT_EQ(selected_domain->current_epoch(), selected_epoch);
+  EXPECT_EQ(orphan_domain->current_epoch(), orphan_epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(selected_l2, kSelectedAddress, kVmid, 8));
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(orphan_l2, kOrphanAddress, kVmid, 8));
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedRejectsOverlappingUnselectedDirtyAlias) {
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kSelectedAddress = 0x1000;
+  constexpr uint64_t kOtherAddress = 0x2000;
+  auto selected_domain = std::make_shared<DeviceCacheCoherence>();
+  auto other_domain = std::make_shared<DeviceCacheCoherence>();
+  L2Cache selected_l2("selected_l2", selected_domain);
+  L2Cache other_l2("other_l2", other_domain);
+  std::array<uint8_t, L2Cache::LINE_SIZE> selected_bytes{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> other_bytes{};
+  selected_bytes.fill(0x5a);
+  other_bytes.fill(0x6b);
+  const std::array selected_range{std::pair<uint32_t, uint32_t>{8, 4}};
+  const std::array other_range{std::pair<uint32_t, uint32_t>{80, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(selected_l2, kSelectedAddress, selected_bytes, kVmid,
+                                               101, 23, selected_range);
+  L2CacheTestAccess::store_prepared_dirty_line(other_l2, kOtherAddress, other_bytes, kVmid, 102, 24,
+                                               other_range);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{selected_domain, 11},
+                           DeviceCacheDomain{other_domain, 12}};
+  const std::array scopes{
+      DeviceCacheAliasScope{domains[0], kVmid, kSelectedAddress, L2Cache::LINE_SIZE, 23, 101}};
+  const uint64_t selected_epoch = selected_domain->current_epoch();
+  const uint64_t other_epoch = other_domain->current_epoch();
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+            domains, scopes, [&](uint32_t, uint32_t, uint64_t address, size_t size) {
+              const bool selected = address == kSelectedAddress;
+              return PreparedCanonicalWritebackTestAccess::make(
+                  address, size, kVmid, selected ? 101 : 102, selected ? 23 : 24,
+                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size),
+                  std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
+                  std::span<std::byte>(owner->bytes_).first(size));
+            });
+      },
+      util::Exception);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0});
+  EXPECT_EQ(owner->bytes_[80], std::byte{0});
+  EXPECT_EQ(selected_domain->current_epoch(), selected_epoch);
+  EXPECT_EQ(other_domain->current_epoch(), other_epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(selected_l2, kSelectedAddress, kVmid, 8));
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(other_l2, kOtherAddress, kVmid, 80));
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedWitnessRefusesMissingStaleOrUnretainedDirtyLine) {
+  using rocjitsu::amdgpu::CacheMaintenanceUnavailable;
+  using rocjitsu::amdgpu::CanonicalLineWitness;
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kSelectedAddress = 0x1000;
+  constexpr uint64_t kOtherAddress = 0x2000;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("witness_l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> bytes{};
+  bytes[8] = 0x5a;
+  const std::array dirty_range{std::pair<uint32_t, uint32_t>{8, 1}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kOtherAddress, bytes, kVmid, 102, 24,
+                                               dirty_range);
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const std::array scopes{
+      DeviceCacheAliasScope{domains[0], kVmid, kSelectedAddress, L2Cache::LINE_SIZE, 23, 101,
+                            PreparedBackingOwner::kBackingId, PreparedBackingOwner::kBaseOffset}};
+  const uint64_t epoch = coherence->current_epoch();
+  for (int invalid = 0; invalid < 3; ++invalid) {
+    bool witness_called = false;
+    EXPECT_THROW(
+        {
+          [[maybe_unused]] auto leases =
+              DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+                  domains, scopes,
+                  [](uint32_t, uint32_t, uint64_t,
+                     size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+                    ADD_FAILURE() << "an absent selected line must not resolve a writeback";
+                    throw util::Exception(std::string_view("unexpected selected dirty line"));
+                  },
+                  [&](uint32_t gpu_id, uint32_t vmid, uint64_t address, size_t size,
+                      uint64_t identity,
+                      uint64_t generation) -> std::optional<CanonicalLineWitness> {
+                    witness_called = true;
+                    EXPECT_EQ(gpu_id, 11u);
+                    EXPECT_EQ(vmid, kVmid);
+                    EXPECT_EQ(address, kOtherAddress);
+                    EXPECT_EQ(size, L2Cache::LINE_SIZE);
+                    EXPECT_EQ(identity, 102u);
+                    EXPECT_EQ(generation, 24u);
+                    if (invalid == 0)
+                      return std::nullopt;
+                    CanonicalLineWitness witness{
+                        .gpu_id = gpu_id,
+                        .vmid = vmid,
+                        .line_address = address,
+                        .line_size = size,
+                        .cache_identity = identity,
+                        .admission_generation = generation,
+                        .backing_id = PreparedBackingOwner::kBackingId,
+                        .backing_offset = PreparedBackingOwner::kBaseOffset + L2Cache::LINE_SIZE,
+                        .retention = std::make_shared<int>(1)};
+                    if (invalid == 1)
+                      ++witness.admission_generation;
+                    else
+                      witness.retention.reset();
+                    return witness;
+                  });
+        },
+        CacheMaintenanceUnavailable);
+    EXPECT_TRUE(witness_called);
+    EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kOtherAddress, kVmid, 8));
+    EXPECT_EQ(coherence->current_epoch(), epoch);
+  }
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedWitnessOutlivesCacheLocks) {
+  using rocjitsu::amdgpu::CanonicalLineWitness;
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kSelectedAddress = 0x1000;
+  constexpr uint64_t kOtherAddress = 0x2000;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("witness_l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> bytes{};
+  bytes[8] = 0x5a;
+  L2CacheTestAccess::store_prepared_clean_line(l2, kSelectedAddress, bytes, kVmid, 101, 23);
+  const std::array dirty_range{std::pair<uint32_t, uint32_t>{8, 1}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kOtherAddress, bytes, kVmid, 102, 24,
+                                               dirty_range);
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const std::array scopes{
+      DeviceCacheAliasScope{domains[0], kVmid, kSelectedAddress, L2Cache::LINE_SIZE, 23, 101,
+                            PreparedBackingOwner::kBackingId, PreparedBackingOwner::kBaseOffset}};
+  bool released = false;
+  bool locks_released_first = false;
+  auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+      domains, scopes,
+      [](uint32_t, uint32_t, uint64_t, size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+        ADD_FAILURE() << "a clean selected line must not resolve a writeback";
+        throw util::Exception(std::string_view("unexpected selected dirty line"));
+      },
+      [&](uint32_t gpu_id, uint32_t vmid, uint64_t address, size_t size, uint64_t identity,
+          uint64_t generation) -> std::optional<CanonicalLineWitness> {
+        auto retention = std::shared_ptr<int>(new int(1), [&](int *value) {
+          locks_released_first = L2CacheTestAccess::cache_access_available(l2);
+          released = true;
+          delete value;
+        });
+        return CanonicalLineWitness{.gpu_id = gpu_id,
+                                    .vmid = vmid,
+                                    .line_address = address,
+                                    .line_size = size,
+                                    .cache_identity = identity,
+                                    .admission_generation = generation,
+                                    .backing_id = PreparedBackingOwner::kBackingId,
+                                    .backing_offset =
+                                        PreparedBackingOwner::kBaseOffset + L2Cache::LINE_SIZE,
+                                    .retention = std::move(retention)};
+      });
+  ASSERT_EQ(leases.size(), 1u);
+  EXPECT_FALSE(released);
+  leases.clear();
+  EXPECT_TRUE(released);
+  EXPECT_TRUE(locks_released_first);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kOtherAddress, kVmid, 8));
+}
+
+TEST(DeviceCacheCoherenceTest, ScopedWitnessChecksSelectedBackingAndScopeConflicts) {
+  using rocjitsu::amdgpu::CanonicalLineWitness;
+  using rocjitsu::amdgpu::DeviceCacheAliasScope;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kSelectedAddress = 0x1000;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("selected_l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> bytes{};
+  bytes[8] = 0x5a;
+  const std::array dirty_range{std::pair<uint32_t, uint32_t>{8, 1}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kSelectedAddress, bytes, kVmid, 101, 23,
+                                               dirty_range);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const uint64_t epoch = coherence->current_epoch();
+  for (int mismatch = 0; mismatch < 2; ++mismatch) {
+    const std::array scopes{DeviceCacheAliasScope{
+        domains[0], kVmid, kSelectedAddress, L2Cache::LINE_SIZE, 23, 101,
+        mismatch == 0 ? PreparedBackingOwner::kBackingId + 1 : PreparedBackingOwner::kBackingId,
+        PreparedBackingOwner::kBaseOffset + (mismatch == 0 ? 0 : L2Cache::LINE_SIZE)}};
+    EXPECT_THROW(
+        {
+          [[maybe_unused]] auto leases =
+              DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+                  domains, scopes,
+                  [&](uint32_t, uint32_t, uint64_t address, size_t size) {
+                    return PreparedCanonicalWritebackTestAccess::make(
+                        address, size, kVmid, 101, 23,
+                        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size),
+                        std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
+                        std::span<std::byte>(owner->bytes_).first(size));
+                  },
+                  [](uint32_t, uint32_t, uint64_t, size_t, uint64_t,
+                     uint64_t) -> std::optional<CanonicalLineWitness> {
+                    ADD_FAILURE() << "a selected dirty line must not need an unselected witness";
+                    return std::nullopt;
+                  });
+        },
+        util::Exception);
+    EXPECT_EQ(owner->write_attempts, 0u);
+    EXPECT_EQ(owner->bytes_[8], std::byte{0});
+    EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kSelectedAddress, kVmid, 8));
+    EXPECT_EQ(coherence->current_epoch(), epoch);
+  }
+  const std::array conflicting_scopes{
+      DeviceCacheAliasScope{domains[0], kVmid, kSelectedAddress, L2Cache::LINE_SIZE, 23, 101,
+                            PreparedBackingOwner::kBackingId, PreparedBackingOwner::kBaseOffset},
+      DeviceCacheAliasScope{domains[0], kVmid, kSelectedAddress, L2Cache::LINE_SIZE, 23, 101,
+                            PreparedBackingOwner::kBackingId + 1,
+                            PreparedBackingOwner::kBaseOffset}};
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+            domains, conflicting_scopes,
+            [&](uint32_t, uint32_t, uint64_t address, size_t size) {
+              return PreparedCanonicalWritebackTestAccess::make(
+                  address, size, kVmid, 101, 23,
+                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size),
+                  std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
+                  std::span<std::byte>(owner->bytes_).first(size));
+            },
+            [](uint32_t, uint32_t, uint64_t, size_t, uint64_t,
+               uint64_t) -> std::optional<CanonicalLineWitness> { return std::nullopt; });
+      },
+      util::ConfigError);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0});
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kSelectedAddress, kVmid, 8));
+  const std::array equivalent_scopes{conflicting_scopes[0], conflicting_scopes[0]};
+  auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+      domains, equivalent_scopes,
+      [&](uint32_t, uint32_t, uint64_t address, size_t size) {
+        return PreparedCanonicalWritebackTestAccess::make(
+            address, size, kVmid, 101, 23,
+            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size),
+            std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
+            std::span<std::byte>(owner->bytes_).first(size));
+      },
+      [](uint32_t, uint32_t, uint64_t, size_t, uint64_t,
+         uint64_t) -> std::optional<CanonicalLineWitness> { return std::nullopt; });
+  ASSERT_EQ(leases.size(), 1u);
+  leases.clear();
+  EXPECT_EQ(owner->bytes_[8], std::byte{0x5a});
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(l2, kSelectedAddress, kVmid, 8));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedRevokedSecondGateRetainsDirtyBatch) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+  using rocjitsu::amdgpu::VmTransferEffectGate;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kFirstAddress = 0x1000;
+  constexpr uint64_t kSecondAddress = kFirstAddress + L2Cache::LINE_SIZE;
+  constexpr uint32_t kDirtyOffset = 8;
+  auto first_domain = std::make_shared<DeviceCacheCoherence>();
+  auto second_domain = std::make_shared<DeviceCacheCoherence>();
+  L2Cache first_l2("first_l2", first_domain);
+  L2Cache second_l2("second_l2", second_domain);
+  std::array<uint8_t, L2Cache::LINE_SIZE> first_dirty{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> second_dirty{};
+  first_dirty.fill(0x5a);
+  second_dirty.fill(0x6b);
+  const std::array dirty_range{std::pair<uint32_t, uint32_t>{kDirtyOffset, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(first_l2, kFirstAddress, first_dirty, kVmid, 101, 23,
+                                               dirty_range);
+  L2CacheTestAccess::store_prepared_dirty_line(second_l2, kSecondAddress, second_dirty, kVmid, 102,
+                                               24, dirty_range);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{first_domain, 11},
+                           DeviceCacheDomain{second_domain, 12}};
+  const uint64_t first_data_epoch = first_domain->current_epoch();
+  const uint64_t first_instruction_epoch = first_domain->current_instruction_epoch();
+  const uint64_t second_data_epoch = second_domain->current_epoch();
+  const uint64_t second_instruction_epoch = second_domain->current_instruction_epoch();
+  auto first_gate = std::make_shared<VmTransferEffectGate>();
+  auto second_gate = std::make_shared<VmTransferEffectGate>();
+  // The coordinator sorts gates by this comparator. Revoke the gate acquired
+  // second so the first permit has already been taken before the refusal.
+  if (std::less<std::shared_ptr<VmTransferEffectGate>>{}(first_gate, second_gate))
+    second_gate->revoke();
+  else
+    first_gate->revoke();
+  size_t resolver_calls = 0;
+  const auto resolve = [&](uint32_t, uint32_t vmid, uint64_t address, size_t line_size) {
+    ++resolver_calls;
+    EXPECT_EQ(vmid, kVmid);
+    const bool first = address == kFirstAddress;
+    const size_t backing_offset = first ? 0 : L2Cache::LINE_SIZE;
+    return PreparedCanonicalWritebackTestAccess::make(
+        address, line_size, kVmid, first ? 101 : 102, first ? 23 : 24,
+        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset + backing_offset,
+                                line_size),
+        first ? first_gate : second_gate, [] {},
+        std::span<std::byte>(owner->bytes_).subspan(backing_offset, line_size));
+  };
+  expect_terminal_maintenance_failure([&] {
+    [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+        domains, DeviceCacheOperation::WritebackInvalidate, resolve);
+  });
+  EXPECT_EQ(resolver_calls, 2u);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[kDirtyOffset], std::byte{0});
+  EXPECT_EQ(owner->bytes_[L2Cache::LINE_SIZE + kDirtyOffset], std::byte{0});
+  EXPECT_EQ(first_domain->current_epoch(), first_data_epoch);
+  EXPECT_EQ(first_domain->current_instruction_epoch(), first_instruction_epoch);
+  EXPECT_EQ(second_domain->current_epoch(), second_data_epoch);
+  EXPECT_EQ(second_domain->current_instruction_epoch(), second_instruction_epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(first_l2, kFirstAddress, kVmid, kDirtyOffset));
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(second_l2, kSecondAddress, kVmid, kDirtyOffset));
+
+  resolver_calls = 0;
+  {
+    [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+        domains, DeviceCacheOperation::WritebackInvalidate,
+        [&](uint32_t, uint32_t vmid, uint64_t address, size_t line_size) {
+          ++resolver_calls;
+          EXPECT_EQ(vmid, kVmid);
+          const bool first = address == kFirstAddress;
+          const size_t backing_offset = first ? 0 : L2Cache::LINE_SIZE;
+          return PreparedCanonicalWritebackTestAccess::make(
+              address, line_size, kVmid, first ? 101 : 102, first ? 23 : 24,
+              rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset + backing_offset,
+                                      line_size),
+              std::make_shared<VmTransferEffectGate>(), [] {},
+              std::span<std::byte>(owner->bytes_).subspan(backing_offset, line_size));
+        });
+  }
+  EXPECT_EQ(resolver_calls, 2u);
+  EXPECT_EQ(owner->bytes_[kDirtyOffset], std::byte{0x5a});
+  EXPECT_EQ(owner->bytes_[L2Cache::LINE_SIZE + kDirtyOffset], std::byte{0x6b});
+  EXPECT_EQ(first_domain->current_epoch(), first_data_epoch + 1);
+  EXPECT_EQ(first_domain->current_instruction_epoch(), first_instruction_epoch + 1);
+  EXPECT_EQ(second_domain->current_epoch(), second_data_epoch + 1);
+  EXPECT_EQ(second_domain->current_instruction_epoch(), second_instruction_epoch + 1);
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(first_l2, kFirstAddress, kVmid, kDirtyOffset));
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(second_l2, kSecondAddress, kVmid, kDirtyOffset));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedRejectsMixedVmidZeroWriterBeforeAnyWrite) {
+  using rocjitsu::amdgpu::CacheMaintenanceUnavailable;
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kZeroAddress = 0x2000;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  GpuMemory memory("memory");
+  L2Cache l2("l2", coherence);
+  MemorySideCache memory_side_cache("msc", coherence, &memory);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array dirty_ranges{std::pair<uint32_t, uint32_t>{8, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, 101, 23, dirty_ranges);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> zero_dirty{};
+  zero_dirty.fill(0x6b);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(memory_side_cache, kZeroAddress, zero_dirty,
+                                                       0, 0, 0);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  size_t resolver_calls = 0;
+  const uint64_t epoch = coherence->current_epoch();
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+            domains, DeviceCacheOperation::WritebackInvalidate,
+            [&](uint32_t, uint32_t, uint64_t, size_t) {
+              ++resolver_calls;
+              return PreparedCanonicalWritebackTestAccess::make(
+                  kAddress, dirty.size(), kVmid, 101, 23,
+                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset,
+                                          dirty.size()));
+            });
+      },
+      CacheMaintenanceUnavailable);
+  EXPECT_EQ(resolver_calls, 0u);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0});
+  EXPECT_EQ(memory.read8(kZeroAddress), 0u);
+  EXPECT_EQ(coherence->current_epoch(), epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+  EXPECT_TRUE(MemorySideCacheTestAccess::line_is_dirty(memory_side_cache, kZeroAddress, 0));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedRejectsReboundDirtyTagDuringResolver) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kOldIdentity = 101;
+  constexpr uint64_t kNewIdentity = 102;
+  constexpr uint64_t kGeneration = 23;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> old_dirty{};
+  old_dirty.fill(0x5a);
+  const std::array dirty_ranges{std::pair<uint32_t, uint32_t>{8, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, old_dirty, kVmid, kOldIdentity,
+                                               kGeneration, dirty_ranges);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const uint64_t epoch = coherence->current_epoch();
+  size_t resolver_calls = 0;
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+            domains, DeviceCacheOperation::WritebackInvalidate,
+            [&](uint32_t, uint32_t, uint64_t, size_t) {
+              ++resolver_calls;
+              std::array<uint8_t, L2Cache::LINE_SIZE> new_dirty{};
+              new_dirty.fill(0x6b);
+              L2CacheTestAccess::rebind_prepared_dirty_line(l2, kAddress, new_dirty, kVmid,
+                                                            kNewIdentity, kGeneration);
+              return PreparedCanonicalWritebackTestAccess::make(
+                  kAddress, old_dirty.size(), kVmid, kOldIdentity, kGeneration,
+                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset,
+                                          old_dirty.size()));
+            });
+      },
+      util::Exception);
+  EXPECT_EQ(resolver_calls, 1u);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0});
+  EXPECT_EQ(coherence->current_epoch(), epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+
+  {
+    [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+        domains, DeviceCacheOperation::WritebackInvalidate,
+        [&](uint32_t, uint32_t, uint64_t, size_t) {
+          return PreparedCanonicalWritebackTestAccess::make(
+              kAddress, old_dirty.size(), kVmid, kNewIdentity, kGeneration,
+              rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset,
+                                      old_dirty.size()));
+        });
+  }
+  EXPECT_EQ(owner->write_attempts, 1u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0x6b});
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedRejectsOtherLineByteChangeDuringBatchPreparation) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kFirstAddress = 0x1000;
+  constexpr uint64_t kSecondAddress = kFirstAddress + L2Cache::LINE_SIZE;
+  constexpr uint32_t kDirtyOffset = 8;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache first_l2("first_l2", coherence);
+  L2Cache second_l2("second_l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> first_dirty{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> second_dirty{};
+  first_dirty.fill(0x5a);
+  second_dirty.fill(0x6b);
+  const std::array dirty_range{std::pair<uint32_t, uint32_t>{kDirtyOffset, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(first_l2, kFirstAddress, first_dirty, kVmid, 101, 23,
+                                               dirty_range);
+  L2CacheTestAccess::store_prepared_dirty_line(second_l2, kSecondAddress, second_dirty, kVmid, 102,
+                                               24, dirty_range);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const uint64_t data_epoch = coherence->current_epoch();
+  const uint64_t instruction_epoch = coherence->current_instruction_epoch();
+  size_t resolver_calls = 0;
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+            domains, DeviceCacheOperation::WritebackInvalidate,
+            [&](uint32_t gpu_id, uint32_t vmid, uint64_t address, size_t line_size) {
+              ++resolver_calls;
+              EXPECT_EQ(gpu_id, 11u);
+              EXPECT_EQ(vmid, kVmid);
+              const bool first = address == kFirstAddress;
+              if (resolver_calls == 1) {
+                std::array<uint8_t, L2Cache::LINE_SIZE> replacement{};
+                replacement.fill(0x7c);
+                if (first)
+                  L2CacheTestAccess::replace_prepared_dirty_line_bytes(second_l2, kSecondAddress,
+                                                                       replacement, kVmid);
+                else
+                  L2CacheTestAccess::replace_prepared_dirty_line_bytes(first_l2, kFirstAddress,
+                                                                       replacement, kVmid);
+              }
+              const size_t backing_offset = first ? 0 : L2Cache::LINE_SIZE;
+              return PreparedCanonicalWritebackTestAccess::make(
+                  address, line_size, kVmid, first ? 101 : 102, first ? 23 : 24,
+                  rocjitsu::FabricBacking(
+                      owner, 1, PreparedBackingOwner::kBaseOffset + backing_offset, line_size),
+                  std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
+                  std::span<std::byte>(owner->bytes_).subspan(backing_offset, line_size));
+            });
+      },
+      util::Exception);
+  EXPECT_EQ(resolver_calls, 2u);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[kDirtyOffset], std::byte{0});
+  EXPECT_EQ(owner->bytes_[L2Cache::LINE_SIZE + kDirtyOffset], std::byte{0});
+  EXPECT_EQ(coherence->current_epoch(), data_epoch);
+  EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(first_l2, kFirstAddress, kVmid, kDirtyOffset));
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(second_l2, kSecondAddress, kVmid, kDirtyOffset));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedVmRebindDuringResolverRevokesTwoRunBatch) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x3000);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x3000);
+  const auto old_handle = gpu_vm.register_translated(kVmid, translator, physical);
+  ASSERT_TRUE(old_handle);
+  const auto old_access = gpu_vm.snapshot_vmid(kVmid);
+  ASSERT_TRUE(old_access);
+
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array<std::pair<uint32_t, uint32_t>, 2> dirty_ranges{{{4, 4}, {112, 4}}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid,
+                                               old_access->cache_identity(), 23, dirty_ranges);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const uint64_t data_epoch = coherence->current_epoch();
+  const uint64_t instruction_epoch = coherence->current_instruction_epoch();
+  size_t resolver_calls = 0;
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+            domains, DeviceCacheOperation::WritebackInvalidate,
+            [&](uint32_t, uint32_t, uint64_t address, size_t line_size) {
+              ++resolver_calls;
+              EXPECT_EQ(address, kAddress);
+              EXPECT_TRUE(gpu_vm.unregister_address_space(old_handle));
+              const auto new_handle = gpu_vm.register_translated(kVmid, translator, physical);
+              EXPECT_TRUE(new_handle);
+              const auto new_access = gpu_vm.snapshot_vmid(kVmid);
+              EXPECT_TRUE(new_access);
+              if (new_access) {
+                EXPECT_NE(new_access->cache_identity(), old_access->cache_identity());
+              }
+              return PreparedCanonicalWritebackTestAccess::make(
+                  kAddress, line_size, kVmid, old_access->cache_identity(), 23,
+                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, line_size),
+                  old_access->retain_effect_gate(), [] {},
+                  std::span<std::byte>(owner->bytes_).first(line_size));
+            });
+      },
+      util::Exception);
+  EXPECT_EQ(resolver_calls, 1u);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[4], std::byte{0});
+  EXPECT_EQ(owner->bytes_[112], std::byte{0});
+  EXPECT_EQ(coherence->current_epoch(), data_epoch);
+  EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 4));
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 112));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedRejectsEpochChangeDuringResolver) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kIdentity = 101;
+  constexpr uint64_t kGeneration = 23;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array dirty_ranges{std::pair<uint32_t, uint32_t>{8, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, kIdentity, kGeneration,
+                                               dirty_ranges);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{coherence, 11}};
+  const uint64_t data_epoch = coherence->current_epoch();
+  const uint64_t instruction_epoch = coherence->current_instruction_epoch();
+  size_t resolver_calls = 0;
+  EXPECT_THROW(
+      {
+        [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+            domains, DeviceCacheOperation::WritebackInvalidate,
+            [&](uint32_t, uint32_t, uint64_t, size_t) {
+              ++resolver_calls;
+              {
+                [[maybe_unused]] auto invalidate =
+                    coherence->acquire_cache_maintenance(DeviceCacheOperation::Invalidate);
+              }
+              EXPECT_EQ(coherence->current_epoch(), data_epoch + 1);
+              EXPECT_TRUE(L2CacheTestAccess::dirty_byte_without_epoch_reconciliation(l2, kAddress,
+                                                                                     kVmid, 8));
+              return PreparedCanonicalWritebackTestAccess::make(
+                  kAddress, dirty.size(), kVmid, kIdentity, kGeneration,
+                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset,
+                                          dirty.size()));
+            });
+      },
+      util::Exception);
+  EXPECT_EQ(resolver_calls, 1u);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_EQ(owner->bytes_[8], std::byte{0});
+  EXPECT_EQ(coherence->current_epoch(), data_epoch + 1);
+  EXPECT_EQ(coherence->current_instruction_epoch(), instruction_epoch + 1);
+  // A normal L2 access would reconcile the new epoch and discard this tag.
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte_without_epoch_reconciliation(l2, kAddress, kVmid, 8));
+}
+
+TEST(DeviceCacheCoherenceTest, GroupPreparedPermitOutlivesAllDomainLeases) {
+  using rocjitsu::amdgpu::DeviceCacheCoherence;
+  using rocjitsu::amdgpu::DeviceCacheDomain;
+  using rocjitsu::amdgpu::DeviceCacheOperation;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto first = std::make_shared<DeviceCacheCoherence>();
+  auto second = std::make_shared<DeviceCacheCoherence>();
+  L2Cache first_l2("first_l2", first);
+  L2Cache second_l2("second_l2", second);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array dirty_ranges{std::pair<uint32_t, uint32_t>{8, 4}};
+  L2CacheTestAccess::store_prepared_dirty_line(first_l2, kAddress, dirty, kVmid, 101, 23,
+                                               dirty_ranges);
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const std::array domains{DeviceCacheDomain{first, 11}, DeviceCacheDomain{second, 12}};
+  size_t permit_releases = 0;
+  bool cache_locks_released_on_permit = false;
+  auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+      domains, DeviceCacheOperation::WritebackInvalidate,
+      [&](uint32_t, uint32_t, uint64_t, size_t) {
+        return PreparedCanonicalWritebackTestAccess::make(
+            kAddress, dirty.size(), kVmid, 101, 23,
+            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()),
+            std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [&] {
+              ++permit_releases;
+              cache_locks_released_on_permit =
+                  L2CacheTestAccess::cache_access_available(first_l2) &&
+                  L2CacheTestAccess::cache_access_available(second_l2);
+            });
+      });
+  ASSERT_EQ(leases.size(), 2u);
+  EXPECT_EQ(permit_releases, 0u);
+  leases.pop_back();
+  EXPECT_EQ(permit_releases, 0u);
+  leases.clear();
+  EXPECT_EQ(permit_releases, 1u);
+  EXPECT_TRUE(cache_locks_released_on_permit);
 }
 
 TEST(DeviceCacheCoherenceTest, DomainsAreIsolated) {
@@ -1059,6 +4088,9 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry
   EXPECT_FALSE(protected_operation_ran);
   EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_dirty(memory_side_cache,
                                                                          kGpuAddress, kVmid));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::may_have_dirty_lines(memory_side_cache));
+  EXPECT_EQ(rocjitsu::amdgpu::MemorySideCacheTestAccess::scan_counts(memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{1, 0}));
 
   ASSERT_EQ(mprotect(mapping.data(), GpuMemory::PAGE_SIZE, PROT_READ | PROT_WRITE), 0);
   {
@@ -1068,6 +4100,16 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideWritebackRetainsDirtyLineForRetry
   EXPECT_FALSE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_dirty(memory_side_cache,
                                                                           kGpuAddress, kVmid));
   EXPECT_TRUE(std::ranges::equal(dirty_line, std::span(mapping.data(), dirty_line.size())));
+  EXPECT_FALSE(
+      rocjitsu::amdgpu::MemorySideCacheTestAccess::may_have_dirty_lines(memory_side_cache));
+  EXPECT_EQ(rocjitsu::amdgpu::MemorySideCacheTestAccess::scan_counts(memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{2, 0}));
+  {
+    [[maybe_unused]] auto maintenance = coherence->acquire_cache_maintenance(
+        rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate);
+  }
+  EXPECT_EQ(rocjitsu::amdgpu::MemorySideCacheTestAccess::scan_counts(memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{2, 1}));
   EXPECT_TRUE(legacy_vm.unregister_vmid(kVmid));
 }
 
@@ -1088,6 +4130,7 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideEvictionRestoresDirtyVictimForRet
   HbmController hbm("hbm", &memory, &gpu_vm);
   auto coherence = std::make_shared<rocjitsu::amdgpu::DeviceCacheCoherence>();
   MemorySideCache memory_side_cache("memory_side_cache", coherence, &memory);
+  memory_side_cache.set_gpu_vm(&gpu_vm);
   simdojo::Link link(/*id=*/0, memory_side_cache.req_port(), hbm.cpl_port(), /*latency=*/0);
   link.set_exec_mode(simdojo::ExecMode::FUNCTIONAL);
   memory_side_cache.req_port()->set_link(&link);
@@ -1114,6 +4157,7 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideEvictionRestoresDirtyVictimForRet
   EXPECT_EQ(physical->load<uint32_t>(kAddress), kInitial);
   EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::line_is_dirty(memory_side_cache,
                                                                          kAddress, kFirstVmid));
+  EXPECT_TRUE(rocjitsu::amdgpu::MemorySideCacheTestAccess::may_have_dirty_lines(memory_side_cache));
 
   const uint32_t reads_before_recovery = physical->read_calls;
   uint32_t recovered = 0;
@@ -1126,6 +4170,8 @@ TEST(DeviceCacheCoherenceTest, FailedMemorySideEvictionRestoresDirtyVictimForRet
   physical->write_outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete;
   EXPECT_EQ(memory_side_cache.flush_all(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
   EXPECT_EQ(physical->load<uint32_t>(kAddress), kDirty);
+  EXPECT_EQ(rocjitsu::amdgpu::MemorySideCacheTestAccess::scan_counts(memory_side_cache),
+            (std::pair<uint64_t, uint64_t>{1, 0}));
 }
 
 class FunctionalMemoryPort : public simdojo::Component {
@@ -4046,6 +7092,1197 @@ TEST(L2CacheTest, InvalidateRangePreservesDirtyBytesOutsidePartialWrite) {
   EXPECT_EQ(actual, expected);
 }
 
+TEST(L2CacheTest, PostExternalWriteDropsDirtyLineWithoutPublishingOldBytes) {
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kExternalOffset = 32;
+  constexpr uint32_t kExternalValue = 0xaabbccdd;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x2000);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  ASSERT_TRUE(gpu_vm.register_translated(kVmid, translator, physical));
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&gpu_vm);
+
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  ASSERT_EQ(l2.writeback_line(kAddress, dirty.data(), Mtype::RW, kVmid),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  physical->store(kAddress + kExternalOffset, kExternalValue);
+  physical->write_outcome = rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+
+  l2.invalidate_range_after_external_write(kAddress + kExternalOffset, sizeof(kExternalValue),
+                                           kVmid);
+  EXPECT_EQ(physical->write_calls, 0u);
+  EXPECT_EQ(physical->load<uint32_t>(kAddress + kExternalOffset), kExternalValue);
+  physical->write_outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete;
+  ASSERT_EQ(l2.flush_all(), rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(physical->write_calls, 0u);
+}
+
+TEST(L2CacheTest, PreExternalWritePreservesDirtySiblingsAcrossL2AndMemorySideCache) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kExternalOffset = 32;
+  constexpr uint32_t kExternalValue = 0xaabbccdd;
+  LinkedCacheHierarchy hierarchy(0x2000);
+  std::array<uint8_t, L2Cache::LINE_SIZE> memory_side_dirty{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> l2_dirty{};
+  std::array<uint8_t, L2Cache::LINE_SIZE> observed{};
+  memory_side_dirty.fill(0x33);
+  l2_dirty.fill(0x5a);
+  MemorySideCacheTestAccess::store_dirty_line(hierarchy.memory_side_cache, kAddress,
+                                              memory_side_dirty, LinkedCacheHierarchy::kVmid);
+  ASSERT_EQ(hierarchy.l2.writeback_line(kAddress, l2_dirty.data(), 0, sizeof(uint32_t), Mtype::RW,
+                                        LinkedCacheHierarchy::kVmid),
+            VmAccessOutcome::Complete);
+  ASSERT_EQ(hierarchy.l2.writeback_line(kAddress, l2_dirty.data(), 64, sizeof(uint32_t), Mtype::RW,
+                                        LinkedCacheHierarchy::kVmid),
+            VmAccessOutcome::Complete);
+
+  // The L2's retained-binding publication goes directly to physical backing.
+  // First retire older MSC dirty state so it cannot overwrite newer L2 bytes.
+  ASSERT_EQ(hierarchy.memory_side_cache.flush_range(
+                kAddress + kExternalOffset, sizeof(kExternalValue), LinkedCacheHierarchy::kVmid),
+            VmAccessOutcome::Complete);
+  ASSERT_EQ(hierarchy.l2.flush_range_before_external_write(
+                kAddress + kExternalOffset, sizeof(kExternalValue), LinkedCacheHierarchy::kVmid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(hierarchy.physical->write_calls, 3u);
+  hierarchy.physical->store(kAddress + kExternalOffset, kExternalValue);
+  hierarchy.l2.invalidate_range_after_external_write(
+      kAddress + kExternalOffset, sizeof(kExternalValue), LinkedCacheHierarchy::kVmid);
+  hierarchy.memory_side_cache.invalidate_range_after_external_write(
+      kAddress + kExternalOffset, sizeof(kExternalValue), LinkedCacheHierarchy::kVmid);
+  ASSERT_EQ(hierarchy.l2.read(kAddress, observed.data(), observed.size(), Mtype::RW,
+                              LinkedCacheHierarchy::kVmid),
+            VmAccessOutcome::Complete);
+  std::array<uint8_t, L2Cache::LINE_SIZE> expected = memory_side_dirty;
+  std::memcpy(expected.data(), l2_dirty.data(), sizeof(uint32_t));
+  std::memcpy(expected.data() + 64, l2_dirty.data() + 64, sizeof(uint32_t));
+  std::memcpy(expected.data() + kExternalOffset, &kExternalValue, sizeof(kExternalValue));
+  EXPECT_EQ(observed, expected);
+  EXPECT_EQ(hierarchy.physical->write_calls, 3u);
+}
+
+TEST(L2CacheTest, ExternalWriteRangesSelectVmidAndResidentLinesOnly) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmidA = 73;
+  constexpr uint32_t kVmidB = 74;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kOtherAddress = kAddress + 2 * L2Cache::LINE_SIZE;
+  constexpr uint32_t kInitial = 0x11223344;
+  constexpr uint32_t kReplacement = 0xaabbccdd;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x2000);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  ASSERT_TRUE(gpu_vm.register_translated(kVmidA, translator, physical));
+  ASSERT_TRUE(gpu_vm.register_translated(kVmidB, translator, physical));
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&gpu_vm);
+  physical->store(kAddress, kInitial);
+  physical->store(kOtherAddress, kInitial);
+  uint32_t observed = 0;
+  for (const auto &[address, vmid] : {std::pair{kAddress, kVmidA}, std::pair{kAddress, kVmidB},
+                                      std::pair{kOtherAddress, kVmidA}}) {
+    ASSERT_EQ(
+        l2.read(address, reinterpret_cast<uint8_t *>(&observed), sizeof(observed), Mtype::RW, vmid),
+        VmAccessOutcome::Complete);
+    ASSERT_EQ(observed, kInitial);
+  }
+  const uint32_t reads_before = physical->read_calls;
+  ASSERT_EQ(l2.flush_range_before_external_write(kAddress, 0, kVmidA), VmAccessOutcome::Complete);
+  l2.invalidate_range_after_external_write(kAddress, 0, kVmidA);
+  ASSERT_EQ(l2.flush_range_before_external_write(kAddress, sizeof(kReplacement), kVmidA),
+            VmAccessOutcome::Complete);
+  physical->store(kAddress, kReplacement);
+  l2.invalidate_range_after_external_write(kAddress, sizeof(kReplacement), kVmidA);
+  ASSERT_EQ(l2.read(kAddress, reinterpret_cast<uint8_t *>(&observed), sizeof(observed), Mtype::RW,
+                    kVmidA),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kReplacement);
+  ASSERT_EQ(l2.read(kAddress, reinterpret_cast<uint8_t *>(&observed), sizeof(observed), Mtype::RW,
+                    kVmidB),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kInitial);
+  ASSERT_EQ(l2.read(kOtherAddress, reinterpret_cast<uint8_t *>(&observed), sizeof(observed),
+                    Mtype::RW, kVmidA),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kInitial);
+  EXPECT_EQ(physical->read_calls, reads_before + 1);
+
+  // This span covers millions of addresses but visits bounded cache storage.
+  ASSERT_EQ(l2.flush_range_before_external_write(0, std::numeric_limits<uint32_t>::max(), kVmidA),
+            VmAccessOutcome::Complete);
+  l2.invalidate_range_after_external_write(0, std::numeric_limits<uint32_t>::max(), kVmidA);
+  EXPECT_EQ(physical->write_calls, 0u);
+}
+
+TEST(L2CacheTest, ExternalWriteRangesClampAtLastAddressableLine) {
+  constexpr uint64_t kLastLine = std::numeric_limits<uint64_t>::max() - (L2Cache::LINE_SIZE - 1);
+  constexpr uint64_t kHighAddress = kLastLine + L2Cache::LINE_SIZE / 2;
+  GpuMemory memory("memory");
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  ASSERT_EQ(l2.writeback_line(kLastLine, dirty.data()),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(l2.flush_range_before_external_write(kHighAddress, L2Cache::LINE_SIZE, 0),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(memory.read32(kLastLine), 0x5a5a5a5au);
+  memory.write32(kHighAddress, 0xaabbccdd);
+  l2.invalidate_range_after_external_write(kHighAddress, L2Cache::LINE_SIZE, 0);
+  EXPECT_EQ(memory.read32(kHighAddress), 0xaabbccddu);
+  EXPECT_EQ(memory.read32(0), 0u);
+}
+
+TEST(L2CacheTest, FailedExternalPrewriteRetainsDirtyBytesForRetry) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x2000);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  ASSERT_TRUE(gpu_vm.register_translated(kVmid, translator, physical));
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&gpu_vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  ASSERT_EQ(l2.writeback_line(kAddress, dirty.data(), Mtype::RW, kVmid), VmAccessOutcome::Complete);
+  physical->write_outcome = VmAccessOutcome::Faulted;
+  EXPECT_EQ(l2.flush_range_before_external_write(kAddress + 32, 4, kVmid),
+            VmAccessOutcome::Faulted);
+  EXPECT_EQ(physical->load<uint32_t>(kAddress), 0u);
+  physical->write_outcome = VmAccessOutcome::Complete;
+  ASSERT_EQ(l2.flush_range_before_external_write(kAddress + 32, 4, kVmid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(physical->load<uint32_t>(kAddress), 0x5a5a5a5au);
+  EXPECT_EQ(physical->write_calls, 2u);
+}
+
+TEST(L2CacheTest, NonlocalAliasPrewriteRetainsDirtyBytesForCoordinatedRetry) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto translator = std::make_shared<DeferredSwitchAddressSpace>(0x2000);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  std::atomic<uint32_t> fault_count{0};
+  ASSERT_TRUE(gpu_vm.register_address_space(
+      kVmid, translator, physical,
+      [&](uint64_t, rocjitsu::amdgpu::VmAccessKind) { ++fault_count; }));
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&gpu_vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  ASSERT_EQ(l2.writeback_line(kAddress, dirty.data(), Mtype::RW, kVmid), VmAccessOutcome::Complete);
+
+  translator->route = rocjitsu::amdgpu::VmDataRoute::Deferred;
+  EXPECT_EQ(l2.flush_range_before_external_write(kAddress + 32, 4, kVmid),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(physical->write_calls, 0u);
+  EXPECT_EQ(fault_count, 0u);
+  translator->route = rocjitsu::amdgpu::VmDataRoute::Faulted;
+  EXPECT_EQ(l2.flush_range_before_external_write(kAddress + 32, 4, kVmid),
+            VmAccessOutcome::Faulted);
+  EXPECT_EQ(physical->write_calls, 0u);
+  EXPECT_EQ(fault_count, 0u);
+  const auto architectural_access = gpu_vm.snapshot_vmid(kVmid);
+  ASSERT_TRUE(architectural_access);
+  EXPECT_EQ(architectural_access->classify_data_route(kAddress + 32, 1,
+                                                      rocjitsu::amdgpu::VmAccessKind::Write),
+            rocjitsu::amdgpu::VmDataRoute::Faulted);
+  EXPECT_EQ(fault_count, 1u);
+  translator->route = rocjitsu::amdgpu::VmDataRoute::Local;
+  ASSERT_EQ(l2.flush_range_before_external_write(kAddress + 32, 4, kVmid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(physical->load<uint32_t>(kAddress), 0x5a5a5a5au);
+  EXPECT_EQ(physical->write_calls, 1u);
+  EXPECT_EQ(fault_count, 1u);
+}
+
+TEST(L2CacheTest, CompletionFlushSelectsExactVmidAndCacheIdentity) {
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kSelectedVmid = 73;
+  constexpr uint32_t kOtherVmid = 74;
+  constexpr uint64_t kSelectedDirty = 0x1000;
+  constexpr uint64_t kSelectedClean = 0x1100;
+  constexpr uint64_t kStaleIdentity = 0x1200;
+  constexpr uint64_t kOtherDirty = 0x1300;
+  constexpr uint64_t kOtherClean = 0x1400;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x3000);
+  auto selected_physical = std::make_shared<ConfigurablePhysicalMemory>(0x3000);
+  auto other_physical = std::make_shared<ConfigurablePhysicalMemory>(0x3000);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm vm;
+  ASSERT_TRUE(vm.register_translated(kSelectedVmid, translator, selected_physical));
+  ASSERT_TRUE(vm.register_translated(kOtherVmid, translator, other_physical));
+  const auto access = vm.snapshot_vmid(kSelectedVmid);
+  ASSERT_TRUE(access);
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> bytes{};
+  bytes.fill(0x5a);
+  const std::array<std::pair<uint32_t, uint32_t>, 1> dirty_range{{{8, 4}}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kSelectedDirty, bytes, kSelectedVmid,
+                                               access->cache_identity(), 0, dirty_range);
+  L2CacheTestAccess::store_prepared_clean_line(l2, kSelectedClean, bytes, kSelectedVmid,
+                                               access->cache_identity(), 0);
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kStaleIdentity, bytes, kSelectedVmid,
+                                               access->cache_identity() + 1, 0, dirty_range);
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kOtherDirty, bytes, kOtherVmid,
+                                               access->cache_identity(), 0, dirty_range);
+  L2CacheTestAccess::store_prepared_clean_line(l2, kOtherClean, bytes, kOtherVmid,
+                                               access->cache_identity(), 0);
+
+  EXPECT_EQ(l2.flush_for_completion(*access), VmAccessOutcome::Complete);
+  EXPECT_EQ(selected_physical->load<uint32_t>(kSelectedDirty + 8), 0x5a5a5a5au);
+  EXPECT_EQ(selected_physical->load<uint32_t>(kStaleIdentity + 8), 0u);
+  EXPECT_EQ(other_physical->write_calls, 0u);
+  EXPECT_FALSE(L2CacheTestAccess::resident(l2, kSelectedDirty, kSelectedVmid));
+  EXPECT_FALSE(L2CacheTestAccess::resident(l2, kSelectedClean, kSelectedVmid));
+  EXPECT_TRUE(L2CacheTestAccess::resident(l2, kStaleIdentity, kSelectedVmid));
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kStaleIdentity, kSelectedVmid, 8));
+  EXPECT_TRUE(L2CacheTestAccess::resident(l2, kOtherDirty, kOtherVmid));
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kOtherDirty, kOtherVmid, 8));
+  EXPECT_TRUE(L2CacheTestAccess::resident(l2, kOtherClean, kOtherVmid));
+}
+
+TEST(L2CacheTest, CompletionRetiresOnlyTheSelectedRootsCuLines) {
+  using rocjitsu::amdgpu::CompletionTracker;
+  using rocjitsu::amdgpu::ComputeQueueRecord;
+  using rocjitsu::amdgpu::ComputeUnitCore;
+  using rocjitsu::amdgpu::DispatchEntry;
+  using rocjitsu::amdgpu::DispatchPacketKind;
+  using rocjitsu::amdgpu::GpuVmAccess;
+  using rocjitsu::amdgpu::InstructionCache;
+  using rocjitsu::amdgpu::L1ScalarCacheTestAccess;
+  using rocjitsu::amdgpu::L1VectorCacheTestAccess;
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+
+  constexpr uint32_t kSelectedVmid = 73;
+  constexpr uint32_t kOtherVmid = 74;
+  constexpr uint64_t kSelectedData = 0x1000;
+  constexpr uint64_t kSelectedSecondGeneration = 0x1080;
+  constexpr uint64_t kOldRootData = 0x1100;
+  constexpr uint64_t kOtherData = 0x1200;
+  constexpr uint64_t kOldCode = 0x600;
+  constexpr uint64_t kSelectedCode = 0x640;
+  constexpr uint64_t kOtherCode = 0x680;
+
+  auto translator = std::make_shared<IdentityAddressSpace>(0x3000);
+  auto old_physical = std::make_shared<ConfigurablePhysicalMemory>(0x3000);
+  auto selected_physical = std::make_shared<ConfigurablePhysicalMemory>(0x3000);
+  auto other_physical = std::make_shared<ConfigurablePhysicalMemory>(0x3000);
+  rocjitsu::amdgpu::GpuVm vm;
+  const rocjitsu::amdgpu::AddressSpaceHandle selected_handle =
+      vm.register_translated(kSelectedVmid, translator, old_physical);
+  ASSERT_TRUE(selected_handle);
+  const std::optional<GpuVmAccess> old_ordinary = vm.snapshot(selected_handle);
+  const std::optional<GpuVmAccess> old_access = vm.snapshot_pinned(selected_handle);
+  ASSERT_TRUE(old_ordinary);
+  ASSERT_TRUE(old_access);
+  ASSERT_TRUE(vm.replace_translated(selected_handle, translator, selected_physical));
+  const std::optional<GpuVmAccess> selected_ordinary = vm.snapshot(selected_handle);
+  const std::optional<GpuVmAccess> selected_access = vm.snapshot_pinned(selected_handle);
+  ASSERT_TRUE(selected_ordinary);
+  ASSERT_TRUE(selected_access);
+  const rocjitsu::amdgpu::AddressSpaceHandle other_handle =
+      vm.register_translated(kOtherVmid, translator, other_physical);
+  ASSERT_TRUE(other_handle);
+  const std::optional<GpuVmAccess> other_access = vm.snapshot(other_handle);
+  ASSERT_TRUE(other_access);
+  ASSERT_NE(old_ordinary->cache_identity(), selected_ordinary->cache_identity());
+  ASSERT_NE(old_access->cache_namespace(), selected_access->cache_namespace());
+
+  GpuMemory memory("completion_l1_memory");
+  L2Cache l2("completion_l1_l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&vm);
+  ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 104;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  std::unique_ptr<ComputeUnitCore> cu =
+      ComputeUnitCore::create("completion_l1_cu", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  cu->set_gpu_vm(&vm);
+
+  for (const uint64_t address : {kSelectedData, kSelectedSecondGeneration}) {
+    const uint64_t generation = address == kSelectedData ? 1 : 2;
+    L1ScalarCacheTestAccess::store_clean_line(cu->l1_scalar(), address, kSelectedVmid, generation,
+                                              selected_ordinary->cache_identity());
+    L1VectorCacheTestAccess::store_clean_line(cu->l1_vector(), address, kSelectedVmid, generation,
+                                              selected_ordinary->cache_identity());
+  }
+  L1ScalarCacheTestAccess::store_clean_line(cu->l1_scalar(), kOldRootData, kSelectedVmid, 1,
+                                            old_ordinary->cache_identity());
+  L1VectorCacheTestAccess::store_clean_line(cu->l1_vector(), kOldRootData, kSelectedVmid, 1,
+                                            old_ordinary->cache_identity());
+  L1ScalarCacheTestAccess::store_clean_line(cu->l1_scalar(), kOtherData, kOtherVmid, 1,
+                                            other_access->cache_identity());
+  L1VectorCacheTestAccess::store_clean_line(cu->l1_vector(), kOtherData, kOtherVmid, 1,
+                                            other_access->cache_identity());
+  std::array<uint8_t, L2Cache::LINE_SIZE> line{};
+  L2CacheTestAccess::store_prepared_clean_line(l2, kSelectedData, line, kSelectedVmid,
+                                               selected_ordinary->cache_identity(), 1);
+  L2CacheTestAccess::store_prepared_clean_line(l2, kOtherData, line, kOtherVmid,
+                                               other_access->cache_identity(), 1);
+
+  old_physical->store(kOldCode, uint32_t{0x11111111});
+  selected_physical->store(kSelectedCode, uint32_t{0x22222222});
+  other_physical->store(kOtherCode, uint32_t{0x33333333});
+  const auto fetch_word = [&](const GpuVmAccess &access, uint64_t address) {
+    std::array<uint8_t, InstructionCache::kFetchBytes> bytes{};
+    EXPECT_EQ(cu->instruction_cache().fetch(access, address, bytes.data()),
+              VmAccessOutcome::Complete);
+    uint32_t word = 0;
+    std::memcpy(&word, bytes.data(), sizeof(word));
+    return word;
+  };
+  ASSERT_EQ(fetch_word(*old_access, kOldCode), 0x11111111u);
+  ASSERT_EQ(fetch_word(*selected_access, kSelectedCode), 0x22222222u);
+  ASSERT_EQ(fetch_word(*other_access, kOtherCode), 0x33333333u);
+  old_physical->store(kOldCode, uint32_t{0xaaaaaaaa});
+  selected_physical->store(kSelectedCode, uint32_t{0xbbbbbbbb});
+  other_physical->store(kOtherCode, uint32_t{0xcccccccc});
+  const uint64_t instruction_epoch = cu->instruction_cache().epoch();
+
+  std::vector<ComputeUnitCore *> cus{cu.get()};
+  std::vector<L2Cache *> l2_caches{&l2};
+  CompletionTracker tracker(vm, cus, l2_caches);
+  ComputeQueueRecord queue{};
+  queue.fanout_replica = true;
+  DispatchEntry entry{};
+  entry.dispatch_id = 1;
+  entry.address_space = selected_handle;
+  entry.execution_access = std::make_shared<GpuVmAccess>(*selected_access);
+  entry.execution_translation_epoch = selected_access->info().translation_epoch;
+  entry.execution_cache_write_sequence = selected_access->cache_write_sequence();
+  entry.process_id = kSelectedVmid;
+  entry.total_wgs = entry.completed_wgs = 1;
+  entry.kind = DispatchPacketKind::Kernel;
+  queue.push_entry(std::move(entry));
+  std::vector<ComputeQueueRecord> queues;
+  queues.push_back(std::move(queue));
+
+  const rocjitsu::amdgpu::CompletionDrainResult result = tracker.drain_completions(queues);
+  ASSERT_FALSE(result.retry_pending);
+  ASSERT_FALSE(result.terminal_fault);
+  EXPECT_TRUE(queues.front().entries.empty());
+  for (const uint64_t address : {kSelectedData, kSelectedSecondGeneration}) {
+    EXPECT_FALSE(L1ScalarCacheTestAccess::resident(cu->l1_scalar(), address, kSelectedVmid));
+    EXPECT_FALSE(L1VectorCacheTestAccess::resident(cu->l1_vector(), address, kSelectedVmid));
+  }
+  EXPECT_TRUE(L1ScalarCacheTestAccess::resident(cu->l1_scalar(), kOldRootData, kSelectedVmid));
+  EXPECT_TRUE(L1VectorCacheTestAccess::resident(cu->l1_vector(), kOldRootData, kSelectedVmid));
+  EXPECT_TRUE(L1ScalarCacheTestAccess::resident(cu->l1_scalar(), kOtherData, kOtherVmid));
+  EXPECT_TRUE(L1VectorCacheTestAccess::resident(cu->l1_vector(), kOtherData, kOtherVmid));
+  EXPECT_FALSE(L2CacheTestAccess::resident(l2, kSelectedData, kSelectedVmid));
+  EXPECT_TRUE(L2CacheTestAccess::resident(l2, kOtherData, kOtherVmid));
+  EXPECT_EQ(cu->instruction_cache().epoch(), instruction_epoch + 1);
+  EXPECT_EQ(fetch_word(*selected_access, kSelectedCode), 0xbbbbbbbbu);
+  EXPECT_EQ(fetch_word(*old_access, kOldCode), 0x11111111u);
+  EXPECT_EQ(fetch_word(*other_access, kOtherCode), 0x33333333u);
+}
+
+TEST(L2CacheTest, CompletionFlushFaultsLinkedPathAndRetriesDirtyWrite) {
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x2000);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm vm;
+  ASSERT_TRUE(vm.register_translated(kVmid, translator, physical));
+  const auto access = vm.snapshot_vmid(kVmid);
+  ASSERT_TRUE(access);
+  L2Cache l2("l2");
+  l2.set_gpu_vm(&vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> bytes{};
+  bytes.fill(0xa5);
+  const std::array<std::pair<uint32_t, uint32_t>, 1> dirty_range{{{16, 4}}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, bytes, kVmid, access->cache_identity(),
+                                               0, dirty_range);
+
+  EXPECT_EQ(l2.flush_for_completion(*access), VmAccessOutcome::Malformed);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 16));
+  EXPECT_EQ(physical->write_calls, 0u);
+
+  l2.set_backing_memory(&memory);
+  translator->direct_backing_write_allowed = false;
+  EXPECT_EQ(l2.flush_for_completion(*access), VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 16));
+  EXPECT_EQ(physical->write_calls, 0u);
+
+  translator->direct_backing_write_allowed = true;
+  physical->write_outcome = VmAccessOutcome::Unavailable;
+  EXPECT_EQ(l2.flush_for_completion(*access), VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 16));
+  EXPECT_TRUE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
+  EXPECT_EQ(physical->load<uint32_t>(kAddress + 16), 0u);
+
+  physical->write_outcome = VmAccessOutcome::Complete;
+  EXPECT_EQ(l2.flush_for_completion(*access), VmAccessOutcome::Complete);
+  EXPECT_FALSE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
+  EXPECT_EQ(physical->load<uint32_t>(kAddress + 16), 0xa5a5a5a5u);
+}
+
+TEST(L2CacheTest, CompletionFlushRetiresOnlyCommittedPrefixAcrossTranslations) {
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto translator =
+      std::make_shared<IdentityAddressSpace>(0x2000, Mtype::RW, 0, /*translation_span=*/64);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm vm;
+  ASSERT_TRUE(vm.register_translated(kVmid, translator, physical));
+  const auto access = vm.snapshot_vmid(kVmid);
+  ASSERT_TRUE(access);
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> bytes{};
+  bytes.fill(0x6b);
+  const std::array<std::pair<uint32_t, uint32_t>, 1> dirty_range{{{48, 32}}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, bytes, kVmid, access->cache_identity(),
+                                               0, dirty_range);
+  physical->fail_on_write_call = 2;
+
+  EXPECT_EQ(l2.flush_for_completion(*access), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(physical->write_calls, 2u);
+  EXPECT_EQ(physical->load<uint32_t>(kAddress + 48), 0x6b6b6b6bu);
+  EXPECT_EQ(physical->load<uint32_t>(kAddress + 64), 0u);
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 48));
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 63));
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 64));
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 79));
+  EXPECT_TRUE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
+
+  physical->fail_on_write_call = 0;
+  EXPECT_EQ(l2.flush_for_completion(*access), VmAccessOutcome::Complete);
+  EXPECT_EQ(physical->write_calls, 3u);
+  EXPECT_EQ(physical->load<uint32_t>(kAddress + 64), 0x6b6b6b6bu);
+  EXPECT_FALSE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
+}
+
+TEST(L2CacheTest, CompletionFlushRetainsDirtyBytesOnStaleGrantAndRevocation) {
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x2000, Mtype::RW,
+                                                           /*admission_generation=*/24);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm vm;
+  const auto handle = vm.register_translated(kVmid, translator, physical);
+  ASSERT_TRUE(handle);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> bytes{};
+  bytes.fill(0x6b);
+  const std::array<std::pair<uint32_t, uint32_t>, 1> dirty_range{{{8, 4}}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, bytes, kVmid, access->cache_identity(),
+                                               23, dirty_range);
+
+  EXPECT_EQ(l2.flush_for_completion(*access), VmAccessOutcome::Faulted);
+  EXPECT_EQ(physical->write_calls, 0u);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+  ASSERT_TRUE(vm.unregister_address_space(handle));
+  EXPECT_EQ(l2.flush_for_completion(*access), VmAccessOutcome::Revoked);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+}
+
+TEST(L2CacheTest, PreparedCanonicalPrewritePublishesOnlyCommittedDirtySiblings) {
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kIdentity = 101;
+  constexpr uint64_t kGeneration = 23;
+  L2Cache l2("l2");
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array<std::pair<uint32_t, uint32_t>, 2> dirty_ranges{{{4, 4}, {112, 4}}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, kIdentity, kGeneration,
+                                               dirty_ranges);
+
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  owner->fail_on_attempt = 2;
+  rocjitsu::FabricBacking backing(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size());
+  const auto prepared = PreparedCanonicalWritebackTestAccess::make(kAddress, dirty.size(), kVmid,
+                                                                   kIdentity, kGeneration, backing);
+  ASSERT_TRUE(prepared);
+
+  // The four-byte external write is elsewhere in this line. Both dirty runs
+  // are siblings and must be published before that effect can begin.
+  EXPECT_EQ(l2.flush_range_before_external_write(kAddress + 32, 4, kVmid, prepared),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(owner->write_attempts, 2u);
+  EXPECT_EQ(owner->bytes_[4], std::byte{0x5a});
+  EXPECT_EQ(owner->bytes_[112], std::byte{0});
+  EXPECT_FALSE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 4));
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 112));
+  EXPECT_TRUE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
+
+  owner->fail_on_attempt = 0;
+  ASSERT_EQ(l2.flush_range_before_external_write(kAddress + 32, 4, kVmid, prepared),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(owner->write_attempts, 3u);
+  EXPECT_EQ(owner->bytes_[112], std::byte{0x5a});
+  EXPECT_EQ(owner->bytes_[32], std::byte{0});
+  EXPECT_FALSE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
+}
+
+TEST(L2CacheTest, MovedFromPreparedCanonicalWritebackCannotAuthorizeEmptyRange) {
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWriteback;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  L2Cache l2("l2");
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  PreparedCanonicalWriteback prepared = PreparedCanonicalWritebackTestAccess::make(
+      kAddress, L2Cache::LINE_SIZE, kVmid, 101, 23,
+      rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, L2Cache::LINE_SIZE));
+  ASSERT_TRUE(prepared);
+  PreparedCanonicalWriteback retained = std::move(prepared);
+  EXPECT_EQ(prepared.outcome(), VmAccessOutcome::Unavailable);
+  EXPECT_FALSE(prepared);
+  EXPECT_EQ(l2.flush_range_before_external_write(kAddress, 4, kVmid, prepared),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(l2.flush_range_before_external_write(kAddress, 4, kVmid, retained),
+            VmAccessOutcome::Complete);
+}
+
+TEST(L2CacheTest, PreparedCanonicalPrewriteRefusedGateAndReusedVmidRetainDirtyBytes) {
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  using rocjitsu::amdgpu::VmTransferEffectGate;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kIdentity = 101;
+  constexpr uint64_t kGeneration = 23;
+  L2Cache l2("l2");
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  const std::array<std::pair<uint32_t, uint32_t>, 1> dirty_ranges{{{8, 4}}};
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, kIdentity, kGeneration,
+                                               dirty_ranges);
+
+  auto old_owner = std::make_shared<PreparedBackingOwner>();
+  auto old_gate = std::make_shared<VmTransferEffectGate>();
+  const auto old_prepared = PreparedCanonicalWritebackTestAccess::make(
+      kAddress, dirty.size(), kVmid, kIdentity, kGeneration,
+      rocjitsu::FabricBacking(old_owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()),
+      old_gate);
+  ASSERT_TRUE(old_prepared);
+  old_gate->revoke();
+  EXPECT_EQ(l2.flush_range_before_external_write(kAddress + 32, 4, kVmid, old_prepared),
+            VmAccessOutcome::Revoked);
+  EXPECT_EQ(old_owner->write_attempts, 0u);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+
+  auto new_owner = std::make_shared<PreparedBackingOwner>();
+  const auto new_prepared = PreparedCanonicalWritebackTestAccess::make(
+      kAddress, dirty.size(), kVmid, kIdentity + 1, kGeneration,
+      rocjitsu::FabricBacking(new_owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()));
+  ASSERT_TRUE(new_prepared);
+  EXPECT_EQ(l2.flush_range_before_external_write(kAddress + 32, 4, kVmid, new_prepared),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(new_owner->write_attempts, 0u);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 8));
+}
+
+TEST(MemorySideCacheTest, PreparedCanonicalPrewriteRequiresWholeLineAndRetries) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  using rocjitsu::amdgpu::PreparedBackingOwner;
+  using rocjitsu::amdgpu::PreparedCanonicalWritebackTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kIdentity = 101;
+  constexpr uint64_t kGeneration = 23;
+  MemorySideCache cache("msc");
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty{};
+  dirty.fill(0x6b);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(cache, kAddress, dirty, kVmid, kIdentity,
+                                                       kGeneration);
+
+  auto owner = std::make_shared<PreparedBackingOwner>();
+  const auto partial = PreparedCanonicalWritebackTestAccess::make(
+      kAddress, dirty.size() / 2, kVmid, kIdentity, kGeneration,
+      rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size() / 2));
+  ASSERT_TRUE(partial);
+  EXPECT_EQ(cache.flush_range(kAddress + 32, 4, kVmid, partial), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_TRUE(MemorySideCacheTestAccess::line_is_dirty(cache, kAddress, kVmid));
+
+  const auto complete = PreparedCanonicalWritebackTestAccess::make(
+      kAddress, dirty.size(), kVmid, kIdentity, kGeneration,
+      rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()));
+  ASSERT_TRUE(complete);
+  MemorySideCacheTestAccess::set_byte_valid(cache, kAddress, kVmid, 16, false);
+  EXPECT_EQ(cache.flush_range(kAddress + 32, 4, kVmid, complete), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(owner->write_attempts, 0u);
+  EXPECT_TRUE(MemorySideCacheTestAccess::line_is_dirty(cache, kAddress, kVmid));
+  MemorySideCacheTestAccess::set_byte_valid(cache, kAddress, kVmid, 16, true);
+  owner->fail_on_attempt = 1;
+  EXPECT_EQ(cache.flush_range(kAddress + 32, 4, kVmid, complete), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(owner->bytes_[32], std::byte{0});
+  EXPECT_TRUE(MemorySideCacheTestAccess::line_is_dirty(cache, kAddress, kVmid));
+
+  owner->fail_on_attempt = 0;
+  ASSERT_EQ(cache.flush_range(kAddress + 32, 4, kVmid, complete), VmAccessOutcome::Complete);
+  EXPECT_EQ(owner->bytes_[32], std::byte{0x6b});
+  EXPECT_FALSE(MemorySideCacheTestAccess::line_is_resident(cache, kAddress, kVmid));
+}
+
+TEST(L2CacheTest, ExternalPrewriteDropsRetiredVmidBindingWithoutTouchingReplacement) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kNewBackingValue = 0xaabbccdd;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x2000);
+  auto old_backing = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  auto new_backing = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  new_backing->store(kAddress, kNewBackingValue);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  const auto address_space = gpu_vm.register_translated(kVmid, translator, old_backing);
+  ASSERT_TRUE(address_space);
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&gpu_vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  ASSERT_EQ(l2.writeback_line(kAddress, dirty.data(), Mtype::RW, kVmid), VmAccessOutcome::Complete);
+  ASSERT_TRUE(gpu_vm.replace_translated(address_space, translator, new_backing));
+
+  ASSERT_EQ(l2.flush_range_before_external_write(kAddress, 4, kVmid), VmAccessOutcome::Complete);
+  EXPECT_EQ(old_backing->write_calls, 0u);
+  EXPECT_EQ(new_backing->write_calls, 0u);
+  EXPECT_EQ(new_backing->load<uint32_t>(kAddress), kNewBackingValue);
+  uint32_t observed = 0;
+  ASSERT_EQ(
+      l2.read(kAddress, reinterpret_cast<uint8_t *>(&observed), sizeof(observed), Mtype::RW, kVmid),
+      VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, kNewBackingValue);
+}
+
+TEST(L2CacheTest, ExternalPrewriteRetainsBindingAcrossConcurrentRebind) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kNewBackingValue = 0xaabbccdd;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x2000);
+  auto old_backing = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  auto new_backing = std::make_shared<ConfigurablePhysicalMemory>(0x2000);
+  new_backing->store(kAddress, kNewBackingValue);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm gpu_vm;
+  const auto address_space = gpu_vm.register_translated(kVmid, translator, old_backing);
+  ASSERT_TRUE(address_space);
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&gpu_vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  ASSERT_EQ(l2.writeback_line(kAddress, dirty.data(), Mtype::RW, kVmid), VmAccessOutcome::Complete);
+  ASSERT_EQ(l2.writeback_line(kAddress + L2Cache::LINE_SIZE, dirty.data(), Mtype::RW, kVmid),
+            VmAccessOutcome::Complete);
+
+  std::mutex mutex;
+  std::condition_variable condition;
+  bool write_entered = false;
+  bool release_write = false;
+  old_backing->before_write = [&] {
+    std::unique_lock lock(mutex);
+    write_entered = true;
+    condition.notify_all();
+    condition.wait(lock, [&] { return release_write; });
+  };
+  auto flush = std::async(std::launch::async, [&] {
+    return l2.flush_range_before_external_write(kAddress, 2 * L2Cache::LINE_SIZE, kVmid);
+  });
+  bool entered = false;
+  {
+    std::unique_lock lock(mutex);
+    entered = condition.wait_for(lock, std::chrono::seconds(2), [&] { return write_entered; });
+  }
+  std::promise<void> replacement_started;
+  std::future<void> replacement_running = replacement_started.get_future();
+  auto replacement = std::async(std::launch::async, [&] {
+    replacement_started.set_value();
+    return gpu_vm.replace_translated(address_space, translator, new_backing);
+  });
+  replacement_running.wait();
+  EXPECT_EQ(replacement.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  {
+    std::lock_guard lock(mutex);
+    release_write = true;
+  }
+  condition.notify_all();
+  EXPECT_TRUE(entered);
+  EXPECT_EQ(flush.get(), VmAccessOutcome::Complete);
+  ASSERT_TRUE(replacement.get());
+  old_backing->before_write = {};
+  EXPECT_EQ(new_backing->write_calls, 0u);
+  EXPECT_EQ(new_backing->load<uint32_t>(kAddress), kNewBackingValue);
+  ASSERT_EQ(l2.flush_range_before_external_write(kAddress, 2 * L2Cache::LINE_SIZE, kVmid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(new_backing->write_calls, 0u);
+}
+
+TEST(PeerCacheTest, DirectProbeAndFillRequireMatchingRawKeyAndValidBytes) {
+  using namespace rocjitsu::amdgpu;
+  constexpr uint32_t kVmid = 7;
+  constexpr uint64_t kGeneration = 19;
+  constexpr uint64_t kIdentity = 23;
+  constexpr uint64_t kAddress = 0x4004;
+
+  L2Cache l2("l2");
+  L1ScalarCache scalar(&l2);
+  L1VectorCache vector(&l2);
+  MemorySideCache memory_side("msc");
+
+  const auto exercise = [&](auto &cache) {
+    std::array<uint8_t, 2> source{0x31, 0x72};
+    std::array<uint8_t, 2> result{0, 0};
+    EXPECT_FALSE(cache.try_read_peer_cached(kAddress, result, kVmid, kGeneration, kIdentity));
+    EXPECT_FALSE(cache.try_fill_peer_cached(kAddress, std::span<const uint8_t>{}, kVmid,
+                                            kGeneration, kIdentity));
+    EXPECT_FALSE(cache.try_fill_peer_cached(kAddress, std::span<const uint8_t>(source), kVmid, 0,
+                                            kIdentity));
+    EXPECT_FALSE(cache.try_fill_peer_cached(0x407f, source, kVmid, kGeneration, kIdentity));
+    ASSERT_TRUE(cache.try_fill_peer_cached(kAddress, std::span<const uint8_t>(source).first(1),
+                                           kVmid, kGeneration, kIdentity));
+    EXPECT_FALSE(cache.try_read_peer_cached(kAddress, result, kVmid, kGeneration, kIdentity));
+    EXPECT_FALSE(cache.try_read_peer_cached(kAddress, std::span<uint8_t>(result).first(1), kVmid,
+                                            kGeneration + 1, kIdentity));
+    EXPECT_FALSE(cache.try_read_peer_cached(kAddress, std::span<uint8_t>(result).first(1), kVmid,
+                                            kGeneration, kIdentity + 1));
+    ASSERT_TRUE(cache.try_fill_peer_cached(kAddress + 1, std::span<const uint8_t>(source).last(1),
+                                           kVmid, kGeneration, kIdentity));
+    ASSERT_TRUE(cache.try_read_peer_cached(kAddress, result, kVmid, kGeneration, kIdentity));
+    EXPECT_EQ(result, source);
+  };
+
+  exercise(scalar);
+  exercise(vector);
+  exercise(l2);
+  exercise(memory_side);
+  EXPECT_EQ(l2.backing_read_transactions(), 0u);
+  EXPECT_EQ(l2.backing_write_transactions(), 0u);
+}
+
+TEST(PeerCacheTest, L2PeerProbesRecoverAfterMaintenanceWithoutOrdinaryAccess) {
+  using namespace rocjitsu::amdgpu;
+  constexpr uint32_t kVmid = 7;
+  constexpr uint64_t kGeneration = 19;
+  constexpr uint64_t kIdentity = 23;
+  constexpr uint64_t kAddress = 0x4004;
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  L2Cache l2("l2", coherence);
+  const std::array<uint8_t, 2> first{0x31, 0x72};
+  const std::array<uint8_t, 2> second{0x53, 0x94};
+  std::array<uint8_t, 2> observed{};
+
+  ASSERT_TRUE(l2.try_fill_peer_cached(kAddress, first, kVmid, kGeneration, kIdentity));
+  const uint64_t first_epoch = L2CacheTestAccess::recorded_epoch(l2);
+  { auto lease = coherence->acquire_cache_maintenance(DeviceCacheOperation::Invalidate); }
+  ASSERT_GT(coherence->current_epoch(), first_epoch);
+  EXPECT_EQ(L2CacheTestAccess::recorded_epoch(l2), first_epoch);
+  EXPECT_FALSE(l2.try_read_peer_cached(kAddress, observed, kVmid, kGeneration, kIdentity));
+  EXPECT_EQ(L2CacheTestAccess::recorded_epoch(l2), coherence->current_epoch());
+  ASSERT_TRUE(l2.try_fill_peer_cached(kAddress, first, kVmid, kGeneration, kIdentity));
+
+  { auto lease = coherence->acquire_cache_maintenance(DeviceCacheOperation::Invalidate); }
+  EXPECT_NE(L2CacheTestAccess::recorded_epoch(l2), coherence->current_epoch());
+  ASSERT_TRUE(l2.try_fill_peer_cached(kAddress, second, kVmid, kGeneration, kIdentity));
+  ASSERT_TRUE(l2.try_read_peer_cached(kAddress, observed, kVmid, kGeneration, kIdentity));
+  EXPECT_EQ(observed, second);
+  EXPECT_EQ(l2.backing_read_transactions(), 0u);
+}
+
+TEST(ControlledCacheBackingTest, DirectL2AndMemorySideSinksRetainDirtyBytesUntilRetirement) {
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint32_t kOffset = 16;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x3000);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x3000);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm vm;
+  const auto handle = vm.register_translated(kVmid, translator, physical);
+  ASSERT_TRUE(handle);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  ASSERT_TRUE(vm.protect_controlled_cache_backing(handle, kAddress, L2Cache::LINE_SIZE));
+
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&vm);
+  l2.set_legacy_maintenance_memory(&memory);
+  l2.set_legacy_maintenance_vm(&vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0xa5);
+  EXPECT_EQ(l2.write(kAddress + kOffset, dirty.data(), 4, Mtype::RW, kVmid),
+            VmAccessOutcome::Unavailable);
+  EXPECT_FALSE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
+  ASSERT_EQ(l2.writeback_line(kAddress, dirty.data(), kOffset, 4, Mtype::RW, kVmid),
+            VmAccessOutcome::Complete);
+  const uint64_t transactions = l2.backing_write_transactions();
+  EXPECT_EQ(l2.flush_line(kAddress, kVmid), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(l2.invalidate_range(kAddress + kOffset, 4, kVmid), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(l2.flush_range_before_external_write(kAddress + kOffset, 4, kVmid),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(l2.flush_all(), VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, kOffset));
+  EXPECT_EQ(l2.backing_write_transactions(), transactions);
+  EXPECT_EQ(physical->write_calls, 0u);
+
+  MemorySideCache memory_side("msc");
+  memory_side.set_gpu_vm(&vm);
+  memory_side.set_legacy_maintenance_vm(&vm);
+  memory_side.set_legacy_maintenance_memory(&memory);
+  EXPECT_EQ(memory_side.write(kAddress + kOffset, dirty.data(), 4, kVmid),
+            VmAccessOutcome::Unavailable);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(memory_side, kAddress, dirty, kVmid,
+                                                       access->cache_identity(), 0);
+  EXPECT_EQ(memory_side.flush_range(kAddress + kOffset, 4, kVmid), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(memory_side.flush_all(), VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(MemorySideCacheTestAccess::line_is_dirty(memory_side, kAddress, kVmid));
+  EXPECT_EQ(physical->write_calls, 0u);
+
+  vm.retire_controlled_cache_backing(handle, kAddress, L2Cache::LINE_SIZE);
+  EXPECT_EQ(l2.flush_line(kAddress, kVmid), VmAccessOutcome::Complete);
+  EXPECT_EQ(memory_side.flush_all(), VmAccessOutcome::Complete);
+  EXPECT_EQ(physical->load<uint32_t>(kAddress + kOffset), 0xa5a5a5a5u);
+}
+
+TEST(ControlledCacheBackingTest, L2PreflightChecksDirtyBytesAtPartialRangeBoundary) {
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x3000);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x3000);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm vm;
+  const auto handle = vm.register_translated(kVmid, translator, physical);
+  ASSERT_TRUE(handle);
+  ASSERT_TRUE(vm.protect_controlled_cache_backing(handle, kAddress + 64, 4));
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  ASSERT_EQ(l2.writeback_line(kAddress, dirty.data(), 8, 4, Mtype::RW, kVmid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(l2.flush_line(kAddress, kVmid), VmAccessOutcome::Complete);
+  EXPECT_EQ(physical->load<uint32_t>(kAddress + 8), 0x5a5a5a5au);
+  ASSERT_EQ(l2.writeback_line(kAddress, dirty.data(), 64, 4, Mtype::RW, kVmid),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(l2.invalidate_range(kAddress + 64, 4, kVmid), VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 64));
+  EXPECT_EQ(physical->load<uint32_t>(kAddress + 64), 0u);
+}
+
+TEST(ControlledCacheBackingTest, UnregisterDropsOldVmidPolicyBeforeBindingReuse) {
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x3000);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x3000);
+  rocjitsu::amdgpu::GpuVm vm;
+  const auto old_handle = vm.register_translated(kVmid, translator, physical);
+  ASSERT_TRUE(old_handle);
+  ASSERT_TRUE(vm.protect_controlled_cache_backing(old_handle, kAddress, L2Cache::LINE_SIZE));
+  ASSERT_TRUE(vm.controlled_cache_backing_overlaps(kVmid, kAddress, 4));
+  ASSERT_TRUE(vm.unregister_address_space(old_handle));
+  EXPECT_FALSE(vm.controlled_cache_backing_overlaps(kVmid, kAddress, 4));
+  const auto new_handle = vm.register_translated(kVmid, translator, physical);
+  ASSERT_TRUE(new_handle);
+  EXPECT_NE(new_handle, old_handle);
+  EXPECT_FALSE(vm.controlled_cache_backing_overlaps(kVmid, kAddress, 4));
+}
+
+TEST(ControlledCacheBackingTest, ConcurrentReadersSurvivePolicyRetirementAndVmidReuse) {
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  auto translator = std::make_shared<IdentityAddressSpace>(0x3000);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(0x3000);
+  rocjitsu::amdgpu::GpuVm vm;
+  auto handle = vm.register_translated(kVmid, translator, physical);
+  ASSERT_TRUE(handle);
+  std::atomic<bool> done{false};
+  std::atomic<uint64_t> probes{0};
+  std::thread reader([&] {
+    while (!done.load(std::memory_order_acquire)) {
+      (void)vm.controlled_cache_backing_overlaps(kVmid, kAddress, 4);
+      probes.fetch_add(1, std::memory_order_relaxed);
+    }
+  });
+  while (probes.load(std::memory_order_acquire) == 0)
+    std::this_thread::yield();
+  for (int attempt = 0; attempt < 100; ++attempt) {
+    EXPECT_TRUE(vm.protect_controlled_cache_backing(handle, kAddress, 4));
+    vm.retire_controlled_cache_backing(handle, kAddress, 4);
+    EXPECT_TRUE(vm.unregister_address_space(handle));
+    handle = vm.register_translated(kVmid, translator, physical);
+    EXPECT_TRUE(handle);
+  }
+  done.store(true, std::memory_order_release);
+  reader.join();
+  EXPECT_GT(probes.load(std::memory_order_relaxed), 0u);
+  EXPECT_FALSE(vm.controlled_cache_backing_overlaps(kVmid, kAddress, 4));
+}
+
+TEST(ControlledCacheBackingTest, DirtyVictimEvictionRetainsLineAndReplacementOrder) {
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kGeneration = 19;
+  constexpr uint64_t kSetSpan = static_cast<uint64_t>(L2Cache::NUM_SETS) * L2Cache::LINE_SIZE;
+  constexpr uint64_t kCandidate = kAddress + L2Cache::ASSOCIATIVITY * kSetSpan;
+  auto translator = std::make_shared<IdentityAddressSpace>(kCandidate + L2Cache::LINE_SIZE,
+                                                           Mtype::RW, kGeneration);
+  auto physical = std::make_shared<ConfigurablePhysicalMemory>(kCandidate + L2Cache::LINE_SIZE);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm vm;
+  const auto handle = vm.register_translated(kVmid, translator, physical);
+  ASSERT_TRUE(handle);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  ASSERT_TRUE(vm.protect_controlled_cache_backing(handle, kAddress, L2Cache::LINE_SIZE));
+  L2Cache l2("l2");
+  l2.set_backing_memory(&memory);
+  l2.set_gpu_vm(&vm);
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty[16] = 0xa5;
+  ASSERT_EQ(l2.writeback_line(kAddress, dirty.data(), 16, 1, Mtype::RW, kVmid),
+            VmAccessOutcome::Complete);
+  const std::array<uint8_t, 1> clean{0x31};
+  for (uint32_t way = 1; way < L2Cache::ASSOCIATIVITY; ++way)
+    ASSERT_TRUE(l2.try_fill_peer_cached(kAddress + way * kSetSpan, clean, kVmid, kGeneration,
+                                        access->cache_identity()));
+  ASSERT_FALSE(
+      l2.try_fill_peer_cached(kCandidate, clean, kVmid, kGeneration, access->cache_identity()));
+  uint8_t observed = 0;
+  for (int retry = 0; retry < 2; ++retry) {
+    EXPECT_EQ(l2.read(kCandidate, &observed, 1, Mtype::RW, kVmid), VmAccessOutcome::Unavailable);
+    EXPECT_TRUE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
+    EXPECT_FALSE(L2CacheTestAccess::resident(l2, kCandidate, kVmid));
+    EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 16));
+    EXPECT_EQ(physical->write_calls, 0u);
+  }
+  vm.retire_controlled_cache_backing(handle, kAddress, L2Cache::LINE_SIZE);
+  EXPECT_EQ(l2.read(kCandidate, &observed, 1, Mtype::RW, kVmid), VmAccessOutcome::Complete);
+  EXPECT_EQ(physical->load<uint8_t>(kAddress + 16), 0xa5);
+}
+
+TEST(ControlledCacheBackingTest, MemorySideDirtyVictimRefusalKeepsReplacementOrder) {
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kGeneration = 19;
+  constexpr uint64_t kSetSpan =
+      static_cast<uint64_t>(MemorySideCache::NUM_SETS) * MemorySideCache::LINE_SIZE;
+  constexpr uint64_t kCandidate = kAddress + MemorySideCache::ASSOCIATIVITY * kSetSpan;
+  auto translator = std::make_shared<IdentityAddressSpace>(kCandidate + MemorySideCache::LINE_SIZE,
+                                                           Mtype::RW, kGeneration);
+  auto physical =
+      std::make_shared<ConfigurablePhysicalMemory>(kCandidate + MemorySideCache::LINE_SIZE);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm vm;
+  HbmController hbm("hbm", &memory, &vm);
+  MemorySideCache memory_side("msc");
+  simdojo::Link link(/*id=*/0, memory_side.req_port(), hbm.cpl_port(), /*latency=*/0);
+  link.set_exec_mode(simdojo::ExecMode::FUNCTIONAL);
+  memory_side.req_port()->set_link(&link);
+  hbm.cpl_port()->set_link(&link);
+  const auto handle = vm.register_translated(kVmid, translator, physical);
+  ASSERT_TRUE(handle);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  ASSERT_TRUE(vm.protect_controlled_cache_backing(handle, kAddress, MemorySideCache::LINE_SIZE));
+  memory_side.set_gpu_vm(&vm);
+  memory_side.set_legacy_maintenance_vm(&vm);
+  memory_side.set_legacy_maintenance_memory(&memory);
+  std::array<uint8_t, MemorySideCache::LINE_SIZE> dirty{};
+  dirty.fill(0x6b);
+  MemorySideCacheTestAccess::store_prepared_dirty_line(memory_side, kAddress, dirty, kVmid,
+                                                       access->cache_identity(), kGeneration);
+  const std::array<uint8_t, 1> clean{0x31};
+  for (uint32_t way = 1; way < MemorySideCache::ASSOCIATIVITY; ++way)
+    ASSERT_TRUE(memory_side.try_fill_peer_cached(kAddress + way * kSetSpan, clean, kVmid,
+                                                 kGeneration, access->cache_identity()));
+  ASSERT_FALSE(memory_side.try_fill_peer_cached(kCandidate, clean, kVmid, kGeneration,
+                                                access->cache_identity()));
+  uint8_t observed = 0;
+  for (int retry = 0; retry < 2; ++retry) {
+    EXPECT_EQ(memory_side.read(kCandidate, &observed, 1, kVmid), VmAccessOutcome::Unavailable);
+    EXPECT_TRUE(MemorySideCacheTestAccess::line_is_resident(memory_side, kAddress, kVmid));
+    EXPECT_FALSE(MemorySideCacheTestAccess::line_is_resident(memory_side, kCandidate, kVmid));
+    EXPECT_EQ(physical->write_calls, 0u);
+  }
+  EXPECT_TRUE(MemorySideCacheTestAccess::line_is_dirty(memory_side, kAddress, kVmid));
+  vm.retire_controlled_cache_backing(handle, kAddress, MemorySideCache::LINE_SIZE);
+  EXPECT_EQ(memory_side.read(kCandidate, &observed, 1, kVmid), VmAccessOutcome::Complete);
+  EXPECT_EQ(physical->load<uint8_t>(kAddress), 0x6b);
+}
+
+TEST(ControlledCacheBackingTest, StaleDirtyVictimsDoNotStallControlledBacking) {
+  using rocjitsu::amdgpu::L2CacheTestAccess;
+  using rocjitsu::amdgpu::MemorySideCacheTestAccess;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint32_t kVmid = 73;
+  constexpr uint64_t kAddress = 0x1000;
+  constexpr uint64_t kGeneration = 19;
+  constexpr uint64_t kL2SetSpan = static_cast<uint64_t>(L2Cache::NUM_SETS) * L2Cache::LINE_SIZE;
+  constexpr uint64_t kMscSetSpan =
+      static_cast<uint64_t>(MemorySideCache::NUM_SETS) * MemorySideCache::LINE_SIZE;
+  constexpr uint64_t kL2Candidate = kAddress + L2Cache::ASSOCIATIVITY * kL2SetSpan;
+  constexpr uint64_t kMscCandidate = kAddress + MemorySideCache::ASSOCIATIVITY * kMscSetSpan;
+  auto translator = std::make_shared<IdentityAddressSpace>(
+      kMscCandidate + MemorySideCache::LINE_SIZE, Mtype::RW, kGeneration);
+  auto physical =
+      std::make_shared<ConfigurablePhysicalMemory>(kMscCandidate + MemorySideCache::LINE_SIZE);
+  GpuMemory memory("memory");
+  rocjitsu::amdgpu::GpuVm vm;
+  const auto handle = vm.register_translated(kVmid, translator, physical);
+  ASSERT_TRUE(handle);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  ASSERT_TRUE(vm.protect_controlled_cache_backing(handle, kAddress, L2Cache::LINE_SIZE));
+
+  for (bool stale_identity : {true, false}) {
+    const uint64_t identity =
+        stale_identity ? access->cache_identity() + 1 : access->cache_identity();
+    const uint64_t generation = stale_identity ? kGeneration : kGeneration - 1;
+    L2Cache l2("l2");
+    l2.set_backing_memory(&memory);
+    l2.set_gpu_vm(&vm);
+    std::array<uint8_t, L2Cache::LINE_SIZE> l2_dirty{};
+    l2_dirty[16] = 0xa5;
+    constexpr std::array<std::pair<uint32_t, uint32_t>, 1> kDirtyRanges{{{16, 1}}};
+    L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, l2_dirty, kVmid, identity,
+                                                 generation, kDirtyRanges);
+    const std::array<uint8_t, 1> clean{0x31};
+    for (uint32_t way = 1; way < L2Cache::ASSOCIATIVITY; ++way)
+      ASSERT_TRUE(l2.try_fill_peer_cached(kAddress + way * kL2SetSpan, clean, kVmid, kGeneration,
+                                          access->cache_identity()));
+    uint8_t observed = 0;
+    EXPECT_EQ(l2.read(kL2Candidate, &observed, 1, Mtype::RW, kVmid), VmAccessOutcome::Complete);
+    EXPECT_FALSE(L2CacheTestAccess::resident(l2, kAddress, kVmid));
+
+    HbmController hbm("hbm", &memory, &vm);
+    MemorySideCache memory_side("msc");
+    simdojo::Link link(/*id=*/0, memory_side.req_port(), hbm.cpl_port(), /*latency=*/0);
+    link.set_exec_mode(simdojo::ExecMode::FUNCTIONAL);
+    memory_side.req_port()->set_link(&link);
+    hbm.cpl_port()->set_link(&link);
+    memory_side.set_gpu_vm(&vm);
+    std::array<uint8_t, MemorySideCache::LINE_SIZE> msc_dirty{};
+    msc_dirty.fill(0x6b);
+    MemorySideCacheTestAccess::store_prepared_dirty_line(memory_side, kAddress, msc_dirty, kVmid,
+                                                         identity, generation);
+    for (uint32_t way = 1; way < MemorySideCache::ASSOCIATIVITY; ++way)
+      ASSERT_TRUE(memory_side.try_fill_peer_cached(kAddress + way * kMscSetSpan, clean, kVmid,
+                                                   kGeneration, access->cache_identity()));
+    EXPECT_EQ(memory_side.read(kMscCandidate, &observed, 1, kVmid), VmAccessOutcome::Complete);
+    EXPECT_FALSE(MemorySideCacheTestAccess::line_is_resident(memory_side, kAddress, kVmid));
+    EXPECT_EQ(physical->write_calls, 0u);
+  }
+  EXPECT_TRUE(vm.controlled_cache_backing_overlaps(kVmid, kAddress, 1));
+}
+
+TEST(PeerCacheTest, DirtyVictimRefusalPreservesTagAndReplacementOrder) {
+  using namespace rocjitsu::amdgpu;
+  constexpr uint32_t kVmid = 7;
+  constexpr uint64_t kGeneration = 19;
+  constexpr uint64_t kIdentity = 23;
+  constexpr uint64_t kAddress = 0x4000;
+  constexpr uint64_t kL2SetSpan = static_cast<uint64_t>(L2Cache::NUM_SETS) * L2Cache::LINE_SIZE;
+  constexpr uint64_t kMemorySideSetSpan =
+      static_cast<uint64_t>(MemorySideCache::NUM_SETS) * MemorySideCache::LINE_SIZE;
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  dirty.fill(0x5a);
+  constexpr std::array<std::pair<uint32_t, uint32_t>, 1> kDirtyRanges{{{0, L2Cache::LINE_SIZE}}};
+  const std::array<uint8_t, 1> clean{0x33};
+  std::array<uint8_t, 1> result{};
+
+  L2Cache l2("l2");
+  L2CacheTestAccess::store_prepared_dirty_line(l2, kAddress, dirty, kVmid, kIdentity, kGeneration,
+                                               kDirtyRanges);
+  EXPECT_FALSE(l2.try_fill_peer_cached(kAddress, clean, kVmid, kGeneration, kIdentity));
+  for (uint32_t way = 1; way < L2Cache::ASSOCIATIVITY; ++way)
+    ASSERT_TRUE(
+        l2.try_fill_peer_cached(kAddress + way * kL2SetSpan, clean, kVmid, kGeneration, kIdentity));
+  const uint64_t l2_candidate = kAddress + L2Cache::ASSOCIATIVITY * kL2SetSpan;
+  EXPECT_FALSE(l2.try_fill_peer_cached(l2_candidate, clean, kVmid, kGeneration, kIdentity));
+  EXPECT_FALSE(l2.try_fill_peer_cached(l2_candidate, clean, kVmid, kGeneration, kIdentity));
+  EXPECT_FALSE(L2CacheTestAccess::resident(l2, l2_candidate, kVmid));
+  EXPECT_TRUE(L2CacheTestAccess::dirty_byte(l2, kAddress, kVmid, 0));
+  ASSERT_TRUE(l2.try_read_peer_cached(kAddress, result, kVmid, kGeneration, kIdentity));
+  EXPECT_EQ(result[0], dirty[0]);
+  EXPECT_EQ(l2.backing_write_transactions(), 0u);
+
+  MemorySideCache memory_side("msc");
+  MemorySideCacheTestAccess::store_prepared_dirty_line(memory_side, kAddress, dirty, kVmid,
+                                                       kIdentity, kGeneration);
+  EXPECT_FALSE(memory_side.try_fill_peer_cached(kAddress, clean, kVmid, kGeneration, kIdentity));
+  for (uint32_t way = 1; way < MemorySideCache::ASSOCIATIVITY; ++way)
+    ASSERT_TRUE(memory_side.try_fill_peer_cached(kAddress + way * kMemorySideSetSpan, clean, kVmid,
+                                                 kGeneration, kIdentity));
+  const uint64_t memory_side_candidate =
+      kAddress + MemorySideCache::ASSOCIATIVITY * kMemorySideSetSpan;
+  EXPECT_FALSE(memory_side.try_fill_peer_cached(memory_side_candidate, clean, kVmid, kGeneration,
+                                                kIdentity));
+  EXPECT_FALSE(memory_side.try_fill_peer_cached(memory_side_candidate, clean, kVmid, kGeneration,
+                                                kIdentity));
+  EXPECT_FALSE(
+      MemorySideCacheTestAccess::line_is_resident(memory_side, memory_side_candidate, kVmid));
+  EXPECT_TRUE(MemorySideCacheTestAccess::line_is_dirty(memory_side, kAddress, kVmid));
+  ASSERT_TRUE(memory_side.try_read_peer_cached(kAddress, result, kVmid, kGeneration, kIdentity));
+  EXPECT_EQ(result[0], dirty[0]);
+}
+
 TEST(L2CacheBenchmark, CrossL2SameAddress) {
   run_cross_l2_atomic_benchmark("cross_l2_same_address", true);
 }
@@ -4205,6 +8442,168 @@ TEST(L2DiagnosticCounters, ReentrantQueriesKeepAttemptAndSuccessBoundaries) {
   EXPECT_EQ(l2.backing_read_transactions(), 2u);
   EXPECT_EQ(l2.backing_write_transactions(), 4u);
   EXPECT_EQ(l2.write_count(), 1u);
+}
+
+TEST(TranslatedLocalCache, ExactHandlePtePolicyAndFabricBoundaryRefetchOwnerData) {
+  using namespace rocjitsu::amdgpu;
+  class MutableLocalTranslator final : public AddressSpaceTranslator {
+  public:
+    VmTranslationResult translate(uint64_t address, std::size_t size,
+                                  VmAccessKind access) const override {
+      if (address >= 4096 || size == 0 || size > 4096 - address ||
+          (access != VmAccessKind::Read && access != VmAccessKind::Write))
+        return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+      return {.outcome = VmAccessOutcome::Complete,
+              .translation = {.domain = VmMemoryDomain::Local,
+                              .address = backing_base + address,
+                              .contiguous_bytes = 4096 - address,
+                              .mtype = Mtype::RW,
+                              .gfx12_pte_mtype = raw_type,
+                              .permissions = {.readable = true, .writable = true}}};
+    }
+    uint64_t backing_base = 0x1000;
+    Gfx12PteMtype raw_type = Gfx12PteMtype::NC;
+  };
+  class LocalBacking final : public PhysicalMemoryAccess {
+  public:
+    explicit LocalBacking(std::shared_ptr<DeviceCacheCoherence> domain)
+        : domain_(std::move(domain)) {}
+    bool supports_translated_local_cache() const override { return true; }
+    MemoryIngressAdmission admit_pt_rewalk() const override {
+      return {.outcome = transport_open ? VmAccessOutcome::Complete : VmAccessOutcome::Revoked,
+              .permit = {}};
+    }
+    VmAccessOutcome read(VmMemoryDomain domain, uint64_t address,
+                         std::span<std::byte> result) override {
+      if (domain != VmMemoryDomain::Local || address > bytes_.size() ||
+          result.size() > bytes_.size() - address)
+        return VmAccessOutcome::Faulted;
+      ++reads;
+      std::memcpy(result.data(), bytes_.data() + address, result.size());
+      return VmAccessOutcome::Complete;
+    }
+    VmAccessOutcome write(VmMemoryDomain domain, uint64_t address,
+                          std::span<const std::byte> source) override {
+      if (domain != VmMemoryDomain::Local || address > bytes_.size() ||
+          source.size() > bytes_.size() - address)
+        return VmAccessOutcome::Faulted;
+      std::memcpy(bytes_.data() + address, source.data(), source.size());
+      domain_->publish_local_backing_write(address, source.size());
+      return VmAccessOutcome::Complete;
+    }
+    void external_effect(uint64_t address, uint32_t value) {
+      ASSERT_LE(address + sizeof(value), bytes_.size());
+      std::memcpy(bytes_.data() + address, &value, sizeof(value));
+    }
+    size_t reads = 0;
+    bool transport_open = true;
+
+  private:
+    std::shared_ptr<DeviceCacheCoherence> domain_;
+    std::array<std::byte, 0x4000> bytes_{};
+  };
+
+  auto coherence = std::make_shared<DeviceCacheCoherence>();
+  auto backing = std::make_shared<LocalBacking>(coherence);
+  auto first_root = std::make_shared<MutableLocalTranslator>();
+  auto second_root = std::make_shared<MutableLocalTranslator>();
+  second_root->backing_base = 0x2000;
+  constexpr uint64_t kVa = 0x80;
+  constexpr uint32_t kInitial = 0x13579bdf;
+  constexpr uint32_t kOther = 0x2468ace0;
+  backing->external_effect(0x1000 + kVa, kInitial);
+  backing->external_effect(0x2000 + kVa, kOther);
+
+  GpuVm vm;
+  const AddressSpaceHandle first = vm.register_unrouted_address_space(77, first_root, backing);
+  const AddressSpaceHandle second = vm.register_unrouted_address_space(77, second_root, backing);
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  EXPECT_FALSE(vm.find_vmid(77));
+  auto first_access = vm.snapshot(first);
+  auto second_access = vm.snapshot(second);
+  ASSERT_TRUE(first_access);
+  ASSERT_TRUE(second_access);
+
+  GpuMemory legacy_backing("translated-local-legacy-maintenance");
+  L2Cache l2("translated-local-l2", coherence);
+  l2.set_gpu_vm(&vm);
+  l2.set_legacy_maintenance_memory(&legacy_backing);
+  l2.set_legacy_maintenance_vm(&vm);
+  L1VectorCache vector(&l2);
+  vector.set_gpu_vm(&vm);
+  const auto load = [&](const GpuVmAccess &access) {
+    uint32_t value = 0;
+    const VmAccessOutcome outcome = vector.load_translated_local(
+        access, kVa, {reinterpret_cast<uint8_t *>(&value), sizeof(value)}, Mtype::RW, false, false);
+    EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+    return value;
+  };
+
+  EXPECT_EQ(load(*first_access), kInitial);
+  EXPECT_EQ(load(*first_access), kInitial);
+  EXPECT_EQ(backing->reads, 1u) << "the second owner read must hit the modeled V$";
+  backing->transport_open = false;
+  uint32_t revoked_result = 0;
+  EXPECT_EQ(vector.load_translated_local(
+                *first_access, kVa,
+                {reinterpret_cast<uint8_t *>(&revoked_result), sizeof(revoked_result)}, Mtype::RW,
+                false, false),
+            VmAccessOutcome::Revoked);
+  backing->transport_open = true;
+  EXPECT_EQ(backing->reads, 1u) << "a revoked session cannot consume cached bytes";
+  EXPECT_EQ(load(*second_access), kOther);
+  EXPECT_EQ(load(*first_access), kInitial);
+  EXPECT_EQ(backing->reads, 2u) << "equal numeric PASIDs must retain distinct handles";
+
+  first_root->raw_type = Gfx12PteMtype::RW;
+  EXPECT_EQ(load(*first_access), kInitial);
+  EXPECT_EQ(backing->reads, 3u) << "NC and RW PTE encodings cannot share a cached hit";
+
+  const uint32_t unrelated_write = 0xdecafbad;
+  ASSERT_EQ(second_access->write(kVa, std::as_bytes(std::span(&unrelated_write, 1))),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(load(*first_access), kInitial);
+  EXPECT_EQ(backing->reads, 3u)
+      << "a write to another physical line must preserve the owner cache hit";
+  EXPECT_EQ(load(*second_access), unrelated_write);
+  EXPECT_EQ(backing->reads, 4u);
+
+  const uint32_t local_write = 0x10203040;
+  ASSERT_EQ(first_access->write(kVa, std::as_bytes(std::span(&local_write, 1))),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(load(*first_access), local_write);
+  EXPECT_EQ(backing->reads, 5u);
+
+  // Fabric maintenance holds both domains through the canonical owner effect;
+  // its release retires the cached owner value before a later CU load.
+  const std::array domains{coherence};
+  {
+    auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
+        domains, DeviceCacheOperation::WritebackInvalidate);
+    ASSERT_EQ(leases.size(), 1u);
+    backing->external_effect(0x1000 + kVa, 0x55667788);
+  }
+  EXPECT_EQ(load(*first_access), 0x55667788u);
+  EXPECT_EQ(backing->reads, 6u);
+
+  ASSERT_TRUE(vm.invalidate(first));
+  auto refreshed = vm.snapshot(first);
+  ASSERT_TRUE(refreshed);
+  EXPECT_NE(refreshed->cache_namespace(), first_access->cache_namespace());
+  EXPECT_EQ(load(*refreshed), 0x55667788u);
+  EXPECT_EQ(backing->reads, 7u);
+
+  // V$ completion alone exposes the retained L2 line. Both completion
+  // operations must retire the translated key before a later backing read.
+  backing->external_effect(0x1000 + kVa, 0x89abcdef);
+  vector.invalidate_for_completion(refreshed->info().vmid, refreshed->cache_identity());
+  EXPECT_EQ(load(*refreshed), 0x55667788u);
+  EXPECT_EQ(backing->reads, 7u);
+  ASSERT_EQ(l2.flush_for_completion(*refreshed), VmAccessOutcome::Complete);
+  vector.invalidate_for_completion(refreshed->info().vmid, refreshed->cache_identity());
+  EXPECT_EQ(load(*refreshed), 0x89abcdefu);
+  EXPECT_EQ(backing->reads, 8u);
 }
 
 } // namespace

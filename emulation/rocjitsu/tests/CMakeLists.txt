@@ -51,6 +51,15 @@ endif()
 
 # --- Unit / integration test suite ---
 
+# Host-only coverage for the TCP rendezvous used by the HIP RCCL rank test.
+add_executable(rccl_tcp_bootstrap_test rccl_tcp_bootstrap_test.cpp)
+target_link_libraries(
+    rccl_tcp_bootstrap_test
+    PRIVATE GTest::gtest_main Threads::Threads
+)
+rj_configure_target(rccl_tcp_bootstrap_test TEST)
+rj_add_gtest_tests(rccl_tcp_bootstrap_test)
+
 add_test(NAME RocjitsuVersion COMMAND $<TARGET_FILE:rocjitsu_bin> --version)
 set_tests_properties(
     RocjitsuVersion
@@ -249,6 +258,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${Python3_EXECUTABLE} -B
             ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_rccl_scaleout.py -v
     )
+    add_test(
+        NAME RcclPodEmulatedNodeUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_rccl_pod_emulated_node.py
+            -v
+    )
 endif()
 
 add_test(
@@ -367,6 +383,8 @@ add_executable(
     coalesced_lane_runs_test.cpp
     gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
+    fabric_endpoint_test.cpp
+    canonical_line_freshness_test.cpp
     legacy_page_table_cache_test.cpp
     config_test.cpp
     gfx1251_compiled_kernel_test.cpp
@@ -414,6 +432,7 @@ add_executable(
     simdojo_sim_test.cpp
     simdojo_pipe_latch_test.cpp
     simdojo_issue_queue_test.cpp
+    pci_bar_address_decoder_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
     kfd_events_test.cpp
@@ -750,6 +769,96 @@ foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
         ":L2MaintenanceMutexTest.${_l2_mutex_case}"
     )
 endforeach()
+if(RJ_ENABLE_TSAN)
+    # These KFD alias and mapping cases can enter scoped maintenance. The
+    # one-page IPC-import mmap reaches the ordinary mapping drain on a single
+    # gfx950 GPU. Keep exact, bounded TSan cases for lock-order regressions.
+    set(_rj_tsan_scoped_cases
+        KfdIoctlTest.FixedAllocationRemapPublishesDirtyAliasAndRetries
+        Architecture/KfdPreparedSdmaTest.FencePublishesDirtyPromotedCanonicalAlias/Gfx1250
+        Architecture/KfdPreparedSdmaTest.FencePublishesDirtyPromotedCanonicalAlias/Gfx950
+        KfdCdna5PeerBindingTest.ControlledOwnerSdmaCopyAndFillRefreshCachedRequester
+        KfdCdna5PeerClientMappingTest.ControlledOwnerSdmaCopyFromPrivateGttPreservesDisjointDirtyLine
+        KfdCdna5PeerBindingTest.ControlledOwnerSdmaWriteAndFillPreserveDisjointDirtyLine
+        KfdCdna5PeerBindingTest.ControlledOwnerTensorDmaStoresRefreshCachedRequester
+        KfdCdna5PeerBindingTest.ControlledRequesterVectorStoreRefreshesCachedPeerLine
+        KfdCdna5PeerBindingTest.ProductionAqlTensorStoreRefreshesCachedRequester
+        KfdIoctlTest.IpcPromotionPublishesDirtyLocalL2AndMscBeforeCanonicalAlias
+        KfdIoctlTest.IpcPromotionRetriesBeforeAndAfterLocalWriteback
+        KfdIoctlTest.IpcPromotionWaitsForLocalIngressBeforeChangingPolicy
+        KfdIoctlTest.IpcVramGrantLeasesCanonicalBytesAcrossVaReuseAndClose
+        KfdIoctlTest.MunmapWaitsForInFlightFixedAllocationMmap
+        KfdIoctlTest.UncachedVramExportKeepsUcPolicyAcrossUnmapAndRemap
+        KfdMissingPeerRouteTest.PublicPeerMapRejectsAbsentSameNodeRouteBeforePublishingGrant
+        KfdOwnerNoPeerRouteTest.ControlledOwnerWriteUsesEndpointWithoutPeerRoute
+        KfdPeerBindingTest.AdmittedPeerWriteDrainsBeforeRequesterUnmap
+        KfdPeerBindingTest.CApiCloseReportsFailureAndRetainsCheckedDestroy
+        KfdPeerClientMappingTest.CanonicalFreeBlocksImportedAliasPublicationUntilRetirement
+        KfdPeerBindingTest.CanonicalFreeCloseDoesNotBlockOrdinaryGttRetirement
+        KfdPeerBindingTest.CanonicalOwnerCuIngressRetriesAndRechecksLiveBinding
+        KfdPeerBindingTest.CanonicalOwnerSdmaWriteRetriesClosedIngressAndNewAliasGeneration
+        KfdPeerBindingTest.CloseAllRetainsAndRetriesFailedProcessClose
+        KfdPeerBindingTest.CloseFlushesOpenDirtyAliasOfPreclaimPendingProcess
+        KfdPeerBindingTest.ConcurrentProcessUnmapWaitsForExclusiveCloseClaim
+        KfdPeerBindingTest.ControlledBackingRejectsDmabufAliasesAndSurvivesIpcReexport
+        KfdPeerBindingTest.ControlledOwnerCuStoreUsesLocalEffect
+        KfdPeerBindingTest.ControlledOwnerWritePreservesDisjointDirtyLocalLine
+        KfdPeerBindingTest.ControlledOwnerWriteUsesSelectedLocalEffectForCanonicalAliases
+        KfdPeerBindingTest.ControlledPeerCacheHitSurvivesRefusedOwnerDirtyWriteback
+        KfdPeerBindingTest.ControlledRequesterCuStoreRefreshesCachedPeerLine
+        KfdPeerBindingTest.ControlledRequesterWriteRetriesBusyCanonicalAlias
+        KfdPeerBindingTest.CuScalarAndVectorPeerReadsReuseRequesterCache
+        KfdPeerBindingTest.FailedCloseKeepsOtherDirtyProcessResolverVisible
+        KfdPeerBindingTest.FreeAdoptsFailedUnmapAndPublishesItsDirtyRequesterByte
+        KfdPeerClientMappingTest.FreeAndCloseSettleFailedOrdinaryMunmap
+        KfdPeerBindingTest.FreeDiscardsAbandonedFailedUnmapGeneration
+        KfdPeerBindingTest.FreeImportedAllocationDrainsItsAliasesButRetainsSourceBacking
+        KfdPeerBindingTest.FreePublishesDirtyOwnerAndRequesterBytesBeforeRetirement
+        KfdPeerBindingTest.FreeRefusesOverlappingDirtyWritersInRetiringBatch
+        KfdPeerBindingTest.FreeRetriesAfterFinalGrantPublicationFailure
+        KfdPeerClientMappingTest.FreeRetriesClosedAliasBatchAfterGrantPublicationFailure
+        KfdPeerBindingTest.FreeRetriesClosedBatchAfterPreMaintenanceFailure
+        KfdPeerBindingTest.FreeWaitsForEveryCanonicalAliasPermitBeforeRetiringBacking
+        KfdPeerBindingTest.ImportedPeerAliasCopiesBothDirectionsThroughKfdSdmaQueue
+        KfdPeerBindingTest.ImportedPeerFreeAndVaReuseRejectQueuedWriteWithoutEffect
+        KfdPeerBindingTest.ImportedPeerRemainsLiveAfterExporterFreeAndClose
+        KfdPeerBindingTest.IpcExportPublishesDirtyOwnerBytesBeforeUncachedPeerAlias
+        KfdPeerBindingTest.LastAliasUnmapPublishesDirtyRequesterLineBeforeRetirement
+        KfdPeerBindingTest.LivePeerEffectSelectsDistinctVaAliasesWithoutFlushingDirtySibling
+        KfdPeerBindingTest.MixedLocalAndUcPeerRequestsKeepRequesterCacheSemantics
+        KfdPeerClientMappingTest.OrdinaryMunmapAndMmapDrainEveryLiveAlias
+        KfdPeerClientMappingTest.OrdinaryMunmapPublishesDirtyRequesterByteAndRetries
+        KfdPeerBindingTest.PreparedCanonicalWritebackPermitDrainsBeforeUnmapPublication
+        KfdPeerBindingTest.PreparedCanonicalWritebackPinsRawGrantAndExactVmGate
+        KfdPeerBindingTest.PreparedCanonicalWritebackRejectsIncompleteRequesterPte
+        KfdPeerBindingTest.ProcessClosePublishesDirtyRequesterLineBeforeRetirement
+        KfdPeerBindingTest.ProcessCloseSettlesFailedFreeAliasBatch
+        KfdPeerBindingTest.ProcessCloseSettlesFailedUnmapGeneration
+        KfdPeerBindingTest.ProcessCloseWaitsForImportedOwnerAndRequesterAliasPermits
+        KfdPeerBindingTest.ProductionAqlCompletionRetriesAfterSelectedPeerWriteback
+        KfdPeerBindingTest.ProductionProviderPublishesTwoDirtyPeerRunsBeforeFabricRead
+        KfdPeerBindingTest.ProductionSdmaCopiesBetweenLocalAndPeerBacking
+        KfdPeerBindingTest.PublicPeerMapAdmitsImportedAliasAndUnmapRejectsQueuedWrite
+        KfdPeerBindingTest.PublicPeerMapAndUnmapKeepOrderedPrefixAcrossBackingRetry
+        KfdPeerBindingTest.QueuedPeerReadRejectsIncompleteRequesterHostExtent
+        KfdPeerBindingTest.QueuedPeerWriteRejectsRetiredAndReboundRequesterGrant
+        KfdPeerBindingTest.QueuedSameLinePeerWriteFollowsFirstEffect
+        KfdPeerBindingTest.RoutesOnlyGrantedLeasedPeerChunksAndRetainsPreparedBacking
+        KfdPeerBindingTest.ScopedMaintenanceRejectsOmittedDirtyImportedAlias
+        KfdPeerBindingTest.UnmapPreservesUnrelatedDirtyCanonicalLine
+        KfdPeerBindingTest.UnmapRetriesClosedAliasAfterPreMaintenanceFailure
+        KfdPeerClientMappingTest.UnmapRetriesClosedGenerationAfterPublicationFailure
+        KfdPeerBindingTest.UnmapRetryAfterFinalMaintenanceDoesNotWriteBackTwice
+        KfdPeerBindingTest.UnmapWaitsForExactAliasIngressBeforeRetiringGrant
+        KfdPeerBindingTest.UnrelatedDrainCannotPublishControlledDirtyLine
+        KfdTwoRequesterBindingTest.CanonicalAliasSnapshotFollowsGpuGrantsAndBackingLifetime
+        KfdTwoRequesterBindingTest.PublicPeerMapsRemainIndependentAcrossRequesterUnmap
+        SimulatedKfdTest.IpcImportRetainsBackingAcrossViewAndReleasesItOnFree
+    )
+    foreach(_rj_tsan_case IN LISTS _rj_tsan_scoped_cases)
+        string(APPEND _rj_gtest_exclusions ":${_rj_tsan_case}")
+    endforeach()
+endif()
 
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
@@ -762,6 +871,31 @@ if(RJ_INSTALL_TESTS)
         APPEND "${RJ_INSTALL_CTEST_FILE}"
         "include(\"rocjitsu_tests.cmake\")\n"
     )
+endif()
+
+if(RJ_ENABLE_TSAN)
+    # Mirror each selected case in both CTest trees without changing its
+    # GoogleTest name or grouping unrelated tests under one process. The
+    # wrapper rejects a stale filter while preserving a nonzero sanitizer
+    # exit status; PASS_REGULAR_EXPRESSION would override that status.
+    foreach(_rj_tsan_case IN LISTS _rj_tsan_scoped_cases)
+        rj_add_test(
+            NAME "${_rj_tsan_case}"
+            COMMAND
+                ${CMAKE_COMMAND}
+                "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_tests>"
+                "-DTEST_FILTER=${_rj_tsan_case}"
+                -P
+                "${PROJECT_SOURCE_DIR}/cmake/rj_run_exact_gtest.cmake"
+            TIMEOUT 120
+            INSTALL_COMMAND
+                "cmake"
+                "-DTEST_EXECUTABLE=bin/rocjitsu_tests"
+                "-DTEST_FILTER=${_rj_tsan_case}"
+                -P
+                "rj_run_exact_gtest.cmake"
+        )
+    endforeach()
 endif()
 
 # Bound worker joins in the idle notification and CPU-use regressions.
@@ -1926,7 +2060,12 @@ target_link_libraries(
     interposer_dup_test
     PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
 )
-add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
+add_dependencies(
+    interposer_dup_test
+    rocjitsu_bin
+    rocjitsu_shared
+    rocjitsu_test_bin
+)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(interposer_dup_test)
 endif()
@@ -1971,6 +2110,17 @@ foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700 gfx950_mi355x_kmd_2gpu)
     endforeach()
 endforeach()
 
+set(_rj_maintenance_interposer_cases
+    FinalKfdCloseReportsDeferredWritebackFailure
+    FinalDrmCloseReportsDeferredWritebackFailure
+    FinalKfdCloseWaitsForSnapshotOnWritebackFailure
+    FinalDrmCloseWaitsForSnapshotOnWritebackFailure
+)
+set(_rj_hook_interposer_cases
+    LiveSvmDenialEndsOnHostVmaReplacement
+    ${_rj_maintenance_interposer_cases}
+)
+
 function(rj_add_interposer_test_suite _suite)
     cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG" "ENVIRONMENT")
     set(_config "${RJ_CDNA4_KMD_CONFIG}")
@@ -1982,26 +2132,36 @@ function(rj_add_interposer_test_suite _suite)
     endif()
     get_filename_component(_config_name "${_config}" NAME)
     foreach(_case IN LISTS ARG_UNPARSED_ARGUMENTS)
+        set(_launcher "${RJ_CLI}")
+        set(_case_env ${ARG_ENVIRONMENT})
+        set(_installed_command
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            "--config"
+            "\${RJ_INSTALLED_CONFIG_DIR}/${_config_name}"
+            "--"
+            "bin/interposer_dup_test"
+            "--gtest_filter=${_suite}.${_case}"
+        )
+        if(_case IN_LIST _rj_hook_interposer_cases)
+            # These cases inspect interposer internals. The test CLI
+            # selects the non-installed library with those hooks compiled in.
+            set(_launcher "$<TARGET_FILE:rocjitsu_test_bin>")
+            set(_installed_command)
+        endif()
         rj_add_test(
             NAME "${_suite}.${_case}${_suffix}"
             COMMAND
-                ${RJ_CLI}
+                ${_launcher}
                 --config
                 ${_config}
                 --
                 $<TARGET_FILE:interposer_dup_test>
                 "--gtest_filter=${_suite}.${_case}"
-            ENVIRONMENT ${ARG_ENVIRONMENT}
+            ENVIRONMENT ${_case_env}
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-            INSTALL_COMMAND
-                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-                "--config"
-                "\${RJ_INSTALLED_CONFIG_DIR}/${_config_name}"
-                "--"
-                "bin/interposer_dup_test"
-                "--gtest_filter=${_suite}.${_case}"
-            INSTALL_ENVIRONMENT ${ARG_ENVIRONMENT}
+            INSTALL_COMMAND ${_installed_command}
+            INSTALL_ENVIRONMENT ${_case_env}
         )
     endforeach()
 endfunction()
@@ -2012,6 +2172,12 @@ set(_rj_interposer_dup_tests
     Dup3PreservesHiddenEventBacking
     Dup2PreservesHiddenAllocationBacking
     Dup3PreservesHiddenAllocationBacking
+    TrackedMunmapFailureUsesLibcErrno
+    LiveSvmDenialEndsOnHostVmaReplacement
+    FinalKfdCloseReportsDeferredWritebackFailure
+    FinalDrmCloseReportsDeferredWritebackFailure
+    FinalKfdCloseWaitsForSnapshotOnWritebackFailure
+    FinalDrmCloseWaitsForSnapshotOnWritebackFailure
     Dup2PreservesHiddenDoorbellBacking
     Dup3PreservesHiddenDoorbellBacking
     DupKeepsKfdRoutingAfterPrimaryClose
@@ -2052,6 +2218,7 @@ rj_add_interposer_test_suite(
     DupRacingTheCloseOfAPrimeExportKeepsTheBoState
     ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone
     GemMappingsFollowGpuCoreDumpPolicy
+    UserptrDmabufAndIpcExportsFailWithoutChangingCallerMemory
     GemMetadataRoundTripsOnABuffer
     GemOpReportsTheCreateSize
     GemOpSetPlacementChangesTheReportedDomain
@@ -2170,6 +2337,17 @@ foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700)
         ${_rj_interposer_pm4_tests}
     )
 endforeach()
+
+# The gfx1100 GEM_CREATE fixture is not available on all DRM-less test hosts.
+rj_add_interposer_test_suite(
+    InterposerPm4Test
+    CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json"
+    KfdResidentVaRejectsGemMapAndReplace
+    GemResidentVaRejectsCallerVaKfdAllocation
+    GemResidentVaRejectsCallerVaKfdDmabufImport
+    KfdGrantWithoutPteRejectsGemMap
+    SameBoPrimeMapRejectsActiveKfdVaAndAllowsDisjointVa
+)
 
 rj_add_interposer_test_suite(
     InterposerFreshForkTest
@@ -3921,7 +4099,12 @@ if(RJ_ENABLE_HIP_TESTS)
 
         # --- RCCL collective test ---
         if(RCCL_LIB AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
-            rj_add_hip_test(hip_rccl_test ARCH gfx950 EXTRA_LIBS ${RCCL_LIB})
+            rj_add_hip_test(
+                hip_rccl_test
+                ARCH gfx950
+                DEPENDENCIES ${CMAKE_CURRENT_SOURCE_DIR}/rccl_tcp_bootstrap.h
+                EXTRA_LIBS ${RCCL_LIB}
+            )
             add_dependencies(daemon_test hip_rccl_test_target)
             set(RJ_RCCL_TESTS
                 RcclDaemonTest.AllReduce
@@ -3983,6 +4166,7 @@ if(RJ_ENABLE_HIP_TESTS)
             hip_rccl_gfx1250_test
             ARCH gfx1250
             SOURCE hip_rccl_test.cpp
+            DEPENDENCIES ${CMAKE_CURRENT_SOURCE_DIR}/rccl_tcp_bootstrap.h
             EXTRA_LIBS ${RCCL_LIB}
         )
         message(STATUS "gfx1250 RCCL rank binary enabled (found ${RCCL_LIB})")
