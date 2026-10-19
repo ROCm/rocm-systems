@@ -5,8 +5,8 @@
  ************************************************************************/
 
 // Host-only microtests for src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu: eligibility against
-// the fixed 512 KiB LL128 slot, the datatype dispatch, the DDA_LL128_RS_THREADS block size, the line grid and its
-// caps, and the launch.
+// the scratch bank's per-rank slot and the LL128 cap, the datatype dispatch, the slice grid and its caps, and the
+// launch.
 
 #include <gtest/gtest.h>
 
@@ -32,11 +32,10 @@ void* const kSendbuff = reinterpret_cast<void*>(0x1000);
 void* const kRecvbuff = reinterpret_cast<void*>(0x2000);
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
 const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
-constexpr size_t kMaxShardBytes = 512u << 10;
-// Two banks of one slot of ceil(512 KiB / 120 B) = 4370 128-byte lines per rank.
-constexpr size_t kScratchPerRank = 2 * 4370 * 128;
-// A 128-byte line carries 120 bytes, 30 floats.
-constexpr size_t kLineFloats = 30;
+// A slice is 16 lines on the wire and carries 1920 bytes, 480 floats.
+constexpr size_t kSliceFloats = 480;
+// Scratch holding exactly one slice per rank at 8 ranks: two banks of 8 x 2 KiB.
+constexpr size_t kOneSliceScratch8 = 2 * 8 * 2048;
 
 template <typename T, int N>
 const void* Kernel() {
@@ -51,6 +50,8 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
       auto it = params_.find(env);
       return it == params_.end() ? deftVal : it->second;
     };
+    // The LL128 tier is off without an arch table; give it a cap well above anything tested.
+    g_rcclDdaLL128Threshold = [](const ncclComm*, ncclFunc_t) { return size_t{1} << 30; };
     comm().rank = 7;
     comm().addonStopEvent = kStopEvent;
   }
@@ -81,15 +82,17 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
   template <typename T>
   void ExpectLaunchOf(const DdaLaunch& launch, size_t recvcount) {
     EXPECT_EQ(launch.kernel, (Kernel<T, 8>()));
-    ASSERT_EQ(launch.args.size(), 8u);
+    ASSERT_EQ(launch.args.size(), 10u);
     EXPECT_EQ(launch.Arg<T**>(0), comm().ddaPeerPtrsDev);
     EXPECT_EQ(launch.Arg<T*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<const T*>(2), kSendbuff);
-    EXPECT_EQ(launch.Arg<size_t>(3), recvcount);
+    EXPECT_EQ(launch.Arg<size_t>(3), recvcount * sizeof(T));
     EXPECT_EQ(launch.Arg<int>(4), 7);
     EXPECT_EQ(launch.Arg<int>(5), 8);
     EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
     EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
+    EXPECT_EQ(launch.Arg<size_t>(8), (recvcount * sizeof(T) + 1919) / 1920);
+    EXPECT_EQ(launch.Arg<size_t>(9), (comm().ddaScratchBytes / 2) / 16 * 16);
   }
 
   DdaFabricMockComm mock_;
@@ -123,6 +126,15 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_NeedsHandlerScratchAndPeer
   }
 }
 
+TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_NeedsTheEpochArray) {
+  comm().ddaLLEpochLen = 0;
+  EXPECT_FALSE(Eligible(4));
+  comm().ddaLLEpochLen = 1;
+  EXPECT_TRUE(Eligible(4));
+  comm().ddaLLEpochDev = nullptr;
+  EXPECT_FALSE(Eligible(4));
+}
+
 TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_ZeroCountRejects) {
   EXPECT_FALSE(Eligible(0));
 }
@@ -152,23 +164,44 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_OnlyFloat32Float16Bfloat16
   }
 }
 
-// The shard moves as 8-byte words, so 8-byte multiples that are not 16-byte multiples are eligible.
-TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_ShardBytesMultipleOf8UpTo512KiB) {
-  EXPECT_TRUE(Eligible(2));
-  EXPECT_TRUE(Eligible(4, ncclFloat16));
-  EXPECT_FALSE(Eligible(1));
-  EXPECT_FALSE(Eligible(6, ncclBfloat16));
-  EXPECT_TRUE(Eligible(kMaxShardBytes / 4));
-  EXPECT_FALSE(Eligible(kMaxShardBytes / 4 + 2));
+TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_ShardBytesMultipleOf16) {
+  EXPECT_TRUE(Eligible(8, ncclFloat16));
+  EXPECT_FALSE(Eligible(2));
+  EXPECT_FALSE(Eligible(6));
+  EXPECT_FALSE(Eligible(12, ncclBfloat16));
 }
 
-TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_ScratchMustHoldBothBanksOfFixedSlots) {
-  comm().ddaScratchBytes = 8 * kScratchPerRank;
+TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_BuffersMustBe16ByteAligned) {
+  void* const misaligned = reinterpret_cast<void*>(0x1008);
+  EXPECT_FALSE(ncclReduceScatterDdaFabricLL128Eligible(mock_.get(), misaligned, kRecvbuff, 4, ncclFloat32, ncclSum));
+  EXPECT_FALSE(ncclReduceScatterDdaFabricLL128Eligible(mock_.get(), kSendbuff, misaligned, 4, ncclFloat32, ncclSum));
+}
+
+// The cap is checked against the whole message, nRanks shards, as the selector does.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_WholeMessageWithinTheLL128Cap) {
+  size_t cap = 8 * 16;
+  g_rcclDdaLL128Threshold = [&](const ncclComm* c, ncclFunc_t func) {
+    EXPECT_EQ(c, mock_.get());
+    EXPECT_EQ(func, ncclFuncReduceScatter);
+    return cap;
+  };
   EXPECT_TRUE(Eligible(4));
-  comm().ddaScratchBytes = 8 * kScratchPerRank - 1;
+  cap = 8 * 16 - 1;
   EXPECT_FALSE(Eligible(4));
+  cap = 0;
+  EXPECT_FALSE(Eligible(4));
+}
+
+TEST_F(DdaReduceScatterFabricLL128Microtest, Eligible_RankSlotMustHoldEverySlice) {
+  comm().ddaScratchBytes = kOneSliceScratch8;
+  EXPECT_TRUE(Eligible(kSliceFloats));
+  EXPECT_FALSE(Eligible(kSliceFloats + 4));
+  comm().ddaScratchBytes = kOneSliceScratch8 - 1;
+  EXPECT_FALSE(Eligible(4));
+  comm().ddaScratchBytes = 2 * kOneSliceScratch8;
+  EXPECT_TRUE(Eligible(kSliceFloats + 4));
   comm().nRanks = 4;
-  comm().ddaScratchBytes = 4 * kScratchPerRank;
+  comm().ddaScratchBytes = kOneSliceScratch8 / 2;
   EXPECT_TRUE(Eligible(4));
 }
 
@@ -187,7 +220,7 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_EachDatatypeLaunchesItsOwnKe
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_TakesTheStopEventOnTheStream) {
   const DdaLaunch& launch = RunOne(4);
-  EXPECT_EQ(launch.block.x, 1024u);
+  EXPECT_EQ(launch.block.x, 512u);
   EXPECT_EQ(launch.stream, kStream);
   EXPECT_EQ(launch.startEvent, nullptr);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
@@ -210,35 +243,22 @@ TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_FourAndEightRanksUnrolledOth
   }
 }
 
-// 1024 threads are 64 sixteen-lane groups, one line each: a block per 64 lines of the shard.
-TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_GridFollowsShardLinesWithinCaps) {
-  EXPECT_EQ(RunOne(1, ncclFloat16).grid.x, 1u);
-  EXPECT_EQ(RunOne(64 * kLineFloats).grid.x, 1u);
-  EXPECT_EQ(RunOne(64 * kLineFloats + 2).grid.x, 2u);
-  EXPECT_EQ(RunOne(64 * kLineFloats, ncclBfloat16).grid.x, 1u);
-  EXPECT_EQ(RunOne(64 * 100 * kLineFloats).grid.x, 100u);
+// 512 threads are 16 warps, one slice each: a block per 16 slices of the shard.
+TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_GridFollowsShardSlicesWithinCaps) {
+  EXPECT_EQ(RunOne(8, ncclFloat16).grid.x, 1u);
+  EXPECT_EQ(RunOne(16 * kSliceFloats).grid.x, 1u);
+  EXPECT_EQ(RunOne(16 * kSliceFloats + 4).grid.x, 2u);
+  EXPECT_EQ(RunOne(32 * kSliceFloats, ncclBfloat16).grid.x, 1u);
+  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 100u);
   comm().ddaFabricMaxBlocks = 6;
-  EXPECT_EQ(RunOne(64 * 100 * kLineFloats).grid.x, 6u);
+  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 6u);
   comm().ddaFabricMaxBlocks = 0;
-  EXPECT_EQ(RunOne(64 * 100 * kLineFloats).grid.x, 1u);
+  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
   comm().ddaFabricMaxBlocks = 256;
   comm().ddaLLEpochLen = 9;
-  EXPECT_EQ(RunOne(64 * 100 * kLineFloats).grid.x, 9u);
+  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 9u);
   comm().ddaLLEpochLen = 0;
-  EXPECT_EQ(RunOne(64 * 100 * kLineFloats).grid.x, 1u);
-}
-
-TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_ThreadsOverrideMustBeALineMultipleUpTo1024) {
-  const std::pair<int64_t, unsigned> cases[] = {{256, 256}, {16, 16},  {1024, 1024}, {8, 1024},
-                                                {24, 1024}, {1040, 1024}, {0, 1024}};
-  for (const auto& [env, threads] : cases) {
-    params_["RCCL_DDA_LL128_RS_THREADS"] = env;
-    EXPECT_EQ(RunOne(4).block.x, threads) << "DDA_LL128_RS_THREADS " << env;
-  }
-  // 256 threads are 16 groups, so 17 lines take a second block.
-  params_["RCCL_DDA_LL128_RS_THREADS"] = 256;
-  EXPECT_EQ(RunOne(16 * kLineFloats).grid.x, 1u);
-  EXPECT_EQ(RunOne(17 * kLineFloats).grid.x, 2u);
+  EXPECT_EQ(RunOne(16 * 100 * kSliceFloats).grid.x, 1u);
 }
 
 TEST_F(DdaReduceScatterFabricLL128Microtest, Launch_LaunchErrorIsReported) {
