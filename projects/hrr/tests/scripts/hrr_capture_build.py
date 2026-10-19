@@ -203,6 +203,9 @@ def clr_configure_command(src: Path, build: Path, dist: Path) -> list:
     ]
 
 
+BUILD_RPATH = "$ORIGIN/../../../../dist/lib;$ORIGIN/../../../dist/lib"
+
+
 def hrr_configure_command(src: Path, build: Path, dist: Path, archs: str) -> list:
     llvm = dist / "lib" / "llvm"
     # One compiler for C, C++ and HIP, as TheRock builds HRR: host objects from
@@ -218,6 +221,12 @@ def hrr_configure_command(src: Path, build: Path, dist: Path, archs: str) -> lis
         "-DCMAKE_BUILD_TYPE=Release",
         f"-DCMAKE_PREFIX_PATH={dist}",
         f"-DROCM_PATH={dist}",
+        # CMake bakes the absolute dist/lib into RUNPATH, which is the build
+        # container's workspace path. The rocJitsu jobs run on the bare runner,
+        # whose workspace path differs. These entries reach dist/lib from the
+        # integration binary and from the playback binary, wherever the
+        # workspace sits.
+        f"-DCMAKE_BUILD_RPATH={BUILD_RPATH}",
         f"-DCMAKE_C_COMPILER={llvm / 'bin' / 'clang'}",
         f"-DCMAKE_CXX_COMPILER={llvm / 'bin' / 'clang++'}",
         f"-DCMAKE_HIP_COMPILER={llvm / 'bin' / 'clang++'}",
@@ -261,6 +270,8 @@ def linkage_errors(ldd_output: str, lib_dir: Path) -> list[str]:
     resolved: dict[str, set[str]] = {}
     for match in re.finditer(r"^\s*(\S+) => (\S+)", ldd_output, re.MULTILINE):
         name, path = match.groups()
+        # A relative RUNPATH entry shows up as .../build/hrr/../../dist/lib.
+        path = os.path.normpath(path)
         for stem in LOADED_LIBS:
             if name.startswith(stem):
                 resolved.setdefault(stem, set()).add(path)

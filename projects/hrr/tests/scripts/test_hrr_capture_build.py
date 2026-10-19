@@ -71,6 +71,7 @@ class CommandTest(unittest.TestCase):
         self.assertIn("-DGPU_TARGETS=gfx942;gfx950", cmd)
         self.assertIn("-DHRR_BUILD_INTEGRATION_TESTS=ON", cmd)
         self.assertIn("-DCMAKE_HIP_COMPILER=/d/lib/llvm/bin/clang++", cmd)
+        self.assertIn(f"-DCMAKE_BUILD_RPATH={cb.BUILD_RPATH}", cmd)
 
     def test_build_targets_cover_uploaded_executables(self):
         names = {Path(rel).name for rel in cb.EXECUTABLES}
@@ -162,6 +163,17 @@ class LinkageTest(unittest.TestCase):
             cb.linkage_errors(self.ldd("/w/dist/lib/libhsa-runtime64.so.1"), self.LIB),
             [],
         )
+
+    def test_relative_runpath_entry(self):
+        text = (
+            "\tlibamdhip64.so.7 => /w/build/hrr/tests/integration/../../../../dist/lib/libamdhip64.so.7 (0x1)\n"
+            "\tlibhsa-runtime64.so.1 => /w/build/hrr/tests/integration/../../../../dist/lib/libhsa-runtime64.so.1 (0x2)\n"
+        )
+        self.assertEqual(cb.linkage_errors(text, self.LIB), [])
+
+    def test_not_found_is_an_error(self):
+        errors = cb.linkage_errors(self.ldd("not found"), self.LIB)
+        self.assertEqual(len(errors), 1)
 
     def test_rocr_from_elsewhere(self):
         errors = cb.linkage_errors(
