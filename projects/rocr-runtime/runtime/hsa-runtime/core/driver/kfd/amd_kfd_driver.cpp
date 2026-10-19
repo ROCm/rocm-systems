@@ -142,6 +142,10 @@ hsa_status_t KfdDriver::DisableRuntime() {
 }
 
 hsa_status_t KfdDriver::Init() {
+  // Bind XNACK before the topology snapshot. Aperture init reads the mode
+  // once, before HSA_SVM_HOST_UNREGISTER_DEBUG, and does not read it again.
+  bool xnack_mode = BindXnackMode();
+
   // Own one snapshot from before the debug probe through BuildTopology().
   if (AcquireTopologySnapshot() != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
   MAKE_NAMED_SCOPE_GUARD(snapshot_guard, [this]() { ReleaseTopologySnapshot(); });
@@ -171,7 +175,6 @@ hsa_status_t KfdDriver::Init() {
   if (version_.KernelInterfaceMajorVersion == 1 && version_.KernelInterfaceMinorVersion == 0)
     core::g_use_interrupt_wait = false;
 
-  bool xnack_mode = BindXnackMode();
   core::Runtime::runtime_singleton_->XnackEnabled(xnack_mode);
 
   runtime_guard.Dismiss();
