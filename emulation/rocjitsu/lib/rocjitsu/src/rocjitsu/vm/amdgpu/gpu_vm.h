@@ -344,12 +344,38 @@ struct VmMtypeSnapshot {
 /// @brief Policy cache that does not retain the binding's backing.
 /// @details Like an L1 cache, it requires externally serialized access.
 class VmMtypeCache {
+public:
+  VmMtypeCache() = default;
+  VmMtypeCache(const VmMtypeCache &other)
+      : access_state_(other.access_state_),
+        snapshots_(other.snapshots_ ? std::make_unique<Snapshots>(*other.snapshots_) : nullptr) {}
+  VmMtypeCache &operator=(const VmMtypeCache &other) {
+    if (this != &other) {
+      VmMtypeCache copy(other);
+      *this = std::move(copy);
+    }
+    return *this;
+  }
+  VmMtypeCache(VmMtypeCache &&) noexcept = default;
+  VmMtypeCache &operator=(VmMtypeCache &&) noexcept = default;
+
+  /// @brief Drop copied policies and their mutation tokens.
+  /// @details Unused CUs retain neither a snapshot table nor work to clear
+  /// during VM setup and teardown.
+  void clear() noexcept {
+    access_state_.reset();
+    snapshots_.reset();
+  }
+
+private:
   friend class GpuVmAccess;
+  static constexpr std::size_t kSnapshotCount = 64;
+  using Snapshots = std::array<VmMtypeSnapshot, kSnapshotCount>;
   std::weak_ptr<GpuVmAccessState> access_state_;
   // Interleaved lanes can revisit several pages in one request.
   // Hashing by 4 KiB page avoids discarding their copied policy on every lane;
   // each snapshot still validates its translator-provided range and epoch.
-  std::array<VmMtypeSnapshot, 64> snapshots_;
+  std::unique_ptr<Snapshots> snapshots_;
 };
 
 /// @brief Address-space policy separated from the physical backing transport.

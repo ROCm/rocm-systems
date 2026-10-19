@@ -20,6 +20,7 @@
 #include <memory>
 #include <new>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace simdojo {
@@ -104,8 +105,10 @@ struct CacheTag {
 /// @tparam NumSets Number of sets in the cache.
 /// @tparam Associativity Number of ways per set.
 /// @tparam Policy Replacement policy (default: LRU).
+/// @tparam LazyStorage Whether backing allocation is deferred for private caches with exclusive
+/// access. Shared caches with concurrent per-set access must keep the default.
 template <uint32_t LineSizeBits, uint32_t NumSets, uint32_t Associativity,
-          typename Policy = LRUPolicy<NumSets, Associativity>>
+          typename Policy = LRUPolicy<NumSets, Associativity>, bool LazyStorage = false>
 class Cache {
 public:
   static constexpr uint32_t LINE_SIZE = 1u << LineSizeBits;
@@ -123,6 +126,24 @@ public:
     static_assert(util::is_power_of_2(NumSets), "NumSets must be a power of 2");
     static_assert(LINE_SIZE <= 128, "Cache byte-validity mask supports lines up to 128 bytes");
   }
+
+  Cache(const Cache &) = default;
+  Cache &operator=(const Cache &)
+    requires(!LazyStorage)
+  = default;
+  Cache &operator=(const Cache &other)
+    requires(LazyStorage)
+  {
+    if (this != &other) {
+      // Finish every allocation before changing tags, bytes or touched markers.
+      Cache replacement(other);
+      *this = std::move(replacement);
+    }
+    return *this;
+  }
+
+  Cache(Cache &&) = default;
+  Cache &operator=(Cache &&) = default;
 
   /// @brief Return whether every byte in one line-relative range is present.
   static bool bytes_valid(const CacheTag &tag, uint32_t offset, uint32_t size) {
@@ -152,6 +173,9 @@ public:
   /// @retval false Cache miss.
   bool lookup(uint64_t addr, CacheTag **tag_out = nullptr, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return false;
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -168,6 +192,9 @@ public:
   /// Inspect residency without changing replacement order or cache contents.
   const CacheTag *peek(uint64_t addr, uint32_t vmid = 0) const {
     const uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return nullptr;
     const uint64_t tag = tag_bits(addr);
     for (uint32_t way = 0; way < Associativity; ++way) {
       const auto &entry = tag_at(set, way);
@@ -196,6 +223,10 @@ public:
   /// directly from a backing level, avoiding a second tag scan in fill_line().
   Allocation allocate_with_data(uint64_t addr, uint32_t vmid = 0, CacheTag *evicted_tag = nullptr,
                                 uint8_t *evicted_data = nullptr) {
+    // Complete deferred allocations before publishing a resident tag. A failing
+    // new_handler must leave the cache empty and safe to retry.
+    tags_.materialize();
+    data_.materialize();
     uint32_t set = set_index(addr);
     uint64_t tag = tag_bits(addr);
 
@@ -244,6 +275,9 @@ public:
   /// @param vmid Owning process address space.
   void invalidate(uint64_t addr, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return;
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -261,6 +295,9 @@ public:
   /// @param addr The memory address whose cache line to invalidate.
   void invalidate_all_vmids(uint64_t addr) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return;
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -306,6 +343,11 @@ public:
   void read_line(uint64_t addr, uint8_t *dst, uint32_t offset, uint32_t size,
                  uint32_t vmid = 0) const {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set]) {
+        assert(false && "read_line called on a miss");
+        return;
+      }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       const auto &t = tag_at(set, w);
@@ -325,6 +367,9 @@ public:
   /// @returns Pointer to the line data, or nullptr if not found.
   const uint8_t *line_data_for_read(uint64_t addr, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return nullptr;
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -344,6 +389,11 @@ public:
   void write_line(uint64_t addr, const uint8_t *src, uint32_t offset, uint32_t size,
                   uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set]) {
+        assert(false && "write_line called on a miss");
+        return;
+      }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -362,6 +412,11 @@ public:
   /// @param data Source buffer containing a full cache line of data.
   void fill_line(uint64_t addr, const uint8_t *data, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set]) {
+        assert(false && "fill_line called on a miss");
+        return;
+      }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -379,6 +434,11 @@ public:
   /// reads while completing the line from a backing-level snapshot.
   void fill_missing_bytes(uint64_t addr, const uint8_t *data, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set]) {
+        assert(false && "fill_missing_bytes called on a miss");
+        return;
+      }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -401,6 +461,9 @@ public:
   /// @returns Pointer to the line data, or nullptr if not found.
   uint8_t *line_data_for_write(uint64_t addr, uint32_t vmid = 0) {
     uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return nullptr;
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -474,7 +537,10 @@ private:
         }(),
         "CacheTag fields must permit zero-initialized invalid entries");
 
-    ZeroStorage() : elements_(allocate()) {}
+    // Private controller caches need no backing until their first access. Keep
+    // shared caches eager: their separate set locks do not serialize a first
+    // allocation of the whole store.
+    ZeroStorage() : elements_(LazyStorage ? nullptr : allocate()) {}
     ZeroStorage(const ZeroStorage &other) : elements_(other.elements_ ? allocate() : nullptr) {
       if (elements_)
         std::memcpy(elements_.get(), other.elements_.get(), Count * sizeof(T));
@@ -494,8 +560,20 @@ private:
     ZeroStorage(ZeroStorage &&) noexcept = default;
     ZeroStorage &operator=(ZeroStorage &&) noexcept = default;
 
-    T &operator[](size_t index) { return elements_[index]; }
-    const T &operator[](size_t index) const { return elements_[index]; }
+    T &operator[](size_t index) {
+      assert(elements_);
+      return elements_[index];
+    }
+    const T &operator[](size_t index) const {
+      assert(elements_);
+      return elements_[index];
+    }
+
+    void materialize() {
+      if constexpr (LazyStorage)
+        if (!elements_)
+          elements_.reset(allocate());
+    }
 
   private:
     class Free {
