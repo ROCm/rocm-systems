@@ -337,10 +337,8 @@ def _split_rccl_version(version: str) -> tuple[str, str, bool]:
 
 
 # RCCL prints this on EVERY call of a deprecated API name (src/misc/api_trace.cc),
-# at WARN, so NCCL_DEBUG=WARN keeps it. GPT-OSS-120B's MoE all-to-all made it
-# 777600 lines per node per phase -- 97% of a 180 MB node log, which madengine
-# keeps three copies of -- and run 38238634668 alone left 2.1 GB on /apps, under
-# the runner account's quota.
+# at WARN, so NCCL_DEBUG=WARN keeps it. GPT-OSS-120B's MoE all-to-all makes it
+# 97% of each node log, which madengine keeps three copies of.
 _LOG_SPAM_RE = re.compile(rb"NCCL WARN Please note that (\w+) is deprecated")
 
 
