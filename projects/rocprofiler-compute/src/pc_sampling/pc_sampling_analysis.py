@@ -175,8 +175,8 @@ def aggregate_pc_sample_records(
     )
     aggregations = {
         "count": ("inst_index", "size"),
-        "issue_count": ("wave_issued", _aggregate_count_issued),
-        "stall_count": ("wave_issued", _aggregate_count_stalled),
+        "issue_count": ("wave_issued", _aggregate_issue_count),
+        "stall_count": ("wave_issued", _aggregate_stall_count),
         "stall_reason": ("stall_reason", _aggregate_stall_reason),
         "inst_type": ("inst_type", _aggregate_inst_type),
         # mean skips missing values, so a sample without the field does not
@@ -347,14 +347,14 @@ def _count_set_bits(exec_masks: pd.Series) -> pd.Series:
     return set_bits
 
 
-def _aggregate_count_issued(wave_issued: pd.Series) -> Optional[int]:
+def _aggregate_issue_count(wave_issued: pd.Series) -> Optional[int]:
     """Sum issued waves; None when no wave_issued info exists (host_trap)."""
     if wave_issued.isnull().all():
         return None
     return int(wave_issued.sum())
 
 
-def _aggregate_count_stalled(wave_issued: pd.Series) -> Optional[int]:
+def _aggregate_stall_count(wave_issued: pd.Series) -> Optional[int]:
     """Count not-issued waves; None when no wave_issued info exists (host_trap)."""
     if wave_issued.isnull().all():
         return None
