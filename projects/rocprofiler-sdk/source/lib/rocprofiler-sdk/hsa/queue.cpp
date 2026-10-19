@@ -1439,17 +1439,20 @@ Queue::Queue(
     CoreApiTable            core_api,
     AmdExtTable             ext_api,
     hsa_queue_t*            queue,
-    set_write_interceptor_t set_write_interceptor)  // NOLINT(performance-unnecessary-value-param)
-: _core_api(core_api)
+    set_write_interceptor_t set_write_interceptor,  // NOLINT(performance-unnecessary-value-param)
+    bool                    profiling_participant)
+: _profiling_participant(profiling_participant)
+, _core_api(core_api)
 , _ext_api(ext_api)
 , _agent(agent)
 , _intercept_queue(queue)
 {
-    if(!context::get_registered_contexts([](const context::context* ctx) {
-            return (ctx->dispatch_counter_collection || ctx->device_counter_collection ||
-                    ctx->dispatch_spm || ctx->device_spm || ctx->dispatch_thread_trace ||
-                    ctx->device_thread_trace);
-        }).empty())
+    if(profiling_participant && !context::get_registered_contexts([](const context::context* ctx) {
+                                     return (ctx->dispatch_counter_collection ||
+                                             ctx->device_counter_collection || ctx->dispatch_spm ||
+                                             ctx->device_spm || ctx->dispatch_thread_trace ||
+                                             ctx->device_thread_trace);
+                                 }).empty())
     {
         CHECK(_agent.cpu_pool().handle != 0);
         CHECK(_agent.get_hsa_agent().handle != 0);
@@ -1505,6 +1508,14 @@ Queue::~Queue()
     if(_active_kernels.handle != 0 && _core_api.hsa_signal_destroy_fn != nullptr)
     {
         _core_api.hsa_signal_destroy_fn(_active_kernels);
+    }
+
+    // A non-participant is never registered, so nothing else releases its ready_signal.
+    // block_signal is released on queue destruction, not here.
+    if(!_profiling_participant && ready_signal.handle != 0 &&
+       _core_api.hsa_signal_destroy_fn != nullptr)
+    {
+        _core_api.hsa_signal_destroy_fn(ready_signal);
     }
 }
 
