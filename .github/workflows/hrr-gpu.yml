@@ -184,7 +184,7 @@ jobs:
         run: |
           set -euo pipefail
           cmake -S emulation/rocjitsu -B build/rocjitsu -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build build/rocjitsu --target rocjitsu_bin -j
+          cmake --build build/rocjitsu --target rocjitsu_bin rocjitsu_shared -j
           echo "${GITHUB_WORKSPACE}/build/rocjitsu/tools/rocjitsu" >> "${GITHUB_PATH}"
 
       - name: Download build
@@ -203,7 +203,9 @@ jobs:
           FAMILY: ${{ matrix.family }}
           ARCH: ${{ matrix.arch }}
           # The config path stays data. The shell does not assemble the command.
-          LAUNCHER: ${{ format('rocjitsu --daemon --config {0} --', matrix.config) }}
+          # Local mode: the simulator runs inside each process. Daemon mode
+          # (rocjitsu --daemon) fails hipMemCreate and hangs gfx90a replay.
+          LAUNCHER: ${{ format('rocjitsu --config {0} --', matrix.config) }}
           HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
         shell: bash
         run: >-
