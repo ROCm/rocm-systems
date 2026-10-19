@@ -436,6 +436,15 @@ rj_configure_target(rj_decode_fuzz_test PRIVATE_INCLUDES WARNINGS)
 add_dependencies(rj_decode_fuzz_test rj_decode_fuzz)
 rj_add_gtest_tests(rj_decode_fuzz_test)
 
+add_executable(rj_execution_fuzz_test fuzz/execution/execution_fuzz_test.cpp)
+target_link_libraries(
+    rj_execution_fuzz_test
+    PRIVATE rj_execution_fuzz_core GTest::gtest_main
+)
+rj_configure_target(rj_execution_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_execution_fuzz_test rj_execution_fuzz)
+rj_add_gtest_tests(rj_execution_fuzz_test)
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
     NAME RocjitsuWaitCheckingCliTest
@@ -466,6 +475,20 @@ add_test(
         ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/decode/test_decode_cli.py -v
 )
+add_test(
+    NAME ExecutionCampaignUnitTest
+    COMMAND
+        ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/execution/test_execution_campaign.py -v
+)
+add_test(
+    NAME ExecutionFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        RJ_EXECUTION_FUZZ=$<TARGET_FILE:rj_execution_fuzz> ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/execution/test_execution_cli.py -v
+)
+set_tests_properties(ExecutionFuzzCliTest PROPERTIES TIMEOUT 120)
 add_test(
     NAME PretranslateScriptUnitTest
     COMMAND

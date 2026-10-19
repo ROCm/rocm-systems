@@ -2033,7 +2033,15 @@ template <bool EnableAsync>
   const bool was_in_trap_handler = active->in_trap_handler();
 
   const uint32_t executing_process = active->process_id();
-  const util::Result execution_result = execute_instruction(inst, *active);
+  util::Result execution_result;
+  try {
+    execution_result = execute_instruction(inst, *active);
+  } catch (const util::UnimplementedInst &) {
+    // Generated callbacks use this exception for unsupported guest encodings.
+    // Keep direct execute_instruction() callers' contract intact while routing
+    // fetched instructions through the ordinary wave-failure path.
+    active->report_instruction_execution_error(InstructionExecutionError::UnimplementedInstruction);
+  }
 
   if (execution_result.failed()) [[unlikely]] {
     return_decoded.discard();

@@ -414,6 +414,7 @@ add_dependencies(rocjitsu_shared flatbuffers_schemas)
 add_subdirectory(tools)
 add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
+add_subdirectory(fuzz/execution)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(tools/rocjitsu)
