@@ -1630,8 +1630,8 @@ Hash128 write_code_object(const void* image, size_t image_size) {
     if (g_events_fd < 0 || g_events_finalized) return {};  // not open, or past the trailer
   }
 
-  // The stored bytes, and so the hash, are the image without its build paths
-  // and compiler build (see hip_capture_scrub.h).
+  // The stored bytes, and so the hash, are the image with its .comment and
+  // debug sections zeroed (see hip_capture_scrub.h).
   std::vector<uint8_t> scrubbed(static_cast<const uint8_t*>(image),
                                 static_cast<const uint8_t*>(image) + image_size);
   scrub::scrub_code_object(scrubbed.data(), scrubbed.size());

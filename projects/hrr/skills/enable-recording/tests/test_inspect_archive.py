@@ -645,19 +645,19 @@ def test_verify_reports_hardware_identifiers_and_build_info(tmp_path, capsys):
     inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
     procs = {p["pid"]: p for p in json.loads(capsys.readouterr().out)["processes"]}
     assert procs[31]["hardware_ids"] == ["pci", "uuid"]
-    assert procs[31]["build_info_files"] == 2
+    assert procs[31]["debug_info_files"] == 2
     assert procs[31]["unchecked_fat_binaries"] == 1
     assert procs[32]["hardware_ids"] == []
-    assert procs[32]["build_info_files"] == 0
+    assert procs[32]["debug_info_files"] == 0
     assert procs[32]["unchecked_fat_binaries"] == 0
 
     inspect_archive.main(["--archive", str(tmp_path), "--no-playback"])
     text = capsys.readouterr().out
     assert (
-        "hardware identifiers: pci, uuid   build info in 2 code objects, "
-        "1 compressed fat binaries not checked" in text
+        "hardware identifiers: pci, uuid   .comment/.debug* in 2 code objects, "
+        "absolute paths in 0, 1 compressed fat binaries not checked" in text
     )
-    assert "hardware identifiers: blank   build info in 0 code objects" in text
+    assert "hardware identifiers: blank   .comment/.debug* in 0 code objects, absolute paths in 0" in text
 
 
 def test_an_allocated_comment_still_counts_as_build_info(tmp_path, capsys):
@@ -670,7 +670,33 @@ def test_an_allocated_comment_still_counts_as_build_info(tmp_path, capsys):
         make_elf({".comment": b"/home/dev/build\0"}, allocated=(".comment",))
     )
     inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
-    assert json.loads(capsys.readouterr().out)["processes"][0]["build_info_files"] == 1
+    assert json.loads(capsys.readouterr().out)["processes"][0]["debug_info_files"] == 1
+
+
+def test_an_absolute_path_in_loaded_data_is_reported(tmp_path, capsys):
+    """A device assert() keeps its source file name in .rodata, which the GPU
+    loads, so capture leaves it and `verify` has to say it is there. Machine
+    code and sections the GPU never loads are not read as strings.
+    """
+    leaky = make_process(tmp_path, 35)
+    (leaky / "code_objects").mkdir()
+    (leaky / "code_objects" / "a.hsaco").write_bytes(
+        make_elf({".rodata": b"p >= 0\0/home/dev/src/k.hip\0"}, allocated=(".rodata",))
+    )
+    clean = make_process(tmp_path, 36)
+    (clean / "code_objects").mkdir()
+    (clean / "code_objects" / "a.hsaco").write_bytes(
+        make_elf({".rodata": b"p >= 0\0k.hip\0//\0", ".note": b"\0/a/b\0"}, allocated=(".rodata",))
+    )
+    text = bytearray(make_elf({".text": b"\0/a/b\0"}, allocated=(".text",)))
+    struct.pack_into("<Q", text, len(text) - 2 * 64 + 8, 6)  # .text: SHF_ALLOC | SHF_EXECINSTR
+    (clean / "code_objects" / "b.hsaco").write_bytes(text)
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    procs = {p["pid"]: p for p in json.loads(capsys.readouterr().out)["processes"]}
+    assert procs[35]["path_files"] == 1
+    assert procs[36]["path_files"] == 0
+    assert procs[35]["debug_info_files"] == procs[36]["debug_info_files"] == 0
 
 
 def test_only_blobs_registered_as_fat_binaries_are_checked(tmp_path, capsys):
@@ -687,7 +713,7 @@ def test_only_blobs_registered_as_fat_binaries_are_checked(tmp_path, capsys):
 
     inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
     proc = json.loads(capsys.readouterr().out)["processes"][0]
-    assert proc["build_info_files"] == 1
+    assert proc["debug_info_files"] == 1
     assert proc["unchecked_fat_binaries"] == 0
 
 
@@ -703,7 +729,7 @@ def test_fat_binaries_are_found_by_the_id_of_the_archive_version(tmp_path, capsy
 
     inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
     procs = {p["pid"]: p for p in json.loads(capsys.readouterr().out)["processes"]}
-    assert [procs[pid]["build_info_files"] for pid in cases] == [1, 0, 1, 0]
+    assert [procs[pid]["debug_info_files"] for pid in cases] == [1, 0, 1, 0]
     assert [procs[pid]["fat_binaries_scanned"] for pid in cases] == [True, True, True, False]
     inspect_archive.main(["--archive", str(tmp_path), "--no-playback"])
     assert "fat binaries not checked (archive format v7)" in capsys.readouterr().out
@@ -723,7 +749,7 @@ def test_a_section_name_ends_inside_its_string_table(tmp_path, capsys):
     (pid_dir / "code_objects" / "b.hsaco").write_bytes(cut)
 
     inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
-    assert json.loads(capsys.readouterr().out)["processes"][0]["build_info_files"] == 1
+    assert json.loads(capsys.readouterr().out)["processes"][0]["debug_info_files"] == 1
 
 
 def test_the_json_verdict_is_one_of_the_four_documented_ones(tmp_path, capsys):

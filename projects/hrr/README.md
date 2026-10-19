@@ -236,10 +236,13 @@ capture.hrr/
   extracted by the runtime, for `hipModuleLoad` too); a launch
   records the hash so kernels sharing a name (Triton emits many `triton_`)
   still resolve to the code object they came from. Their `.comment` and
-  `.debug*` sections, which hold the compiler build and build paths, are
-  zeroed and retyped `SHT_NOBITS` before they are stored, as are those of
-  uncompressed fat binaries, so a debugger on a replay sees no debug
-  information. The symbol table is not touched, so kernel names stay.
+  `.debug*` sections, which hold the compiler build and the build paths of
+  debug information, are zeroed and retyped `SHT_NOBITS` before they are
+  stored, as are those of uncompressed fat binaries, so a debugger on a
+  replay sees no debug information. What the GPU loads is not touched:
+  kernel names stay, and so does a string a kernel keeps, such as the
+  source path a device `assert()` prints. Compressed (`CCOB`) fat binaries
+  and `hipLinkAddData` inputs are stored as they were passed.
 - **manifest.json** — counts, versions and device properties; the GPU's PCI
   address, UUID and LUID are written blank
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events

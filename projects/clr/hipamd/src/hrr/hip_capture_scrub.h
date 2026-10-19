@@ -15,6 +15,7 @@ namespace scrub {
 // object about to be stored: an ELF64 image, or every entry of an uncompressed
 // clang offload bundle. Those sections carry the compiler build, absolute build
 // paths and source file names; the GPU never loads them, so replay is unchanged.
+// A string the GPU does load, such as the file name in a device assert(), stays.
 // Each zeroed section is retyped SHT_NOBITS, so debuggers and profilers see it as
 // absent. Sizes and offsets stay as they are, so a bundle's entry table stays valid.
 // A compressed bundle, or anything that does not parse, is left as it is.

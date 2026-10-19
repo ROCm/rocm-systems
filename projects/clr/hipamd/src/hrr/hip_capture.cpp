@@ -1444,7 +1444,7 @@ static size_t compute_bundle_size(const void* blob) {
   return static_cast<size_t>(end);
 }
 
-// Stores a fat binary with the build paths and compiler build of its code
+// Stores a fat binary with the .comment and debug sections of its code
 // objects zeroed; the application's own copy is left alone.
 static hrr_cap::Hash128 write_fat_binary_blob(const void* blob, size_t blob_size) {
   std::vector<uint8_t> scrubbed(static_cast<const uint8_t*>(blob),

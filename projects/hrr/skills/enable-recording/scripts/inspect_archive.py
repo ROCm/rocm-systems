@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -88,6 +89,11 @@ COMPRESSED_BUNDLE_MAGIC = b"CCOB"
 REGISTER_FAT_BINARY = {8: 549, 9: 550}
 FAT_BINARY_HASH_OFFSET = EVENT_HEADER_BYTES + 8
 HARDWARE_ID_FIELDS = ("pci", "uuid", "luid")
+# Capture cannot zero what the GPU loads, so `verify` looks there for strings
+# such as "/home/dev/src/model.hip": a NUL-terminated string that starts with
+# "/" and has at least two components, in a loaded, non-executable section.
+SHT_PROGBITS, SHF_ALLOC, SHF_EXECINSTR = 1, 0x2, 0x4
+ABSOLUTE_PATH = re.compile(rb"(?<=\0)/[\x21-\x7e]+/[\x21-\x7e]+(?=\0)")
 
 
 @dataclass
@@ -111,7 +117,9 @@ class ProcessArchive:
     # Manifest fields that name the individual GPU and are not blank.
     hardware_ids: list[str] = field(default_factory=list)
     # Code objects and fat binaries still holding a .comment or .debug* section.
-    build_info_files: int = 0
+    debug_info_files: int = 0
+    # Code objects and fat binaries whose loaded data holds an absolute path.
+    path_files: int = 0
     # Compressed fat binaries, which cannot be checked without decompressing.
     unchecked_fat_binaries: int = 0
     # False when events.bin is in a format version whose fat binary id is unknown.
@@ -190,23 +198,28 @@ def _dir_stats(path: Path) -> tuple[int, int]:
     return files, total
 
 
-def _elf_has_build_info(data: bytes) -> bool:
-    """Does this ELF64 image hold a .comment or .debug* section that is not all zero?
+def _elf_findings(data: bytes) -> tuple[bool, bool]:
+    """What an ELF64 image still carries: (a .comment or .debug* section that
+    is not all zero, an absolute path string in its loaded data).
 
     Allocated sections count too: capture leaves them as they are, so they are
-    exactly the ones that can still carry a build path.
+    exactly the ones that can still carry a build path, such as the source path
+    a device assert() prints, which sits in .rodata.
     """
+    debug_info = path = False
     if len(data) < 64 or data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
-        return False
+        return debug_info, path
     shoff = struct.unpack_from("<Q", data, 0x28)[0]
     shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 0x3A)
     if shentsize != 64 or shstrndx >= shnum or shoff + shnum * 64 > len(data):
-        return False
+        return debug_info, path
     names, names_size = struct.unpack_from("<QQ", data, shoff + shstrndx * 64 + 24)
     if names + names_size > len(data):
-        return False
+        return debug_info, path
     for i in range(shnum):
-        name, kind, _, _, offset, size = struct.unpack_from("<IIQQQQ", data, shoff + i * 64)
+        name, kind, flags, _, offset, size = struct.unpack_from("<IIQQQQ", data, shoff + i * 64)
+        if kind == SHT_PROGBITS and flags & SHF_ALLOC and not flags & SHF_EXECINSTR:
+            path = path or bool(ABSOLUTE_PATH.search(b"\0" + data[offset : offset + size]))
         end = data.find(b"\0", names + name, names + names_size)
         if name >= names_size or end < 0:
             continue  # the name does not end inside the string table
@@ -215,18 +228,18 @@ def _elf_has_build_info(data: bytes) -> bool:
             continue
         if kind == 8:  # SHT_NOBITS: nothing in the file
             continue
-        if data[offset : offset + size].strip(b"\0"):
-            return True
-    return False
+        debug_info = debug_info or bool(data[offset : offset + size].strip(b"\0"))
+    return debug_info, path
 
 
-def _code_object_has_build_info(data: bytes) -> bool:
-    """The same, for an ELF or for any entry of an uncompressed offload bundle."""
+def _code_object_findings(data: bytes) -> tuple[bool, bool]:
+    """The same, for an ELF or across the entries of an uncompressed offload bundle."""
     if not data.startswith(BUNDLE_MAGIC):
-        return _elf_has_build_info(data)
+        return _elf_findings(data)
+    debug_info = path = False
     pos = len(BUNDLE_MAGIC)
     if len(data) < pos + 8:
-        return False
+        return debug_info, path
     (count,) = struct.unpack_from("<Q", data, pos)
     pos += 8
     for _ in range(count):
@@ -234,9 +247,9 @@ def _code_object_has_build_info(data: bytes) -> bool:
             break
         offset, size, id_size = struct.unpack_from("<QQQ", data, pos)
         pos += 24 + id_size
-        if _elf_has_build_info(data[offset : offset + size]):
-            return True
-    return False
+        entry = _elf_findings(data[offset : offset + size])
+        debug_info, path = debug_info or entry[0], path or entry[1]
+    return debug_info, path
 
 
 def _fat_binary_blobs(pid_dir: Path) -> list[Path] | None:
@@ -294,8 +307,9 @@ def _scan_code_objects(pid_dir: Path, proc: ProcessArchive) -> None:
         if data.startswith(COMPRESSED_BUNDLE_MAGIC):
             proc.unchecked_fat_binaries += 1
             continue
-        if _code_object_has_build_info(data):
-            proc.build_info_files += 1
+        debug_info, path = _code_object_findings(data)
+        proc.debug_info_files += debug_info
+        proc.path_files += path
 
 
 def _archive_format_version(events: Path) -> int | None:
@@ -843,7 +857,10 @@ def render(report: ArchiveReport) -> str:
         if proc.parent_pid:
             lines.append(f"    parent pid: {proc.parent_pid}")
         hardware = ", ".join(proc.hardware_ids) if proc.hardware_ids else "blank"
-        build_info = f"build info in {proc.build_info_files} code objects"
+        build_info = (
+            f".comment/.debug* in {proc.debug_info_files} code objects, "
+            f"absolute paths in {proc.path_files}"
+        )
         if proc.unchecked_fat_binaries:
             build_info += f", {proc.unchecked_fat_binaries} compressed fat binaries not checked"
         if not proc.fat_binaries_scanned:
@@ -914,7 +931,8 @@ def to_dict(report: ArchiveReport) -> dict:
                 "code_object_files": p.code_object_files,
                 "finalized": p.finalized,
                 "hardware_ids": p.hardware_ids,
-                "build_info_files": p.build_info_files,
+                "debug_info_files": p.debug_info_files,
+                "path_files": p.path_files,
                 "unchecked_fat_binaries": p.unchecked_fat_binaries,
                 "fat_binaries_scanned": p.fat_binaries_scanned,
             }
