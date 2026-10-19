@@ -436,10 +436,24 @@ __device__ inline void warpVecCopy(const uint8_t* s, uint8_t* d, size_t n, uint3
     for (uint32_t b = 0; b < rem; ++b) d[nd * 4 + b] = s[nd * 4 + b];
 }
 
+// ---- one-way global <-> LDS transfer of a byte range, by ONE warp -----------
+// Direction of a single leg: the first pointer is always the global-memory side
+// and the second the LDS side, which keeps the tile helpers below symmetric.
+enum struct LdsDir {
+  Load,
+  Store
+};
+
+template <LdsDir DIR, CachePolicy cp>
+__device__ inline void ldsIssue(const gfx1250_TDM_GROUP0& g0, const gfx1250_TDM_GROUP1& g1) {
+  if constexpr (DIR == LdsDir::Load) load<cp>(g0, g1);
+  else store<cp>(g0, g1);
+}
+
 // ---- one 1-D tile of `nbytes` (<= TILE_DIM_MAX) at BYTE granularity. -------
 // Exact length, so the copy's chunks need no separate sub-row tail. Higher dims
 // (D2/D3/D4) are unused and passed as zero inside load()/store().
-template <bool Store, CachePolicy cp>
+template <LdsDir DIR, CachePolicy cp>
 __device__ inline void tile1d(uint64_t global, uint32_t lds, uint32_t nbytes) {
   gfx1250_TDM_GROUP1 g1;
   g1.dataSize(DS1);
@@ -449,8 +463,7 @@ __device__ inline void tile1d(uint64_t global, uint32_t lds, uint32_t nbytes) {
   g1.tensorDim1(1);
   g1.tensorDim0Stride(nbytes);
   gfx1250_TDM_GROUP0 g0(lds, global);
-  if constexpr (Store) store<cp>(g0, g1);
-  else load<cp>(g0, g1);
+  ldsIssue<DIR, cp>(g0, g1);
 }
 
 using LdsU32 = __attribute__((address_space(3))) uint32_t;
@@ -490,17 +503,7 @@ __device__ inline void shiftDown(uint32_t lds, uint32_t n, uint32_t r, uint32_t 
       }
     }
   }
-  // The tensor store reads LDS behind the DS counter's back.
-  __asm__ volatile("s_wait_dscnt 0x0" ::: "memory");
 }
-
-// ---- one-way global <-> LDS transfer of a byte range, by ONE warp -----------
-// Direction of a single leg: the first pointer is always the global-memory side
-// and the second the LDS side, which keeps the tile helpers below symmetric.
-enum struct LdsDir {
-  Load,
-  Store
-};
 
 constexpr uint32_t TILE_DIM_MAX = 0xFFFFu;   // tile_dim0/tile_dim1 are 16-bit fields
 constexpr uint32_t LINE = 128;       // alignment the head peel targets
@@ -517,12 +520,6 @@ constexpr uint32_t TWO_SLOT_WINDOW = 16384;
 // Whole 256B rows one 1-D bulk tile can carry: tile_dim0 now holds the entire length
 // in elements, not one row's worth, so the 16-bit field is the limit (1023 x 256B).
 constexpr uint32_t MAX_ROWS = TILE_DIM_MAX / TD0;
-
-template <LdsDir DIR, CachePolicy cp>
-__device__ inline void ldsIssue(const gfx1250_TDM_GROUP0& g0, const gfx1250_TDM_GROUP1& g1) {
-  if constexpr (DIR == LdsDir::Load) load<cp>(g0, g1);
-  else store<cp>(g0, g1);
-}
 
 // One 1-D tile at BYTE granularity, for the ragged head/tail. Exact length, so
 // it works at any alignment; `nbytes` must be <= TILE_DIM_MAX.
@@ -672,9 +669,9 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
   const uint32_t window = (ldsUsable / issuers) & ~15u;
   const uint32_t nSlots = window >= 2 * MIN_SLOT && (r || window >= TWO_SLOT_WINDOW) ? 2 : 1;
   const uint32_t slotBytes = (window / nSlots) & ~15u;
-  // slot + o + T (plus the shift's slack) fits; MIN_SLOT keeps T >= ALIGN
-  uint32_t T = (slotBytes - o - (r ? SHIFT_SLACK : 0)) & ~(ALIGN - 1);
-  if (T > MAX_CHUNK) T = MAX_CHUNK;
+  // slot + o + chunkBytes (plus the shift's slack) fits; MIN_SLOT keeps chunkBytes >= ALIGN
+  uint32_t chunkBytes = (slotBytes - o - (r ? SHIFT_SLACK : 0)) & ~(ALIGN - 1);
+  if (chunkBytes > MAX_CHUNK) chunkBytes = MAX_CHUNK;
 
   // distribute the ALIGN-byte units across issuers by team rank (contiguous)
   const size_t base = units / issuers;
@@ -690,14 +687,14 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
   const size_t len = end - begin;
   auto storeChunk = [&](uint32_t slot, uint64_t global, uint32_t n) {
     if (r) shiftDown(slot + o, n, r, warpThread, warpThreads);
-    tile1d<true, cp>(global, slot + o, n);
+    tile1d<LdsDir::Store, cp>(global, slot + o, n);
   };
 
   if (nSlots == 1) {
     // One slot: each chunk's store waits for its load, and the next load for the store.
-    for (size_t off = 0; off < len; off += T) {
-      const uint32_t n = len - off < T ? static_cast<uint32_t>(len - off) : T;
-      tile1d<false, cp>(sB + off, win + o - sigma, n + delta);
+    for (size_t off = 0; off < len; off += chunkBytes) {
+      const uint32_t n = len - off < chunkBytes ? static_cast<uint32_t>(len - off) : chunkBytes;
+      tile1d<LdsDir::Load, cp>(sB + off, win + o - sigma, n + delta);
       waitTensor0();
       storeChunk(win, dB + off, n);
       waitTensor0();
@@ -711,15 +708,15 @@ __device__ inline void issue(void* dst, const void* src, size_t sizeBytes, void*
   // after the other slot's load, so in-order completion leaves nothing to keep
   // in flight across the wait: it drains to zero.
   uint32_t slot = 0;
-  for (size_t off = 0; off < len; off += T) {
-    const uint32_t n = len - off < T ? static_cast<uint32_t>(len - off) : T;
+  for (size_t off = 0; off < len; off += chunkBytes) {
+    const uint32_t n = len - off < chunkBytes ? static_cast<uint32_t>(len - off) : chunkBytes;
     if (off) waitTensor0();
-    tile1d<false, cp>(sB + off, win + slot + o - sigma, n + delta);
-    if (off) storeChunk(win + (slot ^ slotBytes), dB + off - T, T);
+    tile1d<LdsDir::Load, cp>(sB + off, win + slot + o - sigma, n + delta);
+    if (off) storeChunk(win + (slot ^ slotBytes), dB + off - chunkBytes, chunkBytes);
     slot ^= slotBytes;
   }
   waitTensor0();
-  const size_t lastOff = (len - 1) / T * T;
+  const size_t lastOff = (len - 1) / chunkBytes * chunkBytes;
   storeChunk(win + (slot ^ slotBytes), dB + lastOff, static_cast<uint32_t>(len - lastOff));
 }
 

@@ -27,6 +27,8 @@ THE SOFTWARE.
 #include "syncPolicy.h"   // shared SyncPolicy encoding (same as tdmCopy.h)
 #include "uniform.h"      // shared warp-uniformity hints (same as tdmCopy.h)
 
+#include <type_traits>
+
 #ifndef __has_include
 #define __has_include(x) 0
 #endif
@@ -205,11 +207,14 @@ using wave::uniform;
 
 // Bytes moved by a single lane in the widest (b128) access.
 constexpr uint32_t BYTES_PER_LANE_B128 = 16;
-// Bytes moved by one full-warp b128 instruction. gfx1250 is wave32-only; the unrolled runs below bake multiples of
-// this into immediate offsets.
+// Bytes moved by one full-warp b128 instruction. The unrolled runs below bake multiples of this into immediate
+// offsets, so it must be a constant expression, which neither warpSize nor __builtin_amdgcn_wavefrontsize() is.
+// gfx1250 is wave32-only.
 constexpr uint32_t WARP_BYTES_B128 = 32 * BYTES_PER_LANE_B128;
-// The hot loop starts on a 128-byte boundary of its alignment anchor.
-constexpr size_t NATURAL_ALIGNMENT_BYTES = 128;
+// The hot loop starts on a boundary of this many bytes of its alignment anchor. Measured on gfx1250: loads run up to
+// 1.3x faster from 256 than from 128 (512 gains nothing more), while stores run up to 19% slower from 256.
+template <AsyncDir DIR>
+constexpr size_t NATURAL_ALIGNMENT_BYTES = DIR == AsyncDir::Load ? 256 : 128;
 // Longest straight-line run of b128 instructions: the hot loop's unroll factor and the largest pipeline chunk.
 constexpr uint32_t MAX_RUN = 8;
 
@@ -256,8 +261,8 @@ static_assert(MAX_RUN == 8, "issueRunB128 decomposes counts below 2 * MAX_RUN");
 // `global`, `lds`, and `sizeInBytes` arguments -- the per-lane work distribution is derived internally.
 //
 // The copy is split into three phases:
-//   1. Peel the leading bytes so the alignment ANCHOR (see below) reaches a 128-byte boundary: one b8 instruction
-//      up to the 16-byte boundary, then one partial b128 instruction up to the 128-byte boundary.
+//   1. Peel the leading bytes so the alignment ANCHOR (see below) reaches a NATURAL_ALIGNMENT_BYTES boundary: one
+//      b8 instruction up to the 16-byte boundary, then one partial b128 instruction up to the larger one.
 //   2. Stream full-warp b128 instructions (warpSize * 16 bytes each), MAX_RUN per iteration with immediate
 //      offsets; the sub-MAX_RUN remainder is dispatched up front through issueRunB128 (Duff's device).
 //   3. Drain the tail (< warpSize * 16 bytes) with one partial b128 instruction and one b8 instruction.
@@ -290,10 +295,12 @@ __device__ inline void warpAsyncCopy(const uint8_t* global, uint8_t* lds, size_t
     if (lane < head) asyncCopyB8<DIR, cp>(global + lane, lds + lane);
     offset = head;
 
-    // Phase 1b: whole 16-byte chunks up to the anchor's next 128-byte boundary (at most 7), one per lane.
-    size_t peelChunks = ((NATURAL_ALIGNMENT_BYTES - ((anchor + offset) & (NATURAL_ALIGNMENT_BYTES - 1))) &
-                         (NATURAL_ALIGNMENT_BYTES - 1)) /
-                        BYTES_PER_LANE_B128;
+    // Phase 1b: whole 16-byte chunks up to the anchor's next NATURAL_ALIGNMENT_BYTES boundary (fewer than a warp),
+    // one per lane.
+    constexpr size_t ALIGNMENT = NATURAL_ALIGNMENT_BYTES<DIR>;
+    static_assert(ALIGNMENT <= WARP_BYTES_B128, "the peel is a single partial-warp instruction");
+    size_t peelChunks =
+      ((ALIGNMENT - ((anchor + offset) & (ALIGNMENT - 1))) & (ALIGNMENT - 1)) / BYTES_PER_LANE_B128;
     const size_t availChunks = (sizeInBytes - offset) / BYTES_PER_LANE_B128;
     if (peelChunks > availChunks) peelChunks = availChunks;
     if (lane < peelChunks) {
@@ -545,7 +552,7 @@ enum class LoadFrame {
   Slot, // each chunk loads exactly its own slot
   Ring, // source-aligned, t0 a nonzero multiple of 16: lanes stay 16B aligned in LDS
   Ring4, // source-aligned, t0 % 16 in {4, 8, 12}: lanes are offset in LDS, one of them straddles each seam
-  Shift, // source-aligned, t0 % 16 != 0: lanes stay 16B aligned in LDS, each slot is realigned before its store
+  Shift, // source-aligned, t0 % 4 != 0: lanes stay 16B aligned in LDS, each slot is realigned before its store
 };
 
 // How far before its slot a chunk's LDS image starts in a ring frame: t0, or for Shift t0 rounded down to 16, which
@@ -592,8 +599,6 @@ __device__ inline void realignSlot(uint8_t* win, uint32_t slot, uint32_t t0) {
       *toLds<LdsWord4>(p + (i + k) * WARP_BYTES_B128) = o;
     }
   }
-  // The async store reads LDS behind the DS counter's back.
-  __asm__ volatile("s_wait_dscnt 0x0" ::: "memory");
 }
 
 // Load leg of pipeline chunk c into `slot` of the window, from per-lane pointers `g` (the chunk's source) and `win`
@@ -604,7 +609,8 @@ __device__ inline void realignSlot(uint8_t* win, uint32_t slot, uint32_t t0) {
 // (`g` is that aligned address), so their LDS image starts t0 bytes before the slot -- the tail of the previous
 // slot, or for slot 0 of the window's last slot, the one lane group that wraps around. Every global access of both
 // legs is then a whole aligned block; only the LDS side of the loads is offset, which the hardware barely notices.
-// Chunk 0 masks off the lanes wholly ahead of the copy.
+// Chunk 0 masks off the lanes wholly ahead of the copy, and the last chunk those wholly past it. Each remaining load
+// reads an aligned 16B granule holding at least one byte of the copy, so it never touches a page the copy does not.
 //
 // Ring4 also has a lane that straddles each slot seam. The window is padded by 16 bytes at both ends to absorb
 // the parts of a straddling lane that fall outside it, and since the wrapped straddler's second half lands in the
@@ -625,8 +631,9 @@ __device__ inline void loadFull(const uint8_t* g, uint8_t* win, uint32_t slot, u
     if constexpr (FIRST) {
       if (pos + BYTES_PER_LANE_B128 > t0) asyncCopyB128<AsyncDir::Load, cp>(g, l);
     } else {
-      if (F == LoadFrame::Ring4 && slot == 0 && pos < t0 && pos + BYTES_PER_LANE_B128 > t0)
+      if (F == LoadFrame::Ring4 && slot == 0 && pos < t0 && pos + BYTES_PER_LANE_B128 > t0) {
         asyncCopyB128<AsyncDir::Load, cp>(g, l);
+      }
       if (F == LoadFrame::Shift && slot == 0 && pos == lt) asyncCopyB128<AsyncDir::Load, cp>(g, l + S * B);
       asyncCopyB128<AsyncDir::Load, cp>(g, (slot == 0 && pos < lt) ? l + S * B : l);
     }
@@ -657,8 +664,9 @@ __device__ inline void loadPartial(const uint8_t* g, uint8_t* win, uint32_t slot
       if (pos < hi) asyncCopyB128<AsyncDir::Load, cp>(g, wrap ? l + S * B : l);
     }
     for (uint32_t j = 1; j < n; ++j) {
-      if (j * WARP_BYTES_B128 + pos < hi)
+      if (j * WARP_BYTES_B128 + pos < hi) {
         asyncCopyB128<AsyncDir::Load, cp>(g + j * WARP_BYTES_B128, l + j * WARP_BYTES_B128);
+      }
     }
   }
 }
@@ -807,8 +815,9 @@ __device__ __forceinline__ void wholeStage(const uint8_t* s, uint8_t* d, uint8_t
     uint8_t* l = win - t0 + pos;
     const uint32_t hi = t0 + bytes;
     if (pos + BYTES_PER_LANE_B128 > t0 && pos < hi) asyncCopyB128<AsyncDir::Load, cp>(g, l);
-    if (hi > WARP_BYTES_B128)
+    if (hi > WARP_BYTES_B128) {
       issueSpan<AsyncDir::Load, cp>(g + WARP_BYTES_B128, l + WARP_BYTES_B128, hi - WARP_BYTES_B128, lane);
+    }
   } else {
     issueSpan<AsyncDir::Load, cp>(s + pos, win + pos, bytes, lane);
   }
@@ -920,7 +929,7 @@ struct HeadElem<8> {
 };
 template <>
 struct HeadElem<16> {
-  using T = uint32_t __attribute__((ext_vector_type(4)));
+  using T = Word4;
 };
 
 // A copy's head (< ANCHOR_GRAIN bytes, a multiple of W) moved through registers in W-byte accesses, W a common
@@ -967,6 +976,27 @@ __device__ inline void headStore(GlobalByte* d, uint32_t head, uint32_t lane, co
     }
   }
 }
+// Calls f(std::integral_constant<uint32_t, W>{}) for the head access width W = 1 << log2W (log2W <= 4).
+template <typename F>
+__device__ inline void withHeadWidth(uint32_t log2W, F&& f) {
+  switch (log2W) {
+  case 4:
+    f(std::integral_constant<uint32_t, 16>{});
+    break;
+  case 3:
+    f(std::integral_constant<uint32_t, 8>{});
+    break;
+  case 2:
+    f(std::integral_constant<uint32_t, 4>{});
+    break;
+  case 1:
+    f(std::integral_constant<uint32_t, 2>{});
+    break;
+  default:
+    f(std::integral_constant<uint32_t, 1>{});
+    break;
+  }
+}
 
 // core: partition + issue the whole copy for the team [start, stop). Work + LDS
 // partition by rank within the team (warpId - start), so each team indexes its
@@ -992,7 +1022,11 @@ __device__ __forceinline__ void issue(void* dst, const void* src, size_t sizeByt
   uint8_t* d = uniform(reinterpret_cast<uint8_t*>(dst));
   uint8_t* lds = uniform(reinterpret_cast<uint8_t*>(ldsBuffer));
   sizeBytes = uniform(static_cast<uint64_t>(sizeBytes));
-  const uint32_t ldsBytes = uniform(static_cast<uint32_t>(ldsBufferBytes)); // LDS is small
+  uint32_t ldsBytes = uniform(static_cast<uint32_t>(ldsBufferBytes)); // LDS is small
+  // The pipeline's windows must start 16B aligned.
+  const uint32_t ldsPad = (16u - (static_cast<uint32_t>(reinterpret_cast<uintptr_t>(lds)) & 15u)) & 15u;
+  lds += ldsPad;
+  ldsBytes = ldsBytes > ldsPad ? ldsBytes - ldsPad : 0;
   startWarpId = uniform(startWarpId);
   stopWarpId = uniform(stopWarpId);
 
@@ -1000,7 +1034,7 @@ __device__ __forceinline__ void issue(void* dst, const void* src, size_t sizeByt
   const uint32_t nThreads = blockDim.x * blockDim.y * blockDim.z;
   const uint32_t tid = (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
   const uint32_t warpThread = tid % W; // thread index within its warp
-  const uint32_t warpId = async_detail::uniform(tid / W);
+  const uint32_t warpId = uniform(tid / W);
   const uint32_t nWarps = (nThreads + W - 1) / W;
 
   // --- team membership: this warp participates iff in [start, stop) --------
@@ -1033,7 +1067,8 @@ __device__ __forceinline__ void issue(void* dst, const void* src, size_t sizeByt
 
   // --- give each issuing warp a 128B-multiple LDS window -------------------
   // Every warp's source start has the same offset t0 within a 512B block. When the pipeline's load leg has to run
-  // in the source's frame (t0 a nonzero multiple of 4), deeper windows matter more than more warps.
+  // in the source's frame (t0 a nonzero multiple of 4), deeper windows matter more than more warps. Not so for
+  // Shift (t0 % 4 != 0): narrowing the team to reach its windows runs 20-48% slower than more warps on plain slots.
   const uint32_t t0 = static_cast<uint32_t>((uintptr_t)(s + head) & (ANCHOR_GRAIN - 1));
   const bool ring = t0 != 0 && (t0 & 3) == 0;
   uint32_t maxIssuers = ldsBytes / WINDOW_GRAIN; // #warps we can give a window
@@ -1069,23 +1104,7 @@ __device__ __forceinline__ void issue(void* dst, const void* src, size_t sizeByt
   const uint32_t headLen = static_cast<uint32_t>(head);
   const uint32_t headLog = __builtin_ctz(static_cast<uint32_t>((uintptr_t)s | (uintptr_t)d) | headLen | 16u);
   if (hasHead) {
-    switch (headLog) {
-    case 4:
-      headLoad<16>(gs, headLen, warpThread, headRegs);
-      break;
-    case 3:
-      headLoad<8>(gs, headLen, warpThread, headRegs);
-      break;
-    case 2:
-      headLoad<4>(gs, headLen, warpThread, headRegs);
-      break;
-    case 1:
-      headLoad<2>(gs, headLen, warpThread, headRegs);
-      break;
-    default:
-      headLoad<1>(gs, headLen, warpThread, headRegs);
-      break;
-    }
+    withHeadWidth(headLog, [&](auto w) { headLoad<decltype(w)::value>(gs, headLen, warpThread, headRegs); });
   }
   uint32_t residByte = 0;
   if (resid != 0) residByte = gs[myStart + staged + (warpThread < resid ? warpThread : 0)];
@@ -1093,23 +1112,7 @@ __device__ __forceinline__ void issue(void* dst, const void* src, size_t sizeByt
   pipelinedStage<cp>(s + myStart, d + myStart, lds + static_cast<size_t>(rank) * window, staged, window);
 
   if (hasHead) {
-    switch (headLog) {
-    case 4:
-      headStore<16>(gd, headLen, warpThread, headRegs);
-      break;
-    case 3:
-      headStore<8>(gd, headLen, warpThread, headRegs);
-      break;
-    case 2:
-      headStore<4>(gd, headLen, warpThread, headRegs);
-      break;
-    case 1:
-      headStore<2>(gd, headLen, warpThread, headRegs);
-      break;
-    default:
-      headStore<1>(gd, headLen, warpThread, headRegs);
-      break;
-    }
+    withHeadWidth(headLog, [&](auto w) { headStore<decltype(w)::value>(gd, headLen, warpThread, headRegs); });
   }
   if (warpThread < resid) gd[myStart + staged + warpThread] = static_cast<uint8_t>(residByte);
 }
