@@ -1414,7 +1414,8 @@ def _append_dot_int_halves(L: list[str], opsel_exprs: tuple[str, str]) -> None:
     gfx1201 and gfx1100 treat each 32-bit source as two 16-bit halves: OP_SEL
     picks the half used for bits 15:0 and OP_SEL_HI the half for bits 31:16,
     as for packed 16-bit math. The assembler default (op_sel:[0,0],
-    op_sel_hi:[1,1]) keeps the register as is. src2 is unaffected.
+    op_sel_hi:[1,1]) keeps the register as is. src2 is unaffected. RDNA2,
+    CDNA1-4 and CDNA5 share this body without a hardware capture.
     """
     opsel, opsel_hi = opsel_exprs
     if not opsel:

@@ -213,9 +213,9 @@ inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &a, const std::arr
                int(std::max(acc_exp, 1u)) - 127 - 23, bool(acc >> 31)};
   // C aligns no lower than -14 for packed F16 and -126 otherwise. When the
   // grid is at or below that floor, a negative C contributes an
-  // arithmetic-floor unit even when no magnitude bits survive (seen on
-  // gfx1201 for subnormal C in F32 DOT2 and packed F16). Coarser grids drop
-  // that tiny C.
+  // arithmetic-floor unit even when no magnitude bits survive; coarser grids
+  // drop that tiny C. At the -126 floor only BF16 products are small enough
+  // for this to change a result; the README lists which callers were measured.
   const int c_floor = Packed && !Bf16 ? -14 : -126;
   const int grid = std::max(product_grid, std::max(c_floor, c.leading_exponent()) - 26);
   int64_t total = align(c, grid, grid > c_floor);
