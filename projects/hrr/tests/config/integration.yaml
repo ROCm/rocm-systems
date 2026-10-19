@@ -107,8 +107,10 @@ cases:
   Unit_HRR_DiskSpace_StopWhileExiting_Direct: {}
   Unit_HRR_DiskSpace_StopsBeforeReserve: {}
   Unit_HRR_DiskSpace_StopsBeforeReserve_Direct: {}
+  Unit_HRR_DispatchSwap_ChildKeepsInheritedPreload: {}
   Unit_HRR_DispatchSwap_Direct: {}
   Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer: {}
+  Unit_HRR_DispatchSwap_Preload_Direct: {}
   Unit_HRR_DispatchSwap_Unreplayable_Direct: {}
   Unit_HRR_DispatchSwap_WrapperOutlivesCapture: {}
   Unit_HRR_DivergenceAbortRoundtrip: {}
