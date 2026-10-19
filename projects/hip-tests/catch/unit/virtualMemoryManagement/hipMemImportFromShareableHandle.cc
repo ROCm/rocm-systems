@@ -157,6 +157,183 @@ HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_HostBackedAlloc) {
 /**
  * Test Description
  * ------------------------
+ *    - Exports an allocation and imports it back into the exporting process, then
+ *      releases only the imported handle. An imported handle borrows the backing
+ *      store, so dropping it must leave the exporter's allocation and its live
+ *      mapping intact. Regression test: the import path once described imported
+ *      handles with the owner's teardown, so releasing the import freed memory the
+ *      exporting handle still owned and the mapping became a dangling reference.
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemImportFromShareableHandle.cc
+ * Test requirements
+ * ------------------------
+ *    - Host specific (LINUX)
+ *    - HIP_VERSION >= 6.1
+ */
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_SelfImportReleaseKeepsAllocation) {
+  CTX_CREATE();
+
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
+
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+
+  size_t granularity = 0;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+  const size_t size_mem = granularity * 2;
+
+  hipMemGenericAllocationHandle_t allocation_handle;
+  HIP_CHECK(hipMemCreate(&allocation_handle, size_mem, &prop, 0));
+
+  void* ptr = nullptr;
+  HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, nullptr, 0));
+  HIP_CHECK(hipMemMap(ptr, size_mem, 0, allocation_handle, 0));
+
+  hipMemAccessDesc access_desc = {};
+  access_desc.location.type = hipMemLocationTypeDevice;
+  access_desc.location.id = device;
+  access_desc.flags = hipMemAccessFlagsProtReadWrite;
+  HIP_CHECK(hipMemSetAccess(ptr, size_mem, &access_desc, 1));
+
+  constexpr unsigned char kPattern = 0x5a;
+  HIP_CHECK(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(ptr), kPattern, size_mem));
+  HIP_CHECK(hipDeviceSynchronize());
+
+  ShareableHandle shareable_handle;
+  HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, allocation_handle,
+                                          hipMemHandleTypePosixFileDescriptor, 0));
+  hipMemGenericAllocationHandle_t imported_handle;
+  HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(shareable_handle)),
+            hipMemHandleTypePosixFileDescriptor));
+  REQUIRE(close(shareable_handle) == 0);
+
+  // The importer goes away first. The exporting handle is still the owner.
+  HIP_CHECK(hipMemRelease(imported_handle));
+
+  // The backing store must have survived, with its contents.
+  std::vector<unsigned char> readback(size_mem, 0);
+  HIP_CHECK(hipMemcpyDtoH(readback.data(), reinterpret_cast<hipDeviceptr_t>(ptr), size_mem));
+  REQUIRE(std::all_of(readback.begin(), readback.end(),
+                      [](unsigned char value) { return value == kPattern; }));
+
+  // The mapping bookkeeping must also have survived; this used to fail with
+  // hipErrorInvalidValue because the sub-buffer pointed at a freed allocation.
+  HIP_CHECK(hipMemUnmap(ptr, size_mem));
+  HIP_CHECK(hipMemRelease(allocation_handle));
+  HIP_CHECK(hipMemAddressFree(ptr, size_mem));
+
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Repeats the export / self-import / release-import cycle while keeping one
+ *      block alive across each iteration, so the freed virtual address ranges are
+ *      recycled by the next reservation. Releasing an imported handle must not
+ *      disturb the still-mapped block, and every block must keep its own contents.
+ *      The recycling is what makes the regression deterministic: a backing store
+ *      freed by the imported handle is only observed once its bookkeeping is
+ *      reused, which a single-shot test can miss.
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemImportFromShareableHandle.cc
+ * Test requirements
+ * ------------------------
+ *    - Host specific (LINUX)
+ *    - HIP_VERSION >= 6.1
+ */
+HIP_TEST_CASE(Unit_hipMemImportFromShareableHandle_SelfImportReleaseAcrossRecycledVa) {
+  CTX_CREATE();
+
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, 0));
+  checkVMMSupported(device);
+
+  hipMemAllocationProp prop = {};
+  prop.type = hipMemAllocationTypePinned;
+  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;
+
+  size_t granularity = 0;
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+  const size_t size_mem = granularity * 2;
+
+  hipMemAccessDesc access_desc = {};
+  access_desc.location.type = hipMemLocationTypeDevice;
+  access_desc.location.id = device;
+  access_desc.flags = hipMemAccessFlagsProtReadWrite;
+
+  constexpr int kIterations = 16;
+  std::vector<unsigned char> readback(size_mem, 0);
+
+  void* prev_ptr = nullptr;
+  hipMemGenericAllocationHandle_t prev_allocation_handle = {};
+  hipMemGenericAllocationHandle_t prev_imported_handle = {};
+  bool prev_live = false;
+
+  for (int iteration = 0; iteration < kIterations; ++iteration) {
+    hipMemGenericAllocationHandle_t allocation_handle;
+    HIP_CHECK(hipMemCreate(&allocation_handle, size_mem, &prop, 0));
+
+    void* ptr = nullptr;
+    HIP_CHECK(hipMemAddressReserve(&ptr, size_mem, 0, nullptr, 0));
+    HIP_CHECK(hipMemMap(ptr, size_mem, 0, allocation_handle, 0));
+    HIP_CHECK(hipMemSetAccess(ptr, size_mem, &access_desc, 1));
+
+    const unsigned char pattern = static_cast<unsigned char>(iteration);
+    HIP_CHECK(hipMemsetD8(reinterpret_cast<hipDeviceptr_t>(ptr), pattern, size_mem));
+    HIP_CHECK(hipDeviceSynchronize());
+
+    ShareableHandle shareable_handle;
+    HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, allocation_handle,
+                                            hipMemHandleTypePosixFileDescriptor, 0));
+    hipMemGenericAllocationHandle_t imported_handle;
+    HIP_CHECK(hipMemImportFromShareableHandle(&imported_handle,
+              reinterpret_cast<void*>(static_cast<uintptr_t>(shareable_handle)),
+              hipMemHandleTypePosixFileDescriptor));
+    REQUIRE(close(shareable_handle) == 0);
+
+    // Tear down the previous block, importer first, while this block stays mapped.
+    if (prev_live) {
+      HIP_CHECK(hipMemRelease(prev_imported_handle));
+      HIP_CHECK(hipMemUnmap(prev_ptr, size_mem));
+      HIP_CHECK(hipMemRelease(prev_allocation_handle));
+      HIP_CHECK(hipMemAddressFree(prev_ptr, size_mem));
+    }
+
+    // Releasing the previous imported handle must not have touched this block.
+    HIP_CHECK(hipMemcpyDtoH(readback.data(), reinterpret_cast<hipDeviceptr_t>(ptr), size_mem));
+    REQUIRE(std::all_of(readback.begin(), readback.end(),
+                        [pattern](unsigned char value) { return value == pattern; }));
+
+    prev_ptr = ptr;
+    prev_allocation_handle = allocation_handle;
+    prev_imported_handle = imported_handle;
+    prev_live = true;
+  }
+
+  HIP_CHECK(hipMemRelease(prev_imported_handle));
+  HIP_CHECK(hipMemUnmap(prev_ptr, size_mem));
+  HIP_CHECK(hipMemRelease(prev_allocation_handle));
+  HIP_CHECK(hipMemAddressFree(prev_ptr, size_mem));
+
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
  *    - Negative parameters test.
  * ------------------------
  *    - unit/virtualMemoryManagement/hipMemImportFromShareableHandle.cc
