@@ -70,7 +70,7 @@ static void hrr_pinned_workload(int* in, bool by_struct = false) {
   for (int it = 0; it < kPinnedIters; ++it) {
     for (int i = 0; i < kPinnedN; ++i) in[i] = pinned_value(it, i);  // uncaptured stores
     // Replay restores nothing in a graph capture. A launch on another stream
-    // meanwhile is restored, and leaves the next launch nothing to record.
+    // meanwhile is restored on that stream, so the next launch records again.
     if (it == 2) {
       hipStream_t s = nullptr, s2 = nullptr;
       hipGraph_t g  = nullptr;
@@ -89,6 +89,49 @@ static void hrr_pinned_workload(int* in, bool by_struct = false) {
     for (int i = 0; i < kPinnedN; ++i) REQUIRE(hout[i] == pinned_value(it, i) * 3 + 1);
   }
   HRR_HIP_CHECK(hipFree(dout));
+}
+
+__global__ void hrr_pinned_wait(int* flag) {
+  while (atomicAdd(flag, 0) == 0) __builtin_amdgcn_s_sleep(8);
+}
+__global__ void hrr_pinned_signal(int* flag) { atomicExch(flag, 1); }
+
+// The pinned-input kernel on stream a queues behind a kernel waiting for a flag
+// that b sets later, after a launch on b that reads the same unchanged input.
+TEST_CASE("Unit_HRR_PinnedHostStreams_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int *in = nullptr, *dev_in = nullptr, *flag = nullptr, *dout = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&in), kPinnedN * sizeof(int), 0));
+  HRR_HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dev_in), in, 0));
+  HRR_HIP_CHECK(hipMalloc(&flag, sizeof(int)));
+  HRR_HIP_CHECK(hipMemset(flag, 0, sizeof(int)));
+  HRR_HIP_CHECK(hipMalloc(&dout, 2 * kPinnedN * sizeof(int)));
+  hipStream_t a = nullptr, b = nullptr;
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&a, hipStreamNonBlocking));
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&b, hipStreamNonBlocking));
+  std::vector<int> hout(2 * kPinnedN);
+  for (int it = 0; it < 2; ++it) {
+    for (int i = 0; i < kPinnedN; ++i) in[i] = pinned_value(2 * it, i);
+    if (it == 1) {
+      hipLaunchKernelGGL(hrr_pinned_wait, dim3(1), dim3(1), 0, a, flag);
+      hipLaunchKernelGGL(hrr_pinned_triple, dim3(1), dim3(kPinnedN), 0, a,
+                         dout + kPinnedN, dev_in, kPinnedN);
+    }
+    hipLaunchKernelGGL(hrr_pinned_triple, dim3(1), dim3(kPinnedN), 0, b, dout, dev_in, kPinnedN);
+    if (it == 1) hipLaunchKernelGGL(hrr_pinned_signal, dim3(1), dim3(1), 0, b, flag);
+    HRR_HIP_CHECK(hipGetLastError());
+    HRR_HIP_CHECK(hipStreamSynchronize(a));
+    HRR_HIP_CHECK(hipStreamSynchronize(b));
+    HRR_HIP_CHECK(hipMemcpy(hout.data(), dout, (it + 1) * kPinnedN * sizeof(int),
+                            hipMemcpyDeviceToHost));
+    for (int i = 0; i < (it + 1) * kPinnedN; ++i)
+      REQUIRE(hout[i] == pinned_value(2 * it, i % kPinnedN) * 3 + 1);
+  }
+  HRR_HIP_CHECK(hipStreamDestroy(a));
+  HRR_HIP_CHECK(hipStreamDestroy(b));
+  HRR_HIP_CHECK(hipFree(dout));
+  HRR_HIP_CHECK(hipFree(flag));
+  HRR_HIP_CHECK(hipHostFree(in));
 }
 
 TEST_CASE("Unit_HRR_PinnedHostMalloc_Direct", "[.][hrr-direct]") {
@@ -234,7 +277,7 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
         CHECK(ret == 0);
         CHECK(pass == kPinnedIters);
         CHECK(fail == 0);
-        CHECK(out.find("Pinned host snapshots: 2 restored, 0 refused, 1 skipped") !=
+        CHECK(out.find("Pinned host snapshots: 3 restored, 0 refused, 1 skipped") !=
               std::string::npos);
       } else {
         CHECK(ret != 0);
@@ -242,6 +285,22 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
       }
     }
   }
+}
+
+// Replay queues each restore on its launch's stream rather than waiting for
+// the stream, here held by a kernel that waits for one replay submits later.
+// The launch on b records the input too, since replay restores it on a.
+HRR_TEST_CASE(Unit_HRR_PinnedHostStreamsRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_streams"};
+  hrr_capture_direct("Unit_HRR_PinnedHostStreams_Direct", cap.path, 5);
+  auto [ret, out] = hrr_playback_watchdog(cap.path, 120);
+  INFO("Playback exit " << ret << ", output:\n" << out);
+  REQUIRE(ret != kHrrWatchdogKilled);
+  CHECK(ret == 0);
+  // Exact, since the tolerance takes these ints for tiny floats.
+  CHECK(out.find("2 pass (2 exact, 0 within tol), 0 fail") != std::string::npos);
+  CHECK(out.find("Pinned host snapshots: 3 restored, 0 refused, 0 skipped") !=
+        std::string::npos);
 }
 
 // An allocation larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB is not snapshotted and
@@ -270,10 +329,22 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostSnapshotCap) {
       CHECK(ret == 0);
       CHECK(pass == kPinnedIters);
       CHECK(fail == 0);
-      CHECK(out.find("Pinned host snapshots: 2 restored, 0 refused, 1 skipped") !=
+      CHECK(out.find("Pinned host snapshots: 3 restored, 0 refused, 1 skipped") !=
             std::string::npos);
     }
   }
+}
+
+// A snapshot blob over --max-file-bytes ends the replay before the kernel that
+// reads it is launched on input replay never restored.
+HRR_TEST_CASE(Unit_HRR_PinnedHostBlobRefused) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_refused"};
+  hrr_capture_direct("Unit_HRR_PinnedHostLarge_Direct", cap.path, 5);
+  auto [ret, out] = hrr_playback_merged(cap.path, "--trace-kernels --max-file-bytes 2097151");
+  INFO("Playback exit " << ret << ", output:\n" << out);
+  CHECK(ret != 0);
+  CHECK(out.find("refusing to read") != std::string::npos);
+  CHECK(out.find("[HRR launch]") == std::string::npos);
 }
 
 // Capture stops tracking an allocation when it is freed: had it snapshotted the

@@ -549,13 +549,15 @@ ranges of `hipHostMalloc` and `hipHostRegister` (dropped on `hipHostFree`, `hipF
 the arguments, by-value structs included; for each tracked allocation a word points into,
 it copies the whole allocation under the tracking lock, writes the copy as a blob and adds a
 record (base, offset 0, length, blob hash, direction 0) to the launch event, unless the hash
-equals that of the allocation's last record. Struct words pointing into such an allocation
+and the launch stream equal those of the allocation's last record. Struct words pointing into such an allocation
 are flagged for translation like
 embedded device pointers, and replay translates them without the device-address shape
 check. Replay checks each record names the base of a pinned host
 allocation it made, lies inside it and matches its blob's length, refusing and counting it
-otherwise; then it synchronizes the launch stream, copies the blob in, and launches. The
-summary prints restored, refused and skipped counts.
+otherwise; then it queues a host function that copies the blobs in on the launch stream,
+ahead of the kernel, without waiting for the stream. `hipHostFree` and `hipHostUnregister`
+wait for every stream, so the allocation outlives a queued copy. The summary prints
+restored, refused and skipped counts.
 
 Kept deliberately simple:
 
@@ -574,9 +576,8 @@ Kept deliberately simple:
 - An unchanged allocation gets no record, so device writes into it between two launches
   stay in replay's buffer as they did at capture; a host store that puts back exactly the
   last recorded bytes after such a device write is missed.
-- Only the launch stream is synchronized before a restore; work on other streams reading
-  the buffer is not waited for. The sync runs in relaxed capture mode, so a global-mode
-  capture open on another stream is not invalidated by it.
+- A restore is ordered on the launch stream only; work on other streams reading the buffer
+  is not waited for, which is why a launch on another stream records again.
 
 **Threat model.** The snapshots put into the archive host memory the application never
 handed to a HIP call: for a serving stack, token IDs, sampling state and request metadata,

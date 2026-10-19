@@ -211,6 +211,7 @@ cases:
   Unit_HRR_Occupancy_Direct: {}
   Unit_HRR_OverflowingMemcpy3DNotRecorded: {}
   Unit_HRR_OverflowingMemcpy3D_Direct: {}
+  Unit_HRR_PinnedHostBlobRefused: {}
   Unit_HRR_PinnedHostFork: {}
   Unit_HRR_PinnedHostFork_Direct: {}
   Unit_HRR_PinnedHostFreedRoundtrip: {}
@@ -220,6 +221,8 @@ cases:
   Unit_HRR_PinnedHostRegister_Direct: {}
   Unit_HRR_PinnedHostRoundtrip: {}
   Unit_HRR_PinnedHostSnapshotCap: {}
+  Unit_HRR_PinnedHostStreamsRoundtrip: {}
+  Unit_HRR_PinnedHostStreams_Direct: {}
   Unit_HRR_PinnedHostStructLowBits_Direct: {}
   Unit_HRR_PinnedHostStruct_Direct: {}
   Unit_HRR_PitchedD2HBlobEdits: {}

@@ -179,8 +179,9 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 // no HIP call records. Before each launch, the 8-byte-aligned words of its
 // arguments are looked up in the tracked pinned allocations (hipHostMalloc,
 // hipHostRegister). Each allocation hit is written whole as a
-// blob, and named by a record in the launch event unless its hash equals that
-// of the last record for it. Replay copies the blob back before the launch.
+// blob, and named by a record in the launch event unless its hash and stream
+// equal those of the last record for it. Replay copies the blob back when the
+// stream reaches the launch.
 // See DESIGN.md, "Pinned host snapshots".
 // ---------------------------------------------------------------------------
 
@@ -188,11 +189,13 @@ namespace {
 struct PinnedAlloc {
   size_t           size = 0;
   hrr_cap::Hash128 last{};  // blob of the last record, {0,0} before the first
+  hipStream_t      last_stream = nullptr;  // and its launch stream
 };
 struct HostSnap {
   uint64_t         base = 0, size = 0;
   hrr_cap::Hash128 hash{}, last{};
-  bool             record = false;  // contents differ from the last record
+  hipStream_t      last_stream = nullptr;
+  bool             record = false;  // contents or stream differ from the last record
   std::unique_ptr<uint8_t[]> copy;  // the bytes, until hashed and written
 };
 std::mutex                       g_pinned_mu;  // also held while a snapshot copies
@@ -277,7 +280,8 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
       s.copy.reset(new (std::nothrow) uint8_t[s.size]);
       if (s.copy) {
         std::memcpy(s.copy.get(), reinterpret_cast<const void*>(s.base), s.size);
-        s.last = it->second.last;
+        s.last        = it->second.last;
+        s.last_stream = it->second.last_stream;
       } else {
         hrr_cap::writer::note_unreplayable("pinned host snapshot",
                                            "no memory to copy a pinned allocation");
@@ -557,6 +561,10 @@ static void serialize_kernel_launch(
       if (!sig.at(i).info_.hidden_) num_args++;
   }
   push_u16(num_args);
+  // Replay restores a record on its launch's stream, so a launch on another
+  // stream than the last record's needs its own.
+  for (HostSnap& s : t_snaps)
+    if (s.last_stream != stream && (s.hash.lo || s.hash.hi)) s.record = true;
   push_u16(static_cast<uint16_t>(std::count_if(
       t_snaps.begin(), t_snaps.end(), [](const HostSnap& s) { return s.record; })));
 
@@ -707,7 +715,10 @@ static void serialize_kernel_launch(
                                    static_cast<uint32_t>(payload.size()));
   for (const HostSnap& s : t_snaps) {
     auto it = g_pinned.find(s.base);
-    if (s.record && !capturing && it != g_pinned.end()) it->second.last = s.hash;
+    if (s.record && !capturing && it != g_pinned.end()) {
+      it->second.last        = s.hash;
+      it->second.last_stream = stream;
+    }
   }
 }
 

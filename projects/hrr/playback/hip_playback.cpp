@@ -476,23 +476,37 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 //             u64 hash_hi, u8 direction (0)
 //   u32 num_attrs, u32 attr stride, num_attrs * stride bytes
 
-// Write a launch's pinned host snapshots back before it runs, once the work
-// already queued on its stream is done. Not when that stream captures into a
-// graph, where the kernel runs only when the graph is launched.
-static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* rec,
-                                   uint16_t n, hipStream_t stream,
-                                   const std::string& kernel_name) {
+// (destination, blob, length) of each copy; blob_cache_ is never evicted.
+using HostSnapCopies = std::vector<std::tuple<void*, const void*, size_t>>;
+static void host_snapshot_copy(void* data) {
+    auto* copies = static_cast<HostSnapCopies*>(data);
+    for (auto& [dst, src, len] : *copies) memcpy(dst, src, len);
+    delete copies;
+}
+
+// Write a launch's pinned host snapshots back when its stream reaches it, by a
+// host function queued ahead of the kernel. The replay thread does not wait
+// for the stream, which may wait on work it has yet to submit. hipHostFree and
+// hipHostUnregister wait for every stream, so the allocation outlives the copy.
+// Nothing is restored when the stream captures into a graph, where the kernel
+// runs only when the graph is launched.
+static hipError_t restore_host_snapshots(PlaybackContext& ctx, const uint8_t* rec,
+                                         uint16_t n, hipStream_t stream,
+                                         const std::string& kernel_name) {
     hipStreamCaptureStatus cs = hipStreamCaptureStatusNone;
     if (hipStreamIsCapturing(stream, &cs) != hipSuccess || cs != hipStreamCaptureStatusNone) {
         ctx.host_snapshots_skipped += n;
-        return;
+        return hipSuccess;
     }
-    bool synced = false;
+    auto copies = std::make_unique<HostSnapCopies>();
     for (uint16_t i = 0; i < n; i++, rec += kHostSnapRecordSize) {
         uint64_t hash[2];
         memcpy(hash, rec + 24, 16);
         size_t blob_len = 0;
         const void* blob = ctx.load_blob(hash[0], hash[1], &blob_len);
+        // Refused for the host memory cap or a read error, not merely absent.
+        if (!blob && ctx.fatal_error.load(std::memory_order_acquire))
+            return hipErrorUnknown;
         const char* why  = nullptr;
         void* dst = hrr_host_snapshot_target(ctx, rec, blob, blob_len, &why);
         if (!dst) {
@@ -501,21 +515,15 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* rec,
                     compact_kernel_name(kernel_name).c_str(), i, why);
             continue;
         }
-        if (!synced) {
-            // In global mode a sync during another stream's capture
-            // invalidates that capture. This stream is not capturing, so
-            // waiting for it is safe: relax the mode for the call only.
-            hipStreamCaptureMode mode = hipStreamCaptureModeRelaxed;
-            (void)hipThreadExchangeStreamCaptureMode(&mode);
-            (void)HRR_HIP_CHECK(hipStreamSynchronize(stream));
-            (void)hipThreadExchangeStreamCaptureMode(&mode);
-        }
-        synced = true;
-        uint64_t len;
-        memcpy(&len, rec + 16, 8);
-        memcpy(dst, blob, len);
-        ctx.host_snapshots_restored++;
+        copies->emplace_back(dst, blob, blob_len);
     }
+    if (copies->empty()) return hipSuccess;
+    const size_t k = copies->size();
+    hipError_t r = HRR_HIP_CHECK(hipLaunchHostFunc(stream, host_snapshot_copy, copies.get()));
+    if (r != hipSuccess) return r;
+    copies.release();
+    ctx.host_snapshots_restored += k;
+    return hipSuccess;
 }
 
 // ext_global_worksize: the captured grid[] holds *global work-item counts*
@@ -1151,8 +1159,13 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     hipStream_t stream = ctx.translate_stream(stream_rec);
     const size_t kernel_ordinal =
         ctx.kernels_launched.load(std::memory_order_relaxed) + 1;
-    if (num_snapshots)
-        restore_host_snapshots(ctx, snapshots, num_snapshots, stream, kernel_name);
+    if (hipError_t sr = num_snapshots ? restore_host_snapshots(ctx, snapshots, num_snapshots,
+                                                               stream, kernel_name)
+                                      : hipSuccess;
+        sr != hipSuccess) {
+        for (const auto& g : rls.guards) hrr_block_guard_teardown(g);
+        return sr;
+    }
 
     if (ctx.audit_host_args) {
         for (auto& [idx, rec, live] : dbg_ptrs) {
