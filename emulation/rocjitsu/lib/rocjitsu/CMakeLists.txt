@@ -98,6 +98,7 @@ set_target_properties(
 # does not pull in the simulator implementation or the all-ISA registry.
 set(ROCJITSU_DBT_BASE_OBJECT_LIBS
     ${ROCJITSU_ANALYSIS_OBJECT_LIBS}
+    rocjitsu_executable
     rocjitsu_code
 )
 add_library(rocjitsu_dbt_internal STATIC)

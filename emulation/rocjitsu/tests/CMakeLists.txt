@@ -26,6 +26,7 @@ set(RJ_OBJECT_LIBS
     rocjitsu_analysis
     rocjitsu_code
     rocjitsu_code_object
+    rocjitsu_executable
     rocjitsu_isa
     rocjitsu_isa_registry
     simdojo
@@ -435,6 +436,29 @@ target_link_libraries(
 rj_configure_target(rj_decode_fuzz_test PRIVATE_INCLUDES WARNINGS)
 add_dependencies(rj_decode_fuzz_test rj_decode_fuzz)
 rj_add_gtest_tests(rj_decode_fuzz_test)
+
+add_executable(
+    rj_code_object_fuzz_test
+    fuzz/code_object/code_object_fuzz_test.cpp
+)
+target_link_libraries(
+    rj_code_object_fuzz_test
+    PRIVATE rj_code_object_fuzz_core GTest::gtest_main
+)
+target_include_directories(
+    rj_code_object_fuzz_test
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
+)
+rj_configure_target(rj_code_object_fuzz_test PRIVATE_INCLUDES WARNINGS)
+add_dependencies(rj_code_object_fuzz_test rj_code_object_fuzz)
+rj_add_gtest_tests(rj_code_object_fuzz_test)
+add_test(
+    NAME CodeObjectFuzzCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -DFUZZ_EXECUTABLE=$<TARGET_FILE:rj_code_object_fuzz>
+        -DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/code-object-fuzz-cli -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/fuzz/code_object/test_code_object_fuzz_cli.cmake
+)
 
 add_executable(rj_execution_fuzz_test fuzz/execution/execution_fuzz_test.cpp)
 target_link_libraries(

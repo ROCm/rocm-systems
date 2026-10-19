@@ -66,6 +66,17 @@ Executable::Executable(const std::string &path) {
     return;
   }
 
+  parse_image();
+}
+
+Executable::Executable(std::span<const uint8_t> image) {
+  if (!image.empty())
+    image_.assign(reinterpret_cast<const char *>(image.data()),
+                  reinterpret_cast<const char *>(image.data()) + image.size());
+  parse_image();
+}
+
+void Executable::parse_image() {
   if (image_.size() < sizeof(Elf64_Ehdr)) {
     is_valid_ = false;
     return;
