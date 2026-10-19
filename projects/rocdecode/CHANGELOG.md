@@ -10,6 +10,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Added support for explicitly loading librocm_sysdeps_va via dlopen, ensuring complete isolation from the system libva library.
 * Initial Windows support: hardware-accelerated video decoding on Windows via the vaon12 backend (Mesa's VA-API on D3D12 translation layer). Requires HIP and the vaon12 VA-API driver from TheRock for Windows.
 * On Windows, the TheRock VA-API DLLs (`rocm_sysdeps_va_win32.dll`, `rocm_sysdeps_va.dll`) are loaded at run time, matching the Linux dlopen behavior. `%ROCM_PATH%\lib\rocm_sysdeps\bin` no longer needs to be on `PATH`.
+* HEVC: generation of unavailable reference pictures for a BLA picture or a CRA picture with NoRaslOutputFlag equal to 1 (H.265 clause 8.3.3).
 
 ### Resolved issues
 
