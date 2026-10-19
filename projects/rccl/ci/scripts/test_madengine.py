@@ -326,8 +326,9 @@ def patch_madengine_for_cluster(
                 '    MADENGINE_SRC="$SUBMISSION_DIR/madengine"\n'
                 '    if [ -d "$MADENGINE_SRC" ] && [ -f "$MADENGINE_SRC/pyproject.toml" ]; then\n'
                 '        source "$WORKSPACE/node_venv/bin/activate"\n'
-                '        pip install --upgrade pip setuptools wheel 2>&1 | tail -3\n'
-                '        pip install "$MADENGINE_SRC" 2>&1 | tail -20\n'
+                # ~/.cache/pip is on a small NFS home quota.
+                '        pip install --no-cache-dir --upgrade pip setuptools wheel 2>&1 | tail -3\n'
+                '        pip install --no-cache-dir "$MADENGINE_SRC" 2>&1 | tail -20\n'
                 '        if madengine --version >/dev/null 2>&1; then\n'
                 '            MAD_CLI_COMMAND="madengine"\n'
                 '            echo "  ✓ madengine installed: '
