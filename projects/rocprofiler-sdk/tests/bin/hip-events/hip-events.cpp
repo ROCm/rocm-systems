@@ -312,6 +312,41 @@ main(int argc, char** argv)
         HIP_ASSERT(hipIpcGetEventHandle(&ipc_handle, ipc_event));
     }
 
+    // Exercise same-stream waits that name the recording stream differently. Each record is
+    // behind a spin kernel, so it is still in flight when its wait is issued.
+    //
+    // A wait on hipStreamLegacy for an event recorded on nullptr, and a hipStreamWaitEvent_spt
+    // on nullptr for an event recorded on hipStreamPerThread, name the recording stream, so CLR
+    // creates no dependency and no WAIT may be reported. legacy_event and per_thread_event are
+    // not destroyed, for the same reason as same_stream_event above: a wait registered for either
+    // is never claimed, and the execute test fails on its dangling correlation ID. stream1 is a
+    // blocking stream, so the kernel launched on it after the legacy wait makes CLR enqueue a
+    // marker on stream1 that depends on the record, which must not report the wait either.
+    //
+    // validate.py finds the _spt wait as the app's only hipStreamWaitEvent_spt call, and the
+    // legacy wait as the last hipStreamWaitEvent ahead of it.
+    hipEvent_t legacy_event     = nullptr;
+    hipEvent_t per_thread_event = nullptr;
+    {
+        auto wall_clock_khz = 0;
+        HIP_ASSERT(hipDeviceGetAttribute(&wall_clock_khz, hipDeviceAttributeWallClockRate, 0));
+        const auto ticks_per_msec = static_cast<long long>(wall_clock_khz);
+
+        HIP_ASSERT(hipEventCreate(&legacy_event));
+        HIP_ASSERT(hipEventCreate(&per_thread_event));
+
+        spin_kernel<<<1, 1, 0, nullptr>>>(20 * ticks_per_msec);
+        HIP_ASSERT(hipEventRecord(legacy_event, nullptr));
+        HIP_ASSERT(hipStreamWaitEvent(hipStreamLegacy, legacy_event, 0));
+        scale_kernel<<<grid_size, block_size, 0, stream1>>>(d_data, n, 0.99f);
+        HIP_ASSERT(hipDeviceSynchronize());
+
+        spin_kernel<<<1, 1, 0, hipStreamPerThread>>>(20 * ticks_per_msec);
+        HIP_ASSERT(hipEventRecord(per_thread_event, hipStreamPerThread));
+        HIP_ASSERT(hipStreamWaitEvent_spt(nullptr, per_thread_event, 0));
+        HIP_ASSERT(hipDeviceSynchronize());
+    }
+
     // Exercise coalescing: record a hipEventDisableTiming event multiple times
     // on the same stream with no intervening work. CLR's ShouldCoalesceMarker
     // may skip dispatching a barrier for the 2nd and 3rd records, reusing the

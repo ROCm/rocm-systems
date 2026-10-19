@@ -31,6 +31,8 @@
 #include <optional>
 #include <vector>
 
+struct ihipStream_t;
+
 namespace rocprofiler
 {
 namespace context
@@ -105,6 +107,20 @@ plan_barrier(hsa::Queue&                    queue,
 // Returns nullopt otherwise, and the dispatch is submitted unchanged.
 std::optional<hsa::rocprofiler_packet>
 plan_dependency_barrier(hsa::Queue& queue, hsa_signal_t dep_signal);
+
+// Names the stream that the HIP API call executing on this thread targets, until the matching
+// pop_api_stream. hip/stream.cpp pushes one around every HIP API that takes a hipStream_t. A
+// deferred hipStreamWaitEvent is only claimed by a barrier written while its own stream is
+// current, so a barrier CLR submits for another stream cannot report it. per_thread_api is true
+// for the _spt entry points, where nullptr and hipStreamLegacy name the per-thread default stream.
+// Returns false, pushing nothing, when HIP event tracing is not active; pop_api_stream must then
+// not be called.
+bool
+push_api_stream(ihipStream_t* stream, bool per_thread_api);
+
+// Ends the innermost push_api_stream on this thread that returned true.
+void
+pop_api_stream();
 
 }  // namespace event
 }  // namespace hip

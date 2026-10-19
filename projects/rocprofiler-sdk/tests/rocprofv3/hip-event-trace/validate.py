@@ -38,6 +38,8 @@ import pytest
 #   Marker record: record on a blocking stream while the null stream is busy, then a wait
 #     from the non-blocking stream
 #   Interprocess: record and wait on a hipEventInterprocess event within the process
+#   Stream identity: same-stream waits named differently (hipStreamLegacy for nullptr,
+#     hipStreamWaitEvent_spt on nullptr for hipStreamPerThread)
 #   Coalescing: 3x hipEventRecord on a hipEventDisableTiming event
 #
 # This produces at least 8 hipEventRecord and 8 hipStreamWaitEvent calls.
@@ -47,23 +49,26 @@ import pytest
 HIP_EVENT_RECORD = 1
 HIP_EVENT_WAIT = 2
 
-# hipStreamWaitEvent calls in the app that provably cannot produce a completion: the three
-# same-stream waits (one on stream0, one while the record barrier is still in flight, and
-# one on the default stream). CLR's Event::streamWait returns early when the wait targets
-# the recording stream, so no barrier is dispatched and no dependency is ever created.
+# hipStreamWaitEvent calls in the app that provably cannot produce a completion: the five
+# same-stream waits (one on stream0, one while the record barrier is still in flight, one on
+# the default stream, one on hipStreamLegacy for a record on nullptr, and one through
+# hipStreamWaitEvent_spt on nullptr for a record on hipStreamPerThread). CLR's
+# Event::streamWait returns early when the wait targets the recording stream, so no barrier
+# is dispatched and no dependency is ever created.
 #
 # Deliberately excludes the destroyed-event wait: measurement shows CLR does dispatch a
 # barrier for it, which is intercepted directly and legitimately yields a record. Only
 # waits CLR is documented to short-circuit belong here.
-SUPPRESSED_WAIT_CALLS = 3
+SUPPRESSED_WAIT_CALLS = 5
 
 BUFFER_TRACING_HIP_EVENT = 38
 
 # Records produced on the legacy default stream carry stream_id 0: get_stream_id in
 # hip/stream.cpp resolves hipStreamLegacy to nullptr and looks it up in the stream map,
 # which only ever holds streams passed to hipStreamCreate. The app records default_event
-# twice on the default stream, so exactly that many records may carry a zero stream_id.
-DEFAULT_STREAM_RECORDS = 2
+# twice and legacy_event once on the default stream, so exactly that many records may carry
+# a zero stream_id.
+DEFAULT_STREAM_RECORDS = 3
 
 
 HIP_EVENT_API_NAMES = {
@@ -102,7 +107,7 @@ def test_hip_event_record_count(json_data):
     - hipStreamWaitEvent on the same stream, already-complete event, or during
       graph capture produces no barrier (no completion)
 
-    The app makes three same-stream hipStreamWaitEvent calls that CLR short-circuits, so
+    The app makes five same-stream hipStreamWaitEvent calls that CLR short-circuits, so
     the bound subtracts them rather than allowing the full API call count. A plain "<="
     bound against the raw call count passes even when a spurious completion replaces a
     legitimately dropped one, so it cannot detect the same-stream case regressing.
@@ -382,6 +387,48 @@ def test_hip_event_interprocess_wait(json_data):
         f"WAIT ended at {wait.end_timestamp}, before its RECORD ended at "
         f"{rec.end_timestamp}"
     )
+
+
+def test_hip_event_same_stream_wait_spellings(json_data):
+    """Verify a same-stream wait is not reported when it names the stream differently.
+
+    hipStreamLegacy and nullptr both name the null stream, and through hipStreamWaitEvent_spt
+    nullptr names the calling thread's per-thread stream, as hipStreamPerThread does. CLR
+    creates no dependency for these waits. A wait the profiler registered anyway is either
+    claimed by the marker the app's next blocking-stream kernel makes CLR enqueue, reporting a
+    WAIT the application never got, or never claimed, which the execute test rejects through
+    the "retiring dangling correlation ID" warning at finalization.
+    """
+    data = json_data["rocprofiler-sdk-tool"]
+    records = data["buffer_records"]["hip_event"]
+    string_table = data["strings"]["buffer_records"]
+    calls = [
+        (string_table[r.kind]["operations"][r.operation], r.correlation_id.internal)
+        for r in sorted(
+            data["buffer_records"]["hip_api"], key=lambda r: r.correlation_id.internal
+        )
+    ]
+
+    # The app's only hipStreamWaitEvent_spt call is the per-thread wait, and the legacy wait
+    # is the last hipStreamWaitEvent ahead of it.
+    spt = [corr for name, corr in calls if name == "hipStreamWaitEvent_spt"]
+    assert len(spt) == 1, f"Expected one hipStreamWaitEvent_spt call, found {len(spt)}"
+    legacy = [
+        corr for name, corr in calls if name == "hipStreamWaitEvent" and corr < spt[0]
+    ]
+    assert legacy, "No hipStreamWaitEvent ahead of the hipStreamWaitEvent_spt call"
+    waits = [legacy[-1], spt[0]]
+
+    for scenario, corr in zip(("hipStreamLegacy", "hipStreamWaitEvent_spt"), waits):
+        reported = [
+            r
+            for r in records
+            if r.operation == HIP_EVENT_WAIT and r.correlation_id.internal == corr
+        ]
+        assert not reported, (
+            f"{scenario}: same-stream hipStreamWaitEvent (correlation {corr}) reported "
+            f"{len(reported)} WAIT(s) on queue(s) {[r.queue_id.handle for r in reported]}"
+        )
 
 
 def test_hip_event_handle_consistency(json_data):
