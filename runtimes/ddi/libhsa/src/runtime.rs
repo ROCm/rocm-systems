@@ -644,6 +644,30 @@ impl Drop for InFlightToken {
     }
 }
 
+/// Keeps an unlocked native operation in one HSA generation until its owner
+/// is either published back into that generation or safely retired.
+pub(crate) struct InFlightGeneration {
+    generation: u64,
+    token: InFlightToken,
+}
+
+impl InFlightGeneration {
+    pub(crate) fn enter(generation: u64, tracker: &Arc<InFlightTracker>) -> Result<Self, Status> {
+        let token = tracker.enter().ok_or(OUT_OF_RESOURCES)?;
+        Ok(Self { generation, token })
+    }
+
+    pub(crate) fn is_current(&self, lifecycle: &HsaLifecycle) -> bool {
+        lifecycle.active_generation() == Some(self.generation)
+    }
+
+    /// Prevents shutdown from dropping dependencies when an unpublished owner
+    /// cannot be returned to its original generation.
+    pub(crate) fn quarantine(&self) {
+        self.token.tracker.quarantine();
+    }
+}
+
 /// Complete process-global HSA state.
 ///
 /// Every integer handle and public pointer accepted by this frontend must map

@@ -52,7 +52,7 @@ use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
 
 use crate::ffi::*;
-use crate::runtime::{HsaState, boundary, initialized_mut, lock, map_error};
+use crate::runtime::{HsaState, InFlightGeneration, boundary, initialized_mut, lock, map_error};
 use crate::signal::{AsyncCopyClock, AsyncCopyProfile};
 
 const GPU_POOL_COARSE: u64 = 1;
@@ -1427,7 +1427,6 @@ unsafe fn memory_pool_allocate(
 ) -> Status {
     boundary(|| {
         let (
-            generation,
             device,
             kind,
             rounded,
@@ -1437,8 +1436,7 @@ unsafe fn memory_pool_allocate(
             global_flags,
             uncached,
             device_index,
-            tracker,
-            _token,
+            in_flight,
         ) = {
             let mut guard = match lock() {
                 Ok(guard) => guard,
@@ -1507,12 +1505,11 @@ unsafe fn memory_pool_allocate(
                 DeviceAccess::READ | DeviceAccess::WRITE
             };
             let uncached = flags & ALLOC_UNCACHED != 0 || matches!(kind, MemoryKind::System);
-            let tracker = runtime.inflight.clone();
-            let Some(token) = tracker.enter() else {
-                return OUT_OF_RESOURCES;
+            let in_flight = match InFlightGeneration::enter(generation, &runtime.inflight) {
+                Ok(in_flight) => in_flight,
+                Err(status) => return status,
             };
             (
-                generation,
                 runtime.gpus[device_index].device.clone(),
                 kind,
                 rounded,
@@ -1522,8 +1519,7 @@ unsafe fn memory_pool_allocate(
                 global_flags,
                 uncached,
                 device_index,
-                tracker,
-                token,
+                in_flight,
             )
         };
         let allocation = match device.allocate(kind, rounded as u64, page as u64, permissions) {
@@ -1546,15 +1542,15 @@ unsafe fn memory_pool_allocate(
         );
         let mut guard = match lock() {
             Ok(guard) => guard,
-            Err(status) => return retire_unpublished_memory(memory, &tracker, status),
+            Err(status) => return retire_unpublished_memory(memory, &in_flight, status),
         };
-        if guard.active_generation() != Some(generation) {
+        if !in_flight.is_current(&guard) {
             drop(guard);
-            return retire_unpublished_memory(memory, &tracker, INVALID_RUNTIME_STATE);
+            return retire_unpublished_memory(memory, &in_flight, INVALID_RUNTIME_STATE);
         }
         let Some(runtime) = guard.as_mut() else {
             drop(guard);
-            return retire_unpublished_memory(memory, &tracker, NOT_INITIALIZED);
+            return retire_unpublished_memory(memory, &in_flight, NOT_INITIALIZED);
         };
         if runtime.memory_state.allocations.try_reserve(1).is_err()
             || runtime
@@ -1563,7 +1559,7 @@ unsafe fn memory_pool_allocate(
                 .contains_key(&pointer_value)
         {
             drop(guard);
-            return retire_unpublished_memory(memory, &tracker, OUT_OF_RESOURCES);
+            return retire_unpublished_memory(memory, &in_flight, OUT_OF_RESOURCES);
         }
         runtime
             .memory_state
@@ -1578,13 +1574,13 @@ unsafe fn memory_pool_allocate(
 
 fn retire_unpublished_memory(
     mut memory: Memory,
-    tracker: &crate::runtime::InFlightTracker,
+    in_flight: &InFlightGeneration,
     status: Status,
 ) -> Status {
     match memory.free() {
         Ok(()) => status,
         Err(error) => {
-            tracker.quarantine();
+            in_flight.quarantine();
             std::mem::forget(memory);
             map_error(error)
         }
