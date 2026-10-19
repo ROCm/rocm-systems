@@ -27,8 +27,6 @@ add_subdirectory(api-headers)
 include(cmake/RuntimeRust.cmake)
 runtime_rust_initialize()
 add_subdirectory(ddi)
-include(cmake/SharedImage.cmake)
-add_subdirectory(hsa)
 runtime_rust_finalize()
 # ============================================================================
 
