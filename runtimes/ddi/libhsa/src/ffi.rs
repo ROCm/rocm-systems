@@ -378,6 +378,7 @@ pub(crate) const WAIT_STATE_ACTIVE: u32 = 1;
 pub(crate) const AMD_SIGNAL_KIND_INVALID: i64 = 0;
 pub(crate) const AMD_SIGNAL_KIND_USER: i64 = 1;
 pub(crate) const AMD_SIGNAL_KIND_DOORBELL: i64 = -1;
+pub(crate) const AMD_SIGNAL_KIND_LEGACY_DOORBELL: i64 = -2;
 pub(crate) const AMD_SIGNAL_AMD_GPU_ONLY: u64 = 1;
 pub(crate) const AMD_SIGNAL_IPC: u64 = 1 << 1;
 pub(crate) const AMD_QUEUE_PROPERTIES_ENABLE_PROFILING: u32 = 1 << 3;

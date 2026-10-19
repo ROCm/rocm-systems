@@ -17,5 +17,6 @@ a failed commit leaves the existing executable unchanged.
 
 The frontend chooses the target device and memory kind, supplies external
 symbol addresses and opaque IDs, and retains its own ABI metadata such as HSA
-handles, source URIs, profiles, and status codes. Additional device families can use separate code-object rules under
+handles, source URIs, profiles, and status codes. `libhsa` is currently that
+frontend. Additional device families can use separate code-object rules under
 `loader/` while sharing `rocelf` where the ELF format applies.

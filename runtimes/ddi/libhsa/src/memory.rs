@@ -16,7 +16,7 @@
 //! as portable native-handle behavior.
 
 use crate::platform::fd::{AsFd, IntoRawFd};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::{c_char, c_void};
 use std::mem::{MaybeUninit, align_of, size_of};
 use std::sync::Arc;
@@ -31,7 +31,10 @@ use crate::platform::memory::{
     KfdSvmAttribute as SvmAttribute, KfdSvmLocation as SvmLocation,
 };
 use rocddi::device::Device;
-use rocddi::device::gpu::{CopyRect, GpuCopySequence, GpuCopyTimestamps};
+use rocddi::device::gpu::{
+    CopyRect, GpuCopyOptions, GpuCopySequence, GpuCopySignal, GpuCopySignalOperation,
+    GpuCopyTimestamps, GpuCopyWait,
+};
 use rocddi::memory::device::{
     Allocation, DeviceAccess, HostMappingPolicy, MemoryKind, VirtualAddress, VirtualDeviceMapping,
     VirtualHostMapping, VirtualMemory,
@@ -40,7 +43,7 @@ use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
 
 use crate::ffi::*;
-use crate::runtime::{AsyncCopyProfiling, Runtime, boundary, initialized_mut, lock, map_error};
+use crate::runtime::{HsaState, boundary, initialized_mut, lock, map_error};
 use crate::signal::{AsyncCopyClock, AsyncCopyProfile};
 
 const GPU_POOL_COARSE: u64 = 1;
@@ -61,6 +64,86 @@ const SVM_MAX_MIGRATION_GRANULARITY: u64 = 18;
 const SVM_MAX_ATTRIBUTES: usize = 2044;
 const EIO: i32 = 5;
 
+/// Process setting captured when an asynchronous copy is accepted.
+#[derive(Clone, Copy)]
+pub(crate) enum AsyncCopyProfiling {
+    Disabled,
+    Enabled,
+}
+
+/// HSA memory handles and metadata around rocddi allocation owners.
+pub(crate) struct MemoryState {
+    /// Ordinary HSA allocations keyed by host address.
+    allocations: HashMap<usize, Memory>,
+    /// Imported IPC memory keyed by host address.
+    ipc_allocations: HashMap<usize, Memory>,
+    /// External memory imports keyed by host address.
+    interop_allocations: HashMap<usize, Memory>,
+    /// Host ranges locked for GPU access.
+    locked_allocations: Vec<LockedMemory>,
+    /// Outstanding asynchronous copy borrows per allocation address.
+    async_copy_borrows: HashMap<usize, usize>,
+    /// Prevents unsafe reuse after uncertain asynchronous copy retirement.
+    async_copy_quarantine: Arc<AtomicBool>,
+    /// Process setting captured by new asynchronous copies.
+    pub(crate) async_copy_profiling: AsyncCopyProfiling,
+    /// Virtual address reservations ordered by base address.
+    vmem_reservations: BTreeMap<usize, VmemReservation>,
+    /// Physical virtual-memory handles indexed by public ID.
+    vmem_handles: HashMap<u64, VmemHandle>,
+    /// Active virtual-memory mappings ordered by base address.
+    vmem_mappings: BTreeMap<usize, VmemMapping>,
+    /// Prefetch and copy workers joined before memory owners are released.
+    workers: Vec<thread::JoinHandle<()>>,
+}
+
+impl MemoryState {
+    pub(crate) fn new() -> Self {
+        Self {
+            allocations: HashMap::new(),
+            ipc_allocations: HashMap::new(),
+            interop_allocations: HashMap::new(),
+            locked_allocations: Vec::new(),
+            async_copy_borrows: HashMap::new(),
+            async_copy_quarantine: Arc::new(AtomicBool::new(false)),
+            async_copy_profiling: AsyncCopyProfiling::Disabled,
+            vmem_reservations: BTreeMap::new(),
+            vmem_handles: HashMap::new(),
+            vmem_mappings: BTreeMap::new(),
+            workers: Vec::new(),
+        }
+    }
+
+    pub(crate) fn running_on_worker(&self) -> bool {
+        self.workers
+            .iter()
+            .any(|worker| worker.thread().id() == thread::current().id())
+    }
+
+    /// Joins memory workers after the shared stop request is published.
+    pub(crate) fn join_workers(&mut self) {
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
+    }
+
+    pub(crate) fn is_quarantined(&self) -> bool {
+        self.async_copy_quarantine.load(Ordering::Acquire)
+    }
+
+    /// Releases HSA metadata after queues, copies, and signal users stop.
+    pub(crate) fn clear(&mut self) {
+        self.locked_allocations.clear();
+        self.vmem_mappings.clear();
+        self.vmem_handles.clear();
+        self.vmem_reservations.clear();
+        self.ipc_allocations.clear();
+        self.interop_allocations.clear();
+        self.allocations.clear();
+        self.async_copy_borrows.clear();
+    }
+}
+
 /// Canonical metadata for every address alias of one HSA-visible allocation.
 ///
 /// `agent_base` is always present. `host_base` exists only when CPU access is
@@ -68,15 +151,25 @@ const EIO: i32 = 5;
 /// of assuming that host and GPU virtual addresses are identical.
 #[derive(Clone)]
 struct PointerDescription {
+    /// HSA pointer classification reported to callers.
     pointer_type: u32,
+    /// Address visible to the owning agent.
     agent_base: usize,
+    /// CPU alias when this allocation is host accessible.
     host_base: Option<usize>,
+    /// Byte extent common to the address aliases.
     size: usize,
+    /// HSA agent that owns the allocation.
     owner: HsaAgent,
+    /// Pool allocation flags exposed by pointer queries.
     global_flags: u32,
+    /// Whether this address came from host registration.
     registered: bool,
+    /// Native allocation flags retained for compatibility queries.
     alloc_flags: u32,
+    /// Caller-set pointer metadata.
     user_data: usize,
+    /// Agents with established access to the allocation.
     accessible: Vec<HsaAgent>,
 }
 
@@ -126,19 +219,26 @@ impl PointerDescription {
     }
 }
 
-/// Runtime-owned allocation plus callbacks registered for its destruction.
+/// HsaState-owned allocation plus callbacks registered for its destruction.
 pub(crate) struct Memory {
+    /// Native backing and its mapping lifetime.
     allocation: Allocation,
+    /// Canonical metadata for every public address alias.
     description: PointerDescription,
+    /// Pool flags fixed when this allocation was created.
     pool_global_flags: u32,
+    /// Callbacks invoked after public ownership is removed.
     deallocation_callbacks: Vec<RegisteredDeallocationCallback>,
 }
 
 /// Application callback invoked after an allocation loses public ownership.
 #[derive(Clone, Copy)]
 struct RegisteredDeallocationCallback {
+    /// Public allocation address supplied when the callback was registered.
     pointer: usize,
+    /// Application callback invoked after public ownership ends.
     callback: unsafe extern "C" fn(*mut c_void, *mut c_void),
+    /// Caller-owned argument passed back to that callback.
     user_data: usize,
 }
 
@@ -270,15 +370,21 @@ impl Memory {
 /// Some registrations require a native rocddi allocation while already-shared
 /// ranges need only the pointer metadata, hence the optional owner.
 pub(crate) struct LockedMemory {
+    /// Native registration when the host range needed one.
     allocation: Option<Allocation>,
+    /// Host and agent aliases reported by pointer queries.
     description: PointerDescription,
 }
 
 /// Reserved virtual-address interval and the mappings currently occupying it.
 pub(crate) struct VmemReservation {
+    /// Native reserved address range.
     address: VirtualAddress,
+    /// Public pointer metadata for the reservation.
     description: PointerDescription,
+    /// Callbacks invoked when public ownership is removed.
     deallocation_callbacks: Vec<RegisteredDeallocationCallback>,
+    /// Mappings that still occupy this reserved range.
     mappings: usize,
 }
 
@@ -318,40 +424,113 @@ impl VmemReservation {
 
 /// Retained physical-memory handle shared by public references and mappings.
 pub(crate) struct VmemHandle {
-    memory: VirtualMemory,
+    /// Native physical backing or imported fabric handle.
+    backing: VmemBacking,
+    /// Number of public references to this handle.
     references: usize,
+    /// Number of active virtual-address mappings.
     mappings: usize,
+    /// HSA pool from which the backing originates.
     pool: HsaMemoryPool,
+    /// HSA physical-memory type exposed for this handle.
     memory_type: u32,
-    imported: bool,
+}
+
+/// Origin of physical backing behind an HSA virtual-memory handle.
+enum VmemBacking {
+    /// Allocation created through this runtime.
+    Owned(VirtualMemory),
+    /// Native allocation imported from a DMA-BUF.
+    DmaBuf(VirtualMemory),
+    /// Fabric token with per-device imported native owners.
+    Fabric {
+        /// Opaque native token received from another process.
+        token: [u8; 16],
+        /// Imports keyed by activated GPU index in this runtime.
+        imports: HashMap<usize, VirtualMemory>,
+    },
 }
 
 impl VmemHandle {
-    fn new(memory: VirtualMemory, pool: HsaMemoryPool, memory_type: u32, imported: bool) -> Self {
+    fn new(backing: VmemBacking, pool: HsaMemoryPool, memory_type: u32) -> Self {
         Self {
-            memory,
+            backing,
             references: 1,
             mappings: 0,
             pool,
             memory_type,
-            imported,
+        }
+    }
+
+    fn imported(&self) -> bool {
+        !matches!(&self.backing, VmemBacking::Owned(_))
+    }
+
+    fn owned_memory(&self) -> Option<&VirtualMemory> {
+        match &self.backing {
+            VmemBacking::Owned(memory) => Some(memory),
+            VmemBacking::DmaBuf(_) | VmemBacking::Fabric { .. } => None,
+        }
+    }
+
+    fn known_size(&self) -> Option<u64> {
+        match &self.backing {
+            VmemBacking::Owned(memory) | VmemBacking::DmaBuf(memory) => Some(memory.info().size),
+            VmemBacking::Fabric { .. } => None,
+        }
+    }
+
+    fn memory_for_access(
+        &mut self,
+        gpu_index: usize,
+        device: &Device,
+    ) -> Result<&VirtualMemory, Status> {
+        match &mut self.backing {
+            VmemBacking::Owned(memory) | VmemBacking::DmaBuf(memory) => Ok(memory),
+            VmemBacking::Fabric { token, imports } => {
+                if !imports.contains_key(&gpu_index) {
+                    imports.try_reserve(1).map_err(|_| OUT_OF_RESOURCES)?;
+                    let memory = linux_interop::import_fabric_virtual_memory(device, *token)
+                        .map_err(map_error)?;
+                    imports.insert(gpu_index, memory);
+                }
+                imports.get(&gpu_index).ok_or(ERROR)
+            }
         }
     }
 
     fn free(&mut self) -> Result<(), rocddi::Error> {
-        self.memory.free()
+        match &mut self.backing {
+            VmemBacking::Owned(memory) | VmemBacking::DmaBuf(memory) => memory.free(),
+            VmemBacking::Fabric { imports, .. } => {
+                while let Some(index) = imports.keys().next().copied() {
+                    let Some(mut memory) = imports.remove(&index) else {
+                        continue;
+                    };
+                    if let Err(error) = memory.free() {
+                        imports.insert(index, memory);
+                        return Err(error);
+                    }
+                }
+                Ok(())
+            }
+        }
     }
 }
 
 /// Native mapping owner selected by whether access belongs to a CPU or GPU.
 enum VmemAccessOwner {
+    /// Native mapping in an activated device VM.
     Device(VirtualDeviceMapping),
+    /// Native mapping in the host process address space.
     Host(VirtualHostMapping),
 }
 
 /// Per-agent permissions and the native object that enforces them.
 struct VmemAccess {
+    /// HSA permission mask granted to this agent.
     permissions: u32,
+    /// Native mapping retained until this access is removed.
     owner: VmemAccessOwner,
 }
 
@@ -366,11 +545,17 @@ impl VmemAccess {
 
 /// One mapped virtual subrange and all native per-agent access mappings.
 pub(crate) struct VmemMapping {
+    /// Public physical-memory handle supplying backing.
     handle: u64,
+    /// Base address of the parent reservation.
     reservation: usize,
+    /// First mapped virtual byte.
     address: usize,
+    /// Byte offset into physical backing.
     offset: usize,
+    /// Mapped byte extent.
     size: usize,
+    /// Per-agent permissions and native map owners.
     access: HashMap<u64, VmemAccess>,
 }
 
@@ -489,7 +674,7 @@ fn effective_global_flags(pool_flags: u32, uncached: bool, pcie: bool) -> u32 {
     }
 }
 
-fn pool_owner(runtime: &Runtime, pool: HsaMemoryPool) -> Option<HsaAgent> {
+fn pool_owner(runtime: &HsaState, pool: HsaMemoryPool) -> Option<HsaAgent> {
     if cpu_pool(pool) {
         Some(HsaAgent { handle: CPU_AGENT })
     } else {
@@ -499,7 +684,7 @@ fn pool_owner(runtime: &Runtime, pool: HsaMemoryPool) -> Option<HsaAgent> {
     }
 }
 
-fn pool_global_flags(runtime: &Runtime, pool: HsaMemoryPool) -> Option<u32> {
+fn pool_global_flags(runtime: &HsaState, pool: HsaMemoryPool) -> Option<u32> {
     let flags = match pool.handle {
         CPU_POOL_FINE => POOL_FLAG_FINE,
         CPU_POOL_EXTENDED => POOL_FLAG_EXTENDED_FINE,
@@ -517,11 +702,11 @@ fn pool_global_flags(runtime: &Runtime, pool: HsaMemoryPool) -> Option<u32> {
 
 fn gpu_agent_pools(index: usize, fine_grain: bool) -> Vec<HsaMemoryPool> {
     let mut pools = Vec::with_capacity(usize::from(fine_grain) + 2);
-    pools.push(Runtime::gpu_pool(index, GPU_POOL_COARSE));
+    pools.push(HsaState::gpu_pool(index, GPU_POOL_COARSE));
     if fine_grain {
-        pools.push(Runtime::gpu_pool(index, GPU_POOL_FINE));
+        pools.push(HsaState::gpu_pool(index, GPU_POOL_FINE));
     }
-    pools.push(Runtime::gpu_pool(index, GPU_POOL_GROUP));
+    pools.push(HsaState::gpu_pool(index, GPU_POOL_GROUP));
     pools
 }
 
@@ -544,11 +729,16 @@ fn gpu_agent_regions(index: usize, fine_grain: bool) -> Vec<HsaMemoryPool> {
     regions
 }
 
+/// Backing and coherence class represented by one HSA memory pool.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PoolStorage {
+    /// Host system memory.
     System,
+    /// GPU local memory with coarse-grain coherence.
     LocalCoarse,
+    /// GPU local memory with fine-grain coherence.
     LocalFine,
+    /// Per-workgroup memory.
     Group,
 }
 
@@ -566,7 +756,7 @@ fn pool_access(same_owner: bool, storage: PoolStorage, linked: bool, same_hive: 
     }
 }
 
-fn gpu_pool_host_visible(runtime: &Runtime, index: usize) -> bool {
+fn gpu_pool_host_visible(runtime: &HsaState, index: usize) -> bool {
     let endpoint = &runtime.gpus[index].endpoint;
     endpoint.local_memory_bytes != 0
         && endpoint.host_visible_local_memory_bytes >= endpoint.local_memory_bytes
@@ -577,7 +767,7 @@ fn gpu_pool_coherent(pool_kind: u64, uncached: bool, pcie: bool) -> bool {
 }
 
 fn agent_pool_relationship(
-    runtime: &Runtime,
+    runtime: &HsaState,
     agent: HsaAgent,
     owner: HsaAgent,
     storage: PoolStorage,
@@ -658,7 +848,7 @@ const fn hsa_link_type(kind: MemoryLinkType) -> u32 {
     }
 }
 
-fn agent_pools(runtime: &Runtime, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>, Status> {
+fn agent_pools(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>, Status> {
     if agent.handle == CPU_AGENT {
         Ok(vec![
             HsaMemoryPool {
@@ -681,7 +871,7 @@ fn agent_pools(runtime: &Runtime, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>,
     }
 }
 
-fn agent_regions(runtime: &Runtime, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>, Status> {
+fn agent_regions(runtime: &HsaState, agent: HsaAgent) -> Result<Vec<HsaMemoryPool>, Status> {
     if agent.handle == CPU_AGENT {
         return agent_pools(runtime, agent);
     }
@@ -694,7 +884,11 @@ fn agent_regions(runtime: &Runtime, agent: HsaAgent) -> Result<Vec<HsaMemoryPool
     ))
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_agent_iterate_memory_pools")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_agent_iterate_memory_pools(
     agent: HsaAgent,
     callback: PoolCallback,
@@ -733,7 +927,11 @@ pub unsafe extern "C" fn hsa_amd_agent_iterate_memory_pools(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_agent_iterate_regions")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_agent_iterate_regions(
     agent: HsaAgent,
     callback: RegionCallback,
@@ -775,7 +973,11 @@ pub unsafe extern "C" fn hsa_agent_iterate_regions(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_agent_iterate_caches")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_agent_iterate_caches(
     agent: HsaAgent,
     callback: CacheCallback,
@@ -820,7 +1022,11 @@ pub unsafe extern "C" fn hsa_agent_iterate_caches(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_cache_get_info")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_cache_get_info(
     cache: HsaCache,
     attribute: u32,
@@ -858,7 +1064,7 @@ pub unsafe extern "C" fn hsa_cache_get_info(
 }
 
 unsafe fn memory_pool_get_info(
-    runtime: &Runtime,
+    runtime: &HsaState,
     pool: HsaMemoryPool,
     attribute: u32,
     value: *mut c_void,
@@ -919,7 +1125,11 @@ unsafe fn memory_pool_get_info(
     SUCCESS
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_pool_get_info")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_pool_get_info(
     pool: HsaMemoryPool,
     attribute: u32,
@@ -942,7 +1152,11 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_get_info(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_region_get_info")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_region_get_info(
     region: HsaRegion,
     attribute: u32,
@@ -996,7 +1210,11 @@ pub unsafe extern "C" fn hsa_region_get_info(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_memory_allocate")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_memory_allocate(
     region: HsaRegion,
     size: usize,
@@ -1016,7 +1234,11 @@ pub unsafe extern "C" fn hsa_memory_allocate(
     }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_memory_free")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_memory_free(pointer: *mut c_void) -> Status {
     if pointer.is_null() {
         return boundary(|| {
@@ -1024,7 +1246,7 @@ pub unsafe extern "C" fn hsa_memory_free(pointer: *mut c_void) -> Status {
                 Ok(guard) => guard,
                 Err(status) => return status,
             };
-            if guard.is_some() {
+            if guard.as_ref().is_some() {
                 SUCCESS
             } else {
                 NOT_INITIALIZED
@@ -1035,14 +1257,18 @@ pub unsafe extern "C" fn hsa_memory_free(pointer: *mut c_void) -> Status {
     unsafe { hsa_amd_memory_pool_free(pointer) }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_memory_register")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub extern "C" fn hsa_memory_register(pointer: *mut c_void, size: usize) -> Status {
     boundary(|| {
         let guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        if guard.is_none() {
+        if guard.as_ref().is_none() {
             return NOT_INITIALIZED;
         }
         if !pointer.is_null() && size == 0 {
@@ -1052,14 +1278,18 @@ pub extern "C" fn hsa_memory_register(pointer: *mut c_void, size: usize) -> Stat
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_memory_deregister")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub extern "C" fn hsa_memory_deregister(_pointer: *mut c_void, _size: usize) -> Status {
     boundary(|| {
         let guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        if guard.is_some() {
+        if guard.as_ref().is_some() {
             SUCCESS
         } else {
             NOT_INITIALIZED
@@ -1067,7 +1297,11 @@ pub extern "C" fn hsa_memory_deregister(_pointer: *mut c_void, _size: usize) -> 
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_memory_assign_agent")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub extern "C" fn hsa_memory_assign_agent(
     pointer: *mut c_void,
     agent: HsaAgent,
@@ -1091,7 +1325,11 @@ pub extern "C" fn hsa_memory_assign_agent(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_agent_memory_pool_get_info")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_agent_memory_pool_get_info(
     agent: HsaAgent,
     pool: HsaMemoryPool,
@@ -1153,76 +1391,107 @@ unsafe fn memory_pool_allocate(
     invalid_pool: Status,
 ) -> Status {
     boundary(|| {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        if pointer.is_null() || size == 0 || flags & !ALLOC_FLAGS != 0 {
-            return INVALID_ARGUMENT;
-        }
-        let page = runtime.host_page_size;
-        let rounded = match size.checked_add(page - 1).map(|value| value & !(page - 1)) {
-            Some(size) => size,
-            None => return INVALID_ALLOCATION,
-        };
-        let (device_index, kind) = if cpu_pool(pool) {
-            (0, cpu_pool_memory_kind(pool, runtime.lifetime, flags))
-        } else if let Some((index, pool_kind)) = runtime.decode_gpu_pool(pool) {
-            if pool_kind == GPU_POOL_GROUP {
+        let (
+            generation,
+            device,
+            kind,
+            rounded,
+            page,
+            permissions,
+            owner,
+            global_flags,
+            uncached,
+            device_index,
+            tracker,
+            _token,
+        ) = {
+            let mut guard = match lock() {
+                Ok(guard) => guard,
+                Err(status) => return status,
+            };
+            let Some(generation) = guard.active_generation() else {
+                return NOT_INITIALIZED;
+            };
+            let runtime = match initialized_mut(&mut guard) {
+                Ok(runtime) => runtime,
+                Err(status) => return status,
+            };
+            if pointer.is_null() || size == 0 || flags & !ALLOC_FLAGS != 0 {
+                return INVALID_ARGUMENT;
+            }
+            let page = runtime.host_page_size;
+            let rounded = match size.checked_add(page - 1).map(|value| value & !(page - 1)) {
+                Some(size) => size,
+                None => return INVALID_ALLOCATION,
+            };
+            let (device_index, kind) = if cpu_pool(pool) {
+                (0, cpu_pool_memory_kind(pool, runtime.lifetime, flags))
+            } else if let Some((index, pool_kind)) = runtime.decode_gpu_pool(pool) {
+                if pool_kind == GPU_POOL_GROUP {
+                    return INVALID_ALLOCATION;
+                }
+                let uncached = flags & ALLOC_UNCACHED != 0;
+                (
+                    index,
+                    MemoryKind::DeviceLocal {
+                        host_visible: gpu_pool_host_visible(runtime, index),
+                        coherent: gpu_pool_coherent(pool_kind, uncached, flags & ALLOC_PCIE != 0),
+                        uncached,
+                        contiguous: flags & ALLOC_CONTIGUOUS != 0,
+                    },
+                )
+            } else {
+                return invalid_pool;
+            };
+            let maximum = runtime.decode_gpu_pool(pool).map_or(
+                runtime.host_memory_bytes & !(page - 1),
+                |(index, pool_kind)| {
+                    if pool_kind == GPU_POOL_GROUP {
+                        0
+                    } else {
+                        usize::try_from(runtime.gpus[index].endpoint.local_memory_bytes)
+                            .unwrap_or(usize::MAX)
+                            & !(page - 1)
+                    }
+                },
+            );
+            if rounded > maximum {
                 return INVALID_ALLOCATION;
             }
-            let uncached = flags & ALLOC_UNCACHED != 0;
+            let owner = match pool_owner(runtime, pool) {
+                Some(owner) => owner,
+                None => return invalid_pool,
+            };
+            let global_flags = match pool_global_flags(runtime, pool) {
+                Some(flags) => flags,
+                None => return invalid_pool,
+            };
+            let permissions = if flags & ALLOC_EXECUTABLE != 0 {
+                DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE
+            } else {
+                DeviceAccess::READ | DeviceAccess::WRITE
+            };
+            let uncached = flags & ALLOC_UNCACHED != 0 || matches!(kind, MemoryKind::System);
+            let tracker = runtime.inflight.clone();
+            let Some(token) = tracker.enter() else {
+                return OUT_OF_RESOURCES;
+            };
             (
-                index,
-                MemoryKind::DeviceLocal {
-                    host_visible: gpu_pool_host_visible(runtime, index),
-                    coherent: gpu_pool_coherent(pool_kind, uncached, flags & ALLOC_PCIE != 0),
-                    uncached,
-                    contiguous: flags & ALLOC_CONTIGUOUS != 0,
-                },
+                generation,
+                runtime.gpus[device_index].device.clone(),
+                kind,
+                rounded,
+                page,
+                permissions,
+                owner,
+                global_flags,
+                uncached,
+                device_index,
+                tracker,
+                token,
             )
-        } else {
-            return invalid_pool;
         };
-        let maximum = runtime.decode_gpu_pool(pool).map_or(
-            runtime.host_memory_bytes & !(page - 1),
-            |(index, pool_kind)| {
-                if pool_kind == GPU_POOL_GROUP {
-                    0
-                } else {
-                    usize::try_from(runtime.gpus[index].endpoint.local_memory_bytes)
-                        .unwrap_or(usize::MAX)
-                        & !(page - 1)
-                }
-            },
-        );
-        if rounded > maximum {
-            return INVALID_ALLOCATION;
-        }
-        let owner = match pool_owner(runtime, pool) {
-            Some(owner) => owner,
-            None => return invalid_pool,
-        };
-        let global_flags = match pool_global_flags(runtime, pool) {
-            Some(flags) => flags,
-            None => return invalid_pool,
-        };
-        let permissions = if flags & ALLOC_EXECUTABLE != 0 {
-            DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE
-        } else {
-            DeviceAccess::READ | DeviceAccess::WRITE
-        };
-        let uncached = flags & ALLOC_UNCACHED != 0 || matches!(kind, MemoryKind::System);
-        let allocation = match runtime.gpus[device_index].device.allocate(
-            kind,
-            rounded as u64,
-            page as u64,
-            permissions,
-        ) {
+        let allocation = match device.allocate(kind, rounded as u64, page as u64, permissions) {
             Ok(allocation) => allocation,
             Err(error) => return map_error(error),
         };
@@ -1231,25 +1500,67 @@ unsafe fn memory_pool_allocate(
         let accessible = vec![HsaAgent {
             handle: GPU_AGENT_BASE + device_index as u64,
         }];
-        runtime.allocations.insert(
-            pointer_value,
-            Memory::new(
-                allocation,
-                size,
-                owner,
-                global_flags,
-                uncached,
-                flags,
-                accessible,
-            ),
+        let memory = Memory::new(
+            allocation,
+            size,
+            owner,
+            global_flags,
+            uncached,
+            flags,
+            accessible,
         );
-        // SAFETY: The caller supplied writable output storage.
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return retire_unpublished_memory(memory, &tracker, status),
+        };
+        if guard.active_generation() != Some(generation) {
+            drop(guard);
+            return retire_unpublished_memory(memory, &tracker, INVALID_RUNTIME_STATE);
+        }
+        let Some(runtime) = guard.as_mut() else {
+            drop(guard);
+            return retire_unpublished_memory(memory, &tracker, NOT_INITIALIZED);
+        };
+        if runtime.memory_state.allocations.try_reserve(1).is_err()
+            || runtime
+                .memory_state
+                .allocations
+                .contains_key(&pointer_value)
+        {
+            drop(guard);
+            return retire_unpublished_memory(memory, &tracker, OUT_OF_RESOURCES);
+        }
+        runtime
+            .memory_state
+            .allocations
+            .insert(pointer_value, memory);
+        // SAFETY: The caller supplied writable output storage, and the
+        // allocation is registered before its address is exposed.
         unsafe { pointer.write(pointer_value as *mut c_void) };
         SUCCESS
     })
 }
 
-#[unsafe(no_mangle)]
+fn retire_unpublished_memory(
+    mut memory: Memory,
+    tracker: &crate::runtime::InFlightTracker,
+    status: Status,
+) -> Status {
+    match memory.free() {
+        Ok(()) => status,
+        Err(error) => {
+            tracker.quarantine();
+            std::mem::forget(memory);
+            map_error(error)
+        }
+    }
+}
+
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_pool_allocate")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_pool_allocate(
     pool: HsaMemoryPool,
     size: usize,
@@ -1260,7 +1571,11 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_allocate(
     unsafe { memory_pool_allocate(pool, size, flags, pointer, INVALID_MEMORY_POOL) }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_register_deallocation_callback")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_register_deallocation_callback(
     pointer: *mut c_void,
     callback: DeallocationCallbackFn,
@@ -1282,6 +1597,7 @@ pub unsafe extern "C" fn hsa_amd_register_deallocation_callback(
             return INVALID_ARGUMENT;
         }
         if let Some(memory) = runtime
+            .memory_state
             .allocations
             .values_mut()
             .find(|memory| memory.contains(pointer as usize))
@@ -1299,6 +1615,7 @@ pub unsafe extern "C" fn hsa_amd_register_deallocation_callback(
             return SUCCESS;
         }
         if let Some((_, reservation)) = runtime
+            .memory_state
             .vmem_reservations
             .range_mut(..=pointer as usize)
             .next_back()
@@ -1320,7 +1637,11 @@ pub unsafe extern "C" fn hsa_amd_register_deallocation_callback(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_deregister_deallocation_callback")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_deregister_deallocation_callback(
     pointer: *mut c_void,
     callback: DeallocationCallbackFn,
@@ -1341,6 +1662,7 @@ pub unsafe extern "C" fn hsa_amd_deregister_deallocation_callback(
             return INVALID_ARGUMENT;
         }
         if let Some(memory) = runtime
+            .memory_state
             .allocations
             .values_mut()
             .find(|memory| memory.contains(pointer as usize))
@@ -1357,6 +1679,7 @@ pub unsafe extern "C" fn hsa_amd_deregister_deallocation_callback(
             };
         }
         if let Some((_, reservation)) = runtime
+            .memory_state
             .vmem_reservations
             .range_mut(..=pointer as usize)
             .next_back()
@@ -1377,13 +1700,25 @@ pub unsafe extern "C" fn hsa_amd_deregister_deallocation_callback(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_pool_free")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Status {
     boundary(|| {
+        enum Removed {
+            Allocation { key: usize, memory: Memory },
+            Locked { index: usize, memory: LockedMemory },
+        }
+
         if pointer.is_null() {
             return INVALID_ARGUMENT;
         }
-        let callbacks = {
+
+        // Transfer the native owner out of the public registry before calling
+        // the driver. The token keeps its session alive if shutdown starts.
+        let (mut removed, token, tracker) = {
             let mut guard = match lock() {
                 Ok(guard) => guard,
                 Err(status) => return status,
@@ -1393,22 +1728,23 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Statu
                 Err(status) => return status,
             };
             let base = runtime
+                .memory_state
                 .allocations
                 .get(&(pointer as usize))
                 .map_or(pointer as usize, |memory| memory.description.agent_base);
             if copy_borrowed(runtime, base) {
                 return OUT_OF_RESOURCES;
             }
-            if let Some(mut memory) = runtime.allocations.remove(&(pointer as usize)) {
-                match memory.free() {
-                    Ok(()) => std::mem::take(&mut memory.deallocation_callbacks),
-                    Err(error) => {
-                        runtime.allocations.insert(pointer as usize, memory);
-                        return map_error(error);
-                    }
+            let removed = if let Some(memory) =
+                runtime.memory_state.allocations.remove(&(pointer as usize))
+            {
+                Removed::Allocation {
+                    key: pointer as usize,
+                    memory,
                 }
             } else {
                 let Some(index) = runtime
+                    .memory_state
                     .locked_allocations
                     .iter()
                     .rposition(|memory| memory.description.agent_base == pointer as usize)
@@ -1417,20 +1753,90 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Statu
                 };
                 if copy_borrowed(
                     runtime,
-                    runtime.locked_allocations[index].description.agent_base,
+                    runtime.memory_state.locked_allocations[index]
+                        .description
+                        .agent_base,
                 ) {
                     return OUT_OF_RESOURCES;
                 }
-                let mut memory = runtime.locked_allocations.remove(index);
-                return match memory.free() {
-                    Ok(()) => SUCCESS,
-                    Err(error) => {
-                        runtime.locked_allocations.insert(index, memory);
-                        map_error(error)
+                Removed::Locked {
+                    index,
+                    memory: runtime.memory_state.locked_allocations.remove(index),
+                }
+            };
+            let tracker = runtime.inflight.clone();
+            let Some(token) = tracker.enter() else {
+                match removed {
+                    Removed::Allocation { key, memory } => {
+                        runtime.memory_state.allocations.insert(key, memory);
                     }
-                };
-            }
+                    Removed::Locked { index, memory } => {
+                        runtime
+                            .memory_state
+                            .locked_allocations
+                            .insert(index, memory);
+                    }
+                }
+                return OUT_OF_RESOURCES;
+            };
+            (removed, token, tracker)
         };
+        let result = match &mut removed {
+            Removed::Allocation { memory, .. } => memory.free(),
+            Removed::Locked { memory, .. } => memory.free(),
+        };
+        if let Err(error) = result {
+            let status = map_error(error);
+            let mut slot = Some(removed);
+            if let Ok(mut guard) = lock() {
+                if let Some(runtime) = guard.as_mut() {
+                    let can_restore = slot.as_ref().is_some_and(|owner| match owner {
+                        Removed::Allocation { key, .. } => {
+                            !runtime.memory_state.allocations.contains_key(key)
+                        }
+                        Removed::Locked { memory, .. } => !runtime
+                            .memory_state
+                            .locked_allocations
+                            .iter()
+                            .any(|current| {
+                                current.description.agent_base == memory.description.agent_base
+                            }),
+                    });
+                    if can_restore {
+                        if let Some(owner) = slot.take() {
+                            match owner {
+                                Removed::Allocation { key, memory } => {
+                                    runtime.memory_state.allocations.insert(key, memory);
+                                }
+                                Removed::Locked { index, memory } => {
+                                    let index =
+                                        index.min(runtime.memory_state.locked_allocations.len());
+                                    runtime
+                                        .memory_state
+                                        .locked_allocations
+                                        .insert(index, memory);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(owner) = slot {
+                // Shutdown already detached the generation, or the registry
+                // is poisoned. Its native context cannot now be retired.
+                tracker.quarantine();
+                std::mem::forget(owner);
+            }
+            drop(token);
+            return status;
+        }
+        let callbacks = match removed {
+            Removed::Allocation { mut memory, .. } => {
+                std::mem::take(&mut memory.deallocation_callbacks)
+            }
+            Removed::Locked { .. } => Vec::new(),
+        };
+        drop(token);
         for registered in callbacks {
             // SAFETY: The caller registered this callback and its user data for
             // synchronous notification when this allocation was released.
@@ -1445,7 +1851,11 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_free(pointer: *mut c_void) -> Statu
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_ipc_memory_create")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
     pointer: *mut c_void,
     size: usize,
@@ -1462,7 +1872,7 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let Some(memory) = runtime.allocations.values().find(|memory| {
+        let Some(memory) = runtime.memory_state.allocations.values().find(|memory| {
             memory.description.agent_base == pointer as usize
                 && memory.description.size == size
                 && memory.description.owner.handle != CPU_AGENT
@@ -1480,7 +1890,11 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_create(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_ipc_memory_attach")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
     handle: *const HsaAmdIpcMemory,
     size: usize,
@@ -1589,12 +2003,15 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
             .map_or(HsaAgent { handle: 0 }, |(index, _)| HsaAgent {
                 handle: GPU_AGENT_BASE + index as u64,
             });
-        if runtime.ipc_allocations.try_reserve(1).is_err()
-            || runtime.ipc_allocations.contains_key(&imported_pointer)
+        if runtime.memory_state.ipc_allocations.try_reserve(1).is_err()
+            || runtime
+                .memory_state
+                .ipc_allocations
+                .contains_key(&imported_pointer)
         {
             return OUT_OF_RESOURCES;
         }
-        runtime.ipc_allocations.insert(
+        runtime.memory_state.ipc_allocations.insert(
             imported_pointer,
             Memory::new_ipc(allocation, size, owner, accessible),
         );
@@ -1604,7 +2021,11 @@ pub unsafe extern "C" fn hsa_amd_ipc_memory_attach(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_ipc_memory_detach")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub extern "C" fn hsa_amd_ipc_memory_detach(mapped_pointer: *mut c_void) -> Status {
     boundary(|| {
         if mapped_pointer.is_null() {
@@ -1620,25 +2041,30 @@ pub extern "C" fn hsa_amd_ipc_memory_detach(mapped_pointer: *mut c_void) -> Stat
         };
         let key = mapped_pointer as usize;
         let base = runtime
+            .memory_state
             .ipc_allocations
             .get(&key)
             .map_or(key, |memory| memory.description.agent_base);
         if copy_borrowed(runtime, base) {
             return OUT_OF_RESOURCES;
         }
-        let Some(mut memory) = runtime.ipc_allocations.remove(&key) else {
+        let Some(mut memory) = runtime.memory_state.ipc_allocations.remove(&key) else {
             return INVALID_ARGUMENT;
         };
         if memory.free().is_ok() {
             SUCCESS
         } else {
-            runtime.ipc_allocations.insert(key, memory);
+            runtime.memory_state.ipc_allocations.insert(key, memory);
             INVALID_ARGUMENT
         }
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_external_semaphore_handle_open")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_external_semaphore_handle_open(
     agent: HsaAgent,
     descriptor: *const HsaAmdExternalSemaphoreHandleDescriptor,
@@ -1662,7 +2088,11 @@ pub unsafe extern "C" fn hsa_amd_external_semaphore_handle_open(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_external_semaphore_handle_close")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub extern "C" fn hsa_amd_external_semaphore_handle_close(
     _semaphore: HsaAmdExternalSemaphore,
 ) -> Status {
@@ -1671,7 +2101,7 @@ pub extern "C" fn hsa_amd_external_semaphore_handle_close(
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        if guard.is_none() {
+        if guard.as_ref().is_none() {
             return NOT_INITIALIZED;
         }
         ERROR
@@ -1825,7 +2255,11 @@ unsafe fn ais_file_io(
     status
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_ais_file_write")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_ais_file_write(
     handle: HsaAmdAisFileHandle,
     device_pointer: *mut c_void,
@@ -1850,7 +2284,11 @@ pub unsafe extern "C" fn hsa_amd_ais_file_write(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_ais_file_read")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_ais_file_read(
     handle: HsaAmdAisFileHandle,
     device_pointer: *mut c_void,
@@ -1892,12 +2330,18 @@ unsafe fn portable_export_dmabuf(
     if pointer.is_null() || descriptor.is_null() || offset.is_null() || size == 0 {
         return INVALID_ARGUMENT;
     }
-    let Some((memory, pointer_offset)) = runtime.allocations.values().find_map(|memory| {
-        memory
-            .description
-            .offset_range(pointer as usize, size)
-            .map(|pointer_offset| (memory, pointer_offset))
-    }) else {
+    let Some((memory, pointer_offset)) =
+        runtime
+            .memory_state
+            .allocations
+            .values()
+            .find_map(|memory| {
+                memory
+                    .description
+                    .offset_range(pointer as usize, size)
+                    .map(|pointer_offset| (memory, pointer_offset))
+            })
+    else {
         return INVALID_ALLOCATION;
     };
     if memory.description.owner.handle == CPU_AGENT {
@@ -1925,7 +2369,11 @@ unsafe fn portable_export_dmabuf(
     SUCCESS
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_portable_export_dmabuf")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf(
     pointer: *const c_void,
     size: usize,
@@ -1938,7 +2386,11 @@ pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_portable_export_dmabuf_v2")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf_v2(
     pointer: *const c_void,
     size: usize,
@@ -1952,7 +2404,11 @@ pub unsafe extern "C" fn hsa_amd_portable_export_dmabuf_v2(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_portable_close_dmabuf")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub extern "C" fn hsa_amd_portable_close_dmabuf(descriptor: i32) -> Status {
     boundary(|| {
         // SAFETY: The ABI transfers responsibility for closing this descriptor.
@@ -2043,7 +2499,12 @@ unsafe fn memory_lock_to_pool(
         }
     }
 
-    if runtime.locked_allocations.try_reserve(1).is_err() {
+    if runtime
+        .memory_state
+        .locked_allocations
+        .try_reserve(1)
+        .is_err()
+    {
         return OUT_OF_RESOURCES;
     }
     let host_base = host_ptr as usize;
@@ -2087,20 +2548,27 @@ unsafe fn memory_lock_to_pool(
             handle: GPU_AGENT_BASE + index as u64,
         })
         .collect();
-    runtime.locked_allocations.push(LockedMemory::new(
-        allocation,
-        host_base,
-        device_base,
-        size,
-        effective_global_flags(global_flags, flags & ALLOC_UNCACHED != 0, false),
-        accessible,
-    ));
+    runtime
+        .memory_state
+        .locked_allocations
+        .push(LockedMemory::new(
+            allocation,
+            host_base,
+            device_base,
+            size,
+            effective_global_flags(global_flags, flags & ALLOC_UNCACHED != 0, false),
+            accessible,
+        ));
     // SAFETY: The caller supplied writable pointer storage.
     unsafe { agent_ptr.write(device_base as *mut c_void) };
     SUCCESS
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_lock")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_lock(
     host_ptr: *mut c_void,
     size: usize,
@@ -2127,7 +2595,11 @@ pub unsafe extern "C" fn hsa_amd_memory_lock(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_lock_to_pool")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_lock_to_pool(
     host_ptr: *mut c_void,
     size: usize,
@@ -2144,7 +2616,11 @@ pub unsafe extern "C" fn hsa_amd_memory_lock_to_pool(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_unlock")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_unlock(host_ptr: *mut c_void) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -2162,6 +2638,7 @@ pub unsafe extern "C" fn hsa_amd_memory_unlock(host_ptr: *mut c_void) -> Status 
             return INVALID_ARGUMENT;
         }
         let Some(index) = runtime
+            .memory_state
             .locked_allocations
             .iter()
             .rposition(|memory| memory.description.host_base == Some(host_ptr as usize))
@@ -2170,15 +2647,20 @@ pub unsafe extern "C" fn hsa_amd_memory_unlock(host_ptr: *mut c_void) -> Status 
         };
         if copy_borrowed(
             runtime,
-            runtime.locked_allocations[index].description.agent_base,
+            runtime.memory_state.locked_allocations[index]
+                .description
+                .agent_base,
         ) {
             return OUT_OF_RESOURCES;
         }
-        let mut memory = runtime.locked_allocations.remove(index);
+        let mut memory = runtime.memory_state.locked_allocations.remove(index);
         match memory.free() {
             Ok(()) => SUCCESS,
             Err(error) => {
-                runtime.locked_allocations.insert(index, memory);
+                runtime
+                    .memory_state
+                    .locked_allocations
+                    .insert(index, memory);
                 map_error(error)
             }
         }
@@ -2270,13 +2752,22 @@ unsafe fn interop_map_buffer(
     } else {
         metadata_bytes.as_ptr().cast::<c_void>()
     };
-    if runtime.interop_allocations.try_reserve(1).is_err() {
+    if runtime
+        .memory_state
+        .interop_allocations
+        .try_reserve(1)
+        .is_err()
+    {
         return OUT_OF_RESOURCES;
     }
-    if runtime.interop_allocations.contains_key(&imported_pointer) {
+    if runtime
+        .memory_state
+        .interop_allocations
+        .contains_key(&imported_pointer)
+    {
         return ERROR;
     }
-    runtime.interop_allocations.insert(
+    runtime.memory_state.interop_allocations.insert(
         imported_pointer,
         Memory::new_interop(allocation, owner, accessible),
     );
@@ -2295,7 +2786,11 @@ unsafe fn interop_map_buffer(
     SUCCESS
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_interop_map_buffer")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_interop_map_buffer(
     num_agents: u32,
     agents: *mut HsaAgent,
@@ -2324,7 +2819,11 @@ pub unsafe extern "C" fn hsa_amd_interop_map_buffer(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_interop_map_buffer_with_size")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_interop_map_buffer_with_size(
     num_agents: u32,
     agents: *mut HsaAgent,
@@ -2354,7 +2853,11 @@ pub unsafe extern "C" fn hsa_amd_interop_map_buffer_with_size(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_interop_unmap_buffer")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub extern "C" fn hsa_amd_interop_unmap_buffer(pointer: *mut c_void) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -2370,28 +2873,33 @@ pub extern "C" fn hsa_amd_interop_unmap_buffer(pointer: *mut c_void) -> Status {
         }
         let key = pointer as usize;
         let base = runtime
+            .memory_state
             .interop_allocations
             .get(&key)
             .map_or(key, |memory| memory.description.agent_base);
         if copy_borrowed(runtime, base) {
             return OUT_OF_RESOURCES;
         }
-        if let Some(mut memory) = runtime.interop_allocations.remove(&key) {
+        if let Some(mut memory) = runtime.memory_state.interop_allocations.remove(&key) {
             if memory.free().is_err() {
-                runtime.interop_allocations.insert(key, memory);
+                runtime.memory_state.interop_allocations.insert(key, memory);
             }
         }
         SUCCESS
     })
 }
 
-fn vmem_reservation_base(runtime: &Runtime, address: usize, size: usize) -> Option<usize> {
-    let (&base, reservation) = runtime.vmem_reservations.range(..=address).next_back()?;
+fn vmem_reservation_base(runtime: &HsaState, address: usize, size: usize) -> Option<usize> {
+    let (&base, reservation) = runtime
+        .memory_state
+        .vmem_reservations
+        .range(..=address)
+        .next_back()?;
     reservation.contains_range(address, size).then_some(base)
 }
 
 fn vmem_mapping_bases(
-    runtime: &Runtime,
+    runtime: &HsaState,
     address: usize,
     size: usize,
 ) -> Result<Vec<usize>, Status> {
@@ -2400,6 +2908,7 @@ fn vmem_mapping_bases(
     let mut cursor = address;
     while cursor < end {
         let mapping = runtime
+            .memory_state
             .vmem_mappings
             .get(&cursor)
             .ok_or(INVALID_ALLOCATION)?;
@@ -2415,11 +2924,12 @@ fn vmem_mapping_bases(
 }
 
 fn replace_vmem_access(
-    runtime: &mut Runtime,
+    runtime: &mut HsaState,
     mapping_base: usize,
     descriptor: HsaAmdMemoryAccessDesc,
 ) -> Status {
     let existing_permission = runtime
+        .memory_state
         .vmem_mappings
         .get(&mapping_base)
         .and_then(|mapping| mapping.access.get(&descriptor.agent_handle.handle))
@@ -2428,7 +2938,7 @@ fn replace_vmem_access(
         return SUCCESS;
     }
     if descriptor.permissions != ACCESS_PERMISSION_NONE {
-        let Some(mapping) = runtime.vmem_mappings.get_mut(&mapping_base) else {
+        let Some(mapping) = runtime.memory_state.vmem_mappings.get_mut(&mapping_base) else {
             return INVALID_ALLOCATION;
         };
         if existing_permission.is_none() && mapping.access.try_reserve(1).is_err() {
@@ -2436,12 +2946,13 @@ fn replace_vmem_access(
         }
     }
     let old_access = runtime
+        .memory_state
         .vmem_mappings
         .get_mut(&mapping_base)
         .and_then(|mapping| mapping.access.remove(&descriptor.agent_handle.handle));
     if let Some(mut access) = old_access {
         if let Err(error) = access.free() {
-            if let Some(mapping) = runtime.vmem_mappings.get_mut(&mapping_base) {
+            if let Some(mapping) = runtime.memory_state.vmem_mappings.get_mut(&mapping_base) {
                 mapping
                     .access
                     .insert(descriptor.agent_handle.handle, access);
@@ -2453,20 +2964,46 @@ fn replace_vmem_access(
         return SUCCESS;
     }
 
-    let Some(mapping) = runtime.vmem_mappings.get(&mapping_base) else {
+    let Some(mapping) = runtime.memory_state.vmem_mappings.get(&mapping_base) else {
         return INVALID_ALLOCATION;
     };
-    let Some(handle) = runtime.vmem_handles.get(&mapping.handle) else {
+    let gpu_index = if descriptor.agent_handle.handle == CPU_AGENT {
+        runtime
+            .gpus
+            .iter()
+            .position(|gpu| gpu.info.fabric_handles_supported)
+            .unwrap_or(0)
+    } else {
+        let Some(index) = runtime.gpu_index(descriptor.agent_handle) else {
+            return INVALID_AGENT;
+        };
+        index
+    };
+    let Some(gpu) = runtime.gpus.get(gpu_index) else {
+        return NOT_SUPPORTED;
+    };
+    let Some(handle) = runtime.memory_state.vmem_handles.get_mut(&mapping.handle) else {
         return INVALID_ALLOCATION;
     };
-    let Some(reservation) = runtime.vmem_reservations.get(&mapping.reservation) else {
+    if matches!(&handle.backing, VmemBacking::Fabric { .. }) && !gpu.info.fabric_handles_supported {
+        return NOT_SUPPORTED;
+    }
+    let memory = match handle.memory_for_access(gpu_index, &gpu.device) {
+        Ok(memory) => memory,
+        Err(status) => return status,
+    };
+    let Some(reservation) = runtime
+        .memory_state
+        .vmem_reservations
+        .get(&mapping.reservation)
+    else {
         return INVALID_ALLOCATION;
     };
     let Some(permissions) = DeviceAccess::from_bits(descriptor.permissions) else {
         return INVALID_ARGUMENT;
     };
     let owner = if descriptor.agent_handle.handle == CPU_AGENT {
-        match handle.memory.map_host(
+        match memory.map_host(
             &reservation.address,
             mapping.address as u64,
             mapping.offset as u64,
@@ -2477,11 +3014,8 @@ fn replace_vmem_access(
             Err(error) => return map_error(error),
         }
     } else {
-        let Some(index) = runtime.gpu_index(descriptor.agent_handle) else {
-            return INVALID_AGENT;
-        };
-        match runtime.gpus[index].device.map_virtual_memory(
-            &handle.memory,
+        match gpu.device.map_virtual_memory(
+            memory,
             &reservation.address,
             mapping.address as u64,
             mapping.offset as u64,
@@ -2492,7 +3026,7 @@ fn replace_vmem_access(
             Err(error) => return map_error(error),
         }
     };
-    let Some(mapping) = runtime.vmem_mappings.get_mut(&mapping_base) else {
+    let Some(mapping) = runtime.memory_state.vmem_mappings.get_mut(&mapping_base) else {
         return ERROR;
     };
     mapping.access.insert(
@@ -2505,7 +3039,11 @@ fn replace_vmem_access(
     SUCCESS
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_address_reserve")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_vmem_address_reserve(
     address: *mut *mut c_void,
     size: usize,
@@ -2520,7 +3058,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve(
     unsafe { hsa_amd_vmem_address_reserve_align(address, size, requested, page as u64, flags) }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_address_reserve_align")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
     address: *mut *mut c_void,
     size: usize,
@@ -2561,10 +3103,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
             Err(error) => return map_error(error),
         };
         let base = reservation.info().address as usize;
-        if runtime.vmem_reservations.contains_key(&base) {
+        if runtime.memory_state.vmem_reservations.contains_key(&base) {
             return ERROR;
         }
-        runtime.vmem_reservations.insert(
+        runtime.memory_state.vmem_reservations.insert(
             base,
             VmemReservation::new(reservation, flags & VMEM_ADDRESS_NO_REGISTER == 0),
         );
@@ -2574,7 +3116,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_address_free")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub extern "C" fn hsa_amd_vmem_address_free(address: *mut c_void, size: usize) -> Status {
     boundary(|| {
         if address.is_null() || size == 0 {
@@ -2590,19 +3136,28 @@ pub extern "C" fn hsa_amd_vmem_address_free(address: *mut c_void, size: usize) -
                 Err(status) => return status,
             };
             let key = address as usize;
-            let Some(mut reservation) = runtime.vmem_reservations.remove(&key) else {
+            let Some(mut reservation) = runtime.memory_state.vmem_reservations.remove(&key) else {
                 return INVALID_ALLOCATION;
             };
             if reservation.description.size != size {
-                runtime.vmem_reservations.insert(key, reservation);
+                runtime
+                    .memory_state
+                    .vmem_reservations
+                    .insert(key, reservation);
                 return INVALID_ARGUMENT;
             }
             if reservation.mappings != 0 {
-                runtime.vmem_reservations.insert(key, reservation);
+                runtime
+                    .memory_state
+                    .vmem_reservations
+                    .insert(key, reservation);
                 return RESOURCE_FREE;
             }
             if let Err(error) = reservation.free() {
-                runtime.vmem_reservations.insert(key, reservation);
+                runtime
+                    .memory_state
+                    .vmem_reservations
+                    .insert(key, reservation);
                 return map_error(error);
             }
             std::mem::take(&mut reservation.deallocation_callbacks)
@@ -2621,7 +3176,11 @@ pub extern "C" fn hsa_amd_vmem_address_free(address: *mut c_void, size: usize) -
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_handle_create")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
     pool: HsaMemoryPool,
     size: usize,
@@ -2669,7 +3228,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
         } else {
             return INVALID_ARGUMENT;
         };
-        if runtime.vmem_handles.try_reserve(1).is_err() {
+        if runtime.memory_state.vmem_handles.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
         let memory = match runtime.gpus[device_index].device.create_virtual_memory(
@@ -2685,16 +3244,21 @@ pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime
-            .vmem_handles
-            .insert(handle, VmemHandle::new(memory, pool, memory_type, false));
+        runtime.memory_state.vmem_handles.insert(
+            handle,
+            VmemHandle::new(VmemBacking::Owned(memory), pool, memory_type),
+        );
         // SAFETY: The caller supplied writable output storage.
         unsafe { memory_handle.write(HsaAmdVmemAllocHandle { handle }) };
         SUCCESS
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_handle_release")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub extern "C" fn hsa_amd_vmem_handle_release(memory_handle: HsaAmdVmemAllocHandle) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -2705,7 +3269,11 @@ pub extern "C" fn hsa_amd_vmem_handle_release(memory_handle: HsaAmdVmemAllocHand
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let Some(handle) = runtime.vmem_handles.get_mut(&memory_handle.handle) else {
+        let Some(handle) = runtime
+            .memory_state
+            .vmem_handles
+            .get_mut(&memory_handle.handle)
+        else {
             return INVALID_ALLOCATION;
         };
         if handle.references == 0 {
@@ -2715,19 +3283,30 @@ pub extern "C" fn hsa_amd_vmem_handle_release(memory_handle: HsaAmdVmemAllocHand
         if handle.references != 0 || handle.mappings != 0 {
             return SUCCESS;
         }
-        let Some(mut handle) = runtime.vmem_handles.remove(&memory_handle.handle) else {
+        let Some(mut handle) = runtime
+            .memory_state
+            .vmem_handles
+            .remove(&memory_handle.handle)
+        else {
             return ERROR;
         };
         if let Err(error) = handle.free() {
             handle.references = 1;
-            runtime.vmem_handles.insert(memory_handle.handle, handle);
+            runtime
+                .memory_state
+                .vmem_handles
+                .insert(memory_handle.handle, handle);
             return map_error(error);
         }
         SUCCESS
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_map")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub extern "C" fn hsa_amd_vmem_map(
     address: *mut c_void,
     size: usize,
@@ -2759,16 +3338,20 @@ pub extern "C" fn hsa_amd_vmem_map(
         let Some(reservation) = vmem_reservation_base(runtime, base, size) else {
             return INVALID_ARGUMENT;
         };
-        let Some(handle) = runtime.vmem_handles.get(&memory_handle.handle) else {
+        let Some(handle) = runtime.memory_state.vmem_handles.get(&memory_handle.handle) else {
             return INVALID_ARGUMENT;
         };
-        if offset
-            .checked_add(size)
-            .is_none_or(|extent| extent > handle.memory.info().size as usize)
+        let Some(extent) = offset.checked_add(size) else {
+            return INVALID_ARGUMENT;
+        };
+        if handle
+            .known_size()
+            .is_some_and(|known_size| extent as u64 > known_size)
         {
             return INVALID_ARGUMENT;
         }
         if runtime
+            .memory_state
             .vmem_mappings
             .range(..=base)
             .next_back()
@@ -2779,6 +3362,7 @@ pub extern "C" fn hsa_amd_vmem_map(
                         .is_none_or(|mapped_end| mapped_end > base)
             })
             || runtime
+                .memory_state
                 .vmem_mappings
                 .range(base..)
                 .next()
@@ -2786,14 +3370,19 @@ pub extern "C" fn hsa_amd_vmem_map(
         {
             return INVALID_ARGUMENT;
         }
-        let Some(handle) = runtime.vmem_handles.get_mut(&memory_handle.handle) else {
+        let Some(handle) = runtime
+            .memory_state
+            .vmem_handles
+            .get_mut(&memory_handle.handle)
+        else {
             return ERROR;
         };
         handle.mappings = match handle.mappings.checked_add(1) {
             Some(count) => count,
             None => return OUT_OF_RESOURCES,
         };
-        let Some(reservation_owner) = runtime.vmem_reservations.get_mut(&reservation) else {
+        let Some(reservation_owner) = runtime.memory_state.vmem_reservations.get_mut(&reservation)
+        else {
             handle.mappings -= 1;
             return ERROR;
         };
@@ -2802,7 +3391,7 @@ pub extern "C" fn hsa_amd_vmem_map(
             return OUT_OF_RESOURCES;
         };
         reservation_owner.mappings = reservation_mappings;
-        runtime.vmem_mappings.insert(
+        runtime.memory_state.vmem_mappings.insert(
             base,
             VmemMapping {
                 handle: memory_handle.handle,
@@ -2817,7 +3406,11 @@ pub extern "C" fn hsa_amd_vmem_map(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_unmap")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub extern "C" fn hsa_amd_vmem_unmap(address: *mut c_void, size: usize) -> Status {
     boundary(|| {
         if address.is_null() || size == 0 {
@@ -2839,29 +3432,37 @@ pub extern "C" fn hsa_amd_vmem_unmap(address: *mut c_void, size: usize) -> Statu
             return OUT_OF_RESOURCES;
         }
         for base in bases {
-            let Some(mut mapping) = runtime.vmem_mappings.remove(&base) else {
+            let Some(mut mapping) = runtime.memory_state.vmem_mappings.remove(&base) else {
                 return ERROR;
             };
             if let Err(error) = mapping.free_access() {
-                runtime.vmem_mappings.insert(base, mapping);
+                runtime.memory_state.vmem_mappings.insert(base, mapping);
                 return map_error(error);
             }
-            if let Some(reservation) = runtime.vmem_reservations.get_mut(&mapping.reservation) {
+            if let Some(reservation) = runtime
+                .memory_state
+                .vmem_reservations
+                .get_mut(&mapping.reservation)
+            {
                 reservation.mappings = reservation.mappings.saturating_sub(1);
             }
-            let release_handle = if let Some(handle) = runtime.vmem_handles.get_mut(&mapping.handle)
-            {
-                handle.mappings = handle.mappings.saturating_sub(1);
-                handle.mappings == 0 && handle.references == 0
-            } else {
-                false
-            };
+            let release_handle =
+                if let Some(handle) = runtime.memory_state.vmem_handles.get_mut(&mapping.handle) {
+                    handle.mappings = handle.mappings.saturating_sub(1);
+                    handle.mappings == 0 && handle.references == 0
+                } else {
+                    false
+                };
             if release_handle {
-                let Some(mut handle) = runtime.vmem_handles.remove(&mapping.handle) else {
+                let Some(mut handle) = runtime.memory_state.vmem_handles.remove(&mapping.handle)
+                else {
                     return ERROR;
                 };
                 if let Err(error) = handle.free() {
-                    runtime.vmem_handles.insert(mapping.handle, handle);
+                    runtime
+                        .memory_state
+                        .vmem_handles
+                        .insert(mapping.handle, handle);
                     return map_error(error);
                 }
             }
@@ -2870,7 +3471,11 @@ pub extern "C" fn hsa_amd_vmem_unmap(address: *mut c_void, size: usize) -> Statu
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_set_access")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_vmem_set_access(
     address: *mut c_void,
     size: usize,
@@ -2937,7 +3542,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_set_access(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_get_access")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_vmem_get_access(
     address: *mut c_void,
     permissions: *mut u32,
@@ -2958,6 +3567,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_access(
             return INVALID_AGENT;
         }
         let Some((_, mapping)) = runtime
+            .memory_state
             .vmem_mappings
             .range(..=address as usize)
             .next_back()
@@ -2975,7 +3585,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_access(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_export_shareable_handle")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_vmem_export_shareable_handle(
     descriptor: *mut i32,
     memory_handle: HsaAmdVmemAllocHandle,
@@ -2992,13 +3606,16 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_shareable_handle(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let Some(handle) = runtime.vmem_handles.get(&memory_handle.handle) else {
+        let Some(handle) = runtime.memory_state.vmem_handles.get(&memory_handle.handle) else {
             return INVALID_ALLOCATION;
         };
-        if handle.imported {
+        if handle.imported() {
             return INCOMPATIBLE_ARGUMENTS;
         }
-        let dma_buf = match linux_interop::export_virtual_memory(&handle.memory) {
+        let Some(memory) = handle.owned_memory() else {
+            return ERROR;
+        };
+        let dma_buf = match linux_interop::export_virtual_memory(memory) {
             Ok(dma_buf) => dma_buf,
             Err(error) => return map_error(error),
         };
@@ -3009,7 +3626,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_shareable_handle(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_import_shareable_handle")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
     descriptor: i32,
     memory_handle: *mut HsaAmdVmemAllocHandle,
@@ -3026,7 +3647,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if runtime.vmem_handles.try_reserve(1).is_err() {
+        if runtime.memory_state.vmem_handles.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
         let descriptor = match linux_interop::duplicate_descriptor(descriptor) {
@@ -3042,9 +3663,13 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime.vmem_handles.insert(
+        runtime.memory_state.vmem_handles.insert(
             handle,
-            VmemHandle::new(memory, HsaMemoryPool { handle: 0 }, MEMORY_TYPE_NONE, true),
+            VmemHandle::new(
+                VmemBacking::DmaBuf(memory),
+                HsaMemoryPool { handle: 0 },
+                MEMORY_TYPE_NONE,
+            ),
         );
         // SAFETY: The caller supplied writable output storage.
         unsafe { memory_handle.write(HsaAmdVmemAllocHandle { handle }) };
@@ -3052,7 +3677,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_retain_alloc_handle")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_vmem_retain_alloc_handle(
     memory_handle: *mut HsaAmdVmemAllocHandle,
     address: *mut c_void,
@@ -3069,11 +3698,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_retain_alloc_handle(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let Some(mapping) = runtime.vmem_mappings.get(&(address as usize)) else {
+        let Some(mapping) = runtime.memory_state.vmem_mappings.get(&(address as usize)) else {
             return INVALID_ALLOCATION;
         };
         let handle_id = mapping.handle;
-        let Some(handle) = runtime.vmem_handles.get_mut(&handle_id) else {
+        let Some(handle) = runtime.memory_state.vmem_handles.get_mut(&handle_id) else {
             return INVALID_ALLOCATION;
         };
         handle.references = match handle.references.checked_add(1) {
@@ -3086,7 +3715,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_retain_alloc_handle(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_get_alloc_properties_from_handle")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_vmem_get_alloc_properties_from_handle(
     memory_handle: HsaAmdVmemAllocHandle,
     pool: *mut HsaMemoryPool,
@@ -3103,7 +3736,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_alloc_properties_from_handle(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let Some(handle) = runtime.vmem_handles.get(&memory_handle.handle) else {
+        let Some(handle) = runtime.memory_state.vmem_handles.get(&memory_handle.handle) else {
             return INVALID_ALLOCATION;
         };
         // SAFETY: Both outputs were validated and are written only after lookup.
@@ -3115,14 +3748,18 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_alloc_properties_from_handle(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_export_fabric_handle")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_vmem_export_fabric_handle(
     fabric_handle: *mut HsaFabricHandle,
     memory_handle: HsaAmdVmemAllocHandle,
-    _flags: u64,
+    flags: u64,
 ) -> Status {
     boundary(|| {
-        if fabric_handle.is_null() {
+        if fabric_handle.is_null() || flags != 0 {
             return INVALID_ARGUMENT;
         }
         let guard = match lock() {
@@ -3132,59 +3769,111 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_fabric_handle(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if !runtime.vmem_handles.contains_key(&memory_handle.handle) {
+        let Some(handle) = runtime.memory_state.vmem_handles.get(&memory_handle.handle) else {
             return INVALID_ALLOCATION;
+        };
+        if handle.imported() {
+            return INCOMPATIBLE_ARGUMENTS;
         }
-        NOT_SUPPORTED
+        let Some((index, _)) = runtime.decode_gpu_pool(handle.pool) else {
+            return INVALID_ARGUMENT;
+        };
+        if !runtime.gpus[index].info.fabric_handles_supported {
+            return NOT_SUPPORTED;
+        }
+        let Some(memory) = handle.owned_memory() else {
+            return ERROR;
+        };
+        match linux_interop::fabric_virtual_memory_ready(memory) {
+            Ok(true) => (),
+            Ok(false) => return RESOURCE_NOT_READY,
+            Err(error) => return map_error(error),
+        }
+        let fabric = match linux_interop::export_fabric_virtual_memory(memory) {
+            Ok(fabric) => fabric,
+            Err(error) if error.kind() == rocddi::ErrorKind::Busy => return RESOURCE_NOT_READY,
+            Err(error) => return map_error(error),
+        };
+        // SAFETY: The caller supplied writable output storage.
+        unsafe { fabric_handle.write(HsaFabricHandle { handle: fabric }) };
+        SUCCESS
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_vmem_import_fabric_handle")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_vmem_import_fabric_handle(
-    _fabric_handle: HsaFabricHandle,
+    fabric_handle: HsaFabricHandle,
     memory_handle: *mut HsaAmdVmemAllocHandle,
 ) -> Status {
     boundary(|| {
         if memory_handle.is_null() {
             return INVALID_ARGUMENT;
         }
-        let guard = match lock() {
+        let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        if guard.is_none() {
-            NOT_INITIALIZED
-        } else {
-            NOT_SUPPORTED
+        let runtime = match initialized_mut(&mut guard) {
+            Ok(runtime) => runtime,
+            Err(status) => return status,
+        };
+        if runtime.memory_state.vmem_handles.try_reserve(1).is_err() {
+            return OUT_OF_RESOURCES;
         }
+        let handle = match runtime.allocate_handle() {
+            Ok(handle) => handle,
+            Err(status) => return status,
+        };
+        runtime.memory_state.vmem_handles.insert(
+            handle,
+            VmemHandle::new(
+                VmemBacking::Fabric {
+                    token: fabric_handle.handle,
+                    imports: HashMap::new(),
+                },
+                HsaMemoryPool { handle: 0 },
+                MEMORY_TYPE_NONE,
+            ),
+        );
+        // SAFETY: The caller supplied writable output storage.
+        unsafe { memory_handle.write(HsaAmdVmemAllocHandle { handle }) };
+        SUCCESS
     })
 }
 
-fn owned_memory(runtime: &Runtime, address: usize) -> Option<&Memory> {
+fn owned_memory(runtime: &HsaState, address: usize) -> Option<&Memory> {
     runtime
+        .memory_state
         .allocations
         .values()
         .find(|memory| memory.contains(address))
         .or_else(|| {
             runtime
+                .memory_state
                 .ipc_allocations
                 .values()
                 .find(|memory| memory.contains(address))
         })
         .or_else(|| {
             runtime
+                .memory_state
                 .interop_allocations
                 .values()
                 .find(|memory| memory.contains(address))
         })
 }
 
-fn pointer_description(runtime: &Runtime, address: usize) -> Option<PointerDescription> {
+fn pointer_description(runtime: &HsaState, address: usize) -> Option<PointerDescription> {
     vmem_pointer_description(runtime, address).or_else(|| {
         owned_memory(runtime, address)
             .map(|memory| memory.description.clone())
             .or_else(|| {
                 runtime
+                    .memory_state
                     .locked_allocations
                     .iter()
                     .rev()
@@ -3194,15 +3883,19 @@ fn pointer_description(runtime: &Runtime, address: usize) -> Option<PointerDescr
     })
 }
 
-fn vmem_pointer_description(runtime: &Runtime, address: usize) -> Option<PointerDescription> {
+fn vmem_pointer_description(runtime: &HsaState, address: usize) -> Option<PointerDescription> {
     if let Some((_, mapping)) = runtime
+        .memory_state
         .vmem_mappings
         .range(..=address)
         .next_back()
         .filter(|(_, mapping)| mapping.contains(address))
     {
-        let handle = runtime.vmem_handles.get(&mapping.handle)?;
-        let reservation = runtime.vmem_reservations.get(&mapping.reservation)?;
+        let handle = runtime.memory_state.vmem_handles.get(&mapping.handle)?;
+        let reservation = runtime
+            .memory_state
+            .vmem_reservations
+            .get(&mapping.reservation)?;
         let accessible = mapping
             .access
             .iter()
@@ -3237,6 +3930,7 @@ fn vmem_pointer_description(runtime: &Runtime, address: usize) -> Option<Pointer
         });
     }
     runtime
+        .memory_state
         .vmem_reservations
         .range(..=address)
         .next_back()
@@ -3245,7 +3939,7 @@ fn vmem_pointer_description(runtime: &Runtime, address: usize) -> Option<Pointer
 }
 
 fn host_copy_address(
-    runtime: &Runtime,
+    runtime: &HsaState,
     address: usize,
     size: usize,
     required_access: u32,
@@ -3265,7 +3959,8 @@ fn host_copy_address(
             .host_range(address, size)
             .ok_or(INVALID_ALLOCATION);
     }
-    crate::loader::loaded_host_range(runtime, address, size).map(|host| host.unwrap_or(address))
+    crate::loader::loaded_host_range(&runtime.loader, address, size)
+        .map(|host| host.unwrap_or(address))
 }
 
 fn memory_copy_has_work(
@@ -3339,7 +4034,11 @@ unsafe fn write_pointer_info(
     }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_pointer_info")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_pointer_info(
     pointer: *const c_void,
     info: *mut HsaAmdPointerInfo,
@@ -3413,8 +4112,9 @@ pub unsafe extern "C" fn hsa_amd_pointer_info(
     })
 }
 
-fn set_pointer_userdata(runtime: &mut Runtime, address: usize, user_data: usize) -> bool {
+fn set_pointer_userdata(runtime: &mut HsaState, address: usize, user_data: usize) -> bool {
     if let Some((_, reservation)) = runtime
+        .memory_state
         .vmem_reservations
         .range_mut(..=address)
         .next_back()
@@ -3423,25 +4123,25 @@ fn set_pointer_userdata(runtime: &mut Runtime, address: usize, user_data: usize)
         reservation.description.user_data = user_data;
         return true;
     }
-    for memory in runtime.allocations.values_mut() {
+    for memory in runtime.memory_state.allocations.values_mut() {
         if memory.description.starts_at(address) {
             memory.description.user_data = user_data;
             return true;
         }
     }
-    for memory in runtime.ipc_allocations.values_mut() {
+    for memory in runtime.memory_state.ipc_allocations.values_mut() {
         if memory.description.starts_at(address) {
             memory.description.user_data = user_data;
             return true;
         }
     }
-    for memory in runtime.interop_allocations.values_mut() {
+    for memory in runtime.memory_state.interop_allocations.values_mut() {
         if memory.description.starts_at(address) {
             memory.description.user_data = user_data;
             return true;
         }
     }
-    for memory in runtime.locked_allocations.iter_mut().rev() {
+    for memory in runtime.memory_state.locked_allocations.iter_mut().rev() {
         if memory.description.starts_at(address) {
             memory.description.user_data = user_data;
             return true;
@@ -3450,7 +4150,11 @@ fn set_pointer_userdata(runtime: &mut Runtime, address: usize, user_data: usize)
     false
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_pointer_info_set_userdata")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_pointer_info_set_userdata(
     pointer: *const c_void,
     user_data: *mut c_void,
@@ -3475,7 +4179,11 @@ pub unsafe extern "C" fn hsa_amd_pointer_info_set_userdata(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_agents_allow_access")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_agents_allow_access(
     num_agents: u32,
     agents: *const HsaAgent,
@@ -3500,6 +4208,7 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
             return INVALID_AGENT;
         }
         let Some(key) = runtime
+            .memory_state
             .allocations
             .iter()
             .find(|(_, memory)| memory.contains(pointer as usize))
@@ -3509,7 +4218,7 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
             // and locked ranges need their own native mapping lifecycle.
             return INVALID_ALLOCATION;
         };
-        let memory = &runtime.allocations[&key];
+        let memory = &runtime.memory_state.allocations[&key];
         if copy_borrowed(runtime, memory.description.agent_base) {
             return OUT_OF_RESOURCES;
         }
@@ -3553,7 +4262,7 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
         else {
             return ERROR;
         };
-        let Some(memory) = runtime.allocations.get_mut(&key) else {
+        let Some(memory) = runtime.memory_state.allocations.get_mut(&key) else {
             return ERROR;
         };
         match memory.allocation.set_device_access(origin, &devices) {
@@ -3595,7 +4304,11 @@ pub unsafe extern "C" fn hsa_amd_agents_allow_access(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_pool_can_migrate")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_pool_can_migrate(
     source_pool: HsaMemoryPool,
     destination_pool: HsaMemoryPool,
@@ -3624,7 +4337,11 @@ pub unsafe extern "C" fn hsa_amd_memory_pool_can_migrate(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_migrate")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_migrate(
     pointer: *const c_void,
     memory_pool: HsaMemoryPool,
@@ -3648,7 +4365,11 @@ pub unsafe extern "C" fn hsa_amd_memory_migrate(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_memory_copy")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_memory_copy(
     dst: *mut c_void,
     src: *const c_void,
@@ -3706,7 +4427,7 @@ pub unsafe extern "C" fn hsa_memory_copy(
             }
         }
         let stop = runtime.stop_workers.clone();
-        let quarantine = runtime.async_copy_quarantine.clone();
+        let quarantine = runtime.memory_state.async_copy_quarantine.clone();
         drop(guard);
 
         let (status, may_be_live) = match execute_sync_gpu_copy(resolved.route, &stop) {
@@ -3724,7 +4445,11 @@ pub unsafe extern "C" fn hsa_memory_copy(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_fill")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_fill(
     pointer: *mut c_void,
     value: u32,
@@ -3745,11 +4470,12 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
             Err(status) => return status,
         };
         let Some(description) = pointer_description(runtime, pointer as usize) else {
-            let host = match crate::loader::loaded_host_range(runtime, pointer as usize, size) {
-                Ok(Some(host)) => host,
-                Ok(None) => return INVALID_ALLOCATION,
-                Err(status) => return status,
-            };
+            let host =
+                match crate::loader::loaded_host_range(&runtime.loader, pointer as usize, size) {
+                    Ok(Some(host)) => host,
+                    Ok(None) => return INVALID_ALLOCATION,
+                    Err(status) => return status,
+                };
             if host % align_of::<u32>() != 0 {
                 return INVALID_ALLOCATION;
             }
@@ -3806,7 +4532,7 @@ pub unsafe extern "C" fn hsa_amd_memory_fill(
         }
         let device = runtime.gpus[index].device.clone();
         let stop = runtime.stop_workers.clone();
-        let quarantine = runtime.async_copy_quarantine.clone();
+        let quarantine = runtime.memory_state.async_copy_quarantine.clone();
         drop(guard);
 
         let (status, may_be_live) = match device.gpu() {
@@ -3850,7 +4576,7 @@ fn svm_range(pointer: *mut c_void, size: usize) -> Result<(u64, u64), Status> {
 }
 
 fn svm_location_from_agent(
-    runtime: &Runtime,
+    runtime: &HsaState,
     agent: HsaAgent,
     allow_null: bool,
 ) -> Result<SvmLocation, Status> {
@@ -3864,7 +4590,7 @@ fn svm_location_from_agent(
     Ok(SvmLocation::Device(runtime.gpus[index].endpoint.id))
 }
 
-fn svm_agent_from_location(runtime: &Runtime, location: SvmLocation) -> Result<HsaAgent, Status> {
+fn svm_agent_from_location(runtime: &HsaState, location: SvmLocation) -> Result<HsaAgent, Status> {
     match location {
         SvmLocation::System => Ok(HsaAgent { handle: CPU_AGENT }),
         SvmLocation::Undefined => Ok(HsaAgent { handle: 0 }),
@@ -3894,7 +4620,11 @@ fn reserve_svm_attributes(count: usize) -> Result<(Vec<SvmAttribute>, Vec<Option
     Ok((attributes, indices))
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_svm_attributes_set")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_svm_attributes_set(
     pointer: *mut c_void,
     size: usize,
@@ -4061,7 +4791,11 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_set(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_svm_attributes_get")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
     pointer: *mut c_void,
     size: usize,
@@ -4276,14 +5010,18 @@ pub unsafe extern "C" fn hsa_amd_svm_attributes_get(
 
 /// Rolls back signal retention if worker creation fails or unwinds.
 struct PendingAsyncSignals<'a> {
-    runtime: &'a mut Runtime,
+    /// `HsaState` whose signal and allocation counts are being updated.
+    runtime: &'a mut HsaState,
+    /// Signals retained for the pending worker.
     handles: Arc<Vec<HsaSignal>>,
+    /// Prefix successfully retained before a possible failure.
     retained: usize,
+    /// Allocation bases borrowed until worker ownership is published.
     borrowed_memory: Vec<usize>,
 }
 
 impl<'a> PendingAsyncSignals<'a> {
-    fn new(runtime: &'a mut Runtime, handles: Arc<Vec<HsaSignal>>) -> Result<Self, Status> {
+    fn new(runtime: &'a mut HsaState, handles: Arc<Vec<HsaSignal>>) -> Result<Self, Status> {
         let mut pending = Self {
             runtime,
             handles,
@@ -4291,7 +5029,7 @@ impl<'a> PendingAsyncSignals<'a> {
             borrowed_memory: Vec::new(),
         };
         for signal in pending.handles.iter() {
-            pending.runtime.retain_async_signal(*signal)?;
+            pending.runtime.signal_state.retain_async_signal(*signal)?;
             pending.retained += 1;
         }
         Ok(pending)
@@ -4312,29 +5050,35 @@ impl<'a> PendingAsyncSignals<'a> {
     }
 }
 
-fn retain_copy_borrow(runtime: &mut Runtime, base: usize) -> Result<(), Status> {
-    if !runtime.async_copy_borrows.contains_key(&base) {
+fn retain_copy_borrow(runtime: &mut HsaState, base: usize) -> Result<(), Status> {
+    if !runtime.memory_state.async_copy_borrows.contains_key(&base) {
         runtime
+            .memory_state
             .async_copy_borrows
             .try_reserve(1)
             .map_err(|_| OUT_OF_RESOURCES)?;
     }
-    let count = runtime.async_copy_borrows.entry(base).or_default();
+    let count = runtime
+        .memory_state
+        .async_copy_borrows
+        .entry(base)
+        .or_default();
     *count = count.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
     Ok(())
 }
 
-fn release_copy_borrow(runtime: &mut Runtime, base: usize) {
-    if let Some(count) = runtime.async_copy_borrows.get_mut(&base) {
+fn release_copy_borrow(runtime: &mut HsaState, base: usize) {
+    if let Some(count) = runtime.memory_state.async_copy_borrows.get_mut(&base) {
         *count -= 1;
         if *count == 0 {
-            runtime.async_copy_borrows.remove(&base);
+            runtime.memory_state.async_copy_borrows.remove(&base);
         }
     }
 }
 
-fn copy_borrowed(runtime: &Runtime, base: usize) -> bool {
+fn copy_borrowed(runtime: &HsaState, base: usize) -> bool {
     runtime
+        .memory_state
         .async_copy_borrows
         .get(&base)
         .is_some_and(|count| *count != 0)
@@ -4343,7 +5087,7 @@ fn copy_borrowed(runtime: &Runtime, base: usize) -> bool {
 impl Drop for PendingAsyncSignals<'_> {
     fn drop(&mut self) {
         for signal in self.handles.iter().take(self.retained) {
-            self.runtime.release_async_signal(*signal);
+            self.runtime.signal_state.release_async_signal(*signal);
         }
         for &base in &self.borrowed_memory {
             release_copy_borrow(self.runtime, base);
@@ -4359,7 +5103,7 @@ fn release_async_resources(
     if let Ok(mut guard) = lock() {
         if let Some(runtime) = guard.as_mut() {
             for signal in handles {
-                runtime.release_async_signal(*signal);
+                runtime.signal_state.release_async_signal(*signal);
             }
             if !retain_memory {
                 for &base in borrowed_memory.iter().flatten() {
@@ -4405,6 +5149,7 @@ fn finish_async_copy_signal(
     let mut guard = lock().ok();
     if let Some(runtime) = guard.as_mut().and_then(|guard| guard.as_mut()) {
         if let Some(record) = runtime
+            .signal_state
             .async_signal_refs
             .get_mut(&(completion.handle as usize))
         {
@@ -4475,7 +5220,11 @@ fn wait_async_dependencies(dependencies: &[HsaSignal], stop: &AtomicBool) -> boo
     true
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_svm_prefetch_async")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
     pointer: *mut c_void,
     size: usize,
@@ -4512,8 +5261,8 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
         };
         if dependency_slice
             .iter()
-            .any(|dependency| !runtime.owns_signal(*dependency))
-            || (completion.handle != 0 && !runtime.owns_signal(completion))
+            .any(|dependency| !runtime.signal_state.owns_signal(*dependency))
+            || (completion.handle != 0 && !runtime.signal_state.owns_signal(completion))
         {
             return INVALID_SIGNAL;
         }
@@ -4521,7 +5270,7 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
         if signal_handles
             .try_reserve_exact(dependency_slice.len() + usize::from(completion.handle != 0))
             .is_err()
-            || runtime.workers.try_reserve(1).is_err()
+            || runtime.memory_state.workers.try_reserve(1).is_err()
         {
             return OUT_OF_RESOURCES;
         }
@@ -4560,12 +5309,16 @@ pub unsafe extern "C" fn hsa_amd_svm_prefetch_async(
             Err(_) => return OUT_OF_RESOURCES,
         };
         pending.transfer_to_worker();
-        pending.runtime.workers.push(worker);
+        pending.runtime.memory_state.workers.push(worker);
         SUCCESS
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_svm_discard_batch_async")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_svm_discard_batch_async(
     pointers: *mut *mut c_void,
     sizes: *mut usize,
@@ -4579,7 +5332,7 @@ pub unsafe extern "C" fn hsa_amd_svm_discard_batch_async(
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        if guard.is_none() {
+        if guard.as_ref().is_none() {
             return NOT_INITIALIZED;
         }
         if pointers.is_null() || sizes.is_null() || count == 0 {
@@ -4591,7 +5344,11 @@ pub unsafe extern "C" fn hsa_amd_svm_discard_batch_async(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_svm_discard_and_prefetch_batch_async")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_svm_discard_and_prefetch_batch_async(
     pointers: *mut *mut c_void,
     sizes: *mut usize,
@@ -4607,7 +5364,7 @@ pub unsafe extern "C" fn hsa_amd_svm_discard_and_prefetch_batch_async(
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        if guard.is_none() {
+        if guard.as_ref().is_none() {
             return NOT_INITIALIZED;
         }
         if pointers.is_null()
@@ -4624,36 +5381,61 @@ pub unsafe extern "C" fn hsa_amd_svm_discard_and_prefetch_batch_async(
     })
 }
 
+/// Execution path selected for an asynchronous HSA copy request.
 enum AsyncCopyRoute {
+    /// Zero-byte copy that only completes dependencies and its signal.
     Noop,
+    /// CPU copy performed after dependency signals complete.
     Host {
         destination: HostCopyDestination,
         source: HostCopySource,
         size: usize,
     },
+    /// One native SDMA operation on an activated GPU.
     Gpu {
         device: Box<Device>,
         index: usize,
         entry: GpuCopyEntry,
     },
+    /// Several ordered SDMA operations sharing one native sequence.
     GpuBatch {
         device: Box<Device>,
         index: usize,
         entries: Vec<GpuCopyEntry>,
+        controls: BatchCopyControls,
     },
 }
 
+/// One operation within a native GPU copy route.
 enum GpuCopyEntry {
+    /// Rectangular copy with row and slice strides.
     Rect(CopyRect),
+    /// Direct linear copy.
     Linear {
         destination: u64,
         source: u64,
         size: u64,
     },
+    /// Exchange between two GPU address ranges.
+    Swap {
+        address_a: u64,
+        address_b: u64,
+        size: u64,
+    },
+    /// Copy whose addresses may come from GPU-visible pointer slots.
+    Indirect {
+        destination: u64,
+        source: u64,
+        size: u64,
+        indirect_source: bool,
+        indirect_destination: bool,
+    },
+    /// Copy from host storage staged for SDMA access.
     FromHost {
         destination: u64,
         source: HostCopySource,
     },
+    /// Copy to a host destination staged for SDMA access.
     ToHost {
         destination: HostCopyDestination,
         source: u64,
@@ -4661,18 +5443,31 @@ enum GpuCopyEntry {
     },
 }
 
+/// Optional wait and signal attached to a native batch copy.
+#[derive(Clone, Copy, Default)]
+struct BatchCopyControls {
+    /// GPU comparison that must pass before the batch begins.
+    wait: Option<GpuCopyWait>,
+    /// GPU atomic notification after the final packet.
+    signal: Option<GpuCopySignal>,
+}
+
+/// Native route selected for one synchronous HSA copy.
 enum SyncGpuCopyRoute {
+    /// Direct copy between GPU-addressable ranges.
     Direct {
         device: Box<Device>,
         destination: u64,
         source: u64,
         size: u64,
     },
+    /// Copy from a CPU-only source through staging.
     FromHost {
         device: Box<Device>,
         destination: u64,
         source: HostCopySource,
     },
+    /// Copy into a CPU-only destination through staging.
     ToHost {
         device: Box<Device>,
         destination: HostCopyDestination,
@@ -4681,30 +5476,46 @@ enum SyncGpuCopyRoute {
     },
 }
 
+/// CPU source storage and when its bytes must be captured.
 enum HostCopySource {
+    /// Direct host pointer and byte extent.
     Address(usize, usize),
+    /// Loader-owned mapping resolved after dependencies finish.
     LoadedAddress(usize, usize),
+    /// Owned snapshot of a loader mapping for immediate copy.
     LoadedBytes(Vec<u8>),
 }
 
+/// Point at which a loader-owned source is read.
 #[derive(Clone, Copy)]
 enum HostSourceTiming {
+    /// Snapshot before releasing the registry lock.
     Immediate,
+    /// Resolve the live loader mapping after dependency completion.
     AfterDependencies,
 }
 
+/// CPU destination, including loader mappings needing a later lookup.
 enum HostCopyDestination {
+    /// Direct host address.
     Address(usize),
+    /// Loader-owned address resolved while the registry lock is held.
     LoadedAddress(usize),
 }
 
+/// Completion data that must be published after a synchronous GPU copy.
 enum SyncGpuCopyOutcome {
+    /// Native and host copies completed without deferred publication.
     Done,
+    /// Staged bytes to write to a loader-owned mapping.
     LoadedDestination { address: usize, bytes: Vec<u8> },
 }
 
+/// Frontend status and whether native work may still read its operands.
 struct CopyRouteFailure {
+    /// HSA status translated from validation or native failure.
     status: Status,
+    /// Requires retaining borrowed memory until retirement is proved.
     operands_may_be_live: bool,
 }
 
@@ -4726,18 +5537,24 @@ impl From<rocddi::device::gpu::CopyFailure> for CopyRouteFailure {
     }
 }
 
+/// Synchronous route and public allocations borrowed by its operands.
 struct ResolvedSyncGpuCopy {
+    /// Native copy plan selected after pointer validation.
     route: SyncGpuCopyRoute,
+    /// Base addresses whose allocation owners remain borrowed.
     borrowed_memory: [Option<usize>; 2],
 }
 
+/// Asynchronous route and public allocations borrowed by its operands.
 struct ResolvedAsyncCopy {
+    /// Native or host copy plan selected after pointer validation.
     route: AsyncCopyRoute,
+    /// Base addresses whose allocation owners remain borrowed.
     borrowed_memory: [Option<usize>; 2],
 }
 
 fn copy_agent(
-    runtime: &Runtime,
+    runtime: &HsaState,
     requested: HsaAgent,
     description: Option<&PointerDescription>,
 ) -> Result<HsaAgent, Status> {
@@ -4755,7 +5572,7 @@ fn copy_agent(
 }
 
 fn selected_copy_gpu(
-    runtime: &Runtime,
+    runtime: &HsaState,
     description: &PointerDescription,
 ) -> Option<(usize, HsaAgent)> {
     std::iter::once(description.owner)
@@ -4765,7 +5582,7 @@ fn selected_copy_gpu(
 }
 
 fn copy_pointer_description(
-    runtime: &Runtime,
+    runtime: &HsaState,
     pointer: usize,
     size: usize,
 ) -> Result<Option<PointerDescription>, Status> {
@@ -4785,7 +5602,7 @@ fn copy_pointer_description(
 }
 
 fn gpu_copy_address(
-    runtime: &Runtime,
+    runtime: &HsaState,
     description: Option<&PointerDescription>,
     pointer: usize,
     size: usize,
@@ -4810,15 +5627,37 @@ fn gpu_copy_address(
     ))
 }
 
+/// Resolves a caller-owned image backing range to this agent's GPU address.
+/// Image data lifetime remains the caller's responsibility under HSA.
+pub(crate) fn image_device_address(
+    runtime: &HsaState,
+    pointer: usize,
+    size: usize,
+    agent: HsaAgent,
+    permission: u32,
+) -> Result<u64, Status> {
+    let description = copy_pointer_description(runtime, pointer, size)?;
+    gpu_copy_address(
+        runtime,
+        description.as_ref(),
+        pointer,
+        size,
+        agent,
+        permission,
+    )
+    .map(|(address, _)| address)
+}
+
 fn prepare_host_copy_source(
-    runtime: &Runtime,
+    runtime: &HsaState,
     description: Option<&PointerDescription>,
     pointer: usize,
     host: usize,
     size: usize,
     timing: HostSourceTiming,
 ) -> Result<HostCopySource, Status> {
-    if description.is_none() && crate::loader::loaded_host_range(runtime, pointer, size)?.is_some()
+    if description.is_none()
+        && crate::loader::loaded_host_range(&runtime.loader, pointer, size)?.is_some()
     {
         if matches!(timing, HostSourceTiming::AfterDependencies) {
             return Ok(HostCopySource::LoadedAddress(pointer, size));
@@ -4838,13 +5677,14 @@ fn prepare_host_copy_source(
 }
 
 fn prepare_host_copy_destination(
-    runtime: &Runtime,
+    runtime: &HsaState,
     description: Option<&PointerDescription>,
     pointer: usize,
     host: usize,
     size: usize,
 ) -> Result<HostCopyDestination, Status> {
-    if description.is_none() && crate::loader::loaded_host_range(runtime, pointer, size)?.is_some()
+    if description.is_none()
+        && crate::loader::loaded_host_range(&runtime.loader, pointer, size)?.is_some()
     {
         Ok(HostCopyDestination::LoadedAddress(pointer))
     } else {
@@ -4853,7 +5693,7 @@ fn prepare_host_copy_destination(
 }
 
 fn vmem_copy_access(
-    runtime: &Runtime,
+    runtime: &HsaState,
     description: &PointerDescription,
     agent: HsaAgent,
     required_access: u32,
@@ -4862,6 +5702,7 @@ fn vmem_copy_access(
         return Ok(());
     }
     let mapping = runtime
+        .memory_state
         .vmem_mappings
         .get(&description.agent_base)
         .ok_or(INVALID_ALLOCATION)?;
@@ -4876,7 +5717,7 @@ fn vmem_copy_access(
 }
 
 fn resolve_async_copy(
-    runtime: &Runtime,
+    runtime: &HsaState,
     destination: usize,
     dst_agent: HsaAgent,
     source: usize,
@@ -5026,7 +5867,7 @@ fn resolve_async_copy(
 }
 
 fn resolve_sync_gpu_copy(
-    runtime: &Runtime,
+    runtime: &HsaState,
     destination: usize,
     source: usize,
     size: usize,
@@ -5151,8 +5992,8 @@ fn loaded_source_snapshot(address: usize, size: usize) -> Result<Vec<u8>, Status
     bytes.resize(size, 0);
     let guard = lock()?;
     let runtime = guard.as_ref().ok_or(NOT_INITIALIZED)?;
-    let host =
-        crate::loader::loaded_host_range(runtime, address, size)?.ok_or(INVALID_ALLOCATION)?;
+    let host = crate::loader::loaded_host_range(&runtime.loader, address, size)?
+        .ok_or(INVALID_ALLOCATION)?;
     // SAFETY: The registry lock retains the complete loaded mapping while the
     // source is snapshotted after the dependency signals have been satisfied.
     unsafe { std::ptr::copy_nonoverlapping(host as *const u8, bytes.as_mut_ptr(), size) };
@@ -5281,7 +6122,7 @@ fn write_loaded_copy_destination(address: usize, bytes: &[u8]) -> Status {
     let Some(runtime) = guard.as_ref() else {
         return NOT_INITIALIZED;
     };
-    let host = match crate::loader::loaded_host_range(runtime, address, bytes.len()) {
+    let host = match crate::loader::loaded_host_range(&runtime.loader, address, bytes.len()) {
         Ok(Some(host)) => host,
         Ok(None) | Err(_) => return INVALID_ALLOCATION,
     };
@@ -5294,7 +6135,8 @@ fn write_loaded_copy_destination(address: usize, bytes: &[u8]) -> Status {
 
 fn execute_gpu_entries(
     device: &Device,
-    entries: impl IntoIterator<Item = GpuCopyEntry>,
+    entries: impl ExactSizeIterator<Item = GpuCopyEntry>,
+    controls: BatchCopyControls,
     sdma_engine: Option<u32>,
     timed: bool,
     stop: &AtomicBool,
@@ -5308,7 +6150,17 @@ fn execute_gpu_entries(
     if timed {
         sequence.enable_timing().map_err(CopyRouteFailure::from)?;
     }
-    for entry in entries {
+    let count = entries.len();
+    for (ordinal, entry) in entries.enumerate() {
+        let options = GpuCopyOptions {
+            wait: if ordinal == 0 { controls.wait } else { None },
+            signal: if ordinal + 1 == count {
+                controls.signal
+            } else {
+                None
+            },
+            ..GpuCopyOptions::default()
+        };
         let outcome = match entry {
             GpuCopyEntry::Rect(rect) => {
                 // SAFETY: Preparation validated every selected row and keeps
@@ -5324,9 +6176,45 @@ fn execute_gpu_entries(
             } => {
                 // SAFETY: Copy preparation checked both mapped GPU ranges and
                 // retains their owners until native retirement is proved.
-                unsafe { sequence.copy_linear(destination, source, size) }
+                unsafe { sequence.copy_linear_with_options(destination, source, size, options) }
                     .map(|()| SyncGpuCopyOutcome::Done)
                     .map_err(CopyRouteFailure::from)
+            }
+            GpuCopyEntry::Swap {
+                address_a,
+                address_b,
+                size,
+            } => {
+                // SAFETY: Preparation verified read and write access to both
+                // ranges on the selected GPU and retained their owners.
+                unsafe { sequence.swap_linear_with_options(address_a, address_b, size, options) }
+                    .map(|()| SyncGpuCopyOutcome::Done)
+                    .map_err(CopyRouteFailure::from)
+            }
+            GpuCopyEntry::Indirect {
+                destination,
+                source,
+                size,
+                indirect_source,
+                indirect_destination,
+            } => {
+                // SAFETY: Preparation checked access to every direct range and
+                // indirect pointer slot. The caller owns the resolved targets
+                // through completion, including after an uncertain submission.
+                unsafe {
+                    sequence.copy_linear_with_options(
+                        destination,
+                        source,
+                        size,
+                        GpuCopyOptions {
+                            indirect_source,
+                            indirect_destination,
+                            ..options
+                        },
+                    )
+                }
+                .map(|()| SyncGpuCopyOutcome::Done)
+                .map_err(CopyRouteFailure::from)
             }
             GpuCopyEntry::FromHost {
                 destination,
@@ -5417,7 +6305,7 @@ fn execute_copy_route(
             let runtime = guard.as_ref().and_then(|guard| guard.as_ref());
             let loaded_host = |address| {
                 runtime.and_then(|runtime| {
-                    crate::loader::loaded_host_range(runtime, address, size)
+                    crate::loader::loaded_host_range(&runtime.loader, address, size)
                         .ok()
                         .flatten()
                 })
@@ -5442,7 +6330,7 @@ fn execute_copy_route(
                 }
             };
             // SAFETY: The caller keeps ordinary host ranges live through
-            // completion. Runtime-owned memory is borrowed, and the registry
+            // completion. HsaState-owned memory is borrowed, and the registry
             // lock keeps loaded mappings live for this copy. ptr::copy also
             // permits overlapping ranges.
             unsafe { std::ptr::copy(source_host as *const u8, destination_host as *mut u8, size) };
@@ -5468,6 +6356,7 @@ fn execute_copy_route(
         } => execute_gpu_entries(
             &device,
             std::iter::once(entry),
+            BatchCopyControls::default(),
             sdma_engine,
             profile_enabled,
             stop,
@@ -5477,20 +6366,33 @@ fn execute_copy_route(
             device,
             index,
             entries,
-        } => execute_gpu_entries(&device, entries, None, profile_enabled, stop)
-            .map(|ticks| gpu_copy_profile(index, ticks)),
+            controls,
+        } => execute_gpu_entries(
+            &device,
+            entries.into_iter(),
+            controls,
+            None,
+            profile_enabled,
+            stop,
+        )
+        .map(|ticks| gpu_copy_profile(index, ticks)),
     }
 }
 
+/// Enqueued copy with its operands retained until completion signaling.
 struct AsyncCopyTask {
+    /// Validated host or native copy route.
     route: AsyncCopyRoute,
+    /// Optional dedicated SDMA engine selected by the caller.
     sdma_engine: Option<u32>,
+    /// Allocation borrows released after native retirement.
     borrowed_memory: Vec<Option<usize>>,
+    /// HSA signal decremented when the copy task completes.
     completion: HsaSignal,
 }
 
 fn enqueue_copy_job(
-    runtime: &mut Runtime,
+    runtime: &mut HsaState,
     tasks: Vec<AsyncCopyTask>,
     dependency_slice: &[HsaSignal],
 ) -> Status {
@@ -5498,7 +6400,9 @@ fn enqueue_copy_job(
     let Some(handle_count) = dependency_slice.len().checked_add(tasks.len()) else {
         return OUT_OF_RESOURCES;
     };
-    if handles.try_reserve_exact(handle_count).is_err() || runtime.workers.try_reserve(1).is_err() {
+    if handles.try_reserve_exact(handle_count).is_err()
+        || runtime.memory_state.workers.try_reserve(1).is_err()
+    {
         return OUT_OF_RESOURCES;
     }
     handles.extend_from_slice(dependency_slice);
@@ -5517,7 +6421,7 @@ fn enqueue_copy_job(
         }
     }
     let profile_enabled = matches!(
-        pending.runtime.async_copy_profiling,
+        pending.runtime.memory_state.async_copy_profiling,
         AsyncCopyProfiling::Enabled
     );
     let host_clock = if profile_enabled
@@ -5530,7 +6434,7 @@ fn enqueue_copy_job(
         None
     };
     let worker_handles = pending.handles.clone();
-    let quarantine = pending.runtime.async_copy_quarantine.clone();
+    let quarantine = pending.runtime.memory_state.async_copy_quarantine.clone();
     let stop = pending.runtime.stop_workers.clone();
     let dependency_len = dependency_slice.len();
     let worker = match thread::Builder::new()
@@ -5579,6 +6483,7 @@ fn enqueue_copy_job(
     for completion in pending.handles.iter().skip(dependency_len) {
         if let Some(record) = pending
             .runtime
+            .signal_state
             .async_signal_refs
             .get_mut(&(completion.handle as usize))
         {
@@ -5586,12 +6491,12 @@ fn enqueue_copy_job(
         }
     }
     pending.transfer_to_worker();
-    pending.runtime.workers.push(worker);
+    pending.runtime.memory_state.workers.push(worker);
     SUCCESS
 }
 
 fn enqueue_async_copy(
-    runtime: &mut Runtime,
+    runtime: &mut HsaState,
     resolved: ResolvedAsyncCopy,
     dependency_slice: &[HsaSignal],
     completion: HsaSignal,
@@ -5639,7 +6544,7 @@ unsafe fn submit_async_copy(
         {
             return INVALID_ARGUMENT;
         }
-        if !runtime.owns_signal(completion) {
+        if !runtime.signal_state.owns_signal(completion) {
             return INVALID_SIGNAL;
         }
         if engine.is_some_and(|engine| engine.count_ones() != 1 || engine > u16::MAX.into()) {
@@ -5653,7 +6558,7 @@ unsafe fn submit_async_copy(
         };
         if dependency_slice
             .iter()
-            .any(|signal| !runtime.owns_signal(*signal))
+            .any(|signal| !runtime.signal_state.owns_signal(*signal))
         {
             return INVALID_SIGNAL;
         }
@@ -5700,7 +6605,11 @@ unsafe fn submit_async_copy(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_async_copy")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_async_copy(
     dst: *mut c_void,
     dst_agent: HsaAgent,
@@ -5728,7 +6637,11 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy(
     }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_async_copy_on_engine")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_async_copy_on_engine(
     dst: *mut c_void,
     dst_agent: HsaAgent,
@@ -5758,13 +6671,52 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_on_engine(
     }
 }
 
+/// One validated input operation in an HSA async copy batch.
 #[derive(Clone, Copy)]
 struct BatchCopyEntry {
+    /// Destination address supplied by the caller.
     destination: usize,
+    /// Agent expected to reach the destination.
     destination_agent: HsaAgent,
+    /// Source address supplied by the caller.
     source: usize,
+    /// Agent expected to reach the source.
     source_agent: HsaAgent,
+    /// Number of bytes transferred by this operation.
     size: usize,
+    /// Packet shape and address mode.
+    mode: BatchCopyMode,
+}
+
+/// Native packet shape selected for a batch entry.
+#[derive(Clone, Copy)]
+enum BatchCopyMode {
+    /// Ordinary linear copy.
+    Linear,
+    /// Exchange two ranges.
+    Swap,
+    /// Resolve source or destination through GPU pointer slots.
+    Indirect { source: bool, destination: bool },
+}
+
+fn batch_copy_mode(operation: u16) -> Result<BatchCopyMode, Status> {
+    match operation {
+        0 | 1 => Ok(BatchCopyMode::Linear),
+        2 => Ok(BatchCopyMode::Swap),
+        3 => Ok(BatchCopyMode::Indirect {
+            source: true,
+            destination: false,
+        }),
+        4 => Ok(BatchCopyMode::Indirect {
+            source: false,
+            destination: true,
+        }),
+        5 => Ok(BatchCopyMode::Indirect {
+            source: true,
+            destination: true,
+        }),
+        _ => Err(INVALID_ARGUMENT),
+    }
 }
 
 /// The C caller owns the array for the duration of the entry point. Alignment
@@ -5783,19 +6735,29 @@ unsafe fn batch_slice<'a, T>(pointer: *const T, count: usize) -> Result<&'a [T],
 
 #[allow(unsafe_code)]
 unsafe fn batch_copy_entries(op: HsaAmdMemoryCopyOp) -> Result<Vec<BatchCopyEntry>, Status> {
+    let mode = batch_copy_mode(op.operation)?;
+    if matches!(mode, BatchCopyMode::Indirect { .. }) && op.entry_count > 1024 {
+        return Err(INVALID_ARGUMENT);
+    }
     let count = usize::from(op.entry_count.max(1));
     let mut entries = Vec::new();
     entries
         .try_reserve_exact(count)
         .map_err(|_| OUT_OF_RESOURCES)?;
     if op.entry_count == 0 {
-        if op.operation != 0 {
+        if op.operation == 1 {
             return Err(INVALID_ARGUMENT);
         }
         // SAFETY: The scalar members of the public C unions are active here.
         let destination_agent = unsafe { op.destination_agent.agent };
         let size = unsafe { op.size.bytes };
-        if op.secondary_size != 0 {
+        if op.secondary_size
+            != if matches!(mode, BatchCopyMode::Swap) {
+                size
+            } else {
+                0
+            }
+        {
             return Err(INVALID_ARGUMENT);
         }
         entries.push(BatchCopyEntry {
@@ -5804,6 +6766,7 @@ unsafe fn batch_copy_entries(op: HsaAmdMemoryCopyOp) -> Result<Vec<BatchCopyEntr
             source: op.source as usize,
             source_agent: op.source_agent,
             size,
+            mode,
         });
     } else {
         if op.secondary_size != 0 {
@@ -5826,6 +6789,7 @@ unsafe fn batch_copy_entries(op: HsaAmdMemoryCopyOp) -> Result<Vec<BatchCopyEntr
                         source: sources[index] as usize,
                         source_agent: op.source_agent,
                         size: sizes[index],
+                        mode,
                     });
                 }
             }
@@ -5839,6 +6803,21 @@ unsafe fn batch_copy_entries(op: HsaAmdMemoryCopyOp) -> Result<Vec<BatchCopyEntr
                         source: op.source as usize,
                         source_agent: op.source_agent,
                         size,
+                        mode,
+                    });
+                }
+            }
+            2..=5 => {
+                let sources = unsafe { batch_slice(op.source.cast::<*mut c_void>(), count)? };
+                let sizes = unsafe { batch_slice(op.size.list, count)? };
+                for index in 0..count {
+                    entries.push(BatchCopyEntry {
+                        destination: destinations[index] as usize,
+                        destination_agent: agents[index],
+                        source: sources[index] as usize,
+                        source_agent: op.source_agent,
+                        size: sizes[index],
+                        mode,
                     });
                 }
             }
@@ -5849,15 +6828,86 @@ unsafe fn batch_copy_entries(op: HsaAmdMemoryCopyOp) -> Result<Vec<BatchCopyEntr
         entry.source == 0
             || entry.destination == 0
             || entry.size > isize::MAX as usize
-            || (op.entry_count != 0 && entry.size == 0)
+            || (entry.size == 0
+                && (op.entry_count != 0 || !matches!(entry.mode, BatchCopyMode::Linear)))
     }) {
         return Err(INVALID_ARGUMENT);
     }
     Ok(entries)
 }
 
+fn resolve_indirect_batch_entry(
+    runtime: &HsaState,
+    entry: &BatchCopyEntry,
+    indirect_source: bool,
+    indirect_destination: bool,
+    selected: Option<usize>,
+) -> Result<ResolvedAsyncCopy, Status> {
+    if entry.size > 0x3fff_ffe0 {
+        return Err(INVALID_ARGUMENT);
+    }
+    let source_size = if indirect_source { 8 } else { entry.size };
+    let destination_size = if indirect_destination { 8 } else { entry.size };
+    let source_description = copy_pointer_description(runtime, entry.source, source_size)?;
+    let destination_description =
+        copy_pointer_description(runtime, entry.destination, destination_size)?;
+    let source_agent = copy_agent(runtime, entry.source_agent, source_description.as_ref())?;
+    let destination_agent = copy_agent(
+        runtime,
+        entry.destination_agent,
+        destination_description.as_ref(),
+    )?;
+    let index = selected
+        .or(runtime.gpu_index(source_agent))
+        .or(runtime.gpu_index(destination_agent))
+        .ok_or(INVALID_AGENT)?;
+    if runtime.gpus[index].info.gfx_minor != 5 {
+        return Err(NOT_SUPPORTED);
+    }
+    let gpu_agent = HsaAgent {
+        handle: GPU_AGENT_BASE + index as u64,
+    };
+    let (source, source_base) = gpu_copy_address(
+        runtime,
+        source_description.as_ref(),
+        entry.source,
+        source_size,
+        gpu_agent,
+        ACCESS_PERMISSION_RO,
+    )?;
+    let (destination, destination_base) = gpu_copy_address(
+        runtime,
+        destination_description.as_ref(),
+        entry.destination,
+        destination_size,
+        gpu_agent,
+        if indirect_destination {
+            ACCESS_PERMISSION_RO
+        } else {
+            ACCESS_PERMISSION_WO
+        },
+    )?;
+    if indirect_source && source % 8 != 0 || indirect_destination && destination % 8 != 0 {
+        return Err(INVALID_ARGUMENT);
+    }
+    Ok(ResolvedAsyncCopy {
+        route: AsyncCopyRoute::Gpu {
+            device: Box::new(runtime.gpus[index].device.clone()),
+            index,
+            entry: GpuCopyEntry::Indirect {
+                destination,
+                source,
+                size: u64::try_from(entry.size).map_err(|_| INVALID_ARGUMENT)?,
+                indirect_source,
+                indirect_destination,
+            },
+        },
+        borrowed_memory: [Some(destination_base), Some(source_base)],
+    })
+}
+
 fn resolve_batch_copy_entries(
-    runtime: &Runtime,
+    runtime: &HsaState,
     entries: &[BatchCopyEntry],
 ) -> Result<(AsyncCopyRoute, Vec<Option<usize>>), Status> {
     let mut prepared_entries = Vec::new();
@@ -5866,7 +6916,13 @@ fn resolve_batch_copy_entries(
         .map_err(|_| OUT_OF_RESOURCES)?;
     let mut borrowed_memory = Vec::new();
     borrowed_memory
-        .try_reserve_exact(entries.len().checked_mul(2).ok_or(OUT_OF_RESOURCES)?)
+        .try_reserve_exact(
+            entries
+                .len()
+                .checked_mul(4)
+                .and_then(|count| count.checked_add(2))
+                .ok_or(OUT_OF_RESOURCES)?,
+        )
         .map_err(|_| OUT_OF_RESOURCES)?;
     let mut selected: Option<(usize, Box<Device>)> = None;
     for entry in entries {
@@ -5876,15 +6932,22 @@ fn resolve_batch_copy_entries(
         {
             return Err(INVALID_AGENT);
         }
-        let resolved = resolve_async_copy(
-            runtime,
-            entry.destination,
-            entry.destination_agent,
-            entry.source,
-            entry.source_agent,
-            entry.size,
-            selected.as_ref().map(|(index, _)| *index),
-        )?;
+        let selected_index = selected.as_ref().map(|(index, _)| *index);
+        let resolved = match entry.mode {
+            BatchCopyMode::Indirect {
+                source,
+                destination,
+            } => resolve_indirect_batch_entry(runtime, entry, source, destination, selected_index)?,
+            BatchCopyMode::Linear | BatchCopyMode::Swap => resolve_async_copy(
+                runtime,
+                entry.destination,
+                entry.destination_agent,
+                entry.source,
+                entry.source_agent,
+                entry.size,
+                selected_index,
+            )?,
+        };
         let (device, index, prepared) = match resolved.route {
             AsyncCopyRoute::Gpu {
                 device,
@@ -5895,6 +6958,52 @@ fn resolve_batch_copy_entries(
                 return Ok((AsyncCopyRoute::Noop, borrowed_memory));
             }
             _ => return Err(INVALID_AGENT),
+        };
+        let prepared = if matches!(entry.mode, BatchCopyMode::Swap) {
+            let GpuCopyEntry::Linear {
+                destination,
+                source,
+                size,
+            } = prepared
+            else {
+                return Err(NOT_SUPPORTED);
+            };
+            if runtime.gpus[index].info.gfx_minor != 5 {
+                return Err(NOT_SUPPORTED);
+            }
+            let end_a = source.checked_add(size).ok_or(INVALID_ARGUMENT)?;
+            let end_b = destination.checked_add(size).ok_or(INVALID_ARGUMENT)?;
+            if source % 32 != 0 || destination % 32 != 0 || (source < end_b && destination < end_a)
+            {
+                return Err(INVALID_ARGUMENT);
+            }
+            let reverse = resolve_async_copy(
+                runtime,
+                entry.source,
+                entry.source_agent,
+                entry.destination,
+                entry.destination_agent,
+                entry.size,
+                Some(index),
+            )?;
+            if !matches!(
+                reverse.route,
+                AsyncCopyRoute::Gpu {
+                    index: reverse_index,
+                    entry: GpuCopyEntry::Linear { .. },
+                    ..
+                } if reverse_index == index
+            ) {
+                return Err(NOT_SUPPORTED);
+            }
+            borrowed_memory.extend(reverse.borrowed_memory);
+            GpuCopyEntry::Swap {
+                address_a: source,
+                address_b: destination,
+                size,
+            }
+        } else {
+            prepared
         };
         // A multi-entry operation uses the source GPU, or its first
         // destination GPU for host sources. Later peer destinations must be
@@ -5909,18 +7018,36 @@ fn resolve_batch_copy_entries(
             device,
             index,
             entries: prepared_entries,
+            controls: BatchCopyControls::default(),
         },
         borrowed_memory,
     ))
 }
 
+/// Copy tasks staged for publication as one async batch.
 struct PreparedBatchCopy {
+    /// Tasks to enqueue after every entry validates.
     tasks: Vec<AsyncCopyTask>,
+}
+
+fn batch_control_address(
+    runtime: &HsaState,
+    pointer: usize,
+    gpu: HsaAgent,
+    permission: u32,
+) -> Result<(u64, usize), Status> {
+    let description = copy_pointer_description(runtime, pointer, 8)?;
+    let (address, base) =
+        gpu_copy_address(runtime, description.as_ref(), pointer, 8, gpu, permission)?;
+    if address % 8 != 0 {
+        return Err(INVALID_ARGUMENT);
+    }
+    Ok((address, base))
 }
 
 #[allow(unsafe_code)]
 unsafe fn prepare_batch_copy(
-    runtime: &Runtime,
+    runtime: &HsaState,
     operations: &[HsaAmdMemoryCopyOp],
 ) -> Result<PreparedBatchCopy, Status> {
     if operations.is_empty() {
@@ -5943,23 +7070,21 @@ unsafe fn prepare_batch_copy(
         {
             return Err(INVALID_ARGUMENT);
         }
-        if !runtime.owns_signal(op.completion_signal) {
+        if !runtime.signal_state.owns_signal(op.completion_signal) {
             return Err(INVALID_SIGNAL);
         }
-        if op.operation > 1
-            || op.wait.function != 0
-            || op.signal.operation != 0
-            || op.traffic_class != 0
-        {
+        if op.traffic_class != 0 {
             return Err(NOT_SUPPORTED);
         }
-        if op.wait.scope != 0
-            || !op.wait.address.is_null()
-            || op.wait.value != 0
-            || op.wait.mask != 0
-            || op.signal.scope != 0
-            || !op.signal.address.is_null()
-            || op.signal.data != 0
+        if (op.wait.function == 0
+            && (!op.wait.address.is_null()
+                || op.wait.value != 0
+                || op.wait.mask != 0
+                || op.wait.scope != 0 && op.operation < 3))
+            || (op.wait.function != 0 && op.wait.address.is_null())
+            || (op.signal.operation == 0
+                && (op.signal.scope != 0 || !op.signal.address.is_null() || op.signal.data != 0))
+            || (op.signal.operation != 0 && op.signal.address.is_null())
         {
             return Err(INVALID_ARGUMENT);
         }
@@ -5969,7 +7094,67 @@ unsafe fn prepare_batch_copy(
         // SAFETY: Each operation selects the documented scalar or array union
         // members. All array values are copied before the caller returns.
         let entries = unsafe { batch_copy_entries(op)? };
-        let (route, bases) = resolve_batch_copy_entries(runtime, &entries)?;
+        let (mut route, mut bases) = resolve_batch_copy_entries(runtime, &entries)?;
+        if let AsyncCopyRoute::GpuBatch {
+            index,
+            entries,
+            controls,
+            ..
+        } = &mut route
+        {
+            if (op.wait.function != 0 || op.signal.operation != 0)
+                && (runtime.gpus[*index].info.gfx_minor != 5
+                    || entries.iter().any(|entry| {
+                        !matches!(
+                            entry,
+                            GpuCopyEntry::Linear { .. }
+                                | GpuCopyEntry::Swap { .. }
+                                | GpuCopyEntry::Indirect { .. }
+                        )
+                    }))
+            {
+                return Err(NOT_SUPPORTED);
+            }
+            let gpu = HsaAgent {
+                handle: GPU_AGENT_BASE + *index as u64,
+            };
+            if op.wait.function != 0 {
+                let (address, base) = batch_control_address(
+                    runtime,
+                    op.wait.address as usize,
+                    gpu,
+                    ACCESS_PERMISSION_RO,
+                )?;
+                controls.wait = Some(GpuCopyWait {
+                    address,
+                    function: u8::try_from(op.wait.function).map_err(|_| INVALID_ARGUMENT)?,
+                    reference: op.wait.value,
+                    mask: op.wait.mask,
+                });
+                bases.push(Some(base));
+            }
+            if op.signal.operation != 0 {
+                let (address, base) = batch_control_address(
+                    runtime,
+                    op.signal.address as usize,
+                    gpu,
+                    ACCESS_PERMISSION_RW,
+                )?;
+                controls.signal = Some(GpuCopySignal {
+                    address,
+                    operation: match op.signal.operation {
+                        1 => GpuCopySignalOperation::Write,
+                        2 => GpuCopySignalOperation::Add,
+                        3 => GpuCopySignalOperation::Subtract,
+                        _ => return Err(INVALID_ARGUMENT),
+                    },
+                    data: op.signal.data,
+                });
+                bases.push(Some(base));
+            }
+        } else if op.wait.function != 0 || op.signal.operation != 0 {
+            return Err(INVALID_ARGUMENT);
+        }
         tasks.push(AsyncCopyTask {
             route,
             sdma_engine: None,
@@ -5980,7 +7165,11 @@ unsafe fn prepare_batch_copy(
     Ok(PreparedBatchCopy { tasks })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_async_batch_copy")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_async_batch_copy(
     copy_operations: *const HsaAmdMemoryCopyOp,
     operation_count: u32,
@@ -6021,7 +7210,7 @@ pub unsafe extern "C" fn hsa_amd_memory_async_batch_copy(
         };
         if dependency_slice
             .iter()
-            .any(|signal| !runtime.owns_signal(*signal))
+            .any(|signal| !runtime.signal_state.owns_signal(*signal))
         {
             return INVALID_SIGNAL;
         }
@@ -6034,7 +7223,11 @@ pub unsafe extern "C" fn hsa_amd_memory_async_batch_copy(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_async_copy_rect")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
     dst: *const HsaPitchedPtr,
     dst_offset: *const HsaDim3,
@@ -6068,7 +7261,7 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
         {
             return INVALID_ARGUMENT;
         }
-        if !runtime.owns_signal(completion) {
+        if !runtime.signal_state.owns_signal(completion) {
             return INVALID_SIGNAL;
         }
         // SAFETY: The HSA caller supplies readable descriptor storage.
@@ -6085,7 +7278,7 @@ pub unsafe extern "C" fn hsa_amd_memory_async_copy_rect(
         };
         if dependency_slice
             .iter()
-            .any(|signal| !runtime.owns_signal(*signal))
+            .any(|signal| !runtime.signal_state.owns_signal(*signal))
         {
             return INVALID_SIGNAL;
         }
@@ -6190,7 +7383,7 @@ fn pitched_copy_range(
     Some((address, extent))
 }
 
-fn copy_engine_mask_for_gpu(runtime: &Runtime, index: usize) -> Result<u32, Status> {
+fn copy_engine_mask_for_gpu(runtime: &HsaState, index: usize) -> Result<u32, Status> {
     let gpu = runtime.gpus[index].device.gpu().map_err(map_error)?;
     if !gpu.supports_linear_copy() {
         return Ok(0);
@@ -6200,14 +7393,18 @@ fn copy_engine_mask_for_gpu(runtime: &Runtime, index: usize) -> Result<u32, Stat
     Ok(gpu.available_sdma_engines().map_err(map_error)? & valid_ids)
 }
 
-fn copy_engine_mask(runtime: &Runtime, dst: HsaAgent, src: HsaAgent) -> Result<u32, Status> {
+fn copy_engine_mask(runtime: &HsaState, dst: HsaAgent, src: HsaAgent) -> Result<u32, Status> {
     let Some(index) = runtime.gpu_index(src).or_else(|| runtime.gpu_index(dst)) else {
         return Ok(0);
     };
     copy_engine_mask_for_gpu(runtime, index)
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_copy_engine_status")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_copy_engine_status(
     dst: HsaAgent,
     src: HsaAgent,
@@ -6242,7 +7439,11 @@ pub unsafe extern "C" fn hsa_amd_memory_copy_engine_status(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_memory_get_preferred_copy_engine")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_memory_get_preferred_copy_engine(
     dst: HsaAgent,
     src: HsaAgent,
@@ -6881,7 +8082,7 @@ mod tests {
 
     #[test]
     fn portable_export_checks_initialization_before_arguments() {
-        assert!(lock().is_ok_and(|runtime| runtime.is_none()));
+        assert!(lock().is_ok_and(|runtime| runtime.as_ref().is_none()));
 
         let mut descriptor = -1;
         let mut offset = u64::MAX;
@@ -6917,7 +8118,7 @@ mod tests {
 
     #[test]
     fn memory_lock_checks_initialization_before_arguments() {
-        assert!(lock().is_ok_and(|runtime| runtime.is_none()));
+        assert!(lock().is_ok_and(|runtime| runtime.as_ref().is_none()));
 
         let mut agent_ptr = usize::MAX as *mut c_void;
         // SAFETY: An uninitialized runtime returns before inspecting the

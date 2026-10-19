@@ -1,14 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! HSA code-object readers, ELF validation, relocation, and executable state.
+//! HSA code-object readers, executable state, and ELF loader integration.
 //!
 //! Readers first take an owned snapshot of caller memory or a bounded file
-//! range. Parsing uses checked offsets throughout so malformed ELF data cannot
-//! escape its snapshot. Loading allocates rocddi memory, copies loadable bytes,
-//! applies the supported AMDGPU relocations, and publishes symbols only after
-//! the complete object is valid. Executable freeze and destruction retain the
-//! HSA-visible ownership and failure semantics around that native backing.
+//! range. `rocloader` interprets AMD HSA code objects, constructs their rocddi
+//! images, and owns executable publication and lifetime. This module owns HSA
+//! handles, C ABI queries, and status translation.
 //!
 //! File readers use rocddi's Linux descriptor provider to snapshot caller
 //! storage while leaving descriptor ownership with the application.
@@ -16,55 +14,35 @@
 use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::Arc;
-use std::sync::atomic::{Ordering, fence};
 
 use crate::platform::memory as linux_interop;
-use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
+use rocddi::memory::device::MemoryKind;
+#[cfg(test)]
+use rocelf::Layout as ElfLayout;
+#[cfg(test)]
+use rocelf::LoadSegment;
+#[cfg(test)]
+use rocelf::constants::*;
+#[cfg(test)]
+use rocelf::read_u64;
+use rocloader::{
+    CodeObject as LoaderCodeObject, Definition, Scope, SymbolKind, SymbolLinkage, SymbolTableOrder,
+    Target, VariableAllocation, VariableSegment,
+};
 
 use crate::ffi::*;
-use crate::runtime::{Runtime, boundary, initialized_mut, lock, map_error};
-
-const ELF_HEADER_SIZE: usize = 64;
-const ELF_MACHINE_AMDGPU: u16 = 224;
-const ELF_OS_ABI_AMDGPU_HSA: u8 = 64;
-const ELF_TYPE_EXEC: u16 = 2;
-const ELF_TYPE_DYN: u16 = 3;
-const PROGRAM_LOAD: u32 = 1;
-const SECTION_PROGBITS: u32 = 1;
-const SECTION_SYMTAB: u32 = 2;
-const SECTION_STRTAB: u32 = 3;
-const SECTION_RELA: u32 = 4;
-const SECTION_DYNSYM: u32 = 11;
-const SECTION_FLAG_WRITE: u64 = 1;
-const SECTION_FLAG_AMDGPU_HSA_READONLY: u64 = 0x0020_0000;
-const SECTION_FLAG_AMDGPU_HSA_AGENT: u64 = 0x0080_0000;
-const SYMBOL_TYPE_OBJECT: u8 = 1;
-const SYMBOL_TYPE_COMMON: u8 = 5;
-const SYMBOL_TYPE_AMDGPU_HSA_KERNEL: u8 = 10;
-const SYMBOL_TYPE_AMDGPU_HSA_INDIRECT_FUNCTION: u8 = 11;
-const SYMBOL_BINDING_GLOBAL: u8 = 1;
-const SYMBOL_UNDEFINED: u16 = 0;
-const SYMBOL_ABSOLUTE: u16 = 0xfff1;
-const SYMBOL_COMMON: u16 = 0xfff2;
-const RELOCATION_ABSOLUTE_32_LO: u32 = 1;
-const RELOCATION_ABSOLUTE_32_HI: u32 = 2;
-const RELOCATION_ABSOLUTE_64: u32 = 3;
-const RELOCATION_ABSOLUTE_32: u32 = 6;
-const RELOCATION_RELATIVE_64: u32 = 13;
-const AMDGPU_MACHINE_MASK: u32 = 0xff;
-const AMDGPU_MACHINE_GFX1201: u32 = 0x4e;
-const AMDGPU_MACHINE_GFX12_GENERIC: u32 = 0x59;
-const AMDGPU_XNACK_MASK: u32 = 0x300;
-const AMDGPU_XNACK_ANY: u32 = 0x100;
-const AMDGPU_SRAMECC_MASK: u32 = 0xc00;
-const AMDGPU_SRAMECC_ANY: u32 = 0x400;
-const AMDGPU_GENERIC_VERSION_SHIFT: u32 = 24;
+use crate::runtime::{HsaState, boundary, initialized_mut, lock, map_error};
 
 /// Origin retained for loader queries after bytes have been snapshotted.
 #[derive(Clone)]
 enum ReaderStorage {
+    /// Snapshot from caller-owned memory.
     Memory,
-    File { uri: Vec<u8> },
+    /// Snapshot from a file with a retained source URI.
+    File {
+        /// Source URI preserved after the descriptor is released.
+        uri: Vec<u8>,
+    },
 }
 
 impl ReaderStorage {
@@ -76,167 +54,162 @@ impl ReaderStorage {
 
 /// Immutable code-object byte snapshot associated with one reader handle.
 pub(crate) struct Reader {
+    /// Immutable snapshot independent of caller storage lifetime.
     bytes: Arc<[u8]>,
+    /// Source description retained for loader queries.
     storage: ReaderStorage,
 }
 
 /// Parsed code-object metadata cached independently of any executable load.
 pub(crate) struct CodeObject {
+    /// Immutable ELF bytes shared with readers and executable loads.
     bytes: Arc<[u8]>,
+    /// Symbol name to public handle mapping.
     names: HashMap<String, u64>,
+    /// Public symbol handles in enumeration order.
     symbol_handles: Vec<u64>,
+    /// Whether symbols have already been parsed and published.
     symbols_initialized: bool,
 }
 
 /// HSA-visible symbol facts belonging to one parsed code object.
 pub(crate) struct CodeSymbol {
+    /// Public handle of the containing code object.
     code_object: u64,
+    /// Symbol name reported by HSA queries.
     name: String,
+    /// Module name reported by HSA queries.
     module_name: String,
+    /// HSA kernel, variable, or indirect-function kind.
     kind: u32,
+    /// HSA program or module linkage.
     linkage: u32,
+    /// Whether this record defines rather than references a symbol.
     is_definition: bool,
+    /// HSA variable allocation scope.
     allocation: u32,
+    /// HSA variable memory segment.
     segment: u32,
+    /// Required variable alignment in bytes.
     alignment: u32,
+    /// Symbol byte size.
     size: u32,
+    /// Whether a variable is read-only.
     is_const: bool,
+    /// Kernel argument segment byte size.
     kernarg_size: u32,
+    /// Kernel argument segment alignment.
     kernarg_alignment: u32,
+    /// Kernel group segment byte size.
     group_size: u32,
+    /// Kernel private segment byte size.
     private_size: u32,
+    /// Whether kernel calls may require dynamic stack space.
     dynamic_callstack: bool,
+    /// Kernel calling convention identifier.
     call_convention: u32,
+    /// Kernel wavefront width.
     wavefront_size: u32,
 }
 
-/// One contiguous loaded address interval described to loader clients.
-struct LoadedSegment {
-    storage_offset: usize,
-    address: u64,
-    size: usize,
-}
-
-fn loaded_segments(
-    loads: &[(u64, u64, u64, u64)],
-    device_base: u64,
-    virtual_base: u64,
-) -> Result<Vec<LoadedSegment>, Status> {
-    let (file_offset, _, _, _) = loads
-        .iter()
-        .min_by_key(|(_, virtual_address, _, _)| *virtual_address)
-        .ok_or(INVALID_CODE_OBJECT)?;
-    let virtual_end = loads
-        .iter()
-        .try_fold(virtual_base, |end, (_, virtual_address, _, memory_size)| {
-            virtual_address
-                .checked_add(*memory_size)
-                .map(|segment_end| end.max(segment_end))
-        })
-        .ok_or(INVALID_CODE_OBJECT)?;
-    let size = usize::try_from(
-        virtual_end
-            .checked_sub(virtual_base)
-            .ok_or(INVALID_CODE_OBJECT)?,
-    )
-    .map_err(|_| INVALID_CODE_OBJECT)?;
-    Ok(vec![LoadedSegment {
-        storage_offset: usize::try_from(*file_offset).map_err(|_| INVALID_CODE_OBJECT)?,
-        address: device_base,
-        size,
-    }])
-}
-
-/// Native allocation and relocation result for one executable load operation.
-pub(crate) struct LoadedObject {
-    pub(crate) handle: u64,
-    _allocation: Allocation,
-    host_base: usize,
-    device_base: u64,
-    size: u64,
-    virtual_base: u64,
+/// ABI metadata kept alongside an owned image in the loader executable.
+pub(crate) struct LoadedMetadata {
+    /// Public loaded-object handle.
+    handle: u64,
+    /// Agent whose device holds this loaded image.
     agent: HsaAgent,
+    /// Public loaded-object type.
     kind: u32,
-    code_object: Arc<[u8]>,
+    /// Source URI reported to loader clients.
     uri: Vec<u8>,
-    segments: Vec<LoadedSegment>,
 }
 
-/// Mutable HSA executable assembled from loaded objects and symbol definitions.
-///
-/// Symbol maps are completed before `frozen` is set. Once frozen, no operation
-/// may change load addresses or definitions observed through public queries.
+type LoadedObject = rocloader::LoadedObject<LoadedMetadata>;
+
+/// HSA profile and rounding policy around the reusable executable owner.
 pub(crate) struct Executable {
+    /// HSA profile selected at creation.
     pub(crate) profile: u32,
+    /// Default floating-point rounding mode.
     pub(crate) default_rounding: u32,
-    pub(crate) frozen: bool,
-    pub(crate) program_loaded: bool,
-    pub(crate) loaded: Vec<LoadedObject>,
-    pub(crate) names: HashMap<(String, u64), u64>,
-    pub(crate) symbol_handles: Vec<u64>,
+    /// Loader-owned images and scoped symbol index.
+    pub(crate) core: rocloader::Executable<LoadedMetadata>,
 }
 
 /// Resolves a complete range in a loaded executable to its CPU mapping.
-/// An address inside an object with an excessive extent is an error, so a
-/// caller cannot accidentally fall back to dereferencing its GPU address.
 pub(crate) fn loaded_host_range(
-    runtime: &Runtime,
+    loader: &LoaderState,
     address: usize,
     size: usize,
 ) -> Result<Option<usize>, Status> {
-    for executable in runtime.executables.values() {
-        for object in &executable.loaded {
-            let Some(offset) = (address as u64).checked_sub(object.device_base) else {
-                continue;
-            };
-            if offset >= object.size {
-                continue;
-            }
-            let offset = usize::try_from(offset).map_err(|_| INVALID_ALLOCATION)?;
-            let end = offset.checked_add(size).ok_or(INVALID_ALLOCATION)?;
-            if end > object.size as usize {
-                return Err(INVALID_ALLOCATION);
-            }
-            return object
-                .host_base
-                .checked_add(offset)
-                .map(Some)
-                .ok_or(INVALID_ALLOCATION);
+    for executable in loader.executables.values() {
+        match executable.core.host_range(address as u64, size) {
+            Ok(Some(host)) => return Ok(Some(host)),
+            Ok(None) => {}
+            Err(rocloader::Error::InvalidRange) => return Err(INVALID_ALLOCATION),
+            Err(error) => return Err(map_loader_error(error)),
         }
     }
     Ok(None)
 }
 
-/// HSA-visible executable symbol with its resolved runtime address.
-pub(crate) struct Symbol {
-    pub(crate) executable: u64,
-    pub(crate) name: String,
-    pub(crate) module_name: String,
-    pub(crate) agent: HsaAgent,
-    pub(crate) address: u64,
-    pub(crate) size: u32,
-    pub(crate) kind: u32,
-    pub(crate) linkage: u32,
-    pub(crate) is_definition: bool,
-    pub(crate) allocation: u32,
-    pub(crate) segment: u32,
-    pub(crate) alignment: u32,
-    pub(crate) is_const: bool,
-    pub(crate) kernarg_size: u32,
-    pub(crate) kernarg_alignment: u32,
-    pub(crate) group_size: u32,
-    pub(crate) private_size: u32,
-    pub(crate) dynamic_callstack: bool,
-    pub(crate) call_convention: u32,
+#[cfg(test)]
+fn loaded_segments(
+    loads: &[LoadSegment],
+    device_base: u64,
+    virtual_base: u64,
+) -> Result<Vec<rocloader::LoadedSegment>, Status> {
+    rocloader::loaded_segments(loads, device_base, virtual_base).map_err(map_loader_error)
 }
 
-/// Validated symbol staged during parsing before it receives a public handle.
-struct PendingSymbol {
+/// Maps an HSA symbol handle to its loader-owned executable and agent scope.
+pub(crate) struct SymbolReference {
+    /// Public executable handle that owns this symbol.
+    pub(crate) executable: u64,
+    /// Agent scope of this symbol, if any.
+    pub(crate) agent: HsaAgent,
+}
+
+/// HSA handles around code objects and rocloader-owned executables.
+pub(crate) struct LoaderState {
+    /// Parsed code objects indexed by public handle.
+    code_objects: HashMap<u64, CodeObject>,
+    /// Code-object symbols indexed by public handle.
+    code_symbols: HashMap<u64, CodeSymbol>,
+    /// Caller-supplied code-object readers.
+    readers: HashMap<u64, Reader>,
+    /// Executable owners indexed by public handle.
+    executables: HashMap<u64, Executable>,
+    /// Symbols published from loaded executables.
+    symbols: HashMap<u64, SymbolReference>,
+}
+
+impl LoaderState {
+    pub(crate) fn new() -> Self {
+        Self {
+            code_objects: HashMap::new(),
+            code_symbols: HashMap::new(),
+            readers: HashMap::new(),
+            executables: HashMap::new(),
+            symbols: HashMap::new(),
+        }
+    }
+
+    /// Drops HSA symbol handles before their executable and reader owners.
+    pub(crate) fn clear(&mut self) {
+        self.symbols.clear();
+        self.executables.clear();
+        self.readers.clear();
+        self.code_symbols.clear();
+        self.code_objects.clear();
+    }
+}
+
+/// HSA code-symbol metadata staged before receiving an opaque handle.
+struct ParsedCodeSymbol {
     full_name: String,
     name: String,
     module_name: String,
-    value: u64,
-    address: u64,
     size: u32,
     kind: u32,
     linkage: u32,
@@ -254,376 +227,101 @@ struct PendingSymbol {
     wavefront_size: u32,
 }
 
-/// Bounds-checked view of the ELF tables needed by the supported loader path.
-#[derive(Clone, Copy)]
-struct ElfLayout {
-    abi_version: u8,
-    flags: u32,
-    program_offset: u64,
-    program_entry_size: usize,
-    program_count: usize,
-    section_offset: u64,
-    section_entry_size: usize,
-    section_count: usize,
+fn map_loader_error(error: rocloader::Error) -> Status {
+    match error {
+        rocloader::Error::InvalidObject => INVALID_CODE_OBJECT,
+        rocloader::Error::UndefinedSymbol => VARIABLE_UNDEFINED,
+        rocloader::Error::InvalidTarget => INVALID_ISA_NAME,
+        rocloader::Error::IncompatibleTarget | rocloader::Error::ProgramAlreadyLoaded => {
+            INCOMPATIBLE_ARGUMENTS
+        }
+        rocloader::Error::OutOfResources => OUT_OF_RESOURCES,
+        rocloader::Error::Device(error) => map_error(error),
+        rocloader::Error::InvalidRange => INVALID_ALLOCATION,
+        rocloader::Error::Frozen => FROZEN_EXECUTABLE,
+        rocloader::Error::AlreadyDefined => VARIABLE_ALREADY_DEFINED,
+    }
 }
 
-fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(
-        bytes.get(offset..offset + 2)?.try_into().ok()?,
-    ))
+fn hsa_symbol_kind(kind: SymbolKind) -> u32 {
+    match kind {
+        SymbolKind::Kernel => SYMBOL_KIND_KERNEL,
+        SymbolKind::Variable => SYMBOL_KIND_VARIABLE,
+        SymbolKind::IndirectFunction => SYMBOL_KIND_INDIRECT_FUNCTION,
+    }
 }
 
-fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(
-        bytes.get(offset..offset + 4)?.try_into().ok()?,
-    ))
+fn hsa_symbol_linkage(linkage: SymbolLinkage) -> u32 {
+    match linkage {
+        SymbolLinkage::Module => SYMBOL_LINKAGE_MODULE,
+        SymbolLinkage::Program => SYMBOL_LINKAGE_PROGRAM,
+    }
 }
 
-fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
-    Some(u64::from_le_bytes(
-        bytes.get(offset..offset + 8)?.try_into().ok()?,
-    ))
+fn hsa_variable_allocation(allocation: VariableAllocation) -> u32 {
+    match allocation {
+        VariableAllocation::Agent => VARIABLE_ALLOCATION_AGENT,
+        VariableAllocation::Program => VARIABLE_ALLOCATION_PROGRAM,
+    }
 }
 
-fn read_i64(bytes: &[u8], offset: usize) -> Option<i64> {
-    Some(i64::from_le_bytes(
-        bytes.get(offset..offset + 8)?.try_into().ok()?,
-    ))
+fn hsa_variable_segment(segment: VariableSegment) -> u32 {
+    match segment {
+        VariableSegment::Global => VARIABLE_SEGMENT_GLOBAL,
+        VariableSegment::Readonly => VARIABLE_SEGMENT_READONLY,
+    }
 }
 
+#[cfg(test)]
 fn parse_elf_layout(bytes: &[u8]) -> Result<ElfLayout, Status> {
-    if bytes.len() < ELF_HEADER_SIZE
-        || bytes.get(0..4) != Some(b"\x7fELF")
-        || bytes[4] != 2
-        || bytes[5] != 1
-        || bytes[7] != ELF_OS_ABI_AMDGPU_HSA
-        || !matches!(read_u16(bytes, 16), Some(ELF_TYPE_EXEC | ELF_TYPE_DYN))
-        || read_u16(bytes, 18) != Some(ELF_MACHINE_AMDGPU)
-        || read_u32(bytes, 20) != Some(1)
-        || read_u16(bytes, 52).is_none_or(|size| usize::from(size) < ELF_HEADER_SIZE)
-    {
-        return Err(INVALID_CODE_OBJECT);
-    }
-    let layout = ElfLayout {
-        abi_version: bytes[8],
-        flags: read_u32(bytes, 48).ok_or(INVALID_CODE_OBJECT)?,
-        program_offset: read_u64(bytes, 32).ok_or(INVALID_CODE_OBJECT)?,
-        section_offset: read_u64(bytes, 40).ok_or(INVALID_CODE_OBJECT)?,
-        program_entry_size: usize::from(read_u16(bytes, 54).ok_or(INVALID_CODE_OBJECT)?),
-        program_count: usize::from(read_u16(bytes, 56).ok_or(INVALID_CODE_OBJECT)?),
-        section_entry_size: usize::from(read_u16(bytes, 58).ok_or(INVALID_CODE_OBJECT)?),
-        section_count: usize::from(read_u16(bytes, 60).ok_or(INVALID_CODE_OBJECT)?),
-    };
-    if (layout.program_count != 0 && layout.program_entry_size < 56)
-        || (layout.section_count != 0 && layout.section_entry_size < 64)
-    {
-        return Err(INVALID_CODE_OBJECT);
-    }
-    if layout.program_count != 0
-        && table_entry(
-            bytes,
-            layout.program_offset,
-            layout.program_count - 1,
-            layout.program_entry_size,
-        )
-        .is_none()
-    {
-        return Err(INVALID_CODE_OBJECT);
-    }
-    if layout.section_count != 0
-        && table_entry(
-            bytes,
-            layout.section_offset,
-            layout.section_count - 1,
-            layout.section_entry_size,
-        )
-        .is_none()
-    {
-        return Err(INVALID_CODE_OBJECT);
-    }
-    Ok(layout)
+    LoaderCodeObject::parse(bytes)
+        .map(|object| object.layout())
+        .map_err(map_loader_error)
 }
 
-fn code_object_version(layout: ElfLayout) -> Result<u32, Status> {
-    match layout.abi_version {
-        0 => Ok(2),
-        1 => Ok(3),
-        2 => Ok(4),
-        3 => Ok(5),
-        4 => Ok(6),
-        _ => Err(INVALID_CODE_OBJECT),
+impl From<rocloader::Symbol> for ParsedCodeSymbol {
+    fn from(symbol: rocloader::Symbol) -> Self {
+        Self {
+            full_name: symbol.full_name,
+            name: symbol.name,
+            module_name: symbol.module_name,
+            size: symbol.size,
+            kind: hsa_symbol_kind(symbol.kind),
+            linkage: hsa_symbol_linkage(symbol.linkage),
+            is_definition: symbol.is_definition,
+            allocation: hsa_variable_allocation(symbol.allocation),
+            segment: hsa_variable_segment(symbol.segment),
+            alignment: symbol.alignment,
+            is_const: symbol.is_const,
+            kernarg_size: symbol.kernarg_size,
+            kernarg_alignment: symbol.kernarg_alignment,
+            group_size: symbol.group_size,
+            private_size: symbol.private_size,
+            dynamic_callstack: symbol.dynamic_callstack,
+            call_convention: symbol.call_convention,
+            wavefront_size: symbol.wavefront_size,
+        }
     }
 }
 
-fn code_object_target(machine: u32) -> Option<(&'static str, u64)> {
-    match machine & AMDGPU_MACHINE_MASK {
-        AMDGPU_MACHINE_GFX1201 => Some(("gfx1201", 0)),
-        AMDGPU_MACHINE_GFX12_GENERIC => Some(("gfx12-generic", 1)),
-        _ => None,
-    }
-}
-
-fn validate_load_target(layout: ElfLayout, gfx: (u32, u32, u32)) -> Result<(), Status> {
-    let version = code_object_version(layout)?;
-    let Some((_, variant)) = code_object_target(layout.flags) else {
-        return Err(INVALID_ISA_NAME);
-    };
-    let features_supported = if version == 3 {
-        layout.flags & (AMDGPU_XNACK_MASK | AMDGPU_SRAMECC_MASK) == 0
-    } else {
-        matches!(layout.flags & AMDGPU_XNACK_MASK, 0 | AMDGPU_XNACK_ANY)
-            && matches!(layout.flags & AMDGPU_SRAMECC_MASK, 0 | AMDGPU_SRAMECC_ANY)
-    };
-    if !features_supported
-        || (variant == 1 && (version < 6 || layout.flags >> AMDGPU_GENERIC_VERSION_SHIFT == 0))
-        || gfx != (12, 0, 1)
-    {
-        return Err(INCOMPATIBLE_ARGUMENTS);
-    }
-    Ok(())
-}
-
-fn split_symbol_name(full_name: &str) -> (&str, &str) {
-    full_name.rfind("::").map_or(("", full_name), |separator| {
-        (&full_name[..separator], &full_name[separator + 2..])
-    })
-}
-
-fn variable_metadata(section_flags: u64) -> (u32, bool) {
-    let segment = if section_flags & SECTION_FLAG_AMDGPU_HSA_READONLY != 0 {
-        VARIABLE_SEGMENT_READONLY
-    } else {
-        VARIABLE_SEGMENT_GLOBAL
-    };
-    (segment, section_flags & SECTION_FLAG_WRITE != 0)
-}
-
-struct ElfSymbolTable<'a> {
-    bytes: &'a [u8],
-    offset: u64,
-    entry_size: usize,
-    count: usize,
-    strings: &'a [u8],
-}
-
-impl<'a> ElfSymbolTable<'a> {
-    fn entry(&self, index: usize) -> Result<&'a [u8], Status> {
-        table_entry(self.bytes, self.offset, index, self.entry_size).ok_or(INVALID_CODE_OBJECT)
-    }
-
-    fn name(&self, symbol: &[u8]) -> Result<&'a str, Status> {
-        let offset = usize::try_from(read_u32(symbol, 0).ok_or(INVALID_CODE_OBJECT)?)
-            .map_err(|_| INVALID_CODE_OBJECT)?;
-        c_string(self.strings, offset).ok_or(INVALID_CODE_OBJECT)
-    }
-}
-
-fn symbol_table<'a>(
-    bytes: &'a [u8],
-    layout: ElfLayout,
-    section: &[u8],
-) -> Result<ElfSymbolTable<'a>, Status> {
-    let offset = read_u64(section, 24).ok_or(INVALID_CODE_OBJECT)?;
-    let size = read_u64(section, 32).ok_or(INVALID_CODE_OBJECT)?;
-    let strings_index = usize::try_from(read_u32(section, 40).ok_or(INVALID_CODE_OBJECT)?)
-        .map_err(|_| INVALID_CODE_OBJECT)?;
-    if strings_index >= layout.section_count {
-        return Err(INVALID_CODE_OBJECT);
-    }
-    let entry_size = usize::try_from(read_u64(section, 56).ok_or(INVALID_CODE_OBJECT)?)
-        .map_err(|_| INVALID_CODE_OBJECT)?;
-    if entry_size < 24 || size % entry_size as u64 != 0 {
-        return Err(INVALID_CODE_OBJECT);
-    }
-    let strings_section = table_entry(
-        bytes,
-        layout.section_offset,
-        strings_index,
-        layout.section_entry_size,
-    )
-    .filter(|section| read_u32(section, 4) == Some(SECTION_STRTAB))
-    .ok_or(INVALID_CODE_OBJECT)?;
-    let strings_offset = usize::try_from(read_u64(strings_section, 24).ok_or(INVALID_CODE_OBJECT)?)
-        .map_err(|_| INVALID_CODE_OBJECT)?;
-    let strings_size = usize::try_from(read_u64(strings_section, 32).ok_or(INVALID_CODE_OBJECT)?)
-        .map_err(|_| INVALID_CODE_OBJECT)?;
-    let strings = bytes
-        .get(
-            strings_offset
-                ..strings_offset
-                    .checked_add(strings_size)
-                    .ok_or(INVALID_CODE_OBJECT)?,
-        )
-        .ok_or(INVALID_CODE_OBJECT)?;
-    Ok(ElfSymbolTable {
-        bytes,
-        offset,
-        entry_size,
-        count: usize::try_from(size).map_err(|_| INVALID_CODE_OBJECT)? / entry_size,
-        strings,
-    })
-}
-
+#[cfg(test)]
 fn parse_symbols(
     bytes: &[u8],
-    layout: ElfLayout,
+    _layout: ElfLayout,
     preferred_tables: &[u32],
-) -> Result<Vec<PendingSymbol>, Status> {
-    let symbol_section = preferred_tables.iter().find_map(|preferred| {
-        (0..layout.section_count).find_map(|index| {
-            let section = table_entry(
-                bytes,
-                layout.section_offset,
-                index,
-                layout.section_entry_size,
-            )?;
-            (read_u32(section, 4) == Some(*preferred)).then_some(section)
-        })
-    });
-    let Some(symbol_section) = symbol_section else {
-        return Ok(Vec::new());
-    };
-    let table = symbol_table(bytes, layout, symbol_section)?;
-    let wavefront_size = if matches!(
-        layout.flags & AMDGPU_MACHINE_MASK,
-        AMDGPU_MACHINE_GFX1201 | AMDGPU_MACHINE_GFX12_GENERIC
-    ) {
-        32
+) -> Result<Vec<ParsedCodeSymbol>, Status> {
+    let order = if preferred_tables.first() == Some(&SECTION_DYNSYM) {
+        SymbolTableOrder::DynamicFirst
     } else {
-        64
+        SymbolTableOrder::RegularFirst
     };
-    let mut symbols = Vec::new();
-    for symbol_index in 0..table.count {
-        let symbol = table.entry(symbol_index)?;
-        let name_offset = usize::try_from(read_u32(symbol, 0).ok_or(INVALID_CODE_OBJECT)?)
-            .map_err(|_| INVALID_CODE_OBJECT)?;
-        if name_offset == 0 {
-            continue;
-        }
-        let full_name = table.name(symbol)?.to_owned();
-        let symbol_info = *symbol.get(4).ok_or(INVALID_CODE_OBJECT)?;
-        let symbol_type = symbol_info & 0xf;
-        let kind = if symbol_type == SYMBOL_TYPE_AMDGPU_HSA_KERNEL
-            || std::path::Path::new(&full_name)
-                .extension()
-                .is_some_and(|extension| extension.eq_ignore_ascii_case("kd"))
-        {
-            SYMBOL_KIND_KERNEL
-        } else if symbol_type == SYMBOL_TYPE_AMDGPU_HSA_INDIRECT_FUNCTION {
-            SYMBOL_KIND_INDIRECT_FUNCTION
-        } else if matches!(symbol_type, SYMBOL_TYPE_OBJECT | SYMBOL_TYPE_COMMON) {
-            SYMBOL_KIND_VARIABLE
-        } else {
-            continue;
-        };
-        let section_index = read_u16(symbol, 6).ok_or(INVALID_CODE_OBJECT)?;
-        let value = read_u64(symbol, 8).ok_or(INVALID_CODE_OBJECT)?;
-        let size =
-            u32::try_from(read_u64(symbol, 16).ok_or(INVALID_CODE_OBJECT)?).unwrap_or(u32::MAX);
-        let is_definition = section_index != SYMBOL_UNDEFINED
-            && section_index != SYMBOL_COMMON
-            && symbol_type != SYMBOL_TYPE_COMMON;
-        let section = (usize::from(section_index) < layout.section_count)
-            .then(|| {
-                table_entry(
-                    bytes,
-                    layout.section_offset,
-                    usize::from(section_index),
-                    layout.section_entry_size,
-                )
-            })
-            .flatten();
-        let section_flags = section.and_then(|entry| read_u64(entry, 8)).unwrap_or(0);
-        let alignment = section
-            .and_then(|entry| read_u64(entry, 48))
-            .and_then(|alignment| u32::try_from(alignment).ok())
-            .unwrap_or(0);
-        let (segment, is_const) = variable_metadata(section_flags);
-        let descriptor = if kind == SYMBOL_KIND_KERNEL && is_definition {
-            section.and_then(|entry| {
-                if read_u32(entry, 4) != Some(SECTION_PROGBITS) {
-                    return None;
-                }
-                let section_address = read_u64(entry, 16)?;
-                let section_offset = usize::try_from(read_u64(entry, 24)?).ok()?;
-                let offset = usize::try_from(value.checked_sub(section_address)?).ok()?;
-                bytes.get(section_offset.checked_add(offset)?..)?.get(..64)
-            })
-        } else {
-            None
-        };
-        let (group_size, private_size, kernarg_size, dynamic_callstack) =
-            descriptor.map_or((0, 0, 0, false), |descriptor| {
-                (
-                    read_u32(descriptor, 0).unwrap_or(0),
-                    read_u32(descriptor, 4).unwrap_or(0),
-                    read_u32(descriptor, 8).unwrap_or(0),
-                    read_u16(descriptor, 56).is_some_and(|flags| flags & (1 << 11) != 0),
-                )
-            });
-        let (module_name, name) = split_symbol_name(&full_name);
-        symbols.push(PendingSymbol {
-            full_name: full_name.clone(),
-            name: name.to_owned(),
-            module_name: module_name.to_owned(),
-            value,
-            address: 0,
-            size,
-            kind,
-            linkage: if symbol_info >> 4 == SYMBOL_BINDING_GLOBAL {
-                SYMBOL_LINKAGE_PROGRAM
-            } else {
-                SYMBOL_LINKAGE_MODULE
-            },
-            is_definition,
-            allocation: if section_flags & SECTION_FLAG_AMDGPU_HSA_AGENT != 0 {
-                VARIABLE_ALLOCATION_AGENT
-            } else {
-                VARIABLE_ALLOCATION_PROGRAM
-            },
-            segment,
-            alignment,
-            is_const,
-            kernarg_size,
-            kernarg_alignment: 16,
-            group_size,
-            private_size,
-            dynamic_callstack,
-            call_convention: 0,
-            wavefront_size,
-        });
-    }
-    Ok(symbols)
+    LoaderCodeObject::parse(bytes)
+        .and_then(|object| object.symbols(order))
+        .map(|symbols| symbols.into_iter().map(ParsedCodeSymbol::from).collect())
+        .map_err(map_loader_error)
 }
 
-fn align_down(value: u64, alignment: u64) -> u64 {
-    value & !(alignment - 1)
-}
-
-fn align_up(value: u64, alignment: u64) -> Option<u64> {
-    value
-        .checked_add(alignment - 1)
-        .map(|value| align_down(value, alignment))
-}
-
-fn table_entry(bytes: &[u8], base: u64, index: usize, size: usize) -> Option<&[u8]> {
-    let offset = usize::try_from(base)
-        .ok()?
-        .checked_add(index.checked_mul(size)?)?;
-    bytes.get(offset..offset.checked_add(size)?)
-}
-
-fn c_string(bytes: &[u8], offset: usize) -> Option<&str> {
-    let tail = bytes.get(offset..)?;
-    let end = tail.iter().position(|byte| *byte == 0)?;
-    std::str::from_utf8(&tail[..end]).ok()
-}
-
-fn add_relocation_base(base: u64, value: u64, addend: i64) -> Option<u64> {
-    let result = i128::from(base) + i128::from(value) + i128::from(addend);
-    u64::try_from(result).ok()
-}
-
+#[cfg(test)]
 fn apply_relocations(
     bytes: &[u8],
     layout: ElfLayout,
@@ -632,180 +330,46 @@ fn apply_relocations(
     image: &mut [u8],
     resolve_external: impl Fn(&str) -> Option<u64>,
 ) -> Result<(), Status> {
-    let load_bias = device_base
-        .checked_sub(virtual_base)
-        .ok_or(INVALID_CODE_OBJECT)?;
-    for section_index in 0..layout.section_count {
-        let section = table_entry(
-            bytes,
-            layout.section_offset,
-            section_index,
-            layout.section_entry_size,
-        )
-        .ok_or(INVALID_CODE_OBJECT)?;
-        if read_u32(section, 4) != Some(SECTION_RELA) {
-            continue;
-        }
-        let target_section = usize::try_from(read_u32(section, 44).ok_or(INVALID_CODE_OBJECT)?)
-            .map_err(|_| INVALID_CODE_OBJECT)?;
-        if target_section != 0 {
-            if target_section >= layout.section_count {
-                return Err(INVALID_CODE_OBJECT);
-            }
-            // Section-targeted relocations were applied by the linker. Only
-            // dynamic relocations without a target section modify the image.
-            continue;
-        }
-        let relocation_offset = read_u64(section, 24).ok_or(INVALID_CODE_OBJECT)?;
-        let relocation_size = read_u64(section, 32).ok_or(INVALID_CODE_OBJECT)?;
-        let symbol_section_index =
-            usize::try_from(read_u32(section, 40).ok_or(INVALID_CODE_OBJECT)?)
-                .map_err(|_| INVALID_CODE_OBJECT)?;
-        if symbol_section_index >= layout.section_count {
-            return Err(INVALID_CODE_OBJECT);
-        }
-        let relocation_entry_size =
-            usize::try_from(read_u64(section, 56).ok_or(INVALID_CODE_OBJECT)?)
-                .map_err(|_| INVALID_CODE_OBJECT)?;
-        if relocation_entry_size < 24 || relocation_size % relocation_entry_size as u64 != 0 {
-            return Err(INVALID_CODE_OBJECT);
-        }
-
-        let symbol_section = table_entry(
-            bytes,
-            layout.section_offset,
-            symbol_section_index,
-            layout.section_entry_size,
-        )
-        .ok_or(INVALID_CODE_OBJECT)?;
-        if !matches!(
-            read_u32(symbol_section, 4),
-            Some(SECTION_SYMTAB | SECTION_DYNSYM)
-        ) {
-            return Err(INVALID_CODE_OBJECT);
-        }
-        let symbols = symbol_table(bytes, layout, symbol_section)?;
-        let relocation_count = usize::try_from(relocation_size).map_err(|_| INVALID_CODE_OBJECT)?
-            / relocation_entry_size;
-
-        for relocation_index in 0..relocation_count {
-            let relocation = table_entry(
-                bytes,
-                relocation_offset,
-                relocation_index,
-                relocation_entry_size,
-            )
-            .ok_or(INVALID_CODE_OBJECT)?;
-            let target = read_u64(relocation, 0).ok_or(INVALID_CODE_OBJECT)?;
-            let info = read_u64(relocation, 8).ok_or(INVALID_CODE_OBJECT)?;
-            let addend = read_i64(relocation, 16).ok_or(INVALID_CODE_OBJECT)?;
-            let relocation_type = info as u32;
-            let symbol_index = usize::try_from(info >> 32).map_err(|_| INVALID_CODE_OBJECT)?;
-            let value = match relocation_type {
-                RELOCATION_RELATIVE_64 => add_relocation_base(load_bias, 0, addend),
-                RELOCATION_ABSOLUTE_32_LO
-                | RELOCATION_ABSOLUTE_32_HI
-                | RELOCATION_ABSOLUTE_64
-                | RELOCATION_ABSOLUTE_32 => {
-                    if symbol_index >= symbols.count {
-                        return Err(INVALID_CODE_OBJECT);
-                    }
-                    let symbol = symbols.entry(symbol_index)?;
-                    let section_index = read_u16(symbol, 6).ok_or(INVALID_CODE_OBJECT)?;
-                    let symbol_value = read_u64(symbol, 8).ok_or(INVALID_CODE_OBJECT)?;
-                    let symbol_type = *symbol.get(4).ok_or(INVALID_CODE_OBJECT)? & 0xf;
-                    let (base, value) = if section_index == SYMBOL_UNDEFINED
-                        || section_index == SYMBOL_COMMON
-                        || symbol_type == SYMBOL_TYPE_COMMON
-                    {
-                        let name = symbols.name(symbol)?;
-                        (0, resolve_external(name).ok_or(VARIABLE_UNDEFINED)?)
-                    } else if section_index == SYMBOL_ABSOLUTE {
-                        (0, symbol_value)
-                    } else if usize::from(section_index) < layout.section_count {
-                        (load_bias, symbol_value)
-                    } else {
-                        return Err(INVALID_CODE_OBJECT);
-                    };
-                    add_relocation_base(base, value, addend)
-                }
-                _ => return Err(INVALID_CODE_OBJECT),
-            }
-            .ok_or(INVALID_CODE_OBJECT)?;
-            let target_offset = usize::try_from(
-                target
-                    .checked_sub(virtual_base)
-                    .ok_or(INVALID_CODE_OBJECT)?,
-            )
-            .map_err(|_| INVALID_CODE_OBJECT)?;
-            let width = if relocation_type == RELOCATION_ABSOLUTE_64
-                || relocation_type == RELOCATION_RELATIVE_64
-            {
-                8
-            } else {
-                4
-            };
-            let destination = image
-                .get_mut(
-                    target_offset
-                        ..target_offset
-                            .checked_add(width)
-                            .ok_or(INVALID_CODE_OBJECT)?,
-                )
-                .ok_or(INVALID_CODE_OBJECT)?;
-            if width == 8 {
-                destination.copy_from_slice(&value.to_le_bytes());
-            } else {
-                let word = if relocation_type == RELOCATION_ABSOLUTE_32_HI {
-                    value >> 32
-                } else {
-                    value & u64::from(u32::MAX)
-                };
-                let word = u32::try_from(word).map_err(|_| INVALID_CODE_OBJECT)?;
-                destination.copy_from_slice(&word.to_le_bytes());
-            }
-        }
-    }
-    Ok(())
+    rocelf::apply_amdgpu_relocations(
+        bytes,
+        layout,
+        virtual_base,
+        device_base,
+        image,
+        resolve_external,
+    )
+    .map_err(|error| map_loader_error(error.into()))
 }
 
 fn resolve_executable_symbol(
-    runtime: &Runtime,
+    runtime: &HsaState,
     executable: HsaExecutable,
     agent: HsaAgent,
     name: &str,
 ) -> Option<u64> {
-    let executable = runtime.executables.get(&executable.handle)?;
-    let name = name.to_owned();
-    let handle = executable
-        .names
-        .get(&(name.clone(), 0))
-        .or_else(|| executable.names.get(&(name, agent.handle)))?;
     runtime
-        .symbols
-        .get(handle)
-        .filter(|symbol| symbol.is_definition)
-        .map(|symbol| symbol.address)
+        .loader
+        .executables
+        .get(&executable.handle)?
+        .core
+        .resolve(name, agent.handle)
 }
 
 fn parse_and_load(
-    runtime: &Runtime,
+    runtime: &HsaState,
     executable: HsaExecutable,
     agent: HsaAgent,
     code_object: Arc<[u8]>,
     storage: ReaderStorage,
-) -> Result<(LoadedObject, Vec<PendingSymbol>), Status> {
-    let bytes = code_object.as_ref();
-    let layout = parse_elf_layout(bytes)?;
-    let (gpu_index, memory_kind, object_kind) = if agent.handle == 0 {
+    program: bool,
+) -> Result<(LoadedObject, Vec<rocloader::Symbol>), Status> {
+    let object = LoaderCodeObject::parse(&code_object).map_err(map_loader_error)?;
+    let (gpu_index, memory_kind, object_kind) = if program {
         let gpu_index = runtime
             .gpus
             .iter()
-            .position(|gpu| {
-                let info = gpu.info;
-                (info.gfx_major, info.gfx_minor, info.gfx_stepping) == (12, 0, 1)
-            })
-            .ok_or(OUT_OF_RESOURCES)?;
+            .position(|gpu| object.validate_target(Target::from(&gpu.info)).is_ok())
+            .ok_or(INCOMPATIBLE_ARGUMENTS)?;
         (gpu_index, MemoryKind::System, LOADER_OBJECT_KIND_PROGRAM)
     } else {
         let Some(gpu_index) = runtime.gpu_index(agent) else {
@@ -822,153 +386,47 @@ fn parse_and_load(
             LOADER_OBJECT_KIND_AGENT,
         )
     };
-    let info = runtime.gpus[gpu_index].info;
-    validate_load_target(layout, (info.gfx_major, info.gfx_minor, info.gfx_stepping))?;
-    let page = runtime.host_page_size as u64;
-    let mut loads = Vec::new();
-    let mut virtual_base = u64::MAX;
-    let mut virtual_end = 0_u64;
-    for index in 0..layout.program_count {
-        let header = table_entry(
-            bytes,
-            layout.program_offset,
-            index,
-            layout.program_entry_size,
+    let gpu = &runtime.gpus[gpu_index];
+    let uri = match storage {
+        ReaderStorage::Memory => format!(
+            "memory://{}#offset=0x{:x}&size={}",
+            std::process::id(),
+            code_object.as_ptr() as usize,
+            code_object.len()
         )
-        .ok_or(INVALID_CODE_OBJECT)?;
-        if read_u32(header, 0) != Some(PROGRAM_LOAD) {
-            continue;
-        }
-        let file_offset = read_u64(header, 8).ok_or(INVALID_CODE_OBJECT)?;
-        let virtual_address = read_u64(header, 16).ok_or(INVALID_CODE_OBJECT)?;
-        let file_size = read_u64(header, 32).ok_or(INVALID_CODE_OBJECT)?;
-        let memory_size = read_u64(header, 40).ok_or(INVALID_CODE_OBJECT)?;
-        if file_size > memory_size
-            || usize::try_from(file_offset)
-                .ok()
-                .and_then(|offset| offset.checked_add(usize::try_from(file_size).ok()?))
-                .is_none_or(|end| end > bytes.len())
-        {
-            return Err(INVALID_CODE_OBJECT);
-        }
-        virtual_base = virtual_base.min(align_down(virtual_address, page));
-        virtual_end = virtual_end.max(
-            virtual_address
-                .checked_add(memory_size)
-                .ok_or(INVALID_CODE_OBJECT)?,
-        );
-        loads.push((file_offset, virtual_address, file_size, memory_size));
-    }
-    if loads.is_empty() || virtual_end <= virtual_base {
-        return Err(INVALID_CODE_OBJECT);
-    }
-    let mut pending = parse_symbols(bytes, layout, &[SECTION_DYNSYM, SECTION_SYMTAB])?;
-    if pending.iter().any(|symbol| {
-        !symbol.is_definition
-            && symbol.linkage == SYMBOL_LINKAGE_PROGRAM
-            && resolve_executable_symbol(runtime, executable, agent, &symbol.full_name).is_none()
-    }) {
-        return Err(VARIABLE_UNDEFINED);
-    }
-    let allocation_end = align_up(virtual_end, page).ok_or(INVALID_CODE_OBJECT)?;
-    let allocation_size = allocation_end - virtual_base;
-    if allocation_size > isize::MAX as u64 {
-        return Err(INVALID_CODE_OBJECT);
-    }
-    let allocation = runtime.gpus[gpu_index]
-        .device
-        .allocate(
-            memory_kind,
-            allocation_size,
-            page,
-            DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE,
-        )
-        .map_err(map_error)?;
-    let info = allocation.info();
-    let host_base = info.host_address.ok_or(OUT_OF_RESOURCES)?;
-    // SAFETY: The allocation is live, host-visible, and allocation_size bytes.
-    let allocation_size_usize =
-        usize::try_from(allocation_size).map_err(|_| INVALID_CODE_OBJECT)?;
-    unsafe { std::ptr::write_bytes(host_base as *mut u8, 0, allocation_size_usize) };
-    for &(file_offset, virtual_address, file_size, _) in &loads {
-        let source = usize::try_from(file_offset).map_err(|_| INVALID_CODE_OBJECT)?;
-        let destination =
-            usize::try_from(virtual_address - virtual_base).map_err(|_| INVALID_CODE_OBJECT)?;
-        let count = usize::try_from(file_size).map_err(|_| INVALID_CODE_OBJECT)?;
-        // SAFETY: Both ranges were bounds-checked against the source and the
-        // complete mapped PT_LOAD virtual span.
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                bytes.as_ptr().add(source),
-                (host_base as *mut u8).add(destination),
-                count,
-            );
-        }
-    }
-    // SAFETY: The allocation spans the complete page-aligned PT_LOAD range.
-    let image =
-        unsafe { std::slice::from_raw_parts_mut(host_base as *mut u8, allocation_size_usize) };
-    apply_relocations(
-        bytes,
-        layout,
-        virtual_base,
-        info.device_address,
-        image,
+        .into_bytes(),
+        ReaderStorage::File { uri } => uri,
+    };
+    let (image, symbols) = rocloader::load_image(
+        &gpu.device,
+        code_object,
+        memory_kind,
+        runtime.host_page_size as u64,
         |name| resolve_executable_symbol(runtime, executable, agent, name),
-    )?;
-    // The executable is written through a potentially write-combined CPU
-    // mapping. Make both segment data and relocations visible before loading
-    // can be observed complete by a submitting thread.
-    fence(Ordering::SeqCst);
-
-    pending.retain_mut(|symbol| {
-        if !symbol.is_definition || symbol.value < virtual_base || symbol.value >= virtual_end {
-            return false;
-        }
-        let Some(address) = info.device_address.checked_add(symbol.value - virtual_base) else {
-            return false;
-        };
-        symbol.address = address;
-        true
-    });
-    let segments = loaded_segments(&loads, info.device_address, virtual_base)?;
-    let loaded_size = u64::try_from(segments[0].size).map_err(|_| INVALID_CODE_OBJECT)?;
+    )
+    .map_err(map_loader_error)?;
     Ok((
-        LoadedObject {
-            handle: 0,
-            _allocation: allocation,
-            host_base,
-            device_base: info.device_address,
-            size: loaded_size,
-            virtual_base,
-            agent,
-            kind: object_kind,
-            uri: match storage {
-                ReaderStorage::Memory => format!(
-                    "memory://{}#offset=0x{:x}&size={}",
-                    std::process::id(),
-                    code_object.as_ptr() as usize,
-                    code_object.len()
-                )
-                .into_bytes(),
-                ReaderStorage::File { uri } => uri,
+        LoadedObject::new(
+            image,
+            LoadedMetadata {
+                handle: 0,
+                agent,
+                kind: object_kind,
+                uri,
             },
-            segments,
-            code_object,
-        },
-        pending,
+        ),
+        symbols,
     ))
 }
 
-fn code_object_isa(runtime: &Runtime, layout: ElfLayout) -> Result<HsaIsa, Status> {
-    let Some((target, variant)) = code_object_target(layout.flags) else {
-        return Err(INVALID_ISA_NAME);
-    };
+fn code_object_isa(runtime: &HsaState, object: &LoaderCodeObject<'_>) -> Result<HsaIsa, Status> {
+    let (target, variant) = object.target().map_err(map_loader_error)?;
     for (index, gpu) in runtime.gpus.iter().enumerate() {
         let Some(name) = crate::isa_name(
             gpu.info.gfx_major,
             gpu.info.gfx_minor,
             gpu.info.gfx_stepping,
+            gpu.info.asic_revision,
             variant,
         ) else {
             continue;
@@ -980,22 +438,27 @@ fn code_object_isa(runtime: &Runtime, layout: ElfLayout) -> Result<HsaIsa, Statu
     Err(INVALID_ISA_NAME)
 }
 
-fn ensure_code_object_symbols(runtime: &mut Runtime, handle: u64) -> Result<(), Status> {
-    let Some(code_object) = runtime.code_objects.get(&handle) else {
+fn ensure_code_object_symbols(runtime: &mut HsaState, handle: u64) -> Result<(), Status> {
+    let Some(code_object) = runtime.loader.code_objects.get(&handle) else {
         return Err(INVALID_CODE_OBJECT);
     };
     if code_object.symbols_initialized {
         return Ok(());
     }
     let bytes = code_object.bytes.clone();
-    let layout = parse_elf_layout(&bytes)?;
-    let symbols = parse_symbols(&bytes, layout, &[SECTION_SYMTAB, SECTION_DYNSYM])?;
+    let symbols = rocloader::CodeObject::parse(&bytes)
+        .map_err(map_loader_error)?
+        .symbols(SymbolTableOrder::RegularFirst)
+        .map_err(map_loader_error)?
+        .into_iter()
+        .map(ParsedCodeSymbol::from)
+        .collect::<Vec<_>>();
     let mut names = HashMap::new();
     let mut handles = Vec::with_capacity(symbols.len());
     for symbol in symbols {
         let symbol_handle = runtime.allocate_handle()?;
         names.insert(symbol.full_name, symbol_handle);
-        runtime.code_symbols.insert(
+        runtime.loader.code_symbols.insert(
             symbol_handle,
             CodeSymbol {
                 code_object: handle,
@@ -1020,9 +483,9 @@ fn ensure_code_object_symbols(runtime: &mut Runtime, handle: u64) -> Result<(), 
         );
         handles.push(symbol_handle);
     }
-    let Some(code_object) = runtime.code_objects.get_mut(&handle) else {
+    let Some(code_object) = runtime.loader.code_objects.get_mut(&handle) else {
         for symbol_handle in handles {
-            runtime.code_symbols.remove(&symbol_handle);
+            runtime.loader.code_symbols.remove(&symbol_handle);
         }
         return Err(INVALID_CODE_OBJECT);
     };
@@ -1032,7 +495,11 @@ fn ensure_code_object_symbols(runtime: &mut Runtime, handle: u64) -> Result<(), 
     Ok(())
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_code_object_deserialize")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_code_object_deserialize(
     serialized_code_object: *mut c_void,
     serialized_code_object_size: usize,
@@ -1074,7 +541,7 @@ pub unsafe extern "C" fn hsa_code_object_deserialize(
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime.code_objects.insert(
+        runtime.loader.code_objects.insert(
             handle,
             CodeObject {
                 bytes: bytes.into(),
@@ -1089,7 +556,11 @@ pub unsafe extern "C" fn hsa_code_object_deserialize(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_code_object_serialize")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_code_object_serialize(
     code_object: HsaCodeObject,
     alloc_callback: CodeObjectAllocCallback,
@@ -1113,7 +584,7 @@ pub unsafe extern "C" fn hsa_code_object_serialize(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            let Some(code_object) = runtime.code_objects.get(&code_object.handle) else {
+            let Some(code_object) = runtime.loader.code_objects.get(&code_object.handle) else {
                 return INVALID_CODE_OBJECT;
             };
             code_object.bytes.clone()
@@ -1137,7 +608,11 @@ pub unsafe extern "C" fn hsa_code_object_serialize(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_code_object_destroy")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_code_object_destroy(code_object: HsaCodeObject) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -1148,17 +623,21 @@ pub unsafe extern "C" fn hsa_code_object_destroy(code_object: HsaCodeObject) -> 
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let Some(code_object) = runtime.code_objects.remove(&code_object.handle) else {
+        let Some(code_object) = runtime.loader.code_objects.remove(&code_object.handle) else {
             return INVALID_CODE_OBJECT;
         };
         for handle in code_object.symbol_handles {
-            runtime.code_symbols.remove(&handle);
+            runtime.loader.code_symbols.remove(&handle);
         }
         SUCCESS
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_code_object_get_info")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_code_object_get_info(
     code_object: HsaCodeObject,
     attribute: u32,
@@ -1175,20 +654,20 @@ pub unsafe extern "C" fn hsa_code_object_get_info(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let Some(code_object) = runtime.code_objects.get(&code_object.handle) else {
+        let Some(code_object) = runtime.loader.code_objects.get(&code_object.handle) else {
             return INVALID_CODE_OBJECT;
         };
-        let layout = match parse_elf_layout(&code_object.bytes) {
-            Ok(layout) => layout,
-            Err(status) => return status,
+        let object = match LoaderCodeObject::parse(&code_object.bytes) {
+            Ok(object) => object,
+            Err(error) => return map_loader_error(error),
         };
         // SAFETY: Each arm writes the public value type for the attribute.
         unsafe {
             match attribute {
                 CODE_OBJECT_INFO_VERSION => {
-                    let version = match code_object_version(layout) {
+                    let version = match object.version() {
                         Ok(version) => version,
-                        Err(status) => return status,
+                        Err(error) => return map_loader_error(error),
                     };
                     let text = format!("{version}.0");
                     std::ptr::write_bytes(value.cast::<u8>(), 0, 64);
@@ -1200,7 +679,7 @@ pub unsafe extern "C" fn hsa_code_object_get_info(
                 }
                 CODE_OBJECT_INFO_TYPE => value.cast::<u32>().write(CODE_OBJECT_TYPE_PROGRAM),
                 CODE_OBJECT_INFO_ISA => {
-                    let isa = match code_object_isa(runtime, layout) {
+                    let isa = match code_object_isa(runtime, &object) {
                         Ok(isa) => isa,
                         Err(status) => return status,
                     };
@@ -1259,6 +738,7 @@ unsafe fn code_object_get_symbol_impl(
             return status;
         }
         let Some(&handle) = runtime
+            .loader
             .code_objects
             .get(&code_object.handle)
             .and_then(|code_object| code_object.names.get(&full_name))
@@ -1271,7 +751,11 @@ unsafe fn code_object_get_symbol_impl(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_code_object_get_symbol")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_code_object_get_symbol(
     code_object: HsaCodeObject,
     symbol_name: *const c_char,
@@ -1281,7 +765,11 @@ pub unsafe extern "C" fn hsa_code_object_get_symbol(
     unsafe { code_object_get_symbol_impl(code_object, std::ptr::null(), symbol_name, symbol) }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_code_object_get_symbol_from_name")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_code_object_get_symbol_from_name(
     code_object: HsaCodeObject,
     module_name: *const c_char,
@@ -1292,7 +780,11 @@ pub unsafe extern "C" fn hsa_code_object_get_symbol_from_name(
     unsafe { code_object_get_symbol_impl(code_object, module_name, symbol_name, symbol) }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_code_symbol_get_info")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_code_symbol_get_info(
     code_symbol: HsaCodeSymbol,
     attribute: u32,
@@ -1309,10 +801,14 @@ pub unsafe extern "C" fn hsa_code_symbol_get_info(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let Some(symbol) = runtime.code_symbols.get(&code_symbol.handle) else {
+        let Some(symbol) = runtime.loader.code_symbols.get(&code_symbol.handle) else {
             return INVALID_CODE_SYMBOL;
         };
-        if !runtime.code_objects.contains_key(&symbol.code_object) {
+        if !runtime
+            .loader
+            .code_objects
+            .contains_key(&symbol.code_object)
+        {
             return INVALID_CODE_SYMBOL;
         }
         // SAFETY: Each arm writes the public value type for the attribute.
@@ -1371,7 +867,11 @@ pub unsafe extern "C" fn hsa_code_symbol_get_info(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_code_object_iterate_symbols")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_code_object_iterate_symbols(
     code_object: HsaCodeObject,
     callback: CodeObjectSymbolCallback,
@@ -1393,7 +893,7 @@ pub unsafe extern "C" fn hsa_code_object_iterate_symbols(
             if let Err(status) = ensure_code_object_symbols(runtime, code_object.handle) {
                 return status;
             }
-            runtime.code_objects[&code_object.handle]
+            runtime.loader.code_objects[&code_object.handle]
                 .symbol_handles
                 .clone()
         };
@@ -1408,7 +908,11 @@ pub unsafe extern "C" fn hsa_code_object_iterate_symbols(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_code_object_reader_create_from_file")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
     file: i32,
     reader: *mut HsaCodeObjectReader,
@@ -1445,7 +949,7 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime.readers.insert(
+        runtime.loader.readers.insert(
             handle,
             Reader {
                 bytes: bytes.into(),
@@ -1458,7 +962,11 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_file(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_code_object_reader_create_from_memory")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_code_object_reader_create_from_memory(
     code_object: *const c_void,
     size: usize,
@@ -1489,7 +997,7 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_memory(
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime.readers.insert(
+        runtime.loader.readers.insert(
             handle,
             Reader {
                 bytes: bytes.into(),
@@ -1502,7 +1010,11 @@ pub unsafe extern "C" fn hsa_code_object_reader_create_from_memory(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_code_object_reader_destroy")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_code_object_reader_destroy(reader: HsaCodeObjectReader) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -1513,7 +1025,7 @@ pub unsafe extern "C" fn hsa_code_object_reader_destroy(reader: HsaCodeObjectRea
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if runtime.readers.remove(&reader.handle).is_some() {
+        if runtime.loader.readers.remove(&reader.handle).is_some() {
             SUCCESS
         } else {
             INVALID_CODE_OBJECT_READER
@@ -1521,7 +1033,11 @@ pub unsafe extern "C" fn hsa_code_object_reader_destroy(reader: HsaCodeObjectRea
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_create")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_create(
     profile: u32,
     state: u32,
@@ -1547,16 +1063,12 @@ pub unsafe extern "C" fn hsa_executable_create(
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime.executables.insert(
+        runtime.loader.executables.insert(
             handle,
             Executable {
                 profile,
                 default_rounding: DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
-                frozen: state == EXECUTABLE_STATE_FROZEN,
-                program_loaded: false,
-                loaded: Vec::new(),
-                names: HashMap::new(),
-                symbol_handles: Vec::new(),
+                core: rocloader::Executable::new(state == EXECUTABLE_STATE_FROZEN),
             },
         );
         // SAFETY: The caller supplied writable output storage.
@@ -1565,7 +1077,11 @@ pub unsafe extern "C" fn hsa_executable_create(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_create_alt")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_create_alt(
     profile: u32,
     rounding: u32,
@@ -1596,16 +1112,12 @@ pub unsafe extern "C" fn hsa_executable_create_alt(
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime.executables.insert(
+        runtime.loader.executables.insert(
             handle,
             Executable {
                 profile,
                 default_rounding: rounding,
-                frozen: false,
-                program_loaded: false,
-                loaded: Vec::new(),
-                names: HashMap::new(),
-                symbol_handles: Vec::new(),
+                core: rocloader::Executable::new(false),
             },
         );
         // SAFETY: The caller supplied writable output storage.
@@ -1623,7 +1135,7 @@ fn loaded_symbol_agent(program: bool, agent: HsaAgent) -> HsaAgent {
 }
 
 unsafe fn load_executable_code_object(
-    runtime: &mut Runtime,
+    runtime: &mut HsaState,
     executable: HsaExecutable,
     agent: HsaAgent,
     bytes: Arc<[u8]>,
@@ -1631,24 +1143,22 @@ unsafe fn load_executable_code_object(
     program: bool,
     loaded: *mut HsaLoadedCodeObject,
 ) -> Status {
-    let Some(executable_record) = runtime.executables.get(&executable.handle) else {
+    let Some(executable_record) = runtime.loader.executables.get(&executable.handle) else {
         return INVALID_EXECUTABLE;
     };
-    if executable_record.frozen {
-        return FROZEN_EXECUTABLE;
+    if let Err(error) = executable_record.core.can_load(program) {
+        return map_loader_error(error);
     }
-    if program && executable_record.program_loaded {
-        return INCOMPATIBLE_ARGUMENTS;
-    }
-    let (mut object, symbols) = match parse_and_load(runtime, executable, agent, bytes, storage) {
-        Ok(result) => result,
-        Err(status) => return status,
-    };
+    let (mut object, symbols) =
+        match parse_and_load(runtime, executable, agent, bytes, storage, program) {
+            Ok(result) => result,
+            Err(status) => return status,
+        };
     let loaded_handle = match runtime.allocate_handle() {
         Ok(handle) => handle,
         Err(status) => return status,
     };
-    object.handle = loaded_handle;
+    object.metadata_mut().handle = loaded_handle;
     let mut handles = Vec::with_capacity(symbols.len());
     for _ in &symbols {
         let handle = match runtime.allocate_handle() {
@@ -1657,72 +1167,54 @@ unsafe fn load_executable_code_object(
         };
         handles.push(handle);
     }
-    if symbols.iter().any(|symbol| {
-        let symbol_agent = loaded_symbol_agent(program, agent);
-        runtime
-            .executables
-            .get(&executable.handle)
-            .is_some_and(|record| {
-                record
-                    .names
-                    .contains_key(&(symbol.full_name.clone(), symbol_agent.handle))
-            })
-    }) {
-        return VARIABLE_ALREADY_DEFINED;
-    }
-    let mut inserted = Vec::with_capacity(symbols.len());
+
+    let symbol_agent = loaded_symbol_agent(program, agent);
+    let scope = if program {
+        Scope::Program
+    } else {
+        Scope::Agent(agent.handle)
+    };
+    let mut definitions = Vec::with_capacity(symbols.len());
+    let mut published = Vec::with_capacity(symbols.len());
     for (symbol, handle) in symbols.into_iter().zip(handles) {
-        let symbol_agent = loaded_symbol_agent(program, agent);
-        runtime.symbols.insert(
+        definitions.push(Definition {
+            symbol,
+            scope,
+            id: handle,
+        });
+        published.push((
             handle,
-            Symbol {
+            SymbolReference {
                 executable: executable.handle,
-                name: symbol.name,
-                module_name: symbol.module_name,
                 agent: symbol_agent,
-                address: symbol.address,
-                size: symbol.size,
-                kind: symbol.kind,
-                linkage: symbol.linkage,
-                is_definition: symbol.is_definition,
-                allocation: symbol.allocation,
-                segment: symbol.segment,
-                alignment: symbol.alignment,
-                is_const: symbol.is_const,
-                kernarg_size: symbol.kernarg_size,
-                kernarg_alignment: symbol.kernarg_alignment,
-                group_size: symbol.group_size,
-                private_size: symbol.private_size,
-                dynamic_callstack: symbol.dynamic_callstack,
-                call_convention: symbol.call_convention,
             },
-        );
-        inserted.push((symbol.full_name, symbol_agent.handle, handle));
+        ));
     }
-    let Some(executable_record) = runtime.executables.get_mut(&executable.handle) else {
-        for (_, _, handle) in inserted {
-            runtime.symbols.remove(&handle);
-        }
+    let Some(record) = runtime.loader.executables.get_mut(&executable.handle) else {
         return INVALID_EXECUTABLE;
     };
-    for (name, agent_handle, handle) in inserted {
-        executable_record.names.insert((name, agent_handle), handle);
-        executable_record.symbol_handles.push(handle);
+    if let Err(error) = record.core.commit(program, object, definitions) {
+        return map_loader_error(error);
     }
-    executable_record.program_loaded |= program;
-    executable_record.loaded.push(object);
+    for (handle, symbol) in published {
+        runtime.loader.symbols.insert(handle, symbol);
+    }
     if !loaded.is_null() {
         // SAFETY: A non-null optional output points to writable storage.
         unsafe {
             loaded.write(HsaLoadedCodeObject {
                 handle: loaded_handle,
-            });
-        }
+            })
+        };
     }
     SUCCESS
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_load_agent_code_object")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_load_agent_code_object(
     executable: HsaExecutable,
     agent: HsaAgent,
@@ -1739,13 +1231,14 @@ pub unsafe extern "C" fn hsa_executable_load_agent_code_object(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let Some(record) = runtime.executables.get(&executable.handle) else {
+        let Some(record) = runtime.loader.executables.get(&executable.handle) else {
             return INVALID_EXECUTABLE;
         };
-        if record.frozen {
+        if record.core.is_frozen() {
             return FROZEN_EXECUTABLE;
         }
         let Some((bytes, storage)) = runtime
+            .loader
             .readers
             .get(&reader.handle)
             .map(|reader| (reader.bytes.clone(), reader.storage.clone()))
@@ -1759,7 +1252,11 @@ pub unsafe extern "C" fn hsa_executable_load_agent_code_object(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_load_program_code_object")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_load_program_code_object(
     executable: HsaExecutable,
     reader: HsaCodeObjectReader,
@@ -1775,13 +1272,14 @@ pub unsafe extern "C" fn hsa_executable_load_program_code_object(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let Some(record) = runtime.executables.get(&executable.handle) else {
+        let Some(record) = runtime.loader.executables.get(&executable.handle) else {
             return INVALID_EXECUTABLE;
         };
-        if record.frozen {
+        if record.core.is_frozen() {
             return FROZEN_EXECUTABLE;
         }
         let Some((bytes, storage)) = runtime
+            .loader
             .readers
             .get(&reader.handle)
             .map(|reader| (reader.bytes.clone(), reader.storage.clone()))
@@ -1803,7 +1301,11 @@ pub unsafe extern "C" fn hsa_executable_load_program_code_object(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_load_code_object")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_load_code_object(
     executable: HsaExecutable,
     agent: HsaAgent,
@@ -1819,13 +1321,14 @@ pub unsafe extern "C" fn hsa_executable_load_code_object(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let Some(record) = runtime.executables.get(&executable.handle) else {
+        let Some(record) = runtime.loader.executables.get(&executable.handle) else {
             return INVALID_EXECUTABLE;
         };
-        if record.frozen {
+        if record.core.is_frozen() {
             return FROZEN_EXECUTABLE;
         }
         let Some(bytes) = runtime
+            .loader
             .code_objects
             .get(&code_object.handle)
             .map(|code_object| code_object.bytes.clone())
@@ -1847,7 +1350,11 @@ pub unsafe extern "C" fn hsa_executable_load_code_object(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_freeze")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_freeze(
     executable: HsaExecutable,
     _options: *const c_char,
@@ -1861,18 +1368,21 @@ pub unsafe extern "C" fn hsa_executable_freeze(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let Some(executable) = runtime.executables.get_mut(&executable.handle) else {
+        let Some(executable) = runtime.loader.executables.get_mut(&executable.handle) else {
             return INVALID_EXECUTABLE;
         };
-        if executable.frozen {
-            return FROZEN_EXECUTABLE;
+        match executable.core.freeze() {
+            Ok(()) => SUCCESS,
+            Err(error) => map_loader_error(error),
         }
-        executable.frozen = true;
-        SUCCESS
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_destroy")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_destroy(executable: HsaExecutable) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -1883,17 +1393,21 @@ pub unsafe extern "C" fn hsa_executable_destroy(executable: HsaExecutable) -> St
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let Some(executable) = runtime.executables.remove(&executable.handle) else {
+        let Some(executable) = runtime.loader.executables.remove(&executable.handle) else {
             return INVALID_EXECUTABLE;
         };
-        for handle in executable.symbol_handles {
-            runtime.symbols.remove(&handle);
+        for &handle in executable.core.symbol_ids() {
+            runtime.loader.symbols.remove(&handle);
         }
         SUCCESS
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_validate")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_validate(
     executable: HsaExecutable,
     result: *mut u32,
@@ -1909,7 +1423,7 @@ pub unsafe extern "C" fn hsa_executable_validate(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if !runtime.executables.contains_key(&executable.handle) {
+        if !runtime.loader.executables.contains_key(&executable.handle) {
             return INVALID_EXECUTABLE;
         }
         // Every accepted code object has already passed structural validation
@@ -1919,7 +1433,11 @@ pub unsafe extern "C" fn hsa_executable_validate(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_validate_alt")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_validate_alt(
     executable: HsaExecutable,
     _options: *const c_char,
@@ -1929,7 +1447,11 @@ pub unsafe extern "C" fn hsa_executable_validate_alt(
     unsafe { hsa_executable_validate(executable, result) }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_get_info")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_get_info(
     executable: HsaExecutable,
     attribute: u32,
@@ -1945,9 +1467,9 @@ pub unsafe extern "C" fn hsa_executable_get_info(
         };
         let Some(executable) = guard
             .as_ref()
-            .and_then(|runtime| runtime.executables.get(&executable.handle))
+            .and_then(|runtime| runtime.loader.executables.get(&executable.handle))
         else {
-            return if guard.is_some() {
+            return if guard.as_ref().is_some() {
                 INVALID_EXECUTABLE
             } else {
                 NOT_INITIALIZED
@@ -1957,11 +1479,13 @@ pub unsafe extern "C" fn hsa_executable_get_info(
         unsafe {
             match attribute {
                 EXECUTABLE_INFO_PROFILE => value.cast::<u32>().write(executable.profile),
-                EXECUTABLE_INFO_STATE => value.cast::<u32>().write(if executable.frozen {
-                    EXECUTABLE_STATE_FROZEN
-                } else {
-                    EXECUTABLE_STATE_UNFROZEN
-                }),
+                EXECUTABLE_INFO_STATE => {
+                    value.cast::<u32>().write(if executable.core.is_frozen() {
+                        EXECUTABLE_STATE_FROZEN
+                    } else {
+                        EXECUTABLE_STATE_UNFROZEN
+                    })
+                }
                 EXECUTABLE_INFO_DEFAULT_FLOAT_ROUNDING_MODE => {
                     value.cast::<u32>().write(executable.default_rounding);
                 }
@@ -1972,7 +1496,11 @@ pub unsafe extern "C" fn hsa_executable_get_info(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_get_symbol_by_name")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_get_symbol_by_name(
     executable: HsaExecutable,
     name: *const c_char,
@@ -1990,7 +1518,7 @@ pub unsafe extern "C" fn hsa_executable_get_symbol_by_name(
         if name.is_null() || symbol.is_null() {
             return INVALID_ARGUMENT;
         }
-        let Some(executable) = runtime.executables.get(&executable.handle) else {
+        let Some(executable) = runtime.loader.executables.get(&executable.handle) else {
             return INVALID_EXECUTABLE;
         };
         // SAFETY: The ABI requires a NUL-terminated symbol name.
@@ -2003,10 +1531,12 @@ pub unsafe extern "C" fn hsa_executable_get_symbol_by_name(
             // SAFETY: A non-null optional agent points to one HsaAgent.
             unsafe { *agent }
         };
-        let Some(&handle) = executable
-            .names
-            .get(&(name.to_owned(), requested_agent.handle))
-        else {
+        let scope = if requested_agent.handle == 0 {
+            Scope::Program
+        } else {
+            Scope::Agent(requested_agent.handle)
+        };
+        let Some(handle) = executable.core.symbol_id(name, scope) else {
             return INVALID_SYMBOL_NAME;
         };
         // SAFETY: The caller supplied writable output storage.
@@ -2015,7 +1545,11 @@ pub unsafe extern "C" fn hsa_executable_get_symbol_by_name(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_symbol_get_info")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_symbol_get_info(
     symbol: HsaExecutableSymbol,
     attribute: u32,
@@ -2029,24 +1563,23 @@ pub unsafe extern "C" fn hsa_executable_symbol_get_info(
             Ok(guard) => guard,
             Err(status) => return status,
         };
-        let Some(symbol) = guard
-            .as_ref()
-            .and_then(|runtime| runtime.symbols.get(&symbol.handle))
-        else {
-            return if guard.is_some() {
-                INVALID_EXECUTABLE_SYMBOL
-            } else {
-                NOT_INITIALIZED
-            };
+        let Some(runtime) = guard.as_ref() else {
+            return NOT_INITIALIZED;
         };
-        let frozen = guard
-            .as_ref()
-            .and_then(|runtime| runtime.executables.get(&symbol.executable))
-            .is_some_and(|executable| executable.frozen);
+        let Some(reference) = runtime.loader.symbols.get(&symbol.handle) else {
+            return INVALID_EXECUTABLE_SYMBOL;
+        };
+        let Some(executable) = runtime.loader.executables.get(&reference.executable) else {
+            return INVALID_EXECUTABLE_SYMBOL;
+        };
+        let Some(symbol) = executable.core.symbol(symbol.handle) else {
+            return INVALID_EXECUTABLE_SYMBOL;
+        };
+        let frozen = executable.core.is_frozen();
         // SAFETY: Each arm writes the public value type for the attribute.
         unsafe {
             match attribute {
-                SYMBOL_INFO_TYPE => value.cast::<u32>().write(symbol.kind),
+                SYMBOL_INFO_TYPE => value.cast::<u32>().write(hsa_symbol_kind(symbol.kind)),
                 SYMBOL_INFO_NAME_LENGTH => {
                     value
                         .cast::<u32>()
@@ -2067,11 +1600,17 @@ pub unsafe extern "C" fn hsa_executable_symbol_get_info(
                     value.cast::<u8>(),
                     symbol.module_name.len(),
                 ),
-                SYMBOL_INFO_LINKAGE => value.cast::<u32>().write(symbol.linkage),
+                SYMBOL_INFO_LINKAGE => value
+                    .cast::<u32>()
+                    .write(hsa_symbol_linkage(symbol.linkage)),
                 SYMBOL_INFO_IS_DEFINITION => value.cast::<bool>().write(symbol.is_definition),
-                SYMBOL_INFO_AGENT => value.cast::<HsaAgent>().write(symbol.agent),
-                SYMBOL_INFO_VARIABLE_ALLOCATION => value.cast::<u32>().write(symbol.allocation),
-                SYMBOL_INFO_VARIABLE_SEGMENT => value.cast::<u32>().write(symbol.segment),
+                SYMBOL_INFO_AGENT => value.cast::<HsaAgent>().write(reference.agent),
+                SYMBOL_INFO_VARIABLE_ALLOCATION => value
+                    .cast::<u32>()
+                    .write(hsa_variable_allocation(symbol.allocation)),
+                SYMBOL_INFO_VARIABLE_SEGMENT => value
+                    .cast::<u32>()
+                    .write(hsa_variable_segment(symbol.segment)),
                 SYMBOL_INFO_VARIABLE_ALIGNMENT => value.cast::<u32>().write(symbol.alignment),
                 SYMBOL_INFO_VARIABLE_SIZE => value.cast::<u32>().write(symbol.size),
                 SYMBOL_INFO_VARIABLE_IS_CONST => value.cast::<bool>().write(symbol.is_const),
@@ -2108,7 +1647,11 @@ pub unsafe extern "C" fn hsa_executable_symbol_get_info(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_get_symbol")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_get_symbol(
     executable: HsaExecutable,
     module_name: *const c_char,
@@ -2148,14 +1691,14 @@ pub unsafe extern "C" fn hsa_executable_get_symbol(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let Some(executable) = runtime.executables.get(&executable.handle) else {
+        let Some(executable) = runtime.loader.executables.get(&executable.handle) else {
             return INVALID_EXECUTABLE;
         };
         let handle = executable
-            .names
-            .get(&(name.clone(), 0))
-            .or_else(|| executable.names.get(&(name, agent.handle)));
-        let Some(&handle) = handle else {
+            .core
+            .symbol_id(&name, Scope::Program)
+            .or_else(|| executable.core.symbol_id(&name, Scope::Agent(agent.handle)));
+        let Some(handle) = handle else {
             return INVALID_SYMBOL_NAME;
         };
         // SAFETY: The caller supplied writable output storage.
@@ -2165,62 +1708,57 @@ pub unsafe extern "C" fn hsa_executable_get_symbol(
 }
 
 fn define_external_variable(
-    runtime: &mut Runtime,
+    runtime: &mut HsaState,
     executable: HsaExecutable,
     agent: HsaAgent,
     name: &str,
     address: *mut c_void,
-    allocation: u32,
-    segment: u32,
+    allocation: VariableAllocation,
+    segment: VariableSegment,
 ) -> Status {
-    let Some(record) = runtime.executables.get(&executable.handle) else {
+    let Some(record) = runtime.loader.executables.get(&executable.handle) else {
         return INVALID_EXECUTABLE;
     };
-    if record.frozen {
+    if record.core.is_frozen() {
         return FROZEN_EXECUTABLE;
     }
-    let key = (name.to_owned(), agent.handle);
-    if record.names.contains_key(&key) {
+    let scope = if agent.handle == 0 {
+        Scope::Program
+    } else {
+        Scope::Agent(agent.handle)
+    };
+    if record.core.symbol_id(name, scope).is_some() {
         return VARIABLE_ALREADY_DEFINED;
     }
     let handle = match runtime.allocate_handle() {
         Ok(handle) => handle,
         Err(status) => return status,
     };
-    runtime.symbols.insert(
-        handle,
-        Symbol {
-            executable: executable.handle,
-            name: name.to_owned(),
-            module_name: String::new(),
-            agent,
-            address: address as u64,
-            size: 0,
-            kind: SYMBOL_KIND_VARIABLE,
-            linkage: SYMBOL_LINKAGE_PROGRAM,
-            is_definition: true,
-            allocation,
-            segment,
-            alignment: 0,
-            is_const: segment == VARIABLE_SEGMENT_READONLY,
-            kernarg_size: 0,
-            kernarg_alignment: 0,
-            group_size: 0,
-            private_size: 0,
-            dynamic_callstack: false,
-            call_convention: 0,
-        },
-    );
-    let Some(record) = runtime.executables.get_mut(&executable.handle) else {
-        runtime.symbols.remove(&handle);
+    let Some(record) = runtime.loader.executables.get_mut(&executable.handle) else {
         return INVALID_EXECUTABLE;
     };
-    record.names.insert(key, handle);
-    record.symbol_handles.push(handle);
+    if let Err(error) = record.core.define_external(Definition {
+        symbol: rocloader::Symbol::external_variable(name, address as u64, allocation, segment),
+        scope,
+        id: handle,
+    }) {
+        return map_loader_error(error);
+    }
+    runtime.loader.symbols.insert(
+        handle,
+        SymbolReference {
+            executable: executable.handle,
+            agent,
+        },
+    );
     SUCCESS
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_global_variable_define")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_global_variable_define(
     executable: HsaExecutable,
     name: *const c_char,
@@ -2248,13 +1786,17 @@ pub unsafe extern "C" fn hsa_executable_global_variable_define(
             HsaAgent { handle: 0 },
             name,
             address,
-            VARIABLE_ALLOCATION_PROGRAM,
-            VARIABLE_SEGMENT_GLOBAL,
+            VariableAllocation::Program,
+            VariableSegment::Global,
         )
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_agent_global_variable_define")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_agent_global_variable_define(
     executable: HsaExecutable,
     agent: HsaAgent,
@@ -2286,13 +1828,17 @@ pub unsafe extern "C" fn hsa_executable_agent_global_variable_define(
             agent,
             name,
             address,
-            VARIABLE_ALLOCATION_AGENT,
-            VARIABLE_SEGMENT_GLOBAL,
+            VariableAllocation::Agent,
+            VariableSegment::Global,
         )
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_readonly_variable_define")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_readonly_variable_define(
     executable: HsaExecutable,
     agent: HsaAgent,
@@ -2324,33 +1870,38 @@ pub unsafe extern "C" fn hsa_executable_readonly_variable_define(
             agent,
             name,
             address,
-            VARIABLE_ALLOCATION_AGENT,
-            VARIABLE_SEGMENT_READONLY,
+            VariableAllocation::Agent,
+            VariableSegment::Readonly,
         )
     })
 }
 
 fn executable_symbol_handles(
-    runtime: &Runtime,
+    runtime: &HsaState,
     executable: HsaExecutable,
     agent: Option<HsaAgent>,
 ) -> Result<Vec<u64>, Status> {
-    let Some(executable) = runtime.executables.get(&executable.handle) else {
+    let Some(executable) = runtime.loader.executables.get(&executable.handle) else {
         return Err(INVALID_EXECUTABLE);
     };
     Ok(executable
-        .symbol_handles
+        .core
+        .symbol_ids()
         .iter()
         .copied()
         .filter(|handle| {
-            runtime.symbols.get(handle).is_some_and(|symbol| {
+            runtime.loader.symbols.get(handle).is_some_and(|symbol| {
                 agent.map_or(symbol.agent.handle == 0, |agent| symbol.agent == agent)
             })
         })
         .collect())
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_iterate_symbols")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_iterate_symbols(
     executable: HsaExecutable,
     callback: ExecutableSymbolCallback,
@@ -2368,10 +1919,10 @@ pub unsafe extern "C" fn hsa_executable_iterate_symbols(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            let Some(record) = runtime.executables.get(&executable.handle) else {
+            let Some(record) = runtime.loader.executables.get(&executable.handle) else {
                 return INVALID_EXECUTABLE;
             };
-            record.symbol_handles.clone()
+            record.core.symbol_ids().to_vec()
         };
         for handle in handles {
             // SAFETY: Traversal callbacks are synchronous and data stays live.
@@ -2384,7 +1935,11 @@ pub unsafe extern "C" fn hsa_executable_iterate_symbols(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_iterate_agent_symbols")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_iterate_agent_symbols(
     executable: HsaExecutable,
     agent: HsaAgent,
@@ -2423,7 +1978,11 @@ pub unsafe extern "C" fn hsa_executable_iterate_agent_symbols(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_executable_iterate_program_symbols")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_executable_iterate_program_symbols(
     executable: HsaExecutable,
     callback: ExecutableSymbolCallback,
@@ -2457,7 +2016,11 @@ pub unsafe extern "C" fn hsa_executable_iterate_program_symbols(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_query_host_address")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_ven_amd_loader_query_host_address(
     device_address: *const c_void,
     host_address: *mut *const c_void,
@@ -2473,7 +2036,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_host_address(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        match loaded_host_range(runtime, device_address as usize, 1) {
+        match loaded_host_range(&runtime.loader, device_address as usize, 1) {
             Ok(Some(host)) => {
                 // SAFETY: The caller supplied writable output storage.
                 unsafe { host_address.write(host as *const c_void) };
@@ -2484,7 +2047,11 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_host_address(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_query_segment_descriptors")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_ven_amd_loader_query_segment_descriptors(
     segment_descriptors: *mut HsaLoaderSegmentDescriptor,
     num_segment_descriptors: *mut usize,
@@ -2506,13 +2073,15 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_segment_descriptors(
             return NOT_INITIALIZED;
         };
         let actual = runtime
+            .loader
             .executables
             .values()
             .map(|executable| {
                 executable
-                    .loaded
+                    .core
+                    .loaded()
                     .iter()
-                    .map(|object| object.segments.len())
+                    .map(|object| object.image().segments().len())
                     .sum::<usize>()
             })
             .sum::<usize>();
@@ -2525,20 +2094,25 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_segment_descriptors(
             return INCOMPATIBLE_ARGUMENTS;
         }
         let mut output_index = 0;
-        let mut executable_handles = runtime.executables.keys().copied().collect::<Vec<_>>();
+        let mut executable_handles = runtime
+            .loader
+            .executables
+            .keys()
+            .copied()
+            .collect::<Vec<_>>();
         executable_handles.sort_unstable();
         for executable_handle in executable_handles {
-            let executable = &runtime.executables[&executable_handle];
-            for object in &executable.loaded {
-                for segment in &object.segments {
+            let executable = &runtime.loader.executables[&executable_handle];
+            for object in executable.core.loaded() {
+                for segment in object.image().segments() {
                     let descriptor = HsaLoaderSegmentDescriptor {
-                        agent: object.agent,
+                        agent: object.metadata().agent,
                         executable: HsaExecutable {
                             handle: executable_handle,
                         },
                         code_object_storage_type: LOADER_STORAGE_MEMORY,
-                        code_object_storage_base: object.code_object.as_ptr().cast(),
-                        code_object_storage_size: object.code_object.len(),
+                        code_object_storage_base: object.image().code_object().as_ptr().cast(),
+                        code_object_storage_size: object.image().code_object().len(),
                         code_object_storage_offset: segment.storage_offset,
                         segment_base: segment.address as usize as *const c_void,
                         segment_size: segment.size,
@@ -2553,7 +2127,11 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_segment_descriptors(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_query_executable")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_ven_amd_loader_query_executable(
     device_address: *const c_void,
     executable: *mut HsaExecutable,
@@ -2570,15 +2148,19 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_executable(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let Some(handle) = runtime.executables.iter().find_map(|(handle, record)| {
-            record
-                .loaded
-                .iter()
-                .any(|object| {
-                    address >= object.device_base && address - object.device_base < object.size
-                })
-                .then_some(*handle)
-        }) else {
+        let Some(handle) = runtime
+            .loader
+            .executables
+            .iter()
+            .find_map(|(handle, record)| {
+                record
+                    .core
+                    .loaded()
+                    .iter()
+                    .any(|object| object.image().contains(address))
+                    .then_some(*handle)
+            })
+        else {
             return INVALID_ARGUMENT;
         };
         // SAFETY: The caller supplied writable output storage.
@@ -2587,7 +2169,11 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_executable(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_executable_iterate_loaded_code_objects")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
     executable: HsaExecutable,
     callback: LoadedCodeObjectCallback,
@@ -2605,14 +2191,15 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_executable_iterate_loaded_code_objec
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            let Some(record) = runtime.executables.get(&executable.handle) else {
+            let Some(record) = runtime.loader.executables.get(&executable.handle) else {
                 return INVALID_EXECUTABLE;
             };
             record
-                .loaded
+                .core
+                .loaded()
                 .iter()
                 .map(|object| HsaLoadedCodeObject {
-                    handle: object.handle,
+                    handle: object.metadata().handle,
                 })
                 .collect::<Vec<_>>()
         };
@@ -2627,7 +2214,11 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_executable_iterate_loaded_code_objec
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_loaded_code_object_get_info")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_ven_amd_loader_loaded_code_object_get_info(
     loaded_code_object: HsaLoadedCodeObject,
     attribute: u32,
@@ -2645,17 +2236,23 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_loaded_code_object_get_info(
             return NOT_INITIALIZED;
         };
         let Some((executable_handle, object)) =
-            runtime.executables.iter().find_map(|(handle, executable)| {
-                executable
-                    .loaded
-                    .iter()
-                    .find(|object| object.handle == loaded_code_object.handle)
-                    .map(|object| (*handle, object))
-            })
+            runtime
+                .loader
+                .executables
+                .iter()
+                .find_map(|(handle, executable)| {
+                    executable
+                        .core
+                        .loaded()
+                        .iter()
+                        .find(|object| object.metadata().handle == loaded_code_object.handle)
+                        .map(|object| (*handle, object))
+                })
         else {
             return INVALID_CODE_OBJECT;
         };
-        let load_delta = i128::from(object.device_base) - i128::from(object.virtual_base);
+        let load_delta =
+            i128::from(object.image().device_base()) - i128::from(object.image().virtual_base());
         let Ok(load_delta) = i64::try_from(load_delta) else {
             return INVALID_CODE_OBJECT;
         };
@@ -2665,26 +2262,26 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_loaded_code_object_get_info(
                 LOADER_INFO_EXECUTABLE => value.cast::<HsaExecutable>().write(HsaExecutable {
                     handle: executable_handle,
                 }),
-                LOADER_INFO_KIND => value.cast::<u32>().write(object.kind),
-                LOADER_INFO_AGENT => value.cast::<HsaAgent>().write(object.agent),
+                LOADER_INFO_KIND => value.cast::<u32>().write(object.metadata().kind),
+                LOADER_INFO_AGENT => value.cast::<HsaAgent>().write(object.metadata().agent),
                 LOADER_INFO_STORAGE_TYPE => value.cast::<u32>().write(LOADER_STORAGE_MEMORY),
                 LOADER_INFO_STORAGE_MEMORY_BASE => value
                     .cast::<u64>()
-                    .write(object.code_object.as_ptr() as usize as u64),
+                    .write(object.image().code_object().as_ptr() as usize as u64),
                 LOADER_INFO_STORAGE_MEMORY_SIZE => value
                     .cast::<u64>()
-                    .write(u64::try_from(object.code_object.len()).unwrap_or(u64::MAX)),
+                    .write(u64::try_from(object.image().code_object().len()).unwrap_or(u64::MAX)),
                 LOADER_INFO_STORAGE_FILE => return INVALID_ARGUMENT,
                 LOADER_INFO_LOAD_DELTA => value.cast::<i64>().write(load_delta),
-                LOADER_INFO_LOAD_BASE => value.cast::<u64>().write(object.device_base),
-                LOADER_INFO_LOAD_SIZE => value.cast::<u64>().write(object.size),
+                LOADER_INFO_LOAD_BASE => value.cast::<u64>().write(object.image().device_base()),
+                LOADER_INFO_LOAD_SIZE => value.cast::<u64>().write(object.image().size()),
                 LOADER_INFO_URI_LENGTH => value
                     .cast::<u32>()
-                    .write(u32::try_from(object.uri.len()).unwrap_or(u32::MAX)),
+                    .write(u32::try_from(object.metadata().uri.len()).unwrap_or(u32::MAX)),
                 LOADER_INFO_URI => std::ptr::copy_nonoverlapping(
-                    object.uri.as_ptr(),
+                    object.metadata().uri.as_ptr(),
                     value.cast::<u8>(),
-                    object.uri.len(),
+                    object.metadata().uri.len(),
                 ),
                 _ => return INVALID_ARGUMENT,
             }
@@ -2693,7 +2290,13 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_loaded_code_object_get_info(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(
+        export_name = "__hsa_impl_hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size"
+    )
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_with_offset_size(
     file: i32,
     offset: usize,
@@ -2730,7 +2333,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_
             Ok(handle) => handle,
             Err(status) => return status,
         };
-        runtime.readers.insert(
+        runtime.loader.readers.insert(
             handle,
             Reader {
                 bytes: bytes.into(),
@@ -2743,7 +2346,11 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_code_object_reader_create_from_file_
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_ven_amd_loader_iterate_executables")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_ven_amd_loader_iterate_executables(
     callback: ExecutableCallback,
     data: *mut c_void,
@@ -2760,7 +2367,12 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_iterate_executables(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            runtime.executables.keys().copied().collect::<Vec<_>>()
+            runtime
+                .loader
+                .executables
+                .keys()
+                .copied()
+                .collect::<Vec<_>>()
         };
         handles.sort_unstable();
         for handle in handles {
@@ -2774,6 +2386,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_iterate_executables(
     })
 }
 
+#[cfg(any(test, not(target_arch = "x86_64")))]
 pub(crate) fn loader_extension_table() -> [usize; 7] {
     [
         hsa_ven_amd_loader_query_host_address as *const () as usize,
@@ -2841,7 +2454,7 @@ mod tests {
         write_u16(&mut bytes, 18, ELF_MACHINE_AMDGPU);
         write_u32(&mut bytes, 20, 1);
         write_u64(&mut bytes, 40, SECTION_OFFSET as u64);
-        write_u32(&mut bytes, 48, AMDGPU_MACHINE_GFX1201);
+        write_u32(&mut bytes, 48, 0x4e); // gfx1201 machine ID
         write_u16(&mut bytes, 52, ELF_HEADER_SIZE as u16);
         write_u16(&mut bytes, 54, 56);
         write_u16(&mut bytes, 58, 64);
@@ -3007,8 +2620,9 @@ mod tests {
         let Some(layout) = layout.ok() else {
             return;
         };
-        assert_eq!(code_object_version(layout), Ok(6));
-        assert_eq!(code_object_target(layout.flags), Some(("gfx1201", 0)));
+        let object = LoaderCodeObject::parse(&bytes).unwrap();
+        assert_eq!(object.version().ok(), Some(6));
+        assert_eq!(object.target().ok(), Some(("gfx1201", 0)));
         let symbols = parse_symbols(&bytes, layout, &[SECTION_SYMTAB]);
         assert!(symbols.is_ok());
         let Some(symbols) = symbols.ok() else {
@@ -3131,8 +2745,9 @@ mod tests {
                 bytes.len()
             };
             let bytes = &bytes[..length];
-            if let Ok(layout) = parse_elf_layout(bytes) {
-                let _ = code_object_version(layout);
+            if let Ok(object) = LoaderCodeObject::parse(bytes) {
+                let layout = object.layout();
+                let _ = object.version();
                 let _ = parse_symbols(bytes, layout, &[SECTION_SYMTAB, SECTION_DYNSYM]);
                 let mut image = [0_u8; 256];
                 let _ = apply_relocations(bytes, layout, 0x100, 0x1000, &mut image, |_| None);
@@ -3191,7 +2806,10 @@ mod tests {
 
         let mut image = [0_u8; 256];
         let layout = ElfLayout {
+            os_abi: ELF_OS_ABI_AMDGPU_HSA,
             abi_version: 0,
+            kind: ELF_TYPE_DYN,
+            machine: ELF_MACHINE_AMDGPU,
             flags: 0,
             program_offset: 0,
             program_entry_size: 0,
@@ -3211,10 +2829,30 @@ mod tests {
     #[test]
     fn reports_one_combined_segment_for_v2_code_objects() {
         let loads = [
-            (0, 0, 0x17c0, 0x17c0),
-            (0x1800, 0x2800, 0x6c8, 0x6c8),
-            (0x1ec8, 0x3ec8, 0x70, 0x138),
-            (0x1f38, 0x4f38, 4, 4),
+            LoadSegment {
+                file_offset: 0,
+                virtual_address: 0,
+                file_size: 0x17c0,
+                memory_size: 0x17c0,
+            },
+            LoadSegment {
+                file_offset: 0x1800,
+                virtual_address: 0x2800,
+                file_size: 0x6c8,
+                memory_size: 0x6c8,
+            },
+            LoadSegment {
+                file_offset: 0x1ec8,
+                virtual_address: 0x3ec8,
+                file_size: 0x70,
+                memory_size: 0x138,
+            },
+            LoadSegment {
+                file_offset: 0x1f38,
+                virtual_address: 0x4f38,
+                file_size: 4,
+                memory_size: 4,
+            },
         ];
         let segments = loaded_segments(&loads, 0x0010_0000, 0);
         assert!(segments.is_ok());
@@ -3236,7 +2874,7 @@ mod tests {
 
     #[test]
     fn executable_symbol_lookup_checks_initialization_before_arguments() {
-        assert!(lock().is_ok_and(|runtime| runtime.is_none()));
+        assert!(lock().is_ok_and(|runtime| runtime.as_ref().is_none()));
         // SAFETY: An uninitialized runtime returns before inspecting the
         // deliberately invalid input pointers.
         assert_eq!(

@@ -4,7 +4,7 @@
 //! HSA signals, IPC signal storage, waits, groups, and asynchronous handlers.
 //!
 //! The first 64 bytes of each native signal follow the public AMD signal layout
-//! used by queues and device-visible storage. Runtime-owned slabs keep ordinary
+//! used by queues and device-visible storage. HsaState-owned slabs keep ordinary
 //! signal addresses stable, while dedicated rocddi allocations back interrupt
 //! and IPC-capable signals. Atomic operations preserve the ordering requested by
 //! each ABI entry point rather than strengthening all accesses indiscriminately.
@@ -13,7 +13,7 @@
 //! communicate through a channel so callbacks and worker joins occur without
 //! holding the process-global runtime lock.
 
-use std::collections::hash_map::Entry;
+use std::collections::{HashMap, hash_map::Entry};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering, fence};
@@ -29,7 +29,7 @@ use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
 use crate::runtime::{
-    CallbackScope, InFlightToken, Runtime, boundary, initialized_mut, lock, map_error,
+    CallbackScope, HsaState, InFlightToken, boundary, initialized_mut, lock, map_error,
 };
 
 const SIGNAL_BYTES: usize = 64;
@@ -89,23 +89,30 @@ fn timeout_elapsed(elapsed: Duration, timeout_hint: u64, frequency: u64) -> bool
                 >= u128::from(timeout_hint) * 1_000_000_000)
 }
 
-#[repr(C, align(64))]
 /// Public AMD signal record shared with host code and, when applicable, a GPU.
 ///
 /// Field offsets and the 64-byte extent are ABI requirements. The signal kind
 /// determines whether updates are ordinary atomics, queue doorbells, or
 /// interrupt-capable event notifications.
+#[repr(C, align(64))]
 pub(crate) struct AmdSignal {
-    // Destruction invalidates this field while lock-free readers inspect it.
-    // Keep its ABI offset and width while avoiding a host data race.
+    /// Signal kind, invalidated atomically while lock-free readers inspect it.
     pub(crate) kind: AtomicI64,
+    /// Value updated by host atomics or device signal operations.
     pub(crate) value: AtomicI64,
+    /// Native event mailbox or private intercept owner address.
     event_mailbox_ptr: u64,
+    /// Native event ID for interrupt-backed signals.
     event_id: u32,
+    /// Reserved ABI word.
     reserved1: u32,
+    /// GPU start timestamp for profiling queries.
     pub(crate) start_ts: AtomicU64,
+    /// GPU end timestamp for profiling queries.
     pub(crate) end_ts: AtomicU64,
+    /// Queue pointer for doorbell signals.
     pub(crate) queue_ptr: usize,
+    /// Reserved ABI words.
     reserved3: [u32; 2],
 }
 
@@ -145,6 +152,27 @@ impl AmdSignal {
             reserved3: [0; 2],
         }
     }
+
+    pub(crate) fn intercept_doorbell(queue: usize, owner: usize) -> Self {
+        Self {
+            kind: AtomicI64::new(AMD_SIGNAL_KIND_LEGACY_DOORBELL),
+            value: AtomicI64::new(-1),
+            // This signal is private to the intercept queue. The host store
+            // path uses this owner while the queue remains live; device stores
+            // update value and are collected by the queue worker.
+            event_mailbox_ptr: owner as u64,
+            event_id: 0,
+            reserved1: 0,
+            start_ts: AtomicU64::new(0),
+            end_ts: AtomicU64::new(0),
+            queue_ptr: queue,
+            reserved3: [0; 2],
+        }
+    }
+
+    pub(crate) fn intercept_owner(&self) -> usize {
+        self.event_mailbox_ptr as usize
+    }
 }
 
 const _: () = {
@@ -153,14 +181,19 @@ const _: () = {
     assert!(std::mem::offset_of!(AmdSignal, value) == 8);
 };
 
-#[repr(C, align(64))]
 /// Cross-process signal record stored in shareable system memory.
+#[repr(C, align(64))]
 struct SharedSignal {
+    /// Standard public signal prefix.
     signal: AmdSignal,
+    /// SDMA start timestamp in shared storage.
     sdma_start_ts: u64,
+    /// Native core-signal reference; zero for this IPC layout.
     core_signal: u64,
+    /// Signature distinguishing this shared signal layout.
     id: u64,
     reserved: [u8; 8],
+    /// SDMA end timestamp in shared storage.
     sdma_end_ts: u64,
     reserved2: [u8; 24],
 }
@@ -187,23 +220,29 @@ const _: () = assert!(size_of::<SharedSignal>() == 128);
 
 /// Original IPC signal allocation retained until its exporting handle dies.
 pub(crate) struct OwnedIpcSignal {
+    /// Original shareable allocation retained by the exporter.
     allocation: Allocation,
 }
 
 /// Imported IPC signal mapping and its local public-reference count.
 pub(crate) struct ImportedIpcSignal {
+    /// Imported GPU-visible signal backing.
     allocation: Allocation,
+    /// Native token needed to release the import.
     ipc_handle: [u32; 8],
+    /// Number of local public signal handles sharing this import.
     references: u32,
 }
 
 /// Work accepted by the single asynchronous callback dispatcher.
 #[derive(Clone, Copy)]
 enum AsyncRequest {
+    /// Run an application callback without a signal condition.
     Function {
         callback: unsafe extern "C" fn(*mut c_void),
         arg: CallbackArg,
     },
+    /// Register a callback for a signal comparison.
     Signal {
         signal: HsaSignal,
         condition: u32,
@@ -215,25 +254,35 @@ enum AsyncRequest {
 
 /// Persistent signal condition re-evaluated by the dispatcher.
 struct AsyncSignalHandler {
+    /// Public signal handle whose value is polled.
     signal: HsaSignal,
+    /// Comparison operation for handler activation.
     condition: u32,
+    /// Value compared against the signal.
     compare_value: SignalValue,
+    /// Application callback invoked on a satisfied condition.
     handler: unsafe extern "C" fn(SignalValue, *mut c_void) -> bool,
+    /// Caller-owned callback argument.
     arg: CallbackArg,
 }
 
 /// Clock domain of a completed asynchronous copy's raw timestamps.
 #[derive(Clone, Copy)]
 pub(crate) enum AsyncCopyClock {
+    /// System clock counter shared with native clock queries.
     System,
+    /// GPU clock counter for the indexed activated GPU.
     Gpu(usize),
 }
 
 /// Timestamps and clock provenance retained outside the public signal ABI.
 #[derive(Clone, Copy)]
 pub(crate) struct AsyncCopyProfile {
+    /// Clock domain used by both raw timestamps.
     pub(crate) clock: AsyncCopyClock,
+    /// Native copy start timestamp.
     pub(crate) start: u64,
+    /// Native copy end timestamp.
     pub(crate) end: u64,
 }
 
@@ -241,8 +290,11 @@ pub(crate) struct AsyncCopyProfile {
 /// public handle dies. A completed copy keeps its timing until this signal is
 /// reused or destroyed, even after the worker releases its reference.
 pub(crate) struct AsyncSignalRecord {
+    /// Internal worker or dispatcher references to this signal slot.
     references: u32,
+    /// Sticky retirement flag shared with existing waiters.
     retired: Arc<AtomicBool>,
+    /// Completed copy timing retained for profiling queries.
     pub(crate) copy_profile: Option<AsyncCopyProfile>,
 }
 
@@ -257,9 +309,12 @@ impl AsyncSignalRecord {
     }
 }
 
-/// Sending half of the process-wide serialized callback worker.
+/// Process-wide serialized callback worker and its request channel.
 pub(crate) struct AsyncDispatcher {
+    /// Channel sending requests to the serialized callback worker.
     sender: Sender<AsyncRequest>,
+    /// Worker joined before signal storage is released.
+    worker: thread::JoinHandle<()>,
 }
 
 impl AsyncDispatcher {
@@ -270,13 +325,16 @@ impl AsyncDispatcher {
 
 /// Stable device-visible storage from which ordinary signals are carved.
 pub(crate) struct SignalSlab {
+    /// GPU-visible allocation retaining every signal slot in this slab.
     _allocation: Allocation,
+    /// CPU address of the first signal slot.
     host: usize,
+    /// Index of the next never-used slot.
     next: usize,
 }
 
 impl SignalSlab {
-    fn create(runtime: &Runtime) -> Result<Self, Status> {
+    fn create(runtime: &HsaState) -> Result<Self, Status> {
         let gpu = runtime.gpus.first().ok_or(OUT_OF_RESOURCES)?;
         let allocation = gpu
             .device
@@ -324,6 +382,94 @@ impl SignalSlab {
     }
 }
 
+/// HSA signal storage and public handle ownership for one generation.
+///
+/// rocddi owns the native allocations and KFD events stored here. This state
+/// tracks HSA signal slots, IPC attachments, waiters, and callback references.
+pub(crate) struct SignalState {
+    /// Backing slabs for ordinary HSA signals.
+    signal_slabs: Vec<SignalSlab>,
+    /// Signal slots available for reuse.
+    recycled_signals: Vec<usize>,
+    /// Process event page shared by interrupt-backed signals.
+    signal_event_page: Option<SignalEventPage>,
+    /// Whether the native event page has been conclusively established.
+    signal_event_page_confirmed: bool,
+    /// Native events attached to public interrupt signals.
+    interrupt_signals: HashMap<usize, Option<SignalEvent>>,
+    /// Native signal events available for reuse.
+    signal_event_pool: Vec<SignalEvent>,
+    /// IPC signal exports owned by this process.
+    owned_ipc_signals: HashMap<usize, OwnedIpcSignal>,
+    /// IPC signals imported from another process.
+    imported_ipc_signals: HashMap<usize, ImportedIpcSignal>,
+    /// Async-handler references keeping signal slots alive.
+    pub(crate) async_signal_refs: HashMap<usize, AsyncSignalRecord>,
+    /// Public signal groups and their member signals.
+    signal_groups: HashMap<u64, Vec<HsaSignal>>,
+    /// Background dispatcher for asynchronous signal handlers.
+    async_dispatcher: Option<AsyncDispatcher>,
+}
+
+impl SignalState {
+    pub(crate) fn new() -> Self {
+        Self {
+            signal_slabs: Vec::new(),
+            recycled_signals: Vec::new(),
+            signal_event_page: None,
+            signal_event_page_confirmed: false,
+            interrupt_signals: HashMap::new(),
+            signal_event_pool: Vec::new(),
+            owned_ipc_signals: HashMap::new(),
+            imported_ipc_signals: HashMap::new(),
+            async_signal_refs: HashMap::new(),
+            signal_groups: HashMap::new(),
+            async_dispatcher: None,
+        }
+    }
+
+    /// Releases HSA signal records after workers and native queues have stopped.
+    pub(crate) fn clear_storage(&mut self) {
+        self.signal_groups.clear();
+        self.async_signal_refs.clear();
+        self.imported_ipc_signals.clear();
+        self.owned_ipc_signals.clear();
+        self.recycled_signals.clear();
+        self.signal_slabs.clear();
+    }
+
+    pub(crate) fn running_on_worker(&self) -> bool {
+        self.async_dispatcher
+            .as_ref()
+            .is_some_and(|dispatcher| dispatcher.worker.thread().id() == thread::current().id())
+    }
+
+    /// Joins the callback worker after the shared stop request is published.
+    pub(crate) fn join_worker(&mut self) {
+        if let Some(dispatcher) = self.async_dispatcher.take() {
+            let _ = dispatcher.worker.join();
+        }
+    }
+
+    fn enqueue_async(&mut self, request: AsyncRequest, stop_workers: &Arc<AtomicBool>) -> Status {
+        if self.async_dispatcher.is_none() {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let stop = stop_workers.clone();
+            let worker = match thread::Builder::new()
+                .name("rocddi-async-events".into())
+                .spawn(move || run_async_dispatcher(&receiver, &stop))
+            {
+                Ok(worker) => worker,
+                Err(_) => return OUT_OF_RESOURCES,
+            };
+            self.async_dispatcher = Some(AsyncDispatcher { sender, worker });
+        }
+        self.async_dispatcher
+            .as_ref()
+            .map_or(ERROR, |dispatcher| dispatcher.send(request))
+    }
+}
+
 fn retry_unconfirmed_event_page<T, E>(
     first: Result<T, E>,
     page_offered: bool,
@@ -337,39 +483,23 @@ fn retry_unconfirmed_event_page<T, E>(
     }
 }
 
-impl Runtime {
-    fn enqueue_async(&mut self, request: AsyncRequest) -> Status {
-        if self.async_dispatcher.is_none() {
-            let (sender, receiver) = std::sync::mpsc::channel();
-            let stop = self.stop_workers.clone();
-            let worker = match thread::Builder::new()
-                .name("rocddi-async-events".into())
-                .spawn(move || run_async_dispatcher(&receiver, &stop))
-            {
-                Ok(worker) => worker,
-                Err(_) => return OUT_OF_RESOURCES,
-            };
-            self.async_dispatcher = Some(AsyncDispatcher { sender });
-            self.workers.push(worker);
-        }
-        self.async_dispatcher
-            .as_ref()
-            .map_or(ERROR, |dispatcher| dispatcher.send(request))
-    }
-
+impl HsaState {
     fn ensure_signal_slab(&mut self) -> Result<(), Status> {
         if self
+            .signal_state
             .signal_slabs
             .last()
             .is_none_or(|slab| !slab.has_space())
         {
-            self.signal_slabs.push(SignalSlab::create(self)?);
+            self.signal_state
+                .signal_slabs
+                .push(SignalSlab::create(self)?);
         }
         Ok(())
     }
 
     fn allocate_signal(&mut self, signal: AmdSignal) -> Result<HsaSignal, Status> {
-        if let Some(address) = self.recycled_signals.pop() {
+        if let Some(address) = self.signal_state.recycled_signals.pop() {
             // SAFETY: The slot was invalidated after its final asynchronous
             // registration retired. Its slab remains mapped until shutdown.
             unsafe { (address as *mut AmdSignal).write(signal) };
@@ -378,7 +508,11 @@ impl Runtime {
             });
         }
         self.ensure_signal_slab()?;
-        let slab = self.signal_slabs.last_mut().ok_or(OUT_OF_RESOURCES)?;
+        let slab = self
+            .signal_state
+            .signal_slabs
+            .last_mut()
+            .ok_or(OUT_OF_RESOURCES)?;
         // SAFETY: The selected slab has one unused aligned slot.
         Ok(unsafe { slab.allocate(signal) })
     }
@@ -387,7 +521,7 @@ impl Runtime {
         if let Some(host) = PROCESS_SIGNAL_EVENT_PAGE.get().copied() {
             return Ok((host, false));
         }
-        if self.signal_event_page.is_none() {
+        if self.signal_state.signal_event_page.is_none() {
             let allocation = {
                 let (gpu, peers) = self.gpus.split_first().ok_or(OUT_OF_RESOURCES)?;
                 let peers = peers.iter().map(|peer| &peer.device).collect::<Vec<_>>();
@@ -406,9 +540,10 @@ impl Runtime {
             if info.device_address != host as u64 || info.size < SIGNAL_EVENT_PAGE_BYTES {
                 return Err(OUT_OF_RESOURCES);
             }
-            self.signal_event_page = Some(SignalEventPage::new(allocation));
+            self.signal_state.signal_event_page = Some(SignalEventPage::new(allocation));
         }
         let host = self
+            .signal_state
             .signal_event_page
             .as_ref()
             .and_then(SignalEventPage::host_address)
@@ -423,11 +558,12 @@ impl Runtime {
         let gpu = self.gpus.first()?;
         let device = gpu.device.gpu().ok()?;
         let first = if install_page {
-            create_signal_event(device, Some(self.signal_event_page.as_mut()?))
+            create_signal_event(device, Some(self.signal_state.signal_event_page.as_mut()?))
         } else {
             create_signal_event(device, None)
         };
         let page_offered = self
+            .signal_state
             .signal_event_page
             .as_ref()
             .is_some_and(SignalEventPage::was_offered);
@@ -436,7 +572,7 @@ impl Runtime {
         let created = retry_unconfirmed_event_page(
             first,
             install_page && page_offered,
-            self.signal_event_page_confirmed,
+            self.signal_state.signal_event_page_confirmed,
             || create_signal_event(device, None),
         );
         if page_offered
@@ -450,7 +586,7 @@ impl Runtime {
             return None;
         }
         let event = created.ok()?;
-        self.signal_event_page_confirmed = true;
+        self.signal_state.signal_event_page_confirmed = true;
         let info = event.info();
         let offset = usize::try_from(info.event_page_slot_index)
             .ok()?
@@ -462,7 +598,7 @@ impl Runtime {
     fn acquire_signal_event(&mut self) -> Option<(SignalEvent, usize, u32)> {
         // Reuse the KFD event after its previous signal has been destroyed.
         // The stable process event page supplies the same mailbox address.
-        if let Some(event) = self.signal_event_pool.pop() {
+        if let Some(event) = self.signal_state.signal_event_pool.pop() {
             let page = *PROCESS_SIGNAL_EVENT_PAGE.get()?;
             let info = event.info();
             let offset = usize::try_from(info.event_page_slot_index)
@@ -482,7 +618,8 @@ impl Runtime {
         if !interrupt {
             return self.allocate_signal(AmdSignal::user(value));
         }
-        self.interrupt_signals
+        self.signal_state
+            .interrupt_signals
             .try_reserve(1)
             .map_err(|_| OUT_OF_RESOURCES)?;
         let event = self.acquire_signal_event();
@@ -492,7 +629,11 @@ impl Runtime {
         );
         let signal = self.allocate_signal(storage)?;
         let owner = event.map(|(event, _, _)| event);
-        match self.interrupt_signals.entry(signal.handle as usize) {
+        match self
+            .signal_state
+            .interrupt_signals
+            .entry(signal.handle as usize)
+        {
             Entry::Vacant(entry) => {
                 entry.insert(owner);
             }
@@ -501,6 +642,115 @@ impl Runtime {
         Ok(signal)
     }
 
+    fn create_ipc_signal(&mut self, value: SignalValue) -> Result<HsaSignal, Status> {
+        let allocation = {
+            let (gpu, peers) = self.gpus.split_first().ok_or(OUT_OF_RESOURCES)?;
+            let peers = peers.iter().map(|peer| &peer.device).collect::<Vec<_>>();
+            gpu.device
+                .allocate_with_peers(
+                    &peers,
+                    MemoryKind::System,
+                    IPC_SIGNAL_ALLOCATION_BYTES.max(self.host_page_size as u64),
+                    self.host_page_size as u64,
+                    DeviceAccess::READ | DeviceAccess::WRITE,
+                )
+                .map_err(map_error)?
+        };
+        let info = allocation.info();
+        let host = info.host_address.ok_or(OUT_OF_RESOURCES)?;
+        if info.device_address != host as u64 {
+            return Err(OUT_OF_RESOURCES);
+        }
+        self.signal_state
+            .owned_ipc_signals
+            .try_reserve(1)
+            .map_err(|_| OUT_OF_RESOURCES)?;
+        // SAFETY: The dedicated allocation is writable, page-sized, and retained
+        // by owned_ipc_signals for the complete public signal lifetime.
+        unsafe {
+            std::ptr::write_bytes(host as *mut u8, 0, IPC_SIGNAL_ALLOCATION_BYTES as usize);
+            (host as *mut SharedSignal).write(SharedSignal::ipc(value));
+        }
+        match self.signal_state.owned_ipc_signals.entry(host) {
+            Entry::Vacant(entry) => {
+                entry.insert(OwnedIpcSignal { allocation });
+            }
+            Entry::Occupied(_) => return Err(OUT_OF_RESOURCES),
+        }
+        Ok(HsaSignal {
+            handle: host as u64,
+        })
+    }
+
+    unsafe fn attach_ipc_signal(&mut self, words: [u32; 8]) -> Result<HsaSignal, Status> {
+        if let Some((address, imported)) = self
+            .signal_state
+            .imported_ipc_signals
+            .iter_mut()
+            .find(|(_, signal)| signal.ipc_handle == words)
+        {
+            imported.references = imported.references.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
+            let address = *address;
+            if let Some(record) = self.signal_state.async_signal_refs.get_mut(&address) {
+                if record.references == 0 && record.retired.load(Ordering::Acquire) {
+                    self.signal_state.async_signal_refs.remove(&address);
+                } else {
+                    record.revive();
+                }
+            }
+            return Ok(HsaSignal {
+                handle: address as u64,
+            });
+        }
+
+        let allocation = {
+            let devices = self.gpus.iter().map(|gpu| &gpu.device).collect::<Vec<_>>();
+            linux_interop::import_kfd_ipc_memory(
+                &self.session,
+                &devices,
+                &devices,
+                KfdIpcMemoryHandle::from_words(words),
+                IPC_SIGNAL_ALLOCATION_BYTES,
+            )
+            .map_err(|error| match error.kind() {
+                rocddi::ErrorKind::InvalidArgument | rocddi::ErrorKind::Unsupported => {
+                    INVALID_ARGUMENT
+                }
+                rocddi::ErrorKind::ResourceExhausted => OUT_OF_RESOURCES,
+                _ => ERROR,
+            })?
+        };
+        let info = allocation.info();
+        let host = info.host_address.ok_or(INVALID_ARGUMENT)?;
+        if info.device_address != host as u64 {
+            return Err(INVALID_ARGUMENT);
+        }
+        // SAFETY: A successful IPC import mapped at least one page at host.
+        let shared = unsafe { &*(host as *const SharedSignal) };
+        if !shared.is_ipc() {
+            return Err(INVALID_ARGUMENT);
+        }
+        self.signal_state
+            .imported_ipc_signals
+            .try_reserve(1)
+            .map_err(|_| OUT_OF_RESOURCES)?;
+        match self.signal_state.imported_ipc_signals.entry(host) {
+            Entry::Vacant(entry) => {
+                entry.insert(ImportedIpcSignal {
+                    allocation,
+                    ipc_handle: words,
+                    references: 1,
+                });
+            }
+            Entry::Occupied(_) => return Err(OUT_OF_RESOURCES),
+        }
+        Ok(HsaSignal {
+            handle: host as u64,
+        })
+    }
+}
+
+impl SignalState {
     pub(crate) fn owns_signal(&self, signal: HsaSignal) -> bool {
         let address = signal.handle as usize;
         if self
@@ -562,45 +812,6 @@ impl Runtime {
         }
     }
 
-    fn create_ipc_signal(&mut self, value: SignalValue) -> Result<HsaSignal, Status> {
-        let allocation = {
-            let (gpu, peers) = self.gpus.split_first().ok_or(OUT_OF_RESOURCES)?;
-            let peers = peers.iter().map(|peer| &peer.device).collect::<Vec<_>>();
-            gpu.device
-                .allocate_with_peers(
-                    &peers,
-                    MemoryKind::System,
-                    IPC_SIGNAL_ALLOCATION_BYTES.max(self.host_page_size as u64),
-                    self.host_page_size as u64,
-                    DeviceAccess::READ | DeviceAccess::WRITE,
-                )
-                .map_err(map_error)?
-        };
-        let info = allocation.info();
-        let host = info.host_address.ok_or(OUT_OF_RESOURCES)?;
-        if info.device_address != host as u64 {
-            return Err(OUT_OF_RESOURCES);
-        }
-        self.owned_ipc_signals
-            .try_reserve(1)
-            .map_err(|_| OUT_OF_RESOURCES)?;
-        // SAFETY: The dedicated allocation is writable, page-sized, and retained
-        // by owned_ipc_signals for the complete public signal lifetime.
-        unsafe {
-            std::ptr::write_bytes(host as *mut u8, 0, IPC_SIGNAL_ALLOCATION_BYTES as usize);
-            (host as *mut SharedSignal).write(SharedSignal::ipc(value));
-        }
-        match self.owned_ipc_signals.entry(host) {
-            Entry::Vacant(entry) => {
-                entry.insert(OwnedIpcSignal { allocation });
-            }
-            Entry::Occupied(_) => return Err(OUT_OF_RESOURCES),
-        }
-        Ok(HsaSignal {
-            handle: host as u64,
-        })
-    }
-
     fn export_ipc_signal(&self, signal: HsaSignal) -> Result<[u32; 8], Status> {
         let address = signal.handle as usize;
         if !self.owns_signal(signal) {
@@ -619,71 +830,6 @@ impl Runtime {
         linux_interop::export_kfd_ipc_memory(allocation)
             .map(KfdIpcMemoryHandle::words)
             .map_err(map_error)
-    }
-
-    unsafe fn attach_ipc_signal(&mut self, words: [u32; 8]) -> Result<HsaSignal, Status> {
-        if let Some((address, imported)) = self
-            .imported_ipc_signals
-            .iter_mut()
-            .find(|(_, signal)| signal.ipc_handle == words)
-        {
-            imported.references = imported.references.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
-            let address = *address;
-            if let Some(record) = self.async_signal_refs.get_mut(&address) {
-                if record.references == 0 && record.retired.load(Ordering::Acquire) {
-                    self.async_signal_refs.remove(&address);
-                } else {
-                    record.revive();
-                }
-            }
-            return Ok(HsaSignal {
-                handle: address as u64,
-            });
-        }
-
-        let allocation = {
-            let devices = self.gpus.iter().map(|gpu| &gpu.device).collect::<Vec<_>>();
-            linux_interop::import_kfd_ipc_memory(
-                &self.session,
-                &devices,
-                &devices,
-                KfdIpcMemoryHandle::from_words(words),
-                IPC_SIGNAL_ALLOCATION_BYTES,
-            )
-            .map_err(|error| match error.kind() {
-                rocddi::ErrorKind::InvalidArgument | rocddi::ErrorKind::Unsupported => {
-                    INVALID_ARGUMENT
-                }
-                rocddi::ErrorKind::ResourceExhausted => OUT_OF_RESOURCES,
-                _ => ERROR,
-            })?
-        };
-        let info = allocation.info();
-        let host = info.host_address.ok_or(INVALID_ARGUMENT)?;
-        if info.device_address != host as u64 {
-            return Err(INVALID_ARGUMENT);
-        }
-        // SAFETY: A successful IPC import mapped at least one page at host.
-        let shared = unsafe { &*(host as *const SharedSignal) };
-        if !shared.is_ipc() {
-            return Err(INVALID_ARGUMENT);
-        }
-        self.imported_ipc_signals
-            .try_reserve(1)
-            .map_err(|_| OUT_OF_RESOURCES)?;
-        match self.imported_ipc_signals.entry(host) {
-            Entry::Vacant(entry) => {
-                entry.insert(ImportedIpcSignal {
-                    allocation,
-                    ipc_handle: words,
-                    references: 1,
-                });
-            }
-            Entry::Occupied(_) => return Err(OUT_OF_RESOURCES),
-        }
-        Ok(HsaSignal {
-            handle: host as u64,
-        })
     }
 
     fn destroy_signal(&mut self, signal: HsaSignal) -> Status {
@@ -718,7 +864,7 @@ impl Runtime {
             return status;
         }
         if let Some(record) = self.async_signal_refs.get_mut(&address) {
-            // ROCr also retains each async registration. Keep the mapped IPC
+            // Keep the mapped IPC
             // allocation and any interrupt event live until the last handler
             // returns false, even after the public reference is destroyed.
             record.retired.store(true, Ordering::Release);
@@ -773,7 +919,7 @@ impl Runtime {
         SUCCESS
     }
 
-    pub(crate) fn destroy_signal_events(&mut self) -> Status {
+    pub(crate) fn destroy_events(&mut self) -> Status {
         let mut status = SUCCESS;
         for (_, event) in self.interrupt_signals.drain() {
             if let Some(mut event) = event {
@@ -893,7 +1039,11 @@ fn condition_met(condition: u32, observed: SignalValue, compare: SignalValue) ->
     }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_create")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_create(
     initial_value: SignalValue,
     num_consumers: u32,
@@ -927,7 +1077,11 @@ pub unsafe extern "C" fn hsa_signal_create(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_signal_create")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_signal_create(
     initial_value: SignalValue,
     num_consumers: u32,
@@ -970,7 +1124,11 @@ pub unsafe extern "C" fn hsa_amd_signal_create(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_destroy")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_destroy(signal: HsaSignal) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -981,11 +1139,15 @@ pub unsafe extern "C" fn hsa_signal_destroy(signal: HsaSignal) -> Status {
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        runtime.destroy_signal(signal)
+        runtime.signal_state.destroy_signal(signal)
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_ipc_signal_create")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_ipc_signal_create(
     signal: HsaSignal,
     handle: *mut HsaAmdIpcSignal,
@@ -1001,7 +1163,7 @@ pub unsafe extern "C" fn hsa_amd_ipc_signal_create(
         if handle.is_null() {
             return INVALID_ARGUMENT;
         }
-        let words = match runtime.export_ipc_signal(signal) {
+        let words = match runtime.signal_state.export_ipc_signal(signal) {
             Ok(words) => words,
             Err(status) => return status,
         };
@@ -1011,7 +1173,11 @@ pub unsafe extern "C" fn hsa_amd_ipc_signal_create(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_ipc_signal_attach")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_ipc_signal_attach(
     handle: *const HsaAmdIpcSignal,
     signal: *mut HsaSignal,
@@ -1041,71 +1207,117 @@ pub unsafe extern "C" fn hsa_amd_ipc_signal_attach(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_load_relaxed")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_load_relaxed(signal: HsaSignal) -> SignalValue {
     // SAFETY: Callers must supply a live HSA signal handle.
     unsafe { with_signal(signal, |signal| signal.value.load(Ordering::Relaxed)) }.unwrap_or(0)
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_load_scacquire")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_load_scacquire(signal: HsaSignal) -> SignalValue {
     // SAFETY: Callers must supply a live HSA signal handle.
     unsafe { with_signal(signal, |signal| signal.value.load(Ordering::Acquire)) }.unwrap_or(0)
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_load_acquire")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_load_acquire(signal: HsaSignal) -> SignalValue {
     // SAFETY: This deprecated entry point has the same contract as the
     // sequentially-consistent acquire spelling.
     unsafe { hsa_signal_load_scacquire(signal) }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_store_relaxed")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_store_relaxed(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Callers must supply a live HSA signal handle.
     let _ = unsafe {
         with_signal(signal, |signal| {
-            if signal.kind.load(Ordering::Acquire) == AMD_SIGNAL_KIND_DOORBELL {
-                let address = signal.value.load(Ordering::Relaxed) as usize;
-                // SAFETY: A queue doorbell signal contains its live MMIO mapping.
-                rocddi::device::gpu::queue::ring_doorbell(address, value as u64);
-            } else {
-                signal.value.store(value, Ordering::Relaxed);
+            match signal.kind.load(Ordering::Acquire) {
+                AMD_SIGNAL_KIND_DOORBELL => {
+                    let address = signal.value.load(Ordering::Relaxed) as usize;
+                    // SAFETY: A queue doorbell signal contains its live MMIO mapping.
+                    rocddi::device::gpu::queue::ring_doorbell(address, value as u64);
+                }
+                AMD_SIGNAL_KIND_LEGACY_DOORBELL => {
+                    signal.value.store(value, Ordering::Relaxed);
+                    // SAFETY: The HSA caller retains the owning queue through
+                    // this store, including its stable intercept owner.
+                    crate::queue_intercept::ring(signal.intercept_owner());
+                }
+                _ => signal.value.store(value, Ordering::Relaxed),
             }
         })
     };
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_silent_store_relaxed")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_silent_store_relaxed(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Same operation is sufficient for polling-backed signals.
     unsafe { hsa_signal_store_relaxed(signal, value) };
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_silent_store_screlease")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_silent_store_screlease(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Same operation is sufficient for polling-backed signals.
     unsafe { hsa_signal_store_screlease(signal, value) };
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_store_screlease")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_store_screlease(signal: HsaSignal, value: SignalValue) {
     // SAFETY: Callers must supply a live HSA signal handle.
     let _ = unsafe {
         with_signal(signal, |signal| {
-            if signal.kind.load(Ordering::Acquire) == AMD_SIGNAL_KIND_DOORBELL {
-                fence(Ordering::Release);
-                let address = signal.value.load(Ordering::Relaxed) as usize;
-                // SAFETY: A queue doorbell signal contains its live MMIO mapping.
-                rocddi::device::gpu::queue::ring_doorbell(address, value as u64);
-            } else {
-                signal.value.store(value, Ordering::Release);
+            match signal.kind.load(Ordering::Acquire) {
+                AMD_SIGNAL_KIND_DOORBELL => {
+                    fence(Ordering::Release);
+                    let address = signal.value.load(Ordering::Relaxed) as usize;
+                    // SAFETY: A queue doorbell signal contains its live MMIO mapping.
+                    rocddi::device::gpu::queue::ring_doorbell(address, value as u64);
+                }
+                AMD_SIGNAL_KIND_LEGACY_DOORBELL => {
+                    signal.value.store(value, Ordering::Release);
+                    // SAFETY: The HSA caller retains the owning queue through
+                    // this store, including its stable intercept owner.
+                    crate::queue_intercept::ring(signal.intercept_owner());
+                }
+                _ => signal.value.store(value, Ordering::Release),
             }
         })
     };
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_store_release")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_store_release(signal: HsaSignal, value: SignalValue) {
     // SAFETY: This deprecated entry point has the same contract as the
     // sequentially-consistent release spelling.
@@ -1168,7 +1380,8 @@ fn signal_xor(value: &AtomicI64, operand: SignalValue, order: Ordering) {
 
 macro_rules! signal_exchange_entry {
     ($name:ident, $order:expr) => {
-        #[unsafe(no_mangle)]
+        #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
+        #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(signal: HsaSignal, value: SignalValue) -> SignalValue {
             // SAFETY: The public entry point preserves the HSA signal contract.
             unsafe { signal_exchange(signal, value, $order) }
@@ -1178,7 +1391,8 @@ macro_rules! signal_exchange_entry {
 
 macro_rules! signal_compare_exchange_entry {
     ($name:ident, $success:expr, $failure:expr) => {
-        #[unsafe(no_mangle)]
+        #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
+        #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(
             signal: HsaSignal,
             expected: SignalValue,
@@ -1192,7 +1406,8 @@ macro_rules! signal_compare_exchange_entry {
 
 macro_rules! signal_fetch_entry {
     ($name:ident, $order:expr, $operation:path) => {
-        #[unsafe(no_mangle)]
+        #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
+        #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(signal: HsaSignal, value: SignalValue) {
             // SAFETY: The public entry point preserves the HSA signal contract.
             unsafe { signal_fetch_update(signal, value, $order, $operation) };
@@ -1332,7 +1547,11 @@ unsafe fn signal_wait(
     .unwrap_or(0)
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_wait_scacquire")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_wait_scacquire(
     signal: HsaSignal,
     condition: u32,
@@ -1353,7 +1572,11 @@ pub unsafe extern "C" fn hsa_signal_wait_scacquire(
     }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_wait_relaxed")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_wait_relaxed(
     signal: HsaSignal,
     condition: u32,
@@ -1374,7 +1597,11 @@ pub unsafe extern "C" fn hsa_signal_wait_relaxed(
     }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_wait_acquire")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_wait_acquire(
     signal: HsaSignal,
     condition: u32,
@@ -1395,7 +1622,11 @@ pub unsafe extern "C" fn hsa_signal_wait_acquire(
     }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_group_create")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_group_create(
     signal_count: u32,
     signals: *const HsaSignal,
@@ -1421,7 +1652,10 @@ pub unsafe extern "C" fn hsa_signal_group_create(
         }
         // SAFETY: The caller supplies signal_count readable handles.
         let signals = unsafe { std::slice::from_raw_parts(signals, signal_count as usize) };
-        if signals.iter().any(|signal| !runtime.owns_signal(*signal)) {
+        if signals
+            .iter()
+            .any(|signal| !runtime.signal_state.owns_signal(*signal))
+        {
             return INVALID_SIGNAL;
         }
         if consumer_count != 0 {
@@ -1441,14 +1675,18 @@ pub unsafe extern "C" fn hsa_signal_group_create(
             return OUT_OF_RESOURCES;
         }
         stored.extend_from_slice(signals);
-        runtime.signal_groups.insert(handle, stored);
+        runtime.signal_state.signal_groups.insert(handle, stored);
         // SAFETY: The caller supplied writable output storage.
         unsafe { group.write(HsaSignalGroup { handle }) };
         SUCCESS
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_group_destroy")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub extern "C" fn hsa_signal_group_destroy(group: HsaSignalGroup) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -1459,7 +1697,12 @@ pub extern "C" fn hsa_signal_group_destroy(group: HsaSignalGroup) -> Status {
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if runtime.signal_groups.remove(&group.handle).is_some() {
+        if runtime
+            .signal_state
+            .signal_groups
+            .remove(&group.handle)
+            .is_some()
+        {
             SUCCESS
         } else {
             INVALID_SIGNAL_GROUP
@@ -1486,7 +1729,7 @@ unsafe fn signal_group_wait_any(
         if conditions.is_null() || compare_values.is_null() || signal.is_null() || value.is_null() {
             return INVALID_ARGUMENT;
         }
-        let Some(signals) = runtime.signal_groups.get(&group.handle) else {
+        let Some(signals) = runtime.signal_state.signal_groups.get(&group.handle) else {
             return INVALID_SIGNAL_GROUP;
         };
         signals.clone()
@@ -1512,7 +1755,11 @@ unsafe fn signal_group_wait_any(
     SUCCESS
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_group_wait_any_relaxed")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_group_wait_any_relaxed(
     group: HsaSignalGroup,
     conditions: *const u32,
@@ -1534,7 +1781,11 @@ pub unsafe extern "C" fn hsa_signal_group_wait_any_relaxed(
     }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_signal_group_wait_any_scacquire")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_signal_group_wait_any_scacquire(
     group: HsaSignalGroup,
     conditions: *const u32,
@@ -1560,9 +1811,13 @@ pub unsafe extern "C" fn hsa_signal_group_wait_any_scacquire(
     status
 }
 
+/// Owned copies of caller arrays used by a multi-signal wait.
 struct WaitInputs {
+    /// Signal handles to observe.
     signals: Vec<HsaSignal>,
+    /// Comparison operation for each signal.
     conditions: Vec<u32>,
+    /// Comparison value for each signal.
     values: Vec<SignalValue>,
 }
 
@@ -1615,16 +1870,23 @@ fn wait_pause(wait_state_hint: u32, start: &Instant) {
 
 /// One validated signal; `retained` keeps its slot stable even after destroy.
 struct WaitEntry {
+    /// Public handle whose slot is being observed.
     handle: HsaSignal,
+    /// Stable mapped signal address while retained.
     signal: Option<NonNull<AmdSignal>>,
+    /// Retirement flag for an imported or asynchronously owned signal.
     retired: Option<Arc<AtomicBool>>,
+    /// Whether this wait incremented the slot's internal reference count.
     retained: bool,
 }
 
+/// Retained signal slots and runtime token held for one blocking wait.
 struct WaitRegistration {
-    // Release retained slots before the token permits shutdown to unmap them.
+    /// Slots released before the token permits shutdown to unmap them.
     entries: Vec<WaitEntry>,
+    /// Prevents runtime teardown while wait code reads retained slots.
     _token: InFlightToken,
+    /// Shared stop request that interrupts this wait during shutdown.
     stop: Arc<AtomicBool>,
 }
 
@@ -1638,12 +1900,12 @@ impl Drop for WaitRegistration {
     }
 }
 
-fn release_wait_entries(runtime: &mut Runtime, entries: &mut [WaitEntry]) {
+fn release_wait_entries(runtime: &mut HsaState, entries: &mut [WaitEntry]) {
     for entry in entries {
         if entry.retained {
             entry.signal = None;
             entry.retired = None;
-            runtime.release_async_signal(entry.handle);
+            runtime.signal_state.release_async_signal(entry.handle);
             entry.retained = false;
         }
     }
@@ -1653,25 +1915,29 @@ fn release_wait_entries(runtime: &mut Runtime, entries: &mut [WaitEntry]) {
 /// The caller must hold the runtime registry lock until every accepted signal
 /// is retained, and must keep the returned registration alive through the wait.
 unsafe fn prepare_multi_wait(
-    runtime: &mut Runtime,
+    runtime: &mut HsaState,
     handles: &[HsaSignal],
 ) -> Option<WaitRegistration> {
     let token = runtime.inflight.enter()?;
     // SAFETY: The runtime lock protects every accepted handle while its
     // storage reference is acquired, and the references are retained below.
     let mut entries =
-        unsafe { collect_wait_signals(handles, |signal| runtime.owns_signal(signal)) };
+        unsafe { collect_wait_signals(handles, |signal| runtime.signal_state.owns_signal(signal)) };
     for index in 0..entries.len() {
         if entries[index].signal.is_none() {
             continue;
         }
         let handle = entries[index].handle;
-        if runtime.retain_async_signal(handle).is_err() {
+        if runtime.signal_state.retain_async_signal(handle).is_err() {
             release_wait_entries(runtime, &mut entries);
             return None;
         }
         entries[index].retained = true;
-        let Some(record) = runtime.async_signal_refs.get(&(handle.handle as usize)) else {
+        let Some(record) = runtime
+            .signal_state
+            .async_signal_refs
+            .get(&(handle.handle as usize))
+        else {
             release_wait_entries(runtime, &mut entries);
             return None;
         };
@@ -1758,7 +2024,11 @@ unsafe fn signal_wait_any_open(
     }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_signal_wait_any")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_signal_wait_any(
     signal_count: u32,
     signals: *const HsaSignal,
@@ -1856,7 +2126,11 @@ unsafe fn signal_wait_all_open(
     }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_signal_wait_all")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_signal_wait_all(
     signal_count: u32,
     signals: *const HsaSignal,
@@ -1909,7 +2183,11 @@ fn signal_value_pointer(signal: &AmdSignal, interrupt: bool) -> Result<*mut Sign
     Ok((&raw const signal.value).cast::<SignalValue>().cast_mut())
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_signal_value_pointer")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_signal_value_pointer(
     signal: HsaSignal,
     value: *mut *mut SignalValue,
@@ -1925,10 +2203,11 @@ pub unsafe extern "C" fn hsa_amd_signal_value_pointer(
         if value.is_null() {
             return INVALID_ARGUMENT;
         }
-        if !runtime.owns_signal(signal) {
+        if !runtime.signal_state.owns_signal(signal) {
             return INVALID_SIGNAL;
         }
         let interrupt = runtime
+            .signal_state
             .interrupt_signals
             .contains_key(&(signal.handle as usize));
         // SAFETY: owns_signal validated the handle while the runtime lock
@@ -1948,7 +2227,11 @@ pub unsafe extern "C" fn hsa_amd_signal_value_pointer(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_signal_get_event_id")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_signal_get_event_id(
     signal: HsaSignal,
     event_id: *mut u32,
@@ -1964,7 +2247,7 @@ pub unsafe extern "C" fn hsa_amd_signal_get_event_id(
         if event_id.is_null() {
             return INVALID_ARGUMENT;
         }
-        if !runtime.owns_signal(signal) {
+        if !runtime.signal_state.owns_signal(signal) {
             return INVALID_SIGNAL;
         }
         // SAFETY: owns_signal validated this live slab slot and the caller
@@ -1974,7 +2257,11 @@ pub unsafe extern "C" fn hsa_amd_signal_get_event_id(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_async_function")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_async_function(
     callback: AsyncFunction,
     arg: *mut c_void,
@@ -1991,10 +2278,13 @@ pub unsafe extern "C" fn hsa_amd_async_function(
         let Some(callback) = callback else {
             return INVALID_ARGUMENT;
         };
-        runtime.enqueue_async(AsyncRequest::Function {
-            callback,
-            arg: unsafe { CallbackArg::new(arg) },
-        })
+        runtime.signal_state.enqueue_async(
+            AsyncRequest::Function {
+                callback,
+                arg: unsafe { CallbackArg::new(arg) },
+            },
+            &runtime.stop_workers,
+        )
     })
 }
 
@@ -2091,7 +2381,7 @@ fn run_async_dispatcher(receiver: &Receiver<AsyncRequest>, stop: &std::sync::ato
                 let removed = handlers.remove(index);
                 if let Ok(mut guard) = lock() {
                     if let Some(runtime) = guard.as_mut() {
-                        runtime.release_async_signal(removed.signal);
+                        runtime.signal_state.release_async_signal(removed.signal);
                     }
                 }
             }
@@ -2117,7 +2407,11 @@ fn run_async_dispatcher(receiver: &Receiver<AsyncRequest>, stop: &std::sync::ato
     }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_signal_async_handler")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_signal_async_handler(
     signal: HsaSignal,
     condition: u32,
@@ -2143,28 +2437,40 @@ pub unsafe extern "C" fn hsa_amd_signal_async_handler(
         ) {
             return INVALID_ARGUMENT;
         }
-        if !runtime.owns_signal(signal) {
+        if !runtime.signal_state.owns_signal(signal) {
             return INVALID_SIGNAL;
         }
         let address = signal.handle as usize;
-        if !runtime.interrupt_signals.contains_key(&address)
-            && !runtime.owned_ipc_signals.contains_key(&address)
-            && !runtime.imported_ipc_signals.contains_key(&address)
+        if !runtime
+            .signal_state
+            .interrupt_signals
+            .contains_key(&address)
+            && !runtime
+                .signal_state
+                .owned_ipc_signals
+                .contains_key(&address)
+            && !runtime
+                .signal_state
+                .imported_ipc_signals
+                .contains_key(&address)
         {
             return INVALID_SIGNAL;
         }
-        if let Err(status) = runtime.retain_async_signal(signal) {
+        if let Err(status) = runtime.signal_state.retain_async_signal(signal) {
             return status;
         }
-        let status = runtime.enqueue_async(AsyncRequest::Signal {
-            signal,
-            condition,
-            compare_value,
-            handler,
-            arg: unsafe { CallbackArg::new(arg) },
-        });
+        let status = runtime.signal_state.enqueue_async(
+            AsyncRequest::Signal {
+                signal,
+                condition,
+                compare_value,
+                handler,
+                arg: unsafe { CallbackArg::new(arg) },
+            },
+            &runtime.stop_workers,
+        );
         if status != SUCCESS {
-            runtime.release_async_signal(signal);
+            runtime.signal_state.release_async_signal(signal);
         }
         status
     })
@@ -2198,30 +2504,6 @@ mod tests {
         });
         assert_eq!(result, Err(()));
         assert_eq!(retries, 1);
-    }
-
-    #[test]
-    #[ignore = "requires a qualified GPU and KFD runtime"]
-    fn destroyed_signal_storage_is_reused() {
-        assert_eq!(crate::hsa_init(), SUCCESS);
-        let mut signal = HsaSignal { handle: 0 };
-        let mut previous = 0;
-        for value in 0..10_000 {
-            // SAFETY: The test supplies writable output storage and owns each
-            // returned signal until destruction below.
-            assert_eq!(
-                unsafe { hsa_signal_create(value, 0, std::ptr::null(), &raw mut signal) },
-                SUCCESS
-            );
-            assert_eq!(unsafe { hsa_signal_load_relaxed(signal) }, value);
-            if value != 0 {
-                assert_eq!(signal.handle, previous);
-            }
-            previous = signal.handle;
-            // SAFETY: No other work retains this signal.
-            assert_eq!(unsafe { hsa_signal_destroy(signal) }, SUCCESS);
-        }
-        assert_eq!(crate::hsa_shut_down(), SUCCESS);
     }
 
     unsafe extern "C" fn count_rearmed_handler(_value: SignalValue, arg: *mut c_void) -> bool {
@@ -2943,5 +3225,29 @@ mod tests {
             );
             assert_eq!(satisfying, -1);
         }
+    }
+
+    #[test]
+    #[ignore = "requires a qualified GPU and KFD runtime"]
+    fn destroyed_signal_storage_is_reused() {
+        assert_eq!(crate::hsa_init(), SUCCESS);
+        let mut signal = HsaSignal { handle: 0 };
+        let mut previous = 0;
+        for value in 0..10_000 {
+            // SAFETY: The test supplies writable output storage and owns each
+            // returned signal until destruction below.
+            assert_eq!(
+                unsafe { hsa_signal_create(value, 0, std::ptr::null(), &raw mut signal) },
+                SUCCESS
+            );
+            assert_eq!(unsafe { hsa_signal_load_relaxed(signal) }, value);
+            if value != 0 {
+                assert_eq!(signal.handle, previous);
+            }
+            previous = signal.handle;
+            // SAFETY: No other work retains this signal.
+            assert_eq!(unsafe { hsa_signal_destroy(signal) }, SUCCESS);
+        }
+        assert_eq!(crate::hsa_shut_down(), SUCCESS);
     }
 }

@@ -1,49 +1,47 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Process-global HSA initialization, discovery, and object ownership.
+//! Process-global HSA initialization, discovery, and shutdown coordination.
 //!
-//! The single runtime registry owns the rocddi session and every HSA-visible
-//! object map. Native queries that release its mutex retain an in-flight token
-//! until they finish, so shutdown waits before freeing their device VM.
+//! A lifecycle gate publishes one HSA adapter state. Queue, signal, memory,
+//! loader, image, and sampling modules own their HSA handle maps within that
+//! state; rocddi owns native device resources. Native queries that release the
+//! gate's mutex retain an in-flight token until they finish, so shutdown waits
+//! before freeing their device VM.
 //! Application callbacks and worker joins occur outside the lock. Final
 //! shutdown removes public reachability before releasing native resources.
 //!
-//! Host and GPU discovery go through the rocddi provider.
+//! GPU discovery uses rocddi; host CPU information comes from the platform layer.
 
 use std::cell::Cell;
-use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::c_void;
 use std::fmt::Arguments;
 use std::io::Write;
-use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use crate::platform::event::{SignalEvent, SignalEventPage};
 use rocddi::device::Device;
 use rocddi::device::event::{
     DeviceEvent, DeviceEventSubscription, GpuHardwareException, GpuMemoryFault,
     GpuMemoryFaultCause, GpuResetCause, subscribe,
 };
+use rocddi::device::gpu::profiling::{PcSamplingConfiguration, PcSamplingConfigurationSet};
 use rocddi::memory::device::Allocation;
 use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::{Endpoint, EndpointDetailsKind, GpuInfo};
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
-use crate::loader::{CodeObject, CodeSymbol, Executable, Reader, Symbol};
-use crate::memory::{LockedMemory, Memory, VmemHandle, VmemMapping, VmemReservation};
+use crate::image_abi::ImageState;
+use crate::loader::LoaderState;
+use crate::memory::MemoryState;
+use crate::pc_sampling::PcSamplingState;
 use crate::platform::host::{self as platform_host, CpuCacheKind, CpuInfo};
-use crate::queue::{
-    CountedHardwareQueue, CountedQueue, Queue, QueueSharedEvent, SdmaQueue, SoftQueue,
-};
-use crate::signal::{
-    AsyncDispatcher, AsyncSignalRecord, ImportedIpcSignal, OwnedIpcSignal, SignalSlab,
-};
+use crate::queue::QueueState;
+use crate::signal::SignalState;
 
 thread_local! {
     static IN_CALLBACK: Cell<bool> = const { Cell::new(false) };
@@ -54,8 +52,22 @@ thread_local! {
 // HSA generations therefore need a private context to acquire a fresh VM.
 static PRIMARY_CONTEXT_USED: AtomicBool = AtomicBool::new(false);
 
+/// A transient native query failure leaves support undecided so public calls
+/// can retry after the underlying condition clears.
+fn pc_sampling_supported_by_query(
+    result: Result<Vec<PcSamplingConfiguration>, rocddi::Error>,
+) -> bool {
+    match result {
+        Ok(configurations) => !configurations.is_empty(),
+        Err(error) => error.kind() != rocddi::ErrorKind::Unsupported,
+    }
+}
+
+/// Initialization error with evidence that native rollback also failed.
 pub(crate) struct InitFailure {
+    /// HSA status returned to the caller.
     pub(crate) status: Status,
+    /// Native state was retained because cleanup could not be proved.
     pub(crate) cleanup_failed: bool,
 }
 
@@ -110,12 +122,17 @@ impl Drop for LogWriteScope {
     }
 }
 
+/// Logging destination and flags protected during C stream use.
 struct LogConfig {
+    /// Enabled log categories supplied by the caller.
     flags: [u8; 8],
+    /// Borrowed C stream, or stderr when absent.
     stream: Option<BorrowedCStream>,
+    /// Prevents stream replacement during final shutdown.
     stopping: bool,
 }
 
+/// Borrowed C `FILE` pointer governed by the HSA logging contract.
 #[derive(Clone, Copy)]
 struct BorrowedCStream(NonNull<c_void>);
 
@@ -129,8 +146,11 @@ unsafe extern "C" {
     fn fflush(stream: *mut c_void) -> i32;
 }
 
+/// Shared logging sink with an atomic category fast path.
 pub(crate) struct LogOutput {
+    /// Enabled categories checked before locking the stream.
     enabled: AtomicU64,
+    /// Serializes output and changes to the borrowed stream.
     config: Mutex<LogConfig>,
 }
 
@@ -197,10 +217,15 @@ impl LogOutput {
     }
 }
 
+/// Log line that retains its runtime generation until emission completes.
 pub(crate) struct LogWork {
+    /// Sink retained while writing outside the registry lock.
     output: Arc<LogOutput>,
+    /// Blocks shutdown from freeing state while this work is outstanding.
     _inflight: InFlightToken,
+    /// Category to check before emitting the line.
     flag: u32,
+    /// Complete formatted line owned by this work item.
     line: String,
 }
 
@@ -325,8 +350,13 @@ fn system_event_worker(mut subscription: DeviceEventSubscription, stop: &AtomicB
                         Duration::from_millis(50),
                         |registry| {
                             registry.as_ref().is_some_and(|runtime| {
-                                runtime.queues.values().any(|queue| queue.agent == agent)
+                                runtime
+                                    .queue_state
+                                    .queues
+                                    .values()
+                                    .any(|queue| queue.agent == agent)
                                     && !runtime
+                                        .queue_state
                                         .queues
                                         .values()
                                         .any(|queue| queue.agent == agent && queue.vm_faulted)
@@ -338,7 +368,7 @@ fn system_event_worker(mut subscription: DeviceEventSubscription, stop: &AtomicB
                     let Some(runtime) = guard.as_mut() else {
                         return;
                     };
-                    for queue in runtime.queues.values_mut() {
+                    for queue in runtime.queue_state.queues.values_mut() {
                         if queue.agent == agent && queue.vm_faulted {
                             queue.vm_fault_address = fault.virtual_address;
                             queue.vm_fault_reason = reason;
@@ -435,21 +465,38 @@ fn cache_sizes(caches: &[Cache], agent: HsaAgent) -> [u32; 4] {
 
 /// Activated GPU and the immutable compatibility facts derived at startup.
 pub(crate) struct Gpu {
+    /// Passive endpoint used for identity and topology queries.
     pub(crate) endpoint: Endpoint,
+    /// Cached hardware facts from passive discovery.
     pub(crate) info: GpuInfo,
+    /// Activated native device and its driver resources.
     pub(crate) device: Device,
+    /// HSA-visible short target name.
     pub(crate) name: Box<str>,
+    /// HSA-visible product name.
     pub(crate) product_name: Box<str>,
+    /// ASIC family used by image layout and target checks.
     pub(crate) asic_family_id: u32,
+    /// GPU timestamp ticks per second.
     pub(crate) timestamp_frequency_hz: u64,
+    /// Host addresses of native HDP flush controls, when available.
     pub(crate) hdp_flush: [usize; 2],
+    /// Retains the MMIO allocation supplying those controls.
     _mmio_remap: Option<Allocation>,
+    /// HSA coherency classification derived from native capabilities.
     pub(crate) coherency_type: u32,
+    /// Whether a fine-grain local pool is exposed for this GPU.
     pub(crate) fine_grain_pool: bool,
+    /// Whether this target has a PC sampling path; transient query failures
+    /// leave the capability visible so later operations can retry.
+    pub(crate) pc_sampling_supported: bool,
+    /// Current native persisting L2 reservation shared across HSA views.
     pub(crate) persisting_l2_cache_size: Arc<Mutex<usize>>,
 }
 
+/// Minimal cleanup contract shared by real and test session owners.
 trait RetireSession {
+    /// Releases native resources and reports whether cleanup was conclusive.
     fn retire(&mut self) -> bool;
 }
 
@@ -459,8 +506,11 @@ impl RetireSession for Session {
     }
 }
 
+/// Holds startup resources until publication or rollback finishes.
 struct PendingInit<S: RetireSession = Session, G = Gpu> {
+    /// Session released after all activated GPU owners.
     session: Option<S>,
+    /// Activated GPUs that must be dropped before their session.
     gpus: Vec<G>,
 }
 
@@ -489,9 +539,13 @@ impl<S: RetireSession, G> Drop for PendingInit<S, G> {
 
 /// Stable HSA cache object associated with one CPU or GPU agent.
 pub(crate) struct Cache {
+    /// HSA agent that reports this cache.
     pub(crate) agent: HsaAgent,
+    /// Stable NUL-terminated cache name.
     pub(crate) name: Box<[u8]>,
+    /// Cache hierarchy level.
     pub(crate) level: u8,
+    /// Cache capacity in bytes.
     pub(crate) size: u32,
 }
 
@@ -518,15 +572,20 @@ impl Cache {
 
 /// Counts calls that must finish before shutdown releases runtime storage.
 pub(crate) struct InFlightTracker {
+    /// Number of native operations currently holding a token.
     active: Mutex<usize>,
+    /// Wakes shutdown when the final token is dropped.
     idle: Condvar,
+    /// Native cleanup failed after the generation was detached for shutdown.
+    cleanup_uncertain: AtomicBool,
 }
 
 impl InFlightTracker {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             active: Mutex::new(0),
             idle: Condvar::new(),
+            cleanup_uncertain: AtomicBool::new(false),
         }
     }
 
@@ -553,9 +612,21 @@ impl InFlightTracker {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
         }
     }
+
+    /// Retains the whole generation when an unpublished owner cannot be
+    /// returned to its registry after native cleanup fails.
+    pub(crate) fn quarantine(&self) {
+        self.cleanup_uncertain.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn is_quarantined(&self) -> bool {
+        self.cleanup_uncertain.load(Ordering::Acquire)
+    }
 }
 
+/// One registered operation that must finish before runtime teardown.
 pub(crate) struct InFlightToken {
+    /// Counter decremented when this operation leaves its native work.
     tracker: Arc<InFlightTracker>,
 }
 
@@ -573,73 +644,54 @@ impl Drop for InFlightToken {
     }
 }
 
-/// Process-wide setting captured by each accepted asynchronous copy.
-#[derive(Clone, Copy)]
-pub(crate) enum AsyncCopyProfiling {
-    Disabled,
-    Enabled,
-}
-
 /// Complete process-global HSA state.
 ///
 /// Every integer handle and public pointer accepted by this frontend must map
 /// to an owner in this structure. Removing an entry transfers that owner to the
 /// entry point performing destruction, allowing callbacks, blocking cleanup,
 /// and worker joins to happen after the global mutex is released.
-pub(crate) struct Runtime {
-    pub(crate) references: u32,
+pub(crate) struct HsaState {
+    /// Process logging sink retained by work outside the registry lock.
     pub(crate) logging: Arc<LogOutput>,
+    /// Next opaque HSA handle value.
     pub(crate) next_handle: u64,
-    pub(crate) next_queue_id: u64,
-    pub(crate) code_objects: HashMap<u64, CodeObject>,
-    pub(crate) code_symbols: HashMap<u64, CodeSymbol>,
-    pub(crate) readers: HashMap<u64, Reader>,
-    pub(crate) executables: HashMap<u64, Executable>,
-    pub(crate) symbols: HashMap<u64, Symbol>,
-    pub(crate) allocations: HashMap<usize, Memory>,
-    pub(crate) ipc_allocations: HashMap<usize, Memory>,
-    pub(crate) interop_allocations: HashMap<usize, Memory>,
-    pub(crate) locked_allocations: Vec<LockedMemory>,
-    pub(crate) async_copy_borrows: HashMap<usize, usize>,
-    pub(crate) async_copy_quarantine: Arc<AtomicBool>,
-    pub(crate) async_copy_profiling: AsyncCopyProfiling,
-    pub(crate) vmem_reservations: BTreeMap<usize, VmemReservation>,
-    pub(crate) vmem_handles: HashMap<u64, VmemHandle>,
-    pub(crate) vmem_mappings: BTreeMap<usize, VmemMapping>,
-    pub(crate) signal_slabs: Vec<SignalSlab>,
-    pub(crate) recycled_signals: Vec<usize>,
-    pub(crate) signal_event_page: Option<SignalEventPage>,
-    pub(crate) signal_event_page_confirmed: bool,
-    pub(crate) queue_event: Option<Arc<QueueSharedEvent>>,
-    pub(crate) interrupt_signals: HashMap<usize, Option<SignalEvent>>,
-    pub(crate) signal_event_pool: Vec<SignalEvent>,
-    pub(crate) owned_ipc_signals: HashMap<usize, OwnedIpcSignal>,
-    pub(crate) imported_ipc_signals: HashMap<usize, ImportedIpcSignal>,
-    pub(crate) async_signal_refs: HashMap<usize, AsyncSignalRecord>,
-    pub(crate) signal_groups: HashMap<u64, Vec<HsaSignal>>,
-    pub(crate) queues: HashMap<usize, Queue>,
-    pub(crate) cooperative_teardown: HashSet<u64>,
-    pub(crate) sdma_queues: HashMap<usize, SdmaQueue>,
-    pub(crate) soft_queues: HashMap<usize, SoftQueue>,
-    pub(crate) counted_queues: HashMap<usize, CountedQueue>,
-    pub(crate) counted_queue_pools: HashMap<(u64, u32), Vec<CountedHardwareQueue>>,
-    pub(crate) released_counted_queues: HashSet<usize>,
-    pub(crate) counted_queue_limit: usize,
-    pub(crate) counted_queue_size: u32,
+    /// HSA queue handles and their frontend teardown dependencies.
+    pub(crate) queue_state: QueueState,
+    /// HSA code-object and executable handles around rocloader owners.
+    pub(crate) loader: LoaderState,
+    /// HSA image and sampler descriptor handles.
+    pub(crate) image_state: ImageState,
+    /// HSA memory handles and metadata around rocddi allocation owners.
+    pub(crate) memory_state: MemoryState,
+    /// HSA signal handles, backing, events, and asynchronous registrations.
+    pub(crate) signal_state: SignalState,
+    /// HSA PC sampling handles and native cleanup state.
+    pub(crate) pc_sampling_state: PcSamplingState,
+    /// Host memory capacity reported by the CPU agent.
     pub(crate) host_memory_bytes: usize,
+    /// System page size used by host memory pools.
     pub(crate) host_page_size: usize,
+    /// Stable HSA name of the host CPU agent.
     pub(crate) host_name: Box<str>,
+    /// Compute-unit count reported for the CPU agent.
     pub(crate) host_compute_units: u32,
+    /// Whether all exposed agents support the full HSA profile.
     pub(crate) full_profile: bool,
+    /// Latest reported VM fault details for system event queries.
     pub(crate) vm_fault_details: Option<(HsaAgent, u64, u32)>,
+    /// Registered process-level system event callbacks.
     pub(crate) system_event_handlers: Vec<(SystemEventHandler, CallbackArg)>,
-    pub(crate) system_event_worker_started: bool,
-    pub(crate) async_dispatcher: Option<AsyncDispatcher>,
-    pub(crate) workers: Vec<JoinHandle<()>>,
+    /// Native system event worker joined during final teardown.
+    pub(crate) system_event_worker: Option<JoinHandle<()>>,
+    /// Shared stop request observed by those workers.
     pub(crate) stop_workers: Arc<AtomicBool>,
+    /// Counts native work that must finish before session release.
     pub(crate) inflight: Arc<InFlightTracker>,
+    /// CPU and GPU cache records exposed through HSA queries.
     pub(crate) caches: Vec<Cache>,
+    /// Activated GPU agents and their native owners.
     pub(crate) gpus: Vec<Gpu>,
+    /// Native session retained until all GPU and memory owners are gone.
     pub(crate) session: Session,
     /// Lifetime policy for the KFD context used by this runtime generation.
     /// Memory-pool choices that require the primary context use this value.
@@ -673,11 +725,14 @@ pub(crate) fn defer_cleanup<T: Send + 'static>(
     Ok(())
 }
 
-impl Runtime {
+impl HsaState {
     pub(crate) fn running_on_worker(&self) -> bool {
-        self.workers
-            .iter()
-            .any(|worker| worker.thread().id() == thread::current().id())
+        self.signal_state.running_on_worker()
+            || self.memory_state.running_on_worker()
+            || self
+                .system_event_worker
+                .as_ref()
+                .is_some_and(|worker| worker.thread().id() == thread::current().id())
     }
 
     pub(crate) fn request_stop(&self) {
@@ -816,6 +871,10 @@ impl Runtime {
                     .and_then(|mapping| mapping.info().host_address),
             );
             let fine_grain_pool = info.hive_id != 0;
+            let pc_sampling_supported = crate::pc_sampling::session::supported_gpu(info)
+                && pc_sampling_supported_by_query(device.gpu().and_then(|gpu| {
+                    gpu.pc_sampling_configurations(PcSamplingConfigurationSet::Supported)
+                }));
             pending.gpus.push(Gpu {
                 endpoint,
                 info,
@@ -828,51 +887,20 @@ impl Runtime {
                 _mmio_remap: mmio_remap,
                 coherency_type: AMD_COHERENCY_TYPE_NONCOHERENT,
                 fine_grain_pool,
+                pc_sampling_supported,
                 persisting_l2_cache_size: Arc::new(Mutex::new(0)),
             });
         }
         let gpus = std::mem::take(&mut pending.gpus);
         let session = pending.session.take().ok_or(ERROR)?;
         Ok(Self {
-            references: 1,
             logging: Arc::new(LogOutput::new()),
             next_handle: 0x4853_4101_0000_0000,
-            next_queue_id: 0,
-            code_objects: HashMap::new(),
-            code_symbols: HashMap::new(),
-            readers: HashMap::new(),
-            executables: HashMap::new(),
-            symbols: HashMap::new(),
-            allocations: HashMap::new(),
-            ipc_allocations: HashMap::new(),
-            interop_allocations: HashMap::new(),
-            locked_allocations: Vec::new(),
-            async_copy_borrows: HashMap::new(),
-            async_copy_quarantine: Arc::new(AtomicBool::new(false)),
-            async_copy_profiling: AsyncCopyProfiling::Disabled,
-            vmem_reservations: BTreeMap::new(),
-            vmem_handles: HashMap::new(),
-            vmem_mappings: BTreeMap::new(),
-            signal_slabs: Vec::new(),
-            recycled_signals: Vec::new(),
-            signal_event_page: None,
-            signal_event_page_confirmed: false,
-            queue_event: None,
-            interrupt_signals: HashMap::new(),
-            signal_event_pool: Vec::new(),
-            owned_ipc_signals: HashMap::new(),
-            imported_ipc_signals: HashMap::new(),
-            async_signal_refs: HashMap::new(),
-            signal_groups: HashMap::new(),
-            queues: HashMap::new(),
-            cooperative_teardown: HashSet::new(),
-            sdma_queues: HashMap::new(),
-            soft_queues: HashMap::new(),
-            counted_queues: HashMap::new(),
-            counted_queue_pools: HashMap::new(),
-            released_counted_queues: HashSet::new(),
-            counted_queue_limit: 4,
-            counted_queue_size: 16_384,
+            queue_state: QueueState::new(),
+            loader: LoaderState::new(),
+            image_state: ImageState::new(),
+            memory_state: MemoryState::new(),
+            signal_state: SignalState::new(),
             host_memory_bytes,
             host_page_size,
             host_name: host.name.into_boxed_str(),
@@ -880,11 +908,10 @@ impl Runtime {
             full_profile,
             vm_fault_details: None,
             system_event_handlers: Vec::new(),
-            system_event_worker_started: false,
-            async_dispatcher: None,
-            workers: Vec::new(),
+            system_event_worker: None,
             stop_workers: Arc::new(AtomicBool::new(false)),
             inflight: Arc::new(InFlightTracker::new()),
+            pc_sampling_state: PcSamplingState::new(),
             caches,
             gpus,
             session,
@@ -899,7 +926,7 @@ impl Runtime {
     }
 
     pub(crate) fn ensure_system_event_worker(&mut self) -> Status {
-        if self.system_event_worker_started {
+        if self.system_event_worker.is_some() {
             return SUCCESS;
         }
         let Some(device) = self.gpus.first().map(|gpu| gpu.device.clone()) else {
@@ -917,15 +944,8 @@ impl Runtime {
             Ok(worker) => worker,
             Err(_) => return OUT_OF_RESOURCES,
         };
-        self.workers.push(worker);
-        self.system_event_worker_started = true;
+        self.system_event_worker = Some(worker);
         SUCCESS
-    }
-
-    pub(crate) fn allocate_queue_id(&mut self) -> Result<u64, Status> {
-        let id = self.next_queue_id;
-        self.next_queue_id = self.next_queue_id.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
-        Ok(id)
     }
 
     pub(crate) fn gpu_index(&self, agent: HsaAgent) -> Option<usize> {
@@ -950,7 +970,15 @@ impl Runtime {
         let offset = isa.handle.checked_sub(ISA_BASE)?;
         let index = usize::try_from(offset / ISA_COUNT_PER_GPU).ok()?;
         let variant = offset % ISA_COUNT_PER_GPU;
-        (index < self.gpus.len()).then_some((index, variant))
+        let gpu = self.gpus.get(index)?;
+        super::isa_name(
+            gpu.info.gfx_major,
+            gpu.info.gfx_minor,
+            gpu.info.gfx_stepping,
+            gpu.info.asic_revision,
+            variant,
+        )
+        .map(|_| (index, variant))
     }
 
     pub(crate) fn isa_index(&self, isa: HsaIsa) -> Option<usize> {
@@ -1005,55 +1033,37 @@ impl Runtime {
         // Multi-signal waits observe stop_workers and release their signal
         // references. Native calls finish before we release the device VM.
         self.inflight.wait_idle();
-        notify_system_shutdown(&self.system_event_handlers);
-        for worker in self.workers.drain(..) {
-            let _ = worker.join();
-        }
-        if self.async_copy_quarantine.load(Ordering::Acquire) {
-            // A copy with unproved native retirement can still reach runtime
-            // allocations and signals. Keep their entire ownership graph live.
+        if self.inflight.is_quarantined() {
             std::mem::forget(self);
             return INVALID_RUNTIME_STATE;
         }
-        self.counted_queues.clear();
-        self.counted_queue_pools.clear();
-        self.released_counted_queues.clear();
-        for (_, mut queue) in self.queues.drain() {
-            if crate::queue::destroy_runtime_queue(&mut queue).is_err() {
-                // An unresolved native queue can still reference its scratch
-                // and inactive signal. Preserve the complete dependency set
-                // for KFD process teardown instead of freeing reachable pages.
-                std::mem::forget(queue);
-            }
+        notify_system_shutdown(&self.system_event_handlers);
+        if let Some(worker) = self.system_event_worker.take() {
+            let _ = worker.join();
         }
-        for (_, mut queue) in self.sdma_queues.drain() {
-            if crate::queue::destroy_runtime_sdma_queue(&mut queue).is_err() {
-                // Native teardown may still reach the ring, pointer page, or
-                // doorbell. Keep their owner and the public handle together.
-                std::mem::forget(queue);
-            }
+        self.memory_state.join_workers();
+        self.signal_state.join_worker();
+        if self.memory_state.is_quarantined() {
+            // A copy with unproved native retirement can still reach runtime
+            // allocations and signals. Keep their entire ownership graph live.
+            self.pc_sampling_state.quarantine_all();
+            std::mem::forget(self);
+            return INVALID_RUNTIME_STATE;
         }
-        self.queue_event = None;
-        self.soft_queues.clear();
-        let signal_status = self.destroy_signal_events();
-        self.symbols.clear();
-        self.executables.clear();
-        self.readers.clear();
-        self.code_symbols.clear();
-        self.code_objects.clear();
-        self.locked_allocations.clear();
-        self.vmem_mappings.clear();
-        self.vmem_handles.clear();
-        self.vmem_reservations.clear();
-        self.ipc_allocations.clear();
-        self.interop_allocations.clear();
-        self.allocations.clear();
-        self.signal_groups.clear();
-        self.async_signal_refs.clear();
-        self.imported_ipc_signals.clear();
-        self.owned_ipc_signals.clear();
-        self.recycled_signals.clear();
-        self.signal_slabs.clear();
+        if !self.pc_sampling_state.shutdown() {
+            std::mem::forget(self);
+            return INVALID_RUNTIME_STATE;
+        }
+        if !self.queue_state.shutdown() {
+            std::mem::forget(self);
+            return INVALID_RUNTIME_STATE;
+        }
+        let signal_status = self.signal_state.destroy_events();
+        self.image_state.clear();
+        self.loader.clear();
+        self.memory_state.clear();
+        self.signal_state.clear_storage();
+        self.pc_sampling_state.clear_retired();
         self.gpus.clear();
         let session_status = self.session.destroy().map_or_else(map_error, |()| SUCCESS);
         if signal_status == SUCCESS {
@@ -1110,34 +1120,60 @@ pub(crate) fn translate_gpu_tick(
     })
 }
 
+/// Process registry phase and generation during initialization or teardown.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LifecyclePhase {
+    /// No HSA runtime is published.
     Inactive,
+    /// A new generation is acquiring native resources.
     Starting(u64),
+    /// The generation is invoking tool initialization callbacks.
+    LoadingTools(u64),
+    /// The generation is available to HSA callers.
     Active(u64),
+    /// Final shutdown is retiring the generation.
     Stopping(u64),
+    /// Failed native cleanup prevents a safe new generation.
     Quarantined,
 }
 
-pub(crate) struct RuntimeRegistry {
-    runtime: Option<Runtime>,
+/// Process-wide gate for HSA generation transitions.
+pub(crate) struct HsaLifecycle {
+    /// Published HSA adapter state for the active generation.
+    state: Option<HsaState>,
+    /// Successful `hsa_init` calls awaiting shutdown for the active generation.
+    references: u32,
+    /// Last generation number assigned by initialization.
     generation: u64,
+    /// Current transition phase under the registry mutex.
     phase: LifecyclePhase,
 }
 
-impl RuntimeRegistry {
+impl HsaLifecycle {
     const fn new() -> Self {
         Self {
-            runtime: None,
+            state: None,
+            references: 0,
             generation: 0,
             phase: LifecyclePhase::Inactive,
         }
     }
 
+    pub(crate) fn as_ref(&self) -> Option<&HsaState> {
+        self.state.as_ref()
+    }
+
+    pub(crate) fn as_mut(&mut self) -> Option<&mut HsaState> {
+        self.state.as_mut()
+    }
+
     /// Returns the generation of the currently published runtime.
     pub(crate) fn active_generation(&self) -> Option<u64> {
-        match (self.phase, self.runtime.as_ref()) {
-            (LifecyclePhase::Active(generation), Some(_)) => Some(generation),
+        match (self.phase, self.state.as_ref()) {
+            (
+                LifecyclePhase::LoadingTools(generation) | LifecyclePhase::Active(generation),
+                Some(_),
+            ) => Some(generation),
             _ => None,
         }
     }
@@ -1146,11 +1182,13 @@ impl RuntimeRegistry {
     pub(crate) fn begin_init(&mut self) -> Result<Option<u64>, Status> {
         match self.phase {
             LifecyclePhase::Active(_) => {
-                let runtime = self.runtime.as_mut().ok_or(ERROR)?;
-                if runtime.references == i32::MAX as u32 {
+                if self.state.is_none() {
+                    return Err(ERROR);
+                }
+                if self.references == i32::MAX as u32 {
                     return Err(0x100c);
                 }
-                runtime.references += 1;
+                self.references += 1;
                 Ok(None)
             }
             LifecyclePhase::Inactive => {
@@ -1159,16 +1197,32 @@ impl RuntimeRegistry {
                 Ok(Some(self.generation))
             }
             LifecyclePhase::Starting(_)
+            | LifecyclePhase::LoadingTools(_)
             | LifecyclePhase::Stopping(_)
             | LifecyclePhase::Quarantined => Err(INVALID_RUNTIME_STATE),
         }
     }
 
-    pub(crate) fn publish_init(&mut self, generation: u64, runtime: Runtime) -> Result<(), Status> {
+    pub(crate) fn publish_init(
+        &mut self,
+        generation: u64,
+        runtime: HsaState,
+    ) -> Result<(), Status> {
         if self.phase != LifecyclePhase::Starting(generation) {
             return Err(ERROR);
         }
-        self.runtime = Some(runtime);
+        self.state = Some(runtime);
+        self.references = 1;
+        // HSA queries may run from a tool's OnLoad, but recursive init and
+        // shutdown must remain rejected until the tool table is published.
+        self.phase = LifecyclePhase::LoadingTools(generation);
+        Ok(())
+    }
+
+    pub(crate) fn finish_init(&mut self, generation: u64) -> Result<(), Status> {
+        if self.phase != LifecyclePhase::LoadingTools(generation) || self.state.is_none() {
+            return Err(ERROR);
+        }
         self.phase = LifecyclePhase::Active(generation);
         Ok(())
     }
@@ -1186,24 +1240,29 @@ impl RuntimeRegistry {
         } else {
             LifecyclePhase::Inactive
         };
+        self.references = 0;
         Ok(())
     }
 
     /// Returns None after releasing one of several active references.
-    pub(crate) fn begin_shutdown(&mut self) -> Result<Option<(Runtime, u64)>, Status> {
+    pub(crate) fn begin_shutdown(&mut self) -> Result<Option<(HsaState, u64)>, Status> {
         match self.phase {
             LifecyclePhase::Active(generation) => {
-                let runtime = self.runtime.as_mut().ok_or(ERROR)?;
-                if runtime.references > 1 {
-                    runtime.references -= 1;
+                if self.state.is_none() {
+                    return Err(ERROR);
+                }
+                if self.references > 1 {
+                    self.references -= 1;
                     return Ok(None);
                 }
-                let runtime = self.runtime.take().ok_or(ERROR)?;
+                let runtime = self.state.take().ok_or(ERROR)?;
+                self.references = 0;
                 self.phase = LifecyclePhase::Stopping(generation);
                 Ok(Some((runtime, generation)))
             }
             LifecyclePhase::Inactive => Err(NOT_INITIALIZED),
             LifecyclePhase::Starting(_)
+            | LifecyclePhase::LoadingTools(_)
             | LifecyclePhase::Stopping(_)
             | LifecyclePhase::Quarantined => Err(INVALID_RUNTIME_STATE),
         }
@@ -1228,23 +1287,11 @@ impl RuntimeRegistry {
     }
 }
 
-impl Deref for RuntimeRegistry {
-    type Target = Option<Runtime>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.runtime
-    }
-}
-
-impl DerefMut for RuntimeRegistry {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.runtime
-    }
-}
-
 /// Quarantines a generation if initialization or shutdown unwinds.
 pub(crate) struct LifecycleTransition {
+    /// Generation phase that will be quarantined if this guard unwinds.
     phase: LifecyclePhase,
+    /// Cleared once the transition finishes successfully.
     armed: bool,
 }
 
@@ -1273,20 +1320,26 @@ impl Drop for LifecycleTransition {
         if !self.armed {
             return;
         }
-        let mut registry = RUNTIME
+        let mut registry = LIFECYCLE
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if registry.phase == self.phase {
+        if registry.phase == self.phase
+            || matches!(
+                (self.phase, registry.phase),
+                (LifecyclePhase::Starting(expected), LifecyclePhase::LoadingTools(current))
+                    if expected == current
+            )
+        {
             registry.phase = LifecyclePhase::Quarantined;
         }
     }
 }
 
-pub(crate) static RUNTIME: Mutex<RuntimeRegistry> = Mutex::new(RuntimeRegistry::new());
+pub(crate) static LIFECYCLE: Mutex<HsaLifecycle> = Mutex::new(HsaLifecycle::new());
 pub(crate) static VM_FAULT_CONDVAR: Condvar = Condvar::new();
 
-pub(crate) fn lock() -> Result<MutexGuard<'static, RuntimeRegistry>, Status> {
-    RUNTIME.lock().map_err(|_| ERROR)
+pub(crate) fn lock() -> Result<MutexGuard<'static, HsaLifecycle>, Status> {
+    LIFECYCLE.lock().map_err(|_| ERROR)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -1303,7 +1356,7 @@ pub(crate) fn boundary(operation: impl FnOnce() -> Status) -> Status {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(operation)).unwrap_or(ERROR)
 }
 
-pub(crate) fn initialized_mut(runtime: &mut Option<Runtime>) -> Result<&mut Runtime, Status> {
+pub(crate) fn initialized_mut(runtime: &mut HsaLifecycle) -> Result<&mut HsaState, Status> {
     runtime.as_mut().ok_or(NOT_INITIALIZED)
 }
 
@@ -1398,7 +1451,7 @@ mod tests {
 
     #[test]
     fn initialization_gate_rejects_overlapping_generations() {
-        let mut registry = RuntimeRegistry::new();
+        let mut registry = HsaLifecycle::new();
         let first = registry.begin_init().unwrap().unwrap();
         assert_eq!(registry.begin_init().unwrap_err(), INVALID_RUNTIME_STATE);
         assert_eq!(registry.begin_shutdown().err(), Some(INVALID_RUNTIME_STATE));
@@ -1410,7 +1463,7 @@ mod tests {
 
     #[test]
     fn failed_initialization_cleanup_quarantines_the_next_generation() {
-        let mut registry = RuntimeRegistry::new();
+        let mut registry = HsaLifecycle::new();
         let generation = registry.begin_init().unwrap().unwrap();
         registry.cancel_init(generation, true).unwrap();
         assert_eq!(registry.begin_init().unwrap_err(), INVALID_RUNTIME_STATE);
@@ -1453,15 +1506,6 @@ mod tests {
             assert!(pending.cleanup());
             assert_eq!(live.load(AtomicOrdering::Relaxed), 0);
             assert_eq!(joins.load(AtomicOrdering::Relaxed), 0);
-        }
-    }
-
-    #[test]
-    #[ignore = "requires a qualified GPU and KFD runtime"]
-    fn hsa_runtime_reinitializes_after_shutdown() {
-        for _ in 0..3 {
-            assert_eq!(crate::hsa_init(), SUCCESS);
-            assert_eq!(crate::hsa_shut_down(), SUCCESS);
         }
     }
 
@@ -1802,5 +1846,14 @@ mod tests {
             [32 * 1024, 512 * 1024, 8192 * 1024, 0]
         );
         assert_eq!(cache_sizes(&caches, other), [0, 0, 8192 * 1024, 0]);
+    }
+
+    #[test]
+    #[ignore = "requires a qualified GPU and KFD runtime"]
+    fn hsa_runtime_reinitializes_after_shutdown() {
+        for _ in 0..3 {
+            assert_eq!(crate::hsa_init(), SUCCESS);
+            assert_eq!(crate::hsa_shut_down(), SUCCESS);
+        }
     }
 }
