@@ -476,8 +476,8 @@ function(rccl_define_micro_source_lists)
     PARENT_SCOPE)
 
   # rccl-UnitTestsMicroTopo -- src/graph/{xml,topo,paths,search,rome_models,connect,rings,trees}.cc, one
-  # test TU each. Own binary: topo_stubs.cc, nccl_fakes.cc, init_fakes.cc and tuning_fakes.cc, which most
-  # targets link, define graph symbols, and the real graph files define them too.
+  # test TU each. Own binary: rccl-UnitTestsMicroGraph links tuning_fakes.cc, which defines connect.cc's params,
+  # and os_fakes.cc, whose CPU and sysfs seams these tests cannot drive.
   set(TEST_MICRO_TOPO_SOURCE_FILES
     xml-test.cc
     topo-test.cc
@@ -488,6 +488,8 @@ function(rccl_define_micro_source_lists)
     rings-test.cc
     trees-test.cc
     fakes/graph_fakes.cc
+    fakes/amdsmi_fakes.cc
+    fakes/hip_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp

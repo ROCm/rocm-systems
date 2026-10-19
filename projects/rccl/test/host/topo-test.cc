@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
+#include "../common/ScopedEnv.hpp"
 #include "fakes/graph_fakes.h"
 #include "fakes/param_redirect.h"
 
@@ -563,7 +564,8 @@ TEST_F(TopoMicrotest, AddCpu_DecodesArchVendorAndModel) {
   }
 }
 
-// The Rome/Zen classification overwrites the Zen generation, so sockets get Zen 1/2 bandwidth; a fix flips this pin.
+// The Rome/Zen classification overwrites the Zen generation, so sockets get Zen 1/2 bandwidth.
+// Pins AICOMRCCL-3024; a fix flips this pin.
 TEST_F(TopoMicrotest, AddCpu_KnownBug_AmdZenGenerationIsOverwrittenSoSocketsGetZen12Bandwidth) {
   const char* zen5 = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"26\" modelid=\"2\"";
   SystemPtr system =
@@ -940,7 +942,7 @@ TEST_F(TopoLocalMicrotest, NetDevsPolicy_ParsesTheEnvironmentOnce) {
                         {"MAX:2", NETDEVS_POLICY_MAX, 2}, {"MAX:0", NETDEVS_POLICY_AUTO, -1},
                         {"bogus", NETDEVS_POLICY_AUTO, -1}, {nullptr, NETDEVS_POLICY_AUTO, -1}};
   for (const Case& c : cases) {
-    if (c.env) setenv("NCCL_NETDEVS_POLICY", c.env, 1);
+    RcclUnitTesting::ScopedEnv policyEnv("NCCL_NETDEVS_POLICY", c.env);
     netDevsPolicy = NETDEVS_POLICY_UNDEF;
     netDevsPolicyNum = -1;
 
@@ -948,7 +950,6 @@ TEST_F(TopoLocalMicrotest, NetDevsPolicy_ParsesTheEnvironmentOnce) {
 
     EXPECT_EQ(c.policy, netDevsPolicy) << (c.env ? c.env : "unset");
     EXPECT_EQ(c.num, netDevsPolicyNum) << (c.env ? c.env : "unset");
-    unsetenv("NCCL_NETDEVS_POLICY");
   }
   EXPECT_TRUE(Logged("Unable to recognize NCCL_NETDEVS_POLICY=bogus"));
   EXPECT_TRUE(Logged("NCCL_NETDEVS_POLICY set by environment to MAX:2"));
@@ -1487,7 +1488,8 @@ TEST_F(TopoAutoMergeMicrotest, AutoMerge_RailPolicyOnlyFusesTheSameRail) {
   EXPECT_EQ(std::vector<int>({0, 2}), DevsOf(g_vDeviceCalls[0]));  // a1 and c0 have no rail, so no match
 }
 
-// A failed merge restarts at i = 0 before the loop's ++i, so device 0 is never re-placed; a fix flips this pin.
+// A failed merge restarts at i = 0 before the loop's ++i, so device 0 is never re-placed.
+// Pins AICOMRCCL-3027; a fix flips this pin.
 TEST_F(TopoAutoMergeMicrotest, AutoMerge_KnownBug_FailedMergeRestartsPastDeviceZero) {
   Devs({"a0", "a1", "b0"});
   info_.mergeLevel = PATH_PIX;
@@ -1720,11 +1722,11 @@ TEST_F(TopoProcessNetMicrotest, ProcessNet_RmaPluginGetsRmaNodes) {
 
 TEST_F(TopoProcessNetMicrotest, ProcessNet_MergesPortsIntoAVnicOnce) {
   Devs({"a0", "a1"});
-  g_netGetDevCount = [](int, int* nPhys, int* nVirt) {
+  ScopedHook netGetDevCount(g_netGetDevCount, [](int, int* nPhys, int* nVirt) {
     *nPhys = 2;
     *nVirt = NCCL_UNDEF_DEV_COUNT;
     return ncclSuccess;
-  };
+  });
 
   ASSERT_EQ(ncclSuccess, Process(nullptr));
 
@@ -1744,11 +1746,11 @@ TEST_F(TopoProcessNetMicrotest, ProcessNet_KnownVnicCountSkipsMerging) {
   v.name = "a0";  // the vNIC is already in the XML under this name
   v.vProps = ncclNetVDeviceProps_t{2, {0, 1}};
   g_netDevs.push_back(v);
-  g_netGetDevCount = [](int, int* nPhys, int* nVirt) {
+  ScopedHook netGetDevCount(g_netGetDevCount, [](int, int* nPhys, int* nVirt) {
     *nPhys = 2;
     *nVirt = 1;
     return ncclSuccess;
-  };
+  });
   ASSERT_EQ(ncclSuccess, xmlSetAttr(Net("a1"), "gin", "1"));
 
   ASSERT_EQ(ncclSuccess, Process(nullptr));
@@ -1761,14 +1763,14 @@ TEST_F(TopoProcessNetMicrotest, ProcessNet_KnownVnicCountSkipsMerging) {
 
 TEST_F(TopoProcessNetMicrotest, ProcessNet_PluginFailuresAreReturned) {
   Devs({"a0", "a1"});
-  g_netGetDevCount = [](int, int*, int*) { return ncclSystemError; };
+  ScopedHook netGetDevCount(g_netGetDevCount, [](int, int*, int*) { return ncclSystemError; });
   EXPECT_EQ(ncclSystemError, Process());
 
-  g_netGetDevCount = [](int, int* nPhys, int* nVirt) {
+  ScopedHook netGetDevCount2(g_netGetDevCount, [](int, int* nPhys, int* nVirt) {
     *nPhys = 3;
     *nVirt = 0;
     return ncclSuccess;
-  };
+  });
   EXPECT_EQ(ncclInvalidArgument, Process());
 }
 
@@ -1831,24 +1833,30 @@ TEST_F(TopoMicrotest, Lookups_StayOnTheirSystemAndWarnOnlyWhenAsked) {
   EXPECT_TRUE(Logged("ncclTopoRankToIndex could not find rank 9"));
 }
 
-// With no arch attribute kvConvertToInt dereferences NULL instead of returning UNDEF; a fix flips this pin.
+// With no arch attribute kvConvertToInt dereferences NULL instead of returning UNDEF.
+// Pins AICOMRCCL-3025; a fix flips this pin.
 TEST_F(TopoMicrotest, GetXmlCpuArch_KnownBug_NoCpuArchCrashes) {
   XmlPtr xml = MustParseXml(System("<cpu numaid=\"0\"/>"));
   int arch = -1;
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
 
   EXPECT_EXIT(ncclTopoGetXmlCpuArch(xml.get(), &arch), DEATH_BY_SEGV, "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
-// A <gpu> without gcn (any NVIDIA-style topology file) crashes the system build; a fix flips this pin.
+// A <gpu> without gcn (any NVIDIA-style topology file) crashes the system build.
+// Pins AICOMRCCL-3026; a fix flips this pin.
 TEST_F(TopoMicrotest, GetSystemFromXml_KnownBug_GpuWithoutGcnCrashes) {
   XmlPtr xml = MustParseXml(System(Cpu(0, "<pci busid=\"0000:10:00.0\" class=\"0x120000\" link_speed=\"\" "
                                           "link_width=\"16\"><gpu dev=\"0\" sm=\"90\" arch=\"0\" rank=\"0\" "
                                           "gdr=\"1\"/></pci>")));
   ncclTopoSystem* system = nullptr;
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
 
   EXPECT_EXIT(ncclTopoGetSystemFromXml(xml.get(), &system, 0), DEATH_BY_SEGV, "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
 TEST_F(TopoMicrotest, GetFusionEnv_ReadsEnvOrDefaultsByPlatform) {
@@ -1862,11 +1870,9 @@ TEST_F(TopoMicrotest, GetFusionEnv_ReadsEnvOrDefaultsByPlatform) {
   EXPECT_EQ(PATH_PHB, level);
   ASSERT_EQ(ncclSuccess, ncclTopoGetFusionEnv(&level, nullptr, 107, NCCL_TOPO_CPU_ARCH_X86));
   EXPECT_EQ(PATH_PORT, level);
-  setenv("NCCL_NET_MERGE_LEVEL", "PIX", 1);
-  setenv("NCCL_NET_FORCE_MERGE", "a,b", 1);
+  RcclUnitTesting::ScopedEnv mergeLevel("NCCL_NET_MERGE_LEVEL", "PIX");
+  RcclUnitTesting::ScopedEnv forceMerge("NCCL_NET_FORCE_MERGE", "a,b");
   ASSERT_EQ(ncclSuccess, ncclTopoGetFusionEnv(&level, &force, 60, NCCL_TOPO_CPU_ARCH_X86));
-  unsetenv("NCCL_NET_MERGE_LEVEL");
-  unsetenv("NCCL_NET_FORCE_MERGE");
   EXPECT_EQ(PATH_PIX, level);
   EXPECT_STREQ("a,b", force);
 }
@@ -1879,11 +1885,10 @@ TEST_F(TopoMicrotest, GetMergePolicy_RailOnVeraRubinOrByEnv) {
   ASSERT_EQ(ncclSuccess, ncclTopoGetMergePolicy(&policy, 107, NCCL_TOPO_CPU_ARCH_ARM));
   EXPECT_EQ(NCCL_NET_MERGE_POLICY_RAIL, policy);
   for (const char* env : {"rail", "ALL", "both"}) {
-    setenv("NCCL_NET_MERGE_POLICY", env, 1);
+    RcclUnitTesting::ScopedEnv policyEnv("NCCL_NET_MERGE_POLICY", env);
     ASSERT_EQ(ncclSuccess, ncclTopoGetMergePolicy(&policy, 60, NCCL_TOPO_CPU_ARCH_X86));
     EXPECT_EQ(env[0] == 'r' ? NCCL_NET_MERGE_POLICY_RAIL : NCCL_NET_MERGE_POLICY_ALL, policy) << env;
   }
-  unsetenv("NCCL_NET_MERGE_POLICY");
   EXPECT_TRUE(Logged("NCCL_NET_MERGE_POLICY: unknown value 'both', defaulting to ALL"));
   EXPECT_FALSE(Logged("unknown value 'ALL'"));
 }
@@ -2279,10 +2284,10 @@ TEST_F(TopoGetSystemMicrotest, GetSystem_ImportsGinRmaAndCollNetDevices) {
 }
 
 TEST_F(TopoGetSystemMicrotest, GetSystem_WithoutATopoFileDetectsTheGpu) {
-  g_netGetDevCount = [](int, int* nPhys, int* nVirt) {
+  ScopedHook netGetDevCount(g_netGetDevCount, [](int, int* nPhys, int* nVirt) {
     *nPhys = *nVirt = 0;
     return ncclSuccess;
-  };
+  });
 
   ASSERT_EQ(ncclSuccess, GetSystem());
 
@@ -2298,7 +2303,8 @@ TEST_F(TopoGetSystemMicrotest, GetSystem_FailuresAreReturned) {
   EXPECT_EQ(ncclSystemError, GetSystem());
 
   g_amdSmiInitResult = ncclSuccess;
-  g_bootstrapIntraNodeAllGather = [](void*, int*, int, int, void*, int) { return ncclRemoteError; };
+  ScopedHook allGather(g_bootstrapIntraNodeAllGather,
+                       [](void*, int*, int, int, void*, int) { return ncclRemoteError; });
   EXPECT_EQ(ncclRemoteError, GetSystem());
 
   TopoFile("<system version=\"3\"/>");

@@ -1019,7 +1019,7 @@ TEST_F(XmlGpuMicrotest, GetXmlFromGpu_OneHopXgmiPeersBecomeLinks) {
 
 TEST_F(XmlGpuMicrotest, GetXmlFromGpu_SharedFabricCliqueMakesUaloeLinks) {
   smiBusIds_[2] = smiBusIds_[1];  // a second report of the same peer must not restamp it
-  g_amdSmiGetFabricDeviceInfo = [](uint32_t i, amdsmiFabricDeviceInfo* info) {
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo, [](uint32_t i, amdsmiFabricDeviceInfo* info) {
     *info = amdsmiFabricDeviceInfo{};
     info->fabricSupported = true;
     info->cliqueId = 4;
@@ -1030,7 +1030,7 @@ TEST_F(XmlGpuMicrotest, GetXmlFromGpu_SharedFabricCliqueMakesUaloeLinks) {
     info->ppodSize = 16;
     info->vpodSize = 8;
     return ncclSuccess;
-  };
+  });
 
   ncclXmlNode* gpu = GpuNode();
 
@@ -1054,13 +1054,13 @@ TEST_F(XmlGpuMicrotest, GetXmlFromGpu_FabricMismatchFallsBackToXgmiLinks) {
   links_[{0, 2}] = {AMDSMI_LINK_TYPE_XGMI, 1};
   smiBusIds_.push_back("0000:40:00.0");
   links_[{0, 3}] = {AMDSMI_LINK_TYPE_XGMI, 1};
-  g_amdSmiGetFabricDeviceInfo = [](uint32_t i, amdsmiFabricDeviceInfo* info) {
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo, [](uint32_t i, amdsmiFabricDeviceInfo* info) {
     *info = amdsmiFabricDeviceInfo{};
     info->fabricSupported = i != 1;   // 1: peer has no fabric
     info->cliqueId = i == 2 ? 9 : 4;  // 2: other clique
     info->clusterUuid[0] = i == 3;    // 3: other cluster
     return ncclSuccess;
-  };
+  });
 
   std::vector<ncclXmlNode*> links = Links(GpuNode());
 
@@ -1070,25 +1070,25 @@ TEST_F(XmlGpuMicrotest, GetXmlFromGpu_FabricMismatchFallsBackToXgmiLinks) {
 
 TEST_F(XmlGpuMicrotest, GetXmlFromGpu_FabricQueryFailureFallsBackToXgmiLinks) {
   links_[{0, 1}] = {AMDSMI_LINK_TYPE_XGMI, 1};
-  g_amdSmiGetFabricDeviceInfo = [](uint32_t i, amdsmiFabricDeviceInfo* info) {
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo, [](uint32_t i, amdsmiFabricDeviceInfo* info) {
     info->fabricSupported = true;
     return i == 0 ? ncclSuccess : ncclInternalError;
-  };
+  });
 
   EXPECT_EQ(1u, Links(GpuNode()).size());
 }
 
 TEST_F(XmlGpuMicrotest, GetXmlFromGpu_HipPartitionSiblingsGetOneHopXgmi) {
   const std::vector<std::string> hipBusIds = {"0000:10:00.0", "0000:10:00.1", "0000:20:00.0", "", "0000:10:00.3"};
-  g_hipGetDeviceCount = [&](int* n) {
+  ScopedHook count(g_hipGetDeviceCount, [&](int* n) {
     *n = hipBusIds.size();
     return hipSuccess;
-  };
-  g_hipDeviceGetPCIBusId = [&](char* busId, int len, int dev) {
+  });
+  ScopedHook busId(g_hipDeviceGetPCIBusId, [&](char* busId, int len, int dev) {
     if (hipBusIds[dev].empty()) return hipErrorInvalidDevice;
     snprintf(busId, len, "%s", hipBusIds[dev].c_str());
     return hipSuccess;
-  };
+  });
   ncclXmlNode* gpu = Add(pci_, "gpu", {{"dev", "0"}, {"sm", "1"}, {"gcn", "gfx942"}, {"arch", "0"}});
   Add(gpu, "xgmi", {{"target", "0000:10:00.3"}, {"count", "1"}, {"tclass", "0x120000"}, {"fabric_supported", "1"}});
 
@@ -1103,14 +1103,14 @@ TEST_F(XmlGpuMicrotest, GetXmlFromGpu_HipPartitionSiblingsGetOneHopXgmi) {
 }
 
 TEST_F(XmlGpuMicrotest, GetXmlFromGpu_PartitionMatchesOnTheDeviceNotTheFunction) {
-  g_hipGetDeviceCount = [](int* n) {
+  ScopedHook count(g_hipGetDeviceCount, [](int* n) {
     *n = 2;
     return hipSuccess;
-  };
-  g_hipDeviceGetPCIBusId = [](char* busId, int len, int dev) {
+  });
+  ScopedHook busId(g_hipDeviceGetPCIBusId, [](char* busId, int len, int dev) {
     snprintf(busId, len, "0000:10:00.%d", dev);
     return hipSuccess;
-  };
+  });
   pci_ = Add(pci_->parent, "pci", {{"busid", "0000:10:00.1"}});
 
   std::vector<ncclXmlNode*> links = Links(GpuNode(1));
@@ -1247,7 +1247,7 @@ TEST_F(XmlGpuMicrotest, FillGpu_SmiFailuresAreReturned) {
   EXPECT_EQ(ncclSystemError, ncclTopoFillGpu(xml_.get(), "0000:50:00.0", &gpu));
 
   g_amdSmiInitResult = ncclSuccess;
-  g_amdSmiGetDeviceIndexByPciBusId = [](const char*, uint32_t*) { return ncclInvalidArgument; };
+  ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [](const char*, uint32_t*) { return ncclInvalidArgument; });
   EXPECT_EQ(ncclInvalidArgument, ncclTopoFillGpu(xml_.get(), "0000:50:00.0", &gpu));
 }
 

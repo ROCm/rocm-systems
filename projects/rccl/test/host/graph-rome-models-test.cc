@@ -19,6 +19,7 @@
 #include <string>
 #include <vector>
 
+#include "../common/ScopedEnv.hpp"
 #include "fakes/graph_fakes.h"
 #include "fakes/param_redirect.h"
 
@@ -330,15 +331,18 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_MatchesEightFullyConnectedGpusOnTwoSocket
   EXPECT_GE(matched, 5);
 }
 
-// permuteNetIds starts at NIC 2 and checks only complete orderings, so 16 NICs walk ~15! of them; a fix flips this pin.
+// permuteNetIds starts at NIC 2 and checks only complete orderings, so 16 NICs walk ~15! of them.
+// Pins AICOMRCCL-3028; a fix flips this pin.
 TEST_F(GraphRomeModelsMicrotest, A2a8P_KnownBug_SixteenNicsSearchEveryNicOrdering) {
   UseModel(romeTopoModels[kSixteenNicModel]);
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
 
   EXPECT_EXIT(
       {
         alarm(2);
+  ::testing::GTEST_FLAG(death_test_style) = style;
         (void)parseA2a8P(system_.get(), ring.get(), nullptr);
         _exit(0);
       },
@@ -389,7 +393,7 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_SkipsOtherShapes) {
   EXPECT_EQ(0, ring->nChannels);
 }
 
-// The GPU permutation table is not freed when no model matches; a fix flips this pin.
+// The GPU permutation table is not freed when no model matches. Pins AICOMRCCL-3029; a fix flips this pin.
 TEST_F(GraphRomeModelsMicrotest, A2a8P_KnownBug_NoMatchLeaksThePermutationTable) {
   if (kAsan) GTEST_SKIP() << "the leak would fail LeakSanitizer";
   UseModel(romeTopoModels[44], -1, kAmdCpu);
@@ -467,7 +471,8 @@ TEST_F(GraphRomeModelsMicrotest, P1H16P_MatchesSixteenGpuModels) {
   EXPECT_TRUE(system_->ll128Enabled);  // rome_model_59's options
 }
 
-// As in parseA2a8P, the 21 MB permutation table is not freed when no model matches; a fix flips this pin.
+// As in parseA2a8P, the 21 MB permutation table is not freed when no model matches.
+// Pins AICOMRCCL-3029; a fix flips this pin.
 TEST_F(GraphRomeModelsMicrotest, P1H16P_KnownBug_NoMatchLeaksThePermutationTable) {
   if (kAsan) GTEST_SKIP() << "the leak would fail LeakSanitizer";
   rcclRomeModel rewired = romeTopoModels[24];
@@ -651,7 +656,7 @@ TEST_F(GraphRomeModelsMicrotest, ChordalRing_SkipsOtherShapes) {
 TEST_F(GraphRomeModelsMicrotest, ParseRomeSystem_DumpsTheModelWhenAsked) {
   UseModel(romeTopoModels[43]);
   TempFile file;
-  setenv("RCCL_DUMP_ROME_MODEL_FILE", file.path(), 1);
+  RcclUnitTesting::ScopedEnv dumpFile("RCCL_DUMP_ROME_MODEL_FILE", file.path());
   rcclRomeModel topo;
   char pattern[256];
 
@@ -661,7 +666,7 @@ TEST_F(GraphRomeModelsMicrotest, ParseRomeSystem_DumpsTheModelWhenAsked) {
   EXPECT_NE(std::string::npos, text.find(".nGpus = 8, .nCpus = 2, .nNics = 4, .nLinks = 7"));
   EXPECT_NE(std::string::npos, text.find(".pattern = \"4242\""));
   EXPECT_NE(std::string::npos, text.find("PATH_PXB"));
-  setenv("RCCL_DUMP_ROME_MODEL_FILE", "/nonexistent/model.txt", 1);
+  RcclUnitTesting::ScopedEnv badDumpFile("RCCL_DUMP_ROME_MODEL_FILE", "/nonexistent/model.txt");
   ASSERT_EQ(ncclSuccess, parseRomeSystem(system_.get(), &topo, pattern, nullptr));
   EXPECT_TRUE(Logged("Unable to open /nonexistent/model.txt, not dumping Rome model"));
 }
@@ -735,16 +740,19 @@ TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_StopsAtTooManyNics) {
   EXPECT_EQ(0, ring_->nChannels);
 }
 
-// The count is checked after gpus[gpu] is written, so one GPU too many lands past the array; a fix flips this pin.
+// The count is checked after gpus[gpu] is written, so one GPU too many lands past the array.
+// Pins AICOMRCCL-3030; a fix flips this pin.
 TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_KnownBug_OneGpuPastTheLimitIsWrittenBeforeTheStop) {
   if (kAsan) GTEST_SKIP() << "the out-of-bounds stack write would fail AddressSanitizer";
   std::string many;
   for (int g = 0; g <= NCCL_TOPO_MAX_NODES; g++) many += std::to_string(g % 4) + " ";
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
 
   EXPECT_EXIT(
       {
         ncclResult_t ret = parseGraph(many.c_str(), system_.get(), ring_.get(), nullptr, nullptr, 0);
+  ::testing::GTEST_FLAG(death_test_style) = style;
         _exit(ret == ncclSuccess && ring_->nChannels == 0 ? 0 : 1);
       },
       ::testing::ExitedWithCode(0), "");
@@ -779,7 +787,8 @@ TEST_F(GraphRomeModelsMicrotest, ParseOptions_BadGdrLevelAndEmptyString) {
   EXPECT_EQ(4, system_->tuning);
 }
 
-// Options are split into at most 10 tokens, so pairs past the fifth are dropped; a fix flips this pin.
+// Options are split into at most 10 tokens, so pairs past the fifth are dropped.
+// Pins AICOMRCCL-3031; a fix flips this pin.
 TEST_F(GraphRomeModelsMicrotest, ParseOptions_KnownBug_IgnoresPairsPastTheFifth) {
   Use(XgmiSystem(1));
 

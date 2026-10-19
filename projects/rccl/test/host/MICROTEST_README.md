@@ -355,11 +355,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   test TU via `<STEM>_CC_PATH`: `xml.cc` (`Xml*`), `topo.cc` (`Topo*`), `paths.cc` (`Paths*`),
   `search.cc` (`Search*`), `rome_models.cc` (`graph-rome-models-test.cc`, `GraphRomeModels*`),
   `connect.cc` (`graph-connect-test.cc`, `GraphConnect*`), `rings.cc` (`Rings*`), `trees.cc`
-  (`Trees*`). Its own binary: `topo_stubs.cc`, `nccl_fakes.cc`, `init_fakes.cc` and
-  `tuning_fakes.cc`, which most targets link, define graph symbols, and the real graph files
-  define them too. Topologies come from XML built in `TopoScene.h`; externals are faked in
-  `fakes/graph_fakes.cc`.
-  See `test_categories_micro_topo.yaml`.
+  (`Trees*`). Its own binary: `rccl-UnitTestsMicroGraph` links `tuning_fakes.cc`, which
+  defines `connect.cc`'s params, and `os_fakes.cc`, whose CPU and sysfs seams these tests
+  cannot drive. Topologies come from XML built in `TopoScene.h`; HIP and amd-smi come from
+  `fakes/hip_fakes.cc` and `fakes/amdsmi_fakes.cc`, the other externals from
+  `fakes/graph_fakes.cc`. See `test_categories_micro_topo.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the

@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "ScopedHook.h"
 #include "fakes/graph_fakes.h"
 #include "fakes/param_redirect.h"
 
@@ -278,13 +279,13 @@ TEST_F(GraphConnectMicrotest, Preset_IntraGraphGenPermutesChannelZerosRing) {
   Intra(NCCL_ALGO_RING, {{0, 1, 2, 3}, {3, 3, 3, 3}});
   Intra(NCCL_ALGO_TREE, {{0, 1, 2, 3}, {0, 1, 2, 3}});
   g_params["RCCL_INTRA_GRAPH_GEN"] = 1;
-  g_generateRings = [](int n, uint32_t nChannels, int* order) {
+  ScopedHook generateRings(g_generateRings, [](int n, uint32_t nChannels, int* order) {
     const int orders[2][4] = {{0, 1, 2, 3}, {2, 0, 3, 1}};
     for (uint32_t c = 0; c < nChannels; c++) {
       for (int i = 0; i < n; i++) order[c * n + i] = orders[c][i];
     }
     return ncclSuccess;
-  };
+  });
 
   ncclTopoRanks t = Preset();
 
@@ -303,9 +304,9 @@ TEST_F(GraphConnectMicrotest, Preset_InterGraphGenClosesEachRingAtItsCut) {
   Intra(NCCL_ALGO_TREE, {{0, 1, 2, 3}});
   g_params["RCCL_INTRA_GRAPH_GEN"] = 1;
   g_params["RCCL_INTER_GRAPH_GEN"] = 1;
-  g_findRingCutIndices = [](int nChannels, int, const int*, int* cut) {
+  ScopedHook findRingCutIndices(g_findRingCutIndices, [](int nChannels, int, const int*, int* cut) {
     for (int c = 0; c < nChannels; c++) cut[c] = 1;
-  };
+  });
 
   ncclTopoRanks t = Preset();
 
@@ -351,7 +352,7 @@ TEST_F(GraphConnectMicrotest, Preset_GraphGenFailureIsReturned) {
   Intra(NCCL_ALGO_RING, {{0, 1}});
   Intra(NCCL_ALGO_TREE, {{0, 1}});
   g_params["RCCL_INTRA_GRAPH_GEN"] = 1;
-  g_generateRings = [](int, uint32_t, int*) { return ncclInternalError; };
+  ScopedHook generateRings(g_generateRings, [](int, uint32_t, int*) { return ncclInternalError; });
 
   Preset(ncclInternalError);
 }
@@ -476,13 +477,13 @@ TEST_F(GraphConnectMicrotest, ConnectRings_EachNodesExitFeedsTheNextNodesEntry) 
 TEST_F(GraphConnectMicrotest, ConnectRingsLoadBalanced_FollowsTheGeneratedNodeOrder) {
   Use(2, 3, 1);
   comm_->nChannels = 2;
-  g_generateRings = [](int n, uint32_t nChannels, int* order) {
+  ScopedHook generateRings(g_generateRings, [](int n, uint32_t nChannels, int* order) {
     const int orders[2][3] = {{0, 1, 2}, {0, 2, 1}};
     for (uint32_t c = 0; c < nChannels; c++) {
       for (int i = 0; i < n; i++) order[c * n + i] = orders[c][i];
     }
     return ncclSuccess;
-  };
+  });
   std::vector<int> recv = {0, 2, 4, 0, 2, 4}, send = {1, 3, 5, 1, 3, 5}, prev(12, -1), next(12, -1);
 
   ASSERT_EQ(ncclSuccess, connectRingsLoadBalanced(comm_.get(), recv.data(), send.data(), prev.data(), next.data()));
@@ -493,7 +494,7 @@ TEST_F(GraphConnectMicrotest, ConnectRingsLoadBalanced_FollowsTheGeneratedNodeOr
   EXPECT_EQ(5, prev[6 + 2]);
   EXPECT_EQ(0, next[6 + 3]);
 
-  g_generateRings = [](int, uint32_t, int*) { return ncclInternalError; };
+  ScopedHook generateRings2(g_generateRings, [](int, uint32_t, int*) { return ncclInternalError; });
   EXPECT_EQ(ncclInternalError,
             connectRingsLoadBalanced(comm_.get(), recv.data(), send.data(), prev.data(), next.data()));
   comm_->nNodes = 0;
@@ -866,21 +867,21 @@ TEST_F(GraphConnectMicrotest, RepairMissingChannels_FillsEmptyChannelsFromChanne
 
 TEST_F(GraphConnectMicrotest, ReconcileGrowChannels_TakesTheMinimumOverRanks) {
   Use(2, 2, 1);
-  g_bootstrapAllGather = [](void*, void* data, int size) {
+  ScopedHook bootstrapAllGather(g_bootstrapAllGather, [](void*, void* data, int size) {
     int* v = static_cast<int*>(data);
     v[0] = 9, v[2] = 3, v[3] = 12;
     EXPECT_EQ(sizeof(int), (size_t)size);
     return ncclSuccess;
-  };
+  });
   int value = 8;
 
   ASSERT_EQ(ncclSuccess, ncclTopoReconcileGrowChannels(comm_.get(), &value));
   EXPECT_EQ(3, value);
 
-  g_bootstrapAllGather = [](void* , void* data, int) {
+  ScopedHook bootstrapAllGather2(g_bootstrapAllGather, [](void* , void* data, int) {
     static_cast<int*>(data)[0] = 1;
     return ncclSystemError;
-  };
+  });
   value = 8;
   EXPECT_EQ(ncclSystemError, ncclTopoReconcileGrowChannels(comm_.get(), &value));
   EXPECT_EQ(8, value);  // left alone on failure
@@ -1120,10 +1121,10 @@ TEST_F(GraphConnectPostsetMicrotest, Postset_GrowCommAgreesOnTheSmallestCount) {
   Use(2, 1, 0);
   comm_->nChannels = 2;
   comm_->isGrow = true;
-  g_bootstrapAllGather = [](void*, void* data, int) {
+  ScopedHook bootstrapAllGather(g_bootstrapAllGather, [](void*, void* data, int) {
     static_cast<int*>(data)[1] = 3;
     return ncclSuccess;
-  };
+  });
   std::vector<ncclTopoRanks> all = AllRanks(2, 1, 2);
 
   ASSERT_EQ(ncclSuccess, Postset(all, 2, rings_));
@@ -1133,7 +1134,7 @@ TEST_F(GraphConnectPostsetMicrotest, Postset_GrowCommAgreesOnTheSmallestCount) {
 
   Use(2, 1, 0);
   comm_->nChannels = 2;
-  g_bootstrapAllGather = [](void*, void*, int) { return ncclSystemError; };
+  ScopedHook bootstrapAllGather2(g_bootstrapAllGather, [](void*, void*, int) { return ncclSystemError; });
   all = AllRanks(2, 1, 2);
   EXPECT_EQ(ncclSystemError, Postset(all, 2, rings_));
 }

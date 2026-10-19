@@ -4,12 +4,11 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Fakes for everything src/graph/*.cc calls outside src/graph, for rccl-UnitTestsMicroTopo. That binary
-// compiles the real graph files, so topo_stubs.cc, nccl_fakes.cc, init_fakes.cc and tuning_fakes.cc, which
-// define graph symbols, cannot link. The HIP, amd-smi, OS and logging seams are here rather than in
-// hip_fakes.cc, amdsmi_fakes.cc and os_fakes.cc because those lack what the graph tests drive (per-call
-// bus-id lookups, hipDeviceGetByPCIBusId, amd-smi device/link queries, sysfs/realpath/BCM/NUMA maps), so
-// using them means rewriting every scene; one ResetGraphFakes() restores every hook here.
+// Fakes for everything src/graph/*.cc calls outside src/graph, for rccl-UnitTestsMicroTopo, which compiles the
+// real graph files. HIP and amd-smi come from hip_fakes.cc and amdsmi_fakes.cc (ResetGraphFakes() sets the
+// graph defaults on their hooks). The OS seams stay here because os_fakes.cc counts ncclOsCpuCount calls rather
+// than CPUs and reads no sysfs; logging stays here because nccl_fakes.cc's logger only prints, and these tests
+// assert on what the graph code logged.
 
 #ifndef RCCL_TEST_HOST_GRAPH_FAKES_H_
 #define RCCL_TEST_HOST_GRAPH_FAKES_H_
@@ -26,6 +25,8 @@
 #include "debug.h"
 #include "nvmlwrap.h"
 #include "amdsmi_wrap.h"
+#include "amdsmi_fakes.h"
+#include "hip_fakes.h"
 
 struct ncclComm;
 struct ncclConnect;
@@ -54,19 +55,6 @@ extern std::map<std::string, std::vector<std::string>> g_bcmLinks;
 extern std::map<unsigned, std::string> g_numaCpumap;
 extern int g_numaCpuOffset;
 extern cpu_set_t g_processAffinity;
-
-extern std::function<hipError_t(int*)> g_hipGetDeviceCount;
-extern std::function<hipError_t(char*, int, int)> g_hipDeviceGetPCIBusId;
-extern std::function<hipError_t(int*, const char*)> g_hipDeviceGetByPCIBusId;
-extern std::function<hipError_t(hipDeviceProp_t*, int)> g_hipGetDeviceProperties;
-
-extern ncclResult_t g_amdSmiInitResult;
-extern int g_amdSmiInitCalls;
-extern std::function<ncclResult_t(uint32_t*)> g_amdSmiGetNumDevice;
-extern std::function<ncclResult_t(const char*, uint32_t*)> g_amdSmiGetDeviceIndexByPciBusId;
-extern std::function<ncclResult_t(uint32_t, char*, size_t)> g_amdSmiGetDevicePciBusIdString;
-extern std::function<ncclResult_t(uint32_t, struct amdsmiFabricDeviceInfo*)> g_amdSmiGetFabricDeviceInfo;
-extern std::function<ncclResult_t(int, int, amdsmi_link_type_t*, int*, int*)> g_amdSmiGetLinkInfo;
 
 extern std::function<ncclResult_t(const char*, nvmlDevice_t*)> g_nvmlGetHandleByPciBusId;
 extern std::function<ncclResult_t(nvmlDevice_t, nvmlPciInfo_t*)> g_nvmlGetPciInfo;

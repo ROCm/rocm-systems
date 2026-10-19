@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
+#include "../common/ScopedEnv.hpp"
 #include "fakes/graph_fakes.h"
 #include "fakes/param_redirect.h"
 
@@ -153,7 +154,7 @@ TEST_F(PathsMicrotest, ComputePaths_NoGdrNicTrafficGoesThroughTheCpu) {
 }
 
 TEST_F(PathsMicrotest, ComputePaths_UserP2pLevelDivertsGpuPairsThroughTheCpu) {
-  setenv("NCCL_P2P_LEVEL", "LOC", 1);
+  RcclUnitTesting::ScopedEnv p2pLevel("NCCL_P2P_LEVEL", "LOC");
 
   SystemPtr system = BuildWithPaths(XgmiSystem(2));
 
@@ -359,20 +360,19 @@ TEST_F(PathsMicrotest, GetLevel_ParsesNamesOldNumbersAndTheDisableVariable) {
                         {nullptr, "2", PATH_PXB}, {nullptr, "9", PATH_SYS}, {nullptr, "bogus", -2},
                         {nullptr, nullptr, -2}};
   for (const Case& c : cases) {
-    if (c.disable) setenv("NCCL_X_DISABLE", c.disable, 1);
-    if (c.level) setenv("NCCL_X_LEVEL", c.level, 1);
+    RcclUnitTesting::ScopedEnv disable("NCCL_X_DISABLE", c.disable);
+    RcclUnitTesting::ScopedEnv levelEnv("NCCL_X_LEVEL", c.level);
     int level = -1;
 
     ASSERT_EQ(ncclSuccess, ncclGetLevel(&level, "NCCL_X_DISABLE", "NCCL_X_LEVEL"));
 
     EXPECT_EQ(c.expected, level) << (c.level ? c.level : "unset");
-    unsetenv("NCCL_X_DISABLE");
-    unsetenv("NCCL_X_LEVEL");
   }
   int level = PATH_NVL;
-  setenv("NCCL_X_LEVEL", "SYS", 1);
-  ASSERT_EQ(ncclSuccess, ncclGetLevel(&level, nullptr, "NCCL_X_LEVEL"));
-  unsetenv("NCCL_X_LEVEL");
+  {
+    RcclUnitTesting::ScopedEnv sys("NCCL_X_LEVEL", "SYS");
+    ASSERT_EQ(ncclSuccess, ncclGetLevel(&level, nullptr, "NCCL_X_LEVEL"));
+  }
   EXPECT_EQ(PATH_NVL, level);  // already resolved
 }
 
@@ -381,7 +381,7 @@ TEST_F(PathsMicrotest, GetUserP2pLevel_ReadsTheEnvironmentOnce) {
   ASSERT_EQ(ncclSuccess, ncclGetUserP2pLevel(&level));
   EXPECT_EQ(PATH_SYS, level);  // unset leaves it alone
 
-  setenv("NCCL_P2P_DISABLE", "1", 1);
+  RcclUnitTesting::ScopedEnv p2pDisable("NCCL_P2P_DISABLE", "1");
   ASSERT_EQ(ncclSuccess, ncclGetUserP2pLevel(&level));
   EXPECT_EQ(PATH_SYS, level);
 
@@ -451,7 +451,7 @@ TEST_F(PathsCommMicrotest, CheckP2p_AnyPathOnAnAmdHostAndPxbOnOthers) {
 }
 
 TEST_F(PathsCommMicrotest, CheckP2p_UserLevelOverridesTheCpuDefault) {
-  setenv("NCCL_P2P_LEVEL", "PIX", 1);
+  RcclUnitTesting::ScopedEnv p2pLevel("NCCL_P2P_LEVEL", "PIX");
   Use(BuildWithPaths(PcieSystem()));
 
   EXPECT_EQ(1, P2p(0, 1));
@@ -557,7 +557,7 @@ TEST_F(PathsMnnvlMicrotest, CheckP2p_CrossCliqueUsesTheFabricUnlessTheUserLevelI
   EXPECT_EQ(1, cudaP2p);
   EXPECT_EQ(1, cross);
 
-  setenv("NCCL_P2P_LEVEL", "LOC", 1);
+  RcclUnitTesting::ScopedEnv p2pLevel("NCCL_P2P_LEVEL", "LOC");
   ncclTopoUserP2pLevel = -1;
   EXPECT_EQ(0, P2p(0, 1, nullptr, nullptr, nullptr, comm_.get()));
 }
@@ -607,10 +607,11 @@ TEST_F(PathsGdrMicrotest, CheckGdr_LevelFromC2cParamSystemAndUser) {
   EXPECT_EQ(ncclTopoGdrModeDefault, Gdr(0, 0));
 
   system_->netGdrLevel = -2;
-  setenv("NCCL_NET_GDR_LEVEL", "SYS", 1);
-  ncclTopoUserGdrLevel = -1;
-  EXPECT_EQ(ncclTopoGdrModeDefault, Gdr(0, 0));
-  unsetenv("NCCL_NET_GDR_LEVEL");
+  {
+    RcclUnitTesting::ScopedEnv gdrLevel("NCCL_NET_GDR_LEVEL", "SYS");
+    ncclTopoUserGdrLevel = -1;
+    EXPECT_EQ(ncclTopoGdrModeDefault, Gdr(0, 0));
+  }
   ncclTopoUserGdrLevel = -1;
 
   SystemPtr p2c = BuildWithPaths(XgmiSystem(1, 1, true));
@@ -812,14 +813,14 @@ TEST_F(PathsCommMicrotest, ComputePaths_PxnRelaysThroughTheXgmiPeerNextToTheNic)
 
 TEST_F(PathsCommMicrotest, ComputePaths_UnreachablePeersAreMarkedNet) {
   Use(BuildWithPaths(XgmiSystem(3)));
-  g_p2pCanConnect = [](int* ret, ncclComm*, ncclTopoGraph*, ncclPeerInfo* src, ncclPeerInfo* dst) {
+  ScopedHook p2p(g_p2pCanConnect, [](int* ret, ncclComm*, ncclTopoGraph*, ncclPeerInfo* src, ncclPeerInfo* dst) {
     *ret = !((src->rank == 0 && dst->rank == 2) || (src->rank == 2 && dst->rank == 0));
     return ncclSuccess;
-  };
-  g_shmCanConnect = [](int* ret, ncclComm*, ncclTopoGraph*, ncclPeerInfo* src, ncclPeerInfo*) {
+  });
+  ScopedHook shmCanConnect(g_shmCanConnect, [](int* ret, ncclComm*, ncclTopoGraph*, ncclPeerInfo* src, ncclPeerInfo*) {
     *ret = src->rank != 0;
     return ncclSuccess;
-  };
+  });
 
   ASSERT_EQ(ncclSuccess, ncclTopoComputePaths(system_.get(), comm_.get()));
 
@@ -1158,18 +1159,18 @@ TEST_F(PathsP2pChannelsMicrotest, P2pChannels_InitChannelFailureIsReturned) {
 TEST_F(PathsP2pChannelsMicrotest, P2pChannels_GrowCommAgreesOnTheSmallestCount) {
   Setup(BuildWithPaths(XgmiSystem(4)), 4, 1, 6);
   comm_->isGrow = true;
-  g_bootstrapAllGather = [](void*, void* data, int) {
+  ScopedHook bootstrapAllGather(g_bootstrapAllGather, [](void*, void* data, int) {
     int* v = static_cast<int*>(data);
     v[1] = v[2] = 50;
     v[3] = 2;
     return ncclSuccess;
-  };
+  });
 
   Compute();
   EXPECT_EQ(2, comm_->p2pnChannels);
   EXPECT_EQ(2, comm_->p2pnChannelsPerPeer);
 
-  g_bootstrapAllGather = [](void*, void*, int) { return ncclSystemError; };
+  ScopedHook bootstrapAllGather2(g_bootstrapAllGather, [](void*, void*, int) { return ncclSystemError; });
   EXPECT_EQ(ncclSystemError, ncclTopoComputeP2pChannels(comm_.get()));
 }
 
@@ -1211,14 +1212,14 @@ class PathsTrimMicrotest : public PathsCommMicrotest {
 
 TEST_F(PathsTrimMicrotest, TrimSystem_DropsGpusOutsideMyDomain) {
   Use(BuildWithPaths(XgmiSystem(4, 1, true)), 2);
-  g_p2pCanConnect = [](int* ret, ncclComm*, ncclTopoGraph*, ncclPeerInfo* src, ncclPeerInfo* dst) {
+  ScopedHook p2p(g_p2pCanConnect, [](int* ret, ncclComm*, ncclTopoGraph*, ncclPeerInfo* src, ncclPeerInfo* dst) {
     *ret = src->rank / 2 == dst->rank / 2;
     return ncclSuccess;
-  };
-  g_shmCanConnect = [](int* ret, ncclComm*, ncclTopoGraph*, ncclPeerInfo*, ncclPeerInfo*) {
+  });
+  ScopedHook shmCanConnect(g_shmCanConnect, [](int* ret, ncclComm*, ncclTopoGraph*, ncclPeerInfo*, ncclPeerInfo*) {
     *ret = 0;
     return ncclSuccess;
-  };
+  });
   ASSERT_EQ(ncclSuccess, ncclTopoComputePaths(system_.get(), comm_.get()));
 
   ASSERT_EQ(ncclSuccess, Trim());

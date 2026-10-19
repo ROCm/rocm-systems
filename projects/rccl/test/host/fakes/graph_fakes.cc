@@ -140,79 +140,13 @@ ncclResult_t ncclOsGetAffinity(ncclAffinity* affinity) {
 uint64_t ncclOsGetPid() { return 4321; }
 char* ncclOsStrSep(char** stringp, const char* delim) { return strsep(stringp, delim); }
 
-// --- HIP.
-static hipError_t DefaultHipGetDeviceCount(int* n) {
-  *n = 0;
-  return hipSuccess;
-}
-static hipError_t DefaultHipDeviceGetPCIBusId(char*, int, int) { return hipErrorInvalidDevice; }
-static hipError_t DefaultHipDeviceGetByPCIBusId(int*, const char*) { return hipErrorInvalidValue; }
-static hipError_t DefaultHipGetDeviceProperties(hipDeviceProp_t* prop, int) {
+// --- HIP and amd-smi come from hip_fakes.cc and amdsmi_fakes.cc; ResetGraphFakes() sets the graph defaults.
+// The real hipDeviceProp_t default reports 304 CUs, so the topology code sees an MI300X-sized device.
+static hipError_t DefaultGraphHipGetDeviceProperties(hipDeviceProp_t* prop, int) {
   *prop = hipDeviceProp_t{};
   prop->multiProcessorCount = 304;
   snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx942:sramecc+:xnack-");
   return hipSuccess;
-}
-std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
-std::function<hipError_t(char*, int, int)> g_hipDeviceGetPCIBusId = DefaultHipDeviceGetPCIBusId;
-std::function<hipError_t(int*, const char*)> g_hipDeviceGetByPCIBusId = DefaultHipDeviceGetByPCIBusId;
-std::function<hipError_t(hipDeviceProp_t*, int)> g_hipGetDeviceProperties = DefaultHipGetDeviceProperties;
-
-hipError_t hipGetDeviceCount(int* n) { return g_hipGetDeviceCount(n); }
-hipError_t hipDeviceGetPCIBusId(char* busId, int len, int dev) { return g_hipDeviceGetPCIBusId(busId, len, dev); }
-hipError_t hipDeviceGetByPCIBusId(int* dev, const char* busId) { return g_hipDeviceGetByPCIBusId(dev, busId); }
-hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int dev) { return g_hipGetDeviceProperties(prop, dev); }
-const char* hipGetErrorString(hipError_t) { return "fake hip error"; }
-hipError_t hipGetLastError() { return hipSuccess; }
-// UNDRIVEN: only utils.cc's ncclCudaCompCap reaches it, and src/graph never calls that.
-hipError_t hipGetDevice(int*) { FailLoudUnfaked("graph_fakes.cc", "hipGetDevice"); }
-hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t, int) {
-  *value = 0;
-  return hipErrorInvalidValue;
-}
-
-// --- amd-smi.
-ncclResult_t g_amdSmiInitResult = ncclSuccess;
-int g_amdSmiInitCalls = 0;
-static ncclResult_t DefaultAmdSmiGetNumDevice(uint32_t* n) {
-  *n = 0;
-  return ncclSuccess;
-}
-static ncclResult_t DefaultAmdSmiGetDeviceIndexByPciBusId(const char*, uint32_t* index) {
-  *index = 0;
-  return ncclSuccess;
-}
-static ncclResult_t DefaultAmdSmiGetDevicePciBusIdString(uint32_t, char*, size_t) { return ncclInternalError; }
-static ncclResult_t DefaultAmdSmiGetFabricDeviceInfo(uint32_t, struct amdsmiFabricDeviceInfo* info) {
-  info->fabricSupported = false;
-  return ncclSuccess;
-}
-static ncclResult_t DefaultAmdSmiGetLinkInfo(int, int, amdsmi_link_type_t*, int*, int*) { return ncclInternalError; }
-std::function<ncclResult_t(uint32_t*)> g_amdSmiGetNumDevice = DefaultAmdSmiGetNumDevice;
-std::function<ncclResult_t(const char*, uint32_t*)> g_amdSmiGetDeviceIndexByPciBusId =
-  DefaultAmdSmiGetDeviceIndexByPciBusId;
-std::function<ncclResult_t(uint32_t, char*, size_t)> g_amdSmiGetDevicePciBusIdString =
-  DefaultAmdSmiGetDevicePciBusIdString;
-std::function<ncclResult_t(uint32_t, struct amdsmiFabricDeviceInfo*)> g_amdSmiGetFabricDeviceInfo =
-  DefaultAmdSmiGetFabricDeviceInfo;
-std::function<ncclResult_t(int, int, amdsmi_link_type_t*, int*, int*)> g_amdSmiGetLinkInfo = DefaultAmdSmiGetLinkInfo;
-
-ncclResult_t amd_smi_init() {
-  g_amdSmiInitCalls++;
-  return g_amdSmiInitResult;
-}
-ncclResult_t amd_smi_getNumDevice(uint32_t* n) { return g_amdSmiGetNumDevice(n); }
-ncclResult_t amd_smi_getDeviceIndexByPciBusId(const char* busId, uint32_t* index) {
-  return g_amdSmiGetDeviceIndexByPciBusId(busId, index);
-}
-ncclResult_t amd_smi_getDevicePciBusIdString(uint32_t index, char* busId, size_t len) {
-  return g_amdSmiGetDevicePciBusIdString(index, busId, len);
-}
-ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t index, struct amdsmiFabricDeviceInfo* info) {
-  return g_amdSmiGetFabricDeviceInfo(index, info);
-}
-ncclResult_t amd_smi_getLinkInfo(int src, int dst, amdsmi_link_type_t* type, int* hops, int* count) {
-  return g_amdSmiGetLinkInfo(src, dst, type, hops, count);
 }
 
 // --- NVML (only the PCI queries xml.cc makes).
@@ -324,6 +258,19 @@ void permute_array_inplace(int* input, int length, int* permutation) {
 }
 
 void ResetGraphFakes() {
+  ResetHipFakes();
+  g_deviceCount = 0;
+  g_hipDeviceGetPCIBusId = [](char*, int, int) { return hipErrorInvalidDevice; };
+  g_hipGetDeviceProperties = DefaultGraphHipGetDeviceProperties;
+  ResetAmdSmiFakes();
+  g_amdSmiGetDeviceIndexByPciBusId = [](const char*, uint32_t* index) {
+    *index = 0;
+    return ncclSuccess;
+  };
+  g_amdSmiGetFabricDeviceInfo = [](uint32_t, struct amdsmiFabricDeviceInfo* info) {
+    info->fabricSupported = false;
+    return ncclSuccess;
+  };
   g_logs.clear();
   g_params.clear();
   g_loadParam = DefaultLoadParam;
@@ -334,17 +281,6 @@ void ResetGraphFakes() {
   g_numaCpumap.clear();
   g_numaCpuOffset = 0;
   CPU_ZERO(&g_processAffinity);
-  g_hipGetDeviceCount = DefaultHipGetDeviceCount;
-  g_hipDeviceGetPCIBusId = DefaultHipDeviceGetPCIBusId;
-  g_hipDeviceGetByPCIBusId = DefaultHipDeviceGetByPCIBusId;
-  g_hipGetDeviceProperties = DefaultHipGetDeviceProperties;
-  g_amdSmiInitResult = ncclSuccess;
-  g_amdSmiInitCalls = 0;
-  g_amdSmiGetNumDevice = DefaultAmdSmiGetNumDevice;
-  g_amdSmiGetDeviceIndexByPciBusId = DefaultAmdSmiGetDeviceIndexByPciBusId;
-  g_amdSmiGetDevicePciBusIdString = DefaultAmdSmiGetDevicePciBusIdString;
-  g_amdSmiGetFabricDeviceInfo = DefaultAmdSmiGetFabricDeviceInfo;
-  g_amdSmiGetLinkInfo = DefaultAmdSmiGetLinkInfo;
   g_nvmlGetHandleByPciBusId = DefaultNvmlGetHandle;
   g_nvmlGetPciInfo = DefaultNvmlGetPciInfo;
   g_nvmlGetPcieLinkGeneration = DefaultNvmlGetLink;
