@@ -38,6 +38,11 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 set(hip-event-fail-regex
     "${ROCPROFILER_DEFAULT_FAIL_REGEX}|no valid GPU timestamps for a HIP event")
 
+# A deferred wait holds its correlation ID until a barrier claims it. One that CLR never
+# turned into a GPU dependency (for example, a same-stream wait) is never claimed, and its
+# ID is only retired as dangling at finalization.
+string(APPEND hip-event-fail-regex "|retiring dangling correlation ID")
+
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-hip-event-trace
     COMMAND

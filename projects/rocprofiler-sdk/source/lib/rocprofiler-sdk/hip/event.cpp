@@ -62,6 +62,25 @@ namespace event
 {
 using profiling_time = tracing::profiling_time;
 
+// A HIP stream as CLR resolves it. hipStreamLegacy and nullptr both name the current device's
+// null stream outside the _spt entry points, and the per-thread default stream belongs to one
+// thread and one device, so the hipStream_t value alone does not identify a stream.
+struct stream_key_t
+{
+    uint64_t stream = 0;   ///< created stream's handle, 0 for null, or hipStreamPerThread
+    uint64_t thread = 0;   ///< thread owning a per-thread default stream
+    int      device = -1;  ///< current device, for the null and per-thread default streams
+
+    friend bool operator==(const stream_key_t& lhs, const stream_key_t& rhs)
+    {
+        return lhs.stream == rhs.stream && lhs.thread == rhs.thread && lhs.device == rhs.device;
+    }
+    friend bool operator!=(const stream_key_t& lhs, const stream_key_t& rhs)
+    {
+        return !(lhs == rhs);
+    }
+};
+
 struct record_candidate_t;
 using record_candidate_ptr_t = std::shared_ptr<record_candidate_t>;
 
@@ -98,9 +117,9 @@ struct active_event_context_t
     // for the whole call, so every barrier the call submits reports the same one.
     context::correlation_id* corr_id      = nullptr;
     bool                     owns_corr_id = false;
-    // Stream this hipEventRecord targets, as supplied by the caller. Carried so it can be
-    // stored alongside the record info and compared against a later wait's stream.
-    hipStream_t record_stream = nullptr;
+    // Stream this hipEventRecord targets. Carried so it can be stored alongside the record
+    // info and compared against a later wait's stream.
+    stream_key_t record_stream = {};
     // hipStreamWaitEvent: completion signal of the record barrier being waited on. Only a
     // barrier that depends on it is the wait's own barrier. Zero when the record was not seen.
     uint64_t wait_signal = 0;
@@ -122,10 +141,9 @@ struct event_record_info_t
     rocprofiler_queue_id_t queue_id        = {.handle = 0};
     rocprofiler_agent_id_t agent_id        = {.handle = 0};
     uint64_t               original_signal = 0;
-    // Stream the event was recorded on, exactly as the caller supplied it. CLR
-    // short-circuits a wait issued on this same stream, so a wait matching it produces no
-    // GPU dependency to trace. Stored unnormalized: see register_deferred_wait.
-    hipStream_t record_stream = nullptr;
+    // Stream the event was recorded on. CLR short-circuits a wait issued on this same
+    // stream, so a wait matching it produces no GPU dependency to trace.
+    stream_key_t record_stream = {};
     // Set when the record barrier for this generation completes on the GPU. Reset by
     // record_event_info when the event is re-recorded.
     bool completed = false;
@@ -201,6 +219,8 @@ struct pending_wait_t
     context::correlation_id* corr_id_ref      = nullptr;
     uint64_t                 hip_event_handle = 0;
     event_record_info_t      source_info      = {};
+    // Stream the hipStreamWaitEvent targets. Only a barrier written for this stream carries it.
+    stream_key_t wait_stream = {};
 };
 
 using pending_wait_array_t = common::container::small_vector<pending_wait_t, 4>;
@@ -340,6 +360,48 @@ get_stream_is_capturing_fn()
     return _v;
 }
 
+using get_device_fn_t = hipError_t (*)(int*);
+
+get_device_fn_t&
+get_get_device_fn()
+{
+    static auto _v = get_device_fn_t{nullptr};
+    return _v;
+}
+
+// Streams of the HIP API calls executing on this thread, innermost last, pushed by
+// push_api_stream. A call that takes no stream, or began before HIP event tracing was
+// configured, pushes nothing.
+thread_local common::container::small_vector<stream_key_t, 2> g_api_streams = {};
+
+std::optional<stream_key_t>
+get_api_stream()
+{
+    if(g_api_streams.empty()) return std::nullopt;
+    return g_api_streams.back();
+}
+
+// Resolves the stream the way CLR does (hip::getStream and PER_THREAD_DEFAULT_STREAM). The
+// null and per-thread default streams are per device, so they are keyed by the current
+// device, which is what CLR resolves them against.
+stream_key_t
+make_stream_key(hipStream_t stream, bool per_thread_api)
+{
+    if(stream == hipStreamLegacy || stream == nullptr)
+        stream = (per_thread_api) ? hipStreamPerThread : nullptr;
+
+    auto key   = stream_key_t{};
+    key.stream = reinterpret_cast<uint64_t>(stream);
+    if(stream != nullptr && stream != hipStreamPerThread) return key;
+
+    if(stream == hipStreamPerThread) key.thread = common::get_tid();
+
+    auto device = -1;
+    if(get_get_device_fn() && get_get_device_fn()(&device) != hipSuccess) device = -1;
+    key.device = device;
+    return key;
+}
+
 // The map accessors below can return nullptr. Each caches a reference to the
 // static_object's pointer, which destroy_static_objects() nulls at teardown, and nothing
 // unwraps our HIP dispatch table entries. After rocprofiler_register_detach the process
@@ -444,9 +506,12 @@ register_pending_wait(uint64_t signal_handle, pending_wait_t pw)
 }
 
 // Consumes one wait registered against signal_handle, skipping any registered by the
-// hipStreamWaitEvent on event exclude_hip_event_handle (no exclusion when it is 0).
+// hipStreamWaitEvent on event exclude_hip_event_handle (no exclusion when it is 0) and, when
+// stream is known, any waiting on a different stream.
 pending_wait_t
-consume_pending_wait(uint64_t signal_handle, uint64_t exclude_hip_event_handle)
+consume_pending_wait(uint64_t                           signal_handle,
+                     uint64_t                           exclude_hip_event_handle,
+                     const std::optional<stream_key_t>& stream)
 {
     auto  result = pending_wait_t{};
     auto* map_v  = get_pending_wait_map();
@@ -459,6 +524,7 @@ consume_pending_wait(uint64_t signal_handle, uint64_t exclude_hip_event_handle)
             if(exclude_hip_event_handle != 0 &&
                it->second.hip_event_handle == exclude_hip_event_handle)
                 continue;
+            if(stream && it->second.wait_stream != *stream) continue;
 
             result = std::move(it->second);
             map.erase(it);
@@ -718,11 +784,11 @@ void
 resolve_event_candidates(bool call_succeeded);
 
 bool
-begin_event_record(hipEvent_t event, hipStream_t stream)
+begin_event_record(hipEvent_t event, hipStream_t stream, bool per_thread_api)
 {
     if(!begin_event_call(ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), stream))
         return false;
-    g_active_event_ctx->record_stream = stream;
+    g_active_event_ctx->record_stream = make_stream_key(stream, per_thread_api);
     return true;
 }
 
@@ -737,9 +803,11 @@ template <event_record_fn_t saved_table_t::*SavedField>
 hipError_t
 event_record_impl(hipEvent_t event, hipStream_t stream)
 {
+    constexpr auto per_thread_api = (SavedField == &saved_table_t::hipEventRecord_spt_fn);
+
     auto       _ctx   = active_event_context_t{};
     auto       _scope = event_call_scope{_ctx};
-    const auto traced = begin_event_record(event, stream);
+    const auto traced = begin_event_record(event, stream, per_thread_api);
     auto       ret    = (get_saved_table().*SavedField)(event, stream);
     if(traced) end_event_record(ret, event);
     return ret;
@@ -751,7 +819,7 @@ event_record_with_flags_impl(hipEvent_t event, hipStream_t stream, unsigned int 
 {
     auto       _ctx   = active_event_context_t{};
     auto       _scope = event_call_scope{_ctx};
-    const auto traced = begin_event_record(event, stream);
+    const auto traced = begin_event_record(event, stream, false);
     auto       ret    = get_saved_table().hipEventRecordWithFlags_fn(event, stream, flags);
     if(traced) end_event_record(ret, event);
     return ret;
@@ -776,26 +844,15 @@ discard_pending_wait(uint64_t signal_handle, uint64_t hip_event_handle)
 uint64_t
 register_deferred_wait(uint64_t                   hip_event_handle,
                        const event_record_info_t& event_info,
-                       hipStream_t                wait_stream)
+                       const stream_key_t&        wait_stream)
 {
     if(event_info.original_signal == 0) return 0;
 
     // CLR returns early from Event::streamWait when the wait targets the stream the event
-    // was recorded on, so no GPU dependency is created and nothing will ever claim an
-    // entry registered here. Registering one anyway strands it until the event is
-    // re-recorded or destroyed, retaining a correlation id that finalization reports as
-    // dangling.
-    //
-    // Compares the caller-supplied stream values as-is, deliberately without collapsing
-    // nullptr onto a default-stream sentinel. nullptr denotes the per-thread default
-    // stream through the _spt entry points and the legacy default stream otherwise, and
-    // those are different streams; treating them as interchangeable could suppress a wait
-    // that really does cross streams, losing a record. Failing open costs at most a
-    // stranded entry, which is bounded and recovered at re-record or destroy, so the
-    // comparison only suppresses when the two are unambiguously the same stream.
-    //
-    // Also narrower than CLR, which compares event_->command().queue(): two distinct
-    // streams backed by one queue are not caught here.
+    // was recorded on, so no GPU dependency is created. An entry registered anyway would
+    // stay pending on the record's signal, and a later barrier CLR makes depend on that
+    // signal (for example, a blocking stream's implicit wait on the null stream) would claim
+    // it and report a wait the application never got.
     if(event_info.record_stream == wait_stream) return 0;
 
     // CLR skips completed signals when it assembles a barrier's dependency list, so a
@@ -818,6 +875,7 @@ register_deferred_wait(uint64_t                   hip_event_handle,
     pw.corr_id_ref      = corr_id;
     pw.hip_event_handle = hip_event_handle;
     pw.source_info      = event_info;
+    pw.wait_stream      = wait_stream;
     corr_id->add_ref_count();
     corr_id->add_kern_count();
 
@@ -847,7 +905,9 @@ stream_wait_event_impl(hipStream_t stream, hipEvent_t event, unsigned int flags)
         // Pre-register the pending wait BEFORE calling CLR. This ensures the entry
         // is in the map before CLR can enqueue any barrier carrying the dep_signal,
         // even if another thread concurrently submits work to the waiting stream.
-        ctx.registered_signal = register_deferred_wait(hip_event_handle, event_info, stream);
+        constexpr auto per_thread_api = (SavedField == &saved_table_t::hipStreamWaitEvent_spt_fn);
+        ctx.registered_signal         = register_deferred_wait(
+            hip_event_handle, event_info, make_stream_key(stream, per_thread_api));
     }
 
     auto ret = (get_saved_table().*SavedField)(stream, event, flags);
@@ -896,6 +956,22 @@ ipc_open_event_handle_impl(hipEvent_t* event, hipIpcEventHandle_t handle)
     return ret;
 }
 }  // namespace
+
+bool
+push_api_stream(ihipStream_t* stream, bool per_thread_api)
+{
+    if(registration::get_fini_status() > 0) return false;
+    if(!hip_event_service_configured_flag().load(std::memory_order_relaxed)) return false;
+
+    g_api_streams.emplace_back(make_stream_key(stream, per_thread_api));
+    return true;
+}
+
+void
+pop_api_stream()
+{
+    g_api_streams.pop_back();
+}
 
 active_event_context_t*
 get_active_event_context()
@@ -1340,7 +1416,7 @@ claim_deferred_waits(const hsa::rocprofiler_packet& pkt,
 
     auto claim = [&](hsa_signal_t dep) {
         if(dep.handle == 0) return;
-        auto pw = consume_pending_wait(dep.handle, own_wait_handle);
+        auto pw = consume_pending_wait(dep.handle, own_wait_handle, get_api_stream());
         if(pw.corr_id_ref) claimed.emplace_back(std::move(pw));
     };
 
@@ -1833,6 +1909,10 @@ update_table<::HipDispatchTable>(::HipDispatchTable* table)
     if(table_has_entry<ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamIsCapturing>(table) &&
        table->hipStreamIsCapturing_fn)
         get_stream_is_capturing_fn() = table->hipStreamIsCapturing_fn;
+
+    if(table_has_entry<ROCPROFILER_HIP_RUNTIME_API_ID_hipGetDevice>(table) &&
+       table->hipGetDevice_fn)
+        get_get_device_fn() = table->hipGetDevice_fn;
 }
 
 }  // namespace event

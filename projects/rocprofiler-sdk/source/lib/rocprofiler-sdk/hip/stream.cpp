@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hip/event.hpp"
 #include "lib/rocprofiler-sdk/hip/utils.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -50,6 +51,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -68,6 +70,29 @@ using stream_map_t = std::unordered_map<hipStream_t, rocprofiler_stream_id_t>;
 
 namespace
 {
+// Makes stream the target of the HIP API call executing on this thread for the guard's
+// lifetime (see event::push_api_stream).
+class api_stream_scope
+{
+public:
+    api_stream_scope(ihipStream_t* stream, bool per_thread_api)
+    : m_pushed{event::push_api_stream(stream, per_thread_api)}
+    {}
+
+    ~api_stream_scope()
+    {
+        if(m_pushed) event::pop_api_stream();
+    }
+
+    api_stream_scope(const api_stream_scope&) = delete;
+    api_stream_scope(api_stream_scope&&)      = delete;
+    api_stream_scope& operator=(const api_stream_scope&) = delete;
+    api_stream_scope& operator=(api_stream_scope&&) = delete;
+
+private:
+    bool m_pushed = false;
+};
+
 auto*
 get_stream_map()
 {
@@ -421,7 +446,17 @@ FuncT create_read_functor(RetT (*func)(Args...))
         tracing::update_external_correlation_ids(
             external_corr_ids, thr_id, external_corr_id_domain_idx);
 
-        auto _ret = next_func(std::forward<Args>(args)...);
+        // The _spt entry points resolve nullptr and hipStreamLegacy to the per-thread stream
+        constexpr auto api_name   = std::string_view{hip_api_info<TableIdx, OpIdx>::name};
+        constexpr auto spt_suffix = std::string_view{"_spt"};
+        constexpr auto per_thread_api =
+            api_name.size() >= spt_suffix.size() &&
+            api_name.substr(api_name.size() - spt_suffix.size()) == spt_suffix;
+
+        auto _ret = [&]() {
+            auto _stream_scope = api_stream_scope{stream, per_thread_api};
+            return next_func(std::forward<Args>(args)...);
+        }();
 
         if(!callback_contexts.empty())
         {
