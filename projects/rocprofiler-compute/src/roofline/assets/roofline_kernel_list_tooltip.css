@@ -8,9 +8,9 @@
   z-index: 500;
   max-width: min(480px, calc(100vw - 24px));
   padding: 6px 10px;
-  background: var(--roofline-surface);
-  color: var(--roofline-text);
-  border: 1px solid var(--roofline-border);
+  background: var(--report-surface);
+  color: var(--report-text);
+  border: 1px solid var(--report-border);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   font-family: var(--roofline-kernel-font, monospace);
