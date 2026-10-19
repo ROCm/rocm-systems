@@ -46,7 +46,6 @@ class TestGpuEvents(unittest.TestCase):
             pass
 
     def setUp(self):
-        self.raise_exception = None
         self.common.amdsmi_smart_init()
         self.common.processors = amdsmi.amdsmi_get_processor_handles()
 
@@ -213,11 +212,11 @@ class TestGpuEvents(unittest.TestCase):
 
         # Opt-in: amdsmi_reset_gpu() is destructive and needs root, so only run it
         # when AMDSMI_TEST_TRIGGER_RESET is set to actually generate reset events.
-        # Ex. sudo AMDSMI_TEST_TRIGGER_RESET=1 /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "test_events" -v
+        # Ex. sudo AMDSMI_TEST_TRIGGER_RESET=1 /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k TestGpuEvents.test_gpu_event -v
         # (Note: filter not required, but helpful for fast checks)
         # Without AMDSMI_TEST_TRIGGER_RESET=1 the test will still run and check for events,
         # but will not generate any reset events.
-        trigger_reset = bool(os.environ.get("AMDSMI_TEST_TRIGGER_RESET"))
+        trigger_reset = os.environ.get("AMDSMI_TEST_TRIGGER_RESET") == "1"
         if trigger_reset and os.geteuid() != 0:
             self.skipTest("AMDSMI_TEST_TRIGGER_RESET requires root to reset the GPU.")
 
@@ -230,99 +229,88 @@ class TestGpuEvents(unittest.TestCase):
         # ones; keep it short so an idle GPU doesn't stall the run.
         timeout_ms = 1000
 
+        success = amdsmi.AmdSmiStatus.SUCCESS
         # No events fire on an idle GPU, so NO_DATA is a passing outcome for get.
-        get_expected = [self.common.PASS, "AMDSMI_STATUS_NO_DATA"]
+        get_accept = [success, amdsmi.AmdSmiStatus.NO_DATA]
 
-        for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i)
-            msg = f"\t### amdsmi_init_gpu_event_notification(gpu={i}):"
+        missing_events = []
+        unexpected_events = []
+        with self.common.status_sweep():
+            for i, gpu in enumerate(self.common.processors):
+                self.common.print_device_header(i)
 
-            # Init
-            try:
-                ret = amdsmi.amdsmi_init_gpu_event_notification(gpu)
-                self.common.print(msg, ret)
-                self.common.check_ret("", "", self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.PASS):
-                    self.raise_exception = e
-                # Skip remaining tests on any exception when initializing
-                continue
+                initialized = False
+                msg = _api_msg("amdsmi_init_gpu_event_notification", gpu=i)
+                with self.common.expect_status(msg, success):
+                    amdsmi.amdsmi_init_gpu_event_notification(gpu)
+                    initialized = True
+                if not initialized:
+                    continue
 
-            # Set Mask
-            msg = f"\t### amdsmi_set_gpu_event_notification_mask(gpu={i}, mask=0x{mask:X}):"
-            try:
-                ret = amdsmi.amdsmi_set_gpu_event_notification_mask(gpu, mask)
-                self.common.print(msg, ret)
-                self.common.check_ret("", "", self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.PASS):
-                    self.raise_exception = e
+                msg = _api_msg("amdsmi_set_gpu_event_notification_mask", gpu=i, mask=f"0x{mask:X}")
+                with self.common.expect_status(msg, success):
+                    amdsmi.amdsmi_set_gpu_event_notification_mask(gpu, mask)
 
-            # Trigger (opt-in): reset the GPU to generate reset events.
-            if trigger_reset:
-                msg = f"\t### amdsmi_reset_gpu(gpu={i}):"
-                try:
-                    ret = amdsmi.amdsmi_reset_gpu(gpu)
-                    self.common.print(msg, ret)
-                    self.common.check_ret("", "", self.common.PASS)
-                except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                    if self.common.check_ret(msg, e, self.common.PASS):
-                        self.raise_exception = e
-            else:
-                self.common.print(
-                    f"\tSKIPPED (amdsmi_reset_gpu(gpu={i})): opt-in reset disabled "
-                    "\n\t(set AMDSMI_TEST_TRIGGER_RESET=1 as root to generate reset events); "
-                    "expecting AMDSMI_STATUS_NO_DATA (or SUCCESS with no events) below."
-                )
+                # Trigger (opt-in): reset the GPU to generate reset events.
+                if trigger_reset:
+                    msg = _api_msg("amdsmi_reset_gpu", gpu=i)
+                    with self.common.expect_status(msg, success):
+                        amdsmi.amdsmi_reset_gpu(gpu)
+                else:
+                    self.common.print(
+                        f"\tSKIPPED (amdsmi_reset_gpu(gpu={i})): opt-in reset disabled "
+                        "\n\t(set AMDSMI_TEST_TRIGGER_RESET=1 as root to generate reset events); "
+                        "expecting AMDSMI_STATUS_NO_DATA (or SUCCESS with no events) below."
+                    )
 
-            # Get
-            msg = f"\t### amdsmi_get_gpu_event_notification(timeout_ms={timeout_ms}):"
-            seen_events = set()
-            gpu_addr = gpu.value  # records carry processor_handle as a raw address (int)
-            try:
-                ret = amdsmi.amdsmi_get_gpu_event_notification(timeout_ms)
-                self.common.print(msg, f"num_elem={ret['num_elem']}")
-                # Decode each record: 'event' is a raw enum value, 'message' holds details.
-                for event_data in ret["data"]:
-                    # get is process-global, only attribute events for the current GPU.
-                    if event_data["processor_handle"] != gpu_addr:
-                        self.common.print(f"\t\tSKIPPED event for GPU {i}: {event_data}")
-                        continue
-                    try:
-                        event_name = amdsmi.AmdSmiEvtNotificationType(event_data["event"]).name
-                    except ValueError:
-                        event_name = f"UNKNOWN({event_data['event']})"
-                    seen_events.add(event_name)
-                    # message fields are double-space separated; render as "a | b | c".
-                    fields = [f.strip() for f in event_data["message"].split("  ") if f.strip()]
-                    details = " | ".join(fields) if fields else "(no details)"
-                    self.common.print(f"\t\t{event_name:<16} {details}")
-                self.common.check_ret("", "", get_expected)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, get_expected):
-                    self.raise_exception = e
+                notifications = None
+                msg = _api_msg("amdsmi_get_gpu_event_notification", timeout_ms=timeout_ms)
+                with self.common.expect_status(msg, get_accept):
+                    notifications = amdsmi.amdsmi_get_gpu_event_notification(timeout_ms)
 
-            # A forced reset must produce both reset events.
-            if trigger_reset:
-                for expected_event in ("GPU_PRE_RESET", "GPU_POST_RESET"):
-                    if expected_event not in seen_events:
-                        self.raise_exception = AssertionError(
-                            f"Expected {expected_event} after amdsmi_reset_gpu(gpu={i}) "
-                            f"but it was not received (saw: {sorted(seen_events)})."
-                        )
+                seen_events = set()
+                if notifications is not None:
+                    self.common.print(f"\t\tnum_elem={notifications['num_elem']}")
+                    gpu_addr = gpu.value  # records carry processor_handle as a raw address (int)
+                    # 'event' is a raw enum value, 'message' holds details.
+                    for event_data in notifications["data"]:
+                        # get is process-global, only attribute events for the current GPU.
+                        if event_data["processor_handle"] != gpu_addr:
+                            self.common.print(f"\t\tSKIPPED event for GPU {i}: {event_data}")
+                            continue
+                        try:
+                            event_name = amdsmi.AmdSmiEvtNotificationType(event_data["event"]).name
+                        except ValueError:
+                            event_name = f"UNKNOWN({event_data['event']})"
+                        seen_events.add(event_name)
+                        # message fields are double-space separated; render as "a | b | c".
+                        fields = [f.strip() for f in event_data["message"].split("  ") if f.strip()]
+                        details = " | ".join(fields) if fields else "(no details)"
+                        self.common.print(f"\t\t{event_name:<16} {details}")
 
-            # Stop
-            msg = f"\t### amdsmi_stop_gpu_event_notification(gpu={i}):"
-            try:
-                ret = amdsmi.amdsmi_stop_gpu_event_notification(gpu)
-                self.common.print(msg, ret)
-                self.common.check_ret("", "", self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.PASS):
-                    self.raise_exception = e
+                # A forced reset must produce both reset events; without one, neither may appear.
+                reset_events = ("GPU_PRE_RESET", "GPU_POST_RESET")
+                if trigger_reset:
+                    for expected_event in reset_events:
+                        if expected_event not in seen_events:
+                            missing_events.append(
+                                f"gpu {i}: {expected_event} (saw: {sorted(seen_events)})"
+                            )
+                else:
+                    stray = [event for event in reset_events if event in seen_events]
+                    if stray:
+                        unexpected_events.append(f"gpu {i}: {stray}")
 
-        if self.raise_exception:
-            raise self.raise_exception
+                msg = _api_msg("amdsmi_stop_gpu_event_notification", gpu=i)
+                with self.common.expect_status(msg, success):
+                    amdsmi.amdsmi_stop_gpu_event_notification(gpu)
+
+        # Checked outside the sweep so the per-call failures above are still reported.
+        self.assertFalse(
+            missing_events, f"reset events not received after amdsmi_reset_gpu: {missing_events}"
+        )
+        self.assertFalse(
+            unexpected_events,
+            f"reset events received without amdsmi_reset_gpu: {unexpected_events}",
+        )
         return
-
-    # integration
