@@ -95,6 +95,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_transpose.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_traits.h"
@@ -158,6 +159,7 @@ struct ForceScalarGuard {
 static_assert(GpuIsa<cdna3::Isa>);
 static_assert(GpuIsa<cdna5::Isa>);
 static_assert(GpuIsa<rdna4::Isa>);
+static_assert(HasAccVgpr<cdna1::Isa>);
 static_assert(HasAccVgpr<cdna2::Isa>);
 static_assert(HasAccVgpr<cdna3::Isa>);
 static_assert(HasAccVgpr<cdna4::Isa>);
@@ -219,9 +221,9 @@ static_assert(HasMonolithicWaitcnt<rdna3::Isa>);
 static_assert(rdna2::Isa::WF_SIZE_MAX == 64);
 static_assert(cdna5::Isa::WF_SIZE_MAX == 32);
 
-// CDNA1 and GFX1250 have no AccVGPRs; CDNA2/3/4 have 256.
+// CDNA1-4 have 256 AccVGPRs; GFX1250 has none.
 constexpr uint32_t kCdnaAccVgprsPerWf = cdna2::Isa::MAX_ACC_VGPRS_PER_WF;
-static_assert(cdna1::Isa::MAX_ACC_VGPRS_PER_WF == 0);
+static_assert(cdna1::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
 static_assert(kCdnaAccVgprsPerWf == 256);
 static_assert(cdna3::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
 static_assert(cdna4::Isa::MAX_ACC_VGPRS_PER_WF == kCdnaAccVgprsPerWf);
@@ -616,6 +618,64 @@ TEST(TransposeLoadTest, Cdna4B64TrB8MatchesMfmaLaneLayout) {
     for (uint32_t dest_byte = 0; dest_byte < 8; ++dest_byte)
       EXPECT_EQ(state.response_data[dest_lane * 8 + dest_byte],
                 input[(source_base + 2 * dest_byte) * 8 + source_byte]);
+  }
+}
+
+// Layouts independently described by Triton TargetFeatures (CDNA4 B4) and
+// ROCm FlyDSL CDNA4 CopyAtom (B4/B6). Exercise every bit, including packed
+// six-bit fields that cross DWORDs and both wave halves.
+TEST(TransposeLoadTest, Cdna4SubbyteTransposesEveryBitWithinSixteenLaneMatrices) {
+  for (unsigned bits : {4u, 6u}) {
+    const unsigned lane_bytes = bits * 2;
+    amdgpu::VectorMemState state(amdgpu::LOCAL_MEM);
+    state.wf_size = 64;
+    state.num_elems = lane_bytes / 4;
+    state.transpose = static_cast<uint8_t>(bits == 4 ? amdgpu::TransposeKind::CDNA4_TR_B4
+                                                     : amdgpu::TransposeKind::CDNA4_TR_B6);
+    for (unsigned input_bit = 0; input_bit < 64 * lane_bytes * 8; ++input_bit) {
+      state.response_data.assign(64 * lane_bytes, 0);
+      state.response_data[input_bit / 8] = 1u << (input_bit % 8);
+      const unsigned source_lane = input_bit / (16 * bits);
+      const unsigned source_element = (input_bit / bits) % 16;
+      const unsigned output_bit =
+          ((source_lane / 16 * 16 + source_element) * 16 + source_lane % 16) * bits +
+          input_bit % bits;
+      std::vector<uint8_t> expected(64 * lane_bytes, 0);
+      expected[output_bit / 8] = 1u << (output_bit % 8);
+      amdgpu::transpose_response(state);
+      EXPECT_EQ(state.response_data, expected) << "bits=" << bits << " input_bit=" << input_bit;
+    }
+  }
+}
+
+// Preserve the CDNA5 register/lane bit basis when adding the CDNA4 routing.
+TEST(TransposeLoadTest, Cdna5SubbyteTransposesEveryBitAcrossInterleavedGroups) {
+  for (uint32_t bits : {4u, 6u}) {
+    const uint32_t lane_bytes = bits * 2;
+    amdgpu::VectorMemState state(amdgpu::LOCAL_MEM);
+    state.wf_size = 64;
+    state.num_elems = lane_bytes / 4;
+    state.transpose = static_cast<uint8_t>(bits == 4 ? amdgpu::TransposeKind::TR_B4
+                                                     : amdgpu::TransposeKind::TR_B6);
+    for (uint32_t input_bit = 0; input_bit < 64 * lane_bytes * 8; ++input_bit) {
+      state.response_data.assign(64 * lane_bytes, 0);
+      state.response_data[input_bit / 8] = 1u << (input_bit % 8);
+      const uint32_t source_lane = input_bit / (16 * bits);
+      const uint32_t source_element = (input_bit / bits) % 16;
+      const uint32_t matrix_lane_bit = bits == 4 ? 3 : 2;
+      const uint32_t dest_lane =
+          (source_lane & 32) | (((source_lane >> matrix_lane_bit) & 1) << 4) | source_element;
+      // Remove the lane bit selecting the other sixteen-lane matrix.
+      const uint32_t low_mask = (1u << matrix_lane_bit) - 1;
+      const uint32_t dest_element =
+          (source_lane & low_mask) |
+          (((source_lane & 31) >> (matrix_lane_bit + 1)) << matrix_lane_bit);
+      const uint32_t output_bit = (dest_lane * 16 + dest_element) * bits + input_bit % bits;
+      std::vector<uint8_t> expected(64 * lane_bytes, 0);
+      expected[output_bit / 8] = 1u << (output_bit % 8);
+      amdgpu::transpose_response(state);
+      EXPECT_EQ(state.response_data, expected) << "bits=" << bits << " input_bit=" << input_bit;
+    }
   }
 }
 

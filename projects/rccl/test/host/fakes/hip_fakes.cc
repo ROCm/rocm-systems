@@ -52,6 +52,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemMap,                     hipMemMap);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemSetAccess,               hipMemSetAccess);
 ASSERT_HOOK_MATCHES_PROD(g_hipIpcOpenMemHandle,           hipIpcOpenMemHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetPCIBusId,          hipDeviceGetPCIBusId);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetByPCIBusId,        hipDeviceGetByPCIBusId);
 ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamBatchMemOp,           hipStreamBatchMemOp);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWriteValue64,         hipStreamWriteValue64);
@@ -59,6 +60,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
 #endif
+ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -243,6 +245,7 @@ std::function<hipError_t(int*)> g_hipGetDeviceCount = DefaultHipGetDeviceCount;
 static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t attr, int device);
 static hipError_t DefaultHipDeviceSetLimit(hipLimit_t limit, size_t value);
 static hipError_t DefaultHipDeviceGetPCIBusId(char* pciBusId, int len, int device);
+static hipError_t DefaultHipDeviceGetByPCIBusId(int* device, const char* pciBusId);
 static hipError_t DefaultHipEventRecord(hipEvent_t event, hipStream_t stream);
 
 static hipError_t DefaultHipDeviceCanAccessPeer(int* canAccessPeer, int, int)
@@ -352,6 +355,17 @@ static hipError_t DefaultHipMemsetAsync(void*, int, size_t, hipStream_t)
     return g_hipAsyncOpsResult;
 }
 
+// Synchronous memset. Unlike the async form (which answers to the shared
+// g_hipAsyncOpsResult gate), this really writes: the allocation seams above
+// hand out std::malloc'd host memory, so production code that memsets a buffer
+// and later reads it back -- ncclRmaProxyCtxAllocGraph zeroing flushBufDev, for
+// one -- sees the zeros it wrote rather than uninitialised bytes.
+static hipError_t DefaultHipMemset(void* dst, int value, size_t bytes)
+{
+    if (dst != nullptr && bytes > 0) std::memset(dst, value, bytes);
+    return hipSuccess;
+}
+
 static hipError_t DefaultHipStreamCreateWithFlags(hipStream_t* stream, unsigned)
 {
     if (stream) *stream = (g_hipStreamCreateResult == hipSuccess)
@@ -391,6 +405,7 @@ std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind)> g_hipMemcpy
 std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)>
     g_hipMemcpyAsync = DefaultHipMemcpyAsync;
 std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync = DefaultHipMemsetAsync;
+std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
 std::function<hipError_t(hipStream_t*, unsigned)> g_hipStreamCreateWithFlags = DefaultHipStreamCreateWithFlags;
 std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize = DefaultHipStreamSynchronize;
 std::function<hipError_t(hipStream_t)> g_hipStreamDestroy = DefaultHipStreamDestroy;
@@ -618,6 +633,7 @@ void ResetHipFakes()
     g_hipDeviceGetAttributeResult   = hipErrorInvalidValue;
     g_hipDeviceGetPCIBusIdResult    = hipErrorInvalidValue;
     g_hipDeviceGetPCIBusId          = DefaultHipDeviceGetPCIBusId;
+    g_hipDeviceGetByPCIBusId        = DefaultHipDeviceGetByPCIBusId;
     g_hipEventCreateResult          = hipErrorInvalidValue;
     g_hipMemPoolResult              = hipErrorInvalidValue;
     g_hipStreamCreateResult         = hipErrorInvalidValue;
@@ -642,6 +658,7 @@ void ResetHipFakes()
     g_hipMemcpy                     = DefaultHipMemcpy;
     g_hipMemcpyAsync                = DefaultHipMemcpyAsync;
     g_hipMemsetAsync                = DefaultHipMemsetAsync;
+    g_hipMemset                     = DefaultHipMemset;
     g_hipStreamCreateWithFlags      = DefaultHipStreamCreateWithFlags;
     g_hipStreamSynchronize          = DefaultHipStreamSynchronize;
     g_hipStreamDestroy              = DefaultHipStreamDestroy;
@@ -760,6 +777,13 @@ std::function<hipError_t(char*, int, int)> g_hipDeviceGetPCIBusId =
 hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device)
 {
     return g_hipDeviceGetPCIBusId(pciBusId, len, device);
+}
+
+static hipError_t DefaultHipDeviceGetByPCIBusId(int*, const char*) { return hipErrorInvalidValue; }
+std::function<hipError_t(int*, const char*)> g_hipDeviceGetByPCIBusId = DefaultHipDeviceGetByPCIBusId;
+hipError_t hipDeviceGetByPCIBusId(int* device, const char* pciBusId)
+{
+    return g_hipDeviceGetByPCIBusId(device, pciBusId);
 }
 
 hipError_t hipEventCreate(hipEvent_t* event)
@@ -974,7 +998,7 @@ hipError_t hipMallocManaged(void** p, size_t size, unsigned int flags)
     return g_hipMallocManaged(p, size, flags);
 }
 hipError_t hipMemcpy(void* d, const void* s, size_t n, hipMemcpyKind k) { return g_hipMemcpy(d, s, n, k); }
-hipError_t hipMemset(void*, int, size_t) { return hipErrorInvalidValue; }
+hipError_t hipMemset(void* dst, int value, size_t bytes) { return g_hipMemset(dst, value, bytes); }
 hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
 // We define hipGetDevicePropertiesR0600, the versioned public HIP ABI symbol,
 // rather than the unversioned hipGetDeviceProperties. Callers write

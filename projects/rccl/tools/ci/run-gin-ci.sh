@@ -60,6 +60,7 @@ done
 : "${RCCL_INSTALL_PREFIX:?run-gin-ci.sh: RCCL_INSTALL_PREFIX unset (set by gin.sbatch)}"
 : "${RCCL_TESTS_BIN_DIR:?run-gin-ci.sh: RCCL_TESTS_BIN_DIR unset (set by gin.sbatch)}"
 : "${RCCL_FIXTURES_BIN_DIR:?run-gin-ci.sh: RCCL_FIXTURES_BIN_DIR unset (set by gin.sbatch)}"
+: "${RCCL_BUILD_LIB_DIR:?run-gin-ci.sh: RCCL_BUILD_LIB_DIR unset (set by gin.sbatch)}"
 # build-rocshmem.sh records where the test binary landed (bin/ vs share/rocshmem/);
 # fall back to bin/ for older env fragments.
 ROCSHMEM_TESTS_BIN_DIR="${ROCSHMEM_TESTS_BIN_DIR:-${ROCSHMEM_INSTALL_DIR}/bin}"
@@ -92,14 +93,14 @@ echo "==> test matrix          = ${CONFIG}"
 
 MCA=""
 DEBUG_ENV=""
-TEST_NAMES=() TEST_KINDS=() TEST_BINS=() TEST_ENVS=() TEST_ARGS=()
+TEST_NAMES=() TEST_KINDS=() TEST_BINS=() TEST_ENVS=() TEST_ARGS=() TEST_NPS=()
 CONFIG_TSV="$(python3 "${PARSER}" "${CONFIG}")" || {
   echo "ERROR: failed to parse test matrix ${CONFIG}" >&2; exit 1; }
-while IFS=$'\x1f' read -r kind f1 f2 f3 f4 f5; do
+while IFS=$'\x1f' read -r kind f1 f2 f3 f4 f5 f6; do
   case "${kind}" in
     mca)        MCA="${f1}" ;;
     debug_env)  DEBUG_ENV="${f1}" ;;
-    test)       TEST_NAMES+=("${f1}"); TEST_KINDS+=("${f2}"); TEST_BINS+=("${f3}"); TEST_ENVS+=("${f4}"); TEST_ARGS+=("${f5}") ;;
+    test)       TEST_NAMES+=("${f1}"); TEST_KINDS+=("${f2}"); TEST_BINS+=("${f3}"); TEST_ENVS+=("${f4}"); TEST_ARGS+=("${f5}"); TEST_NPS+=("${f6}") ;;
   esac
 done <<< "${CONFIG_TSV}"
 
@@ -194,13 +195,17 @@ apply_gin_pytest_inner_budget() {
 # Word-splitting on flag/arg vars below is intentional.
 # shellcheck disable=SC2086
 run_test() {
-  local name="$1" kind="$2" bin="$3" env_flags="$4" args="$5"
+  local name="$1" kind="$2" bin="$3" env_flags="$4" args="$5" np="${6:-}"
   local bin_path bench_timeout="${BENCH_TIMEOUT}"
+  # Per-test rank count; gtest fixtures that assert an exact world size set it.
+  local nranks="${np:-}"
+  [[ -z "${nranks}" ]] && nranks="${NP}"
   case "${kind}" in
-    rocshmem)   bin_path="${ROCSHMEM_TESTS_BIN_DIR}/${bin}" ;;
-    rccl-tests) bin_path="${RCCL_TESTS_BIN_DIR}/${bin}" ;;
-    fixtures)   bin_path="${RCCL_FIXTURES_BIN_DIR}/${bin}" ;;
-    pytest)     bench_timeout="${GIN_PYTEST_TIMEOUT}" ;;
+    rocshmem)     bin_path="${ROCSHMEM_TESTS_BIN_DIR}/${bin}" ;;
+    rccl-tests)   bin_path="${RCCL_TESTS_BIN_DIR}/${bin}" ;;
+    fixtures)     bin_path="${RCCL_FIXTURES_BIN_DIR}/${bin}" ;;
+    mpi-fixtures) bin_path="${RCCL_FIXTURES_BIN_DIR}/${bin}" ;;
+    pytest)       bench_timeout="${GIN_PYTEST_TIMEOUT}" ;;
     *) echo "  SKIP ${name}: unknown kind '${kind}'"; FAILED_RUNS+=("${name} (unknown kind)"); return ;;
   esac
   if [[ "${kind}" != "pytest" ]]; then
@@ -255,9 +260,16 @@ run_test() {
     timeout --kill-after="${BENCH_KILL_AFTER}" "${bench_timeout}" \
       env LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
         "${bin_path}" ${args}
+  elif [[ "${kind}" == "mpi-fixtures" ]]; then
+    # rccl-UnitTestsMPI links librccl internals, which only the build tree's
+    # ENABLE_MPI_TESTS librccl exports; the installed copy hides them.
+    timeout --kill-after="${BENCH_KILL_AFTER}" "${bench_timeout}" \
+      mpirun -np "${nranks}" ${MCA} ${env_flags} \
+        -x LD_LIBRARY_PATH="${RCCL_BUILD_LIB_DIR}:${LD_LIBRARY_PATH}" \
+        "${bin_path}" ${args}
   else
     timeout --kill-after="${BENCH_KILL_AFTER}" "${bench_timeout}" \
-      mpirun -np "${NP}" ${MCA} ${env_flags} -x LD_LIBRARY_PATH \
+      mpirun -np "${nranks}" ${MCA} ${env_flags} -x LD_LIBRARY_PATH \
         "${bin_path}" ${args}
   fi
   local rc=$?
@@ -272,7 +284,8 @@ run_test() {
 }
 
 for i in "${!TEST_NAMES[@]}"; do
-  run_test "${TEST_NAMES[$i]}" "${TEST_KINDS[$i]}" "${TEST_BINS[$i]}" "${TEST_ENVS[$i]}" "${TEST_ARGS[$i]}"
+  run_test "${TEST_NAMES[$i]}" "${TEST_KINDS[$i]}" "${TEST_BINS[$i]}" "${TEST_ENVS[$i]}" "${TEST_ARGS[$i]}" \
+           "${TEST_NPS[$i]}"
 done
 
 if [[ ${#FAILED_RUNS[@]} -ne 0 ]]; then
