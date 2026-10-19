@@ -56,27 +56,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - The existing `amdsmi_*_gpu_power_profile*` APIs are separate and unchanged.
 
 - **Added Component Unified ID (CUID) reporting APIs**.  
-  - `amdsmi_get_gpu_cuid_info()` returns a device's primary and derived CUIDs together with the Component Type, the lookup stage that answered, and whether the value is auxiliary (a temporary CUID), in the new `amdsmi_cuid_info_t`. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
-  - `amdsmi_get_gpu_device_cuid()` now returns the device's derived CUID.
-  - `amdsmi_get_cuid_components()` lists every component on the node that has a CUID (platform, CPU packages, GPUs and their compute partitions, NPUs, one entry per NIC function; a NIC's UnitID is its PCI function number) in the new `amdsmi_cuid_component_t`, with its BDF and sysfs path. It needs no processor handle.
-  - The entry points are exported whether or not the build links `libamdcuid`; without it they return `AMDSMI_STATUS_NOT_SUPPORTED`.
-  - Every CUID is a temporary CUID, built from the machine ID and world-readable device information, the same for every caller and on any kernel. A GPU handle in SPX reports the whole GPU's CUID; in DPX and above each handle reports its own partition's, with the partition's UnitID taken from amdgpu's `cuid_unit_id` or, on a kernel without it, from the KFD topology.
-  - CLI: `amd-smi static --cuid` reports the CUID block and `--cuid-primary` adds the serial-bearing primary CUID (requires elevation). `amd-smi node --cuid` (`--cuid-primary` for root) lists every component's CUID. `--cuid` is opt-in.
-  - `amd-smi list` adds `cuid`, `identifier_kind`, `source`, `auxiliary` and `cuid_metadata_status`. The existing `uuid`/`gpu_uuid` fields keep reporting the CUID when available and the legacy UUID otherwise.
-  - Build: `BUILD_CUID` takes `AUTO` (default), `ON` or `OFF`. Without an installed `libamdcuid` package, the in-tree `shared/cuid` sources are built and absorbed into `libamd_smi`.
-
-  ```shell
-  $ amd-smi static --cuid
-  GPU: 0
-      CUID:
-          DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
-          PRIMARY_CUID: N/A (not requested)
-          COMPONENT_TYPE: GPU
-          AUXILIARY: True
-          SOURCE: LIBRARY
-          IDENTIFIER_KIND: cuid
-          CUID_METADATA_STATUS: available
-  ```
+  - New `amdsmi_get_gpu_cuid_info()` returns a GPU's derived and primary CUIDs, its component type and whether the ID is temporary, in `amdsmi_cuid_info_t`. `amdsmi_get_gpu_device_cuid()` now returns the derived CUID.
+  - New `amdsmi_get_cuid_components()` lists every component on the node that has a CUID (platform, CPU packages, GPUs and their compute partitions, NPUs and NIC functions), with its BDF and sysfs path.
+  - All CUIDs are currently temporary IDs, the same for every caller. In SPX a GPU handle reports the whole GPU's CUID; in DPX and above each partition reports its own.
+  - CLI: `amd-smi static --cuid` and `amd-smi node --cuid` show CUIDs; add `--cuid-primary` (requires root) for the primary CUID. `amd-smi list` adds `cuid`, `identifier_kind`, `source`, `auxiliary` and `cuid_metadata_status`.
+  - In a build without CUID support (for example `BUILD_CUID=OFF`) these APIs return `AMDSMI_STATUS_NOT_SUPPORTED`.
 
 ### Changed
 
@@ -243,9 +227,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` answered `AMDSMI_STATUS_UNEXPECTED_DATA` on APUs such as gfx1103, which also left PLX temperature and the `amd-smi metric` output empty. These devices now return the values they provide with everything else marked N/A, and a metrics version amd-smi cannot read reports `AMDSMI_STATUS_NOT_SUPPORTED`.
 
-- **Fixed several WSL backend metrics reporting a raw driver sentinel or zero instead of `N/A`**.  
-  - `amdsmi_get_clock_info()`, `amdsmi_get_clk_freq()`, `amdsmi_get_gpu_busy_percent()`, `amdsmi_get_gpu_activity()`, `amdsmi_get_gpu_fan_speed()`, `amdsmi_get_pcie_info()` and `amdsmi_get_power_cap_info()` returned a raw PMLog sentinel, a zero-filled struct field, or (for `amdsmi_get_gpu_busy_percent()`) fell through to the bare-metal-only sysfs path and failed, when the underlying WDDM/dxg sensor was unavailable or rocdxg had no data source at all.
-  - Affected fields now report `N/A`; `amdsmi_get_clk_freq()` and `amdsmi_get_gpu_fan_speed()` return `AMDSMI_STATUS_NOT_SUPPORTED` instead, since they have no downstream `N/A` translation. `amdsmi_get_gpu_busy_percent()` is now routed through the WSL backend.
+- **Fixed several WSL backend metrics reporting a raw driver value or zero instead of `N/A`**.  
+  - When a WDDM sensor was unavailable, `amdsmi_get_clock_info()`, `amdsmi_get_gpu_busy_percent()`, `amdsmi_get_gpu_activity()`, `amdsmi_get_pcie_info()` and `amdsmi_get_power_cap_info()` returned a raw value or zero, or failed. Those fields now report `N/A`.
+  - `amdsmi_get_clk_freq()` and `amdsmi_get_gpu_fan_speed()` return `AMDSMI_STATUS_NOT_SUPPORTED` in that case.
 
 - **Fixed `amd-smi metric --fan` reporting `0.0 %` on Navi3x/4x GPUs with OverDrive enabled**.  
   - Fan speed and maximum fan speed are read from the live hwmon fan duty cycle again, and `amd-smi set --fan --help` shows the range the GPU accepts.
