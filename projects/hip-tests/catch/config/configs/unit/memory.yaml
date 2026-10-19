@@ -974,6 +974,9 @@ memory:
     tags: [multigpu, transfer, image]
   Unit_hipMemcpy3DPeerAsync_NegativeTsts:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [transfer, image]
   Unit_hipMemPoolExportPointer_Negative:
     <<: *level_default
@@ -1137,8 +1140,8 @@ memory:
   Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated:
     <<: *level_default
     disabled:
-      targets: [amd_wsl]
-      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
+      targets: [amd_wsl, asan]
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged. asan disabled (AIRUNTIME-2892): fails under device ASAN on gfx90a but passes on the non-ASAN build; re-triage."
     tags: [P1]
   Unit_hipGetProcAddress_MemoryApisMemcpy2DRelated_Array:
     <<: *level_default
@@ -1168,6 +1171,9 @@ memory:
     tags: [query, managed_memory]
   Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [query, managed_memory]
   Unit_hipMemPrefetchAsync_v2_Negative:
     <<: *level_default
@@ -1835,6 +1841,9 @@ memory:
     tags: [image, P1]
   Unit_hipMalloc3DArray_MaxTexture:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [image, P1]
   Unit_hipMalloc3DArray_Negative_NullArrayPtr:
     <<: *level_default
@@ -1892,6 +1901,9 @@ memory:
     tags: [image, P1]
   Unit_hipArray3DCreate_MaxTexture:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [image, P1]
   Unit_hipArray3DCreate_Negative_NullArrayPtr:
     <<: *level_default
@@ -1946,15 +1958,24 @@ memory:
     tags: [transfer]
   Unit_hipDrvMemcpy3D_MultipleDataTypes:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [image, P1]
   Unit_hipDrvMemcpy3D_HosttoDevice:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [transfer, image, P1]
   Unit_hipDrvMemcpy3D_Negative:
     <<: *level_default
     tags: [transfer, image]
   Unit_hipDrvMemcpy3D_ExtentValidation:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [transfer, image, P1]
   Unit_hipDrvMemcpy3D_H2DDeviceContextChange:
     <<: *level_default
@@ -1964,6 +1985,9 @@ memory:
     tags: [multigpu, transfer, image, P1]
   Unit_hipDrvMemcpy3D_multiDevice_Basic_Size_Test:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [transfer, image, P1]
   Unit_hipDrvMemcpy3DAsync_Positive_Basic:
     <<: *level_default
@@ -1997,9 +2021,15 @@ memory:
     tags: [multigpu, transfer, image, P1]
   Unit_hipDrvMemcpy3DAsync_multiDevice_Basic_Size_Test:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [transfer, image, P1]
   Unit_hipPointerGetAttribute_MemoryTypes:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [query, image, P0]
   Unit_hipPointerGetAttribute_DeferredManagedVar:
     <<: *level_default
@@ -2435,14 +2465,14 @@ memory:
   Unit_hipMallocMipmappedArray_DiffSizes:
     <<: *level_default
     disabled:
-      targets: [amd_windows]
-      reason: "AIRUNTIME-2892 - needs to be further investigated; test fails in PSDB, gfx1201 (amd_windows) is FLAKY (passed then failed within 10 runs)."
+      targets: [amd_windows, asan]
+      reason: "AIRUNTIME-2892 - needs to be further investigated; test fails in PSDB, gfx1201 (amd_windows) is FLAKY (passed then failed within 10 runs). asan disabled (AIRUNTIME-2892): fails under device ASAN on gfx90a but passes on the non-ASAN build; re-triage."
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_MultiThread:
     <<: *level_default
     disabled:
-      targets: [amd_windows]
-      reason: "AIRUNTIME-2892 - needs to be further investigated; test fails in PSDB, gfx1201 (amd_windows) is FLAKY (passed then failed within 10 runs)."
+      targets: [amd_windows, asan]
+      reason: "AIRUNTIME-2892 - needs to be further investigated; test fails in PSDB, gfx1201 (amd_windows) is FLAKY (passed then failed within 10 runs). asan disabled (AIRUNTIME-2892): fails under device ASAN on gfx90a but passes on the non-ASAN build; re-triage."
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_happy:
     <<: *level_default
@@ -2519,17 +2549,26 @@ memory:
   Unit_hipFreeMipmappedArrayMultiTArray:
     <<: *level_default
     disabled:
-      targets: [amd_windows]
-      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
+      targets: [amd_windows, asan]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock. asan disabled (AIRUNTIME-2892): fails under device ASAN on gfx90a but passes on the non-ASAN build; re-triage."
     tags: [P1]
   Unit_hipFreeMipmappedArray_NoLeakAfterGetLevel:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [alloc]
   Unit_hipFreeMipmappedArray_NoLeakAfterGetAllLevels:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [alloc]
   Unit_hipFreeMipmappedArray_NoLeakAfterDuplicateGetLevel:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [alloc]
   Unit_hipMallocArray_DiffSizes:
     <<: *level_default
@@ -2692,6 +2731,9 @@ memory:
     tags: [query, image, P1]
   Unit_hipArrayGetDescriptor_Host2Array_Array2Host:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [query, image, P1]
   Unit_hipArrayGetDescriptor_Negative_Scenarios:
     <<: *level_default

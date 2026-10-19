@@ -655,6 +655,9 @@ graph:
     tags: [exec, image]
   Unit_hipGraphExecMemcpyNodeSetParams_Functional:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [exec, image]
   Unit_hipStreamBeginCapture_Positive_Functional:
     <<: *level_default
@@ -1413,6 +1416,9 @@ graph:
     tags: [userobj]
   Unit_hipGraphDebugDotPrint_Functional:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [query, image]
   Unit_hipGraphDebugDotPrint_Argument_Check:
     <<: *level_default

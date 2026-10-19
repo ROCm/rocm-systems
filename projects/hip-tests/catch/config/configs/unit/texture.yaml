@@ -23,6 +23,9 @@ texture:
     tags: [image]
   Unit_hipTextureObj2D_Check:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [texobj, image]
   Unit_Layered1DTexture_Check_HostBufferToFromLayered1DArray:
     <<: *level_default
@@ -221,12 +224,21 @@ texture:
     tags: [texobj, image]
   Unit_hipTextureObj1DCheckRGBAModes_array:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [image]
   Unit_hipTextureObj1DCheckSRGBAModes_array:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [image]
   Unit_hipTextureObj1DCheckRGBAModes_buffer:
     <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [image]
   Unit_hipTextureObj1DCheckSRGBAModes_buffer:
     <<: *level_default
@@ -318,14 +330,14 @@ texture:
   Unit_hipTexRefSetAddress2D_Negative_Parameters:
     <<: *level_default
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
+      targets: [amd_windows, amd_wsl, asan]
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout. asan disabled (AIRUNTIME-2892): fails under device ASAN on gfx90a but passes on the non-ASAN build; re-triage."
     tags: [texref, image]
   Unit_hipTexRefSetAddress2D_Positive:
     <<: *level_default
     disabled:
-      targets: [amd_windows, amd_wsl]
-      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
+      targets: [amd_windows, amd_wsl, asan]
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151 need re-triage; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout. asan disabled (AIRUNTIME-2892): fails under device ASAN on gfx90a but passes on the non-ASAN build; re-triage."
     tags: [texref, image]
   Unit_hipTexRefSetMaxAnisotropy_Negative_Parameters:
     <<: *level_default

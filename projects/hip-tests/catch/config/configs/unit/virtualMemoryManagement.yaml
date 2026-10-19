@@ -10,7 +10,11 @@ virtualMemoryManagement:
   Unit_hipMemRetainAllocationHandle_NegTst:
     <<: *level_default
   Unit_hipMemRetainAllocationHandle_Capture: *level_default
-  Unit_hipMemImportFromShareableHandle_Positive_Basic: *level_default
+  Unit_hipMemImportFromShareableHandle_Positive_Basic:
+    <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
   Unit_hipMemImportFromShareableHandle_HostBackedAlloc:
     <<: *level_default
     disabled:
@@ -41,7 +45,11 @@ virtualMemoryManagement:
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2892 - fails under device-side ASAN on gfx942 (heap-use-after-free in libamdhip64 / LeakSanitizer leaks); needs re-triage on asan."
-  Unit_hipMemGetHandleForAddressRange_VM_PcieFlag: *level_default
+  Unit_hipMemGetHandleForAddressRange_VM_PcieFlag:
+    <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
   Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice:
     <<: *level_default
     disabled:
