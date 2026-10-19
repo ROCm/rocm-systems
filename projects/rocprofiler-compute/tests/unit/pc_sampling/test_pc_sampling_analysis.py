@@ -75,8 +75,8 @@ STOCHASTIC_DISPLAY_COLUMNS = [
     "offset",
     "count",
     "active_thread_percent",
-    "count_issued",
-    "count_stalled",
+    "issue_count",
+    "stall_count",
     "wave_occupancy_percent",
     "stall_reason",
     "Kernel_Name",
@@ -484,7 +484,7 @@ def test_aggregate_empty_records_returns_columns() -> None:
         empty, group_by=["code_object_id", "code_object_offset"], sys_info={}
     )
     assert result.empty
-    for column in ("count", "count_issued", "count_stalled", "stall_reason"):
+    for column in ("count", "issue_count", "stall_count", "stall_reason"):
         assert column in result.columns
     # kernel_id / inst_index are carried since they are not group keys.
     assert "kernel_id" in result.columns
@@ -513,8 +513,8 @@ def test_aggregate_counts_issued_and_stalled() -> None:
     )
     row = result.iloc[0]
     assert row["count"] == 2
-    assert row["count_issued"] == 1
-    assert row["count_stalled"] == 1
+    assert row["issue_count"] == 1
+    assert row["stall_count"] == 1
     assert row["stall_reason"] == {"WAITCNT": 1}
 
 
@@ -528,8 +528,8 @@ def test_aggregate_host_trap_counts_are_none() -> None:
     )
     row = result.iloc[0]
     assert row["count"] == 1
-    assert row["count_issued"] is None
-    assert row["count_stalled"] is None
+    assert row["issue_count"] is None
+    assert row["stall_count"] is None
     assert row["stall_reason"] is None
 
 
@@ -1355,8 +1355,8 @@ def test_load_pc_sampling_data_filtered_multi_dispatch_groupby() -> None:
     assert len(df) == 1
     row = df.iloc[0]
     assert row["count"] == 2
-    assert row["count_stalled"] == 2
-    assert row["count_issued"] == 0
+    assert row["stall_count"] == 2
+    assert row["issue_count"] == 0
     assert {reason for reason, _ in row["stall_reason"]} == {
         "WAITCNT",
         "ALU_DEPENDENCY",
@@ -1453,8 +1453,8 @@ def test_load_pc_sampling_data_separates_code_objects_within_one_record(
     assert list(df["count"]) == [2, 2]
     assert set(df["Kernel_Name"]) == {"sharedKernel"}
     if method == "stochastic":
-        assert list(df["count_issued"]) == [1, 0]
-        assert list(df["count_stalled"]) == [1, 2]
+        assert list(df["issue_count"]) == [1, 0]
+        assert list(df["stall_count"]) == [1, 2]
         assert list(df["stall_reason"]) == [
             [("WAITCNT", 1)],
             [("ALU_DEPENDENCY", 1), ("WAITCNT", 1)],
@@ -1820,8 +1820,8 @@ def test_load_pc_sampling_data_keeps_multi_process_rows_separate() -> None:
     assert list(shared_rows["offset"]) == ["0x10", "0x10"]
     assert list(shared_rows["code_object_id"]) == [7, 5]
     assert list(shared_rows["count"]) == [3, 2]
-    assert list(shared_rows["count_issued"]) == [1, 0]
-    assert list(shared_rows["count_stalled"]) == [2, 2]
+    assert list(shared_rows["issue_count"]) == [1, 0]
+    assert list(shared_rows["stall_count"]) == [2, 2]
     assert list(shared_rows["stall_reason"]) == [
         [("ALU_DEPENDENCY", 1), ("WAITCNT", 1)],
         [("WAITCNT", 2)],
