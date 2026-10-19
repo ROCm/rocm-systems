@@ -42,11 +42,8 @@ namespace rocshmem {
 
 // XNACK-Replay (gfx1250/MI450): a memory instruction may re-execute until its
 // address translation completes (tracked by XCNT). s_wait_loadcnt only waits
-// for data, not translation, so GFX12 asm blocks on gfx1250 append an explicit
-// s_wait_xcnt 0x0 to end the replay group before any caller can clobber the
-// address/data registers. No-op everywhere else: other GFX12 targets are not
-// confirmed to support s_wait_xcnt, and non-GFX12 arches have no replay mode.
-#if defined(__gfx1250__)
+// for data, not translation
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
 #define ROCSHMEM_XNACK_XCNT_WAIT "\ns_wait_xcnt 0x0"
 #else
 #define ROCSHMEM_XNACK_XCNT_WAIT ""
