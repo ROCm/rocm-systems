@@ -472,12 +472,12 @@ NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList
     setNumWorkgroups();
   }
 
-  // This optimization will set marker_ts_ but may not submit a batch.
+  // The stop event binds to this kernel's signal, which may not submit a batch.
   if (forceProfiling) {
     profilingInfo_.enabled_ = true;
     profilingInfo_.clear();
     profilingInfo_.correlation_id_ = activity_prof::correlation_id;
-    profilingInfo_.marker_ts_ = true;
+    profilingInfo_.signal_required_ = true;
   }
   kernel_.retain();
 }

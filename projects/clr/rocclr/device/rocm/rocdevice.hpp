@@ -66,10 +66,13 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   hsa_signal_t signal_;   //!< HSA signal to track profiling information
   Timestamp* ts_;         //!< Timestamp object associated with the signal
   HwQueueEngine engine_;  //!< Engine used with this signal
+  const bool hints_;      //!< The CP firmware of the device decodes handle hints
   //! AccumulateCommand dispatch record this signal supplies timing for.
   uint32_t dispatch_slot_ = kNoDispatchSlot;
   std::recursive_mutex lock_;  //!< Signal lock for update
   bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
+  bool binary_use_ = false;  //!< The current use starts at 1 and only its packet decrements it
+  bool timed_use_ = true;    //!< The current use captures timestamps
 
   typedef union {
     struct {
@@ -90,7 +93,8 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   };
   CachedTiming cached_timing_;
 
-  ProfilingSignal() : ts_(nullptr), engine_(HwQueueEngine::Compute) {
+  explicit ProfilingSignal(bool hints)
+      : ts_(nullptr), engine_(HwQueueEngine::Compute), hints_(hints) {
     signal_.handle = 0;
     flags_.data_ = 0;
     flags_.done_ = true;
@@ -120,6 +124,23 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     std::scoped_lock lock(lock_);
     start = cached_timing_.start_;
     end = cached_timing_.end_;
+  }
+
+  //! The handle for the completion_signal of the AQL packet ending the current use. Without
+  //! timestamps the CP may skip capturing them; with them it captures them even when the queue
+  //! doesn't profile. Only AQL packets accept the hinted handle.
+  hsa_signal_t PacketHandle(bool timestamps) {
+    // A skipped capture leaves the timestamps of an earlier use in the signal
+    timed_use_ = timestamps;
+    if (!hints_) {
+      return signal_;
+    }
+    uint64_t hints = flags_.interrupt_ ? AMD_SIGNAL_HINT_INTR_DEFAULT : AMD_SIGNAL_HINT_INTR_NONE;
+    if (binary_use_) {
+      hints |= AMD_SIGNAL_HINT_VALUE_BINARY;
+    }
+    hints |= timestamps ? AMD_SIGNAL_HINT_TS_ON : AMD_SIGNAL_HINT_TS_OFF;
+    return hsa_amd_signal_set_hints(signal_, hints);
   }
 };
 
@@ -549,6 +570,8 @@ class Device : public NullDevice {
   //! reports that stores to device memory come over PCIe, re-store the last one and read it back.
   //! last_stored must be in device memory, or the readback does not drain HDP.
   void FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const;
+  //! AQL completion signal handles carry hints the CP firmware decodes
+  bool SignalHints() const { return signal_hints_; }
   //! AQL queue ring buffers are placed in device memory. A profiler tool scans and rewrites the
   //! packets from the host, so its queues keep system-memory rings.
   bool AqlRingsInDeviceMemory() const {
@@ -561,7 +584,8 @@ class Device : public NullDevice {
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
   virtual uint8_t* CreateBarrierPacket(int num_deps) const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events) const override;
+                                   const std::vector<void*>& hw_events,
+                                   bool profiled) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
@@ -777,6 +801,7 @@ class Device : public NullDevice {
   hsa_amd_memory_pool_t device_signal_pool_{0};  //!< Pool for signals in device memory, if any
   bool graph_device_signals_ = false;  //!< Graph signals live in device_signal_pool_
   bool pcie_stores_need_flush_ = true;  //!< Stores to device memory come over PCIe through HDP
+  bool signal_hints_ = false;  //!< AQL completion signal handles carry hints
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem
 

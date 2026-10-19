@@ -784,6 +784,9 @@ class VirtualGPU : public device::VirtualDevice {
                                   hsa_signal_condition32_t cond = HSA_SIGNAL_CONDITION_EQ,
                                   bool skipTs = false,
                                   hsa_signal_t completionSignal = hsa_signal_t{0});
+  //! True if a barrier of the current command needs timestamps: a timed event record, or a
+  //! command created under queue or activity profiling
+  bool BarrierTimestamps() const;
   void initializeDispatchPacket(hsa_kernel_dispatch_packet_t* packet, amd::NDRangeContainer& sizes);
 
   //! Write an AQL packet to the ring buffer with metadata prefetch.
