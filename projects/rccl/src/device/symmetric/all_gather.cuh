@@ -40,6 +40,8 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
                                 EnableTma ? 0 :
 #endif
                                             lane);
+  // Read the window once here: lsaPtr() inside the loop re-reads it after every store.
+  ncclLsaPointerGetter<Pack> outLsa(outPacks);
 
   Pack tmp[UnrollPacks];
 
@@ -93,13 +95,13 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
             if (partial && dr + ur == nRanks) break;
 #if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              ncclSymkTileStore<TileAligned>(outPacks.lsaPtr(r), tmaSmem->buff[0], tileSize, lane);
+              ncclSymkTileStore<TileAligned>(outLsa(r), tmaSmem->buff[0], tileSize, lane);
             } else
 #endif
             {
               NVCC_PRAGMA_UNROLL(UnrollPacks)
               for (int u = 0; u < UnrollPacks; u++) {
-                outPacks.lsaPtr(r)[u * WARP_SIZE] = tmp[u];
+                outLsa(r)[u * WARP_SIZE] = tmp[u];
               }
             }
             if (++r == nRanks) r = 0;
@@ -112,7 +114,7 @@ static __device__ void bcastDeep(ncclSymkArgsHandler const& handler, int tn, int
         }
       }
       inpPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
-      outPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
+      outLsa.base = (Pack*)outLsa.base + intptr_t(wn) * UnrollPacks * WARP_SIZE;
       nIters -= wn;
       if (nIters <= 0) break;
 #if NCCL_SYMK_ASYNC_TILE
@@ -137,7 +139,7 @@ static __device__ void bcastEnds(ncclSymkArgsHandler const& handler, int tn, int
   int const& rank = handler.comm.rank;
   int const& nRanks = handler.comm.nRanks;
   BytePack<sizeof(T)>* inpPacks = (BytePack<sizeof(T)>*)input.localPtr();
-  ncclSymPtr<BytePack<sizeof(T)>> outPacks = (ncclSymPtr<BytePack<sizeof(T)>>)output;
+  ncclLsaPointerGetter<BytePack<sizeof(T)>> outLsa((ncclSymPtr<BytePack<sizeof(T)>>)output);
   NVCC_PRAGMA_UNROLL_DISABLED
   for (size_t i = t; i < nPreElts + nSufElts; i += tn) {
     size_t elt = i < nPreElts ? i : nElts - nPreElts - nSufElts + i;
@@ -149,14 +151,14 @@ static __device__ void bcastEnds(ncclSymkArgsHandler const& handler, int tn, int
     for (; dr + UnrollPeers <= nRanks; dr += UnrollPeers) {
       NVCC_PRAGMA_UNROLL(UnrollPeers)
       for (int u = 0; u < UnrollPeers; u++) {
-        outPacks.lsaPtr(r)[elt] = tmp;
+        outLsa(r)[elt] = tmp;
         if (++r == nRanks) r = 0;
       }
     }
     NVCC_PRAGMA_UNROLL(UnrollPeers)
     for (int u = 0; u < UnrollPeers; u++) {
       if (dr + u == nRanks) break;
-      outPacks.lsaPtr(r)[elt] = tmp;
+      outLsa(r)[elt] = tmp;
       if (++r == nRanks) r = 0;
     }
   }

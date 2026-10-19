@@ -9,13 +9,13 @@
 
 use super::*;
 use crate::driver::AllocationOperations;
-use crate::host_storage::Allocator;
+use crate::memory::host::HostAllocation;
 use crate::memory::{HostMappingPolicy, MemoryKind};
 use std::os::fd::{AsRawFd, IntoRawFd};
 use std::os::unix::fs::FileExt;
 use std::sync::Arc;
 fn shared<T>(value: T) -> Shared<T> {
-    Shared::new(value, Allocator::default()).unwrap()
+    Shared::new(value).unwrap()
 }
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, AtomicUsize};
@@ -34,6 +34,20 @@ enum Reply {
     MapDevices(&'static [u32], u32, u32, Option<i32>),
     UnmapDevices(&'static [u32], u32, u32, Option<i32>),
     Free(Option<i32>),
+}
+
+enum FixtureMemoryKind {
+    Owned(MemoryKind),
+    RegisteredHost {
+        address: usize,
+        policy: HostMappingPolicy,
+    },
+}
+
+impl From<MemoryKind> for FixtureMemoryKind {
+    fn from(kind: MemoryKind) -> Self {
+        Self::Owned(kind)
+    }
 }
 
 struct Fixture {
@@ -68,14 +82,11 @@ fn desc() -> AllocationDesc {
 }
 
 fn scratch_pool() -> Mutex<ScratchPool> {
-    Mutex::new(ScratchPool::new(
-        sysfs::KfdQueueProperties {
-            gfx_target: 120_001,
-            xcc_count: 1,
-            ..sysfs::KfdQueueProperties::default()
-        },
-        Allocator::default(),
-    ))
+    Mutex::new(ScratchPool::new(sysfs::KfdQueueProperties {
+        gfx_target: 120_001,
+        xcc_count: 1,
+        ..sysfs::KfdQueueProperties::default()
+    }))
 }
 
 impl Fixture {
@@ -99,6 +110,7 @@ impl Fixture {
             &[42],
             File::open("/dev/null").unwrap(),
             true,
+            0x12345,
         )
     }
 
@@ -118,6 +130,7 @@ impl Fixture {
             expected_devices,
             render,
             false,
+            0x12345,
         )
     }
 
@@ -131,28 +144,7 @@ impl Fixture {
         expected_devices: &[u32],
         render: File,
         owned_userptr: bool,
-    ) -> Self {
-        Self::with_allocator(
-            replies,
-            expected_flags,
-            expected_devices,
-            render,
-            owned_userptr,
-            Allocator::default(),
-        )
-    }
-
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the scripted native-call matcher keeps each ownership test explicit"
-    )]
-    fn with_allocator(
-        replies: impl IntoIterator<Item = Reply>,
-        expected_flags: u32,
-        expected_devices: &[u32],
-        render: File,
-        owned_userptr: bool,
-        allocator: Allocator,
+        expected_userptr_address: usize,
     ) -> Self {
         let replies = Arc::new(Mutex::new(replies.into_iter().collect::<VecDeque<_>>()));
         let pending = replies.clone();
@@ -169,7 +161,7 @@ impl Fixture {
         let injected_memory_error = memory_wait_errno.clone();
         let scratch_base = Arc::new(AtomicU64::new(0));
         let observed_scratch_base = scratch_base.clone();
-        let kfd = shared(sys::Kfd::with_hook_allocator(
+        let kfd = shared(sys::Kfd::with_hook(
             File::open("/dev/null").unwrap(),
             Arc::new(move |call| {
                 match call {
@@ -237,7 +229,8 @@ impl Fixture {
                         let page = os_memory::page_size().unwrap() as u64;
                         let expected_size = if expected_flags & uapi::USERPTR != 0 && !owned_userptr
                         {
-                            (65536 + (0x12345 & (page - 1))).div_ceil(page) * page
+                            (65536 + (expected_userptr_address as u64 & (page - 1))).div_ceil(page)
+                                * page
                         } else {
                             65536
                         };
@@ -249,7 +242,7 @@ impl Fixture {
                         } else if owned_userptr {
                             args.va
                         } else {
-                            0x12345 & !(page - 1)
+                            expected_userptr_address as u64 & !(page - 1)
                         };
                         assert_eq!(args.mmap_offset, expected_mmap_offset);
                         args.handle = handle;
@@ -331,7 +324,7 @@ impl Fixture {
                         sys::Call::Unmap(args, devices),
                         Reply::UnmapDevices(expected, before, after, errno),
                     ) => {
-                        assert_eq!(*devices, expected);
+                        assert_eq!(devices, &expected);
                         assert_eq!(args.handle, 17);
                         assert_eq!(args.success, before);
                         args.success = after;
@@ -345,44 +338,37 @@ impl Fixture {
                 };
                 errno.map_or(Ok(()), |errno| Err(io::Error::from_raw_os_error(errno)))
             }),
-            allocator,
         ));
-        let vm = Shared::new(
-            DeviceVm {
-                loss: Shared::new(
-                    LossEvent {
-                        kfd,
-                        hardware_event_id: AtomicU32::new(19),
-                        memory_event_id: AtomicU32::new(20),
-                        hardware_destroy_uncertain: AtomicBool::new(false),
-                        memory_destroy_uncertain: AtomicBool::new(false),
-                        observed: Mutex::new(ObservedEvents::new(allocator).unwrap()),
-                        lost: AtomicBool::new(false),
-                    },
-                    allocator,
-                )
-                .unwrap(),
-                render: Some(render),
-                system_dma_buf_import: false,
-                gpu_id: 42,
-                render_minor: 128,
-                identity: [0; 16],
-                unique_id: Some(123),
-                base: 0x10000,
-                limit: isize::MAX as u64,
-                lds_base: 0x1000_0000_0000,
-                scratch_base: 0x2000_0000_0000,
-                sdma_next_engine: AtomicU32::new(0),
-                scratch: scratch_pool(),
-                vmem: Mutex::new(super::super::vmem::VmState::new(Allocator::default())),
-                version: uapi::Version {
-                    major: 1,
-                    minor: 23,
-                },
-                doorbells: super::super::queue::Doorbells::default(),
+        let vm = Shared::new(DeviceVm {
+            loss: Shared::new(LossEvent {
+                kfd,
+                hardware_event_id: AtomicU32::new(19),
+                memory_event_id: AtomicU32::new(20),
+                hardware_destroy_uncertain: AtomicBool::new(false),
+                memory_destroy_uncertain: AtomicBool::new(false),
+                observed: Mutex::new(ObservedEvents::new().unwrap()),
+                lost: AtomicBool::new(false),
+            })
+            .unwrap(),
+            render: Some(render),
+            system_dma_buf_import: false,
+            gpu_id: 42,
+            render_minor: 128,
+            identity: [0; 16],
+            unique_id: Some(123),
+            base: 0x10000,
+            limit: isize::MAX as u64,
+            lds_base: 0x1000_0000_0000,
+            scratch_base: 0x2000_0000_0000,
+            sdma_next_engine: AtomicU32::new(0),
+            scratch: scratch_pool(),
+            vmem: Mutex::new(super::super::vmem::VmState::new()),
+            version: uapi::Version {
+                major: 1,
+                minor: 23,
             },
-            allocator,
-        )
+            doorbells: super::super::queue::Doorbells::default(),
+        })
         .unwrap();
         Self {
             replies,
@@ -411,7 +397,7 @@ impl Fixture {
             scratch_base: 0x4000_0000_0000,
             sdma_next_engine: AtomicU32::new(0),
             scratch: scratch_pool(),
-            vmem: Mutex::new(super::super::vmem::VmState::new(Allocator::default())),
+            vmem: Mutex::new(super::super::vmem::VmState::new()),
             version: self.vm.version,
             doorbells: super::super::queue::Doorbells::default(),
         })
@@ -434,23 +420,25 @@ impl Fixture {
     #[allow(unsafe_code)]
     fn allocate(
         &self,
-        kind: MemoryKind,
+        kind: impl Into<FixtureMemoryKind>,
         permissions: DeviceAccess,
     ) -> Result<Owned<KfdAllocation>, Error> {
-        let kind = match kind {
-            MemoryKind::System => BufferKind::Gtt,
-            MemoryKind::OwnedHost { policy } => BufferKind::OwnedUserptr { cache: policy },
-            MemoryKind::RegisteredHost { address, policy } => {
+        let kind = match kind.into() {
+            FixtureMemoryKind::Owned(MemoryKind::System) => BufferKind::Gtt,
+            FixtureMemoryKind::Owned(MemoryKind::OwnedHost { policy }) => {
+                BufferKind::OwnedUserptr { cache: policy }
+            }
+            FixtureMemoryKind::RegisteredHost { address, policy } => {
                 // SAFETY: Scripted KFD replies cannot access this synthetic
                 // address; the fixture tests metadata and rollback only.
                 BufferKind::Userptr(unsafe { BorrowedHostPages::new(address, policy) })
             }
-            MemoryKind::DeviceLocal {
+            FixtureMemoryKind::Owned(MemoryKind::DeviceLocal {
                 host_visible,
                 coherent,
                 uncached,
                 contiguous,
-            } => BufferKind::Vram {
+            }) => BufferKind::Vram {
                 public: host_visible,
                 coherent,
                 uncached,
@@ -475,8 +463,7 @@ impl Fixture {
             lifetime,
             gpu_counter_frequency_hz: 0,
         };
-        let kind = crate::memory::OwnedMemoryKind::try_from(kind)?;
-        super::super::LinuxKfdDriver::new(Allocator::default()).allocate_owned(
+        super::super::LinuxKfdDriver::new().allocate_owned(
             &device,
             &[],
             kind,
@@ -701,20 +688,21 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
         lifetime: crate::session::DriverContextLifetime::Session,
         gpu_counter_frequency_hz: 0,
     };
-    let driver = super::super::LinuxKfdDriver::new(Allocator::default());
+    let driver = super::super::LinuxKfdDriver::new();
     let gfx1201 = make_device(120_001);
     let other = make_device(110_000);
-    let request = crate::memory::HostRegistration {
+    let request = || crate::memory::HostRegistration {
         address: 0x10000,
         policy: HostMappingPolicy::Extended,
         size: desc().size,
         alignment: desc().alignment,
         permissions: DeviceAccess::READ | DeviceAccess::WRITE,
+        backing: None,
     };
 
     // SAFETY: /dev/null rejects GEM USERPTR before it can retain the
     // synthetic page cover.
-    let error = unsafe { driver.register_host(&gfx1201, &[], request) }
+    let error = unsafe { driver.register_host(&gfx1201, &[], request()) }
         .err()
         .unwrap();
     assert!(matches!(
@@ -725,12 +713,12 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
         }
     ));
     // SAFETY: The unsupported targets are rejected before native access.
-    let error = unsafe { driver.register_host(&other, &[], request) }
+    let error = unsafe { driver.register_host(&other, &[], request()) }
         .err()
         .unwrap();
     assert_eq!(error.kind(), ErrorKind::Unsupported);
     // SAFETY: An unsupported peer is rejected before native access.
-    let error = unsafe { driver.register_host(&gfx1201, &[&other], request) }
+    let error = unsafe { driver.register_host(&gfx1201, &[&other], request()) }
         .err()
         .unwrap();
     assert_eq!(error.kind(), ErrorKind::Unsupported);
@@ -755,6 +743,7 @@ fn failed_secondary_drm_registration_releases_its_vm_dependency() {
             0x10000,
             DeviceAccess::READ | DeviceAccess::WRITE,
             false,
+            None,
         )
     };
     // The scripted VM uses /dev/null as its render endpoint. GEM USERPTR must
@@ -861,16 +850,15 @@ fn ipc_import_rejects_fragments_and_inconsistent_extents_before_kfd() {
 fn scratch_owner_metadata_failure_does_not_acquire_a_native_range() {
     let allocator_state = crate::test_support::allocator::State::default();
     // SAFETY: The allocator state remains live until after the fixture drops.
-    let allocator = unsafe { allocator_state.allocator() };
-    let fixture = Fixture::with_allocator(
+    let fixture = Fixture::with_devices_and_userptr_source(
         [],
         uapi::VRAM | uapi::WRITABLE | uapi::NO_SUBSTITUTE,
         &[42],
         File::open("/dev/null").unwrap(),
         false,
-        allocator,
+        0x12345,
     );
-    assert!(!fixture.vm.allocator().is_system());
+    let _scope = unsafe { allocator_state.allocator() }.scope();
     let before = allocator_state.allocations.load(Ordering::Relaxed);
     allocator_state.fail_at.store(before + 2, Ordering::Relaxed);
     let result = KfdAllocation::create_scratch(
@@ -975,6 +963,7 @@ fn system_allocation_maps_every_vm_at_one_exact_address() {
         desc(),
         BufferKind::Gtt,
         DeviceAccess::READ | DeviceAccess::WRITE,
+        None,
     )
     .unwrap();
     let primary_address = allocation.device_address(&fixture.vm).unwrap();
@@ -1038,6 +1027,7 @@ fn repeated_logical_devices_reuse_each_native_vm_mapping() {
         desc(),
         BufferKind::Gtt,
         DeviceAccess::READ | DeviceAccess::WRITE,
+        None,
     )
     .unwrap();
     let address = allocation.device_address(&fixture.vm).unwrap();
@@ -1074,6 +1064,7 @@ fn local_allocation_maps_every_qualified_peer_vm() {
             contiguous: false,
         },
         DeviceAccess::READ | DeviceAccess::WRITE,
+        None,
     )
     .unwrap();
     let address = allocation.device_address(&fixture.vm).unwrap();
@@ -1291,7 +1282,7 @@ fn incompatible_vm_apertures_fail_before_native_allocation() {
         scratch_base: 0x6000_0000_0000,
         sdma_next_engine: AtomicU32::new(0),
         scratch: scratch_pool(),
-        vmem: Mutex::new(super::super::vmem::VmState::new(Allocator::default())),
+        vmem: Mutex::new(super::super::vmem::VmState::new()),
         version: fixture.vm.version,
         doorbells: super::super::queue::Doorbells::default(),
     });
@@ -1302,6 +1293,7 @@ fn incompatible_vm_apertures_fail_before_native_allocation() {
             desc(),
             BufferKind::Gtt,
             DeviceAccess::READ | DeviceAccess::WRITE,
+            None,
         )
         .err()
         .unwrap()
@@ -1333,6 +1325,7 @@ fn multi_vm_mapping_and_unmapping_resume_from_the_reported_prefix() {
             desc(),
             BufferKind::Gtt,
             DeviceAccess::READ | DeviceAccess::WRITE,
+            None,
         )
         .err()
         .unwrap()
@@ -1362,6 +1355,7 @@ fn multi_vm_mapping_and_unmapping_resume_from_the_reported_prefix() {
         desc(),
         BufferKind::Gtt,
         DeviceAccess::READ | DeviceAccess::WRITE,
+        None,
     )
     .unwrap();
     assert_eq!(allocation.free().unwrap_err().kind(), ErrorKind::Driver);
@@ -1391,6 +1385,7 @@ fn ambiguous_multi_vm_mapping_retains_every_vm_dependency() {
             desc(),
             BufferKind::Gtt,
             DeviceAccess::READ | DeviceAccess::WRITE,
+            None,
         )
         .is_err()
     );
@@ -1746,7 +1741,7 @@ fn registered_host_pages_keep_the_caller_address_and_an_independent_gpu_va() {
     );
     let mut allocation = fixture
         .allocate(
-            MemoryKind::RegisteredHost {
+            FixtureMemoryKind::RegisteredHost {
                 address: 0x12345,
                 policy: HostMappingPolicy::Fine,
             },
@@ -1779,6 +1774,36 @@ fn registered_host_pages_keep_the_caller_address_and_an_independent_gpu_va() {
 }
 
 #[test]
+#[allow(unsafe_code)]
+fn ambiguous_userptr_creation_retains_owned_host_pages() {
+    let mut host = HostAllocation::allocate(desc().size, desc().alignment).unwrap();
+    let fixture = Fixture::with_devices_and_userptr_source(
+        [Reply::Allocate(17, Some(errno::EFAULT))],
+        uapi::USERPTR | uapi::COHERENT | uapi::NO_SUBSTITUTE | uapi::WRITABLE,
+        &[42],
+        File::open("/dev/null").unwrap(),
+        false,
+        host.info().host_address,
+    );
+    // SAFETY: The registration lease moves into the native owner below.
+    let pages =
+        unsafe { BorrowedHostPages::new(host.info().host_address, HostMappingPolicy::Fine) };
+    assert!(
+        KfdAllocation::create_with_peers(
+            fixture.vm.clone(),
+            std::iter::empty(),
+            desc(),
+            BufferKind::Userptr(pages),
+            DeviceAccess::READ | DeviceAccess::WRITE,
+            Some(host.registration_lease().unwrap()),
+        )
+        .is_err()
+    );
+    assert_eq!(host.free().unwrap_err().kind(), ErrorKind::Busy);
+    fixture.exhausted();
+}
+
+#[test]
 fn registered_host_cache_policies_reach_kfd() {
     for (cache, flags) in [
         (HostMappingPolicy::Coarse, 0),
@@ -1800,7 +1825,7 @@ fn registered_host_cache_policies_reach_kfd() {
         );
         let mut allocation = fixture
             .allocate(
-                MemoryKind::RegisteredHost {
+                FixtureMemoryKind::RegisteredHost {
                     address: 0x12345,
                     policy: cache,
                 },
@@ -1852,7 +1877,7 @@ fn invalid_registered_host_address_fails_before_native_observation() {
     assert_eq!(
         fixture
             .allocate(
-                MemoryKind::RegisteredHost {
+                FixtureMemoryKind::RegisteredHost {
                     address: 0,
                     policy: HostMappingPolicy::Fine,
                 },
@@ -2483,7 +2508,7 @@ fn initialization_endpoint(acquisitions: Arc<AtomicUsize>, busy: bool) -> Shared
 
 #[test]
 fn concurrent_initialization_keeps_the_same_render_file_after_public_owners_drop() {
-    let bindings = VmBindings::new(Allocator::default());
+    let bindings = VmBindings::new();
     let acquisitions = Arc::new(AtomicUsize::new(0));
     let kfd = initialization_endpoint(acquisitions.clone(), false);
     let native = node();
@@ -2531,7 +2556,7 @@ fn concurrent_initialization_keeps_the_same_render_file_after_public_owners_drop
 
 #[test]
 fn existing_foreign_vm_is_busy_and_fork_rejection_precedes_the_inherited_lock() {
-    let bindings = VmBindings::new(Allocator::default());
+    let bindings = VmBindings::new();
     let kfd = initialization_endpoint(Arc::new(AtomicUsize::new(0)), true);
     assert_eq!(
         bindings
@@ -2559,7 +2584,7 @@ fn existing_foreign_vm_is_busy_and_fork_rejection_precedes_the_inherited_lock() 
 
 #[test]
 fn runtime_enable_allows_recreation_and_late_distinct_device_activation() {
-    let mut bindings = VmBindings::new(Allocator::default());
+    let mut bindings = VmBindings::new();
     let acquisitions = Arc::new(AtomicUsize::new(0));
     let mut kfd = initialization_endpoint(acquisitions.clone(), false);
     let native = node();
@@ -2616,14 +2641,14 @@ fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() 
             }
         }),
     ));
-    let mut bindings = VmBindings::new(Allocator::default());
+    let mut bindings = VmBindings::new();
     bindings.bindings.get_mut().unwrap().loss = Some(shared(LossEvent {
         kfd,
         hardware_event_id: AtomicU32::new(19),
         memory_event_id: AtomicU32::new(20),
         hardware_destroy_uncertain: AtomicBool::new(false),
         memory_destroy_uncertain: AtomicBool::new(false),
-        observed: Mutex::new(ObservedEvents::new(Allocator::default()).unwrap()),
+        observed: Mutex::new(ObservedEvents::new().unwrap()),
         lost: AtomicBool::new(false),
     }));
     assert_eq!(

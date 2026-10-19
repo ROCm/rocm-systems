@@ -10,7 +10,13 @@
     "  {LOGDIR} in debug_env is replaced by the runner with the per-job debug dir,",
     "  so NCCL_DEBUG_FILE writes per-rank logs there instead of flooding stdout.",
     "suites:     [ { name, bins:[...], args, env:[...] (optional) } ]",
-    "Switched from YAML to JSON because PyYAML is not installed on the CI hosts."
+    "Switched from YAML to JSON because PyYAML is not installed on the CI hosts.",
+    "gin-d3-nicfusion names the NICs it merges instead of using",
+    "  NCCL_NET_MERGE_LEVEL: the runner only collects exit codes, and a level",
+    "  that happens not to fuse would leave the suite passing while testing",
+    "  nothing. NCCL_NET_FORCE_MERGE fails communicator setup when its names do",
+    "  not resolve, so the suite either fuses or goes red. The names below are",
+    "  this cluster's; update them if the lane moves."
   ],
 
   "bench_args": "-b 8 -e 1G -f 2 -g 1",
@@ -46,6 +52,12 @@
       "bins": ["alltoall_perf"],
       "args": "-R 2 -D 4",
       "env": ["NCCL_DMABUF_ENABLE=1", "NCCL_GIN_TYPE=2", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_ENV_PLUGIN=none", "RCCL_ENABLE_INTRANET=1"]
+    },
+    {
+      "name": "gin-d3-nicfusion",
+      "bins": ["alltoall_perf"],
+      "args": "-R 2 -D 3",
+      "env": ["NCCL_DMABUF_ENABLE=1", "NCCL_GIN_TYPE=2", "HSA_NO_SCRATCH_RECLAIM=1", "NCCL_ENV_PLUGIN=none", "RCCL_ENABLE_INTRANET=1", "NCCL_IB_MERGE_NICS=1", "NCCL_NET_FORCE_MERGE=bnxt_re0,bnxt_re1;bnxt_re2,bnxt_re3;bnxt_re4,bnxt_re5;bnxt_re6,bnxt_re7"]
     }
   ]
 }

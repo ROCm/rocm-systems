@@ -47,6 +47,8 @@
     #include <link.h>
 #endif
 
+#include <cstring>
+
 #if defined(__linux__)
     #include <amdgpu_drm.h>
 #endif
@@ -336,8 +338,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
              : kmt_alloc_flags.ui32.Contiguous);
   }
 
-  //// Only allow using the suballocator for ordinary VRAM.
-  if (m_region.IsLocalMemory() && !kmt_alloc_flags.ui32.NoAddress) {
+  if (!kmt_alloc_flags.ui32.NoAddress) {
     bool subAllocEnabled =
         !core::Runtime::runtime_singleton_->flag().disable_fragment_alloc();
     // Avoid modifying executable or queue allocations.
@@ -347,6 +348,17 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
 
     if (useSubAlloc) {
       mem = m_region.fragment_alloc(size);
+
+      // Suballocated fragments may hold stale data from previously freed
+      // fragments, unlike dedicated BOs which are backed by fresh (zeroed)
+      // kernel pages. Zero system-memory fragments so callers that rely on a
+      // freshly allocated buffer being zero-initialized (e.g. an hipHostMalloc
+      // buffer used as an atomic accumulator) behave as they do with a
+      // dedicated BO. Local (device) memory is not host-writable here and is
+      // left untouched (matching pre-existing VRAM suballocation behavior).
+      if (m_region.IsSystem()) {
+        memset(mem, 0, size);
+      }
 
       if ((alloc_flags & core::MemoryRegion::AllocateAsan) &&
           HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
@@ -1003,7 +1015,16 @@ hsa_status_t KfdDriver::GetDeviceFd(uint32_t node_id, int *fd) const {
 hsa_status_t KfdDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const {
   assert(clock_counter);
 
-  if (HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter)) != HSAKMT_STATUS_SUCCESS)
+  const bool precise_timestamps =
+      core::Runtime::runtime_singleton_ != nullptr &&
+      core::Runtime::runtime_singleton_->flag().enable_high_precision_timestamps() &&
+      core::Runtime::runtime_singleton_->thunkLoader()->HSAKMT_PFN(
+          hsaKmtGetClockCountersPrecise) != nullptr;
+
+  HSAKMT_STATUS err = precise_timestamps
+      ? HSAKMT_CALL(hsaKmtGetClockCountersPrecise(node_id, clock_counter))
+      : HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter));
+  if (err != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }

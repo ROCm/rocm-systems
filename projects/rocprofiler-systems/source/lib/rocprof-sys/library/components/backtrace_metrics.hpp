@@ -61,8 +61,6 @@ struct backtrace_metrics : comp::empty_base
     backtrace_metrics& operator=(backtrace_metrics&&) noexcept = default;
 
     static void configure(bool, std::int64_t _tid = threading::get_id());
-    static void init_perfetto(std::int64_t _tid, valid_array_t);
-    static void fini_perfetto(std::int64_t _tid, valid_array_t);
     static void init_cache(std::int64_t _tid, valid_array_t);
     static std::vector<std::string> get_hw_counter_labels(std::int64_t);
 
@@ -94,7 +92,6 @@ struct backtrace_metrics : comp::empty_base
     auto        get_page_faults() const { return m_page_flt; }
     const auto& get_hw_counters() const { return m_hw_counter; }
 
-    void post_process_perfetto(std::int64_t _tid, std::uint64_t _ts) const;
     void cache_backtrace_data(std::int64_t _tid, std::uint64_t _ts) const;
 
     backtrace_metrics& operator-=(const backtrace_metrics&);

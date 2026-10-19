@@ -120,6 +120,9 @@ class StaticCommands:
         clock=None,
         profile=None,
         mem_carveout=None,
+        ampp=None,
+        cuid=None,
+        cuid_primary=None,
     ):
         """Get Static information for target gpu
 
@@ -146,6 +149,9 @@ class StaticCommands:
             soc_pstate (bool, optional): Value override for args.soc_pstate. Defaults to None.
             xgmi_plpd (bool, optional): Value override for args.xgmi_plpd. Defaults to None.
             process_isolation (bool, optional): Value override for args.process_isolation. Defaults to None.
+            cuid (bool, optional): Value override for args.cuid. Defaults to None.
+            cuid_primary (bool, optional): Value override for args.cuid_primary.
+                Defaults to None.
         Returns:
             None: Print output via AMDSMILogger to destination
         """
@@ -154,6 +160,15 @@ class StaticCommands:
             args.gpu = gpu
         if asic:
             args.asic = asic
+        if cuid:
+            args.cuid = cuid
+        if cuid_primary:
+            args.cuid_primary = cuid_primary
+        if getattr(args, "cuid_primary", False):
+            # --cuid-primary selects a field of the CUID block, so asking for it
+            # asks for the block. Without this it is a no-op alongside any other
+            # flag.
+            args.cuid = True
         if bus:
             args.bus = bus
         if vbios:
@@ -176,6 +191,8 @@ class StaticCommands:
             args.clock = clock
         if mem_carveout:
             args.mem_carveout = mem_carveout
+        if ampp:
+            args.ampp = ampp
 
         # args.clock defaults to False so if it was overwritten to empty list, that indicates that it was given as an arguments but with an empty list
         if args.clock == []:
@@ -194,6 +211,7 @@ class StaticCommands:
             "process_isolation",
             "clock",
             "mem_carveout",
+            "ampp",
         ]
         current_platform_values = [
             args.asic,
@@ -207,6 +225,7 @@ class StaticCommands:
             args.process_isolation,
             args.clock,
             args.mem_carveout,
+            getattr(args, "ampp", None),
         ]
 
         # amd-smi static default arguments:
@@ -222,6 +241,16 @@ class StaticCommands:
         if args.partition:
             current_platform_args += ["partition"]
             current_platform_values += [args.partition]
+
+        # Note: CUID is a special case for the same reason, and is not an
+        # amd-smi static default argument either.
+        # Reason: it changes the shape of the default output for every existing
+        #         consumer of `amd-smi static --json`, and on a build without
+        #         libamdcuid it adds a block of "N/A" to every GPU. Opt in with
+        #         --cuid or --cuid-primary.
+        if getattr(args, "cuid", False):
+            current_platform_args += ["cuid"]
+            current_platform_values += [args.cuid]
 
         if not self.group_check_printed:
             self.helpers.check_required_groups()
@@ -245,7 +274,7 @@ class StaticCommands:
                 args.profile,
             ]
 
-        if self.helpers.is_linux() and not self.helpers.is_virtual_os():
+        if self.helpers.is_linux():
             if numa:
                 args.numa = numa
             current_platform_args += ["numa"]
@@ -311,6 +340,10 @@ class StaticCommands:
                 logging.debug("Failed to get asic info for gpu %s | %s", gpu_id, e.get_error_info())
 
             static_dict["asic"] = asic_dict
+        if getattr(args, "cuid", False):
+            static_dict["cuid"] = self.helpers.get_gpu_cuid_info(
+                args.gpu, include_primary=getattr(args, "cuid_primary", False)
+            )
         if args.bus:
             bus_info = {
                 "bdf": "N/A",
@@ -1210,6 +1243,112 @@ class StaticCommands:
                     "Failed to get mem carveout info for gpu %s | %s", gpu_id, e.get_error_info()
                 )
 
+        if getattr(args, "ampp", None):
+            try:
+                ampp_version, ampp_profiles = amdsmi_interface.amdsmi_get_ampp_profiles(args.gpu)
+                logging.debug(f"AMPP version: {ampp_version}, profiles: {ampp_profiles}")
+
+                ampp_profile_list = []
+                for ampp_profile in ampp_profiles:
+                    profile_entry = dict(ampp_profile)
+                    if ampp_profile["is_configured"]:
+                        try:
+                            profile_entry["fields"] = amdsmi_interface.amdsmi_get_ampp_fields(
+                                args.gpu, ampp_profile["name"]
+                            )
+                        except amdsmi_exception.AmdSmiLibraryException as e:
+                            no_data = (
+                                e.get_error_code()
+                                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DATA
+                            )
+                            profile_entry["fields"] = [] if no_data else "N/A"
+                            logging.debug(
+                                "Failed to get AMPP fields for profile %s on gpu %s | %s",
+                                ampp_profile["name"],
+                                gpu_id,
+                                e.get_error_info(),
+                            )
+                    else:
+                        # Unconfigured writable slot - no fields to report
+                        profile_entry["fields"] = []
+                    ampp_profile_list.append(profile_entry)
+
+                if self.logger.is_json_format():
+                    # JSON: version sits alongside profiles, per spec's
+                    # "ampp": {"version": ..., "profiles": [...]} shape.
+                    static_dict["ampp"] = {"version": ampp_version, "profiles": ampp_profile_list}
+                elif self.logger.is_csv_format():
+                    # CSV: flatten completely to avoid an unparsable
+                    # repr() dump, following this file's established
+                    # flatten-before-CSV convention (see soc_pstate,
+                    # xgmi_plpd, mem_carveout above). Compact string form
+                    # matches the spec's CSV Output example.
+                    profiles_str = (
+                        ", ".join(
+                            f"{p['name']}(active={p['is_active']},"
+                            f"configured={p['is_configured']},"
+                            f"writable={p['is_writable']})"
+                            for p in ampp_profile_list
+                        )
+                        or "N/A"
+                    )
+                    static_dict["ampp_version"] = ampp_version
+                    static_dict["ampp"] = profiles_str
+                else:
+                    # Human readable: PROFILE header with ACTIVE/WRITABLE/
+                    # CONFIGURED/FIELDS nested beneath it, per the AMPP design
+                    # doc. custom_dump has no "header + nested children" shape
+                    # for list items, so each profile is keyed by index
+                    # (ampp_profile_N) with its opaque name stashed in a NAME
+                    # field; amdsmi_logger folds that back into a "PROFILE:
+                    # <name>" line. Profile names are opaque sysfs folder
+                    # names (not assumed to be "profile_N"), so they can't be
+                    # recovered from the index alone.
+                    ampp_dict = {"version": ampp_version}
+                    for index, profile_entry in enumerate(ampp_profile_list):
+                        profile_dict = {
+                            "name": profile_entry["name"],
+                            "active": str(profile_entry["is_active"]).lower(),
+                            "writable": str(profile_entry["is_writable"]).lower(),
+                            "configured": str(profile_entry["is_configured"]).lower(),
+                        }
+                        fields = profile_entry["fields"]
+                        if not isinstance(fields, list):
+                            # Per-profile field fetch failed; "fields" holds the
+                            # "N/A" sentinel rather than a list.
+                            profile_dict["fields"] = "N/A"
+                        elif fields:
+                            fields_dict = {}
+                            for field in fields:
+                                field_value = f"{field['value']} {field['unit']}"
+                                if field["has_limits"]:
+                                    field_value += (
+                                        f" (min={field['limit_min']}, max={field['limit_max']})"
+                                    )
+                                fields_dict[field["name"]] = field_value
+                            profile_dict["fields"] = fields_dict
+                        # else: unconfigured slot - omit FIELDS entirely, per design.
+                        ampp_dict[f"ampp_profile_{index}"] = profile_dict
+
+                    if ampp_profile_list:
+                        static_dict["ampp"] = ampp_dict
+                    else:
+                        static_dict["ampp"] = "N/A"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                not_supported = (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
+                if not_supported and not (
+                    self.logger.is_json_format() or self.logger.is_csv_format()
+                ):
+                    static_dict["ampp"] = "N/A (AMPP is not supported on this ASIC/VBIOS)"
+                else:
+                    static_dict["ampp"] = "N/A"
+                logging.debug(
+                    "Failed to get AMPP profiles for gpu %s | %s", gpu_id, e.get_error_info()
+                )
+
         # default to printing all clocks, if in current_platform_args; otherwise print specific clocks
         if "clock" in current_platform_args and (
             args.clock == True or isinstance(args.clock, list)
@@ -1330,39 +1469,25 @@ class StaticCommands:
                 affinity = numa_data.get("affinity", "N/A")
                 cpu_affinity = numa_data.get("cpu_affinity", {})
                 socket_affinity = numa_data.get("socket_affinity", {})
-                # Create a flattened row for list entry
-                row_dict = static_dict.copy()
+                # Either scope can be N/A on its own; NUMA scope needs a NUMA node.
+                cpu_affinity = cpu_affinity if isinstance(cpu_affinity, dict) else {}
+                socket_affinity = socket_affinity if isinstance(socket_affinity, dict) else {}
+                na_entry = {"bitmask": "N/A", "cpu_cores_affinity": "N/A"}
 
-                if cpu_affinity and isinstance(cpu_affinity, dict):
-                    for cpu_list_key in cpu_affinity.keys():
-                        cpu_entry = cpu_affinity[cpu_list_key]
-                        socket_entry = socket_affinity.get(
-                            cpu_list_key, {"bitmask": "N/A", "cpu_cores_affinity": "N/A"}
-                        )
-                        row_dict.update(
-                            {
-                                "node": node,
-                                "affinity": affinity,
-                                "cpu_list": cpu_list_key,
-                                "bitmask": cpu_entry.get("bitmask"),
-                                "cpu_cores_affinity": cpu_entry.get("cpu_cores_affinity"),
-                                "socket_bitmask": socket_entry.get("bitmask"),
-                                "socket_cpu_cores_affinity": socket_entry.get("cpu_cores_affinity"),
-                            }
-                        )
-                        self.logger.store_output(args.gpu, "values", row_dict)
-                        self.logger.store_gpu_json_output.append(row_dict)
-                        self.logger.store_multiple_device_output()
-                else:
+                # Create a flattened row for list entry
+                for cpu_list_key in list(cpu_affinity) or list(socket_affinity) or ["N/A"]:
+                    cpu_entry = cpu_affinity.get(cpu_list_key, na_entry)
+                    socket_entry = socket_affinity.get(cpu_list_key, na_entry)
+                    row_dict = static_dict.copy()
                     row_dict.update(
                         {
                             "node": node,
                             "affinity": affinity,
-                            "cpu_list": "N/A",
-                            "bitmask": "N/A",
-                            "cpu_cores_affinity": "N/A",
-                            "socket_bitmask": "N/A",
-                            "socket_cpu_cores_affinity": "N/A",
+                            "cpu_list": cpu_list_key,
+                            "bitmask": cpu_entry.get("bitmask"),
+                            "cpu_cores_affinity": cpu_entry.get("cpu_cores_affinity"),
+                            "socket_bitmask": socket_entry.get("bitmask"),
+                            "socket_cpu_cores_affinity": socket_entry.get("cpu_cores_affinity"),
                         }
                     )
                     self.logger.store_output(args.gpu, "values", row_dict)
@@ -1615,6 +1740,7 @@ class StaticCommands:
         clock=None,
         profile=None,
         mem_carveout=None,
+        ampp=None,
     ):
         """Get Static information for target gpu and cpu
 
@@ -1694,6 +1820,7 @@ class StaticCommands:
             "clock",
             "profile",
             "mem_carveout",
+            "ampp",
         ]
         for attr in gpu_attributes:
             if hasattr(args, attr):
@@ -1745,6 +1872,7 @@ class StaticCommands:
                     clock,
                     profile,
                     mem_carveout,
+                    ampp,
                 )
         elif self.helpers.is_amd_hsmp_initialized():  # Only CPU is initialized
             if args.cpu == None:
@@ -1780,6 +1908,7 @@ class StaticCommands:
                 clock,
                 profile,
                 mem_carveout,
+                ampp,
             )
 
         if hasattr(args, "nic") and args.nic:

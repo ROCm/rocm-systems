@@ -835,7 +835,7 @@ template <typename T>
 __device__ void IPCContext::alltoall_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
 #if defined(USE_SDMA)
-  if (sizeof(T) * nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+  if (sizeof(T) * nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
   if (sizeof(T) * nelems < 512)
 #endif
@@ -1270,15 +1270,22 @@ __device__ inline int IPCContext::tile_broadcast(rocshmem_team_t team,
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
 
-  // Non-root PEs fetch tile from root using GET
   if (my_pe_in_team != pe_root) {
+    // Non-root PEs fetch the tile from the root using a GET.
     int result = tile_get(dst_data, src_data, dst_strides, src_strides, start_coord,
                           boundary, ndim, element_size, root_pe_world, flags);
     if (result != ROCSHMEM_SUCCESS) {
       return result;
     }
+  } else if (dst_data != src_data) {
+    // Root PE: copy src tile into dst locally when they are different buffers.
+    // Non-root PEs receive via tile_get above; the root must populate its own
+    // dst explicitly — the GET path does not write to the root's dst.
+    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
+    tile_memcpy_rma<MemcpyKind::Put, TileScope::Lane>(
+        dst_data, src_data, dst_strides, src_strides,
+        start_coord, boundary, ndim, element_size);
   }
-  // Note: Root PE's data is already in src, no need to copy to dst unless src != dst
 
   // Synchronize to ensure all PEs complete before root can modify buffer
   sync(team);
@@ -1301,13 +1308,19 @@ __device__ inline int IPCContext::tile_broadcast_wave(rocshmem_team_t team,
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
 
-  // Non-root PEs fetch tile from root using GET (wave-collective)
   if (my_pe_in_team != pe_root) {
+    // Non-root PEs fetch the tile from the root using a wave-collective GET.
     int result = tile_get_wave(dst_data, src_data, dst_strides, src_strides, start_coord,
                                 boundary, ndim, element_size, root_pe_world, flags);
     if (result != ROCSHMEM_SUCCESS) {
       return result;
     }
+  } else if (dst_data != src_data) {
+    // Root PE: copy src tile into dst locally when they are different buffers.
+    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
+    tile_memcpy_rma<MemcpyKind::Put, TileScope::Wave>(
+        dst_data, src_data, dst_strides, src_strides,
+        start_coord, boundary, ndim, element_size);
   }
 
   // Synchronize to ensure all PEs complete before root can modify buffer
@@ -1331,13 +1344,19 @@ __device__ inline int IPCContext::tile_broadcast_wg(rocshmem_team_t team,
   int my_pe_in_team = team_obj->my_pe;
   int root_pe_world = team_obj->get_pe_in_world(pe_root);
 
-  // Non-root PEs fetch tile from root using GET (workgroup-collective)
   if (my_pe_in_team != pe_root) {
+    // Non-root PEs fetch the tile from the root using a workgroup-collective GET.
     int result = tile_get_wg(dst_data, src_data, dst_strides, src_strides, start_coord,
                               boundary, ndim, element_size, root_pe_world, flags);
     if (result != ROCSHMEM_SUCCESS) {
       return result;
     }
+  } else if (dst_data != src_data) {
+    // Root PE: copy src tile into dst locally when they are different buffers.
+    // Use Put (not Get) to avoid system-scope loads on local finegrained memory.
+    tile_memcpy_rma<MemcpyKind::Put, TileScope::Wg>(
+        dst_data, src_data, dst_strides, src_strides,
+        start_coord, boundary, ndim, element_size);
   }
 
   // Synchronize to ensure all PEs complete before root can modify buffer

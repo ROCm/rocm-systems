@@ -385,7 +385,10 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedRoundsOnceAndSaturatesSymmetr
     uint16_t unorm, snorm, unorm_negated = 0;
   };
   // Physical RDNA3/4 witnesses: false FP32 midpoint ties, signed saturation,
-  // exact midpoints, infinities and NaN. The normalized conversion ignores MODE.
+  // exact midpoints, infinities and NaN. Rounding ignores MODE.FP_ROUND. The
+  // only subnormal source (0x33800000 as F16 0x0001) gives 0 with or without
+  // the MODE.FP_DENORM flush tested below. GFX9 and RDNA1-2 F16 results reuse
+  // these RDNA3/4 witnesses and are not verified on hardware.
   constexpr Case second_source{0x3f000000, 0x8000, 0x4000};
   constexpr Case f32_only_cases[] = {
       {0x37c000c0, 0x0001, 0x0001},         {0x386000e0, 0x0003, 0x0002},
@@ -425,18 +428,18 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedRoundsOnceAndSaturatesSymmetr
     for (bool half : {false, true}) {
       const bool early_rdna =
           GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
-      if (half && (gfx9() || early_rdna))
-        continue;
       std::vector<Case> cases(std::begin(exact_half_cases), std::end(exact_half_cases));
       if (!half)
         cases.insert(cases.end(), std::begin(f32_only_cases), std::end(f32_only_cases));
       for (bool signed_result : {false, true}) {
-        // F16 uses opcode 786; F32 uses 660 on GFX9, 872 on RDNA1/2,
-        // and 801 on later targets. The unsigned opcode follows the signed one.
-        const uint32_t opcode = (half         ? 786
-                                 : gfx9()     ? 660
-                                 : early_rdna ? 872
-                                              : 801) +
+        // F16 uses opcode 665 on GFX9 and 786 elsewhere; F32 uses 660 on GFX9,
+        // 872 on RDNA1/2, and 801 on later targets. The unsigned opcode follows
+        // the signed one.
+        const uint32_t opcode = (half && gfx9() ? 665
+                                 : half         ? 786
+                                 : gfx9()       ? 660
+                                 : early_rdna   ? 872
+                                                : 801) +
                                 !signed_result;
         for (uint32_t abs_mask = 0; abs_mask < 4; ++abs_mask) {
           for (uint32_t neg_mask = 0; neg_mask < 4; ++neg_mask) {
@@ -489,6 +492,116 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedRoundsOnceAndSaturatesSymmetr
           }
         }
       }
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfReadsOpSelSelectedHalves) {
+  // Each source holds 0.5 in one half and -1.0 in the other; OP_SEL[0] and
+  // OP_SEL[1] pick the high half of src0 and src1 independently.
+  constexpr uint16_t kHalf = 0x3800, kMinusOne = 0xbc00;
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("packed_normalized_opsel_memory");
+    amdgpu::L2Cache l2("packed_normalized_opsel_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("packed_normalized_opsel", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    for (bool signed_result : {false, true}) {
+      const uint32_t opcode = (gfx9() ? 665u : 786u) + !signed_result;
+      for (uint32_t opsel = 0; opsel < 4; ++opsel) {
+        SCOPED_TRACE(testing::Message() << "scalar=" << force_scalar << " signed=" << signed_result
+                                        << " opsel=" << opsel);
+        const uint32_t words[] = {(gfx9() ? 0xd0000002u : 0xd4000002u) | (opcode << 16) |
+                                      (opsel << 11),
+                                  256u | (257u << 9)};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+        ASSERT_NE(inst, nullptr);
+        wf->set_exec(wf->wf_size() == 64 ? ~0ull : 0xffffffffull);
+        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+          cu->write_vgpr(vb, lane,
+                         opsel & 1u ? (uint32_t{kHalf} << 16) | kMinusOne
+                                    : (uint32_t{kMinusOne} << 16) | kHalf);
+          cu->write_vgpr(vb + 1, lane,
+                         opsel & 2u ? (uint32_t{kHalf} << 16) | kMinusOne
+                                    : (uint32_t{kMinusOne} << 16) | kHalf);
+          cu->write_vgpr(vb + 2, lane, 0xdeadbeef);
+        }
+        ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+        const uint32_t expected = signed_result ? 0x40004000u : 0x80008000u;
+        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+          EXPECT_EQ(cu->read_vgpr(vb + 2, lane), expected) << "lane=" << lane;
+      }
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfFlushesSubnormalSourcesUnderMode) {
+  struct Case {
+    bool signed_result;
+    uint32_t neg_mask;
+    uint16_t src0, src1;
+    uint32_t mode, expected;
+  };
+  // MODE[6] allows F16 input denormals. 0x30 allows only F32 denormals and
+  // 0xc0 only F16/F64 ones, so reading the wrong MODE field changes the result.
+  // 0x40 and 0x80 separate the input bit from the output bit. Source modifiers
+  // precede the flush. gfx1100 and gfx1201 match these results; CDNA1-5,
+  // RDNA1/2 and RDNA3.5 reuse them without hardware verification.
+  constexpr Case cases[] = {
+      {true, 0, 0x3c00, 0x83ff, 0x30, 0x00007fff},  {true, 0, 0x3c00, 0x83ff, 0xc0, 0xfffe7fff},
+      {true, 0, 0x3c00, 0x83ff, 0x40, 0xfffe7fff},  {true, 0, 0x3c00, 0x83ff, 0x80, 0x00007fff},
+      {true, 0, 0x3c00, 0x83ff, 0x00, 0x00007fff},  {true, 0, 0x3c00, 0x83ff, 0x0f, 0x00007fff},
+      {true, 2, 0x0000, 0x83ff, 0x00, 0x00000000},  {true, 2, 0x0000, 0x83ff, 0xf0, 0x00020000},
+      {false, 0, 0x3c00, 0x03ff, 0x30, 0x0000ffff}, {false, 0, 0x3c00, 0x03ff, 0xc0, 0x0004ffff},
+      {false, 0, 0x3c00, 0x03ff, 0x40, 0x0004ffff}, {false, 0, 0x3c00, 0x03ff, 0x80, 0x0000ffff},
+      {false, 1, 0x83ff, 0x3c00, 0x30, 0xffff0000}, {false, 1, 0x83ff, 0x3c00, 0xc0, 0xffff0004}};
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("packed_normalized_subnormal_memory");
+    amdgpu::L2Cache l2("packed_normalized_subnormal_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("packed_normalized_subnormal", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    for (const auto &c : cases) {
+      SCOPED_TRACE(testing::Message() << "scalar=" << force_scalar << " signed=" << c.signed_result
+                                      << " neg=" << c.neg_mask << " src0=" << c.src0
+                                      << " src1=" << c.src1 << " mode=" << c.mode);
+      const uint32_t opcode = (gfx9() ? 665u : 786u) + !c.signed_result;
+      const uint32_t words[] = {(gfx9() ? 0xd0000002u : 0xd4000002u) | (opcode << 16),
+                                256u | (257u << 9) | (c.neg_mask << 29)};
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+      ASSERT_NE(inst, nullptr);
+      wf->set_mode_raw(c.mode);
+      const uint64_t exec = 0x55ull;
+      wf->set_exec(exec);
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+        cu->write_vgpr(vb, lane, c.src0);
+        cu->write_vgpr(vb + 1, lane, c.src1);
+        cu->write_vgpr(vb + 2, lane, 0xdeadbeef);
+      }
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+      for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+        EXPECT_EQ(cu->read_vgpr(vb + 2, lane), exec & (1ull << lane) ? c.expected : 0xdeadbeefu)
+            << "lane=" << lane;
     }
     wf->halt();
   }
@@ -563,6 +676,173 @@ TEST_P(Vop3ConversionModifierTest, UnaryNormalizedHalfRoundsOnceAndAppliesModifi
                           exec & (1ull << lane) ? expected : 0xabcd1234u)
                     << "lane=" << lane << " input=" << c.input;
               }
+            }
+          }
+        }
+      }
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, FrexpExponentIsSignedIntegerWithoutOutputModifiers) {
+  struct Case {
+    uint16_t f16;
+    uint64_t f64;
+    int32_t f16_exponent, f64_exponent;
+    bool subnormal = false;
+  };
+  // gfx1100/gfx1201 captures cover 1.0 and 0.25 for F16 (VOP1 and VOP3) and
+  // 1.0 for F64 VOP3; gfx942/gfx950 captures show OMOD=2 leaves the exponent.
+  // gfx1100/gfx1201 give exponent 0 for subnormal sources when MODE.FP_DENORM
+  // flushes F16/F64 inputs.
+  constexpr Case cases[] = {{0x3c00, 0x3ff0000000000000, 1, 1},
+                            {0x3400, 0x3fd0000000000000, -1, -1},
+                            {0xc000, 0xc008000000000000, 2, 2},
+                            {0x7bff, 0x40effc0000000000, 16, 16},
+                            {0x0000, 0x0000000000000000, 0, 0},
+                            {0x0001, 0x0000000000000001, -23, -1073, true},
+                            {0x83ff, 0x800fffffffffffff, -14, -1022, true}};
+  const bool early_rdna =
+      GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool true16 = !gfx9() && !early_rdna;
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("frexp_exponent_memory");
+    amdgpu::L2Cache l2("frexp_exponent_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("frexp_exponent", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    for (bool f64 : {false, true}) {
+      for (bool vop3 : {false, true}) {
+        // GFX9 uses VOP1 67/48 and VOP3 387/368; later encodings use VOP1 90/60
+        // and VOP3 474/444 for the F16/F64 forms.
+        const uint32_t opcode = vop3 ? (gfx9() ? (f64 ? 368u : 387u) : (f64 ? 444u : 474u))
+                                     : (gfx9() ? (f64 ? 48u : 67u) : (f64 ? 60u : 90u));
+        // VOP3 OP_SEL[3] selects the F16 destination half on true16 targets.
+        const uint32_t high_destinations = vop3 && !f64 && true16 ? 2u : 1u;
+        for (uint32_t high = 0; high < high_destinations; ++high) {
+          for (uint32_t modifiers = 0; modifiers < (vop3 ? 8u : 1u); ++modifiers) {
+            const uint32_t omod = modifiers & 3u;
+            const uint32_t clamp = modifiers >> 2;
+            const uint32_t words[] = {vop3 ? ((gfx9() ? 0xd0000004u : 0xd4000004u) |
+                                              (opcode << 16) | (clamp << 15) | (high << 14))
+                                           : (0x7e000100u | (4u << 17) | (opcode << 9)),
+                                      256u | (omod << 27)};
+            std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+            ASSERT_NE(inst, nullptr);
+            for (uint32_t mode : {0u, 0xf0u}) {
+              wf->set_mode_raw(mode);
+              for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55ull}) {
+                SCOPED_TRACE(testing::Message()
+                             << "scalar=" << force_scalar << " f64=" << f64 << " vop3=" << vop3
+                             << " high=" << high << " omod=" << omod << " clamp=" << clamp
+                             << " mode=" << mode << " exec=" << exec);
+                wf->set_exec(exec);
+                for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+                  const auto &c = cases[lane % std::size(cases)];
+                  cu->write_vgpr(vb, lane,
+                                 f64 ? static_cast<uint32_t>(c.f64) : (0xdead0000u | c.f16));
+                  cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(c.f64 >> 32));
+                  cu->write_vgpr(vb + 4, lane, 0xa5a5a5a5u);
+                }
+                ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+                for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+                  const auto &c = cases[lane % std::size(cases)];
+                  const bool flushed = c.subnormal && !(mode & 0x40u);
+                  const int32_t exponent = flushed ? 0 : f64 ? c.f64_exponent : c.f16_exponent;
+                  const uint32_t half = static_cast<uint16_t>(exponent);
+                  const uint32_t expected = f64      ? static_cast<uint32_t>(exponent)
+                                            : high   ? (half << 16) | 0xa5a5u
+                                            : true16 ? 0xa5a50000u | half
+                                                     : half;
+                  EXPECT_EQ(cu->read_vgpr(vb + 4, lane),
+                            exec & (1ull << lane) ? expected : 0xa5a5a5a5u)
+                      << "lane=" << lane << " exponent=" << exponent;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, FrexpMantissaFlushesSubnormalSourcesUnderMode) {
+  struct Case {
+    uint16_t f16, f16_kept;
+    uint64_t f64, f64_kept;
+    bool subnormal;
+  };
+  // gfx1201 captures: a flushed subnormal gives a signed zero mantissa, a kept
+  // one is normalized.
+  constexpr Case cases[] = {{0x3c00, 0x3800, 0x3ff0000000000000, 0x3fe0000000000000, false},
+                            {0x0001, 0x3800, 0x0000000000000001, 0x3fe0000000000000, true},
+                            {0x83ff, 0xbbfe, 0x800fffffffffffff, 0xbfeffffffffffffe, true}};
+  const bool early_rdna =
+      GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool preserve_high = !gfx9() && !early_rdna;
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("frexp_mantissa_memory");
+    amdgpu::L2Cache l2("frexp_mantissa_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("frexp_mantissa", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    wf->set_exec(wf->wf_size() == 64 ? ~0ull : 0xffffffffull);
+    for (bool f64 : {false, true}) {
+      for (bool vop3 : {false, true}) {
+        // GFX9 uses VOP1 66/49 and VOP3 386/369; later encodings use VOP1 89/61
+        // and VOP3 473/445 for the F16/F64 forms.
+        const uint32_t opcode = vop3 ? (gfx9() ? (f64 ? 369u : 386u) : (f64 ? 445u : 473u))
+                                     : (gfx9() ? (f64 ? 49u : 66u) : (f64 ? 61u : 89u));
+        const uint32_t words[] = {vop3 ? ((gfx9() ? 0xd0000004u : 0xd4000004u) | (opcode << 16))
+                                       : (0x7e000100u | (4u << 17) | (opcode << 9)),
+                                  256u};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+        ASSERT_NE(inst, nullptr);
+        for (uint32_t mode : {0u, 0xf0u}) {
+          SCOPED_TRACE(testing::Message() << "scalar=" << force_scalar << " f64=" << f64
+                                          << " vop3=" << vop3 << " mode=" << mode);
+          wf->set_mode_raw(mode);
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+            const auto &c = cases[lane % std::size(cases)];
+            cu->write_vgpr(vb, lane, f64 ? static_cast<uint32_t>(c.f64) : (0xdead0000u | c.f16));
+            cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(c.f64 >> 32));
+            cu->write_vgpr(vb + 4, lane, 0xa5a5a5a5u);
+            cu->write_vgpr(vb + 5, lane, 0xa5a5a5a5u);
+          }
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+            const auto &c = cases[lane % std::size(cases)];
+            const bool flushed = c.subnormal && !(mode & 0x40u);
+            if (f64) {
+              const uint64_t expected = flushed ? c.f64 & 0x8000000000000000u : c.f64_kept;
+              const uint64_t actual =
+                  cu->read_vgpr(vb + 4, lane) | (uint64_t{cu->read_vgpr(vb + 5, lane)} << 32);
+              EXPECT_EQ(actual, expected) << "lane=" << lane;
+            } else {
+              const uint32_t half = flushed ? c.f16 & 0x8000u : c.f16_kept;
+              EXPECT_EQ(cu->read_vgpr(vb + 4, lane), half | (preserve_high ? 0xa5a50000u : 0))
+                  << "lane=" << lane;
             }
           }
         }
