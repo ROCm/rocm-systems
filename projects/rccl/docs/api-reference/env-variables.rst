@@ -379,6 +379,16 @@ collected in the following table.
         | Default: ``16``
         | ``0``: No lower bound.
 
+    * - | ``NCCL_TREE_COMPACT``
+        | Builds the inter-node trees with a half-interleave node remapping.
+          Intended for jobs whose nodes are ordered by network domain. Both
+          trees keep cross-domain hops at the leaves only when the nodes split
+          evenly into two domains; with an uneven split, the first tree does
+          so when the first domain holds at least half of the nodes, and the
+          second tree still crosses domains. All ranks in a communicator must
+          use the same value; initialization fails otherwise.
+      - | ``0``: Standard double binary tree (default)
+        | ``1``: Compact tree
     * - | ``RCCL_TUNER_EMBEDDED_CONFIG``
         | Controls whether the built-in CSV tuner uses the tuning configurations
           compiled into ``librccl.so`` from the source tree's ``tuner/*.csv``.
@@ -480,6 +490,20 @@ in the following table.
           applicable on AMD hardware.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
+
+    * - | ``NCCL_GIN_MLOPART``
+        | Allows GPU-initiated networking (GIN) on a communicator that includes
+          a rank on a GPU partition. Without this variable, one partitioned
+          rank turns GIN off for the whole communicator. The default allows
+          partitions on a single-node communicator only; set ``1`` to allow
+          them across nodes. See :ref:`device-api-gin` and
+          :ref:`nps4_cpx_mi300_rccl`.
+      - | Unset: Allow GIN on partitions on a single-node communicator; disable
+          GIN on a partitioned communicator spanning several nodes (default).
+          The latter is reported through ``NCCL_DEBUG=INFO``.
+        | ``1``: Allow GIN on partitions on any number of nodes.
+        | ``0``: Disable GIN whenever any rank runs on a partition.
+        | A communicator with no partitioned rank is unaffected by any value.
 
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.

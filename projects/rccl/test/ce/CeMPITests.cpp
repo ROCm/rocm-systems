@@ -112,12 +112,12 @@ protected:
         debugGuard_.reset();
     }
 
-    // Returns true when all CE prerequisites are met (driver + env vars).
+    // Returns true when all CE prerequisites are met (driver + env vars + the comm's symmetric memory).
     // Delegates to isCeDispatchConfigured() in CeTestHelpers.hpp — the single
     // source of truth shared with CeInternalMPITests.cpp.
     // Hierarchical CE (multi-node) only implements AllGather, AlltoAll and AlltoAllv; Scatter,
     // Gather, and AllReduce fall back to SM kernels when nNodes > 1.
-    virtual bool isCeExpected() const { return isCeDispatchConfigured(); }
+    virtual bool isCeExpected() const { return isCeDispatchConfigured(test_comm_); }
 
     // CE log markers: "Init CE" = CE initialised; "CE: rank" = CE path taken for a collective.
     enum class CeLogStatus { Taken, InitOnlyNoOp, NotInitialized };
@@ -272,7 +272,7 @@ protected:
     bool isCeAllReduceExpected() const
     {
         // CE AllReduce is single-node only (ceAllReduceFits / nNodes>1 gate).
-        return isCeAllReduceDispatchConfigured() && !isMultiNodeTest();
+        return isCeAllReduceDispatchConfigured(test_comm_) && !isMultiNodeTest();
     }
 
     void assertCEAllReducePathTaken(const char* context)
@@ -526,7 +526,7 @@ protected:
 
         // DDA IPC claims AlltoAll on gfx942/950 only once nRanks >= 8. Smaller
         // communicators still take the CE path even when RCCL_DDA_ENABLE is left on.
-        if(isCeDispatchConfigured() && nRanks >= 8 && !isCeAlltoAllDispatchConfigured())
+        if(isCeDispatchConfigured(getActiveCommunicator()) && nRanks >= 8 && !isCeAlltoAllDispatchConfigured())
             GTEST_SKIP() << "CE AlltoAll needs RCCL_DDA_ENABLE=0; DDA IPC claims AlltoAll first";
 
         const size_t totalElem = count * static_cast<size_t>(nRanks);
@@ -777,7 +777,7 @@ class CeMPI_Scatter : public CeMPITest
 {
 protected:
     // Hierarchical CE does not implement Scatter; multi-node runs take the SM path.
-    bool isCeExpected() const override { return isCeDispatchConfigured() && !isMultiNodeTest(); }
+    bool isCeExpected() const override { return isCeDispatchConfigured(test_comm_) && !isMultiNodeTest(); }
     // Root sends block r to rank r; non-root send bufs are registered but ignored.
     void runScatter(int minRanks, size_t count, int root, const char* testId)
     {
@@ -828,7 +828,7 @@ class CeMPI_Gather : public CeMPITest
 {
 protected:
     // Hierarchical CE does not implement Gather; multi-node runs take the SM path.
-    bool isCeExpected() const override { return isCeDispatchConfigured() && !isMultiNodeTest(); }
+    bool isCeExpected() const override { return isCeDispatchConfigured(test_comm_) && !isMultiNodeTest(); }
     // All ranks send; root gathers into block-pattern recvbuf; non-root recv bufs registered.
     void runGather(int minRanks, size_t count, int root, const char* testId)
     {
@@ -987,6 +987,10 @@ protected:
 
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
         ncclComm_t comm = getActiveCommunicator();
+        if(!isCeAllReduceDispatchConfigured(comm))
+        {
+            GTEST_SKIP() << "No symmetric memory on this communicator (cuMem unavailable), so CE AllReduce never runs";
+        }
         int        rank{}, nRanks{};
         ncclCommUserRank(comm, &rank);
         ncclCommCount(comm, &nRanks);
