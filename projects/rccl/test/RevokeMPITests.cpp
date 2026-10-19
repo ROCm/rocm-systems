@@ -905,7 +905,7 @@ protected:
 
         // ncclCommAbort frees the communicator; keep TearDown from destroying it again.
         test_comm_ = nullptr;
-        ASSERT_EQ(ncclSuccess, ncclCommAbort(comm));
+        ASSERT_MPI_EQ(ncclSuccess, ncclCommAbort(comm));
         DdaFabricMPI::abortJobUnlessAllRanksDrained(DdaFabricMPI::waitStreamBounded(stream, kDrainTimeout),
                                                     "DDA wait after ncclCommAbort");
     }
