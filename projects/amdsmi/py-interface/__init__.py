@@ -106,6 +106,8 @@ from .amdsmi_interface import amdsmi_get_processor_handle_from_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_uuid
 from .amdsmi_interface import amdsmi_get_gpu_device_cuid
+from .amdsmi_interface import amdsmi_get_gpu_cuid_info
+from .amdsmi_interface import amdsmi_get_cuid_components
 from .amdsmi_interface import amdsmi_get_gpu_enumeration_info
 
 # # Functions not dependent on ESMI library
