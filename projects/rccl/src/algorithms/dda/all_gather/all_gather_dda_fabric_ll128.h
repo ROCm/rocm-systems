@@ -29,8 +29,7 @@ namespace dda::common {
 // slices, so a slot always begins on a slice boundary and the 16B wire accesses
 // stay aligned however nRanks divides the bank.
 constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
-  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks,
-                       (size_t)kDdaLL128WireWordsPerSlice);
+  return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
 // LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
