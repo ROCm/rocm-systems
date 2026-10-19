@@ -394,7 +394,10 @@ fn write_combined_views_require_fences_even_for_host_pairs() {
             structure_size: size_of::<amdf_memory_site_t>() as u32,
             kind: AMDF_MEMORY_SITE_KIND_HOST,
             value: amdf_memory_site_t__value {
-                host_mapping: mapping,
+                host: amdf_memory_site_t__value__host {
+                    mapping,
+                    source_memory: std::ptr::null_mut(),
+                },
             },
             ..Default::default()
         };

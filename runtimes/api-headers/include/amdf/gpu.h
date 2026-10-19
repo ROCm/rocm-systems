@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "amdf/amdf.h"
+#include "amdf/observation.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,8 +16,14 @@ extern "C" {
 /// The first supported GPU extension version.
 #define AMDF_GPU_EXTENSION_VERSION_1 1u
 
+/// First version exposing nominal queue-clock units and native clock samples.
+#define AMDF_GPU_EXTENSION_VERSION_2 2u
+
+/// Adds native GPU events and caller-owned blocking observation.
+#define AMDF_GPU_EXTENSION_VERSION_3 3u
+
 /// The most recent GPU extension version described by this header.
-#define AMDF_GPU_EXTENSION_VERSION_LATEST AMDF_GPU_EXTENSION_VERSION_1
+#define AMDF_GPU_EXTENSION_VERSION_LATEST AMDF_GPU_EXTENSION_VERSION_3
 
 /// An `amdf_gpu_endpoint_info_t` output structure.
 #define AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO \
@@ -41,6 +48,13 @@ extern "C" {
 #define AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO \
   ((amdf_structure_type_t)0x00020007u)
 
+/// An `amdf_gpu_event_create_info_t` input structure.
+#define AMDF_STRUCTURE_TYPE_GPU_EVENT_CREATE_INFO \
+  ((amdf_structure_type_t)0x00020008u)
+
+/// An `amdf_gpu_event_info_t` output structure.
+#define AMDF_STRUCTURE_TYPE_GPU_EVENT_INFO ((amdf_structure_type_t)0x00020009u)
+
 /// Features available on a live device under its instance's lifetime policy.
 typedef uint64_t amdf_gpu_device_features_t;
 enum amdf_gpu_device_feature_bits_e {
@@ -54,6 +68,11 @@ enum amdf_gpu_device_feature_bits_e {
   AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY = UINT64_C(1) << 2,
   /// LOCAL allocations support HOST_VISIBLE together with DEVICE_LOCAL.
   AMDF_GPU_DEVICE_FEATURE_HOST_VISIBLE_LOCAL_MEMORY = UINT64_C(1) << 3,
+  /// Native GPU events provide device producer operands, CPU signaling and
+  /// blocking host observation without a library-owned worker. This bit
+  /// reflects current process event-page mappings; another frontend can
+  /// install a page after the query, so event_create remains authoritative.
+  AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS = UINT64_C(1) << 4,
 };
 
 /// Immutable target identity and compute topology of one GPU endpoint.
@@ -105,6 +124,52 @@ typedef struct amdf_gpu_endpoint_info_t {
   } topology;
 } amdf_gpu_endpoint_info_t;
 
+/// Hardware architecture family, independent of available execution services.
+typedef uint32_t amdf_gpu_architecture_t;
+enum amdf_gpu_architecture_e {
+  /// The GFX IP identity is outside the architectures known to these headers.
+  AMDF_GPU_ARCHITECTURE_UNKNOWN = 0,
+  /// Graphics Core Next, including pre-CDNA GFX9 targets.
+  AMDF_GPU_ARCHITECTURE_GCN = 1,
+  /// Radeon DNA graphics and compute architecture.
+  AMDF_GPU_ARCHITECTURE_RDNA = 2,
+  /// Compute DNA architecture.
+  AMDF_GPU_ARCHITECTURE_CDNA = 3,
+};
+
+/// Classifies a qualified endpoint's hardware architecture without native
+/// calls.
+///
+/// The result describes hardware identity only. Queue families, memory access,
+/// and executable support require their own queries. In particular, GFX9
+/// includes both GCN and CDNA; compute-only or display capability does not
+/// distinguish them. Unknown future IP versions remain UNKNOWN.
+static inline amdf_gpu_architecture_t amdf_gpu_endpoint_architecture(
+    const amdf_gpu_endpoint_info_t* info) {
+  switch (info->gfx_ip.major) {
+    case 6:
+    case 7:
+    case 8:
+      return AMDF_GPU_ARCHITECTURE_GCN;
+    case 9:
+      if (info->gfx_ip.minor == 0) {
+        return info->gfx_ip.stepping == 8 || info->gfx_ip.stepping == 10
+                   ? AMDF_GPU_ARCHITECTURE_CDNA
+                   : AMDF_GPU_ARCHITECTURE_GCN;
+      }
+      if (info->gfx_ip.minor == 4 || info->gfx_ip.minor == 5) {
+        return AMDF_GPU_ARCHITECTURE_CDNA;
+      }
+      return AMDF_GPU_ARCHITECTURE_UNKNOWN;
+    case 10:
+    case 11:
+    case 12:
+      return AMDF_GPU_ARCHITECTURE_RDNA;
+    default:
+      return AMDF_GPU_ARCHITECTURE_UNKNOWN;
+  }
+}
+
 /// Parameters used to materialize one program-independent GPU device.
 ///
 /// A device owns one native GPU execution and address domain. Queue,
@@ -143,13 +208,17 @@ typedef struct amdf_gpu_device_info_t {
 ///
 /// The primary ring contains native type-3 PM4 packets. Transfer commands use
 /// six-dword COPY_DATA and WRITE_DATA with a four-dword prefix and payload.
-/// GFX11.5.1 MEC also supports seven-dword DMA_DATA incrementing L2 copies
-/// between owned coherent SYSTEM ranges, with a direct byte count and write
-/// confirmation. The caller follows each
-/// copy sequence with the zero-byte DMA_DATA drain, explicit cache work and
-/// a completion marker before releasing its operands; ring consumption alone
-/// does not complete a transfer. This does not admit PFP controls, other DMA
-/// selectors or DMA_DATA on kernel-publication or AQL-carried PM4 transports.
+/// Seven-dword MEC DMA_DATA copies use incrementing byte addresses, a direct
+/// byte count, TC_L2 source/destination selectors, RAW_WAIT and enabled write
+/// confirmation. TC_L2 routes through MALL on GFX12; the caller applies the
+/// reported cache-control encoding for the actual producer/consumer edge.
+/// Immediate-source DMA_DATA repeats a DWORD pattern over a DWORD-aligned
+/// destination and byte count, using the same destination and ordering
+/// controls. The pattern occupies source-low and source-high remains zero.
+/// Transfer sequences end with the zero-byte MEC DMA_DATA drain, explicit cache
+/// work and a completion marker before releasing their operands. Ring
+/// consumption alone does not complete a transfer. PFP-only controls and
+/// reserved MEC fields remain zero. AQL-carried PM4 uses a separate format.
 /// Cache-control encoding is described by the reported PM4 format features.
 /// Indices occupy naturally aligned 64-bit storage. The write index is a
 /// monotonic dword count; the native read index wraps at the ring capacity
@@ -160,10 +229,19 @@ typedef struct amdf_gpu_device_info_t {
 /// operations expand the native counter to this monotonic frontier; the raw
 /// mapping continues to expose the native ring-relative read index.
 /// After storing complete commands, the producer release-stores the new write
-/// index followed by the same value to the 64-bit doorbell. Consumption proves
-/// ring storage can be reused; command completion requires a separate fence.
+/// index, executes a host-to-device store fence (SFENCE on x86-64), then stores
+/// the same value to the write-only 64-bit MMIO doorbell. A C/C++ release store
+/// alone does not supply that fence. Consumption proves ring storage can be
+/// reused; command completion requires a separate fence.
 /// Each publication ends on an eight-dword boundary, padded with type-3 NOP
 /// packets when necessary; packets never straddle ring wrap.
+/// A confirmed completion written by a primary-ring RELEASE_MEM also proves
+/// consumption of the command prefix through that release packet. A producer
+/// retaining that exact position may reclaim this prefix without waiting for
+/// the native read-index writeback. It must still leave one dword free relative
+/// to the proven consumed prefix. Later notification packets and padding are
+/// not covered by the earlier marker. Reclaiming referenced code, arguments or
+/// payloads additionally requires their own execution and visibility join.
 /// Kernel publication accepts an immutable dword-aligned first-level IB.
 /// A USER primary ring can call a first-level IB and resume after it. KERNEL
 /// submits that IB directly; placing the ring's call inside a KERNEL buffer
@@ -177,6 +255,16 @@ enum amdf_gpu_pm4_format_feature_bits_e {
   /// preceding compute completion. This does not select a cache policy for
   /// the caller: cache_operations and cache_transition_kinds remain required.
   AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR = UINT64_C(1) << 0,
+  /// The native context requires COMPUTE_PGM_RSRC1.PRIV (bit 20) in each
+  /// shader binding for software context-save traps. This is a queue-context
+  /// requirement, not an ISA-wide shader property. The caller sets it in the
+  /// emitted register value without modifying the compiled kernel descriptor.
+  AMDF_GPU_PM4_FORMAT_FEATURE_COMPUTE_PRIV = UINT64_C(1) << 1,
+  /// The native context requires COMPUTE_PGM_RSRC2.TRAP_PRESENT (bit 6) in
+  /// each shader binding. This feature is absent on GFX12+, where that bit
+  /// instead controls dynamic VGPR allocation. The caller preserves the
+  /// compiler descriptor and adds the required bit to its emitted register.
+  AMDF_GPU_PM4_FORMAT_FEATURE_COMPUTE_TRAP_PRESENT = UINT64_C(1) << 2,
 };
 
 /// First native SDMA command-stream format.
@@ -188,12 +276,29 @@ enum amdf_gpu_pm4_format_feature_bits_e {
 /// index selects storage modulo `ring_byte_length`. A producer never advances
 /// more than that capacity beyond the acquired read index. After storing
 /// complete packets into the ring, the producer performs a release store of
-/// the new write index followed by a release store of the same value to the
-/// 64-bit doorbell. An acquire load of a read index at least that value proves
-/// the corresponding ring bytes are no longer in use by the queue. Packets
-/// are dword-aligned and never straddle ring wrap. NOP dwords have value zero.
+/// the new write index. A host producer then executes a host-to-device store
+/// fence (SFENCE on x86-64) before storing the same value to the write-only
+/// 64-bit MMIO doorbell; a C/C++ release store alone does not supply that
+/// fence. An acquire load of a read index at least that value proves the
+/// corresponding ring bytes are no longer in use by the queue. Packets are
+/// dword-aligned and never straddle ring wrap. NOP dwords have value zero.
 /// Optional commands and field layouts use the reported format features.
 /// Kernel publication accepts an immutable dword-aligned command stream.
+/// TIMESTAMP_GET_GLOBAL uses three dwords: opcode 13/suboperation 2 followed
+/// by the low and high halves of a 32-byte-aligned destination address. It
+/// writes eight raw GPU-clock bytes after preceding commands complete. The
+/// optional MEMORY_SCOPE feature places SYS (3) at header bits 25:24; other
+/// policy bits remain zero. A separate completion after the sample and the
+/// memory edge's cache actions establish result visibility. Sampling neither
+/// returns a host-correlated time nor supplies a slot-reuse notification.
+/// Device publication requires command stores to be visible at system scope
+/// before the write index is published; a device-scope release alone does not
+/// establish SDMA fetch visibility. The write index and doorbell use aligned
+/// 64-bit system-scope release stores. The doorbell is write-only and never
+/// accessed with a load or read-modify-write. Acquiring the read index at
+/// system scope permits command storage reuse, not payload reuse or copy
+/// completion. Payload release/acquire and its completion signal remain
+/// separate edges.
 #define AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1 1u
 
 /// Native SDMA encoding features reported in `format_features`.
@@ -269,22 +374,27 @@ enum amdf_gpu_sdma_format_feature_bits_e {
 /// 1). Both 64-bit indices count packets monotonically. Producers reserve
 /// through the write index (atomic fetch-add for MULTI), wait until the
 /// reserved slot is below acquired read_index + ring_byte_length / 64, and
-/// write the packet body before release-storing its header/setup dword. A
-/// release store of the packet's reservation index to the 64-bit doorbell
-/// notifies firmware. MULTI producers may notify out of order; an unpublished
-/// earlier slot blocks later consumption. SINGLE producers notify
-/// monotonically. Firmware invalidates retired packet slots. Consumption
+/// write the packet body before release-storing its header/setup dword. A host
+/// producer then executes a host-to-device store fence (SFENCE on x86-64)
+/// before storing the packet's reservation index to the write-only 64-bit
+/// MMIO doorbell. A C/C++ release store alone does not supply that fence.
+/// MULTI producers may notify out of order; an unpublished earlier slot blocks
+/// later consumption. SINGLE producers notify monotonically. Firmware
+/// invalidates retired packet slots. Consumption
 /// releases ring storage, not code, kernargs, scratch, or kernel data: those
 /// require native execution completion.
 ///
 /// Dispatches use AMD kernel descriptors and caller-owned kernargs. Completion
 /// and barrier dependencies use native 64-byte AMD signal blocks, not bare
 /// counters or handles created by libamdf. Callers initialize USER kind (1), a
-/// signed 64-bit value at byte offset 8, and zero unused fields; the packet
-/// carries the block's GPU address. Firmware decrements dispatch completion
-/// once after all workgroups complete. System acquire/release fence scopes
-/// provide the advertised global cache transitions. This contract does not
-/// enable HSA runtime services, dynamic scratch growth, or device enqueue.
+/// signed 64-bit value at byte offset 8, and zero unused fields. The event
+/// padding at byte 28, doorbell-only queue pointer at byte 48, and tail padding
+/// at byte 56 are always zero for USER signals and are not caller storage.
+/// Start/end timestamp fields begin at zero. The packet carries the block's GPU
+/// address. Firmware decrements dispatch completion once after all workgroups
+/// complete. System acquire/release fence scopes provide the advertised global
+/// cache transitions. This contract does not enable HSA runtime services,
+/// dynamic scratch growth, or device enqueue.
 ///
 /// AMD vendor format 1 carries a four-dword INDIRECT_BUFFER at packet byte 4,
 /// remaining-dword count 10 at byte 20, zero reserved words, and the native
@@ -304,7 +414,7 @@ enum amdf_gpu_sdma_format_feature_bits_e {
 /// observes command-processor progress and does not complete shader work.
 #define AMDF_GPU_AQL_QUEUE_FORMAT_VERSION_1 1u
 
-/// Optional native AQL packets reported in `format_features`.
+/// Optional native AQL operations reported in `format_features`.
 enum amdf_gpu_aql_format_feature_bits_e {
   /// AMD vendor format 2 BARRIER_VALUE waits until (signal_value & mask)
   /// satisfies the signed 64-bit HSA comparison against its reference value.
@@ -313,6 +423,9 @@ enum amdf_gpu_aql_format_feature_bits_e {
   /// the last dependent execution completion. Ordinary dispatch, BARRIER_AND,
   /// and BARRIER_OR support does not imply this vendor extension.
   AMDF_GPU_AQL_FORMAT_FEATURE_BARRIER_VALUE = UINT64_C(1) << 4,
+  /// Queue creation accepts AMDF_GPU_USER_QUEUE_FLAG_DISPATCH_TIMESTAMPS.
+  /// Availability does not enable capture; the caller selects it at creation.
+  AMDF_GPU_AQL_FORMAT_FEATURE_DISPATCH_TIMESTAMPS = UINT64_C(1) << 5,
 };
 
 /// Scratch backing borrowed by one directly published compute queue.
@@ -351,6 +464,30 @@ typedef struct amdf_gpu_queue_scratch_t {
   uint32_t maximum_wave_count;
 } amdf_gpu_queue_scratch_t;
 
+/// Immutable options selected when a directly published GPU queue is created.
+typedef uint32_t amdf_gpu_user_queue_flags_t;
+enum amdf_gpu_user_queue_flag_bits_e {
+  /// Enables AQL firmware dispatch timestamps for the queue's lifetime.
+  /// Requires the AQL DISPATCH_TIMESTAMPS format feature. PM4 and SDMA use
+  /// explicit timestamp commands and reject this option.
+  ///
+  /// A dispatch with its own native completion signal writes unsigned 64-bit
+  /// start/end ticks at bytes 32/40 of that 64-byte signal block. The caller
+  /// initializes both fields to zero, gives the signal to only one outstanding
+  /// dispatch, acquires its completion, and consumes both fields before reuse.
+  /// Rearming the signal value does not clear old timestamps. A shared signal
+  /// or a later barrier's completion cannot identify individual intervals.
+  ///
+  /// The interval spans firmware packet processing, not exact first/last
+  /// shader instructions. device_query_queue_clock_info supplies the nominal
+  /// tick rate; it supplies no host epoch, cross-queue offset, or continuity
+  /// across device resets. A resident dispatch has only its outer interval.
+  ///
+  /// This option adds firmware timestamp writes, not library-owned signals,
+  /// collection, or synchronization. Zero flags leave capture disabled.
+  AMDF_GPU_USER_QUEUE_FLAG_DISPATCH_TIMESTAMPS = 1u << 0,
+};
+
 /// Parameters used to acquire one directly published GPU queue.
 typedef struct amdf_gpu_user_queue_create_info_t {
   /// Must be `AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO`.
@@ -365,9 +502,13 @@ typedef struct amdf_gpu_user_queue_create_info_t {
   amdf_queue_priority_t priority;
   /// Required producer reservation protocol.
   amdf_queue_producer_mode_t producer_mode;
-  /// Reserved for compatible growth and must be zero.
-  uint32_t reserved;
+  /// Immutable queue options. Unknown bits are invalid.
+  amdf_gpu_user_queue_flags_t flags;
   /// Direct producer capabilities that creation must achieve.
+  /// Optional device publication must be requested here; mapping does not
+  /// upgrade a queue's achieved capabilities. A family capability describes
+  /// what creation supports, while user_queue_query_info reports what this
+  /// queue established. SDMA device publication supports the exact owning GPU.
   amdf_user_queue_capabilities_t required_capabilities;
   /// Requested power-of-two primary ring capacity, or zero for the default.
   uint64_t ring_byte_length;
@@ -429,6 +570,64 @@ typedef struct amdf_gpu_kernel_queue_submission_info_t {
   /// attachment remains borrowed until the accepted submission retires.
   const amdf_gpu_kernel_command_t* commands;
 } amdf_gpu_kernel_queue_submission_info_t;
+
+/// An explicitly owned native wake resource, independent of completion values.
+typedef struct amdf_gpu_event_t amdf_gpu_event_t;
+
+/// Native producer protocol returned by an event's immutable information.
+typedef uint32_t amdf_gpu_event_format_t;
+enum amdf_gpu_event_format_e {
+  /// No device producer protocol; never returned by successful construction.
+  AMDF_GPU_EVENT_FORMAT_NONE = 0,
+  /// KFD signal mailbox and interrupt protocol, version 1. The mailbox is an
+  /// eight-byte native slot. Producers write trigger_data to its low DWORD,
+  /// then issue a native interrupt carrying interrupt_context after that write
+  /// is visible. A qualified native AMD signal producer may instead write all
+  /// eight bytes. The native consumer owns slot acknowledgment/reset.
+  ///
+  /// Queue/ISA-specific encoding and interrupt context widths remain separate
+  /// producer contracts. The format does not make a mailbox write alone wake
+  /// the host, grant another device access, or define application completion.
+  AMDF_GPU_EVENT_FORMAT_KFD_SIGNAL = 1,
+};
+
+/// Parameters for one device-native event, shared by any of its queues.
+typedef struct amdf_gpu_event_create_info_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_GPU_EVENT_CREATE_INFO`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_gpu_event_create_info_t)`.
+  uint32_t structure_size;
+  /// Optional input extension chain. No extensions are currently defined.
+  const void* next;
+  /// Reserved for compatible growth and must be zero.
+  uint64_t reserved;
+} amdf_gpu_event_create_info_t;
+
+/// Immutable native producer operands, valid until event destruction or reset.
+typedef struct amdf_gpu_event_info_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_GPU_EVENT_INFO`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_gpu_event_info_t)`.
+  uint32_t structure_size;
+  /// Optional output extension chain. No extensions are currently defined.
+  void* next;
+  /// Exact device address/interrupt domain in which these operands are valid.
+  amdf_device_id_t device_id;
+  /// Device reset epoch associated with the native resource.
+  uint64_t reset_epoch;
+  /// Native producer representation; it is not an operating-system selector.
+  amdf_gpu_event_format_t format;
+  /// Version of the native representation; KFD_SIGNAL currently uses one.
+  uint32_t format_version;
+  /// Queue publication mechanisms qualified to use these native operands.
+  amdf_queue_publication_modes_t publication_modes;
+  /// Native mailbox address in the exact producer device's address domain.
+  uint64_t mailbox_address;
+  /// Native mailbox payload, independent of any application completion value.
+  uint32_t trigger_data;
+  /// Native interrupt payload, not an application signal value or counter.
+  uint32_t interrupt_context;
+} amdf_gpu_event_info_t;
 
 /// Immutable entry-point table for one negotiated GPU extension version.
 ///
@@ -538,6 +737,102 @@ typedef struct amdf_gpu_api_t {
       amdf_device_t* device,
       const amdf_gpu_user_queue_create_info_t* create_info,
       amdf_user_queue_t** out_queue);
+
+  /// Queries the nominal timestamp rate for an admitted queue family.
+  /// Available from GPU extension version 2.
+  ///
+  /// PM4/AQL GPU-clock samples and SDMA GET_GLOBAL samples use this rate;
+  /// shader cycle counters and performance-event counts do not. The family
+  /// ordinal belongs to device's endpoint. Success publishes a nonzero rate;
+  /// unavailable native metadata returns UNSUPPORTED. Meaningful counter width
+  /// is zero when the native interface does not establish it. Failure leaves
+  /// out_info unchanged.
+  ///
+  /// Rate does not establish a shared epoch between queues, devices or native
+  /// driver clock queries, nor bounded oscillator accuracy against a host
+  /// clock. Correlation uses independently attributed samples from the actual
+  /// event source. Reset or loss of that source invalidates its relation.
+  ///
+  /// This explicit cold query may enter the driver. It creates no queue,
+  /// allocation, collector or retained calibration state and waits for no
+  /// application work. It is thread-safe with submission and other queries;
+  /// the caller keeps device live through the call.
+  amdf_status_t(AMDF_CALL* device_query_queue_clock_info)(
+      amdf_device_t* device, uint32_t queue_family_ordinal,
+      amdf_observation_clock_info_t* out_info);
+
+  /// Samples the native driver's device and host clocks for a queue family.
+  /// Available from GPU extension version 2. The host tuple uses the common
+  /// observation extension clock, so consumers need no native clock calls.
+  ///
+  /// The native service selects the device/partition clock on Linux and the
+  /// admitted engine node on Windows. This sample's device epoch is the native
+  /// query's epoch. Its relation to queue-written timestamps must be
+  /// established for that source; neither equal rates nor one physical device
+  /// implies it. host.before/after bracket the native query, including
+  /// scheduling delay; host.timestamp is the paired native host observation,
+  /// not a simultaneous sampling guarantee. No error bound on physical clock
+  /// drift is implied.
+  ///
+  /// This explicit cold operation enters the driver and reads host clocks.
+  /// It allocates nothing, retains no state, submits no commands, performs no
+  /// retries, and waits for no application work. The caller keeps device live
+  /// and owns sampling cadence and calibration. Failure leaves out_sample
+  /// unchanged; unavailable native sampling returns UNSUPPORTED.
+  amdf_status_t(AMDF_CALL* device_query_clock_sample)(
+      amdf_device_t* device, uint32_t queue_family_ordinal,
+      amdf_observation_clock_sample_t* out_sample);
+
+  /// Creates one native GPU event. Requires GPU extension version 3.
+  ///
+  /// The event borrows device, which must outlive it. device_destroy returns
+  /// BUSY while an event remains live, including after failed event
+  /// destruction. Construction may allocate, map native connection state, and
+  /// enter the driver; it creates no worker, queue, completion value, or
+  /// per-dispatch subscription. Shared native event backing follows the
+  /// instance's native lifetime, not an individual event's lifetime. PROCESS
+  /// lifetime requires coordination with other primary native clients. Failure
+  /// leaves out_event unchanged; partial native connection preparation remains
+  /// with its live instance for retry or teardown. Unsupported providers return
+  /// UNSUPPORTED without substituting polling.
+  amdf_status_t(AMDF_CALL* event_create)(
+      amdf_device_t* device, const amdf_gpu_event_create_info_t* create_info,
+      amdf_gpu_event_t** out_event);
+
+  /// Copies immutable producer operands without allocation, locking, native
+  /// calls or ownership updates. The caller initializes out_info and its chain.
+  /// Failure leaves out_info unchanged.
+  amdf_status_t(AMDF_CALL* event_query_info)(amdf_gpu_event_t* event,
+                                             amdf_gpu_event_info_t* out_info);
+
+  /// Wakes a host observer after the caller publishes its own work/stop state.
+  /// Signals may coalesce and are not counted work credits. This may enter the
+  /// driver and is thread-safe with waiting, querying and other signals. It
+  /// does not publish application payloads or signal a GPU execution
+  /// dependency.
+  amdf_status_t(AMDF_CALL* event_signal)(amdf_gpu_event_t* event);
+
+  /// Blocks this caller until a notification, native failure, host interruption
+  /// or relative nanosecond timeout. Zero observes without blocking;
+  /// AMDF_TIMEOUT_INFINITE imposes no deadline. Timeout returns
+  /// DEADLINE_EXCEEDED. Success is a wake hint: the caller acquires/rechecks
+  /// its authoritative predicates, including after interrupted, spurious or
+  /// coalesced wakes. It never proves execution completion.
+  ///
+  /// Waits on one event are serialized by the caller; signals may be
+  /// concurrent. The operation creates no worker, timer or library allocation,
+  /// and does not actively poll. Native kernel wait resources may be allocated.
+  /// Native context failure is reported as DEVICE_LOST; neither that result nor
+  /// a timeout establishes quiescence or cancels already-accepted work.
+  amdf_status_t(AMDF_CALL* event_wait)(amdf_gpu_event_t* event,
+                                       uint64_t timeout_nanoseconds);
+
+  /// Destroys an event after all producer uses (including notification tails)
+  /// and host calls/waits have ended. The caller owns that synchronization;
+  /// this does not wait for device work or track producer lifetimes. Success
+  /// consumes the event; a native release failure preserves it for retry.
+  /// Shared native connection backing remains with its instance.
+  amdf_status_t(AMDF_CALL* event_destroy)(amdf_gpu_event_t* event);
 } amdf_gpu_api_t;
 
 #ifdef __cplusplus
