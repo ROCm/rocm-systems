@@ -337,7 +337,7 @@ bool ddaLLArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   if (op != ncclSum) {
     return false;
   }
-  if (!rcclDdaDatatypeSupported(datatype)) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -385,7 +385,7 @@ bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
   if (op != ncclSum) {
     return false;
   }
-  if (!rcclDdaDatatypeSupported(datatype)) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -439,7 +439,7 @@ bool ddaLL128ArOneShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
   if (op != ncclSum) {
     return false;
   }
-  if (!rcclDdaDatatypeSupported(datatype)) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -492,7 +492,7 @@ bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
   if (op != ncclSum) {
     return false;
   }
-  if (!rcclDdaDatatypeSupported(datatype)) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 

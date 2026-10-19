@@ -158,7 +158,7 @@ bool ncclAllReduceDdaFabricEligible(ncclComm* comm, const void* sendbuff, void* 
   if (op != ncclSum) {
     return false;
   }
-  if (!rcclDdaDatatypeSupported(datatype)) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
   const size_t bytes = count * ncclTypeSize(datatype);

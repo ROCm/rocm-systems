@@ -120,7 +120,7 @@ bool ncclAllReduceDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
   if (op != ncclSum) {
     return false;
   }
-  if (!rcclDdaDatatypeSupported(datatype)) {
+  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
     return false;
   }
   const size_t bytes = count * ncclTypeSize(datatype);
@@ -160,10 +160,6 @@ ncclResult_t ncclAllReduceDdaIpc(const void* sendbuff, void* recvbuff, size_t co
     return ncclAllReduceDdaIpcTyped<half>(sendbuff, recvbuff, count, comm, stream);
   case ncclBfloat16:
     return ncclAllReduceDdaIpcTyped<bf16>(sendbuff, recvbuff, count, comm, stream);
-  case ncclFloat8e4m3:
-    return ncclAllReduceDdaIpcTyped<dda::common::fp8e4m3>(sendbuff, recvbuff, count, comm, stream);
-  case ncclFloat8e5m2:
-    return ncclAllReduceDdaIpcTyped<dda::common::fp8e5m2>(sendbuff, recvbuff, count, comm, stream);
   default:
     return ncclInvalidArgument;
   }

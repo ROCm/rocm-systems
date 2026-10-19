@@ -11,6 +11,7 @@
 #include <hip/hip_runtime.h>
 
 #include <cstdint>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -24,15 +25,23 @@ using dda::common::fp8e5m2;
 
 constexpr uint32_t kFp8Pairs = 256 * 256;
 
+// Kernels below take only the tag: rccl_float8 / rccl_bfloat8 name different
+// types in the host and gfx942 device passes, so a kernel templated on them
+// would register under a name the gfx942 code object lacks.
+template <typename Tag>
+using Fp8Of = typename std::conditional<std::is_same<Tag, fp8e4m3>::value, rccl_float8, rccl_bfloat8>::type;
+
 struct Fp8AddMismatches
 {
-    uint32_t word32;
-    uint32_t word64;
+    uint32_t llPayload;
+    uint32_t ll128Word;
+    uint32_t vec16B;
     uint32_t firstBadPair;
 };
 
-// RCCL's core fp8 add, which the ring/tree reduce kernels use. The pair's
-// second element is zero.
+// RCCL's core fp8 pair add (hadd2 / hadd2_b), which the reduce kernels use below
+// eight lanes. It converts two lanes per instruction, so it shares no
+// conversion with the pk8 add DDA uses. The pair's second element is zero.
 template <typename Tag>
 __device__ uint8_t coreFp8Add(uint8_t a, uint8_t b)
 {
@@ -42,9 +51,36 @@ __device__ uint8_t coreFp8Add(uint8_t a, uint8_t b)
         return static_cast<uint8_t>(hadd2_b(a, b) & 0xff);
 }
 
-// One thread per (a, b) byte pair, placed in each lane of the 4-byte word that
-// vecElementAdd adds and of the 8-byte word ddaLL128AddWord adds. The other
-// lanes carry unrelated pairs, so a lane that leaks into another shows up too.
+// Places pair p in each of the Lanes byte lanes in turn, with unrelated pairs in
+// the other lanes so a lane that leaks into another shows up too, and counts
+// lanes where `add` disagrees with coreFp8Add.
+template <typename Tag, int Lanes, typename Add>
+__device__ void checkFp8Lanes(uint32_t p, uint32_t salt, Add add, uint32_t* mismatches, uint32_t* firstBadPair)
+{
+    for (int lane = 0; lane < Lanes; ++lane)
+    {
+        uint8_t a[Lanes], b[Lanes], expected[Lanes], sum[Lanes];
+        for (int k = 0; k < Lanes; ++k)
+        {
+            const uint32_t q = (k == lane) ? p : ((p * 2654435761u + k * salt) & 0xffff);
+            a[k]             = q & 0xff;
+            b[k]             = q >> 8;
+            expected[k]      = coreFp8Add<Tag>(a[k], b[k]);
+        }
+        add(a, b, sum);
+        for (int k = 0; k < Lanes; ++k)
+        {
+            if (sum[k] != expected[k])
+            {
+                atomicAdd(mismatches, 1u);
+                atomicCAS(firstBadPair, 0xffffffffu, p);
+            }
+        }
+    }
+}
+
+// One thread per (a, b) byte pair, run through each width the DDA kernels add
+// fp8 at: an LL packet's two payload dwords, an LL128 word, and a 16B vector.
 template <typename Tag>
 __global__ void fp8AddMatchesCoreKernel(Fp8AddMismatches* out)
 {
@@ -52,70 +88,60 @@ __global__ void fp8AddMatchesCoreKernel(Fp8AddMismatches* out)
     if (p >= kFp8Pairs)
         return;
 
-    for (int lane = 0; lane < 4; ++lane)
-    {
-        uint32_t wa = 0, wb = 0;
-        uint8_t  expected[4];
-        for (int k = 0; k < 4; ++k)
-        {
-            const uint32_t q  = (k == lane) ? p : ((p * 2654435761u + k * 40503u) & 0xffff);
-            const uint8_t  qa = q & 0xff, qb = q >> 8;
-            wa |= static_cast<uint32_t>(qa) << (8 * k);
-            wb |= static_cast<uint32_t>(qb) << (8 * k);
-            expected[k] = coreFp8Add<Tag>(qa, qb);
-        }
-        const uint32_t sum = dda::common::vecElementAdd<Tag>(wa, wb);
-        for (int k = 0; k < 4; ++k)
-        {
-            if (((sum >> (8 * k)) & 0xff) != expected[k])
-            {
-                atomicAdd(&out->word32, 1u);
-                atomicCAS(&out->firstBadPair, 0xffffffffu, p);
-            }
-        }
-    }
+    checkFp8Lanes<Tag, 8>(
+        p, 40503u,
+        [](const uint8_t* a, const uint8_t* b, uint8_t* sum) {
+            uint32_t acc[2], d[2];
+            __builtin_memcpy(acc, a, 8);
+            __builtin_memcpy(d, b, 8);
+            dda::common::ddaLLAddPayload<Tag>(acc[0], acc[1], d[0], d[1]);
+            __builtin_memcpy(sum, acc, 8);
+        },
+        &out->llPayload, &out->firstBadPair);
 
-    for (int lane = 0; lane < 8; ++lane)
-    {
-        uint64_t wa = 0, wb = 0;
-        uint8_t  expected[8];
-        for (int k = 0; k < 8; ++k)
-        {
-            const uint32_t q  = (k == lane) ? p : ((p * 2246822519u + k * 3266489917u) & 0xffff);
-            const uint8_t  qa = q & 0xff, qb = q >> 8;
-            wa |= static_cast<uint64_t>(qa) << (8 * k);
-            wb |= static_cast<uint64_t>(qb) << (8 * k);
-            expected[k] = coreFp8Add<Tag>(qa, qb);
-        }
-        const uint64_t sum = dda::common::ddaLL128AddWord<Tag>(wa, wb);
-        for (int k = 0; k < 8; ++k)
-        {
-            if (((sum >> (8 * k)) & 0xff) != expected[k])
-            {
-                atomicAdd(&out->word64, 1u);
-                atomicCAS(&out->firstBadPair, 0xffffffffu, p);
-            }
-        }
-    }
+    checkFp8Lanes<Tag, 8>(
+        p, 3266489917u,
+        [](const uint8_t* a, const uint8_t* b, uint8_t* sum) {
+            uint64_t wa, wb;
+            __builtin_memcpy(&wa, a, 8);
+            __builtin_memcpy(&wb, b, 8);
+            const uint64_t s = dda::common::ddaLL128AddWord<Tag>(wa, wb);
+            __builtin_memcpy(sum, &s, 8);
+        },
+        &out->ll128Word, &out->firstBadPair);
+
+    checkFp8Lanes<Tag, 16>(
+        p, 2246822519u,
+        [](const uint8_t* a, const uint8_t* b, uint8_t* sum) {
+            uint4 wa, wb;
+            __builtin_memcpy(&wa, a, 16);
+            __builtin_memcpy(&wb, b, 16);
+            const uint4 s = dda::common::vecElementAdd<Tag>(wa, wb);
+            __builtin_memcpy(sum, &s, 16);
+        },
+        &out->vec16B, &out->firstBadPair);
 }
 
-// Adds a[i] + b[i] four lanes at a time through vecElementAdd, converting to
-// and from the device's own fp8 encoding (FNUZ or OCP) in device code.
-template <typename Fp8, typename Tag>
+constexpr int kFp8ExactLanes = 8;
+
+// Adds a[i] + b[i] across one 8-byte word, converting to and from the device's
+// fp8 encoding in device code.
+template <typename Tag>
 __global__ void fp8AddFloatsKernel(const float* a, const float* b, float* out)
 {
-    uint32_t wa = 0, wb = 0;
-    for (int k = 0; k < 4; ++k)
+    using Fp8   = Fp8Of<Tag>;
+    uint64_t wa = 0, wb = 0;
+    for (int k = 0; k < kFp8ExactLanes; ++k)
     {
         const Fp8 fa(a[k]), fb(b[k]);
         uint8_t   ba, bb;
         __builtin_memcpy(&ba, &fa, 1);
         __builtin_memcpy(&bb, &fb, 1);
-        wa |= static_cast<uint32_t>(ba) << (8 * k);
-        wb |= static_cast<uint32_t>(bb) << (8 * k);
+        wa |= static_cast<uint64_t>(ba) << (8 * k);
+        wb |= static_cast<uint64_t>(bb) << (8 * k);
     }
-    const uint32_t sum = dda::common::vecElementAdd<Tag>(wa, wb);
-    for (int k = 0; k < 4; ++k)
+    const uint64_t sum = dda::common::vecElementAddFp8x8<Tag>(wa, wb);
+    for (int k = 0; k < kFp8ExactLanes; ++k)
     {
         const uint8_t bits = (sum >> (8 * k)) & 0xff;
         Fp8           v;
@@ -124,10 +150,17 @@ __global__ void fp8AddFloatsKernel(const float* a, const float* b, float* out)
     }
 }
 
-bool haveGpu()
+// DDA admits fp8 only on gfx1250; elsewhere the fp8 add traps.
+const char* fp8SkipReason()
 {
     int count = 0;
-    return hipGetDeviceCount(&count) == hipSuccess && count > 0;
+    if (hipGetDeviceCount(&count) != hipSuccess || count == 0)
+        return "No GPU";
+    hipDeviceProp_t props{};
+    if (hipGetDeviceProperties(&props, 0) != hipSuccess
+        || std::string(props.gcnArchName).find("gfx1250") == std::string::npos)
+        return "DDA fp8 requires gfx1250";
+    return nullptr;
 }
 
 template <typename Tag>
@@ -135,7 +168,7 @@ void expectFp8AddMatchesCore()
 {
     Fp8AddMismatches* d = nullptr;
     ASSERT_EQ(hipMalloc(&d, sizeof(*d)), hipSuccess);
-    const Fp8AddMismatches init{0, 0, 0xffffffffu};
+    const Fp8AddMismatches init{0, 0, 0, 0xffffffffu};
     ASSERT_EQ(hipMemcpy(d, &init, sizeof(init), hipMemcpyHostToDevice), hipSuccess);
     hipLaunchKernelGGL(fp8AddMatchesCoreKernel<Tag>, dim3(kFp8Pairs / 256), dim3(256), 0, 0, d);
     ASSERT_EQ(hipGetLastError(), hipSuccess);
@@ -143,63 +176,65 @@ void expectFp8AddMatchesCore()
     ASSERT_EQ(hipMemcpy(&h, d, sizeof(h), hipMemcpyDeviceToHost), hipSuccess);
     EXPECT_EQ(hipFree(d), hipSuccess);
 
-    EXPECT_EQ(h.word32, 0u) << "first mismatching (a, b) pair 0x" << std::hex << h.firstBadPair;
-    EXPECT_EQ(h.word64, 0u) << "first mismatching (a, b) pair 0x" << std::hex << h.firstBadPair;
+    EXPECT_EQ(h.llPayload, 0u) << "first mismatching (a, b) pair 0x" << std::hex << h.firstBadPair;
+    EXPECT_EQ(h.ll128Word, 0u) << "first mismatching (a, b) pair 0x" << std::hex << h.firstBadPair;
+    EXPECT_EQ(h.vec16B, 0u) << "first mismatching (a, b) pair 0x" << std::hex << h.firstBadPair;
 }
 
 // Sums every fp8 format represents exactly, so the result does not depend on
 // rounding; one per lane, so a lane swap shows up as a wrong value.
-template <typename Fp8, typename Tag>
+template <typename Tag>
 void expectFp8AddExactSums()
 {
-    const std::vector<float> a        = {1.0f, 0.5f, -1.5f, 8.0f};
-    const std::vector<float> b        = {2.0f, 0.25f, 0.5f, 8.0f};
-    const std::vector<float> expected = {3.0f, 0.75f, -1.0f, 16.0f};
+    const std::vector<float> a        = {1.0f, 0.5f, -1.5f, 8.0f, 0.25f, -2.0f, 3.0f, 0.0f};
+    const std::vector<float> b        = {2.0f, 0.25f, 0.5f, 8.0f, 0.25f, -2.0f, -3.0f, 0.0f};
+    const std::vector<float> expected = {3.0f, 0.75f, -1.0f, 16.0f, 0.5f, -4.0f, 0.0f, 0.0f};
+    constexpr size_t         n        = kFp8ExactLanes;
 
     float* d = nullptr;
-    ASSERT_EQ(hipMalloc(&d, 12 * sizeof(float)), hipSuccess);
-    ASSERT_EQ(hipMemcpy(d, a.data(), 4 * sizeof(float), hipMemcpyHostToDevice), hipSuccess);
-    ASSERT_EQ(hipMemcpy(d + 4, b.data(), 4 * sizeof(float), hipMemcpyHostToDevice), hipSuccess);
-    hipLaunchKernelGGL((fp8AddFloatsKernel<Fp8, Tag>), dim3(1), dim3(1), 0, 0, d, d + 4, d + 8);
+    ASSERT_EQ(hipMalloc(&d, 3 * n * sizeof(float)), hipSuccess);
+    ASSERT_EQ(hipMemcpy(d, a.data(), n * sizeof(float), hipMemcpyHostToDevice), hipSuccess);
+    ASSERT_EQ(hipMemcpy(d + n, b.data(), n * sizeof(float), hipMemcpyHostToDevice), hipSuccess);
+    hipLaunchKernelGGL(fp8AddFloatsKernel<Tag>, dim3(1), dim3(1), 0, 0, d, d + n, d + 2 * n);
     ASSERT_EQ(hipGetLastError(), hipSuccess);
-    std::vector<float> got(4);
-    ASSERT_EQ(hipMemcpy(got.data(), d + 8, 4 * sizeof(float), hipMemcpyDeviceToHost), hipSuccess);
+    std::vector<float> got(n);
+    ASSERT_EQ(hipMemcpy(got.data(), d + 2 * n, n * sizeof(float), hipMemcpyDeviceToHost), hipSuccess);
     EXPECT_EQ(hipFree(d), hipSuccess);
 
-    for (int k = 0; k < 4; ++k)
+    for (size_t k = 0; k < n; ++k)
         EXPECT_EQ(got[k], expected[k]) << a[k] << " + " << b[k] << " in lane " << k;
 }
 } // namespace
 
-// The DDA reduce kernels add fp8 through vecElementAdd / ddaLL128AddWord, which
-// must round exactly as the core reduce kernels do, or DDA and non-DDA
-// collectives would disagree on the same inputs.
+// The DDA reduce kernels add fp8 through ddaLLAddPayload, ddaLL128AddWord and
+// vecElementAdd, which must round exactly as the core reduce kernels do, or DDA
+// and non-DDA collectives would disagree on the same inputs.
 TEST(DdaCollCommon, Fp8E4M3AddMatchesCoreForAllPairs)
 {
-    if (!haveGpu())
-        GTEST_SKIP() << "No GPU";
+    if (const char* reason = fp8SkipReason())
+        GTEST_SKIP() << reason;
     expectFp8AddMatchesCore<fp8e4m3>();
 }
 
 TEST(DdaCollCommon, Fp8E5M2AddMatchesCoreForAllPairs)
 {
-    if (!haveGpu())
-        GTEST_SKIP() << "No GPU";
+    if (const char* reason = fp8SkipReason())
+        GTEST_SKIP() << reason;
     expectFp8AddMatchesCore<fp8e5m2>();
 }
 
 TEST(DdaCollCommon, Fp8E4M3AddExactSums)
 {
-    if (!haveGpu())
-        GTEST_SKIP() << "No GPU";
-    expectFp8AddExactSums<rccl_float8, fp8e4m3>();
+    if (const char* reason = fp8SkipReason())
+        GTEST_SKIP() << reason;
+    expectFp8AddExactSums<fp8e4m3>();
 }
 
 TEST(DdaCollCommon, Fp8E5M2AddExactSums)
 {
-    if (!haveGpu())
-        GTEST_SKIP() << "No GPU";
-    expectFp8AddExactSums<rccl_bfloat8, fp8e5m2>();
+    if (const char* reason = fp8SkipReason())
+        GTEST_SKIP() << reason;
+    expectFp8AddExactSums<fp8e5m2>();
 }
 
 TEST(DdaCollCommon, divRoundUp)

@@ -137,7 +137,7 @@ bool ncclReduceScatterDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuf
   if (op != ncclSum) {
     return false;
   }
-  if (!rcclDdaDatatypeSupported(datatype)) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 

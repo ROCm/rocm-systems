@@ -51,6 +51,9 @@ struct fp8e5m2 {
 static_assert(sizeof(fp8e4m3) == 1 && sizeof(fp8e5m2) == 1, "fp8 tags must be one byte");
 
 template <typename T>
+inline constexpr bool is_fp8_v = std::is_same<T, fp8e4m3>::value || std::is_same<T, fp8e5m2>::value;
+
+template <typename T>
 inline constexpr bool is_supported_type_v = (std::is_same<T, float>::value || std::is_same<T, half>::value ||
                                              std::is_same<T, int8_t>::value || std::is_same<T, bf16>::value
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
@@ -59,9 +62,30 @@ inline constexpr bool is_supported_type_v = (std::is_same<T, float>::value || st
 #endif
 );
 
+// Adds the eight fp8 lanes of an 8-byte word with the pk8 add the core reduce
+// kernels use (hadd8 / hadd8_b), so DDA rounds as they do. Only gfx1250 admits
+// fp8 to DDA; other arches compile these kernels but never launch them.
+template <typename T>
+static inline __device__ uint64_t vecElementAddFp8x8(uint64_t a, uint64_t b) {
+  static_assert(is_fp8_v<T>, "dda: vecElementAddFp8x8 takes an fp8 tag");
+#if defined(RCCL_FP8_HAS_PK8)
+  const auto x = __builtin_bit_cast(fp8x8_storage_t, a);
+  const auto y = __builtin_bit_cast(fp8x8_storage_t, b);
+  if constexpr (std::is_same<T, fp8e4m3>::value) {
+    return __builtin_bit_cast(uint64_t, hadd8(x, y));
+  } else {
+    return __builtin_bit_cast(uint64_t, hadd8_b(x, y));
+  }
+#else
+  __builtin_trap();
+  return 0;
+#endif
+}
+
 template <typename T>
 static inline __device__ uint32_t vecElementAdd(const uint32_t& a, const uint32_t& b) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
+  static_assert(!is_fp8_v<T>, "dda: fp8 adds eight lanes at a time; use vecElementAddFp8x8");
   if constexpr (std::is_same<T, float>::value) {
     const float* x = reinterpret_cast<const float*>(&a);
     const float* y = reinterpret_cast<const float*>(&b);
@@ -90,40 +114,6 @@ static inline __device__ uint32_t vecElementAdd(const uint32_t& a, const uint32_
     return (reinterpret_cast<uint32_t*>(&z))[0];
 #endif
   }
-#if defined(__HIP_PLATFORM_AMD__) || defined(__HIP_PLATFORM_HCC__)
-  else if constexpr (std::is_same<T, fp8e4m3>::value || std::is_same<T, fp8e5m2>::value) {
-#if defined(__gfx942__) || defined(__gfx1250__) || defined(__gfx1250_strict__)
-    // The math of hadd2 / hadd2_b on these arches (widen to f32, add, narrow),
-    // with the high pair packed into the low pair's result so nothing narrower
-    // than a dword reaches codegen: the 16-bit form crashes the gfx1250 backend.
-    if constexpr (std::is_same<T, fp8e4m3>::value) {
-      const auto lo = __builtin_amdgcn_cvt_pk_f32_fp8(a, false) + __builtin_amdgcn_cvt_pk_f32_fp8(b, false);
-      const auto hi = __builtin_amdgcn_cvt_pk_f32_fp8(a, true) + __builtin_amdgcn_cvt_pk_f32_fp8(b, true);
-      const int out = __builtin_amdgcn_cvt_pk_fp8_f32(lo[0], lo[1], 0, false);
-      return (uint32_t)__builtin_amdgcn_cvt_pk_fp8_f32(hi[0], hi[1], out, true);
-    } else {
-      const auto lo = __builtin_amdgcn_cvt_pk_f32_bf8(a, false) + __builtin_amdgcn_cvt_pk_f32_bf8(b, false);
-      const auto hi = __builtin_amdgcn_cvt_pk_f32_bf8(a, true) + __builtin_amdgcn_cvt_pk_f32_bf8(b, true);
-      const int out = __builtin_amdgcn_cvt_pk_bf8_f32(lo[0], lo[1], 0, false);
-      return (uint32_t)__builtin_amdgcn_cvt_pk_bf8_f32(hi[0], hi[1], out, true);
-    }
-#else
-    // Same packed add the RCCL reduce kernels use, so DDA rounds identically.
-    union {
-      uint32_t u32;
-      fp8x2_storage_t x2[2];
-    } x{a}, y{b}, z;
-    if constexpr (std::is_same<T, fp8e4m3>::value) {
-      z.x2[0] = hadd2(x.x2[0], y.x2[0]);
-      z.x2[1] = hadd2(x.x2[1], y.x2[1]);
-    } else {
-      z.x2[0] = hadd2_b(x.x2[0], y.x2[0]);
-      z.x2[1] = hadd2_b(x.x2[1], y.x2[1]);
-    }
-    return z.u32;
-#endif
-  }
-#endif
   return 0;
 }
 
@@ -131,10 +121,19 @@ template <typename T>
 static inline __device__ uint4 vecElementAdd(const uint4& a, const uint4& b) {
   static_assert(is_supported_type_v<T>, "dda: unsupported element type");
   uint4 res{0, 0, 0, 0};
-  res.x = vecElementAdd<T>(a.x, b.x);
-  res.y = vecElementAdd<T>(a.y, b.y);
-  res.z = vecElementAdd<T>(a.z, b.z);
-  res.w = vecElementAdd<T>(a.w, b.w);
+  if constexpr (is_fp8_v<T>) {
+    const uint64_t lo = vecElementAddFp8x8<T>(((uint64_t)a.y << 32) | a.x, ((uint64_t)b.y << 32) | b.x);
+    const uint64_t hi = vecElementAddFp8x8<T>(((uint64_t)a.w << 32) | a.z, ((uint64_t)b.w << 32) | b.z);
+    res.x = (uint32_t)lo;
+    res.y = (uint32_t)(lo >> 32);
+    res.z = (uint32_t)hi;
+    res.w = (uint32_t)(hi >> 32);
+  } else {
+    res.x = vecElementAdd<T>(a.x, b.x);
+    res.y = vecElementAdd<T>(a.y, b.y);
+    res.z = vecElementAdd<T>(a.z, b.z);
+    res.w = vecElementAdd<T>(a.w, b.w);
+  }
   return res;
 }
 
@@ -329,6 +328,19 @@ union LLPacket16 {
   uint4 raw;
 };
 static_assert(sizeof(LLPacket16) == 16, "LLPacket16 must be exactly 16 bytes");
+
+// Folds one packet's 8B payload (d0, d1) into the accumulator (acc0, acc1).
+template <typename T>
+__device__ __forceinline__ void ddaLLAddPayload(uint32_t& acc0, uint32_t& acc1, uint32_t d0, uint32_t d1) {
+  if constexpr (is_fp8_v<T>) {
+    const uint64_t sum = vecElementAddFp8x8<T>(((uint64_t)acc1 << 32) | acc0, ((uint64_t)d1 << 32) | d0);
+    acc0 = (uint32_t)sum;
+    acc1 = (uint32_t)(sum >> 32);
+  } else {
+    acc0 = vecElementAdd<T>(acc0, d0);
+    acc1 = vecElementAdd<T>(acc1, d1);
+  }
+}
 
 __device__ __forceinline__ void ddaLLStoreLineB128(uint32_t* dst, uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3) {
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS

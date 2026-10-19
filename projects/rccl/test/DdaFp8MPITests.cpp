@@ -11,7 +11,8 @@
  * Each fixture pins one tier through the DDA threshold parameters and runs every
  * collective that tier serves in both fp8 formats. A case checks that RCCL
  * selected the tier for the fp8 operands, that the data is exact, and for
- * AllReduce that the COLL log names the one-shot / two-shot variant.
+ * AllReduce that the dispatcher's one-shot / two-shot predicate picks the
+ * variant the fixture targets.
  *
  * Reductions use VerifiableFp8 data, whose partial sums are exactly
  * representable, so any reduction order has one correct answer and the check
@@ -19,36 +20,33 @@
  * encodings, NaNs included, and the check is a byte compare.
  *
  * RCCL_PARAM caches on first read, per process, so each fixture has to run in
- * its own process:
- *
- *   mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter='DdaFp8MPI_LL.*'
- *   mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter='DdaFp8MPI_LLTwoShot.*'
- *   mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter='DdaFp8MPI_LL128.*'
- *   mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter='DdaFp8MPI_LL128TwoShot.*'
- *   mpirun -np 4 ./rccl-UnitTestsMPI --gtest_filter='DdaFp8MPI_Vmm.*'
+ * its own process with its tier's settings in the launch environment. The
+ * standard_env_dda_fp8_* categories in test_categories_mpi.yaml do that; a
+ * fixture whose cached settings are not its tier's skips on every rank.
  */
 
 #ifdef MPI_TESTS_ENABLED
 
+#include "DdaFabricMPITestFixture.hpp"
 #include "DeviceBufferHelpers.hpp"
-#include "MPIHelpers.hpp"
-#include "MPITestBase.hpp"
 #include "ResourceGuards.hpp"
-#include "TestChecks.hpp"
 #include "VerifiableFp8.hpp"
-#include "comm.h" // internal: struct ncclComm::ddaFabricBarrierState
+#include "algorithms/dda/all_reduce/dda_all_reduce.h"
+#include "param.h"
 #include "rccl_common.h"
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
 #include <cstdint>
-#include <cstdio>
 #include <initializer_list>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
+
+RCCL_PARAM_DECLARE(DdaLLOneShotThreshold);
+RCCL_PARAM_DECLARE(DdaLL128OneShotThreshold);
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
@@ -70,12 +68,31 @@ const char* fp8Name(ncclDataType_t datatype)
     return datatype == ncclFloat8e4m3 ? "fp8_e4m3" : "fp8_e5m2";
 }
 
-bool isGfx1250Device()
+// Every DDA setting a fixture below may pin, with the value it has when unset
+// (the defaults in rccl_wrap.cc).
+struct DdaKnob
 {
-    hipDeviceProp_t props{};
-    return hipGetDeviceProperties(&props, 0) == hipSuccess
-        && std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
-}
+    const char* env;
+    int64_t (*cached)();
+    int64_t unsetValue;
+};
+const DdaKnob kDdaKnobs[] = {
+    {"RCCL_DDA_LL", rcclParamDdaLL, 1},
+    {"RCCL_DDA_LL_THRESHOLD", rcclParamDdaLLThreshold, kDdaThresholdUnset},
+    {"RCCL_DDA_LL_ONESHOT_THRESHOLD", rcclParamDdaLLOneShotThreshold, 1 << 20},
+    {"RCCL_DDA_LL128_ONESHOT_THRESHOLD", rcclParamDdaLL128OneShotThreshold, 4 << 20},
+    {"RCCL_DDA_THRESHOLD", rcclParamDdaThreshold, kDdaThresholdUnset},
+};
+
+// The AllReduce variant inside the LL / LL128 tiers.
+enum class ArVariant
+{
+    Any,
+    LLOneShot,
+    LLTwoShot,
+    LL128OneShot,
+    LL128TwoShot,
+};
 
 // The two-shot tiers split the message into one shard per rank, each a whole
 // number of 16-byte lines, so the count has to be a multiple of 16 * nRanks.
@@ -92,66 +109,62 @@ uint8_t copyPattern(int rank, size_t i)
     return static_cast<uint8_t>(rank * 37 + i);
 }
 
-std::string pathNeedle(const char* path, int nRanks, size_t count, ncclDataType_t datatype)
-{
-    char buf[160];
-    std::snprintf(buf,
-                  sizeof(buf),
-                  "taking DDA fabric %s path: nRanks=%d nNodes=1 count=%zu datatype=%d",
-                  path,
-                  nRanks,
-                  count,
-                  static_cast<int>(datatype));
-    return buf;
-}
 } // namespace
 
-class DdaFp8MPITest : public MPITestBase
+class DdaFp8MPITest : public DdaFabricMPITest
 {
 protected:
     std::vector<std::unique_ptr<MPIHelpers::MpiEnvGuard>> envGuards_;
-    std::unique_ptr<MPIHelpers::TestLogAssertionContext>  logCtx_;
     int                                                    rank_{};
     int                                                    nRanks_{};
 
     // RCCL_DDA_* settings that leave this fixture's tier as the one claiming the
-    // sizes its tests use.
-    virtual std::vector<std::pair<const char*, const char*>> tierEnv() const = 0;
+    // sizes its tests use. Every other kDdaKnobs entry must be unset.
+    virtual std::vector<std::pair<const char*, int64_t>> tierEnv() const = 0;
+
+    // Why the cached DDA settings are not this tier's, or empty if they are.
+    std::string tierMismatch() const
+    {
+        const auto tier = tierEnv();
+        for(const DdaKnob& knob : kDdaKnobs)
+        {
+            int64_t want = knob.unsetValue;
+            for(const auto& [name, value] : tier)
+                if(std::string(name) == knob.env)
+                    want = value;
+            const int64_t have = knob.cached();
+            if(have != want)
+                return std::string(knob.env) + " is cached as " + std::to_string(have) + ", tier needs "
+                     + std::to_string(want) + "; run this fixture in its own process";
+        }
+        return {};
+    }
 
     void SetUp() override
     {
-        MPITestBase::SetUp();
-        envGuards_.push_back(std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG", "INFO"));
-        envGuards_.push_back(
-            std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS", "INIT,COLL"));
+        DdaFabricMPITest::SetUp();
         for(const auto& [name, value] : tierEnv())
-            envGuards_.push_back(std::make_unique<MPIHelpers::MpiEnvGuard>(name, value));
-        logCtx_ = std::make_unique<MPIHelpers::TestLogAssertionContext>(
-            MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
+            envGuards_.push_back(
+                std::make_unique<MPIHelpers::MpiEnvGuard>(name, std::to_string(value).c_str()));
 
         if(!validateTestPrerequisites(kMinProcessesForMPI))
             GTEST_SKIP() << "Need at least 2 MPI ranks";
-        // Every rank must skip together, or the rest would block in the next collective.
-        const std::string archSkip
-            = mpiCoordinatedSkipReason(!isGfx1250Device(), "DDA fabric requires gfx1250");
-        if(!archSkip.empty())
-            GTEST_SKIP() << archSkip;
+        DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric requires gfx1250"));
 
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
         ASSERT_MPI_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank_));
         ASSERT_MPI_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks_));
 
-        const std::string fabricSkip
-            = mpiCoordinatedSkipReason(getActiveCommunicator()->ddaFabricBarrierState == nullptr,
-                                       "DDA fabric path did not initialize");
-        if(!fabricSkip.empty())
-            GTEST_SKIP() << fabricSkip;
+        DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason());
+        const std::string tierSkip = tierMismatch();
+        const std::string coordinated = mpiCoordinatedSkipReason(!tierSkip.empty(), tierSkip.c_str());
+        if(!coordinated.empty())
+            GTEST_SKIP() << coordinated;
     }
 
     void TearDown() override
     {
-        MPITestBase::TearDown();
-        logCtx_.reset();
+        DdaFabricMPITest::TearDown();
         while(!envGuards_.empty())
             envGuards_.pop_back();
     }
@@ -177,23 +190,41 @@ protected:
             << (algoName ? algoName : "?") << ", expected " << (expectedName ? expectedName : "?");
     }
 
-    void expectLog(const std::string& needle)
+    // The dispatcher takes one-shot whenever the one-shot predicate admits the
+    // call, else two-shot.
+    void expectArVariant(ArVariant variant, size_t count, ncclDataType_t datatype, const void* sendBuf,
+                         void* recvBuf)
     {
-        const std::string merged = logCtx_->readNcclDebugLog() + logCtx_->readPerRankStderrLog();
-        EXPECT_NE(merged.find(needle), std::string::npos)
-            << "Rank " << rank_ << " did not log: " << needle;
+        ncclComm* comm = getActiveCommunicator();
+        switch(variant)
+        {
+        case ArVariant::Any:
+            return;
+        case ArVariant::LLOneShot:
+        case ArVariant::LLTwoShot:
+            EXPECT_EQ(ddaLLArOneShotEligible(comm, sendBuf, recvBuf, count, datatype, ncclSum),
+                      variant == ArVariant::LLOneShot)
+                << "Rank " << rank_ << ": " << fp8Name(datatype) << " count=" << count;
+            return;
+        case ArVariant::LL128OneShot:
+        case ArVariant::LL128TwoShot:
+            EXPECT_EQ(ddaLL128ArOneShotEligible(comm, sendBuf, recvBuf, count, datatype, ncclSum),
+                      variant == ArVariant::LL128OneShot)
+                << "Rank " << rank_ << ": " << fp8Name(datatype) << " count=" << count;
+            return;
+        }
     }
 
     // Exact-count check of a reduced fp8 buffer; eltIx0 places it in the full vector.
     void expectReduced(const void* results, size_t count, ncclDataType_t datatype, size_t eltIx0)
     {
         int64_t* badEltN = nullptr;
-        ASSERT_EQ(hipSuccess, hipHostMalloc(&badEltN, sizeof(*badEltN)));
+        ASSERT_MPI_EQ(hipSuccess, hipHostMalloc(&badEltN, sizeof(*badEltN)));
         *badEltN = -1;
-        ASSERT_EQ(hipSuccess,
-                  RcclUnitTesting::VerifiableFp8Verify(results, count, datatype, ncclSum, nRanks_,
-                                                       kSeed, eltIx0, badEltN, getActiveStream()));
-        ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess,
+                      RcclUnitTesting::VerifiableFp8Verify(results, count, datatype, ncclSum, nRanks_,
+                                                           kSeed, eltIx0, badEltN, getActiveStream()));
+        ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
         EXPECT_EQ(*badEltN, 0) << "Rank " << rank_ << ": " << fp8Name(datatype) << " has "
                                << *badEltN << " of " << count << " elements wrong";
         EXPECT_EQ(hipSuccess, hipHostFree(badEltN));
@@ -202,7 +233,7 @@ protected:
     void runAllReduce(ncclDataType_t datatype,
                       size_t         count,
                       int            expectedAlgo,
-                      const char*    path = nullptr)
+                      ArVariant      variant = ArVariant::Any)
     {
         void* sendBuf = nullptr;
         void* recvBuf = nullptr;
@@ -212,6 +243,7 @@ protected:
         DeviceBufferAutoGuard recvGuard(recvBuf);
 
         expectAlgo(ncclFuncAllReduce, count, datatype, sendBuf, recvBuf, expectedAlgo);
+        expectArVariant(variant, count, datatype, sendBuf, recvBuf);
 
         ASSERT_MPI_EQ(hipSuccess,
                       RcclUnitTesting::VerifiableFp8PrepareInput(sendBuf, count, datatype, ncclSum,
@@ -224,8 +256,6 @@ protected:
         ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
         expectReduced(recvBuf, count, datatype, 0);
-        if(path != nullptr)
-            expectLog(pathNeedle(path, nRanks_, count, datatype));
     }
 
     void runReduceScatter(ncclDataType_t datatype, size_t recvcount, int expectedAlgo)
@@ -340,7 +370,7 @@ protected:
 class DdaFp8MPI_LL : public DdaFp8MPITest
 {
 protected:
-    std::vector<std::pair<const char*, const char*>> tierEnv() const override
+    std::vector<std::pair<const char*, int64_t>> tierEnv() const override
     {
         return {};
     }
@@ -349,7 +379,7 @@ protected:
 TEST_F(DdaFp8MPI_LL, AllReduceOneShot)
 {
     forEachFp8AndCount({kLine, kPrimeLines, 64 * 1024}, [this](ncclDataType_t datatype, size_t count) {
-        runAllReduce(datatype, count, RCCL_DDA_FABRIC_LL, "LL one-shot");
+        runAllReduce(datatype, count, RCCL_DDA_FABRIC_LL, ArVariant::LLOneShot);
     });
 }
 
@@ -381,9 +411,9 @@ TEST_F(DdaFp8MPI_LL, AllToAll)
 class DdaFp8MPI_LLTwoShot : public DdaFp8MPITest
 {
 protected:
-    std::vector<std::pair<const char*, const char*>> tierEnv() const override
+    std::vector<std::pair<const char*, int64_t>> tierEnv() const override
     {
-        return {{"RCCL_DDA_LL_ONESHOT_THRESHOLD", "0"}};
+        return {{"RCCL_DDA_LL_ONESHOT_THRESHOLD", 0}};
     }
 };
 
@@ -392,7 +422,7 @@ TEST_F(DdaFp8MPI_LLTwoShot, AllReduce)
     const size_t ranks = static_cast<size_t>(nRanks_);
     forEachFp8AndCount({kLine * ranks, kPrimeLines * ranks, alignToShards(64 * 1024, nRanks_)},
                        [this](ncclDataType_t datatype, size_t count) {
-                           runAllReduce(datatype, count, RCCL_DDA_FABRIC_LL, "LL two-shot");
+                           runAllReduce(datatype, count, RCCL_DDA_FABRIC_LL, ArVariant::LLTwoShot);
                        });
 }
 
@@ -404,16 +434,16 @@ TEST_F(DdaFp8MPI_LLTwoShot, AllReduce)
 class DdaFp8MPI_LL128 : public DdaFp8MPITest
 {
 protected:
-    std::vector<std::pair<const char*, const char*>> tierEnv() const override
+    std::vector<std::pair<const char*, int64_t>> tierEnv() const override
     {
-        return {{"RCCL_DDA_LL_THRESHOLD", "0"}};
+        return {{"RCCL_DDA_LL_THRESHOLD", 0}};
     }
 };
 
 TEST_F(DdaFp8MPI_LL128, AllReduceOneShot)
 {
     forEachFp8AndCount({kLine, kPrimeLines, 64 * 1024}, [this](ncclDataType_t datatype, size_t count) {
-        runAllReduce(datatype, count, RCCL_DDA_FABRIC_LL128, "LL128 one-shot");
+        runAllReduce(datatype, count, RCCL_DDA_FABRIC_LL128, ArVariant::LL128OneShot);
     });
 }
 
@@ -445,9 +475,9 @@ TEST_F(DdaFp8MPI_LL128, AllToAll)
 class DdaFp8MPI_LL128TwoShot : public DdaFp8MPITest
 {
 protected:
-    std::vector<std::pair<const char*, const char*>> tierEnv() const override
+    std::vector<std::pair<const char*, int64_t>> tierEnv() const override
     {
-        return {{"RCCL_DDA_LL_THRESHOLD", "0"}, {"RCCL_DDA_LL128_ONESHOT_THRESHOLD", "0"}};
+        return {{"RCCL_DDA_LL_THRESHOLD", 0}, {"RCCL_DDA_LL128_ONESHOT_THRESHOLD", 0}};
     }
 };
 
@@ -456,7 +486,7 @@ TEST_F(DdaFp8MPI_LL128TwoShot, AllReduce)
     const size_t ranks = static_cast<size_t>(nRanks_);
     forEachFp8AndCount({kLine * ranks, kPrimeLines * ranks, alignToShards(64 * 1024, nRanks_)},
                        [this](ncclDataType_t datatype, size_t count) {
-                           runAllReduce(datatype, count, RCCL_DDA_FABRIC_LL128, "LL128 two-shot");
+                           runAllReduce(datatype, count, RCCL_DDA_FABRIC_LL128, ArVariant::LL128TwoShot);
                        });
 }
 
@@ -469,9 +499,9 @@ TEST_F(DdaFp8MPI_LL128TwoShot, AllReduce)
 class DdaFp8MPI_Vmm : public DdaFp8MPITest
 {
 protected:
-    std::vector<std::pair<const char*, const char*>> tierEnv() const override
+    std::vector<std::pair<const char*, int64_t>> tierEnv() const override
     {
-        return {{"RCCL_DDA_LL", "0"}, {"RCCL_DDA_THRESHOLD", "67108864"}};
+        return {{"RCCL_DDA_LL", 0}, {"RCCL_DDA_THRESHOLD", 64 << 20}};
     }
 };
 
