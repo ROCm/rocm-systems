@@ -26,6 +26,8 @@ THE SOFTWARE.
 #include <unistd.h>
 
 #include <algorithm>
+#include <chrono>
+#include <string>
 
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
@@ -34,16 +36,37 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-static const int kOutputLineLength = 80;
 static const char kLabelDelimiter[] = "####";
-static const char kDescriptionLabel[] = "TEST DESCRIPTION";
-static const char kTitleLabel[] = "TEST NAME";
 static const char kSetupLabel[] = "TEST SETUP";
-static const char kRunLabel[] = "TEST EXECUTION";
 static const char kCloseLabel[] = "TEST CLEAN UP";
-static const char kResultsLabel[] = "TEST RESULTS";
 
-TestBase::TestBase(uint32_t gpu_index) : gpu_index_(gpu_index), description_("") { SetUp(); }
+LoggedStep::LoggedStep(uint32_t entity, const std::string& step) : entity_(entity), step_(step) {
+  RDC_LOG(RDC_DEBUG, "GPU " << entity_ << " " << step_ << ": start.");
+}
+
+LoggedStep::~LoggedStep() {
+  // A destructor must not throw: the line is put together inside a catch-all and dropped rather
+  // than ending the process when it cannot be.
+  try {
+    RDC_LOG(RDC_DEBUG, "GPU " << entity_ << " " << step_ << ": done.");
+  } catch (...) {
+  }
+}
+
+void TestBase::say(rdc_diag_result_t outcome, const std::string& sentence) {
+  GpuOutcome* const report = release_context_.outcome();
+  if (report != nullptr) {
+    report->add(outcome, sentence);
+  }
+}
+
+TestBase::TestBase(uint32_t gpu_index, uint32_t node_id, GpuOutcome* outcome)
+    : gpu_index_(gpu_index), node_id_(node_id), release_context_(gpu_index, outcome) {
+  // SetUp()'s hsa_init() is the last step of this constructor, and nothing that can throw may
+  // follow it: a throw from here would skip ~TestBase, and with it the hsa_shut_down() that
+  // releases the reference, while a throw from a derived constructor or from a test body runs it.
+  throw_if_error(SetUp(), "Fail to call hsa_init().");
+}
 TestBase::~TestBase() { Close(); }
 
 static void MakeHeaderStr(const char* inStr, std::string* outStr) {
@@ -59,76 +82,131 @@ static void MakeHeaderStr(const char* inStr, std::string* outStr) {
 }
 
 hsa_status_t TestBase::SetUp(void) {
-  hsa_status_t err = HSA_STATUS_SUCCESS;
   std::string label;
   MakeHeaderStr(kSetupLabel, &label);
   RDC_LOG(RDC_DEBUG, label);
 
-  err = InitAndSetupHSA(this);
-
-  return err;
-}
-
-void TestBase::Run(void) {
-  std::string label;
-  MakeHeaderStr(kRunLabel, &label);
-  RDC_LOG(RDC_DEBUG, label);
+  // This object's own reference to ROCr. The run holds one more while it checks its GPUs, so
+  // ROCr stays loaded between the test objects of a check.
+  return hsa_init();
 }
 
 void TestBase::Close(void) {
-  hsa_status_t err;
-  std::string label;
-  MakeHeaderStr(kCloseLabel, &label);
-  RDC_LOG(RDC_DEBUG, label);
+  // This runs from ~TestBase, which must not throw: the label is put together inside a
+  // catch-all and dropped rather than ending the process when it cannot be.
+  try {
+    std::string label;
+    MakeHeaderStr(kCloseLabel, &label);
+    RDC_LOG(RDC_DEBUG, label);
+  } catch (...) {
+  }
 
-  err = CommonCleanUp(this);
-  throw_if_error(err);
-}
+  if (abandoned()) {
+    // Work on the GPU could not be stopped, and its queue is still alive: this reference is kept
+    // on purpose, as a shutdown that took ROCr's count to zero under that queue would make every
+    // later hsa_init() of the process fail.
+    return;
+  }
 
-void TestBase::DisplayResults(void) const {
-  std::string label;
-  MakeHeaderStr(kResultsLabel, &label);
-  printf("\n\t%s\n", label.c_str());
-}
-
-void TestBase::DisplayTestInfo(void) {
-  printf(
-      "#########################################"
-      "######################################\n");
-
-  std::string label;
-  MakeHeaderStr(kTitleLabel, &label);
-  printf("\n\t%s\n%s\n", label.c_str(), title().c_str());
-
-  if (verbosity() >= VERBOSE_STANDARD) {
-    MakeHeaderStr(kDescriptionLabel, &label);
-    printf("\n\t%s\n%s\n", label.c_str(), description().c_str());
+  const hsa_status_t err = hsa_shut_down();
+  if (err != HSA_STATUS_SUCCESS) {
+    // A destructor must not throw: the failure is logged and is that GPU's failure.
+    release_context_.release_failed("hsa_shut_down", err);
   }
 }
 
-void TestBase::set_description(std::string d) {
-  int le = kOutputLineLength - 4;
+uint64_t TestBase::wait_hint(void) {
+  if (wait_hint_ != 0) {
+    return wait_hint_;
+  }
+  uint64_t frequency = 0;
+  throw_if_error(hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &frequency),
+                 "Fail to call hsa_system_get_info().");
+  if (frequency == 0) {
+    throw_failure("ROCr reports a system timestamp frequency of 0.");
+  }
+  // A tenth of a second, in the unit a wait's timeout is given in, and never 0: a
+  // frequency below ten ticks a second would leave a hint of no ticks, which is a wait that
+  // returns at once and spins to the deadline.
+  wait_hint_ = std::max<uint64_t>(frequency / 10, 1);
+  return wait_hint_;
+}
 
-  description_ = d;
-  size_t endlptr;
-
-  for (size_t i = le; i < description_.size(); i += le) {
-    endlptr = description_.find_last_of(" ", i);
-    description_.replace(endlptr, 1, "\n");
-    i = endlptr;
+void TestBase::check_queue_error(const QueueStatus* status) {
+  if (status == nullptr) {
+    return;
+  }
+  const hsa_status_t reported = status->load(std::memory_order_acquire);
+  if (reported != HSA_STATUS_SUCCESS) {
+    throw_if_error(reported, "The queue reported an error.");
   }
 }
 
-hsa_status_t TestBase::get_agent_by_gpu_index(uint32_t gpu_index, hsa_agent_t* agent) {
-  hsa_status_t err = HSA_STATUS_SUCCESS;
+void TestBase::before_doorbell(const QueueStatus* status) {
+  // The hint of the waits to come is read while this check has dispatched nothing, so that a
+  // frequency ROCr cannot report is this GPU's failure rather than a wait without a bound.
+  (void)wait_hint();
+  check_queue_error(status);
+}
+
+void TestBase::wait_for_kernel(hsa_signal_t signal, const QueueStatus* status) {
+  wait_for(signal, status, true);
+}
+
+void TestBase::wait_for_copy(hsa_signal_t signal) { wait_for(signal, nullptr, false); }
+
+void TestBase::wait_for(hsa_signal_t signal, const QueueStatus* status, bool kernel) {
+  const uint64_t hint = wait_hint();
+  const uint64_t deadline = wait_deadline_ms();
+  const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+
+  for (;;) {
+    // An error ROCr reported suspends the queue, so what was put on it never completes: it is
+    // this GPU's failure, with everything this check made released as it would be.
+    check_queue_error(status);
+
+    const hsa_signal_value_t value =
+        hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, hint, HSA_WAIT_STATE_BLOCKED);
+    if (value == 0) {
+      return;
+    }
+    if (value < 0) {
+      // ROCr reports an operation that failed by a negative value on its signal; a value of 1 or
+      // more is the hint running out, which the loop takes up to the deadline.
+      throw_failure(std::string(kernel ? "The kernel" : "The memory copy") +
+                    " reported a failure through its signal, value " + std::to_string(value) + ".");
+    }
+
+    const uint64_t waited =
+        static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  std::chrono::steady_clock::now() - started)
+                                  .count());
+    if (waited >= deadline) {
+      // The work on the GPU could not be stopped: nothing it can touch is released, this object
+      // keeps its reference to ROCr, and the GPU is recorded, which disables the checks.
+      abandon();
+      throw_failure(std::string(kernel ? "The kernel did not complete in "
+                                       : "A memory copy did not complete in ") +
+                    wait_deadline_text(deadline) + ".");
+    }
+  }
+}
+
+void TestBase::get_agent_by_node_id(uint32_t node_id, hsa_agent_t* agent) {
   std::vector<hsa_agent_t> gpus;
-  err = hsa_iterate_agents(IterateGPUAgents, &gpus);
+  hsa_status_t err = hsa_iterate_agents(IterateGPUAgents, &gpus);
   throw_if_error(err, "Fail to iterate agents.");
-  if (gpu_index >= gpus.size()) {
-    throw_if_error(err, "GPU index is too large.");
+  for (const hsa_agent_t& gpu : gpus) {
+    uint32_t node = 0;
+    err = hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
+                             &node);
+    throw_if_error(err, "Fail to read the KFD node of an agent.");
+    if (node == node_id) {
+      *agent = gpu;
+      return;
+    }
   }
-  *agent = gpus[gpu_index];
-  return err;
+  throw_if_skip("ROCr does not list the GPU.");
 }
 
 }  // namespace rdc

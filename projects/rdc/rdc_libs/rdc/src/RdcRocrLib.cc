@@ -36,7 +36,10 @@ RdcRocrLib::RdcRocrLib()
       diag_test_cases_query_(nullptr),
       diag_init_(nullptr),
       diag_destroy_(nullptr) {
-  rdc_status_t status = lib_loader_.load("librdc_rocr.so");
+  // RTLD_NOW: a symbol the module needs that is missing must fail the load, not a
+  // call in a check, and the mapping it calls must bind to this library's copy, which
+  // is the one whose GPU table RDC fills, rather than to a later module's.
+  rdc_status_t status = lib_loader_.load("librdc_rocr.so", RTLD_NOW);
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR, "Rocr related function will not work.");
     return;

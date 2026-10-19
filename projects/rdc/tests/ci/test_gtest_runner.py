@@ -7,6 +7,9 @@ import subprocess
 import os
 import pytest
 
+# The sanitizer and clang jobs run every binary slower than the plain one, and say by how much.
+TIME_FACTOR = float(os.environ.get("RDC_TEST_TIME_FACTOR", "1"))
+
 
 class TestGoogleTestSuite:
     """Run the rdctst GoogleTest binary and report results."""
@@ -161,6 +164,50 @@ class TestGoogleTestSuite:
 
         assert result.returncode == 0, (
             f"rdc_smi_diag_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
+    def test_rdc_rocr_diag(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed, which also
+        # installs rdc_rocr_diag_tests -- except where the build found no HSA headers, which
+        # installs a marker in its place and is the one case that skips here. The limit is a
+        # cap for a hang: one case's deadline is 60 s times RDC_TEST_TIME_FACTOR and a timed-out
+        # case fails the rest at once.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_rocr_diag_tests")
+        marker = binary + ".absent"
+        if os.path.isfile(marker) and not os.path.isfile(binary):
+            with open(marker, encoding="utf-8") as reason:
+                pytest.skip(reason.read().strip())
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=150 * TIME_FACTOR)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_rocr_diag_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
+        )
+
+    def test_rdc_diag_kernels(self, rocm_dir, rdctst_path):
+        # rdctst_path skips this test unless the RDC test package is installed, which also
+        # installs rdc_diag_kernel_tests. Its gtest libraries are installed beside it, so the
+        # binary starts only through its own RPATH: the case runs it with LD_LIBRARY_PATH
+        # removed, where a copy without one cannot even load.
+        binary = os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "rdc_diag_kernel_tests")
+        assert os.path.isfile(binary), f"{binary} is missing from the RDC test package"
+
+        env = os.environ.copy()
+        env.pop("LD_LIBRARY_PATH", None)
+
+        result = subprocess.run([binary], capture_output=True, text=True, timeout=120, env=env)
+
+        print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+
+        assert result.returncode == 0, (
+            f"rdc_diag_kernel_tests failed (rc={result.returncode}):\n{result.stdout[-2000:]}"
         )
 
     def test_rdctst_help(self, rdctst_path):

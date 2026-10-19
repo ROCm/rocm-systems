@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <map>
 #include <stdexcept>
 #include <vector>
 
@@ -42,6 +43,8 @@ THE SOFTWARE.
 namespace {
 
 using amd::rdc::get_flat_gpu_table;
+using amd::rdc::get_kfd_node_id;
+using amd::rdc::get_kfd_partition_id;
 using amd::rdc::get_processor_handle_from_id;
 using amd::rdc::reset_flat_gpu_table;
 using amd::rdc::set_flat_gpu_table_retry_period;
@@ -66,6 +69,10 @@ amdsmi_status_t g_init_status = AMDSMI_STATUS_SUCCESS;
 bool g_init_fails_with_cpus = false;
 uint64_t g_init_flags = 0;          // of the last amdsmi_init() call
 uint32_t g_profile_partitions = 0;  // the partition count AMD SMI reports; 0: not supported
+// What amdsmi_get_gpu_kfd_info answers: a node id per processor id (its own id plus 100 when the
+// case names none), and a status it fails with.
+std::map<uintptr_t, uint32_t> g_kfd_nodes;
+amdsmi_status_t g_kfd_status = AMDSMI_STATUS_SUCCESS;
 
 FakeProcessor gpu(uintptr_t id) { return {id, AMDSMI_PROCESSOR_TYPE_AMD_GPU, false}; }
 FakeProcessor cpu(uintptr_t id) { return {id, AMDSMI_PROCESSOR_TYPE_AMD_CPU, false}; }
@@ -93,6 +100,16 @@ const FakeProcessor* find_processor(amdsmi_processor_handle handle) {
 
 amdsmi_processor_handle handle_of(uintptr_t id) {
   return reinterpret_cast<amdsmi_processor_handle>(id);
+}
+
+// The encoded entity index of a partition instance (socket, proc).
+uint32_t PartitionEntityIndex(uint32_t socket, uint32_t proc) {
+  rdc_entity_info_t info = {};
+  info.device_index = socket;
+  info.instance_index = proc;
+  info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
+  info.device_type = RDC_DEVICE_TYPE_GPU;
+  return rdc_get_entity_index_from_info(info);
 }
 
 // The handle RDC GPU `index` resolves to, or nullptr with the status in *status.
@@ -125,6 +142,8 @@ class GpuTable : public ::testing::Test {
     g_init_fails_with_cpus = false;
     g_init_flags = 0;
     g_profile_partitions = 0;
+    g_kfd_nodes.clear();
+    g_kfd_status = AMDSMI_STATUS_SUCCESS;
     set_flat_gpu_table_retry_period(milliseconds(0));  // retry at every use
     reset_flat_gpu_table();
   }
@@ -214,9 +233,23 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile(
   return AMDSMI_STATUS_SUCCESS;
 }
 
-// Other helpers in SmiUtils.cc call these; no test here does.
-amdsmi_status_t amdsmi_get_gpu_kfd_info(amdsmi_processor_handle, amdsmi_kfd_info_t*) {
-  return AMDSMI_STATUS_NOT_SUPPORTED;
+// The KFD information of a processor, which get_kfd_node_id() and get_kfd_partition_id() read.
+amdsmi_status_t amdsmi_get_gpu_kfd_info(amdsmi_processor_handle processor_handle,
+                                        amdsmi_kfd_info_t* info) {
+  if (g_kfd_status != AMDSMI_STATUS_SUCCESS) {
+    return g_kfd_status;
+  }
+  const FakeProcessor* proc = find_processor(processor_handle);
+  if (proc == nullptr) {
+    return AMDSMI_STATUS_NOT_FOUND;
+  }
+  const auto known = g_kfd_nodes.find(proc->id);
+  *info = {};
+  info->kfd_id = proc->id;
+  info->node_id =
+      known == g_kfd_nodes.end() ? static_cast<uint32_t>(proc->id) + 100 : known->second;
+  info->current_partition_id = 0;
+  return AMDSMI_STATUS_SUCCESS;
 }
 amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle, amdsmi_gpu_metrics_t*) {
   return AMDSMI_STATUS_NOT_SUPPORTED;
@@ -420,4 +453,96 @@ TEST_F(GpuTable, SessionListsTheGpusAgain) {
   }
   g_sockets = {{gpu(201)}, {gpu(202)}};
   EXPECT_EQ(lookup(1), handle_of(202)) << "the table outlived the last session";
+}
+
+// The KFD node of a GPU, which is what the ROCr diagnostic module finds its agent by.
+TEST_F(GpuTable, KfdNodeOfAFlatId) {
+  g_sockets = gpus(3);
+  g_kfd_nodes[2] = 7;
+  uint32_t node = 0;
+  EXPECT_EQ(get_kfd_node_id(1, &node), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(node, 7u);
+}
+
+TEST_F(GpuTable, KfdNodeOfAPartitionId) {
+  g_sockets = {{gpu(1), gpu(2)}, {gpu(3)}};
+  g_kfd_nodes[2] = 11;
+  uint32_t node = 0;
+  EXPECT_EQ(get_kfd_node_id(PartitionEntityIndex(0, 1), &node), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(node, 11u);
+}
+
+TEST_F(GpuTable, PartitionsOfOneSocketHaveTheirOwnNodes) {
+  g_sockets = {{gpu(1), gpu(2)}};
+  g_kfd_nodes[1] = 4;
+  g_kfd_nodes[2] = 5;
+  uint32_t first = 0;
+  uint32_t second = 0;
+  EXPECT_EQ(get_kfd_node_id(PartitionEntityIndex(0, 0), &first), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(get_kfd_node_id(PartitionEntityIndex(0, 1), &second), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(first, 4u);
+  EXPECT_EQ(second, 5u);
+}
+
+// A GPU AMD SMI cannot identify is one RDC cannot name a node for.
+TEST_F(GpuTable, AnUnavailableGpuHasNoKfdNode) {
+  g_sockets = gpus(3);
+  g_sockets[1][0].type_fails = true;
+  uint32_t node = 9;
+  EXPECT_EQ(get_kfd_node_id(1, &node), AMDSMI_STATUS_NOT_FOUND);
+  EXPECT_EQ(node, 9u);
+}
+
+TEST_F(GpuTable, AFlatIdPastTheTableHasNoKfdNode) {
+  g_sockets = gpus(2);
+  uint32_t node = 0;
+  EXPECT_EQ(get_kfd_node_id(5, &node), AMDSMI_STATUS_NOT_FOUND);
+}
+
+TEST_F(GpuTable, APartitionIdOutOfRangeHasNoKfdNode) {
+  g_sockets = {{gpu(1), gpu(2)}};
+  uint32_t node = 0;
+  EXPECT_EQ(get_kfd_node_id(PartitionEntityIndex(3, 0), &node), AMDSMI_STATUS_NOT_FOUND);
+  EXPECT_EQ(get_kfd_node_id(PartitionEntityIndex(0, 4), &node), AMDSMI_STATUS_NOT_FOUND);
+}
+
+// An AMD SMI that cannot report KFD information is told apart from an id it does not know, so
+// that each gets its own sentence in the check's result.
+TEST_F(GpuTable, KfdInfoThatIsNotSupportedIsNotSupported) {
+  g_sockets = gpus(2);
+  g_kfd_status = AMDSMI_STATUS_NOT_SUPPORTED;
+  uint32_t node = 0;
+  EXPECT_EQ(get_kfd_node_id(0, &node), AMDSMI_STATUS_NOT_SUPPORTED);
+}
+
+TEST_F(GpuTable, AFailingKfdInfoCallGivesItsStatus) {
+  g_sockets = gpus(2);
+  g_kfd_status = AMDSMI_STATUS_UNKNOWN_ERROR;
+  uint32_t node = 0;
+  EXPECT_EQ(get_kfd_node_id(0, &node), AMDSMI_STATUS_UNKNOWN_ERROR);
+}
+
+TEST_F(GpuTable, AKfdInfoCallThatFindsNothingIsNotSupported) {
+  g_sockets = gpus(2);
+  g_kfd_status = AMDSMI_STATUS_NOT_FOUND;
+  uint32_t node = 0;
+  EXPECT_EQ(get_kfd_node_id(0, &node), AMDSMI_STATUS_NOT_SUPPORTED);
+}
+
+TEST_F(GpuTable, ANodeIdAmdSmiCannotReadIsNotSupported) {
+  g_sockets = gpus(2);
+  g_kfd_nodes[1] = 0xFFFFFFFF;
+  uint32_t node = 0;
+  EXPECT_EQ(get_kfd_node_id(0, &node), AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(node, 0u);
+}
+
+TEST_F(GpuTable, ANullNodeIdIsRefused) {
+  g_sockets = gpus(2);
+  EXPECT_EQ(get_kfd_node_id(0, nullptr), AMDSMI_STATUS_INVAL);
+}
+
+TEST_F(GpuTable, ANullPartitionIdIsRefused) {
+  g_sockets = gpus(2);
+  EXPECT_EQ(get_kfd_partition_id(handle_of(1), nullptr), AMDSMI_STATUS_INVAL);
 }

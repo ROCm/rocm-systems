@@ -263,9 +263,10 @@ jobs:
       working-directory: .
       run: |
         # confirm binaries are installed
-        find $ROCM_DIR/bin -maxdepth 1 -iname rdcd
-        find $ROCM_DIR/bin -maxdepth 1 -iname rdci
-        find $ROCM_DIR/share/rdc -iname rdctst
+        test -x "${ROCM_DIR}/bin/rdcd" || { echo "no ${ROCM_DIR}/bin/rdcd"; exit 1; }
+        test -x "${ROCM_DIR}/bin/rdci" || { echo "no ${ROCM_DIR}/bin/rdci"; exit 1; }
+        rdctst="${ROCM_DIR}/share/rdc/rdctst_tests/rdctst"
+        test -x "${rdctst}" || { echo "no ${rdctst}"; exit 1; }
         # confirm that libraries are installed
         MISSING_LIBS=()
         for lib in librdc.so librdc_bootstrap.so librdc_client.so; do
@@ -283,6 +284,36 @@ jobs:
         else
           echo "No missing libs found!"
         fi
+        # The installed ROCr diagnostic module must resolve against the
+        # installed RDC: it needs librdc.so.1, for get_kfd_node_id; its whole
+        # closure must relocate; and a shipped build defines no test hook.
+        for tool in readelf nm ldd; do
+          command -v "${tool}" > /dev/null || { echo "no ${tool} on PATH"; exit 1; }
+        done
+        module="${ROCM_DIR}/lib/rdc/librdc_rocr.so"
+        out="$(readelf -d "${module}" 2>&1)" || { echo "readelf failed on ${module}"; exit 1; }
+        if grep -q '(NEEDED).*\[librdc\.so\.1\]' <<<"${out}"; then
+          grep '(NEEDED).*\[librdc\.so\.1\]' <<<"${out}"
+        else
+          echo "${module} does not need librdc.so.1"
+          exit 1
+        fi
+        # ldd -r exits 0 while it reports unresolved symbols, so its output
+        # decides; each line it prints names the object the symbol is missing in.
+        out="$(ldd -r "${module}" 2>&1)" || { echo "ldd failed on ${module}"; exit 1; }
+        if grep -q -e 'not found' -e 'undefined symbol' <<<"${out}"; then
+          echo "${module} does not resolve:"
+          grep -e 'not found' -e 'undefined symbol' <<<"${out}"
+          exit 1
+        fi
+        out="$(nm -D --defined-only "${module}" 2>&1)" || { echo "nm failed on ${module}"; exit 1; }
+        for hook in rdc_rocr_test_set_kernel_directories rdc_rocr_test_set_wait_deadline_ms; do
+          if grep -q " ${hook}$" <<<"${out}"; then
+            echo "${module} defines the test hook ${hook}"
+            exit 1
+          fi
+        done
+        echo "${module}: needs librdc.so.1, resolves, defines no test hook"
 
     - name: Check the installed fake-GPU suite
       shell: bash
@@ -514,7 +545,8 @@ jobs:
         # test and write no reports.
         tmp="$(mktemp -d)"
         for f in bin/rdcd bin/rdci lib/librdc.so lib/librdc_bootstrap.so \
-                 share/rdc/rdctst_tests/fake_gpu/librdc_fake_amdsmi.so; do
+                 share/rdc/rdctst_tests/fake_gpu/librdc_fake_amdsmi.so \
+                 share/rdc/rdctst_tests/rdc_rocr_diag_tests; do
           # The runtime must be needed and found ("=> /path", not "not found").
           if ! ldd "${SANITIZE_PREFIX}/${f}" > "${tmp}/ldd" \
               || ! awk -v r="${SANITIZER_RUNTIME}" \
@@ -523,6 +555,14 @@ jobs:
             exit 1
           fi
         done
+        # The pin test is built and never installed, so it is checked where it is built.
+        pin="build-sanitize/tests/unit/rdc_rocr_pin_tests"
+        if ! ldd "${pin}" > "${tmp}/ldd" \
+            || ! awk -v r="${SANITIZER_RUNTIME}" \
+                 'index($1, r) == 1 && $3 ~ /^\// { ok = 1 } END { exit !ok }' "${tmp}/ldd"; then
+          echo "${pin} is missing or does not load ${SANITIZER_RUNTIME}"
+          exit 1
+        fi
         # Linking is not enough: the code must call the checks.
         nm -D --undefined-only "${SANITIZE_PREFIX}/lib/librdc.so" > "${tmp}/syms"
         if ! grep -qF "${SANITIZER_SYMBOL}" "${tmp}/syms"; then
@@ -552,7 +592,9 @@ jobs:
         # Each runtime reads only its own options.
         # Leak detection is off: Python, which runs the tests with the runtime
         # preloaded, does not free everything at exit, and rdcd and rdci
-        # inherit its options.
+        # inherit its options. The two ROCr test binaries release everything
+        # they make and turn it back on for themselves below; both legs export
+        # the options this line sets, and the UBSan runtime reads none of them.
         # The fake amd-smi, which links the runtime, is preloaded ahead of it
         # into rdcd, so the runtime cannot insist on loading first.
         export ASAN_OPTIONS="detect_leaks=0:verify_asan_link_order=0:log_path=${SANITIZER_LOGS}/asan"
@@ -561,20 +603,48 @@ jobs:
         runtime="${SANITIZER_RUNTIME_PATH}"
         failed=0
         ran=0
+        # The two binaries the loop must have run, which its count cannot see.
+        rocr_ran=0
+        kernels_ran=0
         shopt -s nullglob
         for t in "${SANITIZE_PREFIX}"/share/rdc/rdctst_tests/rdc_*_tests; do
           name="$(basename "$t")"
           case "${name}" in
             rdc_unit_tests) continue ;;         # needs a GPU
-            rdc_diag_kernel_tests) continue ;;  # has no install RPATH
+            rdc_rocr_diag_tests) rocr_ran=1 ;;
+            rdc_diag_kernel_tests) kernels_ran=1 ;;
+          esac
+          options="${ASAN_OPTIONS}"
+          case "${name}" in
+            rdc_rocr_diag_tests) options="${ASAN_OPTIONS/detect_leaks=0/detect_leaks=1}" ;;
           esac
           echo "::group::${name}"
-          timeout -k 30 600 "$t" --gtest_output="xml:build/test-results-sanitize-${name}.xml" || failed=1
+          ASAN_OPTIONS="${options}" \
+            timeout -k 30 600 "$t" --gtest_output="xml:build/test-results-sanitize-${name}.xml" \
+            || failed=1
           echo "::endgroup::"
           ran=$((ran + 1))
         done
         # rdc_codec_tests and rdc_client_tests at least.
         test "${ran}" -ge 2 || { echo "ran ${ran} gtests"; failed=1; }
+        marker="${SANITIZE_PREFIX}/share/rdc/rdctst_tests/rdc_rocr_diag_tests.absent"
+        test "${rocr_ran}" -eq 1 || {
+          echo "rdc_rocr_diag_tests did not run"
+          if test -e "${marker}"; then echo "${marker} is installed"; fi
+          failed=1
+        }
+        test "${kernels_ran}" -eq 1 || { echo "rdc_diag_kernel_tests did not run"; failed=1; }
+        # The pin test loads the module as a shared library: built, never
+        # installed, and no race test, so it runs here and in rdc_clang.
+        echo "::group::rdc_rocr_pin_tests"
+        ASAN_OPTIONS="${ASAN_OPTIONS/detect_leaks=0/detect_leaks=1}" \
+          timeout -k 30 600 build-sanitize/tests/unit/rdc_rocr_pin_tests \
+          --gtest_output="xml:build/test-results-sanitize-rdc_rocr_pin_tests.xml" || {
+          rc=$?
+          failed=1
+          echo "::error title=rdc_rocr_pin_tests::exit ${rc} (124: timed out; 137: killed)"
+        }
+        echo "::endgroup::"
         LD_PRELOAD="${runtime}" python3 -m pytest \
           "${SANITIZE_PREFIX}/share/rdc/rdctst_tests/fake_gpu" \
           -v --tb=short -p no:cacheprovider --timeout=600 \
@@ -857,6 +927,15 @@ jobs:
           test -f "${CLANG_PREFIX}/share/rdc/rdctst_tests/fake_gpu/${f}" \
             || { echo "the installed fake-GPU suite has no ${f}"; exit 1; }
         done
+        # The ROCr gtests: the installed one, and the pin test, never installed.
+        rocr="${CLANG_PREFIX}/share/rdc/rdctst_tests/rdc_rocr_diag_tests"
+        test -x "${rocr}" || {
+          echo "no ${rocr}"
+          if test -e "${rocr}.absent"; then echo "${rocr}.absent is installed"; fi
+          exit 1
+        }
+        test -x build-clang/tests/unit/rdc_rocr_pin_tests \
+          || { echo "no build-clang/tests/unit/rdc_rocr_pin_tests"; exit 1; }
 
     - name: Run the tests
       shell: bash
@@ -870,12 +949,16 @@ jobs:
         export LD_LIBRARY_PATH="${CLANG_PREFIX}/lib:${CLANG_PREFIX}/lib/rdc:/opt/rocm/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
         failed=0
         ran=0
+        # The two binaries the loop must have run, which its count cannot see.
+        rocr_ran=0
+        kernels_ran=0
         shopt -s nullglob
         for t in "${CLANG_PREFIX}"/share/rdc/rdctst_tests/rdc_*_tests; do
           name="$(basename "$t")"
           case "${name}" in
             rdc_unit_tests) continue ;;         # needs a GPU
-            rdc_diag_kernel_tests) continue ;;  # has no install RPATH
+            rdc_rocr_diag_tests) rocr_ran=1 ;;
+            rdc_diag_kernel_tests) kernels_ran=1 ;;
           esac
           echo "::group::${name}"
           timeout -k 30 "${limit}" "$t" --gtest_output="xml:build/test-results-clang-${name}.xml" || failed=1
@@ -883,6 +966,13 @@ jobs:
           ran=$((ran + 1))
         done
         test "${ran}" -ge 2 || { echo "ran ${ran} gtests"; failed=1; }
+        marker="${CLANG_PREFIX}/share/rdc/rdctst_tests/rdc_rocr_diag_tests.absent"
+        test "${rocr_ran}" -eq 1 || {
+          echo "rdc_rocr_diag_tests did not run"
+          if test -e "${marker}"; then echo "${marker} is installed"; fi
+          failed=1
+        }
+        test "${kernels_ran}" -eq 1 || { echo "rdc_diag_kernel_tests did not run"; failed=1; }
         # Race tests: built, never installed. ThreadSanitizer reports every
         # race it sees, then exits with 66; the test results still pass.
         echo "::group::rdc_race_tests"
@@ -891,6 +981,16 @@ jobs:
           rc=$?
           failed=1
           echo "::error title=rdc_race_tests::exit ${rc} (66: ThreadSanitizer found a race or could not start; 124: timed out; 137: killed)"
+        }
+        echo "::endgroup::"
+        # The pin test loads the module as a shared library: built, never
+        # installed, and no race test.
+        echo "::group::rdc_rocr_pin_tests"
+        timeout -k 30 "${limit}" build-clang/tests/unit/rdc_rocr_pin_tests \
+          --gtest_output="xml:build/test-results-clang-rdc_rocr_pin_tests.xml" || {
+          rc=$?
+          failed=1
+          echo "::error title=rdc_rocr_pin_tests::exit ${rc} (124: timed out; 137: killed)"
         }
         echo "::endgroup::"
         # Each pytest suite must still collect at least this many tests: a

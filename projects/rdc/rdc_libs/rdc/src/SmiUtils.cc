@@ -473,9 +473,54 @@ amdsmi_status_t get_processor_handles(amdsmi_socket_handle socket,
   return ret;
 }
 
-amdsmi_status_t get_kfd_partition_id(amdsmi_processor_handle proc, uint32_t* partition_id) {
+namespace {
+
+// What amd-smi reports for a KFD field it cannot read.
+constexpr uint32_t kNoKfdValue = std::numeric_limits<uint32_t>::max();
+
+// One amdsmi_get_gpu_kfd_info call, made afresh at every use: a node id that was kept
+// would go stale across a partition change.
+amdsmi_status_t get_kfd_info(amdsmi_processor_handle proc, amdsmi_kfd_info_t* info) {
+  return amdsmi_get_gpu_kfd_info(proc, info);
+}
+
+}  // namespace
+
+amdsmi_status_t get_kfd_node_id(uint32_t entity_id, uint32_t* node_id) {
+  if (node_id == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  amdsmi_processor_handle proc = nullptr;
+  amdsmi_status_t ret = get_processor_handle_from_id(entity_id, &proc);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    // Every cause reads the same to the caller: RDC cannot identify that GPU.
+    RDC_LOG(RDC_DEBUG, "GPU " << entity_id << ": get_processor_handle_from_id fails with " << ret);
+    return AMDSMI_STATUS_NOT_FOUND;
+  }
+
   amdsmi_kfd_info_t kfd_info = {};
-  amdsmi_status_t ret = amdsmi_get_gpu_kfd_info(proc, &kfd_info);
+  ret = get_kfd_info(proc, &kfd_info);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_DEBUG, "GPU " << entity_id << ": amdsmi_get_gpu_kfd_info fails with " << ret);
+    // A GPU AMD SMI lists but has no KFD node for is not one it does not know.
+    return ret == AMDSMI_STATUS_NOT_FOUND ? AMDSMI_STATUS_NOT_SUPPORTED : ret;
+  }
+  if (kfd_info.node_id == kNoKfdValue) {
+    RDC_LOG(RDC_DEBUG, "GPU " << entity_id << ": amdsmi_get_gpu_kfd_info reports no KFD node");
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  *node_id = kfd_info.node_id;
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t get_kfd_partition_id(amdsmi_processor_handle proc, uint32_t* partition_id) {
+  if (partition_id == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  amdsmi_kfd_info_t kfd_info = {};
+  amdsmi_status_t ret = get_kfd_info(proc, &kfd_info);
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;
   }

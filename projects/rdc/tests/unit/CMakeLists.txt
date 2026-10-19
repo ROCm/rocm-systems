@@ -68,14 +68,20 @@ add_test(NAME ${RDC_CODEC_TESTS} COMMAND ${RDC_CODEC_TESTS})
 # rdc_diag_kernel_tests: packaging guard for the precompiled diagnostic HSACO
 # kernels. Pure-logic and GPU-less: it reads the committed kernel assets
 # directly, so it links no rdc libraries and no amdsmi and runs on GPU-less CI.
-# RDC_KERNELS_HSACO_DIR points at the in-tree kernel sources; the test skips when
-# that tree is not reachable (for example a packaged test run).
+# It reads both roots that are there: RDC_KERNELS_HSACO_DIR, the build tree's
+# kernel sources, and, for an installed copy, <prefix>/lib/rdc/hsaco, which it
+# finds from its own path by the same step as the INSTALL_RPATH below
+# ($ORIGIN/../../../lib). Where neither root is reachable the checks skip.
 add_executable(rdc_diag_kernel_tests ${SRC_DIR}/test_diag_kernels.cc)
 target_compile_definitions(
     rdc_diag_kernel_tests
     PRIVATE RDC_KERNELS_HSACO_DIR="${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/kernels/hsaco"
 )
 target_link_libraries(rdc_diag_kernel_tests PRIVATE GTest::gtest_main pthread)
+set_target_properties(
+    rdc_diag_kernel_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+)
 add_test(NAME rdc_diag_kernel_tests COMMAND rdc_diag_kernel_tests)
 
 # rdc_topology_tests: rdc_device_topology_get() against fake AMD SMI calls that
@@ -359,3 +365,156 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )
+
+# rdc_rocr_diag_tests: the ROCr checks of rdci diag (compute queue, system memory)
+# against a link-time fake of the HSA functions the module calls (fake_hsa.cc).
+# It compiles the module's own sources, so it needs neither ROCr nor a GPU and
+# links no hsa-runtime64; librdc_bootstrap provides the logger. The module's
+# sources and the fake need the HSA headers, which are looked for under ROCM_DIR
+# and nowhere else: without them the target is not built and a marker is
+# installed in its place, which tests/ci/test_gtest_runner.py skips on.
+find_path(RDC_ROCR_TEST_HSA_H hsa/hsa.h PATHS ${ROCM_DIR}/include NO_DEFAULT_PATH)
+find_path(RDC_ROCR_TEST_HSA_EXT_H hsa/hsa_ext_amd.h PATHS ${ROCM_DIR}/include NO_DEFAULT_PATH)
+message(STATUS "RDC_ROCR_TEST_HSA_H=${RDC_ROCR_TEST_HSA_H}")
+message(STATUS "RDC_ROCR_TEST_HSA_EXT_H=${RDC_ROCR_TEST_HSA_EXT_H}")
+
+# The module defines its two test hooks only where RocrTestHooks.h is, which is
+# F22's tree: in a tree without it the tests that need a hook are skipped.
+if(EXISTS "${PROJECT_SOURCE_DIR}/include/rdc_modules/rdc_rocr/RocrTestHooks.h")
+    set(RDC_ROCR_TEST_HOOKS 1)
+else()
+    set(RDC_ROCR_TEST_HOOKS 0)
+endif()
+message(STATUS "RDC_ROCR_TEST_HOOKS=${RDC_ROCR_TEST_HOOKS}")
+
+# The module's own sources, which is the list of
+# rdc_libs/rdc_modules/rdc_rocr/CMakeLists.txt without its RdcLogger.cc: the targets below link
+# librdc_bootstrap, which carries the logger, so compiling it again here would give each of them
+# a second copy of it.
+set(RDC_ROCR_TEST_MODULE_SRC
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocr/RdcDiagnosticLib.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocr/TestBase.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocr/ComputeQueueTest.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocr/MemoryTest.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocr/MemoryAccess.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocr/base_rocr_utils.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocr/common.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc_modules/rdc_rocr/RdcRocrBase.cc
+)
+
+if(RDC_ROCR_TEST_HSA_H AND RDC_ROCR_TEST_HSA_EXT_H)
+    add_executable(
+        rdc_rocr_diag_tests
+        ${SRC_DIR}/test_rocr_diag.cc
+        ${SRC_DIR}/fake_hsa.cc
+        ${RDC_ROCR_TEST_MODULE_SRC}
+    )
+    target_include_directories(
+        rdc_rocr_diag_tests
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}
+            ${PROJECT_SOURCE_DIR}/include
+            ${COMMON_DIR}
+            ${AMD_SMI_INCLUDE_DIR}
+            ${RDC_ROCR_TEST_HSA_H}
+    )
+    target_compile_definitions(
+        rdc_rocr_diag_tests
+        PRIVATE RDC_ROCR_TEST_HOOKS=${RDC_ROCR_TEST_HOOKS}
+    )
+    target_link_libraries(
+        rdc_rocr_diag_tests
+        PRIVATE rdc_bootstrap GTest::gtest_main pthread ${CMAKE_DL_LIBS}
+    )
+    set_target_properties(
+        rdc_rocr_diag_tests
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib"
+    )
+    add_test(NAME rdc_rocr_diag_tests COMMAND rdc_rocr_diag_tests)
+    install(
+        TARGETS rdc_rocr_diag_tests
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
+
+    # rdc_rocr_pin_tests: the module as a shared library, which the test dlopens
+    # and dlcloses as rdcd's loader does, so that the pin that keeps an abandoned
+    # check's code mapped can be seen. Neither library is installed: the fake
+    # exports an absolute rdc_zero_symbol, which only the loader test wants, and
+    # the module library is built to be unmapped by a dlclose without the pin
+    # (-fno-gnu-unique, so that neither library defines a unique symbol).
+    add_library(rdc_rocr_fake_hsa SHARED ${SRC_DIR}/fake_hsa.cc)
+    target_include_directories(
+        rdc_rocr_fake_hsa
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}
+            ${PROJECT_SOURCE_DIR}/include
+            ${COMMON_DIR}
+            ${AMD_SMI_INCLUDE_DIR}
+            ${RDC_ROCR_TEST_HSA_H}
+    )
+    target_compile_definitions(rdc_rocr_fake_hsa PRIVATE RDC_ROCR_TEST_HOOKS=${RDC_ROCR_TEST_HOOKS})
+    target_link_options(rdc_rocr_fake_hsa PRIVATE "LINKER:--defsym=rdc_zero_symbol=0")
+
+    add_library(rdc_rocr_pin_module SHARED ${RDC_ROCR_TEST_MODULE_SRC})
+    target_include_directories(
+        rdc_rocr_pin_module
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}
+            ${PROJECT_SOURCE_DIR}/include
+            ${COMMON_DIR}
+            ${AMD_SMI_INCLUDE_DIR}
+            ${RDC_ROCR_TEST_HSA_H}
+    )
+    target_compile_definitions(
+        rdc_rocr_pin_module
+        PRIVATE RDC_ROCR_TEST_HOOKS=${RDC_ROCR_TEST_HOOKS}
+    )
+    target_link_libraries(
+        rdc_rocr_pin_module
+        PRIVATE rdc_rocr_fake_hsa rdc_bootstrap pthread ${CMAKE_DL_LIBS}
+    )
+
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(rdc_rocr_fake_hsa PRIVATE -fno-gnu-unique)
+        target_compile_options(rdc_rocr_pin_module PRIVATE -fno-gnu-unique)
+    endif()
+
+    add_executable(rdc_rocr_pin_tests ${SRC_DIR}/test_rocr_pin.cc)
+    target_include_directories(
+        rdc_rocr_pin_tests
+        PRIVATE
+            ${PROJECT_SOURCE_DIR}
+            ${PROJECT_SOURCE_DIR}/include
+            ${COMMON_DIR}
+            ${AMD_SMI_INCLUDE_DIR}
+            ${RDC_ROCR_TEST_HSA_H}
+    )
+    target_compile_definitions(
+        rdc_rocr_pin_tests
+        PRIVATE
+            RDC_ROCR_TEST_HOOKS=${RDC_ROCR_TEST_HOOKS}
+            RDC_ROCR_FAKE_HSA_PATH="$<TARGET_FILE:rdc_rocr_fake_hsa>"
+            RDC_ROCR_PIN_MODULE_PATH="$<TARGET_FILE:rdc_rocr_pin_module>"
+    )
+    target_link_libraries(
+        rdc_rocr_pin_tests
+        PRIVATE rdc_bootstrap GTest::gtest_main pthread ${CMAKE_DL_LIBS}
+    )
+    add_dependencies(rdc_rocr_pin_tests rdc_rocr_fake_hsa rdc_rocr_pin_module)
+    add_test(NAME rdc_rocr_pin_tests COMMAND rdc_rocr_pin_tests)
+else()
+    # The exact negation of the guard above: the runner test skips the binary
+    # only when this marker is installed and the binary is not.
+    set(RDC_ROCR_TEST_MARKER ${CMAKE_CURRENT_BINARY_DIR}/rdc_rocr_diag_tests.absent)
+    file(
+        WRITE ${RDC_ROCR_TEST_MARKER}
+        "rdc_rocr_diag_tests was not built: hsa/hsa.h=${RDC_ROCR_TEST_HSA_H}, "
+        "hsa/hsa_ext_amd.h=${RDC_ROCR_TEST_HSA_EXT_H}, searched ${ROCM_DIR}/include\n"
+    )
+    install(
+        FILES ${RDC_ROCR_TEST_MARKER}
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+        COMPONENT ${TESTS_COMPONENT}
+    )
+endif()

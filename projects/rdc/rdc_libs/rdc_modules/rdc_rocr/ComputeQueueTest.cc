@@ -21,18 +21,11 @@ THE SOFTWARE.
 */
 #include "rdc_modules/rdc_rocr/ComputeQueueTest.h"
 
-#include <assert.h>
-#include <fcntl.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <unistd.h>
 
-#include <algorithm>
-#include <climits>
-#include <iostream>
-#include <memory>
 #include <string>
-#include <vector>
 
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
@@ -42,63 +35,48 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-static const uint32_t kNumBufferElements = 256;
-
-ComputeQueueTest::ComputeQueueTest(uint32_t gpu_index) : TestBase(gpu_index) {
-  set_num_iteration(10);  // Number of iterations to execute of the main test;
-                          // This is a default value which can be overridden
-                          // on the command line.
-  set_title("ComputeQueue Test");
-  set_description("This test will run binary search compute task via AQL.");
-}
+ComputeQueueTest::ComputeQueueTest(uint32_t gpu_index, uint32_t node_id, GpuOutcome* outcome)
+    : TestBase(gpu_index, node_id, outcome) {}
 
 ComputeQueueTest::~ComputeQueueTest(void) {}
-
-// Any 1-time setup involving member variables used in the rest of the test
-// should be done here.
-hsa_status_t ComputeQueueTest::SetUp(void) {
-  hsa_status_t err = HSA_STATUS_SUCCESS;
-
-  TestBase::SetUp();
-
-  err = SetDefaultAgents(this);
-  if (err != HSA_STATUS_SUCCESS) return err;
-
-  err = SetPoolsTypical(this);
-  return err;
-}
-
-void ComputeQueueTest::Run(void) {
-  // Compare required profile for this test case with what we're actually
-  // running on
-  if (!CheckProfile(this)) {
-    return;
-  }
-
-  TestBase::Run();
-}
-
-void ComputeQueueTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
-
-void ComputeQueueTest::DisplayResults(void) const {
-  // Compare required profile for this test case with what we're actually
-  // running on
-  if (!CheckProfile(this)) {
-    return;
-  }
-
-  return;
-}
-
-void ComputeQueueTest::Close() {
-  // This will close handles opened within rocrtst utility calls and call
-  // hsa_shut_down(), so it should be done after other hsa cleanup
-  TestBase::Close();
-}
 
 static const uint32_t kBinarySearchLength = 512;
 static const uint32_t kBinarySearchFindMe = 108;
 static const uint32_t kWorkGroupSize = 256;
+
+// The largest work group this search dispatches.
+static const uint32_t kMaxWorkGroupSize = 64;
+
+// What output[0] holds before each dispatch: a kernel that writes nothing leaves it there, and
+// it is outside every range the check accepts below.
+static const uint32_t kNoSubDivision = UINT32_MAX;
+
+// What the check says of a kernel that answered with a sub-division outside the input.
+static const char kIndexOutOfRange[] = "The kernel returned an index out of range.";
+
+// The arguments the search kernel reads, in the order and at the offsets its metadata gives
+// (amdgcn-amd-amdhsa-readelf -aw ./binary_search_kernels.hsaco). They are written into the
+// kernel's argument segment one member at a time, at the offsets below, so that `pad` and the
+// padding after the members stay the zeros the segment was cleared with.
+typedef uint32_t search_uint2_t[2];
+typedef uint32_t search_uint4_t[4];
+struct __attribute__((aligned(16))) search_args_t {
+  search_uint4_t* outputArray;
+  search_uint2_t* sortedArray;
+  uint32_t findMe;
+  uint32_t pad;
+  uint64_t global_offset_x;
+  uint64_t global_offset_y;
+  uint64_t global_offset_z;
+  uint64_t printf_buffer;
+  uint64_t default_queue;
+  uint64_t completion_action;
+};
+
+// The bytes of arguments the kernel is given, without the padding the structure's own alignment
+// adds after them: a kernel whose argument segment is shorter than this cannot be dispatched.
+static const size_t kSearchArgumentBytes =
+    offsetof(search_args_t, completion_action) + sizeof(uint64_t);
 
 void ComputeQueueTest::InitializeBinarySearch(BinarySearch* bs) {
   bs->kernel_file_name = "binary_search_kernels.hsaco";
@@ -106,59 +84,75 @@ void ComputeQueueTest::InitializeBinarySearch(BinarySearch* bs) {
   bs->length = kBinarySearchLength;
   bs->find_me = kBinarySearchFindMe;
   bs->work_group_size = kWorkGroupSize;
+
+  // The run's work group and its sub-divisions, decided here because they size the buffers the
+  // check allocates: a work group is at most kMaxWorkGroupSize work items, and the search needs
+  // at least one sub-division per work item.
+  if (bs->work_group_size > kMaxWorkGroupSize) {
+    bs->work_group_size = kMaxWorkGroupSize;
+  }
   bs->num_sub_divisions = bs->length / bs->work_group_size;
+  if (bs->num_sub_divisions < bs->work_group_size) {
+    bs->num_sub_divisions = bs->work_group_size;
+  }
+  bs->work_grid_size = bs->num_sub_divisions;
 }
 
 // This function shows how to do an asynchronous copy. We have to create a
 // signal and use the signal to notify us when the copy has completed.
-hsa_status_t ComputeQueueTest::AgentMemcpy(void* dst, const void* src, size_t size,
-                                           hsa_agent_t dst_ag, hsa_agent_t src_ag) {
-  hsa_signal_t s;
+void ComputeQueueTest::AgentMemcpy(void* dst, const void* src, size_t size, hsa_agent_t dst_ag,
+                                   hsa_agent_t src_ag) {
+  hsa_signal_t handle = {0};
   hsa_status_t err;
 
-  err = hsa_signal_create(1, 0, NULL, &s);
-  throw_if_error(err);
+  // The hint the wait below carries is read before the signal and the copy are made: a
+  // frequency ROCr cannot report, or one of 0, is this GPU's failure with nothing in flight,
+  // where a throw during the copy would unwind over the buffer the copy writes into.
+  (void)wait_hint();
 
-  err = hsa_amd_memory_async_copy(dst, dst_ag, src, src_ag, size, 0, NULL, s);
-  throw_if_error(err);
-
-  if (hsa_signal_wait_scacquire(s, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
-                                HSA_WAIT_STATE_BLOCKED) != 0) {
-    err = HSA_STATUS_ERROR;
-    RDC_LOG(RDC_ERROR, "Async copy signal error");
-
-    throw_if_error(err);
+  // The copy's signal is released on every path out of this function, a failed copy among them.
+  SignalHolder copy_signal(release_context());
+  err = hsa_signal_create(1, 0, NULL, &handle);
+  if (err == HSA_STATUS_SUCCESS) {
+    copy_signal.reset(handle);
   }
+  throw_if_error(err, "Fail to create the memory copy's signal.");
 
-  err = hsa_signal_destroy(s);
+  const LoggedStep step(gpu_index_, "Memory copy");
+  err = hsa_amd_memory_async_copy(dst, dst_ag, src, src_ag, size, 0, NULL, copy_signal.get());
+  throw_if_error(err, "Fail to start a memory copy.");
 
-  throw_if_error(err);
-
-  return err;
+  // The copy runs on ROCr's own path rather than on this check's queue, so its wait reads no
+  // queue error and ends on the copy's own signal or at the deadline; an error raised meanwhile
+  // is seen by the check before the doorbell, once the copy is done.
+  wait_for_copy(copy_signal.get());
 }
 
-hsa_status_t ComputeQueueTest::FindPools(BinarySearch* bs) {
-  hsa_status_t err;
+// The pools this check allocates from. An iteration whose callback stops at the pool it wants
+// answers HSA_STATUS_INFO_BREAK; HSA_STATUS_SUCCESS means the agent has no pool of that kind,
+// which is that GPU's skip, and any other status is its failure, with the call and the status.
+void ComputeQueueTest::FindPools(BinarySearch* bs) {
+  struct PoolSearch {
+    hsa_agent_t agent;
+    hsa_status_t (*callback)(hsa_amd_memory_pool_t, void*);
+    hsa_amd_memory_pool_t* pool;
+    const char* none;
+  };
+  const PoolSearch searches[] = {
+      {bs->cpu_dev, FindStandardPool, &bs->cpu_pool, "The CPU has no memory pool for the check."},
+      {bs->cpu_dev, FindKernArgPool, &bs->kern_arg_pool, "No pool for kernel arguments."}};
 
-  err = hsa_amd_agent_iterate_memory_pools(bs->cpu_dev, FindStandardPool, &bs->cpu_pool);
-
-  if (err != HSA_STATUS_INFO_BREAK) {
-    return HSA_STATUS_ERROR;
+  for (const PoolSearch& search : searches) {
+    const hsa_status_t err =
+        hsa_amd_agent_iterate_memory_pools(search.agent, search.callback, search.pool);
+    if (err == HSA_STATUS_INFO_BREAK) {
+      continue;
+    }
+    if (err == HSA_STATUS_SUCCESS) {
+      throw_if_skip(search.none);
+    }
+    throw_if_error(err, "Fail to call hsa_amd_agent_iterate_memory_pools().");
   }
-
-  err = hsa_amd_agent_iterate_memory_pools(bs->gpu_dev, FindStandardPool, &bs->gpu_pool);
-
-  if (err != HSA_STATUS_INFO_BREAK) {
-    return HSA_STATUS_ERROR;
-  }
-
-  err = hsa_amd_agent_iterate_memory_pools(bs->cpu_dev, FindKernArgPool, &bs->kern_arg_pool);
-
-  if (err != HSA_STATUS_INFO_BREAK) {
-    return HSA_STATUS_ERROR;
-  }
-
-  return HSA_STATUS_SUCCESS;
 }
 
 // Once the needed memory pools have been found and the BinarySearch structure
@@ -167,9 +161,13 @@ hsa_status_t ComputeQueueTest::FindPools(BinarySearch* bs) {
 // Devices with which a pool is associated already have access to the pool.
 // However, other devices may also need to read or write to that memory. Below,
 // we see how we can grant access to other devices to address this issue.
-hsa_status_t ComputeQueueTest::AllocateAndInitBuffers(BinarySearch* bs) {
+void ComputeQueueTest::AllocateAndInitBuffers(BinarySearch* bs) {
   hsa_status_t err;
   uint32_t out_length = 4 * sizeof(uint32_t);
+
+  // The input holds the whole sorted sequence, and the two arrays the run dispatches hold the
+  // bounds of each of its sub-divisions, which were decided before this allocation.
+  uint32_t input_length = bs->length * sizeof(uint32_t);
   uint32_t in_length = bs->num_sub_divisions * 2 * sizeof(uint32_t);
 
   // In all of these examples, we want both the cpu and gpu to have access to
@@ -177,47 +175,43 @@ hsa_status_t ComputeQueueTest::AllocateAndInitBuffers(BinarySearch* bs) {
   // calls to hsa_amd_agents_allow_access() for this purpose.
   hsa_agent_t ag_list[2] = {bs->gpu_dev, bs->cpu_dev};
 
-  err = hsa_amd_memory_pool_allocate(bs->cpu_pool, in_length, 0,
-                                     reinterpret_cast<void**>(&bs->input));
-  throw_if_error(err);
-  err = hsa_amd_agents_allow_access(2, ag_list, NULL, bs->input);
-  throw_if_error(err);
-  (void)memset(bs->input, 0, in_length);
+  // Each block is taken by its holder as soon as the pool hands it out, so that a failure of any
+  // call below returns every block this check has allocated.
+  struct Allocation {
+    PoolBlockHolder* holder;
+    uint32_t size;
+  };
+  const Allocation allocations[] = {{&bs->input, input_length},
+                                    {&bs->output, out_length},
+                                    {&bs->input_arr, in_length},
+                                    {&bs->input_arr_local, in_length}};
 
-  err = hsa_amd_memory_pool_allocate(bs->cpu_pool, out_length, 0,
-                                     reinterpret_cast<void**>(&bs->output));
-  throw_if_error(err);
-  err = hsa_amd_agents_allow_access(2, ag_list, NULL, bs->output);
-  throw_if_error(err);
-  (void)memset(bs->input, 0, in_length);
+  for (const Allocation& allocation : allocations) {
+    void* block = nullptr;
+    err = hsa_amd_memory_pool_allocate(bs->cpu_pool, allocation.size, 0, &block);
+    if (err == HSA_STATUS_SUCCESS) {
+      allocation.holder->reset(block);
+    }
+    throw_if_error(err, "Fail to allocate memory for the check.");
 
-  err = hsa_amd_memory_pool_allocate(bs->cpu_pool, in_length, 0,
-                                     reinterpret_cast<void**>(&bs->input_arr));
-  throw_if_error(err);
-  err = hsa_amd_agents_allow_access(2, ag_list, NULL, bs->input_arr);
-  throw_if_error(err);
-  (void)memset(bs->input, 0, in_length);
-
-  err = hsa_amd_memory_pool_allocate(bs->cpu_pool, in_length, 0,
-                                     reinterpret_cast<void**>(&bs->input_arr_local));
-  throw_if_error(err);
-  err = hsa_amd_agents_allow_access(2, ag_list, NULL, bs->input_arr_local);
-  throw_if_error(err);
-
-  // Binary-search application specific code...
-  // Initialize input buffer with random values in an increasing order
-  uint32_t max = bs->length * 20;
-  bs->input[0] = 0;
-
-  uint32_t seed = (unsigned int)time(NULL);
-  srand(seed);
-
-  for (uint32_t i = 1; i < bs->length; ++i) {
-    bs->input[i] = bs->input[i - 1] +
-                   static_cast<uint32_t>(max * rand_r(&seed) / static_cast<float>(RAND_MAX));
+    err = hsa_amd_agents_allow_access(2, ag_list, NULL, allocation.holder->get());
+    throw_if_error(err, "Fail to grant access to the memory the check allocated.");
   }
 
-  return err;
+  // Every block the check reads is cleared once: what no work item writes is then a zero the
+  // host can see rather than what the pool's memory held.
+  uint32_t* const input = bs->input.as<uint32_t>();
+  (void)memset(input, 0, input_length);
+  (void)memset(bs->output.get(), 0, out_length);
+  (void)memset(bs->input_arr.get(), 0, in_length);
+  (void)memset(bs->input_arr_local.get(), 0, in_length);
+
+  // Binary-search application specific code...
+  // The input is the same sorted sequence on every run and on every GPU, and it holds the value
+  // to find, at input[54]: a random sequence makes a failure the next run cannot repeat.
+  for (uint32_t i = 0; i < bs->length; ++i) {
+    input[i] = 2 * i;
+  }
 }
 
 // The code in this function illustrates how to load a kernel from
@@ -226,74 +220,65 @@ hsa_status_t ComputeQueueTest::AllocateAndInitBuffers(BinarySearch* bs) {
 // that we will need. All of the information hand kernel handle will
 // be saved to the BinarySearch structure. It will be used when we
 // populate the AQL packet.
-hsa_status_t ComputeQueueTest::LoadKernelFromObjFile(BinarySearch* bs) {
+void ComputeQueueTest::LoadKernelFromObjFile(BinarySearch* bs) {
   hsa_status_t err;
-  char agent_name[512];
   hsa_code_object_reader_t code_obj_rdr = {0};
   hsa_executable_t executable = {0};
 
-  err = hsa_agent_get_info(bs->gpu_dev, HSA_AGENT_INFO_NAME, agent_name);
-  throw_if_error(err);
-  std::string kernel_file = search_hsaco_full_path(bs->kernel_file_name.c_str(), agent_name);
-  if (kernel_file == "") {
-    RDC_LOG(RDC_ERROR, "failed to open " << bs->kernel_file_name.c_str() << " at line " << __LINE__
-                                         << ", errno: " << errno);
-    std::string msg("fail to open ");
-    msg += bs->kernel_file_name;
-    throw_if_skip(msg);
-    return HSA_STATUS_ERROR;
-  }
+  const std::string agent_name = read_agent_name(bs->gpu_dev);
+  const LoggedStep step(gpu_index_, "Kernel " + bs->kernel_file_name + " for " + agent_name);
 
-  hsa_file_t file_handle = open(kernel_file.c_str(), O_RDONLY);
-  if (file_handle == -1) {
-    RDC_LOG(RDC_ERROR, "failed to open " << bs->kernel_file_name.c_str() << " at line " << __LINE__
-                                         << ", errno: " << errno);
-    return HSA_STATUS_ERROR;
-  }
+  // The descriptor the search opened is the one the reader is made from, so that the file that is
+  // loaded is the file that was found. It is held so that every path out of this function closes
+  // it, and it is closed as soon as the reader has been made, whatever that call returned.
+  FileDescriptorHolder file = open_kernel_file(bs->kernel_file_name, agent_name);
 
-  err = hsa_code_object_reader_create_from_file(file_handle, &code_obj_rdr);
-  throw_if_error(err);
-  close(file_handle);
+  err = hsa_code_object_reader_create_from_file(file.get(), &code_obj_rdr);
+  file.reset();
+  if (err == HSA_STATUS_SUCCESS) {
+    bs->reader.reset(code_obj_rdr);
+  }
+  throw_if_error(err, "Fail to read the kernel file.");
 
   err = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, NULL,
                                   &executable);
-  throw_if_error(err);
+  if (err == HSA_STATUS_SUCCESS) {
+    bs->executable.reset(executable);
+  }
+  throw_if_error(err, "Fail to create the kernel's executable.");
 
-  err = hsa_executable_load_agent_code_object(executable, bs->gpu_dev, code_obj_rdr, NULL, NULL);
-  throw_if_error(err);
+  err = hsa_executable_load_agent_code_object(bs->executable.get(), bs->gpu_dev, bs->reader.get(),
+                                              NULL, NULL);
+  throw_if_error(err, "Fail to load the kernel.");
 
-  err = hsa_executable_freeze(executable, NULL);
-  throw_if_error(err);
+  err = hsa_executable_freeze(bs->executable.get(), NULL);
+  throw_if_error(err, "Fail to freeze the kernel's executable.");
 
   hsa_executable_symbol_t kern_sym;
-  err = hsa_executable_get_symbol(executable, NULL, bs->kernel_name.c_str(), bs->gpu_dev, 0,
-                                  &kern_sym);
-  throw_if_error(err);
+  err = hsa_executable_get_symbol(bs->executable.get(), NULL, bs->kernel_name.c_str(), bs->gpu_dev,
+                                  0, &kern_sym);
+  throw_if_error(err, "Fail to find the kernel in its executable.");
 
   err = hsa_executable_symbol_get_info(kern_sym, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
                                        &bs->kernel_object);
-  throw_if_error(err);
+  throw_if_error(err, "Fail to read the kernel's code handle.");
 
   err = hsa_executable_symbol_get_info(
       kern_sym, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &bs->private_segment_size);
-  throw_if_error(err);
+  throw_if_error(err, "Fail to read the kernel's private segment size.");
 
   err = hsa_executable_symbol_get_info(
       kern_sym, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &bs->group_segment_size);
-  throw_if_error(err);
+  throw_if_error(err, "Fail to read the kernel's group segment size.");
 
   // Remaining queries not supported on code object v3.
   err = hsa_executable_symbol_get_info(
       kern_sym, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &bs->kernarg_size);
-  throw_if_error(err);
+  throw_if_error(err, "Fail to read the kernel's argument segment size.");
 
   err = hsa_executable_symbol_get_info(
       kern_sym, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT, &bs->kernarg_align);
-  throw_if_error(err);
-  assert(bs->kernarg_align >= 16 && "Reported kernarg size is too small.");
-  bs->kernarg_align = (bs->kernarg_align == 0) ? 16 : bs->kernarg_align;
-
-  return err;
+  throw_if_error(err, "Fail to read the kernel's argument segment alignment.");
 }
 
 // This function populates the AQL patch with the information
@@ -312,13 +297,13 @@ void ComputeQueueTest::PopulateAQLPacket(BinarySearch const* bs,
   aql->group_segment_size = bs->group_segment_size;
   aql->kernel_object = bs->kernel_object;
   aql->kernarg_address = bs->kern_arg_address;
-  aql->completion_signal = bs->signal;
+  aql->completion_signal = bs->signal.get();
 }
 
-void ComputeQueueTest::WriteAQLToQueue(hsa_kernel_dispatch_packet_t const* in_aql, hsa_queue_t* q) {
+void ComputeQueueTest::WriteAQLToQueue(hsa_kernel_dispatch_packet_t const* in_aql, hsa_queue_t* q,
+                                       uint64_t que_idx) {
   void* queue_base = q->base_address;
   const uint32_t queue_mask = q->size - 1;
-  uint64_t que_idx = hsa_queue_add_write_index_relaxed(q, 1);
 
   hsa_kernel_dispatch_packet_t* queue_aql_packet;
 
@@ -336,52 +321,43 @@ void ComputeQueueTest::WriteAQLToQueue(hsa_kernel_dispatch_packet_t const* in_aq
   queue_aql_packet->kernel_object = in_aql->kernel_object;
   queue_aql_packet->kernarg_address = in_aql->kernarg_address;
   queue_aql_packet->completion_signal = in_aql->completion_signal;
+
+  // reserved0 and reserved2 must be 0 (hsa.h), and ROCr leaves the packet contents of a new ring
+  // uninitialized, so they are written from the staging packet, which starts zeroed.
+  queue_aql_packet->reserved0 = in_aql->reserved0;
+  queue_aql_packet->reserved2 = in_aql->reserved2;
 }
 
-// This function allocates memory from the kern_arg pool we already found, and
-// then sets the argument values needed by the kernel code.
-hsa_status_t ComputeQueueTest::AllocAndSetKernArgs(BinarySearch* bs, void* args, size_t arg_size,
-                                                   void** aql_buf_ptr) {
+// This function allocates the kernel's argument segment from the kern_arg pool we already
+// found. Its size and its alignment are checked against that pool before anything is allocated,
+// so that a kernel this check cannot serve costs no allocation and no dispatch, and the block is
+// zeroed whole, so that every byte the arguments do not fill is a zero the GPU reads rather than
+// what the pool's memory held.
+void ComputeQueueTest::AllocateKernArgBuffer(BinarySearch* bs) {
+  check_kernarg_segment(bs->kern_arg_pool, &bs->kernarg_align, bs->kernarg_size,
+                        kSearchArgumentBytes);
+
   void* kern_arg_buf = nullptr;
-  hsa_status_t err;
-  size_t buf_size;
-  size_t req_align;
+  hsa_status_t err =
+      hsa_amd_memory_pool_allocate(bs->kern_arg_pool, bs->kernarg_size, 0, &kern_arg_buf);
+  if (err == HSA_STATUS_SUCCESS) {
+    bs->kern_arg_buffer.reset(kern_arg_buf);
+  }
+  throw_if_error(err, "Fail to allocate the kernel argument buffer.");
 
-  // The kernel code must be written to memory at the correct alignment. We
-  // already queried the executable to get the correct alignment, which is
-  // stored in bs->kernarg_align. In case the memory returned from
-  // hsa_amd_memory_pool is not of the correct alignment, we request a little
-  // more than what we need in case we need to adjust.
-  req_align = bs->kernarg_align;
-  // Allocate enough extra space for alignment adjustments if necessary
-  buf_size = arg_size + (req_align << 1);
-
-  err = hsa_amd_memory_pool_allocate(bs->kern_arg_pool, buf_size, 0,
-                                     reinterpret_cast<void**>(&kern_arg_buf));
-  throw_if_error(err);
-
-  // Address of the allocated buffer
-  bs->kern_arg_buffer = kern_arg_buf;
-
-  // Addr. of kern arg start.
-  bs->kern_arg_address = AlignUp(kern_arg_buf, req_align);
-
-  assert(arg_size >= bs->kernarg_size);
-  assert(((uintptr_t)bs->kern_arg_address + arg_size) <
-         ((uintptr_t)bs->kern_arg_buffer + buf_size));
-
-  (void)memcpy(bs->kern_arg_address, args, arg_size);
-  throw_if_error(err);
+  // ROCr rounds every pool allocation up to whole pages and carves its fragments from a
+  // page-aligned block, so the address it hands out meets the kernel's alignment; one that does
+  // not is this GPU's failure rather than something the check works around.
+  check_kernarg_address(bs->kern_arg_buffer.get(), bs->kernarg_align);
+  (void)memset(bs->kern_arg_buffer.get(), 0, bs->kernarg_size);
 
   // Make sure both the CPU and GPU can access the kernel arguments
   hsa_agent_t ag_list[2] = {bs->gpu_dev, bs->cpu_dev};
-  err = hsa_amd_agents_allow_access(2, ag_list, NULL, bs->kern_arg_buffer);
-  throw_if_error(err);
+  err = hsa_amd_agents_allow_access(2, ag_list, NULL, bs->kern_arg_buffer.get());
+  throw_if_error(err, "Fail to grant access to the kernel argument buffer.");
 
-  // Save this info in our BinarySearch structure for later.
-  *aql_buf_ptr = bs->kern_arg_address;
-
-  return HSA_STATUS_SUCCESS;
+  // Addr. of kern arg start: the block itself, a view into it rather than an allocation.
+  bs->kern_arg_address = bs->kern_arg_buffer.get();
 }
 
 // Once all the required data for kernel execution is collected (in this
@@ -389,20 +365,17 @@ hsa_status_t ComputeQueueTest::AllocAndSetKernArgs(BinarySearch* bs, void* args,
 // an AQL packet and ring the queue door bell to tell the command processor to
 // execute it.
 hsa_status_t ComputeQueueTest::Run(BinarySearch* bs) {
-  hsa_status_t err;
   RDC_LOG(RDC_DEBUG, "Executing kernel " << bs->kernel_name);
 
-  // Adjust the size of workgroup
-  // This is mostly application specific.
-  if (bs->work_group_size > 64) {
-    bs->work_group_size = 64;
-    bs->num_sub_divisions = bs->length / bs->work_group_size;
-  }
-  if (bs->num_sub_divisions < bs->work_group_size) {
-    bs->num_sub_divisions = bs->work_group_size;
-  }
-
-  bs->work_grid_size = bs->num_sub_divisions;
+  // What this check allocated and made, read from the holders that own it. The run's work group
+  // and its sub-divisions were decided before those buffers were allocated, which is what sizes
+  // them.
+  uint32_t* const input = bs->input.as<uint32_t>();
+  uint32_t* const output = bs->output.as<uint32_t>();
+  uint32_t* const input_arr = bs->input_arr.as<uint32_t>();
+  uint32_t* const input_arr_local = bs->input_arr_local.as<uint32_t>();
+  hsa_queue_t* const queue = bs->queue.get();
+  const hsa_signal_t signal = bs->signal.get();
 
   // Explanation of BinarySearch algorithm.
   /*
@@ -436,86 +409,72 @@ hsa_status_t ComputeQueueTest::Run(BinarySearch* bs) {
   uint32_t global_upper_bound = bs->length - 1;
   uint32_t sub_div_size = (global_upper_bound - global_lower_bound + 1) / bs->num_sub_divisions;
 
-  if ((bs->input[0] > bs->find_me) || (bs->input[bs->length - 1] < bs->find_me)) {
-    bs->output[0] = 0;
-    bs->output[1] = bs->length - 1;
-    bs->output[2] = 0;
+  // The input holds the value by construction, so an input that does not is this GPU's skip:
+  // nothing was dispatched, and a pass would say a kernel ran when none did.
+  if ((input[0] > bs->find_me) || (input[bs->length - 1] < bs->find_me)) {
     RDC_LOG(RDC_DEBUG, "Returning too early");
-    return HSA_STATUS_SUCCESS;
+    throw_if_skip("The kernel's input does not hold the value to find.");
   }
 
-  bs->output[3] = 1;
+  output[3] = 1;
 
-  // Setup the kernel args
-  // See the meta-data for the compiled OpenCL kernel code to ascertain
-  // the sizes, padding and alignment required for kernel arguments.
-  // This can be seen by executing
-  // $ amdgcn-amd-amdhsa-readelf -aw ./binary_search_kernels.hsaco
-  // The kernel code will expect the following arguments aligned as shown.
-  typedef uint32_t uint2[2];
-  typedef uint32_t uint4[4];
-  struct __attribute__((aligned(16))) local_args_t {
-    uint4* outputArray;
-    uint2* sortedArray;
-    uint32_t findMe;
-    uint32_t pad;
-    uint64_t global_offset_x;
-    uint64_t global_offset_y;
-    uint64_t global_offset_z;
-    uint64_t printf_buffer;
-    uint64_t default_queue;
-    uint64_t completion_action;
-  } local_args;
+  // The kernel's argument segment, and each argument written at its own offset: everything the
+  // arguments do not fill, `pad` and the padding after the members among it, stays the zeros the
+  // segment was cleared with.
+  AllocateKernArgBuffer(bs);
 
-  local_args.outputArray = reinterpret_cast<uint4*>(bs->output);
-  local_args.sortedArray = reinterpret_cast<uint2*>(bs->input_arr_local);
-  local_args.findMe = bs->find_me;
-  local_args.global_offset_x = 0;
-  local_args.global_offset_y = 0;
-  local_args.global_offset_z = 0;
-  local_args.printf_buffer = 0;
-  local_args.default_queue = 0;
-  local_args.completion_action = 0;
+  search_uint4_t* const output_array = reinterpret_cast<search_uint4_t*>(output);
+  search_uint2_t* const sorted_array = reinterpret_cast<search_uint2_t*>(input_arr_local);
+  uint8_t* const segment = static_cast<uint8_t*>(bs->kern_arg_address);
+  (void)memcpy(segment + offsetof(search_args_t, outputArray), &output_array, sizeof(output_array));
+  (void)memcpy(segment + offsetof(search_args_t, sortedArray), &sorted_array, sizeof(sorted_array));
+  (void)memcpy(segment + offsetof(search_args_t, findMe), &bs->find_me, sizeof(bs->find_me));
 
-  // Copy the kernel args structure into kernel arg memory
-  err = AllocAndSetKernArgs(bs, &local_args, sizeof(local_args), &bs->kern_arg_address);
-  throw_if_error(err);
-
-  // Populate an AQL packet with the info we've gathered
-  hsa_kernel_dispatch_packet_t aql;
+  // Populate an AQL packet with the info we've gathered. It starts zeroed, so that the fields
+  // the AQL protocol reserves reach the queue's ring as the zeros it asks for.
+  hsa_kernel_dispatch_packet_t aql = {};
   PopulateAQLPacket(bs, &aql);
 
   uint32_t in_length = bs->num_sub_divisions * 2 * sizeof(uint32_t);
 
-  while ((sub_div_size > 1) && (bs->output[3] != 0)) {
+  while ((sub_div_size > 1) && (output[3] != 0)) {
     for (uint32_t i = 0; i < bs->num_sub_divisions; i++) {
-      int idx1 = i * sub_div_size;
-      int idx2 = ((i + 1) * sub_div_size) - 1;
-      bs->input_arr[2 * i] = bs->input[idx1];
-      bs->input_arr[2 * i + 1] = bs->input[idx2];
+      // The bounds of this sub-division of the range the last pass chose, which starts at the
+      // lower bound: a pass that read from 0 would hand the kernel another range than the one
+      // its answer is checked against below.
+      uint32_t idx1 = global_lower_bound + (i * sub_div_size);
+      uint32_t idx2 = global_lower_bound + ((i + 1) * sub_div_size) - 1;
+      input_arr[2 * i] = input[idx1];
+      input_arr[2 * i + 1] = input[idx2];
     }
 
-    // Copy kernel parameter from system memory to local memory
-    err =
-        AgentMemcpy(reinterpret_cast<uint8_t*>(bs->input_arr_local),
-                    reinterpret_cast<uint8_t*>(bs->input_arr), in_length, bs->gpu_dev, bs->cpu_dev);
+    // Both blocks are the CPU pool's, so this copies the sub-division bounds from one block
+    // of system memory to another. It is kept because it is what checks ROCr's copy path, the
+    // asynchronous copy and its signal, which the GPU's own reads of that block rest on.
+    AgentMemcpy(reinterpret_cast<uint8_t*>(input_arr_local), reinterpret_cast<uint8_t*>(input_arr),
+                in_length, bs->gpu_dev, bs->cpu_dev);
 
-    throw_if_error(err);
-
-    // Reset output buffer to zero
-    bs->output[3] = 0;
+    // The flag the kernel raises when it found the value, and the sentinel it writes its
+    // sub-division over: a kernel that writes nothing leaves an answer the check refuses below.
+    output[3] = 0;
+    output[0] = kNoSubDivision;
 
     // Dispatch kernel with global work size, work group size with ONE dimension
     // and wait for kernel to complete
 
+    // An error ROCr reported earlier suspended the queue, so nothing put on it now would ever
+    // complete: it is seen here, before the doorbell, with the hint the wait below carries.
+    before_doorbell(bs->status.get());
+
     // Compute the write index of queue and copy Aql packet into it
-    uint64_t que_idx = hsa_queue_load_write_index_relaxed(bs->queue);
+    uint64_t que_idx = hsa_queue_load_write_index_relaxed(queue);
 
-    const uint32_t mask = bs->queue->size - 1;
+    const uint32_t mask = queue->size - 1;
 
-    // This function simply copies the data we've collected so far into our
-    // local AQL packet, except the the setup and header fields.
-    WriteAQLToQueue(&aql, bs->queue);
+    // The packet is copied into the ring at the index loaded above, except for the setup and
+    // header fields, which the store below writes as one. The index stays where it is until
+    // this function's caller advances it.
+    WriteAQLToQueue(&aql, queue, que_idx);
 
     uint32_t aql_header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
     aql_header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE;
@@ -525,140 +484,122 @@ hsa_status_t ComputeQueueTest::Run(BinarySearch* bs) {
     // atomically after all the other fields have been set, using release
     // memory ordering to ensure all the fields are set when the door bell
     // signal is activated.
-    void* q_base = bs->queue->base_address;
+    void* q_base = queue->base_address;
 
     AtomicSetPacketHeader(
         aql_header, aql.setup,
         &(reinterpret_cast<hsa_kernel_dispatch_packet_t*>(q_base))[que_idx & mask]);
 
     // Increment the write index and ring the doorbell to dispatch kernel.
-    hsa_queue_store_write_index_relaxed(bs->queue, (que_idx + 1));
-    hsa_signal_store_relaxed(bs->queue->doorbell_signal, que_idx);
+    hsa_queue_store_write_index_relaxed(queue, (que_idx + 1));
+    {
+      const LoggedStep step(gpu_index_, "Dispatch of " + bs->kernel_file_name);
+      hsa_signal_store_relaxed(queue->doorbell_signal, que_idx);
 
-    // Wait on the dispatch signal until the kernel is finished.
-    // Modify the wait condition to HSA_WAIT_STATE_ACTIVE (instead of
-    // HSA_WAIT_STATE_BLOCKED) if polling is needed instead of blocking, as we
-    // have below.
-    // The call below will block until the condition is met. Below we have said
-    // the condition is that the signal value (initiailzed to 1) associated with
-    // the queue is less than 1. When the kernel associated with the queued AQL
-    // packet has completed execution, the signal value is automatically
-    // decremented by the packet processor.
-    hsa_signal_value_t value = hsa_signal_wait_scacquire(bs->signal, HSA_SIGNAL_CONDITION_LT, 1,
-                                                         UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
-
-    // value should be 0, or we timed-out
-    if (value) {
-      RDC_LOG(RDC_ERROR, "Timed out waiting for kernel to complete?");
-      throw_if_error(HSA_STATUS_ERROR);
+      // Wait for the kernel, blocked, in hints of a tenth of a second each: the wait ends when
+      // the packet processor has taken the signal below 1, when the queue reports an error, or
+      // at the deadline, which abandons the work rather than destroying a queue a kernel still
+      // runs on.
+      wait_for_kernel(signal, bs->status.get());
     }
 
     // Reset the signal to its initial value for the next iteration
-    hsa_signal_store_screlease(bs->signal, 1);
+    hsa_signal_store_screlease(signal, 1);
 
     // Binary search algorithm stuff...
-    global_lower_bound = bs->output[0] * sub_div_size;
+    // The sub-division the kernel answered with, checked before it is multiplied: a product
+    // that wraps would land back inside the input, and a kernel that wrote nothing leaves the
+    // sentinel above here. The answer numbers the sub-divisions of the range this pass handed
+    // the kernel, so it is added to that range's lower bound, and the bound below holds.
+    if (output[0] >= bs->num_sub_divisions) {
+      throw_failure(kIndexOutOfRange);
+    }
+    global_lower_bound += output[0] * sub_div_size;
     global_upper_bound = global_lower_bound + sub_div_size - 1;
+    if (global_upper_bound >= bs->length) {
+      throw_failure(kIndexOutOfRange);
+    }
     sub_div_size = (global_upper_bound - global_lower_bound + 1) / bs->num_sub_divisions;
   }
 
-  uint32_t element_index = UINT_MAX;
+  // The range the kernel chose must hold the value, at input[54] with this input: a range that
+  // does not is this GPU's failure, where a miss used to be a debug line and a pass.
+  uint32_t element_index = UINT32_MAX;
 
   for (uint32_t i = global_lower_bound; i <= global_upper_bound; i++) {
-    if (bs->input[i] == bs->find_me) {
+    if (input[i] == bs->find_me) {
       element_index = i;
-      bs->output[0] = i;
-      bs->output[1] = i + 1;
-      bs->output[2] = 1;
       break;
     }
-
-    // Element is not found in region specified
-    // by global lower bound to global upper bound
-    bs->output[2] = 0;
   }
 
-  uint32_t is_elem_found = bs->output[2];
   RDC_LOG(RDC_DEBUG, "Lower bound = " << global_lower_bound);
   RDC_LOG(RDC_DEBUG, "Upper bound = " << global_upper_bound);
   RDC_LOG(RDC_DEBUG, "Element search for = " << bs->find_me);
 
-  if (is_elem_found == 1) {
-    RDC_LOG(RDC_DEBUG, "Element found at index " << element_index);
-  } else {
+  if (element_index == UINT32_MAX) {
     RDC_LOG(RDC_DEBUG, "Element value " << bs->find_me << " not found");
+    throw_failure("The kernel's search did not find the value it was given.");
   }
+  RDC_LOG(RDC_DEBUG, "Element found at index " << element_index);
 
   return HSA_STATUS_SUCCESS;
 }
 
-// Release all the RocR resources we have acquired in this application.
-hsa_status_t ComputeQueueTest::CleanUp(BinarySearch* bs) {
-  hsa_status_t err = HSA_STATUS_SUCCESS;
-
-  err = hsa_amd_memory_pool_free(bs->input);
-
-  err = hsa_amd_memory_pool_free(bs->output);
-
-  err = hsa_amd_memory_pool_free(bs->input_arr);
-
-  err = hsa_amd_memory_pool_free(bs->kern_arg_buffer);
-
-  err = hsa_queue_destroy(bs->queue);
-
-  err = hsa_signal_destroy(bs->signal);
-
-  // shutdown will be called at destructor
-  // err = hsa_shut_down();
-
-  return err;
-}
-
-hsa_status_t ComputeQueueTest::RunBinarySearchTest(void) {
-  BinarySearch bs;
+void ComputeQueueTest::RunBinarySearchTest(void) {
+  // Everything this check makes is owned by one of the holders below, so every path out of this
+  // function releases it, in the order they are declared in: the queue, the signal, the
+  // executable and its reader, and the buffers last.
+  BinarySearch bs(release_context());
   hsa_status_t err;
 
   InitializeBinarySearch(&bs);
 
   hsa_agent_t current_gpu;
-  err = get_agent_by_gpu_index(gpu_index_, &current_gpu);
-  throw_if_error(err, "Get agent by GPU index fail.");
+  get_agent_by_node_id(node_id_, &current_gpu);
   bs.gpu_dev.handle = current_gpu.handle;
 
-  // find all cpu agents
-  std::vector<hsa_agent_t> cpus;
-  err = hsa_iterate_agents(IterateCPUAgents, &cpus);
-  throw_if_error(err);
-  bs.cpu_dev.handle = cpus[0].handle;
+  bs.cpu_dev = get_cpu_agent();
 
-  err = hsa_signal_create(1, 0, NULL, &bs.signal);
+  // The kernel is found and loaded before anything is created, so that a GPU whose kernel is not
+  // installed gets no queue, no signal and no block, and so reserves no scratch on it.
+  // A kernel file that was found and then could not be read or loaded is an error of the run,
+  // logged once here with the file and what failed; a kernel that is not installed for the agent
+  // is this check's skip, which the search keeps at debug level.
+  try {
+    LoadKernelFromObjFile(&bs);
+  } catch (const SkipException&) {
+    throw;
+  } catch (const std::exception& failure) {
+    RDC_LOG(RDC_ERROR,
+            "Fail to load the kernel file " << bs.kernel_file_name << ": " << failure.what());
+    throw;
+  }
+
+  hsa_signal_t signal = {0};
+  err = hsa_signal_create(1, 0, NULL, &signal);
+  if (err == HSA_STATUS_SUCCESS) {
+    bs.signal.reset(signal);
+  }
   throw_if_error(err, "Fail to create signal.");
 
-  err = hsa_queue_create(bs.gpu_dev, 128, HSA_QUEUE_TYPE_MULTI, NULL, NULL, UINT32_MAX, UINT32_MAX,
-                         &bs.queue);
-  throw_if_error(err, "Fail to create queue.");
+  // A queue of the packets this check needs, at most what the agent allows, and with no private
+  // or group segment reserved: what the kernel needs of either comes from its packet, where a
+  // reservation of UINT32_MAX costs an APU every scratch slot of every compute unit.
+  // The queue carries an error callback and a status block of its own: ROCr reports an error of
+  // the queue only through it, and suspends the queue, so a dispatch on a queue without one
+  // never completes.
+  err = create_check_queue(bs.gpu_dev, &bs.status, &bs.queue);
+  throw_if_error(err, "Fail to call hsa_queue_create().");
 
-  err = FindPools(&bs);
-  throw_if_error(err, "Fail to find pools.");
+  FindPools(&bs);
 
   // Allocate memory from the correct memory pool, and initialize them as
   // needed for the algorithm.
-  err = AllocateAndInitBuffers(&bs);
-  throw_if_error(err, "Allocate and initBuffers fail.");
-
-  err = LoadKernelFromObjFile(&bs);
-  throw_if_error(err, "Load kernel from Object file fail.");
+  AllocateAndInitBuffers(&bs);
 
   err = Run(&bs);
   throw_if_error(err, "Run binary search fail.");
-
-  CleanUp(&bs);
-
-  gpu_info_ += "Run binary search task on GPU ";
-  gpu_info_ += std::to_string(gpu_index_);
-  gpu_info_ += " Pass.";
-
-  return err;
 }
 
 }  // namespace rdc

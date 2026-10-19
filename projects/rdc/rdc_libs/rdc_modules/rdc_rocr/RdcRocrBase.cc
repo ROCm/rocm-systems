@@ -22,29 +22,11 @@ THE SOFTWARE.
 
 #include "rdc_modules/rdc_rocr/RdcRocrBase.h"
 
-#include <string.h>
-
 namespace amd {
 namespace rdc {
 
-RdcRocrBase::RdcRocrBase(void) {
-  num_iteration_ = 1;
-  cpu_device_.handle = -1;
-  gpu_device1_.handle = -1;
-  device_pool_.handle = 0;
-  kern_arg_pool_.handle = 0;
-  main_queue_ = nullptr;
-  kernarg_buffer_ = nullptr;
-  kernel_object_ = 0;
-  memset(&aql_, 0, sizeof(aql_));
-  set_requires_profile(-1);
-  set_enable_interrupt(false);
-  set_kernel_file_name("");
-  set_verbosity(1);
-  set_monitor_verbosity(0);
-  set_title("unset_title");
-  orig_hsa_enable_interrupt_ = nullptr;
-}
+// The members carry their own initializers, which is all this constructor ever set.
+RdcRocrBase::RdcRocrBase(void) = default;
 
 RdcRocrBase::~RdcRocrBase() {}
 
