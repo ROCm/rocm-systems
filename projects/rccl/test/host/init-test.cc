@@ -32,6 +32,7 @@
 #include <vector>
 
 #include "fakes/init_fakes.h"
+#include "fakes/amdsmi_fakes.h"                      // g_amdSmiFabricTelemetry{Acquire,Release}
 #include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
 #include "../common/ProcessIsolatedTestRunner.hpp"  // fork+execv process isolation
@@ -2525,6 +2526,40 @@ TEST_F(InitMicrotest, CommCleanup_CommFreeFails_PropagatesError) {
   ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
 }
 
+#ifdef USE_AMDSMI
+// --- fabric telemetry release sits ahead of every fallible step of teardown ---
+// Teardown is expected to fail on abort, and cudaSetDevice is the earliest step that
+// can bail. A release behind it would leave the sampler polling a GPU whose comm is
+// gone, so this pins it ahead of even that one.
+TEST_F(InitMicrotest, CommCleanup_TelemetryAcquired_ReleasesEvenWhenTeardownFails) {
+  ScopedHook acquire(g_amdSmiFabricTelemetryAcquire,
+                     [](uint32_t, uint64_t, int, bool* acquired) {
+                       *acquired = true;
+                       return ncclSuccess;
+                     });
+  ScopedHook release(g_amdSmiFabricTelemetryRelease, [](uint32_t) { return ncclSuccess; });
+  CleanupComm c;
+  ASSERT_NO_FATAL_FAILURE(MakeCleanupComm(c, /*withTuner=*/false));
+  ASSERT_TRUE(c.comm->fabricTelemetryAcquired) << "commAlloc never recorded the session ref";
+
+  ncclResult_t res = ncclSuccess;
+  std::string log;
+  {
+    // Scoped so the hook is back to normal before ReleaseUncleanedComm runs.
+    ScopedHook setDevice(g_hipSetDevice, [](int) { return hipErrorInvalidDevice; });
+    log = RcclUnitTesting::CaptureLog([&] { res = commCleanup(c.comm); });
+  }
+
+  EXPECT_EQ(ncclUnhandledCudaError, res);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "HIP failure:"));  // the step really did fail
+  EXPECT_EQ(1, release.calls) << "a failing teardown stranded the device in the sampler's device list";
+  EXPECT_FALSE(c.comm->fabricTelemetryAcquired) << "a retried teardown would double-release";
+
+  ASSERT_NO_FATAL_FAILURE(ReleaseUncleanedComm(c));
+  EXPECT_EQ(1, release.calls) << "the retry released the same device twice";
+}
+#endif  // USE_AMDSMI
+
 // ===========================================================================
 // initTransportsRank's supporting cast: four helpers it calls that are already
 // compiled into this TU and need no seams. Every one computes a result, so the
@@ -2894,6 +2929,85 @@ TEST_F(InitMicrotest, InitTransportsRank_HipOverlayMloPart0Fn0_LeavesHasMloPartU
   EXPECT_FALSE(c.get()->hasMloPart);
 }
 #endif
+
+// The GIN gate itself (:2593). initTransportsRank cannot be driven to that line from any rung here
+// -- it is ~380 lines past the rung-4 terminator, with ncclTopoComputeP2pChannels,
+// rcclCommSetP2pShiftSize, ncclProfilerPluginInit, ncclTransportCheckP2pType and ncclProxyCreate
+// still fail-loud in between -- so the condition is lifted into ginGateAllows() and asserted
+// directly. These are what make NCCL_GIN_MLOPART's effect detectable: without them, flipping the
+// parameter's meaning or dropping the hasMloPart term leaves the whole suite green. The helper
+// takes the communicator so the production call site cannot transpose cuMemGdrSupport and
+// hasMloPart; the fields below are the only ones it reads.
+
+// Heap-allocated: ncclComm's copy is deleted, and one value is already ~3.7 MiB, so two
+// locals in the veto case below blow an 8 MiB stack. Same shape as FreshComm.
+static std::unique_ptr<ncclComm> GinGateComm(bool cuMemGdrSupport, bool hasMloPart, int nNodes = 1) {
+  auto c = std::make_unique<ncclComm>();
+  c->cuMemGdrSupport = cuMemGdrSupport;
+  c->hasMloPart = hasMloPart;
+  c->nNodes = nNodes;
+  return c;
+}
+
+// The AICOMRCCL-2387 regression itself: a CPX partition carries mloPart, so with the parameter off
+// every partitioned rank loses GIN, on any shape.
+TEST_F(InitMicrotest, GinGate_PartitionedCommWithMloPartDisabled_RefusesGin) {
+  SetParams({{"GIN_MLOPART", 0}});
+  auto oneNode = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/1);
+  auto twoNode = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/2);
+  EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/UINT64_MAX, oneNode.get()));
+  EXPECT_FALSE(ginGateAllows(UINT64_MAX, twoNode.get()));
+}
+
+// The fix: an explicit 1 readmits them on any number of nodes. This is the opt-in a multi-node
+// partitioned deployment needs, since the default below stops at one node.
+TEST_F(InitMicrotest, GinGate_PartitionedCommWithMloPartEnabled_AllowsGin) {
+  SetParams({{"GIN_MLOPART", 1}});
+  auto oneNode = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/1);
+  auto twoNode = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/2);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, oneNode.get()));
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, twoNode.get()));
+}
+
+// The parameter governs partitioned communicators only. An unpartitioned one keeps GIN even with
+// the parameter off, so a regression that widened the carve-out would show up here.
+TEST_F(InitMicrotest, GinGate_UnpartitionedCommIgnoresMloPartParam) {
+  SetParams({{"GIN_MLOPART", 0}});
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false, /*nNodes=*/2);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, c.get()));
+}
+
+// The default, with no override installed: a partition on one node is admitted. This is the
+// verified shape -- 8 ranks across two OAMs of one host -- and it is the case the fix exists for,
+// so a default that refused it would put the AICOMRCCL-2387 failure back.
+TEST_F(InitMicrotest, GinGate_MloPartDefaultAllowsPartitionOnOneNode) {
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/1);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, c.get()));
+}
+
+// The other half of the default, and the reason it is not a plain 1: past one node, admitting a
+// partition also reaches the hierarchical CE path, which nothing has run on partitioned hardware.
+// Deleting the node term leaves every other case in this suite green.
+TEST_F(InitMicrotest, GinGate_MloPartDefaultRefusesPartitionAcrossNodes) {
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/true, /*nNodes=*/2);
+  EXPECT_FALSE(ginGateAllows(UINT64_MAX, c.get()));
+}
+
+// The node term is scoped to partitioned communicators: an ordinary multi-node comm is the case GIN
+// exists for and must keep it under the default.
+TEST_F(InitMicrotest, GinGate_MloPartDefaultIgnoresNodeCountWhenUnpartitioned) {
+  auto c = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false, /*nNodes=*/8);
+  EXPECT_TRUE(ginGateAllows(UINT64_MAX, c.get()));
+}
+
+// The other two terms still veto, with the parameter on, so the carve-out did not swallow them.
+TEST_F(InitMicrotest, GinGate_NoSupportedGinTypeOrNoCuMemGdr_RefusesGin) {
+  SetParams({{"GIN_MLOPART", 1}});
+  auto noType = GinGateComm(/*cuMemGdrSupport=*/true, /*hasMloPart=*/false);
+  auto noGdr = GinGateComm(/*cuMemGdrSupport=*/false, /*hasMloPart=*/false);
+  EXPECT_FALSE(ginGateAllows(/*ginTypeBitMask=*/0, noType.get()));
+  EXPECT_FALSE(ginGateAllows(UINT64_MAX, noGdr.get()));
+}
 
 // NOT ASSERTABLE FROM THIS RUNG, deliberately: the four `global*Support` accumulators at :1491-1494 are
 // function-locals first read at :2347-2363, ~700 lines past the terminator. They execute (so they count
@@ -9309,6 +9423,7 @@ struct Tr_AllGatherInfo {
   int localRanks;
   int nc;
   int romeTopoModelIdx;
+  int treeCompact;
   bool pivotA2AEnabled;
   bool ll128Enabled;
   char hostname[128];

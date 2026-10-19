@@ -3,8 +3,8 @@
 
 """Emit the shared/input_denormal.h policy used by floating-point stages.
 
-Comparisons and min/max read the same MODE input-denormal field for each
-format, so they declare the policy once per instruction under one name.
+The source format selects the MODE field. Consumers decide which operations
+flush and apply the policy before widening F16 inputs.
 """
 
 # Floating formats with an input policy -> shared/fp_format.h layout.

@@ -2015,6 +2015,122 @@ TEST_F(KfdIoctlCdna5Test, UpdateQueueValidatesRingAndRejectsMissingQueue) {
       << "UPDATE_QUEUE is write-only, so internal normalization must not alter caller storage";
 }
 
+enum class GwsFailureKind { SemaphoreTimeout, UninitializedBarrier };
+
+class KfdGwsFailureTest : public KfdIoctlTest,
+                          public ::testing::WithParamInterface<GwsFailureKind> {
+protected:
+  void SetUp() override { SetUpWithConfig(CDNA2_CONFIG_PATH); }
+};
+
+TEST_P(KfdGwsFailureTest, MultipleCuFailuresPublishWithoutAcknowledgment) {
+  constexpr uint64_t kWaveAbort = KFD_EC_MASK(EC_QUEUE_WAVE_ABORT);
+  constexpr uint64_t kStatusAddress = 0x600002000ULL;
+  constexpr uint32_t kEventId = 37;
+  constexpr uint32_t kCwsrSize = 0x40000;
+  std::vector<uint8_t> cwsr(kCwsrSize * soc_->num_xcds());
+  alignas(4096) std::array<uint8_t, 4096> exception_page{};
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  process->map_pages(reinterpret_cast<uint64_t>(cwsr.data()), cwsr.data(), cwsr.size());
+  process->map_pages(kStatusAddress, exception_page.data(), exception_page.size());
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t), &kStatusAddress, sizeof(kStatusAddress));
+  std::memcpy(cwsr.data() + 6 * sizeof(uint32_t) + sizeof(uint64_t), &kEventId, sizeof(kEventId));
+  alignas(rocjitsu::amdgpu::kAqlPacketBytes) std::array<uint8_t, 4096> ring{};
+  alignas(4096) amd_queue_v2_t queue_descriptor{};
+  process->map_pages(reinterpret_cast<uint64_t>(&queue_descriptor), &queue_descriptor,
+                     sizeof(queue_descriptor));
+  kfd_ioctl_create_queue_args create{};
+  create.gpu_id = kCdna2GpuId;
+  create.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  create.queue_percentage = 100;
+  create.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  create.ring_size = static_cast<uint32_t>(ring.size());
+  create.read_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.read_dispatch_id);
+  create.write_pointer_address = reinterpret_cast<uint64_t>(&queue_descriptor.write_dispatch_id);
+  create.ctx_save_restore_address = reinterpret_cast<uint64_t>(cwsr.data());
+  create.ctx_save_restore_size = kCwsrSize;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &create), 0);
+  std::atomic<uint32_t> publications{0}, successful_deliveries{0};
+  struct QueueGuard {
+    rocjitsu::SimulatedKfd *driver;
+    uint32_t queue_id;
+    ~QueueGuard() {
+      driver->set_interrupt_callback_for_testing(nullptr);
+      driver->set_runtime_exception_result_hook_for_testing(nullptr);
+      kfd_ioctl_destroy_queue_args destroy{};
+      destroy.queue_id = queue_id;
+      driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy);
+    }
+  } guard{driver_, create.queue_id};
+  driver_->set_interrupt_callback_for_testing([&](uint32_t process_id, uint32_t event_id) {
+    if (event_id != kEventId)
+      return;
+    EXPECT_EQ(vm_read64(kStatusAddress, process_id), kWaveAbort);
+    ++publications;
+    std::lock_guard lock(process->alloc_mutex_);
+    const auto &snapshot = process->queue_snapshot_map_.at(create.queue_id);
+    EXPECT_EQ(snapshot.exception_status & kWaveAbort, kWaveAbort);
+    EXPECT_EQ(snapshot.runtime_exception_pending_status & kWaveAbort, kWaveAbort);
+    // Deliberately never acknowledge. Publication must still transfer ownership.
+  });
+  driver_->set_runtime_exception_result_hook_for_testing([&](bool delivered) {
+    EXPECT_TRUE(delivered);
+    successful_deliveries += delivered;
+  });
+  soc_->for_each_cp([](rocjitsu::amdgpu::CommandProcessor *cp) {
+    cp->set_runtime_exception_ack_timeout_for_testing(std::chrono::milliseconds(0));
+  });
+  const auto &cus = soc_->xcd(0)->command_processor()->compute_units();
+  ASSERT_GE(cus.size(), 2u);
+  std::array<rocjitsu::amdgpu::Wavefront *, 2> waves{};
+  for (unsigned i = 0; i < waves.size(); ++i) {
+    cus[i]->set_gws_wait_limit(1);
+    waves[i] = cus[i]->dispatch_wf(0, 0, 96, 4);
+    ASSERT_NE(waves[i], nullptr);
+    waves[i]->set_process_id(driver_->local_process_id());
+    waves[i]->set_queue_id(create.queue_id);
+    cus[i]->begin_workgroup(0, 0, 1);
+    if (GetParam() == GwsFailureKind::SemaphoreTimeout)
+      cus[i]->gws_sema_p(*waves[i], 0);
+  }
+  const auto fail_wave = [&](unsigned i) {
+    cus[i]->with_wave_state_locked([&] {
+      if (GetParam() == GwsFailureKind::UninitializedBarrier)
+        cus[i]->gws_barrier_arrive(*waves[i], 0, 1);
+      else
+        cus[i]->step();
+    });
+  };
+  // Queue the second failure after the first CU unlocks but before it flushes.
+  // Holding a peer CU's lock during notification delivery would invert the CP's
+  // queue-lock -> wave-lock order, unlike the production pooled execution path.
+  cus[0]->set_notification_flush_hook_for_testing([&] {
+    EXPECT_EQ(publications.load(), 0u);
+    fail_wave(1);
+  });
+  fail_wave(0);
+  EXPECT_EQ(publications.load(), 2u);
+  EXPECT_EQ(successful_deliveries.load(), 2u);
+  for (auto *wave : waves) {
+    EXPECT_TRUE(wave->is_halted());
+    EXPECT_EQ(wave->trap_runtime_exception_status(), 0u);
+  }
+  std::lock_guard lock(process->alloc_mutex_);
+  EXPECT_EQ(process->queue_snapshot_map_.at(create.queue_id).runtime_exception_pending_status &
+                kWaveAbort,
+            0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(GwsFailures, KfdGwsFailureTest,
+                         ::testing::Values(GwsFailureKind::SemaphoreTimeout,
+                                           GwsFailureKind::UninitializedBarrier),
+                         [](const ::testing::TestParamInfo<GwsFailureKind> &info) {
+                           return info.param == GwsFailureKind::SemaphoreTimeout
+                                      ? "SemaphoreTimeout"
+                                      : "UninitializedBarrier";
+                         });
+
 enum class RejectionKind { Decode, Operand, Unimplemented };
 
 struct InstructionRejectionCase {

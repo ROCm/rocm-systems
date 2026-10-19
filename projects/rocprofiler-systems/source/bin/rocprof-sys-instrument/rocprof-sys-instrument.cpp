@@ -1170,6 +1170,28 @@ main(int argc, char** argv)
         return -1;
     }
 
+    // fail before any configuration/Dyninst work when there is nothing to instrument
+    if(_cmdc == 0)
+    {
+        parser.print_help(extra_help);
+        fprintf(stderr, "\nError! No command for dynamic instrumentation. Did you "
+                        "forget '--' before the application? Use "
+                        "\n\trocprof-sys-instrument <OPTIONS> -- <COMMAND> <ARGS>\nE.g. "
+                        "\n\trocprof-sys-instrument -o foo.inst -- ./foo\nwill output an "
+                        "instrumented version of 'foo' executable to 'foo.inst'\n");
+        return EXIT_FAILURE;
+    }
+
+    // mutname was resolved against the search paths in the argument pre-scan
+    if(!path::is_regular_file(mutname))
+    {
+        fprintf(stderr,
+                "Error! Application '%s' does not exist or is not a regular "
+                "file. Nothing to instrument.\n",
+                _cmdv[0]);
+        return EXIT_FAILURE;
+    }
+
     if(parser.exists("config"))
     {
         struct rocprofsys_env_config_s
@@ -1489,16 +1511,6 @@ main(int argc, char** argv)
     //                              MAIN
     //
     //----------------------------------------------------------------------------------//
-
-    if(_cmdc == 0)
-    {
-        parser.print_help(extra_help);
-        fprintf(stderr, "\nError! No command for dynamic instrumentation. Use "
-                        "\n\trocprof-sys-instrument <OPTIONS> -- <COMMAND> <ARGS>\nE.g. "
-                        "\n\trocprof-sys-instrument -o foo.inst -- ./foo\nwill output an "
-                        "instrumented version of 'foo' executable to 'foo.inst'\n");
-        return EXIT_FAILURE;
-    }
 
     verbprintf(1, "instrumentation target: %s\n", mutname.c_str());
 
