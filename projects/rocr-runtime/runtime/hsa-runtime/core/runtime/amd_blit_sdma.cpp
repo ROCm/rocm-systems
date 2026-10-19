@@ -1966,7 +1966,27 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearFillCommand(void* ptr, u
   std::vector<SDMA_PKT_CONSTANT_FILL> heap_buff(num_fill_command > 1 ? num_fill_command : 0);
   auto* buff = num_fill_command <= 1 ? &stack_buff : heap_buff.data();
 
-  BuildFillCommand(reinterpret_cast<char*>(buff), num_fill_command, ptr, value, count);
+  BuildFillCommand(reinterpret_cast<char*>(buff), num_fill_command, ptr, value, size);
+
+  return SubmitBlockingCommand(buff, num_fill_command * sizeof(SDMA_PKT_CONSTANT_FILL), size);
+}
+
+template <bool useGCR, bool scopeFields>
+hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearFillCommandBytes(void* ptr, uint8_t value,
+                                                                         size_t size) {
+  if (size == 0) return HSA_STATUS_SUCCESS;
+
+  const uint32_t num_fill_command = (size + kMaxSingleFillSize - 1) / kMaxSingleFillSize;
+
+  // Avoid heap allocation for common single-packet case.
+  SDMA_PKT_CONSTANT_FILL stack_buff;
+  std::vector<SDMA_PKT_CONSTANT_FILL> heap_buff(num_fill_command > 1 ? num_fill_command : 0);
+  auto* buff = num_fill_command <= 1 ? &stack_buff : heap_buff.data();
+
+  // The engine repeats the low byte lane for a byte fill and reads the whole dword for a
+  // dword fill, so replicating here lets BuildFillCommand pick either encoding.
+  BuildFillCommand(reinterpret_cast<char*>(buff), num_fill_command, ptr,
+                   uint32_t(value) * 0x01010101u, size);
 
   return SubmitBlockingCommand(buff, num_fill_command * sizeof(SDMA_PKT_CONSTANT_FILL), size);
 }
@@ -2662,14 +2682,26 @@ void BlitSdma<useGCR, scopeFields>::BuildCopyRectCommand(const std::function<voi
 
 template <bool useGCR, bool scopeFields>
 void BlitSdma<useGCR, scopeFields>::BuildFillCommand(char* cmd_addr, uint32_t num_fill_command,
-                                                     void* ptr, uint32_t value, size_t count) {
+                                                     void* ptr, uint32_t value, size_t size) {
   char* cur_ptr = reinterpret_cast<char*>(ptr);
-  const uint32_t maxDwordCount = kMaxSingleFillSize / sizeof(uint32_t);
   SDMA_PKT_CONSTANT_FILL* packet_addr = reinterpret_cast<SDMA_PKT_CONSTANT_FILL*>(cmd_addr);
 
+  // A dword fill moves four bytes per element and is the faster encoding, so it is used
+  // whenever the destination and the length are both dword aligned. Everything else falls
+  // back to a byte fill. kMaxSingleFillSize is itself a multiple of a dword, so chunking
+  // never breaks the alignment this decision is made on.
+  const bool dword_fill =
+      (size % sizeof(uint32_t) == 0) && (uintptr_t(cur_ptr) % sizeof(uint32_t) == 0);
+  const size_t element_size = dword_fill ? sizeof(uint32_t) : 1;
+
+  // A byte fill repeats the low byte lane, so a caller that lands here must already have
+  // replicated its pattern across all four lanes.
+  assert((dword_fill || value == uint32_t(uint8_t(value)) * 0x01010101u) &&
+         "SDMA byte fill needs a pattern replicated across all four byte lanes.");
+
   for (uint32_t i = 0; i < num_fill_command; i++) {
-    assert(count != 0 && "SDMA fill command count error.");
-    const uint32_t fill_count = Min(count, size_t(maxDwordCount));
+    assert(size != 0 && "SDMA fill command count error.");
+    const size_t fill_size = Min(size, kMaxSingleFillSize);
 
     memset(packet_addr, 0, sizeof(SDMA_PKT_CONSTANT_FILL));
 
@@ -2678,21 +2710,21 @@ void BlitSdma<useGCR, scopeFields>::BuildFillCommand(char* cmd_addr, uint32_t nu
       packet_addr->HEADER_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
       packet_addr->HEADER_UNION.npd = 1;
     }
-    packet_addr->HEADER_UNION.fillsize = 2;  // DW fill
+    packet_addr->HEADER_UNION.fillsize = dword_fill ? 2 : 0;
 
     packet_addr->DST_ADDR_LO_UNION.dst_addr_31_0 = ptrlow32(cur_ptr);
     packet_addr->DST_ADDR_HI_UNION.dst_addr_63_32 = ptrhigh32(cur_ptr);
 
     packet_addr->DATA_UNION.src_data_31_0 = value;
 
-    /* count is 1-based */
-    packet_addr->COUNT_UNION.count = (fill_count - 1) * sizeof(uint32_t);
+    /* count is 1-based, counted in fill elements rather than in bytes */
+    packet_addr->COUNT_UNION.count = fill_size - element_size;
 
     packet_addr++;
-    cur_ptr += fill_count * sizeof(uint32_t);
-    count -= fill_count;
+    cur_ptr += fill_size;
+    size -= fill_size;
   }
-  assert(count == 0 && "SDMA fill command count error.");
+  assert(size == 0 && "SDMA fill command count error.");
 }
 
 template <bool useGCR, bool scopeFields>

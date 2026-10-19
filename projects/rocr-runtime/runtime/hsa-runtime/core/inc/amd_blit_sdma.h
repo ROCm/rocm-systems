@@ -280,6 +280,13 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   virtual hsa_status_t SubmitLinearFillCommand(void* ptr, uint32_t value,
                                                size_t count) override;
 
+  /// @brief Submit a linear fill command with byte granularity
+  ///
+  /// @param ptr Memory address of the fill destination.
+  /// @param value Byte value to be set.
+  /// @param size Number of bytes to fill.
+  virtual hsa_status_t SubmitLinearFillCommandBytes(void* ptr, uint8_t value, size_t size) override;
+
   virtual hsa_status_t EnableProfiling(bool enable) override;
 
   virtual uint64_t PendingBytes() override;
@@ -406,8 +413,11 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
                             const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
                             const hsa_dim3_t* range);
 
+  // Builds the CONST_FILL packets covering size bytes at ptr. value carries the fill pattern,
+  // which callers filling at byte granularity replicate across all four byte lanes. A dword
+  // fill is emitted when both ptr and size sit on a dword boundary, a byte fill otherwise.
   void BuildFillCommand(char* cmd_addr, uint32_t num_fill_command, void* ptr, uint32_t value,
-                        size_t count);
+                        size_t size);
 
   void BuildPollCommand(char* cmd_addr, void* addr, uint32_t reference);
 
