@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 from utils.metrics.evaluation_pipeline import (
+    _gui_active_zero_detected,
     calc_builtin_vars,
     compute_pct_of_peak,
     create_sys_vars,
@@ -519,3 +520,56 @@ class TestEvaluationPipeline:
         sys_info = pd.Series({**self.sys_info_fields, "num_gl1c": 8})
         result = create_sys_vars(sys_info)
         assert result["ammolite__num_gl1c"] == 8
+
+
+def test_pass_scoped_builtin_is_computed_for_the_used_pass() -> None:
+    from utils.metrics.evaluation_pipeline import _calc_pass_scoped_builtins
+    from utils.metrics.pass_provenance import PassLayout
+
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE"}),
+            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE", "TA_BUSY"}),
+        },
+        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
+    )
+    raw_pmc_df = pd.DataFrame({
+        "TA_BUSY": [50.0],
+        "GRBM_GUI_ACTIVE": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
+    })
+    result = _calc_pass_scoped_builtins(
+        raw_pmc_df,
+        {"ammolite__num_xcd": 1},
+        "gfx942",
+        layout,
+        {"pmc_perf_1"},
+        ["to_avg(raw_pmc_df['TA_BUSY'] / ammolite__GRBM_GUI_ACTIVE_PER_XCD)"],
+    )
+    value = result["ammolite__GRBM_GUI_ACTIVE_PER_XCD__pass1"]
+    if isinstance(value, pd.Series):
+        value = value.iloc[0]
+    assert float(value) == 200.0
+
+
+def test_gui_active_zero_ignores_shadow_columns() -> None:
+    frame = pd.DataFrame({
+        "GRBM_GUI_ACTIVE_sum": [10],
+        "GRBM_GUI_ACTIVE": [0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [0],
+    })
+    assert _gui_active_zero_detected(frame) is None
+
+    base_only = pd.DataFrame({
+        "GRBM_GUI_ACTIVE": [0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [5],
+    })
+    assert _gui_active_zero_detected(base_only) == "GRBM_GUI_ACTIVE"
+
+    summed_zero = pd.DataFrame({
+        "GRBM_GUI_ACTIVE_sum": [0],
+        "GRBM_GUI_ACTIVE": [5],
+    })
+    assert _gui_active_zero_detected(summed_zero) == "GRBM_GUI_ACTIVE_sum"
