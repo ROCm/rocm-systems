@@ -55,6 +55,8 @@ rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **e
     return ROCJITSU_STATUS_SUCCESS;
   } catch (const std::bad_alloc &) {
     return ROCJITSU_STATUS_OUT_OF_RESOURCES;
+  } catch (...) {
+    return ROCJITSU_STATUS_ERROR;
   }
 }
 

@@ -201,6 +201,7 @@ typedef struct rj_code_executable_t rj_code_executable_t;
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT if @p path or @p exec is NULL.
 /// @retval ROCJITSU_STATUS_INVALID_CODE_OBJECT if loading or parsing the file fails.
 /// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES if memory allocation fails.
+/// @retval ROCJITSU_STATUS_ERROR if another exception occurs while loading the executable.
 RJ_API_EXPORT rj_status_t rj_code_executable_create(const char *path, rj_code_executable_t **exec);
 
 /// @brief Increment the executable's reference count.
