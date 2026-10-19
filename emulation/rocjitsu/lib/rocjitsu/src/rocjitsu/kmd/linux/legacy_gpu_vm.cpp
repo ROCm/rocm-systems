@@ -248,6 +248,21 @@ public:
     return vm_access_outcome(outcome);
   }
 
+  [[nodiscard]] VmAccessOutcome atomic_modify_lanes(VmMemoryDomain domain,
+                                                    std::span<const uint64_t> addresses,
+                                                    uint64_t lane_mask, uint32_t width,
+                                                    const AtomicLaneMutation &mutation,
+                                                    uint32_t &next_lane) override {
+    if (domain != VmMemoryDomain::Compatibility)
+      return VmAccessOutcome::Malformed;
+    return vm_access_outcome(address_space_->atomic_modify_strict_lanes(
+        addresses, lane_mask, width,
+        [&](uint32_t lane, uint8_t *bytes) {
+          mutation(lane, std::span<std::byte>(reinterpret_cast<std::byte *>(bytes), width));
+        },
+        vmid_, next_lane));
+  }
+
   [[nodiscard]] std::byte *resolve_host_pointer(VmMemoryDomain domain, uint64_t address,
                                                 std::size_t size) const override {
     if (domain != VmMemoryDomain::Compatibility)

@@ -3765,6 +3765,115 @@ TEST(GpuMemoryTest, FaultedAccessIsDistinguishedFromSparseBacking) {
             amdgpu::CopyOutcome::Complete);
 }
 
+TEST(GpuMemoryTest, AtomicLanesPreserveMappedAliasesAndInactiveLanes) {
+  for (uint32_t width : {4u, 8u}) {
+    SCOPED_TRACE(width);
+    rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
+    constexpr uint32_t kPid = 7;
+    constexpr uint64_t kFirstVa = 0x40000000, kAliasVa = 0x50000000;
+    KfdProcess process(kPid);
+    alignas(uint64_t) std::array<uint8_t, KfdProcess::kPageSize> page{};
+    process.map_pages(kFirstVa, page.data(), page.size());
+    process.map_pages(kAliasVa, page.data(), page.size());
+    memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                            process.page_table_generation());
+    auto access = memory.gpu_vm().snapshot_vmid(kPid);
+    ASSERT_TRUE(access);
+    std::array<uint64_t, 64> addresses{};
+    addresses[0] = kFirstVa;
+    addresses[2] = kAliasVa;
+    addresses[63] = kFirstVa;
+    std::vector<uint32_t> lanes;
+    std::vector<uint64_t> observed;
+    uint32_t next = 0;
+    EXPECT_EQ(access->atomic_modify_lanes(
+                  addresses, (uint64_t{1} << 63) | 0x5, width,
+                  [&](uint32_t lane, std::span<std::byte> bytes) {
+                    uint64_t value = 0;
+                    std::memcpy(&value, bytes.data(), width);
+                    lanes.push_back(lane);
+                    observed.push_back(value);
+                    ++value;
+                    std::memcpy(bytes.data(), &value, width);
+                  },
+                  next),
+              amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(next, addresses.size());
+    EXPECT_EQ(lanes, (std::vector<uint32_t>{0, 2, 63}));
+    EXPECT_EQ(observed, (std::vector<uint64_t>{0, 1, 2}));
+    uint64_t stored = 0;
+    std::memcpy(&stored, page.data(), width);
+    EXPECT_EQ(stored, 3u);
+  }
+}
+
+TEST(GpuMemoryTest, AtomicLanesResumeAfterMissingMappingWithoutReplayingPrefix) {
+  rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kFirstVa = 0x40000000, kSecondVa = 0x50000000;
+  KfdProcess process(kPid);
+  alignas(uint64_t) std::array<uint8_t, KfdProcess::kPageSize> first{}, second{};
+  process.map_pages(kFirstVa, first.data(), first.size());
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  auto access = memory.gpu_vm().snapshot_vmid(kPid);
+  ASSERT_TRUE(access);
+  constexpr std::array<uint64_t, 4> addresses = {kFirstVa, 0, kSecondVa, kFirstVa};
+  std::vector<uint32_t> lanes;
+  const auto increment = [&](uint32_t lane, std::span<std::byte> bytes) {
+    uint32_t value;
+    std::memcpy(&value, bytes.data(), sizeof(value));
+    ++value;
+    std::memcpy(bytes.data(), &value, sizeof(value));
+    lanes.push_back(lane);
+  };
+  uint32_t next = 0;
+  EXPECT_EQ(access->atomic_modify_lanes(addresses, 0xd, 4, increment, next),
+            amdgpu::VmAccessOutcome::Unavailable);
+  EXPECT_EQ(next, 2u);
+  EXPECT_EQ(lanes, (std::vector<uint32_t>{0}));
+  process.map_pages(kSecondVa, second.data(), second.size());
+  EXPECT_EQ(access->atomic_modify_lanes(addresses, 0xd, 4, increment, next),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(next, addresses.size());
+  EXPECT_EQ(lanes, (std::vector<uint32_t>{0, 2, 3}));
+  EXPECT_EQ(memory.read32(kFirstVa, kPid), 2u);
+  EXPECT_EQ(memory.read32(kSecondVa, kPid), 1u);
+}
+
+TEST(GpuMemoryTest, AtomicLanesStopAtClippedMappedOperand) {
+  rocjitsu::test::LegacyGpuMemoryFixture memory("memory");
+  constexpr uint32_t kPid = 7;
+  constexpr uint64_t kFirstVa = 0x40000000, kClippedVa = 0x50000000;
+  KfdProcess process(kPid);
+  alignas(uint64_t) std::array<uint8_t, KfdProcess::kPageSize> first{};
+  std::array<uint8_t, 2> clipped = {0x12, 0x34};
+  process.map_pages(kFirstVa, first.data(), first.size());
+  process.map_pages(kClippedVa, clipped.data(), clipped.size());
+  memory.register_process(kPid, &process.page_table_, &process.page_table_mutex_,
+                          process.page_table_generation());
+  RecordingFaultReporter reporter;
+  memory.set_memory_fault_reporter(&reporter);
+  constexpr std::array<uint64_t, 3> addresses = {kFirstVa, kClippedVa, kFirstVa + 4};
+  std::vector<uint32_t> lanes;
+  uint32_t next = 0;
+  EXPECT_EQ(memory.legacy_address_space(kPid).atomic_modify_strict_lanes(
+                addresses, 0x7, 4,
+                [&](uint32_t lane, uint8_t *bytes) {
+                  std::fill_n(bytes, 4, uint8_t{0x55});
+                  lanes.push_back(lane);
+                },
+                kPid, next),
+            amdgpu::CopyOutcome::Faulted);
+  EXPECT_EQ(next, 1u);
+  EXPECT_EQ(lanes, (std::vector<uint32_t>{0}));
+  EXPECT_EQ(memory.read32(kFirstVa, kPid), 0x55555555u);
+  EXPECT_EQ(memory.read32(kFirstVa + 4, kPid), 0u);
+  EXPECT_EQ(clipped, (std::array<uint8_t, 2>{0x12, 0x34}));
+  EXPECT_EQ(reporter.addresses, (std::vector<uint64_t>{kClippedVa}));
+  memory.set_memory_fault_reporter(nullptr);
+}
+
 /// @brief A fault must not be reported while translation locks are held.
 /// @details The driver takes its process-table lock to deliver a fault, and
 /// takes that same lock before registering a process, which needs this class's
