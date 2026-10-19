@@ -1,6 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+/// @file wait_hazard_test.cpp
+/// @brief Shared wait-retirement and register-readiness tests for the core
+/// scoreboard and race plugin.
+
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
