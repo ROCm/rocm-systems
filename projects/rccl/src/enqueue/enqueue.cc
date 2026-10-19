@@ -3608,6 +3608,7 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
   proxyOp->pattern = pattern;
   proxyOp->coll = info->func;
   proxyOp->collAPI = info->func;
+  proxyOp->collBytes = ncclTypeSize(info->datatype) * ncclFuncMaxSendRecvCount(info->func, comm->nRanks, info->count);
   proxyOp->root = info->root;
   proxyOp->isOneRPN = comm->isOneRPN;
   // This is used by P2P to reduce the receive buffer size. We don't use it in collectives

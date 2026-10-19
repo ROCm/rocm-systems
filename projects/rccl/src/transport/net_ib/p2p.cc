@@ -91,6 +91,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   TRACE(NCCL_NET, "NET/IB: %s: Posting a send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d)", __func__, reqs[0],
         reqs[0]->base, reqs[0]->id, slot, nreqs);
 
+  bool flagFlush = comm->flagFlush && slots[0].flagFlush;
   ncclResult_t ret;
   int nqps = 0;
   NCCLCHECK(ncclIbCommBaseGetNqpsPerRequest(&comm->base, &nqps));
@@ -109,7 +110,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   int qpIndexes[NCCL_IB_MAX_QPS];
   int qpsPerDev[NCCL_IB_MAX_DEVS_PER_NIC] = {};
   for (int i = 0; i < nqps; i++) {
-    NCCLCHECK(ncclIbCommBaseGetQpForRequest(&comm->base, reqs[0]->id, i, &qps[i], &qpIndexes[i]));
+    NCCLCHECK(ncclIbCommBaseGetQpForFlagRequest(&comm->base, reqs[0]->id, i, flagFlush, &qps[i], &qpIndexes[i]));
     qpsPerDev[comm->base.qps[qpIndexes[i]].devIndex]++;
   }
   uint64_t wr_id = 0ULL;
@@ -144,7 +145,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 
   struct ibv_send_wr* lastWr = comm->wrs + nreqs - 1;
   struct ibv_send_wr* sizesWr = NULL;
-  if (comm->flagFlush && slots[0].flagFlush) {
+  if (flagFlush) {
     // Payload (and sizes) go out as plain RDMA writes followed by the flag
     // write, which carries the immediate data.
     if (nreqs > 1) {
@@ -570,8 +571,9 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   // Validate QPs before allocating/publishing the request.
   for (int i = 0; i < nqps; i++) {
-    NCCLCHECKGOTO(ncclIbCommBaseGetQpForRequest(&comm->base, comm->base.fifoHead, i, &qps[i], &qpIndexes[i]), ret,
-                  irecvFail);
+    NCCLCHECKGOTO(ncclIbCommBaseGetQpForFlagRequest(&comm->base, comm->base.fifoHead, i,
+                                                    comm->flagFlush && comm->flagFlushHint, &qps[i], &qpIndexes[i]),
+                  ret, irecvFail);
   }
 
   NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, irecvFail);
@@ -595,6 +597,7 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   // Store the request in a table for easy retrieval by ID.
   comm->recvReqs[req->id % NET_IB_MAX_REQUESTS] = req;
+  req->recv.flagFlush = comm->flagFlush && comm->flagFlushHint;
 
   TIME_START(1);
   for (int i = 0; i < nqps; i++) {
@@ -627,7 +630,6 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   TIME_STOP(1);
 
   req->recv.aggSize = 0;
-  req->recv.flagFlush = comm->flagFlush && comm->flagFlushHint;
   req->recv.cmplsRecords = &comm->cmplsRecords[slot];
   memset(req->recv.cmplsRecords->sizes, 0, sizeof(int) * n);
   memset(req->recv.cmplsRecords->completions, 0, sizeof(req->recv.cmplsRecords->completions));

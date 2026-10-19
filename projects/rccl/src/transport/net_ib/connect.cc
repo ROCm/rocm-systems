@@ -107,14 +107,16 @@ static int rcclIbSelectNqps(int nQpsPerDev, int isP2p, int localNdevs, int remot
   return rcclIbMaxNqps(rcclIbQpsPerDev(nQpsPerDev, isP2p), localNdevs, remoteNdevs, funcName);
 }
 // Opt-in GDR flush through an RO=0 GPU flag written by the sender after the
-// payload. PCIe ordering only covers writes issued in order by one NIC, so it
-// requires a single device and a single QP per connection. The GPU kernel
-// waits on the flag and net.cc skips the proxy flush.
+// payload. PCIe ordering only covers writes issued in order on one QP of one NIC,
+// so it requires a single device and one QP per request (no data split across
+// QPs); flagged requests are pinned to QP 0 while the rest rotate over all QPs.
+// The GPU kernel waits on the flag and net.cc skips the proxy flush.
 RCCL_PARAM(IbGdrFlushFlag, "IB_GDR_FLUSH_FLAG", 0);
 
 static bool ncclIbFlagFlushEligible(struct ncclIbNetCommBase* base) {
-  return rcclParamIbGdrFlushFlag() != 0 && base->vProps.ndevs == 1 && base->nqps == 1 && base->nDataQps == 1 &&
-         base->resiliency == NULL && base->recvMatchingScheme == BY_INDEX;
+  return rcclParamIbGdrFlushFlag() != 0 && base->vProps.ndevs == 1 && base->nDataQps == 1 &&
+         (base->nqps == 1 || base->splitDataOnQps == 0) && base->resiliency == NULL &&
+         base->recvMatchingScheme == BY_INDEX;
 }
 
 NCCL_PARAM(IbSubnetAwareRouting, "IB_SUBNET_AWARE_ROUTING", 0);
