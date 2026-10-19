@@ -66,6 +66,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed the Memory Chart tables printing without their titles or panel heading when analyzing more than one workload (baseline comparison).
 
+* Fixed JAX and PyTorch PC sampling finalization failures when GPU code object addresses are reused.
+
 ### Upcoming changes
 
 ### Known issues
