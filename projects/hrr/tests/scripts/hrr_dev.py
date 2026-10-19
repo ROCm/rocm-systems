@@ -101,6 +101,14 @@ def container_script(repo: Path, backend: str) -> str:
     """Bash run inside the container. One rocJitsu family failing still runs
     the other."""
     headers = f"{repo}/projects/hip/include;{repo}/projects/clr/hipamd/include"
+    if backend == "gpu":
+        # Build for the GPUs actually present, not the emulator targets.
+        targets = (
+            "$(python3 -c 'import sys; sys.path.insert(0, \"projects/hrr/tests/scripts\"); "
+            "import hrr_test_config as c; print(\";\".join(c.detect_archs()))')"
+        )
+    else:
+        targets = ";".join(job["arch"] for job in EMULATOR_JOBS)
     lines = [
         "set -euo pipefail",
         f'python3 -m pip install --no-cache-dir --index-url "{ROCM_INDEX_URL}" '
@@ -120,22 +128,25 @@ def container_script(repo: Path, backend: str) -> str:
         f'-DHIP_COMMON_DIR="{repo}/projects/hip" '
         "-DHIP_PLATFORM=amd -DCLR_BUILD_HIP=ON -DCLR_BUILD_OCL=OFF",
         "cmake --build build/hrr-dev/clr --target amdhip64 -j",
+        f'targets="{targets}"',
         "cmake -S projects/hrr -B build/hrr-dev/integration -G Ninja "
         "-DCMAKE_BUILD_TYPE=Release "
         '-DROCM_PATH="$ROCM_PATH" -DCMAKE_PREFIX_PATH="$ROCM_PATH" '
         f'"-DHRR_HIP_INCLUDE_DIRS={headers}" '
-        "-DGPU_TARGETS=gfx950;gfx1250 -DCMAKE_HIP_ARCHITECTURES=gfx950;gfx1250 "
+        '"-DGPU_TARGETS=$targets" "-DCMAKE_HIP_ARCHITECTURES=$targets" '
         "-DHRR_BUILD_PLAYBACK=ON -DHRR_BUILD_TESTS=ON -DHRR_BUILD_INTEGRATION_TESTS=ON",
         "cmake --build build/hrr-dev/integration -j",
         "set +e",
         "status=0",
+        f'export LD_LIBRARY_PATH="{repo}/build/hrr-dev/clr/hipamd/lib:'
+        '${ROCM_PATH}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"',
         "python3 projects/hrr/tests/scripts/run_catch2.py "
         "--xml build/hrr-dev/unit.xml --config projects/hrr/tests/config/unit.yaml "
         "--arch none -- build/hrr-dev/unit/tests/unit/hrr-unit-tests || status=1",
         "if [ -x build/hrr-dev/unit/tests/unit/hrr-handler-tests ]; then "
         "python3 projects/hrr/tests/scripts/run_catch2.py "
-        "--xml build/hrr-dev/handler.xml --config projects/hrr/tests/config/handler.yaml "
-        "--arch none -- build/hrr-dev/unit/tests/unit/hrr-handler-tests || status=1; fi",
+        "--xml build/hrr-dev/handler.xml "
+        "-- build/hrr-dev/unit/tests/unit/hrr-handler-tests || status=1; fi",
     ]
     binary = f"{repo}/build/hrr-dev/integration/tests/integration/hrr-integration-tests"
     if backend == "emulator":
@@ -156,11 +167,6 @@ def container_script(repo: Path, backend: str) -> str:
             )
     else:
         lines.append(
-            'export LD_LIBRARY_PATH="'
-            + f"{repo}/build/hrr-dev/clr/hipamd/lib:"
-            + '${ROCM_PATH}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"'
-        )
-        lines.append(
             "python3 projects/hrr/tests/scripts/run_catch2.py "
             "--xml build/hrr-dev/integration-gpu.xml --timeout 1200 "
             "--config projects/hrr/tests/config/integration.yaml "
@@ -171,10 +177,14 @@ def container_script(repo: Path, backend: str) -> str:
 
 
 def exec_command(repo: Path, backend: str) -> list[str]:
-    command = ["docker", "exec", "-w", str(repo)]
-    token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    if token:
-        command += ["-e", f"GH_TOKEN={token}"]
+    # No passwd entry for --user uid:gid, so HOME would be "/".
+    command = ["docker", "exec", "-w", str(repo), "-e", "HOME=/tmp"]
+    # Pass the token by name so its value stays off the process list.
+    if os.environ.get("GH_TOKEN"):
+        command += ["-e", "GH_TOKEN"]
+    elif os.environ.get("GITHUB_TOKEN"):
+        command += ["-e", "GH_TOKEN"]
+        os.environ["GH_TOKEN"] = os.environ["GITHUB_TOKEN"]
     command += [CONTAINER, "bash", "-lc", container_script(repo, backend)]
     return command
 

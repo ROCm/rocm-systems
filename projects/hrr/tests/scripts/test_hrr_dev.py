@@ -4,7 +4,9 @@
 """Tests for hrr_dev.py. Docker is not started."""
 
 import sys
+import os
 import unittest
+from unittest import mock
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -64,6 +66,27 @@ class ScriptTest(unittest.TestCase):
         self.assertIn("--arch auto", script)
         self.assertNotIn("rocjitsu", script)
         self.assertNotIn("gfx950_mi355x_kmd_2gpu.json", script)
+        self.assertIn("detect_archs", script)
+        self.assertNotIn("gfx950;gfx1250", script)
+
+    def test_capture_library_on_path_in_both_modes(self):
+        for backend in ("emulator", "gpu"):
+            script = hrr_dev.container_script(Path("/repo"), backend)
+            self.assertLess(
+                script.index("/repo/build/hrr-dev/clr/hipamd/lib"),
+                script.index("run_catch2.py --xml build/hrr-dev/integration"),
+            )
+
+    def test_handler_run_has_no_missing_config(self):
+        script = hrr_dev.container_script(Path("/repo"), "emulator")
+        self.assertNotIn("handler.yaml", script)
+
+    def test_token_not_on_command_line(self):
+        with mock.patch.dict(os.environ, {"GH_TOKEN": "secret"}):
+            command = hrr_dev.exec_command(Path("/repo"), "gpu")
+        self.assertNotIn("GH_TOKEN=secret", command)
+        self.assertIn("GH_TOKEN", command)
+        self.assertIn("HOME=/tmp", command)
 
 
 if __name__ == "__main__":
