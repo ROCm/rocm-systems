@@ -44,7 +44,7 @@ public:
   // Allocates this rank's flag buffer, exchanges peer flag-buffer pointers via
   // fabric shareable handles and builds a device-resident pointer table.
   static __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier> mallocAndInit(
-    int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager, const uint32_t* abortFlag);
+    int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager, DdaAbortSignal abortSignal);
 
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
   __device__ __forceinline__ void syncOnSameBlockIdx() {
@@ -77,18 +77,18 @@ public:
 
       // Signal the peer that this rank reached the barrier for this block.
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
-        signaled = putFlag<std::memory_order_relaxed>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), abortFlag_);
+        signaled = putFlag<std::memory_order_relaxed>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), abortSignal_);
       } else {
-        signaled = putFlag<std::memory_order_release>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), abortFlag_);
+        signaled = putFlag<std::memory_order_release>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), abortSignal_);
       }
       if (!signaled) break;
 
       // Wait for the peer's signal in this rank's own buffer.
       bool arrived = false;
       if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
-        arrived = waitFlag<std::memory_order_relaxed>(selfBuf + getFlagIdx(peerRank, blockIdx.x), abortFlag_);
+        arrived = waitFlag<std::memory_order_relaxed>(selfBuf + getFlagIdx(peerRank, blockIdx.x), abortSignal_);
       } else {
-        arrived = waitFlag<std::memory_order_acquire>(selfBuf + getFlagIdx(peerRank, blockIdx.x), abortFlag_);
+        arrived = waitFlag<std::memory_order_acquire>(selfBuf + getFlagIdx(peerRank, blockIdx.x), abortSignal_);
       }
       if (!arrived) break;
     }
@@ -102,10 +102,10 @@ private:
   int selfRank_{-1};
   int nRanks_{-1};
   FlagType** peerFlags_{nullptr};
-  const uint32_t* abortFlag_{nullptr};
+  DdaAbortSignal abortSignal_{};
 
-  __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags, const uint32_t* abortFlag)
-    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags), abortFlag_(abortFlag) {}
+  __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags, DdaAbortSignal abortSignal)
+    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags), abortSignal_(abortSignal) {}
 
   __device__ inline int getFlagIdx(int rank, int block) {
     return block * nRanks_ + rank;

@@ -52,7 +52,7 @@ __launch_bounds__(512)
                                        uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
                                        int epochLen,                          // number of cells in epochDev
                                        size_t bankSize,                     // scratch bank size (from host)
-                                       const uint32_t* __restrict__ abortFlag) { // comm->abortFlagDev
+                                       DdaAbortSignal abortSignal) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;             // grid.x == nRanks: one column/peer
@@ -117,7 +117,7 @@ __launch_bounds__(512)
     uint32_t* out = reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perRankBytes);
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
-      if (!ddaLLWaitLineFlags(&src[pk], flag, abortFlag, d0, f0, d1, f1)) {
+      if (!ddaLLWaitLineFlags(&src[pk], flag, abortSignal, d0, f0, d1, f1)) {
         break; // poll is the outermost loop; the ddaSetLLEpoch below still runs
       }
       out[2 * pk] = d0;

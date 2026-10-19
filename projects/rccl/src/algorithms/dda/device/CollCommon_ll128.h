@@ -60,12 +60,12 @@ __device__ __forceinline__ uint64_t ddaLL128LoadWord(const uint64_t* p) {
   return __scoped_atomic_load_n((u64_gptr) const_cast<uint64_t*>(p), __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
 }
 
-// Poll the LL128 flag word until it matches, or comm abortFlag is set.
+// Poll the LL128 flag word until it matches, or the comm abort flag is set.
 // Returns false if the wait was aborted so the kernel can exit.
-__device__ __forceinline__ bool ddaLL128WaitFlag(const uint64_t* flagAddr, uint64_t flag, const uint32_t* abortFlag) {
+__device__ __forceinline__ bool ddaLL128WaitFlag(const uint64_t* flagAddr, uint64_t flag, DdaAbortSignal abortSignal) {
   int spins = 0;
   while (ddaLL128LoadWord(flagAddr) != flag) {
-    if (ddaAbortSpinTick(abortFlag, spins)) return false;
+    if (abortSignal.spinTick(spins)) return false;
   }
   return true;
 }
@@ -219,14 +219,14 @@ __device__ __forceinline__ void ddaLL128StoreWire(
 }
 
 // Poll until every line this lane reads has landed, then read the payload once.
-// Returns false if comm abortFlag is set so the kernel can leave the wait.
+// Returns false if the comm abort flag is set so the kernel can leave the wait.
 __device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread],
-                                                 uint64_t flag, int wid, const uint32_t* abortFlag) {
+                                                 uint64_t flag, int wid, DdaAbortSignal abortSignal) {
   const bool flagLane = ddaLL128IsFlagLane(wid);
   int spins = 0;
   bool needReload;
   do {
-    if (__any(ddaAbortSpinTick(abortFlag, spins))) return false;
+    if (__any(abortSignal.spinTick(spins))) return false;
     needReload = false;
 #pragma unroll
     for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {

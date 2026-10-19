@@ -49,7 +49,7 @@ __launch_bounds__(1024)
                                           int epochLen, // number of cells in epochDev
                                           size_t slicesTotal, // slices this call uses
                                           size_t bankSize, // scratch bank size (from host)
-                                          const uint32_t* __restrict__ abortFlag) { // comm->abortFlagDev
+                                          DdaAbortSignal abortSignal) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -114,7 +114,8 @@ __launch_bounds__(1024)
     const int eltInSlice =
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
     uint64_t vr[kDdaLL128WordsPerThread];
-    if (!ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane, abortFlag)) {
+    if (!ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
+                          abortSignal)) {
       break; // not return: every thread must reach the __syncthreads below
     }
     ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);

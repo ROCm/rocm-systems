@@ -384,17 +384,17 @@ __device__ __forceinline__ void ddaLLLoadLineB128(const uint32_t* src, uint32_t&
 #endif
 }
 
-// Poll one 16B LL line until both flags match, or comm abortFlag is set.
+// Poll one 16B LL line until both flags match, or the comm abort flag is set.
 // Returns false if the wait was aborted so the kernel can exit.
 __device__ __forceinline__ bool ddaLLWaitLineFlags(const volatile LLPacket16* src, uint32_t flag,
-                                                   const uint32_t* abortFlag, uint32_t& d0, uint32_t& f0, uint32_t& d1,
+                                                   DdaAbortSignal abortSignal, uint32_t& d0, uint32_t& f0, uint32_t& d1,
                                                    uint32_t& f1) {
   const uint32_t* line = reinterpret_cast<const uint32_t*>(const_cast<const LLPacket16*>(src));
   int spins = 0;
   do {
     ddaLLLoadLineB128(line, d0, f0, d1, f1);
     if (f0 == flag && f1 == flag) return true;
-    if (ddaAbortSpinTick(abortFlag, spins)) return false;
+    if (abortSignal.spinTick(spins)) return false;
   } while (true);
 }
 

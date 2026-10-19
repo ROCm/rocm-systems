@@ -34,19 +34,19 @@ __device__ __forceinline__ uint32_t cas(uint32_t* addr, uint32_t compare, uint32
 }
 
 template <std::memory_order Sem>
-__device__ __forceinline__ bool putFlag(uint32_t* addr, const uint32_t* abortFlag) {
+__device__ __forceinline__ bool putFlag(uint32_t* addr, DdaAbortSignal abortSignal) {
   int spins = 0;
   while (cas<Sem>(addr, 0, 1) != 0) {
-    if (ddaAbortSpinTick(abortFlag, spins)) return false;
+    if (abortSignal.spinTick(spins)) return false;
   }
   return true;
 }
 
 template <std::memory_order Sem>
-__device__ __forceinline__ bool waitFlag(uint32_t* addr, const uint32_t* abortFlag) {
+__device__ __forceinline__ bool waitFlag(uint32_t* addr, DdaAbortSignal abortSignal) {
   int spins = 0;
   while (cas<Sem>(addr, 1, 0) != 1) {
-    if (ddaAbortSpinTick(abortFlag, spins)) return false;
+    if (abortSignal.spinTick(spins)) return false;
   }
   return true;
 }
@@ -64,20 +64,20 @@ public:
 
   __host__ DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf);
 
-  __device__ inline bool setFlagNoMemFence(int senderRank, int senderBlock, const uint32_t* abortFlag) {
-    return putFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock), abortFlag);
+  __device__ inline bool setFlagNoMemFence(int senderRank, int senderBlock, DdaAbortSignal abortSignal) {
+    return putFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock), abortSignal);
   }
 
-  __device__ inline bool waitFlagNoMemFence(int senderRank, int senderBlock, const uint32_t* abortFlag) {
-    return waitFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock), abortFlag);
+  __device__ inline bool waitFlagNoMemFence(int senderRank, int senderBlock, DdaAbortSignal abortSignal) {
+    return waitFlag<std::memory_order_relaxed>(flags_ + getFlagIdx(senderRank, senderBlock), abortSignal);
   }
 
-  __device__ inline bool setFlagWithMemFence(int senderRank, int senderBlock, const uint32_t* abortFlag) {
-    return putFlag<std::memory_order_release>(flags_ + getFlagIdx(senderRank, senderBlock), abortFlag);
+  __device__ inline bool setFlagWithMemFence(int senderRank, int senderBlock, DdaAbortSignal abortSignal) {
+    return putFlag<std::memory_order_release>(flags_ + getFlagIdx(senderRank, senderBlock), abortSignal);
   }
 
-  __device__ inline bool waitFlagWithMemFence(int senderRank, int senderBlock, const uint32_t* abortFlag) {
-    return waitFlag<std::memory_order_acquire>(flags_ + getFlagIdx(senderRank, senderBlock), abortFlag);
+  __device__ inline bool waitFlagWithMemFence(int senderRank, int senderBlock, DdaAbortSignal abortSignal) {
+    return waitFlag<std::memory_order_acquire>(flags_ + getFlagIdx(senderRank, senderBlock), abortSignal);
   }
 
 private:
@@ -102,7 +102,7 @@ public:
   __host__ IpcGpuBarrier() = default;
 
   static __host__ std::pair<std::unique_ptr<IpcGpuBarrierResources>, IpcGpuBarrier> mallocAndInit(
-    int nRanks, int nBlocks, int selfRank, void* bootstrap, const uint32_t* abortFlag);
+    int nRanks, int nBlocks, int selfRank, void* bootstrap, DdaAbortSignal abortSignal);
 
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
   __device__ __forceinline__ void syncOnSameBlockIdx() {
@@ -126,16 +126,16 @@ public:
       auto peerRank = threadIdx.x;
       bool signaled = false;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
-        signaled = allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x, abortFlag_);
+        signaled = allMailboxes_[peerRank].setFlagNoMemFence(selfRank_, blockIdx.x, abortSignal_);
       } else {
-        signaled = allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x, abortFlag_);
+        signaled = allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x, abortSignal_);
       }
 
       if (signaled) {
         if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
-          (void)allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x, abortFlag_);
+          (void)allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x, abortSignal_);
         } else {
-          (void)allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, abortFlag_);
+          (void)allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, abortSignal_);
         }
       }
     }
@@ -148,10 +148,10 @@ private:
   int nBlocks_{-1};
   int selfRank_{-1};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
-  const uint32_t* abortFlag_{nullptr};
+  DdaAbortSignal abortSignal_{};
 
   __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes,
-                         const uint32_t* abortFlag);
+                         DdaAbortSignal abortSignal);
 };
 
 } // namespace dda::common

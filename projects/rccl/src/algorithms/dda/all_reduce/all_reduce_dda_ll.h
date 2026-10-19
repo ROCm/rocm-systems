@@ -64,7 +64,7 @@ __launch_bounds__(512)
                                      uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
                                      int epochLen,                          // number of cells in epochDev
                                      size_t bankSize,                     // scratch bank size (from host)
-                                     const uint32_t* __restrict__ abortFlag) { // comm->abortFlagDev
+                                     DdaAbortSignal abortSignal) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
@@ -107,7 +107,7 @@ __launch_bounds__(512)
       } else {
         volatile LLPacket16* src = myBase + (size_t)peer * slot;
         uint32_t f0, f1;
-        if (!ddaLLWaitLineFlags(&src[pk], flag, abortFlag, d0, f0, d1, f1)) {
+        if (!ddaLLWaitLineFlags(&src[pk], flag, abortSignal, d0, f0, d1, f1)) {
           ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
           return;
         }

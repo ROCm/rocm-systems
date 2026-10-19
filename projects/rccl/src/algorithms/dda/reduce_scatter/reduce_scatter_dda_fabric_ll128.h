@@ -75,7 +75,7 @@ __launch_bounds__(512)
                                               int epochLen, // number of cells in epochDev
                                               size_t slicesTotal, // slices per shard this call uses
                                               size_t bankSize, // scratch bank size (from host)
-                                              const uint32_t* __restrict__ abortFlag) { // comm->abortFlagDev
+                                              DdaAbortSignal abortSignal) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -148,7 +148,7 @@ __launch_bounds__(512)
       const int peer = (selfRank + r) % nRanks;
       const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
       uint64_t vr[kDdaLL128WordsPerThread];
-      if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, abortFlag)) {
+      if (!ddaLL128PollWire(gatherSlot + wireOff, vr, flag, lane, abortSignal)) {
         ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
         return;
       }
