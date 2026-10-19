@@ -334,6 +334,23 @@ def test_create_df_pmc_combines_result_files_of_one_workload(tmp_path) -> None:
     assert df["Dispatch_Unit"].iloc[0] == 1
 
 
+def test_create_df_pmc_keeps_the_legacy_frame_shape(tmp_path) -> None:
+    """Legacy callers get last-write base columns and no pass shadows."""
+    common.write_gzip_csv(
+        tmp_path / "results_pmc_perf_0.csv.gz",
+        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_WAVES,4\n",
+    )
+    common.write_gzip_csv(
+        tmp_path / "results_pmc_perf_1.csv.gz",
+        ROCPD_COUNTER_HEADER + ROCPD_COUNTER_ROW_PREFIX + "SQ_WAVES,9\n",
+    )
+
+    df = create_df_pmc(str(tmp_path), verbose=0)
+
+    assert df["SQ_WAVES"].iloc[0] == 9
+    assert not any("@pass:" in column for column in df.columns)
+
+
 def test_create_df_pmc_rejects_wide_result_file(tmp_path) -> None:
     """Only the rocpd long format is supported, so a wide counter file errors
     out with a re-profile message instead of being read as counter data."""
