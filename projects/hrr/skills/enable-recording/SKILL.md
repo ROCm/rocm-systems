@@ -130,7 +130,7 @@ What the archive holds, per process, and it is worth reading out to whoever has 
 
 - **`events.bin`**: every successful HIP call the process made, with its arguments: sizes, device addresses, stream handles, kernel names.
 - **`blobs/`**: the host buffers those calls carried, byte for byte and in the clear. For a serving stack that means prompts and generated text; for training, the data and the weights that were copied to the device.
-- **`code_objects/`**: the compiled GPU kernels the process loaded, which is the application's own binary code and a separate disclosure question from customer data. Their `.comment` and `.debug*` sections are zeroed, here and in the fat binaries under `blobs/`, so the compiler build, source file names and build paths are gone, except in compressed (`CCOB`) fat binaries, which are stored as the application had them. Kernel names stay.
+- **`code_objects/`**: the compiled GPU kernels the process loaded, which is the application's own binary code and a separate disclosure question from customer data. Their `.comment` and `.debug*` sections are zeroed and marked empty, here and in the fat binaries under `blobs/`, which removes the compiler build and the build paths and source file names that debug information carries, except in compressed (`CCOB`) fat binaries, which are stored as the application had them. The symbol table is not touched, so kernel names stay.
 - **`manifest.json`**: process and parent process ids, event and blob counts, the clean-shutdown flag, the HIP and comgr versions that captured, and the device's name, architecture, memory size and clocks. Its PCI location, UUID and LUID are written blank.
 - **`regions/*.hrrr`**: the framework allocator's own layout, when a producer ran alongside capture.
 

@@ -428,43 +428,44 @@ TEST_CASE("Unit_HRR_CodeObjectScrub_Direct", "[.][hrr-direct]") {
 namespace {
 struct ScrubCount {
   size_t elves = 0;
-  size_t sections = 0;  // .comment and .debug* sections with contents
+  size_t sections = 0;  // non-empty .comment and .debug* sections
   size_t left = 0;      // of those, still holding a non-zero byte
+  size_t typed = 0;     // of those, not SHT_NOBITS, so DWARF readers parse them
 };
 
 // Walks the section headers of an ELF64 image independently of capture's own
-// parser and counts the sections capture has to zero.
-void count_scrub_sections(const uint8_t* p, size_t size, ScrubCount& c) {
+// parser and counts the sections capture has to scrub. False if the image does
+// not parse, including a section name that does not end inside the string table.
+bool count_scrub_sections(const uint8_t* p, size_t size, ScrubCount& c) {
   auto u16 = [&](size_t at) { uint16_t v; std::memcpy(&v, p + at, 2); return v; };
   auto u32 = [&](size_t at) { uint32_t v; std::memcpy(&v, p + at, 4); return v; };
   auto u64 = [&](size_t at) { uint64_t v; std::memcpy(&v, p + at, 8); return v; };
-  REQUIRE(size >= 64);
-  REQUIRE(std::memcmp(p, "\x7f" "ELF", 4) == 0);
-  ++c.elves;
+  if (size < 64 || std::memcmp(p, "\x7f" "ELF", 4) != 0 || u16(0x3a) != 64) return false;
   const uint64_t shoff = u64(0x28);
   const uint16_t shnum = u16(0x3c);
   const uint16_t shstrndx = u16(0x3e);
-  REQUIRE(u16(0x3a) == 64);
-  REQUIRE(shoff + uint64_t{shnum} * 64 <= size);
-  REQUIRE(shstrndx < shnum);
+  if (shoff > size || uint64_t{shnum} * 64 > size - shoff || shstrndx >= shnum) return false;
   const uint64_t names = u64(shoff + shstrndx * 64 + 24);
+  const uint64_t names_size = u64(shoff + shstrndx * 64 + 32);
+  if (names > size || names_size > size - names) return false;
+  ++c.elves;
   for (uint16_t i = 0; i < shnum; ++i) {
     const size_t sh = shoff + size_t{i} * 64;
-    REQUIRE(names + u32(sh) < size);
-    const std::string name(reinterpret_cast<const char*>(p + names + u32(sh)));
+    const uint32_t at = u32(sh);
+    if (at >= names_size) return false;
+    const char* s = reinterpret_cast<const char*>(p + names + at);
+    const size_t name_len = strnlen(s, names_size - at);
+    if (name_len == names_size - at) return false;
+    const std::string name(s, name_len);
     if (name != ".comment" && name.rfind(".debug", 0) != 0) continue;
     const uint64_t off = u64(sh + 24), len = u64(sh + 32);
-    if (u32(sh + 4) == 8 /*SHT_NOBITS*/ || len == 0) continue;
-    REQUIRE(off + len <= size);
-    INFO("Section " << name);
+    if (len == 0) continue;
+    if (off > size || len > size - off) return false;
     ++c.sections;
-    for (uint64_t b = 0; b < len; ++b) {
-      if (p[off + b] != 0) {
-        ++c.left;
-        break;
-      }
-    }
+    if (u32(sh + 4) != 8 /*SHT_NOBITS*/) ++c.typed;
+    if (std::any_of(p + off, p + off + len, [](uint8_t b) { return b != 0; })) ++c.left;
   }
+  return true;
 }
 
 bool contains(const std::vector<uint8_t>& bytes, const std::string& needle) {
@@ -488,7 +489,7 @@ HRR_TEST_CASE(Unit_HRR_CodeObjectScrub) {
     const std::string text = read_text_file(entry.path());
     const std::vector<uint8_t> image(text.begin(), text.end());
     ++module_files;
-    count_scrub_sections(image.data(), image.size(), module_count);
+    REQUIRE(count_scrub_sections(image.data(), image.size(), module_count));
     CHECK_FALSE(contains(image, "clang version"));
     CHECK_FALSE(contains(image, "hrr_fatbin_probe.hip"));
   }
@@ -511,21 +512,54 @@ HRR_TEST_CASE(Unit_HRR_CodeObjectScrub) {
       const uint64_t off = read_u64(blob, pos), len = read_u64(blob, pos + 8);
       pos += kEntryHeaderSize + read_u64(blob, pos + 16);
       if (len >= 4 && std::memcmp(blob.data() + off, "\x7f" "ELF", 4) == 0)
-        count_scrub_sections(blob.data() + off, len, bundle_count);
+        REQUIRE(count_scrub_sections(blob.data() + off, len, bundle_count));
     }
     CHECK_FALSE(contains(blob, "clang version"));
     CHECK_FALSE(contains(blob, "hrr_fatbin_probe.hip"));
   }
 
   INFO("Module code objects: " << module_count.elves << " ELF, " << module_count.sections
-                               << " sections, " << module_count.left << " not zeroed");
+                               << " sections, " << module_count.left << " not zeroed, "
+                               << module_count.typed << " not SHT_NOBITS");
   INFO("Fat binary code objects: " << bundle_count.elves << " ELF, " << bundle_count.sections
-                                   << " sections, " << bundle_count.left << " not zeroed");
+                                   << " sections, " << bundle_count.left << " not zeroed, "
+                                   << bundle_count.typed << " not SHT_NOBITS");
   // The probe was built with -g, so both copies had something to zero.
   CHECK(module_count.sections >= 2);
   CHECK(bundle_count.sections >= 2);
   CHECK(module_count.left == 0);
   CHECK(bundle_count.left == 0);
+  // Retyped, so a debugger on the replay sees no debug information rather than zeros.
+  CHECK(module_count.typed == 0);
+  CHECK(bundle_count.typed == 0);
+}
+
+// The walker reads a section name only inside its string table, even when the
+// bytes after the table would complete a name it looks for.
+HRR_TEST_CASE(Unit_HRR_CodeObjectScrubWalker) {
+  std::vector<uint8_t> elf(80 + 2 * 64, 0);
+  auto put = [&](size_t at, uint64_t v, size_t n) { std::memcpy(elf.data() + at, &v, n); };
+  std::memcpy(elf.data(), "\x7f" "ELF", 4);
+  elf[4] = 2;  // ELFCLASS64
+  elf[5] = 1;  // ELFDATA2LSB
+  put(0x28, 80, 8);  // e_shoff
+  put(0x3a, 64, 2);  // e_shentsize
+  put(0x3c, 2, 2);   // e_shnum
+  put(0x3e, 1, 2);   // e_shstrndx
+  std::memcpy(elf.data() + 64, "\0.comment", 10);
+  // Section 1 is the string table, named at offset 1, and declares only "\0.comm".
+  const size_t sh = 80 + 64;
+  put(sh, 1, 4);
+  put(sh + 4, 3 /*SHT_STRTAB*/, 4);
+  put(sh + 24, 64, 8);
+  put(sh + 32, 6, 8);
+  ScrubCount c;
+  CHECK_FALSE(count_scrub_sections(elf.data(), elf.size(), c));
+  // Declared up to its terminator, the same table parses.
+  put(sh + 32, 10, 8);
+  c = ScrubCount{};
+  CHECK(count_scrub_sections(elf.data(), elf.size(), c));
+  CHECK(c.sections == 1);
 }
 
 #endif  // HRR_TEST_EXE

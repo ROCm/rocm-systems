@@ -237,7 +237,9 @@ capture.hrr/
   records the hash so kernels sharing a name (Triton emits many `triton_`)
   still resolve to the code object they came from. Their `.comment` and
   `.debug*` sections, which hold the compiler build and build paths, are
-  zeroed before they are stored, as are those of uncompressed fat binaries
+  zeroed and retyped `SHT_NOBITS` before they are stored, as are those of
+  uncompressed fat binaries, so a debugger on a replay sees no debug
+  information. Symbol names stay
 - **manifest.json** — counts, versions and device properties; the GPU's PCI
   address, UUID and LUID are written blank
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events

@@ -71,7 +71,7 @@ size_t scrub_elf(uint8_t* image, size_t size) {
 
   size_t zeroed = 0;
   for (uint16_t i = 0; i < shnum; ++i) {
-    const uint8_t* sh = image + shoff + size_t{i} * kSectionHeaderSize;
+    uint8_t* sh = image + shoff + size_t{i} * kSectionHeaderSize;
     const uint32_t name = read<uint32_t>(sh, 0);
     const uint32_t type = read<uint32_t>(sh, 4);
     const uint64_t flags = read<uint64_t>(sh, 8);
@@ -82,6 +82,9 @@ size_t scrub_elf(uint8_t* image, size_t size) {
     if (!is_scrubbed_section(names + name, name_len)) continue;
     if (sec_size == 0 || !in_range(offset, sec_size, size)) continue;
     std::memset(image + offset, 0, sec_size);
+    // SHT_NOBITS makes DWARF readers see the section as absent rather than as
+    // malformed zeros. It is not SHF_ALLOC, so the loader maps nothing from it.
+    std::memcpy(sh + 4, &kShtNobits, sizeof(kShtNobits));
     ++zeroed;
   }
   return zeroed;
