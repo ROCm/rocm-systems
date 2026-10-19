@@ -105,6 +105,21 @@ public:
   /// device nobody is behind.
   [[nodiscard]] ServeResult run(std::stop_token stop_token);
 
+  /// @brief Connection state observed by the node's serving coordinator.
+  struct ClientSnapshot {
+    bool attached = false;
+    bool disconnect_in_progress = false;
+    uint64_t completed_disconnects = 0;
+  };
+
+  /// @brief Read attachment, reset progress, and completed disconnects together.
+  /// @details Attachment is cleared as soon as a client is lost, to reject
+  /// stale DMA and IRQ calls. A disconnect is counted only after its session
+  /// has been revoked and drained and the device reset has completed. The
+  /// progress flag distinguishes that interval from a completed departure.
+  /// Requested serving stop and host detach do not count as disconnects.
+  [[nodiscard]] ClientSnapshot client_snapshot() const;
+
   /// @brief Detach this host from the device.
   /// @details Clears the sinks the device holds, so a device that outlives its
   /// transport cannot call into freed state. Called from the destructor, and
@@ -213,7 +228,7 @@ private:
   std::recursive_mutex vfu_mutex_;
 
   /// @brief Guards connection, reset, and guest-region state shared with callbacks.
-  std::mutex state_mutex_;
+  mutable std::mutex state_mutex_;
 
   /// @brief The single outstanding request, and the lock guarding it.
   ///
@@ -227,6 +242,10 @@ private:
   vfu_ctx *ctx_ = nullptr;
   /// @brief Whether a *client* is attached to the socket.
   bool attached_ = false;
+  /// @brief Revoked connection whose drain and reset have not completed yet.
+  bool disconnect_in_progress_ = false;
+  /// @brief Completed client disconnects, retained across new attachments.
+  uint64_t completed_disconnects_ = 0;
   std::optional<simdojo::ResetKind> pending_reset_;
   /// @brief The sinks this host offers, published to the device as one object.
   ///
