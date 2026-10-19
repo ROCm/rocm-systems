@@ -27,8 +27,8 @@
 #include <array>
 #include <bit>
 #include <cfenv>
-#include <cstdio>
 #include <cstdlib>
+#include <format>
 #include <gtest/gtest.h>
 #include <memory>
 #include <optional>
@@ -4128,9 +4128,9 @@ std::vector<ArithmeticCase> dot2_packed16_cases() {
     uint8_t abs;
     uint8_t neg;
     uint8_t opsel;
-    uint32_t a;
-    uint32_t b;
-    uint32_t c;
+    uint32_t src0;
+    uint32_t src1;
+    uint32_t acc;
     uint32_t gfx1201;
     uint32_t gfx1100;
     std::vector<uint32_t> modes;
@@ -4320,12 +4320,10 @@ std::vector<ArithmeticCase> dot2_packed16_cases() {
                                                                             .neg = lane.neg});
       const uint32_t expected = arch == ROCJITSU_CODE_ARCH_RDNA4 ? lane.gfx1201 : lane.gfx1100;
       for (const uint32_t mode : lane.modes) {
-        char suffix[16];
-        std::snprintf(suffix, sizeof(suffix), "Mode%X", mode);
-        cases.push_back({std::string(prefix) + lane.name + suffix,
+        cases.push_back({std::string(prefix) + lane.name + std::format("Mode{:X}", mode),
                          arch,
                          {words[0], words[1], 0u},
-                         {{0, lane.a}, {1, lane.b}, {2, lane.c}, {6, kUntouched}},
+                         {{0, lane.src0}, {1, lane.src1}, {2, lane.acc}, {6, kUntouched}},
                          {{6, expected}},
                          mode,
                          FE_TONEAREST});
@@ -4363,124 +4361,127 @@ struct DotLane {
 
 std::vector<DotLane> dot_family_lanes() {
   constexpr uint8_t kSrc2 = 4;
-  const uint16_t f16 = rdna4::kVDot2F32F16Vop3p;
-  const uint16_t bf16 = rdna4::kVDot2F32Bf16Vop3p;
+  const uint16_t dot2_f32_f16 = rdna4::kVDot2F32F16Vop3p;
+  const uint16_t dot2_f32_bf16 = rdna4::kVDot2F32Bf16Vop3p;
   std::vector<DotLane> lanes;
-  const auto add = [&](const char *name, uint16_t opcode, DotModifiers modifiers, uint32_t a,
-                       uint32_t b, uint32_t c, uint32_t gfx1201, std::optional<uint32_t> gfx1100,
-                       std::vector<uint32_t> modes, SimdPathExpectation simd = {}) {
+  const auto add = [&](const char *name, uint16_t opcode, DotModifiers modifiers, uint32_t src0,
+                       uint32_t src1, uint32_t acc, uint32_t gfx1201,
+                       std::optional<uint32_t> gfx1100, std::vector<uint32_t> modes,
+                       SimdPathExpectation simd = {}) {
     if (UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && modifiers.clamp &&
         simd.path == amdgpu::SimdFastPath::VOP3P_DOT_INT)
       simd = expect_simd_fallback();
-    lanes.push_back({name, opcode, modifiers, {a, b, c}, gfx1201, gfx1100, std::move(modes), simd});
+    lanes.push_back(
+        {name, opcode, modifiers, {src0, src1, acc}, gfx1201, gfx1100, std::move(modes), simd});
   };
   const std::vector<uint32_t> split_modes{0xf0u, 0x70u, 0xb0u, 0xd0u, 0xe0u, 0xf3u, 0xfcu};
   // NEG_HI on the F32 accumulator is ABS, applied before NEG: -|C| equals C for
   // a negative C and -C for a positive one, and differs from |C| in both.
-  add("F32F16AbsAccumulator", f16, {.neg_hi = kSrc2}, 0x039e5408u, 0x518056e6u, 0xc0e9ac5cu,
-      0x45deb3f0u, 0x45deb3f0u, {0xf0u, 0x30u, 0xc0u, 0xffu});
-  add("F32F16AbsNegativeZero", f16, {.neg_hi = kSrc2}, 0x020083ffu, 0xbc008000u, 0x80000000u,
-      0xb8000000u, 0xb8000001u, {0xf0u, 0x30u, 0xc0u});
-  add("F32Bf16AbsAccumulator", bf16, {.neg_hi = kSrc2}, 0x00c83f74u, 0xb4b1c3f9u, 0xc3edc000u,
-      0x3f57ff80u, 0x3f57ff00u, {0xf0u, 0x30u, 0xc0u, 0xffu});
-  add("F32Bf16AbsNegativeZero", bf16, {.neg_hi = kSrc2}, 0xbf803f00u, 0xbf808000u, 0x80000000u,
-      0x3f800000u, 0x3f7fffffu, {0xf0u, 0x30u, 0xc0u});
-  add("F32F16NegAbsNegativeAccumulator", f16, {.neg = kSrc2, .neg_hi = kSrc2}, 0xfbff0400u,
+  add("F32F16AbsAccumulator", dot2_f32_f16, {.neg_hi = kSrc2}, 0x039e5408u, 0x518056e6u,
+      0xc0e9ac5cu, 0x45deb3f0u, 0x45deb3f0u, {0xf0u, 0x30u, 0xc0u, 0xffu});
+  add("F32F16AbsNegativeZero", dot2_f32_f16, {.neg_hi = kSrc2}, 0x020083ffu, 0xbc008000u,
+      0x80000000u, 0xb8000000u, 0xb8000001u, {0xf0u, 0x30u, 0xc0u});
+  add("F32Bf16AbsAccumulator", dot2_f32_bf16, {.neg_hi = kSrc2}, 0x00c83f74u, 0xb4b1c3f9u,
+      0xc3edc000u, 0x3f57ff80u, 0x3f57ff00u, {0xf0u, 0x30u, 0xc0u, 0xffu});
+  add("F32Bf16AbsNegativeZero", dot2_f32_bf16, {.neg_hi = kSrc2}, 0xbf803f00u, 0xbf808000u,
+      0x80000000u, 0x3f800000u, 0x3f7fffffu, {0xf0u, 0x30u, 0xc0u});
+  add("F32F16NegAbsNegativeAccumulator", dot2_f32_f16, {.neg = kSrc2, .neg_hi = kSrc2}, 0xfbff0400u,
       0x020083ffu, 0xbf800000u, 0xc03ff000u, 0xc03ff000u, split_modes);
-  add("F32F16NegAbsPositiveAccumulator", f16, {.neg = kSrc2, .neg_hi = kSrc2}, 0xfbff0400u,
+  add("F32F16NegAbsPositiveAccumulator", dot2_f32_f16, {.neg = kSrc2, .neg_hi = kSrc2}, 0xfbff0400u,
       0x020083ffu, 0x3f800000u, 0xc03ff000u, 0xc03ff000u, split_modes);
-  add("F32Bf16NegAbsPositiveAccumulator", bf16, {.neg = kSrc2, .neg_hi = kSrc2}, 0xc0403f80u,
-      0x0040807fu, 0x00800000u, 0x815f8000u, 0x80800000u, split_modes);
+  add("F32Bf16NegAbsPositiveAccumulator", dot2_f32_bf16, {.neg = kSrc2, .neg_hi = kSrc2},
+      0xc0403f80u, 0x0040807fu, 0x00800000u, 0x815f8000u, 0x80800000u, split_modes);
   // Subnormal factors and C are read as is on gfx1201 under every MODE; gfx1100
   // keeps F16 subnormal factors but reads BF16 ones as zero.
-  add("F32F16SubnormalFactors", f16, {}, 0x01003800u, 0xbc008000u, 0u, 0xb7800000u, 0xb7800004u,
+  add("F32F16SubnormalFactors", dot2_f32_f16, {}, 0x01003800u, 0xbc008000u, 0u, 0xb7800000u,
+      0xb7800004u, split_modes);
+  add("F32Bf16SubnormalFactors", dot2_f32_bf16, {}, 0x0040807fu, 0xbf808000u, 0u, 0x80400000u, 0u,
       split_modes);
-  add("F32Bf16SubnormalFactors", bf16, {}, 0x0040807fu, 0xbf808000u, 0u, 0x80400000u, 0u,
-      split_modes);
-  add("F32Bf16SubnormalAccumulator", bf16, {}, 0x0040807fu, 0xbf808000u, 1u, 0x803fffffu, 0u,
-      split_modes);
+  add("F32Bf16SubnormalAccumulator", dot2_f32_bf16, {}, 0x0040807fu, 0xbf808000u, 1u, 0x803fffffu,
+      0u, split_modes);
   // gfx1201: a negative subnormal C whose bits all fall below a grid at or
   // under 2^-126 still subtracts one unit. gfx1100 reads BF16 subnormal
   // factors as zero. CLAMP changes neither card's result.
-  add("F32Bf16TinyNegativeAccumulatorClamp", bf16, {.clamp = 1}, 0x023a003au, 0x4509cb3fu,
+  add("F32Bf16TinyNegativeAccumulatorClamp", dot2_f32_bf16, {.clamp = 1}, 0x023a003au, 0x4509cb3fu,
       0x8014e243u, 0x8bac50edu, 0x07c71400u, {0xf0u, 0x30u, 0xc0u, 0xffu});
-  add("F32Bf16TinyNegatedAccumulator", bf16, {.neg = kSrc2}, 0xcaefc286u, 0x000b807bu, 0x000ca6c0u,
-      0x8a244c00u, 0u, {0xf0u, 0x30u, 0xc0u});
-  add("F32Bf16TinyNegativeAccumulatorLowHalves", bf16, {.opsel_hi = 0}, 0xc1200003u, 0xc4f54b59u,
-      0x800a3302u, 0x0a22bff8u, 0u, {0xf0u, 0x30u, 0xc0u});
+  add("F32Bf16TinyNegatedAccumulator", dot2_f32_bf16, {.neg = kSrc2}, 0xcaefc286u, 0x000b807bu,
+      0x000ca6c0u, 0x8a244c00u, 0u, {0xf0u, 0x30u, 0xc0u});
+  add("F32Bf16TinyNegativeAccumulatorLowHalves", dot2_f32_bf16, {.opsel_hi = 0}, 0xc1200003u,
+      0xc4f54b59u, 0x800a3302u, 0x0a22bff8u, 0u, {0xf0u, 0x30u, 0xc0u});
   // RDNA4 FP8 (E4M3) / BF8 (E5M2) DOT4: the four products align on one grid
   // before C, and a NaN factor or an invalid product or sum returns 0xffc00a3d.
-  const uint16_t fp8_fp8 = rdna4::kVDot4F32Fp8Fp8Vop3p;
-  const uint16_t fp8_bf8 = rdna4::kVDot4F32Fp8Bf8Vop3p;
-  const uint16_t bf8_fp8 = rdna4::kVDot4F32Bf8Fp8Vop3p;
-  const uint16_t bf8_bf8 = rdna4::kVDot4F32Bf8Bf8Vop3p;
+  const uint16_t dot4_fp8_fp8 = rdna4::kVDot4F32Fp8Fp8Vop3p;
+  const uint16_t dot4_fp8_bf8 = rdna4::kVDot4F32Fp8Bf8Vop3p;
+  const uint16_t dot4_bf8_fp8 = rdna4::kVDot4F32Bf8Fp8Vop3p;
+  const uint16_t dot4_bf8_bf8 = rdna4::kVDot4F32Bf8Bf8Vop3p;
   const std::vector<uint32_t> fp8_modes{0xf0u, 0x30u, 0xc0u, 0xf3u, 0xfcu};
-  add("Fp8Fp8FactorNan", fp8_fp8, {}, 0xffb88100u, 0xffb88100u, 0u, 0xffc00a3du, {}, fp8_modes);
-  add("Fp8Fp8OneGrid", fp8_fp8, {}, 0x259ade4cu, 0xcf5a6651u, 0xce741245u, 0xce74125du, {},
+  add("Fp8Fp8FactorNan", dot4_fp8_fp8, {}, 0xffb88100u, 0xffb88100u, 0u, 0xffc00a3du, {},
       fp8_modes);
-  add("Fp8Bf8InvalidProduct", fp8_bf8, {}, 0x003040feu, 0xfcbc8100u, 0u, 0xffc00a3du, {},
+  add("Fp8Fp8OneGrid", dot4_fp8_fp8, {}, 0x259ade4cu, 0xcf5a6651u, 0xce741245u, 0xce74125du, {},
       fp8_modes);
-  add("Fp8Bf8InfiniteProduct", fp8_bf8, {}, 0x407e0780u, 0xfcbc8100u, 0u, 0xff800000u, {},
+  add("Fp8Bf8InvalidProduct", dot4_fp8_bf8, {}, 0x003040feu, 0xfcbc8100u, 0u, 0xffc00a3du, {},
       fp8_modes);
-  add("Bf8Fp8InfinitiesCancel", bf8_fp8, {}, 0xfcbc8100u, 0x407e0780u, 0x7f800000u, 0xffc00a3du, {},
+  add("Fp8Bf8InfiniteProduct", dot4_fp8_bf8, {}, 0x407e0780u, 0xfcbc8100u, 0u, 0xff800000u, {},
       fp8_modes);
-  add("Bf8Fp8Finite", bf8_fp8, {}, 0xd2e6da86u, 0xc5364dadu, 0x2b21369bu, 0xc5184000u, {},
+  add("Bf8Fp8InfinitiesCancel", dot4_bf8_fp8, {}, 0xfcbc8100u, 0x407e0780u, 0x7f800000u,
+      0xffc00a3du, {}, fp8_modes);
+  add("Bf8Fp8Finite", dot4_bf8_fp8, {}, 0xd2e6da86u, 0xc5364dadu, 0x2b21369bu, 0xc5184000u, {},
       fp8_modes);
-  add("Bf8Bf8Finite", bf8_bf8, {}, 0x733c7351u, 0x2f7892a9u, 0x43d88000u, 0x4707c4f0u, {},
+  add("Bf8Bf8Finite", dot4_bf8_bf8, {}, 0x733c7351u, 0x2f7892a9u, 0x43d88000u, 0x4707c4f0u, {},
       fp8_modes);
-  add("Fp8Fp8NegAccumulator", fp8_fp8, {.neg = kSrc2}, 0xb1b95cc9u, 0x624037c6u, 0x659a2f29u,
+  add("Fp8Fp8NegAccumulator", dot4_fp8_fp8, {.neg = kSrc2}, 0xb1b95cc9u, 0x624037c6u, 0x659a2f29u,
       0xe59a2f29u, {}, {0xf0u, 0x30u, 0xc0u, 0xffu});
-  add("Bf8Bf8AbsAccumulator", bf8_bf8, {.neg_hi = kSrc2}, 0xbc7897a1u, 0x42bfb6a8u, 0xf3aa2116u,
-      0x73aa2116u, {}, {0xf0u, 0x30u, 0xc0u, 0xffu});
-  add("Bf8Bf8AbsNegativeAccumulator", bf8_bf8, {.neg_hi = kSrc2}, 0xb135ba3bu, 0x34d23428u,
+  add("Bf8Bf8AbsAccumulator", dot4_bf8_bf8, {.neg_hi = kSrc2}, 0xbc7897a1u, 0x42bfb6a8u,
+      0xf3aa2116u, 0x73aa2116u, {}, {0xf0u, 0x30u, 0xc0u, 0xffu});
+  add("Bf8Bf8AbsNegativeAccumulator", dot4_bf8_bf8, {.neg_hi = kSrc2}, 0xb135ba3bu, 0x34d23428u,
       0xbdbc96cau, 0xc171b6d2u, {}, split_modes);
-  add("Fp8Fp8NegAbsPositiveAccumulator", fp8_fp8, {.neg = kSrc2, .neg_hi = kSrc2}, 0x30407e08u,
+  add("Fp8Fp8NegAbsPositiveAccumulator", dot4_fp8_fp8, {.neg = kSrc2, .neg_hi = kSrc2}, 0x30407e08u,
       0x3cfe0801u, 0x3f800000u, 0xc45e5000u, {}, split_modes);
-  add("Bf8Bf8NegAbsNegativeAccumulator", bf8_bf8, {.neg = kSrc2, .neg_hi = kSrc2}, 0xcc553f2fu,
+  add("Bf8Bf8NegAbsNegativeAccumulator", dot4_bf8_bf8, {.neg = kSrc2, .neg_hi = kSrc2}, 0xcc553f2fu,
       0x56d530bfu, 0xc75dc701u, 0xc77cc6fau, {}, split_modes);
-  add("Fp8Fp8SubnormalFactor", fp8_fp8, {}, 0x30407e08u, 0x407e0780u, 0u, 0x4461c800u, {},
+  add("Fp8Fp8SubnormalFactor", dot4_fp8_fp8, {}, 0x30407e08u, 0x407e0780u, 0u, 0x4461c800u, {},
       split_modes);
-  add("Bf8Bf8SubnormalFactor", bf8_bf8, {}, 0x9fb8dca8u, 0xcb2d0379u, 0xb80f58b5u, 0xc49ffe90u, {},
-      split_modes);
+  add("Bf8Bf8SubnormalFactor", dot4_bf8_bf8, {}, 0x9fb8dca8u, 0xcb2d0379u, 0xb80f58b5u, 0xc49ffe90u,
+      {}, split_modes);
   // A negative subnormal C on a grid at or below 2^-126 subtracts one unit.
-  add("Bf8Bf8TinyNegativeAccumulator", bf8_bf8, {}, 0xb3510221u, 0xc48c2309u, 0x8030a352u,
+  add("Bf8Bf8TinyNegativeAccumulator", dot4_bf8_bf8, {}, 0xb3510221u, 0xc48c2309u, 0x8030a352u,
       0x3f5d8020u, {}, split_modes);
   // Integer DOT4/DOT8 read each source as two 16-bit halves: OP_SEL picks the
   // half for bits 15:0 and OP_SEL_HI the half for bits 31:16. Both cards agree.
   // These lanes must also take the integer DOT SIMD path.
-  const uint16_t iu8 = rdna4::kVDot4I32Iu8Vop3p;
-  const uint16_t u8 = rdna4::kVDot4U32U8Vop3p;
-  const uint16_t iu4 = rdna4::kVDot8I32Iu4Vop3p;
-  const uint16_t u4 = rdna4::kVDot8U32U4Vop3p;
+  const uint16_t dot4_iu8 = rdna4::kVDot4I32Iu8Vop3p;
+  const uint16_t dot4_u8 = rdna4::kVDot4U32U8Vop3p;
+  const uint16_t dot8_iu4 = rdna4::kVDot8I32Iu4Vop3p;
+  const uint16_t dot8_u4 = rdna4::kVDot8U32U4Vop3p;
   const std::vector<uint32_t> int_modes{0xf0u, 0x00u};
   const SimdPathExpectation int_simd = expect_simd_path(amdgpu::SimdFastPath::VOP3P_DOT_INT);
-  add("Dot4Iu8HighHalfSrc0", iu8, {.opsel = 1}, 0x32bf5f5eu, 0xf9c54f6bu, 0x00b85d08u, 0x00b97fe8u,
-      0x00b97fe8u, int_modes, int_simd);
-  add("Dot4Iu8LowHalves", iu8, {.opsel_hi = 0}, 0xe9d6d2a3u, 0xffffffefu, 0x00000031u, 0x0002d2e7u,
-      0x0002d2e7u, int_modes, int_simd);
-  add("Dot4U8LowHalves", u8, {.opsel_hi = 0}, 0x2e1ae63eu, 0x14771051u, 0x00dc74cbu, 0x00dcb8c7u,
-      0x00dcb8c7u, int_modes, int_simd);
-  add("Dot8Iu4HighHalfSrc0", iu4, {.opsel = 1}, 0x8d7fb53du, 0x64aeeb2fu, 0x5385deddu, 0x5385e247u,
-      0x5385e247u, int_modes, int_simd);
-  add("Dot8Iu4LowHalves", iu4, {.opsel_hi = 0}, 0x041e0e34u, 0x3f5b683eu, 0xb7a86fa9u, 0xb7a8710bu,
-      0xb7a8710bu, int_modes, int_simd);
-  add("Dot8U4LowHalves", u4, {.opsel_hi = 0}, 0xfffffffdu, 0x00000c75u, 0xffffd984u, 0xffffdc40u,
-      0xffffdc40u, int_modes, int_simd);
+  add("Dot4Iu8HighHalfSrc0", dot4_iu8, {.opsel = 1}, 0x32bf5f5eu, 0xf9c54f6bu, 0x00b85d08u,
+      0x00b97fe8u, 0x00b97fe8u, int_modes, int_simd);
+  add("Dot4Iu8LowHalves", dot4_iu8, {.opsel_hi = 0}, 0xe9d6d2a3u, 0xffffffefu, 0x00000031u,
+      0x0002d2e7u, 0x0002d2e7u, int_modes, int_simd);
+  add("Dot4U8LowHalves", dot4_u8, {.opsel_hi = 0}, 0x2e1ae63eu, 0x14771051u, 0x00dc74cbu,
+      0x00dcb8c7u, 0x00dcb8c7u, int_modes, int_simd);
+  add("Dot8Iu4HighHalfSrc0", dot8_iu4, {.opsel = 1}, 0x8d7fb53du, 0x64aeeb2fu, 0x5385deddu,
+      0x5385e247u, 0x5385e247u, int_modes, int_simd);
+  add("Dot8Iu4LowHalves", dot8_iu4, {.opsel_hi = 0}, 0x041e0e34u, 0x3f5b683eu, 0xb7a86fa9u,
+      0xb7a8710bu, 0xb7a8710bu, int_modes, int_simd);
+  add("Dot8U4LowHalves", dot8_u4, {.opsel_hi = 0}, 0xfffffffdu, 0x00000c75u, 0xffffd984u,
+      0xffffdc40u, 0xffffdc40u, int_modes, int_simd);
   // Selection combined with signedness and CLAMP: the selected elements are
   // negative and C is near the limit, so each modifier changes the result.
-  add("Dot4Iu8HighHalfSrc1SignedClamp", iu8, {.neg = 2, .opsel = 2, .clamp = 1}, 0x7f7f8080u,
+  add("Dot4Iu8HighHalfSrc1SignedClamp", dot4_iu8, {.neg = 2, .opsel = 2, .clamp = 1}, 0x7f7f8080u,
       0x88887777u, 0x800002cfu, 0x80000000u, 0x80000000u, int_modes, int_simd);
-  add("Dot4Iu8HighHalfSrc0SignedClamp", iu8, {.neg = 3, .opsel = 1, .clamp = 1}, 0xffff8000u,
+  add("Dot4Iu8HighHalfSrc0SignedClamp", dot4_iu8, {.neg = 3, .opsel = 1, .clamp = 1}, 0xffff8000u,
       0x7fffffffu, 0x80000000u, 0x80000000u, 0x80000000u, int_modes, int_simd);
-  add("Dot4Iu8MixedHalvesSigned", iu8, {.neg = 3, .opsel_hi = 2}, 0x7fffffffu, 0xffffffffu, 0u,
+  add("Dot4Iu8MixedHalvesSigned", dot4_iu8, {.neg = 3, .opsel_hi = 2}, 0x7fffffffu, 0xffffffffu, 0u,
       0x00000004u, 0x00000004u, int_modes, int_simd);
-  add("Dot8Iu4HighHalfSrc1SignedClamp", iu4, {.neg = 2, .opsel = 2, .clamp = 1}, 0x88887777u,
+  add("Dot8Iu4HighHalfSrc1SignedClamp", dot8_iu4, {.neg = 2, .opsel = 2, .clamp = 1}, 0x88887777u,
       0x88887777u, 0x80000059u, 0x80000000u, 0x80000000u, int_modes, int_simd);
-  add("Dot8Iu4LowHalvesSignedClamp", iu4, {.neg = 1, .opsel_hi = 0, .clamp = 1}, 0x77778888u,
+  add("Dot8Iu4LowHalvesSignedClamp", dot8_iu4, {.neg = 1, .opsel_hi = 0, .clamp = 1}, 0x77778888u,
       0x7f807f80u, 0x8000014eu, 0x80000000u, 0x80000000u, int_modes, int_simd);
-  add("Dot4U8HighHalfSrc0Clamp", u8, {.opsel = 1, .clamp = 1}, 0x80000000u, 0xffffffffu,
+  add("Dot4U8HighHalfSrc0Clamp", dot4_u8, {.opsel = 1, .clamp = 1}, 0x80000000u, 0xffffffffu,
       0xffff8000u, 0xffffffffu, 0xffffffffu, int_modes, int_simd);
-  add("Dot8U4LowHalvesClamp", u4, {.opsel_hi = 0, .clamp = 1}, 0x0bffe1c2u, 0x00000015u,
+  add("Dot8U4LowHalvesClamp", dot8_u4, {.opsel_hi = 0, .clamp = 1}, 0x0bffe1c2u, 0x00000015u,
       0xffffffe8u, 0xffffffffu, 0xffffffffu, int_modes, int_simd);
   return lanes;
 }
@@ -4508,10 +4509,8 @@ std::vector<ArithmeticCase> dot_family_cases() {
                                            .neg = m.neg});
       const uint32_t expected = arch == ROCJITSU_CODE_ARCH_RDNA4 ? lane.gfx1201 : *lane.gfx1100;
       for (const uint32_t mode : lane.modes) {
-        char suffix[16];
-        std::snprintf(suffix, sizeof(suffix), "Mode%X", mode);
         cases.push_back(
-            {std::string(prefix) + lane.name + suffix,
+            {std::string(prefix) + lane.name + std::format("Mode{:X}", mode),
              arch,
              {words[0], words[1], 0u},
              {{0, lane.sources[0]}, {1, lane.sources[1]}, {2, lane.sources[2]}, {6, kUntouched}},

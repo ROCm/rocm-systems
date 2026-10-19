@@ -4647,10 +4647,10 @@ enum class Vop3pDotHalfFormat { F16, BF16 };
 /// fma). op_sel / op_sel_hi pick the halves of src0/src1 (gated to the default
 /// packing op_sel == 0 && op_sel_hi == 3); neg / neg_hi flip the src0/src1
 /// product-operand signs; on the accumulator neg_hi bit 2 is ABS, applied before
-/// neg bit 2, as in the scalar body. The encoded CLAMP
-/// field is ignored for floating DOT instructions. NaN-input payload divergence accepted (same
-/// carve-out as the pk_fma
-/// slices). @tparam Fmt selects the f16 vs bf16 widening.
+/// neg bit 2, as in the scalar body. The encoded CLAMP field is ignored for
+/// floating DOT instructions. NaN-input payload divergence is accepted, as for
+/// the pk_fma slices.
+/// @tparam Fmt Selects F16 or BF16 widening of the half-precision sources.
 template <Vop3pDotHalfFormat Fmt, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_dot_f16_simd(Inst &inst, Wavefront &wf) {
