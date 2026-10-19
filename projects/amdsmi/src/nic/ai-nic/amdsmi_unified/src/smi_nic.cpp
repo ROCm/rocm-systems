@@ -561,7 +561,7 @@ const std::string& SmiNic::telemetry_sysfs_bus_path() const {
 }
 
 SmiNicKind SmiNic::kind() const {
-  // Checked first: SmiNicIfoe is also built with NicProduct::AINIC.
+  // Checked first: SmiNicUALoE is also built with NicProduct::AINIC.
   if (type_ == NicType::Fabric) {
     return SMI_NIC_KIND_UALOE;
   }

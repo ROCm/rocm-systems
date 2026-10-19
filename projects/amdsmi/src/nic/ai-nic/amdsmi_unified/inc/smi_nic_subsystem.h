@@ -30,7 +30,7 @@ class SmiNicSubsystem {
 
   virtual void discover(const std::string& pci_path, const std::string& net_path,
                         std::shared_ptr<amd::smi::nic::transport::NicTransport> transport) = 0;
-  // Descriptive only. Two plugins may report the same vendor (IFoE and Pensando
+  // Descriptive only. Two plugins may report the same vendor (UALoE and Pensando
   // are both AMD), so this cannot route a query to a plugin; SmiNicSystem
   // resolves by which plugin owns the NIC.
   virtual NicVendor vendor() const = 0;

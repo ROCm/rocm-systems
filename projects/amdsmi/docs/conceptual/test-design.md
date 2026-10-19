@@ -440,7 +440,7 @@ tests/python/
 │   │   ├── test_thermal.py            # socket_temperature, prochot_status
 │   │   └── test_benchmark.py          # per-API latency benchmarks with timing assertions
 │   ├── ifoe/
-│   │   └── test_fabric_lazy_init.py   # IFoE fabric query resolves without hanging (needs the package's __init__.py to be discovered)
+│   │   └── test_fabric_lazy_init.py   # UALoE fabric query resolves without hanging (needs the package's __init__.py to be discovered)
 │   └── system/
 │       ├── test_init.py               # amdsmi init / shutdown lifecycle
 │       └── test_topology.py           # socket, processor, and utilization count discovery
