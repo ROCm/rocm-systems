@@ -1185,8 +1185,9 @@ main(int argc, char** argv)
     // mutname was resolved against the search paths in the argument pre-scan
     if(!path::is_regular_file(mutname))
     {
-        fprintf(stderr, "Error! Application '%s' does not exist or is not a regular "
-                        "file. Nothing to instrument.\n",
+        fprintf(stderr,
+                "Error! Application '%s' does not exist or is not a regular "
+                "file. Nothing to instrument.\n",
                 _cmdv[0]);
         return EXIT_FAILURE;
     }
