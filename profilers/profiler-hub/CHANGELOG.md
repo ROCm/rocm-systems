@@ -20,6 +20,8 @@ downstream consumer of the library.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-19
+
 ### Changed
 
 - CMake configure now prints the profiler-hub version and the RocPD schema version. The project version moved to a `VERSION` file.
@@ -111,6 +113,7 @@ Initial release.
 - Cobertura code coverage reports via the `coverage-xml` CMake target.
 - clang-tidy custom target using the bundled `.clang-tidy` configuration.
 
-[Unreleased]: https://github.com/ROCm/rocm-systems/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ROCm/rocm-systems/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ROCm/rocm-systems/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/ROCm/rocm-systems/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ROCm/rocm-systems/releases/tag/v0.1.0
