@@ -860,6 +860,93 @@ static ncclResult_t recvFree(struct ncclComm* comm, struct ncclConnector* recv) 
 }
 
 #define NCCL_SHARED_STEPS 16
+
+// Host-memory shared P2P pools are registered on every NIC that serves a non-GDR P2P connection.
+// With 4 KiB pages a 256 MiB pool takes 65,536 NIC page-table entries; AINIC caps them per LIF
+// (rdma_npts_per_lif = 1,048,576), so one communicator's pools nearly fill a NIC and the next
+// ibv_reg_mr fails with EINVAL. Backing the pool with transparent huge pages lets the MR use
+// 2 MiB pages (128 entries per 256 MiB).
+RCCL_PARAM(NetSharedHostHugePages, "NET_SHARED_HOST_HUGEPAGES", 1);
+static constexpr size_t rcclHugePageSize = 2UL << 20;
+
+static size_t rcclAnonHugeKb(const void* addr) {
+  FILE* f = fopen("/proc/self/smaps", "r");
+  if (f == NULL) return 0;
+  char line[512];
+  bool inVma = false;
+  size_t kb = 0;
+  while (fgets(line, sizeof(line), f)) {
+    unsigned long start, end;
+    if (sscanf(line, "%lx-%lx ", &start, &end) == 2) {
+      if (inVma) break;
+      inVma = (uintptr_t)addr >= start && (uintptr_t)addr < end;
+    } else if (inVma && sscanf(line, "AnonHugePages: %zu kB", &kb) == 1) {
+      break;
+    }
+  }
+  fclose(f);
+  return kb;
+}
+
+static ncclResult_t sharedHostBuffAlloc(struct ncclProxySharedP2p* state) {
+  state->hostBuffMapSize = 0;
+  if (rcclParamNetSharedHostHugePages() && (size_t)state->size >= rcclHugePageSize) {
+    size_t mapSize = ROUNDUP((size_t)state->size, rcclHugePageSize);
+    char* raw = (char*)mmap(NULL, mapSize + rcclHugePageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
+                            -1, 0);
+    if (raw != MAP_FAILED) {
+      char* ptr = (char*)ROUNDUP((uintptr_t)raw, rcclHugePageSize);
+      size_t head = ptr - raw;
+      if (head) munmap(raw, head);
+      if (rcclHugePageSize - head) munmap(ptr + mapSize, rcclHugePageSize - head);
+      if (madvise(ptr, mapSize, MADV_HUGEPAGE) != 0) {
+        INFO(NCCL_ALLOC | NCCL_NET, "NET/Shared host pool: madvise(MADV_HUGEPAGE) failed: %s", strerror(errno));
+      }
+      memset(ptr, 0, mapSize);
+      void* devPtr = NULL;
+      cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+      CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+#if defined(HIP_HOST_UNCACHED_MEMORY)
+      cudaError_t err =
+        cudaHostRegister(ptr, mapSize, cudaHostRegisterPortable | cudaHostRegisterMapped | hipExtHostRegisterUncached);
+#else
+      cudaError_t err = cudaHostRegister(ptr, mapSize, cudaHostRegisterPortable | cudaHostRegisterMapped);
+#endif
+      if (err == cudaSuccess) err = cudaHostGetDevicePointer(&devPtr, ptr, 0);
+      CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
+      if (err == cudaSuccess) {
+        state->hostBuff = ptr;
+        state->hostBuffDev = (char*)devPtr;
+        state->hostBuffMapSize = mapSize;
+        INFO(NCCL_INIT | NCCL_NET, "NET/Shared host pool %p (dev %p) size %zu: %zu kB on huge pages", ptr, devPtr,
+             mapSize, rcclAnonHugeKb(ptr));
+        return ncclSuccess;
+      }
+      INFO(NCCL_ALLOC | NCCL_NET, "NET/Shared host pool: huge-page registration failed (%s), using hipHostMalloc",
+           cudaGetErrorString(err));
+      (void)cudaHostUnregister(ptr);
+      (void)cudaGetLastError();
+      munmap(ptr, mapSize);
+    }
+  }
+  NCCLCHECK(ncclCudaHostCalloc(&state->hostBuff, state->size));
+  state->hostBuffDev = state->hostBuff;
+  return ncclSuccess;
+}
+
+static ncclResult_t sharedHostBuffFree(struct ncclProxySharedP2p* state) {
+  if (state->hostBuffMapSize) {
+    CUDACHECK(cudaHostUnregister(state->hostBuff));
+    munmap(state->hostBuff, state->hostBuffMapSize);
+  } else {
+    NCCLCHECK(ncclCudaHostFree(state->hostBuff));
+  }
+  state->hostBuff = NULL;
+  state->hostBuffDev = NULL;
+  state->hostBuffMapSize = 0;
+  return ncclSuccess;
+}
+
 static ncclResult_t sharedNetBuffersInit(struct ncclProxyState* proxyState, int cuda, int tpLocalRank, int type,
                                          int sameProcess, int nChannels, char** gpuPtr, char** cpuPtr, ssize_t* size,
                                          ncclIpcDesc* ipcDesc) {
@@ -910,10 +997,10 @@ static ncclResult_t sharedNetBuffersInit(struct ncclProxyState* proxyState, int 
     }
   }
   if (!cuda && state->hostBuff == NULL) {
-    NCCLCHECK(ncclCudaHostCalloc(&state->hostBuff, state->size));
+    NCCLCHECK(sharedHostBuffAlloc(state));
   }
   if (cpuPtr) *cpuPtr = cuda ? state->cudaBuff : state->hostBuff;
-  if (gpuPtr) *gpuPtr = (cpuPtr && sameProcess) ? *cpuPtr : NULL;
+  if (gpuPtr) *gpuPtr = (cpuPtr && sameProcess) ? (cuda ? state->cudaBuff : state->hostBuffDev) : NULL;
   if (ipcDesc) memcpy(ipcDesc, &state->ipcDesc, sizeof(state->ipcDesc));
   return ncclSuccess;
 }
@@ -945,7 +1032,7 @@ static ncclResult_t sharedNetBuffersDestroy(struct ncclProxyState* proxyState, i
       }
       NCCLCHECK(ncclCudaFree(state->cudaBuff, proxyState->memManager));
     }
-    if (state->hostBuff) NCCLCHECK(ncclCudaHostFree(state->hostBuff));
+    if (state->hostBuff) NCCLCHECK(sharedHostBuffFree(state));
   }
 
   if (peer->send.refcount || peer->recv.refcount) return ncclSuccess;
