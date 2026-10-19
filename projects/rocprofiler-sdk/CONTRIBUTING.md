@@ -151,6 +151,22 @@ gdb --args /home/user/rocm-systems/projects/rocprofiler-sdk/build-rocprofiler-sd
 If the test command uses [rocprofv3](./source/bin/rocprofv3.py), using debuggers such as `gdb` will require replacing prefixing with `gdb --args python3 /path/to/rocprofv3 ...`.
 If rocprofv3 requires application replay, execute `set follow-fork-mode child` within the GDB command line prompt.
 
+### Code-object metadata compatibility ###
+
+Build `rocprofiler-sdk-shared-library` and `codeobj-library-tests`, then run
+`ctest --test-dir <build>/source/lib/tests/codeobj --output-on-failure`.
+These CPU tests cover executable and bundled-member metadata, unaligned input,
+owned symbol names after input release, malformed input, optional-parser failure,
+and rejection of an optional API exported by another library.
+
+Run the suite with both a released COMGR runtime and a runtime exposing the
+proposed `amd_comgr_get_elf_metadata` API from
+[LLVM PR 5023](https://github.com/ROCm/llvm-project/pull/5023). Select the intended
+runtime with `LD_LIBRARY_PATH` or `LD_PRELOAD` and verify which library is loaded.
+Released COMGR exercises the copying path; the proposed API exercises direct ELF
+parsing. The injected failure and library-ownership tests also run with released
+COMGR, but do not replace testing the real optional API.
+
 ### Test Locations ###
 
 * Integration tests are located in the top-level [tests](./tests) directory.

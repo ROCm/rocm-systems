@@ -101,6 +101,23 @@ get_kernel_symbol_device_name_map(const amd_comgr_code_object_info_t& isa_offset
 kernel_symbol_hip_device_map_t
 get_kernel_symbol_device_name_map_from_executable(const void* executable, size_t executable_size);
 
+namespace detail
+{
+using get_elf_metadata_t = amd_comgr_status_t (*)(size_t, const char*, amd_comgr_metadata_node_t*);
+
+// Accept the optional API only from the implementation containing linked_api.
+get_elf_metadata_t
+resolve_elf_metadata(const void* linked_api);
+
+// Borrow bytes for this call and return owned metadata. A missing or failed
+// optional parser falls back to data import, including with older COMGR headers.
+amd_comgr_status_t
+get_binary_metadata(size_t                     size,
+                    const void*                bytes,
+                    amd_comgr_metadata_node_t* metadata,
+                    get_elf_metadata_t         get_elf_metadata);
+}  // namespace detail
+
 }  // namespace hip
 }  // namespace code_object
 }  // namespace rocprofiler
