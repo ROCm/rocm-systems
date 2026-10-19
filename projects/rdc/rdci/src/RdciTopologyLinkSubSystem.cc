@@ -28,7 +28,8 @@ THE SOFTWARE.
 #include "rdc_lib/rdc_common.h"
 namespace amd {
 namespace rdc {
-RdciTopologyLinkSubSystem::RdciTopologyLinkSubSystem() : topology_ops_(TOPOLOGY_UNKNOWN) {}
+RdciTopologyLinkSubSystem::RdciTopologyLinkSubSystem()
+    : topology_ops_(TOPOLOGY_UNKNOWN), group_index_(0), is_group_index_set(false) {}
 
 void RdciTopologyLinkSubSystem::parse_cmd_opts(int argc, char** argv) {
   const int HOST_OPTIONS = 1000;
