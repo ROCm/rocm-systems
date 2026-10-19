@@ -80,7 +80,7 @@ Without either, the application runs unrecorded and says why on stderr.
 
   mkdir -p ~/.config/hrr && echo yes > ~/.config/hrr/capture-consent
 
- The archive is a directory, not a single file, and it holds one
+The archive is a directory, not a single file, and it holds one
 ``pid-<pid>/`` subdirectory per recorded process:
 
 .. code-block:: text
