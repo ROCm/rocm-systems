@@ -6,8 +6,8 @@
 The page is the customer text for AIRUNTIME-2733. Its device table has to name
 exactly the fields hip_capture_metadata.cpp writes into a manifest, so a task
 that adds, removes or blanks one cannot land without updating the page. Its
-inventory has to list the active marker, the hipHostRegister snapshot and the
-hipLinkAddData inputs.
+inventory has to list the active marker, the hipHostRegister snapshot, the
+hipLinkAddData inputs and the hipDeviceProp_t snapshots in events.bin.
 
 Run: python3 -m unittest discover -s projects/hrr/tools/tests
 """
@@ -88,6 +88,25 @@ class PrivacyDocTest(unittest.TestCase):
         # does not gate on the call's result.
         self.assertNotIn("hipSuccess", body)
         self.assertIn("rejected", row)
+
+    def test_lists_device_property_snapshots_outside_the_manifest(self):
+        # Every shim that copies a caller's hipDeviceProp_t into its event
+        # records the device name, PCI ids, UUID and LUID in events.bin.
+        shims = (CAPTURE_SRC / "hip_capture_generated.cpp").read_text(
+            encoding="utf-8"
+        ) + (CAPTURE_SRC / "hip_capture.cpp").read_text(encoding="utf-8")
+        apis = set()
+        for shim in re.split(r"\n(?=(?:static )?\S+\*? capture_)", shims):
+            name = re.match(r"(?:static )?\S+\*? capture_(\w+)\(", shim)
+            if name and re.search(r"memcpy\(a\.\w+, \w+, sizeof\(hipDeviceProp", shim):
+                apis.add(re.sub(r"R\d{4}$", "", name.group(1)))
+        self.assertIn("hipChooseDevice", apis)
+        text = PRIVACY.read_text(encoding="utf-8")
+        strings = text.split("## Never recorded", 1)[1].split("\n## ", 1)[0]
+        for api in apis:
+            rows = [r for r in inventory_rows() if f"`{api}`" in r]
+            self.assertTrue(any("`events.bin`" in r and "UUID" in r for r in rows), api)
+            self.assertIn(f"`{api}`", strings)
 
     def test_states_that_an_archive_is_untrusted_executable_input(self):
         text = PRIVACY.read_text(encoding="utf-8")

@@ -46,6 +46,8 @@ every capture is a contents capture.
 | Sequence of successful HIP calls, with sizes, flags, device addresses, handles, thread ids | `events.bin` | both | — kept, replay needs it |
 | Kernel names, mangled but read back with `c++filt`; they describe the model's architecture and precision | `events.bin` | both | — kept, triage names the failing kernel |
 | Event timestamps, from a monotonic clock (not the date or time of day) | `events.bin` | both | — kept |
+| Device properties passed to `hipChooseDevice`, the whole `hipDeviceProp_t`: device and architecture names, PCI ids and, in the current layout, the UUID and LUID | `events.bin` | both | — kept, the call's answer depends on them |
+| Other structures passed into a HIP call, copied whole, such as copy, memset, graph node, allocation, pool and launch-attribute parameters. Padding, reserved and unused union bytes are copied as the caller left them | `events.bin` | both | — kept, replay needs it |
 | Host buffers copied to or from the device, byte for byte, unencrypted. For a serving stack this includes prompts and generated output as token ids, which the model's public tokeniser reverses, and the model weights | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Host memory registered with `hipHostRegister`: the whole range, byte for byte, as it was at registration, whether or not it is ever copied | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Kernel argument bytes | `events.bin` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
@@ -67,13 +69,18 @@ The per-process `manifest.json` also holds `pid`, `parent_pid`, `complete`, `eve
 | `integrated`, `managed_memory`, `memory_pools_supported`, `compute_mode` | yes | — |
 | `uuid`, `pci`, `luid`, `luid_device_node_mask`: identify the individual GPU and its slot | no | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): blanked |
 
+This table covers `manifest.json` only. A `hipChooseDevice` call can carry the same
+identifiers in `events.bin`, as listed above.
+
 ## Never recorded
 
 Capture does not read the host name, the command line, environment variables or the user
 name, and records a date and time of day only in the `active` marker on Windows. A string
 reaches the archive only as a kernel name; as a string argument of a HIP call (the path
 given to `hipLinkAddFile`, the name given to `hipLinkAddData`, the function name given to
-`hipGetProcAddress`); as the name of a device variable the program registers; inside a host
+`hipGetProcAddress`); as the name of a device variable the program registers; as a character
+array in a structure passed to a HIP call (the device and architecture names given to
+`hipChooseDevice`); inside the padding or unused bytes of such a structure; inside a host
 buffer the workload copied or registered; inside a linker input buffer, even one the linker
 rejected; or inside a code object. A path in such a buffer,
 for example a compiler cache path under the user's home directory, is recorded with it.
