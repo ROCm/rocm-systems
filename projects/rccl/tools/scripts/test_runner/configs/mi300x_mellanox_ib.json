@@ -3574,6 +3574,16 @@
           }
         },
         {
+          "name": "DDA_IpcAllReduceIndexData_8Ranks",
+          "description": "DDA IPC flat and tree AllReduce with rank- and index-dependent fp32/bf16 data, out-of-place and in-place, checked exactly on every rank",
+          "test_filter": "DdaIpcMPI_IndexData.AllReduce*"
+        },
+        {
+          "name": "DDA_IpcReduceScatterIndexData_8Ranks",
+          "description": "DDA IPC ReduceScatter with rank- and index-dependent fp32/bf16 data: every rank must receive its own reduced slice",
+          "test_filter": "DdaIpcMPI_IndexData.ReduceScatter*"
+        },
+        {
           "name": "HostApi_DenseAllToAllPutSignal_8Ranks",
           "description": "Dense all-to-all put/signal over the copy engine on 8 ranks; the uneven profile can split batches into chunks, which the 2-rank Host API suites never reach",
           "test_filter": "HostApiTest.DenseAllToAllPutSignal",
