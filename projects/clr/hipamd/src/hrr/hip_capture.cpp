@@ -56,6 +56,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <climits>
 #include <cstddef>
 #include <cstdio>
@@ -69,6 +70,11 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
+
+#if defined(__linux__)
+#include <sys/uio.h>   // process_vm_readv()
+#include <unistd.h>
+#endif
 
 static std::once_flag g_hrr_atexit_once;
 
@@ -936,6 +942,30 @@ static void forget_program_hash(const amd::Program* prog) {
   g_prog_hash.erase(prog);
 }
 
+// How many of the n bytes at p can be read, found page by page without reading
+// them: process_vm_readv on this process fails with EFAULT on a page that
+// cannot be read, where a plain read would fault. 0 when it cannot tell. Other
+// platforms do not check, and get n.
+static size_t readable_extent(const void* p, size_t n) {
+#if defined(__linux__)
+  static const uintptr_t page = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
+  const uintptr_t start = reinterpret_cast<uintptr_t>(p);
+  size_t ok = 0;
+  while (ok < n) {
+    char byte;
+    iovec local{&byte, 1};
+    iovec remote{reinterpret_cast<void*>(start + ok), 1};
+    if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != 1)
+      return errno == EFAULT ? ok : 0;
+    ok = std::min(n, static_cast<size_t>(((start + ok) | (page - 1)) + 1 - start));
+  }
+  return ok;
+#else
+  (void)p;
+  return n;
+#endif
+}
+
 // Hash an already-read device binary span, refusing anything that does not
 // look like a loadable image. Returns {0,0} when there is nothing safe to
 // record. Takes the span rather than re-reading it so callers that already
@@ -954,15 +984,17 @@ static hrr_cap::Hash128 hash_program_image(const amd::Program* prog, const uint8
   }
   // The span's length is not a readable extent: a code object HIP took from a
   // registered fat binary carries the size its bundle entry declares, and
-  // nothing bounds that. An ELF's own headers do, so hash no further than its
-  // sections and segments reach, and refuse one whose headers reach past the
-  // declared length.
+  // nothing bounds that, nor the ELF's own headers, which can declare the same
+  // size. So hash no further than its sections and segments reach, and refuse
+  // one whose headers reach past the memory that can be read.
   if (amd::Elf::isElfMagic(reinterpret_cast<const char*>(data))) {
-    const uint64_t elf_size = amd::Elf::getElfSize(data, size);
+    const size_t readable = readable_extent(data, size);
+    const uint64_t elf_size = amd::Elf::getElfSize(data, readable);
     if (elf_size == 0) {
-      LogPrintfWarning("[HRR capture] program %p: ELF at %p does not fit the %llu bytes"
-                       " HIP holds for it — not recording a code object for it",
-                       (const void*)prog, (const void*)data, (unsigned long long)size);
+      LogPrintfWarning("[HRR capture] program %p: ELF at %p does not fit the %llu of its"
+                       " %llu bytes that can be read — not recording a code object for it",
+                       (const void*)prog, (const void*)data, (unsigned long long)readable,
+                       (unsigned long long)size);
       return {0, 0};
     }
     size = static_cast<size_t>(elf_size);

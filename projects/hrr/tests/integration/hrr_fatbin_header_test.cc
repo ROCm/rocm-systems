@@ -32,9 +32,12 @@
 #include <hip/hiprtc.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -49,6 +52,8 @@ extern "C" void __hipRegisterFunction(void** modules, const void* hostFunction,
                                       char* deviceFunction, const char* deviceName,
                                       unsigned int threadLimit, uint3* tid, uint3* bid,
                                       dim3* blockDim, dim3* gridDim, int* wSize);
+extern "C" void __hipRegisterVar(void** modules, void* var, char* hostVar, char* deviceVar,
+                                 int ext, size_t size, int constant, int global);
 
 #define HRR_HIPRTC_CHECK(expr)                                                 \
   do {                                                                         \
@@ -182,6 +187,27 @@ std::vector<uint8_t> oversized_bundle(const std::string& target_id,
   return b;
 }
 
+// The code object with its first section the loader never reads (PROGBITS,
+// not allocated: .comment as lld emits it) declaring a terabyte from the start
+// of the file. HIP looks only at the ELF header of a shared object it is given.
+std::vector<uint8_t> overstated_section(std::vector<uint8_t> co) {
+  uint64_t shoff = 0, flags = 0;
+  uint16_t shnum = 0;
+  uint32_t type = 0;
+  std::memcpy(&shoff, co.data() + 0x28, sizeof(shoff));
+  std::memcpy(&shnum, co.data() + 0x3c, sizeof(shnum));
+  for (size_t sh = shoff; sh < shoff + size_t(shnum) * 64; sh += 64) {
+    std::memcpy(&type, co.data() + sh + 4, sizeof(type));
+    std::memcpy(&flags, co.data() + sh + 8, sizeof(flags));
+    if (type != 1 /* SHT_PROGBITS */ || (flags & 2 /* SHF_ALLOC */)) continue;
+    put_u64(co, sh + 24, 0);
+    put_u64(co, sh + 32, uint64_t(1) << 40);
+    return co;
+  }
+  FAIL("no unallocated PROGBITS section to overstate");
+  return co;
+}
+
 // What clang emits for one target: an empty host entry, then the code object.
 std::vector<uint8_t> valid_bundle(const std::string& target_id,
                                   const std::vector<uint8_t>& payload) {
@@ -205,12 +231,22 @@ constexpr char     kPreInitLongIdMarker[]   = "HRR fatbin pre-init long id";
 constexpr char     kPreInitOverflowMarker[] = "HRR fatbin pre-init overflow";
 constexpr char     kPreInitFarEndMarker[]   = "HRR fatbin pre-init far end";
 constexpr uint64_t kPreInitCompressedTag    = 0x4852524650524531ull;
-// And the ones after: three HIP loads, told apart by their kernel, two it refuses.
+// And the ones after: four HIP loads, told apart by their kernel, two it refuses.
 constexpr char     kLiveKernel[]            = "hrr_fatbin_live_probe";
 constexpr char     kFarEndKernel[]          = "hrr_fatbin_far_end_probe";
 constexpr char     kOversizedKernel[]       = "hrr_fatbin_oversized_probe";
+constexpr char     kOverstatedKernel[]      = "hrr_fatbin_overstated_probe";
 // Registered with device 1 current, launched on device 0.
 constexpr char     kDevice1Kernel[]         = "hrr_fatbin_device1_probe";
+// Registered before HIP initialises, from a bundle the parent builds, and read
+// on both devices: a __device__ global and the kernel that returns it. Replay
+// compares a copy back with a float tolerance, so the values written differ
+// as floats too: 2.0f and 1.0f.
+constexpr char     kGlobalKernel[]          = "hrr_fatbin_global_probe";
+constexpr char     kDeviceGlobal[]          = "hrr_fatbin_device_global";
+constexpr int      kGlobalInit              = 0x40000000;
+constexpr int      kGlobalWritten           = 0x3f800000;
+constexpr char     kGlobalBundleEnv[]       = "HRR_FATBIN_GLOBAL_BUNDLE";
 constexpr char     kLiveForeignMarker[]     = "HRR fatbin live foreign";
 constexpr uint64_t kLiveCompressedTag       = 0x485252464C495631ull;
 
@@ -263,9 +299,14 @@ void** register_fat_binary(const void* bundle) {
   return __hipRegisterFatBinary(new Wrapper{kHipfMagic, 1, bundle, nullptr});
 }
 
-std::vector<uint8_t> compile_code_object(const std::string& kernel) {
+// A kernel writing 1, or with `global`, the value of that __device__ global.
+std::vector<uint8_t> compile_code_object(const std::string& kernel,
+                                         const std::string& global = "") {
   const std::string src =
-      "extern \"C\" __global__ void " + kernel + "(int* out) { out[0] = 1; }\n";
+      (global.empty() ? std::string() : "extern \"C\" __device__ int " + global + " = " +
+                                            std::to_string(kGlobalInit) + ";\n") +
+      "extern \"C\" __global__ void " + kernel + "(int* out) { out[0] = " +
+      (global.empty() ? std::string("1") : global) + "; }\n";
   hiprtcProgram prog = nullptr;
   HRR_HIPRTC_CHECK(hiprtcCreateProgram(&prog, src.c_str(), "hrr_fatbin_probe.hip", 0,
                                        nullptr, nullptr));
@@ -283,6 +324,34 @@ std::vector<uint8_t> compile_code_object(const std::string& kernel) {
   HRR_HIPRTC_CHECK(hiprtcGetCode(prog, reinterpret_cast<char*>(co.data())));
   HRR_HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   return co;
+}
+
+// What clang's module constructor does for a kernel: only the stub's address matters.
+void register_function(void** handle, const void* stub, const char* kernel) {
+  __hipRegisterFunction(handle, stub, const_cast<char*>(kernel), kernel,
+                        static_cast<unsigned>(-1), nullptr, nullptr, nullptr, nullptr, nullptr);
+}
+
+// Run the kernel registered for `stub` on `device` and return what it wrote.
+int launch_probe(int device, const void* stub) {
+  HRR_HIP_CHECK(hipSetDevice(device));
+  int* out = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&out, sizeof(int)));
+  HRR_HIP_CHECK(hipMemset(out, 0, sizeof(int)));
+  void* args[] = {&out};
+  HRR_HIP_CHECK(hipLaunchKernel(stub, dim3(1), dim3(1), args, 0, nullptr));
+  int host = 0;
+  HRR_HIP_CHECK(hipMemcpy(&host, out, sizeof(int), hipMemcpyDeviceToHost));
+  HRR_HIP_CHECK(hipFree(out));
+  return host;
+}
+
+// Whether GPUs 0 and 1 are of one kind, so a code object built for one runs on both.
+bool devices_0_1_alike() {
+  hipDeviceProp_t p0{}, p1{};
+  HRR_HIP_CHECK(hipGetDeviceProperties(&p0, 0));
+  HRR_HIP_CHECK(hipGetDeviceProperties(&p1, 1));
+  return std::strcmp(p0.gcnArchName, p1.gcnArchName) == 0;
 }
 
 }  // namespace
@@ -312,14 +381,22 @@ TEST_CASE("Unit_HRR_FatBinHeader_Direct", "[.][hrr-direct]") {
     REQUIRE(std::memcmp(co->data(), "\x7f" "ELF", 4) == 0);
   }
 
-  // From here HIP digests each bundle inside the call. These three it loads.
-  REQUIRE(register_fat_binary(pin(valid_bundle(target, live_co))) != nullptr);
+  // From here HIP digests each bundle inside the call. These four it loads.
+  void** live = register_fat_binary(pin(valid_bundle(target, live_co)));
+  REQUIRE(live != nullptr);
   REQUIRE(register_fat_binary(pin(far_end_bundle(target, far_end_co))) != nullptr);
   REQUIRE(register_fat_binary(pin_before_guard(oversized_bundle(target, oversized_co))) !=
           nullptr);
+  REQUIRE(register_fat_binary(pin_before_guard(oversized_bundle(
+              target, overstated_section(compile_code_object(kOverstatedKernel))))) != nullptr);
   // And these it refuses: no code object for this GPU, a bad header.
   REQUIRE(register_fat_binary(pin(live_foreign())) == nullptr);
   REQUIRE(register_fat_binary(pin(live_compressed())) == nullptr);
+
+  // A launch for the replay to resolve.
+  static const char live_stub = 0;
+  register_function(live, &live_stub, kLiveKernel);
+  CHECK(launch_probe(0, &live_stub) == 1);
 }
 
 namespace {
@@ -356,7 +433,8 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
 
   // Every registration is recorded, none with a blob: the seven the workload
   // made with a null handle (five before HIP initialised, two HIP refused),
-  // the three HIP loaded with a real one, each naming its code object.
+  // the four HIP loaded with a real one, each naming its code object but the
+  // one whose ELF overstates a section.
   size_t null_handle = 0, loaded = 0;
   for (const auto& ev : arc.events) {
     if (ev.header().event_type != HRR_API_HIPREGISTERFATBINARY) continue;
@@ -364,12 +442,11 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
     const auto* a =
         reinterpret_cast<const hrr_args___hipRegisterFatBinary*>(ev.raw_payload.data());
     CHECK(a->blob_size == 0);
-    // A handle means HIP loaded a code object; a swept one may name one too.
-    if (a->ret || a->blob_hash_lo || a->blob_hash_hi)
+    if (a->blob_hash_lo || a->blob_hash_hi)
       CHECK(arc.code_objects.count(hrr::hash_hex(a->blob_hash_lo, a->blob_hash_hi)) == 1);
     ++(a->ret ? loaded : null_handle);
   }
-  CHECK(loaded == 3);
+  CHECK(loaded == 4);
   CHECK(null_handle >= 7);
 
   std::vector<std::vector<uint8_t>> stored;
@@ -385,7 +462,8 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   // rather than inside a bundle, and only as long as the ELF: it ends with its
   // section header table, as the linker lays it out, even where the bundle
   // entry declared a terabyte. The page after that bundle cannot be read, so
-  // a capture that hashed the declared size did not get this far.
+  // a capture that hashed the declared size did not get this far, nor one that
+  // trusted the ELF's overstated section, whose code object is not stored.
   for (const char* kernel : {kLiveKernel, kFarEndKernel, kOversizedKernel}) {
     INFO("Kernel: " << kernel);
     size_t hits = 0;
@@ -414,7 +492,51 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
       INFO("Marker: " << marker);
       CHECK_FALSE(contains(bytes, marker));
     }
+    CHECK_FALSE(contains(bytes, kOverstatedKernel));
   }
+
+  // An archive from before held the bundle as a blob, which replay loads as a
+  // module, and a launch recorded without a code object finds its kernel by
+  // name. Rewrite the live bundle and its launch that way: its code object
+  // becomes the blob, and the launch names none.
+  const fs::path archive = hrr_single_process_archive(cap.path);
+  std::string events = read_text_file(archive / "events.bin");
+  auto at = [&](const hrr::Event& ev) {
+    const size_t pos = events.find(std::string(ev.raw_payload.begin(), ev.raw_payload.end()));
+    REQUIRE(pos != std::string::npos);
+    return pos;
+  };
+  std::string hex;
+  for (const auto& ev : arc.events) {
+    if (!ev.kernel_launch || ev.kernel_launch->kernel_name != kLiveKernel) continue;
+    hex = hrr::hash_hex(ev.kernel_launch->co_hash_lo, ev.kernel_launch->co_hash_hi);
+    // After the stream, the name's length and the name.
+    const uint64_t none[2] = {0, 0};
+    std::memcpy(&events[at(ev) + sizeof(hrr_event_header) + 10 + std::strlen(kLiveKernel)],
+                none, sizeof(none));
+  }
+  INFO("Code object: " << hex);
+  REQUIRE(arc.code_objects.count(hex) == 1);
+  const fs::path blob = archive / "blobs" / hex.substr(0, 2) / (hex + ".blob");
+  fs::create_directories(blob.parent_path());
+  fs::rename(archive / "code_objects" / (hex + ".hsaco"), blob);
+  const uint64_t blob_size = fs::file_size(blob);
+  size_t registrations = 0;
+  for (const auto& ev : arc.events) {
+    if (ev.header().event_type != HRR_API_HIPREGISTERFATBINARY) continue;
+    const auto* a =
+        reinterpret_cast<const hrr_args___hipRegisterFatBinary*>(ev.raw_payload.data());
+    if (hrr::hash_hex(a->blob_hash_lo, a->blob_hash_hi) != hex) continue;
+    std::memcpy(&events[at(ev) + offsetof(hrr_args___hipRegisterFatBinary, blob_size)],
+                &blob_size, sizeof(blob_size));
+    ++registrations;
+  }
+  REQUIRE(registrations == 1);
+  std::ofstream(archive / "events.bin", std::ios::binary | std::ios::trunc)
+      .write(events.data(), static_cast<std::streamsize>(events.size()));
+  auto [rc, replay] = hrr_playback_merged(archive);
+  INFO("Replay:\n" << replay);
+  CHECK(rc == 0);
 }
 
 // ===========================================================================
@@ -422,12 +544,28 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
 // the device current when the fat binary was registered, and on a host with
 // GPUs of more than one kind it may load on no other. The workload registers
 // with device 1 current, then launches the kernel on device 0, which on GPUs of
-// one kind uses the same code object.
+// one kind uses the same code object; on GPUs of two kinds it cannot, and both
+// halves skip.
 // ===========================================================================
 TEST_CASE("Unit_HRR_FatBinLoadDevice_Direct", "[.][hrr-direct]") {
+  // A __device__ global, registered before HIP initialises so that capture
+  // records it; the parent compiled it, since compiling initialises HIP.
+  const char* global_bundle = std::getenv(kGlobalBundleEnv);
+  if (!global_bundle) HRR_SKIP(kGlobalBundleEnv << " is not set");
+  std::vector<uint8_t> bytes;
+  REQUIRE(hrr::read_file_capped(global_bundle, bytes));
+  void** global_handle = register_fat_binary(pin(bytes));
+  REQUIRE(global_handle != nullptr);
+  static int global_shadow = 0;
+  static const char global_stub = 0;
+  register_function(global_handle, &global_stub, kGlobalKernel);
+  __hipRegisterVar(global_handle, &global_shadow, const_cast<char*>(kDeviceGlobal),
+                   const_cast<char*>(kDeviceGlobal), 0, sizeof(int), 0, 0);
+
   int n = 0;
   HRR_HIP_CHECK(hipGetDeviceCount(&n));
   if (n < 2) HRR_SKIP("needs two GPUs");
+  if (!devices_0_1_alike()) HRR_SKIP("GPUs 0 and 1 are of different kinds");
   HRR_HIP_CHECK(hipSetDevice(1));
   hipDeviceProp_t prop{};
   HRR_HIP_CHECK(hipGetDeviceProperties(&prop, 1));
@@ -435,33 +573,47 @@ TEST_CASE("Unit_HRR_FatBinLoadDevice_Direct", "[.][hrr-direct]") {
   const std::string target = std::string(kTargetPrefix) + prop.gcnArchName;
   void** handle = register_fat_binary(pin(valid_bundle(target, co)));
   REQUIRE(handle != nullptr);
-  // The host stub clang would emit: only its address matters.
   static const char stub = 0;
-  __hipRegisterFunction(handle, &stub, const_cast<char*>(kDevice1Kernel), kDevice1Kernel,
-                        static_cast<unsigned>(-1), nullptr, nullptr, nullptr, nullptr,
-                        nullptr);
+  register_function(handle, &stub, kDevice1Kernel);
+  CHECK(launch_probe(0, &stub) == 1);
+
+  // Each device has its own copy of the global. Write device 0's, through the
+  // address HIP gives for it there, and read both.
   HRR_HIP_CHECK(hipSetDevice(0));
-  int* out = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&out, sizeof(int)));
-  HRR_HIP_CHECK(hipMemset(out, 0, sizeof(int)));
-  void* args[] = {&out};
-  HRR_HIP_CHECK(hipLaunchKernel(&stub, dim3(1), dim3(1), args, 0, nullptr));
-  int host = 0;
-  HRR_HIP_CHECK(hipMemcpy(&host, out, sizeof(int), hipMemcpyDeviceToHost));
-  CHECK(host == 1);
-  HRR_HIP_CHECK(hipFree(out));
+  void* global_addr = nullptr;
+  HRR_HIP_CHECK(hipGetSymbolAddress(&global_addr, global_shadow));
+  HRR_HIP_CHECK(
+      hipMemcpy(global_addr, &kGlobalWritten, sizeof(int), hipMemcpyHostToDevice));
+  CHECK(launch_probe(0, &global_stub) == kGlobalWritten);
+  CHECK(launch_probe(1, &global_stub) == kGlobalInit);
 }
 
 // Replay pre-loads every code object before the first event, so it does not
 // replay the switch to device 1 first: it has to load this one there itself,
 // and on device 0 too, where the launch runs and a module on device 1 cannot.
+// The global's code object is loaded on both devices too, and its registration
+// has to bind device 0's copy, the one capture wrote: either read differs
+// from capture's otherwise.
 HRR_TEST_CASE(Unit_HRR_FatBinLoadDevice) {
   int n = 0;
   if (hipGetDeviceCount(&n) != hipSuccess || n < 2) HRR_SKIP("needs two GPUs");
+  if (!devices_0_1_alike()) HRR_SKIP("GPUs 0 and 1 are of different kinds");
   ScopedDir cap(fs::temp_directory_path() / "hrr_fatbin_load_device.hrr");
+  ScopedDir work(fs::temp_directory_path() / "hrr_fatbin_load_device.work");
+  fs::create_directories(work.path);
+  const fs::path global_bundle = work.path / "global.bundle";
+  {
+    hipDeviceProp_t prop{};
+    HRR_HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+    const auto b = valid_bundle(std::string(kTargetPrefix) + prop.gcnArchName,
+                                compile_code_object(kGlobalKernel, kDeviceGlobal));
+    std::ofstream(global_bundle, std::ios::binary)
+        .write(reinterpret_cast<const char*>(b.data()), static_cast<std::streamsize>(b.size()));
+  }
   { hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true,
                               /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv(kGlobalBundleEnv, global_bundle.string());
     set_proc_search_path(proc);
     int ret = proc.run("\"Unit_HRR_FatBinLoadDevice_Direct\"");
     INFO("Capture exit: " << ret << "\n" << proc.getOutput());

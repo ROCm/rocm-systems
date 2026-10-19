@@ -700,15 +700,17 @@ before suspecting the `<<<>>>` / kernarg capture path.
 At init, all already-registered fat binaries are recovered retroactively via
 `ForEachFatBinary`. Capture does not store the bundle: its size could only come
 from the header, which nothing bounds. It records the code object HIP extracted
-from the bundle for the current device, bounded by the ELF's own headers since the
-size HIP knows is the one the bundle entry declares, and the register event names
-that code object (blob hash set, blob size 0). Replay pre-loads every code object,
+from the bundle for the current device, bounded by the ELF's own headers and by the
+memory that can be read, since the size HIP knows is the one the bundle entry declares
+and the headers can declare as much; one whose headers reach further is not recorded.
+The register event names that code object (blob hash set, blob size 0). Replay pre-loads every code object,
 so kernels and `__device__` globals resolve as they do for module loads. HIP builds
 a loaded code object for one device, so replay keeps a module per code object and
 device, and pre-loads each code object on every device a registration naming it, a
 module load or a kernel launch used it on, the device current on that thread at
 that event; on a host with GPUs of more than one kind it may load on no other. Archives from before this
-change still carry a blob, which playback loads with `hipModuleLoadData`.
+change still carry a blob, which playback loads with `hipModuleLoadData` on the
+current device, keyed like any other module.
 
 ## Multi-Threaded Capture
 
