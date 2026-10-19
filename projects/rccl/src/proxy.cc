@@ -443,7 +443,6 @@ static ncclResult_t ncclProxyOpToArgs(struct ncclProxyOp* op, struct ncclProxyAr
   args->protocol = op->protocol;
   args->coll = op->coll;
   args->collAPI = op->collAPI;
-  args->collBytes = op->collBytes;
   args->algorithm = op->algorithm;
   args->nChannels = op->nChannels;
   args->nPeers = op->nPeers;

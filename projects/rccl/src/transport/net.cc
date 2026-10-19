@@ -155,8 +155,6 @@ struct recvNetResources {
   // Per-step flag value the GPU waits for, in CPU-writable VRAM so the GPU
   // does not need an extra host memory round trip after reading the tail.
   uint64_t* gdrFlushSeq;
-  // Whether the receive posted for each step slot asked for the flag (see gdrFlushFlagForOp)
-  uint8_t gdrFlushFlagStep[NCCL_STEPS];
   void* gdrDesc;
   int shared;
   int channelId;
@@ -218,15 +216,6 @@ struct setupReq {
 };
 
 NCCL_PARAM(NetOptionalRecvCompletion, "NET_OPTIONAL_RECV_COMPLETION", 1);
-
-// RCCL_IB_GDR_FLUSH_FLAG is used only for AllReduce/ReduceScatter larger than this many
-// bytes; other receives keep the RDMA read flush and the connection's full QP set.
-RCCL_PARAM(IbGdrFlushFlagThreshold, "IB_GDR_FLUSH_FLAG_THRESHOLD", 134217728);
-
-static bool gdrFlushFlagForOp(struct ncclProxyArgs* args) {
-  return (args->collAPI == ncclFuncAllReduce || args->collAPI == ncclFuncReduceScatter) &&
-         args->collBytes > (size_t)rcclParamIbGdrFlushFlagThreshold();
-}
 
 static rcclIBNicInfo rcclPrimaryNicInfo = {rcclIBNicTypeUnknown, 0, 0};
 
@@ -2112,11 +2101,7 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
                                 (subCount == 1);
         if (!checkedNetAttr++) setXferNetAttrs(proxyState, args, 0);
         if (ignoreCompletion) *requestPtr = (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
-        if (resources->gdrFlushFlag) {
-          bool useFlag = p == NCCL_PROTO_SIMPLE && gdrFlushFlagForOp(args);
-          resources->gdrFlushFlagStep[step % NCCL_STEPS] = useFlag;
-          ncclIbSetGpuFlushFlagHint(resources->netRecvComm, useFlag);
-        }
+        if (resources->gdrFlushFlag) ncclIbSetGpuFlushFlagHint(resources->netRecvComm, p == NCCL_PROTO_SIMPLE);
         NCCLCHECK(proxyState->ncclNet->irecv(resources->netRecvComm, subCount, ptrs, sizes, tags, mhandles, phandles,
                                              requestPtr));
         if (*requestPtr) {
@@ -2172,11 +2157,10 @@ static ncclResult_t recvProxyProgress(struct ncclProxyState* proxyState, struct 
             }
           }
           subGroup->requests[step % NCCL_STEPS] = NULL;
-          // Steps without the flag need no sequence update: a slot only ever holds a value published
-          // for an earlier flagged step that already completed, so the flag is at or past it and the
-          // GPU's flag wait passes.
+          // Steps that publish nothing (LL/LL128, empty SIMPLE steps) leave the slot holding a value
+          // published for an earlier step that already completed, so the GPU's flag wait passes.
           struct recvNetResources* groupRes = (struct recvNetResources*)(subGroup->connection->transportResources);
-          bool gpuFlagWait = groupRes->gdrFlushFlag != NULL && groupRes->gdrFlushFlagStep[step % NCCL_STEPS];
+          bool gpuFlagWait = groupRes->gdrFlushFlag != NULL && p == NCCL_PROTO_SIMPLE;
           for (int i = 0; gpuFlagWait && i < subGroup->groupSize; i++) {
             struct recvNetResources* subRes = (struct recvNetResources*)(subGroup[i].connection->transportResources);
             if (subRes->gdrFlushSeq == NULL) gpuFlagWait = false;

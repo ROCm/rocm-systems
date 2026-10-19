@@ -7,17 +7,16 @@
 // Multi-node whitebox tests for the remote GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG=1)
 // when consecutive operations on the same NET connection switch protocol.
 //
-// The proxy decides the flag per receive step: only SIMPLE steps of large
-// AllReduce/ReduceScatter ask for it (gdrFlushFlagForOp); LL/LL128 steps and all
-// P2P steps keep the RDMA read flush. A flagged step publishes a descriptor into
-// gdrFlushSeq[slot] that prims_simple waits on; an unflagged step leaves the slot
-// as it was, relying on any stale descriptor naming an already-completed step.
+// On a connection that negotiated the flag, every SIMPLE receive step asks for it
+// and publishes a descriptor into gdrFlushSeq[slot] that prims_simple waits on.
+// LL/LL128 steps leave the slot as it was, relying on any stale descriptor naming
+// an already-completed step.
 //
 // Ops are enqueued back-to-back on one stream without synchronizing, so the
 // proxy and kernels of one protocol are still in flight when the next op starts
 // on the other protocol. Each test then checks data on every rank and walks the
 // NET recv connectors: every published descriptor must use the expected QP count
-// and already be satisfied by its flags, and P2P-only traffic must never publish.
+// and already be satisfied by its flags.
 //
 // Run with >= 2 nodes. NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 selects LL128 (instead of
 // LL) for small P2P on gfx942/gfx950; run under both settings and under each
@@ -133,8 +132,7 @@ protected:
 // All-to-all ncclSend/ncclRecv where every peer's size flips between the
 // latency protocol (LL128, or LL without NCCL_ALLOC_P2P_NET_LL_BUFFERS) and
 // SIMPLE on each consecutive op, and peers in the same group use different
-// protocols. P2P never asks for the flag, so the negotiated connections must
-// fall back to the read flush on every SIMPLE step and never publish.
+// protocols, so flagged SIMPLE steps follow LL/LL128 steps on every connection.
 TEST_F(GdrFlushFlagProtoSwitchMPITest, P2pAllToAll_Ll128SimpleSwitch_BackToBack) {
     const std::string why = SkipReason();
     if (!why.empty()) GTEST_SKIP() << why;
@@ -223,23 +221,22 @@ TEST_F(GdrFlushFlagProtoSwitchMPITest, P2pAllToAll_Ll128SimpleSwitch_BackToBack)
     EXPECT_TRUE(dataOk) << "rank " << rank << ": " << firstErr;
 
     const FlagState st = InspectFlagState(comm);
-    EXPECT_EQ(st.publishedConns, 0) << "P2P-only traffic published a flag descriptor on " << st.publishedConns
-                                    << " connection(s); first: " << st.firstBad;
-    EXPECT_EQ(st.badDescs, 0) << st.firstBad;
-    int flagConns = st.flagConns;
-    MPI_Allreduce(MPI_IN_PLACE, &flagConns, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-    if (rank == 0) TEST_INFO("NET recv connections with the flag mapped (all ranks): %d", flagConns);
-    EXPECT_GT(flagConns, 0) << "no NET recv connection negotiated the flag";
+    EXPECT_EQ(st.badDescs, 0) << "rank " << rank << ": " << st.badDescs << " unmet descriptor(s), first " << st.firstBad;
+    int totals[2] = {st.flagConns, st.publishedConns};
+    MPI_Allreduce(MPI_IN_PLACE, totals, 2, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    if (rank == 0) TEST_INFO("flag-mapped NET recv connections: %d, with published descriptors: %d", totals[0], totals[1]);
+    EXPECT_GT(totals[0], 0) << "no NET recv connection negotiated the flag";
+    EXPECT_GT(totals[1], 0) << "SIMPLE P2P steps never published a flag descriptor";
 
     freeAll();
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
 // Collective connections switching between latency protocols and flagged
-// SIMPLE: small AllReduce, large AllReduce/ReduceScatter above the default
-// flag threshold, and small P2P sends interleaved, all queued back-to-back.
-// Stale gdrFlushSeq slots left by LL/LL128 and unflagged steps must never
-// make the GPU read data early, and every published descriptor must be met.
+// SIMPLE: small AllReduce, large AllReduce/ReduceScatter and small P2P sends
+// interleaved, all queued back-to-back. Stale gdrFlushSeq slots left by
+// LL/LL128 steps must never make the GPU read data early, and every published
+// descriptor must be met.
 TEST_F(GdrFlushFlagProtoSwitchMPITest, Collectives_LatencyToFlaggedSimpleSwitch_BackToBack) {
     const std::string why = SkipReason();
     if (!why.empty()) GTEST_SKIP() << why;
@@ -249,7 +246,7 @@ TEST_F(GdrFlushFlagProtoSwitchMPITest, Collectives_LatencyToFlaggedSimpleSwitch_
     const int rank = MPIEnvironment::world_rank;
     const int nRanks = MPIEnvironment::world_size;
 
-    // 36 Mi floats = 144 MiB, above the default 128 MiB flag threshold.
+    // 36 Mi floats = 144 MiB, deep in the SIMPLE range.
     const size_t kLargeCount = (size_t)36 << 20;
     const size_t kSmallCounts[] = {16, 1000, 8192, 65536};
     const size_t kP2pBytes = 6000;
@@ -341,7 +338,7 @@ TEST_F(GdrFlushFlagProtoSwitchMPITest, Collectives_LatencyToFlaggedSimpleSwitch_
     MPI_Allreduce(MPI_IN_PLACE, totals, 2, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
     if (rank == 0) TEST_INFO("flag-mapped NET recv connections: %d, with published descriptors: %d", totals[0], totals[1]);
     EXPECT_GT(totals[0], 0) << "no NET recv connection negotiated the flag";
-    EXPECT_GT(totals[1], 0) << "large AllReduce/ReduceScatter never published a flag descriptor";
+    EXPECT_GT(totals[1], 0) << "SIMPLE steps never published a flag descriptor";
 
     (void)hipFree(arSmallSend);
     (void)hipFree(arSmallRecv);
