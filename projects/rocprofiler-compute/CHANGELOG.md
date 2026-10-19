@@ -55,6 +55,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed the `analyze --dependency` and `profile --target` options, which had no effect, and the undocumented `analyze --report-diff` and `profile --kokkos-trace` options.
 
+* Removed the roofline plot from CLI analyze output (section 4.3). The HTML roofline plot is unaffected and continues to be written to disk.
+
 ### Optimized
 
 ### Resolved issues
