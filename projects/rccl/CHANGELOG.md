@@ -11,6 +11,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 ### Removed
 
 ### Resolved issues
+* Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 
 ### Known issues
 
@@ -148,7 +149,6 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed `ncclCommAbort` and `ncclCommRevoke` hanging when a DDA collective (IPC on gfx942/gfx950, fabric LL/LL128/VMM on gfx1250) was waiting on a peer that never joined. DDA kernels now observe the communicator abort flag while waiting. A parent communicator shrunk with `NCCL_SHRINK_ABORT` no longer uses DDA for later collectives.
 * Fixed FP8 E4M3 and E5M2 `ncclAvg` returning wrong values for every element of every reduction collective on gfx942, and on architectures that use the software FP8 fallback. The `1/nRanks` scale was packed as an FP8 value in the host's OCP encoding, which those devices decode as FNUZ, so every result came out half as large. The scale is now carried as `float` on all architectures, which also keeps it exact at rank counts FP8 cannot represent: in OCP E4M3, `1/384` was off by 25% and `1/1024` rounded to zero. Single-rank FP8 reductions on gfx942 no longer fail to launch the `oneRankReduce` kernel, and rccl-tests no longer skips FP8 `avg` for `all_reduce`, `all_reduce_bias` and `reduce`.
 * Fixed the GIN plugin never being finalized for a communicator that had connected a GIN backend, leaking the plugin's per-communicator context and leaving its reference count one too high after every `ncclCommDestroy`. `ncclGinHostFinalize` closed the GIN connections and then zeroed the whole `ncclGinState`, so the `ncclGinFinalize` that follows it in `commFree` saw no active backend and skipped the plugin `finalize()` call. Host finalize now clears only the per-connection state and hands the backend records to `ncclGinFinalize`, which finalizes each one on the last shared-resource reference. `commFree` returns the first of a `closeColl` or plugin-finalize error after those frees; if both fail, the `closeColl` error is the one reported. An `ncclRmaProxyFinalize` error still aborts the rest of teardown immediately. On the Anvil SDMA backend (`NCCL_GIN_TYPE=7`) this was one leaked init context per connected communicator.
-* Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Restored topo tuning-model init (`ncclTopoTuneModel`) after the 2.31 `ncclTuningInit` switch so multi-node kernels do not launch with `blockDim.x=0`.
 * Grouped multi-rank finalize to match the v2.31 teardown barrier.
 * Fixed a crash (`HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION`) on gfx110x and gfx120x when the Tree algorithm runs over shared memory with more channels than the Tree graph search found, for example with `NCCL_ALGO=Tree` and `NCCL_P2P_DISABLE=1`. Channels added after `ncclTopoPreset` had no intra-node tree links; `ncclTopoPostset` now sets the tree and CollNet chain links on every channel, as it already did for rings.
