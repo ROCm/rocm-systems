@@ -56,12 +56,21 @@ esac
 if [[ $IS_WINDOWS -eq 1 ]]; then
   WIN_ROCM="${ROCM_PATH:-C:/opt/rocm}"
   SYSDEPS_BIN="$WIN_ROCM/lib/rocm_sysdeps/bin"
+  # Git Bash's PATH is colon-separated, but native Windows paths carry a
+  # drive-letter colon (C:/opt/rocm) that would split mid-path and leave the DLL
+  # dirs unreachable. Convert to POSIX form (/c/opt/rocm) with cygpath before
+  # prepending so launched programs actually find the decode DLLs.
   for d in "$WIN_ROCM/bin" "$SYSDEPS_BIN"; do
-    if [[ -d "$d" && ":$PATH:" != *":$d:"* ]]; then
-      PATH="$d:$PATH"
+    if [[ -d "$d" ]]; then
+      d_posix="$(cygpath -u "$d")"
+      if [[ ":$PATH:" != *":$d_posix:"* ]]; then
+        PATH="$d_posix:$PATH"
+      fi
     fi
   done
   export PATH
+  # LIBVA_DRIVERS_PATH is read by the VA-API loader (native Windows code), so it
+  # must stay a native path, not the POSIX form used for PATH.
   [[ -d "$SYSDEPS_BIN" ]] && export LIBVA_DRIVERS_PATH="$SYSDEPS_BIN"
 fi
 

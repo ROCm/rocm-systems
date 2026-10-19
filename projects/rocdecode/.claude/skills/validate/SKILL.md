@@ -155,7 +155,7 @@ configure (rocdecode-host is intentionally not shipped in the Windows tarball). 
 validating a tarball or switching install trees, do a CLEAN build: delete the stale
 directories first. On Windows the Bash `rm -rf` may be blocked by permissions; use
 `cmd //c "rmdir /s /q <path>"`. After a clean configure, verify a sample's cache has the
-intended tree, e.g. `grep ROCM_PATH samples\videoDecode\build\CMakeCache.txt` should show
+intended tree, e.g. `grep ROCM_PATH samples/videoDecode/build/CMakeCache.txt` should show
 `ROCM_PATH:PATH=` matching `ROCM_PATH`.
 
 ### Step 3 — Build all sample apps
@@ -169,7 +169,8 @@ This builds the full sample set (same as Linux) plus `videoDecodeCaps`, each wit
 
 ### Step 4 — Sanity-check hardware decode capabilities
 
-Run: `samples\videoDecodeCaps\build\Release\videodecodecaps.exe`
+Run (from Git Bash, forward slashes — Bash strips unquoted backslashes):
+`samples/videoDecodeCaps/build/Release/videodecodecaps.exe`
 
 This no-arg exe prints the GPU's hardware decode capability table and exits 0. It is a
 cheap confirmation that the decode stack loads (rocdecode.dll + sysdeps + VAOn12 driver are

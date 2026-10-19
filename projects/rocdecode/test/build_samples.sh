@@ -63,6 +63,12 @@ else
   fi
 fi
 
+# Export the effective prefix so the per-sample cmake child processes inherit it.
+# Without this, an unset ROCM_PATH that we defaulted above is invisible to cmake,
+# and the samples' CMakeLists.txt would fall back to its own /opt/rocm default and
+# resolve dependencies from the wrong install tree.
+export ROCM_PATH="$ROCM_PATH_EFF"
+
 for sample in rocdecDecode videoDecode videoDecodeBatch videoDecodeMem \
               videoDecodeMultiFiles videoDecodePerf videoDecodePicFiles \
               videoDecodeRaw videoDecodeRGB videoToSequence videoDecodeCaps; do
