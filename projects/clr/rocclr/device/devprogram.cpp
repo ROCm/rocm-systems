@@ -2021,17 +2021,21 @@ static amd_comgr_status_t collectCodeObjectSymbol(amd_comgr_symbol_t symbol, voi
       (type != AMD_COMGR_SYMBOL_TYPE_OBJECT && type != AMD_COMGR_SYMBOL_TYPE_FUNC)) {
     return status;
   }
-  size_t length = 0;
+  uint64_t length = 0;
   status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME_LENGTH, &length);
   if (status != AMD_COMGR_STATUS_SUCCESS || length == 0) {
     return status;
   }
-  std::string name(length + 1, '\0');
+  std::string name;
+  if (length >= name.max_size()) {
+    return AMD_COMGR_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+  name.resize(static_cast<size_t>(length) + 1, '\0');
   status = amd::Comgr::symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME, name.data());
   if (status != AMD_COMGR_STATUS_SUCCESS) {
     return status;
   }
-  name.resize(length);
+  name.resize(static_cast<size_t>(length));
   auto& symbols =
       *static_cast<std::map<amd_comgr_symbol_type_t, std::vector<std::string>>*>(userData);
   symbols[type].push_back(std::move(name));

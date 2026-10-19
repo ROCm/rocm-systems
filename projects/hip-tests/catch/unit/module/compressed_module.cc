@@ -23,5 +23,7 @@
 extern "C" {
 __device__ int module_value = 17;
 
+#ifndef GLOBAL_ONLY
 __global__ void read_module(int* output) { *output = module_value * 3 + 1; }
+#endif
 }

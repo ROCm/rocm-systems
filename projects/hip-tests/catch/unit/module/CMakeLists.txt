@@ -25,7 +25,9 @@ set(TEST_SRC
 )
 
 if (HIP_PLATFORM MATCHES "amd")
-  list(APPEND TEST_SRC hipModuleLoadCompressed.cc)
+  list(APPEND TEST_SRC hipModuleLoadCompressed_test.cc)
+  set_source_files_properties(hipModuleLoadCompressed_test.cc PROPERTIES
+                              COMPILE_OPTIONS "--offload-compress")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/compressed_module.code
                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
                    -mcode-object-version=5 --offload-compress --cuda-device-only
@@ -33,10 +35,19 @@ if (HIP_PLATFORM MATCHES "amd")
                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                    -o ${CMAKE_CURRENT_BINARY_DIR}/compressed_module.code
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compressed_module.cc)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/compressed_globals.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST}
+                   -mcode-object-version=5 --offload-compress --cuda-device-only -DGLOBAL_ONLY
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/compressed_module.cc
+                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                   -o ${CMAKE_CURRENT_BINARY_DIR}/compressed_globals.code
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/compressed_module.cc)
   add_custom_target(compressed_module_code
-                    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/compressed_module.code)
+                    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/compressed_module.code
+                            ${CMAKE_CURRENT_BINARY_DIR}/compressed_globals.code)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
-               ${CMAKE_CURRENT_BINARY_DIR}/compressed_module.code)
+               ${CMAKE_CURRENT_BINARY_DIR}/compressed_module.code
+               ${CMAKE_CURRENT_BINARY_DIR}/compressed_globals.code)
 
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
@@ -442,9 +453,9 @@ hip_add_exe_to_target(NAME ModuleTest
   LINKER_LIBS ${RTCLIB}
   COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
-if(TARGET hipModuleLoadCompressed)
-  target_sources(hipModuleLoadCompressed PRIVATE hip_module_common.cc)
-  add_dependencies(hipModuleLoadCompressed compressed_module_code)
+if(TARGET hipModuleLoadCompressed_test)
+  target_sources(hipModuleLoadCompressed_test PRIVATE hip_module_common.cc)
+  add_dependencies(hipModuleLoadCompressed_test compressed_module_code)
 endif()
 
 if(NOT WIN32)

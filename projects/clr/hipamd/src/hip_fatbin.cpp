@@ -366,7 +366,7 @@ static bool UncompressAndPopulateCodeObject(
               unbundled_co.get(), AMD_COMGR_DATA_KIND_EXECUTABLE, i, &item);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data unbundled code object");
-        break;
+        return false;
       }
       auto item_handle = std::make_unique<ComgrDataUniqueHandle>(item);
 
@@ -375,7 +375,7 @@ static bool UncompressAndPopulateCodeObject(
               amd::Comgr::get_data_name(item_handle->get(), &item_name_size, nullptr);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data size");
-        break;
+        return false;
       }
 
       std::string item_bundle_id(item_name_size, 0);
@@ -383,24 +383,30 @@ static bool UncompressAndPopulateCodeObject(
               amd::Comgr::get_data_name(item_handle->get(), &item_name_size, item_bundle_id.data());
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data");
-        break;
+        return false;
       }
 
       size_t item_size = 0;
       if (auto comgr_status = amd::Comgr::get_data(item_handle->get(), &item_size, nullptr);
           comgr_status != AMD_COMGR_STATUS_SUCCESS) {
         LogError("Failed to get data size");
-        break;
+        return false;
       }
 
       if (item_size > 0) {
         const char* image_data = nullptr;
+        bool borrowed = false;
         if (amd::Comgr::has_data_pointer()) {
-          if (amd::Comgr::get_data_pointer(item_handle->get(), &item_size, &image_data) !=
-              AMD_COMGR_STATUS_SUCCESS) {
-            LogError("Failed to get data pointer");
-            return false;
+          size_t view_size = 0;
+          borrowed = amd::Comgr::get_data_pointer(item_handle->get(), &view_size, &image_data) ==
+                         AMD_COMGR_STATUS_SUCCESS &&
+                     image_data != nullptr && view_size == item_size;
+          if (!borrowed) {
+            ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
+                    "Code object view unavailable; falling back to copying the output.");
           }
+        }
+        if (borrowed) {
           // The getter acquires no reference. Transfer our existing reference
           // only for a new address; duplicate addresses already have an owner,
           // and the local wrapper releases the extra reference in that case.
