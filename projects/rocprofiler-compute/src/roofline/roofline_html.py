@@ -100,12 +100,8 @@ def build_interactive_document(
     return build_document(
         title=title,
         body_html=body_html,
-        page_css=read_asset(_ASSETS_DIR, "roofline_plot.css")
-        + "\n"
-        + read_asset(_ASSETS_DIR, "roofline_kernel_list_tooltip.css"),
-        page_js=read_asset(_ASSETS_DIR, "roofline_kernel_list_tooltip.js")
-        + "\n"
-        + read_asset(_ASSETS_DIR, "roofline_plot.js"),
+        page_css=read_asset(_ASSETS_DIR, "roofline_plot.css"),
+        page_js=read_asset(_ASSETS_DIR, "roofline_plot.js"),
         model_id="roofline-model",
         model=view_model.to_payload(),
     )
