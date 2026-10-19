@@ -12,6 +12,7 @@ use crate::generated::amdf::*;
 use crate::instance::{Device, Endpoint, Instance, endpoint_id, supported_endpoint};
 use crate::platform::IntoRawFd;
 use crate::platform::memory as linux_interop;
+use crate::reservation::Reservation;
 use crate::support::*;
 use rocddi::memory;
 use rocddi::memory::storage::Owned;
@@ -19,11 +20,15 @@ use rocddi::memory::storage::TryPush;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
-const BACKING_FLAGS: u64 =
-    AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_LOCAL | AMDF_MEMORY_FLAG_SHAREABLE;
+const BACKING_FLAGS: u64 = AMDF_MEMORY_FLAG_HOST_VISIBLE
+    | AMDF_MEMORY_FLAG_DEVICE_LOCAL
+    | AMDF_MEMORY_FLAG_SHAREABLE
+    | AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE
+    | AMDF_MEMORY_FLAG_HOST_FILE_IO;
 const ACCESS_FLAGS: u64 = AMDF_MEMORY_FLAG_QUEUE_STORAGE
     | AMDF_MEMORY_FLAG_HOST_COHERENT
-    | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
+    | AMDF_MEMORY_FLAG_DEVICE_ADDRESS
+    | AMDF_MEMORY_FLAG_MAPPING_SOURCE;
 const MAX_ALIGNMENT: u64 = 1 << 30;
 const MAX_LENGTH: u64 = (isize::MAX as u64) - MAX_ALIGNMENT;
 
@@ -198,9 +203,15 @@ fn unlink_host_backing(instance: &Instance, pointer: *mut Memory) -> Result<(), 
 }
 
 /// Public host-view handle borrowing one memory owner.
+#[derive(Clone, Copy)]
+enum MappingOwner {
+    Memory(*mut Memory),
+    Reservation(*mut Reservation),
+}
+
 struct Mapping {
-    /// Memory owner borrowed by this public host view.
-    memory: *mut Memory,
+    /// Parent kept live through a child count until this view is destroyed.
+    owner: MappingOwner,
     /// Host address, extent, and cache facts returned to callers.
     info: amdf_host_mapping_info_t,
 }
@@ -401,12 +412,17 @@ unsafe fn profile(
     {
         return Err(UNSUPPORTED);
     }
+    let host_only = !local && endpoint.is_none() && !registered;
     let backing_flags = if local {
         AMDF_MEMORY_FLAG_DEVICE_LOCAL
     } else {
         0
     } | if host_visible {
         AMDF_MEMORY_FLAG_HOST_VISIBLE
+    } else {
+        0
+    } | if host_only {
+        AMDF_MEMORY_FLAG_HOST_FILE_IO
     } else {
         0
     };
@@ -430,7 +446,7 @@ unsafe fn profile(
         } else {
             AMDF_HOST_CACHEABILITY_UNKNOWN
         },
-        reserved: 0,
+        placement_kinds: 0,
         minimum_alignment: if registered { 1 } else { page },
         maximum_alignment: MAX_ALIGNMENT,
         native_byte_length_granularity: page,
@@ -458,6 +474,11 @@ unsafe fn profile(
                 AMDF_MEMORY_FLAG_HOST_VISIBLE
             } else {
                 0
+            }
+            | if host_only {
+                AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE
+            } else {
+                0
             },
         host_mapping: if host_visible {
             amdf_host_mapping_capabilities_t {
@@ -465,7 +486,11 @@ unsafe fn profile(
                 byte_offset_granularity: 1,
                 byte_length_granularity: 1,
                 supported_access: AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
-                reserved: 0,
+                features: if host_only {
+                    AMDF_HOST_MAPPING_FEATURE_FILE_IO
+                } else {
+                    0
+                },
             }
         } else {
             amdf_host_mapping_capabilities_t::default()
@@ -880,6 +905,9 @@ pub(crate) unsafe extern "C" fn create(
         if create.required_flags & !BACKING_FLAGS != 0
             || create.byte_length == 0
             || create.reserved != 0
+            || create.placement.kind > AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA
+            || (create.placement.kind == AMDF_MEMORY_PLACEMENT_KIND_NONE
+                && create.placement.node != 0)
             || (create.minimum_alignment != 0 && !create.minimum_alignment.is_power_of_two())
         {
             return Err(INVALID);
@@ -951,6 +979,9 @@ pub(crate) unsafe extern "C" fn create(
                 a.requirements
             });
         let registered = profile.roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER != 0;
+        if create.placement.kind != AMDF_MEMORY_PLACEMENT_KIND_NONE {
+            return Err(UNSUPPORTED);
+        }
         if registered == create.registered_host_pointer.is_null() {
             return Err(INVALID);
         }
@@ -1182,8 +1213,12 @@ pub(crate) unsafe extern "C" fn create(
             )
         } else {
             let native_allocation =
-                memory::host::HostAllocation::allocate(native_length, alignment)
-                    .map_err(|e| native(&e))?;
+                if create.required_flags & AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE != 0 {
+                    memory::host::HostAllocation::allocate_remappable(native_length, alignment)
+                } else {
+                    memory::host::HostAllocation::allocate(native_length, alignment)
+                }
+                .map_err(|e| native(&e))?;
             let address = native_allocation.info().host_address;
             (
                 Backing::Host(native_allocation),
@@ -1315,7 +1350,7 @@ pub(crate) unsafe extern "C" fn map(
             host_transitions(&*(*memory.scope).instance, memory.cacheability)?;
         register(&memory.children)?;
         let owner = slot.write(Mapping {
-            memory: pointer.cast(),
+            owner: MappingOwner::Memory(pointer.cast()),
             info: amdf_host_mapping_info_t {
                 flags: 3,
                 cacheability: memory.cacheability,
@@ -1326,6 +1361,11 @@ pub(crate) unsafe extern "C" fn map(
                 byte_offset_granularity: 1,
                 byte_length_granularity: 1,
                 cache_line_size: line,
+                features: if memory.info.flags & AMDF_MEMORY_FLAG_HOST_FILE_IO != 0 {
+                    AMDF_HOST_MAPPING_FEATURE_FILE_IO
+                } else {
+                    0
+                },
                 flush,
                 invalidate,
                 ..Default::default()
@@ -1345,6 +1385,74 @@ pub(crate) unsafe extern "C" fn mapping_info(
         output(out, AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO)?.publish_from(&raw const mapping.info);
         Ok(())
     })
+}
+
+pub(crate) unsafe fn map_reservation(
+    pointer: *mut Reservation,
+    reservation: &Reservation,
+    map: amdf_memory_map_info_t,
+    out: *mut *mut amdf_host_mapping_t,
+) -> Result<(), u64> {
+    if map.byte_length == 0
+        || map.flags == 0
+        || map.flags & !3 != 0
+        || map.byte_offset > reservation.info.byte_length
+        || map.byte_length > reservation.info.byte_length - map.byte_offset
+    {
+        return Err(INVALID);
+    }
+    let allowed = u32::from(reservation.info.access & AMDF_MEMORY_ACCESS_READ != 0)
+        | (u32::from(reservation.info.access & AMDF_MEMORY_ACCESS_WRITE != 0) << 1);
+    if map.flags & !allowed != 0 {
+        return Err(UNSUPPORTED);
+    }
+    let instance = unsafe { object(reservation.instance)? };
+    let (line, flush, invalidate) = host_transitions(instance, AMDF_HOST_CACHEABILITY_WRITE_BACK)?;
+    let slot = Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+    let address = reservation
+        .info
+        .address
+        .checked_add(map.byte_offset)
+        .ok_or(RANGE)?;
+    let address = usize::try_from(address).map_err(|_| RANGE)?;
+    register(&reservation.children)?;
+    let owner = slot.write(Mapping {
+        owner: MappingOwner::Reservation(pointer),
+        info: amdf_host_mapping_info_t {
+            flags: map.flags,
+            cacheability: AMDF_HOST_CACHEABILITY_WRITE_BACK,
+            pointer: address as *mut c_void,
+            memory_byte_offset: map.byte_offset,
+            byte_length: map.byte_length,
+            byte_offset_granularity: 1,
+            byte_length_granularity: 1,
+            cache_line_size: line,
+            features: AMDF_HOST_MAPPING_FEATURE_FILE_IO,
+            flush,
+            invalidate,
+            ..Default::default()
+        },
+    });
+    // SAFETY: The ABI output slot was validated by reservation::map.
+    unsafe { out.write(owner.into_raw().cast()) };
+    Ok(())
+}
+
+pub(crate) unsafe fn host_mapping_source<'a>(
+    pointer: *mut amdf_memory_t,
+    instance: *mut Instance,
+) -> Result<(&'a memory::host::HostAllocation, u64), u64> {
+    let source = unsafe { object(pointer.cast::<Memory>())? };
+    if unsafe { (*source.scope).instance } != instance {
+        return Err(INVALID);
+    }
+    if source.info.flags & AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE == 0 {
+        return Err(UNSUPPORTED);
+    }
+    let Backing::Host(allocation) = &source.backing else {
+        return Err(UNSUPPORTED);
+    };
+    Ok((allocation, source.info.byte_length))
 }
 
 pub(crate) unsafe extern "C" fn cache_control(
@@ -1395,7 +1503,10 @@ pub(crate) unsafe extern "C" fn cache_control(
 pub(crate) unsafe extern "C" fn unmap(pointer: *mut amdf_host_mapping_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let mapping = object(pointer.cast::<Mapping>())?;
-        unregister(&(*mapping.memory).children);
+        match mapping.owner {
+            MappingOwner::Memory(memory) => unregister(&(*memory).children),
+            MappingOwner::Reservation(reservation) => unregister(&(*reservation).children),
+        }
         drop(Owned::from_raw(pointer.cast::<Mapping>()));
         Ok(())
     })
@@ -2032,7 +2143,7 @@ unsafe fn profile_site(
                     ),
             ))
         }
-        AMDF_MEMORY_SITE_KIND_HOST => {
+        AMDF_MEMORY_SITE_KIND_HOST | AMDF_MEMORY_SITE_KIND_FILE_IO => {
             let access = unsafe { site.value.host_access };
             if access == 0
                 || access & !(AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE) != 0
@@ -2042,6 +2153,8 @@ unsafe fn profile_site(
             if required_flags & AMDF_MEMORY_FLAG_HOST_VISIBLE == 0
                 || profile.roles & AMDF_MEMORY_PROFILE_ROLE_HOST_MAP == 0
                 || access & !profile.host_mapping.supported_access != 0
+                || (site.kind == AMDF_MEMORY_SITE_KIND_FILE_IO
+                    && profile.host_mapping.features & AMDF_HOST_MAPPING_FEATURE_FILE_IO == 0)
             {
                 return Err(UNSUPPORTED);
             }
@@ -2191,10 +2304,32 @@ unsafe fn site(pointer: *const amdf_memory_site_t) -> Result<Site, u64> {
         return Err(INVALID);
     }
     match site.kind {
-        AMDF_MEMORY_SITE_KIND_HOST => {
-            let mapping = unsafe { object(site.value.host_mapping.cast::<Mapping>())? };
+        AMDF_MEMORY_SITE_KIND_HOST | AMDF_MEMORY_SITE_KIND_FILE_IO => {
+            let host = unsafe { site.value.host };
+            let mapping = unsafe { object(host.mapping.cast::<Mapping>())? };
+            if site.kind == AMDF_MEMORY_SITE_KIND_FILE_IO
+                && mapping.info.features & AMDF_HOST_MAPPING_FEATURE_FILE_IO == 0
+            {
+                return Err(UNSUPPORTED);
+            }
+            let memory = match mapping.owner {
+                MappingOwner::Memory(memory) if host.source_memory.is_null() => memory,
+                MappingOwner::Reservation(reservation) => {
+                    if host.source_memory.is_null() {
+                        return Err(INVALID);
+                    }
+                    let (source, _) = unsafe {
+                        host_mapping_source(host.source_memory, (*reservation).instance)?
+                    };
+                    if !source.is_remappable() {
+                        return Err(UNSUPPORTED);
+                    }
+                    host.source_memory.cast::<Memory>()
+                }
+                MappingOwner::Memory(_) => return Err(INVALID),
+            };
             Ok(Site {
-                memory: mapping.memory,
+                memory,
                 host: true,
                 access: if mapping.info.flags & AMDF_MEMORY_MAP_FLAG_READ != 0 {
                     AMDF_MEMORY_ACCESS_READ

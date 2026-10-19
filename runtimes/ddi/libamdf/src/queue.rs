@@ -189,8 +189,11 @@ fn descriptor(
     family: &amdf_queue_family_info_t,
     scratch: Option<QueueScratch>,
 ) -> Result<QueueRequest, u64> {
-    if info.reserved != 0 {
+    if info.flags & !AMDF_GPU_USER_QUEUE_FLAG_DISPATCH_TIMESTAMPS != 0 {
         return Err(INVALID);
+    }
+    if info.flags != 0 {
+        return Err(UNSUPPORTED);
     }
     if info.required_capabilities & !family.user_queue_capabilities != 0 {
         return Err(UNSUPPORTED);
