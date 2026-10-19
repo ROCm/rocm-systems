@@ -149,6 +149,23 @@ def test_profile_output_directory(flag):
 
 
 # =============================================================================
+# profile --attach-pid
+# =============================================================================
+
+
+def test_profile_attach_pid_accepts_positive_integer():
+    args = build_args(["profile", "--attach-pid", "42"])
+    assert args.attach_pid == "42"
+
+
+@pytest.mark.parametrize("pid", ["0", "-1", "not-a-pid", "../1"])
+def test_profile_attach_pid_rejects_invalid_value(pid):
+    with pytest.raises(SystemExit) as error:
+        build_args(["profile", "--attach-pid", pid])
+    assert error.value.code == 2
+
+
+# =============================================================================
 # profile --kernel-iteration-range
 # =============================================================================
 

@@ -10,6 +10,7 @@ import os
 import re
 import select
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -36,6 +37,7 @@ from vendored import yaml
 METRIC_ID_RE = re.compile(pattern=r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
 PC_SAMPLING_BLOCK_IDS = ("21", "pc_sampling")
 PROFILE_OUTPUT_FORMAT = "rocpd"
+PROCFS_ROOT = Path("/proc")
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
 
@@ -203,6 +205,113 @@ def resolve_rocm_library_path(library_path: Optional[str]) -> Optional[str]:
     resolved = versioned_candidates[0][1]
     console_debug(f"Resolved library (versioned): {library_path} -> {resolved}")
     return resolved
+
+
+def is_library_missing_in_target(pid: Union[int, str], library_path: str) -> bool:
+    """Return whether a library is confirmed absent from a target's mount view."""
+    path = Path(library_path)
+    if not path.is_absolute():
+        return False
+
+    target_path = _target_root(pid) / path.relative_to(path.anchor)
+    try:
+        target_status = target_path.stat()
+    except OSError as error:
+        # Only reject a path proven absent. Restricted procfs access must not
+        # turn a potentially valid target path into a false negative.
+        return error.errno in (errno.ENOENT, errno.ENOTDIR)
+    return not stat.S_ISREG(target_status.st_mode)
+
+
+def find_loaded_library_directory(
+    pid: Union[int, str], library_name: str
+) -> Optional[str]:
+    """Find a mapped library's directory as seen by the target process."""
+    maps_path = PROCFS_ROOT / _pid_component(pid) / "maps"
+    try:
+        with maps_path.open(encoding="utf-8", errors="replace") as maps_file:
+            for line in maps_file:
+                path_start = line.find("/")
+                if path_start < 0:
+                    continue
+                mapped_path = line[path_start:].rstrip("\n")
+                if mapped_path.endswith(" (deleted)"):
+                    continue
+                if Path(mapped_path).name.startswith(library_name):
+                    return str(Path(mapped_path).parent)
+    except OSError:
+        return None
+    return None
+
+
+def find_target_library_from_loaded_library(
+    pid: Union[int, str],
+    library_name: str,
+    loaded_library_name: str,
+) -> Optional[str]:
+    """Find a target library relative to another library mapped by the target."""
+    loaded_directory = find_loaded_library_directory(pid, loaded_library_name)
+    if loaded_directory is None:
+        return None
+
+    target_root = _target_root(pid)
+    target_directory = Path(loaded_directory)
+    candidate_paths = (
+        target_directory / "rocprofiler-sdk" / library_name,
+        target_directory / library_name,
+    )
+    for candidate_path in candidate_paths:
+        host_candidate = target_root / candidate_path.relative_to(candidate_path.anchor)
+        resolved_candidate = resolve_rocm_library_path(str(host_candidate))
+        if resolved_candidate is None or not Path(resolved_candidate).is_file():
+            continue
+        try:
+            relative_candidate = Path(resolved_candidate).relative_to(target_root)
+        except ValueError:
+            continue
+        return f"/{relative_candidate.as_posix()}"
+    return None
+
+
+def resolve_attach_tool_library(
+    pid: Union[int, str], configured_library_path: str
+) -> Optional[str]:
+    """Resolve the SDK tool library to a path visible to the attach target."""
+    if not is_library_missing_in_target(pid, configured_library_path):
+        return configured_library_path
+
+    target_library = find_target_library_from_loaded_library(
+        pid,
+        _unversioned_library_name(configured_library_path),
+        "librocprofiler-register.so",
+    )
+    if target_library is not None:
+        console_debug(f"Resolved live attach tool from process {pid}: {target_library}")
+    return target_library
+
+
+def _target_root(pid: Union[int, str]) -> Path:
+    return PROCFS_ROOT / _pid_component(pid) / "root"
+
+
+def _unversioned_library_name(library_path: str) -> str:
+    library_name = Path(library_path).name
+    shared_object_suffix = ".so"
+    suffix_position = library_name.find(shared_object_suffix)
+    if suffix_position < 0:
+        return library_name
+    suffix_end = suffix_position + len(shared_object_suffix)
+    return library_name[:suffix_end]
+
+
+def _pid_component(pid: Union[int, str]) -> str:
+    pid_string = str(pid)
+    is_ascii_integer = pid_string and all(
+        "0" <= character <= "9" for character in pid_string
+    )
+    if not is_ascii_integer or int(pid_string) <= 0:
+        raise ValueError(f"Invalid process id: {pid!r}")
+    return pid_string
 
 
 def is_tcc_channel_counter(counter: str) -> bool:
