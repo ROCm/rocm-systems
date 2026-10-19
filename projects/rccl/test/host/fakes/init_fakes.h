@@ -24,6 +24,7 @@
 #include "nccl_fakes.h"
 #include "nccl_stubs.h"          // core/lifecycle stubs + data symbols
 #include "os_fakes.h"            // src/os/linux.cc
+#include "rccl_arch_thresholds_fakes.h"  // src/rccl_arch_thresholds.cc
 #include "rccl_wrap_fakes.h"     // src/rccl_wrap.cc
 #include "recorder_fakes.h"      // src/recorder.cc
 #include "rocmwrap_fakes.h"      // src/misc/rocmwrap.cc
