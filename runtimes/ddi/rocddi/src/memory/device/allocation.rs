@@ -13,11 +13,13 @@ use crate::{Error, ErrorKind};
 /// Allocation owner and cached facts shared by drivers that can allocate
 /// device-accessible backing. The driver remains live through native cleanup.
 pub(crate) struct DriverAllocation<D: AllocationOperations> {
+    /// Native allocation whose cleanup runs before the driver is released.
     inner: Owned<D::Allocation>,
-    // A live allocation keeps its driver open even after the creating device
-    // is dropped. Drop releases the native owner before this reference.
+    /// Keeps the creating driver alive after the device handle is dropped.
     driver: Shared<D>,
+    /// Copyable address and extent facts retained across cleanup.
     info: AllocationInfo,
+    /// Prevents replay of a completed native release.
     released: bool,
 }
 
@@ -42,6 +44,10 @@ impl<D: AllocationOperations> DriverAllocation<D> {
 
     pub(crate) fn info(&self) -> AllocationInfo {
         self.info
+    }
+
+    pub(crate) fn shares_driver_instance(&self, driver: &Shared<D>) -> bool {
+        Shared::ptr_eq(&self.driver, driver)
     }
 
     pub(crate) fn check(&self) -> Result<(), Error> {
@@ -82,18 +88,21 @@ impl<D: AllocationOperations> Drop for DriverAllocation<D> {
 /// Validates and applies a replacement access set for any allocation driver.
 pub(crate) fn set_device_access_for<D, F>(
     allocation: &mut DriverAllocation<D>,
-    driver_instance: u64,
     origin: &Device,
     devices: &[&Device],
     state_of: F,
 ) -> Result<(), Error>
 where
     D: AllocationOperations,
-    F: for<'a> Fn(&'a Device) -> Option<&'a D::DeviceState>,
+    F: for<'a> Fn(&'a Device) -> Option<(&'a Shared<D>, &'a D::DeviceState)>,
 {
     let mut states = crate::memory::storage::try_vec_with_capacity(devices.len())?;
     for device in devices {
-        if driver_instance != device.endpoint.driver_instance {
+        let (driver, state) = state_of(device).ok_or(Error::Operation {
+            kind: ErrorKind::InvalidArgument,
+            detail: "access device belongs to another allocation session",
+        })?;
+        if !allocation.shares_driver_instance(driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "access device belongs to another allocation session",
@@ -107,10 +116,7 @@ where
                 detail: "access device has no qualified route to local memory",
             });
         }
-        states.try_push(state_of(device).ok_or(Error::Operation {
-            kind: ErrorKind::Unsupported,
-            detail: "access device has no matching allocation driver",
-        })?)?;
+        states.try_push(state)?;
     }
 
     D::set_allocation_access(allocation.driver_state_mut(), states.as_slice())
@@ -120,16 +126,17 @@ where
 /// Explicit free reports failures. If final Drop cannot complete cleanup, it
 /// retains potentially reachable native backing instead of recycling its VA.
 pub struct Allocation {
+    /// Concrete owner and driver selected when the allocation was created.
     pub(crate) inner: driver::AllocationState,
-    pub(crate) driver_instance: u64,
 }
 
 impl Allocation {
-    pub(crate) fn new(inner: driver::AllocationState, driver_instance: u64) -> Self {
-        Self {
-            inner,
-            driver_instance,
-        }
+    pub(crate) fn new(inner: driver::AllocationState) -> Self {
+        Self { inner }
+    }
+
+    pub(crate) fn shares_driver_instance(&self, device: &Device) -> bool {
+        self.inner.shares_driver_instance(&device.driver_state)
     }
 
     /// Returns creation-time addresses and extent without touching the driver.
@@ -157,7 +164,7 @@ impl Allocation {
     /// device has no mapping, `DeviceLost` for a latched native loss, or the
     /// native error from the availability check.
     pub fn device_address(&self, device: &Device) -> Result<u64, Error> {
-        if self.driver_instance != device.endpoint.driver_instance {
+        if !self.shares_driver_instance(device) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "device belongs to another allocation session",
@@ -183,16 +190,14 @@ impl Allocation {
                 detail: "origin device does not own this allocation",
             });
         }
-        self.inner
-            .set_device_access(self.driver_instance, origin, devices)
+        self.inner.set_device_access(origin, devices)
     }
 
     /// Returns whether this allocation's physical backing originated on the
     /// supplied device. Devices from another session never match.
     #[must_use]
     pub fn originates_from(&self, device: &Device) -> bool {
-        self.driver_instance == device.endpoint.driver_instance
-            && self.inner.originates_from(&device.driver_state)
+        self.shares_driver_instance(device) && self.inner.originates_from(&device.driver_state)
     }
 
     /// Returns opaque driver metadata retained with an imported native
@@ -241,13 +246,8 @@ impl Device {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Allocation, Error> {
-        self.driver_state.allocate_owned(
-            self.endpoint.driver_instance,
-            kind,
-            size,
-            alignment,
-            permissions,
-        )
+        self.driver_state
+            .allocate_owned(kind, size, alignment, permissions)
     }
 
     /// Registers caller-owned host pages for device access.
@@ -283,10 +283,7 @@ impl Device {
             backing: None,
         };
         // SAFETY: The caller preserves the complete registered page cover.
-        unsafe {
-            self.driver_state
-                .register_host(self.endpoint.driver_instance, request)
-        }
+        unsafe { self.driver_state.register_host(request) }
     }
 
     /// Creates one owned allocation mapped into this device and every

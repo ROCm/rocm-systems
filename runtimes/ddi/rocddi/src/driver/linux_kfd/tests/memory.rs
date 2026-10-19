@@ -460,10 +460,9 @@ impl Fixture {
                 public_memory_bytes: 1 << 28,
                 ..node()
             },
-            lifetime,
             gpu_counter_frequency_hz: 0,
         };
-        super::super::LinuxKfdDriver::new().allocate_owned(
+        super::super::LinuxKfdDriver::with_context_lifetime(lifetime).allocate_owned(
             &device,
             &[],
             kind,
@@ -685,7 +684,6 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
             },
             ..node()
         },
-        lifetime: crate::session::DriverContextLifetime::Session,
         gpu_counter_frequency_hz: 0,
     };
     let driver = super::super::LinuxKfdDriver::new();

@@ -14,16 +14,21 @@ use core::ops::{Deref, DerefMut};
 use core::ptr::{self, NonNull};
 use core::sync::atomic::{AtomicUsize, Ordering, fence};
 
+/// Allocation layout shared by initialized and uninitialized unique owners.
 #[repr(C)]
 struct OwnerSlot<T> {
+    /// Test allocator that must also release this slot.
     #[cfg(any(test, feature = "allocator-test-hooks"))]
     allocator: Allocator,
+    /// Value storage that becomes initialized when the guard is published.
     value: MaybeUninit<T>,
 }
 
 /// Unique ownership of one value in fallible metadata storage.
 pub struct Owned<T> {
+    /// Non-null pointer to the unique initialized slot.
     slot: NonNull<OwnerSlot<T>>,
+    /// Carries the contained type's ownership and auto-trait behavior.
     owns: PhantomData<T>,
 }
 
@@ -169,7 +174,9 @@ impl<T> Drop for Owned<T> {
 
 /// Preallocated unique-owner storage with no live contained value yet.
 pub struct UninitOwned<T> {
+    /// Non-null pointer to storage awaiting its value.
     slot: NonNull<OwnerSlot<T>>,
+    /// Releases uninitialized storage if publication never occurs.
     #[allow(dead_code, reason = "the guard owns storage until publication or drop")]
     block: RawBlock,
 }
@@ -193,11 +200,15 @@ impl<T> UninitOwned<T> {
     }
 }
 
+/// Allocation layout for a strong-counted owner without weak references.
 #[repr(C)]
 struct SharedSlot<T> {
+    /// Number of live [`Shared`] handles.
     strong: AtomicUsize,
+    /// Test allocator that must also release this slot.
     #[cfg(any(test, feature = "allocator-test-hooks"))]
     allocator: Allocator,
+    /// Value destroyed by the final strong owner.
     value: T,
 }
 
@@ -205,7 +216,9 @@ struct SharedSlot<T> {
 ///
 /// Cloning increments a count without allocation. This type has no weak handles.
 pub struct Shared<T> {
+    /// Non-null pointer to the counted initialized slot.
     slot: NonNull<SharedSlot<T>>,
+    /// Carries the contained type's ownership and auto-trait behavior.
     owns: PhantomData<T>,
 }
 
@@ -266,7 +279,9 @@ impl<T> Shared<T> {
 
 /// Preallocated shared-owner storage with no live contained value yet.
 pub struct UninitShared<T> {
+    /// Non-null pointer to storage awaiting its first value.
     slot: NonNull<SharedSlot<T>>,
+    /// Releases uninitialized storage if publication never occurs.
     #[allow(dead_code, reason = "the guard owns storage until publication or drop")]
     block: RawBlock,
 }

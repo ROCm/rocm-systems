@@ -23,7 +23,9 @@ pub struct SignalEventInfo {
 /// Owns one process-local KFD signal event.
 #[doc(hidden)]
 pub struct SignalEvent {
+    /// Native KFD event retained until destruction succeeds.
     pub(crate) inner: Owned<driver::KfdSignalEvent>,
+    /// Stable event ID and mailbox slot returned to the caller.
     pub(crate) info: SignalEventInfo,
 }
 
@@ -61,7 +63,9 @@ impl SignalEvent {
 /// retains the complete allocation if explicit transfer has not succeeded.
 #[doc(hidden)]
 pub struct SignalEventPage {
+    /// Allocated page retained until explicit transfer or conclusive cleanup.
     allocation: Option<Allocation>,
+    /// KFD may have installed the page even if event creation failed.
     attempted: bool,
 }
 

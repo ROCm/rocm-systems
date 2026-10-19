@@ -29,20 +29,27 @@ const MAX_LENGTH: u64 = (isize::MAX as u64) - MAX_ALIGNMENT;
 
 /// Memory-profile namespace embedded in either an instance or an endpoint.
 pub(crate) struct Scope {
+    /// Instance that owns this profile namespace.
     pub instance: *mut Instance,
+    /// Endpoint for device-scoped profiles, or null for the host scope.
     pub endpoint: *mut Endpoint,
 }
 
 /// Native or caller-owned storage underlying one public memory object.
 enum Backing {
+    /// Host-only allocation managed by rocddi.
     Host(memory::host::HostAllocation),
+    /// Caller-owned pages registered with a device.
     Registered,
+    /// Driver-owned allocation with qualified device access.
     Gpu(memory::device::Allocation),
+    /// View borrowing an existing provider-owned allocation.
     Alias { _borrow: SourceBorrow },
 }
 
 /// A registration of a provider-owned host view borrows its original backing.
 struct SourceBorrow {
+    /// Original public owner whose child count protects this view.
     source: *mut Memory,
 }
 
@@ -56,8 +63,11 @@ impl Drop for SourceBorrow {
 
 /// One device's established access and translated address for an allocation.
 struct Access {
+    /// Borrowed public device whose VM was granted access.
     device: *mut Device,
+    /// Access requirements and epoch returned to the caller.
     info: amdf_memory_access_info_t,
+    /// Address usable by this device.
     address: u64,
 }
 
@@ -67,15 +77,25 @@ struct Access {
 /// backing destruction while any public child can still reach it. `freeing`
 /// prevents a failed or reentrant destruction from restarting the transition.
 pub(crate) struct Memory {
+    /// Host or endpoint namespace that created this object.
     scope: *mut Scope,
+    /// Native allocation, host storage, registration, or borrowed view.
     backing: Backing,
+    /// Public allocation facts fixed at creation.
     info: amdf_memory_info_t,
+    /// Device access established before publication.
     access: Vec<Access>,
+    /// Mapped CPU address when this memory is host visible.
     host: Option<usize>,
+    /// Public host cacheability classification.
     cacheability: u32,
+    /// Public mappings and queue scratch borrows still alive.
     children: AtomicU64,
+    /// Prevents destruction from being retried after a transition begins.
     freeing: bool,
+    /// Next provider-owned host backing in the instance's cold alias list.
     host_backing_next: AtomicUsize,
+    /// Whether this object currently appears in that alias list.
     listed_host_backing: bool,
 }
 
@@ -179,7 +199,9 @@ fn unlink_host_backing(instance: &Instance, pointer: *mut Memory) -> Result<(), 
 
 /// Public host-view handle borrowing one memory owner.
 struct Mapping {
+    /// Memory owner borrowed by this public host view.
     memory: *mut Memory,
+    /// Host address, extent, and cache facts returned to callers.
     info: amdf_host_mapping_info_t,
 }
 
@@ -525,9 +547,13 @@ unsafe fn profile(
 /// Validated per-device requirements used while composing a joint profile.
 #[derive(Clone, Copy)]
 struct ProfileAccess<'a> {
+    /// Passive endpoint supplying device profile facts.
     endpoint: &'a Endpoint,
+    /// Requested permission and address properties.
     request: amdf_memory_access_requirements_t,
+    /// Inclusive native address bounds for the endpoint.
     address_range: (u64, u64),
+    /// Whether this endpoint supports the requested external import.
     import_supported: bool,
 }
 
@@ -1420,12 +1446,15 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_memory_t) -> u64 {
 /// Resolved queue scratch range and the public memory owner it borrows.
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) struct QueueScratch {
+    /// Public allocation borrowed by the queue.
     pub memory: *mut Memory,
+    /// Device address of the scratch range.
     pub device_address: u64,
 }
 
 /// One queue-lifetime borrow of a public memory resource.
 pub(crate) struct QueueScratchBorrow {
+    /// Public owner whose child count is decremented on drop.
     memory: *mut Memory,
 }
 
@@ -1811,12 +1840,19 @@ pub(crate) unsafe extern "C" fn external_release(pointer: *mut amdf_external_mem
 /// One producer or consumer site used to derive cache-transition requirements.
 #[derive(Clone, Copy)]
 struct Site {
+    /// Public memory resource participating in the transition.
     memory: *mut Memory,
+    /// Whether the participant is the host rather than a device.
     host: bool,
+    /// Access mode required at this participant.
     access: u32,
+    /// Whether host and device accesses are coherent here.
     host_coherent: bool,
+    /// Native or host cacheability classification.
     cacheability: u32,
+    /// Release operation before control passes away from this site.
     release: amdf_cache_transition_t,
+    /// Acquire operation before this site consumes the data.
     acquire: amdf_cache_transition_t,
 }
 
