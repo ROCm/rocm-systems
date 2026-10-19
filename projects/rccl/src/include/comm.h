@@ -722,6 +722,10 @@ struct ncclComm {
   // Device-resident per-block epoch cells for the LL-protocol DDA collectives,
   uint32_t* ddaLLEpochDev;
   int ddaLLEpochLen;
+  // Set by ncclCommShrink(NCCL_SHRINK_ABORT). An abort can leave ranks with
+  // different LL epochs and unconsumed barrier mailbox slots, so DDA must not
+  // run on this comm again until that state is resynchronized.
+  bool ddaDisabledAfterAbort;
 
   // Bitmasks for ncclTransportP2pSetup
   struct channelMasks* connectSend;

@@ -3098,6 +3098,11 @@
           "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaAlltoAllLl128"
         },
         {
+          "name": "ShrinkAbort_DisablesDdaOnParent",
+          "description": "NCCL_SHRINK_ABORT on a DDA fabric parent; the survivors' parent must stop selecting DDA (rcclGetCollImplInfo) and the child AllReduce must complete",
+          "test_filter": "RevokeDdaMPITest.ShrinkAbort_DisablesDdaOnParent"
+        },
+        {
           "name": "AbortDda_IncompleteCollective",
           "description": "Rank np-1 skips a DDA fabric LL AllReduce/AllGather/ReduceScatter/AlltoAll; asserts LL via rcclGetCollImplInfo; ncclCommAbort must return and the blocked stream must drain",
           "test_filter": "AbortDdaMPITest.*"

@@ -843,6 +843,63 @@ TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaAlltoAllLl128)
                                  {ncclFuncAlltoAll, 1024, kDdaLL128, NCCL_PROTO_LL128, kSkipLLTier});
 }
 
+// NCCL_SHRINK_ABORT can leave the parent's LL epochs and barrier mailboxes out of step across
+// ranks, so the survivors' parent must stop selecting DDA while the child keeps working.
+TEST_F(RevokeDdaMPITest, ShrinkAbort_DisablesDdaOnParent)
+{
+    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+    ncclComm_t       parent = getActiveCommunicator();
+    hipStream_t      stream = getActiveStream();
+    constexpr size_t kCount = 100;
+
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&sendBuf, kCount * sizeof(float)));
+    HIP_TEST_CHECK_GTEST_FAIL(hipMalloc(&recvBuf, kCount * sizeof(float)));
+    auto sendGuard = makeScopeGuard([&]() { if(sendBuf) (void)hipFree(sendBuf); });
+    auto recvGuard = makeScopeGuard([&]() { if(recvBuf) (void)hipFree(recvBuf); });
+
+    const auto selectedAlgo = [&](ncclComm_t comm) {
+        int algo = -1, protocol = -1, maxChannels = -1;
+        const ncclResult_t res = rcclGetCollImplInfo(comm, ncclFuncAllReduce, kCount, ncclFloat32, ncclSum,
+                                                     sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &protocol,
+                                                     &maxChannels);
+        return res == ncclSuccess ? algo : -1;
+    };
+    const auto isDda = [](int algo) {
+        return algo == kDdaLL || algo == kDdaLL128
+               || algo == static_cast<int>(rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM)
+               || algo == static_cast<int>(rcclAddonAlgos_t::RCCL_DDA_IPC);
+    };
+
+    const std::string skipReason
+        = mpiCoordinatedSkipReason(!isDda(selectedAlgo(parent)), "parent does not select DDA");
+    if(!skipReason.empty())
+        GTEST_SKIP() << skipReason;
+
+    std::vector<int> excludeList;
+    bool             isExcluded = false;
+    computeSymmetricExclude(MPIEnvironment::world_rank, MPIEnvironment::world_size, excludeList, isExcluded);
+
+    ncclComm_t   child     = NCCL_COMM_NULL;
+    ncclResult_t shrinkRes = ncclSuccess;
+    if(!isExcluded)
+        shrinkRes = ncclCommShrink(parent, excludeList.data(), excludeList.size(), &child, nullptr,
+                                   NCCL_SHRINK_ABORT);
+    ASSERT_MPI_EQ(ncclSuccess, shrinkRes);
+    auto childGuard = makeScopeGuard([&]() { if(child) (void)ncclCommDestroy(child); });
+
+    ASSERT_MPI_TRUE(isExcluded || !isDda(selectedAlgo(parent)));
+
+    ncclResult_t childRes = ncclSuccess;
+    if(!isExcluded)
+        childRes = ncclAllReduce(sendBuf, recvBuf, kCount, ncclFloat, ncclSum, child, stream);
+    ASSERT_MPI_EQ(ncclSuccess, childRes);
+    DdaFabricMPI::abortJobUnlessAllRanksDrained(DdaFabricMPI::waitStreamBounded(stream, kDrainTimeout),
+                                                "child AllReduce after NCCL_SHRINK_ABORT");
+}
+
 /**
  * Incomplete DDA fabric collective + ncclCommAbort (gfx1250). Same setup as RevokeDdaMPITest,
  * but every rank aborts instead of revoking: ncclCommAbort must return and the stream of each
