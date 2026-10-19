@@ -63,9 +63,30 @@ Hip::hipMemcpy(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind)
 }
 
 void
+Hip::hipMemcpyWithStream(void *dst, const void *src, size_t sizeBytes, hipMemcpyKind kind,
+                         hipStream_t stream) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipMemcpyWithStream(dst, src, sizeBytes, kind, stream));
+}
+
+void
 Hip::hipStreamSynchronize(hipStream_t stream) const
 {
     (void)throwOnHipError<Hip::RuntimeError>(::hipStreamSynchronize(stream));
+}
+
+hipStream_t
+Hip::hipStreamCreateWithFlags(unsigned int flags) const
+{
+    hipStream_t stream;
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamCreateWithFlags(&stream, flags));
+    return stream;
+}
+
+void
+Hip::hipStreamDestroy(hipStream_t stream) const
+{
+    (void)throwOnHipError<Hip::RuntimeError>(::hipStreamDestroy(stream));
 }
 
 void *
