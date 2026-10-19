@@ -170,6 +170,9 @@ public:
   bool is_load = true;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::VMCNT;
+  /// FLAT counter participation selected from the resolved requesting lanes.
+  /// Unset before routing; decoded metadata continues to describe all domains.
+  std::optional<MemoryIssueInfo> routed_issue_info;
   bool non_temporal = false;
   // Keep this outside Mtype: cluster loads force only the request-side vector
   // L1 lookup to miss, while mtype must still preserve the instruction/PTE
@@ -226,6 +229,9 @@ public:
   /// Older MIN/MAX compare flushed inputs but return the original selected bits.
   /// They also propagate signaling NaNs instead of treating them as missing numbers.
   bool atomic_legacy_minmax = true;
+  /// L2 ADD on qualified RDNA4 targets selects the incoming NaN first.
+  /// Indexed LDS has an independent source-first policy.
+  bool atomic_source_nan_first = false;
   bool lds_dst = false; ///< Buffer load with LDS bit: write to LDS, not VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
   /// paths this may include the lane-0 destination offset. For cluster

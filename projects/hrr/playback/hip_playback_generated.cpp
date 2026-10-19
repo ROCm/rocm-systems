@@ -30,9 +30,8 @@
 
 static hipError_t playback_hipApiName(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipApiName — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -43,9 +42,8 @@ extern hipError_t playback_hipArray3DCreate(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipArray3DGetDescriptor(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipArray3DGetDescriptor — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -56,9 +54,8 @@ extern hipError_t playback_hipArrayCreate(PlaybackContext& ctx, const uint8_t* p
 
 static hipError_t playback_hipArrayDestroy(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipArrayDestroy — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -67,9 +64,8 @@ static hipError_t playback_hipArrayDestroy(PlaybackContext& ctx, const uint8_t* 
 
 static hipError_t playback_hipArrayGetDescriptor(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipArrayGetDescriptor — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -78,9 +74,8 @@ static hipError_t playback_hipArrayGetDescriptor(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipArrayGetInfo(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipArrayGetInfo — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -189,9 +184,8 @@ static hipError_t playback_hipCreateSurfaceObject(PlaybackContext& ctx, const ui
 
 static hipError_t playback_hipCreateTextureObject(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipCreateTextureObject — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -228,9 +222,8 @@ static hipError_t playback_hipCtxDestroy(PlaybackContext& ctx, const uint8_t* pa
 
 static hipError_t playback_hipCtxDisablePeerAccess(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipCtxDisablePeerAccess — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -239,9 +232,8 @@ static hipError_t playback_hipCtxDisablePeerAccess(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipCtxEnablePeerAccess(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipCtxEnablePeerAccess — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -250,9 +242,8 @@ static hipError_t playback_hipCtxEnablePeerAccess(PlaybackContext& ctx, const ui
 
 static hipError_t playback_hipCtxGetApiVersion(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipCtxGetApiVersion — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -261,9 +252,8 @@ static hipError_t playback_hipCtxGetApiVersion(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipCtxGetCacheConfig(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipCtxGetCacheConfig — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -286,9 +276,8 @@ static hipError_t playback_hipCtxGetCurrent(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipCtxGetDevice(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipCtxGetDevice — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -297,9 +286,8 @@ static hipError_t playback_hipCtxGetDevice(PlaybackContext& ctx, const uint8_t* 
 
 static hipError_t playback_hipCtxGetFlags(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipCtxGetFlags — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -308,9 +296,8 @@ static hipError_t playback_hipCtxGetFlags(PlaybackContext& ctx, const uint8_t* p
 
 static hipError_t playback_hipCtxGetSharedMemConfig(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipCtxGetSharedMemConfig — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -353,9 +340,8 @@ static hipError_t playback_hipCtxSetCacheConfig(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipCtxSetCurrent(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipCtxSetCurrent — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -418,9 +404,8 @@ static hipError_t playback_hipDestroySurfaceObject(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipDestroyTextureObject(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDestroyTextureObject — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -472,9 +457,8 @@ static hipError_t playback_hipDeviceEnablePeerAccess(PlaybackContext& ctx, const
 
 static hipError_t playback_hipDeviceGet(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDeviceGet — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -494,9 +478,8 @@ static hipError_t playback_hipDeviceGetAttribute(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipDeviceGetByPCIBusId(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDeviceGetByPCIBusId — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -530,9 +513,8 @@ static hipError_t playback_hipDeviceGetDefaultMemPool(PlaybackContext& ctx, cons
 
 static hipError_t playback_hipDeviceGetGraphMemAttribute(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDeviceGetGraphMemAttribute — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -566,9 +548,8 @@ static hipError_t playback_hipDeviceGetMemPool(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipDeviceGetName(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDeviceGetName — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -588,9 +569,8 @@ static hipError_t playback_hipDeviceGetP2PAttribute(PlaybackContext& ctx, const 
 
 static hipError_t playback_hipDeviceGetPCIBusId(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDeviceGetPCIBusId — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -622,9 +602,8 @@ static hipError_t playback_hipDeviceGetStreamPriorityRange(PlaybackContext& ctx,
 
 static hipError_t playback_hipDeviceGetUuid(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDeviceGetUuid — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -643,9 +622,8 @@ static hipError_t playback_hipDeviceGraphMemTrim(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipDevicePrimaryCtxGetState(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDevicePrimaryCtxGetState — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -654,9 +632,8 @@ static hipError_t playback_hipDevicePrimaryCtxGetState(PlaybackContext& ctx, con
 
 static hipError_t playback_hipDevicePrimaryCtxRelease(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDevicePrimaryCtxRelease — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -665,9 +642,8 @@ static hipError_t playback_hipDevicePrimaryCtxRelease(PlaybackContext& ctx, cons
 
 static hipError_t playback_hipDevicePrimaryCtxReset(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDevicePrimaryCtxReset — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -690,9 +666,8 @@ static hipError_t playback_hipDevicePrimaryCtxRetain(PlaybackContext& ctx, const
 
 static hipError_t playback_hipDevicePrimaryCtxSetFlags(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDevicePrimaryCtxSetFlags — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -721,9 +696,8 @@ static hipError_t playback_hipDeviceSetCacheConfig(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipDeviceSetGraphMemAttribute(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDeviceSetGraphMemAttribute — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -794,9 +768,8 @@ static hipError_t playback_hipDriverGetVersion(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipDrvGetErrorName(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvGetErrorName — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -805,9 +778,8 @@ static hipError_t playback_hipDrvGetErrorName(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipDrvGetErrorString(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvGetErrorString — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -824,9 +796,8 @@ extern hipError_t playback_hipDrvMemcpy3DAsync(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipDrvPointerGetAttributes(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvPointerGetAttributes — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -874,9 +845,8 @@ static hipError_t playback_hipEventSynchronize(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipExtGetLinkTypeAndHopCount(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipExtGetLinkTypeAndHopCount — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -885,9 +855,8 @@ static hipError_t playback_hipExtGetLinkTypeAndHopCount(PlaybackContext& ctx, co
 
 static hipError_t playback_hipExtLaunchKernel(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipExtLaunchKernel — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -895,23 +864,18 @@ static hipError_t playback_hipExtLaunchKernel(PlaybackContext& ctx, const uint8_
 }
 
 static hipError_t playback_hipExtLaunchMultiKernelMultiDevice(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExtLaunchMultiKernelMultiDevice*>(payload);
-  hipLaunchParams _out_launchParamsList{};
-  hipError_t _r = (hipError_t)hipExtLaunchMultiKernelMultiDevice(&_out_launchParamsList, (int)a->numDevices, (unsigned int)a->flags);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipExtLaunchMultiKernelMultiDevice", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipExtLaunchMultiKernelMultiDevice",
+                        "each hipLaunchParams entry names its kernel by a host function address in the capturing process, and a cooperative multi-device launch cannot be decomposed into per-device launches without breaking the grid-wide barrier it exists for");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipExtMallocWithFlags(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipExtStreamCreateWithCUMask(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipExtStreamCreateWithCUMask — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -920,9 +884,8 @@ static hipError_t playback_hipExtStreamCreateWithCUMask(PlaybackContext& ctx, co
 
 static hipError_t playback_hipExtStreamGetCUMask(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipExtStreamGetCUMask — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -948,9 +911,8 @@ extern hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pay
 
 static hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipFreeHost — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -959,9 +921,8 @@ static hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* payl
 
 static hipError_t playback_hipFreeMipmappedArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipFreeMipmappedArray — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -970,9 +931,8 @@ static hipError_t playback_hipFreeMipmappedArray(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipFuncGetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipFuncGetAttribute — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -981,9 +941,8 @@ static hipError_t playback_hipFuncGetAttribute(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipFuncGetAttributes(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipFuncGetAttributes — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -992,9 +951,8 @@ static hipError_t playback_hipFuncGetAttributes(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipFuncSetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipFuncSetAttribute — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1003,9 +961,8 @@ static hipError_t playback_hipFuncSetAttribute(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipFuncSetCacheConfig(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipFuncSetCacheConfig — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1014,9 +971,8 @@ static hipError_t playback_hipFuncSetCacheConfig(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipFuncSetSharedMemConfig(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipFuncSetSharedMemConfig — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1025,9 +981,8 @@ static hipError_t playback_hipFuncSetSharedMemConfig(PlaybackContext& ctx, const
 
 static hipError_t playback_hipGLGetDevices(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGLGetDevices — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1036,9 +991,8 @@ static hipError_t playback_hipGLGetDevices(PlaybackContext& ctx, const uint8_t* 
 
 static hipError_t playback_hipGetChannelDesc(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGetChannelDesc — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1091,9 +1045,8 @@ static hipError_t playback_hipGetDevicePropertiesR0600(PlaybackContext& ctx, con
 
 static hipError_t playback_hipGetDevicePropertiesR0000(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGetDevicePropertiesR0000 — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1102,9 +1055,8 @@ static hipError_t playback_hipGetDevicePropertiesR0000(PlaybackContext& ctx, con
 
 static hipError_t playback_hipGetErrorName(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGetErrorName — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1113,9 +1065,8 @@ static hipError_t playback_hipGetErrorName(PlaybackContext& ctx, const uint8_t* 
 
 static hipError_t playback_hipGetErrorString(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGetErrorString — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1134,9 +1085,8 @@ static hipError_t playback_hipGetLastError(PlaybackContext& ctx, const uint8_t* 
 
 static hipError_t playback_hipGetMipmappedArrayLevel(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGetMipmappedArrayLevel — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1193,9 +1143,8 @@ static hipError_t playback_hipGetTextureObjectTextureDesc(PlaybackContext& ctx, 
 
 static hipError_t playback_hipGetTextureReference(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGetTextureReference — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1393,16 +1342,9 @@ static hipError_t playback_hipGraphAddEventWaitNode(PlaybackContext& ctx, const 
 static hipError_t playback_hipGraphAddHostNode(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipGraphAddHostNode*>(payload);
   ctx.mark_graph_incomplete(a->graph, "hipGraphAddHostNode");
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] hipGraphAddHostNode: not reconstructable at "
-            "replay, so the call is skipped and the graph it belongs "
-            "to is marked incomplete; instantiating that graph fails "
-            "loudly rather than running a graph that is missing "
-            "work.\n");
-  }
-  return hipSuccess;
+  hrr_note_unreplayable(ctx, "hipGraphAddHostNode",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipGraphAddKernelNode(PlaybackContext& ctx, const uint8_t* payload);
@@ -1562,9 +1504,8 @@ static hipError_t playback_hipGraphAddMemsetNode(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipGraphChildGraphNodeGetGraph(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphChildGraphNodeGetGraph — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1603,9 +1544,8 @@ static hipError_t playback_hipGraphCreate(PlaybackContext& ctx, const uint8_t* p
 
 static hipError_t playback_hipGraphDebugDotPrint(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphDebugDotPrint — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1614,9 +1554,8 @@ static hipError_t playback_hipGraphDebugDotPrint(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipGraphDestroy(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphDestroy — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1649,9 +1588,8 @@ static hipError_t playback_hipGraphDestroyNode(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipGraphEventRecordNodeGetEvent(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphEventRecordNodeGetEvent — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1680,9 +1618,8 @@ static hipError_t playback_hipGraphEventRecordNodeSetEvent(PlaybackContext& ctx,
 
 static hipError_t playback_hipGraphEventWaitNodeGetEvent(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphEventWaitNodeGetEvent — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1741,9 +1678,8 @@ static hipError_t playback_hipGraphExecChildGraphNodeSetParams(PlaybackContext& 
 
 static hipError_t playback_hipGraphExecDestroy(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphExecDestroy — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1811,14 +1747,10 @@ static hipError_t playback_hipGraphExecEventWaitNodeSetEvent(PlaybackContext& ct
 }
 
 static hipError_t playback_hipGraphExecHostNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphExecHostNodeSetParams — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGraphExecHostNodeSetParams",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipGraphExecKernelNodeSetParams(PlaybackContext& ctx, const uint8_t* payload);
@@ -1930,9 +1862,8 @@ static hipError_t playback_hipGraphExecMemsetNodeSetParams(PlaybackContext& ctx,
 
 static hipError_t playback_hipGraphExecUpdate(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphExecUpdate — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1941,9 +1872,8 @@ static hipError_t playback_hipGraphExecUpdate(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipGraphGetEdges(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphGetEdges — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1952,9 +1882,8 @@ static hipError_t playback_hipGraphGetEdges(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipGraphGetNodes(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphGetNodes — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1963,9 +1892,8 @@ static hipError_t playback_hipGraphGetNodes(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipGraphGetRootNodes(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphGetRootNodes — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1974,9 +1902,8 @@ static hipError_t playback_hipGraphGetRootNodes(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipGraphHostNodeGetParams(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphHostNodeGetParams — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -1984,14 +1911,10 @@ static hipError_t playback_hipGraphHostNodeGetParams(PlaybackContext& ctx, const
 }
 
 static hipError_t playback_hipGraphHostNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphHostNodeSetParams — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGraphHostNodeSetParams",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipGraphInstantiate(PlaybackContext& ctx, const uint8_t* payload);
@@ -2030,9 +1953,8 @@ static hipError_t playback_hipGraphKernelNodeCopyAttributes(PlaybackContext& ctx
 
 static hipError_t playback_hipGraphKernelNodeGetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphKernelNodeGetAttribute — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2041,9 +1963,8 @@ static hipError_t playback_hipGraphKernelNodeGetAttribute(PlaybackContext& ctx, 
 
 static hipError_t playback_hipGraphKernelNodeGetParams(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphKernelNodeGetParams — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2079,9 +2000,8 @@ extern hipError_t playback_hipGraphLaunch(PlaybackContext& ctx, const uint8_t* p
 
 static hipError_t playback_hipGraphMemAllocNodeGetParams(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphMemAllocNodeGetParams — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2090,9 +2010,8 @@ static hipError_t playback_hipGraphMemAllocNodeGetParams(PlaybackContext& ctx, c
 
 static hipError_t playback_hipGraphMemFreeNodeGetParams(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphMemFreeNodeGetParams — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2101,9 +2020,8 @@ static hipError_t playback_hipGraphMemFreeNodeGetParams(PlaybackContext& ctx, co
 
 static hipError_t playback_hipGraphMemcpyNodeGetParams(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphMemcpyNodeGetParams — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2163,9 +2081,8 @@ extern hipError_t playback_hipGraphMemcpyNodeSetParamsToSymbol(PlaybackContext& 
 
 static hipError_t playback_hipGraphMemsetNodeGetParams(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphMemsetNodeGetParams — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2222,9 +2139,8 @@ static hipError_t playback_hipGraphNodeFindInClone(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipGraphNodeGetDependencies(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphNodeGetDependencies — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2233,9 +2149,8 @@ static hipError_t playback_hipGraphNodeGetDependencies(PlaybackContext& ctx, con
 
 static hipError_t playback_hipGraphNodeGetDependentNodes(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphNodeGetDependentNodes — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2244,9 +2159,8 @@ static hipError_t playback_hipGraphNodeGetDependentNodes(PlaybackContext& ctx, c
 
 static hipError_t playback_hipGraphNodeGetEnabled(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphNodeGetEnabled — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2255,9 +2169,8 @@ static hipError_t playback_hipGraphNodeGetEnabled(PlaybackContext& ctx, const ui
 
 static hipError_t playback_hipGraphNodeGetType(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphNodeGetType — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2296,9 +2209,8 @@ static hipError_t playback_hipGraphNodeSetEnabled(PlaybackContext& ctx, const ui
 
 static hipError_t playback_hipGraphReleaseUserObject(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphReleaseUserObject — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2307,9 +2219,8 @@ static hipError_t playback_hipGraphReleaseUserObject(PlaybackContext& ctx, const
 
 static hipError_t playback_hipGraphRemoveDependencies(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphRemoveDependencies — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2318,9 +2229,8 @@ static hipError_t playback_hipGraphRemoveDependencies(PlaybackContext& ctx, cons
 
 static hipError_t playback_hipGraphRetainUserObject(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphRetainUserObject — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2329,9 +2239,8 @@ static hipError_t playback_hipGraphRetainUserObject(PlaybackContext& ctx, const 
 
 static hipError_t playback_hipGraphUpload(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphUpload — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2340,9 +2249,8 @@ static hipError_t playback_hipGraphUpload(PlaybackContext& ctx, const uint8_t* p
 
 static hipError_t playback_hipGraphicsGLRegisterBuffer(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphicsGLRegisterBuffer — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2351,9 +2259,8 @@ static hipError_t playback_hipGraphicsGLRegisterBuffer(PlaybackContext& ctx, con
 
 static hipError_t playback_hipGraphicsGLRegisterImage(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphicsGLRegisterImage — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2417,9 +2324,8 @@ static hipError_t playback_hipGraphicsUnregisterResource(PlaybackContext& ctx, c
 
 static hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipHostAlloc — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2445,9 +2351,8 @@ extern hipError_t playback_hipHostGetDevicePointer(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipHostGetFlags(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipHostGetFlags — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2544,9 +2449,8 @@ extern hipError_t playback_hipIpcOpenMemHandle(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipKernelNameRef(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipKernelNameRef — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2555,9 +2459,8 @@ static hipError_t playback_hipKernelNameRef(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipKernelNameRefByPtr(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipKernelNameRefByPtr — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2569,24 +2472,17 @@ extern hipError_t playback_hipLaunchByPtr(PlaybackContext& ctx, const uint8_t* p
 extern hipError_t playback_hipLaunchCooperativeKernel(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipLaunchCooperativeKernelMultiDevice(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLaunchCooperativeKernelMultiDevice*>(payload);
-  hipLaunchParams _out_launchParamsList{};
-  hipError_t _r = (hipError_t)hipLaunchCooperativeKernelMultiDevice(&_out_launchParamsList, (int)a->numDevices, (unsigned int)a->flags);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipLaunchCooperativeKernelMultiDevice", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipLaunchCooperativeKernelMultiDevice",
+                        "each hipLaunchParams entry names its kernel by a host function address in the capturing process, and a cooperative multi-device launch cannot be decomposed into per-device launches without breaking the grid-wide barrier it exists for");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipLaunchHostFunc(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLaunchHostFunc*>(payload);
-  hipError_t _r = (hipError_t)hipLaunchHostFunc((hipStream_t)ctx.translate_stream(a->stream), (hipHostFn_t)a->fn, (void*)a->userData);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipLaunchHostFunc", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipLaunchHostFunc",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipLaunchKernel(PlaybackContext& ctx, const uint8_t* payload);
@@ -2595,9 +2491,8 @@ extern hipError_t playback_hipMalloc(PlaybackContext& ctx, const uint8_t* payloa
 
 static hipError_t playback_hipMalloc3D(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMalloc3D — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2606,9 +2501,8 @@ static hipError_t playback_hipMalloc3D(PlaybackContext& ctx, const uint8_t* payl
 
 static hipError_t playback_hipMalloc3DArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMalloc3DArray — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2617,9 +2511,8 @@ static hipError_t playback_hipMalloc3DArray(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipMallocArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMallocArray — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2632,9 +2525,8 @@ extern hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx, const ui
 
 static hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMallocHost — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2645,9 +2537,8 @@ extern hipError_t playback_hipMallocManaged(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipMallocMipmappedArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMallocMipmappedArray — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2692,9 +2583,8 @@ static hipError_t playback_hipMemAdvise(PlaybackContext& ctx, const uint8_t* pay
 
 static hipError_t playback_hipMemAllocHost(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemAllocHost — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2703,9 +2593,8 @@ static hipError_t playback_hipMemAllocHost(PlaybackContext& ctx, const uint8_t* 
 
 static hipError_t playback_hipMemAllocPitch(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemAllocPitch — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2741,9 +2630,8 @@ static hipError_t playback_hipMemGetAccess(PlaybackContext& ctx, const uint8_t* 
 
 static hipError_t playback_hipMemGetAddressRange(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemGetAddressRange — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2754,9 +2642,8 @@ extern hipError_t playback_hipMemGetAllocationGranularity(PlaybackContext& ctx, 
 
 static hipError_t playback_hipMemGetAllocationPropertiesFromHandle(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemGetAllocationPropertiesFromHandle — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2776,23 +2663,18 @@ static hipError_t playback_hipMemGetInfo(PlaybackContext& ctx, const uint8_t* pa
 }
 
 static hipError_t playback_hipMemImportFromShareableHandle(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemImportFromShareableHandle — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipMemImportFromShareableHandle",
+                        "the recorded argument is an OS handle (a POSIX fd or a Win32 HANDLE) belonging to the process that exported it, and the same number in the replaying process names a different object or nothing at all");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipMemMap(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemMapArrayAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemMapArrayAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2817,9 +2699,8 @@ static hipError_t playback_hipMemPoolDestroy(PlaybackContext& ctx, const uint8_t
 
 static hipError_t playback_hipMemPoolExportPointer(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemPoolExportPointer — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2839,9 +2720,8 @@ static hipError_t playback_hipMemPoolExportToShareableHandle(PlaybackContext& ct
 
 static hipError_t playback_hipMemPoolGetAccess(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemPoolGetAccess — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2851,21 +2731,16 @@ static hipError_t playback_hipMemPoolGetAccess(PlaybackContext& ctx, const uint8
 extern hipError_t playback_hipMemPoolGetAttribute(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemPoolImportFromShareableHandle(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMemPoolImportFromShareableHandle — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipMemPoolImportFromShareableHandle",
+                        "the recorded argument is an OS handle (a POSIX fd or a Win32 HANDLE) belonging to the process that exported it, and the same number in the replaying process names a different object or nothing at all");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipMemPoolImportPointer(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemPoolImportPointer — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2898,9 +2773,8 @@ static hipError_t playback_hipMemPrefetchAsync(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipMemPtrGetInfo(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemPtrGetInfo — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2909,9 +2783,8 @@ static hipError_t playback_hipMemPtrGetInfo(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipMemRangeGetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemRangeGetAttribute — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2920,9 +2793,8 @@ static hipError_t playback_hipMemRangeGetAttribute(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipMemRangeGetAttributes(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemRangeGetAttributes — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2933,9 +2805,8 @@ extern hipError_t playback_hipMemRelease(PlaybackContext& ctx, const uint8_t* pa
 
 static hipError_t playback_hipMemRetainAllocationHandle(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemRetainAllocationHandle — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2954,9 +2825,8 @@ extern hipError_t playback_hipMemcpy2DAsync(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipMemcpy2DFromArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy2DFromArray — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2965,9 +2835,8 @@ static hipError_t playback_hipMemcpy2DFromArray(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipMemcpy2DFromArrayAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy2DFromArrayAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2976,9 +2845,8 @@ static hipError_t playback_hipMemcpy2DFromArrayAsync(PlaybackContext& ctx, const
 
 static hipError_t playback_hipMemcpy2DToArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy2DToArray — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -2987,9 +2855,8 @@ static hipError_t playback_hipMemcpy2DToArray(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipMemcpy2DToArrayAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy2DToArrayAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3004,9 +2871,8 @@ extern hipError_t playback_hipMemcpyAsync(PlaybackContext& ctx, const uint8_t* p
 
 static hipError_t playback_hipMemcpyAtoH(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyAtoH — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3039,9 +2905,8 @@ extern hipError_t playback_hipMemcpyDtoHAsync(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipMemcpyFromArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyFromArray — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3050,9 +2915,8 @@ static hipError_t playback_hipMemcpyFromArray(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipMemcpyFromSymbol(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyFromSymbol — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3061,9 +2925,8 @@ static hipError_t playback_hipMemcpyFromSymbol(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipMemcpyFromSymbolAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyFromSymbolAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3072,9 +2935,8 @@ static hipError_t playback_hipMemcpyFromSymbolAsync(PlaybackContext& ctx, const 
 
 static hipError_t playback_hipMemcpyHtoA(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyHtoA — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3111,9 +2973,8 @@ static hipError_t playback_hipMemcpyPeerAsync(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipMemcpyToArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyToArray — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3122,9 +2983,8 @@ static hipError_t playback_hipMemcpyToArray(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipMemcpyToSymbol(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyToSymbol — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3133,9 +2993,8 @@ static hipError_t playback_hipMemcpyToSymbol(PlaybackContext& ctx, const uint8_t
 
 static hipError_t playback_hipMemcpyToSymbolAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyToSymbolAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3176,9 +3035,8 @@ static hipError_t playback_hipMemset2DAsync(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipMemset3D(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemset3D — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3187,9 +3045,8 @@ static hipError_t playback_hipMemset3D(PlaybackContext& ctx, const uint8_t* payl
 
 static hipError_t playback_hipMemset3DAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemset3DAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3268,9 +3125,8 @@ static hipError_t playback_hipMemsetD8Async(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipMipmappedArrayCreate(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMipmappedArrayCreate — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3279,9 +3135,8 @@ static hipError_t playback_hipMipmappedArrayCreate(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipMipmappedArrayDestroy(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMipmappedArrayDestroy — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3290,9 +3145,8 @@ static hipError_t playback_hipMipmappedArrayDestroy(PlaybackContext& ctx, const 
 
 static hipError_t playback_hipMipmappedArrayGetLevel(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMipmappedArrayGetLevel — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3303,9 +3157,8 @@ extern hipError_t playback_hipModuleGetFunction(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipModuleGetGlobal(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleGetGlobal — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3314,9 +3167,8 @@ static hipError_t playback_hipModuleGetGlobal(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipModuleGetTexRef(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleGetTexRef — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3346,9 +3198,8 @@ extern hipError_t playback_hipModuleLoadDataEx(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleOccupancyMaxActiveBlocksPerMultiprocessor — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3357,9 +3208,8 @@ static hipError_t playback_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(Pl
 
 static hipError_t playback_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3368,9 +3218,8 @@ static hipError_t playback_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWit
 
 static hipError_t playback_hipModuleOccupancyMaxPotentialBlockSize(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleOccupancyMaxPotentialBlockSize — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3379,9 +3228,8 @@ static hipError_t playback_hipModuleOccupancyMaxPotentialBlockSize(PlaybackConte
 
 static hipError_t playback_hipModuleOccupancyMaxPotentialBlockSizeWithFlags(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleOccupancyMaxPotentialBlockSizeWithFlags — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3390,9 +3238,8 @@ static hipError_t playback_hipModuleOccupancyMaxPotentialBlockSizeWithFlags(Play
 
 static hipError_t playback_hipModuleUnload(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleUnload — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3401,9 +3248,8 @@ static hipError_t playback_hipModuleUnload(PlaybackContext& ctx, const uint8_t* 
 
 static hipError_t playback_hipOccupancyMaxActiveBlocksPerMultiprocessor(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyMaxActiveBlocksPerMultiprocessor — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3412,9 +3258,8 @@ static hipError_t playback_hipOccupancyMaxActiveBlocksPerMultiprocessor(Playback
 
 static hipError_t playback_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3423,9 +3268,8 @@ static hipError_t playback_hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
 
 static hipError_t playback_hipOccupancyMaxPotentialBlockSize(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyMaxPotentialBlockSize — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3444,9 +3288,8 @@ static hipError_t playback_hipPeekAtLastError(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipPointerGetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipPointerGetAttribute — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3466,9 +3309,8 @@ static hipError_t playback_hipPointerGetAttributes(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipPointerSetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipPointerSetAttribute — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3552,20 +3394,16 @@ static hipError_t playback_hipSignalExternalSemaphoresAsync(PlaybackContext& ctx
 }
 
 static hipError_t playback_hipStreamAddCallback(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamAddCallback*>(payload);
-  hipError_t _r = (hipError_t)hipStreamAddCallback((hipStream_t)ctx.translate_stream(a->stream), (hipStreamCallback_t)a->callback, (void*)a->userData, (unsigned int)a->flags);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipStreamAddCallback", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipStreamAddCallback",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipStreamAttachMemAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipStreamAttachMemAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3598,9 +3436,8 @@ static hipError_t playback_hipStreamGetCaptureInfo(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipStreamGetCaptureInfo_v2(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipStreamGetCaptureInfo_v2 — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3609,9 +3446,8 @@ static hipError_t playback_hipStreamGetCaptureInfo_v2(PlaybackContext& ctx, cons
 
 static hipError_t playback_hipStreamGetDevice(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipStreamGetDevice — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3665,9 +3501,8 @@ static hipError_t playback_hipStreamSynchronize(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipStreamUpdateCaptureDependencies(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipStreamUpdateCaptureDependencies — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3686,9 +3521,8 @@ static hipError_t playback_hipStreamWaitEvent(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipStreamWaitValue32(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipStreamWaitValue32 — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3697,9 +3531,8 @@ static hipError_t playback_hipStreamWaitValue32(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipStreamWaitValue64(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipStreamWaitValue64 — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3752,9 +3585,8 @@ static hipError_t playback_hipStreamWriteValue64(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipTexObjectCreate(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipTexObjectCreate — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3763,9 +3595,8 @@ static hipError_t playback_hipTexObjectCreate(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipTexObjectDestroy(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipTexObjectDestroy — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3807,9 +3638,8 @@ static hipError_t playback_hipTexObjectGetTextureDesc(PlaybackContext& ctx, cons
 
 static hipError_t playback_hipTexRefGetAddress(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipTexRefGetAddress — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3851,9 +3681,8 @@ static hipError_t playback_hipTexRefGetFlags(PlaybackContext& ctx, const uint8_t
 
 static hipError_t playback_hipTexRefGetFormat(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipTexRefGetFormat — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -3997,9 +3826,8 @@ static hipError_t playback_hipTexRefSetFlags(PlaybackContext& ctx, const uint8_t
 
 static hipError_t playback_hipTexRefSetFormat(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipTexRefSetFormat — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4080,21 +3908,16 @@ static hipError_t playback_hipUnbindTexture(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipUserObjectCreate(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipUserObjectCreate — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipUserObjectCreate",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipUserObjectRelease(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipUserObjectRelease — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4103,9 +3926,8 @@ static hipError_t playback_hipUserObjectRelease(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipUserObjectRetain(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipUserObjectRetain — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4124,9 +3946,8 @@ static hipError_t playback_hipWaitExternalSemaphoresAsync(PlaybackContext& ctx, 
 
 static hipError_t playback_hipCreateChannelDesc(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipCreateChannelDesc — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4137,9 +3958,8 @@ extern hipError_t playback_hipExtModuleLaunchKernel(PlaybackContext& ctx, const 
 
 static hipError_t playback_hipHccModuleLaunchKernel(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipHccModuleLaunchKernel — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4148,9 +3968,8 @@ static hipError_t playback_hipHccModuleLaunchKernel(PlaybackContext& ctx, const 
 
 static hipError_t playback_hipMemcpy_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4159,9 +3978,8 @@ static hipError_t playback_hipMemcpy_spt(PlaybackContext& ctx, const uint8_t* pa
 
 static hipError_t playback_hipMemcpyToSymbol_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyToSymbol_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4170,9 +3988,8 @@ static hipError_t playback_hipMemcpyToSymbol_spt(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipMemcpyFromSymbol_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyFromSymbol_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4181,9 +3998,8 @@ static hipError_t playback_hipMemcpyFromSymbol_spt(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipMemcpy2D_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy2D_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4192,9 +4008,8 @@ static hipError_t playback_hipMemcpy2D_spt(PlaybackContext& ctx, const uint8_t* 
 
 static hipError_t playback_hipMemcpy2DFromArray_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy2DFromArray_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4245,9 +4060,8 @@ static hipError_t playback_hipMemset2DAsync_spt(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipMemset3DAsync_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemset3DAsync_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4256,9 +4070,8 @@ static hipError_t playback_hipMemset3DAsync_spt(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipMemset3D_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemset3D_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4267,9 +4080,8 @@ static hipError_t playback_hipMemset3D_spt(PlaybackContext& ctx, const uint8_t* 
 
 static hipError_t playback_hipMemcpyAsync_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyAsync_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4280,9 +4092,8 @@ extern hipError_t playback_hipMemcpy3DAsync_spt(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipMemcpy2DAsync_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy2DAsync_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4291,9 +4102,8 @@ static hipError_t playback_hipMemcpy2DAsync_spt(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipMemcpyFromSymbolAsync_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyFromSymbolAsync_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4302,9 +4112,8 @@ static hipError_t playback_hipMemcpyFromSymbolAsync_spt(PlaybackContext& ctx, co
 
 static hipError_t playback_hipMemcpyToSymbolAsync_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyToSymbolAsync_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4313,9 +4122,8 @@ static hipError_t playback_hipMemcpyToSymbolAsync_spt(PlaybackContext& ctx, cons
 
 static hipError_t playback_hipMemcpyFromArray_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyFromArray_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4324,9 +4132,8 @@ static hipError_t playback_hipMemcpyFromArray_spt(PlaybackContext& ctx, const ui
 
 static hipError_t playback_hipMemcpy2DToArray_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy2DToArray_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4335,9 +4142,8 @@ static hipError_t playback_hipMemcpy2DToArray_spt(PlaybackContext& ctx, const ui
 
 static hipError_t playback_hipMemcpy2DFromArrayAsync_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy2DFromArrayAsync_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4346,9 +4152,8 @@ static hipError_t playback_hipMemcpy2DFromArrayAsync_spt(PlaybackContext& ctx, c
 
 static hipError_t playback_hipMemcpy2DToArrayAsync_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy2DToArrayAsync_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4400,13 +4205,10 @@ static hipError_t playback_hipStreamGetFlags_spt(PlaybackContext& ctx, const uin
 }
 
 static hipError_t playback_hipStreamAddCallback_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamAddCallback_spt*>(payload);
-  hipError_t _r = (hipError_t)hipStreamAddCallback_spt((hipStream_t)ctx.translate_stream(a->stream), (hipStreamCallback_t)a->callback, (void*)a->userData, (unsigned int)a->flags);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipStreamAddCallback_spt", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipStreamAddCallback_spt",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipEventRecord_spt(PlaybackContext& ctx, const uint8_t* payload) {
@@ -4489,9 +4291,8 @@ static hipError_t playback_hipStreamGetCaptureInfo_spt(PlaybackContext& ctx, con
 
 static hipError_t playback_hipStreamGetCaptureInfo_v2_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipStreamGetCaptureInfo_v2_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4499,20 +4300,16 @@ static hipError_t playback_hipStreamGetCaptureInfo_v2_spt(PlaybackContext& ctx, 
 }
 
 static hipError_t playback_hipLaunchHostFunc_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLaunchHostFunc_spt*>(payload);
-  hipError_t _r = (hipError_t)hipLaunchHostFunc_spt((hipStream_t)ctx.translate_stream(a->stream), (hipHostFn_t)a->fn, (void*)a->userData);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipLaunchHostFunc_spt", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipLaunchHostFunc_spt",
+                        "the callback is a host function pointer belonging to the capturing process, so there is no function here to enqueue");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipGetStreamDeviceId(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGetStreamDeviceId — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4840,9 +4637,8 @@ static hipError_t playback_hipStreamBeginCaptureToGraph(PlaybackContext& ctx, co
 
 static hipError_t playback_hipGetFuncBySymbol(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGetFuncBySymbol — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4851,9 +4647,8 @@ static hipError_t playback_hipGetFuncBySymbol(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipSetValidDevices(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipSetValidDevices — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4862,9 +4657,8 @@ static hipError_t playback_hipSetValidDevices(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipMemcpyAtoD(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyAtoD — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4873,9 +4667,8 @@ static hipError_t playback_hipMemcpyAtoD(PlaybackContext& ctx, const uint8_t* pa
 
 static hipError_t playback_hipMemcpyDtoA(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyDtoA — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4884,9 +4677,8 @@ static hipError_t playback_hipMemcpyDtoA(PlaybackContext& ctx, const uint8_t* pa
 
 static hipError_t playback_hipMemcpyAtoA(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyAtoA — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4895,9 +4687,8 @@ static hipError_t playback_hipMemcpyAtoA(PlaybackContext& ctx, const uint8_t* pa
 
 static hipError_t playback_hipMemcpyAtoHAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyAtoHAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4906,9 +4697,8 @@ static hipError_t playback_hipMemcpyAtoHAsync(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipMemcpyHtoAAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpyHtoAAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4917,9 +4707,8 @@ static hipError_t playback_hipMemcpyHtoAAsync(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipMemcpy2DArrayToArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy2DArrayToArray — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -4998,9 +4787,8 @@ static hipError_t playback_hipDrvGraphExecMemsetNodeSetParams(PlaybackContext& c
 
 static hipError_t playback_hipGraphExecGetFlags(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphExecGetFlags — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5009,9 +4797,8 @@ static hipError_t playback_hipGraphExecGetFlags(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipGraphNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphNodeSetParams — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5020,9 +4807,8 @@ static hipError_t playback_hipGraphNodeSetParams(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipGraphExecNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphExecNodeSetParams — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5042,9 +4828,8 @@ static hipError_t playback_hipExternalMemoryGetMappedMipmappedArray(PlaybackCont
 
 static hipError_t playback_hipDrvGraphMemcpyNodeGetParams(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvGraphMemcpyNodeGetParams — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5055,9 +4840,8 @@ extern hipError_t playback_hipDrvGraphMemcpyNodeSetParams(PlaybackContext& ctx, 
 
 static hipError_t playback_hipExtHostAlloc(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipExtHostAlloc — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5084,9 +4868,8 @@ extern hipError_t playback_hipGraphAddBatchMemOpNode(PlaybackContext& ctx, const
 
 static hipError_t playback_hipGraphBatchMemOpNodeGetParams(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGraphBatchMemOpNodeGetParams — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5208,9 +4991,8 @@ static hipError_t playback_hipMemGetHandleForAddressRange(PlaybackContext& ctx, 
 
 static hipError_t playback_hipModuleGetFunctionCount(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleGetFunctionCount — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5364,9 +5146,8 @@ extern hipError_t playback_hipStreamSetAttribute(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipModuleLoadFatBinary(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleLoadFatBinary — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5417,9 +5198,8 @@ extern hipError_t playback_hipMemcpy3DBatchAsync(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipMemcpy3DPeer(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy3DPeer — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5428,9 +5208,8 @@ static hipError_t playback_hipMemcpy3DPeer(PlaybackContext& ctx, const uint8_t* 
 
 static hipError_t playback_hipMemcpy3DPeerAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemcpy3DPeerAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5439,9 +5218,8 @@ static hipError_t playback_hipMemcpy3DPeerAsync(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipGetDriverEntryPoint(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGetDriverEntryPoint — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5450,9 +5228,8 @@ static hipError_t playback_hipGetDriverEntryPoint(PlaybackContext& ctx, const ui
 
 static hipError_t playback_hipGetDriverEntryPoint_spt(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipGetDriverEntryPoint_spt — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5496,9 +5273,8 @@ static hipError_t playback_hipStreamGetId(PlaybackContext& ctx, const uint8_t* p
 
 static hipError_t playback_hipLibraryLoadData(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipLibraryLoadData — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5507,9 +5283,8 @@ static hipError_t playback_hipLibraryLoadData(PlaybackContext& ctx, const uint8_
 
 static hipError_t playback_hipLibraryLoadFromFile(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipLibraryLoadFromFile — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5518,9 +5293,8 @@ static hipError_t playback_hipLibraryLoadFromFile(PlaybackContext& ctx, const ui
 
 static hipError_t playback_hipLibraryUnload(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipLibraryUnload — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5529,9 +5303,8 @@ static hipError_t playback_hipLibraryUnload(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipLibraryGetKernel(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipLibraryGetKernel — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5540,9 +5313,8 @@ static hipError_t playback_hipLibraryGetKernel(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipLibraryGetKernelCount(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipLibraryGetKernelCount — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5561,9 +5333,8 @@ static hipError_t playback_hipStreamCopyAttributes(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipLibraryEnumerateKernels(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipLibraryEnumerateKernels — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5572,9 +5343,8 @@ static hipError_t playback_hipLibraryEnumerateKernels(PlaybackContext& ctx, cons
 
 static hipError_t playback_hipKernelGetLibrary(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipKernelGetLibrary — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5583,9 +5353,8 @@ static hipError_t playback_hipKernelGetLibrary(PlaybackContext& ctx, const uint8
 
 static hipError_t playback_hipKernelGetName(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipKernelGetName — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5594,9 +5363,8 @@ static hipError_t playback_hipKernelGetName(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipOccupancyAvailableDynamicSMemPerBlock(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyAvailableDynamicSMemPerBlock — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5617,9 +5385,8 @@ static hipError_t playback_hipGetProcAddress_spt(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipKernelGetParamInfo(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipKernelGetParamInfo — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5688,9 +5455,8 @@ static hipError_t playback_hipMemGetMemPool(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipMipmappedArrayGetMemoryRequirements(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMipmappedArrayGetMemoryRequirements — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5699,9 +5465,8 @@ static hipError_t playback_hipMipmappedArrayGetMemoryRequirements(PlaybackContex
 
 static hipError_t playback_hipKernelGetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipKernelGetAttribute — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5710,9 +5475,8 @@ static hipError_t playback_hipKernelGetAttribute(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipKernelSetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipKernelSetAttribute — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5721,9 +5485,8 @@ static hipError_t playback_hipKernelSetAttribute(PlaybackContext& ctx, const uin
 
 static hipError_t playback_hipKernelGetFunction(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipKernelGetFunction — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5746,9 +5509,8 @@ static hipError_t playback_hipMemPrefetchBatchAsync(PlaybackContext& ctx, const 
 
 static hipError_t playback_hipOccupancyMaxPotentialClusterSize(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyMaxPotentialClusterSize — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5757,9 +5519,8 @@ static hipError_t playback_hipOccupancyMaxPotentialClusterSize(PlaybackContext& 
 
 static hipError_t playback_hipOccupancyMaxActiveClusters(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipOccupancyMaxActiveClusters — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5958,9 +5719,8 @@ static hipError_t playback_hipLibraryGetManaged(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipMemDiscardBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemDiscardBatchAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5969,9 +5729,8 @@ static hipError_t playback_hipMemDiscardBatchAsync(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipDrvMemDiscardBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvMemDiscardBatchAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5980,9 +5739,8 @@ static hipError_t playback_hipDrvMemDiscardBatchAsync(PlaybackContext& ctx, cons
 
 static hipError_t playback_hipMemDiscardAndPrefetchBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemDiscardAndPrefetchBatchAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -5991,9 +5749,8 @@ static hipError_t playback_hipMemDiscardAndPrefetchBatchAsync(PlaybackContext& c
 
 static hipError_t playback_hipDrvMemDiscardAndPrefetchBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDrvMemDiscardAndPrefetchBatchAsync — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -6002,9 +5759,8 @@ static hipError_t playback_hipDrvMemDiscardAndPrefetchBatchAsync(PlaybackContext
 
 static hipError_t playback_hipMemGetDefaultMemPool(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipMemGetDefaultMemPool — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -6013,9 +5769,8 @@ static hipError_t playback_hipMemGetDefaultMemPool(PlaybackContext& ctx, const u
 
 static hipError_t playback_hipDeviceGetLuid(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipDeviceGetLuid — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -6024,9 +5779,8 @@ static hipError_t playback_hipDeviceGetLuid(PlaybackContext& ctx, const uint8_t*
 
 static hipError_t playback_hipInitDevice(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipInitDevice — "
             "this API is not replayed; results may differ from capture.\n");
   }
@@ -6035,10 +5789,41 @@ static hipError_t playback_hipInitDevice(PlaybackContext& ctx, const uint8_t* pa
 
 static hipError_t playback_hipModuleEnumerateFunctions(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
-  static bool warned = false;
-  if (!warned) {
-    warned = true;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipModuleEnumerateFunctions — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipDeviceFlushGPUDirectRDMAWrites(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipDeviceFlushGPUDirectRDMAWrites*>(payload);
+  static const auto _fn = reinterpret_cast<decltype(&hipDeviceFlushGPUDirectRDMAWrites)>(
+      hrr_runtime_symbol("hipDeviceFlushGPUDirectRDMAWrites"));
+  if (_fn == nullptr) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      fprintf(stderr, "[HRR] hipDeviceFlushGPUDirectRDMAWrites is not exported by this "
+              "HIP runtime; skipping it during replay, results may "
+              "differ from capture.\n");
+    }
+    return hipSuccess;
+  }
+  hipError_t _r = (hipError_t)_fn((enum hipFlushGPUDirectRDMAWritesTarget)a->target, (enum hipFlushGPUDirectRDMAWritesScope)a->scope);
+  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
+    hrr_note_recorded_error(ctx, "hipDeviceFlushGPUDirectRDMAWrites", a->ret);
+    return hipSuccess;
+  }
+  return _r;
+}
+
+static hipError_t playback_hipLibraryGetModule(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipLibraryGetModule — "
             "this API is not replayed; results may differ from capture.\n");
   }
   return hipSuccess;
@@ -6635,15 +6420,17 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetLuid)),  // [542] HRR_API_HIPDEVICEGETLUID
     static_cast<uint32_t>(sizeof(hrr_args_hipInitDevice)),  // [543] HRR_API_HIPINITDEVICE
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleEnumerateFunctions)),  // [544] HRR_API_HIPMODULEENUMERATEFUNCTIONS
-    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [545] HRR_API_HIPPOPCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [546] HRR_API_HIPPUSHCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [547] HRR_API_HIPREGISTERFATBINARY
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [548] HRR_API_HIPREGISTERFUNCTION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [549] HRR_API_HIPREGISTERMANAGEDVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [550] HRR_API_HIPREGISTERSURFACE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [551] HRR_API_HIPREGISTERTEXTURE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [552] HRR_API_HIPREGISTERVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [553] HRR_API_HIPUNREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceFlushGPUDirectRDMAWrites)),  // [545] HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES
+    static_cast<uint32_t>(sizeof(hrr_args_hipLibraryGetModule)),  // [546] HRR_API_HIPLIBRARYGETMODULE
+    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [547] HRR_API_HIPPOPCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [548] HRR_API_HIPPUSHCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [549] HRR_API_HIPREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [550] HRR_API_HIPREGISTERFUNCTION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [551] HRR_API_HIPREGISTERMANAGEDVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [552] HRR_API_HIPREGISTERSURFACE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [553] HRR_API_HIPREGISTERTEXTURE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [554] HRR_API_HIPREGISTERVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [555] HRR_API_HIPUNREGISTERFATBINARY
 };
 
 // ============================================================
@@ -7195,13 +6982,15 @@ hrr_playback_fn_t hrr_playback_dispatch[HRR_API_COUNT] = {
     playback_hipDeviceGetLuid,  // [542] HRR_API_HIPDEVICEGETLUID
     playback_hipInitDevice,  // [543] HRR_API_HIPINITDEVICE
     playback_hipModuleEnumerateFunctions,  // [544] HRR_API_HIPMODULEENUMERATEFUNCTIONS
-    playback___hipPopCallConfiguration,  // [545] HRR_API_HIPPOPCALLCONFIGURATION
-    playback___hipPushCallConfiguration,  // [546] HRR_API_HIPPUSHCALLCONFIGURATION
-    playback___hipRegisterFatBinary,  // [547] HRR_API_HIPREGISTERFATBINARY
-    playback___hipRegisterFunction,  // [548] HRR_API_HIPREGISTERFUNCTION
-    playback___hipRegisterManagedVar,  // [549] HRR_API_HIPREGISTERMANAGEDVAR
-    playback___hipRegisterSurface,  // [550] HRR_API_HIPREGISTERSURFACE
-    playback___hipRegisterTexture,  // [551] HRR_API_HIPREGISTERTEXTURE
-    playback___hipRegisterVar,  // [552] HRR_API_HIPREGISTERVAR
-    playback___hipUnregisterFatBinary,  // [553] HRR_API_HIPUNREGISTERFATBINARY
+    playback_hipDeviceFlushGPUDirectRDMAWrites,  // [545] HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES
+    playback_hipLibraryGetModule,  // [546] HRR_API_HIPLIBRARYGETMODULE
+    playback___hipPopCallConfiguration,  // [547] HRR_API_HIPPOPCALLCONFIGURATION
+    playback___hipPushCallConfiguration,  // [548] HRR_API_HIPPUSHCALLCONFIGURATION
+    playback___hipRegisterFatBinary,  // [549] HRR_API_HIPREGISTERFATBINARY
+    playback___hipRegisterFunction,  // [550] HRR_API_HIPREGISTERFUNCTION
+    playback___hipRegisterManagedVar,  // [551] HRR_API_HIPREGISTERMANAGEDVAR
+    playback___hipRegisterSurface,  // [552] HRR_API_HIPREGISTERSURFACE
+    playback___hipRegisterTexture,  // [553] HRR_API_HIPREGISTERTEXTURE
+    playback___hipRegisterVar,  // [554] HRR_API_HIPREGISTERVAR
+    playback___hipUnregisterFatBinary,  // [555] HRR_API_HIPUNREGISTERFATBINARY
 };

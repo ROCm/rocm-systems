@@ -51,6 +51,8 @@ SMovB64Sop1::SMovB64Sop1(const MachineInst *inst)
         64,
         static_cast<uint32_t>(reinterpret_cast<const Sop1InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  if ((inst_.sdst < 105u && (inst_.sdst & 1u)) || (inst_.ssrc0 < 105u && (inst_.ssrc0 & 1u)))
+    flags_ |= MISALIGNED_SCALAR_DATA;
   flags_ |= RESULT_COPY;
 }
 

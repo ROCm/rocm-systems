@@ -1681,6 +1681,28 @@ class AMDSMIHelpers:
             return f"{converted} W"
         return value
 
+    def get_max_node_power_limit(self):
+        """Get the platform max NPM node power limit (Watts), for help-text bounds.
+
+        Mirrors get_power_caps(): queried once at parser-build time so
+        --node-power-limit's help text can show its valid upper bound. NPM is
+        node-wide, so the first device that yields a reading is sufficient.
+        """
+        for dev in self.get_gpu_handles():
+            try:
+                node_handle = amdsmi_interface.amdsmi_get_node_handle(dev)
+                max_node_power_limit = amdsmi_interface.amdsmi_get_npm_info(node_handle)[
+                    "max_node_power_limit"
+                ]
+                if max_node_power_limit != "N/A":
+                    return f"{max_node_power_limit} W"
+            except (amdsmi_interface.AmdSmiLibraryException, KeyError) as e:
+                logging.debug(
+                    f"AMDSMIHelpers.get_max_node_power_limit - Unable to get NPM info for device {dev}: {str(e)}"
+                )
+                continue
+        return "N/A"
+
     @staticmethod
     def detect_gpu_od(bdf):
         """Detect if a GPU has the gpu_od sysfs interface.
@@ -2415,7 +2437,26 @@ class AMDSMIHelpers:
 
         return True
 
-    def _severity_as_string(self, error_severity, notify_type, for_filename):
+    def _severity_as_string(self, error_severity, notify_type, for_filename, source=None):
+        if source == "fabric":
+            # IFoE reports a link going down as non-fatal uncorrected and a link
+            # coming back up as non-fatal corrected; there is no other carrier.
+            if error_severity == "non_fatal_uncorrected":
+                if for_filename:
+                    return "fabric-linkdown"
+                return "FABRIC-LINKDOWN"
+            if error_severity == "non_fatal_corrected":
+                if for_filename:
+                    return "fabric-linkup"
+                return "FABRIC-LINKUP"
+            if error_severity == "fatal":
+                if for_filename:
+                    return "fabric-fatal"
+                return "FABRIC-FATAL"
+            if for_filename:
+                return "fabric-unknown"
+            return "FABRIC-UNKNOWN"
+
         if error_severity == "non_fatal_uncorrected":
             if for_filename:
                 return "uncorrected"
@@ -2462,6 +2503,7 @@ class AMDSMIHelpers:
                     entry.get("error_severity", "Unknown"),
                     entry.get("notify_type", "Unknown"),
                     False,
+                    entry.get("source"),
                 )
                 output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
 
@@ -2523,7 +2565,8 @@ class AMDSMIHelpers:
             # Determine prefix/severity
             error_severity = entry.get("error_severity", "").lower()
             notify_type = entry.get("notify_type", "")
-            prefix = self._severity_as_string(error_severity, notify_type, True)
+            source = entry.get("source")
+            prefix = self._severity_as_string(error_severity, notify_type, True, source)
 
             # Generate filenames
             count = cper_counter[0] + 1
@@ -2562,7 +2605,7 @@ class AMDSMIHelpers:
             gpu_id = "-"
             if not isinstance(device_handle, Path):
                 gpu_id = self.get_gpu_id_from_device_handle(device_handle)
-            severity = self._severity_as_string(error_severity, notify_type, False)
+            severity = self._severity_as_string(error_severity, notify_type, False, source)
             output_rows[cper_path] = [
                 timestamp,
                 gpu_id,
@@ -2711,6 +2754,7 @@ class AMDSMIHelpers:
                             entry.get("error_severity", "Unknown"),
                             entry.get("notify_type", "Unknown"),
                             False,
+                            entry.get("source"),
                         )
                         json_rows.append(
                             {
@@ -2894,6 +2938,9 @@ class AMDSMIHelpers:
         collected_json_rows = []
         entries = {}
         cper_data = []
+        gpu_cper_unavailable = False
+        gpu_cper_error_code = None
+
         while True:
             try:
                 entries, new_cursor, cper_data, _status_code = (
@@ -2914,11 +2961,11 @@ class AMDSMIHelpers:
                     or e.get_error_code()
                     == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_NOT_FOUND
                 ):
-                    raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
-                        logger.format,
-                        e.get_error_code(),
-                        detail="Error accessing CPER files. This command requires CPER to be enabled.",
-                    ) from e
+                    # GPU CPER unavailable; try fabric before raising
+                    gpu_cper_unavailable = True
+                    gpu_cper_error_code = e.get_error_code()
+                    logging.debug(f"GPU CPER unavailable: {e}")
+                    break
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_FILE_ERROR:
                     raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
                         logger.format,
@@ -2942,6 +2989,88 @@ class AMDSMIHelpers:
                 collected_json_rows,
                 emit_inline,
                 cper_counter,
+            )
+
+        # Fetch fabric CPER entries (IFoE RAS events). Fabric cursors live in a
+        # separate list so --follow does not interleave them with the GPU cursors.
+        fabric_cursors = getattr(args, "fabric_cursor", None)
+        if fabric_cursors is None:
+            fabric_cursors = []
+            args.fabric_cursor = fabric_cursors
+        while len(fabric_cursors) <= gpu_idx:
+            fabric_cursors.append(0)
+
+        fabric_has_more = False
+        while True:
+            prev_fabric_cursor = fabric_cursors[gpu_idx]
+            try:
+                fabric_entries, new_fabric_cursor, fabric_cper_data, fabric_status_code = (
+                    amdsmi_interface.amdsmi_get_fabric_cper_entries(
+                        device_handle, severity_mask, buffer_size, fabric_cursors[gpu_idx]
+                    )
+                )
+                logging.debug(
+                    f"fabric_cper_entries | entries: {fabric_entries}, status: {fabric_status_code}"
+                )
+                num_entries = num_entries + len(fabric_entries)
+
+                # Check if the status indicates more data is available or if we're done
+                fabric_has_more = (
+                    fabric_status_code == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_MORE_DATA
+                )
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError(
+                        "Error accessing fabric CPER. This command requires elevation"
+                    ) from e
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                ):
+                    logging.debug("Fabric CPER not supported on this device")
+                    break
+                if (
+                    e.get_error_code()
+                    == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_OUT_OF_RESOURCES
+                ):
+                    raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+                        logger.format,
+                        e.get_error_code(),
+                        detail="Fabric CPER entries exceed internal buffer capacity",
+                    ) from e
+                logging.debug(f"Cannot retrieve fabric CPER entries: {e}")
+                break
+
+            # Only update cursor if we got entries or if the library advanced it (non-zero).
+            # When cursor returns 0 with no entries, it means "end of current data" —
+            # preserve the last valid cursor so --follow doesn't restart from 0.
+            if len(fabric_entries) > 0 or new_fabric_cursor != 0:
+                fabric_cursors[gpu_idx] = new_fabric_cursor
+
+            # Emit output if we have entries
+            if len(fabric_entries) > 0:
+                self._emit_cper_output(
+                    fabric_entries,
+                    fabric_cper_data,
+                    device_handle,
+                    args,
+                    logger,
+                    collected_json_rows,
+                    emit_inline,
+                    cper_counter,
+                )
+
+            if not fabric_has_more:
+                break
+
+            if len(fabric_entries) == 0 and fabric_cursors[gpu_idx] == prev_fabric_cursor:
+                break
+
+        if gpu_cper_unavailable and num_entries == 0 and not args.follow:
+            raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
+                logger.format,
+                gpu_cper_error_code,
+                detail="Error accessing CPER files. This command requires CPER to be enabled.",
             )
 
         if num_entries == 0 and not args.follow:
@@ -3410,6 +3539,189 @@ class AMDSMIHelpers:
                     "status": "error",
                     "sensor": power_type_key,
                     "requested_power_cap": self.unit_format(logger, requested_power_cap, "W"),
+                    "error": e.get_error_info(detailed=False),
+                    "message": error_msg,
+                }
+            return error_msg
+
+    # CLI-facing full names for the library's internal "PB"/"FB" strings
+    # (amdsmi_interface.py's own string contract stays unchanged).
+    NPM_BALANCING_MODE_TO_CLI = {"PB": "POWER_BALANCING", "FB": "FREQUENCY_BALANCING"}
+    NPM_BALANCING_MODE_FROM_CLI = {"POWER_BALANCING": "PB", "FREQUENCY_BALANCING": "FB"}
+
+    def validate_and_set_node_balancing_mode(self, node_handle, requested_mode, logger):
+        """Validate and set the NPM balancing mode for a node.
+
+        Args:
+            node_handle: Node handle (system-wide, not per-GPU)
+            requested_mode (str): "POWER_BALANCING" or "FREQUENCY_BALANCING"
+            logger: AMDSMILogger instance for format-aware output
+
+        Returns:
+            dict or str: Structured data for JSON/CSV or formatted string for human-readable output
+        """
+        if node_handle is None:
+            message = "No node handle available; cannot set balancing mode"
+            self.error_collector.record(int(amdsmi_cli_exceptions.AmdSmiExitCode.DEVICE_NOT_FOUND))
+            if logger.is_json_format() or logger.is_csv_format():
+                return {"status": "error", "message": message}
+            return message
+
+        # Pre-check NPM enablement, mirroring validate_and_set_node_power_limit():
+        # amdsmi_set_npm_balancing_mode() reports both "NPM disabled" and
+        # "board/mode sysfs file missing/unreadable while NPM is enabled" as
+        # the same AMDSMI_STATUS_NOT_SUPPORTED. Checking status up front lets
+        # the former be reported unambiguously.
+        try:
+            npm_info = amdsmi_interface.amdsmi_get_npm_info(node_handle)
+            if npm_info["status"] == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED:
+                message = "[AMDSMI_STATUS_NOT_SUPPORTED] NPM is disabled on this node; cannot set balancing mode"
+                self.error_collector.record_library_error(
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
+                if logger.is_json_format() or logger.is_csv_format():
+                    return {
+                        "status": "error",
+                        "requested_mode": requested_mode,
+                        "error": "AMDSMI_STATUS_NOT_SUPPORTED",
+                        "message": message,
+                    }
+                return message
+        except amdsmi_exception.AmdSmiLibraryException:
+            # NPM enablement couldn't be determined (e.g. npm_status sysfs file
+            # unreadable); fall through and let the set call below report its
+            # own error rather than masking it with a pre-check failure.
+            pass
+
+        try:
+            amdsmi_interface.amdsmi_set_npm_balancing_mode(
+                node_handle, self.NPM_BALANCING_MODE_FROM_CLI[requested_mode]
+            )
+            message = f"Successfully set NPM balancing mode to {requested_mode}"
+            if logger.is_json_format() or logger.is_csv_format():
+                return {"status": "success", "balancing_mode": requested_mode, "message": message}
+            return message
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                raise PermissionError("Command requires elevation") from e
+            if (
+                e.get_error_code()
+                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE
+            ):
+                message = (
+                    f"BALANCING_MODE: [{e.get_error_info(detailed=False)}] "
+                    f"{requested_mode} is not supported on this platform"
+                )
+            elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
+                message = (
+                    "NPM balancing mode is not supported on this node; cannot set balancing mode"
+                )
+            else:
+                message = f"[{e.get_error_info(detailed=False)}] Unable to set NPM balancing mode to {requested_mode}"
+            self.error_collector.record_library_error(e.get_error_code())
+            if logger.is_json_format() or logger.is_csv_format():
+                return {
+                    "status": "error",
+                    "requested_mode": requested_mode,
+                    "error": e.get_error_info(detailed=False),
+                    "message": message,
+                }
+            return message
+
+    def validate_and_set_node_power_limit(self, node_handle, requested_limit, logger):
+        """Validate and set the NPM (Node Power Management) power limit for a node.
+
+        Mirrors validate_and_set_power_cap(): fetches the platform max bound via
+        amdsmi_get_npm_info() (amdsmi_npm_info_t::max_node_power_limit, sourced from
+        board/max_node_power_limit) and rejects out-of-range requests before ever
+        issuing the write. This is an early, CLI-friendly pre-check only:
+        amdsmi_set_npm_limit() itself already validates `limit` against the same
+        bound internally and fails closed if that bound can't be read (see its
+        docstring); this CLI-side check exists purely to fail fast and surface a
+        clean, user-facing hint here rather than relying solely on the library
+        call's exception.
+
+        There is no driver-exposed minimum bound beyond positivity (no sysfs file
+        or design-doc source documents a real minimum), so the lower bound enforced
+        here is simply "> 0".
+
+        Also rejects the request up front if NPM itself is disabled on this node
+        (amdsmi_npm_info_t::status == AMDSMI_NPM_STATUS_DISABLED) -- there is no
+        max bound to validate against in that case, and writing
+        board/cur_node_power_limit while NPM is disabled has no defined effect.
+        Same fail-fast pattern as the max-bound check above: amdsmi_set_npm_limit()
+        itself already enforces this too, so this is a CLI-friendly early exit,
+        not the sole enforcement.
+
+        Fails closed when the platform max is unavailable ("N/A"): rather than
+        allowing any positive value through in that degraded-driver scenario, the
+        request is rejected outright here too, matching amdsmi_set_npm_limit()'s
+        own fail-closed behavior for the same condition.
+
+        Args:
+            node_handle: Node handle obtained via amdsmi_get_node_handle()
+            requested_limit: Requested node power limit value in watts
+            logger: AMDSMILogger instance for format-aware output
+
+        Returns:
+            dict or str: Structured data for JSON/CSV or formatted string for human-readable output
+        """
+        try:
+            npm_info = amdsmi_interface.amdsmi_get_npm_info(node_handle)
+            max_node_power_limit = npm_info["max_node_power_limit"]
+
+            if npm_info["status"] == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_DISABLED:
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    f"{requested_limit}",
+                    self.get_output_format(),
+                    hint="Node power limit cannot be set: NPM is disabled on this node",
+                )
+            elif max_node_power_limit == "N/A":
+                # Fail closed: the platform max is unreadable (degraded driver /
+                # unavailable sysfs), so there is no bound to validate the
+                # request against. Reject rather than let an unbounded value
+                # through.
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    f"{requested_limit}",
+                    self.get_output_format(),
+                    hint="Node power limit cannot be validated: platform maximum is unavailable",
+                )
+            elif not 0 < requested_limit <= max_node_power_limit:
+                # Raise so the caller exits with a non-zero return code
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    f"{requested_limit}",
+                    self.get_output_format(),
+                    hint=f"Node power limit must be between 1W and {max_node_power_limit}W",
+                )
+
+            amdsmi_interface.amdsmi_set_npm_limit(node_handle, requested_limit)
+            if logger.is_json_format() or logger.is_csv_format():
+                return {
+                    "status": "success",
+                    "requested_limit": f"{requested_limit}",
+                    "message": f"Successfully set node power limit to {requested_limit} W",
+                }
+            return f"Successfully set node power limit to {requested_limit} W."
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                raise PermissionError("Command requires elevation") from e
+            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
+                # Raise so the caller exits with a non-zero return code, same as
+                # the CLI-side bound checks above.
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                    sys.argv[1] if len(sys.argv) > 1 else "unknown",
+                    f"{requested_limit}",
+                    self.get_output_format(),
+                    hint=e.get_error_info(detailed=False),
+                ) from e
+            error_msg = f"[{e.get_error_info(detailed=False)}] Unable to set node power limit to {requested_limit} W"
+            if logger.is_json_format() or logger.is_csv_format():
+                return {
+                    "status": "error",
+                    "requested_limit": f"{requested_limit}",
                     "error": e.get_error_info(detailed=False),
                     "message": error_msg,
                 }

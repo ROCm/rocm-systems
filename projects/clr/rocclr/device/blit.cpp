@@ -622,11 +622,26 @@ bool HostBlitManager::fillBuffer(device::Memory& memory, const void* pattern, si
     LogError("Misaligned buffer size and pattern size!");
   }
 
-  // Fill the buffer memory with a pattern
-  for (size_t i = 0; i < (fillSize / patternSize); i++) {
-    memcpy((reinterpret_cast<address>(fillMem) + offset),
-           (reinterpret_cast<const_address>(pattern)), patternSize);
-    offset += patternSize;
+  // Fill the buffer memory with a pattern. Copying one pattern per memcpy() makes the call
+  // overhead dominate, so fill in wide copies instead.
+  address dst = reinterpret_cast<address>(fillMem) + offset;
+  const size_t fillBytes = (fillSize / patternSize) * patternSize;
+  if (patternSize == 1) {
+    memset(dst, *reinterpret_cast<const uint8_t*>(pattern), fillBytes);
+  } else {
+    // Replicate the pattern into a host staging block and copy that out, so the destination
+    // is only ever written (it may be write-combined). The block is no larger than the fill
+    // and is built by doubling, to keep small fills cheap.
+    uint8_t staging[4096];
+    static_assert(amd::FillMemoryCommand::MaxFillPatterSize <= sizeof(staging));
+    const size_t blockBytes = std::min(sizeof(staging) / patternSize * patternSize, fillBytes);
+    memcpy(staging, pattern, patternSize);
+    for (size_t n = patternSize; n < blockBytes; n *= 2) {
+      memcpy(staging + n, staging, std::min(n, blockBytes - n));
+    }
+    for (size_t done = 0; done < fillBytes; done += blockBytes) {
+      memcpy(dst + done, staging, std::min(blockBytes, fillBytes - done));
+    }
   }
 
   // Unmap source and destination memory

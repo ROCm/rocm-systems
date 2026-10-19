@@ -110,8 +110,14 @@ class Context {
                                            const int *status,
                                            int cmp, T* vals);
 
+  __device__ uint64_t signal_wait_until(uint64_t *sig_addr, int cmp,
+                                        uint64_t cmp_value);
+
   template <typename T>
   __device__ int test(T *ivars, int cmp, T val);
+
+  template <typename T>
+  __device__ int test_value(T value, int cmp, T cmp_value);
 
   __device__ void threadfence_system();
 

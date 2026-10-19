@@ -92,7 +92,12 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
     pic_data_size_ = pic_data_size;
     curr_byte_offset_ = 0;
 
-    while (ReadObuHeaderAndSize() != PARSER_EOF) {
+    // PARSER_EOF ends the loop normally: the picture data is exhausted.
+    while ((ret = ReadObuHeaderAndSize()) != PARSER_EOF) {
+        if (ret != PARSER_OK) {
+            FunctionExitLog(g_rocdec_logger);
+            return ret;
+        }
         switch (obu_header_.obu_type) {
             case kObuTemporalDelimiter: {
                 seen_frame_header_ = 0;
@@ -726,9 +731,13 @@ void Av1VideoParser::CheckAndUpdateDecStatus() {
     }
 }
 
-ParserResult Av1VideoParser::ParseObuHeader(const uint8_t *p_stream) {
+ParserResult Av1VideoParser::ParseObuHeader(const uint8_t *p_stream, size_t size_in_bytes) {
     size_t offset = 0;
     obu_header_.size = 1;
+    if (size_in_bytes < obu_header_.size) {
+        ErrorLog(g_rocdec_logger, "OBU header extends past the end of the picture data.");
+        return PARSER_OUT_OF_RANGE;
+    }
     if (Parser::GetBit(p_stream, offset) != 0) {
         ErrorLog(g_rocdec_logger, "Syntax error: obu_forbidden_bit must be set to 0.");
         return PARSER_INVALID_ARG;
@@ -746,6 +755,10 @@ ParserResult Av1VideoParser::ParseObuHeader(const uint8_t *p_stream) {
     }
     if (obu_header_.obu_extension_flag) {
         obu_header_.size += 1;
+        if (size_in_bytes < obu_header_.size) {
+            ErrorLog(g_rocdec_logger, "OBU extension header extends past the end of the picture data.");
+            return PARSER_OUT_OF_RANGE;
+        }
         obu_header_.temporal_id = Parser::ReadBits(p_stream, offset, 3);
         obu_header_.spatial_id = Parser::ReadBits(p_stream, offset, 2);
         if (Parser::ReadBits(p_stream, offset, 3) != 0) {
@@ -757,24 +770,42 @@ ParserResult Av1VideoParser::ParseObuHeader(const uint8_t *p_stream) {
 }
 
 ParserResult Av1VideoParser::ReadObuHeaderAndSize() {
+    ParserResult ret;
+    // PARSER_EOF is reserved for clean exhaustion of the picture data, which ends the OBU
+    // loop normally. Every other exit below reports the parse failure instead, so that a
+    // malformed packet is not handed back to the caller as a complete one.
     if (curr_byte_offset_ >= pic_data_size_) {
         return PARSER_EOF;
     }
     uint8_t *p_stream = pic_data_buffer_ptr_ + curr_byte_offset_;
-    if (ParseObuHeader(p_stream) != PARSER_OK) {
+    // Without a valid header there is no obu_size to step over, so the next OBU boundary is
+    // unknown and obu_header_ may still hold the previous OBU's fields. Stop here.
+    if ((ret = ParseObuHeader(p_stream, pic_data_size_ - curr_byte_offset_)) != PARSER_OK) {
         ErrorLog(g_rocdec_logger, "Syntax error(s) found in OBU header.");
+        return ret;
+    }
+    // Backstop: ParseObuHeader() has already checked this for both header sizes.
+    if (pic_data_size_ - curr_byte_offset_ < obu_header_.size) {
+        ErrorLog(g_rocdec_logger, "OBU header extends past the end of the picture data.");
+        return PARSER_OUT_OF_RANGE;
     }
     curr_byte_offset_ += obu_header_.size;
     p_stream += obu_header_.size;
 
     uint32_t bytes_read;
-    obu_size_ = ReadLeb128(p_stream, &bytes_read);
+    if ((ret = ReadLeb128(p_stream, pic_data_size_ - curr_byte_offset_, &bytes_read, &obu_size_)) != PARSER_OK) {
+        ErrorLog(g_rocdec_logger, "Invalid or truncated obu_size field.");
+        return ret;
+    }
     obu_byte_offset_ = curr_byte_offset_ + bytes_read;
-    curr_byte_offset_ = obu_byte_offset_ + obu_size_;
-    if (curr_byte_offset_ > pic_data_size_) {
+    // obu_size_ is bounded by the leb128 range, so sum in 64 bits before the comparison to
+    // keep a large value from wrapping past the end of the picture data undetected.
+    uint64_t next_byte_offset = static_cast<uint64_t>(obu_byte_offset_) + obu_size_;
+    if (next_byte_offset > pic_data_size_) {
         ErrorLog(g_rocdec_logger, "Invalid obu_size value.");
-        return PARSER_EOF;
+        return PARSER_OUT_OF_RANGE;
     } else {
+        curr_byte_offset_ = static_cast<uint32_t>(next_byte_offset);
         return PARSER_OK;
     }
 }
@@ -1842,6 +1873,9 @@ ParserResult Av1VideoParser::TileInfo(const uint8_t *p_stream, size_t &offset, A
         int widest_tile_sb = 0;
         start_sb = 0;
         for (i = 0; start_sb < sb_cols; i++) {
+            // i indexes width_in_sbs_minus_1[MAX_TILE_COLS] here, one entry tighter than the
+            // TileCols bound checked after the loop.
+            CHECK_ALLOWED_MAX("TileCols", i, MAX_TILE_COLS - 1);
             p_frame_header->tile_info.mi_col_starts[i] = start_sb << sb_shift;
             max_width = std::min(sb_cols - start_sb, max_tile_width_sb);
             p_frame_header->tile_info.width_in_sbs_minus_1[i] = ReadUnsignedNonSymmetic(p_stream, offset, max_width);
@@ -1863,6 +1897,9 @@ ParserResult Av1VideoParser::TileInfo(const uint8_t *p_stream, size_t &offset, A
 
         start_sb = 0;
         for (i = 0; start_sb < sb_rows; i++) {
+            // i indexes height_in_sbs_minus_1[MAX_TILE_ROWS] here, one entry tighter than the
+            // TileRows bound checked after the loop.
+            CHECK_ALLOWED_MAX("TileRows", i, MAX_TILE_ROWS - 1);
             p_frame_header->tile_info.mi_row_starts[i] = start_sb << sb_shift;
             max_height = std::min(sb_rows - start_sb, max_tile_height_sb);
             p_frame_header->tile_info.height_in_sbs_minus_1[i] = ReadUnsignedNonSymmetic(p_stream, offset, max_height);

@@ -142,10 +142,11 @@ TEST_F(TaskPreTuningMicrotest, FillCollTuningInput_UnscaledColl_CopiesTheRawFiel
   EXPECT_EQ(1, in.nWorks);
   EXPECT_EQ(1, in.numPipeOps);
   EXPECT_EQ(kCollSendBytes, in.nBytes);
-  // fillCollTuningInput is a partial fill: these four stay the caller's, and the scheduler resolves them.
+  // Only an AllGather can be in place.
+  EXPECT_EQ(0, in.inPlace);
+  // fillCollTuningInput is a partial fill: these three stay the caller's, and the scheduler resolves them.
   EXPECT_EQ(TaskPrep_Poisoned<int>(), in.collNetSupport);
   EXPECT_EQ(TaskPrep_Poisoned<int>(), in.captured);
-  EXPECT_EQ(TaskPrep_Poisoned<int>(), in.inPlace);
   EXPECT_EQ(TaskPrep_Poisoned<int>(), in.CTAPolicy);
 }
 

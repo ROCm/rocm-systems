@@ -10,6 +10,8 @@
 
 #include "gin_anvil_plugin_test_stubs.h"
 
+#include "../common/ScopedEnv.hpp"
+
 #include "gin/gin_host_anvil_sdma.h"
 #include "comm.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
@@ -29,29 +31,6 @@
 
 namespace RcclUnitTesting
 {
-
-class ScopedEnv {
- public:
-  ScopedEnv(const char* name, const char* value) : name_(name) {
-    if (const char* prev = getenv(name)) {
-      had_ = true;
-      prev_ = prev;
-    }
-    setenv(name, value, 1);
-  }
-  ~ScopedEnv() {
-    if (had_) {
-      setenv(name_, prev_.c_str(), 1);
-    } else {
-      unsetenv(name_);
-    }
-  }
-
- private:
-  const char* name_;
-  std::string prev_;
-  bool had_{false};
-};
 
 struct HipFreeDeleter {
   void operator()(void* ptr) const {
@@ -555,7 +534,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_InjectFailRankAbortsBind) {
   ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
   HipAllocation devLsa(rawDevLsa);
   GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
-  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+  GinAnvilPluginStubs::SetConnCheckMissingCalls(-1);
 
   ScopedEnv inj("NCCL_GIN_ANVIL_SDMA_CONN_INJECT_FAIL_RANK", "0");
   GinAnvilPluginStubs::SetBootstrapNranks(2);
@@ -584,7 +563,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_InjectFailRankAbortsBind) {
 TEST_F(GinAnvilPluginTest, ConnCheck_EnvBypassSkipsGate) {
   ScopedEnv bypass("NCCL_GIN_ANVIL_SDMA_CONN_CHECK", "0");
   GinAnvilPluginStubs::SetBootstrapNranks(2);
-  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+  GinAnvilPluginStubs::SetConnCheckMissingCalls(-1);
   mockComm_.get()->devrState.lsaSize = 2;
   void* ictx = nullptr;
   initCtx(&ictx);
@@ -776,7 +755,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_VerifyMissingAbortsBind) {
   ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
   HipAllocation devLsa(rawDevLsa);
   GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
-  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+  GinAnvilPluginStubs::SetConnCheckMissingCalls(-1);
 
   void* ictx = nullptr;
   void* coll = nullptr;
@@ -825,7 +804,7 @@ TEST_F(GinAnvilPluginTest, ConnCheck_FailedBindRetriesGate) {
   ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
   HipAllocation devLsa(rawDevLsa);
   GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
-  GinAnvilPluginStubs::SetConnCheckVerifyMissing(true);
+  GinAnvilPluginStubs::SetConnCheckMissingCalls(-1);
 
   void* ictx = nullptr;
   void* coll = nullptr;
@@ -845,6 +824,77 @@ TEST_F(GinAnvilPluginTest, ConnCheck_FailedBindRetriesGate) {
   EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSystemError);
   EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 6);
   EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 6);
+
+  stopGin(ictx, coll, ginCtx);
+}
+
+// closeColl must un-mark the set: production never reaches plugin finalize
+// (ginState is memset first), so leaving erase only in finalize would leave a
+// recycled ncclComm* marked and skip the gate on the next job.
+TEST_F(GinAnvilPluginTest, ConnCheck_CloseCollUnmarksCommForReuse) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  ASSERT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
+  ginCtx = nullptr;
+  ASSERT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  coll = nullptr;
+  // Intentionally skip finalize: that path is unreachable after HostFinalize.
+
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 2);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 2);
+
+  stopGin(ictx, coll, ginCtx);
+}
+
+// destroyContext alone must leave the dedup marked: gin_host DevCommFree only
+// destroys contexts while the coll stays open, so a second bind on that coll
+// must still skip the gate (counters stay at 1/1).
+TEST_F(GinAnvilPluginTest, ConnCheck_DestroyContextKeepsDedupOnOpenColl) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  ASSERT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
+  ginCtx = nullptr;
+  // Intentionally skip closeColl: matches ncclGinDevCommFree (destroyContext only).
+
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
 
   stopGin(ictx, coll, ginCtx);
 }

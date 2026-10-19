@@ -1,0 +1,55 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+name: RCCL default behavior
+
+# Every PR into develop waits for this check, so the job runs only git and the
+# script on the runner's python3, and the script must stay standard-library
+# only. Its tests run in rccl-default-behavior-test.yml, which is not required.
+#
+# No `paths:` filter: a path-skipped workflow reports no check, so a required
+# status would never pass on a PR that does not touch RCCL. The script exits 0
+# when the diff has no env-var change.
+#
+# pull-requests: write lets the script keep one marker-tagged PR comment up to
+# date with the workflow token; it grants no write access to repository
+# contents. A fork's token is read-only, so there the comment fails with a
+# warning and the check result stands.
+
+on:
+  pull_request:
+    branches: [develop, main, rccl-develop, rccl_develop]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  default-behavior:
+    # A ruleset requires this check by name. Renaming the job leaves every PR
+    # waiting on a check that never reports until the ruleset is updated.
+    name: RCCL env-var changelog
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # HEAD^ on a pull_request merge commit is the base branch tip.
+          fetch-depth: 2
+          # Broad source scans would otherwise fetch blobs individually.
+          sparse-checkout: |
+            .github/scripts
+            projects/rccl/src
+            projects/rccl/docs/api-reference
+            projects/rccl/docs/userguide/source
+
+      - name: Check env-var changes are in the changelog
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: python3 .github/scripts/rccl_check_default_behavior.py --base-ref HEAD^

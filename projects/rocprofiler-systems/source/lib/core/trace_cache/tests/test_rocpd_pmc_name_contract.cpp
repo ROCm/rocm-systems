@@ -79,8 +79,8 @@ inserted_xgmi_samples(std::string_view base, bool is_enabled, const xgmi_link_ar
         {
             continue;
         }
-        samples.push_back({ info::format_link_pmc_name(base, i),
-                            info::format_link_track_name(base, i) });
+        samples.push_back({ .pmc_name   = info::format_link_pmc_name(base, i),
+                            .track_name = info::format_link_track_name(base, i) });
     }
     return samples;
 }

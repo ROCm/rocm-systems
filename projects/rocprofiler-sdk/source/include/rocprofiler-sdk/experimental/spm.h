@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/defines.h>
+#include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 
 ROCPROFILER_EXTERN_C_INIT
@@ -314,5 +315,60 @@ rocprofiler_spm_configure_buffer_dispatch_service(
     rocprofiler_buffer_id_t                        buffer_id,
     rocprofiler_spm_dispatch_counting_service_cb_t callback,
     void* callback_data_args) ROCPROFILER_API ROCPROFILER_NONNULL(3);
+
+/**
+ * @brief (experimental) Restrict an SPM dispatch counting service to a set of GPU agents.
+ *
+ *        By default an SPM dispatch service applies to every GPU agent. This function narrows
+ *        the service so that agents outside @p agents are neither instrumented nor serialized.
+ *        Restricting the agent set also relaxes the SPM context conflict: two contexts may each
+ *        configure an SPM dispatch service and be active at the same time provided their agent
+ *        sets are disjoint.
+ *
+ *        Must be called after an SPM dispatch service has been configured on @p context_id and
+ *        before the context is started. Passing @p num_agents of zero restores all agents.
+ *
+ * @param [in] context_id context id with a configured SPM dispatch service
+ * @param [in] agents array of GPU agent ids to restrict collection to
+ * @param [in] num_agents number of entries in @p agents
+ * @return ::rocprofiler_status_t
+ */
+ROCPROFILER_SDK_EXPERIMENTAL rocprofiler_status_t
+rocprofiler_spm_dispatch_counting_service_set_agents(rocprofiler_context_id_t      context_id,
+                                                     const rocprofiler_agent_id_t* agents,
+                                                     size_t num_agents) ROCPROFILER_API;
+/**
+ * @brief (experimental) Configure SPM Device Counting Service for agent. There may only be one
+ * counting service configured per agent in a context and can be only one active context that is
+ * profiling a single agent at a time. Multiple agent contexts can be started at the same time if
+ * they are profiling different agents.
+ *
+ * @param [in] context_id context id
+ * @param [in] buffer_id id of the buffer to use for the counting service.
+ * @param [in] agent_id agent to configure profiling on.
+ * @param [in] cb Callback called when the context is started for the tool to specify what
+ * counters to collect (rocprofiler_counter_config_id_t).
+ * @param [in] user_data User supplied data to be passed to the callback cb when triggered
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID Returned if the context does not exist.
+ * @retval ::ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND Returned if the buffer is not found.
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Returned if context already has agent
+ *                                                     profiling configured for agent_id.
+ * @retval ::ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED Returned if ROCPROFILER_SPM_BETA_ENABLED is
+ * not set
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT Returned if the context has a conflicting
+ * service configured (e.g. PMC or PC sampling)
+ * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT Returned if dispatch counter
+ * collection is already configured on this context
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if successfully configured
+ */
+ROCPROFILER_SDK_EXPERIMENTAL
+rocprofiler_status_t
+rocprofiler_configure_spm_device_counting_service(rocprofiler_context_id_t context_id,
+                                                  rocprofiler_buffer_id_t  buffer_id,
+                                                  rocprofiler_agent_id_t   agent_id,
+                                                  rocprofiler_device_counting_service_cb_t cb,
+                                                  void* user_data)
+    ROCPROFILER_NONNULL(4) ROCPROFILER_API;
 
 ROCPROFILER_EXTERN_C_FINI

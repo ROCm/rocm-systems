@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
-#include "rocjitsu/vm/amdgpu/aql/aql_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
@@ -2474,7 +2474,7 @@ TEST_F(GpuDeviceMes, LostConnectionReleasesOnlyPciQueuesAndAllowsPasidReuse) {
                .consumer_pointer_address = 0x2000,
                .producer_pointer_address = 0x3000},
       .doorbell = {},
-      .binding_factory = rocjitsu::amdgpu::make_aql_queue_binding_factory(legacy_cp),
+      .binding_factory = rocjitsu::amdgpu::make_compute_queue_binding_factory(legacy_cp),
       .type = rocjitsu::amdgpu::QueueType::Compute,
       .packet_format = rocjitsu::amdgpu::QueuePacketFormat::Aql,
   });

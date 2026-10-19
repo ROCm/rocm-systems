@@ -734,6 +734,25 @@
       ]
     },
 
+    "resiliency_gid_change": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1",
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Resiliency_GidChangeRefresh",
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+          "test_filter": "Transport/NetIbGidChangeTest.*"
+        }
+      ]
+    },
+
     "net_ib_stress": {
       "extends": "net_ib_base",
       "timeout": 600,
@@ -1197,6 +1216,87 @@
       "extends": "cast_multithread",
       "command_args": "--net_ib_nthreads=16"
     },
+    "cast_opt_recv": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "description": "Optional recv completion enabled: QP sched off, RCCL_IB_OPTIONAL_RECV_COMPLETION=1, CTS offload pinned off so the flag is attributable to the control param.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_QPS_PER_CONNECTION": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "Cast_OptRecv_SimpleSendRecv",
+          "description": "Basic send/recv with optRecvCompletion enabled (no hint from this test)",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "Cast_OptRecv_MultipleSizes",
+          "description": "Multiple buffer sizes with optRecvCompletion enabled",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "Cast_OptRecv_LargeTransfer",
+          "description": "Large transfer with optRecvCompletion enabled",
+          "test_filter": "NetIbMPITest.LargeTransfer"
+        },
+        {
+          "name": "Cast_OptRecv_MultipleSequential",
+          "description": "Sequential transfers with optRecvCompletion enabled",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "Cast_OptRecv_FlagEnabled",
+          "description": "White-box: commBase.optRecvCompletion is 1 when control=1 and QP sched=0",
+          "test_filter": "NetIbMPITest.OptRecvCompletionFlagEnabled"
+        },
+        {
+          "name": "Cast_OptRecv_SkipWritePath",
+          "description": "1-req send/recv with NCCL_NET_OPTIONAL_RECV_COMPLETION hint; data matches after send CQE",
+          "test_filter": "NetIbMPITest.OptRecvCompletionSkipWritePath"
+        },
+        {
+          "name": "Cast_OptRecv_MultiRecvNoHint",
+          "description": "n>1 irecv without the optional-recv hint still transfers correctly",
+          "test_filter": "NetIbMPITest.OptRecvCompletionMultiRecvNoHint"
+        },
+        {
+          "name": "Cast_OptRecv_MultiRecvWithHint",
+          "description": "n>1 with the optional-recv hint degrades to WRITE_WITH_IMM and completes",
+          "test_filter": "NetIbMPITest.OptRecvCompletionMultiRecvWithHint"
+        }
+      ]
+    },
+
+    "cast_opt_recv_disabled_sched": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "description": "QP scheduler on (cast_base): optRecvCompletion must stay off.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_OptRecv_FlagDisabledByQpSched",
+          "description": "White-box: commBase.optRecvCompletion is 0 when QP scheduling is enabled",
+          "test_filter": "NetIbMPITest.OptRecvCompletionFlagDisabledByQpSched"
+        },
+        {
+          "name": "Cast_OptRecv_DisabledKeepsRecvSize",
+          "description": "1-req hinted send/recv with the gate forced off: receiver reports the posted size, not the skip path's 0",
+          "test_filter": "NetIbMPITest.OptRecvCompletionDisabledKeepsRecvSize"
+        }
+      ]
+    },
+
     "cast_wrr_split_long_interval": {
       "extends": "cast_base",
       "timeout": 120,
@@ -1238,6 +1338,102 @@
           "name": "Cast_EnableDisableSplitData_LongInterval",
           "description": "Toggle splitData at the threshold with the RTT timer suspended",
           "test_filter": "NetIbMPITest.CastEnableDisableSplitData"
+        }
+      ]
+    },
+    "fault_multithread_base": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "description": "IB-CAST fault environment for the threaded suites, carrying no tests of its own for the reason given in net_ib_multithread_base. Port failover is on and port recovery is left at its default of off: the failover tests here assert that failover absorbed the error and that the device is no longer Ok, which recovery would undo underneath them. Concurrent recovery is covered by fault_recovery_multithread_2 and the nightly drift suite, which enable it. RCCL_IB_FAULT_INJECTION stays off: these tests use the per-communicator pre-call hooks and have no use for the libibverbs ops shims, which add two acquisitions of one process-global mutex to every poll_cq and whose registry is per device, so one worker's clear disarms every other worker's faults.",
+      "env_variables": {
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "100",
+        "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
+        "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "RCCL_IB_FAULT_INJECTION": "0"
+      }
+    },
+    "fault_inject_multithread": {
+      "extends": "fault_multithread_base",
+      "tests": [
+        {
+          "name": "FaultInj_ShimsAbsentUnlessRequested",
+          "description": "With RCCL_IB_FAULT_INJECTION off, arming an ops-level fault must be refused: if it succeeds the libibverbs shims are installed, and their poll_cq takes one process-global mutex per call, serializing progress for the whole process",
+          "test_filter": "NetIbMPITest.FaultInjectionShimsAbsentUnlessRequested"
+        },
+        {
+          "name": "FaultInj_MultiThread_IsolationAcrossWorkers",
+          "description": "One worker breaks its own connection while the others keep transferring: the bystanders' transfers must all verify while the fault is live",
+          "test_filter": "NetIbMPITest.FaultIsolationAcrossWorkers"
+        },
+        {
+          "name": "FaultInj_MultiThread_QpErrorIsFatal",
+          "description": "Every worker arms error injection on its own QPs and must observe the failure itself",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorIsFatal"
+        },
+        {
+          "name": "FaultInj_MultiThread_DelayDataIntegrity",
+          "description": "Every worker slows its own QP 0 and still delivers intact data while the others load the device",
+          "test_filter": "NetIbMPITest.FaultInjCastDelayDataIntegrity"
+        },
+        {
+          "name": "FaultInj_MultiThread_QpErrorClearRecovers",
+          "description": "Each worker breaks one connection, clears the fault and must move data cleanly on a second connection",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        },
+        {
+          "name": "FaultInj_MultiThread_FailoverCqeErrorRecovered",
+          "description": "N workers break their own QP 0 at the same moment on one fused device, so the failovers overlap and each worker must keep routing over the surviving member. Port recovery is off in this suite, so the recovery thread is not involved -- the recovery configurations below cover that",
+          "test_filter": "NetIbMPITest.FailoverCqeErrorRecovered"
+        },
+        {
+          "name": "FaultInj_MultiThread_FailoverLargeMessage",
+          "description": "Concurrent 64 KB messages survive their own link failure byte for byte",
+          "test_filter": "NetIbMPITest.FailoverLargeMessageDataIntegrity"
+        },
+        {
+          "name": "FaultInj_MultiThread_FailoverMultiRequest",
+          "description": "Every worker posts several messages, then breaks its own QP 0, then requires all of them to arrive intact with no fatal error, while the other workers do the same to their own connections. Whether a request was still on the wire at the transition is not observable from a worker, so it is not asserted; the repost count is logged as diagnostics",
+          "test_filter": "NetIbMPITest.FailoverMultiRequestInFlight"
+        }
+      ]
+    },
+    "fault_inject_multithread_2": {
+      "extends": "fault_inject_multithread",
+      "command_args": "--net_ib_nthreads=2"
+    },
+    "fault_inject_multithread_4": {
+      "extends": "fault_inject_multithread",
+      "command_args": "--net_ib_nthreads=4"
+    },
+    "fault_recovery_base": {
+      "extends": "fault_multithread_base",
+      "timeout": 900,
+      "command_args": "--net_ib_nthreads=2",
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1"
+      }
+    },
+    "fault_recovery_nightly_drift": {
+      "extends": "fault_recovery_base",
+      "tests": [
+        {
+          "name": "FaultInj_MultiThread_PostRecoveryPingPongHoldsSync",
+          "description": "Open finding: ten blocking messages on a recovered connection must not leave the ranks a message apart; disabled in this generic plan",
+          "test_filter": "NetIbMPITest.PostRecoveryPingPongHoldsSync"
+        }
+      ]
+    },
+    "fault_recovery_multithread_2": {
+      "extends": "fault_recovery_base",
+      "tests": [
+        {
+          "name": "FaultInj_MultiThread_RecoverySuccessRestoresTraffic",
+          "description": "Concurrent recoveries share one global recovery thread, then every worker's traffic must resume",
+          "test_filter": "NetIbMPITest.RecoverySuccessRestoresTraffic"
         }
       ]
     }
@@ -1436,6 +1632,12 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Resiliency GID Change Refresh",
+      "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+      "config": "resiliency_gid_change",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Stress (2-rank)",
       "description": "Resource exhaustion, connection lifecycle, endurance, bidirectional, GPU stress",
       "config": "net_ib_stress",
@@ -1556,6 +1758,18 @@
       "enabled": true
     },
     {
+      "name": "NET IB - CAST optional recv completion",
+      "description": "optRecvCompletion enabled (QP sched off): transfer sanity plus skip-CQ WRITE path",
+      "config": "cast_opt_recv",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST optional recv completion disabled by QP sched",
+      "description": "White-box: QP scheduler forces optRecvCompletion off",
+      "config": "cast_opt_recv_disabled_sched",
+      "enabled": true
+    },
+    {
       "name": "NET IB - CAST WRR+Split, long update interval",
       "description": "Scheduler toggle tests that need RCCL_IB_QP_SCHED_UPDATE_INTERVAL >= 10 s; they skip in every other config",
       "config": "cast_wrr_split_long_interval",
@@ -1566,6 +1780,30 @@
       "description": "Scheduler toggle tests that need RCCL_IB_QP_SCHED_UPDATE_INTERVAL >= 10 s; they skip in every other config",
       "config": "cast_wrr_no_split_long_interval",
       "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection Multithread (2)",
+      "description": "2 worker threads/rank injecting per-communicator faults, including cross-worker isolation",
+      "config": "fault_inject_multithread_2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection Multithread (4)",
+      "description": "4 worker threads/rank injecting per-communicator faults, including cross-worker isolation",
+      "config": "fault_inject_multithread_4",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Recovery Multithread (2)",
+      "description": "Concurrent link recoveries through the single process-global recovery thread",
+      "config": "fault_recovery_multithread_2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Recovery Nightly Drift (2)",
+      "description": "Open finding: post-recovery ping-pong drifts a message apart",
+      "config": "fault_recovery_nightly_drift",
+      "enabled": false
     }
   ]
 }
