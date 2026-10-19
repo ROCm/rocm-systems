@@ -496,6 +496,20 @@ in the following table.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
 
+    * - | ``NCCL_GIN_MLOPART``
+        | Allows GPU-initiated networking (GIN) on a communicator that includes
+          a rank on a GPU partition. Without this variable, one partitioned
+          rank turns GIN off for the whole communicator. The default allows
+          partitions on a single-node communicator only; set ``1`` to allow
+          them across nodes. See :ref:`device-api-gin` and
+          :ref:`nps4_cpx_mi300_rccl`.
+      - | Unset: Allow GIN on partitions on a single-node communicator; disable
+          GIN on a partitioned communicator spanning several nodes (default).
+          The latter is reported through ``NCCL_DEBUG=INFO``.
+        | ``1``: Allow GIN on partitions on any number of nodes.
+        | ``0``: Disable GIN whenever any rank runs on a partition.
+        | A communicator with no partitioned rank is unaffected by any value.
+
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
         | When unset, RCCL auto-selects an interface in this order:

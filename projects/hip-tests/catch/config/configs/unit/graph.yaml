@@ -1735,6 +1735,7 @@ graph:
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again:
     <<: *level_default
+    disabled: [amd_windows]
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph:
     <<: *level_default

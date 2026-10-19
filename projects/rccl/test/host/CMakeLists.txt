@@ -426,6 +426,15 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
     
+  # rccl-UnitTestsMicroDdaIpc -- src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu. Own binary:
+  # rccl-UnitTestsMicro links fakes/dda_fakes.cc, which defines the same ncclAllReduceDdaIpc* symbols.
+  set(TEST_MICRO_DDA_IPC_SOURCE_FILES
+    dda-allreduce-ipc-test.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroRomeModels
   set(TEST_MICRO_ROME_MODELS_SOURCE_FILES
     rome-models-test.cc
@@ -448,6 +457,16 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # src/algorithms/dda/
+  set(TEST_MICRO_DDA_SOURCE_FILES
+    algorithms/dda/fabric/fabric-mem-handler-test.cc
+    fakes/bootstrap_stubs.cc             # bootstrapAllGather
+    fakes/env_fakes.cc                   # NCCL_CUMEM_SKIP_FREE
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -1012,6 +1031,21 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
     GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host.yaml")
 
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroDdaIpc -- src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroDdaIpc
+  SOURCES ${TEST_MICRO_DDA_IPC_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    DDA_ALL_REDUCE_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu.cpp"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda_ipc.yaml")
+# The TU defines __global__ kernels; an embedded (empty) GPU binary keeps clang from referencing an
+# external __hip_fatbin_<cuid>. Registration itself is faked in fakes/hip_fakes.cc.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary" "")
+target_compile_options(rccl-UnitTestsMicroDdaIpc PRIVATE
+  "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
+
 # sym_kernels_host.cc only exists when sym kernels are generated (GENERATE_SYM_KERNELS
 # in-build / present on disk standalone).
 if(_MICRO_BUILD_SYM_KERNELS)
@@ -1239,6 +1273,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
     DIAG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/p2p.cc"
     DIAG_IB_WRITE_BW_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/ib_write_bw.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroDda
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroDda
+  SOURCES ${TEST_MICRO_DDA_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    FABRIC_MEM_HANDLER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_mem_handler.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.
