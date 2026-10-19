@@ -707,7 +707,9 @@ const std::vector<DdaEnvSetting> kDisableAllReduceLL = {
     {"RCCL_DDA_LL_ONESHOT_THRESHOLD", "0"},
     {"RCCL_DDA_LL_TWOSHOT_THRESHOLD", "0"},
 };
-const std::vector<DdaEnvSetting> kDisableLL = {{"RCCL_DDA_LL", "0"}};
+// RCCL_DDA_LL=0 would also fail the AllGather, ReduceScatter and AlltoAll LL128
+// eligibility checks, so skip the LL tier by capping it at zero bytes instead.
+const std::vector<DdaEnvSetting> kSkipLLTier = {{"RCCL_DDA_LL_THRESHOLD", "0"}};
 } // namespace
 
 /** DDA fabric (gfx1250): LL / LL128 wire waits and the FabricGpuBarrier. */
@@ -794,7 +796,7 @@ TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaAllGatherLl)
 TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaAllGatherLl128)
 {
     runIncompleteDdaRevokeShrink(*this,
-                                 {ncclFuncAllGather, 16384, kDdaLL128, NCCL_PROTO_LL128, kDisableLL});
+                                 {ncclFuncAllGather, 16384, kDdaLL128, NCCL_PROTO_LL128, kSkipLLTier});
 }
 
 TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaReduceScatterLl)
@@ -805,7 +807,7 @@ TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaReduceScatterLl)
 TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaReduceScatterLl128)
 {
     runIncompleteDdaRevokeShrink(
-        *this, {ncclFuncReduceScatter, 256, kDdaLL128, NCCL_PROTO_LL128, kDisableLL});
+        *this, {ncclFuncReduceScatter, 256, kDdaLL128, NCCL_PROTO_LL128, kSkipLLTier});
 }
 
 // 256 B per peer keeps the total under the 64 KiB AlltoAll LL cap at 144 ranks.
@@ -817,7 +819,7 @@ TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaAlltoAllLl)
 TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaAlltoAllLl128)
 {
     runIncompleteDdaRevokeShrink(*this,
-                                 {ncclFuncAlltoAll, 1024, kDdaLL128, NCCL_PROTO_LL128, kDisableLL});
+                                 {ncclFuncAlltoAll, 1024, kDdaLL128, NCCL_PROTO_LL128, kSkipLLTier});
 }
 
 /**
