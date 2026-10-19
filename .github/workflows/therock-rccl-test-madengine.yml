@@ -79,12 +79,14 @@ jobs:
       # ruby's per-job private /tmp is invisible to the Docker daemon, so a -v
       # bind mount of the workspace lands empty; /var/tmp is visible.
       SLURM_TMPDIR: "/var/tmp"
+      # ~/.cache/pip is on a small NFS home quota.
+      PIP_NO_CACHE_DIR: '1'
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+          ref: 47434387de730d51788b705e5600602dd6064997 # 2026-10-16
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -99,8 +101,6 @@ jobs:
             exit 1
           fi
 
-      # The pool is not uniform -- 3.10, 3.12, and one machine with no pip at
-      # all -- so pin the interpreter as rccl-coco-run.yml does.
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:

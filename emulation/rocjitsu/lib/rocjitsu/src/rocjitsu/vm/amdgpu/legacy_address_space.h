@@ -998,6 +998,72 @@ public:
     return atomic_rmw_strict(addr, size, mutation, vmid);
   }
 
+  /// @brief Apply atomic_modify_strict() to active lanes from @p next_lane upward.
+  /// @param addresses At most 64 naturally aligned 4- or 8-byte operands.
+  /// @details Consecutive lanes on mapped pages share one VMID lookup and one page-table
+  /// lease; each lane is still an independent strict atomic under its own mapping lock and
+  /// stripe lock. A lane on an unmapped page takes the ordinary single-lane path with no
+  /// lease held. Stops at the first non-Complete lane, leaving @p next_lane at it.
+  [[nodiscard]] CopyOutcome
+  atomic_modify_strict_lanes(std::span<const uint64_t> addresses, uint64_t lane_mask, uint32_t size,
+                             const std::function<void(uint32_t, uint8_t *)> &mutation,
+                             uint32_t vmid, uint32_t &next_lane) {
+    assert(addresses.size() <= 64 && "atomic batches contain at most 64 operands");
+    assert((size == sizeof(uint32_t) || size == sizeof(uint64_t)) &&
+           "strict atomics are 4 or 8 bytes");
+    const FaultDispatch fault_dispatch(*this);
+    const uint32_t lane_count = static_cast<uint32_t>(addresses.size());
+    uint32_t lane = next_lane;
+    const std::function<void(uint8_t *)> lane_mutation = [&](uint8_t *bytes) {
+      mutation(lane, bytes);
+    };
+    while (lane < lane_count) {
+      if (!(lane_mask & (1ULL << lane))) {
+        ++lane;
+        continue;
+      }
+      if (vmid != 0) {
+        std::shared_lock vmid_lock(vmid_mutex_);
+        const auto vmid_entry = vmid_table_.find(vmid);
+        if (vmid_entry != vmid_table_.end()) {
+          auto &entry = vmid_entry->second;
+          std::shared_lock page_table_lock(*entry.mutex);
+          for (; lane < lane_count; ++lane) {
+            if (!(lane_mask & (1ULL << lane)))
+              continue;
+            const uint64_t addr = addresses[lane];
+            assert((addr & (size - 1)) == 0 && "strict atomics must be naturally aligned");
+            if ((addr & PAGE_MASK) + size > PAGE_SIZE) {
+              next_lane = lane;
+              return CopyOutcome::Unavailable;
+            }
+            const auto pte = entry.page_table->find(addr >> PAGE_SHIFT);
+            if (pte == entry.page_table->end())
+              break;
+            const CopyOutcome outcome =
+                atomic_rmw_strict_mapped_page(pte->second, addr, size, lane_mutation, vmid);
+            if (outcome != CopyOutcome::Complete) {
+              next_lane = lane;
+              return outcome;
+            }
+          }
+        }
+        if (lane >= lane_count)
+          break;
+      }
+      // No page-table entry (or no VMID entry): the ordinary path decides, with
+      // no lease held, since it takes its own.
+      const CopyOutcome outcome = atomic_modify_strict(addresses[lane], size, lane_mutation, vmid);
+      if (outcome != CopyOutcome::Complete) {
+        next_lane = lane;
+        return outcome;
+      }
+      ++lane;
+    }
+    next_lane = lane_count;
+    return CopyOutcome::Complete;
+  }
+
   /// @brief Load @p size bytes atomically, holding the mapping still across it.
   ///
   /// @details The command processor used to read its control words -- SDMA wait
@@ -1890,6 +1956,24 @@ private:
     return AtomicPageOutcome::Complete;
   }
 
+  /// @brief Apply strict atomic completion and fault policy to an already-locked PTE.
+  template <typename F>
+  CopyOutcome atomic_rmw_strict_mapped_page(const LegacyPageTableEntry &pte, uint64_t addr,
+                                            uint32_t size, F &fn, uint32_t vmid) {
+    auto discarded = [](uint8_t *) {};
+    switch (atomic_rmw_mapped_page(pte, addr & PAGE_MASK, size, fn, discarded, addr, vmid)) {
+    case AtomicPageOutcome::Complete:
+      return CopyOutcome::Complete;
+    case AtomicPageOutcome::Clipped:
+      note_clipped_mapped_access("atomic", addr, size, vmid);
+      note_rejected_identity_access(addr, vmid);
+      return CopyOutcome::Faulted;
+    case AtomicPageOutcome::Faulted:
+      return CopyOutcome::Faulted;
+    }
+    return CopyOutcome::Faulted;
+  }
+
   /// @brief Perform an atomic without admitting the sparse-memory fallback.
   /// @details Compatibility VM bindings use this path because a missing PTE is
   /// an unavailable address-space mapping, not anonymous simulator storage.
@@ -1934,20 +2018,8 @@ private:
     auto &entry = vmid_entry->second;
     std::shared_lock page_table_lock(*entry.mutex);
     const auto pte = entry.page_table->find(addr >> PAGE_SHIFT);
-    if (pte != entry.page_table->end()) {
-      auto discarded = [](uint8_t *) {};
-      switch (
-          atomic_rmw_mapped_page(pte->second, addr & PAGE_MASK, size, fn, discarded, addr, vmid)) {
-      case AtomicPageOutcome::Complete:
-        return CopyOutcome::Complete;
-      case AtomicPageOutcome::Clipped:
-        note_clipped_mapped_access("atomic", addr, size, vmid);
-        note_rejected_identity_access(addr, vmid);
-        return CopyOutcome::Faulted;
-      case AtomicPageOutcome::Faulted:
-        return CopyOutcome::Faulted;
-      }
-    }
+    if (pte != entry.page_table->end())
+      return atomic_rmw_strict_mapped_page(pte->second, addr, size, fn, vmid);
 
     if (entry.client_pid > 0 || entry.client_mem_fd.get() >= 0) {
       note_rejected_identity_access(addr, vmid, MemoryFaultCause::Indeterminate);
@@ -2545,6 +2617,18 @@ private:
     std::array<PteCache, kEntryCount> entries;
   };
 
+  /// @brief This thread's PTE cache, shared by every with_page_mapping caller.
+  /// @details glibc carves static TLS out of every thread's stack, including
+  /// application threads that never touch emulated memory, so the cache lives
+  /// on the heap. A thread_local block per template instantiation once made
+  /// glibc refuse a 64 KiB thread stack in any process that preloads rocJITsu.
+  static PteCacheSet &thread_pte_caches() {
+    thread_local std::unique_ptr<PteCacheSet> caches;
+    if (!caches)
+      caches = std::make_unique<PteCacheSet>();
+    return *caches;
+  }
+
 #if defined(RJ_GPU_MEMORY_WITH_ASAN)
   /// @brief Test-only callback invoked while page-table and VMID locks are released.
   using AsanPageTableUnlockedHook = std::function<void()>;
@@ -2887,7 +2971,7 @@ private:
       return fn(nullptr, IdentityPage(page));
     }
 
-    static thread_local PteCacheSet caches;
+    PteCacheSet &caches = thread_pte_caches();
     const uint64_t page = addr >> PAGE_SHIFT;
     const uint64_t cache_key =
         page ^ (page >> 6) ^ (page >> 12) ^ (static_cast<uint64_t>(vmid) * 0x9e3779b97f4a7c15ULL);

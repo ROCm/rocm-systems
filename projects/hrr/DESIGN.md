@@ -168,7 +168,7 @@ the parent that exited cleanly needs no repair. A sub-archive is skipped when
 payloads, finds it complete in the sense `load_archive` uses. `--info` on a
 root applies the same check before it shows a process as complete.
 
-### Archive Format (v8)
+### Archive Format (v9)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -371,13 +371,13 @@ The generator classifies each API:
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 When adding HIP API support, update this script to classify the API in the appropriate capture and playback policy sets. APIs requiring non-trivial serialization or replay belong in `MANUAL_CAPTURE_APIS` and/or `MANUAL_PLAYBACK_APIS`; intentionally unsupported replay APIs belong in `NOOP_PLAYBACK_APIS`.
 
-## Archive Format (v8)
+## Archive Format (v9)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 8
+HRR_VERSION = 9
 ```
 
 Version history, so an archive written by an older runtime can be placed:
@@ -411,12 +411,15 @@ Version history, so an archive written by an older runtime can be placed:
   `HipDispatchTable`. That slot takes the first compiler ID and shifts the
   compiler API IDs up by one. A v7 reader would decode those events as the
   wrong API.
+- **v9** records `hipKernelSetAttributeForDevice`, appended to
+  `HipDispatchTable`, which shifts the compiler API IDs up by one again. A v8
+  reader would decode those events as the wrong API.
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 8)
+                      events.bin HRR_VERSION = 9)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     active             one line naming the process instance (boot id and
@@ -671,8 +674,12 @@ entry symbol `triton_` from many distinct code objects.
 ### Debugging kernel args (`HIP_HRR_DEBUG_ARGS`)
 
 Setting `HIP_HRR_DEBUG_ARGS` enables arg dumps at capture time (see
-[README.md](README.md#capture-environment)). Every captured arg is dumped to stderr
-(`[HRR args] <kernel> arg[i] kind=.. size=.. value/bytes=..`). Two markers make
+[README.md](README.md#capture-environment)). Every captured arg is dumped to the log
+(`[HRR args] <kernel> arg[i] kind=.. size=.. value/bytes=..`), and capture says on
+stderr that it is doing so. The dumps are a second copy of the argument bytes the
+archive already holds, outside the archive's permissions, so only a Debug build of
+the HIP runtime (no `NDEBUG`) reads the variable. A release build ignores it and
+says so on stderr. Two markers make
 common failure modes unambiguous:
 
 - `[TRUNCATED:no-bytes]` — the arg's bytes were unavailable at capture (the packed
@@ -688,8 +695,8 @@ common failure modes unambiguous:
 A GPU fault at a small fixed address (e.g. `0x20000`) with all captured pointer
 args translating correctly indicates a **data** divergence (a buffer's *contents*
 differ at replay so the kernel computes an out-of-bounds index), not an argument
-capture problem. Confirm with `HIP_HRR_DEBUG_ARGS` that the nulls are genuine
-before suspecting the `<<<>>>` / kernarg capture path.
+capture problem. Confirm with `HIP_HRR_DEBUG_ARGS` (Debug runtime) that the nulls
+are genuine before suspecting the `<<<>>>` / kernarg capture path.
 
 ## Fat Binary Registration
 
@@ -1211,10 +1218,22 @@ negative ordinals.
 
 IPC memory handles, external memory imports (`hipImportExternalMemory`), and
 semaphore imports (`hipImportExternalSemaphore`) are recorded as raw events, but the
-opaque handle bytes and import descriptors are never captured. At replay the shims call
-the real APIs with zeroed/stale handles (they are no longer literal no-ops), so the
-imported memory/semaphore is never validly mapped. Workloads that communicate with
-other processes via IPC handles cannot be replayed in isolation.
+opaque handle bytes and import descriptors are never captured. An IPC handle lets any
+process on the machine open the allocation while its exporter lives, so
+`hipIpcGetMemHandle`, `hipIpcOpenMemHandle` and `hipIpcOpenEventHandle` leave
+`handle_bytes` zero. Replay pairs no export whose field is zero, so every
+`hipIpcOpenMemHandle` is reported as unmatched and skipped; a process cannot open its own
+handle, so an archive never holds the export of one of its imports.
+`hipIpcOpenEventHandle` has no such pairing: replay calls it with the zeroed handle,
+which the runtime refuses, and reports that error. The other shims call the real APIs
+with zeroed/stale handles (they are no longer literal no-ops), so the imported
+memory/semaphore is never validly mapped. Workloads that communicate with other processes via IPC handles cannot
+be replayed in isolation.
+
+For a similar reason `hipGetProcAddress`, `hipGetDriverEntryPoint` and their `_spt`
+forms do not record the resolved function pointer, which is an address in the
+capturing process. `hipGetProcAddress` records the symbol name and flags, and replay
+looks the name up again; `hipGetDriverEntryPoint` is a no-op at replay.
 
 ### `hipStreamCaptureModeThreadLocal` Downgraded
 
@@ -1265,7 +1284,6 @@ in `alloc_map`:
 | API | Playback handler |
 |-----|-----------------|
 | `hipHostAlloc` | no-op |
-| `hipMallocHost` | no-op |
 | `hipMemAllocHost` | no-op |
 | `hipMalloc3DArray` | no-op |
 | `hipMallocArray` | no-op |
@@ -1298,8 +1316,8 @@ no-op won, so nothing was allocated or recorded and every derived pointer transl
 
 **What does not work:**
 
-- **Kernel launches** that pass the device-side alias of a `hipHostAlloc` /
-  `hipMallocHost` buffer as a kernel argument. The alias is obtained at capture
+- **Kernel launches** that pass the device-side alias of a `hipHostAlloc`
+  buffer as a kernel argument. The alias is obtained at capture
   time via `hipHostGetDevicePointer`, and that device address is never recorded
   in `alloc_map`. At replay, `translate_ptr` returns `nullptr` for that argument,
   and the kernel receives a null pointer — producing wrong results or a GPU fault.
@@ -1308,7 +1326,7 @@ no-op won, so nothing was allocated or recorded and every derived pointer transl
 D2H transfers (the common case) replay correctly. Workloads that pass pinned memory
 pointers directly to GPU kernels will produce incorrect output.
 
-**Workaround:** replace `hipHostAlloc` / `hipMallocHost` with `hipHostRegister` on
+**Workaround:** replace `hipHostAlloc` with `hipHostRegister` on
 an existing `malloc` buffer — `hipHostRegister` _is_ fully captured and replayed,
 including the device alias registration.
 
@@ -1473,7 +1491,7 @@ The event wire format (finding H5):
   shrinking `reserved` to 2 bytes), so kernel launches with large serialized payloads
   (many args / long mangled names / large by-value structs) up to ~4 GiB are recorded
   normally instead of being dropped at 65535 bytes. This is the change that bumped
-  `HRR_VERSION` to 4; the current version is 8, see Archive Format above. The
+  `HRR_VERSION` to 4; the current version is 9, see Archive Format above. The
   writer's single-record buffer path now writes any oversized record straight through.
 - **Per-argument size limit (64 KiB) now fails loudly.** Each kernel arg's size is still
   a `uint16_t`. A by-value struct argument ≥ 64 KiB cannot be represented, so the launch

@@ -89,11 +89,13 @@ pub(crate) fn output_array<T>(p: *mut T, count: u32) -> Result<(), u64> {
     Ok(())
 }
 
-#[repr(C)]
 /// Universal prefix read before a caller-provided extensible record is trusted.
+#[repr(C)]
 #[derive(Clone, Copy)]
 struct Prefix {
+    /// AMDF structure type discriminator.
     kind: u32,
+    /// Caller-reported byte extent of the record.
     size: u32,
 }
 
@@ -125,7 +127,9 @@ pub(crate) unsafe fn input<T: Copy>(p: *const T, kind: u32) -> Result<T, u64> {
 /// this ABI's structure size. A retained record can publish its payload without
 /// copying the header or materializing a full temporary.
 pub(crate) struct Output<T> {
+    /// Validated caller-owned output record.
     pointer: *mut T,
+    /// Original extensible header preserved across publication.
     header: amdf_input_structure_t,
 }
 

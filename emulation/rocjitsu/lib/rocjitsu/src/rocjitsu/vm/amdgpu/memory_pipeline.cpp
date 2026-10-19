@@ -226,11 +226,24 @@ void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_l
           "LDS-destination load payload too small: lane={} offset={} bytes={} payload={}", lane,
           data_offset, per_lane_bytes, d.response_data.size()));
     }
+    const uint32_t output_bytes = d.lds_dword_extend ? d.num_elems * 4 : per_lane_bytes;
     uint32_t lds_addr =
-        d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
+        d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * output_bytes;
     if (lds_addr == kInvalidLdsAddress)
       continue;
-    lds.write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
+    if (d.lds_dword_extend && d.elem_size < 4) {
+      assert(d.num_elems == 1);
+      uint32_t value = 0;
+      std::memcpy(&value, &d.response_data[data_offset], d.elem_size);
+      if (d.sign_extend) {
+        value = d.elem_size == 1
+                    ? static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(value)))
+                    : static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(value)));
+      }
+      lds.write32(lds_addr, value);
+    } else {
+      lds.write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
+    }
   }
 }
 
@@ -270,8 +283,7 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
   });
 
   if (!d.cluster_multicast || cluster_downgrades_to_ordinary) {
-    // GFX9/CDNA: out-of-range lanes return zeros, and those zeros are written to LDS.
-    const uint64_t write_mask = arch_is_cdna_4_or_lower(cu.arch()) ? d.exec_mask : d.lane_mask;
+    const uint64_t write_mask = lds_destination_write_mask(d, cu.arch());
     write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes, write_mask);
     return MemoryAccessCompletion::Complete;
   }
@@ -303,8 +315,12 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   bool is_atomic = (d.atomic_op != AtomicOp::NONE);
   uint32_t stride = is_atomic ? d.elem_size : d.num_elems * d.elem_size;
   uint32_t vgpr_count = d.destination_vgpr_count();
-  if (!cu.owns_vgpr_range(wf, d.dst_reg_base, vgpr_count))
+  if (!d.is_block_transfer && !cu.owns_vgpr_range(wf, d.dst_reg_base, vgpr_count))
     return MemoryAccessCompletion::Complete;
+  const auto writes_dword = [&](uint32_t word) {
+    return d.block_dword_enabled(word) &&
+           (!d.is_block_transfer || cu.owns_vgpr_range(wf, d.dst_reg_base + word, 1));
+  };
 
   // Zero destination VGPRs for OOB lanes. Per AMD ISA spec, out-of-bounds
   // buffer loads return 0. exec_mask is the effective issue mask; ordinary OOB
@@ -325,6 +341,8 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
       if (!(oob_mask & (1ULL << lane)))
         continue;
       for (uint32_t i = 0; i < vgpr_count; ++i) {
+        if (!writes_dword(i))
+          continue;
         uint32_t val = 0;
         if (!cu.sram_ecc() && d.elem_size <= 2 && (d.d16_hi || d.d16_lo)) {
           const uint32_t old = cu.read_vgpr_storage(d.dst_reg_base + i, lane);
@@ -336,11 +354,13 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   }
   // Performance-only fast path for ordinary dword loads. The general completion
   // path below remains authoritative for atomics, conversions, and partial-register
-  // writes. Whole-range ownership was validated above, so this special case can write
-  // through one raw pointer per destination register. Memory completion is VM
+  // writes. Ownership is validated above for ordinary loads and per DWORD for
+  // blocks, so this path can use one raw pointer per written register. Memory completion is VM
   // bookkeeping and deliberately has no instruction-side observation to preserve.
   if (!is_atomic && d.elem_size == sizeof(uint32_t) && !d.sign_extend && !d.d16_hi && !d.d16_lo) {
     for (uint32_t i = 0; i < vgpr_count; ++i) {
+      if (!writes_dword(i))
+        continue;
       auto *destination = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.dst_reg_base + i));
       uint64_t lanes = d.lane_mask;
       while (lanes) {
@@ -356,6 +376,8 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
     if (!(d.lane_mask & (1ULL << lane)))
       continue;
     for (uint32_t i = 0; i < vgpr_count; ++i) {
+      if (!writes_dword(i))
+        continue;
       uint32_t val = 0;
       uint32_t data_offset = lane * stride + i * 4;
       uint32_t copy_size =
@@ -393,13 +415,50 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   return MemoryAccessCompletion::Complete;
 }
 
+VmAccessOutcome execute_translated_scalar_atomic_rmw(ScalarMemState &d) {
+  assert(d.translated.access.has_value());
+  if (!d.translated.atomic_loaded) {
+    const AtomicLoadResult loaded = d.translated.access->atomic_load(d.addr, d.elem_size);
+    if (loaded.outcome != VmAccessOutcome::Complete)
+      return loaded.outcome;
+    d.translated.atomic_loaded_value = loaded.value;
+    d.translated.atomic_loaded = true;
+  }
+
+  // Retain the load across unavailable CAS attempts, as for vector atomics.
+  while (true) {
+    const uint32_t old = static_cast<uint32_t>(d.translated.atomic_loaded_value);
+    const uint32_t value = apply_int_atomic(d.atomic_op, old, d.store_data[0]);
+    const AtomicCompareExchangeResult exchanged =
+        d.translated.access->compare_exchange(d.addr, d.elem_size, old, value);
+    if (exchanged.outcome != VmAccessOutcome::Complete)
+      return exchanged.outcome;
+    if (exchanged.exchanged) {
+      d.response_data[0] = old;
+      d.translated.atomic_loaded = false;
+      return VmAccessOutcome::Complete;
+    }
+    d.translated.atomic_loaded_value = exchanged.observed;
+  }
+}
+
 } // namespace
 
 VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront &wf) {
   auto &d = *inst.data_as<ScalarMemState>();
+  const auto atomic_mutation = [&](std::span<std::byte> target) {
+    uint32_t old;
+    std::memcpy(&old, target.data(), sizeof(old));
+    const uint32_t value = apply_int_atomic(d.atomic_op, old, d.store_data[0]);
+    std::memcpy(target.data(), &value, sizeof(value));
+    d.response_data[0] = old;
+  };
+  if (d.atomic_op != AtomicOp::NONE && (d.elem_size != 4 || d.num_dwords != 1))
+    return VmAccessOutcome::Malformed;
   // Masked loads still write the zero response, without taking a VM snapshot or
   // touching backing memory, including byte and halfword requests.
-  if (d.is_load && d.load_dword_mask == 0)
+  // Fully masked stores likewise perform no VM or backing-memory access.
+  if (d.load_dword_mask == 0)
     return VmAccessOutcome::Complete;
   if (wf.address_space()) {
     const bool may_refresh_unready =
@@ -412,6 +471,8 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
       d.translated.initialized = true;
     }
     if (!d.translated.access->info().legacy_cache_compatible) {
+      if (d.atomic_op != AtomicOp::NONE)
+        return execute_translated_scalar_atomic_rmw(d);
       if (d.is_load) {
         if (d.elem_size >= 4 && d.load_dword_mask != 0xffff) {
           while (d.translated.request_index < d.num_dwords) {
@@ -445,6 +506,22 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
             return outcome;
         }
       } else {
+        if (d.load_dword_mask != 0xffff) {
+          while (d.translated.request_index < d.num_dwords) {
+            const auto index = d.translated.request_index;
+            if (d.load_dword_mask & (1u << index)) {
+              const auto outcome = d.translated.access->write(
+                  d.addr + index * sizeof(uint32_t),
+                  {reinterpret_cast<const std::byte *>(&d.store_data[index]), sizeof(uint32_t)},
+                  d.translated.completed_bytes);
+              if (outcome != VmAccessOutcome::Complete)
+                return outcome;
+            }
+            ++d.translated.request_index;
+            d.translated.completed_bytes = 0;
+          }
+          return VmAccessOutcome::Complete;
+        }
         const VmAccessOutcome outcome = d.translated.access->write(
             d.addr,
             std::span<const std::byte>(reinterpret_cast<const std::byte *>(d.store_data),
@@ -457,6 +534,14 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     }
   }
 
+  if (d.atomic_op != AtomicOp::NONE) {
+    return wf.raw_cu().l2()->atomic_rmw(
+        d.addr, d.elem_size,
+        [&](uint8_t *line, uint32_t offset) {
+          atomic_mutation({reinterpret_cast<std::byte *>(line + offset), d.elem_size});
+        },
+        wf.process_id());
+  }
   if (d.is_load) {
     if (d.load_dword_mask == 0) {
       // Descriptor bounds suppress memory access while preserving zero writeback.
@@ -485,6 +570,19 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
         return outcome;
     }
   } else {
+    if (d.load_dword_mask != 0xffff) {
+      while (d.translated.request_index < d.num_dwords) {
+        const auto index = d.translated.request_index;
+        if (d.load_dword_mask & (1u << index)) {
+          const auto outcome =
+              l1_->store(d.addr + index * 4, 1, &d.store_data[index], wf.process_id(), d.mtype);
+          if (outcome != VmAccessOutcome::Complete)
+            return outcome;
+        }
+        ++d.translated.request_index;
+      }
+      return VmAccessOutcome::Complete;
+    }
     const VmAccessOutcome outcome =
         l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id(), d.mtype);
     if (outcome != VmAccessOutcome::Complete)
@@ -806,76 +904,64 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
   if (boundary.outcome() != VmAccessOutcome::Complete)
     return boundary.outcome();
 
-  for (uint32_t lane = d.translated.atomic_lane; lane < d.wf_size; ++lane) {
-    if (!(d.lane_mask & (1ULL << lane)))
-      continue;
+  // Reuse the vector's cache-coherence boundary; each backing update remains atomic.
+  uint32_t next_lane = d.translated.atomic_lane;
+  const VmAccessOutcome outcome = l2->atomic_rmw_lanes(
+      boundary, std::span<const uint64_t>(d.per_lane_addr.data(), d.wf_size), d.lane_mask, esz,
+      [&](uint32_t lane, uint8_t *line_data, uint32_t offset) {
+        if (esz == 4) {
+          uint32_t old_val;
+          std::memcpy(&old_val, line_data + offset, 4);
 
-    uint64_t ea = d.per_lane_addr[lane];
-
-    // Reuse the vector's cache-coherence boundary; each backing update remains atomic.
-    const VmAccessOutcome outcome = l2->atomic_rmw(
-        boundary, ea, esz,
-        [&](uint8_t *line_data, uint32_t offset) {
-          if (esz == 4) {
-            uint32_t old_val;
-            std::memcpy(&old_val, line_data + offset, 4);
-
-            uint32_t new_val;
-            if (is_packed_add(d.atomic_op)) {
-              uint32_t src_val;
-              std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
-              new_val = fp_mode::atomic_add_packed_16(old_val, src_val,
-                                                      d.atomic_op == AtomicOp::PK_ADD_BF16,
-                                                      /*denorm_mode=*/3, d.atomic_source_nan_first);
-            } else if (is_fp) {
-              uint32_t source_bits = 0, compare_bits = 0;
-              std::memcpy(&source_bits, &d.store_data[lane * src_stride], 4);
-              if (uses_two_sources)
-                std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 4], 4);
-              new_val =
-                  apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
-            } else {
-              uint32_t src_val = 0, cmp_val = 0;
-              std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
-              if (uses_two_sources)
-                std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
-              new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
-            }
-
-            std::memcpy(line_data + offset, &new_val, 4);
-            std::memcpy(&d.response_data[lane * 4], &old_val, 4);
-          } else if (esz == 8) {
-            uint64_t old_val;
-            std::memcpy(&old_val, line_data + offset, 8);
-
-            uint64_t new_val;
-            if (is_fp) {
-              uint64_t source_bits = 0, compare_bits = 0;
-              std::memcpy(&source_bits, &d.store_data[lane * src_stride], 8);
-              if (uses_two_sources)
-                std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 8], 8);
-              new_val =
-                  apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
-            } else {
-              uint64_t src_val = 0, cmp_val = 0;
-              std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
-              if (uses_two_sources)
-                std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
-              new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
-            }
-
-            std::memcpy(line_data + offset, &new_val, 8);
-            std::memcpy(&d.response_data[lane * 8], &old_val, 8);
+          uint32_t new_val;
+          if (is_packed_add(d.atomic_op)) {
+            uint32_t src_val;
+            std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+            new_val = fp_mode::atomic_add_packed_16(old_val, src_val,
+                                                    d.atomic_op == AtomicOp::PK_ADD_BF16,
+                                                    /*denorm_mode=*/3, d.atomic_source_nan_first);
+          } else if (is_fp) {
+            uint32_t source_bits = 0, compare_bits = 0;
+            std::memcpy(&source_bits, &d.store_data[lane * src_stride], 4);
+            if (uses_two_sources)
+              std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 4], 4);
+            new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
+          } else {
+            uint32_t src_val = 0, cmp_val = 0;
+            std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+            if (uses_two_sources)
+              std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
+            new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
           }
-        },
-        vmid, vm_access);
-    if (outcome != VmAccessOutcome::Complete) {
-      d.translated.atomic_lane = lane;
-      return outcome;
-    }
-    d.translated.atomic_lane = lane + 1;
-  }
-  return VmAccessOutcome::Complete;
+
+          std::memcpy(line_data + offset, &new_val, 4);
+          std::memcpy(&d.response_data[lane * 4], &old_val, 4);
+        } else if (esz == 8) {
+          uint64_t old_val;
+          std::memcpy(&old_val, line_data + offset, 8);
+
+          uint64_t new_val;
+          if (is_fp) {
+            uint64_t source_bits = 0, compare_bits = 0;
+            std::memcpy(&source_bits, &d.store_data[lane * src_stride], 8);
+            if (uses_two_sources)
+              std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 8], 8);
+            new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
+          } else {
+            uint64_t src_val = 0, cmp_val = 0;
+            std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
+            if (uses_two_sources)
+              std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
+            new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
+          }
+
+          std::memcpy(line_data + offset, &new_val, 8);
+          std::memcpy(&d.response_data[lane * 8], &old_val, 8);
+        }
+      },
+      vmid, vm_access, next_lane);
+  d.translated.atomic_lane = next_lane;
+  return outcome;
 }
 
 /// @brief Perform a per-lane atomic RMW on LDS memory.

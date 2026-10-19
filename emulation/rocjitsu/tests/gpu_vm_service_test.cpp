@@ -319,6 +319,222 @@ private:
   std::atomic<std::size_t> atomic_store_calls_ = 0;
 };
 
+// Control translation spans, physical offsets and per-operand failures
+// independently to exercise batched admission and retry behavior.
+class AtomicLaneAddressSpace final : public AddressSpaceTranslator, public PhysicalMemoryAccess {
+public:
+  VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
+    ++translation_calls;
+    if (address == translation_failure || address / 8 >= values.size())
+      return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    return {.outcome = VmAccessOutcome::Complete,
+            .translation = {.domain = domains[address / 8],
+                            .address = address + physical_base,
+                            .contiguous_bytes =
+                                address == short_translation
+                                    ? size - 1
+                                    : std::min<uint64_t>(span_bytes, sizeof(values) - address),
+                            .mtype = Mtype::RW,
+                            .permissions = {.readable = true, .writable = true}}};
+  }
+
+  VmAccessOutcome read(VmMemoryDomain, uint64_t, std::span<std::byte>) override {
+    return VmAccessOutcome::Faulted;
+  }
+  VmAccessOutcome write(VmMemoryDomain, uint64_t, std::span<const std::byte>) override {
+    return VmAccessOutcome::Faulted;
+  }
+  VmAccessOutcome atomic_modify(VmMemoryDomain domain, uint64_t address, uint32_t width,
+                                const AtomicMutation &mutation) override {
+    if (address == physical_failure)
+      return physical_outcome;
+    if (address < physical_base || address - physical_base >= sizeof(values))
+      return VmAccessOutcome::Malformed;
+    const uint64_t index = (address - physical_base) / 8;
+    if (domain != domains[index])
+      return VmAccessOutcome::Malformed;
+    modified_addresses.push_back(address);
+    mutation(std::as_writable_bytes(std::span(&values[index], 1)).first(width));
+    return VmAccessOutcome::Complete;
+  }
+
+  uint64_t physical_base = 0;
+  uint64_t span_bytes = 8;
+  mutable uint32_t translation_calls = 0;
+  std::vector<uint64_t> modified_addresses;
+  std::array<uint64_t, 4> values{};
+  std::array<VmMemoryDomain, 4> domains = {VmMemoryDomain::System, VmMemoryDomain::System,
+                                           VmMemoryDomain::System, VmMemoryDomain::System};
+  uint64_t translation_failure = UINT64_MAX;
+  uint64_t short_translation = UINT64_MAX;
+  uint64_t physical_failure = UINT64_MAX;
+  VmAccessOutcome physical_outcome = VmAccessOutcome::Unavailable;
+};
+
+TEST(GpuVmService, AtomicLanesPreserveOrderAcrossDomainsAndSparseMasks) {
+  for (uint32_t width : {4u, 8u}) {
+    SCOPED_TRACE(width);
+    GpuVm vm;
+    auto backing = std::make_shared<AtomicLaneAddressSpace>();
+    backing->values = {10, 20, 0, 0};
+    backing->domains[1] = VmMemoryDomain::Local;
+    const auto handle = vm.register_translated(7, backing, backing);
+    auto access = vm.snapshot(handle);
+    ASSERT_TRUE(access);
+    std::array<uint64_t, 64> addresses{};
+    addresses[2] = 8;
+    constexpr uint64_t mask = (uint64_t{1} << 63) | 0x5;
+    std::vector<uint32_t> lanes;
+    std::vector<uint64_t> observed;
+    uint32_t next = 0;
+    EXPECT_EQ(access->atomic_modify_lanes(
+                  addresses, mask, width,
+                  [&](uint32_t lane, std::span<std::byte> bytes) {
+                    uint64_t value = 0;
+                    std::memcpy(&value, bytes.data(), width);
+                    lanes.push_back(lane);
+                    observed.push_back(value);
+                    ++value;
+                    std::memcpy(bytes.data(), &value, width);
+                  },
+                  next),
+              VmAccessOutcome::Complete);
+    EXPECT_EQ(next, addresses.size());
+    EXPECT_EQ(lanes, (std::vector<uint32_t>{0, 2, 63}));
+    EXPECT_EQ(observed, (std::vector<uint64_t>{10, 20, 11}));
+    EXPECT_EQ(backing->values, (std::array<uint64_t, 4>{12, 21, 0, 0}));
+  }
+}
+
+TEST(GpuVmService, AtomicLanesReuseNonIdentityTranslationAtDistinctOffsets) {
+  GpuVm vm;
+  auto backing = std::make_shared<AtomicLaneAddressSpace>();
+  backing->physical_base = 0x1000;
+  backing->span_bytes = sizeof(backing->values);
+  backing->values = {0, 10, 20, 30};
+  const auto handle = vm.register_translated(7, backing, backing);
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  constexpr std::array<uint64_t, 3> addresses = {8, 16, 24};
+  uint32_t next = 0;
+  EXPECT_EQ(access->atomic_modify_lanes(
+                addresses, 0x7, 8,
+                [](uint32_t lane, std::span<std::byte> bytes) {
+                  uint64_t value;
+                  std::memcpy(&value, bytes.data(), sizeof(value));
+                  value += lane + 1;
+                  std::memcpy(bytes.data(), &value, sizeof(value));
+                },
+                next),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(next, addresses.size());
+  EXPECT_EQ(backing->translation_calls, 1u);
+  EXPECT_EQ(backing->modified_addresses, (std::vector<uint64_t>{0x1008, 0x1010, 0x1018}));
+  EXPECT_EQ(backing->values, (std::array<uint64_t, 4>{0, 11, 22, 33}));
+}
+
+TEST(GpuVmService, AtomicLanePhysicalFailurePrecedesLaterTranslationFault) {
+  for (VmAccessOutcome first_failure : {VmAccessOutcome::Unavailable, VmAccessOutcome::Faulted}) {
+    SCOPED_TRACE(static_cast<int>(first_failure));
+    GpuVm vm;
+    auto backing = std::make_shared<AtomicLaneAddressSpace>();
+    backing->physical_failure = 8;
+    backing->physical_outcome = first_failure;
+    backing->translation_failure = 16;
+    std::vector<uint64_t> faults;
+    const auto handle = vm.register_unrouted_address_space(7, backing, backing,
+                                                           [&](uint64_t address, VmAccessKind) {
+                                                             faults.push_back(address);
+                                                             EXPECT_EQ(backing->values[0], 1u);
+                                                             EXPECT_EQ(backing->values[1], 1u);
+                                                           });
+    auto access = vm.snapshot(handle);
+    ASSERT_TRUE(access);
+    constexpr std::array<uint64_t, 4> addresses = {0, 8, 16, 24};
+    const auto increment = [](uint32_t, std::span<std::byte> bytes) {
+      uint64_t value;
+      std::memcpy(&value, bytes.data(), sizeof(value));
+      ++value;
+      std::memcpy(bytes.data(), &value, sizeof(value));
+    };
+    uint32_t next = 0;
+    EXPECT_EQ(access->atomic_modify_lanes(addresses, 0xf, 8, increment, next), first_failure);
+    EXPECT_EQ(next, 1u);
+    EXPECT_TRUE(faults.empty());
+    EXPECT_EQ(backing->values, (std::array<uint64_t, 4>{1, 0, 0, 0}));
+    if (first_failure != VmAccessOutcome::Unavailable)
+      continue;
+    backing->physical_failure = UINT64_MAX;
+    EXPECT_EQ(access->atomic_modify_lanes(addresses, 0xf, 8, increment, next),
+              VmAccessOutcome::Faulted);
+    EXPECT_EQ(next, 2u);
+    EXPECT_EQ(faults, (std::vector<uint64_t>{16}));
+    EXPECT_EQ(backing->values, (std::array<uint64_t, 4>{1, 1, 0, 0}));
+  }
+}
+
+TEST(GpuVmService, AtomicLanesCommitPrefixBeforeMalformedOperand) {
+  for (bool short_span : {false, true}) {
+    SCOPED_TRACE(short_span);
+    GpuVm vm;
+    auto backing = std::make_shared<AtomicLaneAddressSpace>();
+    if (short_span)
+      backing->short_translation = 16;
+    std::vector<uint64_t> faults;
+    const auto handle = vm.register_unrouted_address_space(
+        7, backing, backing, [&](uint64_t address, VmAccessKind) { faults.push_back(address); });
+    auto access = vm.snapshot(handle);
+    ASSERT_TRUE(access);
+    const std::array<uint64_t, 4> addresses = {0, 8, short_span ? 16u : 17u, 24};
+    std::vector<uint32_t> lanes;
+    uint32_t next = 0;
+    EXPECT_EQ(access->atomic_modify_lanes(
+                  addresses, 0xf, 8,
+                  [&](uint32_t lane, std::span<std::byte>) { lanes.push_back(lane); }, next),
+              VmAccessOutcome::Malformed);
+    EXPECT_EQ(next, 2u);
+    EXPECT_EQ(lanes, (std::vector<uint32_t>{0, 1}));
+    EXPECT_EQ(faults, (std::vector<uint64_t>{addresses[2]}));
+  }
+}
+
+TEST(GpuVmService, AtomicLanesRejectOversizedBatchesBeforeMutation) {
+  GpuVm vm;
+  auto backing = std::make_shared<AtomicLaneAddressSpace>();
+  const auto handle = vm.register_translated(7, backing, backing);
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  std::array<uint64_t, 65> addresses{};
+  uint32_t next = 0;
+  const auto mutation = [](uint32_t, std::span<std::byte>) { FAIL() << "unexpected mutation"; };
+  EXPECT_EQ(access->atomic_modify_lanes(addresses, UINT64_MAX, 4, mutation, next),
+            VmAccessOutcome::Malformed);
+  EXPECT_EQ(backing->atomic_modify_lanes(VmMemoryDomain::System, addresses, UINT64_MAX, 4, mutation,
+                                         next),
+            VmAccessOutcome::Malformed);
+  EXPECT_EQ(next, 0u);
+}
+
+TEST(GpuVmService, AtomicLanesRejectMissingMutationAtFirstActiveLane) {
+  GpuVm vm;
+  auto backing = std::make_shared<AtomicLaneAddressSpace>();
+  std::vector<uint64_t> faults;
+  const auto handle = vm.register_unrouted_address_space(
+      7, backing, backing, [&](uint64_t address, VmAccessKind) { faults.push_back(address); });
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  constexpr std::array<uint64_t, 3> addresses = {0, 8, 16};
+  uint32_t next = 0;
+  EXPECT_EQ(access->atomic_modify_lanes(addresses, 0x6, 4, {}, next), VmAccessOutcome::Malformed);
+  EXPECT_EQ(next, 1u);
+  EXPECT_EQ(faults, (std::vector<uint64_t>{8}));
+  EXPECT_EQ(backing->values, (std::array<uint64_t, 4>{}));
+  next = 0;
+  EXPECT_EQ(access->atomic_modify_lanes(addresses, 0, 4, {}, next), VmAccessOutcome::Complete);
+  EXPECT_EQ(next, addresses.size());
+  EXPECT_EQ(faults.size(), 1u);
+}
+
 AddressSpaceHandle register_byte_address_space(GpuVm &gpu_vm, uint32_t vmid, uint8_t value) {
   auto access = std::make_shared<ByteAddressSpace>(value);
   return gpu_vm.register_translated(vmid, access, access);
@@ -1198,16 +1414,45 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
   auto access = vm.snapshot(handle);
   ASSERT_TRUE(access);
   VmMtypeCache cache;
+  cache.clear();
+  cache.clear(); // Clearing an already-empty table is idempotent.
   for (uint32_t repeat = 0; repeat < 3; ++repeat)
     for (uint64_t page = 0; page < 8; ++page)
       EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::RW);
   EXPECT_EQ(policy->queries, 8u);
 
+  {
+    VmMtypeCache copied(cache);
+    VmMtypeCache assigned;
+    assigned = copied;
+    VmMtypeCache moved(std::move(assigned));
+    EXPECT_FALSE(access->cached_private_uc_hint(0, assigned));
+    EXPECT_EQ(access->query_mtype(0, moved), Mtype::RW);
+    EXPECT_EQ(policy->queries, 8u);
+    // Clearing/refilling the copy cannot overwrite another cache's entries.
+    policy->mtype = Mtype::CC;
+    moved.clear();
+    EXPECT_EQ(access->query_mtype(0, moved), Mtype::CC);
+    EXPECT_EQ(access->query_mtype(0, cache), Mtype::RW);
+    EXPECT_EQ(access->query_mtype(0, copied), Mtype::RW);
+    EXPECT_EQ(policy->queries, 9u);
+  }
+
   policy->epoch->fetch_add(1);
   policy->mtype = Mtype::UC;
   for (uint64_t page = 0; page < 8; ++page)
     EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::UC);
-  EXPECT_EQ(policy->queries, 16u);
+  EXPECT_EQ(policy->queries, 17u);
+
+  // Explicit clearing must release every retained token and force fresh policy
+  // queries even when the binding and mutation epoch themselves do not change.
+  cache.clear();
+  cache.clear(); // Clearing an already-empty table is idempotent.
+  EXPECT_EQ(policy->epoch.use_count(), 1);
+  policy->mtype = Mtype::CC;
+  for (uint64_t page = 0; page < 8; ++page)
+    EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::CC);
+  EXPECT_EQ(policy->queries, 25u);
 
   // A different VM generation may reuse the same epoch token. Entries from
   // every page must be invalidated even when the token itself is unchanged.
@@ -1221,6 +1466,13 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
     EXPECT_EQ(new_access->query_mtype(page * 4096, cache), Mtype::RW);
   }
   EXPECT_EQ(replacement->queries, 8u);
+
+  // An expired generation still owns cache entries until they are cleared.
+  ASSERT_TRUE(vm.unregister_address_space(handle));
+  access.reset();
+  new_access.reset();
+  cache.clear();
+  EXPECT_EQ(policy->epoch.use_count(), 2);
 }
 
 TEST(GpuVmService, GenerationsShareFaultReporterWithoutCopyingItsTarget) {

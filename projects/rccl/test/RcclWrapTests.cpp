@@ -2900,9 +2900,9 @@ TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
 // test_runner/configs), and Rcclwrap.* is the only listed pattern this file
 // matches. A suite of their own would never be run.
 // ---------------------------------------------------------------------------
-// Which unroll factors are arch-pinned is a build property, not a constant:
-// BUILD_ALL_UNROLLS compiles every one for the targeted archs and pins none. Ask
-// the table for a pinned factor rather than hardcoding 32.
+// Which unroll factors are arch-pinned is a build property, not a constant.
+// BUILD_ALL_UNROLLS adds unroll 8 and 16 and leaves an existing pin in place.
+// Ask the table for a pinned factor rather than hardcoding 32.
 constexpr char kOtherArch[] = "gfx1200";
 
 TEST(Rcclwrap, UnrollFactor_RejectsArchRestrictedUnrollOnOtherArch)
@@ -3038,9 +3038,9 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
             // 4 ranks: totals.
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 32 * MiB);
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 128 * KiB);
-            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 16 * MiB);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 1 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), 128 * MiB);
-            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 2 * MiB);
+            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 64 * MiB);
             EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), 0ul);
             for (int nRanks : {8, 16, 32, 64}) {
                 comm->nRanks = nRanks;
@@ -3050,7 +3050,7 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), n * 256 * KiB) << nRanks;
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), std::min(n * 16 * MiB, 256 * MiB))
                     << nRanks;
-                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), n * 512 * KiB) << nRanks;
+                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
                 // Unscaled tiers keep their totals.
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), 256 * MiB) << nRanks;
@@ -3099,6 +3099,28 @@ TEST(RcclDdaTierThresholds, ForceCeScratchPerArch)
     EXPECT_FALSE(rcclGetArchThresholds("gfx1250")->forceCeScratch);
     EXPECT_TRUE(rcclGetArchThresholds("gfx950")->forceCeScratch);
     EXPECT_TRUE(rcclGetArchThresholds("gfx942")->forceCeScratch);
+}
+
+// RCCL_TUNING_PARTITION_MODE: gfx1250 has its own DPX table, tuned on DPX nodes apart from
+// the SPX one; the other archs return one table for every mode.
+TEST(RcclDdaTierThresholds, TuningPartitionTablePerArch)
+{
+    const rcclArchThresholds* spx = rcclGetArchThresholds("gfx1250");
+    const rcclArchThresholds* dpx = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(spx, nullptr);
+    ASSERT_NE(dpx, nullptr);
+    EXPECT_EQ(spx, rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX));
+    EXPECT_NE(spx, dpx);
+    EXPECT_NE(0, std::memcmp(spx, dpx, sizeof(*spx))) << "the DPX table carries its own tuning";
+    // A few of the DPX-only entries, so a DPX value copied back over SPX shows up here.
+    EXPECT_EQ(dpx->agRingLL128MaxPerRank, (size_t)16 * 1024 * 1024);
+    EXPECT_EQ(dpx->arTreeLLMaxPerRank, (size_t)256 * 1024);
+    EXPECT_EQ(dpx->ddaLLMax[ncclFuncAlltoAll], (size_t)2 * 1024 * 1024);
+    EXPECT_NE(spx->agRingLL128MaxPerRank, dpx->agRingLL128MaxPerRank);
+    for (const char* arch : {"gfx950", "gfx942"})
+    {
+        EXPECT_EQ(rcclGetArchThresholds(arch), rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_DPX)) << arch;
+    }
 }
 
 
