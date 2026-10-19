@@ -8,18 +8,22 @@
 hipFile kernel P2PDMA support
 **********************************
 
-hipFile's fastpath requires a Linux kernel built with ``CONFIG_PCI_P2PDMA=y``.
-This page explains how to check the running kernel for that option and records
-the kernels and distributions that AMD has tested. For the requirement itself
-and for instructions on booting a kernel that enables the option, see
-:ref:`hipfile-kernel-p2pdma`.
+hipFile's fastpath requires a Linux kernel PCIe peer-to-peer DMA (P2PDMA) support. hipFile's fastpath moves data directly between the GPU and the storage device
+using PCIe peer-to-peer DMA. This requires a Linux kernel built with
+``CONFIG_PCI_P2PDMA=y``. Without it, the fastpath backend cannot run at all.
+
+.. warning::
+
+   Not all ROCm-supported distributions have a default kernel that
+   enables ``CONFIG_PCI_P2PDMA``. See :ref:`hipfile-verified-distributions` for a list of verified distributions that support P2PDMA.
+
 
 .. _hipfile-check-p2pdma:
 
 Check for kernel P2PDMA support
 ===============================
 
-Read the configuration of the running kernel:
+Use the following command to read the configuration of the running kernel and determine whether it supports P2PDMA:
 
 .. code:: shell
 
@@ -47,9 +51,12 @@ configuration files in these directories instead:
 Verified distributions
 ======================
 
-The following table lists kernels that AMD has tested for peer-to-peer DMA support.
-Distributions update their kernels between point releases. This table is a
-snapshot and doesn't guarantee support.
+The following table lists kernels that AMD has tested for P2PDMA support.
+Distributions update their kernels between point releases. 
+
+..note ::
+  
+  This table is a snapshot and doesn't guarantee support.
 
 .. list-table::
    :header-rows: 1
@@ -208,8 +215,4 @@ indicates whether the kernel has ``CONFIG_PCI_P2PDMA`` set in its config.
      - Yes
 
 All OS kernels that support P2PDMA pass the fastpath I/O tests except for RHEL
-9.8 and RHEL 10.2. They backported a change that broke DMA mapping for P2PDMA
-pages that are transferred through the host bridge. RHEL 9.9 and RHEL 10.3,
-which are in development, do contain the fix: `dma-mapping: direct: fix missing
-mapping for THRU_HOST_BRIDGE segments
-<https://github.com/torvalds/linux/commit/560000d619ef162568746ce287f0c725e24ea967>`_.
+9.8 and RHEL 10.2. 

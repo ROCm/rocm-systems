@@ -20,56 +20,19 @@ the machine, see :doc:`./python-bindings`.
 Linux kernel requirements
 =========================
 
-hipFile's fastpath moves data directly between the GPU and the storage device
-using PCIe peer-to-peer DMA. This requires a Linux kernel built with
-``CONFIG_PCI_P2PDMA=y``. Without it, the fastpath backend cannot run at all.
+hipFile's fastpath requires a Linux kernel built with PCIe peer-to-peer DMA (P2PDMA) support. When no fastpath is available, hipFile uses the fallback path by default, resulting in lower than expected throughput. 
 
-.. warning::
+Use the following command to read the configuration of the running kernel and determine whether it supports P2PDMA:
 
-   A distribution being supported by ROCm does not mean its default kernel
-   enables ``CONFIG_PCI_P2PDMA``. Ubuntu 22.04 LTS is a supported ROCm
-   distribution, but its default 5.15 kernel is built without the option, so the
-   hipFile fastpath cannot run on it. For the kernels AMD has tested, see
-   :doc:`/reference/hipFile-kernel-p2pdma-support`.
+.. code:: shell
 
-When no fastpath is available, hipFile uses the fallback path by default,
-resulting in lower than expected throughput. If fallback is disabled, I/O
-requests that require it fail instead.
+   grep CONFIG_PCI_P2PDMA /boot/config-$(uname -r)
 
-Check for kernel P2PDMA support
--------------------------------
+If ``CONFIG_PCI_P2PDMA=y`` is returned, the kernel supports peer-to-peer DMA.
+If no string is returned or if ``# CONFIG_PCI_P2PDMA is not set`` is returned,
+peer-to-peer DMA isn't supported.
 
-To read the configuration of the running kernel and determine whether it was
-built with ``CONFIG_PCI_P2PDMA=y``, see :ref:`hipfile-check-p2pdma`. For the
-distribution kernels AMD has tested for the option, and the results of fastpath
-I/O testing in virtual machines, see
-:doc:`/reference/hipFile-kernel-p2pdma-support`.
-
-Enable kernel P2PDMA support
-----------------------------
-
-* On Ubuntu 22.04 LTS, install the hardware enablement (HWE) kernel, which is
-  based on 6.8 and enables the option:
-
-  .. code:: shell
-
-     sudo apt install linux-generic-hwe-22.04
-     sudo systemctl reboot
-
-  After rebooting, confirm the running kernel with ``uname -r`` and re-check the
-  configuration.
-
-* On Ubuntu 20.04 LTS, no available kernel enables the option. Upgrade to a newer
-  release.
-
-* On other distributions, either move to a release whose kernel enables the
-  option or build a custom kernel with ``CONFIG_PCI_P2PDMA=y``.
-
-After the kernel is in place, run ``ais-check`` to confirm that hipFile sees
-P2PDMA support along with the rest of the fastpath prerequisites. See
-:doc:`/how-to/checking-system-compatibility`.
-
-.. _hipfile-install-rocm:
+See :doc:`/reference/hipFile-kernel-p2pdma-support` for more information, including a list of tested distribution kernels.
 
 Install the ROCm Core SDK
 =========================
