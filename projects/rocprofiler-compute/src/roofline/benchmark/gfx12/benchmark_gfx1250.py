@@ -8,6 +8,7 @@
 #
 # -----------------------------------------------------------------------------
 
+from .. import ceilings
 from . import benchmark_gfx12_base
 
 
@@ -18,7 +19,7 @@ class Bench_gfx1250(benchmark_gfx12_base.Bench_gfx12):
     def __init__(self, device_id: int, cache_sizes: dict) -> None:
         super().__init__(device_id, cache_sizes)
 
-        self.unsupported_data_types = ["L1", "MALL", "WMMA-F64"]
+        self.unsupported_data_types = ceilings.UNSUPPORTED_DATA_TYPES["gfx1250"]
 
         self.matrix_ops = {
             "F4": 65536,
