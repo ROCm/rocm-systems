@@ -10,8 +10,15 @@ argparse env handling, or conflict detection.
 
 from __future__ import annotations
 import json
+import shutil
+import signal
 import pytest
-from conftest import RocprofsysTest, parse_metadata_settings, resolved_settings
+from conftest import (
+    RocprofsysTest,
+    assert_resolved_settings,
+    parse_metadata_settings,
+    resolved_settings,
+)
 
 pytestmark = [pytest.mark.tool_runner]
 
@@ -630,6 +637,253 @@ class TestTracePeriods(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIODS=0:2 3:2"])
         assert resolved_settings(result)["ROCPROFSYS_TRACE_PERIODS"] == "0:2 3:2"
+
+    def test_trace_periods_flag_sets_env(self, target, cpu_workload):
+        result = self.run_test(
+            "baseline",
+            target=target,
+            run_args=["--trace-periods", "0:2", *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=[r"ROCPROFSYS_TRACE_PERIODS=0:2"])
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE_PERIODS": "0:2"},
+            flag_args=["--trace-periods", "0:2"],
+        )
+
+
+# =============================================================================
+# --trace-clock-id (CLI -> settings). Window behavior on the controlled
+# workload lives in test_time_window.py.
+# =============================================================================
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.class_name("tool-runner-trace-clock-id")
+@pytest.mark.parametrize("target", TARGETS)
+class TestTraceClockId(RocprofsysTest):
+    """--trace-clock-id reaches ROCPROFSYS_TRACE_PERIOD_CLOCK_ID."""
+
+    def test_cputime_reaches_metadata(self, target, cpu_workload):
+        flag_args = ["--trace-clock-id", "cputime"]
+        result = self.run_test(
+            "baseline",
+            target=target,
+            run_args=[*flag_args, *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result, pass_regex=[r"ROCPROFSYS_TRACE_PERIOD_CLOCK_ID=cputime"]
+        )
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE_PERIOD_CLOCK_ID": "cputime"},
+            flag_args=flag_args,
+        )
+
+
+# =============================================================================
+# --mode coverage: CLI -> settings and disabled trace artifacts. Functional
+# coverage generation is in test_code_coverage.py.
+# =============================================================================
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.class_name("tool-runner-mode-coverage")
+@pytest.mark.parametrize("target", TARGETS)
+class TestModeCoverage(RocprofsysTest):
+    """--mode coverage turns tracing/sampling off and skips trace artifacts."""
+
+    MODE_FLAGS = ["--mode", "coverage"]
+
+    def test_disables_trace_and_sampling(self, target, cpu_workload):
+        result = self.run_test(
+            "baseline",
+            target=target,
+            env=SAMPLING_NO_DELAY,
+            run_args=[*self.MODE_FLAGS, *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result)
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_MODE": "coverage",
+                "ROCPROFSYS_TRACE": False,
+                "ROCPROFSYS_USE_SAMPLING": False,
+                "ROCPROFSYS_USE_PROCESS_SAMPLING": False,
+                "ROCPROFSYS_USE_CODE_COVERAGE": True,
+            },
+            flag_args=self.MODE_FLAGS,
+        )
+        if result.perfetto_file is not None:
+            pytest.fail(
+                "--mode coverage turns ROCPROFSYS_TRACE off, but a Perfetto "
+                f"trace was still written: {result.perfetto_file}"
+            )
+        if result.rocpd_files:
+            pytest.fail(
+                "--mode coverage turns ROCPROFSYS_TRACE off, but a ROCpd "
+                f"database was still written: {[str(f) for f in result.rocpd_files]}"
+            )
+
+
+# =============================================================================
+# --profile-diff writes Timemory .diff. files against a prior profile. No HIP
+# dependency; profiles come from the CPU workload.
+# =============================================================================
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.class_name("tool-runner-profile-diff")
+@pytest.mark.parametrize("target", TARGETS)
+class TestProfileDiff(RocprofsysTest):
+    """--profile-diff writes wall_clock.diff.{txt,json} next to the new run."""
+
+    def test_writes_diff_against_baseline(self, target, cpu_workload, test_output_dir):
+        first = self.run_test(
+            "baseline",
+            target=target,
+            env=SAMPLING_NO_DELAY,
+            run_args=["-P", *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        profiles = [
+            path
+            for path in first.output_dir.iterdir()
+            if path.is_file() and "wall_clock" in path.name and ".diff." not in path.name
+        ]
+        if not profiles:
+            pytest.fail(f"no wall_clock profile under {first.output_dir} to diff against")
+        baseline = test_output_dir / "baseline"
+        baseline.mkdir()
+        for profile in profiles:
+            shutil.copy2(profile, baseline / profile.name)
+
+        flag_args = ["--profile-diff", str(baseline)]
+        result = self.run_test(
+            "baseline",
+            target=target,
+            env=SAMPLING_NO_DELAY,
+            run_args=["-P", *flag_args, *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_DIFF_OUTPUT": True,
+                "ROCPROFSYS_INPUT_PATH": str(baseline),
+            },
+            flag_args=flag_args,
+        )
+        if any(baseline.glob("*.diff.*")):
+            pytest.fail(f"--profile-diff wrote a diff file into the baseline {baseline}")
+        diff_txt = result.output_dir / "wall_clock.diff.txt"
+        diff_json = result.output_dir / "wall_clock.diff.json"
+        if not diff_txt.is_file() or not diff_json.is_file():
+            pytest.fail(
+                f"--profile-diff did not write wall_clock.diff.txt and "
+                f"wall_clock.diff.json under {result.output_dir}"
+            )
+        self.assert_file_regex(
+            diff_txt,
+            pass_regex=[
+                r"vs\.",
+                r"baseline/wall_clock\.json",
+                r"sec\s+\|\s+-?\d+\.\d+",
+            ],
+            subtest_name="wall_clock.diff.txt compares the baseline in seconds",
+        )
+        self.assert_file_regex(
+            diff_json,
+            pass_regex=[r'"unit_repr"\s*:\s*"sec"', r'"repr_data"\s*:\s*-?\d+\.\d+'],
+            subtest_name="wall_clock.diff.json has second values",
+        )
+
+
+# =============================================================================
+# --sampling-cputime-signal on the CPU workload: armed-signal log + samples.
+# =============================================================================
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.class_name("tool-runner-cputime-signal")
+@pytest.mark.parametrize("target", TARGETS)
+class TestSamplingCputimeSignal(RocprofsysTest):
+    """--sampling-cputime-signal moves the cputime sampler off SIGPROF."""
+
+    CPUTIME_SIGNAL = str(signal.SIGVTALRM.value)
+    SIGNAL_FLAGS = ["--sampling-cputime-signal", CPUTIME_SIGNAL]
+
+    def test_override_keeps_sampling(self, target, cpu_workload):
+        result = self.run_test(
+            "baseline",
+            target=target,
+            env=SAMPLING_NO_DELAY,
+            run_args=[
+                "-T",
+                "-S",
+                "cputime",
+                *self.SIGNAL_FLAGS,
+                *parallel_overhead_args(cpu_workload),
+            ],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(
+            result,
+            pass_regex=[rf"\[SIG{self.CPUTIME_SIGNAL}\] Sampler for thread 0"],
+            fail_regex=[rf"\[SIG{signal.SIGPROF.value}\] Sampler for thread"],
+        )
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_SAMPLING_CPUTIME_SIGNAL": int(self.CPUTIME_SIGNAL)},
+            flag_args=self.SIGNAL_FLAGS,
+        )
+        self.assert_perfetto(
+            result,
+            label_substrings=["fib"],
+            subtest_name="CPU samples still recorded on the overridden signal",
+        )
+
+
+# =============================================================================
+# -H --cpus --cpu-metrics: host counters on a CPU workload.
+# =============================================================================
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.class_name("tool-runner-cpu-metrics")
+@pytest.mark.parametrize("target", TARGETS)
+class TestCpuMetrics(RocprofsysTest):
+    """-H --cpus --cpu-metrics selects frequency/load host counters."""
+
+    CPU_METRICS_FLAGS = ["-H", "--cpus", "0", "--cpu-metrics", "frequency,load"]
+
+    def test_frequency_and_load_counters(self, target, cpu_workload):
+        result = self.run_test(
+            "baseline",
+            target=target,
+            env=SAMPLING_NO_DELAY,
+            run_args=[*self.CPU_METRICS_FLAGS, *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result)
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_CPU_METRICS": "frequency,load",
+                "ROCPROFSYS_CPU_FREQ_ENABLED": True,
+                "ROCPROFSYS_SAMPLING_CPUS": "0",
+            },
+            flag_args=self.CPU_METRICS_FLAGS,
+        )
+        self.assert_perfetto(
+            result,
+            subtest_name="host frequency and load counters",
+            counter_names_present=["Frequency (S)", "Load (S)"],
+            label_substrings=["fib"],
+        )
 
 
 # =============================================================================

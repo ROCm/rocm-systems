@@ -821,6 +821,24 @@ def resolved_settings(result) -> dict:
     return parse_metadata_settings(metadata_file)
 
 
+def assert_resolved_settings(result, expected: dict, *, flag_args=None) -> None:
+    """Assert metadata.json holds every key/value in `expected`.
+
+    `flag_args` is only used in the failure message so a mismatch names the
+    CLI flags under test.
+    """
+    label = flag_args if flag_args is not None else "settings"
+    settings = resolved_settings(result)
+    for key, value in expected.items():
+        if key not in settings:
+            pytest.fail(f"{label}: {key} missing from metadata.json")
+        if settings[key] != value:
+            pytest.fail(
+                f"{label}: metadata.json has {key}={settings[key]!r}, "
+                f"expected {value!r}"
+            )
+
+
 # ----------------------------------------------------------------------------
 # Collection-time availability: return None if OK, else a skip reason string.
 # ----------------------------------------------------------------------------

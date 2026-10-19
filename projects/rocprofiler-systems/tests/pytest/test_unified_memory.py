@@ -11,7 +11,7 @@ KFD page fault and page migration events.
 from __future__ import annotations
 
 import pytest
-from conftest import RocprofsysTest
+from conftest import RocprofsysTest, assert_resolved_settings
 
 pytestmark = [
     pytest.mark.gpu,
@@ -73,39 +73,47 @@ class TestUnifiedMemory(RocprofsysTest):
 
 @pytest.mark.sampling
 @pytest.mark.timeout(120)
-@pytest.mark.class_name("unified-memory-output-path")
-class TestUnifiedMemoryOutputPath(RocprofsysTest):
-    """--unified-memory-output-path redirects the reports off the trace output.
+@pytest.mark.class_name("unified-memory-cli")
+class TestUnifiedMemoryCli(RocprofsysTest):
+    """CLI enables unified-memory profiling and redirects its reports.
 
-    Tests:  the unified-memory reports are written where the flag asks, and
-            only there.
-    Input:  --use-unified-memory-profiling --unified-memory-output-path <dir>
-            on unified-memory -s 32 -p 256 -i 4.
-    Expect: unified_memory*.txt and unified_memory*.json under <dir>, none
-            left in the default output directory, and the reports validate.
+    Seeds ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING=OFF so
+    --use-unified-memory-profiling is what turns it on (the shared fixture
+    defaults it ON for the env-driven test above).
     """
 
     run_args = ["-s", "32", "-p", "256", "-i", "4"]
+    CLI_FLAGS_PREFIX = ["--use-unified-memory-profiling", "--unified-memory-output-path"]
 
-    def test_redirects_reports(self, unified_memory_environment, test_output_dir):
+    def test_profiling_flag_and_output_path(
+        self, unified_memory_environment, test_output_dir
+    ):
         # Under test_output_dir so assert_unified_memory_output still finds it.
         reports_dir = test_output_dir / "um-reports"
+        flag_args = [*self.CLI_FLAGS_PREFIX, str(reports_dir)]
+        env = dict(unified_memory_environment)
+        env["ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING"] = "OFF"
+
         result = self.run_test(
             "sampling",
             target="unified-memory",
-            env=unified_memory_environment,
+            env=env,
             run_args=self.run_args,
-            sampling_args=[
-                "--use-unified-memory-profiling",
-                "--unified-memory-output-path",
-                str(reports_dir),
-            ],
+            sampling_args=flag_args,
             check_target_arch=True,
         )
         self.assert_regex(
             result,
             subtest_name="Unified-memory completion check",
             pass_regex=["9 tests completed"],
+        )
+        assert_resolved_settings(
+            result,
+            {
+                "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING": True,
+                "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH": str(reports_dir),
+            },
+            flag_args=flag_args,
         )
 
         requested = sorted(reports_dir.glob("unified_memory*.txt")) + sorted(
