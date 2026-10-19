@@ -256,10 +256,11 @@ typedef struct {
 	/* Effective state of the host unregister path, resolved on first use:
 	 * -1 unknown, 0 off, 1 on. HSA_SVM_HOST_UNREGISTER_DEBUG forces it
 	 * either way; with the variable unset the XNACK mode decides, which is
-	 * not known yet when the apertures are initialised. See
-	 * svm_host_unregister_on(). When the path is on, the NO_ACCESS revoke
-	 * is queued on a worker thread instead of issued on the deregistering
-	 * thread.
+	 * not known yet when the apertures are initialised. Forced to off when
+	 * the kernel's KFD ioctl version is older than 1.24, the first ABI that
+	 * unmaps an SVM range on NO_ACCESS. See svm_host_unregister_on(). When
+	 * the path is on, the NO_ACCESS revoke is queued on a worker thread
+	 * instead of issued on the deregistering thread.
 	 */
 	int svm_host_unregister;
 } svm_t;
@@ -1528,6 +1529,10 @@ static int svm_api_range_put_locked(struct hsa_kfd_fmm_context *fmm_ctx, void *a
  * client that registers host memory through the SVM API before binding its
  * XNACK mode would resolve against the kernel's current mode instead of the
  * one it goes on to choose.
+ *
+ * Kernels older than KFD ioctl 1.24 never take this path: they leave the GPU
+ * mapping in place when NO_ACCESS is set, and the apertures init has already
+ * cached the state as off.
  */
 static bool svm_host_unregister_on(HsaKFDContext *ctx)
 {
@@ -3742,6 +3747,20 @@ static bool init_mem_handle_aperture(struct hsa_kfd_fmm_context *fmm_ctx, HSAuin
 	return false;
 }
 
+/* First KFD ioctl ABI that unmaps an SVM range when NO_ACCESS is applied.
+ * Older kernels leave the GPU mapping in place.
+ */
+#define KFD_IOCTL_MINOR_SVM_NO_ACCESS 24
+
+static bool kfd_supports_svm_no_access(void)
+{
+	const HsaVersionInfo *v = &hsakmt_kfd_version_info;
+
+	return v->KernelInterfaceMajorVersion > 1 ||
+	       (v->KernelInterfaceMajorVersion == 1 &&
+		v->KernelInterfaceMinorVersion >= KFD_IOCTL_MINOR_SVM_NO_ACCESS);
+}
+
 HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 				unsigned int NumNodes)
 {
@@ -3795,11 +3814,22 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(HsaKFDContext *ctx,
 		guardPages = 1;
 
 	/* Leave it unresolved when unset: the XNACK mode that decides the
-	 * default is bound by the client after this runs.
+	 * default is bound by the client after this runs. Kernels older than
+	 * KFD ioctl 1.24 cannot unmap on NO_ACCESS, so the path stays off
+	 * there even if the debug variable asks for it.
 	 */
 	svmHostUnregisterStr = getenv("HSA_SVM_HOST_UNREGISTER_DEBUG");
-	fmm_ctx->svm.svm_host_unregister = svmHostUnregisterStr ?
-		!!strcmp(svmHostUnregisterStr, "0") : -1;
+	if (!kfd_supports_svm_no_access()) {
+		fmm_ctx->svm.svm_host_unregister = 0;
+		pr_warn("SVM host unregister disabled: KFD ioctl %u.%u "
+			"is older than 1.%u\n",
+			hsakmt_kfd_version_info.KernelInterfaceMajorVersion,
+			hsakmt_kfd_version_info.KernelInterfaceMinorVersion,
+			KFD_IOCTL_MINOR_SVM_NO_ACCESS);
+	} else {
+		fmm_ctx->svm.svm_host_unregister = svmHostUnregisterStr ?
+			!!strcmp(svmHostUnregisterStr, "0") : -1;
+	}
 
 	mfmaHighPrecisionModeStr = getenv("HSA_HIGH_PRECISION_MODE");
 	mfma_high_precision_mode = (mfmaHighPrecisionModeStr &&
