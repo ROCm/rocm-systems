@@ -348,6 +348,16 @@ chain. If a path appears twice, raise `InheritanceCycleError` with the full chai
 new paths during Phase A -- no environment variable or hidden option. The Layer 2 path
 is exercised by tests only (Stage 3 validation) until the cutover.
 
+**Trade-off:** production moves to the new path in one step, at Stage 8. A flag during
+Phase A would not lower that risk, because production does not read Layer 2 before the
+cutover; it would only add a second path to maintain. The risk is covered instead by:
+- the Stage 3 equivalence check, which keeps Layer 2 equal to today's analysis configs
+  on every commit;
+- the output and metric-value checks before each stage (see
+  [Risk mitigation](lld-index.md#risk-mitigation-metric-value-validation));
+- a one-release fallback to the old path after the cutover (see
+  [Stage 8](lld-phase2-display-view.md#stage-8----adapter-retirement)).
+
 ### Tests
 
 - Schema validation: required fields produce valid objects, missing required fields
