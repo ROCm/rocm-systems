@@ -6,7 +6,8 @@
 
 // Host-only microtests for src/plugin/net.cc: the NCCL_NET_PLUGIN list, the v12-to-v6 version probe, per-comm
 // plugin init/assign/finalize, and the device-count and GDR queries. Library open/close and the version getters
-// are seamed in this TU; the per-version shims and plugin_open.cc have their own test TUs.
+// are seamed in this TU; logging, env, params and rcclUseAinic come from the shared fakes. The per-version shims
+// and plugin_open.cc have their own test TUs.
 
 #include <gtest/gtest.h>
 
@@ -26,6 +27,10 @@
 
 #include "../common/LogCapture.hpp"
 #include "../common/ProcessIsolatedTestRunner.hpp"
+#include "ScopedHook.h"
+#include "fakes/env_fakes.h"
+#include "fakes/nccl_fakes.h"
+#include "fakes/transport_stubs.h"
 #include "nccl.h"
 #include "comm.h"
 #include "debug.h"
@@ -36,37 +41,9 @@
 using RcclUnitTesting::CaptureLog;
 using RcclUnitTesting::LogHas;
 
-// Logging, env and params for the whole binary: it links no shared nccl fakes.
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long /*flags*/, const char* /*filefunc*/, int /*line*/,
-                  const char* fmt, ...) {
-  const char* tag = level == NCCL_LOG_WARN ? "WARN" : level == NCCL_LOG_ATTN ? "ATTN" : "INFO";
-  std::fprintf(stderr, "%s ", tag);
-  va_list ap;
-  va_start(ap, fmt);
-  std::vfprintf(stderr, fmt, ap);
-  va_end(ap);
-  std::fputc('\n', stderr);
-}
-
 namespace {
-std::map<std::string, std::string> g_env;
-int64_t g_netPluginRefCount = 0;
-bool g_useAinic = false;
 int g_telemetryInitResult = 0;
 }  // namespace
-
-const char* ncclGetEnv(const char* name) {
-  auto it = g_env.find(name);
-  return it == g_env.end() ? nullptr : it->second.c_str();
-}
-
-static int64_t g_loadParam(const char* env, int64_t deftVal) {
-  return std::strcmp(env, "NET_PLUGIN_REF_COUNT") == 0 ? g_netPluginRefCount : deftVal;
-}
 
 // Shared with plugin-open-test.cc: an expected crash would otherwise dump a core.
 void DisableCoreDumpsForExpectedCrash() {
@@ -82,7 +59,7 @@ void DisableCoreDumpsForExpectedCrash() {
 #define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
 #endif
 
-bool rcclUseAinic() { return g_useAinic; }
+// No shared owner for these two.
 int rcclTelemetryInit(void) { return g_telemetryInitResult; }
 ncclResult_t ncclProfilerCallback(void**, int, void*, int64_t, void*) { return ncclSuccess; }
 
@@ -285,9 +262,8 @@ class PluginNetMicrotest : public ::testing::Test {
     pluginCount = 0;
     for (auto& s : g_net) s = NetScript{};
     for (auto& s : g_coll) s = CollScript{};
-    g_env.clear();
-    g_netPluginRefCount = 0;
-    g_useAinic = false;
+    ResetEnvFakes();
+    ResetTransportStubs();
     g_telemetryInitResult = 0;
     g_libs.clear();
     g_opened.clear();
@@ -311,7 +287,7 @@ class PluginNetMicrotest : public ::testing::Test {
 
   // Rebuilds the plugin list as ncclNetInit's call_once would from the current env.
   void BuildList(const char* netPlugin) {
-    if (netPlugin) g_env["NCCL_NET_PLUGIN"] = netPlugin;
+    if (netPlugin) SetMicroEnv("NCCL_NET_PLUGIN", netPlugin);
     initPluginLibsOnceFunc();
   }
 
@@ -321,12 +297,17 @@ class PluginNetMicrotest : public ::testing::Test {
   getNcclCollNet_t* savedCollNet_[NCCL_NET_VERSION_COUNT];
   char* savedLibPath_ = nullptr;
   std::unique_ptr<ncclComm> comm_;
+  int64_t netPluginRefCount_ = 0;  // NCCL_NET_PLUGIN_REF_COUNT
+  ScopedHook<int64_t(const char*, int64_t)> params_{g_loadParam, [this](const char* env, int64_t deftVal) {
+    return std::strcmp(env, "NET_PLUGIN_REF_COUNT") == 0 ? netPluginRefCount_ : deftVal;
+  }};
+  RcclUnitTesting::ScopedDebugLogging logAll_{-1, ~uint64_t(0)};  // nccl_fakes.cc mutes INFO by default
 };
 
 // Plugin list
 
 TEST_F(PluginNetMicrotest, ListDefaultsToLibrcclNetThenIbAndSocket) {
-  g_netPluginRefCount = 3;
+  netPluginRefCount_ = 3;
   BuildList(nullptr);
 
   ASSERT_EQ(pluginCount, 3);
@@ -348,7 +329,7 @@ TEST_F(PluginNetMicrotest, ListDefaultsToLibrcclNetThenIbAndSocket) {
 }
 
 TEST_F(PluginNetMicrotest, ListKeepsNetPluginOrderAheadOfInternals) {
-  g_netPluginRefCount = 1;
+  netPluginRefCount_ = 1;
   BuildList("first,second");
 
   ASSERT_EQ(pluginCount, 4);
@@ -369,17 +350,21 @@ TEST_F(PluginNetMicrotest, ListNoneOrEmptyLeavesOnlyInternals) {
   }
 }
 
-// NCCL_NET_MAX_PLUGINS (16) less the two internals leaves room for 14, but the log claims 13; a fix flips this pin.
+// NCCL_NET_MAX_PLUGINS (16) less the two internals leaves room for 14, but the log claims 13.
+// Pins AICOMRCCL-2986; a fix flips this pin.
 TEST_F(PluginNetMicrotest, List_KnownBug_KeepsFourteenExternalsButLogsThirteen) {
+  constexpr int kExternals = NCCL_NET_MAX_PLUGINS - 2;
   std::string list;
-  for (int i = 0; i < 16; i++) list += (i ? ",p" : "p") + std::to_string(i);
+  for (int i = 0; i < NCCL_NET_MAX_PLUGINS; i++) list += (i ? ",p" : "p") + std::to_string(i);
   std::string log = CaptureLog([&] { BuildList(list.c_str()); });
 
   ASSERT_EQ(pluginCount, NCCL_NET_MAX_PLUGINS);
-  EXPECT_STREQ(Lib(13).name, "p13");
-  EXPECT_EQ(Lib(14).ncclNet, &ncclNetIb);
-  EXPECT_EQ(Lib(15).ncclNet, &ncclNetSocket);
-  EXPECT_TRUE(LogHas(log, "NCCL_NET_PLUGIN list contains more than 13 plugins, ignoring the rest")) << log;
+  EXPECT_EQ(std::string(Lib(kExternals - 1).name), "p" + std::to_string(kExternals - 1));
+  EXPECT_EQ(Lib(kExternals).ncclNet, &ncclNetIb);
+  EXPECT_EQ(Lib(kExternals + 1).ncclNet, &ncclNetSocket);
+  EXPECT_TRUE(LogHas(log, ("NCCL_NET_PLUGIN list contains more than " + std::to_string(kExternals - 1) +
+                           " plugins, ignoring the rest").c_str()))
+      << log;
 }
 
 TEST_F(PluginNetMicrotest, ListSkipsNamesThatDoNotFitWithTheirTerminator) {
@@ -389,7 +374,8 @@ TEST_F(PluginNetMicrotest, ListSkipsNamesThatDoNotFitWithTheirTerminator) {
 
   ASSERT_EQ(pluginCount, 3);
   EXPECT_EQ(std::string(Lib(0).name), fits);
-  EXPECT_TRUE(LogHas(log, "longer than 255 characters, ignoring it")) << log;
+  EXPECT_TRUE(LogHas(log, ("longer than " + std::to_string(MAX_STR_LEN) + " characters, ignoring it").c_str()))
+      << log;
 }
 
 TEST_F(PluginNetMicrotest, ListPicksIbCastForAinicOrNcclNetIbCast) {
@@ -405,9 +391,9 @@ TEST_F(PluginNetMicrotest, ListPicksIbCastForAinicOrNcclNetIbCast) {
       {nullptr, "ext", true, &ncclNetIb},            {nullptr, "none", true, &netIbCast},
   };
   for (const Case& c : cases) {
-    g_env.clear();
-    if (c.net) g_env["NCCL_NET"] = c.net;
-    g_useAinic = c.ainic;
+    ClearMicroEnv();
+    if (c.net) SetMicroEnv("NCCL_NET", c.net);
+    g_rcclUseAinicValue = c.ainic;
     BuildList(c.netPlugin);
     EXPECT_EQ(Lib(pluginCount - 2).ncclNet, c.expected)
         << "NCCL_NET=" << (c.net ? c.net : "-") << " NCCL_NET_PLUGIN=" << (c.netPlugin ? c.netPlugin : "-")
@@ -651,7 +637,7 @@ TEST_F(PluginNetMicrotest, PluginInitCollNetFailuresOnlyDisableCollNet) {
 TEST_F(PluginNetMicrotest, NetInitAssignsTheFirstWorkingExternalAndDisablesTheRest) {
   g_libs["a"] = {11, 11};
   g_libs["b"] = {12, 0, 1};
-  g_env["NCCL_NET_PLUGIN"] = "a,b,c";
+  SetMicroEnv("NCCL_NET_PLUGIN", "a,b,c");
   initPluginLibsOnceFunc();
   comm_->ncclCollNet = &g_extCollNet[1];
   std::string log = CaptureLog([&] { ASSERT_EQ(ncclNetInit(comm_.get()), ncclSuccess); });
@@ -741,7 +727,8 @@ TEST_F(PluginNetMicrotest, NetInitSecondCommReusesTheEnabledPlugin) {
   EXPECT_EQ(Lib(0).ncclNetPluginRefCount, 2);
 }
 
-// A rejected plugin's finalize drops a refcount it never took, so the library is never unloaded; a fix flips this pin.
+// A rejected plugin's finalize drops a refcount it never took, so the library is never unloaded.
+// Pins AICOMRCCL-2983; a fix flips this pin.
 TEST_F(PluginNetMicrotest, NetInit_KnownBug_RejectedPluginLeavesANegativeRefCount) {
   g_libs["ext"] = {12, 0};
   g_net[kExtA].deviceType = static_cast<ncclNetDeviceType>(0x42);
@@ -791,7 +778,7 @@ TEST_F(PluginNetMicrotest, FinalizeUnloadsAnExternalPluginAtZeroRefCount) {
 
 TEST_F(PluginNetMicrotest, FinalizeKeepsTheLibraryWhileNetPluginRefCountPinsIt) {
   g_libs["ext"] = {12, 0};
-  g_netPluginRefCount = 1;
+  netPluginRefCount_ = 1;
   BuildList("ext");
   ASSERT_EQ(ncclNetInit(comm_.get()), ncclSuccess);
   ASSERT_EQ(ncclNetFinalize(comm_.get()), ncclSuccess);
@@ -885,17 +872,20 @@ TEST_F(PluginNetMicrotest, InitFromParentRejectsADifferentNetNameButOnlyLogsTraf
   EXPECT_FALSE(LogHas(log, "trafficClass")) << log;
 }
 
-// A child with a netName under a parent without one passes NULL to strcasecmp; a fix flips this pin.
+// A child with a netName under a parent without one passes NULL to strcasecmp.
+// Pins AICOMRCCL-2984; a fix flips this pin.
 TEST_F(PluginNetMicrotest, InitFromParent_KnownBug_CrashesWhenOnlyTheChildHasANetName) {
-  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   auto parent = std::make_unique<ncclComm>();
   comm_->config.netName = "IB";
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   EXPECT_EXIT(
       {
         DisableCoreDumpsForExpectedCrash();
         (void)ncclNetInitFromParent(comm_.get(), parent.get());
       },
       DEATH_BY_SEGV, "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
 // Device counts
@@ -1009,7 +999,8 @@ TEST_F(PluginNetGdrMicrotestIsolated, ADevicesFailureIsRetried) {
   });
 }
 
-// The slot is zeroed before the scan, so one getProperties failure caches "no GDR"; a fix (#11701) flips this pin.
+// The slot is zeroed before the scan, so one getProperties failure caches "no GDR".
+// Pins AICOMRCCL-2985; a fix (#11701) flips this pin.
 TEST_F(PluginNetGdrMicrotestIsolated, KnownBug_GetPropertiesFailureCachesNoGdr) {
   RUN_ISOLATED_TEST("PluginNetGdr_KnownBug_GetPropertiesFailureCachesNoGdr", [this]() {
     int gdr = -1;

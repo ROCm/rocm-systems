@@ -415,8 +415,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroPlugin -- src/plugin/net.cc, net/net_v*.cc, plugin_open.cc. Own binary: transport_stubs.cc
-  # defines ncclGpuGdrSupport; gin-plugin-init-test.cc, ncclPluginLibPaths, ncclClosePluginLib, ncclGetNetPluginLib.
+  # rccl-UnitTestsMicroPlugin -- src/plugin/net.cc, net/net_v*.cc, plugin_open.cc. Own binary: gin-plugin-init-test.cc
+  # defines ncclPluginLibPaths, ncclClosePluginLib and ncclGetNetPluginLib in rccl-UnitTestsMicro.
   set(TEST_MICRO_PLUGIN_SOURCE_FILES
     plugin-net-test.cc
     plugin-open-test.cc
@@ -427,6 +427,9 @@ function(rccl_define_micro_source_lists)
     net-v10-test.cc
     net-v11-test.cc
     net-v12-test.cc
+    fakes/env_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/transport_stubs.cc
     ../common/ProcessIsolatedTestRunner.cpp
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1210,6 +1213,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroPlugin
     NET_V10_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v10.cc"
     NET_V11_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v11.cc"
     NET_V12_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v12.cc"
+    RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport  # net.cc defines it
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_plugin.yaml")
 
 # ---------------------------------------------------------------------------

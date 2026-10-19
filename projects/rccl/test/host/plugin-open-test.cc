@@ -100,6 +100,7 @@ std::string PathOf(void* handle) { return "/fake/" + std::to_string(reinterpret_
 
 class PluginOpenMicrotest : public ::testing::Test {
  protected:
+  RcclUnitTesting::ScopedDebugLogging logAll_{-1, ~uint64_t(0)};  // nccl_fakes.cc mutes INFO by default
   void SetUp() override {
     ResetSlots();
     g_dl = FakeDl{};
@@ -178,7 +179,8 @@ TEST_F(PluginOpenMicrotest, PathsAndFullLibraryNamesAreTriedOnlyAsGiven) {
   }
 }
 
-// Despite the comment, only a name with both "lib" and ".so" skips the prefixed retry; a fix flips this pin.
+// Despite the comment, only a name with both "lib" and ".so" skips the prefixed retry.
+// Pins AICOMRCCL-2990; a fix flips this pin.
 TEST_F(PluginOpenMicrotest, OpenPluginLib_KnownBug_AHalfLibraryNameIsStillRetriedWithThePrefix) {
   EXPECT_EQ(ncclOpenNetPluginLib("x.so"), nullptr);
   EXPECT_EQ(ncclOpenNetPluginLib("libx"), nullptr);
@@ -191,7 +193,8 @@ TEST_F(PluginOpenMicrotest, StaticPluginOpensTheProcessItself) {
   EXPECT_STREQ(ncclGetPluginLibName(ncclPluginTypeTuner), "static_plugin");
 }
 
-// The STATIC_PLUGIN check compares only strlen(name) chars, so any prefix opens the process; a fix flips this pin.
+// The STATIC_PLUGIN check compares only strlen(name) chars, so any prefix opens the process.
+// Pins AICOMRCCL-2989; a fix flips this pin.
 TEST_F(PluginOpenMicrotest, TryOpenLib_KnownBug_AnyPrefixOfStaticPluginOpensTheProcess) {
   for (const char* name : {"s", "Stat", "STATIC_"}) {
     g_dl.opened.clear();
@@ -260,7 +263,8 @@ TEST_F(PluginOpenMicrotest, SharingTheNetOrGinLibraryTakesItsOwnReference) {
   EXPECT_EQ(libHandles[ncclPluginTypeNet], kNet);
 }
 
-// rma.cc shares GIN then NET into the RMA slot, and NET overwrites GIN's unreleased reference; a fix flips this pin.
+// rma.cc shares GIN then NET into the RMA slot, and NET overwrites GIN's unreleased reference.
+// Pins AICOMRCCL-2987; a fix flips this pin.
 TEST_F(PluginOpenMicrotest, GetNetPluginLib_KnownBug_GinThenNetIntoOneSlotLeaksTheGinReference) {
   g_dl.installed["librccl-net.so"] = kNet;
   g_dl.installed["librccl-gin.so"] = kGin;
@@ -281,18 +285,21 @@ TEST_F(PluginOpenMicrotest, GetNetPluginLib_KnownBug_GinThenNetIntoOneSlotLeaksT
   EXPECT_EQ(g_dl.closeCount[kGin], 1);
 }
 
-// Sharing strdup's the NET library's path, which is NULL when dlinfo failed; a fix flips this pin.
+// Sharing strdup's the NET library's path, which is NULL when dlinfo failed.
+// Pins AICOMRCCL-2988; a fix flips this pin.
 TEST_F(PluginOpenMicrotest, GetNetPluginLib_KnownBug_CrashesWhenTheNetLibraryHasNoPath) {
-  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   g_dl.installed["librccl-net.so"] = kNet;
   g_dl.dlinfoFails = true;
   ASSERT_EQ(ncclOpenNetPluginLib(nullptr), kNet);
+  const std::string style = ::testing::GTEST_FLAG(death_test_style);
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   EXPECT_EXIT(
       {
         DisableCoreDumpsForExpectedCrash();
         (void)ncclGetNetPluginLib(ncclPluginTypeTuner);
       },
       DEATH_BY_SEGV, "");
+  ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
 }  // namespace

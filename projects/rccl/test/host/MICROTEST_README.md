@@ -333,10 +333,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroPlugin`** — `plugin/net.cc`, `plugin/plugin_open.cc` and the
   `plugin/net/net_v6.cc` to `net_v12.cc` shims (via `PLUGIN_NET_CC_PATH`,
   `PLUGIN_OPEN_CC_PATH` and `NET_V<N>_CC_PATH`, one test TU each); suite `Plugin*`. Its
-  own binary: `fakes/transport_stubs.cc`, which most targets link, defines
-  `ncclGpuGdrSupport`, and `gin-plugin-init-test.cc` in `rccl-UnitTestsMicro` defines
-  `ncclPluginLibPaths`, `ncclClosePluginLib` and `ncclGetNetPluginLib`, all of which
-  `net.cc` or `plugin_open.cc` define. See `test_categories_micro_plugin.yaml`.
+  own binary: `gin-plugin-init-test.cc` in `rccl-UnitTestsMicro` defines
+  `ncclPluginLibPaths`, `ncclClosePluginLib` and `ncclGetNetPluginLib`, which
+  `plugin_open.cc` defines. It links `fakes/transport_stubs.cc` with
+  `RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport`, since `net.cc` defines that too. See
+  `test_categories_micro_plugin.yaml`.
 - **`rccl-UnitTestsMicroDdaIpc`**: `algorithms/dda/all_reduce/dda_all_reduce_ipc.cu`
   (`DDA_ALL_REDUCE_IPC_CC_PATH`, from `dda-allreduce-ipc-test.cc`); suites
   `DdaAllReduceIpc*`. Eligibility gates, datatype dispatch and flat/tree kernel

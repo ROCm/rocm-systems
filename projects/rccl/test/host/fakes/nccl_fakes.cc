@@ -72,14 +72,29 @@ uint32_t            ncclDebugLevelMask = 0; // NCCL_LOG_NONE
 uint64_t            ncclDebugMask    = 0;
 thread_local int    ncclDebugNoWarn  = 0;
 
-void ncclDebugLog(ncclDebugLogLevel /*level*/,
+// The level is printed too, so a test can tell a WARN from an INFO in what it captures.
+static const char* LevelName(ncclDebugLogLevel level)
+{
+    switch (level) {
+    case NCCL_LOG_ERROR:   return "ERROR";
+    case NCCL_LOG_VERSION: return "VERSION";
+    case NCCL_LOG_WARN:    return "WARN";
+    case NCCL_LOG_INFO:    return "INFO";
+    case NCCL_LOG_ABORT:   return "ABORT";
+    case NCCL_LOG_TRACE:   return "TRACE";
+    case NCCL_LOG_ATTN:    return "ATTN";
+    default:               return "?";
+    }
+}
+
+void ncclDebugLog(ncclDebugLogLevel level,
                              unsigned long     /*flags*/,
                              const char*       filefunc,
                              int               line,
                              const char*       fmt,
                              ...)
 {
-    std::fprintf(stderr, "[fake] %s:%d ", filefunc ? filefunc : "?", line);
+    std::fprintf(stderr, "[fake] %s:%d %s ", filefunc ? filefunc : "?", line, LevelName(level));
     std::va_list ap;
     va_start(ap, fmt);
     std::vfprintf(stderr, fmt, ap);
