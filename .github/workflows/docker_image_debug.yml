@@ -35,8 +35,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - tag: latest
-            suffix: latest
           - tag: test-pr-13323-v2
             suffix: v2
     steps:
