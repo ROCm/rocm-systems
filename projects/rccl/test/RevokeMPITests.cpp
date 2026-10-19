@@ -4,6 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include "DdaFabricMPITestFixture.hpp"
 #include "DdaMPITestHelpers.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
@@ -13,6 +14,7 @@
 #include "nccl.h"
 #include "rccl_common.h"
 
+#include <chrono>
 #include <memory>
 #include <sched.h>
 #include <string>
@@ -553,6 +555,8 @@ TEST_F(RevokeMPITest, IncompleteCollective_Revoke_Shrink_Collective)
  */
 namespace
 {
+constexpr auto kDrainTimeout = std::chrono::seconds(120);
+
 struct DdaEnvSetting
 {
     const char* name;
@@ -677,10 +681,8 @@ void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
 
     ASSERT_MPI_EQ(ncclSuccess, ncclCommRevoke(parent, NCCL_REVOKE_DEFAULT));
 
-    if(rank != skipRank)
-        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
-
-    MPI_Barrier(MPI_COMM_WORLD);
+    DdaFabricMPI::abortJobUnlessAllRanksDrained(DdaFabricMPI::waitStreamBounded(stream, kDrainTimeout),
+                                                "DDA wait after ncclCommRevoke");
 
     std::vector<int> excludeList;
     bool             isExcluded = false;
@@ -904,9 +906,8 @@ protected:
         // ncclCommAbort frees the communicator; keep TearDown from destroying it again.
         test_comm_ = nullptr;
         ASSERT_EQ(ncclSuccess, ncclCommAbort(comm));
-        HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
-
-        MPI_Barrier(MPI_COMM_WORLD);
+        DdaFabricMPI::abortJobUnlessAllRanksDrained(DdaFabricMPI::waitStreamBounded(stream, kDrainTimeout),
+                                                    "DDA wait after ncclCommAbort");
     }
 };
 
