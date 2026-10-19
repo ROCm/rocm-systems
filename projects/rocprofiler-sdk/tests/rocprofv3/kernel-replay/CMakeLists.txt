@@ -48,6 +48,12 @@ set_tests_properties(
 # this generate step.
 set(REPLAY_PASSES 5)
 
+# The generate tests run with RUN_SERIAL. The SQ counters count every wave on the device,
+# and validate.py compares them exactly across a dispatch's passes, so GPU work from
+# concurrent tests (device-mode counter collection in particular) makes it fail
+# intermittently. The rocprofiler_kernel_replay lock only serializes the replay tests with
+# each other.
+
 add_test(
     NAME rocprofv3-test-kernel-replay-generate
     COMMAND
@@ -68,6 +74,8 @@ set_tests_properties(
                "${rocprofv3-generate-env}"
                RESOURCE_LOCK
                rocprofiler_kernel_replay
+               RUN_SERIAL
+               ON
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
@@ -120,6 +128,8 @@ set_tests_properties(
                "${rocprofv3-generate-env};ROCPROF_COUNTER_GROUPS_INTERVAL=2"
                RESOURCE_LOCK
                rocprofiler_kernel_replay
+               RUN_SERIAL
+               ON
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
@@ -170,6 +180,8 @@ set_tests_properties(
                "${rocprofv3-generate-env}"
                RESOURCE_LOCK
                rocprofiler_kernel_replay
+               RUN_SERIAL
+               ON
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
@@ -219,6 +231,8 @@ set_tests_properties(
                "${rocprofv3-generate-env}"
                RESOURCE_LOCK
                rocprofiler_kernel_replay
+               RUN_SERIAL
+               ON
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP
