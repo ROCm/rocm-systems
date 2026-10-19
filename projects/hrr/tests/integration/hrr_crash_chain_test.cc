@@ -17,16 +17,20 @@
  *     returns. The second time the handler sees events.bin grown to its final
  *     size, so CLR's handler is still installed and flushes again. The handler
  *     runs with its own sa_mask and SA_NODEFER, and CLR's handler keeps its
- *     SA_RESTART.
+ *     SA_RESTART and, as the earlier handler has none, no SA_ONSTACK.
  *
  *   Unit_HRR_CaptureCrashChainsWithAsyncLog:
  *     The same with CLR's asynchronous logging on, which registers its own
  *     crash callback before capture starts. The capture's callback must still
- *     run.
+ *     run, and so must the logger's: the workload holds stderr's lock from
+ *     before its last HIP call, so the logger thread cannot write that call's
+ *     log line, and the line can only reach stderr through the crash flush,
+ *     after a marker the workload writes just before the signal.
  *
  *   Unit_HRR_CaptureCrashChainsResetHandOnce:
- *     The earlier handler is SA_RESETHAND. The first SIGSEGV runs it, the
- *     second kills the process, as it would without CLR's handler.
+ *     The earlier handler is SA_RESETHAND and SA_ONSTACK. The first SIGSEGV
+ *     runs it, the second kills the process, as it would without CLR's
+ *     handler. CLR's handler keeps the SA_ONSTACK.
  *
  * Linux only, like the signal path it covers.
  */
@@ -54,6 +58,9 @@ namespace {
 constexpr int kCrashChainCopies = 3;
 constexpr const char* kCrashChainMarker = "hrr-crash-chain";
 constexpr const char* kCrashResetMarker = "hrr-crash-reset";
+constexpr const char* kCrashSignalMarker = "hrr-last-signal";  // Not a prefix of the others
+// Called once, right before the last signal, so only that call logs it
+constexpr const char* kLastHipCall = "hipDeviceSynchronize";
 
 // Set before the signals, read by the handler: no allocation in it.
 char g_events_path[4096];
@@ -88,7 +95,7 @@ ChainRun run_crash_chain(const fs::path& cap, bool async_log, const char* worklo
   hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.string());
   if (async_log) {
-    proc.setEnv("AMD_LOG_LEVEL", "1");
+    proc.setEnv("AMD_LOG_LEVEL", "3");  // LOG_INFO: API calls are logged
     proc.setEnv("AMD_LOG_ASYNC", "1");
   }
   set_proc_search_path(proc);
@@ -104,23 +111,37 @@ void check_crash_chain(const fs::path& cap, bool async_log) {
 
   const size_t at = run.out.find(kCrashChainMarker);
   REQUIRE(at != std::string::npos);
-  int calls = -1, chained = -1, restart = -1, usr1 = -1, segv = -1;
+  int calls = -1, chained = -1, restart = -1, onstack = -1, usr1 = -1, segv = -1;
   long long first = -1, second = -1, final_size = -1;
   REQUIRE(sscanf(run.out.c_str() + at,
                  "hrr-crash-chain calls=%d first=%lld second=%lld size=%lld chained=%d "
-                 "restart=%d usr1=%d segv=%d",
-                 &calls, &first, &second, &final_size, &chained, &restart, &usr1, &segv) == 8);
+                 "restart=%d onstack=%d usr1=%d segv=%d",
+                 &calls, &first, &second, &final_size, &chained, &restart, &onstack, &usr1,
+                 &segv) == 9);
   CHECK(calls == 2);
   // The second signal flushed the copy recorded after the first, before the
   // earlier handler looked at the file.
   CHECK(first < second);
   CHECK(second == final_size);
-  // CLR's handler is in front, keeps the earlier handler's SA_RESTART and runs
-  // it with its sa_mask (SIGUSR1) and SA_NODEFER (SIGSEGV not blocked).
+  // CLR's handler is in front, keeps the earlier handler's SA_RESTART, does not
+  // add an SA_ONSTACK it lacks, and runs it with its sa_mask (SIGUSR1) and
+  // SA_NODEFER (SIGSEGV not blocked).
   CHECK(chained == 1);
   CHECK(restart == 1);
+  CHECK(onstack == 0);
   CHECK(usr1 == 1);
   CHECK(segv == 0);
+
+  if (async_log) {
+    // The last HIP call's log line comes after the marker, so the logger's
+    // crash callback ran too. Synchronous logging would print it before the
+    // marker, and without the callback it is never printed.
+    const size_t signal_at = run.out.find(kCrashSignalMarker);
+    REQUIRE(signal_at != std::string::npos);
+    const size_t logged_at = run.out.rfind(kLastHipCall);
+    CHECK(logged_at != std::string::npos);
+    CHECK(logged_at > signal_at);
+  }
 
   const fs::path archive = hrr_single_process_archive(cap);
   hrr::Archive ar;
@@ -169,15 +190,22 @@ TEST_CASE("Unit_HRR_CaptureCrashChain_Direct", "[.][hrr-direct]") {
 
   raise(SIGSEGV);
   HRR_HIP_CHECK(hipMemcpy(d, h.data(), h.size() * sizeof(int), hipMemcpyHostToDevice));
+  // From here to _exit, a logger thread blocks on stderr; this thread can
+  // still write it, and so can the crash callbacks run on it.
+  flockfile(stderr);
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  fprintf(stderr, "%s\n", kCrashSignalMarker);
   raise(SIGSEGV);
 
   REQUIRE(stat(g_events_path, &st) == 0);
-  printf("%s calls=%d first=%lld second=%lld size=%lld chained=%d restart=%d usr1=%d segv=%d\n",
+  printf("%s calls=%d first=%lld second=%lld size=%lld chained=%d restart=%d onstack=%d "
+         "usr1=%d segv=%d\n",
          kCrashChainMarker, static_cast<int>(g_earlier_calls),
          static_cast<long long>(g_events_size_seen[0]),
          static_cast<long long>(g_events_size_seen[1]), static_cast<long long>(st.st_size),
          cur.sa_handler != earlier_segv_handler ? 1 : 0, (cur.sa_flags & SA_RESTART) ? 1 : 0,
-         static_cast<int>(g_usr1_blocked), static_cast<int>(g_segv_blocked));
+         (cur.sa_flags & SA_ONSTACK) ? 1 : 0, static_cast<int>(g_usr1_blocked),
+         static_cast<int>(g_segv_blocked));
   fflush(stdout);
   _exit(0);
 }
@@ -191,15 +219,18 @@ TEST_CASE("Unit_HRR_CaptureCrashChainResetHand_Direct", "[.][hrr-direct]") {
   memset(&sa, 0, sizeof(sa));
   sigemptyset(&sa.sa_mask);
   sa.sa_handler = reset_segv_handler;
-  sa.sa_flags = SA_RESETHAND;
+  sa.sa_flags = SA_RESETHAND | SA_ONSTACK;
   REQUIRE(sigaction(SIGSEGV, &sa, nullptr) == 0);
 
   HRR_HIP_CHECK(hipSetDevice(0));
   int* d = nullptr;
   HRR_HIP_CHECK(hipMalloc(&d, 64));
+  struct sigaction cur;
+  REQUIRE(sigaction(SIGSEGV, nullptr, &cur) == 0);
 
   raise(SIGSEGV);
-  printf("%s calls=%d\n", kCrashResetMarker, static_cast<int>(g_reset_calls));
+  printf("%s onstack=%d calls=%d\n", kCrashResetMarker, (cur.sa_flags & SA_ONSTACK) ? 1 : 0,
+         static_cast<int>(g_reset_calls));
   fflush(stdout);
   raise(SIGSEGV);
   printf("%s survived calls=%d\n", kCrashResetMarker, static_cast<int>(g_reset_calls));
@@ -222,7 +253,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsResetHandOnce) {
   const ChainRun run =
       run_crash_chain(cap.path, /*async_log=*/false, "Unit_HRR_CaptureCrashChainResetHand_Direct");
   INFO("Workload exit code: " << run.ret << "\nWorkload output:\n" << run.out);
-  CHECK(run.out.find(std::string(kCrashResetMarker) + " calls=1") != std::string::npos);
+  // CLR's handler keeps the earlier handler's SA_ONSTACK
+  CHECK(run.out.find(std::string(kCrashResetMarker) + " onstack=1 calls=1") != std::string::npos);
   CHECK(run.out.find("survived") == std::string::npos);
   CHECK(run.ret == 128 + SIGSEGV);
 }

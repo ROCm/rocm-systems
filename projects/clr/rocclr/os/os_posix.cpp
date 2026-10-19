@@ -220,11 +220,15 @@ bool Os::installExceptionHandlers(CrashCallback callback) {
   memset(&sa, 0, sizeof(sa));
   sigemptyset(&sa.sa_mask);
   sa.sa_sigaction = crashSignalHandler;
-  sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
 
   for (size_t i = 0; i < kNumCrashSignals; ++i) {
     oldCrashHandlerSpent_[i].store(false);
-    if (sigaction(kCrashSignals[i], &sa, &oldCrashHandlers_[i]) != 0) {
+    // Save the earlier action before ours goes live, and install ours in one
+    // call. The earlier handler runs from ours, so keep the SA_RESTART and the
+    // SA_ONSTACK it asked for.
+    bool ok = sigaction(kCrashSignals[i], nullptr, &oldCrashHandlers_[i]) == 0;
+    sa.sa_flags = SA_SIGINFO | (oldCrashHandlers_[i].sa_flags & (SA_RESTART | SA_ONSTACK));
+    if (!ok || sigaction(kCrashSignals[i], &sa, nullptr) != 0) {
       while (i-- > 0) {
         sigaction(kCrashSignals[i], &oldCrashHandlers_[i], nullptr);
       }
@@ -233,12 +237,6 @@ bool Os::installExceptionHandlers(CrashCallback callback) {
         slot.compare_exchange_strong(expected, nullptr);
       }
       return false;
-    }
-    // The earlier handler runs from ours, so keep the SA_RESTART it asked for
-    if (oldCrashHandlers_[i].sa_flags & SA_RESTART) {
-      struct sigaction restart = sa;
-      restart.sa_flags |= SA_RESTART;
-      sigaction(kCrashSignals[i], &restart, nullptr);
     }
   }
   crashHandlersInstalled_ = true;
@@ -250,7 +248,7 @@ void Os::uninstallExceptionHandlers(CrashCallback callback) {
 
   bool inUse = false;
   for (auto& slot : crashCallbacks_) {
-    if (callback == nullptr || slot.load() == callback) {
+    if (slot.load() == callback) {
       slot.store(nullptr);
     } else if (slot.load() != nullptr) {
       inUse = true;
