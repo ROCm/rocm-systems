@@ -57,10 +57,12 @@ struct Policy {
   /// Finite overflow gives the largest finite value in every rounding mode.
   bool saturate = false;
 
-  /// @brief Read the format's MODE.FP_DENORM and MODE.FP_ROUND fields.
+  /// @brief Build the LDEXP policy from MODE, overflow saturation, and effective OMOD.
+  /// @details Reads the format's MODE.FP_DENORM and MODE.FP_ROUND fields. A tiny
+  /// result flushes when effective OMOD is enabled, ensuring OMOD sees only +0 for
+  /// values that are tiny at full precision but round up to the smallest normal.
   /// @param saturate Overflow gives the largest finite value (FP16_OVFL for F16).
-  /// @param omod Effective OMOD is enabled: a tiny result flushes even with output
-  /// denormals kept, so OMOD then gives +0 (gfx1201 probe, all three formats).
+  /// @param omod Effective OMOD is enabled (gfx1201 probe, all three formats).
   /// Callers must pass it: the OMOD stage sees only the rounded result, and a tiny
   /// value that rounds up to the smallest normal no longer looks tiny there.
   static constexpr Policy make(uint32_t denorm_mode, uint32_t round_mode, bool saturate,
