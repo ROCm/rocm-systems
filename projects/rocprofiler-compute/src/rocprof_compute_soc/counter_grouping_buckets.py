@@ -99,9 +99,9 @@ def count_single_pass_metrics_split_across_buckets(
 ) -> int:
     """Metrics that span buckets but whose PMC set fits one hardware bucket."""
     metric_groups = iter_metric_groups(soc, profile_counters)
-    ctr_to_bucket = _counter_to_bucket_index(output_files)
+    bucket_sets = _bucket_counter_sets(output_files)
     return _single_pass_metrics_split_across_buckets_count(
-        metric_groups, ctr_to_bucket, perfmon_config
+        metric_groups, bucket_sets, perfmon_config
     )
 
 
@@ -112,41 +112,48 @@ def count_multi_bucket_metrics(
 ) -> int:
     """Metrics with in-profile PMCs spanning 2+ perfmon buckets."""
     metric_groups = iter_metric_groups(soc, profile_counters)
-    ctr_to_bucket = _counter_to_bucket_index(output_files)
+    bucket_sets = _bucket_counter_sets(output_files)
     count = 0
     for _sort_key, group, _label in metric_groups:
-        if _metric_bucket_count(group, ctr_to_bucket) > 1:
+        if _group_bucket_span(group, bucket_sets) > 1:
             count += 1
     return count
 
 
-def _counter_to_bucket_index(
-    output_files: List[CounterFile],
-) -> Dict[str, int]:
-    mapping: Dict[str, int] = {}
-    for idx, counter_file in enumerate(output_files):
-        for ctr in flat_counters_in_perfmon_file(counter_file):
-            mapping[ctr] = idx
-    return mapping
+def _bucket_counter_sets(output_files: List[CounterFile]) -> List[Set[str]]:
+    return [bucket_counter_set(counter_file) for counter_file in output_files]
+
+
+def _group_bucket_span(
+    group: FrozenSet[str],
+    bucket_sets: List[Set[str]],
+) -> int:
+    """How many buckets the group occupies.
+
+    Zero when a counter is missing. One when some bucket holds the whole
+    group, even if a member is also copied into another bucket. Otherwise
+    the number of buckets that contain at least one member.
+    """
+    if not group:
+        return 0
+    if not all(
+        any(counter in counters for counters in bucket_sets) for counter in group
+    ):
+        return 0
+    if any(group <= counters for counters in bucket_sets):
+        return 1
+    return sum(1 for counters in bucket_sets if group & counters)
 
 
 def _single_pass_metrics_split_across_buckets_count(
     metric_groups: List[_MetricGroup],
-    ctr_to_bucket: Dict[str, int],
+    bucket_sets: List[Set[str]],
     perfmon_config: Dict[str, int],
 ) -> int:
     count = 0
     for _sort_key, group, _label in metric_groups:
-        buckets = {ctr_to_bucket[ctr] for ctr in group if ctr in ctr_to_bucket}
-        if len(buckets) <= 1:
+        if _group_bucket_span(group, bucket_sets) <= 1:
             continue
         if counters_fit_one_bucket(group, perfmon_config):
             count += 1
     return count
-
-
-def _metric_bucket_count(
-    group: FrozenSet[str],
-    ctr_to_bucket: Dict[str, int],
-) -> int:
-    return len({ctr_to_bucket[ctr] for ctr in group if ctr in ctr_to_bucket})
