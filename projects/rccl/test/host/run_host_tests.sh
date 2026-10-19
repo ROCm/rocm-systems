@@ -22,8 +22,8 @@
 #                   prerequisite the host tests compile against
 #   configure       configure test/host
 #   build           build all host binaries (default target)
-#   guards          device-table unittest and kernel-count pytest plus
-#                   src/include/test_poison_hip_atomics.py,
+#   guards          device-table unittest, the kernel-count and accl-reporter
+#                   pytest suites, plus src/include/test_poison_hip_atomics.py,
 #                   test/test_makefile_depflags.py, and the
 #                   tools/RcclReplayer host checks (make test)
 #   run             run the suite (timestamped log + JUnit XML). Always emits
@@ -168,14 +168,16 @@ do_host_tests() {
     "rccl-UnitTestsMicroConnect:$SCRIPT_DIR/host_tests_micro_connect.xml"
     "rccl-UnitTestsMicroCe:$SCRIPT_DIR/host_tests_micro_ce.xml"
     "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
+    "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
+    "rccl-UnitTestsMicroDdaIpc:$SCRIPT_DIR/host_tests_micro_dda_ipc.xml"
     "rccl-UnitTestsMicroRoctxNvml:$SCRIPT_DIR/host_tests_micro_roctx_nvml.xml"
     # Standalone-only: roctx.cc's ROCTX_ENABLE arm.
     "rccl-UnitTestsMicroRoctxNvml-roctx:$SCRIPT_DIR/host_tests_micro_roctx_nvml_roctx.xml"
-    "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
-    "rccl-UnitTestsMicroRomeModels:$SCRIPT_DIR/host_tests_micro_rome_models.xml"
     "rccl-UnitTestsMicroRocmwrap:$SCRIPT_DIR/host_tests_micro_rocmwrap.xml"
     "rccl-UnitTestsMicroAmdsmiWrap:$SCRIPT_DIR/host_tests_micro_amdsmi_wrap.xml"
+    "rccl-UnitTestsMicroRomeModels:$SCRIPT_DIR/host_tests_micro_rome_models.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
+    "rccl-UnitTestsMicroGraph:$SCRIPT_DIR/host_tests_micro_graph.xml"
     "rccl-UnitTestsMicroRmaProxy:$SCRIPT_DIR/host_tests_micro_rma_proxy.xml"
   )
   # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
@@ -253,10 +255,9 @@ do_device_table_guards() {
   python3 "$RCCL_ROOT/src/device/test_generate_device_table.py" -v
 }
 
-# Run the kernel-count guard pytest suite (test/kernel-count) in a local venv so
-# the lean host-test image needs no system pytest. See that dir's README.
-do_kernel_count_guards() {
-  echo "==> Kernel-count guards (pytest: test/kernel-count)"
+# Provision (once) the shared pytest venv the guard suites run in, so the lean
+# host-test image needs no system pytest. Prints its path. See test/kernel-count.
+guard_venv() {
   local gd="$RCCL_ROOT/test/kernel-count"
   local venv="$gd/venv"
   if [ ! -x "$venv/bin/pytest" ]; then
@@ -264,7 +265,24 @@ do_kernel_count_guards() {
       && "$venv/bin/pip" install -q --disable-pip-version-check -r "$gd/requirements.txt" \
       || { echo "ERROR: could not provision $venv" >&2; return 1; }
   fi
-  "$venv/bin/python" -m pytest "$gd/tests" -v
+  echo "$venv"
+}
+
+# Run the kernel-count guard pytest suite (test/kernel-count).
+do_kernel_count_guards() {
+  echo "==> Kernel-count guards (pytest: test/kernel-count)"
+  local venv
+  venv=$(guard_venv) || return 1
+  "$venv/bin/python" -m pytest "$RCCL_ROOT/test/kernel-count/tests" -v
+}
+
+# Run the accl-profiler reporter suite. It covers accl_report.py's loss banner
+# and its refusal to read pre-rename summaries -- pure host Python, no GPU.
+do_accl_report_guards() {
+  echo "==> ACCL reporter guards (pytest: test/test_accl_report.py)"
+  local venv
+  venv=$(guard_venv) || return 1
+  "$venv/bin/python" -m pytest "$RCCL_ROOT/test/test_accl_report.py" -v
 }
 
 # Run the RcclReplayer host checks (g++ only, no MPI or HIP); nothing else builds tools/.
@@ -273,16 +291,17 @@ do_replayer_guards() {
   make -C "$RCCL_ROOT/tools/RcclReplayer" test
 }
 # All CPU-only guards: makefile -MM scan, the device-table unittest, the
-# kernel-count pytest suite, the __hip_atomic_* poison compile probe, then
-# the RcclReplayer host checks. Collected with `|| rc=1` rather than run
-# back to back so that under `set -e` an early failure still leaves the
-# later guards running and reported, instead of aborting the phase at the
-# first one. Same idiom as do_host_tests above.
+# kernel-count and accl-reporter pytest suites, the __hip_atomic_* poison
+# compile probe, then the RcclReplayer host checks. Collected with `|| rc=1`
+# rather than run back to back so that under `set -e` an early failure still
+# leaves the later guards running and reported, instead of aborting the phase
+# at the first one. Same idiom as do_host_tests above.
 do_guards() {
   local rc=0
   do_makefile_depflags || rc=1
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
+  do_accl_report_guards || rc=1
   do_poison_hip_atomics || rc=1
   do_replayer_guards || rc=1
   return "$rc"

@@ -117,7 +117,6 @@ namespace {
 std::function<int(const char*, int)> g_access;
 std::function<void*(const char*, int)> g_dlopen;
 std::map<std::string, void*> g_dlsymTable;
-std::function<hipError_t(int*, const char*)> g_hipDeviceGetByPCIBusId;
 }  // namespace
 
 static int AmdsmiTestAccess(const char* path, int mode) { return g_access(path, mode); }
@@ -126,16 +125,11 @@ static void* AmdsmiTestDlsym(void*, const char* name) {
   auto it = g_dlsymTable.find(name);
   return it == g_dlsymTable.end() ? nullptr : it->second;
 }
-static hipError_t AmdsmiTestDeviceGetByPCIBusId(int* dev, const char* busId) {
-  return g_hipDeviceGetByPCIBusId(dev, busId);
-}
 
 #define access AmdsmiTestAccess
 #define dlopen AmdsmiTestDlopen
 #define dlsym AmdsmiTestDlsym
-#define hipDeviceGetByPCIBusId AmdsmiTestDeviceGetByPCIBusId
 #include AMDSMI_WRAP_CC_PATH
-#undef hipDeviceGetByPCIBusId
 #undef dlsym
 #undef dlopen
 #undef access
@@ -427,7 +421,6 @@ protected:
     g_access = [](const char*, int) { return -1; };  // no /dev/dxg: not WSL2
     g_dlopen = [](const char*, int) -> void* { return nullptr; };
     g_dlsymTable.clear();
-    g_hipDeviceGetByPCIBusId = [](int*, const char*) { return hipErrorInvalidValue; };
     g_legacyTelemName = "LEGACY_NAME";
     InstallFakeSmiTable();
 

@@ -82,22 +82,13 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Core functionality - Run on every PR (target: < 30 min)"
+    description: "Core functionality - Run on every PR (target: < 30 min). Slow profile tests (>150s on gfx1151) are covered by nightly full runs."
     test_patterns:
-      - test_profile_dispatch
       - test_profile_kernel_execution
-      - test_profile_misc
-      - test_profile_path
       - test_pc_sampling
-      - test_profile_roofline_dir
       - test_profile_roofline_bench
-      - test_profile_roofline_plot
-      - test_profile_roofline_validation
-      - test_profile_section
       - test_profile_sets_func
-      - test_profile_sort
       - test_profile_iteration_multiplexing_1
-      - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
       - test_aggregation
       - test_expression
