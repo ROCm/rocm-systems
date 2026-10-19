@@ -3435,8 +3435,12 @@ ncclResult_t ncclCeAllReduce(struct ncclComm* comm, const void* sendbuff, void* 
         }
       }
     }
-    // Drain the slot before reuse: after NUM_SLOTS chunks, wait until every rank's
-    // reduce signal is 0 (chunk 2 reuses slot 0).
+    // A. Verify that the persistent kernel has fully consumed this slot from the prior loop
+    //
+    // ceARTmpBuf is double-buffered (NUM_SLOTS slots); chunk ch uses slot ch % NUM_SLOTS.
+    // The first NUM_SLOTS chunks get fresh slots — no drain wait. From chunk NUM_SLOTS on,
+    // scatterStream waits for the persistent reduce kernel to clear the slot (signal == 0)
+    // on all ranks before overwriting it (e.g. chunk 2 reuses slot 0 when NUM_SLOTS == 2).
     if (ch >= NUM_SLOTS) {
       for (int r = 0; r < comm->nRanks; r++) {
         if (r == comm->rank) {
