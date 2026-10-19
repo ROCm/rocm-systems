@@ -26,6 +26,7 @@
 
 #include <cstdint>
 #include <map>
+#include <utility>
 #include <vector>
 
 // Pull the hipified search.cc directly into this translation unit so we can
@@ -500,6 +501,74 @@ ncclTopoSystem* makePathSystem(int nGpus, int hostsSplit, const char* gcn = "gfx
     return s;
 }
 
+// Give every still-reachable GPU pair a real one-hop link with a finite budget. Without this
+// the paths carry count == 0, and ncclTopoSearchNextGpuSort() skips every candidate ("There is
+// no path to that GPU"), so the permutation search can never build a ring and only the forced
+// order (which bypasses that sort) produces one. Call after severing any edges.
+void linkifySystem(ncclTopoSystem* s, float linkBw = 24.0f)
+{
+    const int nGpus = s->nodes[GPU].count;
+    for(int i = 0; i < nGpus; ++i)
+    {
+        for(int j = 0; j < nGpus; ++j)
+        {
+            if(i == j) continue;
+            auto& p = s->nodes[GPU].nodes[i].paths[GPU][j];
+            if(p.type >= PATH_DIS) continue;
+            auto* link    = new ncclTopoLink{};
+            link->type    = LINK_NVL;
+            link->bw      = linkBw;
+            link->remNode = &s->nodes[GPU].nodes[j];
+            p.list        = new ncclTopoLink*[1];
+            p.list[0]     = link;
+            p.count       = 1;
+            p.capacity    = 1;
+            p.bw          = linkBw;
+            p.type        = PATH_NVL;
+        }
+    }
+}
+
+// Raise one edge's budget in both directions, so the permutation search has a reason to prefer
+// a neighbour other than the next one in topology order.
+void setLinkBw(ncclTopoSystem* s, int i, int j, float bw)
+{
+    for(auto e : {std::pair<int, int>{i, j}, std::pair<int, int>{j, i}})
+    {
+        auto& p = s->nodes[GPU].nodes[e.first].paths[GPU][e.second];
+        if(p.count == 0 || p.list == nullptr) continue;
+        p.list[0]->bw = bw;
+        p.bw          = bw;
+    }
+}
+
+// 4 GPUs where the fat edges form the ring 0 -> 2 -> 1 -> 3 -> 0, so the unconstrained search
+// prefers that order while topology order 0 1 2 3 is still routable on the thin ones. The two
+// therefore disagree, which is what makes an ordered-ring assertion meaningful.
+ncclTopoSystem* makeBiasedSystem()
+{
+    auto* s = makePathSystem(4, /*hostsSplit=*/0);
+    linkifySystem(s, /*linkBw=*/12.0f);
+    const int fat[4][2] = {{0, 2}, {2, 1}, {1, 3}, {3, 0}};
+    for(auto& e : fat) setLinkBw(s, e[0], e[1], 48.0f);
+    return s;
+}
+
+void freeLinks(ncclTopoSystem* s)
+{
+    const int nGpus = s->nodes[GPU].count;
+    for(int i = 0; i < nGpus; ++i)
+        for(int j = 0; j < nGpus; ++j)
+        {
+            auto& p = s->nodes[GPU].nodes[i].paths[GPU][j];
+            if(p.count == 0 || p.list == nullptr) continue;
+            delete p.list[0];
+            delete[] p.list;
+            p.list  = nullptr;
+            p.count = 0;
+        }
+}
+
 void freePathSystem(ncclTopoSystem* s)
 {
     for(int nt = 0; nt < NCCL_TOPO_NODE_TYPES; ++nt)
@@ -528,15 +597,41 @@ TEST(SearchPcieOrderedRing, SingleHost_ProducesTopologyOrderedRing)
     RUN_ISOLATED_TEST_WITH_ENV("SingleHost_ProducesTopologyOrderedRing",
                                []()
                                {
-                                   auto* s = makePathSystem(8, /*hostsSplit=*/0);
+                                   auto* s = makeBiasedSystem();
                                    auto* g = makeRingGraph();
                                    EXPECT_EQ(ncclTopoCompute(s, g), ncclSuccess);
                                    ASSERT_GT(g->nChannels, 0);
-                                   for(int i = 0; i < 8; ++i) EXPECT_EQ(g->intra[i], i) << "ring position " << i;
+                                   // Every channel, not just the first.
+                                   for(int c = 0; c < g->nChannels; ++c)
+                                       for(int i = 0; i < 4; ++i)
+                                           EXPECT_EQ(g->intra[c * 4 + i], i) << "channel " << c << " position " << i;
                                    delete g;
+                                   freeLinks(s);
                                    freePathSystem(s);
                                },
                                {{"RCCL_PCIE_ORDERED_RING", "1"}});
+}
+
+// The control for the test above: on the same biased topology the unconstrained search picks
+// the fat-edge ring 0 2 1 3, not topology order. Without this pair the ordered-ring assertion
+// would pass on a topology where both paths agree, protecting nothing.
+TEST(SearchPcieOrderedRing, SingleHost_DisabledPicksFatEdgeRing)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("SingleHost_DisabledPicksFatEdgeRing",
+                               []()
+                               {
+                                   auto* s = makeBiasedSystem();
+                                   auto* g = makeRingGraph();
+                                   EXPECT_EQ(ncclTopoCompute(s, g), ncclSuccess);
+                                   ASSERT_GT(g->nChannels, 0);
+                                   const bool topoOrder = g->intra[0] == 0 && g->intra[1] == 1 &&
+                                                          g->intra[2] == 2 && g->intra[3] == 3;
+                                   EXPECT_FALSE(topoOrder) << "search should prefer the fat-edge ring";
+                                   delete g;
+                                   freeLinks(s);
+                                   freePathSystem(s);
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "0"}});
 }
 
 // The regression: an MNNVL clique fused from two hosts has PATH_DIS between them, so the
@@ -557,19 +652,21 @@ TEST(SearchPcieOrderedRing, MultiHostPathDis_StillInitialises)
                                {{"RCCL_PCIE_ORDERED_RING", "1"}});
 }
 
-// The same topology with the knob off is the behaviour we must not change.
+// The same topology with the knob off is the behaviour we must not change. The env has to be
+// set explicitly: the default is 1, so a clean environment would repeat the enabled case.
 TEST(SearchPcieOrderedRing, MultiHostPathDis_DisabledUnchanged)
 {
-    RUN_ISOLATED_TEST("MultiHostPathDis_DisabledUnchanged",
-                      []()
-                      {
-                          auto* s = makePathSystem(16, /*hostsSplit=*/8);
-                          auto* g = makeRingGraph();
-                          EXPECT_EQ(ncclTopoCompute(s, g), ncclSuccess);
-                          EXPECT_GT(g->nChannels, 0);
-                          delete g;
-                          freePathSystem(s);
-                      });
+    RUN_ISOLATED_TEST_WITH_ENV("MultiHostPathDis_DisabledUnchanged",
+                               []()
+                               {
+                                   auto* s = makePathSystem(16, /*hostsSplit=*/8);
+                                   auto* g = makeRingGraph();
+                                   EXPECT_EQ(ncclTopoCompute(s, g), ncclSuccess);
+                                   EXPECT_GT(g->nChannels, 0);
+                                   delete g;
+                                   freePathSystem(s);
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "0"}});
 }
 
 // In scope (single host) but genuinely unroutable: one GPU is cut off from the rest, so no
@@ -615,6 +712,39 @@ TEST(SearchPcieOrderedRing, UnroutableUnsetDegradesInsteadOfFailing)
                           auto* g = makeRingGraph();
                           EXPECT_EQ(ncclTopoCompute(s, g), ncclSuccess);
                           delete g;
+                          freePathSystem(s);
+                      });
+}
+
+// Topology order cannot close a ring here, but another order can. Mode 1 must drop the order
+// and search again, yielding a real ring. Falling straight through to the no-path ring would
+// leave a degraded graph (1 channel, bwIntra 0.1) where the knob off builds a full one.
+TEST(SearchPcieOrderedRing, UnorderableRetriesUnpinnedInsteadOfDegrading)
+{
+    RUN_ISOLATED_TEST("UnorderableRetriesUnpinnedInsteadOfDegrading",
+                      []()
+                      {
+                          auto* s = makePathSystem(4, /*hostsSplit=*/0);
+                          // Cut the two hops topology order needs (0-1 and 2-3). The ring
+                          // 0 -> 2 -> 1 -> 3 -> 0 survives on the remaining edges.
+                          const int cut[2][2] = {{0, 1}, {2, 3}};
+                          for(auto& c : cut)
+                          {
+                              s->nodes[GPU].nodes[c[0]].paths[GPU][c[1]].type = PATH_DIS;
+                              s->nodes[GPU].nodes[c[1]].paths[GPU][c[0]].type = PATH_DIS;
+                          }
+                          linkifySystem(s);
+                          auto* g = makeRingGraph();
+                          EXPECT_EQ(ncclTopoCompute(s, g), ncclSuccess);
+                          ASSERT_GT(g->nChannels, 0);
+                          // The no-path fallback sets bwIntra 0.1; a searched ring is faster.
+                          EXPECT_GT(g->bwIntra, 0.1f);
+                          // And it is not topology order, which is what could not validate.
+                          const bool topoOrder =
+                              g->intra[0] == 0 && g->intra[1] == 1 && g->intra[2] == 2 && g->intra[3] == 3;
+                          EXPECT_FALSE(topoOrder);
+                          delete g;
+                          freeLinks(s);
                           freePathSystem(s);
                       });
 }

@@ -349,6 +349,10 @@ ncclResult_t ncclTopoSearchRec(struct ncclTopoSystem* system, struct ncclTopoGra
 // (ncclTopoSortSystem orders links, not that array). It is PCI order on gfx1250.
 RCCL_PARAM_NCCL_ALIAS(PcieOrderedRing, "PCIE_ORDERED_RING", 1);
 
+// Set while ncclTopoCompute retries the search unpinned. Cleared on entry, set at most once,
+// so the two attempts cannot loop.
+static thread_local int pcieOrderedDropped = 0;
+
 // nodes[GPU].count == nRanks keeps the search on the intra-node path, leaving NET entry
 // selection untouched. nHosts == 1 is needed because MNNVL clique peers fused from several
 // hosts carry PATH_DIS, so ncclTopoFollowPath rejects every cross-host hop and no ring can be
@@ -356,7 +360,8 @@ RCCL_PARAM_NCCL_ALIAS(PcieOrderedRing, "PCIE_ORDERED_RING", 1);
 // REVISIT if those peers gain real paths: nHosts == 1 is a proxy for "the search can validate
 // an ordered ring", and the search would then explore cross-host permutations this should pin.
 static int ringPcieOrdered(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
-  return rcclParamPcieOrderedRing() && graph->pattern == NCCL_TOPO_PATTERN_RING && graph->collNet == 0 &&
+  return !pcieOrderedDropped && rcclParamPcieOrderedRing() && graph->pattern == NCCL_TOPO_PATTERN_RING &&
+         graph->collNet == 0 &&
          system->nodes[GPU].count > 0 && system->nodes[GPU].count == system->nRanks && system->nHosts == 1 &&
          IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
 }
@@ -1264,6 +1269,7 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
   float totalBw;
   int64_t globalTimeout = NCCL_SEARCH_GLOBAL_TIMEOUT;
   int time;
+  pcieOrderedDropped = 0;
   NCCLCHECK(ncclTopoGetCompCap(system, &ccMin, NULL));
 
   int ngpus = system->nodes[GPU].count;
@@ -1300,6 +1306,8 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
     NCCLCHECK(ncclTopoGetGpuMaxLocalNetPath(system, &localNetPath));
     maxTypeInter = std::min(maxTypeInter, localNetPath);
   }
+  // The relaxation loop may widen maxTypeInter; keep the starting cap so a retry can restore it.
+  int maxTypeInterInitial = maxTypeInter;
 
   graph->typeIntra = minTypeIntra;
   graph->typeInter = minTypeInter;
@@ -1410,6 +1418,8 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
   }
 
   NCCLCHECKGOTO(ncclCalloc(&tmpGraph, 1), ret, exit);
+
+retry:
   memcpy(tmpGraph, graph, sizeof(struct ncclTopoGraph));
 
   ncclTopoGetSpeedArray(system->inter, ccMin, &nspeeds, &speedArray);
@@ -1555,19 +1565,32 @@ done:
     int nets[NCCL_TOPO_MAX_NODES];
     int netCount;
 
-    // No ordered ring validated at any relaxation step. The default degrades to the stock
-    // fallback, since failing init on a topology that worked before the default flipped would
-    // be a regression. Only strict (2) refuses.
+    // No ordered ring validated. Strict (2) fails init; mode 1 retries unpinned so an
+    // unorderable topology gets the unconstrained ring, not the no-path one below.
     if (ringPcieOrdered(system, graph)) {
       bool strict = rcclParamPcieOrderedRing() >= 2;
-      WARN("PCIE_ORDERED_RING: no PCIe-ordered ring passed path validation for pattern %d (%d GPUs, bwIntra %f "
+      WARN("RCCL_PCIE_ORDERED_RING: no PCIe-ordered ring passed path validation for pattern %d (%d GPUs, bwIntra %f "
            "typeIntra %s); %s",
            graph->pattern, ngpus, graph->bwIntra, topoPathTypeStr[graph->typeIntra],
-           strict ? "set PCIE_ORDERED_RING=0 or relax the topology constraints" : "falling back to topology order");
+           strict ? "set RCCL_PCIE_ORDERED_RING=0 or relax the topology constraints" :
+                    "retrying the search without it");
       if (strict) {
         ret = ncclInvalidUsage;
         goto exit;
       }
+      pcieOrderedDropped = 1;
+      pass = 1;
+      speedIndex = 0;
+      globalTimeout = NCCL_SEARCH_GLOBAL_TIMEOUT;
+      maxTypeInter = maxTypeInterInitial;
+      graph->typeIntra = minTypeIntra;
+      graph->typeInter = minTypeInter;
+      graph->bwIntra = graph->bwInter = 0;
+      graph->nChannels = 0;
+      graph->nIntraChannels = 0;
+      graph->sameChannels = trySameChannels;
+      memset(graph->intraNets, 0, MAXCHANNELS * NCCL_TOPO_MAX_NODES * 2 * sizeof(int));
+      goto retry;
     }
     INFO(NCCL_GRAPH, "Could not find a path for pattern %d, falling back to simple order", graph->pattern);
     for (int i = 0; i < ngpus; i++) graph->intra[i] = system->nodes[GPU].nodes[i].gpu.rank;
