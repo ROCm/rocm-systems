@@ -366,10 +366,10 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlyCapture) {
  *     and once with HIP_HRR_CAPTURE_CONTENT. Both archives record both pushes.
  *   - Without the opt-in no file in the archive holds the scalar's bytes. With
  *     it the archive does, which shows the search would find them.
- *   - The workload launches nothing, so only the hipSetupArgument handler can
- *     refuse. Replay of the metadata-only archive fails and names the withheld
- *     kernel argument value; replay of the content archive, its genuine zero
- *     included, succeeds.
+ *   - Without the opt-in both pushes are marked HRR_PRESENT_WITHHELD; with it
+ *     they are present and the zero is recorded as zero. Replay of the content
+ *     archive, the genuine zero included, succeeds; replay of the metadata-only
+ *     archive fails.
  */
 HRR_TEST_CASE(Unit_HRR_MetadataOnlySetupArgument) {
   // The scalar Unit_HRR_SetupArgument_Direct pushes first.
@@ -407,18 +407,28 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlySetupArgument) {
         found = true;
     }
 
+    // Both pushes are present. Without the opt-in their bytes are marked
+    // withheld, which replay refuses; with it the zero is a recorded zero.
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(cap.path.string(), arc));
+    std::vector<const hrr_args_hipSetupArgument*> pushes;
+    for (const auto& ev : arc.events)
+      if (ev.header().event_type == static_cast<uint16_t>(HRR_API_HIPSETUPARGUMENT))
+        pushes.push_back(reinterpret_cast<const hrr_args_hipSetupArgument*>(ev.raw_payload.data()));
+    REQUIRE(pushes.size() == 2);
+    for (const auto* a : pushes) {
+      CHECK(a->arg_n == 8);
+      CHECK(a->arg_present == (content ? 1 : HRR_PRESENT_WITHHELD));
+    }
+    CHECK(std::all_of(pushes[1]->arg_bytes, pushes[1]->arg_bytes + 8,
+                      [](uint8_t b) { return b == 0; }));
+
+    // The workload's fat binary refuses a metadata-only replay before the
+    // pushes; Unit_HRR_Blob_WithheldSetupArgumentIsRefused drives their
+    // handler directly. The content replay pushes both, the zero included.
     const auto [ret, out] = hrr_playback_merged(cap.path);
     INFO("Playback output:\n" << out);
-    const bool refused =
-        out.find("needs a kernel argument value, which this archive does not hold because it "
-                 "was captured in metadata-only mode") != std::string::npos;
-    if (content) {
-      CHECK(ret == 0);
-      CHECK_FALSE(refused);
-    } else {
-      CHECK(ret != 0);
-      CHECK(refused);
-    }
+    CHECK((ret == 0) == content);
     return found;
   };
 
