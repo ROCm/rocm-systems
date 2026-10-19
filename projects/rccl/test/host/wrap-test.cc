@@ -6329,6 +6329,71 @@ TEST(WrapMicrotestIsolated, SelectAllGather_InPlaceUnalignedSliceQueriesUnaligne
       });
 }
 
+// AllGather and ReduceScatter report a TDM pick as SymTDM in query mode, like AllReduce; live stays RCCL_SYMMETRIC.
+TEST(WrapMicrotestIsolated, SelectAllGather_TdmKernelReportsSymmetricTdmOnlyInQuery) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TdmKernelReportsSymmetricTdmOnlyInQuery",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclSymkKernelId_AllGather_TmaST, /*maxChannels=*/64));
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_AllGather_TmaST));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->nRanks = 4;
+        alignas(16) static char sendbuf[256];
+        alignas(16) static char recvbuf[1024];
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, sendbuf, recvbuf, /*sendcount=*/8, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/true,
+                                                    /*graphCapturingHint=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(64, decision.nMaxChannels);
+
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, sendbuf, recvbuf, /*sendcount=*/8, ncclFloat32,
+                                                    /*stream=*/nullptr, /*query=*/false,
+                                                    /*graphCapturingHint=*/false, &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, live.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectReduceScatter_TdmKernelReportsSymmetricTdmOnlyInQuery) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_TdmKernelReportsSymmetricTdmOnlyInQuery",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook tuningCompute(g_tuningCompute,
+                                 SelectSymkTuning(ncclSymkKernelId_ReduceScatter_TmaLD, /*maxChannels=*/64));
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma, OnlyKernelIsTma(ncclSymkKernelId_ReduceScatter_TmaLD));
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->nRanks = 4;
+        alignas(16) static char sendbuf[1024];
+        alignas(16) static char recvbuf[256];
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, recvbuf, /*recvcount=*/8, ncclFloat32, ncclSum,
+                                                        /*query=*/true, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(64, decision.nMaxChannels);
+
+        rcclCollDecision live{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, sendbuf, recvbuf, /*recvcount=*/8, ncclFloat32, ncclSum,
+                                                        /*query=*/false, &live));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, live.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
 // rcclSymKGetInfo (the -R 2 reporter) surfaces the same TDM tag as rcclGetCollImplInfo.
 TEST(WrapMicrotestIsolated, SymKGetInfo_TmaKernelReportsSymmetricTdm) {
   RUN_ISOLATED_TEST(
