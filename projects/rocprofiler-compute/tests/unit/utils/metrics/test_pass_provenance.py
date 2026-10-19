@@ -4,6 +4,7 @@
 """Unit tests for same-pass analyze provenance and binding."""
 
 import pandas as pd
+import pytest
 
 from utils.file_io import load_df_pmc
 from utils.metrics.evaluation_pipeline import eval_metric
@@ -12,6 +13,7 @@ from utils.metrics.pass_provenance import (
     PassLayout,
     bind_expression,
     bind_expression_dataframe,
+    bind_metric_tables_to_passes,
     build_pass_layout,
     extract_row_refs,
     natural_pass_sort_key,
@@ -151,6 +153,55 @@ def test_extract_row_refs_ignores_system_vars() -> None:
     assert "GRBM_GUI_ACTIVE_PER_XCD" in refs.builtin_vars
 
 
+def test_dispatch_unit_does_not_block_same_pass_bind() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE"}),
+            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE", "TA_BUSY"}),
+        },
+        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
+    )
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.0.0"],
+        "value": [
+            "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['GRBM_GUI_ACTIVE']"
+            " / raw_pmc_df['Dispatch_Unit'])"
+        ],
+    })
+
+    used = bind_expression_dataframe(expression_df, layout, "MI300")
+
+    assert used == {"pmc_perf_1"}
+    assert "GRBM_GUI_ACTIVE@pass:pmc_perf_1" in expression_df.at[0, "value"]
+    assert "Dispatch_Unit" in expression_df.at[0, "value"]
+
+
+def test_extract_row_refs_ignores_non_pmc_frame_columns() -> None:
+    refs = extract_row_refs([
+        "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['Dispatch_Unit'])",
+        "to_avg(raw_pmc_df['TA_BUSY'] / "
+        "(raw_pmc_df['End_Timestamp'] - raw_pmc_df['Start_Timestamp']))",
+    ])
+    assert refs.direct_counters == frozenset({"TA_BUSY"})
+
+
+def test_extract_row_refs_normalizes_qualified_columns() -> None:
+    refs = extract_row_refs([
+        "to_avg(raw_pmc_df['GRBM_GUI_ACTIVE@pass:pmc_perf_1'] / raw_pmc_df['TA_BUSY'])",
+    ])
+    assert refs.direct_counters == frozenset({"GRBM_GUI_ACTIVE", "TA_BUSY"})
+
+
+def test_build_pass_layout_rejects_unsafe_pass_key() -> None:
+    long_df = pd.DataFrame({
+        "Pass_Key": ["pmc_perf_0'); __import__('os')"],
+        "Counter_Name": ["SQ_WAVES"],
+    })
+    with pytest.raises(ValueError, match="pass key"):
+        build_pass_layout(long_df)
+
+
 def test_select_pass_returns_none_when_counters_span_passes() -> None:
     layout = PassLayout(
         pass_keys=("pmc_perf_0", "pmc_perf_1"),
@@ -163,7 +214,7 @@ def test_select_pass_returns_none_when_counters_span_passes() -> None:
     assert select_pass(frozenset({"A", "B"}), layout) is None
 
 
-def test_select_pass_relaxes_only_runtime_normalization_counter() -> None:
+def test_select_pass_does_not_relax_sq_waves() -> None:
     layout = PassLayout(
         pass_keys=("pmc_perf_0", "pmc_perf_1"),
         counters_by_pass={
@@ -179,8 +230,8 @@ def test_select_pass_relaxes_only_runtime_normalization_counter() -> None:
         "MI300",
     )
 
-    assert selected == "pmc_perf_0"
-    assert relaxed
+    assert selected is None
+    assert not relaxed
 
 
 def test_normalization_fallback_reports_failure_when_formula_still_spans_passes():
@@ -267,6 +318,45 @@ def test_bind_expression_dataframe_groups_by_metric_id() -> None:
     assert "GRBM_GUI_ACTIVE@pass:pmc_perf_1" in expression_df.at[0, "value"]
     assert "GRBM_GUI_ACTIVE@pass:pmc_perf_1" in expression_df.at[1, "value"]
     assert "GRBM_GUI_ACTIVE@pass:pmc_perf_0" in expression_df.at[2, "value"]
+
+    rebound = bind_expression_dataframe(expression_df, layout, "MI300")
+    assert rebound == used
+    assert "GRBM_GUI_ACTIVE@pass:pmc_perf_1" in expression_df.at[0, "value"]
+    assert expression_df.at[0, "value"].count("@pass:") == 1
+
+
+def test_bind_leaves_metric_unset_when_counters_span_passes() -> None:
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"TA_BUSY", "GRBM_GUI_ACTIVE"}),
+            "pmc_perf_1": frozenset({"TD_BUSY", "GRBM_GUI_ACTIVE"}),
+        },
+        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
+    )
+    expression_df = pd.DataFrame({
+        "metric_id": ["1.0.0"],
+        "value": ["to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])"],
+    })
+
+    used = bind_expression_dataframe(expression_df, layout, "MI300")
+
+    assert used == set()
+    assert expression_df.at[0, "value"] == "None"
+    assert expression_df.attrs[METRIC_ROW_PASS_ATTR] == {}
+
+    metric_df = pd.DataFrame({
+        "Avg": ["to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['TD_BUSY'])"],
+    })
+    table_used = bind_metric_tables_to_passes(
+        {1: metric_df},
+        {1: "metric_table"},
+        layout,
+        "MI300",
+        frozenset({"Avg"}),
+    )
+    assert table_used == set()
+    assert metric_df.at[0, "Avg"] == "None"
 
 
 def test_eval_metric_uses_same_pass_for_duplicated_denominator() -> None:
