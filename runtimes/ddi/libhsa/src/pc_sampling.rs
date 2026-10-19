@@ -84,7 +84,6 @@ impl PcSamplingState {
 fn sampling_error(error: rocddi::Error) -> Status {
     match error.kind() {
         rocddi::ErrorKind::Unsupported => NOT_SUPPORTED,
-        rocddi::ErrorKind::Busy => RESOURCE_BUSY,
         _ => map_error(error),
     }
 }
@@ -531,6 +530,15 @@ pub(crate) fn extension_table() -> [usize; 7] {
 mod tests {
     use super::*;
     use std::mem::{offset_of, size_of};
+
+    #[test]
+    fn sampling_busy_uses_the_resource_busy_status() {
+        let error = rocddi::Error::Operation {
+            kind: rocddi::ErrorKind::Busy,
+            detail: "injected active sampling resource",
+        };
+        assert_eq!(sampling_error(error), RESOURCE_BUSY);
+    }
 
     #[test]
     fn entry_points_and_records_match_the_public_abi() {
