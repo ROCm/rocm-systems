@@ -20,6 +20,8 @@ virtualMemoryManagement:
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2892 - fails under device-side ASAN on gfx942 (heap-use-after-free in libamdhip64 / LeakSanitizer leaks); needs re-triage on asan."
+  Unit_hipMemImportFromShareableHandle_SelfImportReleaseKeepsAllocation: *level_default
+  Unit_hipMemImportFromShareableHandle_SelfImportReleaseAcrossRecycledVa: *level_default
   Unit_hipMemImportFromShareableHandle_Negative_Parameters: *level_default
   Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl: *level_default
   Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl: *level_default
