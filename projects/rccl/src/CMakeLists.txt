@@ -573,6 +573,7 @@ set(SRC_FILES
   transport/net_ib/gin.cc
   transport/net_ib/gin.h
   transport/net_ib/init.cc
+  transport/net_ib/net_ib_flush_inspect.cc
   transport/net_ib/net_ib_gid_inspect.cc
   transport/net_ib/net_ib_wqe_lat_inspect.cc
   transport/net_ib/p2p.cc
@@ -586,6 +587,7 @@ set(SRC_FILES
   transport/net_ib/wqe_lat_mon.h
   transport/net_ib_cast/net_ib_cast_inspect.h
   transport/net_ib_cast/net_ib_fault_inject.h
+  transport/net_ib_flush_inspect.h
   transport/net_ib_gid_inspect.h
   transport/net_ib_limits.h
   transport/net_ib_wqe_lat_inspect.h
