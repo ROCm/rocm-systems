@@ -808,6 +808,18 @@ add_test(
         --thread-budget-table
 )
 add_test(
+    NAME RocjitsuOptionExecModeClocked
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --option exec_mode=clocked
+        --thread-budget-table
+)
+add_test(
+    NAME RocjitsuOptionGpusPerNode
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --option=gpus_per_node=2
+        --thread-budget-table
+)
+add_test(
     NAME RocjitsuOptionThreadFields
     COMMAND
         $<TARGET_FILE:rocjitsu_bin> --profile mi350x --option num_threads=2
@@ -823,6 +835,14 @@ set_tests_properties(
 set_tests_properties(
     RocjitsuOptionThreadFields
     PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 2 \\| 3 \\| 0 \\| 4"
+)
+set_tests_properties(
+    RocjitsuOptionExecModeClocked
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 1 \\| 0 \\| 8"
+)
+set_tests_properties(
+    RocjitsuOptionGpusPerNode
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 17,17 \\| 8 \\| 48"
 )
 add_test(
     NAME RocjitsuOptionRejectsInvalid
@@ -845,6 +865,22 @@ add_test(
         ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
         "-DTEST_ARGS=--profile;mi350x;--option;wait_checking=maybe;--thread-budget-table"
         "-DTEST_REGEX=--option wait_checking requires on, off, or all" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuOptionRejectsInvalidExecMode
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--option;exec_mode=fast;--thread-budget-table"
+        "-DTEST_REGEX=--option exec_mode requires functional or clocked" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuOptionRejectsInvalidGpusPerNode
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--option;gpus_per_node=0;--thread-budget-table"
+        "-DTEST_REGEX=--option gpus_per_node requires a positive integer" -P
         ${_rj_cli_failure_script}
 )
 add_test(

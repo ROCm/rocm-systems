@@ -685,6 +685,23 @@ bool apply_config_option(std::string_view assignment, config::LaunchOverrides &o
 
   const std::string_view key = assignment.substr(0, equals);
   const std::string_view value = assignment.substr(equals + 1);
+  if (key == "exec_mode") {
+    if (value != "functional" && value != "clocked") {
+      std::cerr << "rocjitsu: --option exec_mode requires functional or clocked\n";
+      return false;
+    }
+    overrides.exec_mode = std::string(value);
+    return true;
+  }
+  if (key == "gpus_per_node") {
+    std::optional<uint32_t> count = config::parse_uint32(value);
+    if (!count || *count == 0) {
+      std::cerr << "rocjitsu: --option gpus_per_node requires a positive integer\n";
+      return false;
+    }
+    overrides.gpus_per_node = *count;
+    return true;
+  }
   if (key == "num_threads")
     return apply_unsigned_config_option(key, value, overrides.num_threads);
   if (key == "cpu_dispatch_threads")
@@ -713,7 +730,8 @@ bool apply_config_option(std::string_view assignment, config::LaunchOverrides &o
 
   std::cerr << std::format(
       "rocjitsu: unknown --option key '{}'; known options: async_helper_threads, "
-      "cpu_dispatch_threads, cpu_thread_budget, num_threads, wait_checking\n",
+      "cpu_dispatch_threads, cpu_thread_budget, exec_mode, gpus_per_node, num_threads, "
+      "wait_checking\n",
       key);
   return false;
 }
