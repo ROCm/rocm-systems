@@ -125,6 +125,16 @@ def test_first_fit_unplaced_adds_missing_counters():
     }
 
 
+def test_leftover_counter_that_fits_nowhere_fails_the_pack():
+    """A leftover rejected by an empty bucket fails the pack."""
+    with pytest.raises(ValueError, match="SQ_WIDE_ACCUM"):
+        try_allocate_single_pass_metrics(
+            MinimalSoC(),
+            {"SQ_WIDE_ACCUM"},
+            {"SQ": 1},
+        )
+
+
 def test_slot_limit_fill_uses_existing_then_opens_new():
     """multi-pass metric set (4 PMCs, cap 2) fills leftover room then opens buckets."""
     cfg = {"SQ": 2}
