@@ -869,8 +869,8 @@ def _setup_isa_decode_views(conn, codeobj_path_prefix_map, cache_disassembly):
             "rocpd_isa_instruction(s.guid, s.code_object_id, s.code_object_offset))"
         )
         comment_expr = (
-            "COALESCE(d.comment, "
-            "rocpd_isa_comment(s.guid, s.code_object_id, s.code_object_offset))"
+            "CASE WHEN d.instruction IS NOT NULL THEN NULLIF(d.comment, '') "
+            "ELSE rocpd_isa_comment(s.guid, s.code_object_id, s.code_object_offset) END"
         )
         disasm_join = (
             "LEFT JOIN rocpd_disassembly_data d "

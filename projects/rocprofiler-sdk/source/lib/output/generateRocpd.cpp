@@ -1667,6 +1667,7 @@ struct pc_dispatch_context
 {
     uint64_t       agent_id  = 0;
     uint64_t       thread_id = 0;
+    uint64_t       stack_id  = 0;
     pc_sample_arch arch      = pc_sample_arch::gfx9;
 };
 }  // namespace
@@ -2196,6 +2197,7 @@ write_rocpd(
                     dispatch_id,
                     pc_dispatch_context{agent_node_id,
                                         static_cast<uint64_t>(thread_id),
+                                        corr_id.internal,
                                         get_pc_sample_arch(agent->gfx_target_version)});
 
             // Insert into kernel dispatch table
@@ -3138,8 +3140,8 @@ write_rocpd(
     //    dispatch_id; dispatch_pc_context is only populated when PC samples exist.
     // 2) PC samples may exist without a matching kernel_dispatch record
     //    (e.g. counter-collection-only traces), so lookup misses are expected.
-    // 3) On lookup miss we intentionally store NULL parent/agent/thread context
-    //    instead of dropping the sample, preserving data with partial context.
+    // 3) On lookup miss we store NULL parent/thread context and recover the agent
+    //    from code-object metadata when available; otherwise the agent remains NULL.
     // 4) Each sample still gets a dedicated rocpd_event + rocpd_blob_event pair,
     //    and parent_id is linked only when dispatch context is available.
     auto disasm_seen             = std::set<std::pair<uint64_t, uint64_t>>{};
@@ -3219,17 +3221,21 @@ write_rocpd(
                 .first->second;
         };
 
-        // Architecture fallbacks for samples whose dispatch was not traced.
+        // Agent and architecture fallbacks for samples whose dispatch was not traced.
         auto available_archs = std::set<pc_sample_arch>{};
         for(const auto* agent : tool_metadata.get_gpu_agents())
             available_archs.emplace(get_pc_sample_arch(agent->gfx_target_version));
 
-        auto code_object_archs = std::unordered_map<uint64_t, pc_sample_arch>{};
+        auto code_object_archs     = std::unordered_map<uint64_t, pc_sample_arch>{};
+        auto code_object_agent_ids = std::unordered_map<uint64_t, uint64_t>{};
         for(const auto& code_object : tool_metadata.get_code_objects())
         {
             if(const auto* agent = tool_metadata.get_agent(code_object.agent_id))
+            {
                 code_object_archs.emplace(code_object.code_object_id,
                                           get_pc_sample_arch(agent->gfx_target_version));
+                code_object_agent_ids.emplace(code_object.code_object_id, agent->node_id);
+            }
         }
 
         // Resolve an optional dispatch-indexed value; std::nullopt when the dispatch was not
@@ -3252,14 +3258,19 @@ write_rocpd(
                 auto parent_event_id = lookup_dispatch(dispatch_to_evt_id, record.dispatch_id);
                 auto agent_id        = std::optional<uint64_t>{};
                 auto tid             = std::optional<uint64_t>{};
+                auto parent_stack_id = std::optional<uint64_t>{};
                 auto dispatch_arch   = std::optional<pc_sample_arch>{};
                 if(auto context = dispatch_pc_context.find(record.dispatch_id);
                    context != dispatch_pc_context.end())
                 {
-                    agent_id      = context->second.agent_id;
-                    tid           = context->second.thread_id;
-                    dispatch_arch = context->second.arch;
+                    agent_id        = context->second.agent_id;
+                    tid             = context->second.thread_id;
+                    parent_stack_id = context->second.stack_id;
+                    dispatch_arch   = context->second.arch;
                 }
+                else if(auto agent = code_object_agent_ids.find(record.pc.code_object_id);
+                        agent != code_object_agent_ids.end())
+                    agent_id = agent->second;
 
                 auto arch                = pc_sample_arch::gfx9;
                 auto has_memory_counters = false;
@@ -3298,6 +3309,7 @@ write_rocpd(
                     {
                         insert_value("category_id", category_id),
                         insert_value("stack_id", record.correlation_id.internal),
+                        insert_nullable_value("parent_stack_id", parent_stack_id),
                         insert_value("correlation_id", record.correlation_id.external.value),
                         insert_nullable_value("parent_id", parent_event_id),
                     });
