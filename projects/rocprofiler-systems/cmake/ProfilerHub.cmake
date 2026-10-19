@@ -38,7 +38,7 @@ option(ROCPROFSYS_PROFILER_HUB_LINK_STATIC "Link profiler-hub statically" OFF)
 #      ROCPROFSYS_PROFILER_HUB_GIT_REPOSITORY at ROCPROFSYS_PROFILER_HUB_GIT_TAG
 # ------------------------------------------------------------------------------
 set(ROCPROFSYS_PROFILER_HUB_MIN_VERSION
-    "0.2.0"
+    "0.3.0"
     CACHE STRING
     "Minimum profiler-hub package version; older installs fall back to the git pin"
 )
