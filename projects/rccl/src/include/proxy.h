@@ -98,6 +98,7 @@ struct ncclProxyOp {
   size_t loopSize;
   size_t loopOffset;
   size_t channelSize;
+  size_t collBytes; // User-visible collective size (as rccl-tests reports it); 0 for p2p
   uint8_t sliceSteps;
   uint8_t chunkSteps;
   uint8_t channelId;
@@ -222,6 +223,7 @@ struct ncclProxyArgs {
   size_t totalRecvSize;
   size_t sendSizePerRound;
   size_t recvSizePerRound;
+  size_t collBytes;
   uint8_t /*ncclDataType_t*/ dtype;
   uint8_t /*ncclDevRedOp_t*/ redOp;
   uint8_t /*ncclPattern_t*/ pattern;

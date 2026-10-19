@@ -92,6 +92,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
         reqs[0]->base, reqs[0]->id, slot, nreqs);
 
   int nqps = ncclIbCommBaseGetNqpsPerRequest(&comm->base);
+  bool flagFlush = comm->flagFlush && slots[0].flagFlush;
   ncclResult_t ret;
   uint64_t wr_id = 0ULL;
   for (int r = 0; r < nreqs; r++) {
@@ -132,7 +133,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 
   struct ibv_send_wr* lastWr = comm->wrs + nreqs - 1;
   struct ibv_send_wr* sizesWr = NULL;
-  if (comm->flagFlush && slots[0].flagFlush) {
+  if (flagFlush) {
     // Payload (and sizes) go out as plain RDMA writes followed by the flag
     // write, which carries the immediate data.
     if (nreqs > 1) {
@@ -179,7 +180,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   int qpIndex = -1;
   ncclIbQp* qp = NULL;
   for (int i = 0; i < nqps; i++) {
-    NCCLCHECK(ncclIbCommBaseGetQpForRequest(&comm->base, reqs[0]->id, i, &qp, &qpIndex));
+    NCCLCHECK(ncclIbCommBaseGetQpForFlagRequest(&comm->base, reqs[0]->id, i, flagFlush, &qp, &qpIndex));
 
     TRACE(NCCL_NET,
           "NET/IB: %s: Posting send (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d, wr_id=%ld) on QP (qp_num=%u, "
@@ -554,10 +555,11 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   // Store the request in a table for easy retrieval by ID.
   comm->recvReqs[req->id % NET_IB_MAX_REQUESTS] = req;
+  req->recv.flagFlush = comm->flagFlush && comm->flagFlushHint;
 
   TIME_START(1);
   for (int i = 0; i < nqps; i++) {
-    NCCLCHECK(ncclIbCommBaseGetQpForRequest(&comm->base, req->id, i, &qp, &qpIndex));
+    NCCLCHECK(ncclIbCommBaseGetQpForFlagRequest(&comm->base, req->id, i, req->recv.flagFlush, &qp, &qpIndex));
     ncclIbAddEvent(req, qp->devIndex);
     if (comm->prepostReceiveWorkRequests) {
       continue;
@@ -586,7 +588,6 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
   TIME_STOP(1);
 
   req->recv.aggSize = 0;
-  req->recv.flagFlush = comm->flagFlush && comm->flagFlushHint;
   req->recv.cmplsRecords = &comm->cmplsRecords[slot];
   memset(req->recv.cmplsRecords->sizes, 0, sizeof(int) * n);
   memset(req->recv.cmplsRecords->completions, 0, sizeof(req->recv.cmplsRecords->completions));

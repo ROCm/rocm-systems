@@ -409,6 +409,19 @@ static inline ncclResult_t ncclIbCommBaseGetQpForRequest(struct ncclIbNetCommBas
   return ncclSuccess;
 }
 
+// Requests carrying the GDR flush flag all go on QP 0 (the flag needs one QP per request,
+// so qpIndex is 0): the flag is a single increasing counter, so every flag write must stay
+// queued behind the earlier flagged payloads. Other requests keep the rotation above.
+static inline ncclResult_t ncclIbCommBaseGetQpForFlagRequest(struct ncclIbNetCommBase* baseComm, const uint64_t id,
+                                                             const uint8_t qpIndex, bool flagFlush, ncclIbQp** outQp,
+                                                             int* outQpIndex) {
+  if (!flagFlush) return ncclIbCommBaseGetQpForRequest(baseComm, id, qpIndex, outQp, outQpIndex);
+  *outQpIndex = qpIndex;
+  *outQp = baseComm->activeQps[qpIndex];
+  assert(*outQp != NULL);
+  return ncclSuccess;
+}
+
 // Get a QP object from a QP number. If not NULL, qpIndex will also return the
 // index of the QP in the ncclIbNetCommBase::qps[] array.
 static inline ncclResult_t ncclIbCommBaseGetQpByQpNum(struct ncclIbNetCommBase* commBase, int devIndex, uint32_t qpNum,
