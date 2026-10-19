@@ -1445,13 +1445,12 @@ rocprofiler_set_api_table(const char* name,
         // the potential loss of some API calls.
         rocprofiler::hip::restore_table(hip_runtime_api_table, lib_instance);
 
-        // any internal modifications to the HipDispatchTable need to be done before we make the
-        // copy or else those modifications will be lost when HIP API tracing is enabled
-        // because the HIP API tracing invokes the function pointers from the copy below
+        // store a reference of the HipDispatchTable implementations for invoking these
+        // functions without going through tracing wrappers
+        rocprofiler::hip::copy_table(hip_runtime_api_table, lib_instance);
+
         rocprofiler::hip::graph::update_table(hip_runtime_api_table);
         rocprofiler::hip::event::update_table(hip_runtime_api_table);
-
-        rocprofiler::hip::copy_table(hip_runtime_api_table, lib_instance);
 
         // install rocprofiler API wrappers
         rocprofiler::hip::update_table(hip_runtime_api_table, lib_instance);
