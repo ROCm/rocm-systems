@@ -42,12 +42,13 @@ def make_process(
     events_bytes: int = 4096,
     write_manifest: bool = True,
     format_version: int = 5,
+    flags: int = 0,
 ) -> Path:
     pid_dir = root / f"pid-{pid}"
     (pid_dir / "blobs").mkdir(parents=True, exist_ok=True)
     # Real shape: hrr_file_header { magic, version, reserved }, then a whole
     # hrr_event_header whose payload_length counts itself, then the payload.
-    header = struct.pack("<IHH", inspect_archive.HEADER_MAGIC, format_version, 0)
+    header = struct.pack("<IHH", inspect_archive.HEADER_MAGIC, format_version, flags)
     body = b""
     if events_bytes:
         remaining = max(events_bytes - len(header), 0)
@@ -96,6 +97,27 @@ def test_single_process_archive_is_recorded(tmp_path):
     assert proc.event_count == 100
     assert proc.complete is True
     assert "Verdict: recorded" in inspect_archive.render(report)
+
+
+def test_a_metadata_only_archive_is_recorded_and_says_replay_refuses_it(tmp_path):
+    """The header flag, not a missing blob count, says contents were withheld:
+    a content capture that copied nothing from the host has no blobs either."""
+    make_process(tmp_path, 42, blobs=0, flags=inspect_archive.FLAG_METADATA_ONLY)
+    make_process(tmp_path, 43, blobs=0)
+    report = inspect_archive.inspect(tmp_path, use_playback=False)
+
+    assert [p.metadata_only for p in report.processes] == [True, False]
+    text = inspect_archive.render(report)
+    assert text.count("contents: withheld (metadata-only capture)") == 1
+    assert "Verdict: recorded" in text
+    assert "so replay refuses it" in text
+    assert [p["metadata_only"] for p in inspect_archive.to_dict(report)["processes"]] == [
+        True,
+        False,
+    ]
+    assert "metadata-only" not in inspect_archive.render(
+        inspect_archive.inspect(tmp_path / "pid-43", use_playback=False)
+    ).lower()
 
 
 def test_a_pid_directory_can_be_passed_directly(tmp_path):
