@@ -15,10 +15,10 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[7]
 WORKFLOW = REPO_ROOT / '.github/workflows/rocjitsu-benchmarks.yml'
 HELPER = Path(__file__).resolve().parents[1] / 'prepare-benchmark-result.py'
-SHA = 'b' * 40
+SOURCE_SHA = 'b' * 40
 WORKFLOW_SHA = 'c' * 40
 TENSILE_SHA = 'd' * 40
-CORPUS = '6186d5c8bcd5e9bc93f7406e7cb50ed2a7698621'
+CORPUS_SHA = '6186d5c8bcd5e9bc93f7406e7cb50ed2a7698621'
 SOURCE_SUBJECT = 'Source "subject" with spaces = literal $(touch SHOULD_NOT_EXIST)'
 
 
@@ -48,10 +48,10 @@ def raw_run():
         },
         'provenance': {
             'rocjitsu': {
-                'rocjitsu_commit_sha': SHA,
+                'rocjitsu_commit_sha': SOURCE_SHA,
                 'rocjitsu_commit_timestamp': '2026-09-30T00:00:00Z',
             },
-            'corpus': {'corpus_commit_sha': CORPUS},
+            'corpus': {'corpus_commit_sha': CORPUS_SHA},
             'machine': {'hostname': 'fixture-host'},
             'auxiliary': {'optional': None},
         },
@@ -102,6 +102,22 @@ def convert(
     return result, output, original
 
 
+@pytest.fixture
+def publication_catalog():
+    return {
+        'id': 'default-67daf36efa1cd84a9f2beb1f0fa30860edbecf572f2b733c86642cdbbabea8cd',
+        'tests': [
+            {
+                'id': 'fixture.case',
+                'suite': 'Fixture',
+                'name': 'Fixture case',
+                'problem': {'dtype': 'fp32', 'n': 64, 'operation': 'copy'},
+            }
+        ],
+        'targets': {'gfx950': ['fixture.case']},
+    }
+
+
 def test_conversion(tmp_path):
     result, output, _ = convert(tmp_path)
     assert result.returncode == 0, result.stderr
@@ -135,7 +151,7 @@ def test_environment_labels_in_converter_output(tmp_path):
     assert [(detail['key'], detail['value']) for detail in run['environment']] == [
         ('auxiliary.custom_option', '{"nested": [1, null]}'),
         ('auxiliary.optional', 'null'),
-        ('corpus.corpus_commit_sha', CORPUS),
+        ('corpus.corpus_commit_sha', CORPUS_SHA),
         ('execution.benchmark_suite', 'fixture-suite'),
         ('execution.samples', 3),
         ('execution.timeout_seconds', 60),
@@ -286,7 +302,7 @@ def steps():
 
 
 @pytest.mark.parametrize('existing', [False, True])
-def test_copy_and_index_preserve_history(tmp_path, existing):
+def test_copy_and_index_preserve_history(tmp_path, existing, publication_catalog):
     result, output, original = convert(tmp_path)
     assert result.returncode == 0, result.stderr
     download = tmp_path / 'download'
@@ -299,8 +315,13 @@ def test_copy_and_index_preserve_history(tmp_path, existing):
     subprocess.run(['git', 'init', '-q', str(publication)], check=True)
     (publication / 'unrelated.txt').write_text('preserved')
     data = publication / 'rocjitsu-dashboard/data'
+    catalog = data / 'test-catalogs' / (publication_catalog['id'] + '.json')
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text(json.dumps(publication_catalog))
+    assert json.loads(output.read_text())['testCatalog'] == str(
+        catalog.relative_to(data)
+    )
     if existing:
-        data.mkdir(parents=True)
         (data / 'index.json').write_text(
             json.dumps({'runFiles': ['runs/older.json'], 'custom': 'keep'})
         )
@@ -338,8 +359,85 @@ def test_copy_and_index_preserve_history(tmp_path, existing):
         publication / 'raw-benchmarks/github-123-attempt-1/raw.json'
     ).read_bytes() == original
     assert (publication / 'unrelated.txt').read_text() == 'preserved'
-    assert not (data / 'test-catalogs').exists()
+    assert json.loads(catalog.read_text()) == publication_catalog
     assert not (data / 'metadata.json').exists()
+
+
+@pytest.mark.parametrize(
+    'catalog_case',
+    [
+        'present',
+        'missing',
+        'traversal',
+        'absolute',
+        'symlink',
+        'directory',
+        'not-string',
+        'newline',
+    ],
+)
+def test_publication_catalog_path(tmp_path, publication_catalog, catalog_case):
+    result, output, _ = convert(tmp_path)
+    assert result.returncode == 0, result.stderr
+    run = json.loads(output.read_text())
+    publication = tmp_path / 'publication'
+    publication.mkdir()
+    subprocess.run(['git', 'init', '-q', str(publication)], check=True)
+    data = publication / 'rocjitsu-dashboard/data'
+    catalog = data / run['testCatalog']
+    catalog.parent.mkdir(parents=True)
+    outside = publication / 'rocjitsu-dashboard/outside.json'
+    outside.write_text(json.dumps(publication_catalog))
+    if catalog_case == 'directory':
+        catalog.mkdir()
+    elif catalog_case == 'symlink':
+        catalog.symlink_to(outside)
+    elif catalog_case != 'missing':
+        catalog.write_text(json.dumps(publication_catalog))
+    if catalog_case == 'traversal':
+        run['testCatalog'] = '../outside.json'
+    elif catalog_case == 'absolute':
+        run['testCatalog'] = str(outside)
+    elif catalog_case == 'not-string':
+        run['testCatalog'] = 123
+        (data / '123').write_text(json.dumps(publication_catalog))
+    elif catalog_case == 'newline':
+        run['testCatalog'] += '\n'
+    original_index = b'{"runFiles":["runs/older.json"],"custom":"keep"}\n'
+    (data / 'index.json').write_bytes(original_index)
+    download = tmp_path / 'download/dashboard'
+    download.mkdir(parents=True)
+    (download / output.name).write_text(json.dumps(run))
+    body = next(
+        step['run'] for step in steps() if step['name'] == 'Publish benchmark files'
+    )
+    dashboard_body = body[
+        body.index('  if [[ "${DASHBOARD_READY}"') : body.index(
+            '  if git diff --cached'
+        )
+    ]
+    result = subprocess.run(
+        ['bash', '-euo', 'pipefail', '-c', dashboard_body],
+        cwd=publication,
+        env={
+            **os.environ,
+            'DASHBOARD_READY': 'true',
+            'RESULTS_DOWNLOAD_DIR': str(download.parent),
+            'GITHUB_RUN_ID': '123',
+            'GITHUB_RUN_ATTEMPT': '1',
+        },
+        capture_output=True,
+        text=True,
+    )
+    if catalog_case == 'present':
+        assert result.returncode == 0, result.stderr
+        assert (
+            'runs/' + output.name
+            in json.loads((data / 'index.json').read_text())['runFiles']
+        )
+    else:
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert (data / 'index.json').read_bytes() == original_index
 
 
 def test_benchmark_artifact_contract():
@@ -408,7 +506,43 @@ def test_benchmark_artifact_contract():
     )
 
 
-def test_workflow_shell_and_removed_paths():
+@pytest.mark.parametrize('symlinked', [False, True])
+def test_completion_marker_output_path(tmp_path, symlinked):
+    workspace = tmp_path / 'real workspace'
+    results = workspace / 'results'
+    results.mkdir(parents=True)
+    (results / 'run.json').write_text('{}')
+    if symlinked:
+        link = tmp_path / 'workspace link'
+        link.symlink_to(workspace, target_is_directory=True)
+        selected_results = link / 'results'
+    else:
+        selected_results = results
+    # Match the pinned runner's resolved artifact path without running a runner.
+    (tmp_path / 'runner-output.txt').write_text(
+        f'run failed: {selected_results.resolve()}/run.json\n'
+    )
+    body = next(
+        step['run']
+        for step in yaml.safe_load(WORKFLOW.read_text())['jobs']['benchmark']['steps']
+        if step['name'] == 'Run performance suite'
+    )
+    comparison = body.split('esac\n', 1)[1].split('if ! python -m json.tool', 1)[0]
+    result = subprocess.run(
+        ['bash', '-euo', 'pipefail', '-c', comparison],
+        env={
+            **os.environ,
+            'BENCHMARK_DIR': str(tmp_path),
+            'ROCJITSU_RESULT_DIR': str(selected_results),
+            'SUITE_STATUS': 'failed',
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_workflow_shell_and_source_contracts():
     doc = yaml.safe_load(WORKFLOW.read_text())
     for job in doc['jobs'].values():
         for step in job['steps']:
@@ -440,9 +574,18 @@ def test_workflow_shell_and_removed_paths():
 
 
 @pytest.mark.parametrize(
-    'always_fail,dashboard_ready', [(False, True), (False, False), (True, True)]
+    'always_fail,dashboard_ready,catalog_state',
+    [
+        (False, True, 'present'),
+        (False, False, 'missing'),
+        (True, True, 'present'),
+        (False, True, 'missing'),
+        (False, True, 'removed-on-race'),
+    ],
 )
-def test_publication_retry(tmp_path, always_fail, dashboard_ready):
+def test_publication_retry(
+    tmp_path, always_fail, dashboard_ready, catalog_state, publication_catalog
+):
     # All Git operations are local. The git wrapper intercepts push before Git
     # can execute it and simulates a branch race using local fetch/update-ref.
     import shutil
@@ -466,11 +609,17 @@ def test_publication_retry(tmp_path, always_fail, dashboard_ready):
     git(seed, 'config', 'user.email', 'fixture@example.invalid')
     data = seed / 'rocjitsu-dashboard/data'
     data.mkdir(parents=True)
+    catalog = data / 'test-catalogs' / (publication_catalog['id'] + '.json')
+    if catalog_state != 'missing':
+        catalog.parent.mkdir()
+        catalog.write_text(json.dumps(publication_catalog))
     (data / 'index.json').write_text(
         json.dumps({'runFiles': ['runs/older.json'], 'custom': 'keep'})
     )
     git(seed, 'add', '.')
     git(seed, 'commit', '-qm', 'Initial fixture')
+    initial = git(seed, 'rev-parse', 'HEAD')
+    initial_index = (data / 'index.json').read_bytes()
     subprocess.run([real_git, 'clone', '-q', str(seed), str(publication)], check=True)
     git(seed, 'checkout', '-qb', 'race')
     (data / 'index.json').write_text(
@@ -479,6 +628,9 @@ def test_publication_retry(tmp_path, always_fail, dashboard_ready):
         )
     )
     (seed / 'concurrent.txt').write_text('preserve concurrent writer')
+    if catalog_state == 'removed-on-race':
+        catalog.unlink()
+    race_index = (data / 'index.json').read_bytes()
     git(seed, 'add', '.')
     git(seed, 'commit', '-qm', 'Concurrent writer fixture')
     race = git(seed, 'rev-parse', 'HEAD')
@@ -540,6 +692,22 @@ git('update-ref', ref, new, old)
         capture_output=True,
         text=True,
     )
+    if dashboard_ready and catalog_state != 'present':
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert 'catalog' in result.stderr.lower()
+        counter = tmp_path / 'push-count'
+        if catalog_state == 'removed-on-race':
+            assert counter.read_text() == '1'
+            expected_head, expected_index = race, race_index
+        else:
+            assert not counter.exists()
+            expected_head, expected_index = initial, initial_index
+        assert git(publication, 'rev-parse', 'HEAD') == expected_head
+        assert git(seed, 'rev-parse', 'gh-pages-rocjitsu') == expected_head
+        assert (
+            publication / 'rocjitsu-dashboard/data/index.json'
+        ).read_bytes() == expected_index
+        return
     assert int((tmp_path / 'push-count').read_text()) == (3 if always_fail else 2)
     assert result.returncode == (1 if always_fail else 0), result.stderr
     if always_fail:

@@ -20,7 +20,7 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def encoded(value):
+def encode_json_bytes(value):
     return (json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + '\n').encode(
         'utf-8'
     )
@@ -144,7 +144,7 @@ def build_published_run(raw, workflow):
             for target, results in sorted(targets.items())
         },
     }
-    catalog['id'] = 'default-' + hashlib.sha256(encoded(catalog)).hexdigest()
+    catalog['id'] = 'default-' + hashlib.sha256(encode_json_bytes(catalog)).hexdigest()
     run_id = f"github-{github['run_id']}-attempt-{github['run_attempt']}-default"
     details = {'thread_policy': 'default'}
     for section, values in raw['provenance'].items():
@@ -244,7 +244,7 @@ def main():
     }
     result = build_published_run(raw, workflow)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_bytes(encoded(result))
+    args.output.write_bytes(encode_json_bytes(result))
 
 
 if __name__ == '__main__':

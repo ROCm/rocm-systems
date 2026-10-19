@@ -240,7 +240,8 @@ jobs:
           esac
           # Only main's final line follows a normal run_suite return. An abort
           # can also exit 1 and set finished_at, so neither alone is sufficient.
-          if [[ "$(tail -n 1 "${BENCHMARK_DIR}/runner-output.txt")" != "run ${SUITE_STATUS}: ${ROCJITSU_RESULT_DIR}/run.json" ]]; then
+          EXPECTED_ARTIFACT="$(realpath -- "${ROCJITSU_RESULT_DIR}")/run.json"
+          if [[ "$(tail -n 1 "${BENCHMARK_DIR}/runner-output.txt")" != "run ${SUITE_STATUS}: ${EXPECTED_ARTIFACT}" ]]; then
             echo "Runner did not report normal suite completion." >&2
             exit 1
           fi
@@ -356,6 +357,17 @@ jobs:
               NAME="github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}-default.json"
               mkdir -p "${DATA}/runs"
               cp "${RESULTS_DOWNLOAD_DIR}/dashboard/${NAME}" "${DATA}/runs/${NAME}"
+              if ! CATALOG="$(jq -er \
+                '.testCatalog | select(type == "string") | select(test("^test-catalogs/[A-Za-z0-9._-]+\\.json\\z"))' \
+                "${DATA}/runs/${NAME}")"; then
+                echo "Invalid dashboard test catalog reference." >&2
+                exit 1
+              fi
+              CATALOG_PATH="$(realpath -m -- "${DATA}/${CATALOG}")"
+              if [[ "${CATALOG_PATH}" != "$(realpath -- "${DATA}")/"* || ! -f "${CATALOG_PATH}" ]]; then
+                echo "Required dashboard test catalog is missing or outside the data directory: ${CATALOG}" >&2
+                exit 1
+              fi
               if [[ ! -f "${DATA}/index.json" ]]; then
                 printf '{"runFiles":[]}\n' > "${DATA}/index.json"
               fi
