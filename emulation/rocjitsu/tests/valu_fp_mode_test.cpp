@@ -4120,7 +4120,8 @@ std::vector<ArithmeticCase> ldexp_tininess_cases() {
 // field of 0xf0; 0x70/0xb0 and 0xd0/0xe0 clear one input/output bit of the
 // F16/F64 and F32 fields; 0xf3 and 0xfc round one precision toward zero.
 // FP16_OVFL (bit 23) clamps F16 but not BF16 overflow. RDNA3.5 uses the RDNA3
-// rule without a hardware capture.
+// rule without a hardware capture. tests/fixtures/float_dot/README.md lists the
+// capture batches.
 std::vector<ArithmeticCase> dot2_packed16_cases() {
   struct Lane {
     const char *name;
@@ -4343,11 +4344,12 @@ struct DotModifiers {
 };
 
 // VOP3P DOT lanes captured on gfx1201 and, for the instructions RDNA3 has, on
-// gfx1100 (the RDNA3.5 rows reuse the gfx1100 values without a capture). MODE
-// 0x30 and 0xc0 each clear one denormal field of 0xf0, and 0x70/0xb0 and
-// 0xd0/0xe0 one input/output bit of the F16/F64 and F32 fields; 0xf3 and 0xfc
-// round one precision toward zero. NEG_HI/NEG modifier forms captured before
-// 10-17 vary both rounding fields together (0xff).
+// gfx1100 (the RDNA3.5 rows reuse the gfx1100 values without a capture); see
+// tests/fixtures/float_dot/README.md for the capture batches. MODE 0x30 and 0xc0
+// each clear one denormal field of 0xf0, and 0x70/0xb0 and 0xd0/0xe0 one
+// input/output bit of the F16/F64 and F32 fields; 0xf3 and 0xfc round one
+// precision toward zero. Rows from the first DOT probe whose modifier forms
+// only swept 0xf0/0x00/0x30/0xc0/0xff test rounding with both fields at once (0xff).
 struct DotLane {
   const char *name;
   uint16_t opcode;
@@ -4443,8 +4445,8 @@ std::vector<DotLane> dot_family_lanes() {
       split_modes);
   add("Bf8Bf8SubnormalFactor", dot4_bf8_bf8, {}, 0x9fb8dca8u, 0xcb2d0379u, 0xb80f58b5u, 0xc49ffe90u,
       {}, split_modes);
-  // A negative subnormal C on a grid at or below 2^-126 subtracts one unit.
-  add("Bf8Bf8TinyNegativeAccumulator", dot4_bf8_bf8, {}, 0xb3510221u, 0xc48c2309u, 0x8030a352u,
+  // A negative subnormal C is read as is; flushing it would change the result.
+  add("Bf8Bf8NegativeSubnormalAccumulator", dot4_bf8_bf8, {}, 0xb3510221u, 0xc48c2309u, 0x8030a352u,
       0x3f5d8020u, {}, split_modes);
   // Integer DOT4/DOT8 read each source as two 16-bit halves: OP_SEL picks the
   // half for bits 15:0 and OP_SEL_HI the half for bits 31:16. Both cards agree.

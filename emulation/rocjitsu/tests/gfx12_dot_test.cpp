@@ -266,6 +266,42 @@ TEST(Gfx12Dot, WmmaSignModifiersAndWaveSizes) {
   }
 }
 
+TEST(Gfx12Dot, WmmaTinyNegativeAccumulatorSubtractsFloorUnit) {
+  // gfx1201 wave32 captures: only k=0 of A is nonzero, B and C are uniform.
+  // The products' grid is below 2^-126, so the negative subnormal C subtracts
+  // one unit; dropping C would give 0x0c000000 and 0x0c80.
+  struct Case {
+    bool bf16_out;
+    uint16_t a, b;
+    uint32_t c, expected;
+  };
+  for (const Case &test : {Case{false, 0x2900, 0x2280, 0x8000082du, 0x0bffffffu},
+                           Case{true, 0x3800, 0x1400, 0x80518051u, 0x0c7f0c7fu}}) {
+    HostState restore;
+    for (bool scalar : {false, true}) {
+      util::set_force_scalar_for_testing(scalar);
+      DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+      const uint32_t c_regs = test.bf16_out ? 4 : 8;
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        for (uint32_t reg = 0; reg < 4; ++reg) {
+          // A[row][k] sits in lane row (+16 for k >= 8), register k / 2, half k % 2.
+          machine.set(reg, lane, lane < 16 && reg == 0 ? test.a : 0u);
+          machine.set(8 + reg, lane, test.b * 0x10001u);
+        }
+        for (uint32_t reg = 0; reg < c_regs; ++reg)
+          machine.set(16 + reg, lane, test.c);
+      }
+      machine.execute(rdna4::build_vop3p(
+          test.bf16_out ? rdna4::kVWmmaBf1616x16x16Bf16Vop3p : rdna4::kVWmmaF3216x16x16Bf16Vop3p,
+          {.vdst = 24, .src0 = 256, .src1 = 264, .src2 = 272, .opsel_hi = 3}));
+      for (uint32_t lane = 0; lane < 32; ++lane)
+        for (uint32_t reg = 0; reg < c_regs; ++reg)
+          EXPECT_EQ(machine.get(24 + reg, lane), test.expected)
+              << "bf16_out=" << test.bf16_out << " scalar=" << scalar << " lane=" << lane;
+    }
+  }
+}
+
 TEST(Gfx12Dot, WmmaInlineAccumulatorPreservesAllOnesNan) {
   for (uint32_t width : {32u, 64u}) {
     DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
