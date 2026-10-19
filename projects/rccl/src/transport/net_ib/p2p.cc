@@ -133,9 +133,10 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
 
   struct ibv_send_wr* lastWr = comm->wrs + nreqs - 1;
   struct ibv_send_wr* sizesWr = NULL;
+  struct ibv_send_wr* flagWr = NULL;
   if (flagFlush) {
     // Payload (and sizes) go out as plain RDMA writes followed by the flag
-    // write, which carries the immediate data.
+    // write, which carries the immediate data. Each QP writes its own flag.
     if (nreqs > 1) {
       sizesWr = ++lastWr;
       memset(sizesWr, 0, sizeof(struct ibv_send_wr));
@@ -151,8 +152,8 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
     comm->flagFlushSge.addr = (uint64_t)&comm->flagFlushSrc[slot];
     lastWr->sg_list = &comm->flagFlushSge;
     lastWr->num_sge = 1;
-    lastWr->wr.rdma.remote_addr = comm->flagFlushRemAddr;
     lastWr->wr.rdma.rkey = comm->flagFlushRkey;
+    flagWr = lastWr;
   } else if (nreqs > 1 ||
              (!(comm->base.remOooRq && comm->base.localOooRq) && comm->ar && reqs[0]->send.size > ncclIbArThreshold)) {
     // When Adaptive Routing is enabled, send the bulk of the data first as an
@@ -236,6 +237,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       // Populate the correct RKey based on the device used
       sizesWr->wr.rdma.rkey = comm->remCmplsRecords.rkeys[devIndex];
     }
+    if (flagWr) flagWr->wr.rdma.remote_addr = comm->flagFlushRemAddr + qpIndex * sizeof(uint64_t);
 
     struct ibv_send_wr* bad_wr;
 #ifdef NCCL_ENABLE_NET_PROFILING
@@ -795,8 +797,12 @@ static inline ncclResult_t ncclIbRequestComplete(struct ncclIbRequest* r, int* d
         r->base->isSend ? "Send" : "Recv", r, r->base, r->id, ncclIbReqTypeStr[r->type]);
   *done = 1;
   if (r->type == NCCL_NET_IB_REQ_RECV && r->recv.flagFlush) {
+    // net.cc reads this right after ncclIbTest() completes the request, so it
+    // describes this request even if a later one already completed.
+    // Same QPs as ncclIbCommBaseGetQpForFlagRequest: 0..nQps-1.
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)r->base;
-    if (r->id + 1 > recvComm->flagFlushLastSeq) recvComm->flagFlushLastSeq = r->id + 1;
+    uint64_t nQps = ncclIbCommBaseGetNqpsPerRequest(&recvComm->base);
+    recvComm->flagFlushLastDesc = (nQps << NCCL_GDR_FLUSH_COUNT_SHIFT) | ((r->id + 1) & NCCL_GDR_FLUSH_SEQ_MASK);
   }
   if (sizes && r->type == NCCL_NET_IB_REQ_RECV) {
     TRACE(NCCL_NET, "NET/IB: %s: Recv request completed (req=%p, comm=%p, id=%ld, type=%s, nreqs=%d)", __func__, r,

@@ -247,12 +247,20 @@ struct ncclConnInfo {
   uint32_t* next_hdp_reg; // Next GPU in ring (for p2p transport use only)
   uint32_t* curr_hdp_reg; // Current GPU's HDP register
   ncclNetDeviceHandle_t netDeviceHandle;
-  // Net recv only: RO=0 GPU flag written by the remote NIC after the payload.
-  // When set, the GPU waits for gdrFlushFlag >= gdrFlushSeq[step % NCCL_STEPS]
-  // instead of the proxy issuing a GDR flush. Both live in local VRAM.
+  // Net recv only: RO=0 GPU flags, one per QP, each written by the remote NIC
+  // after the payload it carried on that QP. When set, the GPU waits until the
+  // flags selected by gdrFlushSeq[step % NCCL_STEPS] reach its sequence instead
+  // of the proxy issuing a GDR flush. Both live in local VRAM.
   uint64_t* gdrFlushFlag;
   uint64_t* gdrFlushSeq;
 };
+
+// A gdrFlushSeq entry packs the flag value in its low bits with the number of
+// per-QP flags, starting at flag 0, that must reach it. Zero means nothing to
+// wait for.
+#define NCCL_GDR_FLUSH_SEQ_BITS 56
+#define NCCL_GDR_FLUSH_SEQ_MASK ((1ULL << NCCL_GDR_FLUSH_SEQ_BITS) - 1)
+#define NCCL_GDR_FLUSH_COUNT_SHIFT 56
 
 struct ncclProxyConnector {
   bool initialized;
