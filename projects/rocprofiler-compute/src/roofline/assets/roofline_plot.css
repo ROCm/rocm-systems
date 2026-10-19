@@ -97,7 +97,7 @@
 }
 
 .roofline-kernel-name {
-  font-family: var(--roofline-kernel-font, monospace);
+  font-family: var(--report-kernel-font, monospace);
 }
 
 .roofline-kernel-pct {
