@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -131,9 +132,10 @@ setup_output_env(const std::string& output_path)
         return;
     }
 
-    const auto* const pwd = getenv("PWD");
-    const auto        output =
-        output_path.empty() ? fmt::format("{}/rocprof-sys-output", pwd) : output_path;
+    const auto output =
+        output_path.empty()
+            ? (std::filesystem::current_path() / "rocprof-sys-output").string()
+            : output_path;
 
     setenv(rocprofsys::env_vars::OUTPUT_PATH, output.c_str(), 1);
     LOG_INFO("Output path: {}", output);
