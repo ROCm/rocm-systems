@@ -86,7 +86,6 @@ from utils.metrics.pass_provenance import (
     PASS_VAR_SEP,
     PassLayout,
     bind_expression_dataframe,
-    extract_row_refs,
     ordered_scoped_builtin_bindings,
     pass_scoped_builtins,
 )
@@ -1177,9 +1176,11 @@ class db_analysis(OmniAnalyze_Base):
         Keys are ``{var}__pass{ordinal}`` so that bound ``ammolite__var__passN``
         expressions resolve via ``sys_info["var__passN"]``.
 
-        ``expressions`` may already be pass-bound; builtin names are recovered via
-        ``extract_row_refs`` (strips ``__passN``). PER_XCD built-ins are evaluated
-        before dependents that reference them (same order as ``calc_builtin_vars``).
+        expressions may already be pass-bound. Builtin names are recovered by
+        stripping __passN and then resolving formulas transitively, so a
+        dependent such as GRBM_GUI_ACTIVE_PER_XCD is computed when only
+        numActiveCUs is named. PER_XCD built-ins are evaluated before
+        dependents that reference them (same order as calc_builtin_vars).
         """
         if not used_passes or not pass_layout.has_duplicates:
             return {}
@@ -1189,8 +1190,13 @@ class db_analysis(OmniAnalyze_Base):
         if not scoped:
             return {}
 
-        # extract_row_refs strips __passN; extract_counters_and_variables does not.
-        expression_builtin_vars = extract_row_refs(expressions).builtin_vars
+        # extract_counters_and_variables resolves built-ins transitively.
+        # Strip __passN first; that walker does not.
+        plain_expressions = db_analysis._expressions_without_pass_suffixes(expressions)
+        _, expression_builtin_vars = extract_counters_and_variables(
+            "\n".join(plain_expressions),
+            gpu_series,
+        )
         build_in_vars = {
             key: value
             for key, value in get_build_in_vars(gpu_series).items()
@@ -1206,12 +1212,14 @@ class db_analysis(OmniAnalyze_Base):
             for variable_key, bound in ordered_scoped_builtin_bindings(
                 build_in_vars, pass_key, pass_layout, scoped
             ):
-                pass_locals[f"{variable_key}__pass{ordinal}"] = db_analysis.evaluate(
-                    variable_key,
-                    bound,
-                    pmc_df,
-                    {**sys_info, **pass_locals},
-                    parse=False,
+                pass_locals[f"{variable_key}{PASS_VAR_SEP}{ordinal}"] = (
+                    db_analysis.evaluate(
+                        variable_key,
+                        bound,
+                        pmc_df,
+                        {**sys_info, **pass_locals},
+                        parse=False,
+                    )
                 )
             results.update(pass_locals)
         return results
