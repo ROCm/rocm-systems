@@ -53,13 +53,18 @@
 // omitted: repeating them on the definition is ill-formed. Any drift against
 // the HIP headers is a compile error in the .cc, which is the intended alarm.
 
-// X(name, (parameter types))
-#define RCCL_HIP_PROFILE_INTERCEPTORS(X)                                          \
+// X(name, (parameter types)). The full list is the union of the two below.
+
+// Defined in hip_fakes.cc over a g_<name> seam, asserted there to match HIP; the default still fails loud.
+#define RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(X)                               \
+  X(hipExtLaunchKernel, (const void*, dim3, dim3, void**, size_t, hipStream_t, \
+                         hipEvent_t, hipEvent_t, int))
+
+// Defined in hip_fakes.cc as plain fail-loud stubs.
+#define RCCL_HIP_PROFILE_INTERCEPTORS_FAIL_LOUD(X)                                \
   /* launch */                                                                    \
   X(hipLaunchKernel, (const void*, dim3, dim3, void**, size_t, hipStream_t))       \
   X(hipLaunchKernel_spt, (const void*, dim3, dim3, void**, size_t, hipStream_t))   \
-  X(hipExtLaunchKernel, (const void*, dim3, dim3, void**, size_t, hipStream_t,     \
-                         hipEvent_t, hipEvent_t, int))                            \
   X(hipLaunchKernelExC, (const hipLaunchConfig_t*, const void*, void**))           \
   X(hipLaunchCooperativeKernel,                                                    \
     (const void*, dim3, dim3, void**, unsigned int, hipStream_t))                  \

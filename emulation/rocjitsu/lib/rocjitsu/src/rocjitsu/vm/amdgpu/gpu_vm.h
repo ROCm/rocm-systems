@@ -62,6 +62,7 @@ enum class VmAccessOutcome : uint8_t {
   Unavailable, ///< The transport/backing is temporarily unavailable; retry may succeed.
   Faulted,     ///< The mapping is absent or rejects the requested access.
   Malformed,   ///< The address, page-table encoding, or request is invalid.
+  Revoked,     ///< This snapshot was retired; the owner must recapture or terminate.
 };
 
 /// @brief Memory domain selected by a translation.
@@ -343,12 +344,38 @@ struct VmMtypeSnapshot {
 /// @brief Policy cache that does not retain the binding's backing.
 /// @details Like an L1 cache, it requires externally serialized access.
 class VmMtypeCache {
+public:
+  VmMtypeCache() = default;
+  VmMtypeCache(const VmMtypeCache &other)
+      : access_state_(other.access_state_),
+        snapshots_(other.snapshots_ ? std::make_unique<Snapshots>(*other.snapshots_) : nullptr) {}
+  VmMtypeCache &operator=(const VmMtypeCache &other) {
+    if (this != &other) {
+      VmMtypeCache copy(other);
+      *this = std::move(copy);
+    }
+    return *this;
+  }
+  VmMtypeCache(VmMtypeCache &&) noexcept = default;
+  VmMtypeCache &operator=(VmMtypeCache &&) noexcept = default;
+
+  /// @brief Drop copied policies and their mutation tokens.
+  /// @details Unused CUs retain neither a snapshot table nor work to clear
+  /// during VM setup and teardown.
+  void clear() noexcept {
+    access_state_.reset();
+    snapshots_.reset();
+  }
+
+private:
   friend class GpuVmAccess;
+  static constexpr std::size_t kSnapshotCount = 64;
+  using Snapshots = std::array<VmMtypeSnapshot, kSnapshotCount>;
   std::weak_ptr<GpuVmAccessState> access_state_;
   // Interleaved lanes can revisit several pages in one request.
   // Hashing by 4 KiB page avoids discarding their copied policy on every lane;
   // each snapshot still validates its translator-provided range and epoch.
-  std::array<VmMtypeSnapshot, 64> snapshots_;
+  std::unique_ptr<Snapshots> snapshots_;
 };
 
 /// @brief Address-space policy separated from the physical backing transport.
@@ -542,15 +569,18 @@ public:
   friend bool operator==(const VmCacheNamespace &, const VmCacheNamespace &) = default;
 };
 
-/// @brief Immutable, operation-scoped view of one GPU address-space binding.
+/// @brief Immutable view of one GPU address-space binding.
 ///
 /// @details The registry lock selects an immutable translator/backing generation.
 /// Ordinary snapshots share that generation's retirement state; each pinned
 /// snapshot has independent retirement state and survives root replacement.
 /// Access methods hold a shared revocation lease, allowing an in-flight access
 /// to finish without mixing roots. Invalidation and unregistration revoke both
-/// kinds of snapshot. Functional instruction fetch reuses an ordinary snapshot
-/// within a quantum, checking is_current() before reuse.
+/// kinds of snapshot. An admitted kernel dispatch retains a pinned snapshot;
+/// functional instruction fetch without one reuses an ordinary snapshot within
+/// a quantum, checking is_current() before reuse.
+/// Operations on a revoked snapshot report @ref VmAccessOutcome::Revoked,
+/// never the retryable Unavailable outcome.
 class GpuVmAccess {
 public:
   /// @brief Whether this snapshot's access state is still valid.
@@ -560,6 +590,8 @@ public:
   [[nodiscard]] bool is_current() const;
 
   [[nodiscard]] AddressSpaceInfo info() const { return info_; }
+  /// @brief Whether invalidation, unregister, or reset permanently retired this snapshot.
+  [[nodiscard]] bool revoked() const;
   [[nodiscard]] VmCacheNamespace cache_namespace() const {
     return {.address_space = address_space_, .translation_epoch = info_.translation_epoch};
   }

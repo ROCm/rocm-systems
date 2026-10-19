@@ -1,3 +1,4 @@
+<!-- Copyright (c) 2026 Advanced Micro Devices, Inc. -->
 <!-- SPDX-License-Identifier: MIT -->
 
 # Runtime API Headers
@@ -17,16 +18,16 @@ The headers are organized by API family under `include/`:
 
 These files are mirrors for runtime consumers; their primary sources remain:
 
-- `amdf`: `hrx-system/libamdf/include/amdf`, synchronized from
-  `hrx-system@4aa34130de44c45d68a48575cebfd0ff0610c461`;
+- `amdf`: based on `hrx-system/libamdf/include/amdf` at
+  `hrx-system@bd24215e6a5d1e12570c892356fd5b343ac38a6d`;
 - `hsa`: `projects/rocr-runtime/runtime/hsa-runtime/inc` in this repository;
 - DRM: `projects/rocr-runtime/libhsakmt/include/hsakmt/drm` in this repository;
 - KFD and UDMABUF: `projects/rocr-runtime/libhsakmt/include/hsakmt/linux` in
   this repository.
 
-The AMDF headers preserve upstream contents except that their copyright line
-names Advanced Micro Devices, Inc. and their SPDX identifier is MIT. The HSA, DRM,
-KFD, and UDMABUF mirrors are byte-identical to their primary files in this
-checkout.
+The AMDF headers carry local pre-beta API changes, including removal of the
+instance host allocator callback, in addition to their AMD copyright and MIT
+SPDX preamble. The HSA, DRM, KFD, and UDMABUF mirrors are byte-identical to
+their primary files in this checkout.
 
 `abce` is not a mirror: `include/abce` is its primary location.

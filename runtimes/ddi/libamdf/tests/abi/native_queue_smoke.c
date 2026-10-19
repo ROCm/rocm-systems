@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 /* Opt-in empty native queue qualification. No packet, index, or doorbell is

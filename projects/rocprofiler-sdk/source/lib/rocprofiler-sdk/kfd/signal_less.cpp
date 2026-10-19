@@ -27,6 +27,7 @@
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/kfd/env_parse.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_correlation.hpp"
+#include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_reader.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -436,6 +437,10 @@ signal_less_teardown()
     // teardown there would join threads that do not exist.
     if(g_child_stale.load(std::memory_order_acquire)) return;
 
+    // No dispatch-log state in this process means nothing to tear down. Ordered before
+    // signal_less_feature_enabled(), whose first call registers the fork handler and logs.
+    if(!kfd_profiler_state_constructed()) return;
+
     // With the feature off there is no hub work, no retry-owner work and no
     // reader->task handoff, so the ordering constraint does not apply and the
     // existing finalize path is left byte-for-byte as it was.
@@ -504,6 +509,9 @@ void
 signal_less_fence_completions()
 {
     if(g_child_stale.load(std::memory_order_acquire)) return;
+    // No dispatch-log state in this process means nothing to fence. Ordered before
+    // signal_less_feature_enabled(), whose first call registers the fork handler and logs.
+    if(!kfd_profiler_state_constructed()) return;
     if(!signal_less_feature_enabled()) return;
     // Finalization already ran: our atexit finalize()+destroy_static_objects() has
     // nulled the queue-registry static_object, so a second F24 call (from another
