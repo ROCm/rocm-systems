@@ -114,11 +114,17 @@ pub enum MemoryKind {
 /// retains it with a live registration, and quarantines it when cleanup cannot
 /// prove that native access has ended.
 pub(crate) struct HostRegistration {
+    /// First caller-owned or runtime-owned host byte.
     pub(crate) address: usize,
+    /// Native cache behavior requested for the registered pages.
     pub(crate) policy: HostMappingPolicy,
+    /// Exact byte extent to expose to the device.
     pub(crate) size: u64,
+    /// Required device address alignment.
     pub(crate) alignment: u64,
+    /// Device access established at registration.
     pub(crate) permissions: DeviceAccess,
+    /// Retained owner for runtime-allocated backing, when present.
     pub(crate) backing: Option<HostBackingLease>,
 }
 
@@ -162,8 +168,12 @@ pub struct VirtualAddressInfo {
 /// One checked placement request for a driver virtual-memory mapping.
 #[derive(Clone, Copy)]
 pub(crate) struct VirtualMapRequest {
+    /// First virtual byte to map inside the reservation.
     pub(crate) address: u64,
+    /// Byte offset into physical backing.
     pub(crate) offset: u64,
+    /// Byte extent of the mapping.
     pub(crate) size: u64,
+    /// Access granted to the selected address space.
     pub(crate) permissions: DeviceAccess,
 }

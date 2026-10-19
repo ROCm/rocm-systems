@@ -45,9 +45,13 @@ pub struct PciInfo {
 /// Immutable native cache metadata associated with one endpoint.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CacheInfo {
+    /// Hierarchy level reported by the native topology.
     pub(crate) level: u32,
+    /// Cache capacity in bytes.
     pub(crate) size_bytes: u64,
+    /// Native cache-line size in bytes.
     pub(crate) line_size_bytes: u32,
+    /// Native cache type encoding.
     pub(crate) kind: u32,
 }
 
@@ -75,11 +79,17 @@ impl CacheInfo {
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MemoryLinkType {
+    /// `HyperTransport` link.
     HyperTransport,
+    /// `QuickPath` Interconnect link.
     Qpi,
+    /// PCI Express link.
     Pcie,
+    /// InfiniBand link.
     Infiniband,
+    /// AMD XGMI link.
     Xgmi,
+    /// Link type not recognized by this runtime.
     Unknown,
 }
 
@@ -87,14 +97,23 @@ pub enum MemoryLinkType {
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MemoryLinkInfo {
+    /// Native minimum latency value for this direction.
     pub(crate) minimum_latency: u32,
+    /// Native maximum latency value for this direction.
     pub(crate) maximum_latency: u32,
+    /// Native minimum bandwidth value for this direction.
     pub(crate) minimum_bandwidth: u32,
+    /// Native maximum bandwidth value for this direction.
     pub(crate) maximum_bandwidth: u32,
+    /// Whether 32-bit atomics may cross this link.
     pub(crate) atomic_support_32bit: bool,
+    /// Whether 64-bit atomics may cross this link.
     pub(crate) atomic_support_64bit: bool,
+    /// Whether the link preserves coherent memory access.
     pub(crate) coherent_support: bool,
+    /// Native interconnect classification.
     pub(crate) kind: MemoryLinkType,
+    /// Native NUMA weight used for relative distance queries.
     pub(crate) numa_distance: u32,
 }
 
@@ -160,9 +179,12 @@ impl MemoryLinkInfo {
     }
 }
 
+/// Driver-local node identity used to relate discovered topology records.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct TopologyKey {
+    /// Native topology node or group number.
     pub(crate) group: u32,
+    /// Native member identity within that group.
     pub(crate) member: u32,
 }
 
@@ -170,10 +192,15 @@ pub(crate) struct TopologyKey {
 /// inferred from an operating-system node or GPU identifier.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct MemoryLink {
+    /// Topology key at the directed link's origin.
     pub(crate) source: TopologyKey,
+    /// Topology key at the directed link's destination.
     pub(crate) target: TopologyKey,
+    /// The origin represents host memory rather than a device.
     pub(crate) source_is_host: bool,
+    /// The destination represents host memory rather than a device.
     pub(crate) target_is_host: bool,
+    /// Native latency, bandwidth, and coherency facts for this direction.
     pub(crate) info: MemoryLinkInfo,
 }
 
@@ -272,6 +299,8 @@ pub struct GpuInfo {
     /// Maximum persisting L2 cache reservation in bytes reported by topology.
     /// Zero means the native driver did not report support.
     pub persisting_l2_cache_size_max: u32,
+    /// The native GPU exposes `UALink` fabric handles for virtual memory.
+    pub fabric_handles_supported: bool,
     /// GPU queue transports qualified by the current backend.
     pub queues: GpuQueueCapabilities,
 }
@@ -385,7 +414,7 @@ pub struct Endpoint {
     pub(crate) caches: Option<Shared<Vec<CacheInfo>>>,
     pub(crate) memory_links: Option<Shared<Vec<MemoryLink>>>,
     pub(crate) topology_key: TopologyKey,
-    pub(crate) driver_instance: u64,
+    pub(crate) driver_instance: driver::DriverInstanceId,
     pub(crate) selector: driver::EndpointSelector,
 }
 

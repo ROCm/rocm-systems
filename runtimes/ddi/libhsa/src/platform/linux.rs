@@ -7,16 +7,17 @@ pub(crate) use rocddi::device::gpu::event::linux as event;
 pub(crate) use rocddi::memory::interop::linux as memory;
 use rocddi::topology::Endpoint;
 pub(crate) use rocddi::topology::platform::linux::host;
+use rocddi::topology::platform::linux::kfd_drm_info;
 
 pub(crate) fn node_id(endpoint: Option<&Endpoint>) -> u32 {
     endpoint
-        .and_then(Endpoint::linux_kfd_drm_info)
+        .and_then(kfd_drm_info)
         .map_or(0, |info| info.node_id)
 }
 
 pub(crate) fn driver_uid(endpoint: Option<&Endpoint>) -> u32 {
     endpoint
-        .and_then(Endpoint::linux_kfd_drm_info)
+        .and_then(kfd_drm_info)
         .map_or(0, |info| info.gpu_id)
 }
 

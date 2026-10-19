@@ -18,11 +18,17 @@ use rocddi::memory::storage::Owned;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
+/// Public kernel queue with its native submission and retirement state.
 struct KernelQueue {
+    /// Driver-mediated queue that owns accepted native submissions.
     native: NativeQueue,
+    /// Borrowed public device kept live by the queue registration count.
     device: *mut Device,
+    /// Immutable creation facts returned through the AMDF ABI.
     info: amdf_kernel_queue_info_t,
+    /// Highest submission ID published to callers.
     accepted: AtomicU64,
+    /// Prevents new work once public destruction begins.
     destroying: AtomicBool,
 }
 

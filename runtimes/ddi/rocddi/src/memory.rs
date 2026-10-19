@@ -3,9 +3,9 @@
 
 //! Runtime storage, host backing, and device-accessible memory.
 //!
-//! [`storage`] allocates runtime records through the session's callback
-//! allocator. [`host`] owns host-only backing and cache operations without
-//! activating an endpoint. [`device`] owns memory and mappings whose access
+//! [`storage`] provides fallible storage for runtime ownership records.
+//! [`host`] owns host-only backing and cache operations without activating an
+//! endpoint. [`device`] owns memory and mappings whose access
 //! has been qualified by an activated [`Device`](crate::device::Device). A CPU
 //! can use this interface when a driver exposes it as an activated endpoint.
 //! Rocddi-owned host backing can be registered independently with several

@@ -27,26 +27,37 @@ const INITIAL_RESET_EPOCH: u64 = 1;
 /// `children` prevents destruction while endpoint handles remain public.
 /// Cached host facts stay valid until destruction succeeds.
 pub(crate) struct Instance {
+    /// Native session that discovers and activates devices.
     pub native: session::Session,
     /// Guards host-only ABI work that does not enter a native driver.
     pub process_id: u32,
+    /// Number of public children that still borrow this instance.
     pub children: AtomicU64,
+    /// Prevents new children during destruction.
     pub closing: bool,
+    /// Source of public device IDs within this instance.
     pub ids: AtomicU64,
+    /// Head of the linked list of provider-owned host backings.
     pub host_backing_head: Mutex<usize>,
     /// One observer per activated endpoint, shared by its device handles.
     event_observers: Mutex<Vec<ObserverRecord>>,
-    // Cached host facts keep profile queries independent of native calls.
+    /// Host page size cached for memory profile queries.
     pub host_page_size: u64,
+    /// Host cache line size when the platform reports one.
     pub host_cache_line: Option<u32>,
+    /// Embedded host memory profile namespace.
     pub scope: Scope,
 }
 
 /// Passive endpoint handle borrowing its instance and owning no device state.
 pub(crate) struct Endpoint {
+    /// Parent instance borrowed by this public endpoint handle.
     pub instance: *mut Instance,
+    /// Passive topology record used for activation and metadata queries.
     pub native: topology::Endpoint,
+    /// Number of public devices that borrow this endpoint.
     pub children: AtomicU64,
+    /// Embedded endpoint memory profile namespace.
     pub scope: Scope,
 }
 
@@ -56,32 +67,46 @@ pub(crate) struct Endpoint {
 /// advances this handle's reset epoch on native exception notifications;
 /// operation errors also advance it when they observe terminal loss first.
 pub(crate) struct Device {
+    /// Parent endpoint borrowed by this public device handle.
     pub endpoint: *mut Endpoint,
+    /// Activated native device and its retained driver state.
     pub native: native_device::Device,
+    /// Public identity assigned at activation.
     pub id: amdf_device_id_t,
+    /// Number of public queues that borrow this device.
     pub queues: AtomicU64,
+    /// Generation shared with the endpoint's exception observer.
     pub reset_epoch: Shared<AtomicU64>,
+    /// Keeps exception polling alive while this handle is public.
     event_observer: Shared<EventObserver>,
 }
 
 /// Instance registry entry for one endpoint's shared exception observer.
 struct ObserverRecord {
+    /// Endpoint whose device handles receive these events.
     endpoint_id: [u8; 16],
+    /// Observer shared by those handles.
     observer: Shared<EventObserver>,
 }
 
 /// Polls one endpoint's native subscription and fans reset evidence out to
 /// every public device handle created from that endpoint.
 struct EventObserver {
+    /// Filters process-level native events for this endpoint.
     endpoint_id: [u8; 16],
+    /// Serialized reset generation and registered device epochs.
     state: Mutex<ObserverState>,
+    /// Requests the polling worker to exit.
     stop: AtomicBool,
+    /// Worker joined when the final device handle goes away.
     worker: Mutex<Option<JoinHandle<()>>>,
 }
 
 /// Reset generations and deduplication state serialized with handle registration.
 struct ObserverState {
+    /// Latest reset generation published by this observer.
     generation: u64,
+    /// Epoch cells for the currently registered public device handles.
     epochs: Vec<Shared<AtomicU64>>,
     /// A connection-wide terminal loss cannot become valid again.
     terminal_loss_observed: bool,

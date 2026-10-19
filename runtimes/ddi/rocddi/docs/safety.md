@@ -201,16 +201,10 @@ reservation, backing, and GEM remain retained until cleanup is proved, and
 that retries do not replay a submitted unmap. A scripted command submission
 with an unexpected DRM sequence keeps the caller's command storage live until
 its attached timeline point signals, including through a failed destroy.
-The opt-in [GFX1201 C ABI probes](../tests/gpu/README.md) inject ambiguous
-CREATE and failed rollback through both frontends. HSA verifies that the
-separate inactive-signal and scratch KFD allocations remain live; AMDF
-verifies that its public scratch memory remains busy. These probes do not
-cover every native failure or allocation failure path. Independent C/Rust
-ABI probes compare AMDF and HSA layouts, and the HSA probe calls the local
-versioned finalizer symbol.
-Focused Miri tests exercise the custom host owners and buffer, including
-panicking destructors and partial iteration, under tree borrows and alignment
-checks. They cannot inspect GPU behavior. Linux AArch64 CI
+The Rust unit tests do not cover every native failure or allocation failure
+path. Focused Miri unit tests exercise the custom host owners and buffer,
+including panicking destructors and partial iteration, under tree borrows and
+alignment checks. They cannot inspect GPU behavior. Linux AArch64 CI
 cross-checks source compilation and executes the CPU-only suite on native
 hardware. Those tests cannot establish command processor packet ordering,
 cache coherence, or recovery on a device. Those require the hardware and

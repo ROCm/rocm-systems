@@ -101,6 +101,7 @@ pub enum DeviceEvent {
 /// subscriber fills the finite event buffer, native polling waits until that
 /// subscriber reads or drops its backlog.
 pub struct DeviceEventSubscription {
+    /// Concrete driver observer and its independent delivery cursor.
     inner: driver::EventSubscription,
 }
 

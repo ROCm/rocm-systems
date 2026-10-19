@@ -17,6 +17,7 @@ use std::ops::Deref;
 /// same mapped backing. Host cleanup remains busy until every registration is
 /// freed. A failed native cleanup retains the backing through process teardown.
 pub struct RegisteredHostAllocation {
+    /// Device registration retaining its source host pages.
     allocation: Allocation,
 }
 
@@ -56,7 +57,9 @@ impl Deref for RegisteredHostAllocation {
 /// remains mapped if native cleanup cannot prove that every registration has
 /// stopped using it.
 pub struct RegisteredHostMemory {
+    /// Independent driver registrations of the same backing.
     registrations: Vec<RegisteredHostAllocation>,
+    /// Host mapping released after all registrations end.
     backing: HostAllocation,
 }
 
@@ -92,9 +95,11 @@ impl RegisteredHostMemory {
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<(), Error> {
-        if self.registrations.iter().any(|registration| {
-            registration.allocation.driver_instance == device.endpoint.driver_instance
-        }) {
+        if self
+            .registrations
+            .iter()
+            .any(|registration| registration.allocation.shares_driver_instance(device))
+        {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
                 detail: "host backing is already registered with this driver",
@@ -122,9 +127,7 @@ impl RegisteredHostMemory {
         let registration = self
             .registrations
             .iter()
-            .find(|registration| {
-                registration.allocation.driver_instance == device.endpoint.driver_instance
-            })
+            .find(|registration| registration.allocation.shares_driver_instance(device))
             .ok_or(Error::Operation {
                 kind: ErrorKind::Unsupported,
                 detail: "host backing is not registered with this device driver",
@@ -175,7 +178,7 @@ impl Device {
         }
         if peers
             .iter()
-            .any(|peer| peer.endpoint.driver_instance != self.endpoint.driver_instance)
+            .any(|peer| !peer.driver_state.shares_driver_instance(&self.driver_state))
         {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
