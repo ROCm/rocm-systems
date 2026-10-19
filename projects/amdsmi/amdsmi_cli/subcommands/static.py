@@ -1627,6 +1627,9 @@ class StaticCommands:
                 self.logger.print_no_ainics_found()
                 return True
             self._static_ainic(args, multiple_devices, nic)
+            # static() returns right after this, so it never reaches its own flush.
+            if self.logger.is_json_format():
+                self.logger.combine_arrays_to_json()
             return True
 
     def static(

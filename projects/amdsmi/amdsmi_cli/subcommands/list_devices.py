@@ -329,7 +329,8 @@ class ListDevicesCommands:
         self.logger.output = {}
         self.logger.clear_multiple_devices_output()
 
-        if self.helpers.is_ainic_initialized():
+        # JSON/CSV cannot carry a second document; NICs there need an explicit --nic.
+        if self.helpers.is_ainic_initialized() and self.logger.is_human_readable_format():
             ainics = self._get_ainics_from_args(args)
             if len(ainics) > 0:
                 self.list_ainic(args, False, nic=ainics)
