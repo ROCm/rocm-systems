@@ -20,7 +20,7 @@ Pre-built simulator configs are in `configs/`:
 | `gfx1250_mi455x_4gpu_scaleup.json` | Four local CDNA5 GPUs with ScaleUp routes |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four MI455X GPUs (multi-GPU daemon mode) |
 | `gfx1250_mi455x_kmd_2node_net.json` | Schematic two-node, one-GPU-per-node RCCL NET fixture |
-| `gfx1250_mi455x_kmd_4node_2gpu_if.json` | Four nodes with two local GPUs and Infinity Fabric routes per node |
+| `gfx1250_mi455x_kmd_4node_2gpu_if.json` | Four-node, two-GPU-per-node mixed P2P/NET fixture; see the [same-host RCCL gate](same-host-pod-rccl-gate.md#run-this-gate) |
 | `gfx1251_synthetic.json` | Minimal synthetic gfx1251 topology for functional simulation; not a product model |
 | `gfx1100_w7900.json` | Single RDNA3 GPU (standalone simulation) |
 | `gfx1151.json` | Single RDNA3.5 GPU (standalone simulation) |
@@ -426,7 +426,14 @@ to the correct device based on `gpu_id`.
 
 `configs/gfx950_mi355x_kmd_2gpu.json` is the default multi-GPU
 configuration for RCCL tests. `configs/gfx1250_mi455x_kmd_4gpu.json`
-provides a four-GPU daemon topology for explicit multi-GPU runs.
+provides a four-GPU daemon topology through legacy GPU replication.
+`configs/gfx1250_mi455x_4gpu_scaleup.json` is a separate explicit system
+manifest. It connects four GPUs using one abstract switch for functional
+testing. The four-GPU shape and links are simulator choices; they do not
+describe a physical tray, switch, bandwidth, timing, or peer-memory
+coherence. KFD peer discovery stays off until the routed data and coherence
+paths qualify separately.
+
 When the selected ROCm compiler parses `gfx1250`, its HIP runtime advertises
 that target, and its RCCL library exists, the build also produces
 `tests/hip_rccl_gfx1250_test`. This is a compilation gate for the numerically
