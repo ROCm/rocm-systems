@@ -49,6 +49,7 @@
 
 #if !defined(_WIN32)
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 // fs, kPathSep, set_proc_search_path, ScopedDir, hrr_single_process_archive,
@@ -378,6 +379,64 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
     REQUIRE(ret == 0);
     CHECK(out.find("capture needs your consent.") != std::string::npos);
     CHECK(nothing_written());
+  }
+#endif
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Writes yes to the consent file, gives it to another user and spawns
+ *     Unit_HRR_DeviceInfo_Direct with HIP_HRR_CAPTURE_OUTPUT set and no
+ *     HIP_HRR_CAPTURE_CONSENT. A yes owned by someone else is not this user's,
+ *     so the workload passes, prints the consent notice and writes nothing.
+ *   - Gives the file back and captures again: the metadata records
+ *     capture_consent "file", so the refusal came from the owner alone.
+ *   - Skipped on Windows, where the file is not checked for an owner, and when
+ *     the test does not run as root, which it needs to give the file away.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureIgnoresConsentOfOtherUser) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX file owners");
+#else
+  if (::geteuid() != 0) HRR_SKIP("Giving the consent file to another user needs root");
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_consent_owner"};
+  ScopedDir cfg{fs::temp_directory_path() / "hrr_capture_consent_owner_cfg"};
+  const fs::path consent_file = cfg.path / "hrr" / "capture-consent";
+  fs::create_directories(consent_file.parent_path());
+  std::ofstream(consent_file) << "yes\n";
+
+  auto capture = [&]() {
+    hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    proc.setEnv("XDG_CONFIG_HOME", cfg.path.string());
+    proc.unsetEnv("HIP_HRR_CAPTURE_CONSENT");
+    set_proc_search_path(proc);
+    const int ret = proc.run("\"Unit_HRR_DeviceInfo_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess output:\n" << out);
+    REQUIRE(ret == 0);
+    return out;
+  };
+
+  {
+    // 65534 is nobody on most systems; any uid other than root's will do.
+    REQUIRE(::chown(consent_file.c_str(), 65534, 65534) == 0);
+    const std::string out = capture();
+    CHECK(out.find("capture needs your consent.") != std::string::npos);
+    std::error_code ec;
+    CHECK((!fs::exists(cap.path, ec) || fs::is_empty(cap.path, ec)));
+  }
+
+  {
+    REQUIRE(::chown(consent_file.c_str(), ::geteuid(), ::getegid()) == 0);
+    capture();
+    const fs::path archive = hrr_single_process_archive(cap.path);
+    const std::string metadata =
+        json_object_value(read_text_file(archive / "manifest.json"), "metadata");
+    INFO("Metadata:\n" << metadata);
+    CHECK(json_string_value(metadata, "capture_consent") == "file");
   }
 #endif
 }

@@ -159,6 +159,7 @@ static std::string hrr_capture_consent() {
   if (path.empty()) return "";
   std::string line;
 #if defined(_WIN32)
+  // No owner check here: the file lives under %APPDATA%, which is per user.
   std::error_code ec;
   if (!std::filesystem::is_regular_file(path, ec)) return "";
   std::ifstream in(path);
@@ -166,10 +167,12 @@ static std::string hrr_capture_consent() {
 #else
   // Only a regular file, checked on the descriptor that is read: a FIFO planted
   // there, even after a check by path, must not block HIP's init in open().
+  // The file must also belong to the effective user: a yes owned by someone
+  // else, say in an XDG_CONFIG_HOME shared by several users, is not theirs.
   const int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
   if (fd < 0) return "";
   struct stat st{};
-  if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+  if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != ::geteuid()) {
     ::close(fd);
     return "";
   }
