@@ -81,6 +81,11 @@ __global__ void PutmemSignalTest(int loop, int skip, long long int *start_time,
   rocshmem_wg_ctx_destroy(&ctx);
 }
 
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
 template <TestType Type>
 __global__ void SignalFetchTest(int loop, int skip, long long int *start_time,
                                 long long int *end_time, uint64_t *sig_addr,
@@ -111,6 +116,66 @@ __global__ void SignalFetchTest(int loop, int skip, long long int *start_time,
 
 }
 
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+
+template <TestType Type>
+__global__ void SignalUpdateTest(int loop, int skip, long long int *start_time,
+                                 long long int *end_time,
+                                 uint64_t *sig_addr) {
+  int wg_id = get_flat_grid_id();
+  int my_pe = rocshmem_my_pe();
+  int target_pe = (my_pe + 1) % rocshmem_n_pes();
+
+  for (int i = 0; i < loop + skip; i++) {
+    if (i == skip) {
+      __syncthreads();
+      if (hipThreadIdx_x == 0) {
+        start_time[wg_id] = wall_clock64();
+      }
+    }
+
+    if constexpr (Type == SignalAddTestType) {
+      rocshmem_signal_add(sig_addr, 1, target_pe);
+    } else if constexpr (Type == SignalSetTestType) {
+      rocshmem_signal_set(sig_addr, static_cast<uint64_t>(my_pe + 1),
+                          target_pe);
+    }
+  }
+
+  rocshmem_quiet();
+  __syncthreads();
+  if (hipThreadIdx_x == 0) {
+    end_time[wg_id] = wall_clock64();
+  }
+}
+
+__global__ void SignalWaitUntilTest(int loop, int skip,
+                                    long long int *start_time,
+                                    long long int *end_time,
+                                    uint64_t *sig_addr,
+                                    uint64_t *fetched_value) {
+  if (get_flat_grid_id() != 0 || hipThreadIdx_x != 0) {
+    return;
+  }
+
+  int target_pe = (rocshmem_my_pe() + 1) % rocshmem_n_pes();
+  for (int i = 0; i < loop + skip; i++) {
+    if (i == skip) {
+      start_time[0] = wall_clock64();
+    }
+
+    uint64_t expected = static_cast<uint64_t>(i + 1);
+    rocshmem_signal_set(sig_addr, expected, target_pe);
+    rocshmem_quiet();
+    *fetched_value = rocshmem_signal_wait_until(
+        sig_addr, ROCSHMEM_CMP_GE, expected);
+  }
+
+  end_time[0] = wall_clock64();
+}
+
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
@@ -139,7 +204,12 @@ void SignalingOperationsTester::resetBuffers([[maybe_unused]] size_t size) {
   memset(s_buf, '0', max_msg_size * args.wg_size);
   memset(r_buf, '1', max_msg_size * args.wg_size);
   *fetched_value = -1;
-  *sig_addr = args.myid + 123;
+  if (_type == SignalAddTestType || _type == SignalSetTestType ||
+      _type == SignalWaitUntilTestType) {
+    *sig_addr = 0;
+  } else {
+    *sig_addr = args.myid + 123;
+  }
 }
 
 void SignalingOperationsTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
@@ -147,6 +217,21 @@ void SignalingOperationsTester::launchKernel(dim3 gridSize, dim3 blockSize, int 
   size_t shared_bytes = 0;
 
   switch (_type) {
+    case SignalAddTestType:
+      hipLaunchKernelGGL(SignalUpdateTest<SignalAddTestType>, gridSize,
+                         blockSize, shared_bytes, stream, loop, args.skip,
+                         start_time, end_time, sig_addr);
+      break;
+    case SignalSetTestType:
+      hipLaunchKernelGGL(SignalUpdateTest<SignalSetTestType>, gridSize,
+                         blockSize, shared_bytes, stream, loop, args.skip,
+                         start_time, end_time, sig_addr);
+      break;
+    case SignalWaitUntilTestType:
+      hipLaunchKernelGGL(SignalWaitUntilTest, gridSize, blockSize,
+                         shared_bytes, stream, loop, args.skip, start_time,
+                         end_time, sig_addr, fetched_value);
+      break;
     case SignalFetchTestType:
       hipLaunchKernelGGL(SignalFetchTest<SignalFetchTestType>, gridSize,
                          blockSize, shared_bytes, stream, loop, args.skip,
@@ -205,20 +290,48 @@ void SignalingOperationsTester::launchKernel(dim3 gridSize, dim3 blockSize, int 
   }
 
   num_msgs = (loop + args.skip) * gridSize.x;
+  if (_type == SignalAddTestType || _type == SignalSetTestType) {
+    num_msgs *= blockSize.x;
+  }
   num_timed_msgs = loop;
 }
 
 void SignalingOperationsTester::verifyResults(size_t size) {
+  auto check_value = [](const char *operation, uint64_t value,
+                        uint64_t expected) {
+    if (value != expected) {
+      fprintf(stderr, "%s Value %lu, Expected %lu\n", operation, value,
+              expected);
+      exit(-1);
+    }
+  };
+
+  if (_type == SignalAddTestType) {
+    uint64_t expected =
+        (args.skip + num_loops) * args.wg_size * args.num_wgs;
+    check_value("Signal Add", *sig_addr, expected);
+    return;
+  }
+
+  if (_type == SignalSetTestType) {
+    int sender = (args.myid - 1 + args.numprocs) % args.numprocs;
+    check_value("Signal Set", *sig_addr,
+                static_cast<uint64_t>(sender + 1));
+    return;
+  }
+
+  if (_type == SignalWaitUntilTestType) {
+    uint64_t expected = args.skip + num_loops;
+    check_value("Signal Wait", *sig_addr, expected);
+    check_value("Signal Wait Return", *fetched_value, expected);
+    return;
+  }
+
   if (_type == SignalFetchTestType     ||
       _type == WAVESignalFetchTestType ||
       _type == WGSignalFetchTestType) {
     if (0 == args.myid) {
-      uint64_t value = *fetched_value;
-      uint64_t expected_value = (args.myid + 123);
-      if (value != expected_value) {
-        fprintf(stderr, "Fetched Value %lu, Expected %lu\n", value, expected_value);
-        exit(-1);
-      }
+      check_value("Signal Fetch", *fetched_value, args.myid + 123);
       return;
     }
   } else {

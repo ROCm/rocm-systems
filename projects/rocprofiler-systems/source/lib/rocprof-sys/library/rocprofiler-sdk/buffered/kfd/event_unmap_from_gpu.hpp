@@ -24,7 +24,8 @@ template <policies::domain_service::externals Externals>
 inline void
 on_kfd_event_unmap_from_gpu_configure()
 {
-    Externals::add_string(Externals::k_kfd_event_unmap_from_gpu_category_name);
+    auto& metadata_registry = Externals::get_metadata_registry();
+    metadata_registry.add_string(Externals::k_kfd_event_unmap_from_gpu_category_name);
 
     auto const& agent_mgr  = Externals::get_agent_manager();
     auto const  gpu_agents = agent_mgr.get_agents_by_type(Externals::k_agent_type_gpu);
@@ -43,7 +44,7 @@ on_kfd_event_unmap_from_gpu_configure()
         constexpr auto*       k_expression  = "";
         const std::string     value_type_absolute{ Externals::k_pmc_value_type_absolute };
 
-        Externals::add_pmc_info(typename Externals::pmc_info_t{
+        metadata_registry.add_pmc_info(typename Externals::pmc_info_t{
             .type             = Externals::k_agent_type_gpu,
             .agent_type_index = dev_idx,
             .target_arch      = "GPU",
@@ -70,9 +71,8 @@ template <policies::domain_service::backend   SdkBackend,
           policies::domain_service::externals Externals>
 inline void
 on_kfd_event_unmap_from_gpu(typename SdkBackend::kfd_event_unmap_record* record,
-                            void*                                        data)
+                            [[maybe_unused]] void*                       data)
 {
-    (void) data;
     if(!record)
     {
         return;
@@ -93,7 +93,8 @@ on_kfd_event_unmap_from_gpu(typename SdkBackend::kfd_event_unmap_record* record,
                   e.what());
     }
 
-    Externals::add_thread_info(typename Externals::thread_info_t{
+    auto& metadata_registry = Externals::get_metadata_registry();
+    metadata_registry.add_thread_info(typename Externals::thread_info_t{
         Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
 
     auto const agent_label = [](const auto* agent_ptr) {
@@ -107,7 +108,7 @@ on_kfd_event_unmap_from_gpu(typename SdkBackend::kfd_event_unmap_record* record,
     };
 
     auto const track_name = fmt::format("KFD Unmap from GPU [{}]", agent_label(agent));
-    Externals::add_track(typename Externals::track_t{ track_name, tid, "{}" });
+    metadata_registry.add_track(typename Externals::track_t{ track_name, tid, "{}" });
 
     constexpr auto k_empty_event_metadata = "{}";
     const auto     pmc_value =
@@ -123,7 +124,7 @@ on_kfd_event_unmap_from_gpu(typename SdkBackend::kfd_event_unmap_record* record,
           fmt::format("{:#x}", record->end_address.value) },
     });
 
-    Externals::buffer_storage_store(typename Externals::kfd_sample_t{
+    Externals::get_buffer_storage().store(typename Externals::kfd_sample_t{
         tid, name, record->timestamp, record->timestamp, args_str,
         std::string{ Externals::k_kfd_event_unmap_from_gpu_category_name },
         std::move(track_name), k_empty_event_metadata,

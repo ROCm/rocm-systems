@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
 #include "rocjitsu/vm/amdgpu/mes_engine.h"
@@ -238,6 +239,12 @@ public:
   amdgpu::MesEngine &mes_engine() { return mes_engine_; }
   const amdgpu::MesEngine &mes_engine() const { return mes_engine_; }
 
+  /// @brief Return the device-global GWS store shared by every CU of every XCD.
+  /// @details GWS resources are device-global (one small register set per GPU),
+  /// and under XCD fan-out a single dispatch scatters its workgroups across XCDs,
+  /// so the whole SoC shares one store rather than one per XCD (see GwsDevice).
+  const std::shared_ptr<amdgpu::GwsDevice> &gws_device() const { return gws_device_; }
+
   /// @brief Set the execution plugin group and distribute to CPs/CUs.
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group);
 
@@ -245,11 +252,12 @@ public:
   ///
   /// @details This controls host acceleration rather than modeled GPU
   /// resources or timing. The count includes the command-processor thread that
-  /// calls the pool. The effective width is clamped to the largest CU count of
-  /// any command processor in the SoC. One pool retains width-1 workers shared
-  /// across the SoC. CPs can submit and execute concurrently; each submission
-  /// uses its caller and at most width-1 workers, and joins only its own work.
-  /// With E engine threads, the total CU execution capacity is E + width - 1.
+  /// calls the pool. The effective width is clamped to one plus the sum of
+  /// CUs-1 across nonempty XCDs. One pool retains width-1 workers shared across
+  /// the SoC. CPs can submit and execute concurrently; each submission uses its
+  /// caller and at most min(width, active CUs)-1 workers, and joins only its own
+  /// work. With E engine threads, the total engine/CU thread count is
+  /// E + width - 1; fewer concurrent XCDs can leave some workers idle.
   void set_dispatch_threads(uint32_t threads);
   /// @returns The effective functional dispatch width after mode and CU-capacity clamps.
   uint32_t dispatch_threads() const { return dispatch_threads_; }
@@ -262,6 +270,8 @@ private:
   friend class test::SoCTestAccess;
 
   void apply_dispatch_threads();
+  /// @brief Share the SoC-owned device-global GWS store across every XCD's CUs.
+  void wire_gws_to_xcds();
   [[nodiscard]] bool install_internal_address_space(amdgpu::GpuMemory *memory);
   [[nodiscard]] std::optional<amdgpu::ComputeQueueBindingPlan>
   make_aql(uint32_t queue_ordinal) override;
@@ -275,6 +285,8 @@ private:
   std::shared_ptr<amdgpu::DeviceCacheCoherence> cache_coherence_ =
       std::make_shared<amdgpu::DeviceCacheCoherence>();
   amdgpu::GpuVm gpu_vm_;
+  /// Device-global GWS store shared by every CU of every XCD (see gws_device()).
+  std::shared_ptr<amdgpu::GwsDevice> gws_device_ = std::make_shared<amdgpu::GwsDevice>();
   std::shared_ptr<amdgpu::GpuMemoryPhysicalAccess> internal_memory_access_;
   amdgpu::AddressSpaceHandle internal_address_space_;
   amdgpu::SdmaQueueScheduler sdma_queue_scheduler_;
