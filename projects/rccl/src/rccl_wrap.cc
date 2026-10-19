@@ -2113,7 +2113,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
       if (ddaFabricArch) {
         const size_t rsDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter, comm->nRanks);
         const size_t rsDdaLL128Max = rcclDdaLL128ThresholdTab(archTable, ncclFuncReduceScatter, comm->nRanks);
-        if (rcclParamDdaLL() && totalBytes <= rsDdaLLMax &&
+        if (totalBytes <= rsDdaLLMax && rsDdaLLMax > 0 &&
             ncclReduceScatterDdaFabricLLEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
           decision->algo = RCCL_DDA_FABRIC_LL;
           decision->protocol = NCCL_PROTO_LL;
