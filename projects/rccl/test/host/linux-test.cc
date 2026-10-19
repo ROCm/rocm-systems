@@ -267,7 +267,7 @@ TEST_F(LinuxInitMicrotest, Initialize_RaisesASmallDefaultStackTo8MB) {
 }
 
 // linux.cc declares ncclParamSetCpuStackSize (and PollTimeOut, RetryTimeOut, SocketMax*Buff) as int,
-// but NCCL_PARAM defines them int64_t, so only the low 32 bits arrive; a fix flips this pin.
+// but NCCL_PARAM defines them int64_t, so only the low 32 bits arrive. Pins AICOMRCCL-2978; a fix flips this pin.
 TEST_F(LinuxInitMicrotest, Initialize_KnownBug_IntDeclarationTruncatesTheParam) {
   params_.Set("SET_CPU_STACK_SIZE", int64_t(1) << 32);
   SetDefaultStack(1 << 20);
