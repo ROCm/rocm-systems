@@ -49,9 +49,11 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
   * `ncclAllGather`: DDA LL up to nRanks x 16 KiB, DDA LL128 up to 256 MiB from 16 ranks, and Ring LL128 up to 64 MiB per rank.
   * `ncclReduceScatter`: DDA LL up to nRanks x 256 KiB, DDA LL128 up to nRanks x 512 KiB, then DDA VMM up to nRanks x 2 MiB; Ring LL up to 512 KiB per rank and LL128 up to 8 MiB per rank (32 MiB for 1-byte types); Ring Simple on at most 128 channels between 8 and 32 MiB per rank unless `NCCL_MIN_NCHANNELS` or `NCCL_MAX_NCHANNELS` is set.
   * DDA VMM `ncclAllReduce` and `ncclReduceScatter` launch 2048 / nRanks blocks, clamped to 32 to 128 and never more than before.
+* `fp8_e4m3` and `fp8_e5m2` sum reductions on gfx1250 convert eight elements per instruction using the packed conversion instructions, instead of two. Results are unchanged. Other architectures and reduction operators are unaffected.
 
 ### Removed
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.
+* `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
 
 ### Resolved issues
 * Fixed topology GPU indices that followed the HIP device order instead of the PCI order. This reordered rings and NIC selection, causing an `ncclGather` performance regression on multi-node MI355X systems, and made communicator initialization fail when each rank sees only its own GPU.
@@ -66,6 +68,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed `NCCL_P2P_DISABLE` and `NCCL_P2P_LEVEL` being ignored on Intel, ARM and Zhaoxin hosts, where the CPU-based default P2P level overwrote the user setting. On such hosts `NCCL_P2P_DISABLE=1` now falls back to SHM as documented, and `NCCL_P2P_LEVEL` is honored.
 * Fixed LL-protocol latency on gfx950 when RCCL is built against a ROCm older than 7.0.2 without the 128-bit global load/store builtins (for example ROCm 7.0.1, or `-DDWORDX4_INTRINSICS=OFF`). Every store to the user output buffer was followed by a release fence and an L2 writeback, which made 4 KB to 64 KB `ncclBroadcast` about 30% slower on MI355X. Builds against ROCm 7.0.2 or later were not affected and are unchanged.
 * Fixed a 15 to 30% `ncclScatter` bandwidth loss from 16 MB upward on multi-node AINIC jobs, caused by the move to two network channels per peer (for example on 4 nodes of 8 GPUs). Scatter now uses and connects the most channels per peer whose flows still fit the P2P channel pool. Point-to-point operations and the other collectives keep their channel count.
+* Fixed intermittent data corruption in multi-node collectives, seen as out-of-bounds values in 8-node AllToAll, on hosts that use GPU Direct RDMA through peermem. Since RCCL 2.30.4 the GDR flush scratchpad was registered only through dma-buf, so on peermem hosts the flush degraded to a single RDMA read of the receive buffer, which does not order earlier relaxed-ordering writes. The scratchpad is now also registered through peermem, restoring the strictly ordered RDMA write that precedes the flush read.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.

@@ -397,6 +397,7 @@ if(BUILD_TESTS)
       Gfx1250SendRecvLl128WindowTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/TestFp8Reduce.cpp
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
       device/DdaIpcGpuBarrierOrderingTests.cpp
@@ -1059,6 +1060,7 @@ if(BUILD_TESTS)
       test_sparse_send_recv.cpp
       DdaAllReduceMPITests.cpp
       DdaReduceScatterMPITests.cpp
+      DdaReduceScatterLL128MPITests.cpp
       DdaFabricSimpleMPITests.cpp
       DdaIpcIndexDataMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp

@@ -287,6 +287,17 @@
         {"name": "GinHostFinalizeMicrotests", "description": "Host-only gin/gin_host.cc finalize microtests (no GPU, no HIP/RCCL runtime); covers plugin finalize on comm destroy (AICOMRCCL-2739)", "test_filter": "*"}
       ]
     },
+    "unit_tests_micro_dda_ipc": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroDdaIpc",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "DdaIpcMicrotests", "description": "Host-only dda_all_reduce_ipc.cu eligibility, datatype dispatch and flat/tree selection microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
     "unit_tests_micro_rome_models": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroRomeModels",
@@ -370,6 +381,12 @@
       "name": "RCCL Microtests - gin_host.cc finalize",
       "description": "rccl-UnitTestsMicroGinHostFinalize (host-only gin/gin_host.cc finalize microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_gin_host_finalize",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - dda_all_reduce_ipc.cu",
+      "description": "rccl-UnitTestsMicroDdaIpc (host-only DDA IPC all-reduce eligibility/dispatch microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_dda_ipc",
       "enabled": true
     },
     {
