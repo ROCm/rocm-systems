@@ -1662,7 +1662,9 @@
 <p>Instruction decoders, execution bodies, legalization tables, and encoding
 translators are generated from the
 <a href="https://gpuopen.com/machine-readable-isa/">Machine-Readable ISA (MR ISA)</a>
-XML specification via the <code>amdisa</code> Python library in <code>lib/python/amdisa/</code>.</p>
+XML specification via the <code>amdisa</code> Python library in <code>lib/python/amdisa/</code>.
+DBT generation also emits the matrix lane-conversion catalog from Python
+layout formulas and a fixed inventory of source/target layout names.</p>
 <h2 id="amdisa-modules">amdisa modules<a class="headerlink" href="#amdisa-modules" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -1707,6 +1709,14 @@ XML specification via the <code>amdisa</code> Python library in <code>lib/python
 <tr>
 <td><code>encoding_translator_codegen.py</code></td>
 <td>Emit C++20 neutral field structs + decode/encode functions</td>
+</tr>
+<tr>
+<td><code>layout_catalog.py</code></td>
+<td>Matrix lane-layout descriptors and XOR permutation formulas</td>
+</tr>
+<tr>
+<td><code>codegen/dbt/rule_gen.py</code></td>
+<td>Derive and emit the matrix lane-conversion catalog</td>
 </tr>
 </tbody>
 </table>
@@ -1894,8 +1904,23 @@ code generation:</p>
 <td><code>lib/rocjitsu/src/rocjitsu/code/dbt/generated/</code></td>
 <td><code>encoding_translator_codegen.py</code></td>
 </tr>
+<tr>
+<td>Matrix lane-conversion catalog (<code>matrix_conversions.h</code>)</td>
+<td><code>lib/rocjitsu/src/rocjitsu/code/dbt/generated/</code></td>
+<td><code>codegen/dbt/rule_gen.py</code></td>
+</tr>
 </tbody>
 </table>
+<p>The matrix header is regenerated during DBT generation from the four preserved
+layout pairs in <code>_MATRIX_CONVERSION_PAIRS</code> in <code>codegen/dbt/rule_gen.py</code> and the
+lane-layout formulas in <code>layout_catalog.py</code>. The output helper creates the
+directory and runs <code>clang-format</code> when available. The inventory describes
+layout permutations; adding a row does not implement a translation or establish
+opcode availability. In particular, <code>V_WMMA_I32_16X16X32_I8</code> is a historical
+layout-only placeholder absent from the pinned RDNA4 XML, whose 8-bit integer
+WMMA instruction is <code>V_WMMA_I32_16X16X16_IU8</code>. The current consumer in
+<code>cdna4_to_rdna4.cpp</code> selects a row by source mnemonic and emits a fixed F16 WMMA
+instruction; it does not validate or select the catalog's destination names.</p>
 <p>GPUOpen's public CDNA5 MR ISA uses the architecture name <code>AMD CDNA 5</code> and the
 filename <code>amdgpu_isa_cdna5.xml</code>. rocjitsu's logical generator key and
 configuration architecture are <code>cdna5</code>. Concrete GPU/runtime, ELF, and public
@@ -1943,7 +1968,7 @@ decode/encode functions and neutral field structs are auto-generated.</p>
 </tr>
 <tr>
 <td><code>--gen-dbt</code></td>
-<td>Generate DBT legalization tables and encoding translators</td>
+<td>Generate DBT legalization tables, matrix layout conversions, and encoding translators</td>
 </tr>
 <tr>
 <td><code>--isa-output DIR</code></td>
