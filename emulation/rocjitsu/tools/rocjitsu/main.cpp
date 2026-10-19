@@ -919,6 +919,9 @@ int wait_for_process_grid(std::vector<ProcessGridRank> ranks, const sigset_t &sh
 
     const timespec timeout{.tv_sec = 0, .tv_nsec = kProcessGridPollTimeoutMs * 1'000'000L};
     const int signal = sigtimedwait(&shutdown_signals, nullptr, &timeout);
+    if (signal == SIGCHLD) {
+      continue;
+    }
     if (signal == SIGINT || signal == SIGTERM) {
       if (exit_code == 0)
         exit_code = 128 + signal;
@@ -940,6 +943,7 @@ int launch_process_grid(char *const app_argv[], rocjitsu::cli::LaunchEnvironment
   sigemptyset(&shutdown_signals);
   sigaddset(&shutdown_signals, SIGINT);
   sigaddset(&shutdown_signals, SIGTERM);
+  sigaddset(&shutdown_signals, SIGCHLD);
 
   sigset_t previous_signals;
   if (sigprocmask(SIG_BLOCK, &shutdown_signals, &previous_signals) != 0) {
@@ -993,6 +997,8 @@ int launch_process_grid(char *const app_argv[], rocjitsu::cli::LaunchEnvironment
 
       const timespec no_wait{.tv_sec = 0, .tv_nsec = 0};
       const int pending_signal = sigtimedwait(&shutdown_signals, nullptr, &no_wait);
+      if (pending_signal == SIGCHLD)
+        continue;
       if (pending_signal == SIGINT || pending_signal == SIGTERM) {
         const int exit_code = wait_for_process_grid(std::move(children), shutdown_signals,
                                                     128 + pending_signal, true);
