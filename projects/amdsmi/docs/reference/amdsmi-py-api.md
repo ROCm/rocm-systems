@@ -8300,6 +8300,47 @@ finally:
     amdsmi.amdsmi_shut_down()
 ```
 
+### amdsmi_get_cpu_xgmi_width
+
+Description:  Get xgmi link width range.
+
+Input: processor handle
+
+Output: dictionary with fields `min_width` and `max_width`
+
+Exceptions that can be thrown by `amdsmi_get_cpu_xgmi_width` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            xgmi_width = amdsmi.amdsmi_get_cpu_xgmi_width(processor)
+            print(xgmi_width["min_width"], xgmi_width["max_width"])
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
 ### amdsmi_set_cpu_gmi3_link_width_range
 
 Description:  Set gmi3 link width range.
@@ -8408,6 +8449,47 @@ try:
     else:
         for processor in processor_handles:
             apb_disable = amdsmi.amdsmi_cpu_apb_disable(processor, 0)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_apb_status
+
+Description:  Get APB status.
+
+Input: processor handle
+
+Output: dictionary with fields `apb_disabled` (0 = APB enabled/automatic P-state, 1 = APB disabled/fixed P-state) and `pstate` (DF P-state value, only meaningful when APB is disabled)
+
+Exceptions that can be thrown by `amdsmi_get_cpu_apb_status` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            apb_status = amdsmi.amdsmi_get_cpu_apb_status(processor)
+            print(apb_status["apb_disabled"], apb_status["pstate"])
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:
@@ -8562,6 +8644,47 @@ try:
     else:
         for processor in processor_handles:
             pstate_range = amdsmi.amdsmi_set_cpu_df_pstate_range(processor, 0, 2)
+except amdsmi.AmdSmiException as e:
+    print(e)
+finally:
+    amdsmi.amdsmi_shut_down()
+```
+
+### amdsmi_get_cpu_df_pstate_range
+
+Description:  Get df pstate range.
+
+Input: processor handle
+
+Output: dictionary with fields `min_pstate` and `max_pstate`
+
+Exceptions that can be thrown by `amdsmi_get_cpu_df_pstate_range` function:
+
+* `AmdSmiLibraryException`
+
+#### Possible Library Exceptions
+
+- `AMDSMI_STATUS_NOT_SUPPORTED` - Feature not supported
+- `AMDSMI_STATUS_NOT_YET_IMPLEMENTED` - Feature not yet implemented
+- `AMDSMI_STATUS_NO_HSMP_MSG_SUP` - HSMP message/feature not supported
+- `AMDSMI_STATUS_INVAL` - Invalid parameters
+- `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+
+Example:
+
+```python
+import amdsmi
+try:
+    amdsmi.amdsmi_init()
+    cpu_handles = amdsmi.amdsmi_get_cpu_handles()
+    cpu_count = cpu_handles["cpu_count"]
+    processor_handles = cpu_handles["processor_handles"]
+    if cpu_count == 0:
+        print("No CPU sockets on machine")
+    else:
+        for processor in processor_handles:
+            pstate_range = amdsmi.amdsmi_get_cpu_df_pstate_range(processor)
+            print(pstate_range["min_pstate"], pstate_range["max_pstate"])
 except amdsmi.AmdSmiException as e:
     print(e)
 finally:

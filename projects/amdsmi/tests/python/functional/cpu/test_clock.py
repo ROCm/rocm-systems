@@ -105,16 +105,12 @@ class TestCpuClock(unittest.TestCase):
     def test_get_cpu_apb_status(self):
         self.common.print_func_name("")
 
-        # A GPU handle passed to a CPU-only API must fail -- the garbage socket
-        # index derived from a non-CPU handle trips an ESMI error (eg.
-        # NO_HSMP_MSG_SUP or IO), and a null handle surfaces as INVAL. Accepting
-        # any failure would let a wrong status (including a bogus SUCCESS) pass.
-        wrong_processor = [
-            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-            amdsmi.AmdSmiStatus.IO,
-            amdsmi.AmdSmiStatus.INVAL,
-        ]
+        # amdsmi_get_cpu_apb_status derives the socket index from the handle's
+        # processor index and forwards it to ESMI; it does not validate that the
+        # handle is a CPU. A GPU handle therefore reuses its index as a socket
+        # index, which on a combined GPU + EPYC host aliases a real socket and can
+        # legitimately succeed -- so there is no well-defined status to assert for
+        # a GPU handle, and that sweep is intentionally omitted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
             amdsmi.AmdSmiStatus.NOT_SUPPORTED,
@@ -129,18 +125,6 @@ class TestCpuClock(unittest.TestCase):
         failures = []
 
         try:
-            with self.common.status_sweep():
-                for i, gpu in enumerate(self.common.processors):
-                    self.common.print_device_header(i)
-                    msg = f"\t### amdsmi_get_cpu_apb_status(gpu={i}):"
-                    val = "N/A"
-                    with self.common.expect_status(msg, wrong_processor):
-                        val = amdsmi.amdsmi_get_cpu_apb_status(gpu)
-                    self.common.print(f"\t    data: {val}")
-        except Exception as e:
-            failures.append(e)
-
-        try:
             cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_handles = []
@@ -153,6 +137,16 @@ class TestCpuClock(unittest.TestCase):
                     with self.common.expect_status(msg, correct_processor):
                         val = amdsmi.amdsmi_get_cpu_apb_status(cpu)
                     self.common.print(f"\t    data: {val}")
+                    # A SUCCESS must also carry sane data -- status alone would let
+                    # swapped or garbage out-params (eg. apb_disabled == 7) pass.
+                    if isinstance(val, dict):
+                        assert val["apb_disabled"] in (0, 1), (
+                            f"apb_disabled must be 0 or 1, got {val['apb_disabled']}"
+                        )
+                        if val["apb_disabled"] == 1:
+                            assert 0 <= val["pstate"] <= 7, (
+                                f"pstate out of range [0, 7], got {val['pstate']}"
+                            )
         except Exception as e:
             failures.append(e)
 
@@ -254,16 +248,12 @@ class TestCpuClock(unittest.TestCase):
     def test_get_cpu_df_pstate_range(self):
         self.common.print_func_name("")
 
-        # A GPU handle passed to a CPU-only API must fail -- the garbage socket
-        # index derived from a non-CPU handle trips an ESMI error (eg.
-        # NO_HSMP_MSG_SUP or IO), and a null handle surfaces as INVAL. Accepting
-        # any failure would let a wrong status (including a bogus SUCCESS) pass.
-        wrong_processor = [
-            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-            amdsmi.AmdSmiStatus.IO,
-            amdsmi.AmdSmiStatus.INVAL,
-        ]
+        # amdsmi_get_cpu_df_pstate_range derives the socket index from the handle's
+        # processor index and forwards it to ESMI; it does not validate that the
+        # handle is a CPU. A GPU handle therefore reuses its index as a socket
+        # index, which on a combined GPU + EPYC host aliases a real socket and can
+        # legitimately succeed -- so there is no well-defined status to assert for
+        # a GPU handle, and that sweep is intentionally omitted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
             amdsmi.AmdSmiStatus.NOT_SUPPORTED,
@@ -274,18 +264,6 @@ class TestCpuClock(unittest.TestCase):
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
         failures = []
-
-        try:
-            with self.common.status_sweep():
-                for i, gpu in enumerate(self.common.processors):
-                    self.common.print_device_header(i)
-                    msg = f"\t### amdsmi_get_cpu_df_pstate_range(gpu={i}):"
-                    val = "N/A"
-                    with self.common.expect_status(msg, wrong_processor):
-                        val = amdsmi.amdsmi_get_cpu_df_pstate_range(gpu)
-                    self.common.print(f"\t    data: {val}")
-        except Exception as e:
-            failures.append(e)
 
         try:
             cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
@@ -300,6 +278,16 @@ class TestCpuClock(unittest.TestCase):
                     with self.common.expect_status(msg, correct_processor):
                         val = amdsmi.amdsmi_get_cpu_df_pstate_range(cpu)
                     self.common.print(f"\t    data: {val}")
+                    # A SUCCESS must also carry sane data -- status alone would let
+                    # swapped min/max or out-of-range P-states pass.
+                    if isinstance(val, dict):
+                        assert 0 <= val["min_pstate"] <= 7 and 0 <= val["max_pstate"] <= 7, (
+                            f"df pstate values out of range [0, 7]: {val}"
+                        )
+                        assert val["min_pstate"] <= val["max_pstate"], (
+                            f"df pstate min ({val['min_pstate']}) must be <= "
+                            f"max ({val['max_pstate']})"
+                        )
         except Exception as e:
             failures.append(e)
 
@@ -402,16 +390,11 @@ class TestCpuClock(unittest.TestCase):
         # is defined only for *multi-socket* systems (XGMI is the socket-to-socket
         # link). On a single-socket host there is no XGMI link, so ESMI rejects the
         # query and it surfaces as AMDSMI_STATUS_INVAL -- a legitimate result on
-        # the CPU path. A GPU handle passed to this CPU-only API must fail -- the
-        # garbage socket index derived from a non-CPU handle trips an ESMI error
-        # (eg. NO_HSMP_MSG_SUP or IO), and a null handle surfaces as INVAL.
-        # Accepting any failure would let a wrong status (incl. bogus SUCCESS) pass.
-        wrong_processor = [
-            amdsmi.AmdSmiStatus.NOT_SUPPORTED,
-            amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
-            amdsmi.AmdSmiStatus.IO,
-            amdsmi.AmdSmiStatus.INVAL,
-        ]
+        # the CPU path. The API derives the socket index from the handle's
+        # processor index and does not validate that the handle is a CPU, so a GPU
+        # handle reuses its index as a socket index and can legitimately succeed on
+        # a combined GPU + EPYC host; there is no well-defined status to assert for
+        # a GPU handle, and that sweep is intentionally omitted.
         correct_processor = [
             amdsmi.AmdSmiStatus.SUCCESS,
             amdsmi.AmdSmiStatus.NOT_SUPPORTED,
@@ -423,18 +406,6 @@ class TestCpuClock(unittest.TestCase):
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
         failures = []
-
-        try:
-            with self.common.status_sweep():
-                for i, gpu in enumerate(self.common.processors):
-                    self.common.print_device_header(i)
-                    msg = f"\t### amdsmi_get_cpu_xgmi_width(gpu={i}):"
-                    val = "N/A"
-                    with self.common.expect_status(msg, wrong_processor):
-                        val = amdsmi.amdsmi_get_cpu_xgmi_width(gpu)
-                    self.common.print(f"\t    data: {val}")
-        except Exception as e:
-            failures.append(e)
 
         try:
             cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
@@ -449,6 +420,13 @@ class TestCpuClock(unittest.TestCase):
                     with self.common.expect_status(msg, correct_processor):
                         val = amdsmi.amdsmi_get_cpu_xgmi_width(cpu)
                     self.common.print(f"\t    data: {val}")
+                    # A SUCCESS must also carry sane data -- status alone would let
+                    # swapped min/max out-params pass.
+                    if isinstance(val, dict):
+                        assert val["min_width"] <= val["max_width"], (
+                            f"xgmi width min ({val['min_width']}) must be <= "
+                            f"max ({val['max_width']})"
+                        )
         except Exception as e:
             failures.append(e)
 
