@@ -417,8 +417,11 @@ def test_workflow_shell_and_removed_paths():
                     ['bash', '-n'], input=step['run'], text=True, capture_output=True
                 )
                 assert result.returncode == 0, result.stderr
-    text = WORKFLOW.read_text()
-    assert "github.ref == 'refs/heads/develop'" in text
+    assert doc['jobs']['benchmark']['if'] == "${{ github.ref_type == 'branch' }}"
+    assert doc['jobs']['publish']['if'] == (
+        "${{ !cancelled() && github.ref == 'refs/heads/develop' "
+        "&& needs.benchmark.outputs.raw_ready == 'true' }}"
+    )
     # PyYAML safe_load treats the unquoted YAML key on as boolean True.
     assert doc['on' if 'on' in doc else True]['workflow_dispatch']['inputs'][
         'commit'
