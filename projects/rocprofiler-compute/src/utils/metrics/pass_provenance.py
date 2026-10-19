@@ -14,10 +14,11 @@ from typing import Dict, FrozenSet, List, Mapping, Match, Optional, Set, Tuple, 
 
 import pandas as pd
 
-from utils.logger import console_debug, console_warning
+from utils.logger import console_warning
 from utils.metrics.expression import build_eval_string
 from utils.utils_counter_defs import (
     SUPPORTED_DENOM,
+    UNIT_COUNTER,
     extract_counters_and_variables,
     get_build_in_vars,
 )
@@ -32,6 +33,16 @@ METRIC_ROW_PASS_ATTR = "metric_row_pass"
 _COUNTER_COL_RE = re.compile(r"raw_pmc_df\[['\"]([^'\"]+)['\"]\]")
 _AMMOLITE_VAR_RE = re.compile(r"ammolite__([A-Za-z0-9_]+)")
 _DIGIT_SPLIT_RE = re.compile(r"(\d+)")
+
+# Wide-frame columns that are not hardware counters. $denom (per_kernel) and
+# per-second formulas name these, and they are never a Counter_Name in a pass.
+_NON_PMC_FRAME_COLUMNS = frozenset({
+    UNIT_COUNTER,
+    "Start_Timestamp",
+    "End_Timestamp",
+})
+
+_PASS_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 # System / unit variables that never take a pass suffix.
 _SYSTEM_LIKE_VARS = frozenset({
@@ -62,6 +73,29 @@ def natural_pass_sort_key(key: str) -> Tuple[Union[int, str], ...]:
     return tuple(int(part) if part.isdigit() else part for part in parts)
 
 
+def raw_pmc_column_names(expr: str) -> List[str]:
+    """Return raw_pmc_df column names referenced by one expression string."""
+    if not isinstance(expr, str) or not expr:
+        return []
+    return _COUNTER_COL_RE.findall(expr)
+
+
+def _require_safe_pass_key(pass_key: str) -> str:
+    """Reject a pass key that cannot be spliced into a quoted expression."""
+    if _PASS_KEY_RE.fullmatch(pass_key) is None:
+        raise ValueError(
+            f"pass key {pass_key!r} is not safe to splice into an expression"
+        )
+    return pass_key
+
+
+def _pmc_column_base(column: str) -> str:
+    """Strip a pass qualifier so a second bind sees the hardware counter."""
+    if PASS_COLUMN_SEP in column:
+        return column.split(PASS_COLUMN_SEP, 1)[0]
+    return column
+
+
 @dataclass(frozen=True)
 class PassLayout:
     """Counters observed per profiling pass (from results, not perfmon YAML)."""
@@ -78,6 +112,7 @@ class PassLayout:
         return self.pass_keys.index(pass_key)
 
     def qualified_column(self, counter: str, pass_key: str) -> str:
+        _require_safe_pass_key(pass_key)
         return f"{counter}{PASS_COLUMN_SEP}{pass_key}"
 
     def passes_containing(self, counters: FrozenSet[str]) -> List[str]:
@@ -105,7 +140,8 @@ def build_pass_layout(long_df: pd.DataFrame) -> PassLayout:
 
     counters_by_pass: Dict[str, FrozenSet[str]] = {}
     for pass_key, group in long_df.groupby(PASS_KEY_COLUMN, sort=False):
-        counters_by_pass[str(pass_key)] = frozenset(
+        key = _require_safe_pass_key(str(pass_key))
+        counters_by_pass[key] = frozenset(
             str(name) for name in group["Counter_Name"].dropna().unique()
         )
 
@@ -130,7 +166,11 @@ def extract_row_refs(built_exprs: List[str]) -> MetricRowRefs:
     for expr in built_exprs:
         if not isinstance(expr, str) or not expr:
             continue
-        counters.update(_COUNTER_COL_RE.findall(expr))
+        for column in raw_pmc_column_names(expr):
+            base = _pmc_column_base(column)
+            if base in _NON_PMC_FRAME_COLUMNS:
+                continue
+            counters.add(base)
         for var_name in _AMMOLITE_VAR_RE.findall(expr):
             # Strip accidental pass suffixes if re-extracting.
             if PASS_VAR_SEP in var_name:
@@ -194,11 +234,12 @@ def select_pass_with_normalization_fallback(
     layout: PassLayout,
     gpu_series: str,
 ) -> Tuple[Optional[str], bool]:
-    """Select one pass, relaxing only runtime normalization counters if needed.
+    """Select one pass. SQ_WAVES and GRBM_GUI_ACTIVE are never dropped.
 
-    Returns ``(pass_key, relaxed)``. ``pass_key`` is ``None`` when no pass was
-    found even after relaxation. ``relaxed`` is true only when removing
-    normalization counters produced a qualifying pass.
+    Returns (pass_key, relaxed). pass_key is None when no pass holds the
+    counters that must stay together. relaxed is true only when removing a
+    runtime normalization counter other than SQ_WAVES or GRBM_GUI_ACTIVE
+    produced a qualifying pass.
     """
     chosen = select_pass(required, layout)
     if chosen is not None:
@@ -212,12 +253,23 @@ def select_pass_with_normalization_fallback(
             include_supported_denom=False,
         )
         normalization_counters.update(counters)
+    normalization_counters -= _SAME_PASS_COUNTERS
     formula_counters = required - normalization_counters
     if not formula_counters or formula_counters == required:
         return None, False
     fallback = select_pass(frozenset(formula_counters), layout)
     return fallback, fallback is not None
 
+
+def _expression_should_unset(value: object) -> bool:
+    return isinstance(value, str) and bool(value) and value != _UNSET_EXPRESSION
+
+
+# Dividing by these counters across passes is not a same-pass result.
+# Relaxing them would read another pass's copy.
+_SAME_PASS_COUNTERS = frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"})
+
+_UNSET_EXPRESSION = "None"
 
 _ALREADY_BOUND_BUILTIN_RE = re.compile(rf"{re.escape(PASS_VAR_SEP)}\d+$")
 
@@ -315,6 +367,8 @@ def bind_metric_tables_to_passes(
             ]
             refs = extract_row_refs(exprs)
             required = expand_required_counters(refs, gpu_series)
+            if not required:
+                continue
             # Prefer a pass that also has any normalization counters named
             # directly (already in required if present in the formula).
             chosen, normalization_relaxed = select_pass_with_normalization_fallback(
@@ -324,11 +378,17 @@ def bind_metric_tables_to_passes(
             )
             if chosen is None:
                 unbound += 1
-                console_debug(
+                console_warning(
                     "pass_provenance",
                     f"row {row_id}: no single pass for {sorted(required)}; "
-                    "using base columns",
+                    "leaving the metric unset",
                 )
+                for field in df.columns:
+                    if field not in supported_fields:
+                        continue
+                    value = df.at[row_id, field]
+                    if _expression_should_unset(value):
+                        df.at[row_id, field] = _UNSET_EXPRESSION
                 continue
             if normalization_relaxed:
                 missing = required - pass_layout.counters_by_pass[chosen]
@@ -351,9 +411,10 @@ def bind_metric_tables_to_passes(
         df.attrs[METRIC_ROW_PASS_ATTR] = row_pass
 
     if unbound:
-        console_debug(
+        console_warning(
             "pass_provenance",
-            f"same-pass bind: {unbound} metric row(s) fell back to base columns",
+            f"same-pass bind: {unbound} metric row(s) left unset "
+            "(counters do not share a pass)",
         )
     return used_passes
 
@@ -391,6 +452,8 @@ def bind_expression_dataframe(
             continue
         refs = extract_row_refs(exprs)
         required = expand_required_counters(refs, gpu_series)
+        if not required:
+            continue
         chosen, normalization_relaxed = select_pass_with_normalization_fallback(
             required,
             pass_layout,
@@ -398,11 +461,15 @@ def bind_expression_dataframe(
         )
         if chosen is None:
             unbound += 1
-            console_debug(
+            console_warning(
                 "pass_provenance",
                 f"metric {metric_id}: no single pass for {sorted(required)}; "
-                "using base columns",
+                "leaving the metric unset",
             )
+            for row_index in group.index:
+                value = expression_df.at[row_index, "value"]
+                if _expression_should_unset(value):
+                    expression_df.at[row_index, "value"] = _UNSET_EXPRESSION
             continue
         if normalization_relaxed:
             missing = required - pass_layout.counters_by_pass[chosen]
@@ -423,8 +490,9 @@ def bind_expression_dataframe(
 
     expression_df.attrs[METRIC_ROW_PASS_ATTR] = metric_pass
     if unbound:
-        console_debug(
+        console_warning(
             "pass_provenance",
-            f"same-pass bind (DB): {unbound} metric(s) fell back to base columns",
+            f"same-pass bind (DB): {unbound} metric(s) left unset "
+            "(counters do not share a pass)",
         )
     return used_passes
