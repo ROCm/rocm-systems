@@ -178,7 +178,7 @@ class AsyncLogger {
     }
 
     try {
-      flushPending();
+      flushPending(/*crash=*/true);
     } catch (...) {
     }
   }
@@ -190,6 +190,7 @@ class AsyncLogger {
   std::vector<LogEntry> buffer_;           //!< Circular buffer of log entries
   std::atomic<size_t> writeIndex_{0};      //!< Write position in circular buffer
   std::atomic<size_t> readIndex_{0};       //!< Read position in circular buffer
+  std::atomic<size_t> claimIndex_{0};      //!< readIndex_ + 1 while an entry is being written
   std::atomic<bool> running_{false};       //!< Worker thread running flag
   std::atomic<bool> enabled_{false};       //!< Async logging enabled flag
 
@@ -211,31 +212,49 @@ class AsyncLogger {
     flushPending();
   }
 
-  void flushPending() {
+  // The logger thread, a flush in the calling thread and crash callbacks all
+  // consume the queue. Each entry is written by the one consumer that moves
+  // claimIndex_ from k to k + 1 while readIndex_ is k; readIndex_ follows once
+  // it is written. A crash flush may have interrupted the claim holder or a
+  // producer, so it stops where the others would wait.
+  void flushPending(bool crash = false) {
     TruncateLogFileFlushPath();
-    
-    size_t currentRead = readIndex_.load(std::memory_order_acquire);
-    size_t currentWrite = writeIndex_.load(std::memory_order_acquire);
-    size_t writeCount = 0;
 
-    while (currentRead != currentWrite) {
-      LogEntry& entry = buffer_[currentRead % kBufferSize];
-      
-      // Wait for valid flag
-      while (!entry.valid.load(std::memory_order_acquire)) {
-        std::this_thread::yield();
+    size_t writeCount = 0;
+    for (;;) {
+      size_t currentRead = readIndex_.load(std::memory_order_acquire);
+      if (currentRead == writeIndex_.load(std::memory_order_acquire)) {
+        break;
       }
-      
+      size_t expected = currentRead;
+      if (!claimIndex_.compare_exchange_strong(expected, currentRead + 1,
+                                               std::memory_order_acq_rel)) {
+        if (crash) {
+          break;
+        }
+        std::this_thread::yield();
+        continue;
+      }
+      LogEntry& entry = buffer_[currentRead % kBufferSize];
+
+      // Wait for valid flag
+      bool valid = entry.valid.load(std::memory_order_acquire);
+      while (!valid && !crash) {
+        std::this_thread::yield();
+        valid = entry.valid.load(std::memory_order_acquire);
+      }
+      if (!valid) {
+        claimIndex_.store(currentRead, std::memory_order_release);
+        break;
+      }
+
       writeToFile(entry);
       entry.valid.store(false, std::memory_order_release);
-      
-      currentRead++;
-      readIndex_.store(currentRead, std::memory_order_release);
+      readIndex_.store(currentRead + 1, std::memory_order_release);
       writeCount++;
       if (writeCount % 1024 == 0) {
         fflush(outFile);
       }
-      currentWrite = writeIndex_.load(std::memory_order_acquire);
     }
     fflush(outFile);
   }

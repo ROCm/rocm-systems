@@ -27,6 +27,18 @@
  *     log line, and the line can only reach stderr through the crash flush,
  *     after a marker the workload writes just before the signal.
  *
+ *   Unit_HRR_CaptureCrashChainsAsyncLogRecovers:
+ *     With asynchronous logging on, the logger thread is blocked writing a log
+ *     line when a SIGSEGV arrives that the earlier handler recovers from. The
+ *     crash flush must leave that line and the ones after it to the logger, so
+ *     that after the recovery the logger goes on and the process exits instead
+ *     of hanging.
+ *
+ *   Unit_HRR_CaptureCrashChainsKeepErrno:
+ *     The capture's crash callback cannot write its manifest and changes errno.
+ *     The earlier handler, and the code that resumes after it, still see the
+ *     errno from before the signal.
+ *
  *   Unit_HRR_CaptureCrashChainsResetHandOnce:
  *     The earlier handler is SA_RESETHAND and SA_ONSTACK. The first SIGSEGV
  *     runs it, the second kills the process, as it would without CLR's
@@ -47,6 +59,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -85,6 +98,12 @@ void earlier_segv_handler(int) {
 volatile sig_atomic_t g_reset_calls = 0;
 
 void reset_segv_handler(int) { g_reset_calls = g_reset_calls + 1; }
+
+constexpr const char* kLogRecoveryMarker = "hrr-crash-log-recovery";
+constexpr const char* kErrnoMarker = "hrr-crash-errno";
+volatile sig_atomic_t g_errno_seen = -1;
+
+void errno_segv_handler(int) { g_errno_seen = errno; }
 
 struct ChainRun {
   int ret;
@@ -191,8 +210,12 @@ TEST_CASE("Unit_HRR_CaptureCrashChain_Direct", "[.][hrr-direct]") {
   raise(SIGSEGV);
   HRR_HIP_CHECK(hipMemcpy(d, h.data(), h.size() * sizeof(int), hipMemcpyHostToDevice));
   // From here to _exit, a logger thread blocks on stderr; this thread can
-  // still write it, and so can the crash callbacks run on it.
+  // still write it, and so can the crash callbacks run on it. The logger polls
+  // every millisecond: it writes the lines logged so far, then blocks with no
+  // line in hand, so the next one is left to the crash flush.
+  usleep(200 * 1000);
   flockfile(stderr);
+  usleep(200 * 1000);
   HRR_HIP_CHECK(hipDeviceSynchronize());
   fprintf(stderr, "%s\n", kCrashSignalMarker);
   raise(SIGSEGV);
@@ -238,6 +261,61 @@ TEST_CASE("Unit_HRR_CaptureCrashChainResetHand_Direct", "[.][hrr-direct]") {
   _exit(0);
 }
 
+// The earlier handler recovers from a SIGSEGV raised while the logger thread is
+// blocked on stderr in the middle of a log line.
+TEST_CASE("Unit_HRR_CaptureCrashChainLogRecovery_Direct", "[.][hrr-direct]") {
+  if (std::getenv("HIP_HRR_CAPTURE_OUTPUT") == nullptr || std::getenv("AMD_LOG_ASYNC") == nullptr)
+    HRR_SKIP("not running under capture with asynchronous logging");
+
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sigemptyset(&sa.sa_mask);
+  sa.sa_handler = reset_segv_handler;
+  REQUIRE(sigaction(SIGSEGV, &sa, nullptr) == 0);
+
+  HRR_HIP_CHECK(hipSetDevice(0));
+  flockfile(stderr);
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  usleep(200 * 1000);  // The logger thread is now blocked writing a line
+  HRR_HIP_CHECK(hipDeviceSynchronize());
+  raise(SIGSEGV);
+  funlockfile(stderr);
+  int version = 0;
+  HRR_HIP_CHECK(hipRuntimeGetVersion(&version));
+  printf("%s calls=%d\n", kLogRecoveryMarker, static_cast<int>(g_reset_calls));
+  fflush(stdout);
+  // A normal exit flushes the log and stops the logger thread
+  exit(0);
+}
+
+// HRR's crash callback finds a directory where its manifest goes.
+TEST_CASE("Unit_HRR_CaptureCrashChainErrno_Direct", "[.][hrr-direct]") {
+  const char* root = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
+  if (root == nullptr) HRR_SKIP("not running under capture");
+
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sigemptyset(&sa.sa_mask);
+  sa.sa_handler = errno_segv_handler;
+  REQUIRE(sigaction(SIGSEGV, &sa, nullptr) == 0);
+
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, 64));
+  char manifest[4096];
+  snprintf(manifest, sizeof(manifest), "%s/pid-%d/manifest.json", root,
+           static_cast<int>(getpid()));
+  unlink(manifest);
+  REQUIRE(mkdir(manifest, 0700) == 0);
+
+  errno = EDOM;
+  raise(SIGSEGV);
+  const int after = errno;
+  printf("%s seen=%d after=%d\n", kErrnoMarker, static_cast<int>(g_errno_seen), after);
+  fflush(stdout);
+  _exit(0);
+}
+
 HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsEarlierHandler) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_crash_chain"};
   check_crash_chain(cap.path, /*async_log=*/false);
@@ -257,6 +335,30 @@ HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsResetHandOnce) {
   CHECK(run.out.find(std::string(kCrashResetMarker) + " onstack=1 calls=1") != std::string::npos);
   CHECK(run.out.find("survived") == std::string::npos);
   CHECK(run.ret == 128 + SIGSEGV);
+}
+
+HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsAsyncLogRecovers) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_crash_chain_log_recovery"};
+  const ChainRun run =
+      run_crash_chain(cap.path, /*async_log=*/true, "Unit_HRR_CaptureCrashChainLogRecovery_Direct");
+  INFO("Workload exit code: " << run.ret << "\nWorkload output:\n" << run.out);
+  // Before, the crash flush wrote the line the logger thread held and the ones
+  // after it; the logger then waited forever for a line already written, and
+  // so did the flush at exit.
+  REQUIRE(run.ret == 0);
+  CHECK(run.out.find(std::string(kLogRecoveryMarker) + " calls=1") != std::string::npos);
+  CHECK(run.out.find("hipRuntimeGetVersion") != std::string::npos);
+}
+
+HRR_TEST_CASE(Unit_HRR_CaptureCrashChainsKeepErrno) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_crash_chain_errno"};
+  const ChainRun run =
+      run_crash_chain(cap.path, /*async_log=*/false, "Unit_HRR_CaptureCrashChainErrno_Direct");
+  INFO("Workload exit code: " << run.ret << "\nWorkload output:\n" << run.out);
+  REQUIRE(run.ret == 0);
+  // Before, both saw the EISDIR from the manifest open
+  CHECK(run.out.find(std::string(kErrnoMarker) + " seen=" + std::to_string(EDOM) +
+                     " after=" + std::to_string(EDOM)) != std::string::npos);
 }
 
 #endif  // !_WIN32

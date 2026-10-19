@@ -143,12 +143,15 @@ static std::mutex crashHandlersLock_;
 static bool crashHandlersInstalled_ = false;  // Guarded by crashHandlersLock_
 
 static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
+  // The earlier handler, and the thread if it recovers, see the errno of the fault
+  const int savedErrno = errno;
   for (auto& slot : crashCallbacks_) {
     Os::CrashCallback callback = slot.load(std::memory_order_acquire);
     if (callback != nullptr) {
       callback();
     }
   }
+  errno = savedErrno;
 
   size_t i = 0;
   while (i < kNumCrashSignals && kCrashSignals[i] != sig) {
