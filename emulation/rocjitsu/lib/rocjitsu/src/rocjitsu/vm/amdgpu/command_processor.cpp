@@ -3094,7 +3094,7 @@ bool CommandProcessor::submit_pm4(uint32_t queue_id, uint32_t process_id,
       return queue.queue_id == queue_id && queue.process_id == process_id;
     });
     if (it == compute_queues_.end() || !it->submission_queue) {
-      util::Logger::warn("PM4 submission has no registered queue");
+      util::Logger::warn("PM4 submission has no registered DRM submission queue");
       return false;
     }
     if (it->faulted)

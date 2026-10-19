@@ -204,7 +204,7 @@ public:
   /// @brief Cancel DRM work before its frontend revokes the process VM binding.
   void unregister_drm_queues(uint32_t process_id);
   void unregister_drm_queue(uint32_t queue_id, uint32_t process_id);
-  /// @brief Enqueue a DRM submission; return false if its queue is missing or faulted.
+  /// @brief Enqueue a DRM submission; return false if its queue is missing, non-DRM, or faulted.
   [[nodiscard]] bool submit_pm4(uint32_t queue_id, uint32_t process_id, Pm4Submission submission);
   /// @brief Remove the queue currently identified by the legacy routing tuple.
   void unregister_queue(uint32_t queue_id, uint32_t process_id);
