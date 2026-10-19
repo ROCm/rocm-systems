@@ -23,7 +23,7 @@ namespace {
 } // namespace
 
 WaitcntValues decode_waitcnt_gfx9(uint16_t simm16) {
-  const auto fields = amdgpu::decode_legacy_waitcnt(simm16);
+  const auto fields = amdgpu::decode_gfx9_waitcnt(simm16);
   return {static_cast<uint8_t>(fields.vmcnt), static_cast<uint8_t>(fields.lgkmcnt),
           static_cast<uint8_t>(fields.expcnt)};
 }
