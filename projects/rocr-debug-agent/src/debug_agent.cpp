@@ -211,6 +211,8 @@ static amd_dbgapi_callbacks_t dbgapi_callbacks = {
             g_rbrk_breakpoint_id.emplace (breakpoint_id);
             return AMD_DBGAPI_STATUS_SUCCESS;
           }
+        agent_warning ("amd-dbgapi requested a second breakpoint; only r_brk "
+                       "is supported");
         return AMD_DBGAPI_STATUS_ERROR;
       },
 
