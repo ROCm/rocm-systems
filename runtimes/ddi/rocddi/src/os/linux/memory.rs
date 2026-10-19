@@ -45,7 +45,9 @@ pub(crate) fn page_size() -> io::Result<usize> {
 /// The page is unmapped on drop unless publication transfers it to process
 /// lifetime ownership.
 pub(super) struct ForkMarkerPage {
+    /// Start of the private anonymous mapping.
     address: usize,
+    /// Byte extent to unmap if publication does not occur.
     length: usize,
 }
 

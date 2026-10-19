@@ -15,9 +15,13 @@ use crate::{Error, ErrorKind};
 
 /// One KFD event and the shared native endpoint required to destroy it.
 pub(crate) struct KfdSignalEvent {
+    /// Native connection that created this event.
     kfd: Shared<sys::Kfd>,
+    /// Event ID until native destruction succeeds.
     event_id: Option<u32>,
+    /// Cached mailbox and trigger data for HSA signal construction.
     info: SignalEventInfo,
+    /// An interrupted destroy may already have released the event ID.
     uncertain: bool,
 }
 
