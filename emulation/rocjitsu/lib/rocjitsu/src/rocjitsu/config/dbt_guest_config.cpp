@@ -135,21 +135,10 @@ std::optional<std::string> parse_field_name(std::string_view json, size_t &at) {
     return std::nullopt;
 
   if (json[at] == '"' || json[at] == '\'') {
-    const char quote = json[at++];
-    std::string name;
-    while (at < json.size()) {
-      const char c = json[at++];
-      if (c == quote)
-        return name;
-      if (c == '\\') {
-        if (at >= json.size())
-          return std::nullopt;
-        name.push_back(json[at++]);
-      } else {
-        name.push_back(c);
-      }
-    }
-    return std::nullopt;
+    FailureOr<std::string> name = parse_json_quoted_string(json, at, {});
+    if (name.failed())
+      return std::nullopt;
+    return name.value();
   }
 
   const size_t name_begin = at;

@@ -1845,6 +1845,19 @@ TEST(ConfigLoaderTest, AllowsPluginFieldsDuringStrictDbtValidation) {
   EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(file.path()));
 }
 
+TEST(ConfigLoaderTest, AllowsEscapedPluginFieldsDuringStrictDbtValidation) {
+  const auto file = write_temp_config(R"({
+        "plugin\u0073": {"race": {}},
+        "require_all_plugin\u0073": true,
+        "dbt_guest": {
+          "enabled": false,
+          "execution_backend": "hardware"
+        }
+      })");
+
+  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(file.path()));
+}
+
 TEST(ConfigLoaderTest, StillRejectsMisspelledDbtFieldsWithPluginFieldsPresent) {
   const auto file = write_temp_config(R"({
         "plugins": {"race": {}},

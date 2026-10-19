@@ -647,7 +647,23 @@ add_test(
     COMMAND
         ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
         "-DTEST_ARGS=--profile;mi350x;--in-process;--daemon;--;/usr/bin/true"
-        "-DTEST_REGEX=--in-process cannot be combined with --daemon or --attach"
+        "-DTEST_REGEX=--in-process cannot be combined with --daemon, --attach, --gdb, or --gdb-ex"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuInProcessRejectsGdb
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--in-process;--gdb;--;/usr/bin/true"
+        "-DTEST_REGEX=--in-process cannot be combined with --daemon, --attach, --gdb, or --gdb-ex"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuInProcessRejectsGdbEx
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--in-process;--gdb-ex;run;--;/usr/bin/true"
+        "-DTEST_REGEX=--in-process cannot be combined with --daemon, --attach, --gdb, or --gdb-ex"
         -P ${_rj_cli_failure_script}
 )
 

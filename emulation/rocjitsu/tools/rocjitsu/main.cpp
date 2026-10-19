@@ -1084,15 +1084,17 @@ int main(int argc, char *argv[]) {
     std::cerr << "rocjitsu: --config and --profile cannot be combined\n";
     return 1;
   }
-  if (in_process_mode && (daemon_mode || attach_mode)) {
-    std::cerr << "rocjitsu: --in-process cannot be combined with --daemon or --attach\n";
+
+  const bool gdb_requested = gdb || !gdb_commands.empty();
+  if (in_process_mode && (daemon_mode || attach_mode || gdb_requested)) {
+    std::cerr << "rocjitsu: --in-process cannot be combined with --daemon, --attach, --gdb, "
+                 "or --gdb-ex\n";
     return 1;
   }
 
   const bool has_app = (separator_idx >= 0 && separator_idx + 1 < argc);
   const bool launch_environment_options =
       clear_env_vars || !env_overrides.empty() || workdir.has_value();
-  const bool gdb_requested = gdb || !gdb_commands.empty();
   if (thread_budget_table && (launch_environment_options || gdb_requested)) {
     std::cerr << "rocjitsu: --thread-budget-table cannot be combined with launch-only options\n";
     return 1;

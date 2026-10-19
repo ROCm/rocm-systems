@@ -10,7 +10,6 @@
 #include "simulation_config_generated.h"
 
 #include <cctype>
-#include <charconv>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
@@ -63,149 +62,9 @@ void skip_filler(std::string_view json, size_t &at) {
   }
 }
 
-FailureOr<uint32_t> parse_hex_digits(std::string_view json, size_t &at, size_t count,
-                                     const util::DiagnosticEmitter &emit_error) {
-  if (json.size() - at < count)
-    return emit_error.emit() << "unterminated escape sequence";
-
-  const std::string_view digits = json.substr(at, count);
-  uint32_t value = 0;
-  const auto [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), value, 16);
-  if (ec != std::errc{} || ptr != digits.data() + digits.size())
-    return emit_error.emit() << "escape code must be followed by hexadecimal digits";
-
-  at += count;
-  return value;
-}
-
-Result append_utf8(uint32_t code_point, std::string &decoded,
-                   const util::DiagnosticEmitter &emit_error) {
-  if (code_point <= 0x7f) {
-    decoded += static_cast<char>(code_point);
-  } else if (code_point <= 0x7ff) {
-    decoded += static_cast<char>(0xc0 | (code_point >> 6));
-    decoded += static_cast<char>(0x80 | (code_point & 0x3f));
-  } else if (code_point <= 0xffff) {
-    decoded += static_cast<char>(0xe0 | (code_point >> 12));
-    decoded += static_cast<char>(0x80 | ((code_point >> 6) & 0x3f));
-    decoded += static_cast<char>(0x80 | (code_point & 0x3f));
-  } else if (code_point <= 0x10ffff) {
-    decoded += static_cast<char>(0xf0 | (code_point >> 18));
-    decoded += static_cast<char>(0x80 | ((code_point >> 12) & 0x3f));
-    decoded += static_cast<char>(0x80 | ((code_point >> 6) & 0x3f));
-    decoded += static_cast<char>(0x80 | (code_point & 0x3f));
-  } else {
-    return emit_error.emit() << "Unicode code point is out of range";
-  }
-  return Result::success();
-}
-
-/// @brief Decode a quoted string and advance past it.
-FailureOr<std::string> parse_quoted_string(std::string_view json, size_t &at,
-                                           const util::DiagnosticEmitter &emit_error) {
-  if (at >= json.size() || (json[at] != '"' && json[at] != '\''))
-    return emit_error.emit() << "expected a quoted string";
-
-  const char quote = json[at++];
-  std::string decoded;
-  int unicode_high_surrogate = -1;
-  while (at < json.size()) {
-    const char c = json[at++];
-    if (c == quote) {
-      if (unicode_high_surrogate != -1)
-        return emit_error.emit() << "illegal Unicode sequence";
-      return decoded;
-    }
-
-    if (static_cast<unsigned char>(c) < ' ')
-      return emit_error.emit() << "illegal character in string constant";
-    if (c != '\\') {
-      if (unicode_high_surrogate != -1)
-        return emit_error.emit() << "illegal Unicode sequence";
-      decoded += c;
-      continue;
-    }
-
-    if (at >= json.size())
-      return emit_error.emit() << "unterminated escape sequence";
-    const char escape = json[at++];
-    if (unicode_high_surrogate != -1 && escape != 'u')
-      return emit_error.emit() << "illegal Unicode sequence";
-
-    switch (escape) {
-    case 'n':
-      decoded += '\n';
-      break;
-    case 't':
-      decoded += '\t';
-      break;
-    case 'r':
-      decoded += '\r';
-      break;
-    case 'b':
-      decoded += '\b';
-      break;
-    case 'f':
-      decoded += '\f';
-      break;
-    case '"':
-      decoded += '"';
-      break;
-    case '\'':
-      decoded += '\'';
-      break;
-    case '\\':
-      decoded += '\\';
-      break;
-    case '/':
-      decoded += '/';
-      break;
-    case 'x': {
-      FailureOr<uint32_t> digits = parse_hex_digits(json, at, 2, emit_error);
-      if (digits.failed())
-        return Result::failure();
-      decoded += static_cast<char>(digits.value());
-      break;
-    }
-    case 'u': {
-      FailureOr<uint32_t> digits = parse_hex_digits(json, at, 4, emit_error);
-      if (digits.failed())
-        return Result::failure();
-      const uint32_t value = digits.value();
-      if (value >= 0xd800 && value <= 0xdbff) {
-        if (unicode_high_surrogate != -1)
-          return emit_error.emit() << "illegal Unicode sequence";
-        unicode_high_surrogate = static_cast<int>(value);
-      } else if (value >= 0xdc00 && value <= 0xdfff) {
-        if (unicode_high_surrogate == -1)
-          return emit_error.emit() << "illegal Unicode sequence";
-        const uint32_t code_point =
-            0x10000 + ((static_cast<uint32_t>(unicode_high_surrogate) & 0x3ff) << 10) +
-            (value & 0x3ff);
-        Result appended = append_utf8(code_point, decoded, emit_error);
-        if (appended.failed())
-          return Result::failure();
-        unicode_high_surrogate = -1;
-      } else {
-        if (unicode_high_surrogate != -1)
-          return emit_error.emit() << "illegal Unicode sequence";
-        Result appended = append_utf8(value, decoded, emit_error);
-        if (appended.failed())
-          return Result::failure();
-      }
-      break;
-    }
-    default:
-      return emit_error.emit() << "unknown escape code in string constant";
-    }
-  }
-
-  return emit_error.emit() << "unterminated string constant";
-}
-
 /// @brief Advance past a quoted string, honoring the loader's escapes.
 Result skip_string(std::string_view json, size_t &at, const util::DiagnosticEmitter &emit_error) {
-  FailureOr<std::string> parsed = parse_quoted_string(json, at, emit_error);
+  FailureOr<std::string> parsed = parse_json_quoted_string(json, at, emit_error);
   if (parsed.failed())
     return Result::failure();
   return Result::success();
@@ -283,7 +142,7 @@ FailureOr<ObjectField> find_object_field(std::string_view json, size_t object_be
 
     std::string name;
     if (json[at] == '"' || json[at] == '\'') {
-      FailureOr<std::string> parsed_name = parse_quoted_string(json, at, emit_error);
+      FailureOr<std::string> parsed_name = parse_json_quoted_string(json, at, emit_error);
       if (parsed_name.failed())
         return Result::failure();
       name = std::move(parsed_name.value());
