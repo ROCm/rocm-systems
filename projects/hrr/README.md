@@ -96,7 +96,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `HIP_HRR_CAPTURE_CONTENT` | off | Also record host buffers, by-value kernel argument values and code objects, which replay needs. Without it the archive is metadata-only and replay refuses the first call that needs them |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance). Only a Debug build of the HIP runtime (no `NDEBUG`) reads it; a release build ignores it. Either way capture says on stderr whether it reads it, whatever the log level |
 
-On Linux the archive is readable only by the user who captured it (directories 0700, files 0600). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
+On Linux the archive is readable only by the user who captured it (directories 0700, files 0600). What an archive contains, which of it each capture mode records, and why replaying an archive means running its GPU code: [PRIVACY.md](PRIVACY.md). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
 
 ### `hrr-playback` CLI options
 

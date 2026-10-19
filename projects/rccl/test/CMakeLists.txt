@@ -399,6 +399,8 @@ if(BUILD_TESTS)
       device/TestOp128.cpp
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
+      device/DdaIpcGpuBarrierOrderingTests.cpp
+      device/DdaVecElementAddTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestAsyncCopy.cpp
@@ -1058,6 +1060,7 @@ if(BUILD_TESTS)
       DdaAllReduceMPITests.cpp
       DdaReduceScatterMPITests.cpp
       DdaFabricSimpleMPITests.cpp
+      DdaIpcIndexDataMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 

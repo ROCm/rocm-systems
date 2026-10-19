@@ -66,6 +66,13 @@ class ParseArgsTest(unittest.TestCase):
         args = run_catch2.parse_args(["--xml", "r.xml", "--", "./bin"])
         self.assertIsNone(args.timeout)
 
+    def test_launcher_stays_off_the_catch2_binary(self):
+        args = run_catch2.parse_args(
+            ["--xml", "r.xml", "--launcher", "rocjitsu --daemon --config c.json --", "--", "./bin"]
+        )
+        self.assertEqual(args.command, ["./bin"])
+        self.assertEqual(args.launcher, "rocjitsu --daemon --config c.json --")
+
     def test_requires_a_command(self):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
