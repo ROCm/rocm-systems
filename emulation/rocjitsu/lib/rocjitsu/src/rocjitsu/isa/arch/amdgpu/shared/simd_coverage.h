@@ -124,6 +124,7 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, typename 
       result = (result & U(0xffffu)) << (high_dst ? 16 : 0);
     dst.template store_native<uint32_t>(base, result, chunk);
   }
+  detail::record_simd_fast_path(SimdFastPath::VOP_WORDS);
   return true;
 }
 

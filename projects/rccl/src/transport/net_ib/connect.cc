@@ -10,6 +10,8 @@
 #include "p2p.h"
 #include "p2p_resiliency.h"
 
+#include <mutex>
+
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
 NCCL_PARAM(IbRoceVersionNum, "IB_ROCE_VERSION_NUM", 2);
@@ -30,6 +32,11 @@ struct ncclIbDevExtraProps {
 };
 
 extern int64_t rcclParamIbGdrFlushGpuMemNoRelaxedOrdering();
+
+// The flush scratchpad is registered on every accept; report the outcome once per IB device.
+static std::once_flag gpuFlushRegLogOnce[MAX_IB_DEVS];
+static std::once_flag gpuFlushRegWarnOnce[MAX_IB_DEVS];
+
 enum ncclIbCommState {
   ncclIbCommStateStart = 0,
   ncclIbCommStateConnect = 1,
@@ -1382,7 +1389,8 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+    // Each flush may post a scratchpad write in addition to the read.
+    qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     INFO(NCCL_NET, "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
@@ -1842,6 +1850,25 @@ ib_recv:
               close(rCommDev->gpuFlush.dmabuf_fd);
               rCommDev->gpuFlush.dmabuf_fd = -1;
             }
+          } else if (peermemAvailable) {
+            // Registered without IBV_ACCESS_RELAXED_ORDERING so the flush write to it is strictly ordered.
+            if (wrap_ibv_reg_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, rCommDev->gpuFlush.gpuFlushGpuMem,
+                                sizeof(int),
+                                IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) ==
+                ncclSuccess) {
+              gpuFlushRegistered = true;
+              std::call_once(gpuFlushRegLogOnce[rCommDev->base.ibDevN], [&] {
+                INFO(NCCL_INIT | NCCL_NET, "NET/IB: GDR flush scratchpad registered via peermem on device %d (%s)",
+                     rCommDev->base.ibDevN, ibDev->devName);
+              });
+            }
+          }
+          if (!gpuFlushRegistered) {
+            std::call_once(gpuFlushRegWarnOnce[rCommDev->base.ibDevN], [&] {
+              WARN("NET/IB: GDR flush scratchpad registration failed on device %d (%s); flush falls back to "
+                   "reading the receive buffer, which does not fence relaxed-ordering writes",
+                   rCommDev->base.ibDevN, ibDev->devName);
+            });
           }
         }
 #endif

@@ -379,6 +379,16 @@ collected in the following table.
         | Default: ``16``
         | ``0``: No lower bound.
 
+    * - | ``NCCL_TREE_COMPACT``
+        | Builds the inter-node trees with a half-interleave node remapping.
+          Intended for jobs whose nodes are ordered by network domain. Both
+          trees keep cross-domain hops at the leaves only when the nodes split
+          evenly into two domains; with an uneven split, the first tree does
+          so when the first domain holds at least half of the nodes, and the
+          second tree still crosses domains. All ranks in a communicator must
+          use the same value; initialization fails otherwise.
+      - | ``0``: Standard double binary tree (default)
+        | ``1``: Compact tree
     * - | ``RCCL_TUNER_EMBEDDED_CONFIG``
         | Controls whether the built-in CSV tuner uses the tuning configurations
           compiled into ``librccl.so`` from the source tree's ``tuner/*.csv``.
@@ -442,12 +452,58 @@ in the following table.
           ``NCCL_IB_SUBNET_AWARE_ROUTING``.
       - | Integer value, bits (default: ``24``)
 
+    * - | ``NCCL_IB_WQE_LATENCY_THRESHOLD_NS``
+        | Enables per-queue-pair (QP) CPU-side WQE post-to-poll latency
+          monitoring in the ``IB`` network transport (``net_ib``). When set
+          above ``0``, each send-side QP measures the time from posting a
+          signaled work request (``ibv_post_send``) to the CPU polling its
+          completion, which includes any delay before RCCL polls the
+          completion queue (CQ). It is not the hardware completion time.
+        | Each QP samples one signaled WQE at a time. The next one is sampled
+          only after the previous sample completes, so under pipelined
+          traffic the statistics cover a subset of WQEs.
+        | Samples longer than the threshold are counted as slow and logged
+          as ``NET/IB: WQE slow`` lines. A sampled WQE that has been
+          outstanding longer than the threshold without a completion is
+          logged as ``NET/IB: WQE stall (no CQE)``. Both messages are logged
+          at most once per second per QP, at ``INFO`` level with the ``NET``
+          subsystem (``NCCL_DEBUG=INFO``, ``NCCL_DEBUG_SUBSYS=NET``). Each
+          line identifies the local and remote QP number, device, port and
+          LID. The GIDs are only filled in on RoCE (Ethernet link layer)
+          devices and print empty on InfiniBand.
+        | Read once per process. Not applied by the ``IB-CAST`` transport.
+      - | Integer value, nanoseconds (default: ``0``, disabled)
+
+    * - | ``NCCL_IB_WQE_LATENCY_REPORT``
+        | Controls the per-QP latency summary logged when a send connection
+          is closed while ``NCCL_IB_WQE_LATENCY_THRESHOLD_NS`` is enabled.
+          The summary (``NET/IB: WQE latency summary``) reports the sample
+          count, slow count, threshold and the post-to-poll mean, standard
+          deviation, P50/P90/P99/P99.9 estimates and maximum. QPs with no
+          samples are not reported.
+      - | ``1``: Log a summary per QP on close (default).
+        | ``0``: Disabled. Slow and stall messages are still logged.
+
     * - | ``NCCL_PXN_C2C``
         | Allows PXN routing through a C2C link to reach a NIC attached to a
           peer GPU. The C2C path is NVIDIA-specific and is not currently
           applicable on AMD hardware.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
+
+    * - | ``NCCL_GIN_MLOPART``
+        | Allows GPU-initiated networking (GIN) on a communicator that includes
+          a rank on a GPU partition. Without this variable, one partitioned
+          rank turns GIN off for the whole communicator. The default allows
+          partitions on a single-node communicator only; set ``1`` to allow
+          them across nodes. See :ref:`device-api-gin` and
+          :ref:`nps4_cpx_mi300_rccl`.
+      - | Unset: Allow GIN on partitions on a single-node communicator; disable
+          GIN on a partitioned communicator spanning several nodes (default).
+          The latter is reported through ``NCCL_DEBUG=INFO``.
+        | ``1``: Allow GIN on partitions on any number of nodes.
+        | ``0``: Disable GIN whenever any rank runs on a partition.
+        | A communicator with no partitioned rank is unaffected by any value.
 
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
