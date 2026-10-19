@@ -19,7 +19,7 @@
 # THE SOFTWARE.
 
 # Accepted archs
-set(ACCEPTED_GFX1250_ARCH gfx1250)
+set(ACCEPTED_GFX1250_ARCH gfx1250 gfx1250-strict)
 
 function(CheckAcceptedArchs OFFLOAD_ARCH_STR_LOCAL)
   set(ARCH_GFX1250 -1 PARENT_SCOPE)
