@@ -156,9 +156,10 @@ public:
   /// @retval >=0 A new synthetic KFD fd. @retval -1 eventfd creation failed.
   [[nodiscard]] int reissue_synthetic_kfd_fd();
 
-  /// @brief Send RPC_CLOSE to the daemon.
-  /// @retval 0 Success.
-  /// @retval -1 Socket error.
+  /// @brief Send RPC_CLOSE, receive its result, and release local RPC resources.
+  /// @retval 0 Daemon close completed, or this driver was already closed.
+  /// @retval -errno Daemon close or RPC transport failed. The socket is still
+  /// released; the daemon owns any retryable pending process close.
   int close() override;
 
   /// @brief Forward a KFD ioctl to the daemon via RPC_IOCTL.

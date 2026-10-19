@@ -363,6 +363,7 @@ public:
 
   TensorDmaDescriptor desc;
   std::optional<GpuVmAccess> access;
+  VmTransferToken transfer_token;
   std::vector<TensorDmaTransferElement> elements;
   std::size_t next_element = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Complete;
@@ -555,7 +556,8 @@ inline size_t try_coalesced_transfer(TensorDmaState &state, Wavefront &wf) {
   constexpr size_t kCopyBufferBytes = 256;
   constexpr uint64_t kPageBytes = IdentityAddressSpaceTranslator::kPageSize;
   const auto &first = state.elements[state.next_element];
-  if ((!state.access && wf.process_id() != 0) || !first.in_bounds || first.completed_bytes != 0)
+  if (state.transfer_token.pending() || (!state.access && wf.process_id() != 0) ||
+      !first.in_bounds || first.completed_bytes != 0)
     return 0;
   const size_t size = state.desc.elem_size;
   size_t count = 1;
@@ -606,7 +608,8 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
   if (state.outcome != VmAccessOutcome::Complete && state.outcome != VmAccessOutcome::Unavailable)
     return state.outcome;
 
-  if (state.access && !state.access->info().ready && state.next_element == 0 &&
+  if (state.access && !state.transfer_token.pending() && !state.access->info().ready &&
+      state.next_element == 0 &&
       (state.elements.empty() || state.elements.front().completed_bytes == 0)) {
     state.access = wf.snapshot_vm_access();
     if (!state.access)
@@ -634,12 +637,12 @@ inline VmAccessOutcome resume_tensor_dma_state(TensorDmaState &state, Wavefront 
             element.global_address,
             std::span<const std::byte>(reinterpret_cast<const std::byte *>(element.bytes.data()),
                                        size),
-            element.completed_bytes);
+            element.completed_bytes, state.transfer_token);
       } else {
         outcome = state.access->read(
             element.global_address,
             std::span<std::byte>(reinterpret_cast<std::byte *>(element.bytes.data()), size),
-            element.completed_bytes);
+            element.completed_bytes, state.transfer_token);
       }
     } else if (state.store_from_lds) {
       outcome = wf.write_gpu_memory(element.global_address,

@@ -283,6 +283,24 @@ function(rj_add_test)
         list(APPEND ARG_ENVIRONMENT "${_runtime_dir_env}")
     endif()
 
+    if(RJ_ENABLE_TSAN)
+        # A two-GPU scoped cache operation holds more than 128 CU cache locks.
+        # TSan's deadlock detector aborts at that limit; keep race detection on.
+        set(_tsan_env_found FALSE)
+        set(_test_env)
+        foreach(_env_entry IN LISTS ARG_ENVIRONMENT)
+            if(_env_entry MATCHES "^TSAN_OPTIONS=")
+                string(APPEND _env_entry ":detect_deadlocks=0")
+                set(_tsan_env_found TRUE)
+            endif()
+            list(APPEND _test_env "${_env_entry}")
+        endforeach()
+        if(NOT _tsan_env_found)
+            list(APPEND _test_env "TSAN_OPTIONS=detect_deadlocks=0")
+        endif()
+        set(ARG_ENVIRONMENT "${_test_env}")
+    endif()
+
     add_test(NAME "${ARG_NAME}" COMMAND ${ARG_COMMAND})
 
     if(ARG_WORKING_DIRECTORY)
@@ -362,7 +380,17 @@ endfunction()
 # registered twice under one name.
 function(rj_add_gtest_tests target)
     cmake_parse_arguments(ARG "" "TEST_FILTER" "" ${ARGN})
-    gtest_discover_tests(${target} ${ARGN})
+    if(RJ_ENABLE_TSAN)
+        # See rj_add_test: the lock-order detector cannot represent the
+        # intentional cache maintenance lock group on the full GPU topology.
+        gtest_discover_tests(
+            ${target}
+            ${ARGN}
+            PROPERTIES ENVIRONMENT "TSAN_OPTIONS=detect_deadlocks=0"
+        )
+    else()
+        gtest_discover_tests(${target} ${ARGN})
+    endif()
     if(RJ_INSTALL_TESTS)
         rj_install_test_target(${target})
         rj_install_gtest_cases(${target} TEST_FILTER "${ARG_TEST_FILTER}")
@@ -370,6 +398,15 @@ function(rj_add_gtest_tests target)
 endfunction()
 
 # --- Unit / integration test suite ---
+
+# Host-only coverage for the TCP rendezvous used by the HIP RCCL rank test.
+add_executable(rccl_tcp_bootstrap_test rccl_tcp_bootstrap_test.cpp)
+target_link_libraries(
+    rccl_tcp_bootstrap_test
+    PRIVATE GTest::gtest_main Threads::Threads
+)
+rj_configure_target(rccl_tcp_bootstrap_test TEST)
+rj_add_gtest_tests(rccl_tcp_bootstrap_test)
 
 add_test(NAME RocjitsuVersion COMMAND $<TARGET_FILE:rocjitsu_bin> --version)
 set_tests_properties(
@@ -492,6 +529,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${Python3_EXECUTABLE} -B
             ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_rccl_scaleout.py -v
     )
+    add_test(
+        NAME RcclPodEmulatedNodeUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_run_rccl_pod_emulated_node.py
+            -v
+    )
 endif()
 
 add_test(
@@ -609,6 +653,8 @@ add_executable(
     gpu_vm_pipeline_test.cpp
     gpu_vm_service_test.cpp
     gpu_vm_translation_test.cpp
+    fabric_endpoint_test.cpp
+    canonical_line_freshness_test.cpp
     legacy_page_table_cache_test.cpp
     config_test.cpp
     gfx1251_compiled_kernel_test.cpp
@@ -654,6 +700,7 @@ add_executable(
     sparse_memory_test.cpp
     cpu_dispatch_pool_test.cpp
     simdojo_sim_test.cpp
+    pci_bar_address_decoder_test.cpp
     partitioning_test.cpp
     simulated_kfd_test.cpp
     kfd_events_test.cpp
@@ -2132,7 +2179,12 @@ target_link_libraries(
     interposer_dup_test
     PRIVATE GTest::gtest_main ${CMAKE_DL_LIBS}
 )
-add_dependencies(interposer_dup_test rocjitsu_bin rocjitsu_shared)
+add_dependencies(
+    interposer_dup_test
+    rocjitsu_bin
+    rocjitsu_shared
+    rocjitsu_test_bin
+)
 if(RJ_INSTALL_TESTS)
     rj_install_test_target(interposer_dup_test)
 endif()
@@ -2169,6 +2221,13 @@ foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700 gfx950_mi355x_kmd_2gpu)
     )
 endforeach()
 
+set(_rj_hook_interposer_cases
+    FinalKfdCloseReportsDeferredWritebackFailure
+    FinalDrmCloseReportsDeferredWritebackFailure
+    FinalKfdCloseWaitsForSnapshotOnWritebackFailure
+    FinalDrmCloseWaitsForSnapshotOnWritebackFailure
+)
+
 function(rj_add_interposer_test_suite _suite)
     cmake_parse_arguments(PARSE_ARGV 1 ARG "" "CONFIG" "ENVIRONMENT")
     set(_config "${RJ_CDNA4_KMD_CONFIG}")
@@ -2180,10 +2239,25 @@ function(rj_add_interposer_test_suite _suite)
     endif()
     get_filename_component(_config_name "${_config}" NAME)
     foreach(_case IN LISTS ARG_UNPARSED_ARGUMENTS)
+        set(_launcher "${RJ_CLI}")
+        set(_installed_command
+            "\${RJ_INSTALLED_BINDIR}/rocjitsu"
+            "--config"
+            "\${RJ_INSTALLED_CONFIG_DIR}/${_config_name}"
+            "--"
+            "bin/interposer_dup_test"
+            "--gtest_filter=${_suite}.${_case}"
+        )
+        if(_case IN_LIST _rj_hook_interposer_cases)
+            # These four cases inspect interposer internals. The test CLI
+            # selects the non-installed library with those hooks compiled in.
+            set(_launcher "$<TARGET_FILE:rocjitsu_test_bin>")
+            set(_installed_command)
+        endif()
         rj_add_test(
             NAME "${_suite}.${_case}${_suffix}"
             COMMAND
-                ${RJ_CLI}
+                ${_launcher}
                 --config
                 ${_config}
                 --
@@ -2192,13 +2266,7 @@ function(rj_add_interposer_test_suite _suite)
             ENVIRONMENT ${ARG_ENVIRONMENT}
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
             SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]"
-            INSTALL_COMMAND
-                "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-                "--config"
-                "\${RJ_INSTALLED_CONFIG_DIR}/${_config_name}"
-                "--"
-                "bin/interposer_dup_test"
-                "--gtest_filter=${_suite}.${_case}"
+            INSTALL_COMMAND ${_installed_command}
             INSTALL_ENVIRONMENT ${ARG_ENVIRONMENT}
         )
     endforeach()
@@ -2210,6 +2278,11 @@ set(_rj_interposer_dup_tests
     Dup3PreservesHiddenEventBacking
     Dup2PreservesHiddenAllocationBacking
     Dup3PreservesHiddenAllocationBacking
+    TrackedMunmapFailureUsesLibcErrno
+    FinalKfdCloseReportsDeferredWritebackFailure
+    FinalDrmCloseReportsDeferredWritebackFailure
+    FinalKfdCloseWaitsForSnapshotOnWritebackFailure
+    FinalDrmCloseWaitsForSnapshotOnWritebackFailure
     Dup2PreservesHiddenDoorbellBacking
     Dup3PreservesHiddenDoorbellBacking
     DupKeepsKfdRoutingAfterPrimaryClose
@@ -2247,7 +2320,7 @@ rj_add_interposer_test_suite(
     DmabufExportKeepsStoresMadeDuringTheExport
     DmabufExportLeavesPagesPastAPartialMapping
     DupRacingTheCloseOfAPrimeExportKeepsTheBoState
-    ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone
+    UserptrDmabufAndIpcExportsFailWithoutChangingCallerMemory
     GemMetadataRoundTripsOnABuffer
     GemOpReportsTheCreateSize
     GemOpSetPlacementChangesTheReportedDomain
@@ -2332,6 +2405,17 @@ foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700)
         ${_rj_interposer_pm4_tests}
     )
 endforeach()
+
+# The gfx1100 GEM_CREATE fixture is not available on all DRM-less test hosts.
+rj_add_interposer_test_suite(
+    InterposerPm4Test
+    CONFIG "${CMAKE_SOURCE_DIR}/configs/gfx1201_r9700.json"
+    KfdResidentVaRejectsGemMapAndReplace
+    GemResidentVaRejectsCallerVaKfdAllocation
+    GemResidentVaRejectsCallerVaKfdDmabufImport
+    KfdGrantWithoutPteRejectsGemMap
+    SameBoPrimeMapRejectsActiveKfdVaAndAllowsDisjointVa
+)
 
 rj_add_interposer_test_suite(
     InterposerFreshForkTest
@@ -4090,7 +4174,12 @@ if(RJ_ENABLE_HIP_TESTS)
 
         # --- RCCL collective test ---
         if(RCCL_LIB AND RJ_HIP_RUNTIME_SUPPORTS_GFX950)
-            rj_add_hip_test(hip_rccl_test ARCH gfx950 EXTRA_LIBS ${RCCL_LIB})
+            rj_add_hip_test(
+                hip_rccl_test
+                ARCH gfx950
+                DEPENDENCIES ${CMAKE_CURRENT_SOURCE_DIR}/rccl_tcp_bootstrap.h
+                EXTRA_LIBS ${RCCL_LIB}
+            )
             add_dependencies(daemon_test hip_rccl_test_target)
             set(RJ_RCCL_TESTS
                 RcclDaemonTest.AllReduce
@@ -4142,6 +4231,7 @@ if(RJ_ENABLE_HIP_TESTS)
             hip_rccl_gfx1250_test
             ARCH gfx1250
             SOURCE hip_rccl_test.cpp
+            DEPENDENCIES ${CMAKE_CURRENT_SOURCE_DIR}/rccl_tcp_bootstrap.h
             EXTRA_LIBS ${RCCL_LIB}
         )
         message(STATUS "gfx1250 RCCL rank binary enabled (found ${RCCL_LIB})")

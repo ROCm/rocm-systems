@@ -1,0 +1,28 @@
+--- a/amd/amdgpu/amdgpu_vm_sdma.c
++++ b/amd/amdgpu/amdgpu_vm_sdma.c
+@@ -234,7 +234,6 @@
+ 		dma_fence_get(fence);
+ 		r = drm_sched_job_add_dependency(&p->job->base, fence);
+ 		if (r) {
+-			dma_fence_put(fence);
+ 			dma_resv_iter_end(&cursor);
+ 			return r;
+ 		}
+--- a/amd/amdgpu/amdgpu_vm_pt.c
++++ b/amd/amdgpu/amdgpu_vm_pt.c
+@@ -419,8 +419,14 @@
+
+ 	r = vm->update_funcs->update(&params, vmbo, addr, 0, entries,
+ 				     value, flags);
+-	if (r)
++	if (r) {
++		if (params.job) {
++			amdgpu_job_free(params.job);
++			params.job = NULL;
++			params.num_dw_left = 0;
++		}
+ 		goto exit;
++	}
+
+ 	r = vm->update_funcs->commit(&params, NULL);
+ exit:

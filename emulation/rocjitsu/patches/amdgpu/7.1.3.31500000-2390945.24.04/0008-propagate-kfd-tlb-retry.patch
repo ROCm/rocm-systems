@@ -1,0 +1,243 @@
+--- a/amd/amdgpu/amdgpu_amdkfd.h
++++ b/amd/amdgpu/amdgpu_amdkfd.h
+@@ -64,6 +64,7 @@
+ 	enum kfd_mem_attachment_type type;
+ 	bool is_mapped;
+ 	bool unmap_pending;
++	bool tlb_flush_pending;
+ 	struct amdgpu_bo_va *bo_va;
+ 	struct amdgpu_device *adev;
+ 	uint64_t va;
+@@ -346,8 +347,10 @@
+ int amdgpu_amdkfd_gpuvm_map_memory_to_gpu(struct amdgpu_device *adev,
+ 					  struct kgd_mem *mem, void *drm_priv);
+ int amdgpu_amdkfd_gpuvm_unmap_memory_from_gpu(
+-		struct amdgpu_device *adev, struct kgd_mem *mem, void *drm_priv);
++		struct amdgpu_device *adev, struct kgd_mem *mem, void *drm_priv,
++		bool retain_for_ioctl);
+ int amdgpu_amdkfd_gpuvm_dmaunmap_mem(struct kgd_mem *mem, void *drm_priv);
++void amdgpu_amdkfd_gpuvm_complete_unmap(struct kgd_mem *mem, void *drm_priv);
+ int amdgpu_amdkfd_gpuvm_sync_memory(
+ 		struct amdgpu_device *adev, struct kgd_mem *mem, bool intr);
+ int amdgpu_amdkfd_gpuvm_map_bo_to_kernel(struct kgd_mem *mem, void **kptr,
+--- a/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
++++ b/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
+@@ -1306,7 +1306,8 @@
+ 	drm_exec_until_all_locked(&ctx->exec) {
+ 		ctx->n_vms = 0;
+ 		list_for_each_entry(entry, &mem->attachments, list) {
+-			bool mapped = entry->is_mapped || entry->unmap_pending;
++			bool mapped = entry->is_mapped || entry->unmap_pending ||
++				      entry->tlb_flush_pending;
+
+ 			if ((vm && vm != entry->bo_va->base.vm) ||
+ 				(mapped != map_type
+@@ -2054,7 +2055,7 @@
+
+ 	mapped_to_gpu_memory = mem->mapped_to_gpu_memory;
+ 	list_for_each_entry(entry, &mem->attachments, list) {
+-		if (entry->unmap_pending) {
++		if (entry->unmap_pending || entry->tlb_flush_pending) {
+ 			unmap_pending = true;
+ 			break;
+ 		}
+@@ -2245,6 +2246,10 @@
+ 	list_for_each_entry(entry, &mem->attachments, list) {
+ 		if (entry->bo_va->base.vm != avm)
+ 			continue;
++		if (entry->tlb_flush_pending) {
++			ret = -EBUSY;
++			goto out_unreserve;
++		}
+ 		if (entry->unmap_pending) {
+ 			if (entry->is_mapped) {
+ 				ret = -EBUSY;
+@@ -2311,11 +2316,9 @@
+ 	list_for_each_entry(entry, &mem->attachments, list) {
+ 		if (entry->bo_va->base.vm != vm)
+ 			continue;
+-		if (entry->bo_va->base.bo->tbo.ttm &&
+-		    !entry->bo_va->base.bo->tbo.ttm->sg)
+-			continue;
+-
+-		kfd_mem_dmaunmap_attachment(mem, entry);
++		if (!entry->bo_va->base.bo->tbo.ttm ||
++		    entry->bo_va->base.bo->tbo.ttm->sg)
++			kfd_mem_dmaunmap_attachment(mem, entry);
+ 	}
+
+ 	amdgpu_bo_unreserve(mem->bo);
+@@ -2325,8 +2328,22 @@
+ 	return ret;
+ }
+
++void amdgpu_amdkfd_gpuvm_complete_unmap(struct kgd_mem *mem, void *drm_priv)
++{
++	struct amdgpu_vm *vm = drm_priv_to_vm(drm_priv);
++	struct kfd_mem_attachment *entry;
++
++	mutex_lock(&mem->lock);
++	list_for_each_entry(entry, &mem->attachments, list) {
++		if (entry->bo_va->base.vm == vm)
++			entry->tlb_flush_pending = false;
++	}
++	mutex_unlock(&mem->lock);
++}
++
+ int amdgpu_amdkfd_gpuvm_unmap_memory_from_gpu(
+-		struct amdgpu_device *adev, struct kgd_mem *mem, void *drm_priv)
++		struct amdgpu_device *adev, struct kgd_mem *mem, void *drm_priv,
++		bool retain_for_ioctl)
+ {
+ 	struct amdgpu_vm *avm = drm_priv_to_vm(drm_priv);
+ 	unsigned long bo_size = mem->bo->tbo.base.size;
+@@ -2356,8 +2373,14 @@
+
+ 	list_for_each_entry(entry, &mem->attachments, list) {
+ 		if (entry->bo_va->base.vm != avm ||
+-		    (!entry->is_mapped && !entry->unmap_pending))
++		    (!entry->is_mapped && !entry->unmap_pending &&
++		     !entry->tlb_flush_pending))
+ 			continue;
++		if (entry->tlb_flush_pending) {
++			if (!retain_for_ioctl)
++				entry->tlb_flush_pending = false;
++			continue;
++		}
+
+ 		pr_debug("\t unmap VA 0x%llx - 0x%llx from entry %p\n",
+ 			 entry->va, entry->va + bo_size, entry);
+@@ -2372,6 +2395,7 @@
+ 			pr_debug("\t DEC mapping count %d\n",
+ 				 mem->mapped_to_gpu_memory);
+ 		}
++		entry->tlb_flush_pending = retain_for_ioctl;
+ 	}
+
+ unreserve_out:
+--- a/amd/amdkfd/kfd_chardev.c
++++ b/amd/amdkfd/kfd_chardev.c
+@@ -1385,6 +1385,9 @@
+ 			err = PTR_ERR(peer_pdd);
+ 			goto get_mem_obj_from_handle_failed;
+ 		}
++			err = kfd_flush_tlb(peer_pdd);
++			if (err)
++				goto map_memory_to_gpu_failed;
+
+ 		err = amdgpu_amdkfd_gpuvm_map_memory_to_gpu(
+ 			peer_pdd->dev->adev, (struct kgd_mem *)mem,
+@@ -1411,15 +1414,18 @@
+ 		goto sync_memory_failed;
+ 	}
+
+-	mutex_unlock(&p->mutex);
+-
+ 	/* Flush TLBs after waiting for the page table updates to complete */
+ 	for (i = 0; i < args->n_devices; i++) {
+ 		peer_pdd = kfd_process_device_data_by_id(p, devices_arr[i]);
+-		if (WARN_ON_ONCE(!peer_pdd))
+-			continue;
+-		kfd_flush_tlb(peer_pdd);
+-	}
++		if (WARN_ON_ONCE(!peer_pdd)) {
++			err = -EINVAL;
++			goto sync_memory_failed;
++		}
++		err = kfd_flush_tlb(peer_pdd);
++		if (err)
++			goto sync_memory_failed;
++	}
++	mutex_unlock(&p->mutex);
+ 	kfree(devices_arr);
+
+ 	trace_kfd_map_memory_to_gpu_end(p,
+@@ -1485,7 +1491,8 @@
+ 			goto get_mem_obj_from_handle_failed;
+ 		}
+ 		err = amdgpu_amdkfd_gpuvm_unmap_memory_from_gpu(
+-			peer_pdd->dev->adev, (struct kgd_mem *)mem, peer_pdd->drm_priv);
++				peer_pdd->dev->adev, (struct kgd_mem *)mem,
++				peer_pdd->drm_priv, true);
+ 		if (err) {
+ 			pr_debug("Failed to unmap from gpu %d/%d\n", i, args->n_devices);
+ 			goto unmap_memory_from_gpu_failed;
+@@ -1506,15 +1513,25 @@
+ 	/* Flush TLBs after waiting for the page table updates to complete */
+ 	for (i = 0; i < args->n_devices; i++) {
+ 		peer_pdd = kfd_process_device_data_by_id(p, devices_arr[i]);
+-		if (WARN_ON_ONCE(!peer_pdd))
+-			continue;
+-		if (flush_tlb)
+-			kfd_flush_tlb(peer_pdd);
++		if (WARN_ON_ONCE(!peer_pdd)) {
++			err = -EINVAL;
++			goto sync_memory_failed;
++		}
++		if (flush_tlb) {
++			err = kfd_flush_tlb(peer_pdd);
++			if (err)
++				goto sync_memory_failed;
++		}
+
+ 		/* Remove dma mapping after tlb flush to avoid IO_PAGE_FAULT */
+ 		err = amdgpu_amdkfd_gpuvm_dmaunmap_mem(mem, peer_pdd->drm_priv);
+ 		if (err)
+ 			goto sync_memory_failed;
++	}
++	/* Keep every device retryable until all TLB and DMA cleanup succeeds. */
++	for (i = 0; i < args->n_devices; i++) {
++		peer_pdd = kfd_process_device_data_by_id(p, devices_arr[i]);
++		amdgpu_amdkfd_gpuvm_complete_unmap(mem, peer_pdd->drm_priv);
+ 	}
+
+ 	mutex_unlock(&p->mutex);
+--- a/amd/amdkfd/kfd_priv.h
++++ b/amd/amdkfd/kfd_priv.h
+@@ -1730,12 +1730,12 @@
+ void kfd_signal_sigbus_delayed_fn(struct work_struct *work);
+ void kfd_signal_process_terminate_event(struct kfd_process *p);
+
+-static inline void kfd_flush_tlb(struct kfd_process_device *pdd)
++static inline int kfd_flush_tlb(struct kfd_process_device *pdd)
+ {
+ 	struct amdgpu_device *adev = pdd->dev->adev;
+ 	struct amdgpu_vm *vm = drm_priv_to_vm(pdd->drm_priv);
+
+-	amdgpu_vm_flush_compute_tlb(adev, vm, TLB_FLUSH_HEAVYWEIGHT,
++	return amdgpu_vm_flush_compute_tlb(adev, vm, TLB_FLUSH_HEAVYWEIGHT,
+ 				    pdd->dev->xcc_mask);
+ }
+
+--- a/amd/amdkfd/kfd_process.c
++++ b/amd/amdkfd/kfd_process.c
+@@ -793,7 +793,8 @@
+ 		*kptr = NULL;
+ 	}
+
+-	amdgpu_amdkfd_gpuvm_unmap_memory_from_gpu(dev->adev, mem, pdd->drm_priv);
++	amdgpu_amdkfd_gpuvm_unmap_memory_from_gpu(dev->adev, mem, pdd->drm_priv,
++						    false);
+ 	amdgpu_amdkfd_gpuvm_free_memory_of_gpu(dev->adev, mem, pdd->drm_priv,
+ 					       NULL);
+ }
+@@ -846,7 +847,8 @@
+ 	return err;
+
+ sync_memory_failed:
+-	amdgpu_amdkfd_gpuvm_unmap_memory_from_gpu(kdev->adev, *mem, pdd->drm_priv);
++	amdgpu_amdkfd_gpuvm_unmap_memory_from_gpu(kdev->adev, *mem,
++						    pdd->drm_priv, false);
+
+ err_map_mem:
+ 	amdgpu_amdkfd_gpuvm_free_memory_of_gpu(kdev->adev, *mem, pdd->drm_priv,
+@@ -1163,7 +1165,8 @@
+ 			if (!peer_pdd->drm_priv)
+ 				continue;
+ 			amdgpu_amdkfd_gpuvm_unmap_memory_from_gpu(
+-				peer_pdd->dev->adev, buf_obj->mem, peer_pdd->drm_priv);
++				peer_pdd->dev->adev, buf_obj->mem,
++				peer_pdd->drm_priv, false);
+ 		}
+
+ 		amdgpu_amdkfd_gpuvm_free_memory_of_gpu(pdd->dev->adev,

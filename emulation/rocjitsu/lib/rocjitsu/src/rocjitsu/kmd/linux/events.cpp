@@ -59,6 +59,15 @@ bool EventState::release_page(void *ptr) {
   return true;
 }
 
+bool EventState::overlaps_page(const void *ptr, size_t size) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (!ptr || size == 0 || !page_ || page_size_ == 0)
+    return false;
+  const auto address = reinterpret_cast<uintptr_t>(ptr);
+  const auto page = reinterpret_cast<uintptr_t>(page_);
+  return address <= page ? page - address < size : address - page < page_size_;
+}
+
 void EventState::activate_waiters(GpuEvent &event) {
   // KFD delivers a signal to every waiter registered for signals. In particular,
   // auto-reset clears the shared flag, not these per-wait activations: otherwise
@@ -193,15 +202,6 @@ size_t EventState::waiter_count(uint32_t event_id) const {
 bool EventState::has_page() const {
   std::lock_guard<std::mutex> lock(mutex_);
   return page_ != nullptr;
-}
-
-bool EventState::overlaps_page(const void *addr, size_t length) const {
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!page_ || page_size_ == 0 || length == 0)
-    return false;
-  const auto start = reinterpret_cast<uintptr_t>(addr);
-  const auto page = reinterpret_cast<uintptr_t>(page_);
-  return start <= page ? page - start < length : start - page < page_size_;
 }
 
 /// @brief Allocate a new KFD event and return its ID and slot index.

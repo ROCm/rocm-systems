@@ -1,0 +1,28 @@
+--- a/amd/amdgpu/amdgpu_vm.c
++++ b/amd/amdgpu/amdgpu_vm.c
+@@ -973,6 +973,7 @@
+ 	struct amdgpu_vm_update_params params;
+ 	struct amdgpu_vm_bo_base *entry, *tmp;
+ 	bool flush_tlb_needed = false;
++	bool cpu_pdes_written = false;
+ 	int r, idx;
+
+ 	amdgpu_vm_assert_locked(vm);
+@@ -998,8 +999,16 @@
+ 		flush_tlb_needed |= entry->moved;
+
+ 		r = amdgpu_vm_pde_update(&params, entry);
+-		if (r)
++		if (r) {
++			/* Publish earlier CPU stores, but keep moved PDEs for retry. */
++			if (cpu_pdes_written) {
++				WARN_ON_ONCE(vm->update_funcs->commit(&params, NULL));
++				atomic64_inc(&vm->tlb_seq);
++			}
+ 			goto error;
++		}
++		if (vm->update_funcs == &amdgpu_vm_cpu_funcs)
++			cpu_pdes_written = true;
+ 	}
+
+ 	r = vm->update_funcs->commit(&params, &vm->last_update);

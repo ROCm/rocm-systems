@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "async_vm_test_support.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/encodings.h"
@@ -112,6 +113,19 @@ fetch_at(InstructionCache &icache, const amdgpu::GpuVmAccess &access, uint64_t p
   std::array<uint8_t, InstructionCache::kFetchBytes> got{};
   EXPECT_EQ(icache.fetch(access, pc, got.data()), amdgpu::VmAccessOutcome::Complete);
   return got;
+}
+
+TEST(InstructionCacheTest, DeferredDataRouteRejectsInstructionFetchWithoutPosting) {
+  amdgpu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<amdgpu::test::AsyncVmMemory>(*sim.owner, 0x200, 0, 64);
+  GpuVm vm;
+  const auto access = vm.snapshot(vm.register_translated(7, memory, memory));
+  ASSERT_TRUE(access);
+  InstructionCache cache;
+  std::array<uint8_t, InstructionCache::kFetchBytes> fetched{};
+  EXPECT_EQ(cache.fetch(*access, 0, fetched.data()), amdgpu::VmAccessOutcome::Malformed);
+  EXPECT_EQ(memory->backing->posts, 0u);
+  EXPECT_EQ(memory->backing->read_effects, 0u);
 }
 
 // Every four-byte-aligned PC in a two-line window, including the offsets whose

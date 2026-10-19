@@ -1,0 +1,211 @@
+--- a/amd/amdgpu/amdgpu_amdkfd.h
++++ b/amd/amdgpu/amdgpu_amdkfd.h
+@@ -63,6 +63,7 @@
+ 	struct list_head list;
+ 	enum kfd_mem_attachment_type type;
+ 	bool is_mapped;
++	bool unmap_pending;
+ 	struct amdgpu_bo_va *bo_va;
+ 	struct amdgpu_device *adev;
+ 	uint64_t va;
+--- a/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
++++ b/amd/amdgpu/amdgpu_amdkfd_gpuvm.c
+@@ -1306,8 +1306,10 @@
+ 	drm_exec_until_all_locked(&ctx->exec) {
+ 		ctx->n_vms = 0;
+ 		list_for_each_entry(entry, &mem->attachments, list) {
++			bool mapped = entry->is_mapped || entry->unmap_pending;
++
+ 			if ((vm && vm != entry->bo_va->base.vm) ||
+-				(entry->is_mapped != map_type
++				(mapped != map_type
+ 				&& map_type != BO_VM_ALL))
+ 				continue;
+
+@@ -1362,22 +1364,43 @@
+ 	struct amdgpu_bo_va *bo_va = entry->bo_va;
+ 	struct amdgpu_device *adev = entry->adev;
+ 	struct amdgpu_vm *vm = bo_va->base.vm;
++	int ret;
+
+ 	if (bo_va->queue_refcount) {
+ 		pr_debug("bo_va->queue_refcount %d\n", bo_va->queue_refcount);
+ 		return -EBUSY;
+ 	}
+
+-	(void)amdgpu_vm_bo_unmap(adev, bo_va, entry->va);
++	if (!entry->unmap_pending) {
++		ret = amdgpu_vm_bo_unmap(adev, bo_va, entry->va);
++		if (ret)
++			return ret;
++		entry->unmap_pending = true;
++	}
+
+ 	/* VM entity stopped if process killed, don't clear freed pt bo */
+-	if (!amdgpu_vm_ready(vm))
++	if (!amdgpu_vm_ready(vm)) {
++		entry->unmap_pending = false;
+ 		return 0;
+-
+-	(void)amdgpu_vm_clear_freed(adev, vm, &bo_va->last_pt_update);
+-
+-	(void)amdgpu_sync_fence(sync, bo_va->last_pt_update, GFP_KERNEL);
+-
++	}
++
++	ret = amdgpu_vm_clear_freed(adev, vm, &bo_va->last_pt_update);
++	if (ret)
++		return ret;
++	if (bo_va->last_pt_update) {
++		ret = dma_fence_wait(bo_va->last_pt_update, true);
++		if (ret < 0)
++			return ret;
++		ret = dma_fence_get_status(bo_va->last_pt_update);
++		if (ret <= 0)
++			return ret ? ret : -EIO;
++	}
++
++	ret = amdgpu_sync_fence(sync, bo_va->last_pt_update, GFP_KERNEL);
++	if (ret)
++		return ret;
++
++	entry->unmap_pending = false;
+ 	return 0;
+ }
+
+@@ -1387,7 +1410,21 @@
+ {
+ 	struct amdgpu_bo_va *bo_va = entry->bo_va;
+ 	struct amdgpu_device *adev = entry->adev;
++	struct dma_fence *fence = NULL;
+ 	int ret;
++
++	/* Clear old PTEs before a valid PTE can reuse their VA. */
++	ret = amdgpu_vm_clear_freed(adev, bo_va->base.vm, &fence);
++	if (ret)
++		return ret;
++	if (fence) {
++		ret = dma_fence_wait(fence, true);
++		if (ret >= 0)
++			ret = dma_fence_get_status(fence);
++		dma_fence_put(fence);
++		if (ret <= 0)
++			return ret ? ret : -EIO;
++	}
+
+ 	ret = kfd_mem_dmamap_attachment(mem, entry);
+ 	if (ret)
+@@ -1469,8 +1490,8 @@
+ 	return 0;
+
+ update_gpuvm_pte_failed:
+-	unmap_bo_from_gpuvm(mem, entry, sync);
+-	kfd_mem_dmaunmap_attachment(mem, entry);
++	if (!unmap_bo_from_gpuvm(mem, entry, sync))
++		kfd_mem_dmaunmap_attachment(mem, entry);
+ 	return ret;
+ }
+
+@@ -2009,19 +2046,26 @@
+ 	struct kfd_mem_attachment *entry, *tmp;
+ 	struct bo_vm_reservation_context ctx;
+ 	unsigned int mapped_to_gpu_memory;
++	bool unmap_pending = false;
+ 	int ret;
+ 	bool is_imported = false;
+
+ 	mutex_lock(&mem->lock);
+
+ 	mapped_to_gpu_memory = mem->mapped_to_gpu_memory;
++	list_for_each_entry(entry, &mem->attachments, list) {
++		if (entry->unmap_pending) {
++			unmap_pending = true;
++			break;
++		}
++	}
+ 	is_imported = mem->is_imported;
+ 	mutex_unlock(&mem->lock);
+ 	/* lock is not needed after this, since mem is unused and will
+ 	 * be freed anyway
+ 	 */
+
+-	if (mapped_to_gpu_memory > 0) {
++	if (mapped_to_gpu_memory > 0 || unmap_pending) {
+ 		pr_debug("BO VA 0x%llx size 0x%lx is still mapped.\n",
+ 				mem->va, bo_size);
+ 		return -EBUSY;
+@@ -2199,7 +2243,19 @@
+ 		goto out_unreserve;
+
+ 	list_for_each_entry(entry, &mem->attachments, list) {
+-		if (entry->bo_va->base.vm != avm || entry->is_mapped)
++		if (entry->bo_va->base.vm != avm)
++			continue;
++		if (entry->unmap_pending) {
++			if (entry->is_mapped) {
++				ret = -EBUSY;
++				goto out_unreserve;
++			}
++			ret = unmap_bo_from_gpuvm(mem, entry, ctx.sync);
++			if (ret)
++				goto out_unreserve;
++			kfd_mem_dmaunmap_attachment(mem, entry);
++		}
++		if (entry->is_mapped)
+ 			continue;
+
+ 		pr_debug("\t map VA 0x%llx - 0x%llx in entry %p\n",
+@@ -2215,6 +2271,8 @@
+ 		ret = vm_update_pds(avm, ctx.sync);
+ 		if (ret) {
+ 			pr_err("Failed to update page directories\n");
++			if (!unmap_bo_from_gpuvm(mem, entry, ctx.sync))
++				kfd_mem_dmaunmap_attachment(mem, entry);
+ 			goto out_unreserve;
+ 		}
+
+@@ -2297,7 +2355,8 @@
+ 		avm);
+
+ 	list_for_each_entry(entry, &mem->attachments, list) {
+-		if (entry->bo_va->base.vm != avm || !entry->is_mapped)
++		if (entry->bo_va->base.vm != avm ||
++		    (!entry->is_mapped && !entry->unmap_pending))
+ 			continue;
+
+ 		pr_debug("\t unmap VA 0x%llx - 0x%llx from entry %p\n",
+@@ -2307,11 +2366,12 @@
+ 		if (ret)
+ 			goto unreserve_out;
+
+-		entry->is_mapped = false;
+-
+-		mem->mapped_to_gpu_memory--;
+-		pr_debug("\t DEC mapping count %d\n",
+-			 mem->mapped_to_gpu_memory);
++		if (entry->is_mapped) {
++			entry->is_mapped = false;
++			mem->mapped_to_gpu_memory--;
++			pr_debug("\t DEC mapping count %d\n",
++				 mem->mapped_to_gpu_memory);
++		}
+ 	}
+
+ unreserve_out:
+--- a/amd/amdgpu/amdgpu_vm.c
++++ b/amd/amdgpu/amdgpu_vm.c
+@@ -1592,11 +1592,13 @@
+ 		r = amdgpu_vm_update_range(adev, vm, false, false, true, false,
+ 					   &sync, mapping->start, mapping->last,
+ 					   0, 0, 0, NULL, NULL, &f);
+-		amdgpu_vm_free_mapping(adev, vm, mapping, f);
+ 		if (r) {
++			/* Keep the unmap descriptor for the next attempt. */
++			list_add(&mapping->list, &vm->freed);
+ 			dma_fence_put(f);
+ 			goto error_free;
+ 		}
++		amdgpu_vm_free_mapping(adev, vm, mapping, f);
+ 	}
+
+ 	if (fence && f) {

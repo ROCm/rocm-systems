@@ -64,6 +64,9 @@ public:
   /// @brief Whether memory was backed and mapped.
   [[nodiscard]] bool usable() const { return fd_ >= 0 && mapping_ != nullptr; }
 
+  /// Stable canonical identity for this usable backing; zero on failure.
+  [[nodiscard]] uint64_t backing_id() const noexcept { return backing_id_; }
+
   /// @brief The descriptor to share with a transport, or negative when unusable.
   [[nodiscard]] int fd() const { return fd_; }
 
@@ -114,6 +117,7 @@ private:
   uint64_t bytes_ = 0;
   uint64_t aperture_bytes_ = 0;
   int fd_ = -1;
+  uint64_t backing_id_ = 0;
   std::byte *mapping_ = nullptr;
   mutable std::mutex access_mutex_;
 };

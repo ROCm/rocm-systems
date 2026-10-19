@@ -81,6 +81,8 @@ struct AqlPreparedPacket {
   uint64_t completion_signal = 0;
   bool barrier_bit = false;
   bool blocks_following = false;
+  /// A standard HSA barrier with neither acquire nor release fence scope.
+  bool no_fence_aql_barrier = false;
 };
 
 struct AqlPacketProcessRequest {

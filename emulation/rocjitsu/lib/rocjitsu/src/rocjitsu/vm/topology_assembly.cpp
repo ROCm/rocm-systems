@@ -24,6 +24,11 @@ VirtualMachine *assemble_virtual_machine_topology(config::LoadedConfig &loaded,
   SoC *primary_soc = loaded.soc();
   if (primary_soc == nullptr)
     throw std::invalid_argument("topology root must be an SoC");
+  // Checkpoints predating system manifests restore a built SoC without a
+  // SystemGraph. They have no peer routes to project.
+  auto peer_routes = loaded.system_graph.nodes.empty()
+                         ? config::SystemPeerRouteProjection{}
+                         : loaded.system_graph.local_peer_routes(loaded.local_node_id);
   if (loaded.num_gpus > 1 && !loaded.extra_gpu_builds.empty()) {
     std::vector<std::unique_ptr<SoC>> socs;
     std::vector<uint32_t> gpu_ids;
@@ -48,6 +53,7 @@ VirtualMachine *assemble_virtual_machine_topology(config::LoadedConfig &loaded,
         std::make_unique<VirtualMachine>(std::move(socs), std::move(gpu_ids), daemon_mode);
     VirtualMachine *machine_ptr = machine.get();
     topology.set_root(std::move(machine));
+    machine_ptr->install_peer_routes(std::move(peer_routes), topology, loaded.exec_mode);
 
     auto prefix_specs = [](std::vector<simdojo::LinkSpec> &specs, const std::string &prefix) {
       for (auto &spec : specs) {
@@ -74,6 +80,7 @@ VirtualMachine *assemble_virtual_machine_topology(config::LoadedConfig &loaded,
   auto machine = std::make_unique<VirtualMachine>(std::unique_ptr<SoC>(primary_soc), daemon_mode);
   VirtualMachine *machine_ptr = machine.get();
   topology.set_root(std::move(machine));
+  machine_ptr->install_peer_routes(std::move(peer_routes), topology, loaded.exec_mode);
   loaded.wire_links(topology);
   primary_soc->wire_backing(topology);
   return machine_ptr;

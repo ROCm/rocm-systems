@@ -29,6 +29,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -157,11 +158,6 @@ std::optional<uint32_t> read_u32_file(const fs::path &path) {
   if (!(in >> value))
     return std::nullopt;
   return value;
-}
-
-void append_unique_gpu_id(std::vector<uint32_t> *ids, uint32_t gpu_id) {
-  if (std::ranges::find(*ids, gpu_id) == ids->end())
-    ids->push_back(gpu_id);
 }
 
 uint32_t max_numeric_dir(const fs::path &dir) {
@@ -1260,6 +1256,8 @@ int GuestKfd::map_or_unmap_memory_ioctl(Args *args, unsigned long request) {
     errno = EINVAL;
     return -1;
   }
+  if (args->n_success > args->n_devices)
+    return -EINVAL;
 
   uint32_t host_gpu_id = 0;
   {
@@ -1270,32 +1268,55 @@ int GuestKfd::map_or_unmap_memory_ioctl(Args *args, unsigned long request) {
       return 0;
     }
   }
-
-  auto *ids =
-      reinterpret_cast<const uint32_t *>(static_cast<uintptr_t>(args->device_ids_array_ptr));
-  if (!ids) {
+  if (args->n_devices == 0) {
     assert(args->handle < kSyntheticHandleBase);
     return forward_ioctl(request, args);
   }
 
-  std::vector<uint32_t> host_ids;
-  host_ids.reserve(args->n_devices);
+  if (args->n_devices > kMaxPayloadBytes / sizeof(uint32_t))
+    return -E2BIG;
+  std::vector<uint32_t> translated_ids(args->n_devices);
+  if (copy_ioctl_user_buffer(translated_ids.data(), args->device_ids_array_ptr,
+                             translated_ids.size() * sizeof(uint32_t)) != 0)
+    return -EFAULT;
   bool has_guest = false;
-  for (uint32_t i = 0; i < args->n_devices; ++i) {
-    if (ids[i] == guest_.gpu_id) {
+  for (uint32_t &id : translated_ids) {
+    if (id == guest_.gpu_id) {
       has_guest = true;
-      append_unique_gpu_id(&host_ids, host_gpu_id);
-    } else {
-      append_unique_gpu_id(&host_ids, ids[i]);
+      id = host_gpu_id;
     }
   }
   if (!has_guest) {
     assert(args->handle < kSyntheticHandleBase);
     return forward_ioctl(request, args);
   }
-  if (host_ids.empty()) {
-    args->n_success = args->n_devices;
-    return 0;
+  // The guest and host IDs can name the same physical GPU. Keep the full
+  // translated list across retries: the kernel revisits all IDs to flush TLBs
+  // even when n_success has reached n_devices.
+  std::vector<uint32_t> host_ids;
+  host_ids.reserve(translated_ids.size());
+  std::unordered_map<uint32_t, uint32_t> host_positions;
+  std::vector<uint32_t> required_host_position;
+  required_host_position.reserve(translated_ids.size());
+  for (uint32_t id : translated_ids) {
+    const auto [position, inserted] =
+        host_positions.try_emplace(id, static_cast<uint32_t>(host_ids.size()));
+    if (inserted)
+      host_ids.push_back(id);
+    required_host_position.push_back(position->second);
+  }
+  const uint32_t completed = args->n_success;
+  uint32_t host_completed = 0;
+  for (uint32_t i = 0; i < completed; ++i) {
+    if (required_host_position[i] == host_completed)
+      ++host_completed;
+  }
+  std::vector<uint32_t> original_progress(host_ids.size() + 1);
+  uint32_t consumed = 0;
+  for (size_t host_success = 0; host_success <= host_ids.size(); ++host_success) {
+    while (consumed < translated_ids.size() && required_host_position[consumed] < host_success)
+      ++consumed;
+    original_progress[host_success] = consumed;
   }
 
   assert(args->handle < kSyntheticHandleBase);
@@ -1303,12 +1324,12 @@ int GuestKfd::map_or_unmap_memory_ioctl(Args *args, unsigned long request) {
   host_args.device_ids_array_ptr =
       reinterpret_cast<uint64_t>(reinterpret_cast<uintptr_t>(host_ids.data()));
   host_args.n_devices = static_cast<uint32_t>(host_ids.size());
-  host_args.n_success = 0;
-  int ret = forward_ioctl(request, &host_args);
-  if (ret != 0)
-    return ret;
-  args->n_success = args->n_devices;
-  return 0;
+  host_args.n_success = host_completed;
+  const int ret = forward_ioctl(request, &host_args);
+  if (host_args.n_success < host_completed || host_args.n_success > host_ids.size())
+    return -EIO;
+  args->n_success = original_progress[host_args.n_success];
+  return ret;
 }
 
 int GuestKfd::map_memory_ioctl(void *arg) {

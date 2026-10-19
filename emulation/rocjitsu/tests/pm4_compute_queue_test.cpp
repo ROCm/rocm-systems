@@ -601,6 +601,7 @@ TEST_F(Pm4ComputeQueueTest, NormalizesWrappedNativeProducerBeforeRetainingProgre
                                }},
   });
   ASSERT_NE(registration, 0u);
+  EXPECT_EQ(cp->queue_process_identity_kind_for_test(0, 0), ProcessIdentityKind::Vmid);
 
   EXPECT_EQ(cp->notify_pm4_queue_doorbell(registration, 2), QueueSubmissionStatus::Accepted);
   service();

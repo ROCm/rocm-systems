@@ -643,13 +643,22 @@ int RemoteDriver::close() {
     syscall(SYS_write, shutdown_efd_, &val, sizeof(val));
   }
 
+  int result = 0;
   {
     std::lock_guard<std::mutex> lock(rpc_mutex_);
     if (sock_ >= 0) {
       RpcHeader hdr{};
       hdr.opcode = RPC_CLOSE;
       hdr.request_id = next_id_++;
-      rpc_send_exact(sock_, &hdr, sizeof(hdr));
+      RpcHeader response{};
+      if (!rpc_send_exact(sock_, &hdr, sizeof(hdr)) ||
+          !rpc_recv_exact(sock_, &response, sizeof(response)) || response.opcode != RPC_CLOSE ||
+          response.request_id != hdr.request_id || response.reserved != 0 ||
+          response.payload_bytes != 0 || response.result > 0) {
+        result = -EIO;
+      } else {
+        result = response.result;
+      }
     }
 
     if (sock_ >= 0) {
@@ -675,7 +684,7 @@ int RemoteDriver::close() {
     // reclaimed when the last shared_ptr drops.
   }
 
-  return 0;
+  return result;
 }
 
 int RemoteDriver::ioctl(unsigned long request, void *arg) {
@@ -901,11 +910,16 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
     case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU: {
       auto *map_args = reinterpret_cast<kfd_ioctl_map_memory_to_gpu_args *>(args_base);
-      const auto *device_ids = reinterpret_cast<const void *>(map_args->device_ids_array_ptr);
-      const size_t inline_size = map_args->n_devices * sizeof(uint32_t);
+      const size_t payload_so_far = buf.size() - sizeof(RpcHeader);
+      if (payload_so_far > kMaxPayloadBytes ||
+          map_args->n_devices > (kMaxPayloadBytes - payload_so_far) / sizeof(uint32_t))
+        return -E2BIG;
+      const size_t inline_size = static_cast<size_t>(map_args->n_devices) * sizeof(uint32_t);
       size_t inline_offset = buf.size();
       buf.resize(inline_offset + inline_size);
-      std::memcpy(buf.data() + inline_offset, device_ids, inline_size);
+      if (inline_size != 0 && copy_ioctl_user_buffer(buf.data() + inline_offset,
+                                                     saved_device_ids_ptr, inline_size) != 0)
+        return -EFAULT;
       break;
     }
     case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW: {
@@ -1071,7 +1085,8 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
     }
   }
 
-  // Receive response — may include a memfd via SCM_RIGHTS for ALLOC_MEMORY.
+  // Receive response — allocation, IPC import, and dma-buf export may include
+  // a memfd via SCM_RIGHTS.
   uint8_t resp_header_buf[sizeof(RpcHeader)];
   int received_fds[1] = {-1};
   size_t num_fds = 1;
@@ -1382,8 +1397,9 @@ int RemoteDriver::send_ioctl(unsigned long request, void *arg) {
 
   if (request == AMDKFD_IOC_EXPORT_DMABUF && resp->result == 0) {
     auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
-    if (num_fds > 0 && received_fds[0] >= 0)
-      export_args->dmabuf_fd = received_fds[0];
+    if (num_fds != 1 || received_fds[0] < 0)
+      return poison_reply();
+    export_args->dmabuf_fd = received_fds[0];
   }
 
   if (request == AMDKFD_IOC_FREE_MEMORY_OF_GPU && resp->result == 0) {

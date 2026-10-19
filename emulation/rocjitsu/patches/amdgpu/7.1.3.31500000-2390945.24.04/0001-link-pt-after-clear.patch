@@ -1,0 +1,14 @@
+--- a/amd/amdgpu/amdgpu_vm_pt.c
++++ b/amd/amdgpu/amdgpu_vm_pt.c
+@@ -519,8 +519,9 @@
+ 	pt_bo = &pt->bo;
+ 	pt_bo->parent = amdgpu_bo_ref(cursor->parent->bo);
+-	amdgpu_vm_bo_base_init(entry, vm, pt_bo);
++	dma_resv_assert_held(vm->root.bo->tbo.base.resv);
+ 	r = amdgpu_vm_pt_clear(adev, vm, pt, immediate);
+ 	if (r)
+ 		goto error_free_pt;
+-
++
++	amdgpu_vm_bo_base_init(entry, vm, pt_bo);
+ 	return 0;

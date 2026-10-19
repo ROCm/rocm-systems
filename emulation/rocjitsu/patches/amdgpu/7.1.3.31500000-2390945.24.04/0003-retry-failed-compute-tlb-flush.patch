@@ -1,0 +1,42 @@
+--- a/amd/amdgpu/amdgpu_vm.c
++++ b/amd/amdgpu/amdgpu_vm.c
+@@ -1698,17 +1698,13 @@
+ 				uint32_t xcc_mask)
+ {
+ 	uint64_t tlb_seq = amdgpu_vm_tlb_seq(vm);
++	uint64_t flushed_seq;
+ 	bool all_hub = false;
+ 	int xcc = 0, r = 0;
+
+ 	WARN_ON_ONCE(!vm->is_compute_context);
+
+-	/*
+-	 * It can be that we race and lose here, but that is extremely unlikely
+-	 * and the worst thing which could happen is that we flush the changes
+-	 * into the TLB once more which is harmless.
+-	 */
+-	if (atomic64_xchg(&vm->kfd_last_flushed_seq, tlb_seq) == tlb_seq)
++	if (atomic64_read(&vm->kfd_last_flushed_seq) == tlb_seq)
+ 		return 0;
+
+ 	if (adev->family == AMDGPU_FAMILY_AI ||
+@@ -1721,7 +1717,18 @@
+ 		if (r)
+ 			break;
+ 	}
+-	return r;
++	if (r)
++		return r;
++
++	/* Keep reported failures retryable without regressing a newer result. */
++	do {
++		flushed_seq = atomic64_read(&vm->kfd_last_flushed_seq);
++		if (flushed_seq >= tlb_seq)
++			break;
++	} while (atomic64_cmpxchg(&vm->kfd_last_flushed_seq,
++				      flushed_seq, tlb_seq) != flushed_seq);
++
++	return 0;
+ }
+
+ /**

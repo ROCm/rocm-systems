@@ -5,13 +5,17 @@
 
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/kmd/linux/gpu_alias_ingress.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
+#include "rocjitsu/vm/canonical_line_freshness.h"
+#include "rocjitsu/vm/prepared_canonical_writeback.h"
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -21,24 +25,37 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "uapi/linux/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
+#include <shared_mutex>
+#include <span>
 #include <sys/stat.h>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
 
+class FabricEndpoint;
+class FabricBacking;
+class VirtualMachine;
+
 namespace amdgpu {
+class ComputeUnitCore;
+class KfdPreparedProviderTestAccess;
 class Wavefront;
-}
+} // namespace amdgpu
 
 namespace kmd {
 struct CwsrWaveState;
@@ -135,11 +152,29 @@ struct IpcObject {
   uint32_t share_handle[4];
   int backing_memfd = -1;
   std::shared_ptr<GemObject> bo_state;
+  std::shared_ptr<const KfdProcess::GpuBacking> backing_owner;
   uint64_t allocation_size = 0;
   uint32_t allocation_flags = 0;
   uint32_t source_gpu_id = 0;
   uint32_t source_process_id = 0;
   uint64_t source_alloc_handle = 0;
+};
+
+/// Serialize deferred peer writers by canonical backing line across retries.
+/// The gate contains no VM or cache callbacks and can outlive its KFD owner
+/// while an endpoint request releases its retained reservation.
+class PeerCanonicalLineGate final : public std::enable_shared_from_this<PeerCanonicalLineGate> {
+public:
+  [[nodiscard]] std::optional<amdgpu::MemoryIngressPermit>
+  try_acquire(uint64_t backing_id, uint64_t offset, size_t size);
+  [[nodiscard]] bool overlaps(uint64_t backing_id, uint64_t offset, size_t size) const;
+
+private:
+  using Key = std::pair<uint64_t, uint64_t>;
+  void release(std::span<const Key> keys) noexcept;
+
+  mutable std::mutex mutex_;
+  std::set<Key> reserved_;
 };
 
 /// @brief Simulated kernel-mode driver that routes KFD ioctls to the simulator.
@@ -354,11 +389,15 @@ public:
 
   /// @brief Close every registered process, waking any parked event waiters.
   /// @details Daemon-teardown helper: iterates all live processes and closes each,
-  /// firing notify_closing() so client threads blocked in an infinite-timeout
-  /// WAIT_EVENTS unblock and their jthread joins can complete.
-  void close_all_processes();
+  /// including failed pending closes. Returns the first failed close while
+  /// continuing other processes.
+  int close_all_processes();
 
   [[nodiscard]] int get_mmap_memfd(uint32_t process_id, off_t offset) const;
+  /// @brief Duplicate a process backing descriptor while its KFD owner is locked.
+  /// @details A disengaged result means no live backing. A contained -1 means
+  /// duplication failed; the caller owns any nonnegative descriptor.
+  [[nodiscard]] std::optional<int> dup_mmap_memfd(uint32_t process_id, off_t offset) const;
   /// @}
 
   /// @brief Local-mode get_mmap_memfd (uses local process).
@@ -424,6 +463,11 @@ public:
     fail_next_doorbell_monitor_mmap_.store(true, std::memory_order_release);
   }
 
+  /// @brief Make the next owned mmap backing duplication fail with EMFILE.
+  void fail_next_mmap_memfd_dup_for_testing() {
+    fail_next_mmap_memfd_dup_.store(true, std::memory_order_release);
+  }
+
   /// @brief Place the next private doorbell-monitor mmap at @p addr.
   /// @details Uses MAP_FIXED_NOREPLACE so this test seam never destroys an
   /// unexpected mapping while deterministically exercising alias relocation.
@@ -448,23 +492,27 @@ public:
   /// Cancel accepted work and release the queue owned by one DRM context/ring.
   void retire_pm4_queue(uint64_t queue_key);
 
-  /// @brief Install a host range into the local process's GPU page table.
-  /// @details Drives DRM AMDGPU_GEM_VA MAP/REPLACE from the interposer: maps
-  /// @p size bytes at @p gpu_va to @p host_ptr with the MTYPE derived from
-  /// @p alloc_flags.
-  /// @pre host_ptr names the interposer-owned read-write dmabuf mapping, which
-  /// remains alive until these GPU mappings are removed. Application-owned
-  /// pointers must use map_to_gpu with HostExtentOwner::Application instead.
-  /// @retval true the range was installed.
-  /// @retval false the local process is gone, so nothing was mapped (the caller
-  ///         must surface an error rather than report a phantom success).
-  [[nodiscard]] bool gem_va_map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags,
-                                bool sealed_ram = false);
+  /// @brief Pin one local process VA writer across GEM preflight and mutation.
+  /// @details The interposer holds this while it evicts old GEM ranges, installs
+  /// their replacement, and commits its own range records. No alias permit may
+  /// be waited for while this transaction or the interposer fd lock is held.
+  class GemVaTransaction {
+  public:
+    explicit GemVaTransaction(std::shared_ptr<KfdProcess> process);
+    GemVaTransaction(const GemVaTransaction &) = delete;
+    GemVaTransaction &operator=(const GemVaTransaction &) = delete;
 
-  /// @brief Remove a GPU page-table range installed by gem_va_map (GEM_VA UNMAP).
-  /// @retval true the range was unmapped.
-  /// @retval false the local process is gone, so nothing was unmapped.
-  [[nodiscard]] bool gem_va_unmap(uint64_t gpu_va, size_t size);
+    [[nodiscard]] int preflight_map(uint64_t gpu_va, size_t size, uint64_t drm_file_id);
+    [[nodiscard]] int map(uint64_t gpu_va, void *host_ptr, size_t size, uint32_t alloc_flags,
+                          bool sealed_ram, uint64_t drm_file_id);
+    [[nodiscard]] bool unmap(uint64_t gpu_va, size_t size, uint64_t drm_file_id);
+
+  private:
+    std::shared_ptr<KfdProcess> process_;
+    KfdProcess::PageTableTransaction transaction_;
+  };
+
+  [[nodiscard]] std::unique_ptr<GemVaTransaction> begin_gem_va_transaction();
 
   /// @brief Keep DRM BO state with the local allocations backed by the file @p st describes.
   /// @details A KFD allocation's BO, with its UMD metadata, outlives every GEM handle
@@ -483,6 +531,154 @@ public:
   std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
 
   /// @brief Effective mapping flags for a local-process allocation @p handle, or 0.
+  /// @brief Enable a real cacheable PTE and grant for one private peer fixture.
+  /// @details Only a full, driver-owned VRAM allocation before its first MAP
+  /// or export is eligible. The allocation's owner and requester share one
+  /// process page table; the policy therefore applies to both GPUs. This is a
+  /// read-only GPU fixture: owner-local GPU writes fault, and the caller must
+  /// finish direct CPU or VM writes before the first peer cache fill. Imported
+  /// uncached writes remain covered by fabric alias maintenance.
+  [[nodiscard]] bool enable_cacheable_peer_allocation_for_testing(uint32_t process_id,
+                                                                  uint64_t handle);
+
+  /// @brief One retained local or canonical alias joined to its per-GPU VM identity.
+  /// @details The record is observational. Effects still require a permit and
+  /// a fresh raw-grant and VM recheck after the permit is acquired.
+  class GpuAliasBinding {
+  public:
+    KfdProcess::GpuAliasRecord alias;
+    amdgpu::VmCacheNamespace cache_namespace;
+    uint64_t cache_identity = 0;
+    uint32_t vmid = 0;
+    amdgpu::MemoryIngressSpan span;
+  };
+  class GpuAliasJoin {
+  public:
+    amdgpu::VmAccessOutcome outcome = amdgpu::VmAccessOutcome::Complete;
+    std::vector<GpuAliasBinding> aliases;
+    std::shared_ptr<KfdProcess> process;
+    std::shared_ptr<const KfdProcess::GpuAliasSnapshot> publication;
+    std::shared_ptr<const KfdProcess::GpuAliasSnapshot> local_publication;
+    amdgpu::AddressSpaceHandle address_space;
+  };
+
+  [[nodiscard]] GpuAliasJoin
+  join_gpu_aliases(uint32_t process_id, uint32_t gpu_id, const amdgpu::GpuVmAccess &expected,
+                   std::span<const amdgpu::MemoryIngressSpan> spans) const;
+  [[nodiscard]] GpuAliasJoin
+  join_gpu_aliases_for_peer_read(uint32_t process_id, uint32_t gpu_id,
+                                 const amdgpu::GpuVmAccess &expected,
+                                 std::span<const amdgpu::MemoryIngressSpan> spans) const;
+  /// @brief Acquire all touched alias generations before CU or SDMA cache access.
+  [[nodiscard]] amdgpu::MemoryIngressAdmission
+  admit_gpu_alias_ingress(uint32_t process_id, uint32_t gpu_id, const amdgpu::GpuVmAccess &expected,
+                          std::span<const amdgpu::MemoryIngressSpan> spans,
+                          bool peer_cache_read = false);
+  /// @brief Bypass broad COPY source maintenance for one exact private UC GTT view.
+  [[nodiscard]] amdgpu::VmPrivateUcGttCopySourceAdmission
+  admit_private_uc_gtt_copy_source(uint32_t process_id, uint32_t gpu_id,
+                                   const amdgpu::GpuVmAccess &expected, uint64_t address,
+                                   size_t size);
+  /// @brief Probe or optionally fill one cacheable peer read under KFD authority.
+  /// @details A null stamp probes only resident bytes. A completed stamp may
+  /// fill after exact ingress, PTE, route, namespace, and version rechecks.
+  [[nodiscard]] bool try_gpu_peer_cache_read(uint32_t process_id, uint32_t gpu_id,
+                                             const amdgpu::GpuVmAccess &expected, uint64_t address,
+                                             std::span<std::byte> bytes,
+                                             const CanonicalLineFreshness::ReadStamp *stamp,
+                                             amdgpu::ComputeUnitCore &cu, SoC &soc, bool scalar);
+  /// @brief Prepare retained local or canonical dirty writeback before cache locks.
+  /// @details The requested range is expanded to 128-byte cache lines. Every
+  /// retained alias intersects that envelope and holds one shared counted
+  /// ingress permit. Individual writes still require full entry coverage and
+  /// matching resident tag identity before entering the exact VM effect gate.
+  [[nodiscard]] amdgpu::PreparedCanonicalWriteback
+  prepare_gpu_alias_writeback(uint32_t process_id, uint32_t gpu_id,
+                              const amdgpu::GpuVmAccess &expected, uint64_t address, size_t size,
+                              const GpuAliasIngressGate::DrainAuthority *authority = nullptr,
+                              const GpuAliasIngressGate::EffectWindow *effect_window = nullptr);
+  /// @brief Close and drain without running maintenance on the releasing thread.
+  [[nodiscard]] bool close_gpu_alias_ingress(const KfdProcess::GpuAliasRecord &alias,
+                                             GpuAliasIngressGate::OwnerPost owner_post,
+                                             std::function<void()> drained) {
+    return alias_ingress_gate_->close(GpuAliasIngressGate::key(alias), std::move(owner_post),
+                                      std::move(drained));
+  }
+  [[nodiscard]] bool reopen_gpu_alias_ingress(const KfdProcess::GpuAliasRecord &alias) {
+    return alias_ingress_gate_->reopen(GpuAliasIngressGate::key(alias));
+  }
+  /// @brief Fail the next canonical UNMAP grant publication after its PTE step.
+  /// @details Exercises recovery of a closed generation without admitting new
+  /// CU or SDMA work between failed and retried ioctls.
+  void fail_next_alias_unmap_publish_for_testing() {
+    fail_next_alias_unmap_publish_.store(true, std::memory_order_release);
+  }
+  /// @brief Fail one private GTT MAP before its grant-index publication.
+  void fail_next_private_gtt_map_publish_for_testing() {
+    fail_next_private_gtt_map_publish_.store(true, std::memory_order_release);
+  }
+  /// @brief Refuse one local UNMAP before prepared cache maintenance begins.
+  void fail_next_local_unmap_writeback_for_testing() {
+    fail_next_local_unmap_writeback_.store(true, std::memory_order_release);
+  }
+  /// @brief Refuse one local UNMAP after durable writeback, before retirement.
+  void fail_next_local_unmap_retire_for_testing() {
+    fail_next_local_unmap_retire_.store(true, std::memory_order_release);
+  }
+  /// @brief Refuse one active local-to-IPC promotion before cache maintenance.
+  void fail_next_alias_export_writeback_for_testing() {
+    fail_next_alias_export_writeback_.store(true, std::memory_order_release);
+  }
+  /// @brief Refuse one promotion after writeback and the PTE update, before grant publication.
+  void fail_next_alias_export_publish_for_testing() {
+    fail_next_alias_export_publish_.store(true, std::memory_order_release);
+  }
+  void fail_next_alias_close_writeback_for_testing() {
+    fail_next_alias_close_writeback_.store(true, std::memory_order_release);
+  }
+  void fail_next_alias_close_prepare_for_testing() {
+    fail_next_alias_close_prepare_.store(true, std::memory_order_release);
+  }
+  void fail_next_alias_close_retire_for_testing() {
+    fail_next_alias_close_retire_.store(true, std::memory_order_release);
+  }
+  void fail_next_alias_mapping_writeback_for_testing() {
+    fail_next_alias_mapping_writeback_.store(true, std::memory_order_release);
+  }
+  void fail_next_alias_mapping_retire_for_testing() {
+    fail_next_alias_mapping_retire_.store(true, std::memory_order_release);
+  }
+  /// @brief Fail after publishing the CPU mmap, before replacing its GPU PTE.
+  void fail_next_alias_mapping_after_host_map_for_testing() {
+    fail_next_alias_mapping_after_host_map_.store(true, std::memory_order_release);
+  }
+  /// @brief Fail after removing the GPU PTE, before releasing its CPU mmap.
+  void fail_next_alias_mapping_after_pte_unmap_for_testing() {
+    fail_next_alias_mapping_after_pte_unmap_.store(true, std::memory_order_release);
+  }
+  void fail_next_alias_free_publish_for_testing() {
+    fail_next_alias_free_publish_.store(true, std::memory_order_release);
+  }
+  void fail_next_alias_free_final_publish_for_testing() {
+    fail_next_alias_free_final_publish_.store(true, std::memory_order_release);
+  }
+  [[nodiscard]] size_t tracked_alias_ingress_generations_for_testing() const {
+    return alias_ingress_gate_->tracked_generation_count();
+  }
+  [[nodiscard]] std::optional<amdgpu::MemoryIngressPermit>
+  hold_alias_ingress_for_testing(const KfdProcess::GpuAliasRecord &alias) {
+    const std::array keys{GpuAliasIngressGate::key(alias)};
+    return alias_ingress_gate_->try_acquire(keys);
+  }
+  [[nodiscard]] bool
+  alias_ingress_closed_for_testing(const KfdProcess::GpuAliasRecord &alias) const {
+    return alias_ingress_gate_->closed(GpuAliasIngressGate::key(alias));
+  }
+  [[nodiscard]] std::shared_lock<std::shared_mutex> hold_alias_publication_for_testing() const {
+    return std::shared_lock(alias_publication_mutex_);
+  }
+
+  /// @brief KFD allocation flags for a local-process allocation @p handle, or 0.
   /// @details Locks the process alloc mutex internally, keeping lock discipline for
   /// per-process allocation state inside the driver. Used by the interposer to
   /// capture the GPU PTE MTYPE flags at EXPORT_DMABUF time (before the allocation
@@ -509,6 +705,165 @@ public:
   };
 
 private:
+  /// Close one allocation's COPY source gate before any grant, host-view, or
+  /// export mutation, then wait without allocation or VM locks. The destructor
+  /// publishes the current generations after the mutator has released its locks.
+  class ScopedPrivateGttCopySourceMutation {
+  public:
+    ScopedPrivateGttCopySourceMutation(SimulatedKfd &driver, KfdProcess &process, uint64_t handle);
+    ~ScopedPrivateGttCopySourceMutation();
+    ScopedPrivateGttCopySourceMutation(const ScopedPrivateGttCopySourceMutation &) = delete;
+    ScopedPrivateGttCopySourceMutation &
+    operator=(const ScopedPrivateGttCopySourceMutation &) = delete;
+
+  private:
+    SimulatedKfd &driver_;
+    KfdProcess &process_;
+    uint64_t handle_;
+    std::shared_ptr<PrivateGttCopySourceGate> gate_;
+  };
+
+  [[nodiscard]] std::shared_ptr<PrivateGttCopySourceGate>
+  begin_private_gtt_copy_source_mutation(KfdProcess &process, uint64_t handle);
+  void finish_private_gtt_copy_source_mutation(
+      KfdProcess &process, uint64_t handle,
+      const std::shared_ptr<PrivateGttCopySourceGate> &gate) noexcept;
+
+  friend class VirtualMachine;
+  friend class amdgpu::KfdPreparedProviderTestAccess;
+
+  using CacheWritebackResolver =
+      std::function<amdgpu::PreparedCanonicalWriteback(uint32_t, uint32_t, uint64_t, size_t)>;
+  /// Resolve a dirty cache tag by its own process VMID and domain GPU.
+  /// The weak callback drains before KFD teardown and retains no driver lock
+  /// after returning the prepared grant and VM gate.
+  [[nodiscard]] CacheWritebackResolver cache_writeback_resolver();
+  [[nodiscard]] amdgpu::PreparedCanonicalWriteback prepare_gpu_alias_writeback_for_vmid(
+      uint32_t gpu_id, uint32_t vmid, uint64_t address, size_t size,
+      const GpuAliasIngressGate::DrainAuthority *authority = nullptr,
+      const GpuAliasIngressGate::EffectWindow *effect_window = nullptr);
+  [[nodiscard]] std::optional<amdgpu::CanonicalLineWitness>
+  witness_gpu_alias_line_for_vmid(uint32_t gpu_id, uint32_t vmid, uint64_t line_address,
+                                  size_t line_size, uint64_t cache_identity,
+                                  uint64_t admission_generation,
+                                  const GpuAliasIngressGate::EffectWindow *effect_window = nullptr);
+
+  /// @brief Join aliases for cache writeback without local-only VM admission.
+  /// @details Canonical peer routes are deferred by the legacy translator;
+  /// preparation checks their full writable PTE span before retaining backing.
+  [[nodiscard]] GpuAliasJoin join_gpu_aliases_for_writeback(
+      uint32_t process_id, uint32_t gpu_id, const amdgpu::GpuVmAccess &expected,
+      std::span<const amdgpu::MemoryIngressSpan> spans,
+      const GpuAliasIngressGate::DrainAuthority *authority = nullptr) const;
+  [[nodiscard]] GpuAliasJoin
+  join_gpu_aliases_impl(uint32_t process_id, uint32_t gpu_id, const amdgpu::GpuVmAccess &expected,
+                        std::span<const amdgpu::MemoryIngressSpan> spans, bool prepared_writeback,
+                        bool peer_cache_read,
+                        const GpuAliasIngressGate::DrainAuthority *authority = nullptr) const;
+
+  /// The VM owns this endpoint child and destroys KFD before its children.
+  /// A binding snapshot may outlive KFD, so callbacks only lock this weak
+  /// handle. Destruction clears the pointer under the same lock before the
+  /// endpoint child can be destroyed.
+  struct PeerEndpointAccess {
+    std::mutex mutex;
+    FabricEndpoint *endpoint = nullptr;
+  };
+  void attach_fabric_endpoint(FabricEndpoint *endpoint) {
+    std::lock_guard lock(peer_endpoint_access_->mutex);
+    peer_endpoint_access_->endpoint = endpoint;
+  }
+  std::shared_ptr<PeerEndpointAccess> peer_endpoint_access_ =
+      std::make_shared<PeerEndpointAccess>();
+
+  struct CuIngressAccess {
+    std::mutex mutex;
+    std::condition_variable effects_drained;
+    SimulatedKfd *driver = nullptr;
+    size_t active_effect_callbacks = 0;
+    bool standalone_after_shutdown = false;
+  };
+
+  /// @brief A live effect's driver pin, alias publication lock, and ingress freeze.
+  /// @details Destruction releases the freeze first, the publication lock next,
+  /// and finally the driver pin. Cache leases must be released before this owner.
+  class LivePeerEffectLease {
+  public:
+    LivePeerEffectLease(amdgpu::MemoryIngressPermit driver_pin,
+                        std::unique_lock<std::shared_mutex> publication,
+                        GpuAliasIngressGate::EffectWindow window)
+        : driver_pin_(std::move(driver_pin)), publication_(std::move(publication)),
+          window_(std::move(window)) {}
+
+    [[nodiscard]] const GpuAliasIngressGate::EffectWindow &window() const { return window_; }
+
+  private:
+    amdgpu::MemoryIngressPermit driver_pin_;
+    std::unique_lock<std::shared_mutex> publication_;
+    GpuAliasIngressGate::EffectWindow window_;
+  };
+
+  class LivePeerAliasSelection {
+  public:
+    std::vector<amdgpu::DeviceCacheAliasScope> scopes;
+    amdgpu::VmCacheNamespace requester_cache_namespace;
+    std::shared_ptr<LivePeerEffectLease> lease;
+  };
+
+  [[nodiscard]] std::optional<LivePeerAliasSelection>
+  try_select_live_peer_aliases(const KfdProcess::GpuAliasRecord &requester,
+                               const FabricBacking &backing, amdgpu::MemoryIngressPermit driver_pin,
+                               bool allow_cacheable_aliases, bool &busy);
+
+  std::shared_ptr<CuIngressAccess> cu_ingress_access_ = std::make_shared<CuIngressAccess>();
+  std::shared_ptr<GpuAliasIngressGate> alias_ingress_gate_ =
+      std::make_shared<GpuAliasIngressGate>();
+  std::shared_ptr<PeerCanonicalLineGate> peer_line_gate_ =
+      std::make_shared<PeerCanonicalLineGate>();
+  std::atomic<bool> fail_next_alias_unmap_publish_{false};
+  std::atomic<bool> fail_next_private_gtt_map_publish_{false};
+  std::atomic<bool> fail_next_local_unmap_writeback_{false};
+  std::atomic<bool> fail_next_local_unmap_retire_{false};
+  std::atomic<bool> fail_next_alias_export_writeback_{false};
+  std::atomic<bool> fail_next_alias_export_publish_{false};
+  std::atomic<bool> fail_next_alias_free_publish_{false};
+  std::atomic<bool> fail_next_alias_free_final_publish_{false};
+  std::atomic<bool> fail_next_alias_close_prepare_{false};
+  std::atomic<bool> fail_next_alias_close_writeback_{false};
+  std::atomic<bool> fail_next_alias_close_retire_{false};
+  std::atomic<bool> fail_next_alias_mapping_writeback_{false};
+  std::atomic<bool> fail_next_alias_mapping_retire_{false};
+  std::atomic<bool> fail_next_alias_mapping_after_host_map_{false};
+  std::atomic<bool> fail_next_alias_mapping_after_pte_unmap_{false};
+
+  struct PendingOrdinaryMapping {
+    enum class Kind { Mmap, Munmap } kind;
+    void *addr = nullptr;
+    size_t length = 0;
+    int prot = 0;
+    int flags = 0;
+    std::vector<KfdProcess::GpuAliasRecord> aliases;
+    std::vector<GpuAliasIngressGate::Key> keys;
+    // A map_pages exception can leave a prefix installed. Retry against the
+    // retained CPU mapping instead of creating a second view of the BO.
+    bool host_mapping_prepared = false;
+  };
+  /// The per-process operation lock protects each value. This mutex only
+  /// protects the table, which also lets process close find failed operations.
+  std::mutex ordinary_mapping_mutex_;
+  std::map<std::pair<uint64_t, uint64_t>, std::shared_ptr<PendingOrdinaryMapping>>
+      pending_ordinary_mappings_;
+
+  [[nodiscard]] std::shared_ptr<PendingOrdinaryMapping>
+  begin_ordinary_mapping(KfdProcess &proc, uint64_t handle, PendingOrdinaryMapping::Kind kind,
+                         void *addr, size_t length, int prot, int flags,
+                         std::span<const KfdProcess::GpuAliasRecord> aliases,
+                         std::span<const GpuAliasIngressGate::Key> keys, bool &retry);
+  void finish_ordinary_mapping(const KfdProcess &proc, uint64_t handle);
+  int run_ordinary_mapping_drain(KfdProcess &proc, uint64_t handle,
+                                 const PendingOrdinaryMapping &pending, bool retry,
+                                 const std::function<void()> &work);
+
   /// Resolve a multi-GPU DRM render minor through published node metadata.
   /// Before topology setup, retain the legacy ordinal fallback used by tests.
   [[nodiscard]] std::optional<uint32_t> gpu_ordinal_for_render_minor(uint32_t minor) const;
@@ -532,6 +887,26 @@ private:
   GpuDevice *find_gpu(uint32_t gpu_id);
   const GpuDevice *find_gpu(uint32_t gpu_id) const;
 
+  /// @brief Check a retiring batch against every live canonical grant.
+  /// @pre The caller holds alias_publication_mutex_ exclusively.
+  [[nodiscard]] bool
+  has_exclusive_canonical_lines(std::span<const KfdProcess::GpuAliasRecord> aliases) const;
+
+  /// @brief Select owner GPU domains for local-only retirement, all domains for canonical aliases.
+  [[nodiscard]] std::vector<amdgpu::DeviceCacheDomain>
+  maintenance_domains_for_aliases(std::span<const KfdProcess::GpuAliasRecord> aliases) const;
+
+  /// @brief Form an exact UC scope for a current canonical grant and VM.
+  /// @pre The caller holds alias_publication_mutex_ exclusively.
+  [[nodiscard]] std::optional<amdgpu::DeviceCacheAliasScope>
+  scoped_canonical_alias(const KfdProcess &proc, const KfdProcess::GpuAliasRecord &alias,
+                         bool allow_cacheable_aliases = false) const;
+
+  /// @brief Wait for an unrelated publication writer or refuse this process's
+  /// pending canonical retirement, including its pre-close-claim interval.
+  [[nodiscard]] std::optional<std::shared_lock<std::shared_mutex>>
+  acquire_alias_publication_reader(const KfdProcess &proc) const;
+
   /// @brief Get the ordinal (0-based index) for a gpu_id. Returns 0 if not found.
   uint32_t gpu_ordinal(uint32_t gpu_id) const {
     for (uint32_t i = 0; i < gpus_.size(); ++i)
@@ -540,16 +915,23 @@ private:
     return 0;
   }
 
-  void map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
-                  amdgpu::Mtype mtype = amdgpu::Mtype::RW,
-                  KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application);
-  void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
+  KfdProcess::PageTableMutationResult
+  map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
+             amdgpu::Mtype mtype = amdgpu::Mtype::RW,
+             KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application,
+             KfdProcess::PageTableTransaction *transaction = nullptr);
+  KfdProcess::PageTableMutationResult
+  unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size,
+                 KfdProcess::PageTableTransaction *transaction = nullptr);
 
   /// @brief Export existing backing with its public mode and coherent sharing policy.
   /// @details Retains the policy for future mappings and imports as well as
   /// current PTEs. Returns the new fd or a negative errno; failure leaves the
   /// policy unchanged. Caller holds proc.alloc_mutex_.
   int share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc);
+  /// @brief Duplicate the public backing while preserving an imported fd's mode.
+  /// @returns A new fd or negative errno. Caller holds proc.alloc_mutex_.
+  int retain_export_descriptor_locked(const KfdProcess::GpuAllocation &alloc);
 
   void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
 
@@ -558,7 +940,7 @@ private:
   void *dispatch_mmap(KfdProcess &proc, void *addr, size_t length, int prot, int flags,
                       off_t offset);
   int dispatch_munmap(KfdProcess &proc, void *addr, size_t length);
-  int dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset) const;
+  std::optional<int> dispatch_get_mmap_memfd(KfdProcess &proc, off_t offset, bool duplicate) const;
 
   int get_process_apertures_ioctl(void *arg) override;
   int acquire_vm_ioctl(void *arg) override;
@@ -570,7 +952,8 @@ private:
   int unmap_memory_ioctl(void *arg) override;
   int get_available_memory_ioctl(KfdProcess &proc, void *arg);
   int alloc_memory_ioctl(KfdProcess &proc, void *arg);
-  int free_memory_ioctl(KfdProcess &proc, void *arg);
+  int free_memory_ioctl(KfdProcess &proc, void *arg,
+                        std::shared_ptr<const KfdProcess::GpuBacking> &retiring_backing);
   int map_memory_ioctl(KfdProcess &proc, void *arg);
   int unmap_memory_ioctl(KfdProcess &proc, void *arg);
   int create_queue_ioctl(KfdProcess &proc, void *arg);
@@ -589,8 +972,12 @@ private:
   int import_dmabuf_ioctl(KfdProcess &proc, void *arg);
   int export_dmabuf_ioctl(KfdProcess &proc, void *arg);
   int get_dmabuf_info_ioctl(KfdProcess &proc, void *arg);
-  int ipc_export_handle_ioctl(KfdProcess &proc, void *arg);
-  int ipc_import_handle_ioctl(KfdProcess &proc, void *arg);
+  int ipc_export_handle_ioctl(KfdProcess &proc, void *arg, std::unique_lock<std::mutex> &op_lock);
+  int promote_local_alias_for_ipc(KfdProcess &proc, uint64_t handle,
+                                  const KfdProcess::GpuAliasRecord &alias,
+                                  std::unique_lock<std::mutex> &op_lock);
+  int ipc_import_handle_ioctl(KfdProcess &proc, void *arg,
+                              std::shared_ptr<const KfdProcess::GpuBacking> &retiring_backing);
   int svm_ioctl(KfdProcess &proc, void *arg);
   int runtime_enable_ioctl(KfdProcess &proc, void *arg);
   int debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_mem_fd, int target_proc_fd);
@@ -769,13 +1156,21 @@ private:
   bool daemon_mode_ = false;
   std::atomic<int> fd_{-1};
   std::atomic<bool> fail_next_doorbell_monitor_mmap_{false};
+  mutable std::atomic<bool> fail_next_mmap_memfd_dup_{false};
   std::atomic<void *> next_doorbell_monitor_mmap_addr_{nullptr};
 
   /// @brief Process table mapping process_id to KfdProcess.
   /// @details Protected by process_mutex_ for concurrent daemon access.
   ///
   /// Global lock ordering (acquire in this order; never the reverse).
-  /// op_mutex_ (KfdProcess) is the outermost per-process ioctl lock. Under it,
+  /// alias_publication_mutex_ precedes op_mutex_ and process_mutex_. The
+  /// canonical retirement writers hold it exclusively through alias retirement;
+  /// other canonical publication routes take its shared side before their
+  /// process locks. Noncanonical UNMAP and FREE are classified under op_mutex_
+  /// and do not enter the publication gate. The CP scratch allocator does not
+  /// publish canonical backing grants.
+  /// op_mutex_ (KfdProcess) is the outermost per-process ioctl lock after it.
+  /// Under op_mutex_,
   /// process_mutex_ and alloc_mutex_ are independent siblings — they are NEVER
   /// held simultaneously (allocate_scratch_backing and close() both release
   /// process_mutex_ before taking alloc_mutex_):
@@ -804,6 +1199,14 @@ private:
   /// that thread, an ioctl MUST NOT hold a per-process lock (alloc_mutex_) across a
   /// CommandProcessor call that takes hw_queue_mutex_ (e.g. register_queue) — build
   /// state under alloc_mutex_, release it, then call the CP.
+  mutable std::shared_mutex alias_publication_mutex_;
+  /// Includes queued writers, so a failed shared try-lock can distinguish
+  /// contention from a spurious failure before waiting for a release.
+  mutable std::atomic<uint32_t> alias_publication_writers_pending_{0};
+  /// Wakes mmap/munmap readers after any canonical writer leaves the gate.
+  mutable std::atomic<uint64_t> alias_publication_release_epoch_{0};
+  /// Serializes last-close table transitions and retries across the writer wait.
+  std::mutex close_mutex_;
   mutable std::mutex process_mutex_;
 
   /// @brief PM4 queue registry; nests outside CP queue locks, never inside process_mutex_.
@@ -813,6 +1216,19 @@ private:
   static constexpr uint32_t kPm4QueueIdBase = 0x80000000; ///< Separate from KFD queue IDs.
   uint32_t next_pm4_queue_id_ = kPm4QueueIdBase;
   std::unordered_map<uint32_t, std::shared_ptr<KfdProcess>> processes_;
+  struct PendingClose {
+    explicit PendingClose(std::shared_ptr<KfdProcess> owner) : process(std::move(owner)) {}
+    std::mutex mutex;
+    std::shared_ptr<KfdProcess> process;
+    std::vector<KfdProcess::GpuAliasRecord> aliases;
+    std::vector<GpuAliasIngressGate::Key> keys;
+    bool started = false;
+    bool maintenance_prepared = false;
+    bool complete = false;
+  };
+  /// Last-close owners remain visible only to an exact drained writeback.
+  /// Public process lookups still consult processes_ exclusively.
+  std::unordered_map<uint32_t, std::shared_ptr<PendingClose>> pending_closes_;
   // Hardware-visible VMIDs/PASIDs share the SoC namespace even when tests or
   // an embedder attach more than one KFD frontend to that SoC. A per-driver
   // counter would let two live frontends publish the same numeric identity and

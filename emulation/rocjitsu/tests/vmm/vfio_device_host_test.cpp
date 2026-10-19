@@ -5,16 +5,33 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
+#include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
+#include "rocjitsu/vm/amdgpu/pci/ip_block_model.h"
 #include "rocjitsu/vm/amdgpu/pci/mmio_registers.h"
+#include "rocjitsu/vm/amdgpu/pci/physical_memory_access.h"
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
 #include "rocjitsu/vm/amdgpu/pci/scratch_pci_device.h"
+#include "rocjitsu/vm/amdgpu/xcd.h"
+#include "rocjitsu/vm/canonical_backing_id.h"
+#include "rocjitsu/vm/fabric_endpoint.h"
+#include "rocjitsu/vm/soc.h"
+#include "rocjitsu/vm/topology_assembly.h"
+#include "rocjitsu/vm/virtual_machine.h"
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
 #include "rocjitsu/vmm/vfu/vfio_server.h"
+#include "rocjitsu/vmm/vfu/vfio_target_grants.h"
 #include "util/diagnostic.h"
 #include "vfio_user_client.h"
+
+#include "simdojo/sim/simulation.h"
+#include "simdojo/sim/topology.h"
 
 #include <gtest/gtest.h>
 
@@ -39,6 +56,7 @@ extern "C" {
 #include <pci_caps/px.h>
 }
 
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
@@ -57,6 +75,7 @@ extern "C" {
 #include <filesystem>
 #include <format>
 #include <future>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -137,6 +156,21 @@ constexpr simdojo::PciId kTestId = {.vendor = 0x1002,
                                     .prog_if = 0x00,
                                     .revision = 0x5a};
 
+bool program_peer_bar0(rocjitsu::test::VfioUserClient &owner, uint64_t base,
+                       bool is_64bit = false) {
+  const auto low = std::bit_cast<std::array<std::byte, 4>>(static_cast<uint32_t>(base) |
+                                                           (is_64bit ? uint32_t{4} : uint32_t{0}));
+  const auto high = std::bit_cast<std::array<std::byte, 4>>(static_cast<uint32_t>(base >> 32));
+  const auto enable = std::bit_cast<std::array<std::byte, 2>>(uint16_t{2});
+  if (!owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x10, low) ||
+      (is_64bit && !owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x14, high)) ||
+      !owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x04, enable))
+    return false;
+  std::array<std::byte, 4> observed{};
+  return owner.region_read(VFU_PCI_DEV_CFG_REGION_IDX, 0x10, observed) &&
+         (std::to_integer<uint32_t>(observed[0]) & 0xf) == (is_64bit ? uint32_t{4} : uint32_t{0});
+}
+
 /// @brief A served device plus the client attached to it.
 ///
 /// @details Serving happens on its own thread, as it does in the product, so
@@ -213,6 +247,271 @@ private:
   bool built_ = false;
 };
 
+/// A mappable BAR whose callback would fail on the second chunk of an
+/// 11-byte transfer. Target DMA must use its sealed backing instead.
+class MappedBarTestDevice final : public simdojo::PciDevice {
+public:
+  static constexpr uint64_t kBarSize = 0x4000;
+  static constexpr uint64_t kLateFailureOffset = 0x12b;
+
+  explicit MappedBarTestDevice(bool with_msix = false, uint64_t fd_offset = 0,
+                               bool is_64bit = false)
+      : simdojo::PciDevice("mapped-owner", kTestId),
+        backing_(::memfd_create("rj-target-map-test", MFD_CLOEXEC | MFD_ALLOW_SEALING)),
+        with_msix_(with_msix), fd_offset_(fd_offset), is_64bit_(is_64bit) {
+    usable_ = backing_.get() >= 0 &&
+              fd_offset_ <= static_cast<uint64_t>(std::numeric_limits<off_t>::max()) - kBarSize &&
+              ::ftruncate(backing_.get(), static_cast<off_t>(kBarSize + fd_offset_)) == 0;
+  }
+
+  [[nodiscard]] bool usable() const { return usable_; }
+  [[nodiscard]] int fd() const { return backing_.get(); }
+  [[nodiscard]] uint64_t backing_id() const { return backing_id_; }
+  [[nodiscard]] unsigned bar_calls() const { return bar_calls_.load(); }
+
+  [[nodiscard]] bool seal() {
+    if (!usable_ ||
+        ::fcntl(backing_.get(), F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0)
+      return false;
+    backing_id_ = rocjitsu::allocate_canonical_backing_id();
+    return true;
+  }
+
+  [[nodiscard]] std::vector<simdojo::BarSpec> bars() const override {
+    simdojo::BarSpec bar;
+    bar.index = 0;
+    bar.size = kBarSize;
+    bar.mem = true;
+    bar.is_64bit = is_64bit_;
+    bar.backing_fd = backing_.get();
+    bar.fd_offset = fd_offset_;
+    bar.backing_id = backing_id_;
+    bar.mmap_areas.push_back({.offset = 0, .length = kBarSize});
+    return {bar};
+  }
+
+  [[nodiscard]] simdojo::InterruptSpec interrupts() const override {
+    return with_msix_ ? simdojo::InterruptSpec{.kind = simdojo::InterruptKind::MsiX,
+                                               .vectors = 1,
+                                               .table_bar = 0,
+                                               .table_offset = 0x2000,
+                                               .pending_offset = 0x3000}
+                      : simdojo::InterruptSpec{};
+  }
+
+  [[nodiscard]] int64_t bar_access(int bar, std::span<std::byte> bytes, uint64_t offset,
+                                   bool write) override {
+    ++bar_calls_;
+    if (bar != 0 || offset >= kLateFailureOffset || offset > kBarSize ||
+        bytes.size() > kBarSize - offset)
+      return -1;
+    return write ? ::pwrite(backing_.get(), bytes.data(), bytes.size(), fd_offset_ + offset)
+                 : ::pread(backing_.get(), bytes.data(), bytes.size(), fd_offset_ + offset);
+  }
+
+  void dma_map(const simdojo::DmaRegion &) override {}
+  void dma_unmap(const simdojo::DmaRegion &) override {}
+  void reset(simdojo::ResetKind) override {}
+
+private:
+  ScopedFd backing_;
+  bool with_msix_ = false;
+  uint64_t fd_offset_ = 0;
+  bool is_64bit_ = false;
+  uint64_t backing_id_ = 0;
+  bool usable_ = false;
+  std::atomic<unsigned> bar_calls_{0};
+};
+
+class MappedGrantPair {
+public:
+  explicit MappedGrantPair(bool seal_owner, rocjitsu::FabricEndpoint *fabric = nullptr,
+                           uint32_t requester_gpu_id = 0, uint32_t owner_gpu_id = 0,
+                           bool owner_msix = false, uint64_t owner_fd_offset = 0,
+                           bool owner_64bit = false)
+      : runtime_("rj-target-mapped-"), requester_("requester", kTestId, nullptr),
+        owner_(owner_msix, owner_fd_offset, owner_64bit),
+        requester_host_(runtime_.path() + "/requester.sock", requester_),
+        owner_host_(runtime_.path() + "/owner.sock", owner_) {
+    if (!owner_.usable() || (seal_owner && !owner_.seal()))
+      return;
+    built_ = requester_host_.enable_target_grants(grants_, 0, requester_gpu_id, fabric) &&
+             owner_host_.enable_target_grants(grants_, 1, owner_gpu_id, fabric) &&
+             requester_host_.build() && owner_host_.build();
+    if (built_) {
+      requester_thread_ =
+          std::jthread([this](std::stop_token stop) { (void)requester_host_.run(stop); });
+      owner_thread_ = std::jthread([this](std::stop_token stop) { (void)owner_host_.run(stop); });
+    }
+  }
+
+  ~MappedGrantPair() {
+    stop_serving();
+    requester_host_.detach();
+    owner_host_.detach();
+  }
+
+  void stop_serving() {
+    requester_thread_.request_stop();
+    owner_thread_.request_stop();
+    if (requester_thread_.joinable())
+      requester_thread_.join();
+    if (owner_thread_.joinable())
+      owner_thread_.join();
+  }
+
+  [[nodiscard]] bool built() const { return built_; }
+
+  [[nodiscard]] bool attach(rocjitsu::test::VfioUserClient &requester,
+                            rocjitsu::test::VfioUserClient &owner) const {
+    const auto connect = [](rocjitsu::test::VfioUserClient &client, const std::string &path) {
+      for (int attempt = 0; attempt < 200; ++attempt) {
+        if (client.connect(path))
+          return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      return false;
+    };
+    return connect(requester, runtime_.path() + "/requester.sock") &&
+           connect(owner, runtime_.path() + "/owner.sock") &&
+           program_peer_bar0(owner, 0x30000000, owner_.bars().front().is_64bit);
+  }
+
+  MappedBarTestDevice &owner() { return owner_; }
+  rocjitsu::VfioDeviceHost &requester_host() { return requester_host_; }
+  rocjitsu::VfioDeviceHost &owner_host() { return owner_host_; }
+  rocjitsu::VfioTargetGrants &grants() { return grants_; }
+  [[nodiscard]] std::string requester_socket() const { return runtime_.path() + "/requester.sock"; }
+  [[nodiscard]] std::string owner_socket() const { return runtime_.path() + "/owner.sock"; }
+
+private:
+  rocjitsu::test::ScopedTempDirectory runtime_;
+  rocjitsu::ScratchPciDevice requester_;
+  MappedBarTestDevice owner_;
+  rocjitsu::VfioTargetGrants grants_{2};
+  rocjitsu::VfioDeviceHost requester_host_;
+  rocjitsu::VfioDeviceHost owner_host_;
+  std::jthread requester_thread_;
+  std::jthread owner_thread_;
+  bool built_ = false;
+};
+
+class MappedGrantTrio {
+public:
+  MappedGrantTrio()
+      : runtime_("rj-target-cohort-"), requester_a_("requester-a", kTestId, nullptr),
+        requester_b_("requester-b", kTestId, nullptr), owner_(),
+        requester_a_host_(runtime_.path() + "/requester-a.sock", requester_a_),
+        requester_b_host_(runtime_.path() + "/requester-b.sock", requester_b_),
+        owner_host_(runtime_.path() + "/owner.sock", owner_) {
+    if (!owner_.usable() || !owner_.seal())
+      return;
+    built_ = requester_a_host_.enable_target_grants(grants_, 0, 100) &&
+             requester_b_host_.enable_target_grants(grants_, 1, 101) &&
+             owner_host_.enable_target_grants(grants_, 2, 102) && requester_a_host_.build() &&
+             requester_b_host_.build() && owner_host_.build();
+    if (built_) {
+      requester_a_thread_ =
+          std::jthread([this](std::stop_token stop) { (void)requester_a_host_.run(stop); });
+      requester_b_thread_ =
+          std::jthread([this](std::stop_token stop) { (void)requester_b_host_.run(stop); });
+      owner_thread_ = std::jthread([this](std::stop_token stop) { (void)owner_host_.run(stop); });
+    }
+  }
+
+  ~MappedGrantTrio() {
+    requester_a_thread_.request_stop();
+    requester_b_thread_.request_stop();
+    owner_thread_.request_stop();
+    if (requester_a_thread_.joinable())
+      requester_a_thread_.join();
+    if (requester_b_thread_.joinable())
+      requester_b_thread_.join();
+    if (owner_thread_.joinable())
+      owner_thread_.join();
+    requester_a_host_.detach();
+    requester_b_host_.detach();
+    owner_host_.detach();
+  }
+
+  [[nodiscard]] bool built() const { return built_; }
+
+  [[nodiscard]] bool attach(rocjitsu::test::VfioUserClient &requester_a,
+                            rocjitsu::test::VfioUserClient &requester_b,
+                            rocjitsu::test::VfioUserClient &owner) const {
+    const auto connect = [](rocjitsu::test::VfioUserClient &client, const std::string &path) {
+      for (int attempt = 0; attempt < 200; ++attempt) {
+        if (client.connect(path))
+          return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      return false;
+    };
+    return connect(requester_a, runtime_.path() + "/requester-a.sock") &&
+           connect(requester_b, runtime_.path() + "/requester-b.sock") &&
+           connect(owner, runtime_.path() + "/owner.sock") && program_peer_bar0(owner, 0x34000000);
+  }
+
+  rocjitsu::VfioDeviceHost &requester_a_host() { return requester_a_host_; }
+  rocjitsu::VfioDeviceHost &requester_b_host() { return requester_b_host_; }
+  rocjitsu::VfioTargetGrants &grants() { return grants_; }
+
+private:
+  rocjitsu::test::ScopedTempDirectory runtime_;
+  rocjitsu::ScratchPciDevice requester_a_;
+  rocjitsu::ScratchPciDevice requester_b_;
+  MappedBarTestDevice owner_;
+  rocjitsu::VfioTargetGrants grants_{3};
+  rocjitsu::VfioDeviceHost requester_a_host_;
+  rocjitsu::VfioDeviceHost requester_b_host_;
+  rocjitsu::VfioDeviceHost owner_host_;
+  std::jthread requester_a_thread_;
+  std::jthread requester_b_thread_;
+  std::jthread owner_thread_;
+  bool built_ = false;
+};
+
+class HostPciMemory final : public rocjitsu::PciMemoryAccess {
+public:
+  explicit HostPciMemory(rocjitsu::VfioDeviceHost &host) : host_(host) {}
+
+  [[nodiscard]] std::shared_ptr<simdojo::PciTransportSession>
+  capture_transport_session() const override {
+    return host_.target_session_snapshot();
+  }
+  [[nodiscard]] bool read_vram(uint64_t offset, std::span<std::byte> bytes) override {
+    if (offset > local_.size() || bytes.size() > local_.size() - offset)
+      return false;
+    std::copy_n(local_.begin() + offset, bytes.size(), bytes.begin());
+    return true;
+  }
+  [[nodiscard]] bool write_vram(uint64_t offset, std::span<const std::byte> bytes) override {
+    if (offset > local_.size() || bytes.size() > local_.size() - offset)
+      return false;
+    std::copy(bytes.begin(), bytes.end(), local_.begin() + offset);
+    return true;
+  }
+  [[nodiscard]] rocjitsu::amdgpu::AtomicLoadResult atomic_load_vram(uint64_t, uint32_t) override {
+    return {};
+  }
+  [[nodiscard]] rocjitsu::amdgpu::VmAccessOutcome atomic_store_vram(uint64_t, uint32_t,
+                                                                    uint64_t) override {
+    return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+  }
+  [[nodiscard]] rocjitsu::amdgpu::AtomicCompareExchangeResult
+  compare_exchange_vram(uint64_t, uint32_t, uint64_t, uint64_t) override {
+    return {};
+  }
+  [[nodiscard]] bool read_register(uint64_t, uint32_t &) override { return false; }
+  [[nodiscard]] bool write_register(uint64_t, uint32_t) override { return false; }
+  [[nodiscard]] bool deliver_interrupt(const rocjitsu::InterruptEntry &) override { return false; }
+
+  std::array<std::byte, 4096> local_{};
+
+private:
+  rocjitsu::VfioDeviceHost &host_;
+};
+
 TEST(VfioDeviceHost, ServesAClientAndReportsItsBusShape) {
   ServedDevice served;
   ASSERT_TRUE(served.built());
@@ -271,12 +570,17 @@ TEST(VfioDeviceHost, PublishesASecondGenerationPcieEndpointCapability) {
   std::memcpy(&pcie, config.data() + capability, sizeof(pcie));
   EXPECT_EQ(pcie.pxcaps.ver, 2u) << "Device Capabilities 2 is defined from PCIe version 2";
   EXPECT_EQ(pcie.pxcaps.dpt, PCI_EXP_TYPE_ENDPOINT);
+  EXPECT_EQ(pcie.pxlcap.stuff & PCI_EXP_LNKCAP_SLS, 1u);
+  EXPECT_EQ((pcie.pxlcap.stuff & PCI_EXP_LNKCAP_MLW) >> 4, 1u);
+  EXPECT_EQ(pcie.pxls.stuff & PCI_EXP_LNKSTA_CLS, 1u);
+  EXPECT_EQ((pcie.pxls.stuff & PCI_EXP_LNKSTA_NLW) >> 4, 1u);
+  EXPECT_EQ(pcie.pxlcap2.stuff & PCI_EXP_LNKCAP2_SLS, PCI_EXP_LNKCAP2_SLS_2_5GB);
   EXPECT_EQ(pcie.pxdcap2.aocs32, 0u);
   EXPECT_EQ(pcie.pxdcap2.aocs64, 0u)
       << "the transport must not invent AtomicOp completion for an ordinary device";
 }
 
-TEST(VfioDeviceHost, PublishesGpuAtomicCompletionCapabilities) {
+TEST(VfioDeviceHost, DoesNotAdvertiseUnimplementedGpuPeerAtomicCompletion) {
   const std::string socket_path =
       std::format("/tmp/rj-vfu-test-atomics-{}.sock", static_cast<int>(::getpid()));
   std::filesystem::remove(socket_path);
@@ -313,8 +617,14 @@ TEST(VfioDeviceHost, PublishesGpuAtomicCompletionCapabilities) {
 
   pxcap pcie{};
   std::memcpy(&pcie, config.data() + capability, sizeof(pcie));
-  EXPECT_EQ(pcie.pxdcap2.aocs32, 1u);
-  EXPECT_EQ(pcie.pxdcap2.aocs64, 1u);
+  EXPECT_EQ(pcie.pxlcap.stuff & PCI_EXP_LNKCAP_SLS, 5u);
+  EXPECT_EQ((pcie.pxlcap.stuff & PCI_EXP_LNKCAP_MLW) >> 4, 16u);
+  EXPECT_EQ(pcie.pxls.stuff & PCI_EXP_LNKSTA_CLS, 1u);
+  EXPECT_EQ((pcie.pxls.stuff & PCI_EXP_LNKSTA_NLW) >> 4, 1u);
+  EXPECT_EQ(pcie.pxlcap2.stuff & PCI_EXP_LNKCAP2_SLS, 0x3eu);
+  EXPECT_EQ(pcie.pxdcap2.aocs32, 0u);
+  EXPECT_EQ(pcie.pxdcap2.aocs64, 0u)
+      << "root AtomicOp admission does not implement endpoint peer completion";
 
   serving.request_stop();
   serving.join();
@@ -438,6 +748,702 @@ TEST(VfioDeviceHost, WithholdsAWindowSharedWithoutADescriptor) {
 
   EXPECT_EQ(served.device().mapped_regions(), 0u)
       << "the device must not be told about a window it could never read";
+}
+
+TEST(VfioTargetGrants, StandardDescriptorlessMapResolvesOwnerFromPciBar) {
+  MappedGrantPair pair(/*seal_owner=*/true);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  const auto connect = [](rocjitsu::test::VfioUserClient &client, const std::string &path) {
+    for (int attempt = 0; attempt < 200; ++attempt) {
+      if (client.connect(path))
+        return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+  };
+  ASSERT_TRUE(connect(requester, pair.requester_socket()));
+  ASSERT_TRUE(connect(owner, pair.owner_socket()));
+
+  constexpr uint32_t kBarBase = 0x30000000;
+  const auto bar = std::bit_cast<std::array<std::byte, 4>>(kBarBase);
+  const auto enable = std::bit_cast<std::array<std::byte, 2>>(uint16_t{0x0002});
+  ASSERT_TRUE(owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x10, bar));
+  ASSERT_TRUE(owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x04, enable));
+
+  constexpr uint64_t kOwnerOffset = 0x1000;
+  constexpr uint64_t kIova = kBarBase + kOwnerOffset;
+  constexpr std::array<std::byte, 4> kInitial{std::byte{0x12}, std::byte{0x34}, std::byte{0x56},
+                                              std::byte{0x78}};
+  constexpr std::array<std::byte, 4> kReplacement{std::byte{0x87}, std::byte{0x65}, std::byte{0x43},
+                                                  std::byte{0x21}};
+  ASSERT_EQ(::pwrite(pair.owner().fd(), kInitial.data(), kInitial.size(), kOwnerOffset), 4);
+  ASSERT_TRUE(requester.dma_map(kIova, 0x1000, -1, 0));
+
+  std::array<std::byte, 4> read{};
+  ASSERT_EQ(pair.requester_host().read_outcome(kIova, read), simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(read, kInitial);
+  ASSERT_EQ(pair.requester_host().write_outcome(kIova, kReplacement),
+            simdojo::DmaAccessOutcome::Complete);
+  ASSERT_EQ(::pread(pair.owner().fd(), read.data(), read.size(), kOwnerOffset), 4);
+  EXPECT_EQ(read, kReplacement);
+  ASSERT_TRUE(requester.dma_unmap(kIova, 0x1000));
+  EXPECT_NE(pair.requester_host().read_outcome(kIova, read), simdojo::DmaAccessOutcome::Complete);
+}
+
+TEST(VfioTargetGrants, StandardMapResolves64BitPeerBarAbove4GiB) {
+  MappedGrantPair pair(/*seal_owner=*/true, nullptr, 0, 0, false, 0,
+                       /*owner_64bit=*/true);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  const auto connect = [](rocjitsu::test::VfioUserClient &client, const std::string &path) {
+    for (int attempt = 0; attempt < 200; ++attempt) {
+      if (client.connect(path))
+        return true;
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return false;
+  };
+  ASSERT_TRUE(connect(requester, pair.requester_socket()));
+  ASSERT_TRUE(connect(owner, pair.owner_socket()));
+
+  constexpr uint64_t kBarBase = 0xc080000000;
+  constexpr uint64_t kOwnerOffset = 0x1000;
+  constexpr uint64_t kIova = kBarBase + kOwnerOffset;
+  const auto low = std::bit_cast<std::array<std::byte, 4>>(uint32_t{0x8000000c});
+  const auto high = std::bit_cast<std::array<std::byte, 4>>(uint32_t{0xc0});
+  const auto enable = std::bit_cast<std::array<std::byte, 2>>(uint16_t{0x0002});
+  ASSERT_TRUE(owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x10, low));
+  ASSERT_TRUE(owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x14, high));
+  ASSERT_TRUE(owner.region_write(VFU_PCI_DEV_CFG_REGION_IDX, 0x04, enable));
+  std::array<std::byte, 4> actual_high{};
+  ASSERT_TRUE(owner.region_read(VFU_PCI_DEV_CFG_REGION_IDX, 0x14, actual_high));
+  EXPECT_EQ(actual_high, high);
+
+  constexpr std::array<std::byte, 4> kInitial{std::byte{0x12}, std::byte{0x34}, std::byte{0x56},
+                                              std::byte{0x78}};
+  ASSERT_EQ(::pwrite(pair.owner().fd(), kInitial.data(), kInitial.size(), kOwnerOffset), 4);
+  ASSERT_TRUE(requester.dma_map(kBarBase, MappedBarTestDevice::kBarSize, -1, 0));
+  std::array<std::byte, 4> read{};
+  EXPECT_EQ(pair.requester_host().read_outcome(kIova, read), simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(read, kInitial);
+}
+
+TEST(VfioTargetGrants, BarReprogramAndOwnerResetRevokeStandardPeerMaps) {
+  MappedGrantPair pair(/*seal_owner=*/true);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+
+  constexpr uint64_t kOffset = 0x1000;
+  constexpr uint64_t kOldIova = 0x30000000 + kOffset;
+  constexpr uint64_t kNewBase = 0x31000000;
+  constexpr uint64_t kNewIova = kNewBase + kOffset;
+  constexpr uint32_t kValue = 0x13579bdf;
+  ASSERT_EQ(::pwrite(pair.owner().fd(), &kValue, sizeof(kValue), kOffset), sizeof(kValue));
+  ASSERT_TRUE(requester.dma_map(kOldIova, 0x1000, -1, 0));
+  std::array<std::byte, 4> read{};
+  EXPECT_EQ(pair.requester_host().read_outcome(kOldIova, read),
+            simdojo::DmaAccessOutcome::Complete);
+
+  ASSERT_TRUE(program_peer_bar0(owner, kNewBase));
+  EXPECT_NE(pair.requester_host().read_outcome(kOldIova, read),
+            simdojo::DmaAccessOutcome::Complete);
+  ASSERT_TRUE(requester.dma_unmap(kOldIova, 0x1000));
+  ASSERT_TRUE(requester.dma_map(kNewIova, 0x1000, -1, 0));
+  EXPECT_EQ(pair.requester_host().read_outcome(kNewIova, read),
+            simdojo::DmaAccessOutcome::Complete);
+  uint32_t observed = 0;
+  std::memcpy(&observed, read.data(), sizeof(observed));
+  EXPECT_EQ(observed, kValue);
+
+  ASSERT_TRUE(owner.device_reset());
+  EXPECT_NE(pair.requester_host().read_outcome(kNewIova, read),
+            simdojo::DmaAccessOutcome::Complete);
+}
+
+TEST(VfioTargetGrants, StandardPeerMapsValidateWholeMixedTransfer) {
+  MappedGrantPair pair(/*seal_owner=*/true);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+
+  constexpr uint64_t kFirstIova = 0x30001000;
+  constexpr uint64_t kSecondIova = 0x30002000;
+  constexpr std::array<std::byte, 8> kValue{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4},
+                                            std::byte{5}, std::byte{6}, std::byte{7}, std::byte{8}};
+  ASSERT_EQ(::pwrite(pair.owner().fd(), kValue.data(), 4, 0x1ffc), 4);
+  ASSERT_EQ(::pwrite(pair.owner().fd(), kValue.data() + 4, 4, 0x2000), 4);
+  ASSERT_TRUE(requester.dma_map(kFirstIova, 0x1000, -1, 0));
+  ASSERT_TRUE(requester.dma_map(kSecondIova, 0x1000, -1, 0));
+  std::array<std::byte, 8> read{};
+  EXPECT_EQ(pair.requester_host().read_outcome(kSecondIova - 4, read),
+            simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(read, kValue);
+
+  ASSERT_TRUE(requester.dma_unmap(kSecondIova, 0x1000));
+  read.fill(std::byte{0xee});
+  const auto unchanged = read;
+  EXPECT_NE(pair.requester_host().read_outcome(kSecondIova - 4, read),
+            simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(read, unchanged);
+  ASSERT_TRUE(requester.dma_map(kSecondIova, 0x1000, -1, 0, 0, /*writable=*/false));
+  EXPECT_NE(pair.requester_host().write_outcome(kSecondIova - 4, kValue),
+            simdojo::DmaAccessOutcome::Complete);
+  std::array<std::byte, 4> owner_tail{};
+  ASSERT_EQ(::pread(pair.owner().fd(), owner_tail.data(), owner_tail.size(), 0x1ffc), 4);
+  EXPECT_TRUE(std::ranges::equal(owner_tail, std::span(kValue).first(4)));
+}
+
+TEST(VfioTargetGrants, QueuedAdmissionHandleFailsClosedAfterCoordinatorDestruction) {
+  std::function<rocjitsu::amdgpu::MemoryIngressAdmission()> queued;
+  {
+    rocjitsu::VfioTargetGrants grants(2);
+    queued = grants.capture_admission({});
+  }
+  EXPECT_EQ(queued().outcome, rocjitsu::amdgpu::VmAccessOutcome::Revoked);
+}
+
+TEST(VfioTargetGrants, CopiesSealedBackingWithoutCallingFallibleBarAccess) {
+  MappedGrantPair pair(/*seal_owner=*/true);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+
+  constexpr uint64_t kIova = 0x3000'0123;
+  constexpr uint64_t kOwnerOffset = 0x123;
+  constexpr uint64_t kSize = 0x1000;
+  std::array<std::byte, 11> seeded{};
+  std::array<std::byte, 11> replacement{};
+  for (std::size_t index = 0; index < seeded.size(); ++index) {
+    seeded[index] = std::byte{static_cast<uint8_t>(0x20 + index)};
+    replacement[index] = std::byte{static_cast<uint8_t>(0x60 + index)};
+  }
+  ASSERT_EQ(::pwrite(pair.owner().fd(), seeded.data(), seeded.size(), kOwnerOffset),
+            static_cast<ssize_t>(seeded.size()));
+  ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0));
+
+  std::array<std::byte, 11> copied{};
+  EXPECT_EQ(pair.requester_host().read_outcome(kIova, copied), simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(copied, seeded);
+  EXPECT_EQ(pair.requester_host().write_outcome(kIova, replacement),
+            simdojo::DmaAccessOutcome::Complete);
+  ASSERT_EQ(::pread(pair.owner().fd(), copied.data(), copied.size(), kOwnerOffset),
+            static_cast<ssize_t>(copied.size()));
+  EXPECT_EQ(copied, replacement);
+  EXPECT_EQ(pair.owner().bar_calls(), 0u)
+      << "the BAR callback would reject the later chunk of this transfer";
+}
+
+TEST(VfioTargetGrants, RefusesPeerAtomicsWhileEndpointCompleterIsUnadvertised) {
+  MappedGrantPair pair(/*seal_owner=*/true);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+
+  constexpr uint64_t kIova = 0x3000'0100;
+  constexpr uint64_t kOffset = 0x100;
+  constexpr uint64_t kInitial = 0x1122334455667788;
+  ASSERT_EQ(::pwrite(pair.owner().fd(), &kInitial, sizeof(kInitial), kOffset),
+            static_cast<ssize_t>(sizeof(kInitial)));
+  ASSERT_TRUE(requester.dma_map(kIova, 0x1000, -1, 0));
+
+  std::array<std::byte, sizeof(kInitial)> bytes{};
+  EXPECT_EQ(pair.requester_host().read_outcome(kIova, bytes), simdojo::DmaAccessOutcome::Complete);
+  uint64_t ordinary_read = 0;
+  std::memcpy(&ordinary_read, bytes.data(), bytes.size());
+  EXPECT_EQ(ordinary_read, kInitial);
+
+  EXPECT_EQ(pair.requester_host().atomic_load(kIova, sizeof(kInitial)).outcome,
+            simdojo::DmaAccessOutcome::Faulted);
+  EXPECT_EQ(pair.requester_host().atomic_store(kIova, sizeof(kInitial), 9),
+            simdojo::DmaAccessOutcome::Faulted);
+  EXPECT_EQ(pair.requester_host().compare_exchange(kIova, sizeof(kInitial), kInitial, 9).outcome,
+            simdojo::DmaAccessOutcome::Faulted);
+  uint64_t after = 0;
+  ASSERT_EQ(::pread(pair.owner().fd(), &after, sizeof(after), kOffset),
+            static_cast<ssize_t>(sizeof(after)));
+  EXPECT_EQ(after, kInitial);
+}
+
+TEST(VfioTargetGrants, ClassifiesOnePeerStepAndRetainsSameIovaTombstone) {
+  constexpr uint64_t kFdOffset = 0x1000;
+  MappedGrantPair pair(/*seal_owner=*/true, /*fabric=*/nullptr, /*requester_gpu_id=*/0,
+                       /*owner_gpu_id=*/0, /*owner_msix=*/false, kFdOffset);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+
+  constexpr uint64_t kIova = 0x3000'0100;
+  constexpr uint64_t kSize = 0x1000;
+  constexpr uint64_t kOffset = 0x100;
+  ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0, 0, /*writable=*/false));
+  const auto session = pair.requester_host().target_session_snapshot();
+  ASSERT_NE(session, nullptr);
+  const uint64_t generation = session->generation();
+  auto read = pair.grants().prepare_peer(0, generation, kIova + 8, 16, false);
+  ASSERT_EQ(read.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
+  EXPECT_EQ(read.snapshot.map_id, 1u);
+  EXPECT_EQ(read.snapshot.owner_offset, kOffset + 8);
+  EXPECT_EQ(read.snapshot.backing_offset, kFdOffset + kOffset + 8);
+  EXPECT_EQ(read.snapshot.backing_id, pair.owner().backing_id());
+  EXPECT_NE(read.snapshot.backing_id, 0u);
+  EXPECT_EQ(pair.grants().prepare_peer(0, generation, kIova + 8, 16, true).kind,
+            rocjitsu::VfioTargetGrants::PeerKind::Rejected);
+  EXPECT_EQ(pair.grants().prepare_peer(0, generation, kIova - 8, 16, false).kind,
+            rocjitsu::VfioTargetGrants::PeerKind::Rejected);
+  EXPECT_EQ(pair.grants().prepare_peer(0, generation, kIova + kSize - 8, 16, false).kind,
+            rocjitsu::VfioTargetGrants::PeerKind::Rejected);
+  EXPECT_EQ(pair.grants().prepare_peer(0, generation, 0x1100'0000, 16, false).kind,
+            rocjitsu::VfioTargetGrants::PeerKind::OrdinaryRam);
+
+  ASSERT_TRUE(requester.dma_unmap(kIova, kSize));
+  EXPECT_EQ(pair.grants().admit_peer(read.snapshot).outcome,
+            rocjitsu::amdgpu::VmAccessOutcome::Revoked);
+  EXPECT_EQ(pair.grants().prepare_peer(0, generation, kIova + 8, 16, false).kind,
+            rocjitsu::VfioTargetGrants::PeerKind::Rejected);
+
+  ScopedFd reused_ram(::memfd_create("rj-target-reused-iova", 0));
+  ASSERT_GE(reused_ram.get(), 0);
+  ASSERT_EQ(::ftruncate(reused_ram.get(), kSize), 0);
+  ASSERT_TRUE(requester.dma_map(kIova, kSize, reused_ram.get(), 0));
+  EXPECT_EQ(pair.grants().prepare_peer(0, generation, kIova + 8, 16, false).kind,
+            rocjitsu::VfioTargetGrants::PeerKind::Rejected);
+  ASSERT_TRUE(requester.dma_unmap(kIova, kSize));
+  ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0, 0, /*writable=*/false));
+  auto replacement = pair.grants().prepare_peer(0, generation, kIova + 8, 16, false);
+  ASSERT_EQ(replacement.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
+  EXPECT_EQ(replacement.snapshot.map_id, 2u);
+  EXPECT_EQ(replacement.snapshot.backing_id, read.snapshot.backing_id);
+  EXPECT_EQ(replacement.snapshot.backing_offset, read.snapshot.backing_offset);
+  EXPECT_EQ(pair.grants().admit_peer(read.snapshot).outcome,
+            rocjitsu::amdgpu::VmAccessOutcome::Revoked);
+}
+
+TEST(VfioTargetGrants, RejectsPeerSnapshotWithChangedCanonicalBacking) {
+  constexpr uint64_t kFdOffset = 0x1000;
+  MappedGrantPair pair(/*seal_owner=*/true, /*fabric=*/nullptr, /*requester_gpu_id=*/101,
+                       /*owner_gpu_id=*/202, /*owner_msix=*/false, kFdOffset);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+
+  constexpr uint64_t kIova = 0x3000'0100;
+  ASSERT_TRUE(requester.dma_map(kIova, 0x1000, -1, 0, 0, /*writable=*/false));
+  const auto session = pair.requester_host().target_session_snapshot();
+  ASSERT_NE(session, nullptr);
+  auto peer = pair.grants().prepare_peer(0, session->generation(), kIova + 8, 16, false);
+  ASSERT_EQ(peer.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
+  ASSERT_EQ(peer.snapshot.backing_offset, kFdOffset + 0x108);
+  ASSERT_NE(peer.snapshot.backing_id, 0u);
+
+  auto admitted = pair.grants().admit_peer(peer.snapshot);
+  ASSERT_EQ(admitted.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  admitted.permit.reset();
+
+  auto wrong_id = peer.snapshot;
+  ++wrong_id.backing_id;
+  EXPECT_EQ(pair.grants().admit_peer(wrong_id).outcome, rocjitsu::amdgpu::VmAccessOutcome::Revoked);
+  auto wrong_offset = peer.snapshot;
+  ++wrong_offset.backing_offset;
+  EXPECT_EQ(pair.grants().admit_peer(wrong_offset).outcome,
+            rocjitsu::amdgpu::VmAccessOutcome::Revoked);
+}
+
+TEST(VfioTargetGrants, PinsOverlappingTargetMapsThroughPeerEffect) {
+  MappedGrantTrio trio;
+  ASSERT_TRUE(trio.built());
+  rocjitsu::test::VfioUserClient requester_a;
+  rocjitsu::test::VfioUserClient requester_b;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(trio.attach(requester_a, requester_b, owner));
+  ASSERT_TRUE(requester_b.set_io_timeout(std::chrono::seconds(3)));
+
+  constexpr uint64_t kIovaA = 0x3400'0100;
+  constexpr uint64_t kIovaB = 0x3400'0120;
+  constexpr uint64_t kMapSize = 0x1000;
+  ASSERT_TRUE(requester_a.dma_map(kIovaA, kMapSize, -1, 0, 0, /*writable=*/false));
+  ASSERT_TRUE(requester_b.dma_map(kIovaB, kMapSize, -1, 0, 0, /*writable=*/false));
+  const auto session_a = trio.requester_a_host().target_session_snapshot();
+  const auto session_b = trio.requester_b_host().target_session_snapshot();
+  ASSERT_NE(session_a, nullptr);
+  ASSERT_NE(session_b, nullptr);
+  auto peer_a = trio.grants().prepare_peer(0, session_a->generation(), kIovaA + 8, 16, false);
+  auto peer_b = trio.grants().prepare_peer(1, session_b->generation(), kIovaB + 8, 16, false);
+  ASSERT_EQ(peer_a.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
+  ASSERT_EQ(peer_b.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
+  ASSERT_EQ(peer_a.snapshot.backing_id, peer_b.snapshot.backing_id);
+
+  auto admitted_a = trio.grants().admit_peer(peer_a.snapshot);
+  ASSERT_EQ(admitted_a.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  auto unmap_b =
+      std::async(std::launch::async, [&] { return requester_b.dma_unmap(kIovaB, kMapSize); });
+  bool quiescing_b = false;
+  for (int attempt = 0; attempt < 200 && !quiescing_b; ++attempt) {
+    auto probe = trio.grants().admit_peer(peer_b.snapshot);
+    quiescing_b = probe.outcome == rocjitsu::amdgpu::VmAccessOutcome::Unavailable;
+    probe.permit.reset();
+    if (quiescing_b || unmap_b.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+      break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_TRUE(quiescing_b) << "UNMAP must enter quiesce while the cohort holds B's grant";
+  EXPECT_EQ(unmap_b.wait_for(std::chrono::milliseconds(0)), std::future_status::timeout);
+  admitted_a.permit.reset();
+  ASSERT_EQ(unmap_b.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+  EXPECT_TRUE(unmap_b.get());
+
+  EXPECT_EQ(trio.grants().admit_peer(peer_b.snapshot).outcome,
+            rocjitsu::amdgpu::VmAccessOutcome::Revoked);
+  auto admitted_again = trio.grants().admit_peer(peer_a.snapshot);
+  ASSERT_EQ(admitted_again.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  admitted_again.permit.reset();
+
+  constexpr uint64_t kDisjointIova = 0x3400'2000;
+  ASSERT_TRUE(requester_b.dma_map(kDisjointIova, kMapSize, -1, 0, 0, /*writable=*/false));
+  auto disjoint =
+      trio.grants().prepare_peer(1, session_b->generation(), kDisjointIova + 8, 16, false);
+  ASSERT_EQ(disjoint.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
+  auto held_a = trio.grants().admit_peer(peer_a.snapshot);
+  ASSERT_EQ(held_a.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  auto unmap_disjoint = std::async(std::launch::async,
+                                   [&] { return requester_b.dma_unmap(kDisjointIova, kMapSize); });
+  const auto disjoint_result = unmap_disjoint.wait_for(std::chrono::seconds(3));
+  held_a.permit.reset();
+  EXPECT_EQ(disjoint_result, std::future_status::ready);
+  EXPECT_TRUE(unmap_disjoint.get());
+}
+
+TEST(VfioTargetGrants, QuiesceWaitsForAdmittedEffectAndResumesAfterUnrelatedMap) {
+  MappedGrantPair pair(/*seal_owner=*/true);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+  ASSERT_TRUE(requester.set_io_timeout(std::chrono::seconds(3)));
+
+  constexpr uint64_t kIova = 0x3000'0100;
+  constexpr uint64_t kSize = 0x1000;
+  ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0));
+  const auto session = pair.requester_host().target_session_snapshot();
+  ASSERT_NE(session, nullptr);
+  auto peer = pair.grants().prepare_peer(0, session->generation(), kIova, 4, true);
+  ASSERT_EQ(peer.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
+
+  auto admitted = pair.grants().admit_peer(peer.snapshot);
+  ASSERT_EQ(admitted.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ScopedFd ordinary(::memfd_create("rj-target-quiesce-ram", 0));
+  ASSERT_GE(ordinary.get(), 0);
+  ASSERT_EQ(::ftruncate(ordinary.get(), kSize), 0);
+  auto map = std::async(std::launch::async,
+                        [&] { return requester.dma_map(0x1200'0000, kSize, ordinary.get(), 0); });
+  EXPECT_EQ(map.wait_for(std::chrono::milliseconds(100)), std::future_status::timeout);
+  admitted.permit.reset();
+  ASSERT_EQ(map.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+  ASSERT_TRUE(map.get());
+  auto after_map = pair.grants().admit_peer(peer.snapshot);
+  EXPECT_EQ(after_map.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  after_map.permit.reset();
+  ASSERT_TRUE(requester.dma_unmap(0x1200'0000, kSize));
+
+  auto entered = pair.grants().admit_peer(peer.snapshot);
+  ASSERT_EQ(entered.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  auto unmap = std::async(std::launch::async, [&] { return requester.dma_unmap(kIova, kSize); });
+  EXPECT_EQ(unmap.wait_for(std::chrono::milliseconds(100)), std::future_status::timeout);
+  entered.permit.reset();
+  ASSERT_EQ(unmap.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+  EXPECT_TRUE(unmap.get());
+  EXPECT_EQ(pair.grants().admit_peer(peer.snapshot).outcome,
+            rocjitsu::amdgpu::VmAccessOutcome::Revoked);
+}
+
+TEST(VfioTargetGrants, OwnerResetDrainsIncomingPeerEffectBeforeReply) {
+  MappedGrantPair pair(/*seal_owner=*/true, /*fabric=*/nullptr, 0, 0,
+                       /*owner_msix=*/true);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+  ASSERT_TRUE(owner.set_io_timeout(std::chrono::seconds(3)));
+  ScopedFd signalled(::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC));
+  ASSERT_GE(signalled.get(), 0);
+  ASSERT_TRUE(owner.arm_irq(VFIO_PCI_MSIX_IRQ_INDEX, signalled.get()));
+  constexpr uint64_t kIova = 0x3000'0100;
+  constexpr uint64_t kSize = 0x1000;
+  ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0, 0, /*writable=*/false));
+  const auto session = pair.requester_host().target_session_snapshot();
+  ASSERT_NE(session, nullptr);
+  auto peer = pair.grants().prepare_peer(0, session->generation(), kIova, 4, false);
+  ASSERT_EQ(peer.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
+  auto admitted = pair.grants().admit_peer(peer.snapshot);
+  ASSERT_EQ(admitted.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  auto reset = std::async(std::launch::async, [&] { return owner.device_reset(); });
+  EXPECT_EQ(reset.wait_for(std::chrono::milliseconds(100)), std::future_status::timeout);
+  bool paused = false;
+  for (int attempt = 0; attempt < 200 && !paused; ++attempt) {
+    auto probe = pair.grants().admit_peer(peer.snapshot);
+    paused = probe.outcome == rocjitsu::amdgpu::VmAccessOutcome::Unavailable;
+    probe.permit.reset();
+    if (!paused)
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_TRUE(paused) << "reset must enter quiesce before completion is signalled";
+  // An admitted effect may signal completion while reset waits for its permit.
+  EXPECT_TRUE(pair.owner_host().trigger(0));
+  uint64_t irq_count = 0;
+  const auto irq_bytes = ::read(signalled.get(), &irq_count, sizeof(irq_count));
+  EXPECT_EQ(irq_bytes, static_cast<ssize_t>(sizeof(irq_count)));
+  if (irq_bytes == static_cast<ssize_t>(sizeof(irq_count)))
+    EXPECT_EQ(irq_count, 1u);
+  EXPECT_EQ(reset.wait_for(std::chrono::milliseconds(0)), std::future_status::timeout);
+  admitted.permit.reset();
+  ASSERT_EQ(reset.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+  EXPECT_TRUE(reset.get());
+  EXPECT_EQ(pair.grants().admit_peer(peer.snapshot).outcome,
+            rocjitsu::amdgpu::VmAccessOutcome::Revoked);
+  EXPECT_EQ(pair.grants().prepare_peer(0, session->generation(), kIova, 4, false).kind,
+            rocjitsu::VfioTargetGrants::PeerKind::Rejected);
+}
+
+TEST(VfioTargetGrants, ConcurrentHostDetachDrainsSharedAdmittedEffect) {
+  using namespace std::chrono_literals;
+  MappedGrantPair pair(/*seal_owner=*/true);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+
+  constexpr uint64_t kIova = 0x3000'0100;
+  constexpr uint64_t kSize = 0x1000;
+  ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0, 0, /*writable=*/false));
+  const auto session = pair.requester_host().target_session_snapshot();
+  ASSERT_NE(session, nullptr);
+  auto peer = pair.grants().prepare_peer(0, session->generation(), kIova, 4, false);
+  ASSERT_EQ(peer.kind, rocjitsu::VfioTargetGrants::PeerKind::Ready);
+  auto admitted = pair.grants().admit_peer(peer.snapshot);
+  ASSERT_EQ(admitted.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+
+  pair.stop_serving();
+  auto requester_detach = std::async(std::launch::async, [&] { pair.requester_host().detach(); });
+  bool gate_closed = false;
+  for (int attempt = 0; attempt < 200; ++attempt) {
+    if (!peer.snapshot.effect_gate->try_acquire()) {
+      gate_closed = true;
+      break;
+    }
+    std::this_thread::sleep_for(1ms);
+  }
+  if (!gate_closed) {
+    admitted.permit.reset();
+    requester_detach.wait();
+    FAIL() << "requester detach did not close its peer grant";
+  }
+  // The old erase-before-drain path removed the grant immediately. Starting
+  // the owner here made it reset while the requester was still waiting.
+  std::this_thread::sleep_for(50ms);
+  auto owner_detach = std::async(std::launch::async, [&] { pair.owner_host().detach(); });
+  EXPECT_EQ(requester_detach.wait_for(50ms), std::future_status::timeout);
+  EXPECT_EQ(owner_detach.wait_for(50ms), std::future_status::timeout);
+  admitted.permit.reset();
+  ASSERT_EQ(requester_detach.wait_for(5s), std::future_status::ready);
+  ASSERT_EQ(owner_detach.wait_for(5s), std::future_status::ready);
+  requester_detach.get();
+  owner_detach.get();
+}
+
+TEST(VfioTargetGrants, Gfx12GartPeerReadWriteUsesFabricWithStockPageTableWalks) {
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint64_t kPageTableIova = 0x1000'0000;
+  constexpr uint64_t kPeerIova = 0x3300'0000;
+  constexpr uint64_t kAperture = 0x8000'0000;
+  constexpr uint64_t kOwnerOffset = 0;
+  constexpr uint64_t kFdOffset = 0x1000;
+  constexpr uint64_t kPteFlags = (uint64_t{1} << 63) | 1 | 2 | 4 | 32 | 64;
+  simdojo::SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<simdojo::CompositeComponent>("root");
+  auto fabric = std::make_unique<rocjitsu::FabricEndpoint>(
+      std::vector<rocjitsu::config::SystemPeerRoute>{{"g0", "g1", 0, 202, {"e0", "switch", "e1"}}});
+  auto *endpoint = fabric.get();
+  root->add_child(std::move(fabric));
+  engine.topology().set_root(std::move(root));
+  endpoint->wire(engine.topology(), simdojo::ExecMode::FUNCTIONAL);
+  engine.create();
+  engine.register_as_primary();
+  struct StopEngine {
+    simdojo::SimulationEngine &engine;
+    ~StopEngine() {
+      engine.primary_release();
+      engine.shutdown();
+    }
+  } stop{engine};
+
+  MappedGrantPair pair(/*seal_owner=*/true, endpoint, 0, 202,
+                       /*owner_msix=*/false, kFdOffset);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+  ASSERT_TRUE(program_peer_bar0(owner, kPeerIova));
+  ScopedFd page_table(::memfd_create("rj-gart-peer-page-table", 0));
+  ASSERT_GE(page_table.get(), 0);
+  ASSERT_EQ(::ftruncate(page_table.get(), 0x3000), 0);
+  const uint64_t peer_pte = kPeerIova | kPteFlags;
+  const uint64_t ram_pte = (kPageTableIova + 0x1000) | kPteFlags;
+  ASSERT_EQ(::pwrite(page_table.get(), &peer_pte, sizeof(peer_pte), 0),
+            static_cast<ssize_t>(sizeof(peer_pte)));
+  ASSERT_EQ(::pwrite(page_table.get(), &ram_pte, sizeof(ram_pte), sizeof(peer_pte)),
+            static_cast<ssize_t>(sizeof(ram_pte)));
+  constexpr std::array<std::byte, 4> ram_data{std::byte{0x11}, std::byte{0x22}, std::byte{0x33},
+                                              std::byte{0x44}};
+  ASSERT_EQ(::pwrite(page_table.get(), ram_data.data(), ram_data.size(), 0x1000), 4);
+  ASSERT_TRUE(requester.dma_map(kPageTableIova, 0x3000, page_table.get(), 0));
+
+  constexpr std::array<std::byte, 4> peer_data{std::byte{0xa1}, std::byte{0xb2}, std::byte{0xc3},
+                                               std::byte{0xd4}};
+  ASSERT_EQ(
+      ::pwrite(pair.owner().fd(), peer_data.data(), peer_data.size(), kFdOffset + kOwnerOffset), 4);
+  ASSERT_TRUE(requester.dma_map(kPeerIova, 0x1000, -1, 0));
+
+  HostPciMemory host_memory(pair.requester_host());
+  host_memory.local_[0x80] = std::byte{0x5a};
+  auto physical = std::make_shared<rocjitsu::PciPhysicalMemoryAccess>(host_memory);
+  auto translator = std::make_shared<rocjitsu::amdgpu::Gfx12GartTranslator>(
+      physical, kPageTableIova | 3, kAperture, kAperture + 0x1fff);
+  rocjitsu::amdgpu::GpuVm vm;
+  const auto handle = vm.register_address_space(0, translator, physical);
+  ASSERT_TRUE(handle);
+  auto access = vm.snapshot_pinned(handle);
+  ASSERT_TRUE(access.has_value());
+
+  std::array<std::byte, 4> read{};
+  rocjitsu::amdgpu::VmTransferToken token;
+  std::size_t completed = 0;
+  EXPECT_EQ(access->read(kAperture, read, completed, token), VmAccessOutcome::Unavailable);
+  ASSERT_TRUE(token.pending());
+  for (int step = 0; step < 16 && completed == 0; ++step) {
+    ASSERT_TRUE(engine.step());
+    const auto outcome = access->read(kAperture, read, completed, token);
+    if (outcome != VmAccessOutcome::Unavailable)
+      EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+  }
+  ASSERT_EQ(completed, read.size());
+  EXPECT_EQ(read, peer_data);
+  const auto completed_read = token.take_completed_read();
+  ASSERT_TRUE(completed_read.has_value());
+  EXPECT_TRUE(completed_read->stamp.covers(pair.owner().backing_id(), kFdOffset + kOwnerOffset,
+                                           read.size()));
+  EXPECT_EQ(endpoint->diagnostics().effects, 1u);
+
+  constexpr std::array<std::byte, 4> replacement{std::byte{0x01}, std::byte{0x02}, std::byte{0x03},
+                                                 std::byte{0x04}};
+  completed = 0;
+  EXPECT_EQ(access->write(kAperture, replacement, completed, token), VmAccessOutcome::Unavailable);
+  for (int step = 0; step < 16 && completed == 0; ++step) {
+    ASSERT_TRUE(engine.step());
+    const auto outcome = access->write(kAperture, replacement, completed, token);
+    if (outcome != VmAccessOutcome::Unavailable)
+      EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+  }
+  ASSERT_EQ(completed, replacement.size());
+  ASSERT_EQ(::pread(pair.owner().fd(), read.data(), read.size(), kFdOffset + kOwnerOffset), 4);
+  EXPECT_EQ(read, replacement);
+  EXPECT_EQ(endpoint->diagnostics().effects, 2u);
+
+  // The queued effect must rewalk the ordinary GART PTE. Repointing the VA
+  // before the owner event rejects the old peer translation.
+  completed = 0;
+  read.fill(std::byte{0xee});
+  EXPECT_EQ(access->read(kAperture, read, completed, token), VmAccessOutcome::Unavailable);
+  ASSERT_TRUE(token.pending());
+  ASSERT_EQ(::pwrite(page_table.get(), &ram_pte, sizeof(ram_pte), 0),
+            static_cast<ssize_t>(sizeof(ram_pte)));
+  VmAccessOutcome repointed = VmAccessOutcome::Unavailable;
+  for (int step = 0; step < 16 && repointed == VmAccessOutcome::Unavailable; ++step) {
+    ASSERT_TRUE(engine.step());
+    repointed = access->read(kAperture, read, completed, token);
+  }
+  EXPECT_EQ(repointed, VmAccessOutcome::Revoked);
+  EXPECT_EQ(completed, 0u);
+  EXPECT_EQ(endpoint->diagnostics().effects, 2u);
+
+  // Guest RAM and device-local VRAM stay on their ordinary non-fabric paths.
+  EXPECT_EQ(access->read(kAperture + 0x1000, read, completed, token), VmAccessOutcome::Complete);
+  EXPECT_EQ(read, ram_data);
+  std::array<std::byte, 1> local{};
+  completed = 0;
+  EXPECT_EQ(access->read(0x80, local, completed, token), VmAccessOutcome::Complete);
+  EXPECT_EQ(local[0], std::byte{0x5a});
+  EXPECT_EQ(endpoint->diagnostics().effects, 2u);
+
+  // The same GFX12 PTE decoder also serves process VMIDs. A process peer PTE
+  // marked cacheable must not be acknowledged by the currently uncached PCI
+  // path, even though its target grant and backing are otherwise valid.
+  ASSERT_EQ(::pwrite(page_table.get(), &peer_pte, sizeof(peer_pte), 0),
+            static_cast<ssize_t>(sizeof(peer_pte)));
+  const auto process_handle = vm.register_address_space(7, translator, physical);
+  ASSERT_TRUE(process_handle);
+  auto process = vm.snapshot_pinned(process_handle);
+  ASSERT_TRUE(process.has_value());
+  completed = 0;
+  read.fill(std::byte{0xee});
+  EXPECT_EQ(process->read(kAperture, read, completed, token), VmAccessOutcome::Faulted);
+  EXPECT_EQ(completed, 0u);
+  EXPECT_EQ(read, (std::array<std::byte, 4>{std::byte{0xee}, std::byte{0xee}, std::byte{0xee},
+                                            std::byte{0xee}}));
+  completed = 0;
+  EXPECT_EQ(process->write(kAperture, replacement, completed, token), VmAccessOutcome::Faulted);
+  EXPECT_EQ(completed, 0u);
+  EXPECT_EQ(endpoint->diagnostics().effects, 2u);
+
+  // The stock guest's UC peer PTE takes the fabric route. Exact UNMAP retires
+  // that route before any later effect can reach the same owner backing.
+  const uint64_t uc_peer_pte = peer_pte | (uint64_t{3} << 54);
+  ASSERT_EQ(::pwrite(page_table.get(), &uc_peer_pte, sizeof(uc_peer_pte), 0),
+            static_cast<ssize_t>(sizeof(uc_peer_pte)));
+  completed = 0;
+  EXPECT_EQ(process->read(kAperture, read, completed, token), VmAccessOutcome::Unavailable);
+  for (int step = 0; step < 16 && completed == 0; ++step) {
+    ASSERT_TRUE(engine.step());
+    const auto outcome = process->read(kAperture, read, completed, token);
+    if (outcome != VmAccessOutcome::Unavailable)
+      EXPECT_EQ(outcome, VmAccessOutcome::Complete);
+  }
+  ASSERT_EQ(completed, read.size());
+  EXPECT_EQ(read, replacement);
+  EXPECT_EQ(endpoint->diagnostics().effects, 3u);
+  ASSERT_TRUE(requester.dma_unmap(kPeerIova, 0x1000));
+  completed = 0;
+  EXPECT_NE(process->read(kAperture, read, completed, token), VmAccessOutcome::Complete);
+  EXPECT_EQ(completed, 0u);
+  EXPECT_EQ(endpoint->diagnostics().effects, 3u);
+}
+
+TEST(VfioTargetGrants, RejectsUnsealedBackingWithoutLeavingAGrant) {
+  MappedGrantPair pair(/*seal_owner=*/false);
+  ASSERT_TRUE(pair.built());
+  rocjitsu::test::VfioUserClient requester;
+  rocjitsu::test::VfioUserClient owner;
+  ASSERT_TRUE(pair.attach(requester, owner));
+
+  constexpr uint64_t kIova = 0x3000'0123;
+  constexpr uint64_t kSize = 0x1000;
+  ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0));
+  std::array<std::byte, 4> copied{};
+  EXPECT_NE(pair.requester_host().read_outcome(kIova, copied), simdojo::DmaAccessOutcome::Complete);
+  ASSERT_TRUE(requester.dma_unmap(kIova, kSize));
+
+  ASSERT_TRUE(pair.owner().seal());
+  ASSERT_TRUE(requester.dma_map(kIova, kSize, -1, 0));
+  EXPECT_EQ(pair.requester_host().read_outcome(kIova, copied), simdojo::DmaAccessOutcome::Complete);
+  EXPECT_EQ(pair.owner().bar_calls(), 0u);
 }
 
 TEST(VfioDeviceHost, FailedReadAcrossAnUnreachableWindowLeavesTheDestinationUnchanged) {
@@ -1215,6 +2221,12 @@ TEST(VfioDeviceHostLifecycle, EncodesTheMessageCapabilityAGuestCanFollow) {
   EXPECT_EQ(pending & 0x7u, static_cast<uint32_t>(rocjitsu::GpuPciDevice::kMsixBar));
   EXPECT_EQ(pending & ~0x7u, rocjitsu::GpuPciDevice::kMsixPendingOffset);
 
+  uint64_t bar4_size = 0;
+  uint32_t bar4_flags = 0;
+  constexpr uint32_t control_region =
+      VFU_PCI_DEV_BAR0_REGION_IDX + rocjitsu::GpuPciDevice::kMsixBar;
+  ASSERT_TRUE(client.region_info(control_region, bar4_size, bar4_flags));
+  EXPECT_EQ(bar4_size, rocjitsu::GpuPciDevice::kMsixBarBytes);
   serving.request_stop();
   if (serving.joinable()) {
     serving.join();
@@ -1225,14 +2237,6 @@ TEST(VfioDeviceHostLifecycle, EncodesTheMessageCapabilityAGuestCanFollow) {
 
 } // namespace
 
-// The handoff the request signal depends on. Nothing else links an outside
-// request to the device: the delivery tests call deliver_interrupt() directly,
-// so without this the only untested part is the step that actually gets that
-// call onto the thread allowed to make it.
-// The serving loop needs a process, a socket and a connected client before it
-// runs a line, so nothing that exercises it exercises only this mapping -- and
-// the mapping is what silently breaks. A signal routed to the wrong arm, or the
-// request arm deleted, leaves every other test passing.
 TEST(VfioServerSignals, MapsEachHandledSignalToItsAction) {
   EXPECT_EQ(rocjitsu::action_for_signal(SIGINT), rocjitsu::ServerSignalAction::Stop);
   EXPECT_EQ(rocjitsu::action_for_signal(SIGTERM), rocjitsu::ServerSignalAction::Stop);

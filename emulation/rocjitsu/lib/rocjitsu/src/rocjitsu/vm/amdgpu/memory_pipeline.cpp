@@ -18,6 +18,7 @@
 #include "rocjitsu/vm/amdgpu/lds_barrier_cell.h"
 #include "rocjitsu/vm/amdgpu/lds_stack.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/translated_local_cache_policy.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -187,6 +188,11 @@ void MemoryPipeline::tick() {
 
 namespace {
 
+VmAccessOutcome
+read_translated_with_peer_cache(TranslatedMemoryProgress &progress, uint32_t process_id,
+                                uint64_t address, std::span<std::byte> bytes,
+                                const MemoryPipeline::PeerCacheReadHandler &peer_cache_read);
+
 uint32_t extend_scalar_load(const uint8_t *bytes, uint32_t elem_size, bool sign_extend) {
   uint32_t value = 0;
   std::memcpy(&value, bytes, elem_size);
@@ -197,6 +203,30 @@ uint32_t extend_scalar_load(const uint8_t *bytes, uint32_t elem_size, bool sign_
   if (elem_size == 2)
     return static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(value & 0xffffu)));
   return value;
+}
+
+VmDataRoute classify_scalar_data_route(const ScalarMemState &d, const GpuVmAccess &access) {
+  const auto classify = [&](uint64_t address, std::size_t size) {
+    return access.classify_data_route(address, size,
+                                      d.atomic_op != AtomicOp::NONE ? VmAccessKind::Atomic
+                                      : d.is_load                   ? VmAccessKind::Read
+                                                                    : VmAccessKind::Write);
+  };
+  if (!d.is_load || d.elem_size < sizeof(uint32_t) || d.load_dword_mask == 0xffff)
+    return classify(d.addr,
+                    d.elem_size < sizeof(uint32_t) ? d.elem_size : d.num_dwords * sizeof(uint32_t));
+
+  VmDataRoute route = VmDataRoute::Local;
+  for (uint32_t index = 0; index < d.num_dwords; ++index) {
+    if ((d.load_dword_mask & (1u << index)) == 0)
+      continue;
+    const auto word = classify(d.addr + index * sizeof(uint32_t), sizeof(uint32_t));
+    if (word == VmDataRoute::Faulted)
+      return word;
+    if (word == VmDataRoute::Deferred)
+      route = word;
+  }
+  return route;
 }
 
 std::vector<ClusterLdsTarget> resolve_lds_write_targets(VectorMemState &d, Wavefront &wf,
@@ -493,29 +523,48 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
   // Fully masked stores likewise perform no VM or backing-memory access.
   if (d.load_dword_mask == 0)
     return VmAccessOutcome::Complete;
-  if (wf.address_space()) {
+  // KFD waves normally carry the queue's address-space handle. Also resolve a
+  // VMID-only wave when an ingress handler is installed so a legacy caller
+  // cannot reach the local cache path without the alias gate.
+  if (wf.address_space() || (has_ingress_handler() && wf.process_id() != 0)) {
     const bool may_refresh_unready =
         d.translated.initialized && d.translated.access && !d.translated.access->info().ready &&
-        d.translated.completed_bytes == 0 && d.translated.request_index == 0;
+        d.translated.completed_bytes == 0 && d.translated.request_index == 0 &&
+        !d.translated.transfer_token.pending();
     if (!d.translated.initialized || may_refresh_unready) {
       d.translated.access = wf.snapshot_vm_access();
       if (!d.translated.access)
         return VmAccessOutcome::Faulted;
       d.translated.initialized = true;
     }
-    if (!d.translated.access->info().legacy_cache_compatible) {
-      if (d.atomic_op != AtomicOp::NONE)
+    if (d.translated.access->info().legacy_cache_compatible && !d.translated.peer_data_route) {
+      if (d.translated.access->revoked()) {
+        auto refreshed = wf.snapshot_vm_access();
+        if (!refreshed || refreshed->revoked())
+          return VmAccessOutcome::Revoked;
+        d.translated.access = std::move(refreshed);
+      }
+      const VmDataRoute route = classify_scalar_data_route(d, *d.translated.access);
+      if (route == VmDataRoute::Faulted)
+        return d.translated.access->revoked() ? VmAccessOutcome::Revoked : VmAccessOutcome::Faulted;
+      d.translated.peer_data_route = route == VmDataRoute::Deferred;
+    }
+    if (!d.translated.access->info().legacy_cache_compatible || d.translated.peer_data_route) {
+      if (d.atomic_op != AtomicOp::NONE) {
+        if (d.translated.peer_data_route)
+          return VmAccessOutcome::Faulted;
         return d.elem_size == sizeof(uint32_t) ? execute_translated_scalar_atomic_rmw<uint32_t>(d)
                                                : execute_translated_scalar_atomic_rmw<uint64_t>(d);
+      }
       if (d.is_load) {
         if (d.elem_size >= 4 && d.load_dword_mask != 0xffff) {
           while (d.translated.request_index < d.num_dwords) {
             const auto index = d.translated.request_index;
             if (d.load_dword_mask & (1u << index)) {
-              const auto outcome = d.translated.access->read(
-                  d.addr + index * sizeof(uint32_t),
+              const auto outcome = read_translated_with_peer_cache(
+                  d.translated, wf.process_id(), d.addr + index * sizeof(uint32_t),
                   {reinterpret_cast<std::byte *>(&d.response_data[index]), sizeof(uint32_t)},
-                  d.translated.completed_bytes);
+                  peer_cache_read_handler_);
               if (outcome != VmAccessOutcome::Complete)
                 return outcome;
             }
@@ -524,18 +573,19 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
           }
         } else if (d.elem_size < 4) {
           uint8_t *bytes = reinterpret_cast<uint8_t *>(d.response_data);
-          const VmAccessOutcome outcome = d.translated.access->read(
-              d.addr, std::span<std::byte>(reinterpret_cast<std::byte *>(bytes), d.elem_size),
-              d.translated.completed_bytes);
+          const VmAccessOutcome outcome = read_translated_with_peer_cache(
+              d.translated, wf.process_id(), d.addr,
+              std::span<std::byte>(reinterpret_cast<std::byte *>(bytes), d.elem_size),
+              peer_cache_read_handler_);
           if (outcome != VmAccessOutcome::Complete)
             return outcome;
           d.response_data[0] = extend_scalar_load(bytes, d.elem_size, d.sign_extend);
         } else {
-          const VmAccessOutcome outcome = d.translated.access->read(
-              d.addr,
+          const VmAccessOutcome outcome = read_translated_with_peer_cache(
+              d.translated, wf.process_id(), d.addr,
               std::span<std::byte>(reinterpret_cast<std::byte *>(d.response_data),
                                    d.num_dwords * sizeof(uint32_t)),
-              d.translated.completed_bytes);
+              peer_cache_read_handler_);
           if (outcome != VmAccessOutcome::Complete)
             return outcome;
         }
@@ -560,12 +610,32 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
             d.addr,
             std::span<const std::byte>(reinterpret_cast<const std::byte *>(d.store_data),
                                        d.num_dwords * sizeof(uint32_t)),
-            d.translated.completed_bytes);
+            d.translated.completed_bytes, d.translated.transfer_token);
         if (outcome != VmAccessOutcome::Complete)
           return outcome;
       }
       return VmAccessOutcome::Complete;
     }
+  }
+
+  MemoryIngressAdmission ingress;
+  if (d.translated.access && has_ingress_handler()) {
+    std::vector<MemoryIngressSpan> spans;
+    if (d.atomic_op != AtomicOp::NONE) {
+      spans.push_back({d.addr, d.elem_size, VmAccessKind::Atomic});
+    } else if (d.is_load && d.elem_size < sizeof(uint32_t)) {
+      spans.push_back({d.addr, d.elem_size, VmAccessKind::Read});
+    } else if (d.is_load && d.load_dword_mask != 0xffff) {
+      for (uint32_t i = 0; i < d.num_dwords; ++i)
+        if (d.load_dword_mask & (1u << i))
+          spans.push_back({d.addr + i * sizeof(uint32_t), sizeof(uint32_t), VmAccessKind::Read});
+    } else {
+      spans.push_back({d.addr, d.num_dwords * sizeof(uint32_t),
+                       d.is_load ? VmAccessKind::Read : VmAccessKind::Write});
+    }
+    ingress = admit_ingress(wf.process_id(), *d.translated.access, spans);
+    if (ingress.outcome != VmAccessOutcome::Complete)
+      return ingress.outcome;
   }
 
   if (d.atomic_op != AtomicOp::NONE) {
@@ -579,6 +649,7 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
                ? execute_cached_scalar_atomic_rmw<uint32_t>(d, l2, wf.process_id())
                : execute_cached_scalar_atomic_rmw<uint64_t>(d, l2, wf.process_id());
   }
+
   if (d.is_load) {
     if (d.load_dword_mask == 0) {
       // Descriptor bounds suppress memory access while preserving zero writeback.
@@ -803,25 +874,86 @@ void append_translated_requests(VectorMemState &d, uint64_t lane_mask, uint32_t 
                                     });
 }
 
-VmAccessOutcome execute_translated_transfer(VectorMemState &d) {
+VmAccessOutcome
+read_translated_with_peer_cache(TranslatedMemoryProgress &progress, uint32_t process_id,
+                                uint64_t address, std::span<std::byte> bytes,
+                                const MemoryPipeline::PeerCacheReadHandler &peer_cache_read) {
+  assert(progress.access.has_value());
+  const auto probeable_system_span = [&](uint64_t at, std::size_t size) {
+    if (progress.peer_data_route)
+      return true;
+    if (progress.access->info().legacy_cache_compatible || size == 0)
+      return false;
+    const VmTranslationResult translated =
+        progress.access->query_translation(at, size, VmAccessKind::Read);
+    return translated && translated.translation.domain == VmMemoryDomain::System &&
+           translated.translation.contiguous_bytes >= size;
+  };
+  if (peer_cache_read && progress.completed_bytes == 0 && !progress.transfer_token.pending() &&
+      probeable_system_span(address, bytes.size()) &&
+      peer_cache_read(process_id, *progress.access, address, bytes, nullptr)) {
+    progress.completed_bytes = bytes.size();
+    return VmAccessOutcome::Complete;
+  }
+
+  const size_t previous_bytes = progress.completed_bytes;
+  const VmAccessOutcome outcome =
+      progress.access->read(address, bytes, progress.completed_bytes, progress.transfer_token);
+  if (peer_cache_read && progress.completed_bytes > previous_bytes) {
+    const std::optional<VmCompletedRead> completed_read =
+        progress.transfer_token.take_completed_read();
+    if (completed_read && (completed_read->peer_origin ||
+                           probeable_system_span(address + previous_bytes,
+                                                 progress.completed_bytes - previous_bytes))) {
+      std::span<std::byte> completed =
+          bytes.subspan(previous_bytes, progress.completed_bytes - previous_bytes);
+      (void)peer_cache_read(process_id, *progress.access, address + previous_bytes, completed,
+                            &*completed_read);
+    }
+  }
+  return outcome;
+}
+
+VmAccessOutcome
+execute_translated_transfer(VectorMemState &d, uint32_t process_id,
+                            const MemoryPipeline::PeerCacheReadHandler &peer_cache_read,
+                            L1VectorCache *local_cache) {
   assert(d.translated.access.has_value());
   while (d.translated.request_index < d.translated.requests.size()) {
     const TranslatedMemoryRequest &request = d.translated.requests[d.translated.request_index];
     VmAccessOutcome outcome = VmAccessOutcome::Malformed;
     if (d.is_load) {
-      outcome = d.translated.access->read(
-          request.address,
-          std::span<std::byte>(
-              reinterpret_cast<std::byte *>(d.response_data.data() + request.data_offset),
-              request.size),
-          d.translated.completed_bytes);
+      std::span<std::byte> result(
+          reinterpret_cast<std::byte *>(d.response_data.data() + request.data_offset),
+          request.size);
+      const uint32_t line_offset = L1VectorCache::CacheStore::line_offset(request.address);
+      const bool one_line = request.size <= L1VectorCache::LINE_SIZE - line_offset;
+      const auto local_line =
+          local_cache != nullptr && one_line && d.translated.completed_bytes == 0 &&
+                  !d.translated.transfer_token.pending() &&
+                  d.translated.access->supports_translated_local_cache()
+              ? query_translated_local_line(
+                    *d.translated.access, L1VectorCache::CacheStore::line_address(request.address),
+                    L1VectorCache::LINE_SIZE, d.mtype)
+              : std::nullopt;
+      if (local_line) {
+        outcome = local_cache->load_translated_local(
+            *d.translated.access, request.address,
+            {reinterpret_cast<uint8_t *>(result.data()), result.size()}, d.mtype, d.non_temporal,
+            d.request_force_l1_bypass);
+        if (outcome == VmAccessOutcome::Complete)
+          d.translated.completed_bytes = request.size;
+      } else {
+        outcome = read_translated_with_peer_cache(d.translated, process_id, request.address, result,
+                                                  peer_cache_read);
+      }
     } else {
       outcome = d.translated.access->write(
           request.address,
           std::span<const std::byte>(
               reinterpret_cast<const std::byte *>(d.store_data.data() + request.data_offset),
               request.size),
-          d.translated.completed_bytes);
+          d.translated.completed_bytes, d.translated.transfer_token);
     }
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
@@ -922,8 +1054,9 @@ VmAccessOutcome execute_translated_atomic_rmw(VectorMemState &d, uint64_t lane_m
 /// operation, and writes the new value back. The device coherence epoch makes
 /// cached L1/L2 lines stale at the atomic boundary. Old values are stored in
 /// response_data for GLC return.
-VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid,
-                                   uint64_t lane_mask) {
+VmAccessOutcome execute_atomic_rmw(
+    VectorMemState &d, L2Cache *l2, uint32_t vmid, uint64_t lane_mask,
+    const GlobalMemPipeline::PreparedAtomicBoundaryHandler &prepared_boundary_handler) {
   const uint32_t esz = d.elem_size;
   d.response_data.resize(d.wf_size * esz);
   const bool uses_two_sources =
@@ -937,66 +1070,117 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
     return VmAccessOutcome::Complete;
   // A retry keeps completed lanes but must not reuse a retired VM generation.
   const auto vm_access = l2->snapshot_atomic_access(vmid);
-  DeviceCacheCoherence::AtomicBoundary boundary = l2->coherence_domain()->acquire_atomic_boundary();
-  if (boundary.outcome() != VmAccessOutcome::Complete)
-    return boundary.outcome();
+  if (prepared_boundary_handler && vmid != 0) {
+    // KFD may admit a dispatch-pinned access with a different cache identity
+    // from L2's ordinary VMID snapshot. Both must still name the same binding
+    // generation before the prepared cache boundary can publish any bytes.
+    if (!d.translated.access || !vm_access || d.translated.access->info().vmid != vmid ||
+        vm_access->info().vmid != vmid ||
+        d.translated.access->cache_namespace() != vm_access->cache_namespace())
+      return VmAccessOutcome::Revoked;
+  }
+  for (uint32_t lane = d.translated.atomic_lane; lane < d.wf_size; ++lane) {
+    if (!(lane_mask & (uint64_t{1} << lane)))
+      continue;
+    const VmAccessOutcome outcome =
+        prepared_boundary_handler && vmid != 0
+            ? d.translated.access->query_access(d.per_lane_addr[lane], esz, VmAccessKind::Atomic)
+            : l2->preflight_atomic_access(d.per_lane_addr[lane], esz, vmid);
+    if (outcome != VmAccessOutcome::Complete)
+      return outcome;
+    if (prepared_boundary_handler && vmid != 0) {
+      // Use the retained L2 view that will perform the RMW. The admitted view
+      // above is side-effect free, so this remains the only faulting preflight.
+      const VmAccessOutcome l2_outcome =
+          vm_access->admit_access(d.per_lane_addr[lane], esz, VmAccessKind::Atomic).outcome;
+      if (l2_outcome != VmAccessOutcome::Complete)
+        return l2_outcome;
+    }
+  }
+  std::optional<DeviceCacheMaintenanceLease> prepared_boundary;
+  std::optional<DeviceCacheCoherence::AtomicBoundary> legacy_boundary;
+  if (prepared_boundary_handler) {
+    try {
+      auto prepared = prepared_boundary_handler(vmid);
+      if (prepared)
+        prepared_boundary.emplace(std::move(*prepared));
+    } catch (const CacheMaintenanceUnavailable &) {
+      return VmAccessOutcome::Unavailable;
+    } catch (const util::Exception &) {
+      return VmAccessOutcome::Revoked;
+    }
+    if (prepared_boundary &&
+        !prepared_boundary->prepared_atomic_boundary_for(l2->coherence_domain().get()))
+      return VmAccessOutcome::Malformed;
+    if (!prepared_boundary && vmid != 0)
+      return VmAccessOutcome::Revoked;
+  }
+  if (!prepared_boundary) {
+    legacy_boundary.emplace(l2->coherence_domain()->acquire_atomic_boundary());
+    if (legacy_boundary->outcome() != VmAccessOutcome::Complete)
+      return legacy_boundary->outcome();
+  }
 
   // Reuse the vector's cache-coherence boundary; each backing update remains atomic.
+  auto mutation = [&](uint32_t lane, uint8_t *line_data, uint32_t offset) {
+    if (esz == 4) {
+      uint32_t old_val;
+      std::memcpy(&old_val, line_data + offset, 4);
+
+      uint32_t new_val;
+      if (is_packed_add(d.atomic_op)) {
+        uint32_t src_val;
+        std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+        new_val =
+            fp_mode::atomic_add_packed_16(old_val, src_val, d.atomic_op == AtomicOp::PK_ADD_BF16,
+                                          /*denorm_mode=*/3, d.atomic_source_nan_first);
+      } else if (is_fp) {
+        uint32_t source_bits = 0, compare_bits = 0;
+        std::memcpy(&source_bits, &d.store_data[lane * src_stride], 4);
+        if (uses_two_sources)
+          std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 4], 4);
+        new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
+      } else {
+        uint32_t src_val = 0, cmp_val = 0;
+        std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+        if (uses_two_sources)
+          std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
+        new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
+      }
+
+      std::memcpy(line_data + offset, &new_val, 4);
+      std::memcpy(&d.response_data[lane * 4], &old_val, 4);
+    } else if (esz == 8) {
+      uint64_t old_val;
+      std::memcpy(&old_val, line_data + offset, 8);
+
+      uint64_t new_val;
+      if (is_fp) {
+        uint64_t source_bits = 0, compare_bits = 0;
+        std::memcpy(&source_bits, &d.store_data[lane * src_stride], 8);
+        if (uses_two_sources)
+          std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 8], 8);
+        new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
+      } else {
+        uint64_t src_val = 0, cmp_val = 0;
+        std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
+        if (uses_two_sources)
+          std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
+        new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
+      }
+
+      std::memcpy(line_data + offset, &new_val, 8);
+      std::memcpy(&d.response_data[lane * 8], &old_val, 8);
+    }
+  };
   uint32_t next_lane = d.translated.atomic_lane;
-  const VmAccessOutcome outcome = l2->atomic_rmw_lanes(
-      boundary, std::span<const uint64_t>(d.per_lane_addr.data(), d.wf_size), lane_mask, esz,
-      [&](uint32_t lane, uint8_t *line_data, uint32_t offset) {
-        if (esz == 4) {
-          uint32_t old_val;
-          std::memcpy(&old_val, line_data + offset, 4);
-
-          uint32_t new_val;
-          if (is_packed_add(d.atomic_op)) {
-            uint32_t src_val;
-            std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
-            new_val = fp_mode::atomic_add_packed_16(old_val, src_val,
-                                                    d.atomic_op == AtomicOp::PK_ADD_BF16,
-                                                    /*denorm_mode=*/3, d.atomic_source_nan_first);
-          } else if (is_fp) {
-            uint32_t source_bits = 0, compare_bits = 0;
-            std::memcpy(&source_bits, &d.store_data[lane * src_stride], 4);
-            if (uses_two_sources)
-              std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 4], 4);
-            new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
-          } else {
-            uint32_t src_val = 0, cmp_val = 0;
-            std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
-            if (uses_two_sources)
-              std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
-            new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
-          }
-
-          std::memcpy(line_data + offset, &new_val, 4);
-          std::memcpy(&d.response_data[lane * 4], &old_val, 4);
-        } else if (esz == 8) {
-          uint64_t old_val;
-          std::memcpy(&old_val, line_data + offset, 8);
-
-          uint64_t new_val;
-          if (is_fp) {
-            uint64_t source_bits = 0, compare_bits = 0;
-            std::memcpy(&source_bits, &d.store_data[lane * src_stride], 8);
-            if (uses_two_sources)
-              std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 8], 8);
-            new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
-          } else {
-            uint64_t src_val = 0, cmp_val = 0;
-            std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
-            if (uses_two_sources)
-              std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
-            new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
-          }
-
-          std::memcpy(line_data + offset, &new_val, 8);
-          std::memcpy(&d.response_data[lane * 8], &old_val, 8);
-        }
-      },
-      vmid, vm_access, next_lane);
+  const auto execute_lanes = [&](const auto &boundary) {
+    return l2->atomic_rmw_lanes(boundary,
+                                std::span<const uint64_t>(d.per_lane_addr.data(), d.wf_size),
+                                lane_mask, esz, mutation, vmid, vm_access, next_lane);
+  };
+  const VmAccessOutcome outcome =
+      prepared_boundary ? execute_lanes(*prepared_boundary) : execute_lanes(*legacy_boundary);
   d.translated.atomic_lane = next_lane;
   return outcome;
 }
@@ -1168,10 +1352,10 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
   if (d.requires_scratch_backing && swizzled_lanes != 0 && wf.scratch_base() == 0)
     return VmAccessOutcome::Faulted;
 
-  if (wf.address_space()) {
+  if (wf.address_space() || (has_ingress_handler() && wf.process_id() != 0)) {
     const bool has_progress = d.translated.request_index != 0 ||
                               d.translated.completed_bytes != 0 || d.translated.atomic_lane != 0 ||
-                              d.translated.atomic_loaded;
+                              d.translated.atomic_loaded || d.translated.transfer_token.pending();
     const bool may_refresh_unready = d.translated.initialized && d.translated.access &&
                                      !d.translated.access->info().ready && !has_progress;
     if (!d.translated.initialized || may_refresh_unready) {
@@ -1181,13 +1365,94 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
       d.translated.initialized = true;
     }
   }
+
+  // A KFD binding uses the legacy caches for ordinary local data. Resolve all
+  // active requests first so one peer lane cannot enter L1 before another lane
+  // reveals a route or a denial. Retain the route decision with this instruction
+  // once a deferred request has been prepared.
+  if (d.translated.access && d.translated.access->info().legacy_cache_compatible &&
+      !d.translated.peer_data_route) {
+    if (d.translated.access->revoked()) {
+      auto refreshed = wf.snapshot_vm_access();
+      if (!refreshed || refreshed->revoked())
+        return VmAccessOutcome::Revoked;
+      d.translated.access = std::move(refreshed);
+    }
+    if (d.atomic_op != AtomicOp::NONE) {
+      for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
+        if ((d.lane_mask & (uint64_t{1} << lane)) == 0)
+          continue;
+        if (d.translated.access->classify_data_route(d.per_lane_addr[lane], d.elem_size,
+                                                     VmAccessKind::Atomic) != VmDataRoute::Local)
+          return d.translated.access->revoked() ? VmAccessOutcome::Revoked
+                                                : VmAccessOutcome::Faulted;
+      }
+    } else if (d.translated.requests.empty()) {
+      if (swizzled_lanes)
+        append_translated_requests(d, swizzled_lanes, d.scratch_addr_stride,
+                                   d.scratch_addr_base_offset);
+      if (request_lanes & ~swizzled_lanes)
+        append_translated_requests(d, request_lanes & ~swizzled_lanes, 0, 0);
+      bool has_local_request = false;
+      bool has_cacheable_peer_request = false;
+      for (const auto &request : d.translated.requests) {
+        const auto route = d.translated.access->classify_data_route(
+            request.address, request.size, d.is_load ? VmAccessKind::Read : VmAccessKind::Write);
+        if (route == VmDataRoute::Faulted)
+          return d.translated.access->revoked() ? VmAccessOutcome::Revoked
+                                                : VmAccessOutcome::Faulted;
+        has_local_request |= route == VmDataRoute::Local;
+        has_cacheable_peer_request |=
+            route == VmDataRoute::Deferred &&
+            d.translated.access->query_mtype(request.address) == Mtype::RW;
+        if (route == VmDataRoute::Deferred)
+          d.translated.peer_data_route = true;
+      }
+      // The translated peer route cannot preserve local cache semantics for a
+      // second lane. Deny a cacheable peer effect before any lane is issued.
+      if (has_local_request && has_cacheable_peer_request)
+        return VmAccessOutcome::Faulted;
+      if (!d.translated.peer_data_route)
+        d.translated.requests.clear();
+    }
+  }
+
   const bool translated_address_space =
-      d.translated.access && !d.translated.access->info().legacy_cache_compatible;
+      d.translated.access &&
+      (!d.translated.access->info().legacy_cache_compatible || d.translated.peer_data_route);
+
+  MemoryIngressAdmission ingress;
+  if (!translated_address_space && d.translated.access && has_ingress_handler()) {
+    std::vector<MemoryIngressSpan> spans;
+    const VmAccessKind access = d.atomic_op != AtomicOp::NONE ? VmAccessKind::Atomic
+                                : d.is_load                   ? VmAccessKind::Read
+                                                              : VmAccessKind::Write;
+    if (d.atomic_op != AtomicOp::NONE) {
+      for (uint32_t lane = 0; lane < d.wf_size; ++lane)
+        if ((d.lane_mask & (uint64_t{1} << lane)) != 0)
+          spans.push_back({d.per_lane_addr[lane], d.elem_size, access});
+    } else {
+      assert(d.translated.requests.empty());
+      if (swizzled_lanes)
+        append_translated_requests(d, swizzled_lanes, d.scratch_addr_stride,
+                                   d.scratch_addr_base_offset);
+      if (request_lanes & ~swizzled_lanes)
+        append_translated_requests(d, request_lanes & ~swizzled_lanes, 0, 0);
+      spans.reserve(d.translated.requests.size());
+      for (const auto &request : d.translated.requests)
+        spans.push_back({request.address, request.size, access});
+      d.translated.requests.clear();
+    }
+    ingress = admit_ingress(wf.process_id(), *d.translated.access, spans);
+    if (ingress.outcome != VmAccessOutcome::Complete)
+      return ingress.outcome;
+  }
 
   if (d.atomic_op != AtomicOp::NONE) {
     if (translated_address_space)
       return execute_translated_atomic_rmw(d, request_lanes);
-    return execute_atomic_rmw(d, l2_, wf.process_id(), request_lanes);
+    return execute_atomic_rmw(d, l2_, wf.process_id(), request_lanes,
+                              prepared_atomic_boundary_handler_);
   }
 
   // Swizzle is a per-lane layout property. FLAT can mix private-aperture and
@@ -1199,15 +1464,15 @@ VmAccessOutcome GlobalMemPipeline::initiate_global_access(VectorMemState &d, Wav
   const uint32_t base_offset = d.scratch_addr_base_offset;
 
   if (translated_address_space) {
+    if (d.is_load && d.response_data.empty())
+      d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
     if (d.translated.requests.empty() && d.translated.request_index == 0) {
-      if (d.is_load)
-        d.response_data.assign(d.wf_size * d.num_elems * d.elem_size, 0);
       if (swizzled_lanes)
         append_translated_requests(d, swizzled_lanes, stride, base_offset);
       if (plain_lanes)
         append_translated_requests(d, plain_lanes, 0, 0);
     }
-    return execute_translated_transfer(d);
+    return execute_translated_transfer(d, wf.process_id(), peer_cache_read_handler_, l1_);
   }
 
   if (d.is_load) {

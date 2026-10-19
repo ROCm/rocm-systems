@@ -60,8 +60,16 @@
 namespace rocjitsu {
 namespace test {
 class ComputeUnitTestAccess;
-}
+class KfdCuAtomicTestAccess;
+} // namespace test
 namespace amdgpu {
+
+struct ShaderApertures {
+  uint64_t shared_base = 0;
+  uint64_t shared_limit = 0;
+  uint64_t private_base = 0;
+  uint64_t private_limit = 0;
+};
 
 /// @brief Reporting policy for pending memory-result register accesses.
 enum class MemoryWaitDiagnostics { Off, Warn };
@@ -466,6 +474,25 @@ public:
   GpuVm *gpu_vm() { return gpu_vm_; }
   const GpuVm *gpu_vm() const { return gpu_vm_; }
 
+  /// @brief Gate scalar, vector, and global atomic cache ingress for this CU.
+  void set_memory_ingress_handler(MemoryPipeline::IngressHandler handler) {
+    scalar_mem_pipeline_.set_ingress_handler(handler);
+    global_mem_pipeline_.set_ingress_handler(std::move(handler));
+  }
+
+  /// @brief Install cache-only peer read probes and validated fills.
+  void set_peer_cache_read_handlers(MemoryPipeline::PeerCacheReadHandler scalar,
+                                    MemoryPipeline::PeerCacheReadHandler vector) {
+    scalar_mem_pipeline_.set_peer_cache_read_handler(std::move(scalar));
+    global_mem_pipeline_.set_peer_cache_read_handler(std::move(vector));
+  }
+
+  /// @brief Install KFD's prepared cache boundary for local vector atomics.
+  void
+  set_prepared_atomic_boundary_handler(GlobalMemPipeline::PreparedAtomicBoundaryHandler handler) {
+    global_mem_pipeline_.set_prepared_atomic_boundary_handler(std::move(handler));
+  }
+
   /// @brief Return the command processor that owns this CU's dispatch stream.
   CommandProcessor *command_processor() { return cp_; }
 
@@ -761,6 +788,18 @@ public:
     inst_cache_.invalidate_all();
   }
 
+  /// @brief Discard this CU's lines for one ordinary VM root at completion.
+  /// @details Data L1 tags use the ordinary backing identity; I$ tags use the
+  /// address-space generation and translation epoch. This is paired with the
+  /// scoped L2 completion flush after the dispatch's work has quiesced.
+  void flush_l1_for_completion(const GpuVmAccess &access) {
+    const uint32_t vmid = access.info().vmid;
+    const uint64_t cache_identity = access.cache_identity();
+    l1_scalar_.invalidate_for_completion(vmid, cache_identity);
+    l1_vector_.invalidate_for_completion(vmid, cache_identity);
+    inst_cache_.invalidate_for_completion(access.cache_namespace());
+  }
+
   /// @brief Set (or replace) the shared GPU memory pointer.
   ///
   /// Used by the config loader for deferred initialization.
@@ -787,6 +826,52 @@ public:
     shared_aperture_limit_ = shared_limit;
     private_aperture_base_ = private_base;
     private_aperture_limit_ = private_limit;
+  }
+
+  /// @brief Program the shader aperture register bank selected by a guest VMID.
+  void set_vmid_apertures(uint32_t vmid, uint64_t shared_base, uint64_t shared_limit,
+                          uint64_t private_base, uint64_t private_limit) {
+    if (vmid >= vmid_apertures_.size())
+      return;
+    std::lock_guard lock(vmid_aperture_mutex_);
+    vmid_apertures_[vmid] = {shared_base, shared_limit, private_base, private_limit};
+  }
+
+  /// @brief Resolve a shader bank for a dispatch identity.
+  /// @details Only a hardware VMID selects an indexed bank. A PASID can use
+  /// the driver's uniform programmed banks; a missing or divergent bank
+  /// refuses that fallback even when the PASID numerically matches a VMID.
+  [[nodiscard]] std::optional<ShaderApertures> vmid_apertures(uint32_t identity,
+                                                              ProcessIdentityKind kind) const {
+    if (identity == 0)
+      return std::nullopt;
+    std::lock_guard lock(vmid_aperture_mutex_);
+    if (kind == ProcessIdentityKind::Vmid && identity < vmid_apertures_.size() &&
+        vmid_apertures_[identity])
+      return vmid_apertures_[identity];
+    std::optional<ShaderApertures> uniform;
+    for (uint32_t vmid = 1; vmid < vmid_apertures_.size(); ++vmid) {
+      if (!vmid_apertures_[vmid])
+        continue;
+      const ShaderApertures &candidate = *vmid_apertures_[vmid];
+      if (uniform && (uniform->shared_base != candidate.shared_base ||
+                      uniform->shared_limit != candidate.shared_limit ||
+                      uniform->private_base != candidate.private_base ||
+                      uniform->private_limit != candidate.private_limit))
+        return std::nullopt;
+      uniform = candidate;
+    }
+    return uniform;
+  }
+
+  /// Report an unresolved guest-programmed bank once per CU. A wave keeps its
+  /// base apertures, so a diagnostic is necessary when banks disagree.
+  void report_unresolved_apertures(uint32_t identity, ProcessIdentityKind kind);
+
+  void clear_vmid_apertures() {
+    std::lock_guard lock(vmid_aperture_mutex_);
+    vmid_apertures_.fill(std::nullopt);
+    unresolved_aperture_reported_.store(false, std::memory_order_relaxed);
   }
 
   /// @brief Query SRAM ECC mode. When true, D16 loads zero unused VGPR bits.
@@ -1554,6 +1639,9 @@ protected:
   uint64_t shared_aperture_limit_ = 0;
   uint64_t private_aperture_base_ = 0;
   uint64_t private_aperture_limit_ = 0;
+  mutable std::mutex vmid_aperture_mutex_;
+  std::array<std::optional<ShaderApertures>, 16> vmid_apertures_{};
+  std::atomic<bool> unresolved_aperture_reported_{false};
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   bool observes_before_execute_instruction_ = false;
@@ -1630,6 +1718,7 @@ protected:
   friend class InstructionComputeUnitView;
   friend class GwsDevice; // Shared GWS store polls only this CU's waiters.
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
+  friend class ::rocjitsu::test::KfdCuAtomicTestAccess;
 };
 
 // Keep LDS selection available to self-contained execution plugin modules.

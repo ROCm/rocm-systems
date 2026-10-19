@@ -8,12 +8,18 @@
 
 #include <cstdint>
 #include <cstring>
+#include <memory>
+#include <mutex>
+#include <span>
 
 namespace rocjitsu {
 namespace amdgpu {
 
 class GpuMemory;
 class L2Cache;
+class DeviceCacheCoherence;
+struct DeviceCacheAliasScope;
+class L1ScalarCacheTestAccess;
 
 /// @brief L1 Scalar Cache (K$) controller for SMEM instructions.
 ///
@@ -43,8 +49,10 @@ public:
   L1ScalarCache(L1ScalarCache &&) = delete;
   L1ScalarCache &operator=(L1ScalarCache &&) = delete;
 
-  /// @brief Set (or replace) the backing L2 cache.
+  /// @brief Set (or replace) the backing L2 cache while the CU is quiesced.
   /// @param l2 New L2 cache (not owned).
+  /// @details Rebinding must finish before ordinary accesses or maintenance:
+  /// registry transfer and backing pointer replacement are separate steps.
   void set_l2(L2Cache *l2);
 
   /// @brief Set the VM service used for process-scoped MTYPE lookups.
@@ -82,15 +90,50 @@ public:
   /// @param num_lines Number of consecutive 64-byte lines to invalidate (one or two).
   void discard(uint64_t addr, uint32_t num_lines, uint32_t vmid = 0);
 
+  /// @brief Invalidate lines belonging to one ordinary VM root at completion.
+  /// @details Matches resident VMID and cache identity across the whole root,
+  /// including lines admitted under different page generations. Other roots
+  /// and address spaces remain resident.
+  void invalidate_for_completion(uint32_t vmid, uint64_t cache_identity);
+
+  /// Probe only resident, byte-valid data under the supplied raw grant key.
+  /// The span must be nonempty and contained in one K$ line. False is a miss;
+  /// this method performs no VM admission or backing request.
+  [[nodiscard]] bool try_read_peer_cached(uint64_t addr, std::span<uint8_t> dst, uint32_t vmid,
+                                          uint64_t admission_generation, uint64_t cache_identity);
+
+  /// Optionally fill one K$ line fragment from a canonical peer read.
+  /// The caller must hold exact ingress, current-VM, and canonical-line
+  /// freshness authority through this call. The span must be nonempty and
+  /// contained in one line. A dirty-line refusal leaves tags and replacement
+  /// order unchanged; normal epoch reconciliation may discard stale lines.
+  /// This method never invokes VM admission or backing traffic.
+  [[nodiscard]] bool try_fill_peer_cached(uint64_t addr, std::span<const uint8_t> src,
+                                          uint32_t vmid, uint64_t admission_generation,
+                                          uint64_t cache_identity);
+
 private:
-  void cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid);
-  VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid = 0, bool fetch_on_miss = true);
+  friend class DeviceCacheCoherence;
+  friend class L1ScalarCacheTestAccess;
+
+  [[nodiscard]] uint64_t current_cache_identity(uint32_t vmid) const;
+  [[nodiscard]] bool has_unidentified_overlap(std::span<const DeviceCacheAliasScope> aliases);
+  void invalidate_selected_lines(std::span<const DeviceCacheAliasScope> aliases);
+  [[nodiscard]] VmAccessAdmission admit_access(uint64_t addr, uint32_t size, uint32_t vmid,
+                                               VmAccessKind kind, bool report_fault = true) const;
+  void cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid,
+                           uint64_t admission_generation, uint64_t cache_identity);
+  VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid, uint64_t admission_generation,
+                              bool fetch_on_miss = true);
   void flush_line(uint64_t addr, uint32_t vmid = 0);
   void invalidate_all_lines();
   void synchronize_epoch();
 
   CacheStore cache_;
+  // Acquired before any L2 maintenance lock on ordinary accesses and scoped maintenance.
+  std::mutex maintenance_mutex_;
   L2Cache *l2_;
+  std::shared_ptr<DeviceCacheCoherence> registered_domain_;
   GpuVm *gpu_vm_ = nullptr;
   VmMtypeCache mtype_cache_;
   uint64_t coherence_epoch_ = 0;

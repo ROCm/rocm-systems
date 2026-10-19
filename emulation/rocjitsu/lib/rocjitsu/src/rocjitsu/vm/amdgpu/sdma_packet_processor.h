@@ -32,6 +32,8 @@ enum class SdmaPacketDialect {
 
 using SdmaCacheOperation = DeviceCacheOperation;
 using SdmaCacheLease = DeviceCacheMaintenanceLease;
+using SdmaMemoryIngressHandler =
+    std::function<MemoryIngressAdmission(const GpuVmAccess &, std::span<const MemoryIngressSpan>)>;
 
 /// @brief Queue-owned semantic state for one partially executed SDMA packet.
 /// @details The ring consumer owns this object alongside its immutable VM
@@ -89,10 +91,19 @@ public:
   std::function<SdmaPacketRegisterReadResult(uint32_t address)> read_register;
   std::function<VmAccessOutcome(uint32_t address, uint32_t value)> write_register;
   std::function<VmAccessOutcome(uint32_t data)> deliver_interrupt;
-  /// The returned lease spans every direct memory effect. It is released when
-  /// execution yields and reacquired before the effect resumes.
+  /// Data copy/fill/write acquire a lease for each synchronous backing step.
+  /// Deferred requests cross a writeback/invalidate boundary before submission,
+  /// then submit and poll after the lease is released. Atomic, fence, and
+  /// timestamp hold a lease only through each admitted local effect.
   std::function<SdmaCacheLease(SdmaCacheOperation operation)> acquire_cache_maintenance;
   std::function<uint64_t()> timestamp;
+  /// Admit each data or atomic memory step before local cache/backing effects.
+  /// A closed gate returns Unavailable without consuming packet progress.
+  SdmaMemoryIngressHandler admit_memory_ingress;
+  /// Optional KFD authority for a private UC GTT COPY source. Only the COPY
+  /// source read consumes this hook; other packets keep caller maintenance.
+  std::function<VmPrivateUcGttCopySourceAdmission(const GpuVmAccess &, uint64_t, std::size_t)>
+      admit_private_uc_gtt_copy_source;
 };
 
 /// @brief Processes the union of SDMA packets used by legacy and PCI queues.

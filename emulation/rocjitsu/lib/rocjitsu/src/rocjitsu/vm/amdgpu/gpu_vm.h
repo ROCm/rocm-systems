@@ -8,6 +8,7 @@
 
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/canonical_line_freshness.h"
 #include "util/distributed_shared_mutex.h"
 
 #include <array>
@@ -16,7 +17,9 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <unordered_map>
 #include <utility>
@@ -27,6 +30,14 @@ namespace rocjitsu::amdgpu {
 class GpuVm;
 class GpuVmAccess;
 class GpuVmAccessState;
+class DeviceCacheMaintenanceLease;
+class VmTransferEffectGate;
+
+/// @brief Acquire a move-only cache lease for one tokenized data step.
+/// @details Acquisition runs without the VM state lock. A local backing step
+/// keeps the lease through its effect; a deferred request releases it before
+/// submission or polling.
+using VmTransferMaintenance = std::function<DeviceCacheMaintenanceLease()>;
 
 /// @brief Cache immutable VM snapshots for one bounded execution quantum.
 /// @details Nested guards share the outer cache. Borrowed objects remain alive
@@ -56,6 +67,9 @@ private:
 /// @brief Operation whose permissions must be checked by an address-space walk.
 enum class VmAccessKind : uint8_t { Read, Write, Execute, Atomic };
 
+/// @brief Whether a data request can use the local fast path.
+enum class VmDataRoute : uint8_t { Local, Deferred, Faulted };
+
 /// @brief Typed result shared by translation and physical-memory operations.
 enum class VmAccessOutcome : uint8_t {
   Complete,    ///< The requested operation completed.
@@ -63,6 +77,125 @@ enum class VmAccessOutcome : uint8_t {
   Faulted,     ///< The mapping is absent or rejects the requested access.
   Malformed,   ///< The address, page-table encoding, or request is invalid.
   Revoked,     ///< This snapshot was retired; the owner must recapture or terminate.
+};
+
+/// @brief Identity of the transport session that admitted a page-table walk.
+/// @details A deferred owner must reacquire a lease on this exact session
+/// before revalidating a walk. This proves lifetime, not page-table publication
+/// or cache coherence.
+class MemoryPtEpoch {
+public:
+  uint64_t generation = 0;
+  std::shared_ptr<const void> session_identity;
+
+  [[nodiscard]] explicit operator bool() const { return static_cast<bool>(session_identity); }
+  friend bool operator==(const MemoryPtEpoch &, const MemoryPtEpoch &) = default;
+};
+
+/// @brief Lifetime-safe namespace for virtually indexed cache entries.
+/// @details A numeric VMID is routing metadata and may be reused. The
+/// address-space generation and translation epoch distinguish later owners
+/// and page-table roots.
+class VmCacheNamespace {
+public:
+  AddressSpaceHandle address_space;
+  uint64_t translation_epoch = 0;
+
+  explicit operator bool() const { return address_space && translation_epoch != 0; }
+  friend bool operator==(const VmCacheNamespace &, const VmCacheNamespace &) = default;
+};
+
+/// @brief Move-only lease that releases one memory-ingress count on every exit path.
+class MemoryIngressPermit {
+public:
+  MemoryIngressPermit() = default;
+  explicit MemoryIngressPermit(std::function<void()> release,
+                               std::optional<MemoryPtEpoch> pt_epoch = {})
+      : release_(std::move(release)) {
+    if (pt_epoch) {
+      pt_epoch_ = std::move(*pt_epoch);
+      has_pt_epoch_ = true;
+    }
+  }
+  MemoryIngressPermit(const MemoryIngressPermit &) = delete;
+  MemoryIngressPermit &operator=(const MemoryIngressPermit &) = delete;
+  MemoryIngressPermit(MemoryIngressPermit &&other) noexcept
+      : release_(std::exchange(other.release_, {})), pt_epoch_(std::move(other.pt_epoch_)),
+        has_pt_epoch_(std::exchange(other.has_pt_epoch_, false)) {}
+  MemoryIngressPermit &operator=(MemoryIngressPermit &&other) noexcept {
+    if (this != &other) {
+      reset();
+      release_ = std::exchange(other.release_, {});
+      pt_epoch_ = std::move(other.pt_epoch_);
+      has_pt_epoch_ = std::exchange(other.has_pt_epoch_, false);
+    }
+    return *this;
+  }
+  ~MemoryIngressPermit() { reset(); }
+
+  void reset() {
+    if (auto release = std::exchange(release_, {}))
+      release();
+    pt_epoch_ = {};
+    has_pt_epoch_ = false;
+  }
+  explicit operator bool() const { return static_cast<bool>(release_); }
+  [[nodiscard]] std::optional<MemoryPtEpoch> pt_epoch() const {
+    return has_pt_epoch_ ? std::optional<MemoryPtEpoch>{pt_epoch_} : std::nullopt;
+  }
+
+private:
+  std::function<void()> release_;
+  // Keep the shared_ptr constructed when the epoch is absent: GCC 13 at -O3
+  // warns about an inactive optional payload during admission destruction.
+  MemoryPtEpoch pt_epoch_{};
+  bool has_pt_epoch_ = false;
+};
+
+class MemoryIngressAdmission {
+public:
+  VmAccessOutcome outcome = VmAccessOutcome::Complete;
+  MemoryIngressPermit permit;
+};
+
+/// One virtual span admitted before a local GPU memory effect.
+struct MemoryIngressSpan {
+  uint64_t address = 0;
+  size_t size = 0;
+  VmAccessKind access = VmAccessKind::Read;
+};
+
+/// @brief Admit the remaining virtual span before one local backing step.
+/// @details The span is a conservative upper bound on the local step. A
+/// deferred route does not call this hook, and the permit is released before
+/// any deferred request is submitted or polled.
+using VmTransferIngress =
+    std::function<MemoryIngressAdmission(uint64_t, std::size_t, VmAccessKind)>;
+
+/// @brief Authority for one KFD SDMA COPY source read from private UC GTT.
+/// @details A Complete result with no permit uses ordinary caller maintenance.
+/// A permit certifies the entire requested local source span and is held only
+/// through its synchronous read step. A closing source returns Unavailable or
+/// Revoked so the caller cannot silently fall back to a stale host view.
+struct VmPrivateUcGttCopySourceAdmission {
+  VmAccessOutcome outcome = VmAccessOutcome::Complete;
+  MemoryIngressPermit permit;
+};
+using VmPrivateUcGttCopySource =
+    std::function<VmPrivateUcGttCopySourceAdmission(uint64_t, std::size_t)>;
+
+/// @brief Live authorization for an architectural cache or backing request.
+/// @details A nonzero generation distinguishes cache lines filled under an
+/// earlier frontend mapping state, even when the VMID and virtual address match.
+class VmAccessAdmission {
+public:
+  VmAccessOutcome outcome = VmAccessOutcome::Complete;
+  uint64_t generation = 0;
+  // A multi-grant request has no single generation suitable for a cache tag.
+  bool cacheable = true;
+  // Cache admission may succeed while a raw host-backing mutation is forbidden.
+  bool direct_backing_write_allowed = true;
+  explicit operator bool() const { return outcome == VmAccessOutcome::Complete; }
 };
 
 /// @brief Memory domain selected by a translation.
@@ -95,7 +228,13 @@ public:
     }
     return false;
   }
+  friend bool operator==(const VmPermissions &, const VmPermissions &) = default;
 };
+
+/// @brief Exact memory-type field of a terminal GFX12 PTE.
+/// @details The cache model currently treats NC and RW alike, but a peer
+/// admission must still distinguish their raw encodings across a rewalk.
+enum class Gfx12PteMtype : uint8_t { NC = 0, CC = 1, RW = 2, UC = 3 };
 
 /// @brief One bounded virtual-to-physical translation.
 class VmTranslation {
@@ -104,7 +243,14 @@ public:
   uint64_t address = 0;
   uint64_t contiguous_bytes = 0;
   Mtype mtype = Mtype::RW;
+  std::optional<Gfx12PteMtype> gfx12_pte_mtype = std::nullopt;
   VmPermissions permissions;
+};
+
+/// @brief One completed read stamp and whether the read used a VFIO peer route.
+struct VmCompletedRead {
+  CanonicalLineFreshness::ReadStamp stamp;
+  bool peer_origin = false;
 };
 
 /// @brief Outcome and address metadata produced by one translation attempt.
@@ -124,6 +270,130 @@ struct VmTransferStep {
   std::size_t completed_bytes = 0;
   VmAccessOutcome outcome = VmAccessOutcome::Faulted;
   bool report_translation_fault = false;
+};
+
+/// @brief Per-generation permit for a deferred backing effect.
+/// @details An owner event enters immediately before its bounded memory effect.
+/// Revocation closes entry and waits for effects that entered earlier to finish.
+/// Submission and polling never hold this permit. Revocation drains permits
+/// while the VM registry mutex is held, so an entered effect body must use
+/// owned backing and must not synchronously call back into GpuVm.
+class VmTransferEffectGate {
+public:
+  /// @brief One admitted effect that keeps revocation from finishing.
+  /// @details Entry is nonblocking. A batch acquires every distinct gate
+  /// before changing backing bytes and releases them after the whole batch.
+  class Permit {
+  public:
+    Permit(const Permit &) = delete;
+    Permit &operator=(const Permit &) = delete;
+    Permit(Permit &&other) noexcept : gate_(std::exchange(other.gate_, nullptr)) {}
+    Permit &operator=(Permit &&) = delete;
+    ~Permit();
+
+  private:
+    friend class VmTransferEffectGate;
+    explicit Permit(VmTransferEffectGate *gate) : gate_(gate) {}
+    VmTransferEffectGate *gate_ = nullptr;
+  };
+
+  [[nodiscard]] std::optional<Permit> try_acquire() noexcept;
+
+  template <typename Effect> [[nodiscard]] bool commit(Effect &&effect) {
+    std::optional<Permit> permit = try_acquire();
+    if (!permit)
+      return false;
+    std::invoke(std::forward<Effect>(effect));
+    return true;
+  }
+
+  /// Close admission without waiting. A VFIO callback uses this while the
+  /// protocol library holds its lock; the serving loop drains outside it.
+  void close() noexcept;
+  [[nodiscard]] bool drained() const noexcept;
+  void revoke();
+
+private:
+  [[nodiscard]] bool enter() noexcept;
+  void leave() noexcept;
+
+  static constexpr uint64_t kRevoked = uint64_t{1} << 63;
+  std::atomic<uint64_t> state_{0};
+};
+
+/// @brief One owned request handed to an execution owner's event loop.
+/// @details Preparation may retain backing leases and copy write data, but
+/// must not send or affect memory. submit() queues owned work for the owner
+/// event without waiting or executing the backing itself, and is called once
+/// after the VM lock is released. poll() is nonblocking and may copy a completed
+/// read into its supplied staging span; it leaves that span unchanged on other
+/// outcomes.
+/// reconcile_revocation() is a nonblocking proof query after the VM generation
+/// is retired. Complete includes a retained read result even when the reply is
+/// still in flight; Revoked proves the owner never entered the effect; and
+/// Unavailable means the entered effect has not published its outcome yet.
+/// Terminal deferred faults are published by GpuVmAccess at the retained
+/// request address when this operation is retired.
+/// cancel() is nonblocking, including when an owner event is still queued.
+class VmDeferredTransfer {
+public:
+  virtual ~VmDeferredTransfer() = default;
+  virtual void submit() = 0;
+  [[nodiscard]] virtual VmAccessOutcome poll(std::span<std::byte> read_result) = 0;
+  [[nodiscard]] virtual VmAccessOutcome reconcile_revocation(std::span<std::byte> read_result) = 0;
+  /// Owned canonical line versions for a completed deferred read, when the
+  /// provider can prove them. Valid only after poll or reconciliation completes.
+  [[nodiscard]] virtual std::optional<CanonicalLineFreshness::ReadStamp>
+  completed_read_stamp() const {
+    return std::nullopt;
+  }
+  virtual void cancel() noexcept = 0;
+};
+
+/// @brief Owner of cache maintenance for a deferred VM write.
+/// @details A controlled-local endpoint prepares and proves selected alias
+/// maintenance at effect time. Every other transfer retains caller maintenance
+/// before submission.
+enum class VmDeferredWriteMaintenance : uint8_t { Caller, ControlledLocalEndpoint };
+
+/// @brief Move-only identity and storage for one outstanding VM request.
+/// @details An owner keeps this token across Unavailable retries. The token
+/// stages read results and advances transfer progress exactly once. Destroying
+/// or resetting it cancels queued work without waiting for the owner event.
+class VmTransferToken {
+public:
+  VmTransferToken() = default;
+  VmTransferToken(std::unique_ptr<VmDeferredTransfer> operation, std::size_t bytes,
+                  VmDeferredWriteMaintenance write_maintenance = VmDeferredWriteMaintenance::Caller,
+                  bool peer_origin = false);
+  ~VmTransferToken();
+  VmTransferToken(const VmTransferToken &) = delete;
+  VmTransferToken &operator=(const VmTransferToken &) = delete;
+  VmTransferToken(VmTransferToken &&other) noexcept;
+  VmTransferToken &operator=(VmTransferToken &&other) noexcept;
+
+  [[nodiscard]] bool pending() const noexcept { return operation_ != nullptr; }
+  /// Take the stamp and peer-route marker of the most recently completed read
+  /// step after its bytes have been copied into the caller's result span.
+  [[nodiscard]] std::optional<VmCompletedRead> take_completed_read() noexcept {
+    return std::exchange(completed_read_, std::nullopt);
+  }
+  void cancel() noexcept;
+
+private:
+  friend class GpuVmAccess;
+  std::unique_ptr<VmDeferredTransfer> operation_;
+  bool peer_origin_ = false;
+  std::optional<VmCompletedRead> completed_read_;
+  std::vector<std::byte> read_result_;
+  std::size_t bytes_ = 0;
+  std::size_t total_bytes_ = 0;
+  std::size_t offset_ = 0;
+  uint64_t address_ = 0;
+  VmAccessKind kind_ = VmAccessKind::Read;
+  std::shared_ptr<GpuVmAccessState> state_;
+  VmDeferredWriteMaintenance write_maintenance_ = VmDeferredWriteMaintenance::Caller;
+  bool submitted_ = false;
 };
 
 /// @brief Result of one strong compare/exchange against physical backing.
@@ -206,6 +476,79 @@ public:
   using AtomicLaneMutation = std::function<void(uint32_t, std::span<std::byte>)>;
 
   virtual ~PhysicalMemoryAccess() = default;
+
+  /// A local cache may retain clean translated lines only when every ordinary
+  /// local write is reported to the device coherence domain and host BAR writes
+  /// have a modeled flush boundary. Other transports keep the direct VM path.
+  [[nodiscard]] virtual bool supports_translated_local_cache() const { return false; }
+
+  /// @brief Admit a live page-table walk before taking a VM state lease.
+  /// @details Ordinary backings have no separate page-table lifetime lease. A
+  /// PCI backing retains its transport session until the walk completes.
+  [[nodiscard]] virtual MemoryIngressAdmission admit_pt_rewalk() const { return {}; }
+  /// @brief Reenter the exact page-table epoch selected by deferred prepare.
+  /// @details An unqualified backing cannot prove a supplied epoch and must
+  /// reject it rather than silently admitting work in a different generation.
+  [[nodiscard]] virtual MemoryIngressAdmission admit_pt_rewalk(const MemoryPtEpoch &) const {
+    return {.outcome = VmAccessOutcome::Revoked, .permit = {}};
+  }
+
+  /// Prepare one translated System data step without copying backing bytes.
+  /// Nullopt means ordinary synchronous storage. A rejected peer returns a
+  /// terminal token, so it cannot fall through to the ordinary RAM path.
+  [[nodiscard]] virtual std::optional<VmTransferToken>
+  prepare_deferred_system_read(uint64_t, std::size_t, VmAccessKind,
+                               const std::shared_ptr<VmTransferEffectGate> &) {
+    return std::nullopt;
+  }
+  /// The tokenized GFX12 path supplies its exact executing snapshot, GPU VA,
+  /// and the policy selected by the translation that produced this IOVA.
+  /// Backings that do not use guest VM identity retain the original behavior.
+  [[nodiscard]] virtual std::optional<VmTransferToken>
+  prepare_deferred_system_read(uint64_t iova, std::size_t size, VmAccessKind access,
+                               const std::shared_ptr<VmTransferEffectGate> &gate,
+                               const GpuVmAccess &executing_access, uint64_t gpu_va,
+                               const VmTranslation &selected_translation) {
+    (void)executing_access;
+    (void)gpu_va;
+    (void)selected_translation;
+    return prepare_deferred_system_read(iova, size, access, gate);
+  }
+  [[nodiscard]] virtual std::optional<VmTransferToken>
+  prepare_deferred_system_read(uint64_t iova, std::size_t size, VmAccessKind access,
+                               const std::shared_ptr<VmTransferEffectGate> &gate,
+                               const GpuVmAccess &executing_access, uint64_t gpu_va,
+                               const VmTranslation &selected_translation,
+                               const std::optional<MemoryPtEpoch> &pt_epoch) {
+    (void)pt_epoch;
+    return prepare_deferred_system_read(iova, size, access, gate, executing_access, gpu_va,
+                                        selected_translation);
+  }
+  [[nodiscard]] virtual std::optional<VmTransferToken>
+  prepare_deferred_system_write(uint64_t, std::span<const std::byte>,
+                                const std::shared_ptr<VmTransferEffectGate> &) {
+    return std::nullopt;
+  }
+  [[nodiscard]] virtual std::optional<VmTransferToken>
+  prepare_deferred_system_write(uint64_t iova, std::span<const std::byte> bytes,
+                                const std::shared_ptr<VmTransferEffectGate> &gate,
+                                const GpuVmAccess &executing_access, uint64_t gpu_va,
+                                const VmTranslation &selected_translation) {
+    (void)executing_access;
+    (void)gpu_va;
+    (void)selected_translation;
+    return prepare_deferred_system_write(iova, bytes, gate);
+  }
+  [[nodiscard]] virtual std::optional<VmTransferToken>
+  prepare_deferred_system_write(uint64_t iova, std::span<const std::byte> bytes,
+                                const std::shared_ptr<VmTransferEffectGate> &gate,
+                                const GpuVmAccess &executing_access, uint64_t gpu_va,
+                                const VmTranslation &selected_translation,
+                                const std::optional<MemoryPtEpoch> &pt_epoch) {
+    (void)pt_epoch;
+    return prepare_deferred_system_write(iova, bytes, gate, executing_access, gpu_va,
+                                         selected_translation);
+  }
 
   /// @brief Read one physical span as an indivisible transport request.
   /// @details A non-Complete result must leave @p bytes unmodified. Larger GPU
@@ -422,6 +765,26 @@ private:
 /// @brief Address-space policy separated from the physical backing transport.
 class AddressSpaceTranslator {
 public:
+  /// @brief Classify a data span before a CU cache or local backing path.
+  /// @details Implementations must make this a bounded, nonblocking policy
+  /// query with no backing effect. Deferred requires tokenized access, while
+  /// Faulted must not be served from a previously filled local cache line.
+  [[nodiscard]] virtual VmDataRoute classify_data_route(uint64_t, std::size_t, VmAccessKind) const {
+    return VmDataRoute::Local;
+  }
+
+  /// @brief Check frontend access policy before cache hits or backing effects.
+  /// @details The default has no additional policy. Implementations must make
+  /// this a bounded, nonblocking query because caches may use it in hot paths.
+  [[nodiscard]] virtual VmAccessAdmission admit_access(uint64_t, std::size_t, VmAccessKind) const {
+    return {};
+  }
+  /// @brief Read a live write grant for cache-tag freshness without authorizing
+  /// a backing write. The returned direct-write flag remains advisory here.
+  [[nodiscard]] virtual VmAccessAdmission query_cache_write_grant(uint64_t address,
+                                                                  std::size_t size) const {
+    return admit_access(address, size, VmAccessKind::Write);
+  }
   /// @brief Optional ordered same-page DWORD stores. False has no guest effects.
   /// @details Implementations must prove every request under the same admission held
   /// through all copies, without allocation, callbacks or fault publication.
@@ -444,6 +807,58 @@ public:
 
   [[nodiscard]] virtual VmTranslationResult translate(uint64_t address, std::size_t size,
                                                       VmAccessKind access) const = 0;
+
+  /// @brief Optionally prepare one deferred data request under the VM lease.
+  /// @details Return nullopt for a synchronous span. A returned token must own
+  /// every request and backing lease it needs after the lease is released.
+  /// The preparation must have no send or memory effect. The write form must
+  /// copy its source bytes before returning. Neither form may defer Execute.
+  /// An owner request must retain the supplied gate and enter it around every
+  /// backing effect. The entered effect must not reenter the GpuVm registry.
+  /// Untokenized read/write callers reject a returned token without submitting
+  /// it, so a deferred route cannot silently fall back to synchronous access.
+  [[nodiscard]] virtual std::optional<VmTransferToken>
+  prepare_deferred_read(PhysicalMemoryAccess &, uint64_t, std::size_t, VmAccessKind,
+                        const std::shared_ptr<VmTransferEffectGate> &) const {
+    return std::nullopt;
+  }
+  /// The tokenized path supplies the identity of its executing snapshot. A
+  /// pinned snapshot can have a different cache identity from a fresh lookup.
+  [[nodiscard]] virtual std::optional<VmTransferToken>
+  prepare_deferred_read(PhysicalMemoryAccess &memory, uint64_t address, std::size_t size,
+                        VmAccessKind access, const std::shared_ptr<VmTransferEffectGate> &gate,
+                        const GpuVmAccess &executing_access) const {
+    (void)executing_access;
+    return prepare_deferred_read(memory, address, size, access, gate);
+  }
+  [[nodiscard]] virtual std::optional<VmTransferToken>
+  prepare_deferred_read(PhysicalMemoryAccess &memory, uint64_t address, std::size_t size,
+                        VmAccessKind access, const std::shared_ptr<VmTransferEffectGate> &gate,
+                        const GpuVmAccess &executing_access,
+                        const std::optional<MemoryPtEpoch> &pt_epoch) const {
+    (void)pt_epoch;
+    return prepare_deferred_read(memory, address, size, access, gate, executing_access);
+  }
+  [[nodiscard]] virtual std::optional<VmTransferToken>
+  prepare_deferred_write(PhysicalMemoryAccess &, uint64_t, std::span<const std::byte>,
+                         const std::shared_ptr<VmTransferEffectGate> &) const {
+    return std::nullopt;
+  }
+  [[nodiscard]] virtual std::optional<VmTransferToken>
+  prepare_deferred_write(PhysicalMemoryAccess &memory, uint64_t address,
+                         std::span<const std::byte> bytes,
+                         const std::shared_ptr<VmTransferEffectGate> &gate,
+                         const GpuVmAccess &executing_access) const {
+    (void)executing_access;
+    return prepare_deferred_write(memory, address, bytes, gate);
+  }
+  [[nodiscard]] virtual std::optional<VmTransferToken> prepare_deferred_write(
+      PhysicalMemoryAccess &memory, uint64_t address, std::span<const std::byte> bytes,
+      const std::shared_ptr<VmTransferEffectGate> &gate, const GpuVmAccess &executing_access,
+      const std::optional<MemoryPtEpoch> &pt_epoch) const {
+    (void)pt_epoch;
+    return prepare_deferred_write(memory, address, bytes, gate, executing_access);
+  }
 
   /// @brief Execute the next ordinary translated physical request.
   /// @details The default translates one span and invokes the supplied transport.
@@ -518,6 +933,32 @@ public:
 
   [[nodiscard]] VmTranslationResult translate(uint64_t address, std::size_t size,
                                               VmAccessKind access) const override;
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_read(PhysicalMemoryAccess &memory, uint64_t address, std::size_t size,
+                        VmAccessKind access,
+                        const std::shared_ptr<VmTransferEffectGate> &gate) const override;
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_write(PhysicalMemoryAccess &memory, uint64_t address,
+                         std::span<const std::byte> bytes,
+                         const std::shared_ptr<VmTransferEffectGate> &gate) const override;
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_read(PhysicalMemoryAccess &memory, uint64_t address, std::size_t size,
+                        VmAccessKind access, const std::shared_ptr<VmTransferEffectGate> &gate,
+                        const GpuVmAccess &executing_access) const override;
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_read(PhysicalMemoryAccess &memory, uint64_t address, std::size_t size,
+                        VmAccessKind access, const std::shared_ptr<VmTransferEffectGate> &gate,
+                        const GpuVmAccess &executing_access,
+                        const std::optional<MemoryPtEpoch> &pt_epoch) const override;
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_write(PhysicalMemoryAccess &memory, uint64_t address,
+                         std::span<const std::byte> bytes,
+                         const std::shared_ptr<VmTransferEffectGate> &gate,
+                         const GpuVmAccess &executing_access) const override;
+  [[nodiscard]] std::optional<VmTransferToken> prepare_deferred_write(
+      PhysicalMemoryAccess &memory, uint64_t address, std::span<const std::byte> bytes,
+      const std::shared_ptr<VmTransferEffectGate> &gate, const GpuVmAccess &executing_access,
+      const std::optional<MemoryPtEpoch> &pt_epoch) const override;
 
 private:
   std::shared_ptr<PhysicalMemoryAccess> memory_;
@@ -541,6 +982,32 @@ public:
 
   [[nodiscard]] VmTranslationResult translate(uint64_t address, std::size_t size,
                                               VmAccessKind access) const override;
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_read(PhysicalMemoryAccess &memory, uint64_t address, std::size_t size,
+                        VmAccessKind access,
+                        const std::shared_ptr<VmTransferEffectGate> &gate) const override;
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_write(PhysicalMemoryAccess &memory, uint64_t address,
+                         std::span<const std::byte> bytes,
+                         const std::shared_ptr<VmTransferEffectGate> &gate) const override;
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_read(PhysicalMemoryAccess &memory, uint64_t address, std::size_t size,
+                        VmAccessKind access, const std::shared_ptr<VmTransferEffectGate> &gate,
+                        const GpuVmAccess &executing_access) const override;
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_read(PhysicalMemoryAccess &memory, uint64_t address, std::size_t size,
+                        VmAccessKind access, const std::shared_ptr<VmTransferEffectGate> &gate,
+                        const GpuVmAccess &executing_access,
+                        const std::optional<MemoryPtEpoch> &pt_epoch) const override;
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_write(PhysicalMemoryAccess &memory, uint64_t address,
+                         std::span<const std::byte> bytes,
+                         const std::shared_ptr<VmTransferEffectGate> &gate,
+                         const GpuVmAccess &executing_access) const override;
+  [[nodiscard]] std::optional<VmTransferToken> prepare_deferred_write(
+      PhysicalMemoryAccess &memory, uint64_t address, std::span<const std::byte> bytes,
+      const std::shared_ptr<VmTransferEffectGate> &gate, const GpuVmAccess &executing_access,
+      const std::optional<MemoryPtEpoch> &pt_epoch) const override;
 
 private:
   std::shared_ptr<PhysicalMemoryAccess> retained_memory_;
@@ -595,21 +1062,6 @@ private:
   AddressSpaceInfo info_;
 };
 
-/// @brief Lifetime-safe namespace for virtually indexed cache entries.
-///
-/// @details A numeric VMID is routing metadata and may be reused.  The address-space
-/// generation distinguishes successive owners of one slot, while the
-/// translation epoch distinguishes root replacement and invalidation within
-/// one address-space lifetime.
-class VmCacheNamespace {
-public:
-  AddressSpaceHandle address_space;
-  uint64_t translation_epoch = 0;
-
-  explicit operator bool() const { return address_space && translation_epoch != 0; }
-  friend bool operator==(const VmCacheNamespace &, const VmCacheNamespace &) = default;
-};
-
 /// @brief Immutable view of one GPU address-space binding.
 ///
 /// @details The registry lock selects an immutable translator/backing generation.
@@ -633,12 +1085,63 @@ public:
   [[nodiscard]] AddressSpaceInfo info() const { return info_; }
   /// @brief Whether invalidation, unregister, or reset permanently retired this snapshot.
   [[nodiscard]] bool revoked() const;
+  /// @brief Process-unique identity of this immutable backing generation.
+  /// @details Ordinary snapshots of one live generation share the identity;
+  /// replacement, invalidation, or VMID reuse receives a different one.
+  [[nodiscard]] uint64_t cache_identity() const;
+  [[nodiscard]] bool supports_translated_local_cache() const;
+  /// Saturating count of admitted cache writes and atomics under this root.
+  /// Invalidation and pinned snapshots share the count; explicit root
+  /// replacement starts a new count. Saturation is unsafe for recovery.
+  [[nodiscard]] uint64_t cache_write_sequence() const;
+  /// Whether two snapshots descend from one explicit VM root binding.
+  /// Invalidation preserves the lineage; root replacement starts a new one.
+  [[nodiscard]] bool same_root_lineage(const GpuVmAccess &other) const;
   [[nodiscard]] VmCacheNamespace cache_namespace() const {
     return {.address_space = address_space_, .translation_epoch = info_.translation_epoch};
   }
+  /// @brief Retain the exact generation gate for an already prepared effect.
+  /// @details A caller must establish its own backing and frontend authority
+  /// before taking cache locks. Gate entry then excludes VM retirement during
+  /// the bounded effect without calling back into the VM registry.
+  [[nodiscard]] std::shared_ptr<VmTransferEffectGate> retain_effect_gate() const;
 
+  /// @brief Retain permission for one live page-table rewalk.
+  /// @details Admission is acquired before the VM state lease; a closed PCI
+  /// gate returns retryable Unavailable without reading the first PTE.
+  [[nodiscard]] MemoryIngressAdmission admit_pt_rewalk() const;
+  /// @brief Reenter the exact gate captured by a deferred PCI request.
+  [[nodiscard]] MemoryIngressAdmission admit_pt_rewalk(const MemoryPtEpoch &expected) const;
+
+  /// @brief Inspect one translated span without publishing an architectural fault.
+  /// @details Intended for optional routing probes; a successful result does
+  /// not authorize a cache hit, fill, or backing effect.
+  [[nodiscard]] VmTranslationResult query_translation(uint64_t address, std::size_t size,
+                                                      VmAccessKind access) const;
   [[nodiscard]] VmTranslationResult translate(uint64_t address, std::size_t size,
                                               VmAccessKind access) const;
+  /// @brief Recheck a queued System step without publishing a second GPU fault.
+  /// @details This validates the retained snapshot, selected memory type and
+  /// all permission bits, IOVA, and complete span immediately before a deferred
+  /// provider grants its effect. The VFIO owner must hold the PT permit it
+  /// acquired before effect entry across this validation and the effect;
+  /// acquiring again here could reject an already admitted entry after BEGIN.
+  [[nodiscard]] VmAccessOutcome validate_deferred_system_span(uint64_t gpu_va, uint64_t iova,
+                                                              std::size_t size, VmAccessKind access,
+                                                              const VmTranslation &selected) const;
+  /// @brief Classify a data route, optionally suppressing architectural fault
+  /// reporting for maintenance probes that must fail closed and retry.
+  [[nodiscard]] VmDataRoute classify_data_route(uint64_t address, std::size_t size,
+                                                VmAccessKind access,
+                                                bool report_fault = true) const;
+  /// @brief Check live frontend policy without translating or touching backing.
+  /// @details Terminal denial is reported to this binding's GPU fault sink.
+  [[nodiscard]] VmAccessAdmission admit_access(uint64_t address, std::size_t size,
+                                               VmAccessKind access, bool report_fault = true) const;
+  /// @brief Compare dirty cache tags with the current write grant only.
+  /// @details This query does not authorize a backing effect, report a GPU
+  /// fault, or advance the cache-write sequence.
+  [[nodiscard]] VmAccessAdmission query_cache_write_grant(uint64_t address, std::size_t size) const;
   /// @brief Query cache policy without exposing physical backing metadata.
   [[nodiscard]] std::optional<Mtype> query_mtype(uint64_t address) const;
   /// @brief Reuse a copied policy while its access state and mutation token are valid.
@@ -667,10 +1170,32 @@ public:
   [[nodiscard]] VmAccessOutcome read(uint64_t address, std::span<std::byte> bytes,
                                      std::size_t &completed_bytes,
                                      VmAccessKind access = VmAccessKind::Read) const;
+  /// @brief Resume a data read with a retained deferred-request identity.
+  /// @details Setting @p allow_deferred false still permits synchronous spans,
+  /// but rejects a deferred route before submission. If supplied, maintenance
+  /// is acquired outside the VM lock for each local span and released before
+  /// any deferred request is submitted or polled.
+  [[nodiscard]] VmAccessOutcome read(uint64_t address, std::span<std::byte> bytes,
+                                     std::size_t &completed_bytes, VmTransferToken &token,
+                                     VmAccessKind access = VmAccessKind::Read,
+                                     bool allow_deferred = true) const;
+  [[nodiscard]] VmAccessOutcome read(uint64_t address, std::span<std::byte> bytes,
+                                     std::size_t &completed_bytes, VmTransferToken &token,
+                                     VmAccessKind access, bool allow_deferred,
+                                     const VmTransferMaintenance &maintenance,
+                                     const VmTransferIngress &ingress = {},
+                                     const VmPrivateUcGttCopySource &copy_source = {}) const;
   [[nodiscard]] VmAccessOutcome write(uint64_t address, std::span<const std::byte> bytes) const;
   /// @brief Resume a translated write at @p completed_bytes.
   [[nodiscard]] VmAccessOutcome write(uint64_t address, std::span<const std::byte> bytes,
                                       std::size_t &completed_bytes) const;
+  [[nodiscard]] VmAccessOutcome write(uint64_t address, std::span<const std::byte> bytes,
+                                      std::size_t &completed_bytes, VmTransferToken &token,
+                                      bool allow_deferred = true) const;
+  [[nodiscard]] VmAccessOutcome write(uint64_t address, std::span<const std::byte> bytes,
+                                      std::size_t &completed_bytes, VmTransferToken &token,
+                                      bool allow_deferred, const VmTransferMaintenance &maintenance,
+                                      const VmTransferIngress &ingress = {}) const;
   /// @brief Try one translated span with all-or-nothing refusal.
   /// @details Refusal leaves both bytes and backing untouched. It does not
   /// report a guest fault; the caller must issue its original smaller accesses.
@@ -722,6 +1247,12 @@ private:
   void report_terminal_fault(uint64_t address, VmAccessKind access, VmAccessOutcome outcome) const;
   [[nodiscard]] VmAccessOutcome probe_impl(uint64_t address, std::size_t size, VmAccessKind access,
                                            bool report_fault) const;
+  template <typename Span>
+  [[nodiscard]] VmAccessOutcome
+  transfer_tokenized(uint64_t address, Span bytes, std::size_t &completed_bytes,
+                     VmTransferToken &token, VmAccessKind access, bool allow_deferred,
+                     const VmTransferMaintenance &maintenance, const VmTransferIngress &ingress,
+                     const VmPrivateUcGttCopySource &copy_source) const;
 
   AddressSpaceHandle address_space_;
   AddressSpaceInfo info_;
@@ -738,6 +1269,49 @@ private:
 class GpuVm {
 public:
   explicit GpuVm(Gfx12VmConfig gfx12_config = Gfx12VmConfig::gfx12_1());
+
+  /// @brief Publish a controlled canonical backing range before its first GPU grant.
+  /// @details Cache sinks consult this copy-on-write policy without a registry
+  /// or KFD callback while holding cache locks. The binding identity prevents
+  /// a retired VMID's policy from affecting a later owner of the same number.
+  [[nodiscard]] bool protect_controlled_cache_backing(AddressSpaceHandle handle, uint64_t address,
+                                                      uint64_t size);
+  /// @brief Retire the policy only after the backing's grants and PTEs are retired.
+  /// @details This operation does not allocate, so completed KFD retirement can use it.
+  void retire_controlled_cache_backing(AddressSpaceHandle handle, uint64_t address,
+                                       uint64_t size) noexcept;
+  /// @brief True when a direct cache sink must refuse a write to this virtual range.
+  /// @details The query uses only an immutable policy snapshot and binding lifetime bit.
+  [[nodiscard]] bool controlled_cache_backing_overlaps(uint32_t vmid, uint64_t address,
+                                                       uint64_t size) const noexcept;
+
+  /// Short registry authority proving that a fill still targets the current
+  /// address-space generation. Release it on the acquiring thread before any
+  /// VM callback or before destroying the GpuVm.
+  class CurrentNamespaceLease {
+  public:
+    CurrentNamespaceLease() = default;
+    CurrentNamespaceLease(CurrentNamespaceLease &&) noexcept = default;
+    CurrentNamespaceLease &operator=(CurrentNamespaceLease &&) noexcept = default;
+    CurrentNamespaceLease(const CurrentNamespaceLease &) = delete;
+    CurrentNamespaceLease &operator=(const CurrentNamespaceLease &) = delete;
+
+    [[nodiscard]] explicit operator bool() const noexcept { return lock_.owns_lock(); }
+
+  private:
+    friend class GpuVm;
+    explicit CurrentNamespaceLease(std::shared_lock<util::DistributedSharedMutex> lock) noexcept
+        : lock_(std::move(lock)) {}
+
+    std::shared_lock<util::DistributedSharedMutex> lock_;
+  };
+
+  /// Nonblocking check of the live binding's handle and translation epoch.
+  /// Hold this lease through only a cache fill; root replacement and VMID
+  /// reuse then cannot publish a different namespace until it is released.
+  [[nodiscard]] CurrentNamespaceLease
+  try_acquire_current_namespace(AddressSpaceHandle handle,
+                                VmCacheNamespace expected) const noexcept;
 
   /// @brief Register one complete frontend-provided address-space binding.
   /// @details The VM retains the shared translator and backing in every access
@@ -776,9 +1350,9 @@ public:
   register_gfx12_address_space(uint32_t vmid, uint64_t page_table_base,
                                std::shared_ptr<PhysicalMemoryAccess> memory);
   /// @brief Register a handle-only GFX12 root without claiming numeric VMID routing.
-  [[nodiscard]] AddressSpaceHandle
-  register_unrouted_gfx12_address_space(uint32_t vmid, uint64_t page_table_base,
-                                        std::shared_ptr<PhysicalMemoryAccess> memory);
+  [[nodiscard]] AddressSpaceHandle register_unrouted_gfx12_address_space(
+      uint32_t vmid, uint64_t page_table_base, std::shared_ptr<PhysicalMemoryAccess> memory,
+      std::function<void(uint64_t, VmAccessKind)> fault_reporter = {});
   [[nodiscard]] bool replace_translated(AddressSpaceHandle handle,
                                         std::shared_ptr<AddressSpaceTranslator> translator,
                                         std::shared_ptr<PhysicalMemoryAccess> memory);
@@ -877,6 +1451,15 @@ public:
 private:
   friend class GpuVmAccessBatchGuard;
 
+  struct ControlledCacheBacking {
+    AddressSpaceHandle handle;
+    uint32_t vmid;
+    uint64_t first;
+    uint64_t last;
+    std::weak_ptr<GpuVmBindingState> binding;
+    std::shared_ptr<std::atomic<bool>> active;
+  };
+
   class Binding {
   public:
     uint32_t vmid = 0;
@@ -902,6 +1485,8 @@ private:
   void revoke_access_state_locked(Binding &binding);
 
   mutable util::DistributedSharedMutex mutex_;
+  std::mutex controlled_backing_mutex_;
+  std::atomic<std::shared_ptr<const std::vector<ControlledCacheBacking>>> controlled_backings_;
   std::vector<Slot> slots_;
   std::vector<uint32_t> free_slots_;
   std::unordered_map<uint32_t, AddressSpaceHandle> vmid_handles_;

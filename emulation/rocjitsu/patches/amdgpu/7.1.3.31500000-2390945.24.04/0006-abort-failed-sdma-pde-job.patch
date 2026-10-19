@@ -1,0 +1,72 @@
+--- a/amd/amdgpu/amdgpu_vm.h
++++ b/amd/amdgpu/amdgpu_vm.h
+@@ -333,6 +333,8 @@
+ 		      unsigned count, uint32_t incr, uint64_t flags);
+ 	int (*commit)(struct amdgpu_vm_update_params *p,
+ 		      struct dma_fence **fence);
++	/* Discard only work that has not been submitted. */
++	void (*abort_pending)(struct amdgpu_vm_update_params *p);
+ };
+
+ struct amdgpu_vm_fault_info {
+--- a/amd/amdgpu/amdgpu_vm_sdma.c
++++ b/amd/amdgpu/amdgpu_vm_sdma.c
+@@ -64,6 +64,17 @@
+ 	return 0;
+ }
+
++/* A submitted job belongs to the scheduler, not this update. */
++static void amdgpu_vm_sdma_abort_pending(struct amdgpu_vm_update_params *p)
++{
++	if (!p->job)
++		return;
++
++	amdgpu_job_free(p->job);
++	p->job = NULL;
++	p->num_dw_left = 0;
++}
++
+ /**
+  * amdgpu_vm_sdma_prepare - prepare SDMA command submission
+  *
+@@ -87,10 +98,8 @@
+ 		return 0;
+
+ 	r = amdgpu_sync_push_to_job(sync, p->job);
+-	if (r) {
+-		p->num_dw_left = 0;
+-		amdgpu_job_free(p->job);
+-	}
++	if (r)
++		amdgpu_vm_sdma_abort_pending(p);
+ 	return r;
+ }
+
+@@ -121,6 +130,8 @@
+
+ 	WARN_ON(ib->length_dw > p->num_dw_left);
+ 	f = amdgpu_job_submit(p->job);
++	p->job = NULL;
++	p->num_dw_left = 0;
+
+ 	if (p->unlocked) {
+ 		struct dma_fence *tmp = dma_fence_get(f);
+@@ -300,5 +311,6 @@
+ 	.map_table = amdgpu_vm_sdma_map_table,
+ 	.prepare = amdgpu_vm_sdma_prepare,
+ 	.update = amdgpu_vm_sdma_update,
+-	.commit = amdgpu_vm_sdma_commit
++	.commit = amdgpu_vm_sdma_commit,
++	.abort_pending = amdgpu_vm_sdma_abort_pending
+ };
+--- a/amd/amdgpu/amdgpu_vm.c
++++ b/amd/amdgpu/amdgpu_vm.c
+@@ -1022,6 +1022,8 @@
+ 		amdgpu_vm_bo_idle(entry);
+
+ error:
++	if (r && vm->update_funcs->abort_pending)
++		vm->update_funcs->abort_pending(&params);
+ 	drm_dev_exit(idx);
+ 	return r;
+ }

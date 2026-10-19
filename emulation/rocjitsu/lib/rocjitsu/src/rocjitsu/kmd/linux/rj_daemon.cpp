@@ -6,8 +6,10 @@
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
+#include "rocjitsu/vm/fabric_endpoint.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
+#include "util/log.h"
 #include "util/unique_handle.h"
 
 #include <algorithm>
@@ -15,8 +17,10 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -38,6 +42,7 @@ struct rj_daemon_t {
   std::atomic<rj_daemon_status_t> status{RJ_DAEMON_STATUS_STARTING};
   std::atomic<bool> stop_requested{false};
   rj_vm_t *vm = nullptr;
+  bool trace_fabric_effects = false;
   int listen_fd = -1;
   std::string socket_path;
   dev_t socket_device = 0;
@@ -141,10 +146,11 @@ bool validate_ioctl_payload(uint32_t command, const void *buffer, size_t buffer_
   return inline_size <= buffer_size - argument_size && argument_size + inline_size == buffer_size;
 }
 
-bool send_with_fd_exact(int socket, const void *data, size_t size, int fd) {
+bool send_with_fd_exact(int socket, const void *data, size_t size, util::UniqueHandle fd) {
+  const int raw_fd = fd.get();
   ssize_t sent = 0;
   do {
-    sent = rpc_send_msg(socket, data, size, &fd, 1);
+    sent = rpc_send_msg(socket, data, size, &raw_fd, 1);
   } while (sent < 0 && errno == EINTR);
   if (sent <= 0)
     return false;
@@ -223,6 +229,7 @@ void mark_error(rj_daemon_t *daemon) {
          !daemon->status.compare_exchange_weak(state, RJ_DAEMON_STATUS_ERROR,
                                                std::memory_order_acq_rel)) {
   }
+  daemon->status.notify_all();
   if (state == RJ_DAEMON_STATUS_STOPPING || state == RJ_DAEMON_STATUS_STOPPED)
     return;
   interrupt_transport(daemon);
@@ -345,10 +352,11 @@ private:
     if (process_id_ == 0 || header.payload_bytes != 0 || input_fds.notifier)
       return RequestDisposition::Disconnect;
 
-    close_device();
+    const int close_result = close_device();
     RpcHeader response{};
     response.opcode = header.opcode;
     response.request_id = header.request_id;
+    response.result = close_result;
     rpc_send_exact(client_fd_, &response, sizeof(response));
     return RequestDisposition::Disconnect;
   }
@@ -380,14 +388,15 @@ private:
     std::memcpy(response_buffer, &response, sizeof(response));
     std::memcpy(response_buffer + sizeof(response), &map_response, sizeof(map_response));
 
-    rj_handle_t backing_memory = -1;
-    if (rj_vm_get_shared_mem_as(daemon_->vm, process_id_, request.offset, &backing_memory) !=
+    rj_handle_t backing_fd = -1;
+    if (rj_vm_dup_shared_mem_as(daemon_->vm, process_id_, request.offset, &backing_fd) !=
         ROCJITSU_STATUS_SUCCESS) {
       return RequestDisposition::Disconnect;
     }
-    const bool sent = backing_memory >= 0
+    util::UniqueHandle backing_memory(backing_fd);
+    const bool sent = backing_memory
                           ? send_with_fd_exact(client_fd_, response_buffer, sizeof(response_buffer),
-                                               backing_memory)
+                                               std::move(backing_memory))
                           : rpc_send_exact(client_fd_, response_buffer, sizeof(response_buffer));
     return sent ? RequestDisposition::Continue : RequestDisposition::Disconnect;
   }
@@ -401,11 +410,14 @@ private:
     if (!rpc_recv_exact(client_fd_, &request, sizeof(request)))
       return RequestDisposition::Disconnect;
     rj_vm_unmap_t unmap{.addr = request.addr, .length = request.length};
-    if (rj_vm_device_unmap_as(daemon_->vm, process_id_, &unmap) != ROCJITSU_STATUS_SUCCESS)
+    const rj_status_t status = rj_vm_device_unmap_as(daemon_->vm, process_id_, &unmap);
+    const int unmap_errno = errno;
+    if (status != ROCJITSU_STATUS_SUCCESS && status != ROCJITSU_STATUS_ERROR)
       return RequestDisposition::Disconnect;
     RpcHeader response{};
     response.opcode = header.opcode;
     response.request_id = header.request_id;
+    response.result = status == ROCJITSU_STATUS_SUCCESS ? 0 : -unmap_errno;
     return rpc_send_exact(client_fd_, &response, sizeof(response)) ? RequestDisposition::Continue
                                                                    : RequestDisposition::Disconnect;
   }
@@ -444,6 +456,15 @@ private:
       static_cast<void>(input_fds.notifier.release());
     if (command.in_mem_handle < 0)
       static_cast<void>(input_fds.target_mem.release());
+    // EXPORT_DMABUF returns a new descriptor in the daemon's fd table. Own it
+    // immediately, including on an invalid reply or a failed socket send.
+    util::UniqueHandle exported_dmabuf;
+    if (canonical_ioctl_request(command.cmd) == AMDKFD_IOC_EXPORT_DMABUF && command.result == 0) {
+      exported_dmabuf =
+          util::UniqueHandle(static_cast<kfd_ioctl_export_dmabuf_args *>(command.buf)->dmabuf_fd);
+      if (!exported_dmabuf)
+        return RequestDisposition::Disconnect;
+    }
     if (command.buf_size > available_arguments)
       return RequestDisposition::Disconnect;
 
@@ -454,14 +475,40 @@ private:
     response.payload_bytes = static_cast<uint32_t>(command.buf_size);
 
     bool sent = false;
-    if (command.shared_handle >= 0) {
+    if (exported_dmabuf) {
+      std::vector<uint8_t> response_buffer(sizeof(response) + command.buf_size);
+      std::memcpy(response_buffer.data(), &response, sizeof(response));
+      std::memcpy(response_buffer.data() + sizeof(response), command.buf, command.buf_size);
+      sent = send_with_fd_exact(client_fd_, response_buffer.data(), response_buffer.size(),
+                                std::move(exported_dmabuf));
+    } else if (command.shared_handle >= 0) {
+      // shared_handle is borrowed by the VM. Resolve the allocation by its
+      // mmap offset and duplicate under the KFD allocation lock, so FREE or
+      // CLOSE cannot recycle its fd before SCM_RIGHTS takes a reference.
+      int64_t shared_offset = 0;
+      switch (canonical_ioctl_request(command.cmd)) {
+      case AMDKFD_IOC_ALLOC_MEMORY_OF_GPU:
+        shared_offset = static_cast<kfd_ioctl_alloc_memory_of_gpu_args *>(command.buf)->mmap_offset;
+        break;
+      case AMDKFD_IOC_IPC_IMPORT_HANDLE:
+        shared_offset = static_cast<kfd_ioctl_ipc_import_handle_args *>(command.buf)->mmap_offset;
+        break;
+      default:
+        return RequestDisposition::Disconnect;
+      }
+      rj_handle_t shared_fd = -1;
+      if (rj_vm_dup_shared_mem_as(daemon_->vm, process_id_, shared_offset, &shared_fd) !=
+              ROCJITSU_STATUS_SUCCESS ||
+          shared_fd < 0)
+        return RequestDisposition::Disconnect;
+      util::UniqueHandle owned_shared(shared_fd);
       std::vector<uint8_t> response_buffer(sizeof(response) + command.buf_size);
       std::memcpy(response_buffer.data(), &response, sizeof(response));
       if (command.buf_size > 0) {
         std::memcpy(response_buffer.data() + sizeof(response), command.buf, command.buf_size);
       }
       sent = send_with_fd_exact(client_fd_, response_buffer.data(), response_buffer.size(),
-                                command.shared_handle);
+                                std::move(owned_shared));
     } else {
       sent = rpc_send_exact(client_fd_, &response, sizeof(response)) &&
              (command.buf_size == 0 || rpc_send_exact(client_fd_, command.buf, command.buf_size));
@@ -469,10 +516,13 @@ private:
     return sent ? RequestDisposition::Continue : RequestDisposition::Disconnect;
   }
 
-  void close_device() {
+  int close_device() {
     if (process_id_ == 0)
-      return;
-    rj_vm_device_close(daemon_->vm, std::exchange(process_id_, 0));
+      return 0;
+    if (rj_vm_device_close(daemon_->vm, process_id_) != ROCJITSU_STATUS_SUCCESS)
+      return -(errno != 0 ? errno : EIO);
+    process_id_ = 0;
+    return 0;
   }
 
   const int client_fd_;
@@ -487,6 +537,13 @@ void handle_client(int client_fd, rj_daemon_t *daemon, std::stop_token stop) {
 }
 
 void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
+  // The accept thread starts before rj_daemon_start publishes its handle.
+  // Do not admit a client until startup has committed that publication.
+  while (daemon->status.load(std::memory_order_acquire) == RJ_DAEMON_STATUS_STARTING)
+    daemon->status.wait(RJ_DAEMON_STATUS_STARTING, std::memory_order_acquire);
+  if (daemon->status.load(std::memory_order_acquire) != RJ_DAEMON_STATUS_RUNNING)
+    return;
+
   struct ClientThread {
     std::jthread thread;
     std::shared_ptr<std::atomic<bool>> complete;
@@ -551,8 +608,13 @@ void remove_owned_socket(const rj_daemon_t *daemon) {
   }
 }
 
-void teardown(rj_daemon_t *daemon) {
+rj_status_t teardown(rj_daemon_t *daemon) {
+  if (daemon->vm == nullptr) {
+    daemon->status.store(RJ_DAEMON_STATUS_STOPPED, std::memory_order_release);
+    return ROCJITSU_STATUS_SUCCESS;
+  }
   daemon->status.store(RJ_DAEMON_STATUS_STOPPING, std::memory_order_release);
+  daemon->status.notify_all();
   interrupt_transport(daemon);
   // Wake clients blocked inside an infinite-timeout device operation before
   // joining their threads. Transport shutdown alone only interrupts socket I/O.
@@ -571,9 +633,37 @@ void teardown(rj_daemon_t *daemon) {
   daemon->engine_thread.request_stop();
   if (daemon->engine_thread.joinable())
     daemon->engine_thread.join();
-  rj_vm_destroy(daemon->vm);
+  if (daemon->trace_fabric_effects) {
+    auto *fabric = daemon->vm->vm ? daemon->vm->vm->fabric_endpoint() : nullptr;
+    if (!fabric) {
+      util::Logger::warn("kfd: fabric effect trace unavailable during teardown");
+    } else {
+      const auto diagnostics = fabric->diagnostics();
+      for (const auto &route : diagnostics.directed_effects)
+        util::Logger::warn(std::format("kfd: committed fabric effects {} -> {}: reads={}, "
+                                       "writes={}, read_bytes={}, write_bytes={}",
+                                       route.requester_gpu_id, route.owner_gpu_id, route.reads,
+                                       route.writes, route.read_bytes, route.write_bytes));
+      for (const auto &effect : diagnostics.committed_effects)
+        util::Logger::warn(std::format("kfd: committed fabric effect request={} {} -> {}: op={}, "
+                                       "backing_id={}, offset={}, bytes={}",
+                                       effect.request_id, effect.requester_gpu_id,
+                                       effect.owner_gpu_id, effect.write ? "write" : "read",
+                                       effect.backing_id, effect.backing_offset, effect.bytes));
+      util::Logger::warn(std::format("kfd: fabric effect trace captured={}, dropped={}",
+                                     diagnostics.committed_effects.size(),
+                                     diagnostics.effect_trace_dropped));
+    }
+  }
+  // A session can finish closing only after its thread has left the VM. Retry
+  // pending final closes now, while the VM still owns their grants and backing.
+  if (rj_vm_destroy_checked(daemon->vm) != ROCJITSU_STATUS_SUCCESS) {
+    daemon->status.store(RJ_DAEMON_STATUS_ERROR, std::memory_order_release);
+    return ROCJITSU_STATUS_ERROR;
+  }
   daemon->vm = nullptr;
   daemon->status.store(RJ_DAEMON_STATUS_STOPPED, std::memory_order_release);
+  return ROCJITSU_STATUS_SUCCESS;
 }
 
 bool remove_stale_socket(const rj_daemon_t *daemon, const sockaddr_un &address,
@@ -647,10 +737,17 @@ rj_status_t bind_socket(rj_daemon_t *daemon) {
 
 } // namespace
 
-rj_status_t rj_daemon_start(const char *json, const char *socket_path, rj_daemon_t **daemon) {
+rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_path,
+                                         const rj_daemon_options_t *options, rj_daemon_t **daemon) {
   if (daemon)
     *daemon = nullptr;
   if (!json || !socket_path || !daemon)
+    return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  if (options && (options->struct_size != sizeof(*options) ||
+                  (options->flags & ~RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS) != 0 ||
+                  options->fabric_trace_capacity > RJ_DAEMON_FABRIC_TRACE_MAX_CAPACITY ||
+                  (options->fabric_trace_capacity != 0 &&
+                   (options->flags & RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS) == 0)))
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   const size_t socket_path_length = std::strlen(socket_path);
   if (socket_path_length == 0 || socket_path_length >= sizeof(sockaddr_un::sun_path))
@@ -667,6 +764,19 @@ rj_status_t rj_daemon_start(const char *json, const char *socket_path, rj_daemon
   rj_status_t status = rj_vm_create_from_string(json, RJ_VM_MODE_DAEMON, &created->vm);
   if (status != ROCJITSU_STATUS_SUCCESS)
     return status;
+
+  if (options && (options->flags & RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS) != 0) {
+    auto *fabric = created->vm->vm ? created->vm->vm->fabric_endpoint() : nullptr;
+    const size_t capacity = options->fabric_trace_capacity == 0
+                                ? static_cast<size_t>(RJ_DAEMON_FABRIC_TRACE_MAX_CAPACITY)
+                                : options->fabric_trace_capacity;
+    if (!fabric || !fabric->enable_effect_trace(capacity)) {
+      rj_vm_destroy(created->vm);
+      created->vm = nullptr;
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    }
+    created->trace_fabric_effects = true;
+  }
 
   // Daemon callers supply the same configuration as local-mode callers, so
   // install its plugins before any client can submit work. With no explicit
@@ -717,15 +827,22 @@ rj_status_t rj_daemon_start(const char *json, const char *socket_path, rj_daemon
     teardown(created.get());
     return ROCJITSU_STATUS_ERROR;
   }
+  created->status.notify_all();
 
   *daemon = created.release();
   return ROCJITSU_STATUS_SUCCESS;
 }
 
+rj_status_t rj_daemon_start(const char *json, const char *socket_path, rj_daemon_t **daemon) {
+  return rj_daemon_start_with_options(json, socket_path, nullptr, daemon);
+}
+
 rj_status_t rj_daemon_stop(rj_daemon_t *daemon) {
   if (!daemon)
     return ROCJITSU_STATUS_SUCCESS;
-  teardown(daemon);
+  const rj_status_t status = teardown(daemon);
+  if (status != ROCJITSU_STATUS_SUCCESS)
+    return status;
   delete daemon;
   return ROCJITSU_STATUS_SUCCESS;
 }

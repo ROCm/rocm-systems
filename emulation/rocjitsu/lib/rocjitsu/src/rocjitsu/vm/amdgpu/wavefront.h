@@ -18,6 +18,7 @@
 #include "rocjitsu/vm/thread_context.h"
 
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <memory>
@@ -258,19 +259,22 @@ public:
   /// queue whose context-save-restore area holds its saved state.
   void set_queue_id(uint32_t id) { queue_id_ = id; }
 
-  /// @brief Return the owning process ID (PASID analog).
+  /// @brief Return the dispatch's VMID or PASID, according to its identity kind.
   uint32_t process_id() const { return process_id_; }
 
-  /// @brief Set the owning process ID at dispatch time.
-  void set_process_id(uint32_t id) { process_id_ = id; }
+  /// @brief Set the owning VMID or PASID at dispatch time.
+  /// @details The default kind identifies a PASID.
+  void set_process_id(uint32_t id, ProcessIdentityKind kind = ProcessIdentityKind::Pasid);
 
   /// @brief Return the generation-safe identity of the owning GPU address space.
   AddressSpaceHandle address_space() const { return address_space_; }
 
   /// @brief Set the owning GPU address space at dispatch time.
   void set_address_space(AddressSpaceHandle address_space) {
-    if (address_space_ != address_space)
+    if (address_space_ != address_space) {
       vm_access_.reset();
+      execution_root_access_.reset();
+    }
     address_space_ = address_space;
   }
 
@@ -278,7 +282,27 @@ public:
   const GpuVmAccess *vm_access() const { return vm_access_.get(); }
 
   /// @brief Share the dispatch-scoped VM snapshot with this wave.
-  void set_vm_access(std::shared_ptr<const GpuVmAccess> access) { vm_access_ = std::move(access); }
+  void set_vm_access(std::shared_ptr<const GpuVmAccess> access) {
+    if (access && !execution_root_access_)
+      execution_root_access_ = access;
+    vm_access_ = std::move(access);
+  }
+  [[nodiscard]] bool same_execution_root(const GpuVmAccess &access) const {
+    return !execution_root_access_ || execution_root_access_->same_root_lineage(access);
+  }
+  void set_execution_effect_guard(std::shared_ptr<std::atomic_bool> marker) {
+    execution_effect_possible_ = std::move(marker);
+    execution_effect_marked_ = false;
+  }
+  [[nodiscard]] bool needs_execution_effect_mark() const {
+    return execution_effect_possible_ && !execution_effect_marked_;
+  }
+  void note_potential_execution_effect() {
+    if (needs_execution_effect_mark()) {
+      execution_effect_possible_->store(true, std::memory_order_release);
+      execution_effect_marked_ = true;
+    }
+  }
   /// @brief Select host monotonic timestamps for PM4, modeled time for AQL.
   void set_system_clock(bool enabled) { use_system_clock_ = enabled; }
   /// @brief Read the realtime clock selected by the launch ABI.
@@ -1004,6 +1028,9 @@ public:
     wave_in_group_ = 0;
     address_space_ = {};
     vm_access_.reset();
+    execution_root_access_.reset();
+    execution_effect_possible_.reset();
+    execution_effect_marked_ = false;
     process_id_ = 0;
     use_system_clock_ = false;
     scratch_lease_.reset();
@@ -1101,7 +1128,10 @@ protected:
   uint32_t wave_in_group_ = 0;       ///< Position of this wave within its workgroup (debugger).
   AddressSpaceHandle address_space_; ///< Generation-safe GPU address-space identity.
   std::shared_ptr<const GpuVmAccess> vm_access_; ///< Dispatch-scoped immutable VM snapshot.
-  uint32_t process_id_ = 0; ///< Owning process ID (PASID analog, set per dispatch).
+  std::shared_ptr<const GpuVmAccess> execution_root_access_; ///< Root retained across revocation.
+  std::shared_ptr<std::atomic_bool> execution_effect_possible_;
+  bool execution_effect_marked_ = false;
+  uint32_t process_id_ = 0; ///< Dispatch VMID or PASID, selected by the identity kind.
 
   bool use_system_clock_ = false;                ///< PM4 shader timestamps use host monotonic time.
   std::shared_ptr<Pm4FailureState> pm4_failure_; ///< Null for AQL launches.

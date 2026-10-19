@@ -97,6 +97,11 @@ public:
   /// a concurrent munmap tearing the mapping down.
   [[nodiscard]] bool release_page(void *ptr);
 
+  /// @brief True if a CPU mapping would replace any part of the adopted page.
+  /// @details Takes mutex_ so fixed mmap preflight sees the same page protected
+  /// by signal_interrupt() and release_page().
+  [[nodiscard]] bool overlaps_page(const void *ptr, size_t size) const;
+
   /// @brief Signal event(s) from the CP's interrupt callback.
   /// @details When event_id is non-zero, signals that specific event. When
   ///          event_id is zero, broadcasts to all type-0 events — matching
@@ -162,9 +167,6 @@ public:
   /// @details Takes mutex_, so it cannot race a concurrent release_page()/munmap
   /// the way a direct read of the `page_` field can.
   [[nodiscard]] bool has_page() const;
-
-  /// @brief Check whether a host range overlaps the adopted event page under mutex_.
-  [[nodiscard]] bool overlaps_page(const void *addr, size_t length) const;
 
 private:
   int memfd_ = -1;       ///< memfd backing the KFD signal event page.

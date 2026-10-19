@@ -1,0 +1,68 @@
+--- a/amd/amdkfd/kfd_chardev.c
++++ b/amd/amdkfd/kfd_chardev.c
+@@ -35,6 +35,7 @@
+ #include <linux/time.h>
+ #include <linux/mm.h>
+ #include <linux/mman.h>
++#include <linux/moduleparam.h>
+ #include <linux/ptrace.h>
+ #include <linux/dma-buf.h>
+ #include <linux/processor.h>
+@@ -58,6 +59,11 @@
+
+ static const char kfd_dev_name[] = "kfd";
+
++static bool p4v_ipc_map_trace;
++module_param_named(p4v_ipc_map_trace, p4v_ipc_map_trace, bool, 0444);
++MODULE_PARM_DESC(p4v_ipc_map_trace,
++		 "Log successful KFD DMA-buf/IPC imports and GPU maps for VFIO diagnosis");
++
+ static const struct file_operations kfd_fops = {
+ 	.owner = THIS_MODULE,
+ 	.unlocked_ioctl = kfd_ioctl,
+@@ -1328,6 +1334,7 @@
+ {
+ 	struct kfd_ioctl_map_memory_to_gpu_args *args = data;
+ 	struct kfd_process_device *pdd, *peer_pdd;
++	struct kfd_bo *trace_bo;
+ 	void *mem;
+ 	struct kfd_node *dev;
+ 	long err = 0;
+@@ -1425,6 +1432,15 @@
+ 		if (err)
+ 			goto sync_memory_failed;
+ 	}
++	if (p4v_ipc_map_trace && ((struct kgd_mem *)mem)->is_imported) {
++		trace_bo = kfd_process_device_find_bo(pdd, GET_IDR_HANDLE(args->handle));
++		if (trace_bo)
++			for (i = 0; i < args->n_devices; i++)
++				pr_info("P4V KFD MAP pid=%u handle=%#llx gpu_id=%u va=%#llx bytes=%#llx\n",
++					p->lead_thread->pid, args->handle, devices_arr[i],
++					(unsigned long long)trace_bo->it.start,
++					(unsigned long long)(trace_bo->it.last - trace_bo->it.start + 1));
++	}
+ 	mutex_unlock(&p->mutex);
+ 	kfree(devices_arr);
+
+@@ -1680,6 +1696,10 @@
+ 	mutex_unlock(&p->mutex);
+
+ 	args->handle = MAKE_HANDLE(args->gpu_id, idr_handle);
++	if (p4v_ipc_map_trace)
++		pr_info("P4V KFD DMABUF_IMPORT pid=%u gpu_id=%u handle=%#llx va=%#llx bytes=%#llx\n",
++			p->lead_thread->pid, args->gpu_id, args->handle,
++			args->va_addr, (unsigned long long)size);
+
+ 	return 0;
+
+@@ -1732,6 +1752,10 @@
+ 				  &args->mmap_offset, &args->flags, false);
+ 	if (r)
+ 		pr_err("Failed to import IPC handle\n");
++	else if (p4v_ipc_map_trace)
++		pr_info("P4V KFD IPC_IMPORT pid=%u gpu_id=%u handle=%#llx va=%#llx flags=%#x\n",
++			p->lead_thread->pid, args->gpu_id, args->handle,
++			args->va_addr, args->flags);
+
+ 	return r;
+ }
