@@ -389,8 +389,8 @@ TEST_CASE("Unit_HRR_CaptureMarkerRefused_Direct", "[.][hrr-direct]") {
 // is up, and with it the capture, renames its own pid-<pid> to "moved" and
 // plants a symbolic link to HRR_TEST_VICTIM at pid-<pid>, as someone who can
 // write to the base directory could. It then copies 32 distinct host buffers
-// to the device, blobs that between them need blobs/<xx> prefixes not claimed
-// yet, and exits cleanly, which writes manifest.json and removes the marker.
+// to the device, blobs spread over many blobs/<xx> prefixes, and exits
+// cleanly, which writes manifest.json and removes the marker.
 // Run without either variable, it does nothing.
 // ---------------------------------------------------------------------------
 TEST_CASE("Unit_HRR_CaptureRenamedArchive_Direct", "[.][hrr-direct]") {
@@ -1092,6 +1092,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureClosesArchiveDirs) {
     const size_t at = run.output.find(head);
     return at == std::string::npos ? -1 : std::atoi(run.output.c_str() + at + head.size());
   };
+  // Each blob is written inside its hipMemcpy, on the calling thread, so the
+  // blobs/<xx> it opened is closed again before the workload counts.
   const int during = reported("during the capture");
   CHECK(during >= 0);
   CHECK(during <= 3);
