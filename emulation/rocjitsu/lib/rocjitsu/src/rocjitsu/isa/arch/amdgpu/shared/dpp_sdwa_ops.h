@@ -29,7 +29,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
 
 namespace rocjitsu {
 
@@ -548,7 +547,11 @@ inline void apply_dpp8(const Operand &source, uint32_t lane_sel, uint32_t fi,
 
 namespace sdwa {
 
-/// @brief Instruction policy for SDWA scaling, shared with its VOP3 form.
+/// @brief Select the SDWA OMOD eligibility and F32 scaling policy.
+/// @details Selects the denormal mode used for OMOD eligibility, shared with VOP3.
+/// For F32, FLUSH_NEAREST uses apply_omod_f32 under the producer's nearest-rounding
+/// environment; MODE uses scale_f32 with guest rounding. F16 scaling order remains
+/// the producer helper's responsibility.
 enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST };
 
 /// @brief Return the architectural source bytes selected by an SDWA selector.
@@ -586,77 +589,6 @@ inline uint32_t sdwa_src_select(uint32_t val, uint32_t sel, bool sign_ext) {
   if (sign_ext && (word_val & 0x8000))
     return word_val | 0xFFFF0000u;
   return word_val;
-}
-
-/// @brief Append an SDWA source, including modifiers encoded in the extension word.
-/// The semantic source format selects which modifier family is meaningful:
-/// integer-like sources use sign extension, while floating-point sources use
-/// negate and absolute-value modifiers.
-inline void append_source(std::string &out, const Operand &source, SourceModifierFormat format,
-                          bool sign_extend, bool negate, bool absolute) {
-  if (format == SourceModifierFormat::NONE && sign_extend)
-    out += "sext(";
-  if (format != SourceModifierFormat::NONE && negate)
-    out += '-';
-  if (format != SourceModifierFormat::NONE && absolute)
-    out += '|';
-  out += source.name();
-  if (format != SourceModifierFormat::NONE && absolute)
-    out += '|';
-  if (format == SourceModifierFormat::NONE && sign_extend)
-    out += ')';
-}
-
-inline std::string selection_name(uint32_t selection) {
-  constexpr std::array<std::string_view, 7> names = {"BYTE_0", "BYTE_1", "BYTE_2", "BYTE_3",
-                                                     "WORD_0", "WORD_1", "DWORD"};
-  if (selection < names.size())
-    return std::string(names[selection]);
-  return "invalid(" + std::to_string(selection) + ")";
-}
-
-inline std::string destination_unused_name(uint32_t unused) {
-  constexpr std::array<std::string_view, 3> names = {"UNUSED_PAD", "UNUSED_SEXT",
-                                                     "UNUSED_PRESERVE"};
-  if (unused < names.size())
-    return std::string(names[unused]);
-  return "invalid(" + std::to_string(unused) + ")";
-}
-
-inline void append_source_attributes(std::string &out, uint32_t src0_selection, const Operand *src1,
-                                     uint32_t src1_selection) {
-  out += " src0_sel:";
-  out += selection_name(src0_selection);
-  if (src1) {
-    out += " src1_sel:";
-    out += selection_name(src1_selection);
-  }
-}
-
-inline void append_destination_attributes(std::string &out, bool clamp, uint32_t omod,
-                                          uint32_t destination_selection,
-                                          uint32_t destination_unused, uint32_t src0_selection,
-                                          const Operand *src1, uint32_t src1_selection) {
-  if (clamp)
-    out += " clamp";
-  switch (omod) {
-  case 1:
-    out += " mul:2";
-    break;
-  case 2:
-    out += " mul:4";
-    break;
-  case 3:
-    out += " div:2";
-    break;
-  default:
-    break;
-  }
-  out += " dst_sel:";
-  out += selection_name(destination_selection);
-  out += " dst_unused:";
-  out += destination_unused_name(destination_unused);
-  append_source_attributes(out, src0_selection, src1, src1_selection);
 }
 
 inline uint32_t apply_source_modifiers(uint32_t value, SourceModifierFormat format, bool negate,
@@ -808,6 +740,7 @@ inline uint32_t output_modifier(const Inst &inst, const Wavefront &wf) {
 }
 
 /// @brief Apply SDWA scaling before narrowing a semantic F16 result.
+/// @details Retained legacy ordering, without SDWA hardware validation.
 template <typename Inst>
 inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float value,
                                  bool fp16_ovfl) {
@@ -821,6 +754,7 @@ inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float va
 }
 
 /// @brief Apply SDWA scaling to an already rounded half transcendental result.
+/// @details Retained legacy ordering, without SDWA hardware validation.
 template <typename Inst>
 inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float value,
                                    bool fp16_ovfl) {
@@ -829,6 +763,8 @@ inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float 
 }
 
 /// @brief Apply SDWA scaling before guest-mode rounding of a wide F16 arithmetic result.
+/// @details Retained legacy ordering, without SDWA hardware validation; migrated
+/// VOP3 arithmetic instead modifies the rounded half. See output_modifier.h.
 template <typename Inst>
 inline uint16_t finish_arithmetic_f16(const Inst &inst, const Wavefront &wf, double value,
                                       uint32_t round_mode, uint32_t denorm_mode, bool fp16_ovfl) {
@@ -887,7 +823,7 @@ inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t val
   if (omod == 0)
     return value;
   if constexpr (Format == ResultFormat::F16) {
-    // F16 scaling precedes narrowing in the semantic result producer.
+    // The producer has already applied F16 scaling; finalize its encoded result.
     return fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);
   } else if constexpr (Format == ResultFormat::PK_F16) {
     const uint32_t low = fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);

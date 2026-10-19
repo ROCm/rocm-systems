@@ -4057,6 +4057,45 @@ TEST_CASE("Unit_HRR_ForkWhileNotingUnreplayable_Direct", "[.][hrr-direct]") {
   REQUIRE(g_unreplayable_ran_out.load());
 }
 
+// ---------------------------------------------------------------------------
+// The forked child drops the overflowing copy of Unit_HRR_OverflowingMemcpy3D_Direct
+// before its first record, which opens its archive. Unit_HRR_ForkedChildStaysIncomplete
+// checks that only the child's archive is incomplete.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_ForkedChildStaysIncomplete_Direct", "[.][hrr-direct]") {
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  hipStream_t stream = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&stream));
+  void* dst = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dst, 1024));
+  std::vector<char> host(1024, 1);
+  hipMemcpy3DParms p{};
+  p.srcPtr = make_hipPitchedPtr(host.data(), 256, 256, 4);
+  p.dstPtr = make_hipPitchedPtr(dst, 256, 256, 4);
+  p.extent = make_hipExtent(256, (size_t{1} << 56) + 1, 1);  // 2^64 + 256 bytes
+  p.kind = hipMemcpyHostToDevice;
+  HRR_HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+
+  const pid_t pid = fork();
+  if (pid == 0) {
+    g_hrr_after_capture_shutdown = [] {};
+    if (hipMemcpy3DAsync(&p, stream) != hipSuccess) _exit(3);
+    (void)hipGetLastError();  // opens the child's archive
+    exit(0);
+  }
+  const int status = pid > 0 ? hrr_wait_child(pid, 30) : -1;
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HRR_HIP_CHECK(hipGraphDestroy(graph));
+  HRR_HIP_CHECK(hipFree(dst));
+  HRR_HIP_CHECK(hipStreamDestroy(stream));
+  INFO("child wait status " << status);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
+}
+
 // Records through the compiler dispatch table, which the capture shutdown
 // leaves in place.
 static void hrr_push_pop_launch_config() {
