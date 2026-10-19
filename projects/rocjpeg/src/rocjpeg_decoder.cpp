@@ -198,6 +198,34 @@ RocJpegStatus RocJpegDecoder::GetDecoderCaps(RocJpegDecodeCaps *decode_caps) con
 }
 
 /**
+ * @brief Checks that the crop rectangle of the decode parameters lies within the image.
+ *
+ * Without this check, a rectangle extending past the image is accepted, and the part of the output
+ * outside the image is filled with whatever the decoder surface holds there.
+ *
+ * @param decode_params The decode parameters holding the crop rectangle.
+ * @param jpeg_stream_params The parsed JPEG stream parameters holding the image dimensions.
+ * @return ROCJPEG_STATUS_SUCCESS if no cropping is requested or the crop rectangle is within the image,
+ *         ROCJPEG_STATUS_INVALID_PARAMETER otherwise.
+ */
+RocJpegStatus RocJpegDecoder::ValidateCropRectangle(const RocJpegDecodeParams &decode_params, const JpegStreamParameters &jpeg_stream_params) {
+    const auto &crop = decode_params.crop_rectangle;
+    if (crop.left == 0 && crop.top == 0 && crop.right == 0 && crop.bottom == 0) {
+        return ROCJPEG_STATUS_SUCCESS;
+    }
+    const int32_t width = jpeg_stream_params.picture_parameter_buffer.picture_width;
+    const int32_t height = jpeg_stream_params.picture_parameter_buffer.picture_height;
+    if (crop.left < 0 || crop.top < 0 || crop.left >= crop.right || crop.top >= crop.bottom ||
+        crop.right > width || crop.bottom > height) {
+        ErrorLog(g_rocjpeg_logger, "Invalid crop rectangle (left " + ROCJPEG_TOSTR(crop.left) + ", top " + ROCJPEG_TOSTR(crop.top) +
+                 ", right " + ROCJPEG_TOSTR(crop.right) + ", bottom " + ROCJPEG_TOSTR(crop.bottom) + ") for a " +
+                 ROCJPEG_TOSTR(width) + "x" + ROCJPEG_TOSTR(height) + " image");
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    return ROCJPEG_STATUS_SUCCESS;
+}
+
+/**
  * @brief Decodes a JPEG image using the RocJpegDecoder.
  *
  * This function decodes a JPEG image from the provided JPEG stream handle and decode parameters,
@@ -223,6 +251,10 @@ RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, con
     }
     auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_stream_handle);
     const JpegStreamParameters *jpeg_stream_params = rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
+    if (ValidateCropRectangle(*decode_params, *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
 
     VASurfaceID current_surface_id;
     CHECK_ROCJPEG(jpeg_vaapi_decoder_.SubmitDecode(jpeg_stream_params, current_surface_id, decode_params));
@@ -255,6 +287,10 @@ RocJpegStatus RocJpegDecoder::DecodeAsync(RocJpegStreamHandle jpeg_stream_handle
 
     auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_stream_handle);
     const JpegStreamParameters *jpeg_stream_params = rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
+    if (ValidateCropRectangle(*decode_params, *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
 
     AsyncDecodeState state;
     state.jpeg_stream_params = *jpeg_stream_params;
@@ -435,6 +471,15 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_EXECUTION_FAILED;
     }
+    // Validate every image before submitting any, so an invalid one does not leave earlier images in flight.
+    for (int i = 0; i < batch_size; i++) {
+        auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_streams[i]);
+        if (ValidateCropRectangle(decode_params[i], *rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters()) != ROCJPEG_STATUS_SUCCESS) {
+            ErrorLog(g_rocjpeg_logger, "Invalid crop rectangle for the image at index " + ROCJPEG_TOSTR(i));
+            FunctionExitLog(g_rocjpeg_logger);
+            return ROCJPEG_STATUS_INVALID_PARAMETER;
+        }
+    }
 
     std::vector<VASurfaceID> current_surface_ids;
     std::vector<JpegStreamParameters> jpeg_streams_params;
@@ -502,6 +547,11 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_strea
     for (int i = 0; i < batch_size; i++) {
         auto rocjpeg_stream_handle = static_cast<RocJpegStreamParserHandle*>(jpeg_streams[i]);
         const JpegStreamParameters *jpeg_stream_params = rocjpeg_stream_handle->rocjpeg_stream->GetJpegStreamParameters();
+        if (ValidateCropRectangle(decode_params[i], *jpeg_stream_params) != ROCJPEG_STATUS_SUCCESS) {
+            ErrorLog(g_rocjpeg_logger, "Invalid crop rectangle for the image at index " + ROCJPEG_TOSTR(i));
+            FunctionExitLog(g_rocjpeg_logger);
+            return ROCJPEG_STATUS_INVALID_PARAMETER;
+        }
         jpeg_streams_params[i] = *jpeg_stream_params;
     }
 
