@@ -23,7 +23,7 @@ namespace rocjitsu::test {
 load_valid_config(const std::string &path, config::LoadedConfig &output,
                   std::optional<uint32_t> host_threads = std::nullopt) {
   util::StringDiagnostic diagnostic;
-  auto result =
+  util::FailureOr<config::LoadedConfig> result =
       host_threads ? config::load_config(path, kEmbeddedSchema, diagnostic.emitter(), *host_threads)
                    : config::load_config(path, kEmbeddedSchema, diagnostic.emitter());
   if (result.failed())
@@ -37,10 +37,10 @@ load_valid_config(const std::string &path, config::LoadedConfig &output,
 load_valid_config_from_string(const std::string &json, config::LoadedConfig &output,
                               std::optional<uint32_t> host_threads = std::nullopt) {
   util::StringDiagnostic diagnostic;
-  auto result = host_threads
-                    ? config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(),
-                                                      *host_threads)
-                    : config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter());
+  util::FailureOr<config::LoadedConfig> result =
+      host_threads ? config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter(),
+                                                     *host_threads)
+                   : config::load_config_from_string(json, kEmbeddedSchema, diagnostic.emitter());
   if (result.failed())
     return testing::AssertionFailure() << diagnostic.message();
   output = std::move(result).value();

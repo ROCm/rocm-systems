@@ -1359,6 +1359,24 @@ TEST(ConfigHelperTest, MissingFileDiagnosticIncludesPath) {
   EXPECT_EQ(diagnostic.message(), "Cannot open file: " + path);
 }
 
+TEST(ConfigHelperTest, DirectoryReadFailureDiagnosticIncludesPath) {
+  const test::ScopedTempDirectory directory("rocjitsu-config-read-error-");
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<std::string> result =
+      config::read_config_file(directory.path(), diagnostic.emitter());
+  EXPECT_TRUE(result.failed());
+  EXPECT_EQ(diagnostic.message(), "Cannot read file: " + directory.path());
+}
+
+TEST(ConfigHelperTest, EmptyFileReadSucceedsWithoutDiagnostic) {
+  const test::ScopedTempFile file("rocjitsu-config-empty-");
+  util::StringDiagnostic diagnostic;
+  util::FailureOr<std::string> result = config::read_config_file(file.path(), diagnostic.emitter());
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  EXPECT_TRUE(result.value().empty());
+  EXPECT_TRUE(diagnostic.message().empty());
+}
+
 TEST(ConfigHelperTest, ParserFailuresDoNotInvokeCallback) {
   struct Case {
     const char *json;
@@ -3724,6 +3742,23 @@ TEST(CApiTest, MissingConfigFileReturnsInvalidFile) {
   rj_vm_t *handle = nullptr;
   EXPECT_EQ(rj_vm_create(path.c_str(), RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_INVALID_FILE);
   EXPECT_EQ(handle, nullptr);
+}
+
+TEST(CApiTest, InvalidConfigsReturnEntryPointSpecificStatus) {
+  for (const char *json : {"{", "{}"}) {
+    SCOPED_TRACE(json);
+    const test::ScopedTempFile file("rocjitsu-c-api-invalid-config-");
+    file.write(json);
+    rj_vm_t *file_handle = nullptr;
+    EXPECT_EQ(rj_vm_create(file.path().c_str(), RJ_VM_MODE_DEFAULT, &file_handle),
+              ROCJITSU_STATUS_INVALID_FILE);
+    EXPECT_EQ(file_handle, nullptr);
+
+    rj_vm_t *string_handle = nullptr;
+    EXPECT_EQ(rj_vm_create_from_string(json, RJ_VM_MODE_DEFAULT, &string_handle),
+              ROCJITSU_STATUS_INVALID_ARGUMENT);
+    EXPECT_EQ(string_handle, nullptr);
+  }
 }
 
 TEST(CApiTest, InvalidArguments) {

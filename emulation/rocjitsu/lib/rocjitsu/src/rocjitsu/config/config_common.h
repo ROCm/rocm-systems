@@ -54,7 +54,7 @@ inline std::optional<uint32_t> parse_uint32(std::string_view text) {
 
 /// @brief Read a config file into a string.
 /// @returns File contents on success, or failure after emitting a diagnostic
-/// containing @p path when the file cannot be opened.
+/// containing @p path when the file cannot be opened or read.
 inline util::FailureOr<std::string> read_config_file(const std::string &path,
                                                      util::DiagnosticEmitter emit_error) {
   std::ifstream file(path);
@@ -62,7 +62,9 @@ inline util::FailureOr<std::string> read_config_file(const std::string &path,
     return emit_error.emit() << "Cannot open file: " << path;
 
   std::ostringstream contents;
-  contents << file.rdbuf();
+  file >> std::noskipws >> contents.rdbuf();
+  if (file.bad() || !file.eof())
+    return emit_error.emit() << "Cannot read file: " << path;
   return contents.str();
 }
 
