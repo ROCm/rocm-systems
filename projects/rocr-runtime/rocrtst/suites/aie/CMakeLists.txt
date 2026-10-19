@@ -181,24 +181,55 @@ if(AIE_KERNEL_TOOLCHAIN)
 endif()
 
 # aie-hsaco packages the kernel artifacts into the hsacos the loader tests dispatch from. It ships
-# with mlir-aie, next to aiecc, and is used for aie2/aie2p (npu/npu2).
+# with mlir-aie, next to aiecc. Its --arch takes "aie2"/"aie2p"/"aie4", while NPU_TARGET (detected
+# above) is "npu"/"npu2"/"npu3", so map the latter onto the former.
 #
-# npu3 (AIE4) uses hsaco_packer instead: a copy of aie-hsaco vendored into this tree with "aie4"
-# added to its arch list (see hsaco_packer/README.md), since the upstream wheel doesn't know that
-# arch yet.
+# AIE_HSACO names the aie-hsaco executable, found on PATH by default. AIE_HSACO_PYTHON_DIR instead
+# runs it from an mlir-aie checkout's python/compiler directory, with this build's Python. That is
+# for a venv whose mlir-aie lacks aie-hsaco or the target's arch while its aiecc is still the one
+# to compile with: npu3 needs the mlir-aie-xrlabs venv for its compiler, and that venv ships no
+# aie-hsaco.
+set(AIE_HSACO_PYTHON_DIR "" CACHE PATH
+    "mlir-aie checkout's python/compiler directory to run aie-hsaco from, instead of AIE_HSACO")
+if(NPU_TARGET STREQUAL "npu2")
+  set(AIE_HSACO_ARCH "aie2p")
+elseif(NPU_TARGET STREQUAL "npu3")
+  set(AIE_HSACO_ARCH "aie4")
+else()
+  set(AIE_HSACO_ARCH "aie2")
+endif()
 if(AIE_KERNEL_TOOLCHAIN)
-  if(NPU_TARGET STREQUAL "npu3")
-    set(AIE_HSACO_CMD "${Python3_EXECUTABLE}" -m hsaco_packer.pack)
+  if(AIE_HSACO_PYTHON_DIR)
+    set(AIE_HSACO_CMD "${CMAKE_COMMAND}" -E env "PYTHONPATH=${AIE_HSACO_PYTHON_DIR}"
+                      "${Python3_EXECUTABLE}" -m hsaco.pack)
   else()
     find_program(AIE_HSACO aie-hsaco)
-    if(NOT AIE_HSACO)
-      message(STATUS "Could not find aie-hsaco; AIE kernel artifacts and the dispatch tests will "
-                     "not be built. It ships with mlir-aie; set up the IRON environment to build "
-                     "them.")
+    if(AIE_HSACO)
+      set(AIE_HSACO_CMD "${AIE_HSACO}")
+    endif()
+  endif()
+
+  if(NOT AIE_HSACO_CMD)
+    message(STATUS "Could not find aie-hsaco; AIE kernel artifacts and the dispatch tests will "
+                   "not be built. It ships with mlir-aie; set up the IRON environment, or set "
+                   "AIE_HSACO or AIE_HSACO_PYTHON_DIR, to build them.")
+    set(AIE_KERNEL_TOOLCHAIN FALSE)
+  else()
+    # A packer that predates the target's arch would only fail once the first hsaco is packed, so
+    # check its --arch choices ("{aie2,aie2p,...}" in its usage) now.
+    list(JOIN AIE_HSACO_CMD " " AIE_HSACO_CMD_STR)
+    execute_process(COMMAND ${AIE_HSACO_CMD} --help
+                    OUTPUT_VARIABLE AIE_HSACO_HELP
+                    RESULT_VARIABLE AIE_HSACO_HELP_RESULT
+                    ERROR_QUIET)
+    if(NOT AIE_HSACO_HELP_RESULT EQUAL 0 OR
+       NOT AIE_HSACO_HELP MATCHES "[{,]${AIE_HSACO_ARCH}[,}]")
+      message(STATUS "aie-hsaco (${AIE_HSACO_CMD_STR}) does not accept --arch ${AIE_HSACO_ARCH}; "
+                     "AIE kernel artifacts and the dispatch tests will not be built. Set "
+                     "AIE_HSACO or AIE_HSACO_PYTHON_DIR to an aie-hsaco that supports it.")
       set(AIE_KERNEL_TOOLCHAIN FALSE)
     else()
-      message(STATUS "aie-hsaco: ${AIE_HSACO}")
-      set(AIE_HSACO_CMD "${AIE_HSACO}")
+      message(STATUS "aie-hsaco: ${AIE_HSACO_CMD_STR}")
     endif()
   endif()
 endif()
@@ -386,16 +417,8 @@ add_aie_kernel(vsmul "${CMAKE_CURRENT_SOURCE_DIR}/vector_scalar_mul.py" "--scale
 # Packages each design's artifacts into an AIE hsaco. test_dispatch.cc loads every kernel it
 # dispatches from these through hsa_executable_load_agent_code_object.
 #
-# --arch takes "aie2"/"aie2p"/"aie4", while NPU_TARGET (detected above) is "npu"/"npu2"/"npu3", so
-# map the latter onto the former.
+# --arch is AIE_HSACO_ARCH, mapped from NPU_TARGET where aie-hsaco is found above.
 # ---------------------------------------------------------------------------
-if(NPU_TARGET STREQUAL "npu2")
-  set(AIE_HSACO_ARCH "aie2p")
-elseif(NPU_TARGET STREQUAL "npu3")
-  set(AIE_HSACO_ARCH "aie4")
-else()
-  set(AIE_HSACO_ARCH "aie2")
-endif()
 
 # npu3 (AIE4) builds only the full-ELF toolchain flow (see add_aie_kernel above), so there's
 # nothing to pack these PDI+insts/xclbin hsacos from. test_dispatch.cc, elf_parse_test and
@@ -448,7 +471,7 @@ if(NOT NPU_TARGET STREQUAL "npu3")
   set(multiarch_HSACO "${CMAKE_CURRENT_BINARY_DIR}/multiarch.hsaco")
   add_custom_command(
     OUTPUT "${multiarch_HSACO}"
-    # hsaco_packer adds to an existing file, so start from none.
+    # aie-hsaco adds to an existing file, so start from none.
     COMMAND "${CMAKE_COMMAND}" -E rm -f "${multiarch_HSACO}"
     COMMAND ${AIE_HSACO_CMD}
             --hsaco "${multiarch_HSACO}"
@@ -506,6 +529,38 @@ if(AIE_FULL_ELF_SUPPORTED)
   add_custom_target(vsmul_elf_hsaco_artifact DEPENDS "${vsmul_ELF_HSACO}")
 endif()
 
+# The full-ELF counterpart of multiarch.hsaco: vsmul's ELF in a section for the other full-ELF
+# arch, packed first, then vsadd's in the device's own section. Both kernels have the same name, so
+# the test tells which section was loaded by dispatching it and checking for vsadd's output. aie2
+# has no full-ELF format, so there is nothing to build there.
+set(multiarch_elf_HSACO "${CMAKE_CURRENT_BINARY_DIR}/multiarch_elf.hsaco")
+if(AIE_FULL_ELF_SUPPORTED AND NOT AIE_HSACO_ARCH STREQUAL "aie2")
+  if(AIE_HSACO_ARCH STREQUAL "aie4")
+    set(MULTIARCH_ELF_OTHER_ARCH "aie2p")
+  else()
+    set(MULTIARCH_ELF_OTHER_ARCH "aie4")
+  endif()
+  add_custom_command(
+    OUTPUT "${multiarch_elf_HSACO}"
+    # aie-hsaco adds to an existing file, so start from none.
+    COMMAND "${CMAKE_COMMAND}" -E rm -f "${multiarch_elf_HSACO}"
+    COMMAND ${AIE_HSACO_CMD}
+            --hsaco "${multiarch_elf_HSACO}"
+            --arch "${MULTIARCH_ELF_OTHER_ARCH}"
+            --kernel "elf:${vsmul_FULL_ELF}:0:1"
+    COMMAND ${AIE_HSACO_CMD}
+            --hsaco "${multiarch_elf_HSACO}"
+            --arch "${AIE_HSACO_ARCH}"
+            --kernel "elf:${vsadd_FULL_ELF}:0:1"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    DEPENDS vsadd_full_elf_artifacts vsmul_full_elf_artifacts
+    COMMENT "Packaging vsmul (${MULTIARCH_ELF_OTHER_ARCH}) and vsadd (${AIE_HSACO_ARCH}) full ELFs "
+            "into a multi-arch AIE hsaco"
+    VERBATIM
+  )
+  add_custom_target(multiarch_elf_hsaco_artifact DEPENDS "${multiarch_elf_HSACO}")
+endif()
+
 if(NPU_TARGET STREQUAL "npu3")
   message(STATUS "npu3 (AIE4): built vsadd/vsmul full-ELF kernel artifacts and their hsacos "
                  "(vsadd_elf_hsaco_artifact, vsmul_elf_hsaco_artifact). test_dispatch's "
@@ -554,6 +609,7 @@ target_compile_definitions(test_dispatch
     MUL_HSACO_PATH=${vsmul_HSACO}
     MUL_HSACO_KERNEL_NAME="${VSMUL_HSACO_KERNEL_NAME}"
     MUL_ELF_HSACO_PATH=${vsmul_ELF_HSACO}
+    MULTIARCH_ELF_HSACO_PATH=${multiarch_elf_HSACO}
 )
 target_link_libraries(test_dispatch
   PRIVATE
@@ -576,6 +632,9 @@ if(vsadd_FULL_ELF_TARGET OR vsmul_FULL_ELF_TARGET)
 endif()
 if(AIE_FULL_ELF_SUPPORTED)
   add_dependencies(test_dispatch vsadd_elf_hsaco_artifact vsmul_elf_hsaco_artifact)
+endif()
+if(TARGET multiarch_elf_hsaco_artifact)
+  add_dependencies(test_dispatch multiarch_elf_hsaco_artifact)
 endif()
 
 gtest_discover_tests(test_dispatch)
