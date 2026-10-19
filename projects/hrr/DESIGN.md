@@ -171,7 +171,7 @@ the parent that exited cleanly needs no repair. A sub-archive is skipped when
 payloads, finds it complete in the sense `load_archive` uses. `--info` on a
 root applies the same check before it shows a process as complete.
 
-### Archive Format (v9)
+### Archive Format (v10)
 ```
 capture.hrr/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
@@ -374,13 +374,13 @@ The generator classifies each API:
 Generated capture shims for manual APIs are pass-throughs (no `write_event()`).
 When adding HIP API support, update this script to classify the API in the appropriate capture and playback policy sets. APIs requiring non-trivial serialization or replay belong in `MANUAL_CAPTURE_APIS` and/or `MANUAL_PLAYBACK_APIS`; intentionally unsupported replay APIs belong in `NOOP_PLAYBACK_APIS`.
 
-## Archive Format (v9)
+## Archive Format (v10)
 
 Single-authority definition in `hrr_api_args.h` (auto-generated):
 
 ```
 HRR_MAGIC   = 0x52524845  ("HRRE")
-HRR_VERSION = 9
+HRR_VERSION = 10
 ```
 
 Version history, so an archive written by an older runtime can be placed:
@@ -417,12 +417,17 @@ Version history, so an archive written by an older runtime can be placed:
 - **v9** records `hipKernelSetAttributeForDevice`, appended to
   `HipDispatchTable`, which shifts the compiler API IDs up by one again. A v8
   reader would decode those events as the wrong API.
+- **v10** marks a capture without `HIP_HRR_CAPTURE_CONTENT` with
+  `HRR_FILE_FLAG_METADATA_ONLY` and stores `HRR_HASH_WITHHELD` where a blob or
+  code-object hash would be. A v9 reader ignores the flag, skips each H2D copy
+  whose blob it cannot find and replays on. `hrr-playback --info` prints the mode
+  as its `Contents:` line.
 
 ```
 <output_dir>/
   manifest.json      { version, capture_mode, owner_pid, processes[] }
                      (version here is the manifest schema = 1, distinct from the
-                      events.bin HRR_VERSION = 9)
+                      events.bin HRR_VERSION = 10)
   pid-<pid>/
     manifest.json      { pid, parent_pid, complete, event_count, blob_count }
     active             one line naming the process instance (boot id and

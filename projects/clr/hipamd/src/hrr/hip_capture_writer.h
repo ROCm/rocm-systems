@@ -89,8 +89,8 @@ bool is_incomplete();
 void note_unreplayable(const char* api, const char* reason);
 
 // Choose whether write_blob() and write_code_object() store contents. Off by
-// default: capture is metadata-only unless HIP_HRR_CAPTURE_CONTENT is set. Call
-// before open().
+// default: capture is metadata-only unless HIP_HRR_CAPTURE_CONTENT is set, and
+// open() then marks the header HRR_FILE_FLAG_METADATA_ONLY. Call before open().
 void set_record_content(bool on);
 
 // Write a buffer as a content-addressed blob. Returns hash, or {} when the

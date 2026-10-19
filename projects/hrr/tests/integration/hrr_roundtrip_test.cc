@@ -294,8 +294,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
  *     the copies and launches: an H2D copy and every launch's code object carry
  *     the withheld hash instead of a content hash, and the saxpy launch keeps
  *     its pointer arguments but records its by-value float as zeros.
- *   - Replay of that archive fails and names the mode that would have recorded
- *     what the refused call needs.
+ *   - Replay of that archive names the mode at the start, then fails and names
+ *     the mode that would have recorded what the refused call needs.
  */
 HRR_TEST_CASE(Unit_HRR_MetadataOnlyCapture) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_metadata_only"};
@@ -353,6 +353,7 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlyCapture) {
   const auto [ret, out] = hrr_playback_merged(cap.path);
   INFO("Playback output:\n" << out);
   CHECK(ret != 0);
+  CHECK(out.find("[HRR] Mode    : metadata-only capture") != std::string::npos);
   CHECK(out.find("captured in metadata-only mode. Content mode "
                  "(HIP_HRR_CAPTURE_CONTENT=1 at capture) would have recorded it.") !=
         std::string::npos);
@@ -367,7 +368,9 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlyCapture) {
  *   - Without the opt-in no file in the archive holds the scalar's bytes. With
  *     it the archive does, which shows the search would find them.
  *   - Without the opt-in both pushes are marked HRR_PRESENT_WITHHELD; with it
- *     they are present and the zero is recorded as zero. Replay of the content
+ *     they are present and the zero is recorded as zero.
+ *   - Only the metadata-only archive carries HRR_FILE_FLAG_METADATA_ONLY in its
+ *     header, and --info says whether contents were recorded. Replay of the content
  *     archive, the genuine zero included, succeeds; replay of the metadata-only
  *     archive fails.
  */
@@ -422,6 +425,17 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlySetupArgument) {
     }
     CHECK(std::all_of(pushes[1]->arg_bytes, pushes[1]->arg_bytes + 8,
                       [](uint8_t b) { return b == 0; }));
+
+    // The header names the mode, and --info reads it without a GPU.
+    CHECK(((arc.flags & HRR_FILE_FLAG_METADATA_ONLY) != 0) == !content);
+    {
+      const auto [info_rc, info] =
+          hrr_playback_merged(hrr_single_process_archive(cap.path), "--info");
+      INFO("--info output:\n" << info);
+      CHECK(info_rc == 0);
+      CHECK(info.find(content ? "Contents:     recorded" : "Contents:     withheld") !=
+            std::string::npos);
+    }
 
     // The workload's fat binary refuses a metadata-only replay before the
     // pushes; Unit_HRR_Blob_WithheldSetupArgumentIsRefused drives their

@@ -83,8 +83,12 @@
  * reader decodes those events as the wrong API.
  * v9: hipKernelSetAttributeForDevice was appended to HipDispatchTable,
  * taking the first compiler ID and shifting the compiler API IDs up by one.
- * A v8 reader would decode those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)9u)
+ * A v8 reader would decode those events as the wrong API.
+ * v10: capture without HIP_HRR_CAPTURE_CONTENT records no contents. It sets
+ * HRR_FILE_FLAG_METADATA_ONLY and stores HRR_HASH_WITHHELD where a blob or
+ * code-object hash would be. A v9 reader ignored the flag, skipped the H2D
+ * copies whose blob it could not find and replayed on. */
+#define HRR_VERSION ((uint16_t)10u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -104,6 +108,12 @@ typedef struct {
  * the last copied byte, or holds the flat width*height*depth bytes from the
  * base pointer (3D and driver D2H, hipMemcpy3D H2D). */
 #define HRR_FILE_FLAG_PACKED_HOST_RECTS ((uint16_t)0x0001u)
+
+/* HRR_FILE_FLAG_METADATA_ONLY: capture ran without HIP_HRR_CAPTURE_CONTENT, so
+ * the archive holds no host buffer, by-value kernel argument or code object.
+ * Replay refuses each call that needs one (HRR_HASH_WITHHELD below); --info
+ * and the enable-recording inspector name the mode from this bit. */
+#define HRR_FILE_FLAG_METADATA_ONLY ((uint16_t)0x0002u)
 
 /* Stored in place of both halves of a blob or code-object hash when capture ran
  * without HIP_HRR_CAPTURE_CONTENT: the call needed contents that the
