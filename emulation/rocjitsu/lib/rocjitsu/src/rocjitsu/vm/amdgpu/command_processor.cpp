@@ -962,10 +962,8 @@ void CommandProcessor::notify_execution_failure(uint32_t queue_id, uint32_t proc
       sim->request_exit(reason, 1);
   };
   for (auto *peer : peers)
-    peer->accept_dispatch_fault({.queue_id = queue_id,
-                                 .process_id = process_id,
-                                 .outcome = VmAccessOutcome::Malformed,
-                                 .on_cancelled = completed});
+    peer->accept_dispatch_fault(
+        {.queue_id = queue_id, .process_id = process_id, .on_cancelled = completed});
 }
 
 void CommandProcessor::accept_dispatch_fault(DispatchFaultNotification fault) {
@@ -997,25 +995,15 @@ void CommandProcessor::drain_dispatch_fault_inbox() {
         queue->faulted = true;
         for (auto &entry : queue->entries) {
           entry.terminal_faulted = true;
-          dispatch_launch_metadata_.erase(entry.dispatch_id);
-          erase_cluster_workgroups(entry.dispatch_id);
           if (entry.grid_completion)
             entry.grid_completion->mark_faulted();
         }
-        // Abort, rather than halt, so no workgroup completion can publish success.
-        for (auto *cu : cus_) {
-          cu->with_wave_state_locked([&] {
-            for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-              auto *wave = cu->wf(slot);
-              if (wave && !wave->is_halted() && wave->queue_id() == fault.queue_id &&
-                  wave->process_id() == fault.process_id)
-                cu->abort_dispatch(wave->dispatch_id());
-            }
-          });
-        }
-        // Native PM4 submissions deliver their failed callback/fence here, before
-        // the last replica acknowledges cancellation and stops the engine.
+        // Share queue cancellation with PM4/forced close: cancel resident waves,
+        // release cluster pins and SPI reservations, then fail native submissions
+        // before the last replica acknowledges cancellation and stops the engine.
         fail_pm4_queue(*queue, queue->dispatches);
+        for (const auto &entry : queue->entries)
+          dispatch_launch_metadata_.erase(entry.dispatch_id);
         queue->entries.clear();
         queue->next_dispatch_idx = 0;
       }

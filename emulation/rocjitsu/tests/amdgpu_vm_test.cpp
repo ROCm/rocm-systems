@@ -10847,6 +10847,19 @@ TEST(AmdgpuVmTest, LaterHostProducerCompletesParkedAqlConsumer) {
 }
 
 TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
+  struct CancellationCounts final : ExecutionPlugin {
+    CancellationCounts() : ExecutionPlugin("gws_cancellation_counts") {}
+    std::atomic<uint32_t> launched = 0;
+    std::atomic<uint32_t> cancelled = 0;
+    std::atomic<uint32_t> halted = 0;
+    std::atomic<uint32_t> completed_workgroups = 0;
+    std::atomic<uint32_t> completed_dispatches = 0;
+    void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &) override { ++launched; }
+    void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &) override { ++cancelled; }
+    void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { ++halted; }
+    void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { ++completed_workgroups; }
+    void onAmdgpuDispatchExecutionEnd(uint32_t) override { ++completed_dispatches; }
+  };
   for (uint32_t partitions : {1u, 2u, 8u})
     for (bool uninitialized : {false, true})
       for (uint32_t threads : {1u, 2u}) {
@@ -10858,6 +10871,11 @@ TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
             test::load_valid_config(std::string(CONFIG_DIR) + "/gfx942_cdna3.json", loaded));
         auto *soc = loaded.soc();
         auto *mem = loaded.memory();
+        auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+        auto counts = std::make_unique<CancellationCounts>();
+        auto *observed = counts.get();
+        ASSERT_TRUE(group->add(std::move(counts)));
+        soc->set_plugin_group(group);
         soc->set_dispatch_threads(threads);
         loaded.engine_config.num_threads = partitions;
         loaded.engine_config.max_ticks = 10000;
@@ -10902,6 +10920,11 @@ TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
         EXPECT_EQ(active, 0);
         EXPECT_FALSE(soc->gws_device()->any_parked());
         EXPECT_EQ(faulted, soc->num_xcds());
+        EXPECT_GT(observed->launched.load(), 0u);
+        EXPECT_EQ(observed->cancelled.load(), observed->launched.load());
+        EXPECT_EQ(observed->halted.load(), 0u);
+        EXPECT_EQ(observed->completed_workgroups.load(), 0u);
+        EXPECT_EQ(observed->completed_dispatches.load(), 0u);
       }
 }
 
