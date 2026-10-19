@@ -28,6 +28,7 @@ pub(super) const GET_AVAILABLE_MEMORY: u64 = request(3, 0x23, 16);
 pub(super) const UPDATE_QUEUE: u64 = request(1, 0x07, 24);
 pub(super) const CREATE_EVENT: u64 = request(3, 0x08, 32);
 pub(super) const DESTROY_EVENT: u64 = request(1, 0x09, 8);
+pub(super) const SET_EVENT: u64 = request(1, 0x0a, 8);
 pub(super) const RESET_EVENT: u64 = request(1, 0x0b, 8);
 pub(super) const WAIT_EVENTS: u64 = request(3, 0x0c, 24);
 pub(super) const SET_SCRATCH_BACKING_VA: u64 = request(3, 0x11, 16);

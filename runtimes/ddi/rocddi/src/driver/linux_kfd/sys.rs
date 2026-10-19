@@ -76,8 +76,10 @@ pub(super) enum Call<'a> {
     Ais(&'a mut uapi::AisArgs),
     CreateEvent(&'a mut uapi::CreateEvent),
     DestroyEvent(&'a mut uapi::DestroyEvent),
+    SetEvent(&'a mut uapi::ResetEvent),
     ResetEvent(&'a mut uapi::ResetEvent),
     Wait(&'a mut uapi::WaitEvents, &'a mut uapi::EventData),
+    WaitSignal(&'a mut uapi::WaitEvents, &'a mut [uapi::EventData; 3]),
     SetScratchBackingVa(&'a mut uapi::SetScratchBackingVa),
     SetTrapHandler(&'a mut uapi::SetTrapHandler),
     CreateQueue(&'a mut uapi::CreateQueue),
@@ -189,6 +191,10 @@ impl Kfd {
         self.call_with_page_offer(call, None)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one typed match audits every native KFD ioctl body and borrowed buffer"
+    )]
     fn call_with_page_offer(
         &self,
         mut call: Call<'_>,
@@ -268,7 +274,12 @@ impl Kfd {
             Call::Ais(args) => (uapi::AIS, ptr::from_mut(*args).cast()),
             Call::CreateEvent(args) => (uapi::CREATE_EVENT, ptr::from_mut(*args).cast()),
             Call::DestroyEvent(args) => (uapi::DESTROY_EVENT, ptr::from_mut(*args).cast()),
+            Call::SetEvent(args) => (uapi::SET_EVENT, ptr::from_mut(*args).cast()),
             Call::ResetEvent(args) => (uapi::RESET_EVENT, ptr::from_mut(*args).cast()),
+            Call::WaitSignal(args, events) => {
+                args.events = events.as_mut_ptr() as u64;
+                (uapi::WAIT_EVENTS, ptr::from_mut(*args).cast())
+            }
             Call::SetScratchBackingVa(args) => {
                 (uapi::SET_SCRATCH_BACKING_VA, ptr::from_mut(*args).cast())
             }
@@ -980,6 +991,53 @@ impl Kfd {
 
     pub(super) fn reset_event(&self, event_id: u32) -> io::Result<()> {
         self.call(Call::ResetEvent(&mut uapi::ResetEvent { event_id, pad: 0 }))
+    }
+
+    pub(super) fn set_event(&self, event_id: u32) -> io::Result<()> {
+        self.call(Call::SetEvent(&mut uapi::ResetEvent { event_id, pad: 0 }))
+    }
+
+    pub(super) fn wait_signal_event(
+        &self,
+        event_id: u32,
+        last_age: u64,
+        memory_exception_id: u32,
+        hardware_exception_id: u32,
+        timeout_ms: u32,
+    ) -> io::Result<Option<(u64, bool)>> {
+        let mut events = [
+            uapi::EventData {
+                payload: [last_age, 0, 0, 0],
+                event_id,
+                ..uapi::EventData::default()
+            },
+            uapi::EventData {
+                payload: [u64::from(u32::MAX), 0, 0, 0],
+                event_id: memory_exception_id,
+                ..uapi::EventData::default()
+            },
+            uapi::EventData {
+                payload: [u64::from(u32::MAX), 0, 0, 0],
+                event_id: hardware_exception_id,
+                ..uapi::EventData::default()
+            },
+        ];
+        let mut args = uapi::WaitEvents {
+            count: 3,
+            timeout: timeout_ms,
+            ..uapi::WaitEvents::default()
+        };
+        self.call(Call::WaitSignal(&mut args, &mut events))?;
+        match args.result {
+            uapi::WAIT_COMPLETE => Ok(Some((
+                events[0].payload[0],
+                events[1..]
+                    .iter()
+                    .any(|event| event.payload[0] & u64::from(u32::MAX) != u64::from(u32::MAX)),
+            ))),
+            uapi::WAIT_TIMEOUT => Ok(None),
+            _ => Err(invalid_data("KFD signal wait returned an unknown result")),
+        }
     }
 
     /// Exception events are created without auto-reset. The connection owner

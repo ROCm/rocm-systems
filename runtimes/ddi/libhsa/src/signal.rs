@@ -16,15 +16,19 @@
 use std::collections::{HashMap, hash_map::Entry};
 use std::ffi::c_void;
 use std::ptr::NonNull;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering, fence};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
-use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::platform::event::{SignalEvent, SignalEventPage, create_signal_event};
+use crate::platform::event::{
+    ProcessSignalEventPageGuard, SignalEvent, SignalEventPage, create_signal_event,
+    lock_process_signal_event_page,
+};
 use crate::platform::memory::{self as linux_interop, KfdIpcMemoryHandle};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
+use rocddi::session::DriverContextLifetime;
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
@@ -39,8 +43,13 @@ const BLOCKED_SPIN_BUDGET: Duration = Duration::from_micros(200);
 const SIGNAL_EVENT_PAGE_BYTES: u64 = 4096 * 8;
 const IPC_SIGNAL_ALLOCATION_BYTES: u64 = 4096;
 const SHARED_SIGNAL_ID: u64 = 0x71fc_ca6a_3d5d_5276;
-static PROCESS_SIGNAL_EVENT_PAGE: OnceLock<usize> = OnceLock::new();
 static SYSTEM_FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
+
+struct PreparedSignalEventPage {
+    host: usize,
+    install: bool,
+    mappings: Vec<([u8; 16], u64)>,
+}
 
 pub(crate) fn set_system_frequency(frequency: u64) {
     SYSTEM_FREQUENCY_HZ.store(frequency, Ordering::Release);
@@ -517,9 +526,35 @@ impl HsaState {
         Ok(unsafe { slab.allocate(signal) })
     }
 
-    fn ensure_signal_event_page(&mut self) -> Result<(usize, bool), Status> {
-        if let Some(host) = PROCESS_SIGNAL_EVENT_PAGE.get().copied() {
-            return Ok((host, false));
+    fn ensure_signal_event_page(
+        &mut self,
+        process: Option<&ProcessSignalEventPageGuard>,
+    ) -> Result<PreparedSignalEventPage, Status> {
+        if let Some(host) = process.and_then(ProcessSignalEventPageGuard::host_address) {
+            if self.gpus.iter().any(|gpu| {
+                process.and_then(|page| page.device_address(gpu.device.endpoint().id))
+                    != Some(host as u64)
+            }) {
+                return Err(OUT_OF_RESOURCES);
+            }
+            return Ok(PreparedSignalEventPage {
+                host,
+                install: false,
+                mappings: Vec::new(),
+            });
+        }
+        if process.is_none() && self.signal_state.signal_event_page_confirmed {
+            let host = self
+                .signal_state
+                .signal_event_page
+                .as_ref()
+                .and_then(SignalEventPage::host_address)
+                .ok_or(OUT_OF_RESOURCES)?;
+            return Ok(PreparedSignalEventPage {
+                host,
+                install: false,
+                mappings: Vec::new(),
+            });
         }
         if self.signal_state.signal_event_page.is_none() {
             let allocation = {
@@ -548,13 +583,42 @@ impl HsaState {
             .as_ref()
             .and_then(SignalEventPage::host_address)
             .ok_or(OUT_OF_RESOURCES)?;
-        Ok((host, true))
+        let page = self
+            .signal_state
+            .signal_event_page
+            .as_ref()
+            .ok_or(OUT_OF_RESOURCES)?;
+        let mut mappings = Vec::new();
+        mappings
+            .try_reserve_exact(self.gpus.len())
+            .map_err(|_| OUT_OF_RESOURCES)?;
+        for gpu in &self.gpus {
+            let address = page.device_address(&gpu.device).map_err(map_error)?;
+            if address != host as u64 {
+                return Err(OUT_OF_RESOURCES);
+            }
+            mappings.push((gpu.device.endpoint().id, address));
+        }
+        Ok(PreparedSignalEventPage {
+            host,
+            install: true,
+            mappings,
+        })
     }
 
     pub(crate) fn create_signal_event(
         &mut self,
     ) -> Option<(crate::platform::event::SignalEvent, usize, u32)> {
-        let (page_host, install_page) = self.ensure_signal_event_page().ok()?;
+        let mut process = if self.lifetime == DriverContextLifetime::Process {
+            Some(lock_process_signal_event_page().ok()?)
+        } else {
+            None
+        };
+        let PreparedSignalEventPage {
+            host: page_host,
+            install: install_page,
+            mappings,
+        } = self.ensure_signal_event_page(process.as_ref()).ok()?;
         let gpu = self.gpus.first()?;
         let device = gpu.device.gpu().ok()?;
         let first = if install_page {
@@ -569,23 +633,25 @@ impl HsaState {
             .is_some_and(SignalEventPage::was_offered);
         // An attempted CREATE_EVENT can install the page before reporting an
         // error. Retry without its handle only after the ioctl was dispatched.
+        if install_page && page_offered {
+            if let Some(process) = process.as_mut() {
+                process.record_offer(page_host, mappings).ok()?;
+            }
+        }
         let created = retry_unconfirmed_event_page(
             first,
             install_page && page_offered,
-            self.signal_state.signal_event_page_confirmed,
+            process
+                .as_ref()
+                .map_or(self.signal_state.signal_event_page_confirmed, |page| {
+                    page.is_confirmed()
+                }),
             || create_signal_event(device, None),
         );
-        if page_offered
-            && PROCESS_SIGNAL_EVENT_PAGE
-                .set(page_host)
-                .is_err_and(|published| published != page_host)
-        {
-            if let Ok(mut event) = created {
-                let _ = event.destroy();
-            }
-            return None;
-        }
         let event = created.ok()?;
+        if let Some(process) = process.as_mut() {
+            process.confirm();
+        }
         self.signal_state.signal_event_page_confirmed = true;
         let info = event.info();
         let offset = usize::try_from(info.event_page_slot_index)
@@ -599,7 +665,14 @@ impl HsaState {
         // Reuse the KFD event after its previous signal has been destroyed.
         // The stable process event page supplies the same mailbox address.
         if let Some(event) = self.signal_state.signal_event_pool.pop() {
-            let page = *PROCESS_SIGNAL_EVENT_PAGE.get()?;
+            let page = if self.lifetime == DriverContextLifetime::Process {
+                lock_process_signal_event_page().ok()?.host_address()?
+            } else {
+                self.signal_state
+                    .signal_event_page
+                    .as_ref()?
+                    .host_address()?
+            };
             let info = event.info();
             let offset = usize::try_from(info.event_page_slot_index)
                 .ok()?

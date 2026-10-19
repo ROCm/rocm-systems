@@ -304,6 +304,11 @@ impl Reservation {
         self.address
     }
 
+    /// Whether this owner still holds the range that its cached extent names.
+    pub(crate) fn is_live(&self) -> bool {
+        self.length != 0
+    }
+
     /// Prevents a live mapping from being inherited across `fork`.
     pub(crate) fn dont_fork(&self) -> io::Result<()> {
         check_process(self.process)?;
