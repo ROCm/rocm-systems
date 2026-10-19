@@ -361,14 +361,6 @@ class OmniSoC_Base:
         policy_arch = canonical_config_arch(arch)
         return _load_same_bucket_priority_policy_map().get(policy_arch, ())
 
-    def parse_counters(self, config_text: str) -> set[str]:
-        """Hardware PMC names in YAML metric config text."""
-        counters, _variables = extract_counters_and_variables(
-            config_text,
-            self._mspec.gpu_series,
-        )
-        return counters
-
     def _metric_aware_coalesce_pass(
         self,
         work_set: set[str],
