@@ -1,17 +1,46 @@
 .. meta::
-   :description: Kernels and distributions tested for hipFile fastpath support
+   :description: Check a kernel for P2PDMA support and see the kernels and distributions tested for hipFile fastpath support
    :keywords: hipFile, ROCm, P2PDMA, CONFIG_PCI_P2PDMA, kernel, distribution, support matrix, AMD
 
-.. _hipfile-kernel-support-matrix:
+.. _hipfile-kernel-p2pdma-support:
 
 **********************************
-hipFile kernel support matrix
+hipFile kernel P2PDMA support
 **********************************
 
 hipFile's fastpath requires a Linux kernel built with ``CONFIG_PCI_P2PDMA=y``.
-This page records the kernels and distributions that AMD has tested. For the
-requirement itself and for instructions on booting a kernel that enables the
-option, see :ref:`hipfile-kernel-p2pdma`.
+This page explains how to check the running kernel for that option and records
+the kernels and distributions that AMD has tested. For the requirement itself
+and for instructions on booting a kernel that enables the option, see
+:ref:`hipfile-kernel-p2pdma`.
+
+.. _hipfile-check-p2pdma:
+
+Check for kernel P2PDMA support
+===============================
+
+Read the configuration of the running kernel:
+
+.. code:: shell
+
+   grep CONFIG_PCI_P2PDMA /boot/config-$(uname -r)
+
+If ``CONFIG_PCI_P2PDMA=y`` is returned, the kernel supports peer-to-peer DMA.
+If no string is returned or if ``# CONFIG_PCI_P2PDMA is not set`` is returned,
+peer-to-peer DMA isn't supported.
+
+If there are no configuration files present under ``/boot/``, search for the
+configuration files in these directories instead:
+
+.. code:: shell
+
+   zgrep CONFIG_PCI_P2PDMA /proc/config.gz
+   grep CONFIG_PCI_P2PDMA /lib/modules/$(uname -r)/build/.config
+
+.. note::
+
+   ``CONFIG_PCI_P2PDMA`` is a boolean kernel option. It's either compiled into
+   the kernel image or it isn't. It can't be changed.
 
 .. _hipfile-verified-distributions:
 

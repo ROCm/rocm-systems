@@ -30,7 +30,7 @@ using PCIe peer-to-peer DMA. This requires a Linux kernel built with
    enables ``CONFIG_PCI_P2PDMA``. Ubuntu 22.04 LTS is a supported ROCm
    distribution, but its default 5.15 kernel is built without the option, so the
    hipFile fastpath cannot run on it. For the kernels AMD has tested, see
-   :doc:`/reference/hipFile-kernel-support-matrix`.
+   :doc:`/reference/hipFile-kernel-p2pdma-support`.
 
 When the kernel lacks P2PDMA support, hipFile does not fail. Every I/O request
 uses the fallback path instead, resulting in lower than expected throughput.
@@ -38,35 +38,11 @@ uses the fallback path instead, resulting in lower than expected throughput.
 Check for kernel P2PDMA support
 -------------------------------
 
-Read the configuration of the running kernel:
-
-.. code:: shell
-
-   grep CONFIG_PCI_P2PDMA /boot/config-$(uname -r)
-
-If ``CONFIG_PCI_P2PDMA=y`` is returned, the kernel supports peer-to-peer DMA.
-If no string is returned or if ``# CONFIG_PCI_P2PDMA is not set`` is returned,
-peer-to-peer DMA isn't supported.
-
-If there are no configuration files present under ``/boot/``, search for the
-configuration files in these directories instead:
-
-.. code:: shell
-
-   zgrep CONFIG_PCI_P2PDMA /proc/config.gz
-   grep CONFIG_PCI_P2PDMA /lib/modules/$(uname -r)/build/.config
-
-.. note::
-
-   ``CONFIG_PCI_P2PDMA`` is a boolean kernel option. It's either compiled into
-   the kernel image or it isn't. It can't be changed.
-
-Verified kernels and distributions
-----------------------------------
-
-For the distribution kernels AMD has tested for ``CONFIG_PCI_P2PDMA``, and the
-results of fastpath I/O testing in virtual machines, see
-:doc:`/reference/hipFile-kernel-support-matrix`.
+To read the configuration of the running kernel and determine whether it was
+built with ``CONFIG_PCI_P2PDMA=y``, see :ref:`hipfile-check-p2pdma`. For the
+distribution kernels AMD has tested for the option, and the results of fastpath
+I/O testing in virtual machines, see
+:doc:`/reference/hipFile-kernel-p2pdma-support`.
 
 Enable kernel P2PDMA support
 ----------------------------

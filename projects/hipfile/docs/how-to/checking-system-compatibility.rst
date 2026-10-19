@@ -90,7 +90,7 @@ present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, 
    default 5.15 kernel is not built with ``CONFIG_PCI_P2PDMA``. For
    how to boot a kernel that enables the option, see
    :ref:`hipfile-kernel-p2pdma`. For the list of verified distributions, see
-   :doc:`/reference/hipFile-kernel-support-matrix`.
+   :doc:`/reference/hipFile-kernel-p2pdma-support`.
 
 .. note::
 

@@ -77,7 +77,7 @@ Confirm the kernel configuration directly:
 
 For instructions on booting a kernel that enables the option, see
 :ref:`hipfile-kernel-p2pdma`. For the list of verified distributions, see
-:doc:`/reference/hipFile-kernel-support-matrix`.
+:doc:`/reference/hipFile-kernel-p2pdma-support`.
 
 .. note::
 

@@ -79,7 +79,7 @@ kernel, which is based on 6.8 and enables the option:
   $ sudo systemctl reboot
 
 See :ref:`hipfile-kernel-p2pdma` for other distributions, and
-:doc:`/reference/hipFile-kernel-support-matrix` for the kernels AMD has tested.
+:doc:`/reference/hipFile-kernel-p2pdma-support` for the kernels AMD has tested.
 
 High memory utilization with hipFile
 ====================================

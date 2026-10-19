@@ -27,7 +27,7 @@ see :ref:`ROCm Core SDK components <rocm:release-components>`.
   fastpath. hipFile builds and runs without
   it, but all I/O uses the fallback path. See :ref:`hipfile-kernel-p2pdma` for how
   to check the running kernel, and
-  :doc:`/reference/hipFile-kernel-support-matrix` for which distribution kernels
+  :doc:`/reference/hipFile-kernel-p2pdma-support` for which distribution kernels
   enable the option.
 
 

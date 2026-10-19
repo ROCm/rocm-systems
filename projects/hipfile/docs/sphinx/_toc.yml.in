@@ -44,8 +44,8 @@ subtrees:
     entries:
       - file: reference/hipFile-io-backends.rst
         title: Fastpath and fallback backends
-      - file: reference/hipFile-kernel-support-matrix.rst
-        title: Kernel support matrix
+      - file: reference/hipFile-kernel-p2pdma-support.rst
+        title: Kernel P2PDMA support
       - file: reference/hipFile-file-registration.rst
         title: File registration
       - file: reference/hipFile-buffer-registration.rst
