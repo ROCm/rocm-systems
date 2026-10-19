@@ -145,8 +145,9 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
                              void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
                              ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
                              uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS],
-                             int winFlags, bool multiSegment, int memType) {
+                             int winFlags, bool multiSegment, int memType, int dmabufFd) {
   (void)comm;
+  (void)dmabufFd;
   (void)address;
   (void)size;
   (void)ginHostWins;

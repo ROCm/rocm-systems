@@ -554,7 +554,7 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
                              void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
                              ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
                              uint32_t ginWinGenerations[NCCL_GIN_MAX_ACTIVE_BACKENDS],
-                             int winFlags, bool multiSegment, int memType) {
+                             int winFlags, bool multiSegment, int memType, int dmabufFd) {
   struct ncclGinState* ginState = &comm->sharedRes->ginState;
   int mrFlags = (winFlags & NCCL_WIN_STRICT_ORDERING) ? NCCL_NET_MR_FLAG_FORCE_SO : 0;
   for (int backendIdx = 0; backendIdx < ginState->numActiveBackends; backendIdx++) {
@@ -575,8 +575,14 @@ ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
     ginWinGenerations[backendIdx] = backend->connectGeneration;
     for (int commIdx = 0; commIdx < backend->ginCommCount; commIdx++) {
       int slot = backendIdx * NCCL_GIN_MAX_CONNECTIONS + commIdx;
-      NCCLCHECK(backend->ncclGin->regMrSym(backend->ginComms[commIdx], address, size, memType, mrFlags,
-                                           &ginHostWins[slot], &ginDevWins[slot]));
+      // RCCL: a caller-supplied DMA-BUF fd covers imported host segments the runtime cannot export.
+      if (dmabufFd >= 0 && backend->ncclGin->regMrSymDmaBuf != nullptr) {
+        NCCLCHECK(backend->ncclGin->regMrSymDmaBuf(backend->ginComms[commIdx], address, size, memType, 0, dmabufFd,
+                                                   mrFlags, &ginHostWins[slot], &ginDevWins[slot]));
+      } else {
+        NCCLCHECK(backend->ncclGin->regMrSym(backend->ginComms[commIdx], address, size, memType, mrFlags,
+                                             &ginHostWins[slot], &ginDevWins[slot]));
+      }
       if (ginHostWins[slot] == NULL) {
         WARN("rank %d - GIN Symmetric register failed: buff %p, size %ld", comm->rank, address, size);
         return ncclSystemError;

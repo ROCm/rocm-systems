@@ -393,6 +393,8 @@ struct symLsaMessage {
   };
   CUmemLocationType type;
   size_t segmentSize;
+  // RCCL: 1 when this rank holds the creating POSIX fd for the segment.
+  int hostExportable;
 };
 
 static ncclResult_t symMemorySetAccessForVASegment(struct ncclComm* comm, symLsaMessage* message, CUdeviceptr addr) {
@@ -528,6 +530,7 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
   symLsaMessage* messages = nullptr;
+  int* localHostFds = nullptr;
   int* segmentCounts = mem->lsaNumSegments; // filled from global allgather in symMemoryObtain
   int maxSegments = 0;
   const int numSegments = mem->numSegments;
@@ -540,6 +543,8 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
   }
 
   NCCLCHECKGOTO(ncclCalloc(&messages, (size_t)devr->lsaSize * maxSegments), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&localHostFds, numSegments), ret, fail);
+  for (int segment = 0; segment < numSegments; segment++) localHostFds[segment] = -1;
 
   for (int segment = 0; segment < numSegments; segment++) {
     symLsaMessage* msg = messages + devr->lsaSelf * maxSegments + segment;
@@ -551,6 +556,19 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
                     fail);
       INFO(NCCL_REG, "[%d] Segment %d, Type : %d, numSegments : %d, Segment size : %ld, memHandle : %lld",
            devr->lsaSelf, segment, msg->type, numSegments, msg->segmentSize, msg->memHandle);
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+      // Imported host handles fail this export. The creating rank's fd is what GIN can register.
+      if (ncclSymIsHostSegment(msg->type) &&
+          ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
+          mem->memHandles[segment] != 0 && CUPFN(cuMemExportToShareableHandle) != nullptr) {
+        int fd = -1;
+        CUresult st = CUPFN(cuMemExportToShareableHandle)(&fd, mem->memHandles[segment], ncclCuMemHandleType, 0);
+        if (st == CUDA_SUCCESS && fd >= 0) {
+          msg->hostExportable = 1;
+          localHostFds[segment] = fd;
+        }
+      }
+#endif
     }
   }
 
@@ -583,11 +601,36 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
         goto fail;
       }
       if (nHost == 1) {
+        for (int r = 0; r < devr->lsaSize; r++) {
+          if (segment >= segmentCounts[r]) continue;
+          messages[r * maxSegments + segment].type = hostType;
+        }
+      }
+      int exporter = -1;
+      for (int r = 0; r < devr->lsaSize; r++) {
+        if (segment >= segmentCounts[r]) continue;
+        if (messages[r * maxSegments + segment].hostExportable) {
+          exporter = r;
+          break;
+        }
+      }
+      if (exporter == devr->lsaSelf && segment < numSegments && localHostFds[segment] >= 0) {
+        if (mem->hostOwnerFds == nullptr) {
+          NCCLCHECKGOTO(ncclCalloc(&mem->hostOwnerFds, mem->numSegments), ret, fail);
+          for (int s = 0; s < mem->numSegments; s++) mem->hostOwnerFds[s] = -1;
+        }
+        mem->hostOwnerFds[segment] = localHostFds[segment];
+        localHostFds[segment] = -1;
+        INFO(NCCL_REG, "Symmetric window segment %d: NIC registration uses the local host allocation fd", segment);
+      } else if (exporter >= 0) {
+        NCCLCHECKGOTO(symMemoryGetHostOwnerFd(comm, mem, segment, exporter,
+                                              messages + exporter * maxSegments + segment),
+                      ret, fail);
+      } else if (nHost == 1) {
         int owner = -1;
         for (int r = 0; r < devr->lsaSize; r++) {
           if (segment >= segmentCounts[r]) continue;
           if (ncclSymIsHostSegment(messages[r * maxSegments + segment].type)) owner = r;
-          messages[r * maxSegments + segment].type = hostType;
         }
         NCCLCHECKGOTO(symMemoryGetHostOwnerFd(comm, mem, segment, owner, messages + owner * maxSegments + segment),
                       ret, fail);
@@ -618,6 +661,12 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
                   ret, fail);
   }
 leave:
+  if (localHostFds != nullptr) {
+    for (int s = 0; s < numSegments; s++) {
+      if (localHostFds[s] >= 0) (void)ncclIpcFdClose(localHostFds[s]);
+    }
+    free(localHostFds);
+  }
   free(messages);
   return ret;
 fail:
@@ -871,9 +920,12 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
 
   for (int segment = 0; segment < mem->numGinSegments; segment++) {
     CUmemLocationType cuMemLocType = (CUmemLocationType)mem->ginSegmentInfos[segment].memType;
+    int hostOwnerFd = (mem->hostOwnerFds != nullptr && segment < mem->numSegments) ? mem->hostOwnerFds[segment] : -1;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     int ptrType;
     bool needDmabuf;
+    // RCCL: TODO(ROCM-29810): imported host VMM reads as device; the owner fd marks it as host.
+    if (hostOwnerFd >= 0) cuMemLocType = static_cast<CUmemLocationType>(CU_MEM_LOCATION_TYPE_HOST_NUMA);
     NCCLCHECKGOTO(rcclDevrGinSegmentRegType(ncclSymIsHostSegment(cuMemLocType), mem->maxGlobalNumSegments, &ptrType,
                                             &needDmabuf),
                   ret, fail);
@@ -891,7 +943,7 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     NCCLCHECKGOTO(ncclGinRegister(comm, (char*)mem->primaryAddr + offset, mem->ginSegmentInfos[segment].segmentSize,
                                   mem->ginSegmentInfos[segment].ginHostWins, mem->ginSegmentInfos[segment].ginDevWins,
                                   mem->ginSegmentInfos[segment].ginWinGenerations,
-                                  mem->winFlags, needDmabuf, ptrType),
+                                  mem->winFlags, needDmabuf, ptrType, hostOwnerFd),
                   ret, fail);
     numSegmentsRegistered++;
     offset += mem->ginSegmentInfos[segment].segmentSize;
