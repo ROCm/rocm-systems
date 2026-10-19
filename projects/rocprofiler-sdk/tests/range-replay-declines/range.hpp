@@ -34,15 +34,10 @@ constexpr uint64_t kRangeId = 0xDEC11E;
 // the replayed ones.
 constexpr uint64_t kRequestedPasses = 4;
 
-// Dispatches CLOSE reports for a range declined by a device write between its two kernels: only the
-// first. The write is folded into the record before the second kernel is counted, and a declined
-// range stops counting.
-constexpr uint64_t kObservedDispatches = 1;
-
-// Elements the copy inside the range writes. HIP performs a copy of up to GPU_FORCE_BLIT_COPY_SIZE
-// (16 KiB by default) with a kernel on the application's own queue, which the range records like
-// any other dispatch. Only a larger copy reaches the copy engines through
-// hsa_amd_memory_async_copy*, which is the path that declines the range.
+// Elements the copy modes write. HIP performs a copy of up to GPU_FORCE_BLIT_COPY_SIZE (16 KiB by
+// default) with a kernel on the application's own queue, which the range records like any other
+// dispatch. Only a larger copy reaches the copy engines through hsa_amd_memory_async_copy*, which
+// is the path that declines the range.
 constexpr size_t kCopyElements = (1u << 20) / sizeof(int);
 
 // The value the copy writes at element `i`, so a partial or misplaced copy is detectable.
@@ -53,8 +48,12 @@ copy_pattern(size_t i)
 }
 
 // The first kernel computes acc = 0*3 + 1; the second reads the copied buffer and computes
-// acc = acc*3 + y[0] + y[n-1].
-constexpr int kExpectedResult = 3 + copy_pattern(0) + copy_pattern(kCopyElements - 1);
+// acc = acc*3 + y[0] + y[n-1]. Used by the MEMORY_COPY_IN_RANGE modes.
+constexpr int kExpectedCopyResult = 3 + copy_pattern(0) + copy_pattern(kCopyElements - 1);
+
+// Acc after only rr_decline_first runs (ALLOCATION_CHANGED modes: one binding kernel, then
+// hipMalloc / hipFree, then close).
+constexpr int kExpectedFirstOnlyResult = 1;
 
 // Set by the application before it exits without opening the range, so the tool reports a skip
 // rather than a missing CLOSE. Its value is the reason.
