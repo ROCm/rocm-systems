@@ -12,7 +12,7 @@ sitting and can be merged or dropped on its own. The table below lists what has 
 | Unit, no GPU | `range_replay/tests/` (92 tests) | eligibility and decline bookkeeping, the code-object watermark, kernarg layout, pass packets, digests, kernarg block retention, the public ABI, the single-subscriber claim, CONFIG → PASS → CLOSE ordering, the queue hook's early returns |
 | Samples, GPU | `samples/range_replay/` | a replayed range with `divergence_count == 0`, a tool that opts out, a multi-queue decline |
 | Integration, GPU | `tests/range-replay-local-context/` | every per-dispatch service sees the replayed dispatches and honors per-pass toggles |
-| Declines, GPU | `tests/range-replay-declines/` | a device-writing copy between a range's kernels, through `hipMemcpyAsync` (C1) or `hsa_amd_memory_async_batch_copy` (C2), declines with `MEMORY_COPY_IN_RANGE` while nothing traces memory copies; no pass runs and the application's result is intact |
+| Declines, GPU | `tests/range-replay-declines/` | a device-writing copy between a range's kernels, through `hipMemcpyAsync` (C1) or `hsa_amd_memory_async_batch_copy` (C2), declines with `MEMORY_COPY_IN_RANGE` while nothing traces memory copies; `hipMalloc` / `hipFree` inside a bound range decline with `ALLOCATION_CHANGED_IN_RANGE` (C3); an empty range closes with `NO_DISPATCH` (C4); no pass runs and the application's result is intact |
 | Concurrency, GPU | `tests/range-replay-concurrency/` | another thread's HIP graph launches on the agent, timed into the replay window, wait for it to close: the range replays with `divergence_count == 0`, its result is intact, and every launch's increment survives (C8) |
 | Performance, GPU, nightly | `tests/range-replay-perf/` | pass-count scaling, and amortization of the window cost over dispatches |
 
@@ -20,12 +20,15 @@ sitting and can be merged or dropped on its own. The table below lists what has 
 
 Most decline reasons are asserted only as bookkeeping: nothing on hardware drives an application
 into them and checks that the range is declined and the application is unaffected. The three bugs
-fixed in #10864 now each have a regression test:
+fixed in #10864 now each have a regression test, and C3 / C4 cover allocation-set changes and an
+empty range on hardware:
 
 - device-writing copies went unseen when nothing traced memory copies (C1);
 - `hsa_amd_memory_async_batch_copy` bypassed the decline (C2);
 - a graph launched from another thread during a replay window could corrupt application data
-  (C8).
+  (C8);
+- `hipMalloc` / `hipFree` inside a bound range must decline with `ALLOCATION_CHANGED_IN_RANGE`
+  (C3); an empty range must close with `NO_DISPATCH` (C4).
 
 A small `hipMemcpyAsync` is not declined at all. HIP performs a copy of up to
 `GPU_FORCE_BLIT_COPY_SIZE` (16 KiB by default) with a copy kernel on the application's own queue,
