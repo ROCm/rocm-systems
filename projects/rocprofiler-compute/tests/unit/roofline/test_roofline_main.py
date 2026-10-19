@@ -36,7 +36,7 @@ class MockMspec:
 
 def make_roofline(datatypes: List[str], **run_parameters: object) -> Roofline:
     """A Roofline for the unit tests. It never reads its ``args`` on the
-    cli_generate_plot / generate_plot paths, so a bare Namespace suffices."""
+    generate_plot path, so a bare Namespace suffices."""
     parameters: Dict[str, object] = {
         "workload_dir": "",
         "device_id": 0,
