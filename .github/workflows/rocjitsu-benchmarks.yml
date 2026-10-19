@@ -41,8 +41,6 @@ jobs:
     permissions:
       contents: read
     outputs:
-      machine: ${{ steps.metadata.outputs.machine }}
-      source_commit_message: ${{ steps.metadata.outputs.commit_message }}
       raw_ready: ${{ steps.upload_raw.outcome == 'success' }}
       dashboard_ready: ${{ steps.upload_dashboard.outcome == 'success' }}
     container:
@@ -183,14 +181,22 @@ jobs:
             --config-settings="cmake.define.ROCM_PATH=${ROCM_PATH}" \
             --config-settings="cmake.define.CMAKE_CXX_COMPILER=${ROCM_PATH}/bin/amdclang++" \
             "${TENSILE_SOURCE}/projects/hipblaslt/tensilelite/rocisa"
-          cmake -S "${CORPUS_SOURCE_DIR}/corpus/benchmarks/tensile_candidates" -B "${BENCHMARK_DIR}/tensile-native" -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release -DROCM_PATH="${ROCM_PATH}" -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
+          cmake \
+            -S "${CORPUS_SOURCE_DIR}/corpus/benchmarks/tensile_candidates" \
+            -B "${BENCHMARK_DIR}/tensile-native" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DROCM_PATH="${ROCM_PATH}" \
+            -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
             -DCMAKE_CXX_COMPILER="${ROCM_PATH}/bin/amdclang++" \
             -DROCmCMakeBuildTools_DIR="${ROCM_PATH}/share/rocmcmakebuildtools/cmake" \
             -DLLVM_DIR="${ROCM_PATH}/lib/llvm/lib/cmake/llvm" \
-            -DTENSILE_SOURCE="${TENSILE_SOURCE}" -DPython_EXECUTABLE="${TENSILE_VENV}/bin/python" \
+            -DTENSILE_SOURCE="${TENSILE_SOURCE}" \
+            -DPython_EXECUTABLE="${TENSILE_VENV}/bin/python" \
             -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          cmake --build "${BENCHMARK_DIR}/tensile-native" --parallel "$(($(nproc) / 2))" --target tensile_candidate tensile_candidate_host_tests
+          cmake --build "${BENCHMARK_DIR}/tensile-native" \
+            --parallel "$(($(nproc) / 2))" \
+            --target tensile_candidate tensile_candidate_host_tests
           "${BENCHMARK_DIR}/tensile-native/tensile_candidate_host_tests"
 
       - name: Generate pinned Tensile artifacts
@@ -199,10 +205,9 @@ jobs:
         run: |
           export PYTHON="${TENSILE_VENV}/bin/python"
           export PATH="${TENSILE_VENV}/bin:${PATH}"
-          env HCC_AMDGPU_TARGET=gfx950 "${TENSILE_VENV}/bin/python" "${CORPUS_SOURCE_DIR}/corpus/benchmarks/tensile_candidates/generate.py" --source-root "${TENSILE_SOURCE}" --output "${BENCHMARK_DIR}/tensile-artifacts" --variant bf16_streamk --shape 4096 4096 4096
-          env HCC_AMDGPU_TARGET=gfx1250 "${TENSILE_VENV}/bin/python" "${CORPUS_SOURCE_DIR}/corpus/benchmarks/tensile_candidates/generate.py" --source-root "${TENSILE_SOURCE}" --output "${BENCHMARK_DIR}/tensile-artifacts" --variant bf16_subtile --shape 4096 4096 4096
-          env HCC_AMDGPU_TARGET=gfx950 "${TENSILE_VENV}/bin/python" "${CORPUS_SOURCE_DIR}/corpus/benchmarks/tensile_candidates/generate.py" --source-root "${TENSILE_SOURCE}" --output "${BENCHMARK_DIR}/tensile-artifacts" --variant mxfp8_subtile --shape 4096 4096 4096
-          env HCC_AMDGPU_TARGET=gfx1250 "${TENSILE_VENV}/bin/python" "${CORPUS_SOURCE_DIR}/corpus/benchmarks/tensile_candidates/generate.py" --source-root "${TENSILE_SOURCE}" --output "${BENCHMARK_DIR}/tensile-artifacts" --variant mxfp4_streamk --shape 4096 4096 4096
+          "${TENSILE_VENV}/bin/python" "${CORPUS_SOURCE_DIR}/corpus/benchmarks/tensile_candidates/generate.py" \
+            --source-root "${TENSILE_SOURCE}" \
+            --output "${BENCHMARK_DIR}/tensile-artifacts"
           {
             echo "TENSILE_CANDIDATE_ARTIFACTS=${BENCHMARK_DIR}/tensile-artifacts"
             echo "TENSILE_CANDIDATE_RUNNER=${BENCHMARK_DIR}/tensile-native/tensile_candidate"
@@ -214,7 +219,8 @@ jobs:
         id: benchmark
         working-directory: ${{ env.CORPUS_SOURCE_DIR }}
         run: |
-          # The runner checkpoints all selected target/policy groups in one raw file.
+          # Capture only this invocation; keep console output visible.
+          set +e
           "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
             --rocjitsu-source-dir "${ROCJITSU_SOURCE_DIR}" \
             --build-dir "${ROCJITSU_BUILD_DIR}" \
@@ -222,7 +228,38 @@ jobs:
             --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json" \
             --run-wrapper "\"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
             --manifest benchmarks/suites/performance-v1.toml \
-            --output "${ROCJITSU_RESULT_DIR}"
+            --output "${ROCJITSU_RESULT_DIR}" | tee "${BENCHMARK_DIR}/runner-output.txt"
+          RUNNER_PIPE_STATUS=("${PIPESTATUS[@]}")
+          set -e
+          RUNNER_EXIT="${RUNNER_PIPE_STATUS[0]}"
+          if [[ "${RUNNER_PIPE_STATUS[1]}" -ne 0 ]]; then exit "${RUNNER_PIPE_STATUS[1]}"; fi
+          case "${RUNNER_EXIT}" in
+            0) SUITE_STATUS=completed ;;
+            1) SUITE_STATUS=failed ;;
+            *) exit "${RUNNER_EXIT}" ;;
+          esac
+          # Only main's final line follows a normal run_suite return. An abort
+          # can also exit 1 and set finished_at, so neither alone is sufficient.
+          if [[ "$(tail -n 1 "${BENCHMARK_DIR}/runner-output.txt")" != "run ${SUITE_STATUS}: ${ROCJITSU_RESULT_DIR}/run.json" ]]; then
+            echo "Runner did not report normal suite completion." >&2
+            exit 1
+          fi
+          if ! python -m json.tool "${ROCJITSU_RESULT_DIR}/run.json" > /dev/null; then exit 1; fi
+          if [[ "${RUNNER_EXIT}" -eq 1 ]]; then
+            echo "case_failures=true" >> "${GITHUB_OUTPUT}"
+            echo "::warning::Suite completed with benchmark failures; preserving results."
+          fi
+
+      - name: Upload workload failure diagnostics
+        if: ${{ !cancelled() && (steps.benchmark.outcome == 'failure' || steps.benchmark.outputs.case_failures == 'true') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}-diagnostics
+          path: |
+            ${{ env.ROCJITSU_RESULT_DIR }}/*/*/cases/*/stdout.txt
+            ${{ env.ROCJITSU_RESULT_DIR }}/*/*/cases/*/stderr.txt
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload original raw benchmark JSON
         id: upload_raw
@@ -236,20 +273,23 @@ jobs:
 
       # The new dashboard requires both default and single thread-policy data.
       # This workflow publishes only default-policy dashboard data to match the
-      # existing dashboard. The success gate still requires both policies to pass.
+      # existing dashboard. Normal completion may include failed/timeout cases;
+      # runner errors and aborted suites still fail before conversion.
       - name: Prepare dashboard benchmark result
         id: dashboard
         if: ${{ !cancelled() && steps.benchmark.outcome == 'success' }}
         env:
           BENCHMARK_COMMIT_MESSAGE: ${{ steps.metadata.outputs.commit_message }}
           BENCHMARK_MACHINE: ${{ steps.metadata.outputs.machine }}
+          BENCHMARK_WORKFLOW_SHA: ${{ github.sha }}
         run: |
           python "${GITHUB_WORKSPACE}/workflow-source/emulation/rocjitsu/website/dashboard/scripts/dashboard-data/prepare-benchmark-result.py" \
             --raw-run "${ROCJITSU_RESULT_DIR}/run.json" \
             --output "${BENCHMARK_DIR}/dashboard/github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}-default.json" \
             --run-id "${GITHUB_RUN_ID}" --run-attempt "${GITHUB_RUN_ATTEMPT}" \
             --repository "${GITHUB_REPOSITORY}" --event "${GITHUB_EVENT_NAME}" \
-            --commit-message "${BENCHMARK_COMMIT_MESSAGE}" --machine "${BENCHMARK_MACHINE}"
+            --commit-message "${BENCHMARK_COMMIT_MESSAGE}" --machine "${BENCHMARK_MACHINE}" \
+            --workflow-sha "${BENCHMARK_WORKFLOW_SHA}" --tensile-sha "${TENSILE_SHA}"
 
       - name: Upload dashboard benchmark JSON
         id: upload_dashboard

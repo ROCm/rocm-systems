@@ -26,11 +26,11 @@ def encoded(value):
     )
 
 
-def timestamp(value):
+def parse_timestamp(value):
     return datetime.fromisoformat(value.replace('Z', '+00:00'))
 
 
-def dashboard_result(raw, workflow):
+def build_published_run(raw, workflow):
     github = {
         'run_id': workflow['run_id'],
         'run_attempt': workflow['run_attempt'],
@@ -44,7 +44,8 @@ def dashboard_result(raw, workflow):
     summary = raw['execution_summary']
     require(summary['finished_at'] is not None, 'Cannot convert unfinished checkpoint')
     require(
-        timestamp(summary['finished_at']) >= timestamp(summary['timestamp']),
+        parse_timestamp(summary['finished_at'])
+        >= parse_timestamp(summary['timestamp']),
         'Finish precedes start',
     )
     require(
@@ -55,7 +56,7 @@ def dashboard_result(raw, workflow):
     )
     committed = raw['provenance']['rocjitsu']['rocjitsu_commit_timestamp']
     require(
-        timestamp(committed) <= timestamp(summary['timestamp']),
+        parse_timestamp(committed) <= parse_timestamp(summary['timestamp']),
         'Source commit is later than benchmark start',
     )
     samples = summary['samples']
@@ -81,8 +82,8 @@ def dashboard_result(raw, workflow):
             'Operation metadata collision',
         )
         problem['operation'] = result['operation']
-        # Develop accepts scalar problem/environment values. Preserve containers
-        # and null losslessly as explicit JSON strings, as the reference does.
+        # The dashboard data contract requires scalar problem values. Serialize
+        # containers and null as JSON strings to preserve their contents.
         problem = {
             key: (
                 value
@@ -158,14 +159,35 @@ def dashboard_result(raw, workflow):
                 if type(value) in (str, int, float, bool) and value != ''
                 else json.dumps(value, sort_keys=True, allow_nan=False)
             )
+    details['workflow.commit_sha'] = workflow['workflow_sha']
+    details['tensile.commit_sha'] = workflow['tensile_sha']
     for key in ('warmups', 'samples', 'timeout_seconds', 'benchmark_suite'):
         details['execution.' + key] = summary[key]
+    labels = {
+        'thread_policy': 'Thread policy',
+        'workflow.commit_sha': 'Workflow commit',
+        'tensile.commit_sha': 'Tensile commit',
+        'machine.hostname': 'Hostname',
+        'machine.platform': 'Platform',
+        'machine.kernel': 'Kernel',
+        'machine.cpu': 'CPU',
+        'rocjitsu.rocm_sdk_version': 'ROCm SDK',
+        'corpus.corpus_commit_sha': 'Corpus commit',
+        'corpus.corpus_commit_timestamp': 'Corpus commit timestamp',
+        'auxiliary.python': 'Python',
+        'execution.warmups': 'Warmups',
+        'execution.samples': 'Samples',
+        'execution.timeout_seconds': 'Timeout (seconds)',
+        'execution.benchmark_suite': 'Benchmark suite',
+    }
     run = {
         'id': run_id,
         'comparisonId': f"github-{github['run_id']}-attempt-{github['run_attempt']}",
         'testCatalog': f"test-catalogs/{catalog['id']}.json",
         'plugin': {'id': 'vanilla', 'name': 'Vanilla'},
         'source': {
+            # The workflow requires the measured commit to be in develop history.
+            # This is its source branch, not the workflow dispatch branch.
             'branch': 'develop',
             'commit': source['commit'],
             'committedAt': committed,
@@ -177,7 +199,14 @@ def dashboard_result(raw, workflow):
             'machine': workflow['runner'],
         },
         'environment': [
-            {'key': key, 'label': key, 'value': value}
+            {
+                'key': key,
+                'label': labels.get(
+                    key,
+                    key.replace('.', ' ').replace('_', ' ').replace('-', ' ').title(),
+                ),
+                'value': value,
+            }
             for key, value in sorted(details.items())
         ],
         'targets': [
@@ -197,6 +226,8 @@ def main():
     parser.add_argument('--repository', required=True)
     parser.add_argument('--commit-message', required=True)
     parser.add_argument('--machine', required=True)
+    parser.add_argument('--workflow-sha', required=True)
+    parser.add_argument('--tensile-sha', required=True)
     parser.add_argument('--event', choices=('push', 'workflow_dispatch'), required=True)
     args = parser.parse_args()
     raw = json.loads(args.raw_run.read_text())
@@ -207,9 +238,11 @@ def main():
         'source_subject': args.commit_message,
         'source_sha': raw['provenance']['rocjitsu']['rocjitsu_commit_sha'],
         'runner': args.machine,
+        'workflow_sha': args.workflow_sha,
+        'tensile_sha': args.tensile_sha,
         'trigger': 'manual' if args.event == 'workflow_dispatch' else 'auto',
     }
-    result = dashboard_result(raw, workflow)
+    result = build_published_run(raw, workflow)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(encoded(result))
 

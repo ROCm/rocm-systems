@@ -2,22 +2,24 @@
 # SPDX-License-Identifier: MIT
 """Fixture-based conversion and local file publication tests; no remote writes."""
 
-import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
 import pytest
 import yaml
 
-ROOT = Path(__file__).resolve().parents[7]
-WORKFLOW = ROOT / '.github/workflows/rocjitsu-benchmarks.yml'
+REPO_ROOT = Path(__file__).resolve().parents[7]
+WORKFLOW = REPO_ROOT / '.github/workflows/rocjitsu-benchmarks.yml'
 HELPER = Path(__file__).resolve().parents[1] / 'prepare-benchmark-result.py'
 SHA = 'b' * 40
+WORKFLOW_SHA = 'c' * 40
+TENSILE_SHA = 'd' * 40
 CORPUS = '6186d5c8bcd5e9bc93f7406e7cb50ed2a7698621'
-TENSILE = 'dd77374194a3ea1a7258cd54f87af6747b6362a5'
+SOURCE_SUBJECT = 'Source "subject" with spaces = literal $(touch SHOULD_NOT_EXIST)'
 
 
 def raw_run():
@@ -60,47 +62,12 @@ def raw_run():
     }
 
 
-def context(
-    run_id='123',
-    attempt='1',
-    subject='Source "subject" with spaces = literal $(touch SHOULD_NOT_EXIST)',
+def convert(
+    tmp_path, attempt='1', raw=None, workflow_sha=WORKFLOW_SHA, tensile_sha=TENSILE_SHA
 ):
-    return {
-        'repository': 'ROCm/rocm-systems',
-        'branch': 'develop',
-        'ref': 'refs/heads/develop',
-        'source_sha': SHA,
-        'source_subject': subject,
-        'run_id': run_id,
-        'run_attempt': attempt,
-        'run_url': f'https://github.com/ROCm/rocm-systems/actions/runs/{run_id}/attempts/{attempt}',
-        'event': 'workflow_dispatch',
-        'trigger': 'manual',
-        'runner': 'benchmark machine',
-        'corpus_sha': CORPUS,
-        'tensile_sha': TENSILE,
-    }
-
-
-def manifest():
-    return {
-        'name': 'fixture-suite',
-        'cases': [
-            {
-                'id': 'fixture.case',
-                'suite': 'Fixture',
-                'name': 'Fixture case',
-                'operation': 'copy',
-                'params': {'dtype': 'fp32', 'n': 64},
-                'targets': ['gfx950'],
-                'thread_policies': ['default', 'single'],
-            }
-        ],
-    }
-
-
-def convert(tmp_path, attempt='1', raw=None):
     source = tmp_path / 'raw.json'
+    # Unusual indentation and trailing whitespace detect raw JSON reserialization.
+    # Publication must archive these exact bytes, not just equivalent JSON.
     original = (
         json.dumps(raw_run() if raw is None else raw, indent=1) + '\n  '
     ).encode()
@@ -122,9 +89,13 @@ def convert(tmp_path, attempt='1', raw=None):
         '--event',
         'workflow_dispatch',
         '--commit-message',
-        context()['source_subject'],
+        SOURCE_SUBJECT,
         '--machine',
         'benchmark machine',
+        '--workflow-sha',
+        workflow_sha,
+        '--tensile-sha',
+        tensile_sha,
     ]
     result = subprocess.run(command, capture_output=True, text=True)
     assert source.read_bytes() == original
@@ -138,12 +109,76 @@ def test_conversion(tmp_path):
     assert output.stem == run['id']
     assert run['targets'][0]['results'][0]['durationSeconds'] == 0.2
     assert len(run['targets'][0]['results']) == 1
-    assert run['source']['message'] == context()['source_subject']
+    assert run['source']['message'] == SOURCE_SUBJECT
     assert (
         run['execution']['completedAt'] == raw_run()['execution_summary']['finished_at']
     )
     assert run['testCatalog'].startswith('test-catalogs/default-')
     assert {p.name for p in tmp_path.iterdir()} == {'raw.json', output.name}
+
+
+def test_environment_labels_in_converter_output(tmp_path):
+    raw = raw_run()
+    raw['provenance']['auxiliary']['custom_option'] = {'nested': [1, None]}
+    result, output, _ = convert(tmp_path, raw=raw)
+    assert result.returncode == 0, result.stderr
+    run = json.loads(output.read_text())
+    details = {detail['key']: detail for detail in run['environment']}
+    assert details['thread_policy']['label'] == 'Thread policy'
+    assert details['corpus.corpus_commit_sha']['label'] == 'Corpus commit'
+    assert details['execution.warmups']['label'] == 'Warmups'
+    assert details['machine.hostname']['label'] == 'Hostname'
+    assert details['auxiliary.custom_option']['label'] == 'Auxiliary Custom Option'
+    assert details['auxiliary.custom_option']['value'] == '{"nested": [1, null]}'
+    assert list(details) == sorted(details)
+
+    assert [(detail['key'], detail['value']) for detail in run['environment']] == [
+        ('auxiliary.custom_option', '{"nested": [1, null]}'),
+        ('auxiliary.optional', 'null'),
+        ('corpus.corpus_commit_sha', CORPUS),
+        ('execution.benchmark_suite', 'fixture-suite'),
+        ('execution.samples', 3),
+        ('execution.timeout_seconds', 60),
+        ('execution.warmups', 1),
+        ('machine.hostname', 'fixture-host'),
+        ('tensile.commit_sha', TENSILE_SHA),
+        ('thread_policy', 'default'),
+        ('workflow.commit_sha', WORKFLOW_SHA),
+    ]
+    assert run['targets'][0]['results'][0]['timing_results_s'] == [0.3, 0.1, 0.2]
+
+
+def test_converter_revision_metadata(tmp_path):
+    first, output, original = convert(tmp_path)
+    assert first.returncode == 0, first.stderr
+    run = json.loads(output.read_text())
+    details = {detail['key']: detail for detail in run['environment']}
+    assert details['workflow.commit_sha'] == {
+        'key': 'workflow.commit_sha',
+        'label': 'Workflow commit',
+        'value': WORKFLOW_SHA,
+    }
+    assert details['tensile.commit_sha'] == {
+        'key': 'tensile.commit_sha',
+        'label': 'Tensile commit',
+        'value': TENSILE_SHA,
+    }
+    assert len({run['source']['commit'], WORKFLOW_SHA, TENSILE_SHA}) == 3
+    assert (tmp_path / 'raw.json').read_bytes() == original
+    second, changed_output, _ = convert(
+        tmp_path,
+        workflow_sha='e' * 40,
+        tensile_sha='f' * 40,
+    )
+    assert second.returncode == 0, second.stderr
+    changed = json.loads(changed_output.read_text())
+    for key in ('id', 'comparisonId', 'testCatalog', 'source', 'execution', 'targets'):
+        assert changed[key] == run[key]
+    changed_details = {detail['key']: detail for detail in changed['environment']}
+    assert changed_details['workflow.commit_sha']['value'] == 'e' * 40
+    assert changed_details['tensile.commit_sha']['value'] == 'f' * 40
+    for key in details.keys() - {'workflow.commit_sha', 'tensile.commit_sha'}:
+        assert changed_details[key] == details[key]
 
 
 def test_attempt_identity(tmp_path):
@@ -159,6 +194,91 @@ def test_invalid_input(tmp_path):
     result, output, _ = convert(tmp_path, raw=raw)
     assert result.returncode != 0
     assert not output.exists()
+
+
+def test_dashboard_data_ci():
+    doc = yaml.safe_load(
+        (REPO_ROOT / '.github/workflows/rocjitsu-website-test.yml').read_text()
+    )
+    # Covers path filters and ordinary pytest wiring, not workflow execution.
+    # PyYAML safe_load treats the unquoted YAML key on as boolean True.
+    triggers = doc['on' if 'on' in doc else True]
+    for event in ('pull_request', 'push'):
+        assert '.github/workflows/rocjitsu-benchmarks.yml' in triggers[event]['paths']
+    assert any(
+        shlex.split(step.get('run', ''))
+        == ['python', '-m', 'pytest', 'scripts/dashboard-data/tests']
+        for step in doc['jobs']['dashboard-data']['steps']
+    )
+
+
+@pytest.mark.parametrize(
+    'status,timings,duration',
+    [
+        ('completed', [0.3, 0.1, 0.2], 0.2),
+        ('failed', [0.3], None),
+        ('timeout', [], None),
+    ],
+)
+def test_converter_result_status(tmp_path, status, timings, duration):
+    raw = raw_run()
+    measurement = raw['benchmark_results'][0]
+    measurement.update(
+        status=status,
+        timing_results_s=timings,
+        error=None if status == 'completed' else 'fixture workload failure',
+        exit_code=0 if status == 'completed' else None,
+    )
+    result, output, _ = convert(tmp_path, raw=raw)
+    assert result.returncode == 0, result.stderr
+    published = json.loads(output.read_text())['targets'][0]['results'][0]
+    assert published['status'] == status
+    assert published['durationSeconds'] == duration
+    assert published['error'] == measurement['error']
+    assert published['timing_results_s'] == timings
+
+
+def test_workload_failure_diagnostics(tmp_path):
+    benchmark = yaml.safe_load(WORKFLOW.read_text())['jobs']['benchmark']
+    logs = next(
+        step
+        for step in benchmark['steps']
+        if step['name'] == 'Upload workload failure diagnostics'
+    )
+    assert logs['if'] == (
+        "${{ !cancelled() && (steps.benchmark.outcome == 'failure' "
+        "|| steps.benchmark.outputs.case_failures == 'true') }}"
+    )
+    assert logs['uses'].startswith('actions/upload-artifact@')
+    assert logs['with'] == {
+        'name': '${{ env.RESULTS_ARTIFACT }}-diagnostics',
+        'path': (
+            '${{ env.ROCJITSU_RESULT_DIR }}/*/*/cases/*/stdout.txt\n'
+            '${{ env.ROCJITSU_RESULT_DIR }}/*/*/cases/*/stderr.txt\n'
+        ),
+        'if-no-files-found': 'ignore',
+        'retention-days': 14,
+    }
+    # Match only current-run workload streams, not setup logs or other runs.
+    paths = [
+        'current/gfx950/default/cases/fixture.case/stdout.txt',
+        'current/gfx1250/single/cases/fixture.case/stderr.txt',
+        'current/gfx950/default/cases/fixture.case/config.json',
+        'current/setup/stderr.txt',
+        'older/gfx950/default/cases/fixture.case/stderr.txt',
+    ]
+    for path in paths:
+        file = tmp_path / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.touch()
+    matched = {
+        str(file.relative_to(tmp_path))
+        for pattern in logs['with']['path'].splitlines()
+        for file in (tmp_path / 'current').glob(
+            pattern.removeprefix('${{ env.ROCJITSU_RESULT_DIR }}/')
+        )
+    }
+    assert matched == set(paths[:2])
 
 
 def steps():
@@ -222,6 +342,72 @@ def test_copy_and_index_preserve_history(tmp_path, existing):
     assert not (data / 'metadata.json').exists()
 
 
+def test_benchmark_artifact_contract():
+    doc = yaml.safe_load(WORKFLOW.read_text())
+    benchmark = {step['name']: step for step in doc['jobs']['benchmark']['steps']}
+    uploads = {
+        step['name']
+        for step in benchmark.values()
+        if step.get('uses', '').startswith('actions/upload-artifact@')
+    }
+    assert uploads == {
+        'Upload original raw benchmark JSON',
+        'Upload dashboard benchmark JSON',
+        'Upload workload failure diagnostics',
+    }
+    raw = benchmark['Upload original raw benchmark JSON']
+    assert raw['if'] == (
+        "${{ !cancelled() && (steps.benchmark.outcome == 'success' "
+        "|| steps.benchmark.outcome == 'failure') }}"
+    )
+    assert raw['with'] == {
+        'name': '${{ env.RESULTS_ARTIFACT }}-raw',
+        'path': '${{ env.ROCJITSU_RESULT_DIR }}/run.json',
+        'if-no-files-found': 'error',
+        'retention-days': 14,
+    }
+    dashboard = benchmark['Upload dashboard benchmark JSON']
+    assert (
+        dashboard['if'] == "${{ !cancelled() && steps.dashboard.outcome == 'success' }}"
+    )
+    assert dashboard['with'] == {
+        'name': '${{ env.RESULTS_ARTIFACT }}-dashboard',
+        'path': '${{ env.BENCHMARK_DIR }}/dashboard/*.json',
+        'if-no-files-found': 'error',
+        'retention-days': 14,
+    }
+    converter = benchmark['Prepare dashboard benchmark result']
+    assert (
+        converter['if'] == "${{ !cancelled() && steps.benchmark.outcome == 'success' }}"
+    )
+    assert converter['env'] == {
+        'BENCHMARK_COMMIT_MESSAGE': '${{ steps.metadata.outputs.commit_message }}',
+        'BENCHMARK_MACHINE': '${{ steps.metadata.outputs.machine }}',
+        'BENCHMARK_WORKFLOW_SHA': '${{ github.sha }}',
+    }
+    assert doc['jobs']['benchmark']['outputs'] == {
+        'raw_ready': "${{ steps.upload_raw.outcome == 'success' }}",
+        'dashboard_ready': "${{ steps.upload_dashboard.outcome == 'success' }}",
+    }
+    downloads = {
+        step['name']: step
+        for step in doc['jobs']['publish']['steps']
+        if step.get('uses', '').startswith('actions/download-artifact@')
+    }
+    assert set(downloads) == {'Download original raw JSON', 'Download dashboard JSON'}
+    assert downloads['Download original raw JSON']['with'] == {
+        'name': '${{ env.RESULTS_ARTIFACT }}-raw',
+        'path': '${{ env.RESULTS_DOWNLOAD_DIR }}/raw',
+    }
+    assert downloads['Download dashboard JSON']['with'] == {
+        'name': '${{ env.RESULTS_ARTIFACT }}-dashboard',
+        'path': '${{ env.RESULTS_DOWNLOAD_DIR }}/dashboard',
+    }
+    assert downloads['Download dashboard JSON']['if'] == (
+        "${{ needs.benchmark.outputs.dashboard_ready == 'true' }}"
+    )
+
+
 def test_workflow_shell_and_removed_paths():
     doc = yaml.safe_load(WORKFLOW.read_text())
     for job in doc['jobs'].values():
@@ -232,17 +418,8 @@ def test_workflow_shell_and_removed_paths():
                 )
                 assert result.returncode == 0, result.stderr
     text = WORKFLOW.read_text()
-    for removed in (
-        'workflow.txt',
-        'enriched',
-        'publish-raw-benchmark.py',
-        'prepare-dashboard-data.py',
-        'commit-tree',
-        'test-catalogs',
-    ):
-        assert removed not in text
     assert "github.ref == 'refs/heads/develop'" in text
-    assert 'publish_results' not in text
+    # PyYAML safe_load treats the unquoted YAML key on as boolean True.
     assert doc['on' if 'on' in doc else True]['workflow_dispatch']['inputs'][
         'commit'
     ] == {
