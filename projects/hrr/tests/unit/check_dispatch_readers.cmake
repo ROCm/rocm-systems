@@ -18,4 +18,12 @@ endif()
 if(n_loaded EQUAL 0)
   message(FATAL_ERROR "no HIP_LOAD_*_TABLE_FN call sites found in ${SOURCE}")
 endif()
+# The call sites are only as good as the macros: each one must load through
+# hip::LoadDispatchSlot, not read the slot with a plain ->fn.
+foreach(table DISPATCH COMPILER)
+  string(REGEX MATCH "#define HIP_LOAD_${table}_TABLE_FN\\(([^\n]*\\\\\n)*[^\n]*" def "${text}")
+  if(NOT def MATCHES "hip::LoadDispatchSlot\\(")
+    message(FATAL_ERROR "HIP_LOAD_${table}_TABLE_FN does not load through hip::LoadDispatchSlot: '${def}'")
+  endif()
+endforeach()
 message(STATUS "${n_loaded} entry points load their dispatch slot atomically")
