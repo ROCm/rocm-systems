@@ -47,6 +47,23 @@ def pytest_addoption(parser):
         default=["SQ_WAVES", "SQ_INSTS_VALU"],
         help="counters shared by every --pmc group; must be constant across a kernel's passes",
     )
+    parser.addoption(
+        "--expected-dispatch-count",
+        action="store",
+        type=int,
+        default=None,
+        help="optional exact number of logical dispatches expected in the counter records",
+    )
+    parser.addoption("--n-elems", type=int, default=1048576)
+    parser.addoption("--baseline-json", help="optional 1-pass baseline JSON for scaling")
+    parser.addoption("--max-scaling-ratio", type=float, default=10.0)
+
+
+def pytest_generate_tests(metafunc):
+    if "common_counter" in metafunc.fixturenames:
+        metafunc.parametrize(
+            "common_counter", metafunc.config.getoption("--common-counters")
+        )
 
 
 @pytest.fixture
@@ -60,6 +77,11 @@ def json_data(request):
 @pytest.fixture
 def expected_passes(request):
     return request.config.getoption("--passes")
+
+
+@pytest.fixture
+def expected_dispatch_count(request):
+    return request.config.getoption("--expected-dispatch-count")
 
 
 @pytest.fixture

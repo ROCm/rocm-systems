@@ -79,7 +79,7 @@ sed -n "${START},${END}p" CHANGELOG.md | grep -nE 'ROCM-[0-9]+|SWDEV-[0-9]+'    
 shipped tree before reporting it:
 
 ```bash
-git grep -l "<symbol named in the entry>" "$(pin therock-<V>)" -- projects/amdsmi | grep -v CHANGELOG
+git grep -l "<symbol from the change's diff>" "$(pin therock-<V>)" -- projects/amdsmi | grep -v CHANGELOG
 ```
 
 Present at `pin(V)` → the entry belongs in `V`, whatever blame said. Absent → a
@@ -113,12 +113,14 @@ cases blame gets wrong:
 
 ## Entry Rules
 
-- One bullet per logical change, starting with the affected component (API name, CLI subcommand, or module).
+- Each logical change gets one user-facing entry: describe the user-visible
+  impact, not internal mechanics, as a short bold summary plus one concise
+  bullet; drop signal/abort details, enum constants and file internals.
 - Breaking changes include migration guidance.
 - JIRA/issue refs only in the PR `JIRA ID` section, never in entry text.
 - Bold headline bullets must end with **two trailing spaces** (`··`) so Sphinx
-  keeps the headline and its sub-bullets on separate lines:
+  keeps the headline and its bullet on separate lines:
   ```markdown
   - **Fixed `amd-smi static` hang on gfx1153**.··
-    - Added 60-second timeout to `amdsmi_init()`.
+    - The command now gives up after 60 seconds instead of hanging.
   ```

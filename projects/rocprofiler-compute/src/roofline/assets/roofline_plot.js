@@ -10,11 +10,13 @@
 
   // ---- Config forwarded from roofline_html.py via the model ---------------
   var ALL_PEAKS_VALUE = model.allPeaksValue;
+  var LIMITING_PEAK_VALUE = model.limitingPeakValue;
   var ROOF_EXTREME_MAX_AI = model.roofExtremeMaxAi;
   var KERNEL_NAME_FONT_FAMILY = model.kernelNameFontFamily;
 
   // ---- Own presentation ---------------------------------------------------
   var ALL_PEAKS_LABEL = "All peaks";
+  var LIMITING_PEAK_LABEL = "Limited by";
   var FALLBACK_COLOR = "#888888";
   var PLOT_DIM_OPACITY = 0.15;
   // How far a roof drawn at 45 degrees in data space may lean on screen.
@@ -286,6 +288,11 @@
     var peak = effectivePeak();
     if (peak === ALL_PEAKS_VALUE) {
       return points;
+    }
+    if (peak === LIMITING_PEAK_VALUE) {
+      return points.filter(function (point) {
+        return point.peak === kernel.limitingPeak;
+      });
     }
     return points.filter(function (point) {
       return point.peak === peak;
@@ -1135,11 +1142,18 @@
     return entries;
   }
 
+  function peakLabel(peak) {
+    if (peak === ALL_PEAKS_VALUE) {
+      return ALL_PEAKS_LABEL;
+    }
+    if (peak === LIMITING_PEAK_VALUE) {
+      return LIMITING_PEAK_LABEL;
+    }
+    return peak;
+  }
+
   function exportViewSubtitle() {
-    var peak = effectivePeak();
-    var parts = [
-      "AI axis: " + (peak === ALL_PEAKS_VALUE ? ALL_PEAKS_LABEL : peak),
-    ];
+    var parts = ["AI axis: " + peakLabel(effectivePeak())];
     if (hasRuntimeData && isFinite(state.runtimeThreshold)) {
       parts.push("runtime shown: " + state.runtimeThreshold.toFixed(3) + "%");
     }
@@ -1353,6 +1367,9 @@
     var action = document.createElement("button");
     action.type = "button";
     action.className = "roofline-panel-action";
+    if (opts.title) {
+      action.setAttribute("aria-label", opts.title);
+    }
 
     var swatch = document.createElement("span");
     swatch.className = opts.swatchClass || "roofline-swatch";
@@ -1361,13 +1378,21 @@
     var label = document.createElement("span");
     label.className = opts.labelClass || "roofline-panel-name";
     label.textContent = opts.label;
+    if (opts.title) {
+      RooflineKernelListTooltip.attachTooltipToKernelRow(action, label, opts.title);
+    }
 
     action.appendChild(swatch);
     action.appendChild(label);
     opts.actionExtras.forEach(function (node) {
       action.appendChild(node);
     });
-    action.addEventListener("click", opts.onClick);
+    action.addEventListener("click", function (event) {
+      if (opts.title) {
+        RooflineKernelListTooltip.hide();
+      }
+      opts.onClick(event);
+    });
     item.appendChild(action);
     opts.siblingControls.forEach(function (node) {
       item.appendChild(node);
@@ -1379,6 +1404,10 @@
     if (!peakSelect) {
       return;
     }
+    var limitingEl = document.createElement("option");
+    limitingEl.value = LIMITING_PEAK_VALUE;
+    limitingEl.textContent = LIMITING_PEAK_LABEL;
+    peakSelect.appendChild(limitingEl);
     model.peaks.forEach(function (peak) {
       var el = document.createElement("option");
       el.value = peak;
@@ -1461,7 +1490,8 @@
       kernelList.appendChild(
         createPanelRow({
           color: kernel.color,
-          label: kernel.name,
+          label: kernel.label,
+          title: kernel.name,
           labelClass: "roofline-panel-name roofline-kernel-name",
           dataset: { index: String(index) },
           actionExtras: actionExtras,

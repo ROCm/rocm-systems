@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: MIT
 
 # Common Tests - Test independent of all platforms
-set(TARGETS_SUPPORTING_CLUSTERS gfx1250 gfx1251)
+set(TARGETS_SUPPORTING_CLUSTERS gfx1250)
 set(CLUSTERS_SUPPORTED -1)
 
 function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)

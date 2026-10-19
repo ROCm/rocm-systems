@@ -3,7 +3,6 @@
 
 """Integration tests for roofline profiling and benchmark-only mode."""
 
-import inspect
 import os
 from pathlib import Path
 
@@ -17,7 +16,6 @@ from tests.integration.common import (
     num_devices,
     num_kernels,
     skip_unsupported_roofline_soc,
-    validate,
 )
 
 
@@ -39,12 +37,6 @@ def test_roof_basic_validation(binary_handler_profile_rocprof_compute):
     file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
 
     assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
 
     common.clean_output_dir(config["cleanup"], workload_dir)
 

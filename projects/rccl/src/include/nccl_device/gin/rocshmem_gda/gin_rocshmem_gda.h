@@ -175,6 +175,15 @@ struct ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
       loadConst(qps + peer)->quiet(wf_info);
     }
   }
+  // quiet() blocks until drained; nothing to time out.
+  template <typename Coop>
+  NCCL_DEVICE_INLINE static ncclResult_t call(ncclGinCtx ctx, Coop coop, bool hasDescriptor,
+                                              ncclGinDescriptorSmem* descriptor, cuda::memory_order ord,
+                                              uint32_t* abortFlag, uint64_t timeoutCycles) {
+    (void)timeoutCycles;
+    call(ctx, coop, hasDescriptor, descriptor, ord, abortFlag);
+    return ncclSuccess;
+  }
 };
 
 template <>
@@ -198,6 +207,19 @@ struct ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
   NCCL_DEVICE_INLINE static void call(ncclGinCtx, ncclGinRequest_t&, bool, ncclGinDescriptorSmem*, cuda::memory_order,
                                       uint32_t*) {
     __builtin_trap();
+  }
+  NCCL_DEVICE_INLINE static ncclResult_t call(ncclGinCtx, ncclGinRequest_t&, bool, ncclGinDescriptorSmem*,
+                                              cuda::memory_order, uint32_t*, uint64_t) {
+    __builtin_trap();
+    return ncclInternalError;
+  }
+};
+
+// A signal does not order earlier Puts; keep the per-peer flush.
+template <>
+struct ncclGinApi_FlushesAllPutsOnAnySignal<NCCL_NET_DEVICE_GIN_ROCSHMEM_GDA> {
+  NCCL_DEVICE_INLINE static bool call(ncclGinCtx) {
+    return false;
   }
 };
 

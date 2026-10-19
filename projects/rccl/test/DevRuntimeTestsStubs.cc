@@ -19,7 +19,10 @@
 #include "sym_kernels.h"
 #include "allocator.h"
 #include "utils.h"
+#include "ipcsocket.h"
 #include "cudawrap.h"
+#include "alloc.h"
+#include "p2p.h"
 #include "dev_runtime_internal.h"
 #include "enqueue.h"
 #include "enqueue/mgmt_task_enq.h"
@@ -41,6 +44,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <sys/mman.h>
+#include <unistd.h>
 
 // Count hipMemAddressFree for skip-on vs skip-off finalize tests.
 int rcclTestHipMemAddressFreeCount = 0;
@@ -50,7 +54,7 @@ int rcclTestHipMemUnmapCount = 0;
 // ---------------------------------------------------------------------------
 // Globals the translation unit references.
 // ---------------------------------------------------------------------------
-int                          ncclDebugLevel = 0;
+uint32_t                     ncclDebugLevelMask = 0;
 uint64_t                     ncclDebugMask  = 0;
 thread_local int             ncclDebugNoWarn = 0;
 // Use POSIX-FD handles so the single-rank success path takes the no-export /
@@ -121,6 +125,8 @@ int64_t ncclParamWinEnable() { return 1; }
 // Proxy / mgmt task enqueue.
 // ---------------------------------------------------------------------------
 ncclResult_t ncclProxyClientGetFdBlocking(struct ncclComm*, int, void*, int*) { return ncclSuccess; }
+// NCCL 2.32: dev_runtime.cc closes imported fds through ncclIpcFdClose (os/linux_ipcsocket.cc).
+int ncclIpcFdClose(ncclIpcFd fd) { return close(fd); }
 ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct ncclAsyncJob*), void (*)(void*),
                                  struct ncclComm*) {
   return ncclSuccess;
@@ -131,6 +137,7 @@ ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob*, ncclResult_t (*)(struct n
 // ---------------------------------------------------------------------------
 ncclResult_t ncclSymkInitOnce(struct ncclComm*) { return ncclSuccess; }
 bool ncclRmaProxyEnabled(struct ncclComm*) { return false; }
+int64_t ncclParamRMADisable() { return 0; }
 ncclResult_t ncclRmaCeInit(struct ncclComm*) { return ncclSuccess; }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +150,22 @@ ncclResult_t ncclSpaceAlloc(struct ncclSpace*, int64_t, int64_t, int, int64_t* o
   return ncclSuccess;
 }
 ncclResult_t ncclSpaceFree(struct ncclSpace*, int64_t, int64_t) { return ncclSuccess; }
+
+// ---------------------------------------------------------------------------
+// cuMem allocation tracking / peer import. windowRegisterNonSym takes the cuMem
+// branch for VMM buffers, which reaches ncclP2pImportShareableBuffer and (via
+// ncclCudaFree in alloc.h) the mem-manager untrack helpers. Report cuMem as
+// disabled so the micro-tests keep exercising the legacy IPC branch.
+// ---------------------------------------------------------------------------
+struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
+int ncclCuMemEnable() { return 0; }
+ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager*, void*, struct ncclMemUntrackInfo*) { return ncclSuccess; }
+ncclResult_t ncclMemUntrackPersist(struct ncclMemManager*, void*, size_t) { return ncclSuccess; }
+ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm*, int, size_t, ncclIpcDesc*, void** devMemPtr, void*,
+                                          ncclMemType_t) {
+  if (devMemPtr) *devMemPtr = nullptr;
+  return ncclInternalError;
+}
 
 // ---------------------------------------------------------------------------
 // Shadow pool.
@@ -262,11 +285,13 @@ int computeCftSize(struct ncclComm*) { return 1; }
 int computeCftMcSize(struct ncclComm*) { return 1; }
 ncclResult_t symBindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
 ncclResult_t symUnbindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
-ncclResult_t symTeamObtainUcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier) {
+ncclResult_t symTeamObtainUcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier,
+                               bool /*counted*/) {
   if (needBarrier) *needBarrier = false;
   return ncclSuccess;
 }
-ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier) {
+ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool* needBarrier,
+                               bool /*counted*/) {
   if (needBarrier) *needBarrier = false;
   return ncclSuccess;
 }
