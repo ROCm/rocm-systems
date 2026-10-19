@@ -2351,6 +2351,10 @@ def _generated_matrix_call(body: str, callee: str) -> str:
             'exec_smfmac_f32_16x16x64_fp8',
             True,
         ),
+        ('V_SMFMAC_I32_16X16X64_I8', 'cdna3', 'exec_smfmac_i32_i8', True),
+        ('V_SMFMAC_I32_32X32X32_I8', 'cdna3', 'exec_smfmac_i32_i8', True),
+        ('V_SMFMAC_I32_16X16X128_I8', 'cdna4', 'exec_smfmac_i32_i8', True),
+        ('V_SMFMAC_I32_32X32X64_I8', 'cdna4', 'exec_smfmac_i32_i8', True),
         # Fixed-wave sparse float result variants.
         ('V_SWMMAC_F32_16X16X32_F16', 'cdna5', 'exec_swmmac_f32', True),
         ('V_SWMMAC_F16_16X16X32_F16', 'cdna5', 'exec_swmmac_f16', True),
@@ -2590,14 +2594,15 @@ def test_unimplemented_execute_stub_requires_unconditional_failure(body, expecte
         ('cdna4', 'VSmfmacI3232x32x32I8Vop3pMfma'),
     ],
 )
-def test_generated_sparse_integer_mma_stubs_report_failure(
+def test_generated_sparse_integer_mma_dispatches_cross_lane_helper(
     amdgpu_generated_root: Path, arch: str, class_name: str
 ):
     source = (amdgpu_generated_root / arch / 'vop3p_exec.cpp').read_text()
     body = _generated_function_body(source, f'void {class_name}::execute_impl')
-    assert 'wf.report_instruction_execution_error(' in body
-    assert 'InstructionExecutionError::UnimplementedInstruction' in body
-    assert 'throw ' not in body
+    assert 'amdgpu::exec_smfmac_i32_i8<' in body
+    assert 'idx, inst_.cbsz, inst_.abid);' in body
+    assert 'inst_.acc_cd' in body
+    assert 'InstructionExecutionError::UnimplementedInstruction' not in body
 
 
 def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):

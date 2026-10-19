@@ -9460,60 +9460,164 @@ TEST(HwregTest, SetregImm32PartialBitfield) {
   }
 }
 
-TEST(SparseMmaExecution, UnimplementedIntegerInstructionsReportFailure) {
+TEST(SparseMmaExecution, IntegerProductsUseSparseSelectorsAndWrapAccumulators) {
   struct Case {
     rj_code_arch_t arch;
-    std::array<uint32_t, 2> words;
+    uint16_t opcode;
+    uint32_t m, k, a_regs;
   };
   const std::array cases = {
-      Case{ROCJITSU_CODE_ARCH_CDNA3,
-           cdna3::build_vop3p_mfma(cdna3::kVSmfmacI3216x16x64I8Vop3pMfma,
-                                   {.src0 = 256, .src1 = 256, .src2 = 256})},
-      Case{ROCJITSU_CODE_ARCH_CDNA3,
-           cdna3::build_vop3p_mfma(cdna3::kVSmfmacI3232x32x32I8Vop3pMfma,
-                                   {.src0 = 256, .src1 = 256, .src2 = 256})},
-      Case{ROCJITSU_CODE_ARCH_CDNA4,
-           cdna4::build_vop3p_mfma(cdna4::kVSmfmacI3216x16x128I8Vop3pMfma,
-                                   {.src0 = 256, .src1 = 256, .src2 = 256})},
-      Case{ROCJITSU_CODE_ARCH_CDNA4,
-           cdna4::build_vop3p_mfma(cdna4::kVSmfmacI3232x32x64I8Vop3pMfma,
-                                   {.src0 = 256, .src1 = 256, .src2 = 256})},
-      Case{ROCJITSU_CODE_ARCH_CDNA4,
-           cdna4::build_vop3p_mfma(cdna4::kVSmfmacI3216x16x64I8Vop3pMfma,
-                                   {.src0 = 256, .src1 = 256, .src2 = 256})},
-      Case{ROCJITSU_CODE_ARCH_CDNA4,
-           cdna4::build_vop3p_mfma(cdna4::kVSmfmacI3232x32x32I8Vop3pMfma,
-                                   {.src0 = 256, .src1 = 256, .src2 = 256})},
+      Case{ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVSmfmacI3216x16x64I8Vop3pMfma, 16, 64, 2},
+      Case{ROCJITSU_CODE_ARCH_CDNA3, cdna3::kVSmfmacI3232x32x32I8Vop3pMfma, 32, 32, 2},
+      Case{ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVSmfmacI3216x16x128I8Vop3pMfma, 16, 128, 4},
+      Case{ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVSmfmacI3232x32x64I8Vop3pMfma, 32, 64, 4},
+      Case{ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVSmfmacI3216x16x64I8Vop3pMfma, 16, 64, 2},
+      Case{ROCJITSU_CODE_ARCH_CDNA4, cdna4::kVSmfmacI3232x32x32I8Vop3pMfma, 32, 32, 2},
   };
-  for (const auto &test_case : cases) {
-    SCOPED_TRACE(test_case.arch);
-    amdgpu::GpuMemory memory("sparse_mma_unimpl_mem");
-    amdgpu::L2Cache l2("sparse_mma_unimpl_l2");
+  constexpr std::array<uint32_t, 6> pairs{0x4, 0x8, 0xC, 0x9, 0xD, 0xE};
+  constexpr uint32_t a_base = 0, b_base = 32, index_base = 64, dst_base = 96;
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.arch);
+    SCOPED_TRACE(test.opcode);
+    const uint32_t m = test.m, k = test.k;
+    const uint32_t a_regs = test.a_regs;
+    const bool wide = a_regs == 4;
+    amdgpu::GpuMemory memory("sparse_mma_i8_mem");
+    amdgpu::L2Cache l2("sparse_mma_i8_l2");
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = test_case.arch;
+    cfg.arch = test.arch;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("sparse_mma_unimpl", cfg, &memory, &l2);
+    auto cu = amdgpu::ComputeUnitCore::create("sparse_mma_i8", cfg, &memory, &l2);
     ASSERT_NE(cu, nullptr);
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
     ASSERT_NE(wf, nullptr);
-    auto decoder = Decoder::create(test_case.arch);
+    wf->set_exec(~0ULL);
+    wf->set_mode_raw(0); // FP16_OVFL=0: integer accumulation wraps.
+    const uint32_t vb = wf->vgpr_alloc().base;
+    auto decoder = Decoder::create(test.arch);
     ASSERT_NE(decoder, nullptr);
-    std::unique_ptr<Instruction> inst(decode_valid(*decoder, test_case.words.data()));
-    ASSERT_NE(inst, nullptr);
-    SCOPED_TRACE(inst->mnemonic());
-    EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).failed());
-    EXPECT_EQ(wf->instruction_execution_error(),
-              amdgpu::InstructionExecutionError::UnimplementedInstruction);
-    EXPECT_FALSE(wf->is_halted());
 
-    constexpr std::array<uint32_t, 2> nop_words{0xBF800000u, 0};
-    std::unique_ptr<Instruction> nop(decode_valid(*decoder, nop_words.data()));
-    ASSERT_NE(nop, nullptr);
-    EXPECT_TRUE(cu->execute_instruction(nop.get(), *wf).succeeded());
-    EXPECT_EQ(wf->instruction_execution_error(), amdgpu::InstructionExecutionError::None);
+    // Build independent dense matrices while packing the ISA's per-lane
+    // fragments. All six ordered 2:4 selector pairs and signed byte values occur.
+    std::array<std::vector<int32_t>, 2> a{std::vector<int32_t>(m * k, 0),
+                                          std::vector<int32_t>(m * k, 0)};
+    std::vector<int32_t> b(k * m);
+    std::array<uint32_t, 128 * 64> seed{};
+    auto put_byte = [&](uint32_t base, uint32_t lane, uint32_t element, int32_t value) {
+      seed[(base + element / 4) * 64 + lane] |= static_cast<uint32_t>(static_cast<uint8_t>(value))
+                                                << (8 * (element % 4));
+    };
+    for (uint32_t lane = 0; lane < 64; ++lane) {
+      const uint32_t row = lane % m, group = lane / m;
+      for (uint32_t word = 0; word < a_regs; ++word) {
+        for (uint32_t pair = 0; pair < 2; ++pair) {
+          uint32_t q, nibble;
+          if (!wide) {
+            q = word * (k / 8) + group * 2 + pair;
+            nibble = word * 2 + pair;
+          } else {
+            q = pair + 2 * (word / 2) + 4 * (word % 2);
+            if (m == 16)
+              q = pair + 2 * (word / 2) + 4 * (group % 2) + 8 * (word % 2) + 16 * (group / 2);
+            else
+              q += 8 * group;
+            nibble = pair + 4 * (word / 2) + 2 * (word % 2);
+          }
+          const uint32_t selectors = pairs[(row + q) % pairs.size()];
+          const uint32_t alternate_selectors = pairs[(row + q + 3) % pairs.size()];
+          seed[index_base * 64 + lane] |= selectors << (4 * nibble);
+          if (!wide)
+            seed[index_base * 64 + lane] |= alternate_selectors << (16 + 4 * nibble);
+          for (uint32_t element = 0; element < 2; ++element) {
+            const int32_t value =
+                static_cast<int32_t>((row * 29 + q * 37 + element * 83) % 256) - 128;
+            put_byte(a_base, lane, 4 * word + 2 * pair + element, value);
+            a[0][row * k + 4 * q + ((selectors >> (2 * element)) & 3)] = value;
+            a[1][row * k + 4 * q + ((alternate_selectors >> (2 * element)) & 3)] = value;
+          }
+        }
+      }
+      for (uint32_t byte = 0; byte < a_regs * 8; ++byte) {
+        const uint32_t inner = (byte / 8) * (m == 16 ? 32 : 16) + group * 8 + byte % 8;
+        const int32_t value = static_cast<int32_t>((inner * 43 + row * 17) % 256) - 128;
+        put_byte(b_base, lane, byte, value);
+        b[inner * m + row] = value;
+      }
+    }
+
+    // CDNA3 section 7.4 and CDNA4 section 7.5 select metadata with ABID only
+    // when CBSZ[1:0] is zero. Both halves contain different legal 2:4 pairs;
+    // the dense oracle for each was constructed independently while packing A.
+    struct IndexCase {
+      uint32_t cbsz, abid, compact_set;
+    };
+    constexpr std::array index_cases = {IndexCase{0, 0, 0}, IndexCase{0, 1, 1}, IndexCase{1, 0, 0},
+                                        IndexCase{1, 1, 0}};
+    for (const auto [cbsz, abid, compact_set] : index_cases) {
+      SCOPED_TRACE(testing::Message() << "cbsz=" << cbsz << " abid=" << abid);
+      const auto &selected_a = a[wide ? 0 : compact_set];
+      for (uint32_t dst : {dst_base, a_base, b_base, index_base}) {
+        SCOPED_TRACE(dst);
+        for (bool acc_dst : {false, true}) {
+          SCOPED_TRACE(acc_dst);
+          const uint32_t physical_dst = dst + (acc_dst ? amdgpu::ACC_VGPR_OFFSET : 0);
+          for (uint32_t reg = 0; reg < 128; ++reg)
+            for (uint32_t lane = 0; lane < 64; ++lane)
+              cu->write_vgpr(vb + reg, lane, seed[reg * 64 + lane]);
+          // Non-aliased C starts near overflow; aliases retain the packed inputs as C.
+          if (dst == dst_base || acc_dst)
+            for (uint32_t reg = 0; reg < m * m / 64; ++reg)
+              for (uint32_t lane = 0; lane < 64; ++lane)
+                cu->write_vgpr(vb + physical_dst + reg, lane, 0x7FFFFF00u + reg * 64 + lane);
+
+          std::vector<uint32_t> expected(m * m);
+          for (uint32_t row = 0; row < m; ++row)
+            for (uint32_t col = 0; col < m; ++col) {
+              const uint32_t lane = col + m * ((row / 4) % (64 / m));
+              const uint32_t reg = (row / (256 / m)) * 4 + row % 4;
+              uint32_t value = cu->read_vgpr(vb + physical_dst + reg, lane);
+              for (uint32_t inner = 0; inner < k; ++inner)
+                value += static_cast<uint32_t>(selected_a[row * k + inner] * b[inner * m + col]);
+              expected[row * m + col] = value;
+            }
+          const auto fields = cdna3::Vop3pMfmaBuilderFields{.vdst = static_cast<uint8_t>(dst),
+                                                            .cbsz = static_cast<uint8_t>(cbsz),
+                                                            .abid = static_cast<uint8_t>(abid),
+                                                            .acc_cd = static_cast<uint8_t>(acc_dst),
+                                                            .src0 = 256 + a_base,
+                                                            .src1 = 256 + b_base,
+                                                            .src2 = 256 + index_base};
+          const auto words = test.arch == ROCJITSU_CODE_ARCH_CDNA3
+                                 ? cdna3::build_vop3p_mfma(test.opcode, fields)
+                                 : cdna4::build_vop3p_mfma(test.opcode, {.vdst = fields.vdst,
+                                                                         .cbsz = fields.cbsz,
+                                                                         .abid = fields.abid,
+                                                                         .acc_cd = fields.acc_cd,
+                                                                         .src0 = fields.src0,
+                                                                         .src1 = fields.src1,
+                                                                         .src2 = fields.src2});
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+          for (uint32_t reg = 0; reg < 128; ++reg) {
+            if (reg >= physical_dst && reg < physical_dst + m * m / 64)
+              continue;
+            for (uint32_t lane = 0; lane < 64; ++lane)
+              EXPECT_EQ(cu->read_vgpr(vb + reg, lane), seed[reg * 64 + lane]);
+          }
+          for (uint32_t row = 0; row < m; ++row)
+            for (uint32_t col = 0; col < m; ++col) {
+              const uint32_t lane = col + m * ((row / 4) % (64 / m));
+              const uint32_t reg = (row / (256 / m)) * 4 + row % 4;
+              EXPECT_EQ(cu->read_vgpr(vb + physical_dst + reg, lane), expected[row * m + col])
+                  << "row=" << row << " col=" << col;
+            }
+        }
+      }
+    }
   }
 }
 
