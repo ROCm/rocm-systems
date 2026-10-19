@@ -22,7 +22,7 @@ from tests.integration import common as integration_common
 config = {}
 config["cleanup"] = True
 
-roofline_dir = "tests/workloads/mem_levels_HBM/MI200"
+roofline_dir = "tests/workloads/roofline/MI200"
 
 
 def embedded_roofline_model(document: str) -> dict:
