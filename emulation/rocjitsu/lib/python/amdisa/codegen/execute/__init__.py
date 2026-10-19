@@ -424,7 +424,7 @@ def _register_handlers() -> None:
         c.dst_ops,
         c.src_ops,
         c.cls,
-        instruction=c.sem.name,
+        operation=c.sem.operation,
         dot_accumulation=c.profile.float_dot_accumulation,
         opsel_exprs=c.opsel_exprs,
     )

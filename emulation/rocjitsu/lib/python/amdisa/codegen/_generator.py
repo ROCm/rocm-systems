@@ -7766,7 +7766,7 @@ class CodeGenerator:
                 dst_ops,
                 src_ops,
                 cls,
-                instruction=sem.name,
+                operation=sem.operation,
                 dot_accumulation=self.isa_spec.profile.float_dot_accumulation,
                 opsel_exprs=self._vop3p_opsel_exprs(),
             )

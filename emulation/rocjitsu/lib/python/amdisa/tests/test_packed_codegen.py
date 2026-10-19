@@ -389,20 +389,27 @@ def test_dot2_true16_rejects_host_float_accumulation():
 
 
 def test_rdna4_fp8_dot4_uses_the_gfx12_dot_model():
-    for instruction, bf8_a, bf8_b in (
+    from amdisa.semantics import derive_semantics
+
+    for instruction, src0_bf8, src1_bf8 in (
         ('V_DOT4_F32_FP8_FP8', 'false', 'false'),
         ('V_DOT4_F32_FP8_BF8', 'false', 'true'),
         ('V_DOT4_F32_BF8_FP8', 'true', 'false'),
         ('V_DOT4_F32_BF8_BF8', 'true', 'true'),
     ):
+        sem = derive_semantics(instruction, 'ENC_VOP3P')
+        assert sem.semantic_class == 'dot4_f32_fp8'
         cpp = gen_dot4(
             ['vdst'],
             ['src0', 'src1', 'src2'],
-            'dot4_f32_fp8',
-            instruction=instruction,
+            sem.semantic_class,
+            operation=sem.operation,
             dot_accumulation=FloatDotAccumulation.GFX12,
         )
-        assert f'amdgpu::gfx12_dot4_f32_fp8<{bf8_a}, {bf8_b}>(raw0, raw1, acc)' in cpp
+        assert (
+            f'amdgpu::gfx12_dot4_f32_fp8<{src0_bf8}, {src1_bf8}>(raw0, raw1, acc)'
+            in cpp
+        )
         assert (
             'acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, '
             'inst_.neg_hi, inst_.neg);' in cpp
@@ -418,7 +425,7 @@ def test_fp8_dot4_rejects_other_accumulation_models():
             ['vdst'],
             ['src0', 'src1', 'src2'],
             'dot4_f32_fp8',
-            instruction='V_DOT4_F32_FP8_FP8',
+            operation='fp8_fp8',
             dot_accumulation=FloatDotAccumulation.HOST_F32,
         )
 

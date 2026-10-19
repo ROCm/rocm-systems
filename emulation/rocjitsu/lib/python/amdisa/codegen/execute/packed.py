@@ -1425,16 +1425,25 @@ def _append_dot_int_halves(L: list[str], opsel_exprs: tuple[str, str]) -> None:
         )
 
 
+# FP8 DOT4 semantic operation -> (src0 is BF8, src1 is BF8).
+_FP8_DOT4_BF8_SOURCES = {
+    'fp8_fp8': ('false', 'false'),
+    'fp8_bf8': ('false', 'true'),
+    'bf8_fp8': ('true', 'false'),
+    'bf8_bf8': ('true', 'true'),
+}
+
+
 def gen_dot4(
     dst: list[str],
     src: list[str],
     cls: str,
-    instruction: str = '',
+    operation: str | None = None,
     dot_accumulation: FloatDotAccumulation = FloatDotAccumulation.HOST_F32,
     opsel_exprs: tuple[str, str] = ('', ''),
 ) -> str:
     """Generate V_DOT4_I32_I8 / V_DOT4_I32_IU8 / V_DOT4_U32_U8 and the RDNA4
-    V_DOT4_F32_{FP8,BF8}_{FP8,BF8} forms (``instruction`` names the formats)."""
+    V_DOT4_F32_{FP8,BF8}_{FP8,BF8} forms (``operation`` names the formats)."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -1480,11 +1489,10 @@ def gen_dot4(
     elif cls == 'dot4_f32_fp8':
         # Only RDNA4 has these; gfx1201 runs them through its DOT datapath.
         if dot_accumulation is not FloatDotAccumulation.GFX12:
-            raise ValueError(f'{instruction} needs the GFX12 DOT accumulation model')
-        formats = instruction.upper().removeprefix('V_DOT4_F32_').split('_')
-        if len(formats) != 2 or not set(formats) <= {'FP8', 'BF8'}:
-            raise ValueError(f'unhandled FP8 dot instruction: {instruction}')
-        bf8_a, bf8_b = (str(f == 'BF8').lower() for f in formats)
+            raise ValueError(f'{cls} needs the GFX12 DOT accumulation model')
+        if operation not in _FP8_DOT4_BF8_SOURCES:
+            raise ValueError(f'unhandled FP8 dot4 operation: {operation}')
+        src0_bf8, src1_bf8 = _FP8_DOT4_BF8_SOURCES[operation]
         L.append(
             f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
         )
@@ -1493,7 +1501,7 @@ def gen_dot4(
             '    acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);'
         )
         L.append(
-            f'    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<{bf8_a}, {bf8_b}>(raw0, raw1, acc);'
+            f'    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<{src0_bf8}, {src1_bf8}>(raw0, raw1, acc);'
         )
         L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, result);')
     else:  # dot4_u32_u8
