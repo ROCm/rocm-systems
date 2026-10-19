@@ -61,6 +61,9 @@ ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
 #endif
 ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
+#if HIP_VERSION >= 70000000
+ASSERT_HOOK_MATCHES_PROD(g_hipMemGetHandleForAddressRange, hipMemGetHandleForAddressRange);
+#endif
 #define RCCL_ASSERT_INTERCEPTOR_HOOK(name, params) ASSERT_HOOK_MATCHES_PROD(g_##name, name);
 RCCL_HIP_PROFILE_INTERCEPTORS_HOOKED(RCCL_ASSERT_INTERCEPTOR_HOOK)
 #undef RCCL_ASSERT_INTERCEPTOR_HOOK
@@ -409,6 +412,14 @@ std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)
     g_hipMemcpyAsync = DefaultHipMemcpyAsync;
 std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync = DefaultHipMemsetAsync;
 std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
+#if HIP_VERSION >= 70000000
+static hipError_t DefaultHipMemGetHandleForAddressRange(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType,
+                                                        unsigned long long) {
+    return hipErrorNotSupported;
+}
+std::function<hipError_t(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)>
+    g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;
+#endif
 std::function<hipError_t(hipStream_t*, unsigned)> g_hipStreamCreateWithFlags = DefaultHipStreamCreateWithFlags;
 std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize = DefaultHipStreamSynchronize;
 std::function<hipError_t(hipStream_t)> g_hipStreamDestroy = DefaultHipStreamDestroy;
@@ -668,6 +679,9 @@ void ResetHipFakes()
     g_hipMemcpyAsync                = DefaultHipMemcpyAsync;
     g_hipMemsetAsync                = DefaultHipMemsetAsync;
     g_hipMemset                     = DefaultHipMemset;
+#if HIP_VERSION >= 70000000
+    g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;
+#endif
     g_hipStreamCreateWithFlags      = DefaultHipStreamCreateWithFlags;
     g_hipStreamSynchronize          = DefaultHipStreamSynchronize;
     g_hipStreamDestroy              = DefaultHipStreamDestroy;
@@ -1009,6 +1023,12 @@ hipError_t hipMallocManaged(void** p, size_t size, unsigned int flags)
 }
 hipError_t hipMemcpy(void* d, const void* s, size_t n, hipMemcpyKind k) { return g_hipMemcpy(d, s, n, k); }
 hipError_t hipMemset(void* dst, int value, size_t bytes) { return g_hipMemset(dst, value, bytes); }
+#if HIP_VERSION >= 70000000
+hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t ptr, size_t size, hipMemRangeHandleType type,
+                                          unsigned long long flags) {
+    return g_hipMemGetHandleForAddressRange(handle, ptr, size, type, flags);
+}
+#endif
 hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
 // We define hipGetDevicePropertiesR0600, the versioned public HIP ABI symbol,
 // rather than the unversioned hipGetDeviceProperties. Callers write

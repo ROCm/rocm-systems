@@ -295,9 +295,11 @@ function(rccl_define_micro_source_lists)
     PARENT_SCOPE)
 
   # rccl-UnitTestsMicroGinHostProxy -- src/gin/gin_host_proxy.cc + src/gin/proxy_gpucontext/. Own
-  # binary: it defines the HIP and logging symbols the shared fakes also define.
+  # binary: gin-plugin-init-test.cc in rccl-UnitTestsMicro defines ncclGinProxy and ncclGinProxyVersion.
   set(TEST_MICRO_GIN_HOST_PROXY_SOURCE_FILES
     gin-host-proxy-test.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 

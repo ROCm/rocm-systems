@@ -176,6 +176,12 @@ extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/, 
 // hipSuccess -- the allocation seams hand out std::malloc'd host memory, so a
 // buffer production zeroes is genuinely zero when a test reads it back.
 extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/)> g_hipMemset;
+#if HIP_VERSION >= 70000000
+// The DMA-BUF export (HIP >= 7.0). The default reports the export unsupported.
+extern std::function<hipError_t(void* /*handle*/, hipDeviceptr_t /*ptr*/, size_t /*size*/,
+                                hipMemRangeHandleType /*type*/, unsigned long long /*flags*/)>
+    g_hipMemGetHandleForAddressRange;
+#endif
 
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;

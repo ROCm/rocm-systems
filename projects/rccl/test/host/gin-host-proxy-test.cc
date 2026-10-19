@@ -5,8 +5,8 @@
  ************************************************************************/
 
 // Host-only microtests for src/gin/gin_host_proxy.cc, the GIN proxy backend over an RMA plugin, and the
-// versioned GPU-context writers in src/gin/proxy_gpucontext/. The RMA plugin, device allocations and the
-// DMA-BUF export are seamed in this TU; GFDs are posted straight into the host-side queues.
+// versioned GPU-context writers in src/gin/proxy_gpucontext/. The RMA plugin and device allocations are seamed
+// in this TU, HIP and logging come from the shared fakes; GFDs are posted straight into the host-side queues.
 
 #include <gtest/gtest.h>
 
@@ -36,71 +36,17 @@
 #include "gin/gin_host_proxy.h"
 #include "gin/proxy_gpucontext/gpucontext.h"
 
-// Logging and params: this binary links no shared fakes.
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
-std::function<int64_t(const char*, int64_t)> g_loadParam = [](const char*, int64_t deft) { return deft; };
+#include "../common/LogCapture.hpp"
+#include "ScopedHook.h"
+#include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"
 
-namespace {
-std::vector<std::string> g_logs;
+using RcclUnitTesting::CaptureLog;
+using RcclUnitTesting::LogHas;
 
-bool Logged(const char* needle) {
-  for (const auto& m : g_logs) {
-    if (m.find(needle) != std::string::npos) return true;
-  }
-  return false;
-}
-
-int64_t g_dmaBufEnable = 0;
-}  // namespace
-
-void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char* fmt, ...) {
-  char buf[512];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  g_logs.push_back(buf);
-}
-
-int64_t ncclParamDmaBufEnable() { return g_dmaBufEnable; }
+// No shared owner for these.
 int64_t ncclParamIbDataDirect() { return 0; }
 gdr_t ncclGdrCopy = nullptr;
-
-// HIP: no runtime is linked, so these are the only definitions.
-namespace {
-hipError_t g_memsetResult = hipSuccess;
-std::deque<hipError_t> g_exportResults;  // one per DMA-BUF export; empty means success
-std::vector<size_t> g_exportSizes;
-std::vector<int> g_exportedFds;
-}  // namespace
-
-const char* hipGetErrorString(hipError_t) { return "fake hip error"; }
-
-hipError_t hipMemset(void* dst, int value, size_t sizeBytes) {
-  if (g_memsetResult != hipSuccess) return g_memsetResult;
-  std::memset(dst, value, sizeBytes);
-  return hipSuccess;
-}
-
-// hipMemGetHandleForAddressRange needs HIP >= 7.0; rma_proxy.cc guards it the same way.
-#if HIP_VERSION >= 70000000
-hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t, size_t size, hipMemRangeHandleType,
-                                          unsigned long long) {
-  g_exportSizes.push_back(size);
-  hipError_t res = hipSuccess;
-  if (!g_exportResults.empty()) {
-    res = g_exportResults.front();
-    g_exportResults.pop_front();
-  }
-  if (res != hipSuccess) return res;
-  int fd = open("/dev/null", O_RDONLY);
-  g_exportedFds.push_back(fd);
-  *static_cast<int*>(handle) = fd;
-  return hipSuccess;
-}
-#endif
 
 // Device allocations: host memory standing in for GPU/GDR buffers.
 namespace {
@@ -205,6 +151,9 @@ ncclResult_t FakeCudaMemcpy(T* dst, T* src, size_t nelem) {
 #endif
 
 #include "fakes/param_redirect.h"
+// gin_host_proxy.cc's only other param, defined in src/transport/net_ib with no shared owner.
+int64_t g_dmaBufEnable = 0;
+int64_t ncclParamDmaBufEnable() { return g_dmaBufEnable; }
 
 #include GIN_HOST_PROXY_CC_PATH
 #include GPUCONTEXT_CC_PATH
@@ -458,21 +407,45 @@ class GinHostProxyMicrotest : public ::testing::Test {
   void* listenComm_ = nullptr;
   void* collComm_ = nullptr;
 
+  // The DMA-BUF exports hipMemGetHandleForAddressRange hands out, and their scripted results.
+  std::deque<hipError_t> exportResults_;  // one per export; empty means success
+  std::vector<size_t> exportSizes_;
+  std::vector<int> exportedFds_;
+  hipError_t memsetResult_ = hipSuccess;
+
+  ScopedHook<int64_t(const char*, int64_t)> params_{g_loadParam, [this](const char* env, int64_t deft) -> int64_t {
+    if (std::strcmp(env, "GIN_PROXY_QUEUE_SIZE") == 0) return queueSizeParam_;
+    if (std::strcmp(env, "GIN_PROXY_POLL_BATCH") == 0) return pollBatchParam_;
+    return deft;
+  }};
+  ScopedHook<hipError_t(void*, int, size_t)> memset_{g_hipMemset, [this](void* dst, int value, size_t bytes) {
+    if (memsetResult_ != hipSuccess) return memsetResult_;
+    std::memset(dst, value, bytes);
+    return hipSuccess;
+  }};
+#if HIP_VERSION >= 70000000
+  ScopedHook<hipError_t(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)> export_{
+      g_hipMemGetHandleForAddressRange,
+      [this](void* handle, hipDeviceptr_t, size_t size, hipMemRangeHandleType, unsigned long long) {
+        exportSizes_.push_back(size);
+        hipError_t res = hipSuccess;
+        if (!exportResults_.empty()) {
+          res = exportResults_.front();
+          exportResults_.pop_front();
+        }
+        if (res != hipSuccess) return res;
+        int fd = open("/dev/null", O_RDONLY);
+        exportedFds_.push_back(fd);
+        *static_cast<int*>(handle) = fd;
+        return hipSuccess;
+      }};
+#endif
+
   void SetUp() override {
     FakeRma::Current() = &rma_;
-    g_logs.clear();
     g_mem.Reset();
     g_dmaBufEnable = 0;
-    g_memsetResult = hipSuccess;
-    g_exportResults.clear();
-    g_exportSizes.clear();
-    g_exportedFds.clear();
     ncclGdrCopy = nullptr;
-    g_loadParam = [this](const char* env, int64_t deft) -> int64_t {
-      if (std::strcmp(env, "GIN_PROXY_QUEUE_SIZE") == 0) return queueSizeParam_;
-      if (std::strcmp(env, "GIN_PROXY_POLL_BATCH") == 0) return pollBatchParam_;
-      return deft;
-    };
     comm_->rmaState.rmaProxyState.ncclRma = &rma_.vtable;
     comm_->rmaState.rmaProxyState.rmaVersion = 16;
     ASSERT_EQ(ncclSuccess, ncclGinProxyInit(comm_.get()));
@@ -481,7 +454,6 @@ class GinHostProxyMicrotest : public ::testing::Test {
   void TearDown() override {
     g_mem.Reset();
     ncclGdrCopy = nullptr;
-    g_loadParam = [](const char*, int64_t deft) { return deft; };
     FakeRma::Current() = nullptr;
   }
 
@@ -501,8 +473,8 @@ class GinHostProxyMicrotest : public ::testing::Test {
 
 TEST_F(GinHostProxyMicrotest, Init_WithoutAnRmaBackendFails) {
   comm_->rmaState.rmaProxyState.ncclRma = nullptr;
-  EXPECT_EQ(ncclInvalidArgument, ncclGinProxyInit(comm_.get()));
-  EXPECT_TRUE(Logged("RMA backend not found"));
+  std::string log = CaptureLog([&] { EXPECT_EQ(ncclInvalidArgument, ncclGinProxyInit(comm_.get())); });
+  EXPECT_TRUE(LogHas(log, "RMA backend not found")) << log;
 }
 
 TEST_F(GinHostProxyMicrotest, Init_ForwardsThePluginEntryPointsAndVersion) {
@@ -624,27 +596,27 @@ TEST_F(GinHostProxyRegMrMicrotest, Host_RegistersPlainWithoutDmaBuf) {
   EXPECT_EQ(-1, rma_.regs[0].fd);
   EXPECT_EQ(rma_.regs[0].mhandle, mhandle_);
   EXPECT_EQ(mhandle_, ginHandle_);
-  EXPECT_TRUE(g_exportSizes.empty());
+  EXPECT_TRUE(exportSizes_.empty());
 }
 
 #if HIP_VERSION >= 70000000
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_RegistersThroughAnExportedDmaBufAndClosesIt) {
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
-  ASSERT_EQ(1u, g_exportedFds.size());
-  EXPECT_EQ(std::vector<size_t>{(size_t)sysconf(_SC_PAGESIZE)}, g_exportSizes);  // page-aligned length
+  ASSERT_EQ(1u, exportedFds_.size());
+  EXPECT_EQ(std::vector<size_t>{(size_t)sysconf(_SC_PAGESIZE)}, exportSizes_);  // page-aligned length
   ASSERT_EQ(1u, rma_.regs.size());
-  EXPECT_EQ(g_exportedFds[0], rma_.regs[0].fd);
+  EXPECT_EQ(exportedFds_[0], rma_.regs[0].fd);
   EXPECT_EQ(NCCL_PTR_CUDA, rma_.regs[0].type);
   EXPECT_EQ(7u, rma_.regs[0].mrFlags);
   EXPECT_EQ(mhandle_, ginHandle_);
-  EXPECT_FALSE(FdIsOpen(g_exportedFds[0]));
+  EXPECT_FALSE(FdIsOpen(exportedFds_[0]));
 }
 #endif
 
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_DmaBufDisabledRegistersPlain) {
   g_dmaBufEnable = 0;
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
-  EXPECT_TRUE(g_exportSizes.empty());
+  EXPECT_TRUE(exportSizes_.empty());
   ASSERT_EQ(1u, rma_.regs.size());
   EXPECT_EQ(-1, rma_.regs[0].fd);
 }
@@ -652,16 +624,16 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_DmaBufDisabledRegistersPlain) {
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_PluginWithoutDmaBufSupportRegistersPlain) {
   CollComm()->props.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA;
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
-  EXPECT_TRUE(g_exportSizes.empty());
+  EXPECT_TRUE(exportSizes_.empty());
   ASSERT_EQ(1u, rma_.regs.size());
   EXPECT_EQ(-1, rma_.regs[0].fd);
 }
 
 #if HIP_VERSION >= 70000000
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_ExportFailureFallsBackToPlain) {
-  g_exportResults = {hipErrorNotSupported};
+  exportResults_ = {hipErrorNotSupported};
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
-  EXPECT_EQ(1u, g_exportSizes.size());
+  EXPECT_EQ(1u, exportSizes_.size());
   ASSERT_EQ(1u, rma_.regs.size());
   EXPECT_EQ(-1, rma_.regs[0].fd);
   EXPECT_EQ(mhandle_, ginHandle_);
@@ -671,31 +643,31 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_ExportFailureFallsBackToPlain) {
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_RejectedDmaBufRetriesWithASecondExport) {
   rma_.regMrSymDmaBufResults = {ncclSystemError, ncclSuccess};
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
-  ASSERT_EQ(2u, g_exportedFds.size());
+  ASSERT_EQ(2u, exportedFds_.size());
   ASSERT_EQ(1u, rma_.regs.size());
-  EXPECT_EQ(g_exportedFds[1], rma_.regs[0].fd);
-  EXPECT_FALSE(FdIsOpen(g_exportedFds[0]));
-  EXPECT_FALSE(FdIsOpen(g_exportedFds[1]));
+  EXPECT_EQ(exportedFds_[1], rma_.regs[0].fd);
+  EXPECT_FALSE(FdIsOpen(exportedFds_[0]));
+  EXPECT_FALSE(FdIsOpen(exportedFds_[1]));
 }
 
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_RejectedDmaBufAndFailedReexportFallsBackToPlain) {
   rma_.regMrSymDmaBufResults = {ncclSystemError};
-  g_exportResults = {hipSuccess, hipErrorNotSupported};
+  exportResults_ = {hipSuccess, hipErrorNotSupported};
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
-  EXPECT_EQ(2u, g_exportSizes.size());
+  EXPECT_EQ(2u, exportSizes_.size());
   ASSERT_EQ(1u, rma_.regs.size());
   EXPECT_EQ(-1, rma_.regs[0].fd);
 }
 
-// LATENT BUG (gin_host_proxy.cc:470): when the retry is rejected too, NCCLCHECK returns before the second
-// export's fd is closed.
+// When the retry is rejected too, NCCLCHECK returns before the second export's fd is closed.
+// Pins AICOMRCCL-2991; a fix flips this pin.
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_BothDmaBufRegistrationsRejected_LeaksTheSecondFd) {
   rma_.regMrSymDmaBufResults = {ncclSystemError, ncclRemoteError};
   EXPECT_EQ(ncclRemoteError, Reg(NCCL_PTR_CUDA));
-  ASSERT_EQ(2u, g_exportedFds.size());
-  EXPECT_TRUE(FdIsOpen(g_exportedFds[1]));
+  ASSERT_EQ(2u, exportedFds_.size());
+  EXPECT_TRUE(FdIsOpen(exportedFds_[1]));
   EXPECT_TRUE(rma_.regs.empty());
-  close(g_exportedFds[1]);
+  close(exportedFds_[1]);
 }
 #endif
 
@@ -858,7 +830,7 @@ TEST_F(GinHostProxyContextMicrotest, Create_ZeroesTheSignalBuffer) {
   for (int i = 0; i < 2 * 3; i++) EXPECT_EQ(0u, Ctx()->signalsDev[i]) << i;
   Destroy();
 
-  g_memsetResult = hipErrorInvalidValue;
+  memsetResult_ = hipErrorInvalidValue;
   EXPECT_EQ(ncclUnhandledCudaError, Create(Config(3)));
 }
 
@@ -886,12 +858,12 @@ TEST_F(GinHostProxyContextMicrotest, Create_OlderBackendVersionsUseTheirOwnGpuCo
   EXPECT_EQ(Ctx()->hostGpuCtx[1].lastVisibleGet, v2[1].lastVisibleGet);
 }
 
-// LATENT BUG (gin_host_proxy.cc:499, :604): 0 passes the version check up front, so the failure comes from
-// the GPU-context writer after the RMA context and every buffer exist, and none of them is released.
+// 0 passes the version check up front, so the failure comes from the GPU-context writer after the RMA context
+// and every buffer exist, and none of them is released. Pins AICOMRCCL-2992; a fix flips this pin.
 TEST_F(GinHostProxyContextMicrotest, Create_BackendVersionZero_FailsLateAndLeaksEverything) {
-  EXPECT_EQ(ncclInternalError, Create(Config(0)));
+  std::string log = CaptureLog([&] { EXPECT_EQ(ncclInternalError, Create(Config(0))); });
   EXPECT_EQ(nullptr, ginCtx_);
-  EXPECT_TRUE(Logged("Invalid GIN proxy backend version 0"));
+  EXPECT_TRUE(LogHas(log, "Invalid GIN proxy backend version 0")) << log;
   EXPECT_EQ(2, rma_.createConfig.nContexts);  // the RMA context was created ...
   EXPECT_TRUE(rma_.destroyedContexts.empty());  // ... and never destroyed
   EXPECT_FALSE(g_mem.live.empty());
@@ -914,32 +886,38 @@ TEST_F(GinHostProxyContextMicrotest, Create_WithoutSignalsOrCountersAllocatesNei
 // Where counters live is allocMemCPUAccessible's call; the proxy logs the choice and must hand the GPU
 // the device-side pointer either way.
 TEST_F(GinHostProxyContextMicrotest, Create_GdrCopyChoosesTheCountersMappingTheGpuSees) {
-  ASSERT_EQ(ncclSuccess, Create(Config(3)));
-  EXPECT_TRUE(Logged("will not be using GDRCopy"));
+  RcclUnitTesting::ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
+  ncclResult_t res = ncclInternalError;
+  std::string log = CaptureLog([&] { res = Create(Config(3)); });
+  ASSERT_EQ(ncclSuccess, res);
+  EXPECT_TRUE(LogHas(log, "will not be using GDRCopy")) << log;
   EXPECT_EQ(nullptr, Ctx()->countersGdrHandle);
   EXPECT_EQ(Ctx()->counters, GpuCtx()[0].counters);
   Destroy();
-  g_logs.clear();
   ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
-  ASSERT_EQ(ncclSuccess, Create(Config(3)));
-  EXPECT_FALSE(Logged("GDRCopy"));
+  log = CaptureLog([&] { res = Create(Config(3)); });
+  ASSERT_EQ(ncclSuccess, res);
+  EXPECT_FALSE(LogHas(log, "GDRCopy")) << log;
   EXPECT_NE(nullptr, Ctx()->countersGdrHandle);
   EXPECT_NE(Ctx()->counters, GpuCtx()[0].counters);
   EXPECT_EQ(Ctx()->countersDev, GpuCtx()[0].counters);
 }
 
 TEST_F(GinHostProxyContextMicrotest, Create_QueueSizeMustBeAPowerOfTwoWithinThePluginLimit) {
+  RcclUnitTesting::ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
   EXPECT_EQ(32u, QueueSizeFor(-1));  // default
   EXPECT_EQ(16u, QueueSizeFor(16));
   EXPECT_EQ(1u, QueueSizeFor(1));
   EXPECT_EQ(32u, QueueSizeFor(32));
-  EXPECT_EQ(32u, QueueSizeFor(64));
-  EXPECT_TRUE(Logged("greater than the maximum outstanding requests"));
-  EXPECT_EQ(32u, QueueSizeFor(-5));  // wraps to a huge unsigned value
-  EXPECT_EQ(32u, QueueSizeFor(0));
-  EXPECT_TRUE(Logged("less than 1"));
-  EXPECT_EQ(32u, QueueSizeFor(12));
-  EXPECT_TRUE(Logged("not a power of two"));
+  std::string log = CaptureLog([&] { EXPECT_EQ(32u, QueueSizeFor(64)); });
+  EXPECT_TRUE(LogHas(log, "greater than the maximum outstanding requests")) << log;
+  log = CaptureLog([&] {
+    EXPECT_EQ(32u, QueueSizeFor(-5));  // wraps to a huge unsigned value
+    EXPECT_EQ(32u, QueueSizeFor(0));
+  });
+  EXPECT_TRUE(LogHas(log, "less than 1")) << log;
+  log = CaptureLog([&] { EXPECT_EQ(32u, QueueSizeFor(12)); });
+  EXPECT_TRUE(LogHas(log, "not a power of two")) << log;
 }
 
 TEST_F(GinHostProxyContextMicrotest, Create_QueueLimitScalesWithMaxRecvs) {
@@ -948,8 +926,8 @@ TEST_F(GinHostProxyContextMicrotest, Create_QueueLimitScalesWithMaxRecvs) {
   EXPECT_EQ(64u, QueueSizeFor(64));
 }
 
-// LATENT BUG (gin_host_proxy.cc:528-546): the fallback size is never checked itself, so a plugin with a
-// non-power-of-two maxRecvs gets a queue the index mask (queueSize - 1) cannot wrap.
+// The fallback size is never checked itself, so a plugin with a non-power-of-two maxRecvs gets a queue the
+// index mask (queueSize - 1) cannot wrap. Pins AICOMRCCL-2994; a fix flips this pin.
 TEST_F(GinHostProxyContextMicrotest, Create_NonPowerOfTwoMaxRecvs_KeepsANonPowerOfTwoQueue) {
   CollComm()->props.maxRecvs = 3;
   EXPECT_EQ(96u, QueueSizeFor(-1));
@@ -1000,8 +978,8 @@ TEST_F(GinHostProxyContextMicrotest, Destroy_NullIsANoOp) {
   EXPECT_TRUE(rma_.destroyedContexts.empty());
 }
 
-// LATENT BUG (gin_host_proxy.cc:575, :634-682): destroy releases everything CreateContext allocated except
-// the signal-offsets buffer.
+// Destroy releases everything CreateContext allocated except the signal-offsets buffer.
+// Pins AICOMRCCL-2993; a fix flips this pin.
 TEST_F(GinHostProxyContextMicrotest, Destroy_ReleasesAllButTheSignalOffsets) {
   ASSERT_EQ(ncclSuccess, Create(Config(3)));
   void* signalOffsets = Ctx()->signalOffsetsDev;
@@ -1242,8 +1220,8 @@ TEST_F(GinHostProxyProgressMicrotest, Get_SubmitsAnIget) {
 TEST_F(GinHostProxyProgressMicrotest, Get_PluginWithoutIgetIsAnError) {
   rma_.vtable.iget = nullptr;
   Post(0, 0, Gfd(ncclGinProxyOpGet, 8));
-  EXPECT_EQ(ncclInvalidUsage, Progress());
-  EXPECT_TRUE(Logged("does not support GET"));
+  std::string log = CaptureLog([&] { EXPECT_EQ(ncclInvalidUsage, Progress()); });
+  EXPECT_TRUE(LogHas(log, "does not support GET")) << log;
   EXPECT_TRUE(HasError());
 }
 
@@ -1270,14 +1248,14 @@ TEST_F(GinHostProxyProgressMicrotest, Flush_WithoutARequestCompletesWithoutATest
 TEST_F(GinHostProxyProgressMicrotest, Flush_PluginWithoutIflushIsAnError) {
   rma_.vtable.iflush = nullptr;
   Post(0, 0, Gfd(ncclGinProxyOpFlush));
-  EXPECT_EQ(ncclInvalidUsage, Progress());
-  EXPECT_TRUE(Logged("does not support FLUSH"));
+  std::string log = CaptureLog([&] { EXPECT_EQ(ncclInvalidUsage, Progress()); });
+  EXPECT_TRUE(LogHas(log, "does not support FLUSH")) << log;
 }
 
 TEST_F(GinHostProxyProgressMicrotest, UnknownOpIsAnInternalError) {
   Post(0, 0, Gfd(ncclGinProxyOpWithCounter, 8));
-  EXPECT_EQ(ncclInternalError, Progress());
-  EXPECT_TRUE(Logged("Unexpected GIN proxy operation"));
+  std::string log = CaptureLog([&] { EXPECT_EQ(ncclInternalError, Progress()); });
+  EXPECT_TRUE(LogHas(log, "Unexpected GIN proxy operation")) << log;
   EXPECT_TRUE(HasError());
 }
 
