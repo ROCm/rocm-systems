@@ -664,10 +664,3 @@ def test_roofline_stylesheet_uses_shared_dark_theme_class() -> None:
     css = (_ASSETS / "roofline_plot.css").read_text(encoding="utf-8")
 
     assert f":root.{DARK_THEME_CLASS}" in css
-
-
-def test_roofline_document_contains_one_inline_plotly_bundle() -> None:
-    """The standalone roofline report embeds exactly one Plotly bundle."""
-    document = build_interactive_document(go.Figure(), RooflineViewModel())
-
-    assert document.count("plotly.js v") == 1

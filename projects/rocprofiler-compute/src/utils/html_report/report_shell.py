@@ -6,14 +6,12 @@
 import html
 import json
 import math
-import re
 from pathlib import Path
 from string import Template
 from typing import Dict, Final
 
 DARK_THEME_CLASS: Final[str] = "report-theme-dark"
 _ASSETS_DIR = Path(__file__).parent / "assets"
-_MODEL_ID_PATTERN = re.compile(r"[a-z][a-z0-9-]*\Z")
 
 
 def read_asset(assets_dir: Path, name: str) -> str:
@@ -31,9 +29,6 @@ def build_document(
     model: object,
 ) -> str:
     """Insert a page's trusted fragments into the shared HTML shell."""
-    if _MODEL_ID_PATTERN.fullmatch(model_id) is None:
-        raise ValueError(f"invalid model id: {model_id!r}")
-
     shell = Template(read_asset(_ASSETS_DIR, "report_shell.html"))
     return shell.substitute(
         TITLE=html.escape(title),
