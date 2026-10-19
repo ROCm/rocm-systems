@@ -436,7 +436,11 @@ def create_df_pmc(
     any, and from the rocpd result artifacts otherwise. Bad profiling output
     stops the run instead of producing a partial frame.
     """
-    df, _layout = load_df_pmc(raw_data_dir, verbose)
+    df, _layout = load_df_pmc(
+        raw_data_dir,
+        verbose,
+        preserve_pass_provenance=False,
+    )
     return df
 
 
