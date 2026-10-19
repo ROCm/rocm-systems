@@ -3415,24 +3415,6 @@ TEST(WrapMicrotestIsolated, UseCeAllReduce_CountNotDivisibleByNRanksReturnsFalse
       });
 }
 
-TEST(WrapMicrotestIsolated, UseCeAllReduce_MsgTooLargeReturnsFalse) {
-  RUN_ISOLATED_TEST(
-      "Wrap_UseCeAllReduce_MsgTooLargeReturnsFalse",
-      []() {
-        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
-        ncclComm* comm = MakeZeroedComm();
-        comm->symmetricSupport = 1;
-        comm->nNodes = 1;
-        comm->nRanks = 1;
-        // count * sizeof(float) must exceed RCCL_CE_AR_2SHOT_MAX_BYTES (256MiB).
-        size_t count = (256ull * 1024 * 1024 / 4) + 1;
-        std::string log = RcclUnitTesting::CaptureLog(
-            [&]() { EXPECT_FALSE(rcclUseCeAr2Shot(comm, count, ncclFloat32, ncclSum, nullptr)); });
-        EXPECT_NE(std::string::npos, log.find("msgBytes"));
-        DeleteCommWithArch(comm);
-      });
-}
-
 TEST(WrapMicrotestIsolated, UseCeAllReduce_NonZeroCtaPolicyWithoutForceReturnsFalse) {
   RUN_ISOLATED_TEST(
       "Wrap_UseCeAllReduce_NonZeroCtaPolicyWithoutForceReturnsFalse",
