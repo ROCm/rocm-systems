@@ -38,8 +38,10 @@
  *   Unit_HRR_ProfilerSwap_ToolSlotOutlivesDisable:
  *     A tool wraps one runtime slot and one compiler slot after
  *     hipProfilerEnableExt(). hipProfilerDisableExt() must leave both wrappers
- *     in place, restore every other slot, and not touch the size fields. Enabled
- *     again, the profiler must not call back into the tool's wrappers.
+ *     in place, restore every other slot, and not touch the size fields. Calls
+ *     through the tool's wrappers then reach the profiler's but must add no
+ *     record. Enabled again, the profiler must not call back into the tool's
+ *     wrappers.
  *
  * The live dispatch table is reached through rocprofiler-register, the way a
  * profiler reaches it: hrr_dispatch_tool.cc is loaded as the tool library.
@@ -489,6 +491,15 @@ TEST_CASE("Unit_HRR_ProfilerSwap_Direct", "[.][hrr-direct]") {
   auto disable = reinterpret_cast<DisableFn>(dlsym(RTLD_DEFAULT, "hipProfilerDisableExt"));
   REQUIRE(enable != nullptr);
   REQUIRE(disable != nullptr);
+  using RecordsFn = hipError_t (*)(const void* const**, size_t*, size_t*, size_t*);
+  auto records = reinterpret_cast<RecordsFn>(dlsym(RTLD_DEFAULT, "hipProfilerGetRecordsExt"));
+  REQUIRE(records != nullptr);
+  auto record_count = [records] {
+    const void* const* chunks = nullptr;
+    size_t chunk_count = 0, chunk_size = 0, total = 0;
+    HRR_HIP_CHECK(records(&chunks, &chunk_count, &chunk_size, &total));
+    return total;
+  };
 
   void* dev = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dev, 64));
@@ -520,7 +531,14 @@ TEST_CASE("Unit_HRR_ProfilerSwap_Direct", "[.][hrr-direct]") {
   printf(HRR_PROFILER_MARKER " kept=%d/%d others=%zu/%zu\n", kept_runtime, kept_compiler,
          others_runtime, others_compiler);
   fflush(stdout);
+  // The tool's slots still chain to the profiler's wrappers, which must not
+  // record anything once profiling is off.
+  const size_t recorded_before = record_count();
   REQUIRE(call_through(t, c, dev));
+  const size_t recorded_after_disable = record_count() - recorded_before;
+  printf(HRR_PROFILER_MARKER " recorded_after_disable=%zu\n", recorded_after_disable);
+  fflush(stdout);
+  CHECK(recorded_after_disable == 0);
 
   // Enabled again, the wrappers must call on to what they wrapped first, not to
   // the tool's slots that chain back to them.
@@ -837,6 +855,13 @@ HRR_TEST_CASE(Unit_HRR_ProfilerSwap_ToolSlotOutlivesDisable) {
   CHECK(kept_compiler == 1);
   CHECK(others_runtime == 0);
   CHECK(others_compiler == 0);
+  // Calls through the tool's slots after the disable added no record.
+  const size_t rec_at = out.find(HRR_PROFILER_MARKER " recorded_after_disable=");
+  REQUIRE(rec_at != std::string::npos);
+  size_t recorded_after_disable = 0;
+  REQUIRE(sscanf(out.c_str() + rec_at, HRR_PROFILER_MARKER " recorded_after_disable=%zu",
+                 &recorded_after_disable) == 1);
+  CHECK(recorded_after_disable == 0);
   CHECK(out.find(HRR_PROFILER_MARKER " reenabled") != std::string::npos);
 
   hrr::Archive ar;
