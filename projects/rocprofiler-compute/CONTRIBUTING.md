@@ -164,6 +164,7 @@ Copyright header check..........................................................
 Sets metric ID validation....................................(no files to check)Skipped
 Membw tree spec metric validation............................(no files to check)Skipped
 Hash consistency check...........................................................Passed
+Memory chart layout formatting...............................(no files to check)Skipped
 Analysis config lint (equation format, header/metric keys)...(no files to check)Skipped
 [users/xuchen-amd/analysis_config_lint 88a788cc86] Share global variables across modules
  1 file changed, 1 insertion(+), 1 deletion(-)
