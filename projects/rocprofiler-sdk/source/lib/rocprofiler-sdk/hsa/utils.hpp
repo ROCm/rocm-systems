@@ -118,6 +118,13 @@ struct formatter<hsa_amd_vmem_alloc_handle_t>
 : rocprofiler::hsa::utils::handle_formatter<hsa_amd_vmem_alloc_handle_t>
 {};
 
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x17
+template <>
+struct formatter<hsa_amd_signal_batch_t>
+: rocprofiler::hsa::utils::handle_formatter<hsa_amd_signal_batch_t>
+{};
+#    endif
+
 template <>
 struct formatter<hsa_access_permission_t>
 {
@@ -131,14 +138,24 @@ struct formatter<hsa_access_permission_t>
     auto format(hsa_access_permission_t v, Ctx& ctx) const
     {
         auto label = [v]() -> std::string_view {
-            switch(v)
+            using value_type = std::underlying_type_t<hsa_access_permission_t>;
+
+            // Older HSA headers do not define HSA_ACCESS_PERMISSION_EX (1 << 2).
+            // Use the integer value to support those headers and combined permissions.
+            constexpr value_type execute = 1U << 2;
+
+            switch(static_cast<value_type>(v))
             {
                 case HSA_ACCESS_PERMISSION_NONE: return "NONE";
                 case HSA_ACCESS_PERMISSION_RO: return "READ_ONLY";
                 case HSA_ACCESS_PERMISSION_WO: return "WRITE_ONLY";
                 case HSA_ACCESS_PERMISSION_RW: return "READ_WRITE";
+                case execute: return "EXECUTE";
+                case HSA_ACCESS_PERMISSION_RO | execute: return "READ_EXECUTE";
+                case HSA_ACCESS_PERMISSION_WO | execute: return "WRITE_EXECUTE";
+                case HSA_ACCESS_PERMISSION_RW | execute: return "READ_WRITE_EXECUTE";
+                default: return "UNKNOWN";
             }
-            return "NONE";
         }();
         return fmt::format_to(ctx.out(), "{}", label);
     }

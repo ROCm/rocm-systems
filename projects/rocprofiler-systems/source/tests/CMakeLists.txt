@@ -12,6 +12,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:control-timeline-clock-tests>
     $<TARGET_OBJECTS:control-steady-clock-tests>
     $<TARGET_OBJECTS:control-session-scope-tests>
+    $<TARGET_OBJECTS:control-roctx-trigger-tests>
     $<TARGET_OBJECTS:trace-period-config-tests>
     $<TARGET_OBJECTS:track-registry-tests>
     $<TARGET_OBJECTS:packet-framing-tests>
@@ -19,7 +20,9 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:perfetto-sinks-tests>
     $<TARGET_OBJECTS:emission-handshake-tls-contract-tests>
     $<TARGET_OBJECTS:output-format-tests>
+    $<TARGET_OBJECTS:output-summary-tests>
     $<TARGET_OBJECTS:parse-numeric-range-tests>
+    $<TARGET_OBJECTS:process-environment-tests>
     $<TARGET_OBJECTS:rank-passes-filter-tests>
     $<TARGET_OBJECTS:state-tests>
     $<TARGET_OBJECTS:progress-tests>

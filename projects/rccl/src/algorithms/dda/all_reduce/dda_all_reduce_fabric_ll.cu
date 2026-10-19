@@ -26,6 +26,7 @@
 #include "debug.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 #include "param.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
@@ -37,9 +38,7 @@
 
 RCCL_PARAM_DECLARE(DdaLL);
 RCCL_PARAM_DECLARE(DdaLLOneShotThreshold);
-RCCL_PARAM_DECLARE(DdaLLTwoShotThreshold);
 RCCL_PARAM_DECLARE(DdaLL128OneShotThreshold);
-RCCL_PARAM_DECLARE(DdaLL128TwoShotThreshold);
 
 namespace {
 
@@ -366,7 +365,7 @@ bool ddaLLArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvbuff
       return false;
   }
 
-  if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLLTwoShotThreshold()) {
+  if (count * ncclTypeSize(datatype) > rcclDdaLLTwoShotThreshold(comm)) {
       return false;
   }
 
@@ -471,7 +470,7 @@ bool ddaLL128ArTwoShotEligible(ncclComm* comm, const void* sendbuff, void* recvb
     return false;
   }
 
-  if (count * ncclTypeSize(datatype) > (size_t)rcclParamDdaLL128TwoShotThreshold()) {
+  if (count * ncclTypeSize(datatype) > rcclDdaLL128TwoShotThreshold(comm)) {
     return false;
   }
 
