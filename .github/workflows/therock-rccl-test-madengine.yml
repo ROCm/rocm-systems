@@ -301,13 +301,8 @@ jobs:
           # step above already keeps everything worth keeping out of it -- the
           # perf files, the manifests and the per-node slurm_output -- as an
           # artifact with 30-day retention, and it runs first. What stayed
-          # behind on NFS was the same data a second time, forever.
-          #
-          # Run 38773329260 died in "Create Python environment" with
-          # "[Errno 122] Disk quota exceeded" while /apps still had 7.2 TB
-          # free: it is the runner account's quota, not the filesystem. One
-          # leftover from 12 October held 2.1 GB on its own, almost all of it
-          # a node log repeating a single deprecation warning 777600 times.
+          # behind on NFS was the same data a second time, forever, and the
+          # runner account is quota-bound on /apps.
           rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/conda" \
                  "${WORK_DIR}/env" "${WORK_DIR}/overlay_ctx" \
                  "${WORK_DIR}/docker_builds" "${WORK_DIR}/ab" "${WORK_DIR}/repro"
