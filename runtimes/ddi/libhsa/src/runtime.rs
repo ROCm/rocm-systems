@@ -1347,7 +1347,9 @@ pub(crate) fn map_error(error: rocddi::Error) -> Status {
     match error.kind() {
         rocddi::ErrorKind::InvalidArgument => INVALID_ARGUMENT,
         rocddi::ErrorKind::ResourceExhausted => OUT_OF_RESOURCES,
-        rocddi::ErrorKind::Busy => INVALID_QUEUE,
+        // Busy describes a live native dependency. Only queue-handle
+        // validation in the queue adapter may return INVALID_QUEUE.
+        rocddi::ErrorKind::Busy => RESOURCE_BUSY,
         _ => ERROR,
     }
 }
@@ -1367,6 +1369,16 @@ mod tests {
     use rocddi::device::gpu::profiling::ClockCounters;
     use std::ffi::c_void;
     use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering as AtomicOrdering};
+
+    #[test]
+    fn native_busy_reports_resource_contention_across_frontends() {
+        let busy = || rocddi::Error::Operation {
+            kind: rocddi::ErrorKind::Busy,
+            detail: "injected live native dependency",
+        };
+        assert_eq!(map_error(busy()), RESOURCE_BUSY);
+        assert_ne!(map_error(busy()), INVALID_QUEUE);
+    }
 
     #[test]
     #[allow(clippy::unwrap_used)]
