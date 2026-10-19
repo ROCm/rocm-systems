@@ -7,6 +7,7 @@
  ************************************************************************/
 
 #include "tdm/tdmCopy.h"
+#include "ll128Layout.h"
 
 #define NCCL_LL128_FLAGTHREAD (NCCL_LL128_LINEELEMS - 1)
 
@@ -262,12 +263,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     // LINEELEMS/2 for the 64-byte-line case; gfx1250 doubles LINEELEMS
     // (128-byte non-tearing line) so the stride and flag-subgroup width
     // both double accordingly.
-    constexpr int LineElems = NCCL_LL128_LINEELEMS;
-    constexpr int LineSkip = 2 * WARP_SIZE / LineElems;
     int ix[WordPerThread / 2];
 #pragma unroll
     for (int g = 0; g < WordPerThread / 2; g++) {
-      ix[g] = g * WARP_SIZE - LineSkip * (g / 2) + wid - (g % 2) * (wid / (LineElems / 2));
+      ix[g] = ll128SlotIx<NCCL_LL128_LINEELEMS, WARP_SIZE>(g, wid);
     }
     if (reinterpret_cast<uintptr_t>(src) % 16 == 0) {
       /* We are aligned to 16 bytes, so load directly to registers no shmem.
@@ -337,11 +336,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     // Write to dst if 4-byte aligned, shmem otherwise.
     int misalignment = reinterpret_cast<uintptr_t>(dst) % 16;
     uint64_t* shm8 = shmemCvtPtr((uint64_t*)ncclScratchForWarp(warpInBlock));
-    constexpr int LineElems = NCCL_LL128_LINEELEMS;
-    constexpr int LineSkip = 2 * WARP_SIZE / LineElems;
 #pragma unroll
     for (int g = 0; g < WordPerThread / 2; g++) {
-      int ix = g * WARP_SIZE - LineSkip * (g / 2) + wid - (g % 2) * (wid / (LineElems / 2));
+      int ix = ll128SlotIx<NCCL_LL128_LINEELEMS, WARP_SIZE>(g, wid);
       if (!flagThread || g % 2 == 0) {
         if (misalignment == 0 && (ix + 1) * EltPer16B <= eltN) {
           storeUser128((uint64_t*)(dst + ix * EltPer16B), regs[2 * g + 0], regs[2 * g + 1]);

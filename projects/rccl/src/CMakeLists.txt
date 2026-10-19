@@ -63,6 +63,7 @@ set(SRC_FILES
   device/hierarchical_shuffle.h
   device/network/unpack/unpack.h
   device/network/unpack/unpack_defs.h
+  device/ll128Layout.h
   device/onerank.cu
   device/op128.h
   device/primitives.h

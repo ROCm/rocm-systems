@@ -19,9 +19,7 @@ static constexpr CachePolicy TdmStoreDevPolicy = createCachePolicy(TemporalHint:
 static constexpr CachePolicy TdmStoreSysPolicy = createCachePolicy(TemporalHint::RT, MemScope::SYS);
 
 __device__ __forceinline__ int tdmSlotIx(int g) const {
-  constexpr int LineElems = NCCL_LL128_LINEELEMS;
-  constexpr int LineSkip = 2 * WARP_SIZE / LineElems;
-  return g * WARP_SIZE - LineSkip * (g / 2) + wid - (g % 2) * (wid / (LineElems / 2));
+  return ll128SlotIx<NCCL_LL128_LINEELEMS, WARP_SIZE>(g, wid);
 }
 
 __device__ __forceinline__ uint8_t* tdmWindow() const {
