@@ -169,9 +169,9 @@ static void FillCpuSetFromNumaNodes(cpu_set_t* cpuset, int cores, unsigned long 
   int max_node = numa_max_node();
   int num_cpus = numa_num_possible_cpus();
 
-   struct bitmask* node_cpus = numa_allocate_cpumask();
+  struct bitmask* node_cpus = numa_allocate_cpumask();
 
-    if (node_cpus == nullptr) {
+  if (node_cpus == nullptr) {
     // Allocation failed - allow all CPU cores as fallback
     for (int i = 0; i < cores; i++) {
       CPU_SET_S(i, CPU_ALLOC_SIZE(cores), cpuset);
@@ -179,6 +179,7 @@ static void FillCpuSetFromNumaNodes(cpu_set_t* cpuset, int cores, unsigned long 
     return;
   }
 
+  bool added_cpu = false;
   for (int node = 0; node <= max_node; node++) {
     // Safety check: ensure we don't shift beyond the width of unsigned long
     if (node >= static_cast<int>(sizeof(unsigned long) * 8)) {
@@ -200,11 +201,20 @@ static void FillCpuSetFromNumaNodes(cpu_set_t* cpuset, int cores, unsigned long 
     for (int cpu = 0; cpu < num_cpus && cpu < cores; cpu++) {
       if (numa_bitmask_isbitset(node_cpus, cpu)) {
         CPU_SET_S(cpu, CPU_ALLOC_SIZE(cores), cpuset);
+        added_cpu = true;
       }
     }
   }
 
   numa_free_cpumask(node_cpus);
+
+  // An empty affinity mask makes pthread_setaffinity_np fail and the helper
+  // thread is never created. Preserve the previous all-CPU behavior instead.
+  if (!added_cpu) {
+    for (int i = 0; i < cores; i++) {
+      CPU_SET_S(i, CPU_ALLOC_SIZE(cores), cpuset);
+    }
+  }
 }
 #endif  // HAS_NUMA
 
@@ -299,27 +309,14 @@ class os_thread {
     } while (stackSize < 20 * 1024 * 1024);
 
 #ifndef HAVE_PTHREAD_ATTR_SETAFFINITY_NP
-    if (cores) {
-      // We need to recreate the cpuset since it was freed above
-      cpuset = CPU_ALLOC(cores);
-      if (cpuset != nullptr) {
-#if HAS_NUMA
-        unsigned long allowed_node_mask = GetAllowedNumaNodeMask();
-        FillCpuSetFromNumaNodes(cpuset, cores, allowed_node_mask);
-#else
-        // NUMA not available - allow all CPU cores
-        for (int i = 0; i < cores; i++) {
-          CPU_SET_S(i, CPU_ALLOC_SIZE(cores), cpuset);
-        }
-#endif
-
-        err = pthread_setaffinity_np(thread, CPU_ALLOC_SIZE(cores), cpuset);
-        CPU_FREE(cpuset);
-        if (err != 0) {
-          fprintf(stderr, "pthread_setaffinity_np failed: %s\n", strerror(err));
-          thread = 0;
-          return;
-        }
+    // Reuse the already-filled cpuset from above (no need to reallocate)
+    if (cores && cpuset) {
+      err = pthread_setaffinity_np(thread, CPU_ALLOC_SIZE(cores), cpuset);
+      CPU_FREE(cpuset);
+      if (err != 0) {
+        fprintf(stderr, "pthread_setaffinity_np failed: %s\n", strerror(err));
+        thread = 0;
+        return;
       }
     }
 #endif

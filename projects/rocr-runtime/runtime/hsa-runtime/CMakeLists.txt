@@ -118,25 +118,57 @@ if(UNIX)
         set(NUMA_FOUND TRUE)
         message(STATUS "Found NUMA via pkg-config (SHARED): ${NUMA_LIBRARY_FILE}")
       else()
-        # Fallback to INTERFACE target if we only have link flags
+        # Fallback to INTERFACE target if we only have link flags.
+        # Prefix with -l so CMake treats these as link flags; a bare "numa"
+        # item resolves back to this target and is silently dropped.
+        set(_numa_link_items "")
+        foreach(_numa_lib IN LISTS NUMA_PC_LIBRARIES)
+          list(APPEND _numa_link_items "-l${_numa_lib}")
+        endforeach()
         add_library(numa INTERFACE IMPORTED GLOBAL)
         set_target_properties(numa PROPERTIES
           INTERFACE_INCLUDE_DIRECTORIES "${NUMA_PC_INCLUDE_DIRS}"
-          INTERFACE_LINK_LIBRARIES "${NUMA_PC_LIBRARIES}"
+          INTERFACE_LINK_LIBRARIES "${_numa_link_items}"
           INTERFACE_LINK_DIRECTORIES "${NUMA_PC_LIBRARY_DIRS}"
         )
+        unset(_numa_link_items)
         set(NUMA_FOUND TRUE)
         message(STATUS "Found NUMA via pkg-config (INTERFACE): ${NUMA_PC_LIBRARIES}")
       endif()
     endif()
   endif()
 
-  # Try CMake package config
+  # Try CMake package config. ROCm ships this as numa::numa, while the
+  # link lines below use the target name numa.
   if(NOT NUMA_FOUND)
-    find_package(NUMA QUIET)
-    if(NUMA_FOUND)
-      message(STATUS "Found NUMA via CMake package")
+    set(_numa_hints)
+    if(DEFINED ROCM_PATH)
+      list(APPEND _numa_hints "${ROCM_PATH}/lib/rocm_sysdeps")
     endif()
+    if(DEFINED ENV{ROCM_PATH})
+      list(APPEND _numa_hints "$ENV{ROCM_PATH}/lib/rocm_sysdeps")
+    endif()
+    find_package(NUMA QUIET HINTS ${_numa_hints})
+    if(TARGET numa::numa)
+      set(_numa_package_target numa::numa)
+    elseif(TARGET NUMA::NUMA)
+      set(_numa_package_target NUMA::NUMA)
+    else()
+      set(_numa_package_target "")
+    endif()
+
+    if(_numa_package_target)
+      if(NOT TARGET numa)
+        add_library(numa INTERFACE IMPORTED GLOBAL)
+        target_link_libraries(numa INTERFACE ${_numa_package_target})
+      endif()
+      set(NUMA_FOUND TRUE)
+      message(STATUS "Found NUMA via CMake package: ${_numa_package_target}")
+    else()
+      set(NUMA_FOUND FALSE)
+    endif()
+    unset(_numa_package_target)
+    unset(_numa_hints)
   endif()
 
   # Manual detection as fallback
@@ -155,7 +187,8 @@ if(UNIX)
   endif()
 
   if(NOT NUMA_FOUND)
-    message(FATAL_ERROR "NUMA library not found. This is required for Linux builds.")
+    message(WARNING "NUMA library not found; helper threads will use all CPUs. "
+                    "Install libnuma-dev for NUMA-aware CPU affinity (perf optimization).")
   endif()
 endif()
 
@@ -456,7 +489,6 @@ if (UNIX)
   else()
     target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE elf::elf dl pthread rt )
   endif()
-
 else()
   target_link_libraries ( ${CORE_RUNTIME_TARGET} PRIVATE Ws2_32 )
   target_link_directories(${CORE_RUNTIME_TARGET} PRIVATE ${DXCORE_LIB_PATH})
