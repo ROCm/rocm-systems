@@ -31,7 +31,7 @@ defaults:
 
 jobs:
   codeql:
-    name: CodeQL C/C++ (report-only)
+    name: CodeQL C/C++
     if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
     runs-on:
       - self-hosted
@@ -110,6 +110,19 @@ jobs:
         with:
           sarif_file: sarif-results/cpp.sarif
           category: '/workflow:amdsmi-codeql/language:cpp'
+
+      - name: Fail on CodeQL findings
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("sarif-results/cpp.sarif").read_text())
+          findings = sum(len(run.get("results", [])) for run in report["runs"])
+          if findings:
+              print(f"::error::CodeQL reported {findings} finding(s)")
+              raise SystemExit(1)
+          PY
 
       - name: Publish CodeQL report
         if: always()
