@@ -7,16 +7,17 @@
 Recording and replaying HIP workloads
 **********************************************************
 
-HIP Record & Replay (HRR) records the HIP API calls an application makes, together
-with the host buffers and code objects it needs, into an archive that can be
-replayed on a GPU later. The replay does not need the original application, its
+HIP Record & Replay (HRR) records the HIP API calls an application makes into an
+archive. In content mode it also records the host buffers and code objects they
+need, and the archive can then be replayed on a GPU later. The replay does not need the original application, its
 source, or its input data, which makes an archive a practical way to hand a
 failing workload to somebody else.
 
 HRR has two halves:
 
-* **Capture** is part of the HIP runtime library. It is off unless you ask for it,
-  and is turned on with a single environment variable.
+* **Capture** is part of the HIP runtime library. It is off unless you ask for it:
+  one environment variable turns it on, and a second one records the contents
+  replay needs.
 * **Replay** is a separate developer tool, ``hrr-playback``, installed into the
   ROCm binary directory by a ROCm build that includes the HRR project.
 
@@ -71,14 +72,18 @@ application as usual:
   HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr HIP_HRR_CAPTURE_CONTENT=1 ./my_hip_app
 
 Capture is off whenever ``HIP_HRR_CAPTURE_OUTPUT`` is unset, so nothing changes
-for an ordinary run. Without ``HIP_HRR_CAPTURE_CONTENT`` the capture is
+for an ordinary run. The notice the capture prints on stderr names the mode it
+runs in.
+
+Without ``HIP_HRR_CAPTURE_CONTENT`` the capture is
 metadata-only: the archive holds the call sequence, handles and sizes, but no
 host buffer, no by-value kernel argument (a struct argument is withheld whole,
 device pointers inside it included) and no code object. ``--info`` reads
 such an archive as usual; a replay stops at the first call that needs the
-missing contents and says that content mode would have recorded them. The
-notice the capture prints on stderr names the mode it runs in. The archive is a directory, not a single file, and it holds one
-``pid-<pid>/`` subdirectory per recorded process:
+missing contents and says that content mode would have recorded them.
+
+The archive is a directory, not a single file, and it holds one ``pid-<pid>/``
+subdirectory per recorded process:
 
 .. code-block:: text
 
@@ -87,18 +92,18 @@ notice the capture prints on stderr names the mode it runs in. The archive is a 
     pid-<pid>/
       manifest.json     what this process recorded, and whether it ended cleanly
       events.bin        the recorded call sequence
-      blobs/            host buffers, addressed by content hash (content mode only)
-      code_objects/     the GPU code the run used (content mode only)
+      blobs/            host buffers, addressed by content hash (empty without content mode)
+      code_objects/     the GPU code the run used (empty without content mode)
       regions/          optional, and written by tooling outside the runtime:
                         memory a framework allocated without going through HIP
 
-Expect the result to be large. It contains the buffers the workload moved, so a
-short run of a big model produces gigabytes.
+In content mode, expect the result to be large. It contains the buffers the
+workload moved, so a short run of a big model produces gigabytes.
 
 .. warning::
 
-  The archive holds the recorded buffers verbatim, so anything the workload had
-  in host memory is readable in it. Treat an archive as you would treat the input
+  A content-mode archive holds the recorded buffers verbatim, so anything the
+  workload had in host memory is readable in it. Treat an archive as you would treat the input
   data of the run it came from.
 
 Your first replay
