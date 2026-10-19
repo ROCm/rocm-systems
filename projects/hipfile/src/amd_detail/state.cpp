@@ -246,6 +246,14 @@ DriverState::decrRefCount()
         batch_map->clear();
         buffer_map->clear();
         file_map->clear();
+        for (auto &backend : getBackends()) {
+            try {
+                backend->driver_state_teardown();
+            }
+            catch (...) {
+                // Ignore exceptions during teardown
+            }
+        }
     }
 
     // Negative reference count, should never get here
