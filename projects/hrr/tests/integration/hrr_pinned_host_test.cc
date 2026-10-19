@@ -53,14 +53,25 @@ __global__ void hrr_pinned_triple_struct(int* out, PinnedIn s) {
 
 __global__ void hrr_pinned_ignore(uint64_t) {}
 
-static void hrr_pinned_workload(int* in, bool by_struct = false) {
+// by_module launches through hipModuleLaunchKernel with an extra[] buffer, the
+// path where capture finds the arguments by the kernel's offsets.
+static void hrr_pinned_workload(int* in, bool by_struct = false, bool by_module = false) {
   int* dev_in = nullptr;
   HRR_HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&dev_in), in, 0));
   int* dout = nullptr;
   HRR_HIP_CHECK(hipMalloc(&dout, kPinnedN * sizeof(int)));
   std::vector<int> hout(kPinnedN);
+  hipFunction_t f = nullptr;
+  if (by_module)
+    HRR_HIP_CHECK(hipGetFuncBySymbol(&f, reinterpret_cast<const void*>(hrr_pinned_triple)));
   auto launch = [&](hipStream_t s) {
-    if (by_struct)
+    if (by_module) {
+      struct { int* out; const int* in; int n; } a{dout, dev_in, kPinnedN};
+      size_t sz = sizeof(a);
+      void* extra[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &a, HIP_LAUNCH_PARAM_BUFFER_SIZE, &sz,
+                       HIP_LAUNCH_PARAM_END};
+      HRR_HIP_CHECK(hipModuleLaunchKernel(f, 1, 1, 1, kPinnedN, 1, 1, 0, s, nullptr, extra));
+    } else if (by_struct)
       hipLaunchKernelGGL(hrr_pinned_triple_struct, dim3(1), dim3(kPinnedN), 0, s,
                          dout, PinnedIn{dev_in, kPinnedN});
     else
@@ -150,6 +161,26 @@ TEST_CASE("Unit_HRR_PinnedHostStruct_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(in));
 }
 
+TEST_CASE("Unit_HRR_PinnedHostModule_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* in = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&in), kPinnedN * sizeof(int), 0));
+  hrr_pinned_workload(in, false, true);
+  HRR_HIP_CHECK(hipHostFree(in));
+}
+
+// The deprecated hipMallocHost and hipFreeHost, which replay still replays.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+TEST_CASE("Unit_HRR_PinnedMallocHost_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* in = nullptr;
+  HRR_HIP_CHECK(hipMallocHost(reinterpret_cast<void**>(&in), kPinnedN * sizeof(int)));
+  hrr_pinned_workload(in);
+  HRR_HIP_CHECK(hipFreeHost(in));
+}
+#pragma clang diagnostic pop
+
 // A 2 MiB allocation: over HIP_HRR_HOST_SNAPSHOT_MAX_MB=1, within 2.
 TEST_CASE("Unit_HRR_PinnedHostLarge_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -159,18 +190,30 @@ TEST_CASE("Unit_HRR_PinnedHostLarge_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(in));
 }
 
-// A freed allocation's address passed on as a plain number: capture must not
-// snapshot memory that is gone.
+// A released allocation's address passed on as a plain number, once for each
+// way to release it: capture must not snapshot memory that is no longer pinned.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 TEST_CASE("Unit_HRR_PinnedHostFreed_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
-  void* p = nullptr;
-  HRR_HIP_CHECK(hipHostMalloc(&p, kPinnedN * sizeof(int), 0));
-  HRR_HIP_CHECK(hipHostFree(p));
-  hipLaunchKernelGGL(hrr_pinned_ignore, dim3(1), dim3(1), 0, nullptr,
-                     reinterpret_cast<uint64_t>(p));
-  HRR_HIP_CHECK(hipGetLastError());
+  std::vector<int> reg(kPinnedN);
+  for (int how = 0; how < 4; ++how) {
+    void* p = reg.data();
+    if (how == 3)
+      HRR_HIP_CHECK(hipHostRegister(p, kPinnedN * sizeof(int), hipHostRegisterDefault));
+    else
+      HRR_HIP_CHECK(hipHostMalloc(&p, kPinnedN * sizeof(int), 0));
+    if (how == 0) HRR_HIP_CHECK(hipHostFree(p));
+    if (how == 1) HRR_HIP_CHECK(hipFree(p));
+    if (how == 2) HRR_HIP_CHECK(hipFreeHost(p));
+    if (how == 3) HRR_HIP_CHECK(hipHostUnregister(p));
+    hipLaunchKernelGGL(hrr_pinned_ignore, dim3(1), dim3(1), 0, nullptr,
+                       reinterpret_cast<uint64_t>(p));
+    HRR_HIP_CHECK(hipGetLastError());
+  }
   HRR_HIP_CHECK(hipDeviceSynchronize());
 }
+#pragma clang diagnostic pop
 
 TEST_CASE("Unit_HRR_PinnedHostRegister_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
@@ -255,6 +298,8 @@ TEST_CASE("Unit_HRR_PinnedHostFork_Direct", "[.][hrr-direct]") {
 // is nothing to write back and the checks fail.
 HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
   for (const char* direct : {"Unit_HRR_PinnedHostMalloc_Direct",
+                             "Unit_HRR_PinnedMallocHost_Direct",
+                             "Unit_HRR_PinnedHostModule_Direct",
                              "Unit_HRR_PinnedHostRegister_Direct",
                              "Unit_HRR_PinnedHostStruct_Direct",
 #ifndef _WIN32
@@ -347,8 +392,9 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostBlobRefused) {
   CHECK(out.find("[HRR launch]") == std::string::npos);
 }
 
-// Capture stops tracking an allocation when it is freed: had it snapshotted the
-// stale address, replay would refuse the record for an allocation it freed.
+// Capture stops tracking an allocation on hipHostFree, hipFree, hipFreeHost and
+// hipHostUnregister: had it snapshotted the stale address, replay would refuse
+// the record for an allocation it released.
 HRR_TEST_CASE(Unit_HRR_PinnedHostFreedRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_freed"};
   hrr_capture_direct("Unit_HRR_PinnedHostFreed_Direct", cap.path, 3);

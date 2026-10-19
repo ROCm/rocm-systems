@@ -181,8 +181,9 @@ static bool parse_kernel_extra(void** extra, const void*& out_buf, size_t& out_s
 // hipHostRegister). Each allocation hit is written whole as a
 // blob, and named by a record in the launch event unless its hash and stream
 // equal those of the last record for it. Replay copies the blob back when the
-// stream reaches the launch.
-// See DESIGN.md, "Pinned host snapshots".
+// stream reaches the launch. The copy is taken at enqueue, without waiting for
+// the stream: bytes that queued GPU work has yet to write are restored as they
+// were before it. See DESIGN.md, "Pinned host snapshots".
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -1770,12 +1771,13 @@ hipError_t capture_hipHostUnregister(void* hostPtr) {
   return r;
 }
 
-// hipHostMalloc and the frees are recorded by generated shims. These wrappers
-// sit in front of them in g_cap_table and keep g_pinned current; hipFree can
-// release pinned memory too. The other pinned allocators are not tracked:
-// replay makes no buffer for them.
+// hipHostMalloc, hipMallocHost and the frees are recorded by generated shims.
+// These wrappers sit in front of them in g_cap_table and keep g_pinned current;
+// hipFree can release pinned memory too. hipHostAlloc and hipMemAllocHost are
+// not tracked: replay makes no buffer for them.
 namespace {
 decltype(HipDispatchTable::hipHostMalloc_fn) g_next_hipHostMalloc = nullptr;
+decltype(HipDispatchTable::hipMallocHost_fn) g_next_hipMallocHost = nullptr;
 decltype(HipDispatchTable::hipHostFree_fn)   g_next_hipHostFree   = nullptr;
 decltype(HipDispatchTable::hipFreeHost_fn)   g_next_hipFreeHost   = nullptr;
 decltype(HipDispatchTable::hipFree_fn)       g_next_hipFree       = nullptr;
@@ -1783,6 +1785,11 @@ decltype(HipDispatchTable::hipFree_fn)       g_next_hipFree       = nullptr;
 
 static hipError_t pinned_hipHostMalloc(void** ptr, size_t size, unsigned int flags) {
   hipError_t r = g_next_hipHostMalloc(ptr, size, flags);
+  if (r == hipSuccess && ptr) pinned_track(*ptr, size);
+  return r;
+}
+static hipError_t pinned_hipMallocHost(void** ptr, size_t size) {
+  hipError_t r = g_next_hipMallocHost(ptr, size);
   if (r == hipSuccess && ptr) pinned_track(*ptr, size);
   return r;
 }
@@ -1798,6 +1805,7 @@ static void pinned_wrap_table() {
   g_next_##api = g_cap_table.api##_fn; \
   g_cap_table.api##_fn = pinned_##api;
   HRR_PINNED_WRAP(hipHostMalloc)
+  HRR_PINNED_WRAP(hipMallocHost)
   HRR_PINNED_WRAP(hipHostFree)
   HRR_PINNED_WRAP(hipFreeHost)
   HRR_PINNED_WRAP(hipFree)

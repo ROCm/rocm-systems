@@ -218,6 +218,7 @@ cases:
   Unit_HRR_PinnedHostFreed_Direct: {}
   Unit_HRR_PinnedHostLarge_Direct: {}
   Unit_HRR_PinnedHostMalloc_Direct: {}
+  Unit_HRR_PinnedHostModule_Direct: {}
   Unit_HRR_PinnedHostRegister_Direct: {}
   Unit_HRR_PinnedHostRoundtrip: {}
   Unit_HRR_PinnedHostSnapshotCap: {}
@@ -225,6 +226,7 @@ cases:
   Unit_HRR_PinnedHostStreams_Direct: {}
   Unit_HRR_PinnedHostStructLowBits_Direct: {}
   Unit_HRR_PinnedHostStruct_Direct: {}
+  Unit_HRR_PinnedMallocHost_Direct: {}
   Unit_HRR_PitchedD2HBlobEdits: {}
   Unit_HRR_PitchedD2HGapRoundtrip: {}
   Unit_HRR_PitchedD2HGap_Direct: {}

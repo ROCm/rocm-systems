@@ -544,7 +544,7 @@ At playback:
 
 A kernel can read pinned host memory that the host filled with plain stores, which no HIP
 call records; replay would run it on whatever its fresh buffer holds. Capture tracks the
-ranges of `hipHostMalloc` and `hipHostRegister` (dropped on `hipHostFree`, `hipFreeHost`,
+ranges of `hipHostMalloc`, `hipMallocHost` and `hipHostRegister` (dropped on `hipHostFree`, `hipFreeHost`,
 `hipFree` and `hipHostUnregister`). Before each launch it reads the 8-byte-aligned words of
 the arguments, by-value structs included; for each tracked allocation a word points into,
 it copies the whole allocation under the tracking lock, writes the copy as a blob and adds a
@@ -561,16 +561,21 @@ restored, refused and skipped counts.
 
 Kept deliberately simple:
 
-- Capture does not wait for the stream: the bytes are those at enqueue time, which is what
-  the kernel reads unless earlier queued work still changes them. If that work is writing
-  the allocation during the copy, replay restores the partial bytes over its output.
+- Capture does not wait for the stream: the bytes are those at enqueue time, the host's
+  stores up to the launch. Queued work that writes the allocation (a kernel, an async copy
+  into it) and has not finished by then is not in them, and replay, which restores right
+  before the kernel, puts the older bytes back over its output. A kernel reading device
+  writes to pinned memory that the host did not wait for replays wrong. Waiting for the
+  stream would deadlock a stream that waits on work the host submits later, and a
+  stream-ordered copy would stall the stream on every such launch and put a host node in
+  the application's graphs.
 - `HIP_HRR_HOST_SNAPSHOTS=0` turns snapshots off; an allocation larger than
   `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64) is not snapshotted and is listed under
   `unreplayable_apis`.
 - Replay restores nothing for a launch replayed into a capturing stream, and capture does
   not snapshot at graph launch. A record for a launch into a capturing stream does not
   become the allocation's last, so the next launch outside the capture records again.
-- `hipHostAlloc`, `hipMallocHost` and `hipMemAllocHost` are not tracked, since replay makes
+- `hipHostAlloc` and `hipMemAllocHost` are not tracked, since replay makes
   no buffer for them, nor is a `hipHostRegister` device alias that differs from the host
   address.
 - An unchanged allocation gets no record, so device writes into it between two launches
