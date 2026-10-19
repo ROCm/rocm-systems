@@ -48,6 +48,16 @@ Environment Variables:
         default=5,
         help="Base delay in seconds between retries (default: 5).",
     )
+    parser.add_argument(
+        "--gpu-tests",
+        action="store_true",
+        help="Run GPU-based integration tests (default when no flag is given).",
+    )
+    parser.add_argument(
+        "--cpu-tests",
+        action="store_true",
+        help="Run CPU-based unit tests; combine with --gpu-tests to run both.",
+    )
 
     return parser.parse_args()
 
@@ -165,10 +175,8 @@ def get_default_paths(rocm_root: Path) -> Tuple[Path, Path, Optional[Path]]:
         logger.error(f"[X] Error: Test script not found: {test_script}")
         sys.exit(1)
 
-    # Unit test binary is optional.
+    # Unit test binary is optional; main() reports it when missing.
     if not unit_test_bin.exists():
-        logger.warning(f"[!] Warning: Unit test binary not found: {unit_test_bin}")
-        logger.warning("Skipping unit tests.")
         unit_test_bin = None
 
     return test_bin, test_script, unit_test_bin
@@ -406,7 +414,7 @@ def main() -> None:
     if unit_test_bin:
         logger.info(f"Unit Test Binary: {unit_test_bin}")
     else:
-        logger.info("Unit Test Binary: Not found (will skip)")
+        logger.info("Unit Test Binary: Not found")
 
     env_vars = setup_environment(rocm_root, try_rocm_path=args.try_rocm_path)
 
@@ -415,20 +423,37 @@ def main() -> None:
     # Set core dump limit to 0 (ulimit -c 0).
     set_core_dump_limit()
 
-    # Run integration tests.
-    run_tests(
-        test_script=test_script,
-        test_bin_dir=test_bin_dir,
-        env_vars=env_vars,
-        max_retries=args.max_retries,
-        retry_delay=args.retry_delay,
-    )
+    # Determine which tests to run based on flags.
+    # Default (neither flag): run integration tests only, as before unit
+    #   tests were added, so existing callers are unaffected.
+    # --gpu-tests only: run integration tests
+    # --cpu-tests only: run unit tests
+    # Both flags: run both
+    run_gpu = args.gpu_tests or not args.cpu_tests
+    run_unit = args.cpu_tests
 
-    # Run unit tests if the binary exists.
-    if unit_test_bin:
+    # Run integration tests if requested.
+    if run_gpu:
+        run_tests(
+            test_script=test_script,
+            test_bin_dir=test_bin_dir,
+            env_vars=env_vars,
+            max_retries=args.max_retries,
+            retry_delay=args.retry_delay,
+        )
+    else:
+        logger.info("Skipping GPU-based integration tests (--cpu-tests only)")
+
+    # Run unit tests only when requested.
+    if run_unit:
+        if unit_test_bin is None:
+            logger.error(
+                "[X] Error: --cpu-tests requested but unit test binary not found."
+            )
+            sys.exit(1)
         run_unit_tests(unit_test_bin=unit_test_bin, env_vars=env_vars)
     else:
-        logger.info("Skipping unit tests (binary not found)")
+        logger.info("Skipping unit tests (use --cpu-tests to run them)")
 
 
 if __name__ == "__main__":
