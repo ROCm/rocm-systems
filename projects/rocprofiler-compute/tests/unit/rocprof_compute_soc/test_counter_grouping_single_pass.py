@@ -225,12 +225,8 @@ def test_allocator_integrates_slot_limit_fill(monkeypatch):
     """Multi-pass metric fill follows the single-pass metric layout."""
     slot = frozenset({"SQ_C", "SQ_D", "SQ_E", "SQ_F"})
     monkeypatch.setattr(
-        "rocprof_compute_soc.counter_grouping_single_pass.collect_unique_single_pass_metric_sets",
-        lambda soc, counters, cfg: ([], 0),
-    )
-    monkeypatch.setattr(
-        "rocprof_compute_soc.counter_grouping_single_pass.collect_unique_multi_pass_metric_sets",
-        lambda soc, counters, cfg: ([slot], 1),
+        "rocprof_compute_soc.counter_grouping_single_pass._partition_unique_metric_sets",
+        lambda soc, counters, cfg: ([], 0, [slot], 1),
     )
     # Leave multi-pass metric PMCs unplaced so fill must open buckets (gfx942 often +0).
     monkeypatch.setattr(
