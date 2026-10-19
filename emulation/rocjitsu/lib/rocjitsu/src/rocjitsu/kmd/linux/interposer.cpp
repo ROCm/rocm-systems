@@ -5019,7 +5019,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     // The AMDGPU command range starts at DRM_COMMAND_BASE, while generic DRM
     // requests occupy ranges on both sides of it (timeline syncobj requests, for
     // example, start at 0xbf). Only label requests in the range defined by this
-    // vendored AMDGPU UAPI as driver-relative commands.
+    // shared AMDGPU UAPI as driver-relative commands.
     if (nr >= DRM_COMMAND_BASE && nr < DRM_COMMAND_END) {
       util::Logger::warn("DRM ioctl rejected: nr=0x", std::hex, nr, " (AMDGPU cmd 0x",
                          nr - DRM_COMMAND_BASE, std::dec, ") fd=", fd);

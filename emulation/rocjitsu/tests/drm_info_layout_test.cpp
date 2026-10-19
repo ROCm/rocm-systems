@@ -3,7 +3,7 @@
 
 /// @file drm_info_layout_test.cpp
 /// @brief Verifies the drm_amdgpu_info_device layout relied on by the
-///        interposer against rocJITsu's vendored DRM UAPI definition.
+///        interposer against the shared DRM UAPI header in runtimes/api-headers.
 
 #include <gtest/gtest.h>
 
