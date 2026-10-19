@@ -39,6 +39,11 @@ rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/init_fakes.cc"
   "int64_t ncclParamP2pLL128Enable() { return g_loadParam(\"P2P_LL128_ENABLE\", -1); }"
   "the P2pLL128Enable fake default")
+rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
+  "NCCL_PARAM(TreeCompact, \"TREE_COMPACT\", 0)" "fakes/init_fakes.cc: ncclParamTreeCompact()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/init_fakes.cc"
+  "int64_t ncclParamTreeCompact() { return g_loadParam(\"TREE_COMPACT\", 0); }"
+  "the TreeCompact fake default")
 rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
   "NCCL_PARAM(IbQpsPerConn, \"IB_QPS_PER_CONNECTION\", 1)" "fakes/transport_net_ib_fakes.cc: ncclParamIbQpsPerConn()")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
@@ -104,10 +109,10 @@ function(rccl_define_micro_source_lists)
     tuning-general-test.cc
     csv-tuner-test.cc                    # src/plugin/tuner/csv_tuner.cc
     param-utils-test.cc                  # src/include/param/utils.h, src/include/param/parser_common.h
-    comm-dump-test.cc                    # src/commDump.cc
-    timer-test.cc                        # src/include/timer.h
     ras-client-test.cc
     group-test.cc
+    comm-dump-test.cc                    # src/commDump.cc
+    timer-test.cc                        # src/include/timer.h
     devcomm-test.cc
     wrap-test.cc
     dev-runtime-test.cc
@@ -115,6 +120,7 @@ function(rccl_define_micro_source_lists)
     gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
     dv_symbols_test.cc                   # src/misc/ionicdvsymbols.cc, src/misc/mlx5dvsymbols.cc
     process-isolated-runner-test.cc
+    rccl-graph-gen-test.cc               # src/graph/rccl_graph_gen.cc ring construction + cut balancing
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     fakes/dev_runtime_micro_fakes.cc
@@ -262,6 +268,37 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroDebug -- src/debug.cc. Own binary: it is the real ncclDebugLog, which
+  # every shared fake set also defines.
+  set(TEST_MICRO_DEBUG_SOURCE_FILES
+    debug-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroApiTrace -- src/misc/api_trace.cc. Own binary: it defines the public
+  # NCCL_API entry points that fakes/api_trace_fakes.cc supplies elsewhere.
+  set(TEST_MICRO_API_TRACE_SOURCE_FILES
+    api-trace-test.cc
+    fakes/debug_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroRecorder -- src/misc/recorder.cc. Own binary: it is the real
+  # rccl::Recorder, which fakes/recorder_fakes.cc supplies elsewhere.
+  set(TEST_MICRO_RECORDER_SOURCE_FILES
+    recorder-test.cc
+    fakes/debug_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroCollTrace -- src/misc/latency_profiler/*.cc. Own binary: its ncclDebugLog,
+  # HIP event and bootstrap seams would collide with the shared fakes.
+  set(TEST_MICRO_COLL_TRACE_SOURCE_FILES
+    coll-trace-test.cc
+    fakes/debug_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroCe -- src/ce_coll.cc. Its own binary: every other target links ce_fakes.cc.
   set(TEST_MICRO_CE_SOURCE_FILES
     ce-coll-test.cc
@@ -389,6 +426,28 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroGraph: the real src/graph topology TUs, which every other micro binary fakes.
+  set(TEST_MICRO_GRAPH_SOURCE_FILES
+    graph-dev-test.cc
+    fakes/amdsmi_fakes.cc
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/os_fakes.cc
+    fakes/rccl_wrap_fakes.cc
+    fakes/transport_stubs.cc
+    fakes/tuning_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/nvmlwrap_stub.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroGinHost -- src/gin/gin_host.cc (GIN_PROXY_NTHREADS, proxy affinity). Own
   # binary: gin-plugin-init-test.cc already defines ncclParamGinEnable in
   # rccl-UnitTestsMicro, and gin_fakes.cc supplies ncclGinQueryLastError to Init.
@@ -400,6 +459,15 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
     
+  # rccl-UnitTestsMicroDdaIpc -- src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu. Own binary:
+  # rccl-UnitTestsMicro links fakes/dda_fakes.cc, which defines the same ncclAllReduceDdaIpc* symbols.
+  set(TEST_MICRO_DDA_IPC_SOURCE_FILES
+    dda-allreduce-ipc-test.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroRomeModels
   set(TEST_MICRO_ROME_MODELS_SOURCE_FILES
     rome-models-test.cc
@@ -422,37 +490,6 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroDebug -- src/debug.cc. Own binary: it is the real ncclDebugLog, which
-  # every shared fake set also defines.
-  set(TEST_MICRO_DEBUG_SOURCE_FILES
-    debug-test.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroApiTrace -- src/misc/api_trace.cc. Own binary: it defines the public
-  # NCCL_API entry points that fakes/api_trace_fakes.cc supplies elsewhere.
-  set(TEST_MICRO_API_TRACE_SOURCE_FILES
-    api-trace-test.cc
-    fakes/debug_fakes.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroRecorder -- src/misc/recorder.cc. Own binary: it is the real
-  # rccl::Recorder, which fakes/recorder_fakes.cc supplies elsewhere.
-  set(TEST_MICRO_RECORDER_SOURCE_FILES
-    recorder-test.cc
-    fakes/debug_fakes.cc
-    ../common/main_altrsmi.cpp
-    PARENT_SCOPE)
-
-  # rccl-UnitTestsMicroCollTrace -- src/misc/latency_profiler/*.cc. Own binary: its ncclDebugLog,
-  # HIP event and bootstrap seams would collide with the shared fakes.
-  set(TEST_MICRO_COLL_TRACE_SOURCE_FILES
-    coll-trace-test.cc
-    fakes/debug_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -983,6 +1020,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     DV_PROVIDER_FAKE_IONIC_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-ionic>"
     DV_PROVIDER_FAKE_IONIC_NO_GDA_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-ionic-no-gda>"
     DV_PROVIDER_FAKE_MLX5_NAME="$<TARGET_FILE_NAME:rccl-micro-dv-provider-fake-mlx5>"
+    RCCL_GRAPH_GEN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # Fake ibverbs provider dv libraries for dv_symbols_test.cc; the SONAME is what the builders' dlopen matches.
@@ -1017,6 +1055,21 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGinHost
     GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host.yaml")
 
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroDdaIpc -- src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroDdaIpc
+  SOURCES ${TEST_MICRO_DDA_IPC_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    DDA_ALL_REDUCE_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu.cpp"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda_ipc.yaml")
+# The TU defines __global__ kernels; an embedded (empty) GPU binary keeps clang from referencing an
+# external __hip_fatbin_<cuid>. Registration itself is faked in fakes/hip_fakes.cc.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary" "")
+target_compile_options(rccl-UnitTestsMicroDdaIpc PRIVATE
+  "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
+
 # sym_kernels_host.cc only exists when sym kernels are generated (GENERATE_SYM_KERNELS
 # in-build / present on disk standalone).
 if(_MICRO_BUILD_SYM_KERNELS)
@@ -1036,6 +1089,51 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRmaProxy
     ${_MICRO_MODE_DEFS}
     RMA_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rma/rma_proxy.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rma_proxy.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroDebug
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroDebug
+  SOURCES ${TEST_MICRO_DEBUG_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    DEBUG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/debug.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_debug.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroApiTrace
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroApiTrace
+  SOURCES ${TEST_MICRO_API_TRACE_SOURCE_FILES}
+  # The rocprofiler-register branch would need librocprofiler-register; keep the standalone config.
+  REMOVE_DEFS RCCL_ROCPROFILER_REGISTER=1
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    API_TRACE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/api_trace.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_api_trace.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroRecorder
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroRecorder
+  SOURCES ${TEST_MICRO_RECORDER_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    RECORDER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/recorder.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_recorder.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroCollTrace
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroCollTrace
+  SOURCES ${TEST_MICRO_COLL_TRACE_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    COLL_TRACE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTrace.cc"
+    COLL_TRACE_EVENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTraceEvent.cc"
+    COLL_TRACE_FUNC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTraceFunc.cc"
+    COLL_TRACE_UTILS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTraceUtils.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_coll_trace.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroWarpSpeed -- tests for ENABLE_WARP_SPEED
@@ -1150,51 +1248,6 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroDebug
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroDebug
-  SOURCES ${TEST_MICRO_DEBUG_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    DEBUG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/debug.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_debug.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroApiTrace
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroApiTrace
-  SOURCES ${TEST_MICRO_API_TRACE_SOURCE_FILES}
-  # The rocprofiler-register branch would need librocprofiler-register; keep the standalone config.
-  REMOVE_DEFS RCCL_ROCPROFILER_REGISTER=1
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    API_TRACE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/api_trace.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_api_trace.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroRecorder
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroRecorder
-  SOURCES ${TEST_MICRO_RECORDER_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    RECORDER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/recorder.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_recorder.yaml")
-
-# ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroCollTrace
-# ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroCollTrace
-  SOURCES ${TEST_MICRO_COLL_TRACE_SOURCE_FILES}
-  EXTRA_DEFS
-    ${_MICRO_MODE_DEFS}
-    COLL_TRACE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTrace.cc"
-    COLL_TRACE_EVENT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTraceEvent.cc"
-    COLL_TRACE_FUNC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTraceFunc.cc"
-    COLL_TRACE_UTILS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/latency_profiler/CollTraceUtils.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_coll_trace.yaml")
-
-# ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
 # ---------------------------------------------------------------------------
 if(_MICRO_BUILD_SYM_KERNELS)
@@ -1258,6 +1311,26 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRomeModels
     ${_MICRO_MODE_DEFS}
     ROME_MODELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rome_models.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroGraph is its own binary because the others link fakes for the graph symbols these TUs define.
+# ---------------------------------------------------------------------------
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc
+  ${RCCL_HOST_HIPIFY_DIR}/src/misc/nvmlwrap_stub.cc
+  PROPERTIES GENERATED TRUE)
+rccl_add_micro_binary(rccl-UnitTestsMicroGraph
+  SOURCES ${TEST_MICRO_GRAPH_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ${_MICRO_AMDSMI_DEF}
+    RCCL_NCCL_FAKES_OMIT_GRAPH
+    RCCL_TRANSPORT_STUBS_OMIT_ncclPxnDisable
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_graph.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDiagnostics

@@ -7,13 +7,34 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'Build mode'
+        description: 'Build mode (also selects the default matrix when arch is "default")'
         required: false
         default: 'continuous'
         type: choice
         options:
           - continuous
           - nightly
+      arch:
+        description: 'GPU arch to run. "default" uses the matrix for the selected mode; any other value ignores the mode filter.'
+        required: false
+        default: 'default'
+        type: choice
+        options:
+          - default
+          - all
+          - gfx950
+          - gfx94X
+          - gfx90a
+          - gfx1151
+      os-release:
+        description: 'Ubuntu release to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - '22.04'
+          - '24.04'
   push:
     branches: [ develop ]
     paths:
@@ -52,7 +73,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Dispatch runs are keyed by their selection so a single-arch run does not
+  # cancel (or get cancelled by) a PR run or another arch on the same ref.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && format('{0}-{1}-{2}', inputs.mode, inputs.arch, inputs.os-release) || '' }}
   cancel-in-progress: true
 
 env:
@@ -91,6 +114,7 @@ jobs:
       contents: read
     outputs:
       matrix: ${{ steps.generate_matrix.outputs.matrix }}
+      mode: ${{ steps.generate_matrix.outputs.mode }}
 
     steps:
       - uses: actions/checkout@v6
@@ -105,11 +129,44 @@ jobs:
           GFX94X_RUNNER: ${{ needs.ci_config.outputs.gfx94x_runner }}
           GFX90A_RUNNER: ${{ needs.ci_config.outputs.gfx90a_runner }}
           GFX1151_RUNNER: ${{ needs.ci_config.outputs.gfx1151_runner }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MODE: ${{ inputs.mode }}
+          INPUT_ARCH: ${{ inputs.arch }}
+          INPUT_OS: ${{ inputs.os-release }}
         run: |
-          if [ '${{ github.event_name }}' = 'schedule' ] || [ '${{ inputs.mode }}' = 'nightly' ]; then
-            MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ubuntu-nightly' -I=0 -o=json)
+          set -e
+          if [ "$EVENT_NAME" = 'schedule' ] || { [ "$EVENT_NAME" = 'workflow_dispatch' ] && [ "$INPUT_MODE" = 'nightly' ]; }; then
+            MODE=nightly
           else
-            MATRIX_CONTENT=$(cat ci-matrix.yml | yq '.matrix-ubuntu-ci' -I=0 -o=json)
+            MODE=continuous
+          fi
+          echo "mode=${MODE}" >> $GITHUB_OUTPUT
+
+          MATRIX_CONTENT=$(yq '.matrix-ubuntu' ci-matrix.yml -I=0 -o=json)
+
+          # Entries are tagged with the modes they run in. A dispatch that names
+          # an arch bypasses the mode tags; otherwise filter by effective mode.
+          if [ "$EVENT_NAME" = 'workflow_dispatch' ] && [ "${INPUT_ARCH:-default}" != 'default' ]; then
+            MATRIX_CONTENT=$(echo "$MATRIX_CONTENT" | jq -c --arg arch "$INPUT_ARCH" \
+              '[.[] | select($arch == "all" or .arch == $arch)]')
+          else
+            MATRIX_CONTENT=$(echo "$MATRIX_CONTENT" | jq -c --arg mode "$MODE" \
+              '[.[] | select(.modes | index($mode))]')
+          fi
+
+          if [ "$EVENT_NAME" = 'workflow_dispatch' ] && [ -n "$INPUT_OS" ] && [ "$INPUT_OS" != 'all' ]; then
+            MATRIX_CONTENT=$(echo "$MATRIX_CONTENT" | jq -c --arg os "$INPUT_OS" \
+              '[.[] | select(."os-release" == $os)]')
+          fi
+
+          # Apply the per-mode override (test-label, timeout-minutes) so the job
+          # only sees the final values.
+          MATRIX_CONTENT=$(echo "$MATRIX_CONTENT" | jq -c --arg mode "$MODE" \
+            '[.[] | (if $mode == "continuous" then . + (.continuous // {}) else . end) | del(.continuous)]')
+
+          if [ "$(echo "$MATRIX_CONTENT" | jq 'length')" -eq 0 ]; then
+            echo "::error::No matrix entries match (event=${EVENT_NAME}, mode=${MODE}, arch=${INPUT_ARCH}, os-release=${INPUT_OS})"
+            exit 1
           fi
 
           # Map arch to resolved runner labels from therock-ci-config
@@ -169,7 +226,7 @@ jobs:
       - name: Setup Environment
         id: setup_env
         run: |
-          if [ '${{ github.event_name }}' = 'schedule' ]; then
+          if [ '${{ needs.prepare_matrix.outputs.mode }}' = 'nightly' ]; then
             MODE=Nightly
             ADD_COVERAGE="--coverage"
           else
@@ -249,7 +306,7 @@ jobs:
       - name: Configure, Build, and Test
         id: test
         continue-on-error: true
-        timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 120 || 90 }}
+        timeout-minutes: ${{ matrix.system.timeout-minutes }}
         working-directory: projects/rocprofiler-compute
         run: |
           set -e
@@ -269,8 +326,8 @@ jobs:
             -DINSTALL_TESTS=ON \
             -DPYTEST_NUMPROCS=8 \
             -- \
-            -L full \
-            -LE full_rocprofiler_compute_ci_exclude
+            -L ${{ matrix.system.test-label }} \
+            -LE ${{ matrix.system.test-label }}_rocprofiler_compute_ci_exclude
 
       - name: Upload Test Logs (on failure)
         if: steps.test.outcome == 'failure'

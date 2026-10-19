@@ -19,7 +19,9 @@ struct SourceModifiers {
 
 /// @brief ABS/NEG -> operation -> OMOD -> CLAMP, for scalar or SIMD raw bits.
 /// @details All sources and the result use Fmt. The operation owns input
-/// flushing and any rounding needed to return bits in the destination format.
+/// flushing, destination rounding, and any output flush before modifiers.
+/// Signed input flushing commutes with ABS/NEG, so the operation may flush the
+/// modified raw source before widening it.
 template <typename Fmt, typename Op, typename... Vs>
 constexpr auto apply(const SourceModifiers &source, const output_modifier::Policy &output,
                      const Op &operation, Vs... values) {
