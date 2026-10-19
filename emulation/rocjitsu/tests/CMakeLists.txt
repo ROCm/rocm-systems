@@ -721,6 +721,25 @@ if [ -n "$ROCJITSU_DAEMON_PID" ]; then
 else
     printf 'RJ_CLI_DAEMON_PID=missing\n'
 fi
+if [ "${RJ_CHECK_DAEMON_PROCESS_GROUP:-}" = 1 ]; then
+    if [ -z "$ROCJITSU_DAEMON_PID" ]; then
+        printf 'RJ_CLI_DAEMON_PROCESS_GROUP=missing-daemon\n'
+        exit 11
+    fi
+    daemon_pgid="$(ps -o pgid= -p "$ROCJITSU_DAEMON_PID" | tr -d ' ')"
+    rocgdb_pgid="$(ps -o pgid= -p "$$" | tr -d ' ')"
+    printf 'RJ_CLI_DAEMON_PGID=%s\n' "$daemon_pgid"
+    printf 'RJ_CLI_ROCGDB_PGID=%s\n' "$rocgdb_pgid"
+    if [ -z "$daemon_pgid" ] || [ -z "$rocgdb_pgid" ]; then
+        printf 'RJ_CLI_DAEMON_PROCESS_GROUP=missing-pgid\n'
+        exit 12
+    fi
+    if [ "$daemon_pgid" = "$rocgdb_pgid" ]; then
+        printf 'RJ_CLI_DAEMON_PROCESS_GROUP=foreground\n'
+        exit 13
+    fi
+    printf 'RJ_CLI_DAEMON_PROCESS_GROUP=detached\n'
+fi
 first=1
 for arg in "$@"; do
     if [ "$first" = 0 ]; then
@@ -782,6 +801,21 @@ set_tests_properties(
     PROPERTIES
         PASS_REGULAR_EXPRESSION "RJ_CLI_DAEMON_PID=[1-9][0-9]*"
         FAIL_REGULAR_EXPRESSION "RJ_CLI_DAEMON_PID=missing"
+)
+add_test(
+    NAME RocjitsuLaunchGdbDetachesDaemonProcessGroup
+    COMMAND
+        ${CMAKE_COMMAND} -E env "PATH=${_rj_fake_rocgdb_dir}:$ENV{PATH}"
+        RJ_CHECK_DAEMON_PROCESS_GROUP=1
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/gdb-detach-pgid
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --gdb -- /bin/true
+)
+set_tests_properties(
+    RocjitsuLaunchGdbDetachesDaemonProcessGroup
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION "RJ_CLI_DAEMON_PROCESS_GROUP=detached"
+        FAIL_REGULAR_EXPRESSION
+            "RJ_CLI_DAEMON_PROCESS_GROUP=(missing-daemon|missing-pgid|foreground)"
 )
 
 set(_rj_bad_rocgdb_dir "${CMAKE_CURRENT_BINARY_DIR}/bad-rocgdb")

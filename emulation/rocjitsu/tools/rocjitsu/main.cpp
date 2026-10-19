@@ -1298,6 +1298,12 @@ int main(int argc, char *argv[]) {
     if (daemon_pid == 0) {
       close(ready_pipe[0]);
       prctl(PR_SET_PDEATHSIG, SIGTERM);
+      if (gdb_requested && setpgid(0, 0) != 0) {
+        std::cerr << std::format("rocjitsu: failed to detach daemon process group: {}\n",
+                                 strerror(errno));
+        close(ready_pipe[1]);
+        return 1;
+      }
       return run_daemon_server(abs_config.c_str(), socket_path, ready_pipe[1]);
     }
 
