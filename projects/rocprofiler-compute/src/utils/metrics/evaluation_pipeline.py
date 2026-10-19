@@ -22,6 +22,7 @@ from utils.metrics.noise_clamper import (
     print_noise_clamp_summary,
 )
 from utils.metrics.pass_provenance import (
+    PASS_VAR_SEP,
     PassLayout,
     bind_metric_tables_to_passes,
     ordered_scoped_builtin_bindings,
@@ -194,18 +195,19 @@ def calc_builtin_vars(
 
 
 def _gui_active_zero_detected(raw_pmc_df: pd.DataFrame) -> Optional[str]:
-    """Return a GUI-active column name that contains a zero, if any."""
-    candidates = [
-        column
-        for column in raw_pmc_df.columns
-        if column == "GRBM_GUI_ACTIVE"
-        or column == "GRBM_GUI_ACTIVE_sum"
-        or column.startswith("GRBM_GUI_ACTIVE@pass:")
-        or column.startswith("GRBM_GUI_ACTIVE_sum@pass:")
-    ]
-    for column in candidates:
-        if (raw_pmc_df[column] == 0).any():
-            return column
+    """Return the preferred GUI-active column when it contains a zero.
+
+    Shadow columns are ignored. A zero in one replay must not abort analyze
+    when the summed column, or otherwise the base column, is non-zero.
+    """
+    if "GRBM_GUI_ACTIVE_sum" in raw_pmc_df.columns:
+        column = "GRBM_GUI_ACTIVE_sum"
+    elif "GRBM_GUI_ACTIVE" in raw_pmc_df.columns:
+        column = "GRBM_GUI_ACTIVE"
+    else:
+        return None
+    if (raw_pmc_df[column] == 0).any():
+        return column
     return None
 
 
@@ -247,7 +249,7 @@ def _calc_pass_scoped_builtins(
                 calculation_result = temporary_evaluator.eval_expression(eval_string)
                 if np.isscalar(calculation_result) and calculation_result == "N/A":
                     calculation_result = np.nan
-                pass_locals[f"ammolite__{variable_key}__pass{ordinal}"] = (
+                pass_locals[f"ammolite__{variable_key}{PASS_VAR_SEP}{ordinal}"] = (
                     calculation_result
                 )
             except (TypeError, NameError, KeyError):
@@ -255,7 +257,7 @@ def _calc_pass_scoped_builtins(
                     "pass_provenance",
                     f"builtin {variable_key!r} pass{ordinal}: eval failed, using nan",
                 )
-                pass_locals[f"ammolite__{variable_key}__pass{ordinal}"] = np.nan
+                pass_locals[f"ammolite__{variable_key}{PASS_VAR_SEP}{ordinal}"] = np.nan
         results.update(pass_locals)
     return results
 
