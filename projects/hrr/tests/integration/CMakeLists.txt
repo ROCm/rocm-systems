@@ -163,9 +163,9 @@ if(NOT WIN32)
 
   # hrr_disk_space_test.cc defines these for the HIP runtime to bind to. An
   # executable exports only what its link-time libraries reference, and the
-  # runtime may name either statvfs or statvfs64, so export all three.
+  # runtime may name statvfs or fstatvfs by either name, so export all five.
   set(_hrr_disk_space_exports "${CMAKE_CURRENT_BINARY_DIR}/hrr_disk_space_exports.list")
-  file(WRITE "${_hrr_disk_space_exports}" "{ statvfs; statvfs64; fsync; };\n")
+  file(WRITE "${_hrr_disk_space_exports}" "{ statvfs; statvfs64; fstatvfs; fstatvfs64; fsync; };\n")
   target_link_options(hrr-integration-tests PRIVATE
                       "LINKER:--dynamic-list=${_hrr_disk_space_exports}")
   target_link_libraries(hrr-integration-tests PRIVATE ${CMAKE_DL_LIBS})

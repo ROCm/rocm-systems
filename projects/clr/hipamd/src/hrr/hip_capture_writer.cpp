@@ -849,7 +849,8 @@ static void update_root_manifest() {
 // before any write that brings the bytes counted since the last check to
 // g_space_check_bytes, so less than that is ever written unchecked. The interval
 // is at most a quarter of the reserve, which bounds how far a capture can go
-// into it.
+// into it. On POSIX it is read through the pid-<pid> descriptor, so a rename of
+// that directory or one above it does not turn the checks off.
 // ---------------------------------------------------------------------------
 
 static constexpr uint64_t kKeepFreeMax   = 4ull << 30;
@@ -868,10 +869,13 @@ static uint64_t g_bytes_since_space_check = 0;
 static std::atomic<uint64_t> g_bytes_reserved{0};
 static std::atomic<bool>     g_out_of_space{false};
 
-static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total,
+// The file system holding `dir`: on POSIX the directory `dir_fd`, or `dir` when
+// there is none.
+static bool fs_space(int dir_fd, const std::string& dir, uint64_t* avail, uint64_t* total,
                      uint64_t* block = nullptr) {
   uint64_t bs = 0;
 #ifdef _WIN32
+  (void)dir_fd;
   ULARGE_INTEGER a{}, t{}, f{};
   // A UNC path is only accepted with a trailing backslash.
   const std::string d = dir.empty() || dir.back() == '\\' ? dir : dir + '\\';
@@ -890,7 +894,7 @@ static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total,
   }
 #else
   struct statvfs sv{};
-  if (::statvfs(dir.c_str(), &sv) != 0) return false;
+  if ((dir_fd >= 0 ? ::fstatvfs(dir_fd, &sv) : ::statvfs(dir.c_str(), &sv)) != 0) return false;
   *avail = static_cast<uint64_t>(sv.f_bavail) * sv.f_frsize;
   *total = static_cast<uint64_t>(sv.f_blocks) * sv.f_frsize;
   bs = sv.f_frsize;
@@ -941,13 +945,14 @@ static void stop_for_space(uint64_t keep_free) {
 }
 
 // Size the reserve for the file system holding `dir`, the archive open() is
-// about to publish. False when less than the reserve is free to begin with.
-static bool init_space_reserve(const std::string& dir) {
+// about to publish, open as `dir_fd`. False when less than the reserve is free
+// to begin with.
+static bool init_space_reserve(int dir_fd, const std::string& dir) {
   g_keep_free = 0;
   g_bytes_since_space_check = 0;
   g_bytes_reserved.store(0, std::memory_order_relaxed);
   uint64_t avail = 0, total = 0, block = kFileBlockDefault;
-  if (!fs_space(dir, &avail, &total, &block)) return true;
+  if (!fs_space(dir_fd, dir, &avail, &total, &block)) return true;
   g_file_block_bytes.store(block, std::memory_order_relaxed);
   g_keep_free = std::min<uint64_t>(total / 100 * 15, kKeepFreeMax);
   g_space_check_bytes = std::max<uint64_t>(std::min<uint64_t>(kSpaceCheckMax, g_keep_free / 4), 1);
@@ -973,7 +978,7 @@ static bool check_space(uint64_t pending) {
     pending += g_buf_len;
   }
   uint64_t avail = 0, total = 0;
-  if (!fs_space(g_output_dir, &avail, &total)) return true;
+  if (!fs_space(g_dir_fd.load(), g_output_dir, &avail, &total)) return true;
   if (avail >= g_keep_free && avail - g_keep_free >= pending) return true;
   stop_for_space(g_keep_free);
   return false;
@@ -1167,7 +1172,7 @@ bool open(const char* output_dir) {
     return open_failed(out_dir, created_pid_dir);
   }
 
-  if (!init_space_reserve(out_dir)) {
+  if (!init_space_reserve(dirs.dir, out_dir)) {
     LogPrintfError("[HRR capture] Less than %llu MiB free on the file system holding %s",
                    static_cast<unsigned long long>(g_keep_free >> 20), out_dir.c_str());
     fprintf(stderr, "[HRR capture] Capture disabled: less than %llu MiB free on the file "

@@ -111,6 +111,8 @@ cases:
   Unit_HRR_DiskSpace_SmallBlobsCountedInBlocks_Direct: {}
   Unit_HRR_DiskSpace_StopWhileExiting: {}
   Unit_HRR_DiskSpace_StopWhileExiting_Direct: {}
+  Unit_HRR_DiskSpace_StopsAfterRename: {}
+  Unit_HRR_DiskSpace_StopsAfterRename_Direct: {}
   Unit_HRR_DiskSpace_StopsBeforeReserve: {}
   Unit_HRR_DiskSpace_StopsBeforeReserve_Direct: {}
   Unit_HRR_DispatchSwap_Direct: {}
