@@ -47,6 +47,7 @@ struct BarrierImage {
   int nBlocks;
   int selfRank;
   std::array<DeviceMailbox, kRanks> mailboxes;
+  const uint32_t* abortFlag;
 };
 static_assert(sizeof(MailboxImage) == sizeof(DeviceMailbox), "DeviceMailbox layout changed");
 static_assert(sizeof(BarrierImage) == sizeof(IpcGpuBarrier), "IpcGpuBarrier layout changed");
@@ -61,7 +62,7 @@ DeviceMailbox makeMailbox(uint32_t* flags) {
 }
 
 IpcGpuBarrier makeBarrier(int selfRank, const std::vector<DeviceMailbox>& mailboxes) {
-  BarrierImage img{kBlocks, selfRank, {}};
+  BarrierImage img{kBlocks, selfRank, {}, nullptr};
   for (int r = 0; r < kRanks; ++r) {
     img.mailboxes[r] = mailboxes[r];
   }
@@ -90,20 +91,20 @@ __global__ void mailboxMessagePassing(DeviceMailbox* dataMb, DeviceMailbox* ackM
   unsigned long long mismatches = 0;
   for (int it = 0; it < iters; ++it) {
     if (it > 0) {
-      ackMb[self].waitFlagWithMemFence(dst, b);
+      ackMb[self].waitFlagWithMemFence(dst, b, nullptr);
     }
     for (int i = 0; i < kMpWords; ++i) {
       outSlot[i] = payloadValue(self, it, b, i);
     }
-    dataMb[dst].setFlagWithMemFence(self, b);
-    dataMb[self].waitFlagWithMemFence(src, b);
+    dataMb[dst].setFlagWithMemFence(self, b, nullptr);
+    dataMb[self].waitFlagWithMemFence(src, b, nullptr);
     for (int i = 0; i < kMpWords; ++i) {
       if (inSlot[i] != payloadValue(src, it, b, i)) {
         mismatches++;
       }
     }
     if (it + 1 < iters) {
-      ackMb[src].setFlagWithMemFence(self, b);
+      ackMb[src].setFlagWithMemFence(self, b, nullptr);
     }
   }
   if (mismatches != 0) {
