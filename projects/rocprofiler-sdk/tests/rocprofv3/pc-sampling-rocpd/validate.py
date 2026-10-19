@@ -260,15 +260,44 @@ def test_rocpd_sample_event_metadata(rocpd_connection):
     assert stacked == total, "PC-sampling events must retain an internal stack_id"
 
 
+def test_rocpd_agent_attribution(rocpd_connection, request):
+    known, mismatched = rocpd_connection.execute(
+        "SELECT COUNT(COALESCE(K.agent_id, C.agent_id)), "
+        "COUNT(CASE WHEN S.agent_id IS NOT COALESCE(K.agent_id, C.agent_id) "
+        "THEN 1 END) "
+        "FROM rocpd_gpu_pc_sample S "
+        "LEFT JOIN rocpd_kernel_dispatch K "
+        "ON K.guid = S.guid AND K.dispatch_id = S.dispatch_id "
+        "LEFT JOIN rocpd_info_code_object C "
+        "ON C.guid = S.guid AND C.id = S.code_object_id"
+    ).fetchone()
+    assert known > 0, "Expected samples with recoverable agent metadata"
+    assert mismatched == 0, "Use the dispatch agent, or the code-object agent on a miss"
+    if request.config.getoption("--expect-no-dispatches"):
+        assert _count_rows(rocpd_connection, "rocpd_kernel_dispatch") == 0
+        assert (
+            rocpd_connection.execute(
+                "SELECT COUNT(*) FROM rocpd_gpu_pc_sample S "
+                "JOIN rocpd_event E ON E.guid = S.guid AND E.id = S.event_id "
+                "WHERE S.tid IS NOT NULL OR E.parent_id IS NOT NULL "
+                "OR E.parent_stack_id IS NOT NULL"
+            ).fetchone()[0]
+            == 0
+        )
+
+
 def test_rocpd_parent_dispatch_linkage(rocpd_connection):
     # The producer runs with --kernel-trace, so samples taken inside a captured
     # dispatch link to that dispatch's event via rocpd_event.parent_id.
-    linked = rocpd_connection.execute(
-        "SELECT COUNT(*) FROM rocpd_gpu_pc_sample S "
-        "JOIN rocpd_event E ON E.id = S.event_id "
-        "WHERE E.parent_id IS NOT NULL"
-    ).fetchone()[0]
+    linked, mismatched = rocpd_connection.execute(
+        "SELECT COUNT(*), "
+        "COUNT(CASE WHEN E.parent_stack_id IS NOT P.stack_id THEN 1 END) "
+        "FROM rocpd_gpu_pc_sample S "
+        "JOIN rocpd_event E ON E.guid = S.guid AND E.id = S.event_id "
+        "JOIN rocpd_event P ON P.guid = E.guid AND P.id = E.parent_id"
+    ).fetchone()
     assert linked > 0
+    assert mismatched == 0, "parent_stack_id must match the parent event's stack_id"
 
 
 def test_json_pc_sampling_records_present(json_data):
