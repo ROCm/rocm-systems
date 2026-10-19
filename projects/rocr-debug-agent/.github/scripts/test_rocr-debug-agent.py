@@ -53,6 +53,16 @@ Environment Variables:
         action="store_true",
         help="Skip unit tests even if the binary is found.",
     )
+    parser.add_argument(
+        "--gpu-tests",
+        action="store_true",
+        help="Run only GPU-based integration tests (exclusive with --cpu-tests unless both specified).",
+    )
+    parser.add_argument(
+        "--cpu-tests",
+        action="store_true",
+        help="Run only CPU-based unit tests (exclusive with --gpu-tests unless both specified).",
+    )
 
     return parser.parse_args()
 
@@ -439,18 +449,31 @@ def main() -> None:
     # Set core dump limit to 0 (ulimit -c 0).
     set_core_dump_limit()
 
-    # Run integration tests.
-    run_tests(
-        test_script=test_script,
-        test_bin_dir=test_bin_dir,
-        env_vars=env_vars,
-        max_retries=args.max_retries,
-        retry_delay=args.retry_delay,
-    )
+    # Determine which tests to run based on flags.
+    # Default (neither flag): run both
+    # --gpu-tests only: run integration tests
+    # --cpu-tests only: run unit tests
+    # Both flags: run both
+    run_gpu = args.gpu_tests or (not args.gpu_tests and not args.cpu_tests)
+    run_unit = args.cpu_tests or (not args.gpu_tests and not args.cpu_tests)
 
-    # Run unit tests if binary exists and not skipped.
+    # Run integration tests if requested.
+    if run_gpu:
+        run_tests(
+            test_script=test_script,
+            test_bin_dir=test_bin_dir,
+            env_vars=env_vars,
+            max_retries=args.max_retries,
+            retry_delay=args.retry_delay,
+        )
+    else:
+        logger.info("Skipping GPU-based integration tests (--cpu-tests only)")
+
+    # Run unit tests if requested and binary exists and not skipped.
     if args.skip_unit:
         logger.info("Skipping unit tests (--skip-unit flag)")
+    elif not run_unit:
+        logger.info("Skipping unit tests (--gpu-tests only)")
     elif unit_test_bin:
         run_unit_tests(
             unit_test_bin=unit_test_bin,
