@@ -92,6 +92,18 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
   return file;
 }
 
+std::string config_load_error(const std::string &path, bool validate_only) {
+  try {
+    if (validate_only)
+      config::validate_config(path, rocjitsu::kEmbeddedSchema);
+    else
+      (void)config::load_config(path, rocjitsu::kEmbeddedSchema);
+    return {};
+  } catch (const std::exception &error) {
+    return error.what();
+  }
+}
+
 std::vector<uint8_t> read_binary_file(const std::string &path) {
   std::ifstream stream(path, std::ios::binary);
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
@@ -122,6 +134,34 @@ TEST(SoCTest, SelectsSdmaPacketDialect) {
     SCOPED_TRACE(static_cast<int>(arch));
     SoC soc("soc", nullptr, arch);
     EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), expected);
+  }
+}
+
+TEST(ConfigLoaderTest, MatchesFullConstructionForRepositoryConfigurations) {
+  for (const auto &entry : std::filesystem::directory_iterator(CONFIG_DIR_PATH)) {
+    if (entry.path().extension() != ".json")
+      continue;
+    SCOPED_TRACE(entry.path().string());
+    EXPECT_EQ(config_load_error(entry.path().string(), /*validate_only=*/true),
+              config_load_error(entry.path().string(), /*validate_only=*/false));
+  }
+}
+
+TEST(ConfigLoaderTest, MatchesConstructorResourceAndTypeErrors) {
+  const std::string prefix = R"({ "vm": { "arch": "cdna3" }, "topology": {
+    "root": { "name": "soc", "type": "soc", "children": [
+      { "name": "mem", "type": "gpu_memory" },
+      { "name": "cu", "type": "compute_unit", "config": [)";
+  for (const auto &setting : {R"({"key":"num_wf_slots","value":"1000000"})",
+                              R"({"key":"vgprs_per_wf","value":"1000000"})",
+                              R"({"key":"memory_wait_diagnostics","value":"invalid"})",
+                              R"({"key":"xcnt_diagnostics","value":"invalid"})",
+                              R"({"key":"functional_quantum","value":"nonnumeric"})",
+                              R"({"key":"num_wf_slots","value":"0"})"}) {
+    SCOPED_TRACE(setting);
+    const auto file = write_temp_config(prefix + setting + "]} ]} }}");
+    EXPECT_EQ(config_load_error(file.path(), /*validate_only=*/true),
+              config_load_error(file.path(), /*validate_only=*/false));
   }
 }
 
