@@ -21,17 +21,11 @@
 import importlib
 from pathlib import Path
 
+from roofline.benchmark import ceilings
+
 BENCHMARKING_SUPPORTED = [
-    "gfx90a",
-    "gfx940",
-    "gfx941",
-    "gfx942",
-    "gfx950",
-    "gfx1150",
-    "gfx1151",
-    "gfx1152",
-    "gfx1153",
-    "gfx1250",
+    *ceilings.UNSUPPORTED_DATA_TYPES,
+    *ceilings.BENCH_DEVICE_ALIASES,
 ]
 
 
@@ -49,12 +43,9 @@ def load_bench(device_id: int, cache_sizes: dict) -> object:
         from utils.hip_interface import hipGetDeviceProperties
 
         # Get exact LLVM target name of the device
-        gfx_device = (hipGetDeviceProperties(device_id).gcnArchName).split(":", 1)[0]
-
-        # Force gfx940 MI300A_A0 and gfx941 MI300X_A0 products
-        # to use same class as gfx942 MI300_A1
-        if gfx_device == "gfx940" or gfx_device == "gfx941":
-            gfx_device = "gfx942"
+        gfx_device = ceilings.bench_device(
+            (hipGetDeviceProperties(device_id).gcnArchName).split(":", 1)[0]
+        )
 
         # Get the gfx architecture of the device
         gfx_arch = gfx_device[:-2]

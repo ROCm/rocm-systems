@@ -21,6 +21,7 @@ import pytest
 
 import roofline.benchmark.benchmark_base as benchmark_base
 import utils.utils_profile as utils_profile
+from roofline.benchmark import ceilings
 
 try:
     from roofline.benchmark.gfx9.benchmark_gfx90a import Bench_gfx90a
@@ -130,6 +131,11 @@ def runs_benchmark(bench, test_key):
 # =============================================================================
 # Tests
 # =============================================================================
+
+
+def test_every_benchmarked_device_has_a_class():
+    devices = {bench_class.__name__[len("Bench_") :] for bench_class in BENCH_CLASSES}
+    assert devices == set(ceilings.UNSUPPORTED_DATA_TYPES)
 
 
 @pytest.mark.parametrize("bench_class", BENCH_CLASSES, ids=lambda cls: cls.__name__)
