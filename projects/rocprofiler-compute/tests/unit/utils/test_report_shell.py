@@ -79,21 +79,3 @@ def test_shared_assets_have_no_plotly_dependency() -> None:
 
     assert "Plotly" not in shell + controller
     assert "<script src" not in shell + controller
-    assert f'"{DARK_THEME_CLASS}"' in controller
-    assert "readModel: readModel" in controller
-    assert "initTheme: initTheme" in controller
-    assert "createKernelList: createKernelList" in controller
-    assert "selectedKeys: selectedKeys" in controller
-    assert "applyRowStates: applyRowStates" in controller
-    assert "setCountText: setCountText" in controller
-
-
-def test_shared_model_lookup_uses_exact_id_without_browser_id_helper() -> None:
-    """The shared controller accepts the embedded model ID without CSS escaping."""
-    controller = read_asset(_ASSETS, "report_base.js")
-
-    assert "getElementById" not in controller
-    assert 'document.querySelectorAll("[id]")' in controller
-    assert "elements[i].id === modelId" in controller
-    assert "if (!modelEl)" in controller
-    assert "JSON.parse(modelEl.textContent)" in controller

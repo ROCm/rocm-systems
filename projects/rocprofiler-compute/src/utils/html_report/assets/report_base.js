@@ -6,14 +6,7 @@
   var DARK_THEME_CLASS = "report-theme-dark";
 
   function readModel(modelId) {
-    var modelEl = null;
-    var elements = document.querySelectorAll("[id]");
-    for (var i = 0; i < elements.length; i += 1) {
-      if (elements[i].id === modelId) {
-        modelEl = elements[i];
-        break;
-      }
-    }
+    var modelEl = document.getElementById(modelId);
     if (!modelEl) {
       return null;
     }
