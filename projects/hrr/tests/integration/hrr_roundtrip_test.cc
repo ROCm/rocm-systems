@@ -297,6 +297,11 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
  *     written and its metadata records capture_consent "file".
  *   - Captures with HIP_HRR_CAPTURE_CONSENT=yes and no consent file: the
  *     metadata records capture_consent "HIP_HRR_CAPTURE_CONSENT".
+ *   - Writes the yes as Windows PowerShell does, after a UTF-8 or a UTF-16LE
+ *     byte order mark: each still records capture_consent "file".
+ *   - With yes in the file and HIP_HRR_CAPTURE_CONSENT=no, nothing is written:
+ *     a set variable decides the run. With "yes " and no file, the trailing
+ *     blank is ignored as it is in the file.
  *   - On POSIX, puts a FIFO with no writer at the consent path: the workload
  *     must finish within a deadline, with nothing written, instead of blocking
  *     HIP's init in the open of the consent file.
@@ -307,14 +312,19 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
   fs::create_directories(cfg.path);
   const fs::path consent_file = cfg.path / "hrr" / "capture-consent";
 
-  auto capture = [&](bool env_consent) {
+  // env_consent is the value of HIP_HRR_CAPTURE_CONSENT, or nullptr to unset it.
+  auto capture = [&](const char* env_consent) {
     hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
     proc.setEnv("AMD_LOG_LEVEL", "0");
     // The consent file lives under XDG_CONFIG_HOME on POSIX and APPDATA on Windows.
     proc.setEnv("XDG_CONFIG_HOME", cfg.path.string());
     proc.setEnv("APPDATA", cfg.path.string());
-    if (!env_consent) proc.unsetEnv("HIP_HRR_CAPTURE_CONSENT");
+    if (env_consent == nullptr) {
+      proc.unsetEnv("HIP_HRR_CAPTURE_CONSENT");
+    } else {
+      proc.setEnv("HIP_HRR_CAPTURE_CONSENT", env_consent);
+    }
     set_proc_search_path(proc);
     int ret = proc.run("\"Unit_HRR_DeviceInfo_Direct\"");
     const std::string out = proc.getOutput();
@@ -338,7 +348,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
   };
 
   {
-    const std::string out = capture(/*env_consent=*/false);
+    const std::string out = capture(nullptr);
     CHECK(out.find("[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent.") !=
           std::string::npos);
     CHECK(out.find("write the line yes to " + consent_file.string() + " once") !=
@@ -351,14 +361,34 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
   {
     fs::create_directories(consent_file.parent_path());
     std::ofstream(consent_file) << "yes\n";
-    capture(/*env_consent=*/false);
+    capture(nullptr);
     CHECK(recorded_consent() == "file");
   }
 
   {
     fs::remove_all(cap.path);
     fs::remove(consent_file);
-    capture(/*env_consent=*/true);
+    capture("yes");
+    CHECK(recorded_consent() == "HIP_HRR_CAPTURE_CONSENT");
+  }
+
+  // Windows PowerShell's byte order marks: UTF-8, and UTF-16LE from its `>`.
+  for (const std::string& yes :
+       {std::string("\xEF\xBB\xBFyes\r\n"), std::string("\xFF\xFEy\0e\0s\0\r\0\n\0", 12)}) {
+    fs::remove_all(cap.path);
+    std::ofstream(consent_file, std::ios::binary) << yes;
+    capture(nullptr);
+    CHECK(recorded_consent() == "file");
+  }
+
+  {
+    fs::remove_all(cap.path);
+    std::ofstream(consent_file) << "yes\n";
+    const std::string out = capture("no");
+    CHECK(out.find("capture needs your consent.") != std::string::npos);
+    CHECK(nothing_written());
+    fs::remove(consent_file);
+    capture("yes ");
     CHECK(recorded_consent() == "HIP_HRR_CAPTURE_CONSENT");
   }
 

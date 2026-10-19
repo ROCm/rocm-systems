@@ -146,15 +146,34 @@ static std::string hrr_consent_file() {
 #endif
 }
 
+// The answer in the consent file or variable, without what shells and editors
+// add around it: trailing blanks and line ends, and the byte order mark that
+// Windows PowerShell writes, UTF-8 or, with its `>`, UTF-16LE.
+static std::string hrr_consent_answer(std::string s) {
+  if (s.rfind("\xEF\xBB\xBF", 0) == 0) {
+    s.erase(0, 3);
+  } else if (s.rfind("\xFF\xFE", 0) == 0) {
+    s.erase(0, 2);
+    s.erase(std::remove(s.begin(), s.end(), '\0'), s.end());
+  }
+  while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+  return s;
+}
+
 // The archive holds the recorded process's memory, so HIP_HRR_CAPTURE_OUTPUT
 // alone does not start capture: the user also has to say yes, once in the
 // consent file or per run in HIP_HRR_CAPTURE_CONSENT for CI and containers.
 // Returns where the yes came from for the manifest, "HIP_HRR_CAPTURE_CONSENT" or
 // "file" (not its path, which names the user), or "" when there is none.
 static std::string hrr_capture_consent() {
-  if (!flagIsDefault(HIP_HRR_CAPTURE_CONSENT) &&
-      std::strcmp(HIP_HRR_CAPTURE_CONSENT, "yes") == 0)
-    return "HIP_HRR_CAPTURE_CONSENT";
+  // A set variable decides this run either way: yes consents, and any other
+  // value, such as no, withholds consent even when the file says yes. A blank
+  // value, which is what the flag parser keeps of an exported empty variable,
+  // counts as unset.
+  if (!flagIsDefault(HIP_HRR_CAPTURE_CONSENT)) {
+    const std::string answer = hrr_consent_answer(HIP_HRR_CAPTURE_CONSENT);
+    if (!answer.empty()) return answer == "yes" ? "HIP_HRR_CAPTURE_CONSENT" : "";
+  }
   const std::string path = hrr_consent_file();
   if (path.empty()) return "";
   std::string line;
@@ -185,8 +204,7 @@ static std::string hrr_capture_consent() {
   while ((c = std::fgetc(f)) != EOF && c != '\n') line.push_back(static_cast<char>(c));
   std::fclose(f);
 #endif
-  while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back()))) line.pop_back();
-  return line == "yes" ? "file" : "";
+  return hrr_consent_answer(line) == "yes" ? "file" : "";
 }
 
 // Read once: the answer must not change between hip_capture_init() and the
