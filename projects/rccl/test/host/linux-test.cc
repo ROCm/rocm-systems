@@ -4,8 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/os/linux.cc on real sockets, files, shared memory and dlopen. The libc calls
-// a test cannot make fail or vary for real go through lx:: hooks that default to the real call.
+// Host-only microtests for src/os/linux.cc on real sockets, files, shared memory and dlopen. Its libc
+// calls go through fakes/libc_seam.h, real unless a test hooks one to fail or vary.
 
 #include <gtest/gtest.h>
 
@@ -19,24 +19,27 @@
 #include "utils.h"
 
 #include <arpa/inet.h>
+#include <atomic>
 #include <cctype>
 #include <climits>
-#include <cstdarg>
+#include <condition_variable>
 #include <cstdio>
 #include <cstring>
-#include <deque>
 #include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <functional>
+#include <filesystem>
 #include <ifaddrs.h>
+#include <mutex>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
 #include <set>
 #include <string>
+#include <signal.h>
+#include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
@@ -49,148 +52,32 @@
 #include <unistd.h>
 #include <vector>
 
+#include "../common/ScopedEnv.hpp"
+#include "fakes/hip_fakes.h"
 #include "linux-test-common.h"
 
-// --- Logging, env and params: this binary links no shared fakes.
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
-std::string g_linuxLog;
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long /*flags*/, const char* /*filefunc*/, int /*line*/,
-                  const char* fmt, ...) {
-  if (ncclDebugNoWarn != 0 && level == NCCL_LOG_WARN) level = NCCL_LOG_INFO;
-  char buf[1024];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  const char* tag = level == NCCL_LOG_WARN ? "WARN" : level == NCCL_LOG_ATTN ? "ATTN" : "INFO";
-  g_linuxLog += std::string(tag) + " " + buf + "\n";
-}
-
-const char* ncclGetEnv(const char* name) { return std::getenv(name); }
-
-namespace {
-std::vector<std::pair<int64_t*, int64_t>> g_paramCaches;
-}
-
-int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int64_t* cache, int8_t* noCache) {
-  const char* str = std::getenv(env);
-  int64_t value = (str && *str) ? std::strtoll(str, nullptr, 0) : deftVal;
-  g_paramCaches.push_back({cache, uninitialized});
-  *cache = value;
-  if (noCache) *noCache = 0;
-  return value;
-}
-
-void LinuxResetParams() {
-  for (auto& c : g_paramCaches) *c.first = c.second;
-  g_paramCaches.clear();
-}
-
-// Defined by init.cc in production, with this default.
-constexpr int kSetCpuStackSizeDefault = 1;
-int g_setCpuStackSize = kSetCpuStackSizeDefault;
-int ncclParamSetCpuStackSize() { return g_setCpuStackSize; }
-
-// --- HIP: only the SHM device-mapping path calls into it.
-namespace lx {
-std::function<hipError_t(hipStreamCaptureMode*)> hipExchangeCaptureMode;
-std::function<hipError_t(void*, size_t, unsigned int)> hipHostRegister;
-std::function<hipError_t(void**, void*, unsigned int)> hipHostGetDevicePointer;
-std::function<hipError_t(void*)> hipHostUnregister;
-}  // namespace lx
-
-hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode) { return lx::hipExchangeCaptureMode(mode); }
-hipError_t hipHostRegister(void* ptr, size_t size, unsigned int flags) { return lx::hipHostRegister(ptr, size, flags); }
-hipError_t hipHostGetDevicePointer(void** dptr, void* hptr, unsigned int flags) {
-  return lx::hipHostGetDevicePointer(dptr, hptr, flags);
-}
-hipError_t hipHostUnregister(void* ptr) { return lx::hipHostUnregister(ptr); }
-const char* hipGetErrorString(hipError_t) { return "hip error"; }
-hipError_t hipGetLastError() { return hipSuccess; }
-
-// --- Libc hooks, scoped to linux.cc by the macros below.
-namespace lx {
-#define LX_HOOKS(X)                                                                                  \
-  X(accept) X(poll) X(connect) X(getsockopt) X(setsockopt) X(getrlimit) X(setrlimit) X(getifaddrs)   \
-  X(freeifaddrs) X(sched_getaffinity) X(dlopen) X(dlerror) X(realpath) X(fopen) X(opendir) X(calloc) \
-  X(mkstemp) X(fallocate) X(mmap) X(munmap) X(unlink)
-#define LX_DECLARE(fn) Hook<decltype(&::fn)>::type fn = ::fn;
-LX_HOOKS(LX_DECLARE)
-#define LX_RESET(fn) fn = ::fn;
-void Reset() {
-  LX_HOOKS(LX_RESET)
-  hipExchangeCaptureMode = [](hipStreamCaptureMode*) { return hipSuccess; };
-  hipHostRegister = [](void*, size_t, unsigned int) { return hipSuccess; };
-  hipHostGetDevicePointer = [](void** d, void* h, unsigned int) {
-    *d = h;
-    return hipSuccess;
-  };
-  hipHostUnregister = [](void*) { return hipSuccess; };
-}
-}  // namespace lx
-
-#define accept(...) lx::accept(__VA_ARGS__)
-#define poll(...) lx::poll(__VA_ARGS__)
-#define connect(...) lx::connect(__VA_ARGS__)
-#define getsockopt(...) lx::getsockopt(__VA_ARGS__)
-#define setsockopt(...) lx::setsockopt(__VA_ARGS__)
-#define getrlimit(...) lx::getrlimit(__VA_ARGS__)
-#define setrlimit(...) lx::setrlimit(__VA_ARGS__)
-#define getifaddrs(...) lx::getifaddrs(__VA_ARGS__)
-#define freeifaddrs(...) lx::freeifaddrs(__VA_ARGS__)
-#define sched_getaffinity(...) lx::sched_getaffinity(__VA_ARGS__)
-#define dlopen(...) lx::dlopen(__VA_ARGS__)
-#define dlerror(...) lx::dlerror(__VA_ARGS__)
-#define realpath(...) lx::realpath(__VA_ARGS__)
-#define fopen(...) lx::fopen(__VA_ARGS__)
-#define opendir(...) lx::opendir(__VA_ARGS__)
-#define calloc(...) lx::calloc(__VA_ARGS__)
-#define mkstemp(...) lx::mkstemp(__VA_ARGS__)
-#define fallocate(...) lx::fallocate(__VA_ARGS__)
-#define mmap(...) lx::mmap(__VA_ARGS__)
-#define munmap(...) lx::munmap(__VA_ARGS__)
-#define unlink(...) lx::unlink(__VA_ARGS__)
+#include "fakes/libc_seam.h"
 #include LINUX_CC_PATH
-#undef accept
-#undef poll
-#undef connect
-#undef getsockopt
-#undef setsockopt
-#undef getrlimit
-#undef setrlimit
-#undef getifaddrs
-#undef freeifaddrs
-#undef sched_getaffinity
-#undef dlopen
-#undef dlerror
-#undef realpath
-#undef fopen
-#undef opendir
-#undef calloc
-#undef mkstemp
-#undef fallocate
-#undef mmap
-#undef munmap
-#undef unlink
+#include "fakes/libc_seam_undef.h"
 
 namespace {
 
 bool FdOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
 bool Exists(const std::string& path) { return access(path.c_str(), F_OK) == 0; }
 
-class LinuxMicrotest : public ::testing::Test {
- protected:
-  void SetUp() override {
-    lx::Reset();
-    g_linuxLog.clear();
-    g_setCpuStackSize = kSetCpuStackSizeDefault;
-  }
-  void TearDown() override { lx::Reset(); }
-  LinuxScopedEnv retrySleep_{"NCCL_SOCKET_RETRY_SLEEP_MSEC", "0"};
-};
+// Whether the thread whose /proc/.../stat this is sleeps ('S'), the state field after the name.
+bool ThreadSleeps(const std::string& statPath) {
+  char buf[512] = "";
+  FILE* f = ::fopen(statPath.c_str(), "r");
+  if (!f) return false;
+  size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+  fclose(f);
+  buf[n] = '\0';
+  const char* end = std::strrchr(buf, ')');
+  return end && end[1] == ' ' && end[2] == 'S';
+}
+
+using LinuxMicrotest = LinuxTestBase;
 
 // Dynamic loading
 
@@ -198,10 +85,10 @@ using LinuxDlMicrotest = LinuxMicrotest;
 
 TEST_F(LinuxDlMicrotest, Dlopen_LoadsLocallyAndResolvesASymbol) {
   int seenFlags = -1;
-  lx::dlopen = [&](const char* f, int flags) {
+  ScopedHook dlopenHook(g_dlopen, [&](const char* f, int flags) {
     seenFlags = flags;
     return ::dlopen(f, flags);
-  };
+  });
   ncclOsLibraryHandle h = ncclOsDlopen("libc.so.6");
   ASSERT_NE(h, nullptr);
   EXPECT_EQ(seenFlags, RTLD_NOW | RTLD_LOCAL);
@@ -214,10 +101,10 @@ TEST_F(LinuxDlMicrotest, Dlopen_LoadsLocallyAndResolvesASymbol) {
 
 TEST_F(LinuxDlMicrotest, Dlopen_ModeSelectsNowOrLazy) {
   int seenFlags = -1;
-  lx::dlopen = [&](const char* f, int flags) {
+  ScopedHook dlopenHook(g_dlopen, [&](const char* f, int flags) {
     seenFlags = flags;
     return ::dlopen(f, flags);
-  };
+  });
   ncclOsLibraryHandle h = ncclOsDlopen("libc.so.6", NCCL_OS_DL_NOW);
   EXPECT_EQ(seenFlags, RTLD_NOW);
   ncclOsDlclose(h);
@@ -239,7 +126,7 @@ TEST_F(LinuxDlMicrotest, Failures_KeepTheLoaderMessageForDlerror) {
   EXPECT_NE(std::string(ncclOsDlerror()).find("ncclNoSuchSymbol"), std::string::npos);
   ncclOsDlclose(h);
 
-  lx::dlerror = []() -> char* { return nullptr; };
+  ScopedHook dlerrorHook(g_dlerror, []() -> char* { return nullptr; });
   EXPECT_EQ(ncclOsDlopen("libnccl-no-such-lib.so"), nullptr);
   EXPECT_STREQ(ncclOsDlerror(), "");
 }
@@ -254,24 +141,24 @@ TEST_F(LinuxDlMicrotest, Dlerror_IsPerThread) {
 
 TEST_F(LinuxDlMicrotest, NvmlOpen_LoadsLibnvidiaMl) {
   std::string seen;
-  lx::dlopen = [&](const char* f, int) {
+  ScopedHook dlopenHook(g_dlopen, [&](const char* f, int) {
     seen = f;
     return reinterpret_cast<void*>(0x1);
-  };
+  });
   ncclOsLibraryHandle h = nullptr;
   ASSERT_EQ(ncclOsNvmlOpen(&h), ncclSuccess);
   EXPECT_EQ(seen, "libnvidia-ml.so.1");
   EXPECT_EQ(h, reinterpret_cast<void*>(0x1));
-  EXPECT_TRUE(LinuxLogged("INFO Loaded NVML from libnvidia-ml.so.1"));
+  EXPECT_TRUE(log_.Has("INFO Loaded NVML from libnvidia-ml.so.1"));
 }
 
 TEST_F(LinuxDlMicrotest, NvmlOpen_MissingLibraryIsASystemError) {
-  lx::dlopen = [](const char*, int) -> void* { return nullptr; };
-  lx::dlerror = []() { return const_cast<char*>("not here"); };
+  ScopedHook dlopenHook(g_dlopen, [](const char*, int) -> void* { return nullptr; });
+  ScopedHook dlerrorHook(g_dlerror, []() { return const_cast<char*>("not here"); });
   ncclOsLibraryHandle h = reinterpret_cast<void*>(0x1);
   EXPECT_EQ(ncclOsNvmlOpen(&h), ncclSystemError);
   EXPECT_EQ(h, nullptr);
-  EXPECT_TRUE(LinuxLogged("WARN Failed to open libnvidia-ml.so.1: not here"));
+  EXPECT_TRUE(log_.Has("WARN Failed to open libnvidia-ml.so.1: not here"));
 }
 
 // Process and memory helpers
@@ -307,7 +194,7 @@ TEST_F(LinuxProcessMicrotest, AlignedAllocHonoursTheAlignment) {
 }
 
 TEST_F(LinuxProcessMicrotest, SetEnvNeverOverwrites) {
-  LinuxScopedEnv env("NCCL_LINUX_TEST_VAR", nullptr);
+  RcclUnitTesting::ScopedEnv env("NCCL_LINUX_TEST_VAR", nullptr);
   ncclOsSetEnv("NCCL_LINUX_TEST_VAR", "first");
   EXPECT_STREQ(getenv("NCCL_LINUX_TEST_VAR"), "first");
   ncclOsSetEnv("NCCL_LINUX_TEST_VAR", "second");
@@ -360,40 +247,54 @@ class LinuxInitMicrotest : public LinuxMicrotest {
 };
 
 TEST_F(LinuxInitMicrotest, Initialize_ParamOffLeavesTheStackAlone) {
-  g_setCpuStackSize = 0;
+  params_.Set("SET_CPU_STACK_SIZE", 0);
   SetDefaultStack(1 << 20);
   ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
   EXPECT_EQ(DefaultStack(), 1u << 20);
-  EXPECT_TRUE(g_linuxLog.empty());
+  EXPECT_TRUE(log_.Text().empty());
 }
 
 TEST_F(LinuxInitMicrotest, Initialize_RaisesASmallDefaultStackTo8MB) {
   SetDefaultStack(1 << 20);
-  lx::getrlimit = [](int resource, rlimit* lim) {
+  ScopedHook getrlimitHook(g_getrlimit, [](int resource, rlimit* lim) {
     int rc = ::getrlimit((__rlimit_resource_t)resource, lim);
     if (resource == RLIMIT_STACK) lim->rlim_cur = 2048 * 1024;
     return rc;
-  };
+  });
   ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
   EXPECT_EQ(DefaultStack(), 8192u * 1024);
-  EXPECT_TRUE(LinuxLogged("Stack size limit (2048KB) is unsafe; will use 8192KB"));
+  EXPECT_TRUE(log_.Has("Stack size limit (2048KB) is unsafe; will use 8192KB"));
+}
+
+// linux.cc declares ncclParamSetCpuStackSize (and PollTimeOut, RetryTimeOut, SocketMax*Buff) as int,
+// but NCCL_PARAM defines them int64_t, so only the low 32 bits arrive; a fix flips this pin.
+TEST_F(LinuxInitMicrotest, Initialize_KnownBug_IntDeclarationTruncatesTheParam) {
+  params_.Set("SET_CPU_STACK_SIZE", int64_t(1) << 32);
+  SetDefaultStack(1 << 20);
+  ScopedHook getrlimitHook(g_getrlimit, [](int resource, rlimit* lim) {
+    int rc = ::getrlimit((__rlimit_resource_t)resource, lim);
+    if (resource == RLIMIT_STACK) lim->rlim_cur = 2048 * 1024;
+    return rc;
+  });
+  ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
+  EXPECT_EQ(DefaultStack(), 1u << 20);  // read as 0: the stack is left alone
 }
 
 TEST_F(LinuxInitMicrotest, Initialize_ReportsAnUnlimitedStackLimit) {
   SetDefaultStack(2 << 20);  // glibc's fallback when RLIMIT_STACK is unlimited
-  lx::getrlimit = [](int resource, rlimit* lim) {
+  ScopedHook getrlimitHook(g_getrlimit, [](int resource, rlimit* lim) {
     int rc = ::getrlimit((__rlimit_resource_t)resource, lim);
     if (resource == RLIMIT_STACK) lim->rlim_cur = RLIM_INFINITY;
     return rc;
-  };
+  });
   ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
-  EXPECT_TRUE(LinuxLogged("Stack size limit (unlimited) is unsafe"));
+  EXPECT_TRUE(log_.Has("Stack size limit (unlimited) is unsafe"));
 }
 
 TEST_F(LinuxInitMicrotest, Initialize_KeepsAStackThatIsAlready8MB) {
   SetDefaultStack(8192 * 1024);
   ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
-  EXPECT_FALSE(LinuxLogged("unsafe"));
+  EXPECT_FALSE(log_.Has("unsafe"));
   SetDefaultStack(16 << 20);
   ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
   EXPECT_EQ(DefaultStack(), 16u << 20);
@@ -401,12 +302,12 @@ TEST_F(LinuxInitMicrotest, Initialize_KeepsAStackThatIsAlready8MB) {
 
 TEST_F(LinuxInitMicrotest, Initialize_GetrlimitFailureIsASystemError) {
   SetDefaultStack(1 << 20);
-  lx::getrlimit = [](int, rlimit*) {
+  ScopedHook getrlimitHook(g_getrlimit, [](int, rlimit*) {
     errno = EPERM;
     return -1;
-  };
+  });
   EXPECT_EQ(ncclOsInitialize(), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN Call to getrlimit failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to getrlimit failed"));
 }
 
 TEST_F(LinuxInitMicrotest, SetFilesLimit_RaisesTheSoftLimitToTheHardLimit) {
@@ -416,10 +317,10 @@ TEST_F(LinuxInitMicrotest, SetFilesLimit_RaisesTheSoftLimitToTheHardLimit) {
   lowered.rlim_cur = std::min<rlim_t>(saved.rlim_max, 256);
   ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &lowered), 0);
   rlimit seen{};
-  lx::setrlimit = [&](int resource, const rlimit* lim) {
+  ScopedHook setrlimitHook(g_setrlimit, [&](int resource, const rlimit* lim) {
     seen = *lim;
     return ::setrlimit((__rlimit_resource_t)resource, lim);
-  };
+  });
   EXPECT_EQ(ncclOsSetFilesLimit(), ncclSuccess);
   EXPECT_EQ(seen.rlim_cur, saved.rlim_max);
   EXPECT_EQ(seen.rlim_max, saved.rlim_max);
@@ -427,18 +328,18 @@ TEST_F(LinuxInitMicrotest, SetFilesLimit_RaisesTheSoftLimitToTheHardLimit) {
 }
 
 TEST_F(LinuxInitMicrotest, SetFilesLimit_SyscallFailuresAreSystemErrors) {
-  lx::setrlimit = [](int, const rlimit*) {
+  ScopedHook setrlimitHook(g_setrlimit, [](int, const rlimit*) {
     errno = EPERM;
     return -1;
-  };
+  });
   EXPECT_EQ(ncclOsSetFilesLimit(), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN Call to setrlimit failed"));
-  lx::getrlimit = [](int, rlimit*) {
+  EXPECT_TRUE(log_.Has("WARN Call to setrlimit failed"));
+  ScopedHook getrlimitHook(g_getrlimit, [](int, rlimit*) {
     errno = EPERM;
     return -1;
-  };
+  });
   EXPECT_EQ(ncclOsSetFilesLimit(), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN Call to getrlimit failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to getrlimit failed"));
 }
 
 // Sockets
@@ -508,14 +409,14 @@ TEST_F(LinuxSocketMicrotest, DescriptorValidity) {
 }
 
 TEST_F(LinuxSocketMicrotest, PollSocket_WaitsForTheOpsDirectionWithThePollTimeout) {
-  LinuxScopedEnv env("NCCL_SOCKET_POLL_TIMEOUT_MSEC", "7");
+  params_.Set("SOCKET_POLL_TIMEOUT_MSEC", 7);
   std::vector<std::pair<short, int>> calls;
-  lx::poll = [&](pollfd* p, nfds_t n, int timeout) {
+  ScopedHook pollHook(g_poll, [&](pollfd* p, nfds_t n, int timeout) {
     EXPECT_EQ(n, 1u);
     EXPECT_EQ(p->fd, 5);
     calls.push_back({p->events, timeout});
     return 1;
-  };
+  });
   ncclOsPollSocket(5, NCCL_SOCKET_RECV);
   ncclOsPollSocket(5, NCCL_SOCKET_SEND);
   ASSERT_EQ(calls.size(), 2u);
@@ -548,7 +449,7 @@ TEST_F(LinuxSocketMicrotest, TryAccept_NothingPendingIsNotAnError) {
   EXPECT_EQ(ncclOsSocketTryAccept(&sock), ncclSuccess);
   EXPECT_EQ(sock.state, ncclSocketStateAccepting);
   EXPECT_EQ(sock.errorRetries, 0);
-  EXPECT_TRUE(g_linuxLog.empty());
+  EXPECT_TRUE(log_.Text().empty());
 }
 
 TEST_F(LinuxSocketMicrotest, TryAccept_OtherErrorsAreSystemErrors) {
@@ -556,48 +457,48 @@ TEST_F(LinuxSocketMicrotest, TryAccept_OtherErrorsAreSystemErrors) {
   sock.acceptSocketDescriptor = Track(::socket(AF_INET, SOCK_STREAM, 0));  // not listening: EINVAL
   sock.state = ncclSocketStateAccepting;
   EXPECT_EQ(ncclOsSocketTryAccept(&sock), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN ncclOsSocketTryAccept: Accept failed"));
+  EXPECT_TRUE(log_.Has("WARN ncclOsSocketTryAccept: Accept failed"));
 }
 
 // Network errors that accept() may report for an already-failed peer are retried up to NCCL_SOCKET_RETRY_CNT.
 TEST_F(LinuxSocketMicrotest, TryAccept_RetriesPendingNetworkErrorsUpToTheRetryCount) {
-  LinuxScopedEnv env("NCCL_SOCKET_RETRY_CNT", "3");
+  params_.Set("SOCKET_RETRY_CNT", 3);
   for (int err : {ENETDOWN, EPROTO, ENOPROTOOPT, EHOSTDOWN, ENONET, EHOSTUNREACH, EOPNOTSUPP, ENETUNREACH, EINTR}) {
     SCOPED_TRACE(err);
-    g_linuxLog.clear();
-    lx::accept = [err](int, sockaddr*, socklen_t*) {
+    log_.Clear();
+    ScopedHook acceptHook(g_accept, [err](int, sockaddr*, socklen_t*) {
       errno = err;
       return -1;
-    };
+    });
     ncclSocket sock = Sock(NCCL_INVALID_SOCKET);
     sock.state = ncclSocketStateAccepting;
     EXPECT_EQ(ncclOsSocketTryAccept(&sock), ncclSuccess);
     EXPECT_EQ(ncclOsSocketTryAccept(&sock), ncclSuccess);
     EXPECT_EQ(sock.errorRetries, 2);
-    EXPECT_TRUE(LinuxLogged("INFO Call to accept returned"));
+    EXPECT_TRUE(log_.Has("INFO Call to accept returned"));
     EXPECT_EQ(ncclOsSocketTryAccept(&sock), ncclSystemError);
-    EXPECT_TRUE(LinuxLogged("exceeded error retry count after 3 attempts"));
+    EXPECT_TRUE(log_.Has("exceeded error retry count after 3 attempts"));
     EXPECT_EQ(sock.state, ncclSocketStateAccepting);
   }
 }
 
 TEST_F(LinuxSocketMicrotest, TryAccept_WouldBlockIsNotRetried) {
   for (int err : {EAGAIN, EWOULDBLOCK}) {
-    lx::accept = [err](int, sockaddr*, socklen_t*) {
+    ScopedHook acceptHook(g_accept, [err](int, sockaddr*, socklen_t*) {
       errno = err;
       return -1;
-    };
+    });
     ncclSocket sock = Sock(NCCL_INVALID_SOCKET);
     EXPECT_EQ(ncclOsSocketTryAccept(&sock), ncclSuccess);
     EXPECT_EQ(sock.errorRetries, 0);
   }
-  EXPECT_TRUE(g_linuxLog.empty());
+  EXPECT_TRUE(log_.Text().empty());
 }
 
 TEST_F(LinuxSocketMicrotest, SetFlags_RejectsAnInvalidSocket) {
   ncclSocket sock = Sock(NCCL_INVALID_SOCKET);
   EXPECT_EQ(ncclOsSocketSetFlags(&sock), ncclInvalidArgument);
-  EXPECT_TRUE(LinuxLogged("WARN ncclOsSocketSetFlags: invalid socket"));
+  EXPECT_TRUE(log_.Has("WARN ncclOsSocketSetFlags: invalid socket"));
 }
 
 TEST_F(LinuxSocketMicrotest, SetFlags_BlockingSocketGetsNoDelayAndDefaultBuffers) {
@@ -624,8 +525,8 @@ TEST_F(LinuxSocketMicrotest, SetFlags_AsyncOrAbortableSocketsAreNonBlocking) {
 }
 
 TEST_F(LinuxSocketMicrotest, SetFlags_AppliesTheBufferSizeParams) {
-  LinuxScopedEnv snd("NCCL_SOCKET_SNDBUF", "65536");
-  LinuxScopedEnv rcv("NCCL_SOCKET_RCVBUF", "32768");
+  params_.Set("SOCKET_SNDBUF", 65536);
+  params_.Set("SOCKET_RCVBUF", 32768);
   int fd = Track(::socket(AF_INET, SOCK_STREAM, 0));
   ncclSocket sock = Sock(fd);
   ASSERT_EQ(ncclOsSocketSetFlags(&sock), ncclSuccess);
@@ -637,7 +538,7 @@ TEST_F(LinuxSocketMicrotest, SetFlags_SyscallFailuresAreSystemErrors) {
   ncclSocket sock = Sock(1 << 20);  // valid-looking, but not open: fcntl fails
   sock.asyncFlag = 1;
   EXPECT_EQ(ncclOsSocketSetFlags(&sock), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN Call to fcntl failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to fcntl failed"));
 
   int p[2];
   ASSERT_EQ(pipe(p), 0);
@@ -645,26 +546,26 @@ TEST_F(LinuxSocketMicrotest, SetFlags_SyscallFailuresAreSystemErrors) {
   Track(p[1]);
   sock = Sock(p[0]);  // not a socket: setsockopt fails
   EXPECT_EQ(ncclOsSocketSetFlags(&sock), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN Call to setsockopt TCP NODELAY failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to setsockopt TCP NODELAY failed"));
 }
 
 TEST_F(LinuxSocketMicrotest, SetFlags_BufferSizeFailuresAreSystemErrors) {
-  LinuxScopedEnv snd("NCCL_SOCKET_SNDBUF", "65536");
-  LinuxScopedEnv rcv("NCCL_SOCKET_RCVBUF", "32768");
+  params_.Set("SOCKET_SNDBUF", 65536);
+  params_.Set("SOCKET_RCVBUF", 32768);
   int fd = Track(::socket(AF_INET, SOCK_STREAM, 0));
   ncclSocket sock = Sock(fd);
   for (int failing : {SO_SNDBUF, SO_RCVBUF}) {
-    lx::setsockopt = [failing](int s, int level, int name, const void* v, socklen_t len) {
+    ScopedHook setsockoptHook(g_setsockopt, [failing](int s, int level, int name, const void* v, socklen_t len) {
       if (level == SOL_SOCKET && name == failing) {
         errno = ENOBUFS;
         return -1;
       }
       return ::setsockopt(s, level, name, v, len);
-    };
+    });
     EXPECT_EQ(ncclOsSocketSetFlags(&sock), ncclSystemError);
   }
-  EXPECT_TRUE(LinuxLogged("WARN Call to setsockopt SO_SNDBUF failed"));
-  EXPECT_TRUE(LinuxLogged("WARN Call to setsockopt SO_RCVBUF failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to setsockopt SO_SNDBUF failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to setsockopt SO_RCVBUF failed"));
 }
 
 TEST_F(LinuxSocketMicrotest, ResetAccept_ClosesThePeerAndMarksABadHandshake) {
@@ -711,7 +612,7 @@ TEST_F(LinuxSocketMicrotest, ResetFd_SocketFailureLeavesTheDescriptorAlone) {
   sock.addr.sa.sa_family = AF_UNSPEC;
   EXPECT_EQ(ncclOsSocketResetFd(&sock), ncclSystemError);
   EXPECT_EQ(sock.socketDescriptor, NCCL_INVALID_SOCKET);
-  EXPECT_TRUE(LinuxLogged("WARN Call to socket failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to socket failed"));
 }
 
 TEST_F(LinuxSocketMicrotest, ResetFd_Dup2FailureClosesTheNewSocket) {
@@ -729,7 +630,7 @@ TEST_F(LinuxSocketMicrotest, ResetFd_Dup2FailureClosesTheNewSocket) {
   setrlimit(RLIMIT_NOFILE, &saved);
   EXPECT_EQ(ret, ncclSystemError);
   EXPECT_EQ(sock.socketDescriptor, target);
-  EXPECT_TRUE(LinuxLogged("WARN Call to dup2 failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to dup2 failed"));
   EXPECT_FALSE(FdOpen(probe));
 }
 
@@ -738,7 +639,7 @@ TEST_F(LinuxSocketMicrotest, ResetFd_PropagatesASetFlagsFailure) {
   sock.addr.sa.sa_family = AF_UNIX;  // a UNIX stream socket rejects TCP_NODELAY
   EXPECT_EQ(ncclOsSocketResetFd(&sock), ncclSystemError);
   Track(sock.socketDescriptor);
-  EXPECT_TRUE(LinuxLogged("WARN Call to setsockopt TCP NODELAY failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to setsockopt TCP NODELAY failed"));
 }
 
 TEST_F(LinuxSocketMicrotest, StartConnect_ConnectsToAListener) {
@@ -753,12 +654,12 @@ TEST_F(LinuxSocketMicrotest, StartConnect_InProgressPollsUntilConnected) {
   sockaddr_in addr;
   Listen(&addr);
   ncclSocket sock = Sock(Track(::socket(AF_INET, SOCK_STREAM, 0)), &addr);
-  lx::connect = [](int fd, const sockaddr* a, socklen_t l) {
+  ScopedHook connectHook(g_connect, [](int fd, const sockaddr* a, socklen_t l) {
     fcntl(fd, F_SETFL, O_NONBLOCK);
     int rc = ::connect(fd, a, l);
     if (rc == 0) errno = EINPROGRESS;  // loopback may finish at once
     return -1;
-  };
+  });
   ASSERT_EQ(ncclOsSocketStartConnect(&sock), ncclSuccess);
   EXPECT_EQ(sock.state, ncclSocketStateConnectPolling);
   for (int i = 0; i < 1000 && sock.state == ncclSocketStateConnectPolling; i++)
@@ -767,7 +668,7 @@ TEST_F(LinuxSocketMicrotest, StartConnect_InProgressPollsUntilConnected) {
 }
 
 TEST_F(LinuxSocketMicrotest, StartConnect_RefusedIsRetriedWithAGrowingSleep) {
-  LinuxScopedEnv retries("NCCL_SOCKET_RETRY_CNT", "2");
+  params_.Set("SOCKET_RETRY_CNT", 2);
   sockaddr_in addr = ClosedPort();
   ncclSocket sock = Sock(Track(::socket(AF_INET, SOCK_STREAM, 0)), &addr);
   int fd = sock.socketDescriptor;
@@ -775,32 +676,33 @@ TEST_F(LinuxSocketMicrotest, StartConnect_RefusedIsRetriedWithAGrowingSleep) {
   EXPECT_EQ(sock.state, ncclSocketStateConnecting);
   EXPECT_EQ(sock.errorRetries, 1);
   EXPECT_EQ(sock.socketDescriptor, fd);  // reset in place
-  EXPECT_TRUE(LinuxLogged("retrying (1/2) after sleep for 0 msec"));
+  EXPECT_TRUE(log_.Has("retrying (1/2) after sleep for 0 msec"));
 
   ASSERT_EQ(ncclOsSocketStartConnect(&sock), ncclSuccess);
   EXPECT_EQ(sock.errorRetries, 2);
   EXPECT_EQ(ncclOsSocketStartConnect(&sock), ncclRemoteError);
   EXPECT_EQ(sock.state, ncclSocketStateError);
-  EXPECT_TRUE(LinuxLogged("exceeded error retry count after 3 attempts"));
+  EXPECT_TRUE(log_.Has("exceeded error retry count after 3 attempts"));
 }
 
 TEST_F(LinuxSocketMicrotest, StartConnect_SleepGrowsWithTheRetryCount) {
-  LinuxScopedEnv sleep("NCCL_SOCKET_RETRY_SLEEP_MSEC", "3");
+  params_.Set("SOCKET_RETRY_CNT", 5);
+  params_.Set("SOCKET_RETRY_SLEEP_MSEC", 1);
   sockaddr_in addr = ClosedPort();
   ncclSocket sock = Sock(Track(::socket(AF_INET, SOCK_STREAM, 0)), &addr);
   sock.errorRetries = 2;
   ASSERT_EQ(ncclOsSocketStartConnect(&sock), ncclSuccess);
-  EXPECT_TRUE(LinuxLogged("retrying (3/34) after sleep for 9 msec"));
+  EXPECT_TRUE(log_.Has("retrying (3/5) after sleep for 3 msec"));
 }
 
 TEST_F(LinuxSocketMicrotest, StartConnect_TransientErrnosAreRetried) {
   sockaddr_in addr = ClosedPort();
   for (int err : {EINTR, EWOULDBLOCK, EAGAIN, ETIMEDOUT, EHOSTUNREACH, ECONNREFUSED}) {
     SCOPED_TRACE(err);
-    lx::connect = [err](int, const sockaddr*, socklen_t) {
+    ScopedHook connectHook(g_connect, [err](int, const sockaddr*, socklen_t) {
       errno = err;
       return -1;
-    };
+    });
     ncclSocket sock = Sock(Track(::socket(AF_INET, SOCK_STREAM, 0)), &addr);
     ASSERT_EQ(ncclOsSocketStartConnect(&sock), ncclSuccess);
     EXPECT_EQ(sock.state, ncclSocketStateConnecting);
@@ -810,14 +712,14 @@ TEST_F(LinuxSocketMicrotest, StartConnect_TransientErrnosAreRetried) {
 
 // A caller with its own retry policy gets the reset but no count and no sleep.
 TEST_F(LinuxSocketMicrotest, StartConnect_CustomRetryOnlyResets) {
-  LinuxScopedEnv retries("NCCL_SOCKET_RETRY_CNT", "0");
+  params_.Set("SOCKET_RETRY_CNT", 0);
   sockaddr_in addr = ClosedPort();
   ncclSocket sock = Sock(Track(::socket(AF_INET, SOCK_STREAM, 0)), &addr);
   sock.customRetry = 1;
   ASSERT_EQ(ncclOsSocketStartConnect(&sock), ncclSuccess);
   EXPECT_EQ(sock.state, ncclSocketStateConnecting);
   EXPECT_EQ(sock.errorRetries, 0);
-  EXPECT_FALSE(LinuxLogged("retrying"));
+  EXPECT_FALSE(log_.Has("retrying"));
 }
 
 TEST_F(LinuxSocketMicrotest, StartConnect_OtherErrorsFail) {
@@ -827,31 +729,31 @@ TEST_F(LinuxSocketMicrotest, StartConnect_OtherErrorsFail) {
   sock.salen = 1;  // EINVAL
   EXPECT_EQ(ncclOsSocketStartConnect(&sock), ncclSystemError);
   EXPECT_EQ(sock.state, ncclSocketStateError);
-  EXPECT_TRUE(LinuxLogged("WARN ncclOsSocketStartConnect: connect to 127.0.0.1<"));
-  EXPECT_TRUE(LinuxLogged("failed : Invalid argument"));
+  EXPECT_TRUE(log_.Has("WARN ncclOsSocketStartConnect: connect to 127.0.0.1<"));
+  EXPECT_TRUE(log_.Has("failed : Invalid argument"));
 }
 
 TEST_F(LinuxSocketMicrotest, StartConnect_PropagatesAResetFailure) {
-  lx::connect = [](int, const sockaddr*, socklen_t) {
+  ScopedHook connectHook(g_connect, [](int, const sockaddr*, socklen_t) {
     errno = ECONNREFUSED;
     return -1;
-  };
+  });
   ncclSocket sock = Sock(Track(::socket(AF_INET, SOCK_STREAM, 0)));
   sock.addr.sa.sa_family = AF_UNSPEC;  // the replacement socket cannot be created
   EXPECT_EQ(ncclOsSocketStartConnect(&sock), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN Call to socket failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to socket failed"));
 }
 
 TEST_F(LinuxSocketMicrotest, PollConnect_NotReadyYetIsSuccess) {
   ncclSocket sock = Sock(3);
   sock.state = ncclSocketStateConnectPolling;
   int pollRc = 0;
-  lx::poll = [&](pollfd* p, nfds_t, int timeout) {
+  ScopedHook pollHook(g_poll, [&](pollfd* p, nfds_t, int timeout) {
     EXPECT_EQ(p->events, POLLOUT);
     EXPECT_EQ(timeout, 1);
     errno = EINTR;
     return pollRc;
-  };
+  });
   EXPECT_EQ(ncclOsSocketPollConnect(&sock), ncclSuccess);
   pollRc = -1;  // interrupted
   EXPECT_EQ(ncclOsSocketPollConnect(&sock), ncclSuccess);
@@ -860,34 +762,34 @@ TEST_F(LinuxSocketMicrotest, PollConnect_NotReadyYetIsSuccess) {
 
 TEST_F(LinuxSocketMicrotest, PollConnect_PollFailureIsASystemError) {
   ncclSocket sock = Sock(3);
-  lx::poll = [](pollfd*, nfds_t, int) {
+  ScopedHook pollHook(g_poll, [](pollfd*, nfds_t, int) {
     errno = ENOMEM;
     return -1;
-  };
+  });
   EXPECT_EQ(ncclOsSocketPollConnect(&sock), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN ncclOsSocketPollConnect to"));
+  EXPECT_TRUE(log_.Has("WARN ncclOsSocketPollConnect to"));
 }
 
 TEST_F(LinuxSocketMicrotest, PollConnect_ChecksThePendingSocketError) {
   sockaddr_in addr = ClosedPort();
   ncclSocket sock = Sock(Track(::socket(AF_INET, SOCK_STREAM, 0)), &addr);
-  lx::poll = [](pollfd*, nfds_t, int) { return 1; };
-  lx::getsockopt = [](int, int level, int name, void* v, socklen_t*) {
+  ScopedHook pollHook(g_poll, [](pollfd*, nfds_t, int) { return 1; });
+  ScopedHook getsockoptHook(g_getsockopt, [](int, int level, int name, void* v, socklen_t*) {
     EXPECT_EQ(level, SOL_SOCKET);
     EXPECT_EQ(name, SO_ERROR);
     *(int*)v = ECONNREFUSED;
     return 0;
-  };
+  });
   ASSERT_EQ(ncclOsSocketPollConnect(&sock), ncclSuccess);
   EXPECT_EQ(sock.state, ncclSocketStateConnecting);
-  EXPECT_TRUE(LinuxLogged("ncclOsSocketPollConnect: connect to"));
+  EXPECT_TRUE(log_.Has("ncclOsSocketPollConnect: connect to"));
 
-  lx::getsockopt = [](int, int, int, void*, socklen_t*) {
+  ScopedHook failingHook(g_getsockopt, [](int, int, int, void*, socklen_t*) {
     errno = EBADF;
     return -1;
-  };
+  });
   EXPECT_EQ(ncclOsSocketPollConnect(&sock), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN Call to getsockopt failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to getsockopt failed"));
 }
 
 TEST_F(LinuxSocketMicrotest, ProgressOpt_BlockingSendAndRecvMoveEverything) {
@@ -911,15 +813,20 @@ TEST_F(LinuxSocketMicrotest, ProgressOpt_BlockingRecvWaitsForTheRest) {
   int sv[2];
   Pair(sv);
   ncclSocket b = Sock(sv[1]);
-  std::thread writer([&] {
-    ::send(sv[0], "abcd", 4, 0);
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    ::send(sv[0], "efgh", 4, 0);
+  std::vector<int> flags;
+  ScopedHook recvHook(g_recv, [&](int fd, void* buf, size_t n, int f) {
+    flags.push_back(f);
+    ssize_t got = ::recv(fd, buf, n, f);
+    int err = errno;
+    if (flags.size() == 1) ::send(sv[0], "efgh", 4, 0);  // the rest arrives only after the first read
+    errno = err;
+    return got;
   });
+  ::send(sv[0], "abcd", 4, 0);
   char in[8];
   int offset = 0, closed = 0;
   EXPECT_EQ(ncclOsSocketProgressOpt(NCCL_SOCKET_RECV, &b, in, sizeof(in), &offset, 1, &closed), ncclSuccess);
-  writer.join();
+  EXPECT_EQ(flags, (std::vector<int>{0, 0}));  // two blocking reads
   EXPECT_EQ(offset, 8);
   EXPECT_EQ(std::string(in, 8), "abcdefgh");
 }
@@ -1000,7 +907,7 @@ TEST_F(LinuxSocketMicrotest, ProgressOpt_ConnectionResetOnRecvIsAClose) {
   int offset = 0, closed = 0;
   ASSERT_EQ(ncclOsSocketProgressOpt(NCCL_SOCKET_RECV, &a, buf, sizeof(buf), &offset, 1, &closed), ncclSuccess);
   EXPECT_EQ(closed, 1);
-  EXPECT_TRUE(g_linuxLog.empty());
+  EXPECT_TRUE(log_.Text().empty());
 }
 
 TEST_F(LinuxSocketMicrotest, ProgressOpt_OtherErrorsAreRemoteErrors) {
@@ -1012,10 +919,10 @@ TEST_F(LinuxSocketMicrotest, ProgressOpt_OtherErrorsAreRemoteErrors) {
   int offset = 0, closed = 0;
   ncclSocket sock = Sock(p[0]);
   EXPECT_EQ(ncclOsSocketProgressOpt(NCCL_SOCKET_RECV, &sock, buf, sizeof(buf), &offset, 1, &closed), ncclRemoteError);
-  EXPECT_TRUE(LinuxLogged("WARN ncclOsSocketProgressOpt: Call to recv from"));
+  EXPECT_TRUE(log_.Has("WARN ncclOsSocketProgressOpt: Call to recv from"));
   sock = Sock(p[1]);
   EXPECT_EQ(ncclOsSocketProgressOpt(NCCL_SOCKET_SEND, &sock, buf, sizeof(buf), &offset, 1, &closed), ncclRemoteError);
-  EXPECT_TRUE(LinuxLogged("WARN ncclOsSocketProgressOpt: Call to send to"));
+  EXPECT_TRUE(log_.Has("WARN ncclOsSocketProgressOpt: Call to send to"));
   EXPECT_EQ(closed, 0);
 }
 
@@ -1028,20 +935,13 @@ TEST_F(LinuxSocketMicrotest, ProgressOpt_AbortStopsAfterTheTransfer) {
   int offset = 0, closed = 0;
   EXPECT_EQ(ncclOsSocketProgressOpt(NCCL_SOCKET_SEND, &a, (void*)"abcd", 4, &offset, 1, &closed), ncclInternalError);
   EXPECT_EQ(offset, 4);
-  EXPECT_TRUE(LinuxLogged("INFO ncclOsSocketProgressOpt: abort called"));
+  EXPECT_TRUE(log_.Has("INFO ncclOsSocketProgressOpt: abort called"));
 }
 
 // Interface enumeration over a scripted getifaddrs() list.
 class LinuxIfMicrotest : public LinuxMicrotest {
  protected:
-  void SetUp() override {
-    LinuxMicrotest::SetUp();
-    ifs_.Install();
-  }
-  void TearDown() override {
-    EXPECT_EQ(ifs_.freed, ifs_.listed);
-    LinuxMicrotest::TearDown();
-  }
+  void TearDown() override { EXPECT_EQ(ifs_.Freed(), ifs_.Listed()); }
   template <typename... A>
   void Add(A... args) {
     ifs_.Add(args...);
@@ -1126,15 +1026,15 @@ TEST_F(LinuxIfMicrotest, FindInterfaces_ClearsTheStoredAddress) {
 }
 
 TEST_F(LinuxIfMicrotest, FindInterfaces_GetifaddrsFailureIsASystemError) {
-  lx::getifaddrs = [](ifaddrs**) {
+  ScopedHook getifaddrsHook(g_getifaddrs, [](ifaddrs**) {
     errno = ENOMEM;
     return -1;
-  };
+  });
   int found = -1;
   EXPECT_EQ(ncclOsFindInterfaces(nullptr, names_, addrs_, -1, MAX_IF_NAME_SIZE, MAX_IFS, &found), ncclSystemError);
   EXPECT_EQ(found, 0);
   EXPECT_EQ(ncclFindInterfaceMatchSubnet(names_, addrs_, addrs_, MAX_IF_NAME_SIZE, &found), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN Call to getifaddrs failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to getifaddrs failed"));
 }
 
 TEST_F(LinuxIfMicrotest, MatchSubnet_IPv4UsesTheNetmask) {
@@ -1161,7 +1061,8 @@ TEST_F(LinuxIfMicrotest, MatchSubnet_IPv6ComparesThePrefixAndTheScope) {
 }
 
 TEST_F(LinuxIfMicrotest, RealGetifaddrsFindsLoopback) {
-  lx::Reset();
+  ScopedHook realList(g_getifaddrs, ::getifaddrs);
+  ScopedHook realFree(g_freeifaddrs, ::freeifaddrs);
   int found = 0;
   ASSERT_EQ(ncclOsFindInterfaces("=lo", names_, addrs_, AF_INET, MAX_IF_NAME_SIZE, MAX_IFS, &found), ncclSuccess);
   ASSERT_EQ(found, 1);
@@ -1220,14 +1121,16 @@ TEST_F(LinuxSocketCloseMicrotest, WaitDrainsUntilThePeerCloses) {
   int sv[2];
   Pair(sv);
   ::send(sv[1], "leftover", 8, 0);
-  std::thread peer([&] {
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    ::shutdown(sv[1], SHUT_WR);
+  ScopedHook recvHook(g_recv, [&](int fd, void* buf, size_t n, int f) {
+    int avail = 0;
+    ioctl(fd, FIONREAD, &avail);
+    if (avail == 0) ::shutdown(sv[1], SHUT_WR);  // the peer closes once the leftover is drained
+    return ::recv(fd, buf, n, f);
   });
   ncclSocket sock = Sock(sv[0]);
   sock.state = ncclSocketStateReady;
   EXPECT_EQ(ncclSocketClose(&sock, /*wait=*/true), ncclSuccess);
-  peer.join();
+  EXPECT_EQ(recvHook.calls, 9);  // eight bytes, then the close
   EXPECT_FALSE(FdOpen(sv[0]));
 }
 
@@ -1241,7 +1144,7 @@ TEST_F(LinuxSocketCloseMicrotest, WaitStopsOnAReadErrorAndFreesTlsState) {
   ASSERT_EQ(ncclSocketClose(&sock, /*wait=*/true), ncclSuccess);
   EXPECT_EQ(sock.crypto, nullptr);
   EXPECT_FALSE(FdOpen(sv[0]));
-  EXPECT_TRUE(LinuxLogged("ncclCryptSocketRecv called without TLS support"));
+  EXPECT_TRUE(log_.Has("ncclCryptSocketRecv called without TLS support"));
 }
 #endif
 
@@ -1278,23 +1181,29 @@ TEST_F(LinuxSyncMicrotest, MutexCondShared_WakesAWaiterInAnotherProcess) {
   ASSERT_NE(mem, MAP_FAILED);
   Shared* s = new (mem) Shared;
   ncclOsSetMutexCondShared(s->m, s->cv, nullptr);
+  const std::string waiterStat = "/proc/" + std::to_string(getpid()) + "/task/" + std::to_string(syscall(SYS_gettid)) +
+                                 "/stat";
+  auto start = std::chrono::steady_clock::now();
+  std::unique_lock<std::mutex> lock(s->m);  // held across fork: the child gets it only once we wait
   pid_t child = fork();
   if (child == 0) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     {
-      std::lock_guard<std::mutex> lock(s->m);
+      std::lock_guard<std::mutex> childLock(s->m);
+      // Notify only once the waiter sleeps in the kernel, where only a shared condition variable reaches it.
+      for (int i = 0; i < 1000000 && !ThreadSleeps(waiterStat); i++) sched_yield();
       s->ready = 1;
     }
     s->cv.notify_all();
     _exit(0);
   }
-  auto start = std::chrono::steady_clock::now();
-  {
-    std::unique_lock<std::mutex> lock(s->m);
-    while (!s->ready && std::chrono::steady_clock::now() - start < std::chrono::seconds(10))
-      s->cv.wait_for(lock, std::chrono::seconds(5));
-  }
+  // Likewise release the mutex only once the child sleeps on it, where only a shared mutex reaches it.
+  const std::string childStat = "/proc/" + std::to_string(child) + "/stat";
+  for (int i = 0; i < 1000000 && !ThreadSleeps(childStat); i++) sched_yield();
+  while (!s->ready && std::chrono::steady_clock::now() - start < std::chrono::seconds(10))
+    s->cv.wait_for(lock, std::chrono::seconds(5));
+  lock.unlock();
   auto waited = std::chrono::steady_clock::now() - start;
+  if (!s->ready) kill(child, SIGKILL);
   int status = 0;
   waitpid(child, &status, 0);
   EXPECT_EQ(s->ready, 1);
@@ -1337,13 +1246,13 @@ TEST_F(LinuxSyncMicrotest, Affinity_FailuresAreSystemErrors) {
   ncclAffinity none;
   CPU_ZERO(&none);
   EXPECT_EQ(ncclOsSetAffinity(none), ncclSystemError);  // EINVAL
-  EXPECT_TRUE(LinuxLogged("WARN sched_setaffinity failed with error: Invalid argument"));
-  lx::sched_getaffinity = [](pid_t, size_t, cpu_set_t*) {
+  EXPECT_TRUE(log_.Has("WARN sched_setaffinity failed with error: Invalid argument"));
+  ScopedHook schedGetaffinityHook(g_schedGetaffinity, [](pid_t, size_t, cpu_set_t*) {
     errno = EFAULT;
     return -1;
-  };
+  });
   EXPECT_EQ(ncclOsGetAffinity(&none), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN sched_getaffinity failed with error: Bad address"));
+  EXPECT_TRUE(log_.Has("WARN sched_getaffinity failed with error: Bad address"));
 }
 
 // sysfs readers, over a scratch tree that the /sys hooks redirect to.
@@ -1351,25 +1260,17 @@ TEST_F(LinuxSyncMicrotest, Affinity_FailuresAreSystemErrors) {
 class LinuxSysfsMicrotest : public LinuxMicrotest {
  protected:
   void SetUp() override {
-    LinuxMicrotest::SetUp();
     char tmpl[] = "/tmp/nccl-linux-sysfs-XXXXXX";
     ASSERT_NE(mkdtemp(tmpl), nullptr);
     root_ = tmpl;
-    auto redirect = [this](const char* path) {
-      std::string p = path;
-      return p.rfind("/sys/", 0) == 0 ? root_ + p : p;
-    };
-    lx::realpath = [=](const char* p, char* out) {
-      seenPaths_.push_back(p);
-      return ::realpath(redirect(p).c_str(), out);
-    };
-    lx::fopen = [=](const char* p, const char* mode) { return ::fopen(redirect(p).c_str(), mode); };
-    lx::opendir = [=](const char* p) { return ::opendir(redirect(p).c_str()); };
   }
   void TearDown() override {
-    std::string cmd = "rm -rf " + root_;
-    EXPECT_EQ(system(cmd.c_str()), 0);
-    LinuxMicrotest::TearDown();
+    std::error_code ec;
+    if (!root_.empty()) std::filesystem::remove_all(root_, ec);
+  }
+  std::string Redirect(const char* path) const {
+    std::string p = path;
+    return p.rfind("/sys/", 0) == 0 ? root_ + p : p;
   }
   void Mkdirs(const std::string& rel) {
     std::string path = root_;
@@ -1397,6 +1298,14 @@ class LinuxSysfsMicrotest : public LinuxMicrotest {
   }
   std::string root_;
   std::vector<std::string> seenPaths_;
+  // The /sys hooks: production's sysfs reads land in root_.
+  ScopedHook<char*(const char*, char*)> realpath_{g_realpath, [this](const char* p, char* out) {
+                                                    seenPaths_.push_back(p);
+                                                    return ::realpath(Redirect(p).c_str(), out);
+                                                  }};
+  ScopedHook<FILE*(const char*, const char*)> fopen_{
+      g_fopen, [this](const char* p, const char* mode) { return ::fopen(Redirect(p).c_str(), mode); }};
+  ScopedHook<DIR*(const char*)> opendir_{g_opendir, [this](const char* p) { return ::opendir(Redirect(p).c_str()); }};
 };
 
 TEST_F(LinuxSysfsMicrotest, GetPciPath_LowercasesTheBusIdAndResolves) {
@@ -1413,7 +1322,7 @@ TEST_F(LinuxSysfsMicrotest, GetPciPath_MissingDeviceIsASystemError) {
   char* path = (char*)0x1;
   EXPECT_EQ(ncclOsGetPciPath("0000:1b:00.0", &path), ncclSystemError);
   EXPECT_EQ(path, nullptr);
-  EXPECT_TRUE(LinuxLogged("WARN Could not find real path of /sys/class/pci_bus/0000:1b/../../0000:1b:00.0"));
+  EXPECT_TRUE(log_.Has("WARN Could not find real path of /sys/class/pci_bus/0000:1b/../../0000:1b:00.0"));
 }
 
 TEST_F(LinuxSysfsMicrotest, TopoGetStrFromSys_StripsTheNewlineAndTruncates) {
@@ -1426,16 +1335,16 @@ TEST_F(LinuxSysfsMicrotest, TopoGetStrFromSys_StripsTheNewlineAndTruncates) {
   EXPECT_STREQ(buf, "0x030000");
   ASSERT_EQ(ncclOsTopoGetStrFromSys(dir.c_str(), "nl", buf, 4), ncclSuccess);  // truncated to maxLen
   EXPECT_STREQ(buf, "0x0");
-  EXPECT_FALSE(LinuxLogged("could not read"));
+  EXPECT_FALSE(log_.Has("could not read"));
   ASSERT_EQ(ncclOsTopoGetStrFromSys(dir.c_str(), "empty", buf, sizeof(buf)), ncclSuccess);
   EXPECT_STREQ(buf, "");
-  EXPECT_TRUE(LinuxLogged(("could not read " + dir + "/empty").c_str()));  // empty reads as unreadable
+  EXPECT_TRUE(log_.Has(("could not read " + dir + "/empty").c_str()));  // empty reads as unreadable
   ASSERT_EQ(ncclOsTopoGetStrFromSys(dir.c_str(), "missing", buf, sizeof(buf)), ncclSuccess);
   EXPECT_STREQ(buf, "");
-  EXPECT_TRUE(LinuxLogged(("INFO Topology detection : could not read " + dir + "/missing, ignoring").c_str()));
+  EXPECT_TRUE(log_.Has(("INFO Topology detection : could not read " + dir + "/missing, ignoring").c_str()));
 }
 
-// A value without a trailing newline loses its last character; a fix flips this pin.
+// A value without a trailing newline loses its last character. Pins AICOMRCCL-2975; a fix flips this pin.
 TEST_F(LinuxSysfsMicrotest, TopoGetStrFromSys_KnownBug_DropsTheLastCharacter) {
   Mkdirs("/d");
   Write("/d/raw", "abc");
@@ -1459,8 +1368,8 @@ TEST_F(LinuxSysfsMicrotest, DeviceClass_MissingDeviceIsAQuietSystemError) {
   char cls[32] = "junk";
   EXPECT_EQ(ncclOsGetPciDeviceClassByBusId("0000:1b:00.0", cls, sizeof(cls)), ncclSystemError);
   EXPECT_STREQ(cls, "");
-  EXPECT_FALSE(LinuxLogged("WARN"));
-  EXPECT_TRUE(LinuxLogged("INFO Could not find real path"));
+  EXPECT_FALSE(log_.Has("WARN"));
+  EXPECT_TRUE(log_.Has("INFO Could not find real path"));
 }
 
 TEST_F(LinuxSysfsMicrotest, ComputePartition_ReadsTheAttributeOrEmpty) {
@@ -1482,7 +1391,7 @@ TEST_F(LinuxSysfsMicrotest, ComputePartition_BadArgumentsAndMissingDevice) {
   EXPECT_STREQ(part, "junk");
   EXPECT_EQ(ncclOsGetPciDeviceComputePartitionByBusId("0000:1b:00.0", part, sizeof(part)), ncclSystemError);
   EXPECT_STREQ(part, "");
-  EXPECT_FALSE(LinuxLogged("WARN"));
+  EXPECT_FALSE(log_.Has("WARN"));
 }
 
 TEST_F(LinuxSysfsMicrotest, BcmLinks_ListsPeersThatArePciDevices) {
@@ -1520,7 +1429,7 @@ TEST_F(LinuxSysfsMicrotest, NumaNodeAffinity_StripsLineEndings) {
   EXPECT_EQ(offset, 0);
   ASSERT_EQ(ncclOsGetNumaNodeAffinity(3, str, 6, &offset), ncclSuccess);  // maxLen counts the NUL
   EXPECT_STREQ(str, "00000");
-  EXPECT_FALSE(LinuxLogged("could not read"));
+  EXPECT_FALSE(log_.Has("could not read"));
 }
 
 TEST_F(LinuxSysfsMicrotest, NumaNodeAffinity_MissingNodeIsEmpty) {
@@ -1528,7 +1437,7 @@ TEST_F(LinuxSysfsMicrotest, NumaNodeAffinity_MissingNodeIsEmpty) {
   int offset = -1;
   ASSERT_EQ(ncclOsGetNumaNodeAffinity(7, str, sizeof(str), &offset), ncclSuccess);
   EXPECT_STREQ(str, "");
-  EXPECT_TRUE(LinuxLogged("could not read /sys/devices/system/node/node7/cpumap, using empty affinity"));
+  EXPECT_TRUE(log_.Has("could not read /sys/devices/system/node/node7/cpumap, using empty affinity"));
 }
 
 // Shared memory, on real files.
@@ -1536,26 +1445,38 @@ TEST_F(LinuxSysfsMicrotest, NumaNodeAffinity_MissingNodeIsEmpty) {
 class LinuxShmMicrotest : public LinuxMicrotest {
  protected:
   void SetUp() override {
-    LinuxMicrotest::SetUp();
     char tmpl[] = "/tmp/nccl-linux-shm-XXXXXX";
     ASSERT_NE(mkdtemp(tmpl), nullptr);
     dir_ = tmpl;
   }
   void TearDown() override {
     for (auto* h : handles_) ncclOsShmClose(h);
-    std::string cmd = "rm -rf " + dir_;
-    EXPECT_EQ(system(cmd.c_str()), 0);
-    LinuxMicrotest::TearDown();
+    for (auto& p : created_) ::unlink(p.c_str());
+    std::error_code ec;
+    if (!dir_.empty()) std::filesystem::remove_all(dir_, ec);
   }
   ncclResult_t Open(char* path, size_t size, int refcount, void** ptr, ncclShmHandleInternal** h,
                     void** dev = nullptr) {
     ncclResult_t ret = ncclOsShmOpen(path, PATH_MAX, size, ptr, dev, refcount, h);
     if (*h) handles_.push_back(*h);
+    if (refcount > 0 && path[0]) created_.push_back(path);
     return ret;
   }
   void Forget(ncclShmHandleInternal* h) { handles_.erase(std::find(handles_.begin(), handles_.end(), h)); }
   std::string dir_;
   std::vector<ncclShmHandleInternal*> handles_;
+  std::vector<std::string> created_;
+  // HIP host registration succeeds unless a test says otherwise.
+  ScopedHook<hipError_t(hipStreamCaptureMode*)> capture_{g_hipThreadExchangeStreamCaptureMode,
+                                                         [](hipStreamCaptureMode*) { return hipSuccess; }};
+  ScopedHook<hipError_t(void*, size_t, unsigned int)> register_{g_hipHostRegister,
+                                                                [](void*, size_t, unsigned int) { return hipSuccess; }};
+  ScopedHook<hipError_t(void**, void*, unsigned int)> devPtr_{g_hipHostGetDevicePointer,
+                                                              [](void** d, void* h, unsigned int) {
+                                                                *d = h;
+                                                                return hipSuccess;
+                                                              }};
+  ScopedHook<hipError_t(void*)> unregister_{g_hipHostUnregister, [](void*) { return hipSuccess; }};
 };
 
 TEST_F(LinuxShmMicrotest, CreateInDevShmThenAttachUntilTheLastPeerUnlinks) {
@@ -1592,7 +1513,7 @@ TEST_F(LinuxShmMicrotest, CreateInDevShmThenAttachUntilTheLastPeerUnlinks) {
 
   EXPECT_EQ(ncclOsShmClose(h), ncclSuccess);  // refcount 0: no second unlink
   Forget(h);
-  EXPECT_FALSE(LinuxLogged("WARN"));
+  EXPECT_FALSE(log_.Has("WARN"));
 }
 
 TEST_F(LinuxShmMicrotest, CreateAtAGivenPath) {
@@ -1607,7 +1528,7 @@ TEST_F(LinuxShmMicrotest, CreateAtAGivenPath) {
   ASSERT_EQ(stat(path, &st), 0);
   EXPECT_EQ((size_t)st.st_size, 100 + sizeof(int));
   EXPECT_EQ(st.st_mode & 0777, (mode_t)(S_IRUSR | S_IWUSR));
-  EXPECT_TRUE(LinuxLogged("Allocated 104 bytes of shared memory in"));
+  EXPECT_TRUE(log_.Has("Allocated 104 bytes of shared memory in"));
 }
 
 // open() does not truncate, so a creator reusing a path must clear what the file held.
@@ -1642,15 +1563,15 @@ TEST_F(LinuxShmMicrotest, CloseReportsUnlinkAndMunmapFailures) {
   ncclShmHandleInternal* h = nullptr;
   ASSERT_EQ(Open(path, 64, 1, &ptr, &h), ncclSuccess);
   ::unlink(path);
-  lx::munmap = [](void* p, size_t n) {
+  ScopedHook munmapHook(g_munmap, [](void* p, size_t n) {
     ::munmap(p, n);
     errno = EINVAL;
     return -1;
-  };
+  });
   Forget(h);
   EXPECT_EQ(ncclOsShmClose(h), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN unlink shared memory"));
-  EXPECT_TRUE(LinuxLogged("WARN munmap of shared memory"));
+  EXPECT_TRUE(log_.Has("WARN unlink shared memory"));
+  EXPECT_TRUE(log_.Has("WARN munmap of shared memory"));
 }
 
 TEST_F(LinuxShmMicrotest, UnlinkRemovesTheFileOnce) {
@@ -1663,7 +1584,7 @@ TEST_F(LinuxShmMicrotest, UnlinkRemovesTheFileOnce) {
   EXPECT_EQ(h->shmPath, nullptr);
   EXPECT_EQ(ncclOsShmUnlink(h), ncclSuccess);  // nothing left to unlink
   EXPECT_EQ(ncclOsShmUnlink(nullptr), ncclSuccess);
-  EXPECT_FALSE(LinuxLogged("WARN"));
+  EXPECT_FALSE(log_.Has("WARN"));
 }
 
 TEST_F(LinuxShmMicrotest, UnlinkSkipsAFullyAttachedSegmentAndReportsFailures) {
@@ -1677,7 +1598,7 @@ TEST_F(LinuxShmMicrotest, UnlinkSkipsAFullyAttachedSegmentAndReportsFailures) {
   *h->refcount = 1;
   ::unlink(path);
   EXPECT_EQ(ncclOsShmUnlink(h), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN unlink shared memory"));
+  EXPECT_TRUE(log_.Has("WARN unlink shared memory"));
 }
 
 TEST_F(LinuxShmMicrotest, OpenFailuresReturnNoHandle) {
@@ -1689,56 +1610,57 @@ TEST_F(LinuxShmMicrotest, OpenFailuresReturnNoHandle) {
   EXPECT_EQ(Open(path, 64, 1, &ptr, &h), ncclSystemError);
   EXPECT_EQ(h, nullptr);
   EXPECT_EQ(ptr, nullptr);
-  EXPECT_TRUE(LinuxLogged("Error while creating shared memory segment"));
+  EXPECT_TRUE(log_.Has("Error while creating shared memory segment"));
   EXPECT_EQ(Open(path, 64, 0, &ptr, &h), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("Error while attaching to shared memory segment"));
+  EXPECT_TRUE(log_.Has("Error while attaching to shared memory segment"));
 }
 
 TEST_F(LinuxShmMicrotest, InterruptedMkstempAndFallocateAreRetried) {
   int mkstemps = 0, fallocates = 0;
-  lx::mkstemp = [&](char* tmpl) {
+  ScopedHook mkstempHook(g_mkstemp, [&](char* tmpl) {
     if (mkstemps++ == 0) {
       errno = EINTR;
       return -1;
     }
     return ::mkstemp(tmpl);
-  };
-  lx::fallocate = [&](int fd, int mode, off_t off, off_t len) {
+  });
+  ScopedHook fallocateHook(g_fallocate, [&](int fd, int mode, off_t off, off_t len) {
     if (fallocates++ == 0) {
       errno = EINTR;
       return -1;
     }
     return ::fallocate(fd, mode, off, len);
-  };
+  });
   char path[PATH_MAX] = "";
   void* ptr = nullptr;
   ncclShmHandleInternal* h = nullptr;
   ASSERT_EQ(Open(path, 64, 1, &ptr, &h), ncclSuccess);
   EXPECT_EQ(mkstemps, 2);
   EXPECT_EQ(fallocates, 2);
-  EXPECT_TRUE(LinuxLogged("mkstemp: Failed to create"));
-  EXPECT_TRUE(LinuxLogged("fallocate: Failed to extend"));
+  EXPECT_TRUE(log_.Has("mkstemp: Failed to create"));
+  EXPECT_TRUE(log_.Has("fallocate: Failed to extend"));
 }
 
 TEST_F(LinuxShmMicrotest, MkstempFailure) {
-  lx::mkstemp = [](char*) {
+  ScopedHook mkstempHook(g_mkstemp, [](char*) {
     errno = EACCES;
     return -1;
-  };
+  });
   char path[PATH_MAX] = "";
   void* ptr = nullptr;
   ncclShmHandleInternal* h = nullptr;
   EXPECT_EQ(Open(path, 64, 1, &ptr, &h), ncclSystemError);
   EXPECT_EQ(h, nullptr);
-  EXPECT_TRUE(LinuxLogged("WARN Error: failed to create shared memory file /dev/shm/nccl-XXXXXX"));
+  EXPECT_TRUE(log_.Has("WARN Error: failed to create shared memory file /dev/shm/nccl-XXXXXX"));
 }
 
-// Close only unlinks once a refcount is mapped, so a failure after creation leaves the file; a fix flips this pin.
+// Close only unlinks once a refcount is mapped, so a failure after creation leaves the file.
+// Pins AICOMRCCL-2974; a fix flips this pin.
 TEST_F(LinuxShmMicrotest, ShmOpen_KnownBug_FallocateFailureLeavesTheCreatedFile) {
-  lx::fallocate = [](int, int, off_t, off_t) {
+  ScopedHook fallocateHook(g_fallocate, [](int, int, off_t, off_t) {
     errno = ENOSPC;
     return -1;
-  };
+  });
   std::string p = dir_ + "/seg";
   char path[PATH_MAX];
   std::strcpy(path, p.c_str());
@@ -1746,25 +1668,25 @@ TEST_F(LinuxShmMicrotest, ShmOpen_KnownBug_FallocateFailureLeavesTheCreatedFile)
   ncclShmHandleInternal* h = nullptr;
   EXPECT_EQ(Open(path, 64, 1, &ptr, &h), ncclSystemError);
   EXPECT_EQ(h, nullptr);
-  EXPECT_TRUE(LinuxLogged("WARN Error: failed to extend"));
+  EXPECT_TRUE(log_.Has("WARN Error: failed to extend"));
   EXPECT_TRUE(Exists(p));
 }
 
 TEST_F(LinuxShmMicrotest, MmapAndCallocFailures) {
-  lx::mmap = [](void*, size_t, int, int, int, off_t) {
+  ScopedHook mmapHook(g_mmap, [](void*, size_t, int, int, int, off_t) {
     errno = ENOMEM;
     return MAP_FAILED;
-  };
+  });
   char path[PATH_MAX] = "";
   void* ptr = nullptr;
   ncclShmHandleInternal* h = nullptr;
   EXPECT_EQ(Open(path, 64, 1, &ptr, &h), ncclSystemError);
   EXPECT_EQ(h, nullptr);
   EXPECT_EQ(ptr, nullptr);
-  EXPECT_TRUE(LinuxLogged("WARN Error: Could not map"));
+  EXPECT_TRUE(log_.Has("WARN Error: Could not map"));
   ::unlink(path);
 
-  lx::calloc = [](size_t, size_t) -> void* { return nullptr; };
+  ScopedHook callocHook(g_calloc, [](size_t, size_t) -> void* { return nullptr; });
   path[0] = '\0';
   EXPECT_EQ(Open(path, 64, 1, &ptr, &h), ncclSystemError);
   EXPECT_EQ(h, nullptr);
@@ -1776,41 +1698,40 @@ TEST_F(LinuxShmMicrotest, LastAttachUnlinkFailureIsOnlyLogged) {
   void* ptr = nullptr;
   ncclShmHandleInternal* h = nullptr;
   ASSERT_EQ(Open(path, 64, 1, &ptr, &h), ncclSuccess);
-  lx::unlink = [](const char*) {
+  ScopedHook unlinkHook(g_unlink, [](const char*) {
     errno = EBUSY;
     return -1;
-  };
+  });
   void* peer = nullptr;
   ncclShmHandleInternal* hp = nullptr;
   EXPECT_EQ(Open(path, 64, 0, &peer, &hp), ncclSuccess);
-  EXPECT_TRUE(LinuxLogged("INFO unlink shared memory"));
-  lx::unlink = ::unlink;
-  ::unlink(path);
+  EXPECT_EQ(unlinkHook.calls, 1);
+  EXPECT_TRUE(log_.Has("INFO unlink shared memory"));
 }
 
 TEST_F(LinuxShmMicrotest, DevicePointerRegistersTheMappingWithHip) {
   std::vector<std::string> calls;
   unsigned int regFlags = 0;
-  lx::hipExchangeCaptureMode = [&](hipStreamCaptureMode* m) {
+  ScopedHook hipExchangeCaptureModeHook(g_hipThreadExchangeStreamCaptureMode, [&](hipStreamCaptureMode* m) {
     calls.push_back("exchange");
     EXPECT_EQ(*m, hipStreamCaptureModeRelaxed);
     return hipSuccess;
-  };
-  lx::hipHostRegister = [&](void*, size_t size, unsigned int flags) {
+  });
+  ScopedHook hipHostRegisterHook(g_hipHostRegister, [&](void*, size_t size, unsigned int flags) {
     calls.push_back("register");
     regFlags = flags;
     EXPECT_EQ(size, 64 + sizeof(int));
     return hipSuccess;
-  };
-  lx::hipHostGetDevicePointer = [&](void** d, void*, unsigned int) {
+  });
+  ScopedHook hipHostGetDevicePointerHook(g_hipHostGetDevicePointer, [&](void** d, void*, unsigned int) {
     calls.push_back("devptr");
     *d = (void*)0xd00d;
     return hipSuccess;
-  };
-  lx::hipHostUnregister = [&](void*) {
+  });
+  ScopedHook hipHostUnregisterHook(g_hipHostUnregister, [&](void*) {
     calls.push_back("unregister");
     return hipSuccess;
-  };
+  });
   char path[PATH_MAX] = "";
   void *ptr = nullptr, *dev = nullptr;
   ncclShmHandleInternal* h = nullptr;
@@ -1825,17 +1746,7 @@ TEST_F(LinuxShmMicrotest, DevicePointerRegistersTheMappingWithHip) {
 }
 
 TEST_F(LinuxShmMicrotest, HipFailuresUnwindTheSegment) {
-  for (int step = 0; step < 4; step++) {
-    SCOPED_TRACE(step);
-    int exchanges = 0;
-    lx::Reset();
-    if (step == 0) lx::hipExchangeCaptureMode = [](hipStreamCaptureMode*) { return hipErrorInvalidValue; };
-    if (step == 1) lx::hipHostRegister = [](void*, size_t, unsigned int) { return hipErrorInvalidValue; };
-    if (step == 2) lx::hipHostGetDevicePointer = [](void**, void*, unsigned int) { return hipErrorInvalidValue; };
-    if (step == 3)
-      lx::hipExchangeCaptureMode = [&](hipStreamCaptureMode*) {
-        return exchanges++ ? hipErrorInvalidValue : hipSuccess;
-      };
+  auto openFails = [&] {
     char path[PATH_MAX] = "";
     void *ptr = nullptr, *dev = (void*)0x1;
     ncclShmHandleInternal* h = nullptr;
@@ -1843,11 +1754,33 @@ TEST_F(LinuxShmMicrotest, HipFailuresUnwindTheSegment) {
     EXPECT_EQ(h, nullptr);
     EXPECT_EQ(dev, nullptr);
     EXPECT_FALSE(Exists(path));
+  };
+  {
+    SCOPED_TRACE("capture mode");
+    ScopedHook fail(g_hipThreadExchangeStreamCaptureMode, [](hipStreamCaptureMode*) { return hipErrorInvalidValue; });
+    openFails();
+  }
+  {
+    SCOPED_TRACE("register");
+    ScopedHook fail(g_hipHostRegister, [](void*, size_t, unsigned int) { return hipErrorInvalidValue; });
+    openFails();
+  }
+  {
+    SCOPED_TRACE("device pointer");
+    ScopedHook fail(g_hipHostGetDevicePointer, [](void**, void*, unsigned int) { return hipErrorInvalidValue; });
+    openFails();
+  }
+  {
+    SCOPED_TRACE("restoring the capture mode");
+    int exchanges = 0;
+    ScopedHook fail(g_hipThreadExchangeStreamCaptureMode,
+                    [&](hipStreamCaptureMode*) { return exchanges++ ? hipErrorInvalidValue : hipSuccess; });
+    openFails();
   }
 }
 
 TEST_F(LinuxShmMicrotest, CloseReportsAHipUnregisterFailure) {
-  lx::hipHostUnregister = [](void*) { return hipErrorInvalidValue; };
+  ScopedHook hipHostUnregisterHook(g_hipHostUnregister, [](void*) { return hipErrorInvalidValue; });
   char path[PATH_MAX] = "";
   void *ptr = nullptr, *dev = nullptr;
   ncclShmHandleInternal* h = nullptr;

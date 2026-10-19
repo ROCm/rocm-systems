@@ -10,6 +10,29 @@
 // real libc again; a test that wants a seamed call can name micro_* directly.
 // No include guard on purpose: the push/pop pair is positional.
 
+#undef signal
+#undef unlink
+#undef munmap
+#undef mmap
+#undef fallocate
+#undef mkstemp
+#undef opendir
+#undef fopen
+#undef realpath
+#undef dlerror
+#undef dlopen
+#undef sched_getaffinity
+#undef setrlimit
+#undef getrlimit
+#undef freeifaddrs
+#undef getifaddrs
+#undef pipe
+#undef sendmsg
+#undef recvmsg
+#undef shutdown
+#undef getsockname
+#undef getsockopt
+#undef poll
 #undef access
 #undef gethostname
 #undef free

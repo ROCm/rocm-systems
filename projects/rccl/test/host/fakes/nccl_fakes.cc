@@ -30,7 +30,9 @@
 #include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
 #include "ipcsocket.h"    // ncclIpcFd
 
+#include <algorithm>
 #include <functional>
+#include <string>
 
 #include "nccl_fakes.h"   // controllable seam hooks
 
@@ -72,19 +74,32 @@ uint32_t            ncclDebugLevelMask = 0; // NCCL_LOG_NONE
 uint64_t            ncclDebugMask    = 0;
 thread_local int    ncclDebugNoWarn  = 0;
 
-void ncclDebugLog(ncclDebugLogLevel /*level*/,
-                             unsigned long     /*flags*/,
+static void DefaultNcclDebugLog(ncclDebugLogLevel, unsigned long, const char* filefunc, int line, const char* msg)
+{
+    std::fprintf(stderr, "[fake] %s:%d %s\n", filefunc ? filefunc : "?", line, msg);
+}
+
+std::function<void(ncclDebugLogLevel, unsigned long, const char*, int, const char*)> g_ncclDebugLog =
+    DefaultNcclDebugLog;
+
+void ncclDebugLog(ncclDebugLogLevel level,
+                             unsigned long     flags,
                              const char*       filefunc,
                              int               line,
                              const char*       fmt,
                              ...)
 {
-    std::fprintf(stderr, "[fake] %s:%d ", filefunc ? filefunc : "?", line);
+    // debug.cc demotes a WARN raised under NOWARN to INFO.
+    if (ncclDebugNoWarn != 0 && level == NCCL_LOG_WARN) level = NCCL_LOG_INFO;
     std::va_list ap;
     va_start(ap, fmt);
-    std::vfprintf(stderr, fmt, ap);
+    std::va_list again;
+    va_copy(again, ap);
+    std::string msg(std::max(0, std::vsnprintf(nullptr, 0, fmt, ap)), '\0');
+    std::vsnprintf(&msg[0], msg.size() + 1, fmt, again);
+    va_end(again);
     va_end(ap);
-    std::fputc('\n', stderr);
+    g_ncclDebugLog(level, flags, filefunc, line, msg.c_str());
 }
 
 // Every param sits at its default. The NCCL_PARAM bodies that p2p-test.cc redirects through g_loadParam bypass this.
@@ -206,7 +221,8 @@ ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           comm,
 // src/os/linux_ipcsocket.cc (NCCL 2.32): p2p.cc and dev_runtime.cc close
 // imported fds through this instead of close(2). A real close, as production
 // does, so suites that hand back a dup'd fd can still prove it was closed.
-int ncclIpcFdClose(ncclIpcFd fd) { return ::close(fd); }
+// Weak: rccl-UnitTestsMicroLinux compiles the real one.
+__attribute__((weak)) int ncclIpcFdClose(ncclIpcFd fd) { return ::close(fd); }
 
 // --- Controllable seam: ncclRegLocalIsValid -----------------------------
 // Default preserves the old stub: report the record as not locally valid
@@ -571,6 +587,7 @@ int64_t ncclParamMultiSegmentRegister() { return 0; }
 
 void ResetNcclFakes()
 {
+    g_ncclDebugLog                 = DefaultNcclDebugLog;
     g_ncclProxyClientGetFdBlocking = DefaultNcclProxyClientGetFdBlocking;
     g_strongStreamAcquire          = DefaultStrongStreamAcquire;
     g_strongStreamRelease          = DefaultStrongStreamRelease;

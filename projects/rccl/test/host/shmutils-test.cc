@@ -25,9 +25,8 @@
 
 namespace {
 
-class ShmutilsMicrotest : public ::testing::Test {
+class ShmutilsMicrotest : public LinuxTestBase {
  protected:
-  void SetUp() override { g_linuxLog.clear(); }
   void TearDown() override {
     for (int k = 0; k < 2; k++) {
       free(coll_.cnt[k]);

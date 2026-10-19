@@ -292,12 +292,14 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   so a fake tests this binary's own error-propagation logic just as well
   without pulling in that file's dependency floor. See
   `test_categories_micro_scheduler.yaml`.
+
 - **`rccl-UnitTestsMicroLinux`**: `os/linux.cc` (`LINUX_CC_PATH`, from `linux-test.cc`),
   plus `os/linux_ipcsocket.cc`, `os/linux_socket_pair.cc`, `misc/socket.cc`,
   `misc/shmutils.cc` and `misc/signals.cc`, one test TU each; suites `Linux*`,
   `Socket*`, `Shmutils*`, `Signals*`. Its own binary: `fakes/os_fakes.cc`, which most
   targets link, defines `ncclOsInitialize`, `ncclOsTopoGetStrFromSys` and other `ncclOs*`
-  symbols `os/linux.cc` defines. See `test_categories_micro_linux.yaml`.
+  symbols `os/linux.cc` defines. The units run on real sockets and files through
+  `fakes/libc_seam.h` with `UseRealLibc()`. See `test_categories_micro_linux.yaml`.
 
 - **`rccl-UnitTestsMicroTaskPrep`** — `src/enqueue/task_prep/task_prep.cc` (via
   `TASK_PREP_CC_PATH`, suite `TaskPrepMicrotest.*`),
@@ -541,7 +543,8 @@ symbol.
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
-| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`) | `fakes/libc_fakes.cc` |
+| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; the OS surface of `os/linux*.cc` and `misc/{socket,signals}.cc`) | `fakes/libc_fakes.cc` |
+| `src/init.cc`'s `SetCpuStackSize` param (`rccl-UnitTestsMicroLinux`, which cannot link `init_fakes.cc`) | `fakes/linux_fakes.cc` |
 | reusable RAS poll-entry, message, and diagnostics-context seams | `fakes/ras_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
@@ -754,7 +757,8 @@ triage it into the right bucket:
   `fakes/utils_fakes.cc`, since `src/misc/utils.cc` owns them). Only
   when the symbol has no owning TU does it belong in the test itself.
 - **It's a logging or env-param helper** → already covered by
-  `ncclDebugLog` (prints to stderr) / `ncclLoadParam` (no-op). If a new
+  `ncclDebugLog` (prints to stderr; a test that asserts on what was logged
+  hooks `g_ncclDebugLog`) / `ncclLoadParam` (no-op). If a new
   logging primitive
   appears, follow the same pattern.
 - **It's a `ncclProxy*` / `ncclShm*` / `ncclCommGraph*` / `ncclTopo*`

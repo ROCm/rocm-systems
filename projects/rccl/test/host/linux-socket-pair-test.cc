@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/os/linux_socket_pair.cc on real pipes; only pipe() failure is seamed.
+// Host-only microtests for src/os/linux_socket_pair.cc on real pipes; only a pipe() failure is hooked.
 
 #include <gtest/gtest.h>
 
@@ -19,28 +19,17 @@
 
 #include "linux-test-common.h"
 
-namespace {
-std::function<int(int*)> g_pipe = ::pipe;
-}
-
-#define pipe(...) g_pipe(__VA_ARGS__)
+#include "fakes/libc_seam.h"
 #include LINUX_SOCKET_PAIR_CC_PATH
-#undef pipe
+#include "fakes/libc_seam_undef.h"
 
 namespace {
 
 bool FdOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
 
-class LinuxSocketPairMicrotest : public ::testing::Test {
+class LinuxSocketPairMicrotest : public LinuxTestBase {
  protected:
-  void SetUp() override {
-    g_linuxLog.clear();
-    g_pipe = ::pipe;
-  }
-  void TearDown() override {
-    ncclOsSocketPairClose(pair_);
-    g_pipe = ::pipe;
-  }
+  void TearDown() override { ncclOsSocketPairClose(pair_); }
   ncclSocketPairDescriptor pair_[2] = {NCCL_SOCKET_PAIR_INVALID, NCCL_SOCKET_PAIR_INVALID};
 };
 
@@ -81,7 +70,7 @@ TEST_F(LinuxSocketPairMicrotest, Close_ClosesBothEndsAndSkipsInvalidOnes) {
   pair_[1] = NCCL_SOCKET_PAIR_INVALID;
   ASSERT_EQ(ncclOsSocketPairClose(pair_), ncclSuccess);
   EXPECT_FALSE(FdOpen(readEnd));
-  EXPECT_TRUE(g_linuxLog.empty());
+  EXPECT_TRUE(log_.Text().empty());
 }
 
 // Both ends are still reset, and only the first failure is reported.
@@ -92,7 +81,7 @@ TEST_F(LinuxSocketPairMicrotest, Close_ReportsTheFirstFailure) {
   EXPECT_EQ(ncclOsSocketPairClose(pair_), ncclSystemError);
   EXPECT_EQ(pair_[0], NCCL_SOCKET_PAIR_INVALID);
   EXPECT_EQ(pair_[1], NCCL_SOCKET_PAIR_INVALID);
-  EXPECT_EQ(g_linuxLog, "WARN close failed: Bad file descriptor\n");
+  EXPECT_EQ(log_.Text(), "WARN close failed: Bad file descriptor\n");
 
   ASSERT_EQ(ncclOsSocketPairCreate(pair_), ncclSuccess);
   int readEnd = pair_[0];
@@ -102,13 +91,13 @@ TEST_F(LinuxSocketPairMicrotest, Close_ReportsTheFirstFailure) {
 }
 
 TEST_F(LinuxSocketPairMicrotest, Create_PipeFailureIsASystemError) {
-  g_pipe = [](int*) {
+  ScopedHook pipeHook(g_pipe, [](int*) {
     errno = EMFILE;
     return -1;
-  };
+  });
   EXPECT_EQ(ncclOsSocketPairCreate(pair_), ncclSystemError);
   EXPECT_EQ(pair_[0], NCCL_SOCKET_PAIR_INVALID);
-  EXPECT_TRUE(LinuxLogged("WARN Call to pipe failed: Too many open files"));
+  EXPECT_TRUE(log_.Has("WARN Call to pipe failed: Too many open files"));
 }
 
 TEST_F(LinuxSocketPairMicrotest, ReadAndWrite_FailuresAreSystemErrors) {
@@ -116,9 +105,9 @@ TEST_F(LinuxSocketPairMicrotest, ReadAndWrite_FailuresAreSystemErrors) {
   size_t n = 99;
   char buf[4];
   EXPECT_EQ(ncclOsSocketPairWrite(pair_[0], "x", 1, &n), ncclSystemError);  // the read end
-  EXPECT_TRUE(LinuxLogged("WARN Call to write failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to write failed"));
   EXPECT_EQ(ncclOsSocketPairRead(pair_[1], buf, sizeof(buf), &n), ncclSystemError);
-  EXPECT_TRUE(LinuxLogged("WARN Call to read failed"));
+  EXPECT_TRUE(log_.Has("WARN Call to read failed"));
   EXPECT_EQ(n, 99u);
 }
 

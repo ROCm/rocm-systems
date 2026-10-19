@@ -4,72 +4,88 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Shared by the rccl-UnitTestsMicroLinux test TUs. The binary links no shared fakes:
-// linux-test.cc defines the log capture, the env-backed param loader and the lx:: hooks declared here.
+// Shared by the rccl-UnitTestsMicroLinux test TUs: the base fixture, a log recorder and a scripted
+// getifaddrs() list, all over the shared libc, nccl, env and HIP fakes.
 #pragma once
+
+#include <gtest/gtest.h>
 
 #include <arpa/inet.h>
 #include <ifaddrs.h>
 #include <net/if.h>
-#include <poll.h>
-#include <sys/socket.h>
 
-#include <cstdlib>
 #include <cstring>
 #include <deque>
-#include <functional>
+#include <map>
+#include <mutex>
 #include <string>
 
-// Every WARN/INFO/ATTN line, as "WARN <message>\n". A WARN under NOWARN is logged as INFO, as debug.cc does.
-extern std::string g_linuxLog;
-inline bool LinuxLogged(const char* needle) { return g_linuxLog.find(needle) != std::string::npos; }
+#include "../common/LogCapture.hpp"
+#include "ScopedHook.h"
+#include "fakes/env_fakes.h"
+#include "fakes/libc_fakes.h"
+#include "fakes/nccl_fakes.h"
 
-// NCCL_PARAM/RCCL_PARAM read their env var once and cache it; this forgets every cached value.
-void LinuxResetParams();
-
-// Sets (nullptr: unsets) an env var for one scope, so params re-read it.
-class LinuxScopedEnv {
+// What production logged, from any thread, as "WARN|INFO|ATTN <message>\n" lines.
+class LogRecord {
  public:
-  LinuxScopedEnv(const char* name, const char* value) : name_(name) {
-    const char* old = std::getenv(name);
-    if (old) old_ = old, hadOld_ = true;
-    Set(value);
+  bool Has(const std::string& needle) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return text_.find(needle) != std::string::npos;
   }
-  ~LinuxScopedEnv() { Set(hadOld_ ? old_.c_str() : nullptr); }
+  std::string Text() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return text_;
+  }
+  void Clear() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    text_.clear();
+  }
 
  private:
-  void Set(const char* value) {
-    if (value) setenv(name_.c_str(), value, 1);
-    else unsetenv(name_.c_str());
-    LinuxResetParams();
+  void Append(ncclDebugLogLevel level, const char* msg) {
+    const char* tag = level == NCCL_LOG_WARN ? "WARN" : level == NCCL_LOG_ATTN ? "ATTN" : "INFO";
+    std::lock_guard<std::mutex> lock(mutex_);
+    text_ += std::string(tag) + " " + msg + "\n";
   }
-  std::string name_, old_;
-  bool hadOld_ = false;
+  mutable std::mutex mutex_;
+  std::string text_;
+  RcclUnitTesting::ScopedDebugLogging everyLevel_{-1, ~uint64_t(0)};
+  ScopedHook<void(ncclDebugLogLevel, unsigned long, const char*, int, const char*)> hook_{
+      g_ncclDebugLog,
+      [this](ncclDebugLogLevel level, unsigned long, const char*, int, const char* msg) { Append(level, msg); }};
 };
 
-namespace lx {
-// std::function for a libc function's type, minus the noexcept glibc puts on it.
-template <typename T>
-struct Hook;
-template <typename R, typename... A>
-struct Hook<R (*)(A...)> {
-  using type = std::function<R(A...)>;
-};
-template <typename R, typename... A>
-struct Hook<R (*)(A...) noexcept> {
-  using type = std::function<R(A...)>;
+// Params reach the units through param_redirect.h's g_loadParam; one not Set() keeps its default.
+class ParamScript {
+ public:
+  void Set(const char* name, int64_t value) { values_[name] = value; }
+
+ private:
+  std::map<std::string, int64_t> values_;
+  ScopedHook<int64_t(const char*, int64_t)> hook_{g_loadParam, [this](const char* name, int64_t deftVal) {
+                                                     auto it = values_.find(name);
+                                                     return it == values_.end() ? deftVal : it->second;
+                                                   }};
 };
 
-// The os/linux.cc hooks other TUs drive; Reset() restores every lx:: hook to the real call.
-extern Hook<decltype(&::getifaddrs)>::type getifaddrs;
-extern Hook<decltype(&::freeifaddrs)>::type freeifaddrs;
-extern Hook<decltype(&::setsockopt)>::type setsockopt;
-extern Hook<decltype(&::connect)>::type connect;
-extern Hook<decltype(&::poll)>::type poll;
-void Reset();
-}  // namespace lx
+// Real libc behind every seam, an empty scripted environment, and socket retries that do not sleep.
+class LinuxTestBase : public ::testing::Test {
+ protected:
+  LinuxTestBase() {
+    UseRealLibc();
+    ResetEnvFakes();
+    params_.Set("SOCKET_RETRY_SLEEP_MSEC", 0);
+  }
+  ~LinuxTestBase() override {
+    ResetEnvFakes();
+    UseRealLibc();
+  }
+  LogRecord log_;
+  ParamScript params_;
+};
 
-// A scripted getifaddrs() list. Install() routes os/linux.cc to it until lx::Reset().
+// A scripted getifaddrs() list, installed for the object's lifetime.
 class LinuxFakeIfaddrs {
  public:
   void Add(const char* name, int family, const char* addr = nullptr, const char* mask = nullptr,
@@ -87,19 +103,6 @@ class LinuxFakeIfaddrs {
       n.ifa.ifa_netmask = (sockaddr*)&n.mask;
     }
   }
-  void Install() {
-    lx::getifaddrs = [this](ifaddrs** out) {
-      ifaddrs* next = nullptr;
-      for (auto it = nodes_.rbegin(); it != nodes_.rend(); ++it) {
-        it->ifa.ifa_next = next;
-        next = &it->ifa;
-      }
-      *out = next;
-      listed++;
-      return 0;
-    };
-    lx::freeifaddrs = [this](ifaddrs*) { freed++; };
-  }
   static void Fill(sockaddr_storage* ss, int family, const char* text, uint32_t scope) {
     std::memset(ss, 0, sizeof(*ss));
     ss->ss_family = family;
@@ -109,7 +112,8 @@ class LinuxFakeIfaddrs {
       ((sockaddr_in6*)ss)->sin6_scope_id = scope;
     }
   }
-  int listed = 0, freed = 0;
+  int Listed() const { return list_.calls; }
+  int Freed() const { return free_.calls; }
 
  private:
   struct Node {
@@ -118,4 +122,14 @@ class LinuxFakeIfaddrs {
     sockaddr_storage addr{}, mask{};
   };
   std::deque<Node> nodes_;
+  ScopedHook<int(ifaddrs**)> list_{g_getifaddrs, [this](ifaddrs** out) {
+                                     ifaddrs* next = nullptr;
+                                     for (auto it = nodes_.rbegin(); it != nodes_.rend(); ++it) {
+                                       it->ifa.ifa_next = next;
+                                       next = &it->ifa;
+                                     }
+                                     *out = next;
+                                     return 0;
+                                   }};
+  ScopedHook<void(ifaddrs*)> free_{g_freeifaddrs, [](ifaddrs*) {}};
 };

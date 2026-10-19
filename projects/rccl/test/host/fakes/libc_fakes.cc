@@ -6,15 +6,17 @@
 
 #include "fakes/libc_fakes.h"
 
-// Puts the seam's 26 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
+// Puts the seam's micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
 // this file. Without it the two lists are hand-maintained and both extern "C", so a drifted parameter type would link
 // cleanly and corrupt arguments at run time. Include the undef half immediately: this file's defaults call real libc.
 #include "fakes/libc_seam.h"
 #include "fakes/libc_seam_undef.h"
 
 #include <arpa/inet.h>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <sys/mman.h>
 #include <sys/time.h>
 
 #include <algorithm>
@@ -314,9 +316,59 @@ std::function<void*(size_t)> g_malloc = DefaultMalloc;
 std::function<void*(size_t, size_t)> g_calloc = DefaultCalloc;
 std::function<void(void*)> g_free = DefaultFree;
 
+static int RealFcntl(int fd, int cmd, int arg) { return ::fcntl(fd, cmd, arg); }
+static void RealExit(int status) { ::exit(status); }
+
+std::function<int(struct pollfd*, nfds_t, int)> g_poll = ::poll;
+std::function<int(int, int, int, void*, socklen_t*)> g_getsockopt = ::getsockopt;
+std::function<int(int, struct sockaddr*, socklen_t*)> g_getsockname = ::getsockname;
+std::function<int(int, int)> g_shutdown = ::shutdown;
+std::function<ssize_t(int, struct msghdr*, int)> g_recvmsg = ::recvmsg;
+std::function<ssize_t(int, const struct msghdr*, int)> g_sendmsg = ::sendmsg;
+std::function<int(int*)> g_pipe = ::pipe;
+std::function<int(struct ifaddrs**)> g_getifaddrs = ::getifaddrs;
+std::function<void(struct ifaddrs*)> g_freeifaddrs = ::freeifaddrs;
+std::function<int(int, struct rlimit*)> g_getrlimit = ::getrlimit;
+std::function<int(int, const struct rlimit*)> g_setrlimit = ::setrlimit;
+std::function<int(pid_t, size_t, cpu_set_t*)> g_schedGetaffinity = ::sched_getaffinity;
+std::function<void*(const char*, int)> g_dlopen = ::dlopen;
+std::function<char*()> g_dlerror = ::dlerror;
+std::function<char*(const char*, char*)> g_realpath = ::realpath;
+std::function<FILE*(const char*, const char*)> g_fopen = ::fopen;
+std::function<DIR*(const char*)> g_opendir = ::opendir;
+std::function<int(char*)> g_mkstemp = ::mkstemp;
+std::function<int(int, int, off_t, off_t)> g_fallocate = ::fallocate;
+std::function<void*(void*, size_t, int, int, int, off_t)> g_mmap = ::mmap;
+std::function<int(void*, size_t)> g_munmap = ::munmap;
+std::function<int(const char*)> g_unlink = ::unlink;
+std::function<sighandler_t(int, sighandler_t)> g_signal = ::signal;
+
 ASSERT_HOOK_MATCHES_PROD(g_accept, ::accept);
 ASSERT_HOOK_MATCHES_PROD(g_recv, ::recv);
 ASSERT_HOOK_MATCHES_PROD(g_send, ::send);
+ASSERT_HOOK_MATCHES_PROD(g_poll, ::poll);
+ASSERT_HOOK_MATCHES_PROD(g_getsockopt, ::getsockopt);
+ASSERT_HOOK_MATCHES_PROD(g_getsockname, ::getsockname);
+ASSERT_HOOK_MATCHES_PROD(g_shutdown, ::shutdown);
+ASSERT_HOOK_MATCHES_PROD(g_recvmsg, ::recvmsg);
+ASSERT_HOOK_MATCHES_PROD(g_sendmsg, ::sendmsg);
+ASSERT_HOOK_MATCHES_PROD(g_pipe, ::pipe);
+ASSERT_HOOK_MATCHES_PROD(g_getifaddrs, ::getifaddrs);
+ASSERT_HOOK_MATCHES_PROD(g_freeifaddrs, ::freeifaddrs);
+ASSERT_HOOK_MATCHES_PROD(g_getrlimit, ::getrlimit);
+ASSERT_HOOK_MATCHES_PROD(g_setrlimit, ::setrlimit);
+ASSERT_HOOK_MATCHES_PROD(g_schedGetaffinity, ::sched_getaffinity);
+ASSERT_HOOK_MATCHES_PROD(g_dlopen, ::dlopen);
+ASSERT_HOOK_MATCHES_PROD(g_dlerror, ::dlerror);
+ASSERT_HOOK_MATCHES_PROD(g_realpath, ::realpath);
+ASSERT_HOOK_MATCHES_PROD(g_fopen, ::fopen);
+ASSERT_HOOK_MATCHES_PROD(g_opendir, ::opendir);
+ASSERT_HOOK_MATCHES_PROD(g_mkstemp, ::mkstemp);
+ASSERT_HOOK_MATCHES_PROD(g_fallocate, ::fallocate);
+ASSERT_HOOK_MATCHES_PROD(g_mmap, ::mmap);
+ASSERT_HOOK_MATCHES_PROD(g_munmap, ::munmap);
+ASSERT_HOOK_MATCHES_PROD(g_unlink, ::unlink);
+ASSERT_HOOK_MATCHES_PROD(g_signal, ::signal);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -364,6 +416,29 @@ void ResetLibcFakes() {
   g_malloc = DefaultMalloc;
   g_calloc = DefaultCalloc;
   g_free = DefaultFree;
+  g_poll = ::poll;
+  g_getsockopt = ::getsockopt;
+  g_getsockname = ::getsockname;
+  g_shutdown = ::shutdown;
+  g_recvmsg = ::recvmsg;
+  g_sendmsg = ::sendmsg;
+  g_pipe = ::pipe;
+  g_getifaddrs = ::getifaddrs;
+  g_freeifaddrs = ::freeifaddrs;
+  g_getrlimit = ::getrlimit;
+  g_setrlimit = ::setrlimit;
+  g_schedGetaffinity = ::sched_getaffinity;
+  g_dlopen = ::dlopen;
+  g_dlerror = ::dlerror;
+  g_realpath = ::realpath;
+  g_fopen = ::fopen;
+  g_opendir = ::opendir;
+  g_mkstemp = ::mkstemp;
+  g_fallocate = ::fallocate;
+  g_mmap = ::mmap;
+  g_munmap = ::munmap;
+  g_unlink = ::unlink;
+  g_signal = ::signal;
 
   g_writtenData.clear();
   g_stdoutData.clear();
@@ -408,6 +483,30 @@ void ResetLibcFakes() {
   g_connectResult = 0;
   g_connectErrno = ECONNREFUSED;
   errno = 0;
+}
+
+void UseRealLibc() {
+  ResetLibcFakes();
+  g_write = ::write;
+  g_read = ::read;
+  g_close = ::close;
+  g_socket = ::socket;
+  g_connect = ::connect;
+  g_bind = ::bind;
+  g_listen = ::listen;
+  g_accept = ::accept;
+  g_fcntl = RealFcntl;
+  g_recv = ::recv;
+  g_send = ::send;
+  g_setsockopt = ::setsockopt;
+  g_getaddrinfo = ::getaddrinfo;
+  g_freeaddrinfo = ::freeaddrinfo;
+  g_getnameinfo = ::getnameinfo;
+  g_fwrite = ::fwrite;
+  g_fflush = ::fflush;
+  g_perror = ::perror;
+  g_exit = RealExit;
+  g_free = ::free;
 }
 
 // ---------------------------------------------------------------------------
@@ -459,6 +558,33 @@ int micro_access(const char* path, int mode) { return g_access(path, mode); }
 void* micro_malloc(size_t size) { return g_malloc(size); }
 void* micro_calloc(size_t nmemb, size_t size) { return g_calloc(nmemb, size); }
 void micro_free(void* ptr) { g_free(ptr); }
+int micro_poll(struct pollfd* fds, nfds_t nfds, int timeout) { return g_poll(fds, nfds, timeout); }
+int micro_getsockopt(int fd, int level, int optname, void* optval, socklen_t* optlen) {
+  return g_getsockopt(fd, level, optname, optval, optlen);
+}
+int micro_getsockname(int fd, struct sockaddr* addr, socklen_t* len) { return g_getsockname(fd, addr, len); }
+int micro_shutdown(int fd, int how) { return g_shutdown(fd, how); }
+ssize_t micro_recvmsg(int fd, struct msghdr* msg, int flags) { return g_recvmsg(fd, msg, flags); }
+ssize_t micro_sendmsg(int fd, const struct msghdr* msg, int flags) { return g_sendmsg(fd, msg, flags); }
+int micro_pipe(int* fds) { return g_pipe(fds); }
+int micro_getifaddrs(struct ifaddrs** ifap) { return g_getifaddrs(ifap); }
+void micro_freeifaddrs(struct ifaddrs* ifa) { g_freeifaddrs(ifa); }
+int micro_getrlimit(int resource, struct rlimit* lim) { return g_getrlimit(resource, lim); }
+int micro_setrlimit(int resource, const struct rlimit* lim) { return g_setrlimit(resource, lim); }
+int micro_sched_getaffinity(pid_t pid, size_t size, cpu_set_t* set) { return g_schedGetaffinity(pid, size, set); }
+void* micro_dlopen(const char* file, int mode) { return g_dlopen(file, mode); }
+char* micro_dlerror(void) { return g_dlerror(); }
+char* micro_realpath(const char* path, char* resolved) { return g_realpath(path, resolved); }
+FILE* micro_fopen(const char* path, const char* mode) { return g_fopen(path, mode); }
+DIR* micro_opendir(const char* path) { return g_opendir(path); }
+int micro_mkstemp(char* tmpl) { return g_mkstemp(tmpl); }
+int micro_fallocate(int fd, int mode, off_t offset, off_t len) { return g_fallocate(fd, mode, offset, len); }
+void* micro_mmap(void* addr, size_t len, int prot, int flags, int fd, off_t offset) {
+  return g_mmap(addr, len, prot, flags, fd, offset);
+}
+int micro_munmap(void* addr, size_t len) { return g_munmap(addr, len); }
+int micro_unlink(const char* path) { return g_unlink(path); }
+sighandler_t micro_signal(int sig, sighandler_t handler) { return g_signal(sig, handler); }
 
 // Always forwards to the real vfprintf so stderr output still happens; records only the FILE* and never the
 // formatted text, since no test needs the diagnostic's wording, only whether and where one was printed.
