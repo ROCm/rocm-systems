@@ -67,7 +67,7 @@ New module `src/utils/layer3_reader.py`.
 `load_views(view_dirs: list[Path], arch: str, library: MetricLibrary) -> list[ViewDefinition]`:
 
 1. Discover `*.yaml` files in each directory in `view_dirs`.
-2. Load each via `yaml.safe_load` (no `!inherit` needed for view files -- they are
+2. Load each via `yaml.safe_load` (no `inherit` needed for view files -- they are
    flat by design).
 3. Validate against `layer3_schema.py`.
 4. Filter: skip views where `archs` is set and the current arch is not in the list.

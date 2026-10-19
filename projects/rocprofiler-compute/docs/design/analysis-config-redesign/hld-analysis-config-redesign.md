@@ -261,14 +261,14 @@ flowchart LR
 |---|---|---|---|---|---|
 | **Layer 1** Counter Registry | Raw PMC counter definitions per architecture (`sdk_config.yaml`) | Nothing (ground truth) | Already exists as the SDK config. No structural change needed. | — | — |
 | **Layer 1.5** Collectables | Sub-expressions of metrics whose counters fit in a single hardware pass | Layer 1 counter names | - Each collectable is a formula fragment that produces a correct result within one hardware pass<br>- Metrics whose full formula exceeds the pass limit are composed of collectables<br>- ⚠️ Target: integrate into `sdk_config.yaml` as part of the SDK counter definitions. Requires collaboration with the SDK team. Until then, defined separately by rocprof-compute. | — | — |
-| **Layer 2** Metric Library | Metric specification, documentation, profiling sets | Layer 1 counter names, Layer 1.5 collectables | - One file per hardware concept (e.g., SQ, TCP, TCC), multiple metrics per file<br>- Profiling sets are a hardware concept within Layer 2: one file per set, referencing metrics by id, constrained by hardware pass limits. Both developers and users may author sets.<br>- Per-architecture files are preserved, organized as family base + arch overrides using YAML inheritance (`!inherit` tag) — see [YAML inheritance](#yaml-inheritance)<br>- The first architecture in each family serves as the base (gfx908 for CDNA, gfx115x for RDNA); inheritance chains mirror hardware lineage (e.g., `gfx908 -> gfx90a -> gfx940 -> gfx942 -> gfx950`)<br>- Each metric has a canonical `name` — the stable, unambiguous display name for the metric concept<br>- Built-in sets may optionally have a matching Layer 3 view for structured display; user-defined sets get default flat rendering<br>- ⚠️ Default display behavior is unresolved — see [OQ2](#oq2--default-display-for-set-based-profiling) | One file for all metrics, similar to SDK counter yaml. | [[FR2]](#fr2) requires a metric is defined exactly once. Single-place definition eliminates the per-architecture duplication identified in [[PS2]](#ps2-per-architecture-duplication-makes-metric-maintenance-costly-and-error-prone), satisfying FR2.2. |
+| **Layer 2** Metric Library | Metric specification, documentation, profiling sets | Layer 1 counter names, Layer 1.5 collectables | - One file per hardware concept (e.g., SQ, TCP, TCC), multiple metrics per file<br>- Profiling sets are a hardware concept within Layer 2: one file per set, referencing metrics by id, constrained by hardware pass limits. Both developers and users may author sets.<br>- Per-architecture files are preserved, organized as family base + arch overrides using YAML inheritance (`inherit` key) — see [YAML inheritance](#yaml-inheritance)<br>- The first architecture in each family serves as the base (gfx908 for CDNA, gfx115x for RDNA); inheritance chains mirror hardware lineage (e.g., `gfx908 -> gfx90a -> gfx940 -> gfx942 -> gfx950`)<br>- Each metric has a canonical `name` — the stable, unambiguous display name for the metric concept<br>- Built-in sets may optionally have a matching Layer 3 view for structured display; user-defined sets get default flat rendering<br>- ⚠️ Default display behavior is unresolved — see [OQ2](#oq2--default-display-for-set-based-profiling) | One file for all metrics, similar to SDK counter yaml. | [[FR2]](#fr2) requires a metric is defined exactly once. Single-place definition eliminates the per-architecture duplication identified in [[PS2]](#ps2-per-architecture-duplication-makes-metric-maintenance-costly-and-error-prone), satisfying FR2.2. |
 | **Layer 3** Display / View | Metric grouping, display configuration | Layer 2 metric ids | - One file per view (what the user sees as a panel or block)<br>- Each view references metrics by id and declares which to show, in what order, and how to render<br>- A view may declare an optional `label` override for a metric — the same metric concept intentionally appears under different names in different panel contexts (e.g., `"L2 Cache Hit Rate"` in a speed-of-light panel vs. `"Hit Rate"` in a memory chart). Static analysis found 234 such cases within a single architecture. If no `label` is declared, the canonical `name` from Layer 2 is used.<br>- **View-level `archs:`** — entire view is arch-conditional<br>- **Metric-level `archs:`** — individual entries skipped for unsupported archs<br>- ⚠️ What views exist and what they contain requires customer input — see [OQ1](#oq1--layer-3-view-definition-requires-customer-input)<br>- ⚠️ Default display for set-based analysis is unresolved — see [OQ2](#oq2--default-display-for-set-based-profiling) | Drive grouping and display directly in code — no view YAML layer. | [[FR1]](#fr1) (FR1.1) requires grouping to be explicitly declared, not inferred. Hardcoding panel structure in code makes grouping implicit and non-auditable by non-developers, and every display change requires a code change and a release. |
 
 ### YAML inheritance
 
-Layer 2 metric files use a custom `!inherit` YAML tag to eliminate per-architecture duplication while keeping files separate. This is not a native YAML feature — it requires a custom PyYAML loader.
+Layer 2 metric files use file-level inheritance to eliminate per-architecture duplication while keeping files separate. This is not a native YAML feature — it requires a custom PyYAML loader.
 
-A file beginning with `!inherit <path>` loads the referenced base file first, then deep-merges the current file's content on top.
+A file with a top-level `inherit: <path>` key loads the referenced base file first, then deep-merges the current file's content on top.
 
 **Merge operations** -- the inheritance mechanism supports three operations:
 
@@ -297,12 +297,12 @@ flowchart LR
 
 The first architecture in each family serves as the base -- its files are the complete, standalone definitions. There is no abstract `_base/` directory. CDNA and RDNA share no content. gfx1250 is a third standalone base: it shares no identical file with gfx115x. Each arch inherits from its immediate predecessor in the hardware lineage, not from the family root. This minimizes the diff at each step: gfx90a overrides only what changed from gfx908, gfx940 overrides only what changed from gfx90a, etc. The same chain-based pattern applies to future families (gfx12xx).
 
-Files identical to the parent arch do not exist in the child directory; they are inherited implicitly. Files that exist contain only `!inherit` plus additions, modifications, or removals.
+Files identical to the parent arch do not exist in the child directory; they are inherited implicitly. Files that exist contain only the `inherit` key plus additions, modifications, or removals.
 
 **Example:** gfx941 differs from gfx940 in two files. With inheritance, the first of them becomes:
 
 ```yaml
-!inherit ../gfx940/0200_system_speed_of_light.yaml
+inherit: ../gfx940/0200_system_speed_of_light.yaml
 
 Panel Config:
   data source:
@@ -403,7 +403,7 @@ Three fields govern metric identity and display:
 
 ```yaml
 # gfx90a/1700_l2_cache.yaml -- inherits from gfx908, overrides only what differs
-!inherit ../gfx908/1700_l2_cache.yaml
+inherit: ../gfx908/1700_l2_cache.yaml
 
 # only the fields that differ from gfx908 are present
 ```
@@ -494,8 +494,8 @@ Implementation details for all stages are covered by the [LLD](lld-index.md).
 ```mermaid
 flowchart LR
     subgraph P1["Phase 1 — Metric Library (Layer 2)"]
-        s1["1. Layer 2 schema + inheritance loader\n───────────────────\nRequired: id, name, formula,\nunit, description\nOptional: peak, coll_level\nTyped variants: xfer, coherency,\nexpr (fabric stall tables)\nPyYAML loader for !inherit tag\nwith vendored deepmerge\n───────────────────\nDepends on: nothing\nResolves: FR2.1, FR2.4\nDeveloper gains: agreed field contract\nfor all metric files"]
-        s2["2. Layer 2 parser\n───────────────────\nRead Layer 2 metric files\nResolve !inherit chains\n───────────────────\nDepends on: Stage 1\nResolves: FR2.2.1, FR2.3\nDeveloper gains: metric files\ncan be parsed and validated"]
+        s1["1. Layer 2 schema + inheritance loader\n───────────────────\nRequired: id, name, formula,\nunit, description\nOptional: peak, coll_level\nTyped variants: xfer, coherency,\nexpr (fabric stall tables)\nPyYAML loader for the inherit key\nwith vendored deepmerge\n───────────────────\nDepends on: nothing\nResolves: FR2.1, FR2.4\nDeveloper gains: agreed field contract\nfor all metric files"]
+        s2["2. Layer 2 parser\n───────────────────\nRead Layer 2 metric files\nResolve inherit chains\n───────────────────\nDepends on: Stage 1\nResolves: FR2.2.1, FR2.3\nDeveloper gains: metric files\ncan be parsed and validated"]
         s3["3. Compatibility adapter\n───────────────────\nTranslate Layer 2 output into\nexisting pipeline structure\nExisting consumers unchanged\n───────────────────\nDepends on: Stage 2\nResolves: NFR1\nDeveloper gains: safe to merge\nLayer 2 files without breaking\nexisting pipeline"]
         s4["4. Metric migration\n───────────────────\ngfx908 is CDNA base,\ngfx115x is RDNA base\nConvert one arch at a time\n(start with gfx90a — inherits gfx908)\nVerify output equivalence at each step\nParallelizable: compute,\nmemory, system, sets\n17 metric groups: one shared id,\nformula differences tracked\n30 metric groups: canonical\nname selected\n───────────────────\nDepends on: Stages 1, 2\nResolves: FR2, FR2.2, FR3 (Layer 2), PS2\nDeveloper gains: formula fixes\npropagate in one edit; new arch\nadds only override files;\nsets reference metric ids"]
     end
