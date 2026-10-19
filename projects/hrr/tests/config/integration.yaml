@@ -199,6 +199,7 @@ cases:
   Unit_HRR_MemsetVariants_Direct: {}
   Unit_HRR_MetadataManifest: {}
   Unit_HRR_MetadataOnlyCapture: {}
+  Unit_HRR_MetadataOnlyKernelArguments: {}
   Unit_HRR_MetadataOnlySetupArgument: {}
   Unit_HRR_MiscAPIsRoundtrip: {}
   Unit_HRR_MiscAPIs_Direct: {}

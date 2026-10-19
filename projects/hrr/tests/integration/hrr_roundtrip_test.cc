@@ -429,6 +429,100 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlySetupArgument) {
 /**
  * Test Description
  * ----------------
+ *   - Captures two workloads without HIP_HRR_CAPTURE_CONTENT and reads the
+ *     archives back.
+ *   - Unit_HRR_ApiMatrix_GraphNodes_Direct adds kernel nodes with by-value int
+ *     arguments: each node carries the withheld code-object hash, keeps its
+ *     pointer argument and records every by-value argument as zeros.
+ *   - Unit_HRR_EmbeddedPtrStruct_Direct launches on a by-value struct that
+ *     embeds three device pointers: the launch records it as a plain by-value
+ *     argument (kind 0, no pointer offsets) of zeros.
+ */
+HRR_TEST_CASE(Unit_HRR_MetadataOnlyKernelArguments) {
+  auto capture = [](const char* workload, const fs::path& dir) {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", dir.string());
+    proc.unsetEnv("HIP_HRR_CAPTURE_CONTENT");
+    set_proc_search_path(proc);
+    const int ret = proc.run(std::string("\"") + workload + "\"");
+    INFO("Capture of " << workload << " exit code: " << ret);
+    REQUIRE(ret == 0);
+  };
+
+  {
+    ScopedDir cap{fs::temp_directory_path() / "hrr_metadata_only_kernel_node"};
+    capture("Unit_HRR_ApiMatrix_GraphNodes_Direct", cap.path);
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(cap.path.string(), arc));
+    size_t nodes = 0, by_value = 0;
+    for (const auto& ev : arc.events) {
+      if (ev.header().event_type != static_cast<uint16_t>(HRR_API_HIPGRAPHADDKERNELNODE))
+        continue;
+      // The tail after the record: u16 name_len, name, u64 co_hash_lo,
+      // u64 co_hash_hi, u16 num_args, then per argument u8 kind, u16 size and
+      // size bytes.
+      const std::vector<uint8_t>& r = ev.raw_payload;
+      size_t at = sizeof(hrr_args_hipGraphAddKernelNode);
+      auto take = [&](void* out, size_t n) {
+        REQUIRE(at + n <= r.size());
+        std::memcpy(out, r.data() + at, n);
+        at += n;
+      };
+      uint16_t name_len = 0;
+      take(&name_len, sizeof(name_len));
+      if (name_len == 0) continue;  // unresolved kernel, no arguments
+      at += name_len;
+      uint64_t co[2] = {};
+      take(co, sizeof(co));
+      CHECK(co[0] == HRR_HASH_WITHHELD);
+      CHECK(co[1] == HRR_HASH_WITHHELD);
+      uint16_t num_args = 0;
+      take(&num_args, sizeof(num_args));
+      ++nodes;
+      for (uint16_t i = 0; i < num_args; ++i) {
+        uint8_t kind = 0;
+        uint16_t size = 0;
+        take(&kind, sizeof(kind));
+        take(&size, sizeof(size));
+        std::vector<uint8_t> bytes(size);
+        take(bytes.data(), size);
+        if (kind == 1) {
+          CHECK(bytes != std::vector<uint8_t>(size, 0));  // the device pointer
+          continue;
+        }
+        REQUIRE(kind == 0);
+        CHECK(bytes == std::vector<uint8_t>(size, 0));  // fill value and count
+        ++by_value;
+      }
+    }
+    CHECK(nodes > 0);
+    CHECK(by_value > 0);
+  }
+
+  {
+    ScopedDir cap{fs::temp_directory_path() / "hrr_metadata_only_struct_arg"};
+    capture("Unit_HRR_EmbeddedPtrStruct_Direct", cap.path);
+    hrr::Archive arc;
+    REQUIRE(hrr::load_archive(cap.path.string(), arc));
+    bool seen = false;
+    for (const auto& ev : arc.events) {
+      if (!ev.kernel_launch ||
+          ev.kernel_launch->kernel_name.find("hrr_repro_addStruct") == std::string::npos)
+        continue;
+      seen = true;
+      const auto& args = ev.kernel_launch->args;
+      REQUIRE(args.size() == 1);
+      CHECK(args[0].value_kind == 0);
+      CHECK(args[0].ptr_offsets.empty());
+      CHECK(args[0].data == std::vector<uint8_t>(args[0].size, 0));
+    }
+    CHECK(seen);
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
  *     AMD_LOG_LEVEL=3, capturing stdout and stderr. The summary that
  *     hip_capture_shutdown() logs at exit must name the per-process pid-<pid>

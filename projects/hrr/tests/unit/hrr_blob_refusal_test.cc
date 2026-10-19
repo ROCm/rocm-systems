@@ -195,6 +195,29 @@ TEST_CASE("Unit_HRR_Blob_WithheldArgumentsRefuseReplacedKernel", "[hrr]") {
 /**
  * Test Description
  * ----------------
+ *   - A __hipRegisterFatBinary whose blob a metadata-only capture withheld is
+ *     refused as a fat binary, and the handler adds no "blob not found" line
+ *     of its own after the refusal.
+ */
+TEST_CASE("Unit_HRR_Blob_WithheldFatBinaryIsNamed", "[hrr]") {
+  PlaybackContext ctx;
+  hrr_test::ExactRecord<hrr_args___hipRegisterFatBinary> rec;
+  rec.get()->blob_hash_lo = HRR_HASH_WITHHELD;
+  rec.get()->blob_hash_hi = HRR_HASH_WITHHELD;
+  rec.get()->blob_size = 4096;
+
+  REQUIRE(hrr_playback_dispatch[HRR_API_HIPREGISTERFATBINARY] != nullptr);
+  const std::string err = hrr_test::capture_stderr(
+      [&] { (void)hrr_playback_dispatch[HRR_API_HIPREGISTERFATBINARY](ctx, rec.bytes()); });
+  INFO("stderr: " << err);
+  CHECK(ctx.fatal_error.load());
+  CHECK(err.find("needs a fat binary") != std::string::npos);
+  CHECK(err.find("not found") == std::string::npos);
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - A legacy hipSetupArgument whose argument value a metadata-only capture
  *     withheld (present flag HRR_PRESENT_WITHHELD, zero bytes) is refused
  *     through the generated handler before any HIP call: the replay ends and

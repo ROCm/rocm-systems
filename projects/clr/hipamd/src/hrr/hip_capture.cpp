@@ -375,10 +375,8 @@ static void serialize_kernel_launch(
   uint16_t name_len = name_oversized ? 0 : static_cast<uint16_t>(kernel_name_len);
   push_u16(name_len);
   push_bytes(kernel_name, name_len);
-  // Metadata-only: the withheld code-object hash also marks this launch's
-  // by-value arguments as withheld, even where no code object was hashed, so
-  // replay refuses the launch on any path, --replace-kernel included.
-  if (!hrr_capture_content()) co_hash = {HRR_HASH_WITHHELD, HRR_HASH_WITHHELD};
+  // From kernel_code_object_hash(): withheld in metadata-only mode, which is
+  // what makes replay refuse this launch's zeroed by-value arguments.
   push_u64(co_hash.lo); push_u64(co_hash.hi);  // code object identity (0 = unknown)
   push_u32(gx); push_u32(gy); push_u32(gz);
   push_u32(bx); push_u32(by); push_u32(bz);
@@ -581,10 +579,7 @@ static void append_kernel_node_tail(std::vector<uint8_t>& payload,
   const std::string& name = kernel->name();
   push_u16(static_cast<uint16_t>(name.size()));
   push_bytes(name.data(), name.size());
-  hrr_cap::Hash128 co = kernel_code_object_hash(kernel);
-  // As for a launch: in metadata-only mode the withheld hash marks the node's
-  // by-value arguments as withheld.
-  if (!hrr_capture_content()) co = {HRR_HASH_WITHHELD, HRR_HASH_WITHHELD};
+  const hrr_cap::Hash128 co = kernel_code_object_hash(kernel);
   push_u64(co.lo); push_u64(co.hi);
 
   const void* kbuf = nullptr;
@@ -1004,6 +999,11 @@ static hrr_cap::Hash128 write_module_code_object(hipModule_t module) {
 }
 
 static hrr_cap::Hash128 kernel_code_object_hash(amd::Kernel* kernel) {
+  // Metadata-only: every launch and kernel node gets the withheld hash, even
+  // where no code object could be hashed. It also marks their by-value
+  // arguments as withheld, so replay refuses them on any path, --replace-kernel
+  // included. Nothing is read or cached.
+  if (!hrr_capture_content()) return {HRR_HASH_WITHHELD, HRR_HASH_WITHHELD};
   if (!kernel) return {0, 0};
   amd::Program* prog = &kernel->program();
   if (!prog) return {0, 0};
@@ -1821,6 +1821,9 @@ static hrr_cap::Hash128 write_host_rect_blob(const void* base, size_t pitch,
     return {0, 0};
   }
   if (r.bytes == 0) return {0, 0};
+  // Metadata-only: nothing is gathered, so no failed allocation can mark the
+  // capture incomplete over bytes it would not have recorded.
+  if (!hrr_capture_content()) return {HRR_HASH_WITHHELD, HRR_HASH_WITHHELD};
   // Neither product wraps: both are at most r.bytes, which fits.
   const size_t n = width * height * depth;
   const auto* src = static_cast<const uint8_t*>(base) + r.first;
