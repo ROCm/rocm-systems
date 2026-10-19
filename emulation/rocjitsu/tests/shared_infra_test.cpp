@@ -7701,6 +7701,32 @@ TEST(CdnaAddrCalcTest, Gfx9BufferElemsInRange) {
   static_assert(in_range({true, true, 16, 4, 4, 0}, 4, 1) == 0);
 }
 
+TEST(CdnaAddrCalcTest, MubufInvalidResourceDisablesRawAndAtomicAccesses) {
+  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                              ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+    SCOPED_TRACE(arch);
+    CdnaBufferWave wave(arch);
+    ASSERT_NE(wave.wf, nullptr);
+    wave.set_lanes(4, {0, 4});
+    for (uint32_t word3 : {0u, kGfx9DataFormat32}) {
+      wave.set_resource(encode_gfx9_buffer_resource(/*base=*/0x10, /*num_records=*/~0u,
+                                                    /*stride=*/4, word3));
+      for (uint32_t op : {cdna4::kBufferLoadDwordMubuf, cdna4::kBufferStoreDwordMubuf,
+                          cdna4::kBufferAtomicAddMubuf, cdna4::kBufferLoadDwordx4Mubuf}) {
+        SCOPED_TRACE(op);
+        const bool atomic = op == cdna4::kBufferAtomicAddMubuf;
+        const uint32_t count = op == cdna4::kBufferLoadDwordx4Mubuf ? 4 : 1;
+        auto addresses =
+            cdna_mubuf_addresses(cdna_mubuf_offen_inst(op), *wave.wf, 4, count,
+                                 atomic ? amdgpu::AtomicOp::ADD : amdgpu::AtomicOp::NONE);
+        EXPECT_EQ(addresses.exec_mask, 0x3ULL);
+        EXPECT_EQ(addresses.lane_mask, word3 ? 0x3ULL : 0ULL);
+        EXPECT_EQ(addresses.per_lane_addr[0], word3 ? 0x10u : 0u);
+      }
+    }
+  }
+}
+
 TEST(CdnaAddrCalcTest, MubufRangeCheckCountsSoffsetAndInstOffset) {
   for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     CdnaBufferWave wave(arch);
@@ -7888,6 +7914,13 @@ TEST(CdnaAddrCalcTest, MubufAddTidAddsLaneTimesStride) {
     EXPECT_EQ(indexed.lane_mask, ~0ULL) << arch;
     for (uint32_t lane : kLanes)
       EXPECT_EQ(indexed.per_lane_addr[lane], kCdnaBufferBase + 4) << arch;
+    // ADD_TID keeps DATA_FORMAT 0 bound even when IDXEN suppresses lane addition.
+    wave.set_resource(encode_gfx9_buffer_resource(kCdnaBufferBase, /*num_records=*/16,
+                                                  /*stride=*/4, kGfx9AddTidEnable));
+    auto indexed_zero_format = cdna_mubuf_addresses(inst, *wave.wf, 4, 1);
+    EXPECT_EQ(indexed_zero_format.lane_mask, ~0ULL) << arch;
+    for (uint32_t lane : kLanes)
+      EXPECT_EQ(indexed_zero_format.per_lane_addr[lane], kCdnaBufferBase + 4) << arch;
   }
 }
 
