@@ -50,7 +50,7 @@ class CocoPathsTest(unittest.TestCase):
             "projects/rdc/CMakeLists.txt",
             "docs/index.md",
             "README.md",
-            ".github/workflows/therock-ci.yml",
+            ".github/workflows/therock-multi-arch-ci.yml",
             # Adjacent names a loose pattern would sweep in.
             "projects/rccl-other/src/x.cc",
             "projects/rcclfoo/x.cc",
