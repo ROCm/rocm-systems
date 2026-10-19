@@ -439,7 +439,11 @@ def _first_fit_unplaced(
     perfmon_config: Dict[str, int],
     file_count: int,
 ) -> Tuple[List[CounterFile], int]:
-    """First-fit counters that are not present in any bucket yet."""
+    """First-fit counters that are not present in any bucket yet.
+
+    A counter that fits no bucket, including a fresh empty one, raises
+    ValueError. The same situation in multi-pass fill is an error too.
+    """
     placed = _counters_in_any_bucket(files)
     leftovers = sorted(work_set - placed)
     files = list(files)
@@ -461,11 +465,10 @@ def _first_fit_unplaced(
         bucket = CounterFile(str(file_count), perfmon_config)
         file_count += 1
         if not bucket.add(ctr):
-            console_warning(
-                "profiling",
-                f"single-pass metric allocation: leftover {ctr!r} was rejected.",
+            raise ValueError(
+                "single-pass metric counter(s) exceed a block budget "
+                f"even in an empty bucket: {ctr}"
             )
-            continue
         files.append(bucket)
         if is_tcc_channel_counter(ctr):
             tcc_map[_channel_instance_base(ctr)] = bucket
