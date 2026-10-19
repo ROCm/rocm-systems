@@ -18,4 +18,5 @@ tw-gfx950-ainic-ROCm-scale-runner
 .github/workflows/rccl-ainic-tw-gfx950-runner.yml
 .github/workflows/rccl_perf_regression.yml
 .github/workflows/therock-rccl-ci-linux.yml
+.github/workflows/therock-rccl-test-accl-profiler.yml
 .github/workflows/therock-rccl-test-madengine.yml
