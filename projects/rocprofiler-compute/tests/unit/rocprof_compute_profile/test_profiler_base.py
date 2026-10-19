@@ -347,7 +347,6 @@ def test_attach_library_resolution_with_fallback():
         iteration_multiplexing=None,
         attach_pid=12345,
         attach_duration_msec=None,
-        kokkos_trace=False,
         kernel=None,
         kernel_iteration_range=None,
         torch_trace=False,
@@ -399,7 +398,6 @@ def test_sdk_profiler_options_preserve_ld_preload_and_set_env(tmp_path, monkeypa
         iteration_multiplexing=None,
         attach_pid=None,
         attach_duration_msec=None,
-        kokkos_trace=False,
         kernel=None,
         kernel_iteration_range=None,
         torch_trace=False,
@@ -430,7 +428,6 @@ def test_rocprofv3_live_attach_uses_sync_output():
         ["/bin/true"],
         attach_pid="12345",
         attach_duration_msec="500",
-        kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
     profiler = rocprof_v3_profiler(args, profiler_mode="rocprofv3", soc=None)
@@ -452,7 +449,6 @@ def test_kernel_iteration_range_translated_for_both_backends(tmp_path):
         kernel_iteration_range=["1", "3:5"],
         output_directory=str(tmp_path),
         rocprofiler_sdk_tool_path="sdk_tool",
-        kokkos_trace=False,
     )
     args.remaining = "-- /bin/true"
 
@@ -495,7 +491,6 @@ def test_sdk_pc_sampling_options(
         output_directory=str(tmp_path),
         pc_sampling_method=method,
         pc_sampling_interval=1000,
-        kokkos_trace=False,
     )
     args.remaining = "/bin/true"
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
@@ -788,7 +783,6 @@ def test_pre_processing_persists_membw_analysis_config(
     mock_soc = Mock()
     mock_soc._mspec = SimpleNamespace()
     mock_soc.profiling_setup.return_value = effective_filter_blocks
-    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
     profiler = rocprof_v3_profiler(
         profiling_args,
         profiler_mode="rocprofv3",
@@ -833,7 +827,6 @@ def test_pre_processing_pmc_power_gating_warning(
     mock_soc = Mock()
     mock_soc._mspec = SimpleNamespace(perf_level=perf_level)
     mock_soc.profiling_setup.return_value = []
-    mock_soc.get_compatible_profilers.return_value = ["rocprofv3"]
     profiler = rocprof_v3_profiler(
         profiling_args,
         profiler_mode="rocprofv3",

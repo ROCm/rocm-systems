@@ -228,13 +228,17 @@ For instructions on building and testing changes to files under the `docs/` fold
 
 ## Metrics Management
 
-If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml` or metric descriptions in `docs/data/metrics_description.yaml` — follow the metric management workflow:
+If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml` or metric descriptions in `tools/per_arch_metric_definitions/gfx<arch>_metrics_description.yaml` — follow the metric management workflow:
 
 1. Edit the relevant panel YAMLs.
 2. Validate them with `python tools/config_management/master_config_workflow_script.py --validate-only`.
 3. Refresh the hash DB with `python tools/config_management/hash_manager.py --compute-all src/rocprof_compute_soc/analysis_configs` and confirm CI tests pass.
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
+
+## Memory Chart Layouts
+
+The memory chart is drawn from one JSON layout per architecture family. To add or change a layout, see the [memory chart layouts README](./src/memory_chart/README.md).
 
 ## Analysis Database Schema Diagrams
 

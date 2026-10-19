@@ -486,7 +486,6 @@ def capture_subprocess_output(
     subprocess_args: list[str],
     new_env: Optional[dict[str, str]] = None,
     profileMode: bool = False,
-    enable_logging: bool = True,
 ) -> tuple[bool, str]:
     sanitized_env = (
         None
@@ -585,8 +584,6 @@ def capture_subprocess_output(
         if not line:
             break
         buf.write(line)
-        if not enable_logging:
-            continue
         if profileMode:
             console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
         else:
@@ -645,6 +642,11 @@ def format_time(seconds: float) -> str:
         return parts[0] if parts else "0 seconds"
 
     return ", ".join(parts[:-1]) + f" and {parts[-1]}"
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences."""
+    return re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", text)
 
 
 def parse_sets_yaml(arch: str) -> dict[str, Any]:
@@ -769,7 +771,7 @@ def build_metric_list(
     Build metric_list from the panel configs.
 
     Returns a mapping of (panel/table/metric IDs -> display names)
-    without constructing DataFrames or metric_counters. Use this directly when
+    without constructing DataFrames. Use this directly when
     only the metric listing is needed (e.g. --list-metrics, --list-blocks).
     """
     metric_list: dict[str, str] = {}
@@ -798,8 +800,8 @@ def build_metric_list(
     return metric_list
 
 
-def get_uuid(length: int = 8) -> str:
-    return uuid.uuid4().hex[:length]
+def get_uuid() -> str:
+    return uuid.uuid4().hex[:8]
 
 
 def convert_filter_blocks_to_panel_ids(
@@ -884,10 +886,7 @@ def get_arch_panel_id_to_alias(arch: str) -> dict[str, str]:
     """Return panel_id_str -> alias from the *_config_template.yaml whose
     filename prefix matches arch. Empty/None aliases stay as "".
     Returns {} when no template matches the arch."""
-    analysis_dir = (
-        config.rocprof_compute_home / "rocprof_compute_soc" / "analysis_configs"
-    )
-    for path in sorted(analysis_dir.glob("*_config_template.yaml")):
+    for path in sorted(config.analysis_configs_dir.glob("*_config_template.yaml")):
         m = re.match(r"(gfx\d+)_config_template\.yaml$", path.name)
         if m and arch.startswith(m.group(1)):
             panel_yaml = load_yaml(path) or {}
