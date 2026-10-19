@@ -51,6 +51,13 @@ endforeach()
 #
 #########################################################################################
 
+set(_rocpd_python_bindings_dependency
+    rocprofiler-sdk-rocpd-python-bindings-${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}
+    )
+if(NOT TARGET ${_rocpd_python_bindings_dependency})
+    set(_rocpd_python_bindings_dependency "")
+endif()
+
 rocprofiler_add_integration_validate_test(
     rocpd-pc-sampling-postprocess
     TEST_PATHS pc_sampling_postprocess.py
@@ -60,6 +67,4 @@ rocprofiler_add_integration_validate_test(
     PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
     PYTHON_PATH
         "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
-    DEPENDS
-        rocprofiler-sdk-rocpd-python-bindings-${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}
-    )
+    DEPENDS ${_rocpd_python_bindings_dependency})
