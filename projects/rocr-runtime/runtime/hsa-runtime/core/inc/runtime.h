@@ -360,6 +360,18 @@ class Runtime {
 #undef FillMemory
   hsa_status_t FillMemory(void* ptr, uint32_t value, size_t count);
 
+  /// @brief Fill memory with byte value.
+  ///
+  /// @param [in] ptr Memory address to be filled.
+  /// @param [in] value The byte value to fill.
+  /// @param [in] size Number of bytes to be set.
+  /// @param [in] owner Agent that owns @p ptr, or nullptr when the caller does
+  /// not know. A nullptr makes this resolve the owner with a pointer-info
+  /// query; passing the agent skips that query.
+  ///
+  /// @retval ::HSA_STATUS_SUCCESS if memory fill is successful and completed.
+  hsa_status_t FillMemoryBytes(void* ptr, uint8_t value, size_t size, Agent* owner = nullptr);
+
   /// @brief Set agents as the whitelist to access ptr.
   ///
   /// @param [in] num_agents The number of agent handles in @p agents array.

@@ -442,6 +442,31 @@ hsa_status_t hsa_amd_memory_fill(void* ptr, uint32_t value, size_t count) {
   CATCH;
 }
 
+hsa_status_t hsa_amd_memory_fill_bytes(void* ptr, uint8_t value, size_t size, hsa_agent_t agent) {
+  TRY;
+  IS_OPEN();
+
+  if (ptr == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  if (size == 0) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // A zero handle is the documented "I do not know the owner" value, not an
+  // invalid agent: only a non-zero handle is converted and validated here, so
+  // the implementation receives either a checked agent or nullptr.
+  core::Agent* owner = nullptr;
+  if (agent.handle != 0) {
+    owner = core::Agent::Convert(agent);
+    IS_VALID(owner);
+  }
+
+  return core::Runtime::runtime_singleton_->FillMemoryBytes(ptr, value, size, owner);
+  CATCH;
+}
+
 hsa_status_t hsa_amd_memory_async_copy(void* dst, hsa_agent_t dst_agent_handle, const void* src,
                                        hsa_agent_t src_agent_handle, size_t size,
                                        uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
