@@ -66,13 +66,13 @@ jobs:
       VENV_DIR: '${{ github.workspace }}/accl-profiler-workdir/venv'
     steps:
       - name: Checkout TheRock repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: 'ROCm/TheRock'
           ref: e0e238c0323f76aeabdd348cfd3798a653820fdc # 2026-09-23
 
       - name: Checkout rocm-systems scripts
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: projects/rccl/ci/scripts
           path: rocm-systems
@@ -140,7 +140,7 @@ jobs:
 
       - name: Upload ACCL profiler summary
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: accl-profiler-summary-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}
           path: |
@@ -157,7 +157,7 @@ jobs:
 
       - name: Upload raw ACCL profiler JSONL
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: accl-profiler-raw-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}
           path: ${{ env.WORK_DIR }}/raw/**/*.jsonl
