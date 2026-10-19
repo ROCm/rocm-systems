@@ -349,7 +349,10 @@ gets either the old function or the new one. The acquire load pairs
 with the release store, so a shim also sees what was written before its install, such
 as `g_real_table`. An acquire load of a pointer is a plain load on x86-64 and `LDAR` on
 AArch64. `hrr-unit-tests-tsan` races the store against the load under ThreadSanitizer.
-`hrr-unit-tests-dispatch-readers` fails if an entry point reads its slot directly.
+`hrr-unit-tests-dispatch-readers` fails if an entry point reads its slot directly, or if
+either macro stops going through `hip::LoadDispatchSlot`. The workflow
+`.github/workflows/hip-dispatch-slot-loads.yml` runs both on every pull request that
+changes `hip_table_interface.cpp` or `hip_dispatch_load.hpp`.
 
 Other writers do not follow the contract yet. The CLR profiler
 (`projects/clr/hipamd/src/profiler/hip_clr_dispatch_wrappers.cpp`) installs and removes
