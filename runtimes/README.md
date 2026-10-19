@@ -20,18 +20,20 @@ part of the repository's default build or installation yet.
   implementation-neutral AMD GPU device-interface layer.
 - [`ddi/libamdf`](ddi/libamdf/README.md) implements the AMDF C table ABI and
   builds a static library. Its shared ABI is an alias of the shared image.
-- [`loader/rocelf`](loader/rocelf/README.md) parses ELF64 and AMDGPU
-  code objects and constructs checked load images independently of rocddi.
-- [`image/rocaddr3`](image/rocaddr3/README.md) computes GFX12 surface
-  layouts through AddrLib3 without owning device memory.
-- [`loader/rocloader`](loader/rocloader/README.md) validates AMD HSA
-  code objects and retains executable images over rocddi allocations.
+- [`loader/rocelf`](loader/rocelf/README.md) provides a standalone Rust library for
+  checked ELF64 parsing and AMDGPU load-image construction. It depends on
+  neither rocddi nor the HSA frontend.
+- [`image/rocaddr3`](image/rocaddr3/README.md) wraps AddrLib3 to compute GFX12
+  surface layouts and map image rows without owning device memory.
+- [`loader/rocloader`](loader/rocloader/README.md) interprets AMD HSA code
+  objects, creates rocddi-backed GPU images, and owns executable state.
 - [`ddi/libhsa`](ddi/libhsa/README.md) implements the HSA C ABI and builds a
-  shared ABI in the same image. It consumes rocddi directly, not through AMDF.
+  shared ABI in the same image. It consumes rocddi and rocloader directly,
+  not through AMDF.
 
 Component directories own implementation and local tests. The root owns the
-shared-image linker package, lockfile, toolchain, Rust profiles, and common
-CMake integration. Grouping directories do not introduce additional
+shared-image linker package, lockfile, toolchain, Rust profiles,
+and common CMake integration. Grouping directories do not introduce additional
 Cargo workspaces or CMake projects.
 Rocddi remains an internal `rlib`; it has no standalone native ABI.
 
@@ -39,7 +41,8 @@ Rocddi remains an internal `rlib`; it has no standalone native ABI.
 
 The workspace root is the `rocddi-frontends` Cargo package. It implements no
 third frontend. Its small `src/lib.rs` makes Cargo link the AMDF and HSA `rlib`s
-into one `cdylib`, so both public ABIs use one copy of rocddi's process state.
+into one `cdylib`. The ABIs retain separate rocddi sessions and public handles;
+the shared image contains one copy of rocddi's process-local KFD backend state.
 The root `build.rs` retains both entry point sets, applies HSA symbol versions
 and SONAME, and marks the image `NODELETE` while native KFD and DRM owners may
 remain live. `cmake/SharedImage.cmake` owns the corresponding CMake targets.
@@ -84,7 +87,7 @@ Build-tree consumers can link `rocm_runtime::amdf_shared`, `rocm_runtime::amdf_s
 retain native process state together. These targets include headers and build ordering. The AMDF
 static target propagates rustc's reported native link requirements through a
 generated linker response file. `rocm_runtime::runtime_headers` exposes the source
-header tree for internal tests, not an installed SDK contract.
+header tree for runtime consumers, not an installed SDK contract.
 
 The library helper takes keyword arguments for the Cargo package/target, native
 output name, type, and ABI version. Component `project(... VERSION ...)` calls and the shared-image module
@@ -99,10 +102,11 @@ Python's standard-library TOML parser requires Python 3.11 or newer.
 `runtime-rust-config.cmake` in the build directory records the generated Cargo
 command and environment for inspection.
 
-With `BUILD_TESTING=ON` (the default), CTest runs build-helper tests, the Rust unit suite, AMDF C ABI
-layout and shared/static negotiation checks, and an HSA pre-initialization C ABI
-check. These tests do not require GPU activation. Device execution examples
-remain explicit qualification tools, not automatic build tests.
+With `BUILD_TESTING=ON` (the default), CTest runs build-helper and Rust tests,
+AMDF static and shared C smoke tests, an AMDF C layout check, and the HSA C
+smoke test. These checks do not require GPU activation. The
+[HSA GPU probes](ddi/libhsa/tests/gpu/README.md) run separately on a qualified
+host and include a kernel comparison against an installed ROCr runtime.
 
 ## Dependency inputs
 

@@ -48,13 +48,31 @@ int main(void) {
   }
 
   uint16_t system_minor = 0, agent_minor = 0;
-  bool system_supported = true, agent_supported = true;
+  bool system_supported = false, agent_supported = false;
   hsa_status_t system_status = hsa_system_major_extension_supported(
       HSA_EXTENSION_AMD_PC_SAMPLING, 1, &system_minor, &system_supported);
   hsa_status_t agent_status = hsa_agent_major_extension_supported(
       HSA_EXTENSION_AMD_PC_SAMPLING, gpu, 1, &agent_minor, &agent_supported);
   hsa_status_t iterate_status = hsa_ven_amd_pcs_iterate_configuration(
       gpu, visit_configuration, NULL);
+  if (system_status != HSA_STATUS_SUCCESS ||
+      agent_status != HSA_STATUS_SUCCESS ||
+      (agent_supported && !system_supported) ||
+      iterate_status != (agent_supported ? HSA_STATUS_SUCCESS
+                                        : HSA_STATUS_ERROR_NOT_SUPPORTED)) {
+    fprintf(stderr,
+            "PC sampling capability mismatch: system=%d agent=%d "
+            "iterate=0x%x\n",
+            system_supported, agent_supported, iterate_status);
+    hsa_shut_down();
+    return 3;
+  }
+  if (agent_supported) {
+    if (hsa_shut_down() != HSA_STATUS_SUCCESS) return 4;
+    puts("PC sampling capability is advertised");
+    return 0;
+  }
+
   hsa_ven_amd_pcs_t session = {.handle = UINT64_C(0x12345678)};
   hsa_status_t create_status = hsa_ven_amd_pcs_create(
       gpu, HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1,
@@ -62,20 +80,16 @@ int main(void) {
       ready, NULL, &session);
   hsa_status_t shutdown_status = hsa_shut_down();
 
-  if (system_status != HSA_STATUS_SUCCESS ||
-      agent_status != HSA_STATUS_SUCCESS ||
-      system_supported || agent_supported ||
-      iterate_status != (hsa_status_t)HSA_STATUS_ERROR_NOT_SUPPORTED ||
-      create_status != (hsa_status_t)HSA_STATUS_ERROR_NOT_SUPPORTED ||
+  if (create_status != (hsa_status_t)HSA_STATUS_ERROR_NOT_SUPPORTED ||
       session.handle != UINT64_C(0x12345678) ||
       shutdown_status != HSA_STATUS_SUCCESS) {
     fprintf(stderr,
-            "PC sampling capability mismatch: system=%d agent=%d "
-            "iterate=0x%x create=0x%x session=0x%llx shutdown=0x%x\n",
-            system_supported, agent_supported, iterate_status, create_status,
+            "PC sampling unavailable-path mismatch: create=0x%x "
+            "session=0x%llx shutdown=0x%x\n",
+            create_status,
             (unsigned long long)session.handle, shutdown_status);
     return 3;
   }
-  puts("PC sampling remains unadvertised and session creation is unsupported");
+  puts("PC sampling is unavailable and session creation is unsupported");
   return 0;
 }
