@@ -19,9 +19,10 @@
 
 namespace {
 
-// A reset yields about 4 records per device; the read loop drains any remainder.
+// One reset can yield several records on every device; the read loop drains what does not fit.
 constexpr uint32_t kEventsPerDevice = 20;
-constexpr int kMaxReads = 5;
+// Only a guard against an endless event stream; the loop normally ends on NO_DATA.
+constexpr int kMaxReads = 100;
 constexpr int kFirstReadTimeoutMs = 10000;
 constexpr int kDrainReadTimeoutMs = 1000;
 
@@ -40,6 +41,21 @@ constexpr uint64_t kAllEventsMask = AllEventsMask();
 bool ResetRequested() {
   const char* env = std::getenv("AMDSMI_TEST_TRIGGER_RESET");
   return env != nullptr && std::string(env) == "1";
+}
+
+// One reset covers every device in an XGMI hive, so only one device per hive needs one.
+std::vector<uint32_t> ResetTargets(const amdsmi_processor_handle* handles, uint32_t count) {
+  std::vector<uint32_t> targets;
+  std::set<uint64_t> seen_hives;
+  for (uint32_t i = 0; i < count; ++i) {
+    amdsmi_xgmi_info_t info = {};
+    const bool in_hive =
+        amdsmi_get_xgmi_info(handles[i], &info) == AMDSMI_STATUS_SUCCESS && info.xgmi_hive_id != 0;
+    if (!in_hive || seen_hives.insert(info.xgmi_hive_id).second) {
+      targets.push_back(i);
+    }
+  }
+  return targets;
 }
 
 }  // namespace
@@ -106,9 +122,16 @@ void TestEvtNotifReadWrite::Run(void) {
   }
 
   if (trigger_reset) {
-    for (dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
-      DISPLAY_AMDSMI_API("amdsmi_reset_gpu", "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-      ret = amdsmi_reset_gpu(processor_handles_[dv_ind]);
+    const std::vector<uint32_t> targets = ResetTargets(processor_handles_, num_monitor_devs());
+    IF_VERB(STANDARD) {
+      if (targets.size() < num_monitor_devs()) {
+        std::cout << "\tResetting " << targets.size() << " of " << num_monitor_devs()
+                  << " devices; the others share an XGMI hive and are reset with it." << std::endl;
+      }
+    }
+    for (uint32_t target : targets) {
+      DISPLAY_AMDSMI_API("amdsmi_reset_gpu", "gpu=" + std::to_string(target), VERB(STANDARD));
+      ret = amdsmi_reset_gpu(processor_handles_[target]);
       DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, ret, AMDSMI_STATUS_SUCCESS);
       ASSERT_EQ(ret, AMDSMI_STATUS_SUCCESS);
     }
