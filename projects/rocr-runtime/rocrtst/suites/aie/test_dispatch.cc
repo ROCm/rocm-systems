@@ -285,7 +285,11 @@ hsa_amd_aie_kernel_dispatch_packet_t make_aie_packet(hsa_signal_t completion_sig
   static const bool is_aie4 = IsAie4Agent();
 
   hsa_amd_aie_kernel_dispatch_packet_t pkt{};
+  // The barrier and fence bits are set so every dispatch shows they survive submission: on aie4
+  // they share a byte with the device's own reserved packet field, and the runtime leaves them as
+  // the application wrote them.
   pkt.header = (HSA_AMD_AIE_PACKET_TYPE_READY << HSA_PACKET_HEADER_TYPE) |
+      (1 << HSA_PACKET_HEADER_BARRIER) |
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
   pkt.opcode = is_aie4 ? HSA_AMD_AIE_PACKET_OPCODE_UMQ : HSA_AMD_AIE_PACKET_OPCODE_KMQ;
@@ -336,6 +340,8 @@ const std::filesystem::path kMulElfHsacoPath = STRINGIFY(MUL_ELF_HSACO_PATH);
 // Neither design names its aie.device or its runtime sequence, so aiecc defaults both to the
 // same "<device>:<sequence>" key.
 constexpr const char* kMulElfHsacoKernelName = DEFAULT_ELF_HSACO_KERNEL_NAME;
+// vsmul's full ELF in a section for the other full-ELF arch, followed by vsadd's in the agent's.
+const std::filesystem::path kMultiArchElfHsacoPath = STRINGIFY(MULTIARCH_ELF_HSACO_PATH);
 
 // The build skips packaging an hsaco when the toolchain cannot produce what it is built from, so
 // every test that needs one checks first and skips itself rather than failing.
@@ -1899,15 +1905,61 @@ struct aie_full_elf_mul_kernel {
   }
 };
 
+// Input, output and kernarg buffers for a run of full-ELF vsadd dispatches, one slice of each per
+// dispatch, so every packet patches its own addresses and a mixed-up packet shows up as a wrong
+// value in someone else's slice.
+struct vsadd_elf_buffers {
+  static constexpr std::size_t n = aie_full_elf_kernel::element_count;
+
+  pool_buffer input, output, kernargs;
+  std::uint32_t count = 0;
+
+  /**
+   * @brief Allocates slices for `num_dispatches` packets, fills the input from `first_value`
+   * upwards and the output with `fill`.
+   *
+   * @return HSA_STATUS_SUCCESS, or the first allocation failure
+   */
+  hsa_status_t allocate(hsa_amd_memory_pool_t data_pool, hsa_amd_memory_pool_t kernarg_pool,
+                        std::uint32_t num_dispatches, std::uint32_t first_value = 0,
+                        std::uint32_t fill = 0) {
+    count = num_dispatches;
+    hsa_status_t s = input.allocate(data_pool, aie_full_elf_kernel::element_bytes * count);
+    if (s == HSA_STATUS_SUCCESS) {
+      s = output.allocate(data_pool, aie_full_elf_kernel::element_bytes * count);
+    }
+    if (s == HSA_STATUS_SUCCESS) {
+      s = kernargs.allocate(kernarg_pool, aie_full_elf_kernel::kernarg_bytes * count);
+    }
+    if (s != HSA_STATUS_SUCCESS) return s;
+    std::iota(in(0), in(0) + n * count, first_value);
+    std::fill_n(out(0), n * count, fill);
+    return HSA_STATUS_SUCCESS;
+  }
+
+  std::uint32_t* in(std::uint32_t i) const { return input.as<std::uint32_t>() + i * n; }
+  std::uint32_t* out(std::uint32_t i) const { return output.as<std::uint32_t>() + i * n; }
+  std::uint64_t* args(std::uint32_t i) const {
+    return kernargs.as<std::uint64_t>() + i * aie_full_elf_kernel::num_kernargs_sizes;
+  }
+
+  /** @brief Writes the packet for slice `i` into the next queue slot, without the doorbell. */
+  std::uint64_t dispatch(std::uint64_t kernel_object, std::uint32_t i, hsa_signal_t signal,
+                         hsa_queue_t* q) const {
+    return aie_full_elf_kernel::dispatch_packet(kernel_object, in(i), out(i), args(i), signal, q);
+  }
+};
+
 }  // namespace
 
 class FullElfDispatchTest : public DispatchTest {
  protected:
   // Kernel object of the full-ELF vector-scalar-add kernel, loaded once per test.
   std::uint64_t elf_kernel = 0;
-  // Set by SetUp(); true when this run is against an aie4 agent. aie4 has no completion-signal
-  // bridge from CERT back to HSA yet, so tests that block on a real dispatch finishing use this
-  // to skip themselves instead of hanging forever (see the per-test skips below).
+  // Set by SetUp(); true when this run is against an aie4 agent. aie4 dispatches through a
+  // user-mode queue (UMQ), so tests use this where its behaviour differs from aie2p's: what the
+  // runtime checks in a packet, and the tests that have no aie4 counterpart (see the per-test
+  // skips below).
   bool is_aie4 = false;
 
   void SetUp() override {
@@ -2119,6 +2171,82 @@ TEST_F(FullElfDispatchTest, HsacoFullElfRejectsUnknownKernelName) {
             HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
 }
 
+// The full-ELF counterpart of the before-freeze half of DispatchTest.HsacoKernelObjectIsPublished;
+// HsacoFullElfLoads checks the after-freeze half. The handle is zero until the executable is
+// frozen, matching the GPU contract.
+TEST_F(FullElfDispatchTest, HsacoFullElfKernelObjectIsZeroBeforeFreeze) {
+  const auto hsaco = elf_hsaco_bytes();
+  ASSERT_FALSE(hsaco.empty()) << "failed to read " << kElfHsacoPath;
+
+  hsa_executable_t executable{};
+  hsa_code_object_reader_t reader{};
+  ASSERT_EQ(TryLoad(hsaco, aie_agents.front(), &executable, &reader), HSA_STATUS_SUCCESS);
+
+  hsa_executable_symbol_t symbol{};
+  ASSERT_EQ(hsa_executable_get_symbol_by_name(executable, kElfHsacoKernelName, &aie_agents.front(),
+                                              &symbol),
+            HSA_STATUS_SUCCESS);
+  std::uint64_t kernel_object = 1;
+  ASSERT_EQ(hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                                           &kernel_object),
+            HSA_STATUS_SUCCESS);
+  EXPECT_EQ(kernel_object, 0u) << "kernel object must be zero before freeze";
+
+  EXPECT_EQ(hsa_executable_destroy(executable), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_code_object_reader_destroy(reader), HSA_STATUS_SUCCESS);
+}
+
+// The full-ELF counterpart of DispatchTest.AieKindIsValidated: a FullElf entry relabelled as
+// PdiInsts claims a PDI it does not carry, and an unknown kind (99) is out of range. Both must be
+// refused at load.
+TEST_F(FullElfDispatchTest, HsacoFullElfKindIsValidated) {
+  const auto hsaco = elf_hsaco_bytes();
+  ASSERT_FALSE(hsaco.empty()) << "failed to read " << kElfHsacoPath;
+
+  const std::size_t kind_offset = FindKindFieldOffset(hsaco);
+  ASSERT_NE(kind_offset, 0u) << "could not locate the AIE section in " << kElfHsacoPath;
+  ASSERT_LE(kind_offset + sizeof(rocr::AMD::AieKernelKind), hsaco.size());
+
+  for (const std::uint32_t bad_kind :
+       {static_cast<std::uint32_t>(rocr::AMD::AieKernelKind::PdiInsts), std::uint32_t{99}}) {
+    SCOPED_TRACE(bad_kind);
+    auto patched = hsaco;
+    std::memcpy(patched.data() + kind_offset, &bad_kind, sizeof(bad_kind));
+
+    hsa_executable_t executable{};
+    hsa_code_object_reader_t reader{};
+    EXPECT_EQ(TryLoad(patched, aie_agents.front(), &executable, &reader),
+              HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  }
+}
+
+// The full-ELF counterpart of DispatchTest.LoadsTheAgentsSectionOfAMultiArchHsaco. The other
+// arch's section comes first and holds the mul design under the same kernel name, so only the
+// agent's own section yields a kernel that adds -- which the dispatch checks.
+TEST_F(FullElfDispatchTest, HsacoFullElfLoadsTheAgentsSectionOfAMultiArchHsaco) {
+  if (!std::filesystem::exists(kMultiArchElfHsacoPath)) {
+    GTEST_SKIP() << "hsaco was not built: " << kMultiArchElfHsacoPath;
+  }
+  const std::uint64_t kernel = LoadKernel(kMultiArchElfHsacoPath, kElfHsacoKernelName);
+  ASSERT_NE(kernel, 0u);
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+  vsadd_elf_buffers bufs;
+  ASSERT_EQ(bufs.allocate(data_pool, kernarg_pool, 1), HSA_STATUS_SUCCESS);
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  hsa_signal_store_screlease(queue->doorbell_signal, bufs.dispatch(kernel, 0, signal, queue));
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  EXPECT_NO_FATAL_FAILURE(ExpectVsaddCorrect(bufs.in(0), bufs.out(0), vsadd_elf_buffers::n));
+
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
 TEST_F(FullElfDispatchTest, HsacoFullElfDispatches) {
   // End to end: load, dispatch, check the output buffer.
   hsa_queue_t* queue = nullptr;
@@ -2231,6 +2359,204 @@ TEST_F(FullElfDispatchTest, ElfRepatch) {
   }
 
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+// The full-ELF counterpart of DispatchTest.MultiDispatch: many packets, a doorbell per packet,
+// one wait at the end. Each doorbell may find earlier packets still running, so the runtime keeps
+// accepting work while it retires the packets before it.
+TEST_F(FullElfDispatchTest, ElfMultiDispatch) {
+  constexpr std::uint32_t total_num_dispatches = 100;
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  vsadd_elf_buffers bufs;
+  ASSERT_EQ(bufs.allocate(data_pool, kernarg_pool, total_num_dispatches), HSA_STATUS_SUCCESS);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(total_num_dispatches, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  for (std::uint32_t i = 0; i < total_num_dispatches; ++i) {
+    hsa_signal_store_screlease(queue->doorbell_signal, bufs.dispatch(elf_kernel, i, signal, queue));
+  }
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  ASSERT_NO_FATAL_FAILURE(
+      ExpectVsaddCorrect(bufs.in(0), bufs.out(0), vsadd_elf_buffers::n * total_num_dispatches));
+
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+// The full-ELF counterpart of DispatchTest.MultiDispatchWrapAround: the write index runs ten times
+// around the ring, starting half-way round so the wrap does not coincide with a batch boundary.
+TEST_F(FullElfDispatchTest, ElfMultiDispatchWrapAround) {
+  const std::uint32_t initial_dispatches = min_queue_size / 2;
+  const std::uint32_t total_num_dispatches = initial_dispatches + 10 * min_queue_size;
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  vsadd_elf_buffers bufs;
+  ASSERT_EQ(bufs.allocate(data_pool, kernarg_pool, total_num_dispatches), HSA_STATUS_SUCCESS);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(total_num_dispatches, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  for (std::uint32_t i = 0; i < total_num_dispatches; ++i) {
+    hsa_signal_store_screlease(queue->doorbell_signal, bufs.dispatch(elf_kernel, i, signal, queue));
+  }
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  ASSERT_NO_FATAL_FAILURE(
+      ExpectVsaddCorrect(bufs.in(0), bufs.out(0), vsadd_elf_buffers::n * total_num_dispatches));
+
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+// The full-ELF counterpart of DispatchTest.MultiDispatchWrapAroundAsync: all but one slot is used
+// first, so the following batch, rung once, starts on the last slot and wraps inside the batch.
+//
+// The batch is one ring's worth rather than the PDI test's fixed 40: its packets are only written
+// as earlier ones retire and none of them can retire before the doorbell, so a batch larger than
+// the ring would spin in enqueue_aie_packet forever. aie4's ring is 32 slots.
+TEST_F(FullElfDispatchTest, ElfMultiDispatchWrapAroundAsync) {
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  const std::uint32_t initial_dispatches = queue->size - 1;
+  const std::uint32_t total_num_dispatches = initial_dispatches + queue->size;
+
+  vsadd_elf_buffers bufs;
+  ASSERT_EQ(bufs.allocate(data_pool, kernarg_pool, total_num_dispatches), HSA_STATUS_SUCCESS);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(total_num_dispatches, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  for (std::uint32_t i = 0; i < initial_dispatches; ++i) {
+    hsa_signal_store_screlease(queue->doorbell_signal, bufs.dispatch(elf_kernel, i, signal, queue));
+  }
+  std::uint64_t wr_idx = 0;
+  for (std::uint32_t i = initial_dispatches; i < total_num_dispatches; ++i) {
+    wr_idx = bufs.dispatch(elf_kernel, i, signal, queue);
+  }
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  ASSERT_NO_FATAL_FAILURE(
+      ExpectVsaddCorrect(bufs.in(0), bufs.out(0), vsadd_elf_buffers::n * total_num_dispatches));
+
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+// The full-ELF counterpart of DispatchTest.DestroyQueueWithPendingPacket: the queue is torn down
+// while its packet may still be running. The destroy must return cleanly and leave the hardware
+// detached from the buffers freed after it.
+TEST_F(FullElfDispatchTest, ElfDestroyQueueWithPendingPacket) {
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  vsadd_elf_buffers bufs;
+  ASSERT_EQ(bufs.allocate(data_pool, kernarg_pool, 1), HSA_STATUS_SUCCESS);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  hsa_signal_store_screlease(queue->doorbell_signal, bufs.dispatch(elf_kernel, 0, signal, queue));
+
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+}
+
+// The full-ELF counterpart of DispatchTest.ConcurrentQueuesIndependentExecution: two queues, each
+// its own hardware context, fed alternately so both are in flight at once. Each queue's inputs
+// start from a different value, so a packet that ran with the other queue's arguments shows up
+// as a wrong output rather than as a coincidentally right one.
+TEST_F(FullElfDispatchTest, ElfConcurrentQueuesIndependentExecution) {
+  constexpr std::uint32_t num_queues = 2;
+  constexpr std::uint32_t num_rounds = 20;
+
+  hsa_queue_t* queues[num_queues] = {};
+  vsadd_elf_buffers bufs[num_queues];
+  hsa_signal_t signals[num_queues] = {};
+  for (std::uint32_t q = 0; q < num_queues; ++q) {
+    SCOPED_TRACE(q);
+    ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                               nullptr, 0, 0, &queues[q]),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(bufs[q].allocate(data_pool, kernarg_pool, num_rounds,
+                               q * num_rounds * vsadd_elf_buffers::n),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(hsa_signal_create(num_rounds, 0, nullptr, &signals[q]), HSA_STATUS_SUCCESS);
+  }
+
+  for (std::uint32_t round = 0; round < num_rounds; ++round) {
+    for (std::uint32_t q = 0; q < num_queues; ++q) {
+      hsa_signal_store_screlease(queues[q]->doorbell_signal,
+                                 bufs[q].dispatch(elf_kernel, round, signals[q], queues[q]));
+    }
+  }
+
+  for (std::uint32_t q = 0; q < num_queues; ++q) {
+    SCOPED_TRACE(q);
+    hsa_signal_wait_scacquire(signals[q], HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                              HSA_WAIT_STATE_BLOCKED);
+    EXPECT_NO_FATAL_FAILURE(
+        ExpectVsaddCorrect(bufs[q].in(0), bufs[q].out(0), vsadd_elf_buffers::n * num_rounds));
+  }
+
+  for (std::uint32_t q = 0; q < num_queues; ++q) {
+    EXPECT_EQ(hsa_signal_destroy(signals[q]), HSA_STATUS_SUCCESS);
+    EXPECT_EQ(hsa_queue_destroy(queues[q]), HSA_STATUS_SUCCESS);
+  }
+}
+
+// The full-ELF counterpart of DispatchTest.SingleDispatchVMem: the I/O buffers and the kernargs
+// come from the vmem API rather than plain pool allocation. The control code is still the
+// runtime's own allocation.
+TEST_F(FullElfDispatchTest, ElfSingleDispatchVMem) {
+  std::vector<hsa_agent_t> access_agents;
+  ASSERT_EQ(hsa_iterate_agents(discover_agents<HSA_DEVICE_TYPE_CPU>, &access_agents),
+            HSA_STATUS_SUCCESS);
+  ASSERT_FALSE(access_agents.empty());
+  access_agents.insert(access_agents.end(), aie_agents.begin(), aie_agents.end());
+
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
+                             nullptr, 0, 0, &queue),
+            HSA_STATUS_SUCCESS);
+
+  vmem_buffer input{}, output{}, kernargs{};
+  ASSERT_TRUE(vmem_allocate(data_pool, aie_full_elf_kernel::element_bytes, access_agents, &input));
+  ASSERT_TRUE(vmem_allocate(data_pool, aie_full_elf_kernel::element_bytes, access_agents, &output));
+  ASSERT_TRUE(
+      vmem_allocate(data_pool, aie_full_elf_kernel::kernarg_bytes, access_agents, &kernargs));
+
+  auto* in = static_cast<std::uint32_t*>(input.va);
+  auto* out = static_cast<std::uint32_t*>(output.va);
+  std::iota(in, in + aie_full_elf_kernel::element_count, 0);
+  std::fill_n(out, aie_full_elf_kernel::element_count, 0);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  const auto wr_idx = aie_full_elf_kernel::dispatch_packet(
+      elf_kernel, in, out, static_cast<std::uint64_t*>(kernargs.va), signal, queue);
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+
+  EXPECT_NO_FATAL_FAILURE(ExpectVsaddCorrect(in, out, aie_full_elf_kernel::element_count));
+
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+  EXPECT_TRUE(vmem_free(kernargs));
+  EXPECT_TRUE(vmem_free(output));
+  EXPECT_TRUE(vmem_free(input));
 }
 
 TEST_F(FullElfDispatchTest, ElfNoPdiCeiling) {
@@ -2366,20 +2692,25 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
     const char* name;
     std::function<void(packet_t&)> mutate;
   };
-  const std::vector<malformed_case> cases = {
+  std::vector<malformed_case> cases = {
       {"null kernel object",
        [](packet_t& p) {
          p.kernel_object_low = 0;
          p.kernel_object_high = 0;
        }},
-      // The arguments are patched into the kernel's control code rather than handed to the
-      // hardware, so a miscounted list would otherwise run against the ELF's placeholders.
-      {"too few kernargs",
-       [](packet_t& p) { p.num_kernargs = aie_full_elf_kernel::num_kernargs - 1; }},
-      {"too many kernargs",
-       [](packet_t& p) { p.num_kernargs = aie_full_elf_kernel::num_kernargs + 1; }},
-      {"unrecognised opcode", [](packet_t& p) { p.opcode = 0xFF; }},
   };
+  // On aie4 the opcode and the argument count are the application's to get right: the device reads
+  // the packet in place, and the runtime checks neither -- it patches as many arguments as the
+  // kernel takes, whatever the packet declares.
+  if (!is_aie4) {
+    // The arguments are patched into the kernel's control code rather than handed to the
+    // hardware, so a miscounted list would otherwise run against the ELF's placeholders.
+    cases.push_back({"too few kernargs",
+                     [](packet_t& p) { p.num_kernargs = aie_full_elf_kernel::num_kernargs - 1; }});
+    cases.push_back({"too many kernargs",
+                     [](packet_t& p) { p.num_kernargs = aie_full_elf_kernel::num_kernargs + 1; }});
+    cases.push_back({"unrecognised opcode", [](packet_t& p) { p.opcode = 0xFF; }});
+  }
 
   for (const auto& c : cases) {
     SCOPED_TRACE(c.name);
@@ -2421,6 +2752,174 @@ TEST_F(FullElfDispatchTest, ElfMalformedPacketsRejected) {
     EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
     EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
   }
+}
+
+// The full-ELF counterpart of DispatchTest.KernargSizeExceedsBufferRejected, with an outcome that
+// depends on the queue type. KMQ flushes [ptr, ptr + size) of every argument around the dispatch,
+// so a size larger than the argument's allocation would walk that flush off the end of the
+// mapping; the packet has to be refused before anything is flushed or submitted. UMQ devices are
+// cache-coherent and flush nothing, and the arguments are patched into the control code as
+// addresses alone, so the size is never used: the dispatch must simply run.
+TEST_F(FullElfDispatchTest, ElfKernargSizeExceedsBuffer) {
+  dispatch_error err;
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
+            HSA_STATUS_SUCCESS);
+
+  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
+  vsadd_elf_buffers bufs;
+  ASSERT_EQ(bufs.allocate(data_pool, kernarg_pool, 1, 0, sentinel), HSA_STATUS_SUCCESS);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(1, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  const auto wr_idx = bufs.dispatch(elf_kernel, 0, signal, queue);
+  // dispatch() fills the sizes, so overstate one of them afterwards. A gigabyte is far past any
+  // rounding the pool may apply, so the outcome cannot be an artifact of the allocation being
+  // larger than asked for.
+  bufs.args(0)[aie_full_elf_kernel::num_kernargs] = 1ULL << 30;
+
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+  if (is_aie4) {
+    hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                              HSA_WAIT_STATE_BLOCKED);
+    EXPECT_FALSE(err.invoked.load(std::memory_order_acquire))
+        << "a dispatch whose argument sizes are unused was reported as an error";
+    ASSERT_NO_FATAL_FAILURE(ExpectVsaddCorrect(bufs.in(0), bufs.out(0), vsadd_elf_buffers::n));
+  } else {
+    ExpectRejected(err, queue, signal, 1);
+    for (std::size_t i = 0; i < vsadd_elf_buffers::n; ++i) {
+      ASSERT_EQ(bufs.out(0)[i], sentinel) << "rejected dispatch wrote output at index " << i;
+    }
+  }
+
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
+}
+
+/**
+ * @brief Builds a FullElf hsaco whose kernel's control code the NPU cannot execute.
+ *
+ * Every byte of the nested ELF's .ctrltext sections is overwritten, while the ELF's structure,
+ * relocations and sizes stay intact, so the loader accepts it and a batch naming it builds
+ * normally; only the device can tell.
+ *
+ * @return the corrupted hsaco, or an empty vector if the nested ELF cannot be located
+ */
+std::vector<std::uint8_t> BadControlCodeElfHsaco() {
+  auto hsaco = elf_hsaco_bytes();
+  const std::size_t section_offset = FindAieSectionOffset(hsaco);
+  if (section_offset == 0) return {};
+  rocr::AMD::aie_section_header sec_hdr{};
+  std::memcpy(&sec_hdr, hsaco.data() + section_offset, sizeof(sec_hdr));
+  if (sec_hdr.kernel_count == 0 ||
+      section_offset + sec_hdr.header_size + sizeof(rocr::AMD::aie_kernel_entry) > hsaco.size()) {
+    return {};
+  }
+  rocr::AMD::aie_kernel_entry entry{};
+  std::memcpy(&entry, hsaco.data() + section_offset + sec_hdr.header_size, sizeof(entry));
+
+  // The nested ELF is the 32-bit AIE ELF aiecc emits; anything else is not what this knows how to
+  // corrupt.
+  const std::size_t elf_offset = section_offset + entry.insts_offset;
+  const std::size_t elf_size = entry.insts_size;
+  if (elf_offset + elf_size > hsaco.size() || elf_size < sizeof(Elf32_Ehdr)) return {};
+  std::uint8_t* elf = hsaco.data() + elf_offset;
+  Elf32_Ehdr ehdr{};
+  std::memcpy(&ehdr, elf, sizeof(ehdr));
+  if (std::memcmp(ehdr.e_ident, ELFMAG, SELFMAG) != 0 || ehdr.e_ident[EI_CLASS] != ELFCLASS32 ||
+      ehdr.e_shentsize < sizeof(Elf32_Shdr) || ehdr.e_shstrndx >= ehdr.e_shnum ||
+      ehdr.e_shoff + std::size_t{ehdr.e_shnum} * ehdr.e_shentsize > elf_size) {
+    return {};
+  }
+  const auto shdr_at = [&](std::size_t i) {
+    Elf32_Shdr shdr{};
+    std::memcpy(&shdr, elf + ehdr.e_shoff + i * ehdr.e_shentsize, sizeof(shdr));
+    return shdr;
+  };
+  const Elf32_Shdr strtab = shdr_at(ehdr.e_shstrndx);
+  if (std::size_t{strtab.sh_offset} + strtab.sh_size > elf_size) return {};
+  const auto* names = reinterpret_cast<const char*>(elf + strtab.sh_offset);
+
+  std::size_t corrupted = 0;
+  for (std::size_t i = 0; i < ehdr.e_shnum; ++i) {
+    const Elf32_Shdr shdr = shdr_at(i);
+    if (shdr.sh_name >= strtab.sh_size) return {};
+    // Bounded by the table, so an unterminated last name cannot run off its end.
+    const std::string_view name(names + shdr.sh_name,
+                                strnlen(names + shdr.sh_name, strtab.sh_size - shdr.sh_name));
+    if (name.rfind(".ctrltext", 0) != 0) continue;
+    if (std::size_t{shdr.sh_offset} + shdr.sh_size > elf_size) return {};
+    std::fill_n(elf + shdr.sh_offset, shdr.sh_size, std::uint8_t{0xFF});
+    ++corrupted;
+  }
+  return corrupted != 0 ? hsaco : std::vector<std::uint8_t>{};
+}
+
+// The full-ELF counterpart of DispatchTest.PartiallyFailedBatchRetiresCompletedPackets: one
+// doorbell for a ring's worth of packets, the last of which the device cannot run. Packets that
+// ran are retired with their output, the failing one is not, and the read index and the
+// completion signal agree on how many ran.
+TEST_F(FullElfDispatchTest, ElfPartiallyFailedBatchRetiresCompletedPackets) {
+  if (is_aie4) {
+    GTEST_SKIP() << "CERT stalls on control code it cannot execute instead of failing the packet: "
+                    "its read_index stops before the bad packet and no return code is written "
+                    "(observed for over 60 s), and the UMQ wait has no timeout, so the dispatch "
+                    "never returns";
+  }
+  dispatch_error err;
+  hsa_queue_t* queue = nullptr;
+  ASSERT_EQ(create_queue_with_error_callback(aie_agents.front(), min_queue_size, &err, &queue),
+            HSA_STATUS_SUCCESS);
+  const std::uint32_t total_num_dispatches = queue->size;
+
+  const auto bad_bytes = BadControlCodeElfHsaco();
+  ASSERT_FALSE(bad_bytes.empty()) << "could not build a corrupted copy of " << kElfHsacoPath;
+  loaded_hsaco bad_hsaco;
+  ASSERT_TRUE(bad_hsaco.load(bad_bytes, aie_agents.front()));
+  const std::uint64_t bad_kernel = bad_hsaco.kernel_object(kElfHsacoKernelName);
+  ASSERT_NE(bad_kernel, 0u);
+
+  constexpr std::uint32_t sentinel = 0xD0D0D0D0;
+  vsadd_elf_buffers bufs;
+  ASSERT_EQ(bufs.allocate(data_pool, kernarg_pool, total_num_dispatches, 0, sentinel),
+            HSA_STATUS_SUCCESS);
+
+  hsa_signal_t signal{};
+  ASSERT_EQ(hsa_signal_create(total_num_dispatches, 0, nullptr, &signal), HSA_STATUS_SUCCESS);
+  std::uint64_t wr_idx = 0;
+  for (std::uint32_t i = 0; i < total_num_dispatches; ++i) {
+    wr_idx =
+        bufs.dispatch(i == total_num_dispatches - 1 ? bad_kernel : elf_kernel, i, signal, queue);
+  }
+  hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
+
+  EXPECT_TRUE(err.invoked.load(std::memory_order_acquire))
+      << "a partially failed batch did not report through the queue error callback";
+  EXPECT_NE(err.status, HSA_STATUS_SUCCESS);
+
+  // Partial: what ran before the failing packet is retired, the failing one is not. KMQ retires in
+  // whole chains, so how many ran depends on where the runtime split the batch.
+  const hsa_signal_value_t remaining = hsa_signal_load_scacquire(signal);
+  ASSERT_LT(remaining, total_num_dispatches)
+      << "no packet was retired, so a waiter on a dispatch that did run would block forever";
+  ASSERT_GT(remaining, 0) << "the failing packet was credited with a completion it never reached";
+  const std::uint32_t retired = total_num_dispatches - static_cast<std::uint32_t>(remaining);
+  EXPECT_EQ(hsa_queue_load_read_index_scacquire(queue), retired)
+      << "read index does not match the packets that were completed";
+  EXPECT_LT(hsa_queue_load_read_index_scacquire(queue), hsa_queue_load_write_index_scacquire(queue))
+      << "the failing packet was consumed from the ring";
+
+  for (std::uint32_t d = 0; d < retired; ++d) {
+    SCOPED_TRACE(d);
+    ASSERT_NO_FATAL_FAILURE(ExpectVsaddCorrect(bufs.in(d), bufs.out(d), vsadd_elf_buffers::n));
+  }
+  for (std::size_t e = 0; e < vsadd_elf_buffers::n; ++e) {
+    ASSERT_EQ(bufs.out(total_num_dispatches - 1)[e], sentinel)
+        << "the failing dispatch wrote output at " << e;
+  }
+
+  EXPECT_EQ(hsa_signal_destroy(signal), HSA_STATUS_SUCCESS);
+  EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(DispatchTest, PdiCacheRolledBackOnFailedBatch) {
@@ -3323,6 +3822,27 @@ TEST_F(DispatchTest, NumColsOutOfRangeRejectedAtLoad) {
     SCOPED_TRACE(num_cols);
     const auto patched = WithNumCols(hsaco, num_cols);
     ASSERT_FALSE(patched.empty()) << "could not locate the AIE section in " << kHsacoPath;
+    hsa_executable_t executable{};
+    hsa_code_object_reader_t reader{};
+    EXPECT_EQ(TryLoad(patched, aie_agents.front(), &executable, &reader),
+              HSA_STATUS_ERROR_INVALID_CODE_OBJECT);
+  }
+
+  // The unmodified hsaco's single column is accepted.
+  loaded_hsaco loaded;
+  EXPECT_TRUE(loaded.load(hsaco, aie_agents.front()));
+}
+
+// The full-ELF counterpart of DispatchTest.NumColsOutOfRangeRejectedAtLoad.
+TEST_F(FullElfDispatchTest, HsacoFullElfNumColsOutOfRangeRejectedAtLoad) {
+  const auto hsaco = elf_hsaco_bytes();
+  ASSERT_FALSE(hsaco.empty()) << "failed to read " << kElfHsacoPath;
+
+  // No columns at all, and more than any NPU has.
+  for (const std::uint32_t num_cols : {0u, std::numeric_limits<std::uint32_t>::max()}) {
+    SCOPED_TRACE(num_cols);
+    const auto patched = WithNumCols(hsaco, num_cols);
+    ASSERT_FALSE(patched.empty()) << "could not locate the AIE section in " << kElfHsacoPath;
     hsa_executable_t executable{};
     hsa_code_object_reader_t reader{};
     EXPECT_EQ(TryLoad(patched, aie_agents.front(), &executable, &reader),

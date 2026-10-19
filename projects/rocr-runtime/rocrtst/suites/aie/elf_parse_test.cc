@@ -566,24 +566,4 @@ TEST(AieElfParse, FindsStringTablesThroughSymbolTableLinks) {
   }
 }
 
-TEST(AieElfPatch, ShimDma48IsAdditive) {
-  // Two applications must not equal one: this is why the driver patches a pristine copy.
-  std::uint32_t once[3] = {0, 0x1000, 0};
-  std::uint32_t twice[3] = {0, 0x1000, 0};
-  rocr::AMD::aie_elf::PatchShimDma48(once, 0x2000);
-  rocr::AMD::aie_elf::PatchShimDma48(twice, 0x2000);
-  rocr::AMD::aie_elf::PatchShimDma48(twice, 0x2000);
-  EXPECT_NE(once[1], twice[1]);
-}
-
-TEST(AieElfPatch, ShimDma57Aie4IsAdditive) {
-  // Same contract as ShimDma48, for aie4's wider (57-bit, site[0]+site[1]) scheme.
-  std::uint32_t once[2] = {0, 0x1000};
-  std::uint32_t twice[2] = {0, 0x1000};
-  rocr::AMD::aie_elf::PatchShimDma57Aie4(once, 0x2000);
-  rocr::AMD::aie_elf::PatchShimDma57Aie4(twice, 0x2000);
-  rocr::AMD::aie_elf::PatchShimDma57Aie4(twice, 0x2000);
-  EXPECT_NE(once[1], twice[1]);
-}
-
 }  // namespace

@@ -156,9 +156,9 @@ TEST_F(PointerInfoTest, ReportsDeviceAddress) {
     // Dev-pool memory has a device address distinct from its host address.
     EXPECT_NE(info.agentBaseAddress, ptr);
   } else {
-    // Measured directly on this pool: aie4's data pool has no DDR aperture offset, so the device
-    // address is the host address itself (see XdnaDriver::TranslateUmqPackets's
-    // PatchShimDma57Aie4 comment, which relies on the same measurement).
+    // Measured directly on this pool: aie4's device address is the host address itself. (The
+    // shim DMA's DDR aperture is added on top only inside buffer descriptors; see
+    // PatchShimDma57Aie4.)
     EXPECT_EQ(info.agentBaseAddress, ptr);
   }
 

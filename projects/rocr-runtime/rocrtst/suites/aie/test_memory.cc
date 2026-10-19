@@ -538,10 +538,10 @@ TEST_F(MemoryTest, VMemMapNPU) {
   const std::uint64_t address = 0;
   const std::uint64_t alignment = 0;
   std::uint32_t* buffer = nullptr;
-  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(reinterpret_cast<void**>(&buffer), allocation_size,
-                                               address, alignment,
-                                               HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
-            HSA_STATUS_SUCCESS);
+  ASSERT_EQ(
+      hsa_amd_vmem_address_reserve_align(reinterpret_cast<void**>(&buffer), allocation_size,
+                                         address, alignment, HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
+      HSA_STATUS_SUCCESS);
   ASSERT_NE(buffer, nullptr);
 
   const std::uint64_t offset = 0;
