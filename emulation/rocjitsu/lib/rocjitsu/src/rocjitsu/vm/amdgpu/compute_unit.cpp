@@ -429,14 +429,14 @@ void ComputeUnitCore::flush_cp_notifications() {
   for (;;) {
     bool capacity_changed = false;
     std::vector<PendingExecutionFailure> execution_failures;
-    std::vector<PendingDispatchFailure> faults;
+    std::vector<PendingDispatchFailure> failures;
     std::vector<PendingQueueException> exceptions;
     std::vector<std::pair<uint32_t, uint32_t>> ready;
     {
       std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
       if (!has_pending_cp_notifications())
         return;
-      faults.swap(pending_dispatch_failures_);
+      failures.swap(pending_dispatch_failures_);
       execution_failures.swap(pending_execution_failures_);
       exceptions.swap(pending_queue_exceptions_);
       ready.swap(pending_wg_completions_);
@@ -448,12 +448,12 @@ void ComputeUnitCore::flush_cp_notifications() {
       return;
     for (const auto &failure : execution_failures)
       cp_->notify_execution_failure(failure.queue_id, failure.process_id, failure.reason);
-    for (const PendingDispatchFailure &fault : faults) {
-      if (fault.vm_outcome)
-        cp_->notify_dispatch_vm_fault(fault.queue_id, fault.process_id, fault.dispatch_id,
-                                      *fault.vm_outcome);
+    for (const PendingDispatchFailure &failure : failures) {
+      if (failure.vm_outcome)
+        cp_->notify_dispatch_vm_fault(failure.queue_id, failure.process_id, failure.dispatch_id,
+                                      *failure.vm_outcome);
       else
-        cp_->notify_dispatch_failure(fault.queue_id, fault.process_id, fault.dispatch_id);
+        cp_->notify_dispatch_failure(failure.queue_id, failure.process_id, failure.dispatch_id);
     }
     for (const auto &exception : exceptions) {
       const bool delivered =
@@ -853,7 +853,8 @@ void ComputeUnitCore::handle_instruction_failure(Wavefront &wf, const std::strin
   util::Logger::warn(failure);
   if (!wf.fail_pm4_submission()) {
     // Keep upstream queue-owner exception delivery before cancelling the dispatch.
-    const bool claimed = execution_failure_handler_ && execution_failure_handler_(wf, /*retain_wave=*/true);
+    const bool claimed =
+        execution_failure_handler_ && execution_failure_handler_(wf, /*retain_wave=*/true);
     pending_dispatch_failures_.push_back({.queue_id = wf.queue_id(),
                                           .process_id = wf.process_id(),
                                           .dispatch_id = wf.dispatch_id(),
