@@ -904,76 +904,64 @@ VmAccessOutcome execute_atomic_rmw(VectorMemState &d, L2Cache *l2, uint32_t vmid
   if (boundary.outcome() != VmAccessOutcome::Complete)
     return boundary.outcome();
 
-  for (uint32_t lane = d.translated.atomic_lane; lane < d.wf_size; ++lane) {
-    if (!(d.lane_mask & (1ULL << lane)))
-      continue;
+  // Reuse the vector's cache-coherence boundary; each backing update remains atomic.
+  uint32_t next_lane = d.translated.atomic_lane;
+  const VmAccessOutcome outcome = l2->atomic_rmw_lanes(
+      boundary, std::span<const uint64_t>(d.per_lane_addr.data(), d.wf_size), d.lane_mask, esz,
+      [&](uint32_t lane, uint8_t *line_data, uint32_t offset) {
+        if (esz == 4) {
+          uint32_t old_val;
+          std::memcpy(&old_val, line_data + offset, 4);
 
-    uint64_t ea = d.per_lane_addr[lane];
-
-    // Reuse the vector's cache-coherence boundary; each backing update remains atomic.
-    const VmAccessOutcome outcome = l2->atomic_rmw(
-        boundary, ea, esz,
-        [&](uint8_t *line_data, uint32_t offset) {
-          if (esz == 4) {
-            uint32_t old_val;
-            std::memcpy(&old_val, line_data + offset, 4);
-
-            uint32_t new_val;
-            if (is_packed_add(d.atomic_op)) {
-              uint32_t src_val;
-              std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
-              new_val = fp_mode::atomic_add_packed_16(old_val, src_val,
-                                                      d.atomic_op == AtomicOp::PK_ADD_BF16,
-                                                      /*denorm_mode=*/3, d.atomic_source_nan_first);
-            } else if (is_fp) {
-              uint32_t source_bits = 0, compare_bits = 0;
-              std::memcpy(&source_bits, &d.store_data[lane * src_stride], 4);
-              if (uses_two_sources)
-                std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 4], 4);
-              new_val =
-                  apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
-            } else {
-              uint32_t src_val = 0, cmp_val = 0;
-              std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
-              if (uses_two_sources)
-                std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
-              new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
-            }
-
-            std::memcpy(line_data + offset, &new_val, 4);
-            std::memcpy(&d.response_data[lane * 4], &old_val, 4);
-          } else if (esz == 8) {
-            uint64_t old_val;
-            std::memcpy(&old_val, line_data + offset, 8);
-
-            uint64_t new_val;
-            if (is_fp) {
-              uint64_t source_bits = 0, compare_bits = 0;
-              std::memcpy(&source_bits, &d.store_data[lane * src_stride], 8);
-              if (uses_two_sources)
-                std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 8], 8);
-              new_val =
-                  apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
-            } else {
-              uint64_t src_val = 0, cmp_val = 0;
-              std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
-              if (uses_two_sources)
-                std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
-              new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
-            }
-
-            std::memcpy(line_data + offset, &new_val, 8);
-            std::memcpy(&d.response_data[lane * 8], &old_val, 8);
+          uint32_t new_val;
+          if (is_packed_add(d.atomic_op)) {
+            uint32_t src_val;
+            std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+            new_val = fp_mode::atomic_add_packed_16(old_val, src_val,
+                                                    d.atomic_op == AtomicOp::PK_ADD_BF16,
+                                                    /*denorm_mode=*/3, d.atomic_source_nan_first);
+          } else if (is_fp) {
+            uint32_t source_bits = 0, compare_bits = 0;
+            std::memcpy(&source_bits, &d.store_data[lane * src_stride], 4);
+            if (uses_two_sources)
+              std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 4], 4);
+            new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
+          } else {
+            uint32_t src_val = 0, cmp_val = 0;
+            std::memcpy(&src_val, &d.store_data[lane * src_stride], 4);
+            if (uses_two_sources)
+              std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 4], 4);
+            new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
           }
-        },
-        vmid, vm_access);
-    if (outcome != VmAccessOutcome::Complete) {
-      d.translated.atomic_lane = lane;
-      return outcome;
-    }
-    d.translated.atomic_lane = lane + 1;
-  }
-  return VmAccessOutcome::Complete;
+
+          std::memcpy(line_data + offset, &new_val, 4);
+          std::memcpy(&d.response_data[lane * 4], &old_val, 4);
+        } else if (esz == 8) {
+          uint64_t old_val;
+          std::memcpy(&old_val, line_data + offset, 8);
+
+          uint64_t new_val;
+          if (is_fp) {
+            uint64_t source_bits = 0, compare_bits = 0;
+            std::memcpy(&source_bits, &d.store_data[lane * src_stride], 8);
+            if (uses_two_sources)
+              std::memcpy(&compare_bits, &d.store_data[lane * src_stride + 8], 8);
+            new_val = apply_fp_atomic(d, old_val, source_bits, compare_bits, d.atomic_denorm_mode);
+          } else {
+            uint64_t src_val = 0, cmp_val = 0;
+            std::memcpy(&src_val, &d.store_data[lane * src_stride], 8);
+            if (uses_two_sources)
+              std::memcpy(&cmp_val, &d.store_data[lane * src_stride + 8], 8);
+            new_val = apply_int_atomic(d.atomic_op, old_val, src_val, cmp_val);
+          }
+
+          std::memcpy(line_data + offset, &new_val, 8);
+          std::memcpy(&d.response_data[lane * 8], &old_val, 8);
+        }
+      },
+      vmid, vm_access, next_lane);
+  d.translated.atomic_lane = next_lane;
+  return outcome;
 }
 
 /// @brief Perform a per-lane atomic RMW on LDS memory.

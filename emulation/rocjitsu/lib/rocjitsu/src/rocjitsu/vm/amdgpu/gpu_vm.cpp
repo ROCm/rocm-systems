@@ -673,6 +673,92 @@ GpuVmAccess::atomic_modify(uint64_t address, uint32_t width,
       translated.translation.domain, translated.translation.address, width, mutation);
 }
 
+VmAccessOutcome GpuVmAccess::atomic_modify_lanes(
+    std::span<const uint64_t> lane_addresses, uint64_t lane_mask, uint32_t width,
+    const PhysicalMemoryAccess::AtomicLaneMutation &mutation, uint32_t &next_lane) const {
+  const uint32_t lane_count = static_cast<uint32_t>(lane_addresses.size());
+  if (access_state_ == nullptr)
+    return VmAccessOutcome::Unavailable;
+  std::shared_lock state_lock(access_state_->mutex);
+  if (!access_state_->valid)
+    return VmAccessOutcome::Revoked;
+  if (access_state_->translator == nullptr || access_state_->physical_memory == nullptr)
+    return VmAccessOutcome::Unavailable;
+
+  // The last translated span: operands inside it translate by a constant offset
+  // under the same lease, so the translator need not be consulted again.
+  uint64_t span_begin = 0, span_bytes = 0, span_physical = 0;
+  VmMemoryDomain span_domain = VmMemoryDomain::Compatibility;
+  std::array<uint64_t, 64> physical{};
+  if (lane_addresses.size() > physical.size())
+    return VmAccessOutcome::Malformed;
+
+  uint32_t lane = next_lane;
+  while (lane < lane_count) {
+    // Translate a run of lanes sharing one domain; apply it as a unit. A lane
+    // that fails to translate ends the run, so earlier lanes still take effect
+    // (and fault) before the failure is reported, as in lane-at-a-time order.
+    uint64_t run_mask = 0;
+    VmMemoryDomain run_domain = VmMemoryDomain::Compatibility;
+    uint32_t run_start = lane;
+    VmAccessOutcome failure = VmAccessOutcome::Complete;
+    uint64_t failure_address = 0;
+    for (; lane < lane_count; ++lane) {
+      if (!(lane_mask & (1ULL << lane)))
+        continue;
+      const uint64_t address = lane_addresses[lane];
+      if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) ||
+          (address & (width - 1)) != 0 || !mutation) {
+        failure = VmAccessOutcome::Malformed;
+        failure_address = address;
+        break;
+      }
+      if (address - span_begin >= span_bytes || span_bytes - (address - span_begin) < width) {
+        const VmTranslationResult translated =
+            access_state_->translator->translate(address, width, VmAccessKind::Atomic);
+        if (!translated) {
+          failure = translated.outcome;
+          failure_address = address;
+          break;
+        }
+        if (translated.translation.contiguous_bytes < width) {
+          failure = VmAccessOutcome::Malformed;
+          failure_address = address;
+          break;
+        }
+        span_begin = address;
+        span_bytes = translated.translation.contiguous_bytes;
+        span_physical = translated.translation.address;
+        span_domain = translated.translation.domain;
+      }
+      if (run_mask == 0)
+        run_domain = span_domain;
+      else if (span_domain != run_domain)
+        break;
+      physical[lane] = span_physical + (address - span_begin);
+      run_mask |= 1ULL << lane;
+    }
+
+    if (run_mask != 0) {
+      uint32_t applied = run_start;
+      const VmAccessOutcome outcome = access_state_->physical_memory->atomic_modify_lanes(
+          run_domain, std::span<const uint64_t>(physical.data(), lane_count), run_mask, width,
+          mutation, applied);
+      if (outcome != VmAccessOutcome::Complete) {
+        next_lane = applied;
+        return outcome;
+      }
+    }
+    if (failure != VmAccessOutcome::Complete) {
+      report_terminal_fault(failure_address, VmAccessKind::Atomic, failure);
+      next_lane = lane;
+      return failure;
+    }
+  }
+  next_lane = lane_count;
+  return VmAccessOutcome::Complete;
+}
+
 std::byte *GpuVmAccess::resolve_host_pointer(uint64_t address, std::size_t size) const {
   if (access_state_ == nullptr)
     return nullptr;
