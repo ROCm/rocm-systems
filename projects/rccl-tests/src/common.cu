@@ -840,6 +840,8 @@ static std::mutex vmmMu;
 static std::vector<VmmRange> vmmRanges;
 static int layoutMetaReady = 0;
 static int layoutPrinted = 0;
+static int layoutTraceNext = 0;
+static size_t layoutTraceBytes = 0;
 
 static void releaseVmmRange(VmmRange& b) {
   size_t off = 0;
@@ -877,16 +879,96 @@ static size_t vmmBytes(void* ptr) {
   return 0;
 }
 
+struct LayoutSlot {
+  size_t bytes;
+  void* send;
+  void* recv;
+  void* sendReg;
+  void* recvReg;
+};
+
+struct LayoutPool {
+  ncclComm_t comm;
+  std::vector<LayoutSlot> slots;
+};
+
+static std::mutex layoutPoolMu;
+static std::vector<LayoutPool> layoutPools;
+
+static int findLayoutPool(void* send) {
+  if (send == nullptr) return -1;
+  std::lock_guard<std::mutex> lock(layoutPoolMu);
+  for (int p = 0; p < (int)layoutPools.size(); p++) {
+    for (const auto& slot : layoutPools[p].slots) {
+      if (slot.send == send) return p;
+    }
+  }
+  return -1;
+}
+
+static void collectSweepSizes(std::vector<size_t>& sizes, size_t minB, size_t maxB, size_t factor, size_t step) {
+  auto push = [&](size_t size) {
+    if (std::find(sizes.begin(), sizes.end(), size) == sizes.end()) sizes.push_back(size);
+  };
+  for (size_t size = minB; size <= maxB; ) {
+    push(size);
+    if (factor > 1) {
+      if (size > maxB / factor) break;
+      size *= factor;
+    } else {
+      if (step == 0 || size > maxB - step) break;
+      size += step;
+    }
+  }
+  for (size_t size = minB; size <= maxB; ) {
+    push(size);
+    if (size > maxB / 2) break;
+    size *= 2;
+  }
+  std::sort(sizes.begin(), sizes.end());
+}
+
+static testResult_t bindLayoutForSize(struct threadArgs* args, size_t size, ncclDataType_t type) {
+  if (bufferLayout == kLayoutDefault) return testSuccess;
+  const size_t delta = (size_t)unalign * wordSize(type);
+  for (int i = 0; i < args->nGpus; i++) {
+    void* cur = args->sendbuffs[i];
+    int pool = findLayoutPool(cur);
+    if (pool < 0 && delta != 0) pool = findLayoutPool((char*)cur - delta);
+    if (pool < 0) {
+      fprintf(stderr, "layout buffer for size %zu is not allocated\n", size);
+      return testInternalError;
+    }
+    const LayoutSlot* slot = nullptr;
+    for (const auto& s : layoutPools[pool].slots) {
+      if (s.bytes == size) { slot = &s; break; }
+    }
+    if (slot == nullptr) {
+      fprintf(stderr, "layout buffer for size %zu is not allocated\n", size);
+      return testInternalError;
+    }
+    args->sendbuffs[i] = (char*)slot->send + delta;
+    args->recvbuffs[i] = (char*)slot->recv + delta;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    if (args->sendRegHandles) args->sendRegHandles[i] = slot->sendReg;
+    if (args->recvRegHandles) args->recvRegHandles[i] = slot->recvReg;
+#endif
+  }
+  return testSuccess;
+}
+
 static void publishLayout(const VmmRange& r) {
   std::lock_guard<std::mutex> lock(vmmMu);
-  if (!layoutMetaReady) {
-    layoutMappedBytes = r.totalSize;
-    layoutSegBytes = r.segSizes.empty() ? 0 : r.segSizes[0];
-    layoutGpuSegs = r.nGpu;
-    layoutHostSegs = r.nHost;
-    layoutMetaReady = 1;
-  }
-  if (!is_main_thread || layoutPrinted) return;
+  layoutMappedBytes = r.totalSize;
+  layoutSegBytes = r.segSizes.empty() ? 0 : r.segSizes[0];
+  layoutGpuSegs = r.nGpu;
+  layoutHostSegs = r.nHost;
+  layoutMetaReady = 1;
+  const int trace = layoutTraceNext;
+  if (trace) layoutTraceNext = 0;
+  if (!is_main_thread) return;
+  if (!trace && layoutPrinted) return;
+  const int first = !layoutPrinted;
   layoutPrinted = 1;
   const char* kind = bufferLayout == kLayoutElastic ? "elastic" : "multiseg";
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
@@ -894,9 +976,15 @@ static void publishLayout(const VmmRange& r) {
 #else
   const int reg = 0;
 #endif
-  printf("# buffer_layout %s mapped_bytes %zu gpu_segments %d host_segments %d segment_bytes %zu local_register %d\n",
-         kind, layoutMappedBytes, layoutGpuSegs, layoutHostSegs, layoutSegBytes, reg);
-  jsonOutputBufferLayout(kind, layoutMappedBytes, layoutGpuSegs, layoutHostSegs, layoutSegBytes, reg);
+  const size_t segBytes = r.segSizes.empty() ? 0 : r.segSizes[0];
+  if (trace) {
+    printf("# buffer_layout %s mapped_bytes %zu gpu_segments %d host_segments %d segment_bytes %zu local_register %d message_bytes %zu\n",
+           kind, r.totalSize, r.nGpu, r.nHost, segBytes, reg, layoutTraceBytes);
+  } else {
+    printf("# buffer_layout %s mapped_bytes %zu gpu_segments %d host_segments %d segment_bytes %zu local_register %d\n",
+           kind, r.totalSize, r.nGpu, r.nHost, segBytes, reg);
+  }
+  if (first && !trace) jsonOutputBufferLayout(kind, r.totalSize, r.nGpu, r.nHost, segBytes, reg);
 }
 
 static testResult_t allocVmmRange(size_t minBytes, void** out) {
@@ -1063,25 +1151,126 @@ static testResult_t registerLayoutBuffers(ncclComm_t comm, void* sendbuf, void* 
   if (local_register) {
     NCCLCHECK(ncclCommRegister(comm, sendbuf, sendBytes, sendReg));
     NCCLCHECK(ncclCommRegister(comm, recvbuf, recvBytes, recvReg));
-    if (test_bias) NCCLCHECK(ncclCommRegister(comm, biasbuf, biasBytes, biasReg));
+    if (test_bias && biasbuf) NCCLCHECK(ncclCommRegister(comm, biasbuf, biasBytes, biasReg));
   }
   return testSuccess;
 }
 #endif
 
+static testResult_t allocLayoutGpu(bool printSizes, ncclComm_t comm, void** sendbuff, void** recvbuff,
+                                   void** expected, void** bias, void** sendReg, void** recvReg, void** biasReg,
+                                   int nranks) {
+  std::vector<size_t> sizes;
+  collectSweepSizes(sizes, minBytes, maxBytes, stepFactor, stepBytes);
+  if (sizes.empty()) return testInternalError;
+
+  LayoutPool pool;
+  pool.comm = comm;
+  const size_t pad = 8 * (size_t)unalign;
+  size_t expectBytes = 0;
+  for (size_t size : sizes) {
+    size_t sendBytes = 0, recvBytes = 0;
+    ncclTestEngine.getBuffSize(&sendBytes, &recvBytes, size, nranks);
+    if (recvBytes > expectBytes) expectBytes = recvBytes;
+    LayoutSlot slot = {};
+    slot.bytes = size;
+    if (printSizes) {
+      layoutTraceBytes = sendBytes;
+      layoutTraceNext = 1;
+    }
+    TESTCHECK(allocVmmRange(sendBytes + pad, &slot.send));
+    if (printSizes && size == sizes.back()) {
+      const char* kind = bufferLayout == kLayoutElastic ? "elastic" : "multiseg";
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+      const int reg = local_register;
+#else
+      const int reg = 0;
+#endif
+      jsonOutputBufferLayout(kind, layoutMappedBytes, layoutGpuSegs, layoutHostSegs, layoutSegBytes, reg);
+    }
+    TESTCHECK(allocVmmRange(recvBytes + pad, &slot.recv));
+    CUDACHECK(hipMemset(slot.send, 1, sendBytes + pad));
+    CUDACHECK(hipMemset(slot.recv, 1, recvBytes + pad));
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    if (sendReg && recvReg) {
+      void* sreg = nullptr;
+      void* rreg = nullptr;
+      TESTCHECK(registerLayoutBuffers(comm, slot.send, slot.recv, nullptr, 0, &sreg, &rreg, nullptr));
+      slot.sendReg = sreg;
+      slot.recvReg = rreg;
+    }
+#else
+    (void)sendReg;
+    (void)recvReg;
+#endif
+    pool.slots.push_back(slot);
+  }
+  if (datacheck && expected) TESTCHECK(allocDefaultOne(expected, expectBytes + pad));
+  if (bias && test_bias) {
+    TESTCHECK(allocDefaultOne(bias, maxBytes + pad));
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+    if (biasReg && local_register) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
+      if (!(test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER))
+#endif
+        NCCLCHECK(ncclCommRegister(comm, *bias, maxBytes, biasReg));
+    }
+#else
+    (void)biasReg;
+#endif
+  }
+  *sendbuff = pool.slots.front().send;
+  *recvbuff = pool.slots.front().recv;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  if (sendReg) *sendReg = pool.slots.front().sendReg;
+  if (recvReg) *recvReg = pool.slots.front().recvReg;
+#endif
+  {
+    std::lock_guard<std::mutex> lock(layoutPoolMu);
+    layoutPools.push_back(std::move(pool));
+  }
+  return testSuccess;
+}
+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
 static testResult_t deregisterTestWindows(
     ncclComm_t* comms, void** sendRegHandles, void** recvRegHandles, void** biasRegHandles,
     int count) {
-  for (int i = 0; i < count; i++) {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
-    // Symmetric windows are drained by ncclDevrFinalize during comm destroy;
-    // explicit deregister here can leave lsaFlatBase in a state where
-    // cuMemAddressFree double-frees during ncclCommDestroy (MI455 GIN path).
-    if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
-      continue;
-    }
+  const bool symmetric = test_ncclVersion >= NCCL_VERSION(2,27,0) && local_register == SYMMETRIC_REGISTER;
+#else
+  const bool symmetric = false;
 #endif
+  if (bufferLayout != kLayoutDefault && local_register && !symmetric) {
+    std::vector<std::pair<ncclComm_t, void*>> regs;
+    {
+      std::lock_guard<std::mutex> lock(layoutPoolMu);
+      for (auto& pool : layoutPools) {
+        bool mine = false;
+        for (int i = 0; i < count; i++) if (comms[i] == pool.comm) mine = true;
+        if (!mine) continue;
+        for (auto& slot : pool.slots) {
+          if (slot.sendReg) regs.emplace_back(pool.comm, slot.sendReg);
+          if (slot.recvReg) regs.emplace_back(pool.comm, slot.recvReg);
+          slot.sendReg = nullptr;
+          slot.recvReg = nullptr;
+        }
+      }
+    }
+    for (auto& reg : regs) NCCLCHECK(ncclCommDeregister(reg.first, reg.second));
+    for (int i = 0; i < count; i++) {
+      sendRegHandles[i] = nullptr;
+      recvRegHandles[i] = nullptr;
+      if (test_bias && biasRegHandles[i]) {
+        NCCLCHECK(ncclCommDeregister(comms[i], biasRegHandles[i]));
+        biasRegHandles[i] = nullptr;
+      }
+    }
+    return testSuccess;
+  }
+  for (int i = 0; i < count; i++) {
+    // Symmetric windows are drained by ncclDevrFinalize during comm destroy.
+    if (symmetric) continue;
     if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], sendRegHandles[i]));
     if (local_register) NCCLCHECK(ncclCommDeregister(comms[i], recvRegHandles[i]));
     if (local_register && test_bias) NCCLCHECK(ncclCommDeregister(comms[i], biasRegHandles[i]));
@@ -1093,10 +1282,28 @@ static testResult_t deregisterTestWindows(
 static testResult_t freeTestDeviceBuffers(
     void** sendbuffs, void** recvbuffs, void** bias, void** expected, int count) {
   if (bufferLayout != kLayoutDefault) {
+    std::vector<LayoutSlot> doomed;
+    {
+      std::lock_guard<std::mutex> lock(layoutPoolMu);
+      for (int i = 0; i < count; i++) {
+        void* key = sendbuffs[i];
+        if (key == nullptr) continue;
+        for (auto it = layoutPools.begin(); it != layoutPools.end(); ++it) {
+          bool hit = false;
+          for (const auto& slot : it->slots) if (slot.send == key) hit = true;
+          if (!hit) continue;
+          doomed.insert(doomed.end(), it->slots.begin(), it->slots.end());
+          layoutPools.erase(it);
+          break;
+        }
+      }
+    }
+    for (auto& slot : doomed) {
+      freeVmmPtr(slot.send);
+      freeVmmPtr(slot.recv);
+    }
     for (int i = 0; i < count; i++) {
-      freeVmmPtr(sendbuffs[i]);
       sendbuffs[i] = nullptr;
-      freeVmmPtr(recvbuffs[i]);
       recvbuffs[i] = nullptr;
       if (test_bias && bias[i]) {
         TESTCHECK(freeDefaultOne(bias[i]));
@@ -1160,15 +1367,17 @@ static testResult_t destroyTestComms(ncclComm_t* comms, int count) {
 testResult_t startColl(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t opIndex, int root, int in_place, int iter) {
   size_t count = args->nbytes / wordSize(type);
 
-  // Try to change offset for each iteration so that we avoid cache effects and catch race conditions in ptrExchange
+  // Only the default layout slides. Multiseg and elastic buffers are sized to the message.
   size_t shift = 0;
-  if(enable_rotating_tensor) {
-    shift = cache_bytes * (iter % 2);
-  }
-  else {
-    size_t totalnbytes = std::max(args->sendBytes, args->expectedBytes);
-    size_t steps = totalnbytes ? args->maxbytes / totalnbytes : 1;
-    shift = totalnbytes * (iter % steps);
+  if (bufferLayout == kLayoutDefault) {
+    if(enable_rotating_tensor) {
+      shift = cache_bytes * (iter % 2);
+    }
+    else {
+      size_t totalnbytes = std::max(args->sendBytes, args->expectedBytes);
+      size_t steps = totalnbytes ? args->maxbytes / totalnbytes : 1;
+      shift = totalnbytes * (iter % steps);
+    }
   }
 
   if (args->nGpus > 1) NCCLCHECK(ncclGroupStart());
@@ -1730,6 +1939,7 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
   // Warm-up for all sizes (using a stepfactor of 2)
   for (size_t size = args->minbytes; size <= args->maxbytes; size = size * 2) {
     setupArgs(size, type, args);
+    TESTCHECK(bindLayoutForSize(args, size, type));
 #if HIP_VERSION >= 50221310
     std::vector<cudaGraph_t> graphs(args->nGpus);
     std::vector<cudaGraphExec_t> graphExec(args->nGpus);
@@ -1804,6 +2014,7 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
     }
     for (size_t size = args->minbytes; size<=args->maxbytes; size = ((args->stepfactor > 1) ? size*args->stepfactor : size+args->stepbytes)) {
       setupArgs(size, type, args);
+      TESTCHECK(bindLayoutForSize(args, size, type));
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
       args->devtimeAugmentLine[0] = '\0';
 #endif
@@ -2059,7 +2270,22 @@ testResult_t threadInit(struct threadArgs* args) {
   NCCLCHECK(ncclGroupStart());
   for (int i = 0; i < args->nGpus; i++) {
     CUDACHECK(cudaSetDevice(args->gpus[i]));
-    TESTCHECK(AllocateBuffs(args->sendbuffs + i, sendBytes, args->recvbuffs + i, recvBytes, args->expected + i, (size_t)args->maxbytes, test_bias ? args->bias + i : NULL));
+    if (bufferLayout != kLayoutDefault) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+      void** sendReg = &args->sendRegHandles[i];
+      void** recvReg = &args->recvRegHandles[i];
+      void** biasReg = &args->biasRegHandles[i];
+#else
+      void** sendReg = nullptr;
+      void** recvReg = nullptr;
+      void** biasReg = nullptr;
+#endif
+      TESTCHECK(allocLayoutGpu(is_main_thread && i == 0, args->comms[i],
+                               args->sendbuffs + i, args->recvbuffs + i, args->expected + i,
+                               test_bias ? args->bias + i : NULL, sendReg, recvReg, biasReg, nranks));
+    } else {
+      TESTCHECK(AllocateBuffs(args->sendbuffs + i, sendBytes, args->recvbuffs + i, recvBytes, args->expected + i, (size_t)args->maxbytes, test_bias ? args->bias + i : NULL));
+    }
   }
   NCCLCHECK(ncclGroupEnd());
 
@@ -2071,14 +2297,9 @@ testResult_t threadInit(struct threadArgs* args) {
   }
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,19,0)
+  if (bufferLayout == kLayoutDefault) {
   NCCLCHECK(ncclGroupStart());
   for (int i=0; i<args->nGpus; i++) {
-    if (bufferLayout != kLayoutDefault) {
-      TESTCHECK(registerLayoutBuffers(args->comms[i], args->sendbuffs[i], args->recvbuffs[i],
-                                      test_bias ? args->bias[i] : nullptr, args->maxbytes,
-                                      &args->sendRegHandles[i], &args->recvRegHandles[i],
-                                      &args->biasRegHandles[i]));
-    } else
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
     if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
       NCCLCHECK(ncclCommWindowRegister(args->comms[i], args->sendbuffs[i], args->maxbytes, (ncclWindow_t*)&args->sendRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
@@ -2092,6 +2313,7 @@ testResult_t threadInit(struct threadArgs* args) {
     }
   }
   NCCLCHECK(ncclGroupEnd());
+  }
 #endif
   // Capture memory used by test buffers
   for (int g = 0; g < args->nGpus; ++g) {
@@ -3029,16 +3251,18 @@ testResult_t run() {
      NCCLCHECK(ncclGroupStart());
      for (int i=0; i<nGpus*nThreads; i++) {
        CUDACHECK(cudaSetDevice(gpus[i]));
-       if(test_bias) {
+       if (bufferLayout != kLayoutDefault) {
+         TESTCHECK(allocLayoutGpu(is_main_thread && i == 0, comms[i],
+                                  sendbuffs.data()+i, recvbuffs.data()+i, expected.data()+i,
+                                  test_bias ? bias.data()+i : nullptr,
+                                  &sendRegHandles[i], &recvRegHandles[i], &biasRegHandles[i],
+                                  ncclProcs*nGpus*nThreads));
+       } else if(test_bias) {
          TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, bias.data()+i));
        } else {
          TESTCHECK(AllocateBuffs(sendbuffs.data()+i, sendBytes, recvbuffs.data()+i, recvBytes, expected.data()+i, (size_t)maxBytes, NULL));
        }
-       if (bufferLayout != kLayoutDefault) {
-         TESTCHECK(registerLayoutBuffers(comms[i], sendbuffs[i], recvbuffs[i],
-                                         test_bias ? bias[i] : nullptr, (size_t)maxBytes,
-                                         &sendRegHandles[i], &recvRegHandles[i], &biasRegHandles[i]));
-       } else
+       if (bufferLayout == kLayoutDefault)
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,27,0)
        if (test_ncclVersion >= NCCL_VERSION(2,27,0) && (local_register == SYMMETRIC_REGISTER)) {
          NCCLCHECK(ncclCommWindowRegister(comms[i], sendbuffs[i], maxBytes, (ncclWindow_t*)&sendRegHandles[i], NCCL_WIN_COLL_SYMMETRIC));
