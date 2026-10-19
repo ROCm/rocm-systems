@@ -49,6 +49,7 @@ printf '%s  %s\n' "${EXPECTED_SHA256}" "${BPFLAND}" | sha256sum --check --strict
 
 install -d -o root -g root -m 0755 "${INSTALL_DIR}"
 install -o root -g root -m 0644 "${SRC}/host_setup.py" "${SRC}/benchmark_run.py" \
+  "${SRC}/cpu_policy.py" \
   "${INSTALL_DIR}/"
 install -o root -g root -m 0755 "${BPFLAND}" \
   "${INSTALL_DIR}/scx_bpfland"
@@ -68,10 +69,12 @@ systemctl enable rocjitsu-bpfland.service
 ```
 
 `rocjitsu-bpfland.service` runs `host_setup.py` before starting Bpfland. Setup
+validates the CPU topology and required controls before writing settings. It
 applies fixed 3.2 GHz min/max limits, performance governor/EPP, boost disabling
 on reserved cores and their SMT siblings, and idle-state disabling for exit
 latency ≥10 μs. If per-policy boost controls are unavailable, it disables boost
-globally. The service then starts Bpfland and waits for scheduler readiness.
+globally. Setup verifies the resulting settings. The service then starts Bpfland
+and waits for scheduler readiness.
 CPU setup runs again each time the service starts, including automatic restarts.
 
 The policy stays applied between jobs. Stopping the service doesn't restore
@@ -111,13 +114,13 @@ Run the wrapper inside the Actions runner service context. Set `INSTALL_DIR`
 to the installation path in that shell:
 
 ```bash
-/usr/bin/python3 -I "${INSTALL_DIR}/benchmark_run.py" -- \
+/usr/bin/python3 "${INSTALL_DIR}/benchmark_run.py" -- \
   /PATH_TO_RELEASE_BENCHMARK --WORKLOAD_ARGUMENTS
 ```
 
 The wrapper checks the effective benchmark and background cgroup CPU masks
-before and after execution and confirms affinity `16-63` before launching the
-command. It also requires Bpfland to be enabled and rejects results if the
+and CPU policy before and after execution and confirms affinity `16-63` before
+launching the command. It also requires Bpfland to be enabled and rejects results if the
 scheduler identity or enable sequence changes during execution, including
 internal Bpfland restarts. It doesn't serialize runs; schedule one benchmark
 job at a time.

@@ -3,9 +3,9 @@ Description=Pinned Bpfland scheduler for benchmark runners
 
 [Service]
 Type=exec
-ExecStartPre=/usr/bin/python3 -I /usr/local/libexec/rocjitsu-benchmark-runner/host_setup.py
+ExecStartPre=/usr/bin/python3 /usr/local/libexec/rocjitsu-benchmark-runner/host_setup.py
 ExecStart=/usr/local/libexec/rocjitsu-benchmark-runner/scx_bpfland
-ExecStartPost=/usr/bin/python3 -I /usr/local/libexec/rocjitsu-benchmark-runner/host_setup.py --wait-ready
+ExecStartPost=/usr/bin/python3 /usr/local/libexec/rocjitsu-benchmark-runner/host_setup.py --wait-ready
 WorkingDirectory=/
 Restart=on-failure
 RestartSec=5

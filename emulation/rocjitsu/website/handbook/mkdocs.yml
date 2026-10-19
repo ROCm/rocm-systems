@@ -78,6 +78,7 @@ nav:
       - Race detection: race-detector.md
       - GPU debugging: rocgdb-debugging.md
       - Benchmarking: benchmarking.md
+      - Benchmark runner setup: benchmark-runner-setup.md
       - QEMU VFIO-user compute: qemu-vfio.md
       - Vulkan compute: vulkan-compute.md
       - Memory wait diagnostics: memory-wait-diagnostics.md
