@@ -89,7 +89,7 @@ TEST_F(SdkPmcDeviceTest, EmptyDeviceNotSupported)
 
 TEST_F(SdkPmcDeviceTest, DeviceWithIndex3)
 {
-    auto agent3               = std::make_shared<rocprofsys::agent>();
+    auto const agent3         = std::make_shared<rocprofsys::agent>();
     agent3->device_type_index = 3;
     agent3->name              = "GPU 3";
     agent3->product_name      = "GPU 3";
@@ -373,7 +373,7 @@ TEST_F(SdkPmcDeviceTest, SampleFailureReturnsEmpty)
         .WillOnce(Return(MockBackend::status_error));
 
     const enabled_metrics enabled{ {} };
-    auto                  result = dev.sample_metrics(enabled, 1000000);
+    auto const            result = dev.sample_metrics(enabled, 1000000);
 
     EXPECT_TRUE(result.empty());
 }
@@ -394,7 +394,7 @@ TEST_F(SdkPmcDeviceTest, SampleWithZeroRecords)
         });
 
     const enabled_metrics enabled{ {} };
-    auto                  result = dev.sample_metrics(enabled, 1000000);
+    auto const            result = dev.sample_metrics(enabled, 1000000);
 
     EXPECT_TRUE(result.empty());
 }

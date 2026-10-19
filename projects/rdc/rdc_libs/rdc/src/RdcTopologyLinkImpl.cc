@@ -179,14 +179,25 @@ rdc_status_t RdcTopologyLinkImpl::rdc_link_status_get(rdc_link_status_t* results
       return status;
     }
 
-    amdsmi_xgmi_link_status_t link_status;
+    amdsmi_xgmi_link_status_t link_status = {};
     err = amdsmi_get_gpu_xgmi_link_status(processor_handle, &link_status);
     if (err != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(RDC_INFO, "Fail to get process GPUs xgmi link information: " << err);
+      // A failed call can leave link_status unset or partly set, so report no
+      // links. NOT_SUPPORTED is the exception: amdsmi returns it with every link
+      // filled in as disabled when no link is enabled. When it returns
+      // NOT_SUPPORTED before writing anything, the zero-init leaves 0 links.
+      if (err != AMDSMI_STATUS_NOT_SUPPORTED) {
+        link_status.total_links = 0;
+      }
     }
+    // Never copy more links than either status array holds.
+    const uint32_t num_links =
+        std::min<uint32_t>(link_status.total_links,
+                           std::min<uint32_t>(AMDSMI_MAX_NUM_XGMI_LINKS, RDC_MAX_NUM_OF_LINKS));
     results->gpus[i].gpu_index = gpu_index_list[i];
-    results->gpus[i].num_of_links = link_status.total_links;
-    for (uint32_t n = 0; n < link_status.total_links; n++) {
+    results->gpus[i].num_of_links = num_links;
+    for (uint32_t n = 0; n < num_links; n++) {
       results->gpus[i].link_states[n] = static_cast<rdc_link_state_t>(link_status.status[n]);
     }
 

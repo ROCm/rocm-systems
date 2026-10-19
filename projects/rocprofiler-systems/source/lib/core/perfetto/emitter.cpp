@@ -83,8 +83,8 @@ ensure_synthetic_process_track_emitted(int pid)
         return;
     }
 
-    auto track = make_synthetic_process_track(pid);
-    auto desc  = track.Serialize();
+    auto const track = make_synthetic_process_track(pid);
+    auto       desc  = track.Serialize();
     desc.mutable_process()->set_pid(pid);
     ::perfetto::TrackEvent::SetTrackDescriptor(track, desc);
 }

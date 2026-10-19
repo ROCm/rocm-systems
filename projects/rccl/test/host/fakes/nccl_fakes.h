@@ -39,6 +39,12 @@ extern std::function<ncclResult_t(struct ncclCudaGraph,
                                   hipStream_t*)>
     g_strongStreamAcquire;
 
+// ncclStrongStreamRelease / ncclStreamWaitStream: succeed by default. The
+// addon capture cases in enqueue-test.cc install hooks to observe the calls.
+extern std::function<ncclResult_t(struct ncclCudaGraph, struct ncclStrongStream*, bool)>
+    g_strongStreamRelease;
+extern std::function<ncclResult_t(hipStream_t, hipStream_t, hipEvent_t)> g_ncclStreamWaitStream;
+
 // ncclProxyConnect / ncclProxyCallBlocking: fresh-registration arm of
 // ipcRegisterBuffer routes the per-peer IPC handshake through these. The
 // default Connect returns ncclSystemError (so tests that don't expect to
@@ -113,7 +119,7 @@ extern std::function<int64_t(const char* /*env*/, int64_t /*deftVal*/)>
 
 // The two device ids and the isXGMI out-parameter; the topo system and the inter-GPU knobs are dropped.
 // maxInter is carried because init.cc:1834 passes an explicit 1 where graph.h:90 defaults to MAX_XGMI_INTER_GPUS.
-extern std::function<ncclResult_t(int /*cudaDev1*/, int /*cudaDev2*/, bool* /*isXGMI*/, int /*maxInter*/)>
+extern std::function<ncclResult_t(int /*dev1*/, int /*dev2*/, bool* /*isXGMI*/, int /*maxInter*/)>
     g_ncclTopoGetLinkType;
 extern int g_ncclTopoGetLinkTypeCalls;
 

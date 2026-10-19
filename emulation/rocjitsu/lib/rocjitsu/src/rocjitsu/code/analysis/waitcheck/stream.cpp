@@ -23,7 +23,8 @@ bool has_committed_generations(rj_code_arch_t arch) {
 
 std::optional<RegisterRef> first_intersection(const RegisterSet &a, const RegisterSet &b) {
   std::optional<RegisterRef> first;
-  (a & b).for_each([&](RegisterRef ref) {
+  // Keep the optional assignment together with RegisterRef construction.
+  (a & b).for_each([&](RegisterRef ref) __attribute__((always_inline)) {
     if (!first)
       first = ref;
   });

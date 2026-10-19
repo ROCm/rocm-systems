@@ -53,8 +53,9 @@ TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
   EXPECT_EQ(sim.cu()->num_wfs(), 0u);
 }
 
-TEST(Gfx1250SimulationTest, DispatchedModeSetterControlsPseudoScalarRounding) {
-  constexpr uint32_t kExpectedRoundTowardPositive = 0x3FB504F4u;
+TEST(Gfx1250SimulationTest, DispatchedPseudoScalarExpIgnoresRoundingMode) {
+  // The gfx1201-qualified mapping is shared here; physical gfx1250 is not yet qualified.
+  constexpr uint32_t kExpectedHardwareApproximation = 0x3FB504F3u;
   const uint32_t code[] = {
       0xB9800801u, // s_setreg_imm32_b32 hwreg(HW_REG_MODE, 0, 2), 1
       0x00000001u,
@@ -66,7 +67,7 @@ TEST(Gfx1250SimulationTest, DispatchedModeSetterControlsPseudoScalarRounding) {
   const auto *snapshot = dispatch_one_wave(sim, code, std::size(code));
 
   ASSERT_NE(snapshot, nullptr);
-  EXPECT_EQ(snapshot->sgpr(4), kExpectedRoundTowardPositive);
+  EXPECT_EQ(snapshot->sgpr(4), kExpectedHardwareApproximation);
 }
 
 TEST(Gfx1250SimulationTest, MultiWaveDispatchHonorsPackedTidComponentCount) {

@@ -286,7 +286,7 @@ TEST_F(DeviceTest, valid_device_construction_full_support)
 
     EXPECT_TRUE(dev.is_supported());
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_NE(supported.value, 0U);
 
     EXPECT_EQ(dev.get_index(), test_index);
@@ -305,7 +305,7 @@ TEST_F(DeviceTest, device_construction_no_support)
 
     EXPECT_FALSE(dev.is_supported());
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_EQ(supported.value, 0U);
 
     auto met = dev.get_metrics(enabled_metrics{ .value = 0xFFFFFFFF }, 1000000000ULL);
@@ -327,7 +327,7 @@ TEST_F(DeviceTest, device_construction_partial_support)
 
     EXPECT_TRUE(dev.is_supported());
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
 
     EXPECT_TRUE(supported.bits.current_socket_power);
     EXPECT_TRUE(supported.bits.hotspot_temperature);
@@ -446,7 +446,7 @@ TEST_F(DeviceTest, power_metrics_not_collected_when_unsupported)
 
     device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_FALSE(supported.bits.current_socket_power);
     EXPECT_FALSE(supported.bits.average_socket_power);
 
@@ -538,7 +538,7 @@ TEST_F(DeviceTest, temperature_metrics_not_collected_when_unsupported)
 
     device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_FALSE(supported.bits.hotspot_temperature);
     EXPECT_FALSE(supported.bits.edge_temperature);
 
@@ -647,7 +647,7 @@ TEST_F(DeviceTest, all_activity_metrics_collection)
 
     device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_TRUE(supported.bits.gfx_activity);
     EXPECT_TRUE(supported.bits.umc_activity);
     EXPECT_TRUE(supported.bits.mm_activity);
@@ -817,7 +817,7 @@ TEST_F(DeviceTest, xcp_metrics_not_collected_when_unsupported)
 
     device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_FALSE(supported.bits.vcn_busy);
     EXPECT_FALSE(supported.bits.jpeg_busy);
     EXPECT_FALSE(supported.bits.vcn_activity);
@@ -863,7 +863,7 @@ TEST_F(DeviceTest, mixed_vcn_jpeg_support)
 
     device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_TRUE(supported.bits.vcn_busy);
     EXPECT_FALSE(supported.bits.jpeg_busy);
     EXPECT_FALSE(supported.bits.vcn_activity);
@@ -1192,7 +1192,7 @@ TEST_F(DeviceTest, all_metrics_supported_detection)
 
     const device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_TRUE(supported.bits.current_socket_power);
     EXPECT_TRUE(supported.bits.average_socket_power);
     EXPECT_TRUE(supported.bits.memory_usage);
@@ -1527,7 +1527,7 @@ TEST_F(DeviceTest, get_metrics_info_failure_during_init)
 
     EXPECT_TRUE(dev.is_supported());
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_TRUE(supported.bits.memory_usage);
     EXPECT_FALSE(supported.bits.current_socket_power);
 }
@@ -1892,7 +1892,7 @@ TEST_F(DeviceTest, clock_metrics_not_collected_when_unsupported)
 
     device<MockBackend> dev(mock_backend, test_index);
 
-    auto supported = dev.get_supported_metrics();
+    auto const supported = dev.get_supported_metrics();
     EXPECT_FALSE(supported.bits.gfx_clock);
     EXPECT_FALSE(supported.bits.mem_clock);
 

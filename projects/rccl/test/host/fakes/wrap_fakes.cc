@@ -55,6 +55,8 @@ ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetFirmwareVersion, amd_smi_getFirmwareVersion)
 ASSERT_HOOK_MATCHES_PROD(g_isSymmetricKernelRequested, isSymmetricKernelRequested);
 ASSERT_HOOK_MATCHES_PROD(g_allReduceShouldTakeDdaPath, rcclAllReduceShouldTakeDdaPath);
 ASSERT_HOOK_MATCHES_PROD(g_commCount, ncclCommCount);
+ASSERT_HOOK_MATCHES_PROD(g_ensureHierarchicalComms, rcclEnsureHierarchicalComms);
+ASSERT_HOOK_MATCHES_PROD(g_reserveHierarchicalTempBuffer, rcclReserveHierarchicalTempBuffer);
 
 // getAlgoInfo, rcclKernelPackedChannels, and the four ReduceScatter *Blocks
 // hooks are link-closure symbols with no production header declaration, so
@@ -68,7 +70,7 @@ ASSERT_HOOK_MATCHES_PROD(g_commCount, ncclCommCount);
 // rcclGetProtocolName) call WARN on their invalid-input arms, and tests assert
 // on that text via gtest's stderr capture.
 //
-// ncclDebugLevel / ncclDebugMask / ncclDebugNoWarn / ncclDebugLog() itself
+// ncclDebugLevelMask / ncclDebugMask / ncclDebugNoWarn / ncclDebugLog() itself
 // are defined once, by fakes/nccl_fakes.cc, which this binary already links
 // for p2p.cc's tests -- defining them again here would be a duplicate-symbol
 // error. ncclDebugMask's default there (0) differs from what this file used
@@ -153,6 +155,14 @@ static ncclResult_t DefaultCommCount(const ncclComm_t comm, int* count) {
 }
 std::function<ncclResult_t(const ncclComm_t, int*)> g_commCount = DefaultCommCount;
 ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) { return g_commCount(comm, count); }
+
+static ncclResult_t DefaultEnsureHierarchicalComms(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ensureHierarchicalComms = DefaultEnsureHierarchicalComms;
+ncclResult_t rcclEnsureHierarchicalComms(struct ncclComm* comm) { return g_ensureHierarchicalComms(comm); }
+
+static ncclResult_t DefaultReserveHierarchicalTempBuffer(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_reserveHierarchicalTempBuffer = DefaultReserveHierarchicalTempBuffer;
+ncclResult_t rcclReserveHierarchicalTempBuffer(struct ncclComm* comm) { return g_reserveHierarchicalTempBuffer(comm); }
 
 // ---------------------------------------------------------------------------
 // Controllable seams for the top-level dispatchers (rcclSelectAllReduce/
