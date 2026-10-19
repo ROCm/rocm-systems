@@ -605,6 +605,24 @@ def _safe_round_value(
         return "N/A"
 
 
+def _is_hidden_collectable_metric(name: object) -> bool:
+    """True for internal ``_collect.*`` rows.
+
+    Same visibility rule as the analysis-db export.
+    """
+    return isinstance(name, str) and name.startswith("_collect.")
+
+
+def _visible_cli_table_rows(frame: pd.DataFrame, table_type: str) -> pd.DataFrame:
+    """Drop ``_collect.*`` rows from a CLI metric table."""
+    if table_type != "metric_table" or "Metric" not in frame.columns:
+        return frame
+    visible = [
+        not _is_hidden_collectable_metric(name) for name in frame["Metric"].tolist()
+    ]
+    return frame.loc[visible]
+
+
 def process_table_data(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -615,7 +633,7 @@ def process_table_data(
 ) -> pd.DataFrame:
     # take the 1st run as baseline
     base_run, base_data = next(iter(runs.items()))
-    base_df = base_data.dfs[table_config["id"]]
+    base_df = _visible_cli_table_rows(base_data.dfs[table_config["id"]], table_type)
 
     if args.time_unit and has_time_data(base_df):
         base_df = convert_time_columns(base_df, args.time_unit)
@@ -652,7 +670,9 @@ def process_table_data(
         else:
             # Process columns that can be compared across runs.
             for run_name, run_data in runs.items():
-                cur_df = run_data.dfs[table_config["id"]]
+                cur_df = _visible_cli_table_rows(
+                    run_data.dfs[table_config["id"]], table_type
+                )
 
                 if args.time_unit and has_time_data(base_df):
                     cur_df = convert_time_columns(cur_df, args.time_unit)
