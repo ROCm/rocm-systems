@@ -31,7 +31,8 @@
  * while no memory-copy tracing is configured in the process.
  *
  * Environment:
- *   RR_DECLINE_EXPECT  the status CLOSE must report, by name (for example MEMORY_COPY_IN_RANGE)
+ *   RR_DECLINE_EXPECT            the status CLOSE must report, by name
+ *   RR_DECLINE_EXPECT_DISPATCHES the dispatch_count CLOSE must report (per mode)
  */
 
 #include "range.hpp"
@@ -147,17 +148,20 @@ tool_fini(void*)
         return;
     }
 
-    const char* expect = std::getenv("RR_DECLINE_EXPECT");
-    const char* status = status_name(g_status.load());
+    const char* expect            = std::getenv("RR_DECLINE_EXPECT");
+    const char* expect_dispatches = std::getenv("RR_DECLINE_EXPECT_DISPATCHES");
+    const char* status            = status_name(g_status.load());
 
     fprintf(stderr,
-            "[rr-decline] configs=%d passes=%d closes=%d status=%s dispatches=%lu expected=%s\n",
+            "[rr-decline] configs=%d passes=%d closes=%d status=%s dispatches=%lu expected=%s "
+            "expected_dispatches=%s\n",
             g_configs.load(),
             g_passes.load(),
             g_closes.load(),
             status,
             static_cast<unsigned long>(g_dispatches.load()),
-            expect != nullptr ? expect : "<unset>");
+            expect != nullptr ? expect : "<unset>",
+            expect_dispatches != nullptr ? expect_dispatches : "<unset>");
 
     auto ok = true;
     if(expect == nullptr || std::string_view{status} != std::string_view{expect})
@@ -170,19 +174,38 @@ tool_fini(void*)
         fprintf(stderr, "[rr-decline] FAIL: expected exactly one CONFIG and one CLOSE\n");
         ok = false;
     }
-    // The decline is known while the range is still recording, so no pass may have run.
+    // The decline is known while the range is still recording, or at the start of execute_range
+    // before any pass runs, so no pass may have run.
     if(g_passes.load() != 0)
     {
         fprintf(stderr, "[rr-decline] FAIL: a declined range ran replayed passes\n");
         ok = false;
     }
-    if(g_dispatches.load() != kObservedDispatches)
+
+    if(expect_dispatches == nullptr)
     {
-        fprintf(stderr,
-                "[rr-decline] FAIL: CLOSE reported %lu dispatches, expected %lu\n",
-                static_cast<unsigned long>(g_dispatches.load()),
-                static_cast<unsigned long>(kObservedDispatches));
+        fprintf(stderr, "[rr-decline] FAIL: RR_DECLINE_EXPECT_DISPATCHES is unset\n");
         ok = false;
+    }
+    else
+    {
+        char*      end      = nullptr;
+        const auto expected = std::strtoull(expect_dispatches, &end, 10);
+        if(end == expect_dispatches || *end != '\0')
+        {
+            fprintf(stderr,
+                    "[rr-decline] FAIL: RR_DECLINE_EXPECT_DISPATCHES '%s' is not an integer\n",
+                    expect_dispatches);
+            ok = false;
+        }
+        else if(g_dispatches.load() != expected)
+        {
+            fprintf(stderr,
+                    "[rr-decline] FAIL: CLOSE reported %lu dispatches, expected %lu\n",
+                    static_cast<unsigned long>(g_dispatches.load()),
+                    static_cast<unsigned long>(expected));
+            ok = false;
+        }
     }
 
     fprintf(stderr, ok ? "[rr-decline] PASS\n" : "[rr-decline] FAIL\n");

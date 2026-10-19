@@ -20,17 +20,21 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// An application whose range writes device memory with a copy between its two kernels, which the
-// SDK must decline, and which checks afterwards that its own result is intact.
+// An application whose range is driven into one decline reason, and which checks afterwards that
+// its own result is intact (where the mode ran kernels).
 //
-// RR_DECLINE_MODE selects the copy:
-//   hip-memcpy-async  hipMemcpyAsync host-to-device on the range's stream
-//   hsa-batch-copy    hsa_amd_memory_async_batch_copy host-to-device, waited for on the host;
-//   skipped
-//                     where the HSA runtime does not provide it
+// RR_DECLINE_MODE selects the path:
+//   hip-memcpy-async  hipMemcpyAsync host-to-device between two kernels (MEMORY_COPY_IN_RANGE)
+//   hsa-batch-copy    hsa_amd_memory_async_batch_copy between two kernels (MEMORY_COPY_IN_RANGE);
+//                     skipped where the HSA runtime does not provide it
+//   hip-malloc        one binding kernel, then hipMalloc inside the range
+//                     (ALLOCATION_CHANGED_IN_RANGE at close)
+//   hip-free          one binding kernel, then hipFree of a pre-range allocation
+//                     (ALLOCATION_CHANGED_IN_RANGE at close)
+//   empty             begin then end with no dispatch (NO_DISPATCH)
 //
-// The range is bound by its first kernel before the copy runs: a copy can only decline a range that
-// already belongs to an agent.
+// The range is bound by its first kernel before a copy or allocation change runs: those declines
+// need a range that already belongs to an agent (and, for allocations, an entry snapshot).
 
 #include "range.hpp"
 
@@ -179,6 +183,46 @@ prepare_batch_copy(batch_copier& copier, const void* device_buffer)
     return nullptr;
 }
 #endif
+
+bool
+begin_range()
+{
+    auto* begin_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_begin)>(
+        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_begin"));
+    if(begin_fn == nullptr)
+    {
+        fprintf(stderr, "[app] FAIL: the range replay API is not in this process\n");
+        return false;
+    }
+    if(const auto status = begin_fn(kRangeId); status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        fprintf(stderr,
+                "[app] FAIL: rocprofiler_range_replay_begin returned status %d\n",
+                static_cast<int>(status));
+        return false;
+    }
+    return true;
+}
+
+bool
+end_range()
+{
+    auto* end_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_end)>(
+        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_end"));
+    if(end_fn == nullptr)
+    {
+        fprintf(stderr, "[app] FAIL: the range replay API is not in this process\n");
+        return false;
+    }
+    if(const auto status = end_fn(); status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        fprintf(stderr,
+                "[app] FAIL: rocprofiler_range_replay_end returned status %d\n",
+                static_cast<int>(status));
+        return false;
+    }
+    return true;
+}
 }  // namespace
 
 int
@@ -190,34 +234,47 @@ main()
 
     const char* mode_env = std::getenv("RR_DECLINE_MODE");
     const auto  mode     = std::string_view{mode_env != nullptr ? mode_env : ""};
-    if(mode != "hip-memcpy-async" && mode != "hsa-batch-copy")
+    if(mode != "hip-memcpy-async" && mode != "hsa-batch-copy" && mode != "hip-malloc" &&
+       mode != "hip-free" && mode != "empty")
     {
         fprintf(stderr, "[app] FAIL: unknown RR_DECLINE_MODE '%s'\n", mode_env ? mode_env : "");
         return EXIT_FAILURE;
     }
 
-    auto* begin_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_begin)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_begin"));
-    auto* end_fn = reinterpret_cast<decltype(&rocprofiler_range_replay_end)>(
-        dlsym(RTLD_DEFAULT, "rocprofiler_range_replay_end"));
-    if(begin_fn == nullptr || end_fn == nullptr)
+    // C4: an empty range closes with NO_DISPATCH and never touches device memory.
+    if(mode == "empty")
     {
-        fprintf(stderr, "[app] FAIL: the range replay API is not in this process\n");
-        return EXIT_FAILURE;
+        if(!begin_range()) return EXIT_FAILURE;
+        if(!end_range()) return EXIT_FAILURE;
+        printf("[app] mode=%s\n", mode_env);
+        return EXIT_SUCCESS;
     }
 
-    // A device allocation inside a range is itself a decline reason, so everything the range
-    // touches is allocated and settled before it opens.
+    // Everything the range touches is allocated and settled before it opens, except the deliberate
+    // hipMalloc / hipFree of the allocation-change modes.
     int* acc     = nullptr;
     int* copied  = nullptr;
     int* pattern = nullptr;
+    int* to_free = nullptr;
     HIP_CHECK(hipMalloc(&acc, sizeof(int)));
-    HIP_CHECK(hipMalloc(&copied, kCopyBytes));
-    HIP_CHECK(hipHostMalloc(&pattern, kCopyBytes));
-    for(size_t i = 0; i < kCopyElements; ++i)
-        pattern[i] = copy_pattern(i);
     HIP_CHECK(hipMemset(acc, 0, sizeof(int)));
-    HIP_CHECK(hipMemset(copied, 0, kCopyBytes));
+
+    const bool copy_mode = (mode == "hip-memcpy-async" || mode == "hsa-batch-copy");
+    if(copy_mode)
+    {
+        HIP_CHECK(hipMalloc(&copied, kCopyBytes));
+        HIP_CHECK(hipHostMalloc(&pattern, kCopyBytes));
+        for(size_t i = 0; i < kCopyElements; ++i)
+            pattern[i] = copy_pattern(i);
+        HIP_CHECK(hipMemset(copied, 0, kCopyBytes));
+    }
+
+    if(mode == "hip-free")
+    {
+        // Freed inside the range after the entry snapshot has recorded it.
+        HIP_CHECK(hipMalloc(&to_free, kCopyBytes));
+        HIP_CHECK(hipMemset(to_free, 0, kCopyBytes));
+    }
 
 #if defined(HSA_AMD_MEMORY_COPY_OP_VERSION)
     auto batch_copy = batch_copier{};
@@ -233,14 +290,9 @@ main()
 
     HIP_CHECK(hipDeviceSynchronize());
 
-    if(const auto status = begin_fn(kRangeId); status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        fprintf(stderr,
-                "[app] FAIL: rocprofiler_range_replay_begin returned status %d\n",
-                static_cast<int>(status));
-        return EXIT_FAILURE;
-    }
+    if(!begin_range()) return EXIT_FAILURE;
 
+    // Binding kernel: takes the entry snapshot before the copy or allocation change.
     rr_decline_first<<<1, 64>>>(acc);
     HIP_CHECK(hipGetLastError());
 
@@ -249,30 +301,68 @@ main()
         HIP_CHECK(hipMemcpyAsync(copied, pattern, kCopyBytes, hipMemcpyHostToDevice, nullptr));
     }
 #if defined(HSA_AMD_MEMORY_COPY_OP_VERSION)
-    else if(const auto status = batch_copy(copied, pattern, kCopyBytes);
-            status != HSA_STATUS_SUCCESS)
+    else if(mode == "hsa-batch-copy")
     {
-        fprintf(stderr,
-                "[app] FAIL: hsa_amd_memory_async_batch_copy returned status %d inside the range\n",
-                static_cast<int>(status));
-        return EXIT_FAILURE;
+        if(const auto status = batch_copy(copied, pattern, kCopyBytes);
+           status != HSA_STATUS_SUCCESS)
+        {
+            fprintf(stderr,
+                    "[app] FAIL: hsa_amd_memory_async_batch_copy returned status %d inside the "
+                    "range\n",
+                    static_cast<int>(status));
+            return EXIT_FAILURE;
+        }
     }
 #endif
+    else if(mode == "hip-malloc")
+    {
+        int* tmp = nullptr;
+        HIP_CHECK(hipMalloc(&tmp, kCopyBytes));
+        // Free after the range closes so the tracked set still differs from the entry snapshot at
+        // execute_range. Leaving it allocated also works; freeing outside keeps the process tidy.
+        HIP_CHECK(hipDeviceSynchronize());
+        if(!end_range()) return EXIT_FAILURE;
 
+        auto acc_h = 0;
+        HIP_CHECK(hipMemcpy(&acc_h, acc, sizeof(int), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipFree(tmp));
+        HIP_CHECK(hipFree(acc));
+
+        printf("[app] mode=%s acc=%d\n", mode_env, acc_h);
+        if(acc_h != kExpectedFirstOnlyResult)
+        {
+            fprintf(stderr, "[app] FAIL: acc=%d (expected %d)\n", acc_h, kExpectedFirstOnlyResult);
+            return EXIT_FAILURE;
+        }
+        return EXIT_SUCCESS;
+    }
+    else if(mode == "hip-free")
+    {
+        HIP_CHECK(hipFree(to_free));
+        to_free = nullptr;
+        HIP_CHECK(hipDeviceSynchronize());
+        if(!end_range()) return EXIT_FAILURE;
+
+        auto acc_h = 0;
+        HIP_CHECK(hipMemcpy(&acc_h, acc, sizeof(int), hipMemcpyDeviceToHost));
+        HIP_CHECK(hipFree(acc));
+
+        printf("[app] mode=%s acc=%d\n", mode_env, acc_h);
+        if(acc_h != kExpectedFirstOnlyResult)
+        {
+            fprintf(stderr, "[app] FAIL: acc=%d (expected %d)\n", acc_h, kExpectedFirstOnlyResult);
+            return EXIT_FAILURE;
+        }
+        return EXIT_SUCCESS;
+    }
+
+    // Copy modes: second kernel, then close, then check both acc and the copied buffer.
     rr_decline_second<<<1, 64>>>(acc, copied, kCopyElements);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
-    if(const auto status = end_fn(); status != ROCPROFILER_STATUS_SUCCESS)
-    {
-        fprintf(stderr,
-                "[app] FAIL: rocprofiler_range_replay_end returned status %d\n",
-                static_cast<int>(status));
-        return EXIT_FAILURE;
-    }
+    if(!end_range()) return EXIT_FAILURE;
 
-    // A decline only skips the replayed passes: the application must see exactly what its own
-    // execution of the range produced, the copied buffer included.
     auto acc_h    = 0;
     auto copied_h = std::vector<int>(kCopyElements);
     HIP_CHECK(hipMemcpy(&acc_h, acc, sizeof(int), hipMemcpyDeviceToHost));
@@ -286,9 +376,9 @@ main()
     HIP_CHECK(hipFree(acc));
 
     printf("[app] mode=%s acc=%d\n", mode_env, acc_h);
-    if(acc_h != kExpectedResult)
+    if(acc_h != kExpectedCopyResult)
     {
-        fprintf(stderr, "[app] FAIL: acc=%d (expected %d)\n", acc_h, kExpectedResult);
+        fprintf(stderr, "[app] FAIL: acc=%d (expected %d)\n", acc_h, kExpectedCopyResult);
         return EXIT_FAILURE;
     }
     for(size_t i = 0; i < kCopyElements; ++i)

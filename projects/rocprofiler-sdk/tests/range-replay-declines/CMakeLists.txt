@@ -3,7 +3,8 @@
 # reason and checks the two things a decline promises: CLOSE names the reason before any pass
 # runs, and the application's own execution of the range is unchanged.
 #
-# A test is one RR_DECLINE_MODE of the application paired with the status the tool expects.
+# A test is one RR_DECLINE_MODE of the application paired with the status and dispatch count the
+# tool expects.
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -77,7 +78,7 @@ add_dependencies(range-replay-declines-testapp range-replay-declines-client)
 # The tool's verdict alone would let a run pass while the application reported a wrong
 # result, so the application's own failure line fails the test too.
 function(add_rr_decline_test NAME)
-    cmake_parse_arguments(arg "" "MODE;EXPECT" "" ${ARGN})
+    cmake_parse_arguments(arg "" "MODE;EXPECT;DISPATCHES" "" ${ARGN})
     rocprofiler_add_integration_execute_test(
         ${NAME}
         COMMAND $<TARGET_FILE:range-replay-declines-testapp>
@@ -86,6 +87,7 @@ function(add_rr_decline_test NAME)
         LABELS "integration-tests;range-replay"
         PRELOAD "$<TARGET_FILE:range-replay-declines-client>"
         ENVIRONMENT "RR_DECLINE_MODE=${arg_MODE}" "RR_DECLINE_EXPECT=${arg_EXPECT}"
+                    "RR_DECLINE_EXPECT_DISPATCHES=${arg_DISPATCHES}"
         PASS_REGULAR_EXPRESSION "\\[rr-decline\\] PASS"
         FAIL_REGULAR_EXPRESSION
             "\\[rr-decline\\] FAIL|\\[rr-decline\\] error|\\[app\\] FAIL|${ROCPROFILER_DEFAULT_FAIL_REGEX}"
@@ -93,12 +95,27 @@ function(add_rr_decline_test NAME)
 endfunction()
 
 # C1: a host-to-device hipMemcpyAsync between the range's two kernels, with no memory-copy
-# tracing configured anywhere in the process.
+# tracing configured anywhere in the process. CLOSE reports 1 dispatch: only the first;
+# the copy folds the decline in before the second is counted.
 add_rr_decline_test(test-range-replay-decline-hip-memcpy-async MODE hip-memcpy-async
-                    EXPECT MEMORY_COPY_IN_RANGE)
+                    EXPECT MEMORY_COPY_IN_RANGE DISPATCHES 1)
 
 # C2: the same write through hsa_amd_memory_async_batch_copy, an HSA entry point
 # intercepted separately from the other copy functions. Skipped where the runtime does not
 # provide it.
 add_rr_decline_test(test-range-replay-decline-hsa-batch-copy MODE hsa-batch-copy EXPECT
-                    MEMORY_COPY_IN_RANGE)
+                    MEMORY_COPY_IN_RANGE DISPATCHES 1)
+
+# C3: hipMalloc after the binding kernel changes the tracked allocation set versus the
+# entry snapshot, so execute_range declines with ALLOCATION_CHANGED_IN_RANGE. One observed
+# dispatch.
+add_rr_decline_test(test-range-replay-decline-hip-malloc MODE hip-malloc EXPECT
+                    ALLOCATION_CHANGED_IN_RANGE DISPATCHES 1)
+
+# C3: hipFree of a pre-range allocation after the binding kernel, same decline.
+add_rr_decline_test(test-range-replay-decline-hip-free MODE hip-free EXPECT
+                    ALLOCATION_CHANGED_IN_RANGE DISPATCHES 1)
+
+# C4: begin then end with nothing recorded closes with NO_DISPATCH and zero dispatches.
+add_rr_decline_test(test-range-replay-decline-empty MODE empty EXPECT NO_DISPATCH
+                    DISPATCHES 0)
