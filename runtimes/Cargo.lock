@@ -37,3 +37,7 @@ dependencies = [
  "libamdf",
  "libhsa",
 ]
+
+[[package]]
+name = "rocelf"
+version = "0.1.0"
