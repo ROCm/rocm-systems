@@ -32,8 +32,9 @@ using PCIe peer-to-peer DMA. This requires a Linux kernel built with
    hipFile fastpath cannot run on it. For the kernels AMD has tested, see
    :doc:`/reference/hipFile-kernel-p2pdma-support`.
 
-When the kernel lacks P2PDMA support, hipFile does not fail. Every I/O request
-uses the fallback path instead, resulting in lower than expected throughput.
+When no fastpath is available, hipFile uses the fallback path by default,
+resulting in lower than expected throughput. If fallback is disabled, I/O
+requests that require it fail instead.
 
 Check for kernel P2PDMA support
 -------------------------------
