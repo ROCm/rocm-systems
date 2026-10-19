@@ -49,13 +49,13 @@ Two differences from kernel replay matter when changing the shared snapshot code
 ### The kernarg block is kept between ranges
 
 Each pass reads its arguments from one kernarg block the executor allocates for the agent: device
-memory when the application's kernel arguments are in device memory, as HIP's are on devices that
-support it, and the agent's kernarg pool otherwise. Rather than freeing it when the range closes,
-the executor keeps it, and the next range on the same agent reuses it when it is the same kind of
-memory, at least as large as that range needs, and no more than twice as large. A block outside
-that bound is freed, and the range allocates its own. Each agent holds at most one block, it is
-kept only after the last pass that read it has drained, it never enters a snapshot, and it is
-released with the process.
+memory when the range's first dispatch with arguments had them in device memory, as HIP's are on
+devices that support it, and the agent's kernarg pool otherwise or if that allocation fails. Rather
+than freeing it when the range closes, the executor keeps it, and the next range on the same agent
+reuses it when it is the same kind of memory, at least as large as that range needs, and no more
+than twice as large. A block outside that bound is freed, and the range allocates its own. Each
+agent holds at most one block, it is kept only after the last pass that read it has drained, it
+never enters a snapshot, and it is released with the process.
 
 ### Reading the phase timings
 
