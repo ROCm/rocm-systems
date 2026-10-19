@@ -6,7 +6,7 @@
 Scalar bodies and VOP1 SIMD functors use the same helper with the same MODE
 policy, resolved once before the lane loop. VOP3 forms use
 shared/floating_operation.h to apply ABS/NEG before the operation and
-OMOD/CLAMP afterward.
+OMOD/CLAMP afterward, and run scalar only: VOP3 FRACT has no SIMD path.
 """
 
 from amdisa.codegen.execute import input_policy
@@ -58,5 +58,5 @@ def fract_expr(
 
 
 def simd_functor(dtype: str) -> str:
-    """Return the VOP1 SIMD functor on raw lanes; VOP3 forms stay scalar."""
+    """Return the VOP1 SIMD functor on raw lanes; VOP3 FRACT has no SIMD path."""
     return operation_expr(dtype, policy_expr(dtype))

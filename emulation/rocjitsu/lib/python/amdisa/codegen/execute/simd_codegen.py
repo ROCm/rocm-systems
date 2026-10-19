@@ -314,7 +314,9 @@ _VOP3_UNARY_FP_F32 = {
 
 # VOP3 twins excluded from generic VOP1 reuse:
 # - F16 unary/FREXP mantissa: SIMD_VOP3_UNARY_FP16 and SIMD_VOP3_FREXP_FP.
-# - FRACT: scalar; the raw VOP1 functor lacks VOP3's floating modifiers.
+# - FRACT: VOP3 deliberately has no SIMD path in any format. No raw-bit VOP3
+#   adapter is provided: F32/F64 could reuse try_execute_unary_vop3_rounded_simd's
+#   dispatch, and F16 would need true16 half selection.
 # - FREXP_EXP_I16_F16: scalar; VOP3 selects 16-bit halves through OP_SEL.
 # - FREXP_EXP_I32_F32: SIMD_VOP3_UNARY_INT_EXTRA's integer result route.
 # - MOV_B16: scalar; the VOP1 raw copy lacks VOP3's numeric modifiers.
@@ -583,7 +585,7 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'float32_t',
         '[](auto a) { return util::rndne_simd(a); }',
     ),
-    # FRACT reads raw encodings; the VOP3 forms stay scalar.
+    # FRACT reads raw encodings; VOP3 FRACT has no SIMD path (see _VOP3_UNARY_SKIP).
     'v_fract_f32_vop1': ('uint32_t', 'uint32_t', float_fract.simd_functor('f32')),
     # --- transcendental div / sqrt. These mirror amdgpu::transcendental::*_f32
     # exactly via util::*_f32_simd (FTZ input/output flush + canonical-qNaN and

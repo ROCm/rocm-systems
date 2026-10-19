@@ -240,7 +240,7 @@ def test_fract_simd_probes_use_the_shared_raw_operation(dtype):
     operation = f'amdgpu::fract::Operation<{fmt}>{{amdgpu::fract::Policy::make('
     vop1 = simd_probe_line(f'v_fract_{dtype}_vop1')
     assert operation in vop1 and 'floor' not in vop1
-    # The VOP1 functor lacks VOP3's floating modifiers, so VOP3 stays scalar.
+    # VOP3 FRACT deliberately has no SIMD path in any format.
     assert simd_probe_line(f'v_fract_{dtype}_vop3') is None
     if dtype == 'f16':
         assert simd_probe_line('v_fract_f16_vop3', true16_vop3=True) is None

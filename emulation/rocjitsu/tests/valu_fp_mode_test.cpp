@@ -2934,8 +2934,9 @@ ArithmeticCase unary_case(const UnaryForm &form, const UnaryLane &lane) {
     }
   }
   static constexpr const char *kEncodingNames[] = {"Vop1", "Vop1High", "Vop3", "Vop3High"};
-  // F16 VOP1 runs on the tracked word path and VOP3 forms run scalar. F32/F64
-  // VOP1 SIMD paths are not instrumented, so those cases assert nothing.
+  // F16 VOP1 runs on the tracked word path. VOP3 FRACT has no SIMD path in any
+  // format, so VOP3 cases assert that none runs. F32/F64 VOP1 SIMD paths are not
+  // instrumented, so those cases assert nothing.
   const bool vop3 =
       lane.encoding == UnaryEncoding::Vop3 || lane.encoding == UnaryEncoding::Vop3High;
   SimdPathExpectation simd{};
