@@ -33,11 +33,13 @@
  * 0700, every file is 0600, no file is opened through a symbolic link in its last
  * path component, and when the archive is opened the per-process directory must
  * be a real directory owned by the effective user. The writer keeps a descriptor
- * for each archive directory it checked, pid-<pid>, blobs/, code_objects/ and
- * each blobs/<xx>, and creates, opens, renames and removes every file inside
- * the archive relative to it, so a directory renamed on the path after the
- * check cannot redirect a write. Only finding pid-<pid> and the root manifest
- * in the base directory go by path.
+ * for pid-<pid>, blobs/ and code_objects/ once it has checked them, and checks
+ * each blobs/<xx> relative to blobs/ for every blob write. Every file inside the
+ * archive is created, opened, renamed and removed relative to those
+ * descriptors, so a directory renamed on the path after the check cannot
+ * redirect a write. Only finding pid-<pid> and the root manifest in the base
+ * directory go by path. On Windows none of this applies: every file is opened
+ * by path and gets the access the base directory passes on.
  */
 
 #include "hip_capture_writer.h"

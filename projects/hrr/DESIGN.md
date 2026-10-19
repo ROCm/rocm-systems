@@ -136,7 +136,9 @@ can write to should have the sticky bit. When
 the archive cannot be set up, capture is disabled with a
 `[HRR capture] Capture disabled` line on stderr and the application runs on without the
 runtime capture shims. Reading an archive needs the capturing user or root, so a capture
-taken as root in a container needs `chown` before another user can replay it.
+taken as root in a container needs `chown` before another user can replay it. On Windows
+none of this applies: the writer opens every file by path, checks no directory and sets
+no permissions, so the archive gets the access its base directory passes on.
 
 `writer::open()` (`hip_capture_writer.cpp`) always selects the current process's
 PID directory. A `fork()` child re-opens from the base dir on its first record,
