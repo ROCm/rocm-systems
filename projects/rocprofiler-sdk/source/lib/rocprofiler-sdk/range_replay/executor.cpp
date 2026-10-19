@@ -41,6 +41,7 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <mutex>
@@ -104,11 +105,14 @@ public:
     kernarg_staging& operator=(kernarg_staging&&) = delete;
 
     // Reserve space for `dispatches` and record each one's offset, reusing the block retained from
-    // an earlier range on this agent when it fits. Returns false if the kernarg pool allocation
-    // fails.
+    // an earlier range on this agent when it fits and is the same kind of memory. `device` asks for
+    // the agent's device memory, where HIP keeps kernel arguments on devices that support it;
+    // otherwise, or if that allocation fails, the block comes from the kernarg pool. Returns false
+    // if no block can be allocated.
     bool reserve(const hsa::Queue&                       queue,
                  rocprofiler_agent_id_t                  agent_id,
-                 const std::vector<recorded_dispatch_t>& dispatches)
+                 const std::vector<recorded_dispatch_t>& dispatches,
+                 bool                                    device)
     {
         auto placement = plan_kernarg_layout(dispatches);
         m_offsets      = std::move(placement.offsets);
@@ -118,29 +122,45 @@ public:
         if(total == 0) return true;
 
         m_block = take_retained_kernarg_block(agent_id);
-        if(kernarg_block_fits(m_block.capacity, total))
+        if(m_block.device == device && kernarg_block_fits(m_block.capacity, total))
         {
             m_reused = true;
             return true;
         }
         free_kernarg_block(m_block);
 
-        const auto& ext  = queue.ext_api();
-        const auto  pool = queue.get_agent().kernarg_pool();
-        if(pool.handle == 0 || ext.hsa_amd_memory_pool_allocate_fn == nullptr) return false;
+        const auto& ext = queue.ext_api();
+        if(ext.hsa_amd_memory_pool_allocate_fn == nullptr) return false;
 
-        void* base = nullptr;
-        if(ext.hsa_amd_memory_pool_allocate_fn(pool, total, 0, &base) != HSA_STATUS_SUCCESS ||
+        // Executable, like HIP's device kernarg memory.
+        const auto gpu_pool = queue.get_agent().gpu_pool();
+        void*      base     = nullptr;
+        if(device && gpu_pool.handle != 0 &&
+           ext.hsa_amd_memory_pool_allocate_fn(
+               gpu_pool, total, hsa::hsa_amd_memory_pool_executable_flag, &base) ==
+               HSA_STATUS_SUCCESS &&
+           base != nullptr)
+        {
+            m_block = kernarg_block_t{base, total, ext.hsa_amd_memory_pool_free_fn, true};
+            return true;
+        }
+
+        const auto pool = queue.get_agent().kernarg_pool();
+        base            = nullptr;
+        if(pool.handle == 0 ||
+           ext.hsa_amd_memory_pool_allocate_fn(pool, total, 0, &base) != HSA_STATUS_SUCCESS ||
            base == nullptr)
             return false;
 
-        m_block    = kernarg_block_t{base, total, ext.hsa_amd_memory_pool_free_fn};
+        m_block    = kernarg_block_t{base, total, ext.hsa_amd_memory_pool_free_fn, false};
         auto agent = queue.get_agent().get_hsa_agent();
         if(ext.hsa_amd_agents_allow_access_fn != nullptr)
             ext.hsa_amd_agents_allow_access_fn(1, &agent, nullptr, base);
 
         return true;
     }
+
+    std::string_view memory() const { return m_block.device ? "device memory" : "kernarg pool"; }
 
     size_t capacity() const { return m_block.capacity; }
 
@@ -155,6 +175,8 @@ public:
     void fill(const std::vector<recorded_dispatch_t>& dispatches,
               std::vector<hsa::rocprofiler_packet>&   packets) const
     {
+        const recorded_dispatch_t* last      = nullptr;
+        uint8_t*                   last_slot = nullptr;
         for(size_t i = 0; i < dispatches.size(); ++i)
         {
             if(dispatches[i].kernarg.empty())
@@ -166,6 +188,19 @@ public:
             auto* slot = static_cast<uint8_t*>(m_block.base) + m_offsets[i];
             std::memcpy(slot, dispatches[i].kernarg.data(), dispatches[i].kernarg.size());
             packets[i].kernel_dispatch.kernarg_address = slot;
+            last                                       = &dispatches[i];
+            last_slot                                  = slot;
+        }
+
+        // Host stores to device memory may still be in flight when the packets are submitted.
+        // Same readback HIP does for its device kernarg memory.
+        if(m_block.device && last != nullptr)
+        {
+            auto* sentinel = last_slot + last->kernarg.size() - 1;
+            std::atomic_thread_fence(std::memory_order_seq_cst);
+            *sentinel = last->kernarg.back();
+            std::atomic_thread_fence(std::memory_order_seq_cst);
+            static_cast<void>(*static_cast<volatile uint8_t*>(sentinel));
         }
     }
 
@@ -374,7 +409,7 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
     if(!exit_snapshot.ok) return ROCPROFILER_RANGE_REPLAY_STATUS_SNAPSHOT_FAILED;
 
     auto staging = kernarg_staging{};
-    if(!staging.reserve(queue, ctx.agent_id, ctx.record.dispatches()))
+    if(!staging.reserve(queue, ctx.agent_id, ctx.record.dispatches(), ctx.device_kernargs))
         return ROCPROFILER_RANGE_REPLAY_STATUS_STAGING_FAILED;
     const auto staged_at = phase_clock::now();
 
@@ -463,8 +498,8 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
 
     ROCP_INFO << fmt::format(
         "range replay: range {} ({} dispatches) phases: lock+drain {:.3f} ms, exit snapshot {:.3f} "
-        "ms ({} bytes in {} regions), kernarg staging {:.3f} ms ({} bytes, {}), {} passes {:.3f} "
-        "ms, {} restores {:.3f} ms, verify {}, exit restore {:.3f} ms, window {:.3f} ms",
+        "ms ({} bytes in {} regions), kernarg staging {:.3f} ms ({} bytes, {}, {}), {} passes "
+        "{:.3f} ms, {} restores {:.3f} ms, verify {}, exit restore {:.3f} ms, window {:.3f} ms",
         ctx.record.range_id(),
         dispatch_count,
         elapsed_ms(drained_at - window_start),
@@ -474,6 +509,7 @@ execute_range(range_context_t& ctx, uint64_t& divergence_count)
         elapsed_ms(staged_at - snapped_at),
         staging.capacity(),
         staging.origin(),
+        staging.memory(),
         passes_run,
         elapsed_ms(passes_time),
         restores_run,
