@@ -1009,8 +1009,8 @@ inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t fun
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
 }
-size_t rcclCeAr2ShotMax(const struct ncclComm* comm) {
-  return rcclCeNonRegMaxTab(extAlgoArchTable(comm), ncclFuncAllReduce);
+size_t rcclCeNonRegMax(const struct ncclComm* comm, ncclFunc_t func) {
+  return rcclCeNonRegMaxTab(extAlgoArchTable(comm), func);
 }
 size_t rcclCeAr2ShotMin(const struct ncclComm* comm) {
   return rcclCeNonRegMinTab(extAlgoArchTable(comm), ncclFuncAllReduce);
