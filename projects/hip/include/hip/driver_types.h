@@ -466,9 +466,12 @@ typedef enum hipMemcpyFlags {
   hipMemcpyFlagExtOpIndirectDst = 0x800,       ///< Same as IndirectSrc, but for the dst pointer.
   hipMemcpyFlagExtPreferComputeEngine = 0x1000,///< Prefer compute engine over copy engine.
                                                ///< Linear copies only.
+                                               ///< hipExtMemcpyBatchAsync only.
   hipMemcpyFlagExtPreferLinear = 0x2000,       ///< Prefer issuing each copy individually.
+                                               ///< hipExtMemcpyBatchAsync only.
   hipMemcpyFlagExtPreferBroadcast = 0x4000     ///< Prefer one broadcast for copies with the same
                                                ///< src and size. Linear copies only.
+                                               ///< hipExtMemcpyBatchAsync only.
 } hipMemcpyFlags;
 
 /**
