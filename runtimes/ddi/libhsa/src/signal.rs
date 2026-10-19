@@ -16,9 +16,9 @@
 use std::collections::{HashMap, hash_map::Entry};
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering, fence};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -32,6 +32,7 @@ use rocddi::session::DriverContextLifetime;
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
+use crate::memory::{SignalBatchPool, signal_batch_pool};
 use crate::runtime::{
     CallbackScope, HsaState, InFlightToken, boundary, initialized_mut, lock, map_error,
 };
@@ -44,6 +45,47 @@ const SIGNAL_EVENT_PAGE_BYTES: u64 = 4096 * 8;
 const IPC_SIGNAL_ALLOCATION_BYTES: u64 = 4096;
 const SHARED_SIGNAL_ID: u64 = 0x71fc_ca6a_3d5d_5276;
 static SYSTEM_FREQUENCY_HZ: AtomicU64 = AtomicU64::new(0);
+static HAS_FLUSH_BATCHES: AtomicBool = AtomicBool::new(false);
+static FLUSH_BATCHES: Mutex<Vec<(usize, usize)>> = Mutex::new(Vec::new());
+
+fn flush_batches() -> MutexGuard<'static, Vec<(usize, usize)>> {
+    FLUSH_BATCHES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn batch_needs_flush(address: usize) -> bool {
+    HAS_FLUSH_BATCHES.load(Ordering::Acquire)
+        && flush_batches()
+            .iter()
+            .any(|&(start, end)| start <= address && address < end)
+}
+
+fn flush_device_write(value: &AtomicI64) {
+    // KFD's public VRAM mapping can post PCIe writes through HDP. Read back
+    // the existing store; repeating it could overwrite an agent's update.
+    fence(Ordering::SeqCst);
+    let _ = value.load(Ordering::Relaxed);
+}
+
+fn flush_device_store(value: &AtomicI64, written: SignalValue) {
+    fence(Ordering::Release);
+    value.store(written, Ordering::Relaxed);
+    flush_device_write(value);
+}
+
+fn flush_signal_store(signal: &AmdSignal) {
+    if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
+        flush_device_write(&signal.value);
+    }
+}
+
+pub(crate) fn flush_signal_timestamps(signal: &AmdSignal) {
+    if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
+        fence(Ordering::SeqCst);
+        let _ = signal.end_ts.load(Ordering::Relaxed);
+    }
+}
 
 struct PreparedSignalEventPage {
     host: usize,
@@ -70,9 +112,7 @@ fn system_frequency() -> u64 {
     let Some((device, generation, _call)) = retained else {
         return 0;
     };
-    let frequency = device
-        .gpu()
-        .and_then(|gpu| gpu.clock_counters())
+    let frequency = crate::runtime::clock_counters(&device)
         .ok()
         .map_or(0, |counters| counters.system_frequency);
     if frequency == 0 {
@@ -342,6 +382,33 @@ pub(crate) struct SignalSlab {
     next: usize,
 }
 
+/// One contiguous native allocation retained by its public handle and members.
+#[allow(dead_code, reason = "the backing is held for its lifetime, not read")]
+enum SignalBatchBacking {
+    Native(Allocation),
+    #[cfg(test)]
+    Test(Box<[AmdSignal]>),
+}
+
+struct SignalBatchStorage {
+    _backing: SignalBatchBacking,
+    remaining: usize,
+    handle_live: bool,
+    /// Async copy and SVM completion require a host atomic decrement.
+    host_atomics_supported: bool,
+    flush_range: Option<(usize, usize)>,
+}
+
+impl Drop for SignalBatchStorage {
+    fn drop(&mut self) {
+        if let Some(range) = self.flush_range {
+            let mut ranges = flush_batches();
+            ranges.retain(|&registered| registered != range);
+            HAS_FLUSH_BATCHES.store(!ranges.is_empty(), Ordering::Release);
+        }
+    }
+}
+
 impl SignalSlab {
     fn create(runtime: &HsaState) -> Result<Self, Status> {
         let gpu = runtime.gpus.first().ok_or(OUT_OF_RESOURCES)?;
@@ -400,6 +467,9 @@ pub(crate) struct SignalState {
     signal_slabs: Vec<SignalSlab>,
     /// Signal slots available for reuse.
     recycled_signals: Vec<usize>,
+    /// Contiguous batch backing and each member's owning batch ID.
+    batches: HashMap<u64, SignalBatchStorage>,
+    batch_members: HashMap<usize, u64>,
     /// Process event page shared by interrupt-backed signals.
     signal_event_page: Option<SignalEventPage>,
     /// Whether the native event page has been conclusively established.
@@ -421,10 +491,26 @@ pub(crate) struct SignalState {
 }
 
 impl SignalState {
+    fn destroy_batch(&mut self, batch: HsaAmdSignalBatch) -> Status {
+        let Some(storage) = self.batches.get_mut(&batch.handle) else {
+            return INVALID_ARGUMENT;
+        };
+        if !storage.handle_live {
+            return INVALID_ARGUMENT;
+        }
+        storage.handle_live = false;
+        if storage.remaining == 0 {
+            self.batches.remove(&batch.handle);
+        }
+        SUCCESS
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             signal_slabs: Vec::new(),
             recycled_signals: Vec::new(),
+            batches: HashMap::new(),
+            batch_members: HashMap::new(),
             signal_event_page: None,
             signal_event_page_confirmed: false,
             interrupt_signals: HashMap::new(),
@@ -444,6 +530,8 @@ impl SignalState {
         self.imported_ipc_signals.clear();
         self.owned_ipc_signals.clear();
         self.recycled_signals.clear();
+        self.batch_members.clear();
+        self.batches.clear();
         self.signal_slabs.clear();
     }
 
@@ -524,6 +612,154 @@ impl HsaState {
             .ok_or(OUT_OF_RESOURCES)?;
         // SAFETY: The selected slab has one unused aligned slot.
         Ok(unsafe { slab.allocate(signal) })
+    }
+
+    fn create_signal_batch(
+        &mut self,
+        values: &[SignalValue],
+        interrupt: bool,
+        pool: SignalBatchPool,
+        consumers: &[HsaAgent],
+    ) -> Result<(HsaAmdSignalBatch, Vec<HsaSignal>), Status> {
+        let bytes = values
+            .len()
+            .checked_mul(SIGNAL_BYTES)
+            .ok_or(OUT_OF_RESOURCES)?;
+        let page = self.host_page_size;
+        let allocation_bytes = bytes
+            .checked_add(page - 1)
+            .map(|size| size & !(page - 1))
+            .ok_or(OUT_OF_RESOURCES)?;
+        let (owner_index, kind, flush) = match pool {
+            SignalBatchPool::System => (0, MemoryKind::System, false),
+            SignalBatchPool::Device {
+                index,
+                uncached,
+                flush,
+            } => (
+                index,
+                MemoryKind::DeviceLocal {
+                    host_visible: true,
+                    coherent: uncached,
+                    uncached,
+                    contiguous: false,
+                },
+                flush,
+            ),
+        };
+        if flush {
+            flush_batches()
+                .try_reserve(1)
+                .map_err(|_| OUT_OF_RESOURCES)?;
+        }
+        let owner = self
+            .gpus
+            .get(owner_index)
+            .ok_or(OUT_OF_RESOURCES)?
+            .device
+            .clone();
+        let peers = self
+            .gpus
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| *index != owner_index)
+            .filter(|(index, _)| {
+                matches!(pool, SignalBatchPool::System)
+                    || consumers.is_empty()
+                    || consumers
+                        .iter()
+                        .any(|agent| agent.handle == GPU_AGENT_BASE + *index as u64)
+            })
+            .map(|(_, gpu)| gpu.device.clone())
+            .collect::<Vec<_>>();
+        let peer_refs = peers.iter().collect::<Vec<_>>();
+        let allocation = owner
+            .allocate_with_peers(
+                &peer_refs,
+                kind,
+                allocation_bytes as u64,
+                page as u64,
+                DeviceAccess::READ | DeviceAccess::WRITE,
+            )
+            .map_err(map_error)?;
+        let info = allocation.info();
+        let host = info.host_address.ok_or(OUT_OF_RESOURCES)?;
+        let end = host.checked_add(bytes).ok_or(OUT_OF_RESOURCES)?;
+        if info.device_address != host as u64
+            || info.size < bytes as u64
+            || host % SIGNAL_BYTES != 0
+        {
+            return Err(OUT_OF_RESOURCES);
+        }
+        self.signal_state
+            .batches
+            .try_reserve(1)
+            .map_err(|_| OUT_OF_RESOURCES)?;
+        self.signal_state
+            .batch_members
+            .try_reserve(values.len())
+            .map_err(|_| OUT_OF_RESOURCES)?;
+        if interrupt {
+            self.signal_state
+                .interrupt_signals
+                .try_reserve(values.len())
+                .map_err(|_| OUT_OF_RESOURCES)?;
+        }
+        let mut signals = Vec::new();
+        signals
+            .try_reserve_exact(values.len())
+            .map_err(|_| OUT_OF_RESOURCES)?;
+        let batch = HsaAmdSignalBatch {
+            handle: self.allocate_handle()?,
+        };
+        for (index, &value) in values.iter().enumerate() {
+            let address = host + index * SIGNAL_BYTES;
+            let event = if interrupt {
+                self.acquire_signal_event()
+            } else {
+                None
+            };
+            let storage = match &event {
+                Some((_, mailbox, id)) => AmdSignal::interrupt(value, *mailbox, *id),
+                None if interrupt => AmdSignal::interrupt(value, 0, 0),
+                None => AmdSignal::user(value),
+            };
+            // SAFETY: The unique aligned slot is inside the live allocation.
+            unsafe { (address as *mut AmdSignal).write(storage) };
+            if interrupt {
+                self.signal_state
+                    .interrupt_signals
+                    .insert(address, event.map(|(event, _, _)| event));
+            }
+            self.signal_state
+                .batch_members
+                .insert(address, batch.handle);
+            signals.push(HsaSignal {
+                handle: address as u64,
+            });
+        }
+        let flush_range = if flush {
+            let last = signals.last().ok_or(OUT_OF_RESOURCES)?;
+            // SAFETY: The initialized last slot remains live in allocation.
+            let last_signal = unsafe { &*(last.handle as usize as *const AmdSignal) };
+            flush_device_store(&last_signal.value, values[values.len() - 1]);
+            flush_batches().push((host, end));
+            HAS_FLUSH_BATCHES.store(true, Ordering::Release);
+            Some((host, end))
+        } else {
+            None
+        };
+        self.signal_state.batches.insert(
+            batch.handle,
+            SignalBatchStorage {
+                _backing: SignalBatchBacking::Native(allocation),
+                remaining: values.len(),
+                handle_live: true,
+                host_atomics_supported: !flush,
+                flush_range,
+            },
+        );
+        Ok((batch, signals))
     }
 
     fn ensure_signal_event_page(
@@ -834,11 +1070,27 @@ impl SignalState {
             return false;
         }
         self.owned_ipc_signals.contains_key(&address)
+            || self.batch_members.contains_key(&address)
             || self
                 .imported_ipc_signals
                 .get(&address)
                 .is_some_and(|imported| imported.references != 0)
             || self.signal_slabs.iter().any(|slab| slab.owns_live(address))
+    }
+
+    /// Rejects batch backings that cannot perform the worker's atomic decrement.
+    pub(crate) fn async_completion_status(&self, signal: HsaSignal) -> Status {
+        if !self.owns_signal(signal) {
+            return INVALID_SIGNAL;
+        }
+        let Some(batch_id) = self.batch_members.get(&(signal.handle as usize)) else {
+            return SUCCESS;
+        };
+        match self.batches.get(batch_id) {
+            Some(batch) if batch.host_atomics_supported => SUCCESS,
+            Some(_) => NOT_SUPPORTED,
+            None => INVALID_SIGNAL,
+        }
     }
 
     pub(crate) fn retain_async_signal(&mut self, signal: HsaSignal) -> Result<(), Status> {
@@ -978,6 +1230,21 @@ impl SignalState {
                 self.interrupt_signals.insert(address, Some(event));
                 return map_error(error);
             }
+        }
+        if let Some(batch_id) = self.batch_members.remove(&address) {
+            // Native backing is retained until both independent ownership
+            // paths have retired, including deferred async signal references.
+            // SAFETY: Membership identifies a live initialized batch slot.
+            unsafe { &*(address as *const AmdSignal) }
+                .kind
+                .store(AMD_SIGNAL_KIND_INVALID, Ordering::Release);
+            if let Some(batch) = self.batches.get_mut(&batch_id) {
+                batch.remaining -= 1;
+                if batch.remaining == 0 && !batch.handle_live {
+                    self.batches.remove(&batch_id);
+                }
+            }
+            return SUCCESS;
         }
         // Slab storage remains mapped until shutdown. A later creation may
         // reuse the slot once all asynchronous registrations have retired.
@@ -1199,6 +1466,88 @@ pub unsafe extern "C" fn hsa_amd_signal_create(
 
 #[cfg_attr(
     all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_signal_batch_create")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+pub unsafe extern "C" fn hsa_amd_signal_batch_create(
+    count: u32,
+    initial_values: *const SignalValue,
+    num_consumers: u32,
+    consumers: *const HsaAgent,
+    attributes: u64,
+    pool: HsaMemoryPool,
+    batch: *mut HsaAmdSignalBatch,
+    signals: *mut HsaSignal,
+) -> Status {
+    boundary(|| {
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        let runtime = match initialized_mut(&mut guard) {
+            Ok(runtime) => runtime,
+            Err(status) => return status,
+        };
+        if count == 0 || initial_values.is_null() || batch.is_null() || signals.is_null()
+            || attributes & AMD_SIGNAL_IPC != 0
+            // SAFETY: The ABI requires num_consumers readable handles.
+            || !unsafe { valid_consumers(num_consumers, consumers) }
+        {
+            return INVALID_ARGUMENT;
+        }
+        let Some(pool_kind) = signal_batch_pool(runtime, pool) else {
+            return INVALID_MEMORY_POOL;
+        };
+        // SAFETY: Validated non-null input with count readable values.
+        let values = unsafe { std::slice::from_raw_parts(initial_values, count as usize) };
+        // SAFETY: The consumer list was validated before this read.
+        let consumer_slice = if num_consumers == 0 {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(consumers, num_consumers as usize) }
+        };
+        // SAFETY: The validated consumer list meets the signal selector's ABI.
+        let interrupt = match unsafe { signal_uses_interrupt(num_consumers, consumers, attributes) }
+        {
+            Ok(value) => value,
+            Err(status) => return status,
+        };
+        let (created_batch, created_signals) =
+            match runtime.create_signal_batch(values, interrupt, pool_kind, consumer_slice) {
+                Ok(created) => created,
+                Err(status) => return status,
+            };
+        // SAFETY: The caller supplies count writable handles and a batch slot.
+        // Inputs have all been consumed before either output is written.
+        unsafe {
+            std::ptr::copy_nonoverlapping(created_signals.as_ptr(), signals, count as usize);
+            batch.write(created_batch);
+        }
+        SUCCESS
+    })
+}
+
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_signal_batch_destroy")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
+pub extern "C" fn hsa_amd_signal_batch_destroy(batch: HsaAmdSignalBatch) -> Status {
+    boundary(|| {
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        let runtime = match initialized_mut(&mut guard) {
+            Ok(runtime) => runtime,
+            Err(status) => return status,
+        };
+        runtime.signal_state.destroy_batch(batch)
+    })
+}
+
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
     unsafe(export_name = "__hsa_impl_hsa_signal_destroy")
 )]
 #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
@@ -1332,7 +1681,10 @@ pub unsafe extern "C" fn hsa_signal_store_relaxed(signal: HsaSignal, value: Sign
                     // this store, including its stable intercept owner.
                     crate::queue_intercept::ring(signal.intercept_owner());
                 }
-                _ => signal.value.store(value, Ordering::Relaxed),
+                _ => {
+                    signal.value.store(value, Ordering::Relaxed);
+                    flush_signal_store(signal);
+                }
             }
         })
     };
@@ -1380,7 +1732,10 @@ pub unsafe extern "C" fn hsa_signal_store_screlease(signal: HsaSignal, value: Si
                     // this store, including its stable intercept owner.
                     crate::queue_intercept::ring(signal.intercept_owner());
                 }
-                _ => signal.value.store(value, Ordering::Release),
+                _ => {
+                    signal.value.store(value, Ordering::Release);
+                    flush_signal_store(signal);
+                }
             }
         })
     };
@@ -1399,7 +1754,18 @@ pub unsafe extern "C" fn hsa_signal_store_release(signal: HsaSignal, value: Sign
 
 unsafe fn signal_exchange(signal: HsaSignal, value: SignalValue, order: Ordering) -> SignalValue {
     // SAFETY: Callers must supply a live HSA user signal.
-    unsafe { with_signal(signal, |signal| signal.value.swap(value, order)) }.unwrap_or(0)
+    unsafe {
+        with_signal(signal, |signal| {
+            if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
+                let previous = signal.value.load(Ordering::Acquire);
+                flush_device_store(&signal.value, value);
+                previous
+            } else {
+                signal.value.swap(value, order)
+            }
+        })
+    }
+    .unwrap_or(0)
 }
 
 unsafe fn signal_compare_exchange(
@@ -1412,10 +1778,18 @@ unsafe fn signal_compare_exchange(
     // SAFETY: Callers must supply a live HSA user signal.
     unsafe {
         with_signal(signal, |signal| {
-            signal
-                .value
-                .compare_exchange(expected, value, success, failure)
-                .unwrap_or_else(|observed| observed)
+            if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
+                let observed = signal.value.load(Ordering::Acquire);
+                if observed == expected {
+                    flush_device_store(&signal.value, value);
+                }
+                observed
+            } else {
+                signal
+                    .value
+                    .compare_exchange(expected, value, success, failure)
+                    .unwrap_or_else(|observed| observed)
+            }
         })
     }
     .unwrap_or(0)
@@ -1426,9 +1800,37 @@ unsafe fn signal_fetch_update(
     value: SignalValue,
     order: Ordering,
     operation: fn(&AtomicI64, SignalValue, Ordering),
+    plain: fn(SignalValue, SignalValue) -> SignalValue,
 ) {
     // SAFETY: Callers must supply a live HSA user signal.
-    let _ = unsafe { with_signal(signal, |signal| operation(&signal.value, value, order)) };
+    let _ = unsafe {
+        with_signal(signal, |signal| {
+            if batch_needs_flush(std::ptr::from_ref(signal) as usize) {
+                let previous = signal.value.load(Ordering::Acquire);
+                flush_device_store(&signal.value, plain(previous, value));
+            } else {
+                operation(&signal.value, value, order);
+            }
+        })
+    };
+}
+
+macro_rules! signal_plain {
+    (signal_add) => {
+        |old: SignalValue, value: SignalValue| old.wrapping_add(value)
+    };
+    (signal_subtract) => {
+        |old: SignalValue, value: SignalValue| old.wrapping_sub(value)
+    };
+    (signal_and) => {
+        |old: SignalValue, value: SignalValue| old & value
+    };
+    (signal_or) => {
+        |old: SignalValue, value: SignalValue| old | value
+    };
+    (signal_xor) => {
+        |old: SignalValue, value: SignalValue| old ^ value
+    };
 }
 
 fn signal_add(value: &AtomicI64, operand: SignalValue, order: Ordering) {
@@ -1478,12 +1880,12 @@ macro_rules! signal_compare_exchange_entry {
 }
 
 macro_rules! signal_fetch_entry {
-    ($name:ident, $order:expr, $operation:path) => {
+    ($name:ident, $order:expr, $operation:ident) => {
         #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
         #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(signal: HsaSignal, value: SignalValue) {
             // SAFETY: The public entry point preserves the HSA signal contract.
-            unsafe { signal_fetch_update(signal, value, $order, $operation) };
+            unsafe { signal_fetch_update(signal, value, $order, $operation, signal_plain!($operation)) };
         }
     };
 }
@@ -2553,6 +2955,110 @@ pub unsafe extern "C" fn hsa_amd_signal_async_handler(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    fn batch_fixture(count: usize) -> (SignalState, HsaAmdSignalBatch, Vec<HsaSignal>) {
+        let slots: Box<[AmdSignal]> = (0..count)
+            .map(|index| AmdSignal::user(SignalValue::try_from(index).unwrap()))
+            .collect();
+        let signals = slots
+            .iter()
+            .map(|slot| HsaSignal {
+                handle: std::ptr::from_ref(slot) as u64,
+            })
+            .collect::<Vec<_>>();
+        let batch = HsaAmdSignalBatch { handle: 42 };
+        let mut state = SignalState::new();
+        for signal in &signals {
+            state
+                .batch_members
+                .insert(signal.handle as usize, batch.handle);
+        }
+        state.batches.insert(
+            batch.handle,
+            SignalBatchStorage {
+                _backing: SignalBatchBacking::Test(slots),
+                remaining: count,
+                handle_live: true,
+                host_atomics_supported: true,
+                flush_range: None,
+            },
+        );
+        (state, batch, signals)
+    }
+
+    #[test]
+    fn batch_storage_survives_both_destruction_orders() {
+        for handle_first in [false, true] {
+            let (mut state, batch, signals) = batch_fixture(3);
+            if handle_first {
+                assert_eq!(state.destroy_batch(batch), SUCCESS);
+                assert_eq!(state.destroy_batch(batch), INVALID_ARGUMENT);
+            }
+            assert_eq!(state.destroy_signal(signals[0]), SUCCESS);
+            assert_eq!(state.destroy_signal(signals[1]), SUCCESS);
+            assert_eq!(state.destroy_signal(signals[0]), INVALID_SIGNAL);
+            assert!(state.batches.contains_key(&batch.handle));
+            assert!(state.owns_signal(signals[2]));
+            if !handle_first {
+                assert_eq!(state.destroy_batch(batch), SUCCESS);
+            }
+            assert_eq!(state.destroy_signal(signals[2]), SUCCESS);
+            assert!(state.batches.is_empty());
+            assert!(state.batch_members.is_empty());
+        }
+    }
+
+    #[test]
+    fn batch_storage_waits_for_retired_async_member() {
+        let (mut state, batch, signals) = batch_fixture(1);
+        state.retain_async_signal(signals[0]).unwrap();
+        assert_eq!(state.destroy_signal(signals[0]), SUCCESS);
+        assert!(!state.owns_signal(signals[0]));
+        assert_eq!(state.destroy_batch(batch), SUCCESS);
+        assert!(state.batches.contains_key(&batch.handle));
+        state.release_async_signal(signals[0]);
+        assert!(state.batches.is_empty());
+        assert!(state.batch_members.is_empty());
+    }
+
+    #[test]
+    fn device_write_readback_does_not_restore_an_intervening_update() {
+        let value = AtomicI64::new(1);
+        // Model a GPU decrement after the host's store but before its flush.
+        value.fetch_sub(1, Ordering::AcqRel);
+        flush_device_write(&value);
+        assert_eq!(value.load(Ordering::Acquire), 0);
+    }
+
+    #[test]
+    fn posted_store_batch_range_tracks_member_lifetime() {
+        let (mut state, batch, signals) = batch_fixture(1);
+        let signal = signals[0];
+        assert_eq!(state.async_completion_status(signal), SUCCESS);
+        let range = (
+            signal.handle as usize,
+            signal.handle as usize + SIGNAL_BYTES,
+        );
+        flush_batches().push(range);
+        HAS_FLUSH_BATCHES.store(true, Ordering::Release);
+        let storage = state.batches.get_mut(&batch.handle).unwrap();
+        storage.flush_range = Some(range);
+        storage.host_atomics_supported = false;
+        assert_eq!(state.async_completion_status(signal), NOT_SUPPORTED);
+        assert!(batch_needs_flush(range.0));
+        // SAFETY: The fixture retains the aligned signal through all operations.
+        unsafe {
+            hsa_signal_store_relaxed(signal, 5);
+            assert_eq!(hsa_signal_exchange_relaxed(signal, 8), 5);
+            hsa_signal_add_relaxed(signal, 2);
+            assert_eq!(hsa_signal_load_relaxed(signal), 10);
+        }
+        assert_eq!(state.destroy_signal(signal), SUCCESS);
+        assert_eq!(state.async_completion_status(signal), INVALID_SIGNAL);
+        assert!(batch_needs_flush(range.0));
+        assert_eq!(state.destroy_batch(batch), SUCCESS);
+        assert!(!batch_needs_flush(range.0));
+    }
 
     #[test]
     fn first_event_retries_only_after_the_page_was_offered() {
