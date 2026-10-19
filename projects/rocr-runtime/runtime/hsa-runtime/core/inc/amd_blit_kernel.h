@@ -108,6 +108,13 @@ class BlitKernel : public core::Blit {
   virtual hsa_status_t SubmitLinearFillCommand(void* ptr, uint32_t value,
                                                size_t count) override;
 
+  /// @brief Submit an AQL packet to perform memory fill with byte granularity.
+  ///
+  /// @param ptr Memory address of the fill destination.
+  /// @param value Byte value to be set.
+  /// @param size Number of bytes to fill.
+  virtual hsa_status_t SubmitLinearFillCommandBytes(void* ptr, uint8_t value, size_t size) override;
+
   virtual hsa_status_t EnableProfiling(bool enable) override;
 
   virtual uint64_t PendingBytes() override;
@@ -150,6 +157,16 @@ class BlitKernel : public core::Blit {
       uint32_t fill_value;
       uint32_t num_workitems;
     } fill;
+
+    struct __ALIGNED__(16) {
+      uint64_t phase1_dst_start;
+      uint64_t phase2_dst_start;
+      uint64_t phase3_dst_start;
+      uint64_t phase4_dst_start;
+      uint64_t phase4_dst_end;
+      uint32_t fill_value;
+      uint32_t num_workitems;
+    } fill_bytes;
   };
 
   // Index after which bytes will have been written.
@@ -179,6 +196,7 @@ class BlitKernel : public core::Blit {
     CopyAligned,
     CopyMisaligned,
     Fill,
+    FillBytes,
   };
 
   struct KernelCode {
