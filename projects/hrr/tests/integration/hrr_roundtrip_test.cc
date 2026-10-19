@@ -288,15 +288,17 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
  * ----------------
  *   - Spawns Unit_HRR_DeviceInfo_Direct with HIP_HRR_CAPTURE_OUTPUT set, without
  *     HIP_HRR_CAPTURE_CONSENT and with an empty configuration directory. The
- *     workload must still pass, record nothing, and say on stderr that capture
- *     needs consent and which file records it.
+ *     workload must still pass and say on stderr that capture needs consent and
+ *     which file records it. After it exits the capture directory must hold
+ *     nothing, not even an empty or partial pid-* directory: without consent
+ *     hip_capture_enabled() is false, so neither init nor exit writes there.
  *   - Writes yes to that consent file and captures again: the archive is
  *     written and its metadata records capture_consent "file".
  *   - Captures with HIP_HRR_CAPTURE_CONSENT=yes and no consent file: the
  *     metadata records capture_consent "HIP_HRR_CAPTURE_CONSENT".
  *   - On POSIX, puts a FIFO with no writer at the consent path: the workload
- *     must finish within a deadline, unrecorded, instead of blocking HIP's
- *     init in the open of the consent file.
+ *     must finish within a deadline, with nothing written, instead of blocking
+ *     HIP's init in the open of the consent file.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_capture_consent"};
@@ -327,6 +329,12 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
     REQUIRE_FALSE(metadata.empty());
     return json_string_value(metadata, "capture_consent");
   };
+  // Stricter than hrr_process_archives(), which skips a pid-* directory with no
+  // events.bin: any entry at all would be a partial archive.
+  auto nothing_written = [&]() {
+    std::error_code ec;
+    return !fs::exists(cap.path, ec) || fs::is_empty(cap.path, ec);
+  };
 
   {
     const std::string out = capture(/*env_consent=*/false);
@@ -336,7 +344,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
           std::string::npos);
     CHECK(out.find("set HIP_HRR_CAPTURE_CONSENT=yes") != std::string::npos);
     CHECK(out.find("[HRR capture] Recording") == std::string::npos);
-    CHECK(hrr_process_archives(cap.path).empty());
+    CHECK(nothing_written());
   }
 
   {
@@ -369,7 +377,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
     REQUIRE(ret != hrr::test::SpawnProc::kKilledOnTimeout);
     REQUIRE(ret == 0);
     CHECK(out.find("capture needs your consent.") != std::string::npos);
-    CHECK(hrr_process_archives(cap.path).empty());
+    CHECK(nothing_written());
   }
 #endif
 }

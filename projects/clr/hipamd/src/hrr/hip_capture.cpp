@@ -130,8 +130,6 @@ static bool hrr_capture_requested() {
   return false;
 }
 
-bool hip_capture_enabled() { return hrr_capture_requested() && !hrr_secure_exec(); }
-
 // The per-user file that records consent to capture, or "" when the
 // environment names no home for it.
 static std::string hrr_consent_file() {
@@ -188,8 +186,22 @@ static std::string hrr_capture_consent() {
   return line == "yes" ? "file" : "";
 }
 
+// Read once: the answer must not change between hip_capture_init() and the
+// callers that ask later, and hip_capture_enabled() runs on the launch path.
+static const std::string& hrr_consent_source() {
+  static const std::string source = hrr_capture_consent();
+  return source;
+}
+
+// Consent is part of the predicate, so no caller sees capture on after
+// hip_capture_init() refused it. Short-circuits so that the consent file is
+// read only when capture was asked for.
+bool hip_capture_enabled() {
+  return hrr_capture_requested() && !hrr_secure_exec() && !hrr_consent_source().empty();
+}
+
 const char* hip_capture_output_dir() {
-  return HIP_HRR_CAPTURE_OUTPUT;
+  return hip_capture_enabled() ? HIP_HRR_CAPTURE_OUTPUT : "";
 }
 
 // HIP_HRR_DEBUG_ARGS also enables provenance tracing: every H2D memcpy
@@ -2769,19 +2781,18 @@ void hrr_install_clr_exception_handler() {
 void hip_capture_init() {
   #if defined(HIP_HRR_CAPTURE_ENABLED)
     if (!hip_capture_enabled()) {
-      if (hrr_secure_exec() && hrr_capture_requested())
+      if (!hrr_capture_requested()) return;
+      if (hrr_secure_exec()) {
         fprintf(stderr,
                 "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: the program was started in "
                 "secure-execution mode (set-user-ID, set-group-ID, file capabilities or an "
                 "LSM transition).\n");
-      return;
-    }
-
-    // Deliberately not gated on AMD_LOG_LEVEL, like the start notice below: the
-    // user asked for an archive and must learn why there is none. Never prompts:
-    // the process may have no terminal, or many workers sharing one.
-    const std::string consent = hrr_capture_consent();
-    if (consent.empty()) {
+        return;
+      }
+      // No consent. Deliberately not gated on AMD_LOG_LEVEL, like the start
+      // notice below: the user asked for an archive and must learn why there is
+      // none. Never prompts: the process may have no terminal, or many workers
+      // sharing one.
       const std::string file = hrr_consent_file();
       fprintf(stderr,
               "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent. The "
@@ -2832,7 +2843,7 @@ void hip_capture_init() {
 #endif
 
     hrr_cap::writer::set_capture_metadata_json(
-        hrr_cap::metadata::collect_json(consent));
+        hrr_cap::metadata::collect_json(hrr_consent_source()));
 
     hrr_install_clr_exception_handler();
 
@@ -2866,7 +2877,6 @@ void hip_capture_init() {
     (void)&record_fat_binary_blob;
     (void)&record_registered_var;
     (void)&hrr_install_clr_exception_handler;
-    (void)&hrr_capture_consent;
     (void)&g_hrr_atexit_once;
   #endif
 }

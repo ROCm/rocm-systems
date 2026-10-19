@@ -34,10 +34,10 @@ struct Hash128 {
 // ---------------------------------------------------------------------------
 
 // Check if capture is enabled (HIP_HRR_CAPTURE_OUTPUT env var set and not empty or blank,
-// and the process not started in secure-execution mode)
+// the process not started in secure-execution mode, and the user's consent given)
 bool hip_capture_enabled();
 
-// Return the output directory from the env var
+// Return the output directory from the env var, or "" when capture is not enabled
 const char* hip_capture_output_dir();
 
 // Snapshot real fn ptrs (must be called while live table holds real ptrs)
