@@ -17,6 +17,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
+#include "rocjitsu/vm/amdgpu/raw_backing_write_gate.h"
 #include "util/distributed_shared_mutex.h"
 #include "util/unique_handle.h"
 
@@ -24,10 +25,14 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
+#include <span>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -41,6 +46,7 @@ namespace rocjitsu {
 /// @brief DRM BO state (create info, placement, UMD metadata); defined by the interposer.
 /// @details The KFD code only stores and copies pointers to it.
 struct GemObject;
+class PrivateGttCopySourceGate;
 
 /// @brief Per-process KFD state.
 ///
@@ -50,6 +56,9 @@ struct GemObject;
 /// routes ioctls to the correct KfdProcess.
 class KfdProcess {
 public:
+  class PageTableTransaction;
+  enum class SvmAccessMode { Access, AccessInPlace, NoAccess };
+
   /// @brief Per-GPU state within a process.
   struct PerGpuState {
     /// @brief One live client mapping of the canonical doorbell backing.
@@ -76,11 +85,13 @@ public:
   /// @brief Construct a new KFD process with a unique process ID.
   /// @param process_id Unique identifier (analogous to PASID) for CP routing.
   /// @param num_gpus Number of GPU devices (sizes per-GPU state vector).
-  explicit KfdProcess(uint32_t process_id, uint32_t num_gpus = 1)
-      : process_id_(process_id), next_gpu_va_(0x1000000000ULL), gpu_state_(num_gpus) {}
+  explicit KfdProcess(uint32_t process_id, uint32_t num_gpus = 1);
 
   /// @brief Get the process ID (PASID analog).
   uint32_t process_id() const { return process_id_; }
+
+  /// @brief Get the identity shared by this process lifetime's alias permits.
+  uint64_t process_incarnation() const { return process_incarnation_; }
 
   pid_t client_pid() const { return client_pid_; }
   void set_client_pid(pid_t pid) { client_pid_ = pid; }
@@ -99,31 +110,803 @@ public:
     return prev == 1;
   }
 
+  /// @brief Stable driver-owned alias of one IPC-exported VRAM memfd.
+  /// @details The alias starts at file offset zero and is independent of both
+  /// processes' host pointers and GPU virtual addresses. Its last owner may
+  /// outlive the source allocation, exported handle, and all imports.
+  class GpuBacking {
+  public:
+    GpuBacking(size_t size, uint32_t gpu_id, bool controlled_peer_for_testing);
+    ~GpuBacking();
+
+    GpuBacking(const GpuBacking &) = delete;
+    GpuBacking &operator=(const GpuBacking &) = delete;
+
+    [[nodiscard]] static std::shared_ptr<const GpuBacking>
+    create_memfd_alias(int fd, size_t size, uint32_t gpu_id,
+                       bool controlled_peer_for_testing = false);
+    [[nodiscard]] std::byte *data() const { return static_cast<std::byte *>(mapping_); }
+    [[nodiscard]] size_t size() const { return size_; }
+    [[nodiscard]] uint32_t gpu_id() const { return gpu_id_; }
+    [[nodiscard]] uint64_t backing_id() const { return backing_id_; }
+    [[nodiscard]] bool controlled_peer_for_testing() const { return controlled_peer_for_testing_; }
+
+  private:
+    void *mapping_ = nullptr;
+    size_t size_ = 0;
+    uint32_t gpu_id_ = 0;
+    const bool controlled_peer_for_testing_ = false;
+    const uint64_t backing_id_;
+  };
+
+  /// @brief Request-bounded view of canonical BO bytes for a future peer route.
+  /// @details Capturing a lease pins the alias after FREE, CLOSE, or VA reuse.
+  /// Its offset is a memfd file offset, never a process virtual address.
+  class GpuBackingLease {
+  public:
+    GpuBackingLease() = default;
+    [[nodiscard]] explicit operator bool() const { return owner_ != nullptr; }
+    [[nodiscard]] std::byte *data() const { return owner_ ? owner_->data() + offset_ : nullptr; }
+    [[nodiscard]] std::span<std::byte> bytes() const { return {data(), size_}; }
+    [[nodiscard]] uint64_t file_offset() const { return offset_; }
+    [[nodiscard]] size_t size() const { return size_; }
+    [[nodiscard]] uint32_t owner_gpu_id() const { return owner_ ? owner_->gpu_id() : 0; }
+    [[nodiscard]] uint64_t backing_id() const { return owner_ ? owner_->backing_id() : 0; }
+    [[nodiscard]] bool controlled_peer_for_testing() const {
+      return owner_ && owner_->controlled_peer_for_testing();
+    }
+    [[nodiscard]] bool same_backing(const GpuBackingLease &other) const {
+      return owner_ != nullptr && owner_ == other.owner_;
+    }
+
+  private:
+    friend class KfdProcess;
+    GpuBackingLease(std::shared_ptr<const GpuBacking> owner, uint64_t offset, size_t size)
+        : owner_(std::move(owner)), offset_(offset), size_(size) {}
+
+    std::shared_ptr<const GpuBacking> owner_;
+    uint64_t offset_ = 0;
+    size_t size_ = 0;
+  };
+
+  enum class GpuGrantDomain : uint8_t { Unknown, System, Vram, Driver };
+
+  /// @brief Read-only observation of one active retained backing MAP grant.
+  /// @details This record is not an access permit or proof of PTE residency.
+  /// Consumers recheck the live grant and VM binding before an effect or alias
+  /// maintenance, including while MAP is installing or repairing its PTE.
+  /// Canonical and local records live in separate snapshots; local records
+  /// identify cacheable VRAM grants and use their own retained memfd owner.
+  struct GpuAliasRecord {
+    uint64_t backing_id = 0;
+    uint32_t process_id = 0;
+    uint64_t process_incarnation = 0;
+    uint32_t gpu_id = 0;
+    uint64_t gpu_va = 0;
+    uint64_t backing_offset = 0;
+    size_t extent = 0;
+    uint64_t admission_generation = 0;
+    // Local cacheable grants use a separate retained memfd owner. Canonical
+    // peer grants keep their existing snapshot and uncached access policy.
+    bool local = false;
+  };
+  using GpuAliasSnapshot = std::vector<GpuAliasRecord>;
+
   /// @brief GPU memory allocation descriptor.
   struct GpuAllocation {
     uint64_t gpu_va = 0;
     uint64_t size = 0;
     void *host_ptr = nullptr;
     uint32_t flags = 0;
+    GpuGrantDomain domain = GpuGrantDomain::System;
     uint64_t handle = 0;
     int memfd = -1;
     // Public dma-buf access mode retained across IPC import and re-export.
     int export_access_mode = -1;
     uint32_t gpu_id = 0;
     bool user_va = false;
+    // Bytes of the original USERPTR client VMA that still survive host mapping
+    // changes. FREE keeps tombstones only for these bytes.
+    std::vector<std::pair<uint64_t, uint64_t>> userptr_host_vma_spans;
     bool imported = false;
     bool shared = false; ///< Simulator cache policy; does not alter requested ABI flags.
     int dmabuf_fd = -1;
+    // Scratch backing is created by the driver for an executing GPU request,
+    // rather than by an application KFD allocation/MAP sequence.
+    bool driver_gpu_mapping = false;
+    // A page-table allocation failure can leave a mapped prefix. A later
+    // scratch request must finish the map before treating this VA as backed.
+    bool scratch_mapping_incomplete = false;
+    uint64_t driver_admission_generation = 0;
+    // KFD MAP/UNMAP grants. The process page table is shared by all local
+    // GPUs; each GPU's legacy VM binding consults the published grant index.
+    std::unordered_set<uint32_t> mapped_device_ids;
+    std::unordered_map<uint32_t, uint64_t> admission_generations;
+    // A retired noncanonical grant can leave dirty cache lines that still
+    // need the old CPU view, even after UNMAP removes its PTE and generation.
+    bool ever_gpu_admitted = false;
+    uint64_t page_table_mapped_bytes = 0;
+    bool ipc_shared = false;
+    // A controlled test may keep this canonical VRAM allocation cacheable
+    // after IPC export. Public peer allocations never set this policy.
+    bool cacheable_peer_for_testing = false;
+    // A prior DMA-buf export may have created an untracked alias of this fd.
+    bool dmabuf_exported = false;
+    // A first ineligible export after local admission keeps the installed
+    // cache policy while later MAP/mmap repairs extend that same local view.
+    bool ipc_export_retains_local_policy = false;
+    // The first export fixes peer-lease eligibility for this BO lifetime. A
+    // later export must not promote an earlier handle's unleased imports into
+    // a different canonical owner.
+    bool backing_promotion_attempted = false;
+    std::shared_ptr<const GpuBacking> backing_owner;
+    // Stable local sink for cacheable VRAM lines. It never changes the
+    // canonical backing_owner policy used by peer routes and PTE MTYPE.
+    std::shared_ptr<const GpuBacking> local_backing_owner;
+    // FREE keeps these generations after grant publication so failed PTE or
+    // tombstone maintenance can retry the same closed batch.
+    std::vector<GpuAliasRecord> retiring_aliases;
+    bool retirement_in_progress = false;
+    bool grants_retired = false;
+    // A failed host-view or grant mutation may have changed only a PTE prefix.
+    // Keep private GTT COPY admission closed until FREE removes this descriptor.
+    bool private_gtt_copy_source_unstable = false;
+    // Actual size of the CPU mmap owned by the driver. It may be shorter than
+    // size when a caller maps only a prefix of a BO.
+    size_t host_ptr_mapped_bytes = 0;
     // True when the driver created host_ptr (mmap it itself) and must munmap it
     // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages
     // from the thunk) that the driver must never unmap, since unmapping them
     // races with the owning process still accessing the memory.
     bool host_ptr_owned = false;
+    // MAP_FIXED installs a BO view in a caller-selected VMA. KFD owns the
+    // backing descriptor, while the caller retains responsibility for munmap.
+    bool host_ptr_caller_reserved = false;
     // DRM BO state (create info, placement, UMD metadata) for this backing. The
     // kernel BO keeps it after every GEM handle and dmabuf fd closes.
     std::shared_ptr<GemObject> bo_state;
+    int host_view_prot = 0;
+    // A fresh token is assigned whenever the tracked CPU memfd view changes.
+    // Raw MAP generation and host-view generation must both match a COPY permit.
+    uint64_t host_view_generation = 0;
+    std::shared_ptr<PrivateGttCopySourceGate> private_gtt_copy_source_gate;
   };
 
+  /// @brief Authorize one GPU request against the current KFD allocation grants.
+  /// @details GPU access never takes alloc_mutex_. A pinned VM snapshot consults
+  /// this live immutable index on every request, including after MAP/UNMAP.
+  struct GpuGrantDecision {
+    bool allowed = false;
+    uint64_t generation = 0;
+    bool cacheable = true;
+    bool direct_backing_write_allowed = true;
+    // Copied allocation metadata; a regular lookup never retains a BO owner.
+    GpuGrantDomain domain = GpuGrantDomain::Unknown;
+    uint32_t owner_gpu_id = 0;
+    size_t first_extent_bytes = 0;
+    bool peer_candidate = false;
+    bool first_peer_candidate = false;
+    // Only the first range may supply an owned local-write effect. This is
+    // independent of the aggregate raw-backing write policy.
+    bool first_controlled_local_write_candidate = false;
+    uint32_t peer_owner_gpu_id = 0;
+    bool mixed_peer_owners = false;
+  };
+
+  struct GpuPeerBackingDecision {
+    GpuGrantDecision admission;
+    GpuBackingLease backing;
+  };
+
+  [[nodiscard]] std::shared_ptr<const GpuAliasSnapshot> gpu_alias_snapshot() const {
+    const auto grants = gpu_grants_.load(std::memory_order_acquire);
+    return {grants, &grants->aliases};
+  }
+
+  [[nodiscard]] std::shared_ptr<const GpuAliasSnapshot> gpu_local_alias_snapshot() const {
+    const auto grants = gpu_grants_.load(std::memory_order_acquire);
+    return {grants, &grants->local_aliases};
+  }
+
+  struct GpuAliasSnapshots {
+    std::shared_ptr<const GpuAliasSnapshot> canonical;
+    std::shared_ptr<const GpuAliasSnapshot> local;
+  };
+
+  /// @brief Capture both alias kinds from one immutable grant publication.
+  [[nodiscard]] GpuAliasSnapshots gpu_alias_snapshots() const {
+    const auto grants = gpu_grants_.load(std::memory_order_acquire);
+    return {{grants, &grants->aliases}, {grants, &grants->local_aliases}};
+  }
+
+  /// @brief Recheck the raw per-GPU MAP generation of a retained alias.
+  /// @details UC access decisions intentionally expose generation zero, so an
+  /// ingress consumer must compare against this live grant index instead.
+  [[nodiscard]] bool gpu_alias_grant_current(const GpuAliasRecord &alias) const {
+    if (alias.process_id != process_id_ || alias.process_incarnation != process_incarnation_)
+      return false;
+    const auto grants = gpu_grants_.load(std::memory_order_acquire);
+    const GpuAliasSnapshot &aliases = alias.local ? grants->local_aliases : grants->aliases;
+    return grants->valid && std::ranges::any_of(aliases, [&](const GpuAliasRecord &current) {
+             return current.backing_id == alias.backing_id &&
+                    current.process_incarnation == alias.process_incarnation &&
+                    current.gpu_id == alias.gpu_id && current.gpu_va == alias.gpu_va &&
+                    current.backing_offset == alias.backing_offset &&
+                    current.extent == alias.extent &&
+                    current.admission_generation == alias.admission_generation &&
+                    current.local == alias.local;
+           });
+  }
+
+  [[nodiscard]] GpuGrantDecision gpu_access_grant(uint32_t gpu_id, uint64_t address,
+                                                  size_t size) const {
+    return gpu_access_grant_impl(gpu_id, address, size, nullptr);
+  }
+
+  /// @brief Admit and retain a bounded peer backing for one GPU request.
+  /// @details Ordinary CU/SDMA admission avoids owner reference traffic; only
+  /// peer preparation asks the same live grant index for a retained backing.
+  [[nodiscard]] GpuPeerBackingDecision gpu_peer_backing_grant(uint32_t gpu_id, uint64_t address,
+                                                              size_t size) const {
+    GpuPeerBackingDecision result;
+    result.admission = gpu_access_grant_impl(gpu_id, address, size, &result.backing);
+    return result;
+  }
+
+  /// @brief Retain a bounded local memfd sink for a prepared cache writeback.
+  [[nodiscard]] GpuPeerBackingDecision gpu_local_backing_grant(uint32_t gpu_id, uint64_t address,
+                                                               size_t size) const {
+    GpuPeerBackingDecision result;
+    result.admission = gpu_access_grant_impl(gpu_id, address, size, &result.backing, true);
+    return result;
+  }
+
+private:
+  [[nodiscard]] GpuGrantDecision gpu_access_grant_impl(uint32_t gpu_id, uint64_t address,
+                                                       size_t size, GpuBackingLease *backing,
+                                                       bool local_backing = false) const {
+    if (size == 0 || size - 1 > UINT64_MAX - address)
+      return {};
+    const auto grants = gpu_grants_.load(std::memory_order_acquire);
+    if (!grants->valid)
+      return {};
+    // SVM NO_ACCESS also applies to ordinary host pages, which have no KFD
+    // allocation or retired-range entry in the grant index.
+    const uint64_t last_byte = address + size - 1;
+    const auto first_denial =
+        std::lower_bound(grants->svm_denials.begin(), grants->svm_denials.end(),
+                         std::pair{gpu_id, address}, [](const auto &range, const auto &key) {
+                           return std::pair{range.gpu_id, range.gpu_va} < key;
+                         });
+    const auto overlaps = [&](const auto &range) {
+      return range.gpu_id == gpu_id && range.gpu_va <= last_byte &&
+             range.gpu_va + range.size > address;
+    };
+    if ((first_denial != grants->svm_denials.end() && overlaps(*first_denial)) ||
+        (first_denial != grants->svm_denials.begin() && overlaps(*std::prev(first_denial))))
+      return {};
+    uint64_t generation = 0;
+    bool matched = false;
+    bool cacheable = true;
+    std::shared_ptr<const GpuBacking> single_backing;
+    uint64_t backing_offset = 0;
+    uint64_t covered_end = address;
+    uint64_t previous_end = 0;
+    GpuGrantDecision decision;
+    const auto first =
+        std::upper_bound(grants->max_end_prefix.begin(), grants->max_end_prefix.end(), address);
+    for (size_t index = static_cast<size_t>(first - grants->max_end_prefix.begin());
+         index < grants->ranges.size(); ++index) {
+      const auto &range = grants->ranges[index];
+      if (range.gpu_va > last_byte)
+        break;
+      const uint64_t range_end = range.gpu_va + range.size;
+      if (range_end <= address)
+        continue;
+      // Every touched range must join the preceding one without a hole or an
+      // overlap. Keep scanning after covering the request to reject a second
+      // allocation that overlaps an otherwise valid first one.
+      if (range.gpu_va > covered_end || (matched && range.gpu_va < previous_end))
+        return decision;
+      if (!matched) {
+        decision.domain = range.domain;
+        decision.owner_gpu_id = range.owner_gpu_id;
+        decision.first_extent_bytes =
+            static_cast<size_t>(std::min<uint64_t>(size, range_end - address));
+        decision.first_peer_candidate =
+            range.domain == GpuGrantDomain::Vram && range.owner_gpu_id != gpu_id;
+        decision.first_controlled_local_write_candidate =
+            range.domain == GpuGrantDomain::Vram && range.owner_gpu_id == gpu_id &&
+            range.backing_owner &&
+            (range.cacheable_peer_for_testing ||
+             range.backing_owner->controlled_peer_for_testing());
+      }
+      if (range.domain == GpuGrantDomain::Vram && range.owner_gpu_id != gpu_id) {
+        if (decision.peer_candidate && decision.peer_owner_gpu_id != range.owner_gpu_id)
+          decision.mixed_peer_owners = true;
+        if (!decision.peer_candidate)
+          decision.peer_owner_gpu_id = range.owner_gpu_id;
+        decision.peer_candidate = true;
+      }
+      // The controlled peer fixture has no coherence path for owner raw
+      // writes. Accumulate across the entire request, not just its first BO.
+      if (range.domain == GpuGrantDomain::Vram && range.owner_gpu_id == gpu_id &&
+          (range.cacheable_peer_for_testing ||
+           (range.backing_owner && range.backing_owner->controlled_peer_for_testing())))
+        decision.direct_backing_write_allowed = false;
+      uint64_t range_generation = 0;
+      if (range.driver_gpu_mapping) {
+        range_generation = range.driver_admission_generation;
+      } else {
+        const auto grant = range.admission_generations.find(gpu_id);
+        if (grant == range.admission_generations.end())
+          return decision;
+        range_generation = grant->second;
+      }
+      if (!matched) {
+        generation = range_generation;
+        // Production peer aliases follow the UC PCIe BAR mapping policy, so
+        // local access bypasses L2 and the memory-side cache. Controlled
+        // cacheable fixtures explicitly opt into fabric maintenance.
+        cacheable = !range.backing_owner || range.cacheable_peer_for_testing;
+        if (backing) {
+          single_backing = local_backing ? range.local_backing_owner : range.backing_owner;
+          backing_offset = address - range.gpu_va;
+        }
+      } else {
+        cacheable = false;
+        single_backing.reset();
+      }
+      matched = true;
+      covered_end = range_end;
+      previous_end = range_end;
+    }
+    if (matched && covered_end <= last_byte)
+      return decision;
+    // Queue rings and driver-owned mappings can live outside allocations_.
+    // A span crossing grants is valid architecturally, but cannot use one
+    // generation to identify every cache line it touches.
+    if (backing && single_backing && backing_offset <= single_backing->size() &&
+        size <= single_backing->size() - backing_offset)
+      *backing = GpuBackingLease(std::move(single_backing), backing_offset, size);
+    decision.allowed = true;
+    decision.generation = cacheable ? generation : 0;
+    decision.cacheable = cacheable;
+    return decision;
+  }
+
+public:
+  /// @brief Allocate an identity for the next GPU MAP or driver-created range.
+  /// @pre The caller holds alloc_mutex_.
+  uint64_t next_gpu_admission_generation_locked() {
+    if (++gpu_admission_generation_ == 0)
+      ++gpu_admission_generation_;
+    return gpu_admission_generation_;
+  }
+
+  /// @pre The caller holds alloc_mutex_.
+  uint64_t next_host_view_generation_locked() {
+    if (++host_view_generation_ == 0)
+      ++host_view_generation_;
+    return host_view_generation_;
+  }
+
+  /// @brief Keep a freed GPU VA denied while the process VMID remains live.
+  /// @pre The caller holds alloc_mutex_.
+  void retire_gpu_range_locked(uint64_t gpu_va, uint64_t size, bool host_vma_backed = false) {
+    if (size == 0 || size > UINT64_MAX - gpu_va)
+      return;
+    const uint64_t end = gpu_va + size;
+    std::vector<GpuGrantRange> updated;
+    updated.reserve(retired_gpu_ranges_.size() + 3);
+    const auto append = [&updated](GpuGrantRange range) {
+      if (!updated.empty() && updated.back().admission_generations.empty() &&
+          range.admission_generations.empty() &&
+          updated.back().host_vma_backed == range.host_vma_backed &&
+          updated.back().gpu_va + updated.back().size == range.gpu_va) {
+        updated.back().size += range.size;
+      } else {
+        updated.push_back(std::move(range));
+      }
+    };
+    GpuGrantRange denied{gpu_va, size, {}, false, 0, {}, GpuGrantDomain::Unknown, 0, {}};
+    denied.host_vma_backed = host_vma_backed;
+    bool inserted = false;
+    for (const auto &range : retired_gpu_ranges_) {
+      const uint64_t old_end = range.gpu_va + range.size;
+      if (old_end <= gpu_va) {
+        append(range);
+      } else if (end <= range.gpu_va) {
+        if (!inserted) {
+          append(denied);
+          inserted = true;
+        }
+        append(range);
+      } else {
+        // Retiring new bytes revokes their grants, but unrelated portions of
+        // an earlier retired range keep their GPU-specific SVM policy.
+        if (range.gpu_va < gpu_va) {
+          auto prefix = range;
+          prefix.size = gpu_va - range.gpu_va;
+          append(std::move(prefix));
+        }
+        if (end < old_end) {
+          if (!inserted) {
+            append(denied);
+            inserted = true;
+          }
+          auto suffix = range;
+          suffix.gpu_va = end;
+          suffix.size = old_end - end;
+          append(std::move(suffix));
+        }
+      }
+    }
+    if (!inserted)
+      append(denied);
+    retired_gpu_ranges_ = std::move(updated);
+  }
+
+  /// @brief Replace a tombstone only for bytes claimed by a new allocation.
+  /// @pre The caller holds alloc_mutex_.
+  void claim_gpu_range_locked(uint64_t gpu_va, uint64_t size) {
+    if (size == 0 || size > UINT64_MAX - gpu_va)
+      return;
+    const uint64_t end = gpu_va + size;
+    std::vector<GpuGrantRange> remaining;
+    remaining.reserve(retired_gpu_ranges_.size() + 1);
+    for (const auto &range : retired_gpu_ranges_) {
+      const uint64_t old_end = range.gpu_va + range.size;
+      if (old_end <= gpu_va || end <= range.gpu_va) {
+        remaining.push_back(range);
+        continue;
+      }
+      if (range.gpu_va < gpu_va) {
+        auto prefix = range;
+        prefix.size = gpu_va - range.gpu_va;
+        remaining.push_back(std::move(prefix));
+      }
+      if (end < old_end) {
+        auto suffix = range;
+        suffix.gpu_va = end;
+        suffix.size = old_end - end;
+        remaining.push_back(std::move(suffix));
+      }
+    }
+    // A new BO or host view at this VA must not inherit an earlier host SVM
+    // denial. Prepare both vectors before changing either published state.
+    std::vector<GpuSvmDeniedRange> remaining_denials;
+    remaining_denials.reserve(svm_denied_ranges_.size() + 1);
+    for (const auto &range : svm_denied_ranges_) {
+      const uint64_t old_end = range.gpu_va + range.size;
+      if (old_end <= gpu_va || end <= range.gpu_va) {
+        remaining_denials.push_back(range);
+        continue;
+      }
+      if (range.gpu_va < gpu_va)
+        remaining_denials.push_back({range.gpu_id, range.gpu_va, gpu_va - range.gpu_va});
+      if (end < old_end)
+        remaining_denials.push_back({range.gpu_id, end, old_end - end});
+    }
+    (void)clear_svm_access_locked(gpu_va, size);
+    retired_gpu_ranges_ = std::move(remaining);
+    svm_denied_ranges_ = std::move(remaining_denials);
+  }
+
+  /// @brief Set one GPU's SVM access, including ordinary live host memory.
+  /// @pre The caller holds alloc_mutex_ and passes a nonwrapping range.
+  void set_svm_gpu_access_locked(uint64_t gpu_va, uint64_t size, uint32_t gpu_id,
+                                 SvmAccessMode mode) {
+    const uint64_t end = gpu_va + size;
+    std::vector<GpuSvmAccessRange> access;
+    access.reserve(svm_access_ranges_.size() + 3);
+    for (const auto &range : svm_access_ranges_) {
+      const uint64_t old_end = range.gpu_va + range.size;
+      if (range.gpu_id != gpu_id || old_end <= gpu_va || end <= range.gpu_va) {
+        access.push_back(range);
+        continue;
+      }
+      if (range.gpu_va < gpu_va)
+        access.push_back({gpu_id, range.gpu_va, gpu_va - range.gpu_va, range.mode});
+      if (end < old_end)
+        access.push_back({gpu_id, end, old_end - end, range.mode});
+    }
+    access.push_back({gpu_id, gpu_va, size, mode});
+    std::sort(access.begin(), access.end(), [](const auto &left, const auto &right) {
+      return std::pair{left.gpu_id, left.gpu_va} < std::pair{right.gpu_id, right.gpu_va};
+    });
+    std::vector<GpuSvmAccessRange> merged_access;
+    merged_access.reserve(access.size());
+    for (const auto &range : access) {
+      if (!merged_access.empty() && merged_access.back().gpu_id == range.gpu_id &&
+          merged_access.back().mode == range.mode &&
+          merged_access.back().gpu_va + merged_access.back().size == range.gpu_va) {
+        merged_access.back().size += range.size;
+      } else {
+        merged_access.push_back(range);
+      }
+    }
+    std::vector<GpuSvmDeniedRange> updated;
+    updated.reserve(svm_denied_ranges_.size() + 3);
+    for (const auto &range : svm_denied_ranges_) {
+      const uint64_t old_end = range.gpu_va + range.size;
+      if (range.gpu_id != gpu_id || old_end <= gpu_va || end <= range.gpu_va) {
+        updated.push_back(range);
+        continue;
+      }
+      if (range.gpu_va < gpu_va)
+        updated.push_back({gpu_id, range.gpu_va, gpu_va - range.gpu_va});
+      if (end < old_end)
+        updated.push_back({gpu_id, end, old_end - end});
+    }
+    if (mode == SvmAccessMode::NoAccess)
+      updated.push_back({gpu_id, gpu_va, size});
+    std::sort(updated.begin(), updated.end(), [](const auto &left, const auto &right) {
+      return std::pair{left.gpu_id, left.gpu_va} < std::pair{right.gpu_id, right.gpu_va};
+    });
+    std::vector<GpuSvmDeniedRange> merged;
+    merged.reserve(updated.size());
+    for (const auto &range : updated) {
+      if (!merged.empty() && merged.back().gpu_id == range.gpu_id &&
+          merged.back().gpu_va + merged.back().size >= range.gpu_va) {
+        const uint64_t merged_end =
+            std::max(merged.back().gpu_va + merged.back().size, range.gpu_va + range.size);
+        merged.back().size = merged_end - merged.back().gpu_va;
+      } else {
+        merged.push_back(range);
+      }
+    }
+    svm_denied_ranges_ = std::move(merged);
+    svm_access_ranges_ = std::move(merged_access);
+  }
+
+  /// @brief Return the access shared by every byte in a queried GPU range.
+  /// @details An unspecified byte defaults to ACCESS. Any NO_ACCESS byte
+  /// makes the intersection inaccessible; an ACCESS_IN_PLACE byte restricts
+  /// the result to in-place access.
+  /// @pre The caller holds alloc_mutex_ and passes a nonwrapping range.
+  [[nodiscard]] SvmAccessMode svm_gpu_access_locked(uint64_t gpu_va, uint64_t size,
+                                                    uint32_t gpu_id) const {
+    const uint64_t end = gpu_va + size;
+    bool has_in_place = false;
+    for (const auto &range : svm_access_ranges_) {
+      if (range.gpu_id != gpu_id || range.gpu_va >= end || range.gpu_va + range.size <= gpu_va)
+        continue;
+      if (range.mode == SvmAccessMode::NoAccess)
+        return SvmAccessMode::NoAccess;
+      has_in_place |= range.mode == SvmAccessMode::AccessInPlace;
+    }
+    return has_in_place ? SvmAccessMode::AccessInPlace : SvmAccessMode::Access;
+  }
+
+  /// @brief Forget explicit SVM modes when their host VA is replaced or claimed.
+  /// @pre The caller holds alloc_mutex_ and passes a nonwrapping range.
+  [[nodiscard]] bool clear_svm_access_locked(uint64_t gpu_va, uint64_t size) {
+    const uint64_t end = gpu_va + size;
+    if (std::ranges::none_of(svm_access_ranges_, [&](const auto &range) {
+          return range.gpu_va < end && gpu_va < range.gpu_va + range.size;
+        }))
+      return false;
+    std::vector<GpuSvmAccessRange> remaining;
+    remaining.reserve(svm_access_ranges_.size() + 1);
+    bool changed = false;
+    for (const auto &range : svm_access_ranges_) {
+      const uint64_t old_end = range.gpu_va + range.size;
+      if (old_end <= gpu_va || end <= range.gpu_va) {
+        remaining.push_back(range);
+        continue;
+      }
+      changed = true;
+      if (range.gpu_va < gpu_va)
+        remaining.push_back({range.gpu_id, range.gpu_va, gpu_va - range.gpu_va, range.mode});
+      if (end < old_end)
+        remaining.push_back({range.gpu_id, end, old_end - end, range.mode});
+    }
+    if (changed)
+      svm_access_ranges_ = std::move(remaining);
+    return changed;
+  }
+
+  /// @brief Forget SVM policy tied to host VMA bytes removed or replaced by libc.
+  /// @details Preserve unrelated GPU-only tombstones and surviving USERPTR bytes.
+  /// @pre The caller holds alloc_mutex_ and passes a nonwrapping range.
+  [[nodiscard]] bool clear_host_svm_policy_locked(uint64_t gpu_va, uint64_t size,
+                                                  uint64_t preserve_userptr_handle = 0) {
+    const uint64_t end = gpu_va + size;
+    const auto overlaps = [&](const auto &range) {
+      return range.gpu_va < end && gpu_va < range.gpu_va + range.size;
+    };
+    for (auto &[handle, allocation] : allocations_) {
+      if (handle == preserve_userptr_handle)
+        continue;
+      if (std::ranges::none_of(allocation.userptr_host_vma_spans, [&](const auto &span) {
+            return span.first < end && gpu_va < span.first + span.second;
+          }))
+        continue;
+      std::vector<std::pair<uint64_t, uint64_t>> surviving;
+      surviving.reserve(allocation.userptr_host_vma_spans.size() + 1);
+      for (const auto &[start, length] : allocation.userptr_host_vma_spans) {
+        const uint64_t span_end = start + length;
+        if (span_end <= gpu_va || end <= start) {
+          surviving.emplace_back(start, length);
+          continue;
+        }
+        if (start < gpu_va)
+          surviving.emplace_back(start, gpu_va - start);
+        if (end < span_end)
+          surviving.emplace_back(end, span_end - end);
+      }
+      allocation.userptr_host_vma_spans = std::move(surviving);
+    }
+    const bool has_denials = std::ranges::any_of(svm_denied_ranges_, overlaps);
+    const bool has_access = std::ranges::any_of(svm_access_ranges_, overlaps);
+    const bool has_host_tombstones =
+        std::ranges::any_of(retired_gpu_ranges_, [&](const auto &range) {
+          return range.host_vma_backed && overlaps(range);
+        });
+    if (!has_denials && !has_host_tombstones && !has_access)
+      return false;
+    std::vector<GpuSvmDeniedRange> remaining;
+    if (has_denials) {
+      remaining.reserve(svm_denied_ranges_.size() + 1);
+      for (const auto &range : svm_denied_ranges_) {
+        const uint64_t old_end = range.gpu_va + range.size;
+        if (old_end <= gpu_va || end <= range.gpu_va) {
+          remaining.push_back(range);
+          continue;
+        }
+        if (range.gpu_va < gpu_va)
+          remaining.push_back({range.gpu_id, range.gpu_va, gpu_va - range.gpu_va});
+        if (end < old_end)
+          remaining.push_back({range.gpu_id, end, old_end - end});
+      }
+    }
+    std::vector<GpuGrantRange> remaining_retired;
+    if (has_host_tombstones) {
+      remaining_retired.reserve(retired_gpu_ranges_.size() + 1);
+      for (const auto &range : retired_gpu_ranges_) {
+        const uint64_t old_end = range.gpu_va + range.size;
+        if (!range.host_vma_backed || old_end <= gpu_va || end <= range.gpu_va) {
+          remaining_retired.push_back(range);
+          continue;
+        }
+        if (range.gpu_va < gpu_va) {
+          auto prefix = range;
+          prefix.size = gpu_va - range.gpu_va;
+          remaining_retired.push_back(std::move(prefix));
+        }
+        if (end < old_end) {
+          auto suffix = range;
+          suffix.gpu_va = end;
+          suffix.size = old_end - end;
+          remaining_retired.push_back(std::move(suffix));
+        }
+      }
+    }
+    if (has_access)
+      (void)clear_svm_access_locked(gpu_va, size);
+    if (has_denials)
+      svm_denied_ranges_ = std::move(remaining);
+    if (has_host_tombstones)
+      retired_gpu_ranges_ = std::move(remaining_retired);
+    return true;
+  }
+
+  /// @brief Change one GPU's grant within retired GPU VA tombstones.
+  /// @details Other GPU grants and the denied portions outside this span remain
+  /// intact. The caller publishes the changed grant index before releasing
+  /// alloc_mutex_.
+  /// @pre The caller holds alloc_mutex_ and passes a nonwrapping range.
+  void set_retired_gpu_access_locked(uint64_t gpu_va, uint64_t size, uint32_t gpu_id,
+                                     bool allowed) {
+    const uint64_t end = gpu_va + size;
+    std::vector<GpuGrantRange> updated;
+    updated.reserve(retired_gpu_ranges_.size() + 2);
+    for (const auto &range : retired_gpu_ranges_) {
+      const uint64_t old_end = range.gpu_va + range.size;
+      if (old_end <= gpu_va || end <= range.gpu_va) {
+        updated.push_back(range);
+        continue;
+      }
+      const uint64_t changed_begin = std::max(gpu_va, range.gpu_va);
+      const uint64_t changed_end = std::min(end, old_end);
+      if (range.gpu_va < changed_begin) {
+        auto prefix = range;
+        prefix.size = changed_begin - range.gpu_va;
+        updated.push_back(std::move(prefix));
+      }
+      auto changed = range;
+      changed.gpu_va = changed_begin;
+      changed.size = changed_end - changed_begin;
+      if (allowed)
+        changed.admission_generations[gpu_id] = next_gpu_admission_generation_locked();
+      else
+        changed.admission_generations.erase(gpu_id);
+      updated.push_back(std::move(changed));
+      if (changed_end < old_end) {
+        auto suffix = range;
+        suffix.gpu_va = changed_end;
+        suffix.size = old_end - changed_end;
+        updated.push_back(std::move(suffix));
+      }
+    }
+    retired_gpu_ranges_ = std::move(updated);
+  }
+
+  /// @brief Publish a copied grant view after changing allocations_ or MAP/UNMAP.
+  /// @pre The caller holds alloc_mutex_.
+  void publish_gpu_grants_locked();
+  /// @brief Publish while retaining the request lock across grant and PTE work.
+  /// @pre The caller holds alloc_mutex_ and owns a transaction for this process.
+  void publish_gpu_grants_locked(PageTableTransaction &transaction);
+  /// @brief Deny GPU access permanently if host VMA cleanup cannot publish.
+  /// @pre The caller holds alloc_mutex_. No allocation occurs on this path.
+  void fail_closed_gpu_grants_locked() noexcept {
+    gpu_grants_poisoned_ = true;
+    gpu_grants_.store(deny_all_gpu_grants_, std::memory_order_release);
+  }
+
+private:
+  void publish_gpu_grants_impl_locked() {
+    if (gpu_grants_poisoned_) {
+      gpu_grants_.store(deny_all_gpu_grants_, std::memory_order_release);
+      return;
+    }
+    auto next = std::make_shared<GpuGrantIndex>();
+    next->svm_denials = svm_denied_ranges_;
+    next->ranges.reserve(allocations_.size() + retired_gpu_ranges_.size());
+    for (const auto &[handle, allocation] : allocations_) {
+      (void)handle;
+      const auto domain =
+          allocation.driver_gpu_mapping ? GpuGrantDomain::Driver : allocation.domain;
+      next->ranges.push_back({allocation.gpu_va, allocation.size, allocation.admission_generations,
+                              allocation.driver_gpu_mapping, allocation.driver_admission_generation,
+                              allocation.backing_owner, domain, allocation.gpu_id,
+                              allocation.local_backing_owner,
+                              allocation.cacheable_peer_for_testing});
+    }
+    next->ranges.insert(next->ranges.end(), retired_gpu_ranges_.begin(), retired_gpu_ranges_.end());
+    std::sort(next->ranges.begin(), next->ranges.end(),
+              [](const GpuGrantRange &left, const GpuGrantRange &right) {
+                return left.gpu_va < right.gpu_va;
+              });
+    next->max_end_prefix.reserve(next->ranges.size());
+    uint64_t maximum_end = 0;
+    for (const auto &range : next->ranges) {
+      if (range.size == 0 || range.size > UINT64_MAX - range.gpu_va) {
+        next->valid = false;
+        break;
+      }
+      maximum_end = std::max(maximum_end, range.gpu_va + range.size);
+      next->max_end_prefix.push_back(maximum_end);
+    }
+    if (next->valid) {
+      for (const auto &range : next->ranges) {
+        if (range.domain != GpuGrantDomain::Vram || range.driver_gpu_mapping)
+          continue;
+        const auto publish_aliases = [&](const std::shared_ptr<const GpuBacking> &owner,
+                                         GpuAliasSnapshot &aliases, bool local) {
+          if (!owner || owner->gpu_id() != range.owner_gpu_id || range.size > owner->size())
+            return;
+          for (const auto &[gpu_id, generation] : range.admission_generations) {
+            if (generation == 0)
+              continue;
+            aliases.push_back({owner->backing_id(), process_id_, process_incarnation_, gpu_id,
+                               range.gpu_va, 0, static_cast<size_t>(range.size), generation,
+                               local});
+          }
+        };
+        publish_aliases(range.backing_owner, next->aliases, false);
+        // Once canonical promotion takes ownership, the local cacheable
+        // generation cannot also appear as a second alias of those bytes.
+        if (!range.backing_owner)
+          publish_aliases(range.local_backing_owner, next->local_aliases, true);
+      }
+    }
+    gpu_grants_.store(std::move(next), std::memory_order_release);
+  }
+
+public:
   /// @brief Memory policy descriptor.
   struct MemoryPolicy {
     uint64_t alternate_base = 0;
@@ -364,78 +1147,224 @@ public:
   static constexpr uint64_t kPageShift = amdgpu::kLegacyPageShift;
   static constexpr uint64_t kPageSize = amdgpu::kLegacyPageSize;
   using HostExtentOwner = amdgpu::LegacyHostExtentOwner;
+  using VaOwnerKind = amdgpu::LegacyGpuVaOwnerKind;
+  using VaOwner = amdgpu::LegacyGpuVaOwner;
   using HostExtent = amdgpu::LegacyHostExtent;
   using PageTableEntry = amdgpu::LegacyPageTableEntry;
   using PageTable = amdgpu::LegacyPageTable;
+
+  enum class PageTableMutationResult : uint8_t {
+    Applied,
+    ForeignOwnerCollision,
+    InvalidRange,
+    InvalidTransaction,
+  };
+
+  /// @brief Hold the process request lock across a GPU VA ownership change.
+  /// @details GEM replacement must retain this token while its bookkeeping and
+  /// PTE changes are committed, so a KFD writer cannot enter between them.
+  class PageTableTransaction {
+  public:
+    PageTableTransaction(const PageTableTransaction &) = delete;
+    PageTableTransaction &operator=(const PageTableTransaction &) = delete;
+    PageTableTransaction(PageTableTransaction &&) = default;
+    PageTableTransaction &operator=(PageTableTransaction &&) = default;
+
+  private:
+    friend class KfdProcess;
+    explicit PageTableTransaction(KfdProcess &process)
+        : process_(&process), request_lock_(*process.page_table_request_mutex_) {}
+
+    KfdProcess *process_;
+    std::unique_lock<util::DistributedSharedMutex> request_lock_;
+  };
+
+  [[nodiscard]] PageTableTransaction begin_page_table_transaction() {
+    return PageTableTransaction(*this);
+  }
+
+  /// @brief Test published KFD grants while a VA ownership transaction is held.
+  /// @details Missing or malformed state is treated as occupied. Unmapped
+  /// allocations and retired tombstones have no active admission generation.
+  bool active_gpu_grant_overlaps(PageTableTransaction &transaction, uint64_t gpu_va,
+                                 size_t size) const {
+    if (transaction.process_ != this || !transaction.request_lock_.owns_lock() || size == 0 ||
+        size - 1 > UINT64_MAX - gpu_va)
+      return true;
+    const auto grants = gpu_grants_.load(std::memory_order_acquire);
+    if (!grants || !grants->valid)
+      return true;
+    const uint64_t last_byte = gpu_va + size - 1;
+    for (const auto &range : grants->ranges) {
+      if (range.size == 0 || range.size > UINT64_MAX - range.gpu_va)
+        return true;
+      if (range.gpu_va <= last_byte && gpu_va <= range.gpu_va + range.size - 1 &&
+          (!range.admission_generations.empty() || range.driver_gpu_mapping))
+        return true;
+    }
+    return false;
+  }
+
+  /// @brief Preflight a proposed map while a transaction protects GEM state.
+  /// @details Applied means no resident extent of the other interface overlaps
+  /// the requested bytes. The later map must use this same transaction.
+  PageTableMutationResult has_foreign_resident_overlap(PageTableTransaction &transaction,
+                                                       uint64_t gpu_va, size_t size,
+                                                       VaOwner va_owner) const {
+    if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
+      return PageTableMutationResult::InvalidTransaction;
+    if (size == 0)
+      return PageTableMutationResult::Applied;
+    if (size - 1 > UINT64_MAX - gpu_va)
+      return PageTableMutationResult::InvalidRange;
+    std::unique_lock lock(page_table_mutex_);
+    return has_foreign_va_overlap_locked(gpu_va, size, va_owner, false)
+               ? PageTableMutationResult::ForeignOwnerCollision
+               : PageTableMutationResult::Applied;
+  }
 
   /// @brief Map host pages into this process's GPU page table.
   /// @param mtype PTE MTYPE for these pages (derived from allocation flags).
   /// @param owner Who may revoke the backing; see HostExtentOwner. Defaults to
   ///        Application so an unannotated caller is validated rather than
   ///        trusted.
-  void map_pages(uint64_t gpu_va, void *host_ptr, size_t size,
-                 amdgpu::Mtype mtype = amdgpu::Mtype::RW,
-                 HostExtentOwner owner = HostExtentOwner::Application) {
-    std::unique_lock request_lock(*page_table_request_mutex_);
+  PageTableMutationResult map_pages(uint64_t gpu_va, void *host_ptr, size_t size,
+                                    amdgpu::Mtype mtype = amdgpu::Mtype::RW,
+                                    HostExtentOwner owner = HostExtentOwner::Application,
+                                    VaOwner va_owner = {}) {
+    auto transaction = begin_page_table_transaction();
+    return map_pages(transaction, gpu_va, host_ptr, size, mtype, owner, va_owner);
+  }
+
+  PageTableMutationResult map_pages(PageTableTransaction &transaction, uint64_t gpu_va,
+                                    void *host_ptr, size_t size,
+                                    amdgpu::Mtype mtype = amdgpu::Mtype::RW,
+                                    HostExtentOwner owner = HostExtentOwner::Application,
+                                    VaOwner va_owner = {}) {
+    if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
+      return PageTableMutationResult::InvalidTransaction;
+    if (size == 0)
+      return PageTableMutationResult::Applied;
+    if (size - 1 > UINT64_MAX - gpu_va)
+      return PageTableMutationResult::InvalidRange;
     std::unique_lock lock(page_table_mutex_);
+    if (has_foreign_va_overlap_locked(gpu_va, size, va_owner, false))
+      return PageTableMutationResult::ForeignOwnerCollision;
+    // MTYPE is a page field. A disjoint subpage map may coexist with the
+    // other interface only when it preserves that page's existing policy.
+    uint64_t inspected_va = gpu_va;
+    size_t inspected_bytes = 0;
+    while (inspected_bytes < size) {
+      const auto page = page_table_.find(inspected_va >> kPageShift);
+      if (page != page_table_.end() && page->second.mtype != mtype &&
+          has_foreign_va_overlap_locked(inspected_va, 1, va_owner, false, true))
+        return PageTableMutationResult::ForeignOwnerCollision;
+      const size_t chunk =
+          std::min<size_t>(kPageSize - (inspected_va & (kPageSize - 1)), size - inspected_bytes);
+      inspected_va += chunk;
+      inspected_bytes += chunk;
+    }
     invalidate_page_policies_locked();
     auto *base = static_cast<uint8_t *>(host_ptr);
     uint64_t mapped_va = gpu_va;
     size_t host_offset = 0;
-    while (host_offset < size) {
-      const size_t gpu_page_offset = mapped_va & (kPageSize - 1);
-      const size_t host_backed_bytes =
-          std::min<size_t>(kPageSize - gpu_page_offset, size - host_offset);
-      auto [page, inserted] =
-          page_table_.try_emplace(mapped_va >> kPageShift, base + host_offset, mtype,
-                                  host_backed_bytes, gpu_page_offset, owner);
-      if (!inserted) {
-        page->second.mtype = mtype;
-        replace_host_extent(page->second,
-                            {base + host_offset, host_backed_bytes, gpu_page_offset, owner});
+    try {
+      while (host_offset < size) {
+        const size_t gpu_page_offset = mapped_va & (kPageSize - 1);
+        const size_t host_backed_bytes =
+            std::min<size_t>(kPageSize - gpu_page_offset, size - host_offset);
+        auto [page, inserted] =
+            page_table_.try_emplace(mapped_va >> kPageShift, base + host_offset, mtype,
+                                    host_backed_bytes, gpu_page_offset, owner, va_owner);
+        if (!inserted) {
+          page->second.mtype = mtype;
+          replace_host_extent(page->second, {base + host_offset, host_backed_bytes, gpu_page_offset,
+                                             owner, va_owner});
+        }
+        mapped_va += host_backed_bytes;
+        host_offset += host_backed_bytes;
       }
-      mapped_va += host_backed_bytes;
-      host_offset += host_backed_bytes;
+    } catch (...) {
+      // An allocation failure can leave a mapped prefix or an updated MTYPE.
+      // Cached translations must still observe the changed page table.
+      publish_page_table_mutation_locked();
+      throw;
     }
     // Keep publication in the page-table critical section. Cached readers
     // validate this generation while holding the shared side of the same lock;
     // publishing after unlock would permit a stale-cache hit in between.
     publish_page_table_mutation_locked();
+    return PageTableMutationResult::Applied;
   }
 
   /// @brief Unmap pages from this process's GPU page table.
-  void unmap_pages(uint64_t gpu_va, size_t size) {
-    std::unique_lock request_lock(*page_table_request_mutex_);
+  PageTableMutationResult unmap_pages(uint64_t gpu_va, size_t size, VaOwner va_owner = {}) {
+    auto transaction = begin_page_table_transaction();
+    return unmap_pages(transaction, gpu_va, size, va_owner);
+  }
+
+  PageTableMutationResult unmap_pages(PageTableTransaction &transaction, uint64_t gpu_va,
+                                      size_t size, VaOwner va_owner = {}) {
+    if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
+      return PageTableMutationResult::InvalidTransaction;
+    if (size == 0)
+      return PageTableMutationResult::Applied;
+    if (size - 1 > UINT64_MAX - gpu_va)
+      return PageTableMutationResult::InvalidRange;
     std::unique_lock lock(page_table_mutex_);
+    if (has_foreign_va_overlap_locked(gpu_va, size, va_owner, true))
+      return PageTableMutationResult::ForeignOwnerCollision;
     invalidate_page_policies_locked();
     uint64_t mapped_va = gpu_va;
     size_t unmapped_bytes = 0;
-    while (unmapped_bytes < size) {
-      const size_t chunk =
-          std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - unmapped_bytes);
-      auto page = page_table_.find(mapped_va >> kPageShift);
-      if (page != page_table_.end()) {
-        // Avoid building a temporary extent vector for a page being discarded.
-        if (chunk != kPageSize)
-          erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
-        if (chunk == kPageSize || page->second.host_extents.empty())
-          page_table_.erase(page);
+    try {
+      while (unmapped_bytes < size) {
+        const size_t chunk =
+            std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - unmapped_bytes);
+        auto page = page_table_.find(mapped_va >> kPageShift);
+        if (page != page_table_.end()) {
+          // Avoid building a temporary extent vector for a page being discarded.
+          if (chunk != kPageSize)
+            erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
+          if (chunk == kPageSize || page->second.host_extents.empty())
+            page_table_.erase(page);
+        }
+        mapped_va += chunk;
+        unmapped_bytes += chunk;
       }
-      mapped_va += chunk;
-      unmapped_bytes += chunk;
+    } catch (...) {
+      publish_page_table_mutation_locked();
+      throw;
     }
     // See map_pages(): the mutation and generation publication are one
     // page-table critical section by design.
     publish_page_table_mutation_locked();
+    return PageTableMutationResult::Applied;
   }
 
   /// @brief Replace mapped host pages while preserving their other PTE fields.
   /// @details The mutation and cache-generation publication occur under one
   /// page-table critical section. Only entries still pointing at the expected
   /// old page are changed.
-  void remap_page_host_ptrs(uint64_t gpu_va, void *old_host_ptr, void *new_host_ptr, size_t size) {
-    std::unique_lock request_lock(*page_table_request_mutex_);
+  PageTableMutationResult remap_page_host_ptrs(uint64_t gpu_va, void *old_host_ptr,
+                                               void *new_host_ptr, size_t size,
+                                               VaOwner va_owner = {}) {
+    auto transaction = begin_page_table_transaction();
+    return remap_page_host_ptrs(transaction, gpu_va, old_host_ptr, new_host_ptr, size, va_owner);
+  }
+
+  PageTableMutationResult remap_page_host_ptrs(PageTableTransaction &transaction, uint64_t gpu_va,
+                                               void *old_host_ptr, void *new_host_ptr, size_t size,
+                                               VaOwner va_owner = {}) {
+    if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
+      return PageTableMutationResult::InvalidTransaction;
+    if (size == 0)
+      return PageTableMutationResult::Applied;
+    if (size - 1 > UINT64_MAX - gpu_va)
+      return PageTableMutationResult::InvalidRange;
     std::unique_lock lock(page_table_mutex_);
+    if (has_foreign_va_overlap_locked(gpu_va, size, va_owner, false))
+      return PageTableMutationResult::ForeignOwnerCollision;
     invalidate_page_policies_locked();
     auto *old_base = static_cast<uint8_t *>(old_host_ptr);
     auto *new_base = static_cast<uint8_t *>(new_host_ptr);
@@ -465,12 +1394,29 @@ public:
     }
     if (changed)
       publish_page_table_mutation_locked();
+    return PageTableMutationResult::Applied;
   }
 
   /// @brief Update the MTYPE of mapped pages and invalidate cached PTE copies.
-  void set_page_mtype(uint64_t gpu_va, size_t size, amdgpu::Mtype mtype) {
-    std::unique_lock request_lock(*page_table_request_mutex_);
+  PageTableMutationResult set_page_mtype(uint64_t gpu_va, size_t size, amdgpu::Mtype mtype,
+                                         VaOwner va_owner = {}) {
+    auto transaction = begin_page_table_transaction();
+    return set_page_mtype(transaction, gpu_va, size, mtype, va_owner);
+  }
+
+  PageTableMutationResult set_page_mtype(PageTableTransaction &transaction, uint64_t gpu_va,
+                                         size_t size, amdgpu::Mtype mtype, VaOwner va_owner = {}) {
+    if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
+      return PageTableMutationResult::InvalidTransaction;
+    if (size == 0)
+      return PageTableMutationResult::Applied;
+    if (size - 1 > UINT64_MAX - gpu_va)
+      return PageTableMutationResult::InvalidRange;
     std::unique_lock lock(page_table_mutex_);
+    // MTYPE belongs to a whole PTE. Even a disjoint foreign extent within one
+    // touched page would have its memory policy changed by this operation.
+    if (has_foreign_va_overlap_locked(gpu_va, size, va_owner, false, true))
+      return PageTableMutationResult::ForeignOwnerCollision;
     invalidate_page_policies_locked();
     bool changed = false;
     uint64_t mapped_va = gpu_va;
@@ -488,6 +1434,7 @@ public:
     }
     if (changed)
       publish_page_table_mutation_locked();
+    return PageTableMutationResult::Applied;
   }
 
   /// @brief Return the mutation counter used by GpuMemory translation caches.
@@ -519,6 +1466,9 @@ public:
   // -- Per-process state --
 
   uint32_t process_id_;
+  // Address spaces are installed once for a KfdProcess and removed on close.
+  // This distinguishes a later process/VM binding that reuses its numeric ID.
+  const uint64_t process_incarnation_;
   pid_t client_pid_ = 0;
   std::atomic<uint32_t> open_ref_count_{1};
 
@@ -528,6 +1478,10 @@ public:
   /// waiting for signals that SET_EVENT/RESET_EVENT (which DO run under this lock)
   /// must produce, so holding it would deadlock forward progress.
   std::mutex op_mutex_;
+  /// @brief Canonical retirements queued for or holding the publication writer.
+  /// @details Mmap and munmap can reject this process's own in-flight close
+  /// without making unrelated processes fail on the global publication gate.
+  std::atomic<uint32_t> canonical_retirements_pending_{0};
   mutable std::mutex alloc_mutex_;
   /// @brief Serializes scratch-pool backing allocation for this process.
   /// @details Every XCD of a fanned-out dispatch independently finds the same
@@ -539,6 +1493,64 @@ public:
   /// page_table_mutex_}; nothing taken under it reaches a command processor.
   std::mutex scratch_backing_mutex_;
   std::unordered_map<uint64_t, GpuAllocation> allocations_;
+  struct GpuGrantRange {
+    uint64_t gpu_va = 0;
+    uint64_t size = 0;
+    std::unordered_map<uint32_t, uint64_t> admission_generations;
+    bool driver_gpu_mapping = false;
+    uint64_t driver_admission_generation = 0;
+    std::shared_ptr<const GpuBacking> backing_owner;
+    GpuGrantDomain domain = GpuGrantDomain::Unknown;
+    uint32_t owner_gpu_id = 0;
+    std::shared_ptr<const GpuBacking> local_backing_owner;
+    bool cacheable_peer_for_testing = false;
+    // A freed USERPTR tombstone lasts only while its original host VMA exists.
+    bool host_vma_backed = false;
+  };
+  struct GpuSvmDeniedRange {
+    uint32_t gpu_id = 0;
+    uint64_t gpu_va = 0;
+    uint64_t size = 0;
+  };
+  struct GpuSvmAccessRange {
+    uint32_t gpu_id = 0;
+    uint64_t gpu_va = 0;
+    uint64_t size = 0;
+    SvmAccessMode mode = SvmAccessMode::Access;
+  };
+  struct GpuGrantIndex {
+    std::vector<GpuGrantRange> ranges;
+    // Disjoint within each GPU, sorted by (gpu_id, gpu_va).
+    std::vector<GpuSvmDeniedRange> svm_denials;
+    GpuAliasSnapshot aliases;
+    GpuAliasSnapshot local_aliases;
+    // Monotonic end of all ranges through each sorted position. It locates an
+    // earlier long overlap that a search on range starts alone would miss.
+    std::vector<uint64_t> max_end_prefix;
+    bool valid = true;
+  };
+  std::atomic<std::shared_ptr<const GpuGrantIndex>> gpu_grants_{
+      std::make_shared<const GpuGrantIndex>()};
+  std::shared_ptr<const GpuGrantIndex> deny_all_gpu_grants_ = [] {
+    auto denied = std::make_shared<GpuGrantIndex>();
+    denied->valid = false;
+    return denied;
+  }();
+  bool gpu_grants_poisoned_ = false;
+  std::shared_ptr<amdgpu::VmRawBackingWriteGate> raw_write_gate_ =
+      std::make_shared<amdgpu::VmRawBackingWriteGate>();
+  uint64_t gpu_admission_generation_ = 0;
+  uint64_t host_view_generation_ = 0;
+  std::vector<GpuGrantRange> retired_gpu_ranges_;
+  std::vector<GpuSvmDeniedRange> svm_denied_ranges_;
+  // Explicit SVM access modes, disjoint within each GPU. Unlike the grant
+  // index, this also retains ACCESS versus ACCESS_IN_PLACE for GET_ATTR.
+  std::vector<GpuSvmAccessRange> svm_access_ranges_;
+  struct RetiredIdentityView {
+    uint64_t gpu_va;
+    size_t mapped_bytes;
+  };
+  std::vector<RetiredIdentityView> retired_identity_views_;
   uint64_t next_handle_ = 1;
   uint64_t next_gpu_va_;
 
@@ -781,6 +1793,35 @@ public:
   RuntimeState runtime_state_;
 
 private:
+  /// @pre page_table_mutex_ is held, and the range has been checked for wrap.
+  bool has_foreign_va_overlap_locked(uint64_t gpu_va, size_t size, VaOwner va_owner, bool unmapping,
+                                     bool whole_pages = false) const {
+    uint64_t mapped_va = gpu_va;
+    size_t examined_bytes = 0;
+    while (examined_bytes < size) {
+      const size_t page_offset = mapped_va & (kPageSize - 1);
+      const size_t chunk = std::min<size_t>(kPageSize - page_offset, size - examined_bytes);
+      const size_t range_begin = whole_pages ? 0 : page_offset;
+      const size_t range_end = whole_pages ? kPageSize : page_offset + chunk;
+      const auto page = page_table_.find(mapped_va >> kPageShift);
+      if (page != page_table_.end()) {
+        for (const auto &extent : page->second.host_extents) {
+          const size_t extent_begin = extent.gpu_page_offset;
+          const size_t extent_end = extent_begin + extent.host_backed_bytes;
+          if (extent_end <= range_begin || range_end <= extent_begin)
+            continue;
+          if (extent.va_owner.kind != va_owner.kind ||
+              (unmapping && va_owner.identity != 0 && extent.va_owner.identity != 0 &&
+               extent.va_owner.identity != va_owner.identity))
+            return true;
+        }
+      }
+      mapped_va += chunk;
+      examined_bytes += chunk;
+    }
+    return false;
+  }
+
   static void normalize_host_extents(PageTableEntry &page) {
     auto &extents = page.host_extents;
     if (extents.size() > 1)
@@ -791,7 +1832,7 @@ private:
         continue;
       if (out > 0) {
         auto &previous = extents[out - 1];
-        if (previous.owner == extent.owner &&
+        if (previous.owner == extent.owner && previous.va_owner == extent.va_owner &&
             previous.gpu_page_offset + previous.host_backed_bytes == extent.gpu_page_offset &&
             previous.host_ptr + previous.host_backed_bytes == extent.host_ptr) {
           previous.host_backed_bytes += extent.host_backed_bytes;
@@ -820,11 +1861,12 @@ private:
         continue;
       }
       if (extent_begin < replacement_begin)
-        updated.push_back(
-            {extent.host_ptr, replacement_begin - extent_begin, extent_begin, extent.owner});
+        updated.push_back({extent.host_ptr, replacement_begin - extent_begin, extent_begin,
+                           extent.owner, extent.va_owner});
       if (replacement_end < extent_end)
         updated.push_back({extent.host_ptr + (replacement_end - extent_begin),
-                           extent_end - replacement_end, replacement_end, extent.owner});
+                           extent_end - replacement_end, replacement_end, extent.owner,
+                           extent.va_owner});
     }
     updated.push_back(replacement);
     page.host_extents = std::move(updated);
@@ -843,11 +1885,11 @@ private:
         continue;
       }
       if (extent_begin < erased_begin)
-        updated.push_back(
-            {extent.host_ptr, erased_begin - extent_begin, extent_begin, extent.owner});
+        updated.push_back({extent.host_ptr, erased_begin - extent_begin, extent_begin, extent.owner,
+                           extent.va_owner});
       if (erased_end < extent_end)
         updated.push_back({extent.host_ptr + (erased_end - extent_begin), extent_end - erased_end,
-                           erased_end, extent.owner});
+                           erased_end, extent.owner, extent.va_owner});
     }
     page.host_extents = std::move(updated);
     normalize_host_extents(page);
@@ -878,5 +1920,16 @@ private:
   std::shared_ptr<amdgpu::LegacyPageTableCacheState> page_table_cache_state_ =
       std::make_shared<amdgpu::LegacyPageTableCacheState>();
 };
+
+inline void KfdProcess::publish_gpu_grants_locked() {
+  auto transaction = begin_page_table_transaction();
+  publish_gpu_grants_locked(transaction);
+}
+
+inline void KfdProcess::publish_gpu_grants_locked(PageTableTransaction &transaction) {
+  if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
+    throw std::logic_error("GPU grant publication requires a live page-table transaction");
+  publish_gpu_grants_impl_locked();
+}
 
 } // namespace rocjitsu

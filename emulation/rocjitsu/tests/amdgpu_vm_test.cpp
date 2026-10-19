@@ -1208,8 +1208,9 @@ TEST(AqlDispatchTest, InvalidationRefetchesInstructionsAlreadyInCache) {
   EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(1, kProcessId));
 }
 
-TEST(AqlDispatchTest, RevokedWaveSetupRecoversBeforeExecution) {
+TEST(AqlDispatchTest, RevokedWaveSetupRecoversOnlyOnTheSameRoot) {
   using namespace rocjitsu::amdhsa;
+  enum class RootChange : uint8_t { None, Invalidate, Replace };
   constexpr uint32_t kProcessId = 77;
   constexpr uint32_t kQueueId = 1;
   constexpr uint32_t kExceptionEvent = 19;
@@ -1238,11 +1239,15 @@ TEST(AqlDispatchTest, RevokedWaveSetupRecoversBeforeExecution) {
   };
 
   // Revoke before a kernarg preload, or between scratch's initial probe and
-  // post-allocation validation. Neither setup path has executed guest code;
-  // both must release the uncommitted workgroup and allow it to complete.
+  // post-allocation validation. Neither setup path has executed guest code.
+  // Invalidation may retry on the same root; replacement must fault before
+  // wave dispatch or completion publication.
   for (bool scratch : {false, true}) {
-    for (bool invalidate : {false, true}) {
-      SCOPED_TRACE(testing::Message() << "scratch=" << scratch << ", invalidate=" << invalidate);
+    for (RootChange root_change : {RootChange::None, RootChange::Invalidate, RootChange::Replace}) {
+      const bool invalidate = root_change != RootChange::None;
+      const bool replace_root = root_change == RootChange::Replace;
+      SCOPED_TRACE(testing::Message()
+                   << "scratch=" << scratch << ", root_change=" << static_cast<int>(root_change));
       VmFixture fixture;
       ASSERT_NO_FATAL_FAILURE(fixture.initialize("cdna5", /*num_cus=*/1, /*num_wf_slots=*/2));
       auto translator = std::make_shared<amdgpu::IdentityAddressSpaceTranslator>();
@@ -1257,6 +1262,10 @@ TEST(AqlDispatchTest, RevokedWaveSetupRecoversBeforeExecution) {
       const auto invalidate_once = [&] {
         if (invalidate && invalidations == 0) {
           ASSERT_TRUE(fixture.soc_ptr->gpu_vm().invalidate(address_space));
+          if (replace_root) {
+            ASSERT_TRUE(
+                fixture.soc_ptr->gpu_vm().replace_translated(address_space, translator, physical));
+          }
           ++invalidations;
         }
       };
@@ -1326,11 +1335,13 @@ TEST(AqlDispatchTest, RevokedWaveSetupRecoversBeforeExecution) {
 
       EXPECT_EQ(invalidations, invalidate ? 1u : 0u);
       EXPECT_TRUE(fixture.cu()->is_idle());
-      EXPECT_FALSE(fixture.cp()->queue_faulted_for_test(kQueueId, kProcessId));
-      EXPECT_EQ(completion_signal_value(fixture.mem(), kCompletionSignal), 0);
+      EXPECT_EQ(fixture.cp()->queue_faulted_for_test(kQueueId, kProcessId), replace_root);
+      EXPECT_EQ(completion_signal_value(fixture.mem(), kCompletionSignal), replace_root ? 1 : 0);
       EXPECT_EQ(exception_count, 0u);
       EXPECT_EQ(snapshot_faults, 0u);
-      EXPECT_EQ(observed->preloaded_values.size(), 2u);
+      EXPECT_EQ(observed->preloaded_values.size(), replace_root ? 0u : 2u);
+      if (replace_root)
+        continue;
       if (observed->preloaded_values.size() != 2)
         continue;
       if (scratch) {
@@ -2338,6 +2349,106 @@ TEST(GpuMemoryTest, PageTableUnmapPreservesSurvivingOwners) {
     process.map_pages(base + 16, backing.data() + 16, 16, amdgpu::Mtype::UC, owner);
     EXPECT_EQ(extents, (std::vector<amdgpu::LegacyHostExtent>{{backing.data(), 64, 0, owner}}));
   }
+}
+
+TEST(GpuMemoryTest, PageTableRejectsCrossInterfaceSubpageOverlapAtomically) {
+  using Result = KfdProcess::PageTableMutationResult;
+  using VaOwner = KfdProcess::VaOwner;
+  using VaKind = KfdProcess::VaOwnerKind;
+  constexpr uint64_t base = 0x40000000;
+  std::array<uint8_t, 64> backing{};
+  KfdProcess process(7);
+
+  ASSERT_EQ(process.map_pages(base, backing.data(), 16), Result::Applied);
+  ASSERT_EQ(process.map_pages(base + 16, backing.data() + 16, 16, amdgpu::Mtype::RW,
+                              KfdProcess::HostExtentOwner::Application, VaOwner{VaKind::Gem, 91}),
+            Result::Applied);
+  const auto original = process.page_table_.at(base >> KfdProcess::kPageShift);
+  const uint64_t generation = *process.page_table_generation();
+
+  // A late conflict cannot leave the earlier bytes partially replaced.
+  EXPECT_EQ(process.map_pages(base + 32, backing.data() + 32, 16, amdgpu::Mtype::UC),
+            Result::ForeignOwnerCollision);
+  EXPECT_EQ(process.map_pages(base, backing.data() + 32, 32), Result::ForeignOwnerCollision);
+  EXPECT_EQ(process.unmap_pages(base, 32), Result::ForeignOwnerCollision);
+  EXPECT_EQ(process.map_pages(base + 8, backing.data() + 8, 16, amdgpu::Mtype::RW,
+                              KfdProcess::HostExtentOwner::Application, VaOwner{VaKind::Gem, 92}),
+            Result::ForeignOwnerCollision);
+  EXPECT_EQ(process.remap_page_host_ptrs(base, backing.data(), backing.data() + 32, 32),
+            Result::ForeignOwnerCollision);
+  // MTYPE is stored once per page, so even disjoint extents share its policy.
+  EXPECT_EQ(process.set_page_mtype(base, 16, amdgpu::Mtype::UC), Result::ForeignOwnerCollision);
+  EXPECT_EQ(process.page_table_.at(base >> KfdProcess::kPageShift), original);
+  EXPECT_EQ(*process.page_table_generation(), generation);
+
+  EXPECT_EQ(process.unmap_pages(base, 16), Result::Applied);
+  const auto &remaining = process.page_table_.at(base >> KfdProcess::kPageShift).host_extents;
+  ASSERT_EQ(remaining.size(), 1u);
+  EXPECT_EQ(remaining.front().va_owner, (VaOwner{VaKind::Gem, 91}));
+  EXPECT_EQ(remaining.front().gpu_page_offset, 16u);
+}
+
+TEST(GpuMemoryTest, PageTableGemIdentitySurvivesSplitAndRejectsStaleTeardown) {
+  using Result = KfdProcess::PageTableMutationResult;
+  using VaOwner = KfdProcess::VaOwner;
+  using VaKind = KfdProcess::VaOwnerKind;
+  constexpr uint64_t base = 0x40000000;
+  std::array<uint8_t, 64> backing{};
+  KfdProcess process(7);
+  const VaOwner old_owner{VaKind::Gem, 91};
+  const VaOwner replacement_owner{VaKind::Gem, 92};
+
+  auto transaction = process.begin_page_table_transaction();
+  ASSERT_EQ(process.has_foreign_resident_overlap(transaction, base, backing.size(), old_owner),
+            Result::Applied);
+  ASSERT_EQ(process.map_pages(transaction, base, backing.data(), backing.size(), amdgpu::Mtype::RW,
+                              KfdProcess::HostExtentOwner::Application, old_owner),
+            Result::Applied);
+  ASSERT_EQ(process.map_pages(transaction, base + 16, backing.data() + 16, 16, amdgpu::Mtype::RW,
+                              KfdProcess::HostExtentOwner::Application, replacement_owner),
+            Result::Applied);
+  const auto original = process.page_table_.at(base >> KfdProcess::kPageShift);
+  ASSERT_EQ(original.host_extents.size(), 3u);
+  EXPECT_EQ(original.host_extents.front().va_owner, old_owner);
+  EXPECT_EQ(original.host_extents[1].va_owner, replacement_owner);
+  EXPECT_EQ(original.host_extents.back().va_owner, old_owner);
+
+  EXPECT_EQ(process.unmap_pages(transaction, base, backing.size(), old_owner),
+            Result::ForeignOwnerCollision);
+  EXPECT_EQ(process.page_table_.at(base >> KfdProcess::kPageShift), original);
+  EXPECT_EQ(process.unmap_pages(transaction, base + 16, 16, replacement_owner), Result::Applied);
+  EXPECT_EQ(process.unmap_pages(transaction, base, 16, old_owner), Result::Applied);
+  EXPECT_EQ(process.unmap_pages(transaction, base + 32, 32, old_owner), Result::Applied);
+  EXPECT_FALSE(process.page_table_.contains(base >> KfdProcess::kPageShift));
+}
+
+TEST(GpuMemoryTest, PageTableTransactionObservesPublishedActiveKfdGrants) {
+  constexpr uint64_t base = 0x40000000;
+  KfdProcess process(7);
+  KfdProcess::GpuAllocation allocation;
+  allocation.gpu_va = base;
+  allocation.size = 32;
+  process.allocations_.emplace(1, std::move(allocation));
+  auto transaction = process.begin_page_table_transaction();
+
+  const auto publish = [&] {
+    std::lock_guard lock(process.alloc_mutex_);
+    process.publish_gpu_grants_locked(transaction);
+  };
+  publish();
+  EXPECT_FALSE(process.active_gpu_grant_overlaps(transaction, base, 32));
+  EXPECT_FALSE(process.active_gpu_grant_overlaps(transaction, base + 32, 1));
+
+  process.allocations_.at(1).admission_generations[42] = 1;
+  publish();
+  EXPECT_TRUE(process.active_gpu_grant_overlaps(transaction, base + 31, 2));
+  EXPECT_FALSE(process.active_gpu_grant_overlaps(transaction, base + 32, 1));
+
+  process.allocations_.at(1).admission_generations.clear();
+  process.allocations_.at(1).driver_gpu_mapping = true;
+  publish();
+  EXPECT_TRUE(process.active_gpu_grant_overlaps(transaction, base, 1));
+  EXPECT_TRUE(process.active_gpu_grant_overlaps(transaction, UINT64_MAX, 2));
 }
 
 TEST(GpuMemoryTest, SamePageMappingsRemainIndependent) {

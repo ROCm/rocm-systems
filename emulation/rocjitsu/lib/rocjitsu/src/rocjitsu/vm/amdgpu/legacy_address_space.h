@@ -13,6 +13,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/memory_transaction.h"
+#include "rocjitsu/vm/amdgpu/raw_backing_write_gate.h"
 #include "simdojo/components/sparse_memory.h"
 #include "simdojo/sim/component.h"
 #include "util/distributed_shared_mutex.h"
@@ -72,6 +73,7 @@ namespace rocjitsu {
 namespace amdgpu {
 
 class LegacyAddressSpaceTestAccess;
+class LegacyAddressSpace;
 
 static_assert(kLegacyPageShift == simdojo::SparseMemory::PAGE_SHIFT,
               "KFD and sparse-memory page shifts must match");
@@ -147,6 +149,22 @@ public:
   virtual void report_memory_fault(uint32_t vmid, uint64_t addr, MemoryFaultCause cause) = 0;
 };
 
+/// @brief The owned effect required for a compatibility data request.
+enum class LegacyDeferredCandidate : uint8_t {
+  None,                 ///< The request has no deferred backing effect.
+  Peer,                 ///< Read or write through a peer backing owner.
+  ControlledLocalWrite, ///< Write through the local backing owner under a token.
+};
+
+/// @brief A copied route classification for one compatibility data request.
+struct LegacyDataRoute {
+  VmDataRoute route = VmDataRoute::Local;
+  // The first allocation boundary limits a synchronous or deferred step. A
+  // local write with no proven extent cannot authorize a raw backing path.
+  std::size_t first_extent_bytes = 0;
+  LegacyDeferredCandidate candidate = LegacyDeferredCandidate::None;
+};
+
 /// @brief Complete frontend contribution to one legacy address-space binding.
 class LegacyAddressSpaceRegistration {
 public:
@@ -161,6 +179,21 @@ public:
   int client_mem_fd = -1;
   bool passthrough = false;
   MemoryFaultReporter *fault_reporter = nullptr;
+  /// Optional live per-device allocation policy for the compatibility binding.
+  std::function<VmAccessAdmission(uint64_t, std::size_t, VmAccessKind)> access_admission = {};
+  /// Optional nonblocking permit across raw admission and backing mutation.
+  std::shared_ptr<VmRawBackingWriteGate> raw_write_gate = {};
+  /// Copied grant metadata; classification must not retain a backing owner.
+  std::function<LegacyDataRoute(uint64_t, std::size_t, VmAccessKind)> data_route = {};
+  /// Prepare one owned candidate chunk. Empty means the candidate must fault.
+  /// @details The operation must retain write bytes and the VM effect gate until
+  /// its owner event completes or proves revocation. ControlledLocalWrite is
+  /// supplied only for writes; Peer may prepare reads or writes.
+  std::function<std::unique_ptr<VmDeferredTransfer>(
+      LegacyDeferredCandidate, uint64_t, std::size_t, std::span<const std::byte>, bool,
+      const std::shared_ptr<VmTransferEffectGate> &, const GpuVmAccess &,
+      std::shared_ptr<const LegacyAddressSpace>)>
+      prepare_deferred_transfer = {};
 };
 
 /// @brief Why a block access ended, once a faulted address is distinguishable
@@ -505,6 +538,51 @@ public:
                  chunk;
         return ea < kUserSpaceLimit && chunk <= kUserSpaceLimit - ea &&
                page.read_valid_pointer(page_offset, chunk) != nullptr;
+      });
+    });
+  }
+
+  /// @brief Check every byte of a mapped host extent for readable protection.
+  /// @details Peer effect admission uses this before cache maintenance. Unlike
+  /// has_host_backing(), a PROT_NONE application extent cannot pass this probe.
+  bool has_readable_host_backing(uint64_t addr, uint32_t vmid, size_t size) const {
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - addr)
+      return false;
+    return for_each_page_chunk_until(addr, size, [&](uint64_t ea, size_t, size_t chunk) {
+      return with_page_mapping(ea, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage) {
+        if (!pte)
+          return false;
+        struct Span {
+          size_t value_offset = 0;
+          uint8_t *host_ptr = nullptr;
+          size_t size = 0;
+          const LegacyHostExtent *extent = nullptr;
+        };
+        std::vector<Span> spans;
+        const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
+        const size_t mapped_bytes =
+            for_each_mapped_span(*pte, ea & PAGE_MASK, chunk,
+                                 [&](size_t value_offset, uint8_t *host_ptr, size_t span_size,
+                                     const LegacyHostExtent &extent) {
+                                   spans.push_back({value_offset, host_ptr, span_size, &extent});
+                                 });
+        if (mapped_bytes != chunk)
+          return false;
+        std::ranges::sort(spans, {}, &Span::value_offset);
+        size_t covered = 0;
+        for (const Span &span : spans) {
+          if (span.value_offset != covered ||
+              addressable_prefix(span.host_ptr, span.size) != span.size)
+            return false;
+          if (span.extent->owner != LegacyHostExtentOwner::Driver &&
+              span.extent->owner != LegacyHostExtentOwner::DriverSealedRam) {
+            const PageWritability protection = host_range_writability(span.host_ptr, span.size);
+            if (protection != PageWritability::Writable && protection != PageWritability::ReadOnly)
+              return false;
+          }
+          covered += span.size;
+        }
+        return covered == chunk;
       });
     });
   }

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ipaddress
 import json
 import math
 import os
@@ -20,7 +21,8 @@ import stat
 import subprocess
 import sys
 from collections.abc import Iterator, Sequence
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 SocketIdentity = tuple[int, int]
 DEFAULT_PROBE_TIMEOUT_SECONDS = 10.0
@@ -31,6 +33,62 @@ MANAGED_TERMINATION_SIGNALS = frozenset((signal.SIGTERM, signal.SIGINT))
 
 class GuestRunError(ValueError):
     """A QEMU or vfio-user launch requirement was not satisfied."""
+
+
+def validate_network_endpoint(value: str) -> str:
+    """Return a safe, canonical IPv4 endpoint for QEMU's socket netdev."""
+
+    host, separator, port_text = value.rpartition(":")
+    if not separator:
+        raise GuestRunError("network socket endpoint must be numeric IPv4 HOST:PORT")
+    try:
+        address = ipaddress.IPv4Address(host)
+    except ipaddress.AddressValueError as error:
+        raise GuestRunError(
+            "network socket endpoint must be numeric IPv4 HOST:PORT"
+        ) from error
+    if len(port_text) > 5 or not port_text.isascii() or not port_text.isdecimal():
+        raise GuestRunError("network socket port must be in 1..65535")
+    port = int(port_text)
+    if not 1 <= port <= 65535:
+        raise GuestRunError("network socket port must be in 1..65535")
+    return f"{address}:{port}"
+
+
+def validate_network_mac(value: str) -> str:
+    """Require six hexadecimal octets with the multicast bit clear."""
+
+    octets = value.split(":")
+    hex_digits = "0123456789abcdefABCDEF"
+    if len(octets) != 6 or any(
+        len(octet) != 2 or any(digit not in hex_digits for digit in octet)
+        for octet in octets
+    ):
+        raise GuestRunError("network MAC must be six colon-separated hex octets")
+    parsed = [int(octet, 16) for octet in octets]
+    if parsed[0] & 1:
+        raise GuestRunError("network MAC must be unicast")
+    return ":".join(f"{octet:02x}" for octet in parsed)
+
+
+@dataclass(frozen=True)
+class SocketNetwork:
+    """Validated settings for one optional QEMU socket NIC."""
+
+    mode: Literal["listen", "connect", "mcast"]
+    endpoint: str
+    mac: str
+
+    def __post_init__(self) -> None:
+        if self.mode not in ("listen", "connect", "mcast"):
+            raise GuestRunError(f"unknown network socket mode: {self.mode}")
+        object.__setattr__(self, "endpoint", validate_network_endpoint(self.endpoint))
+        if (
+            self.mode == "mcast"
+            and not ipaddress.IPv4Address(self.endpoint.rpartition(":")[0]).is_multicast
+        ):
+            raise GuestRunError("mcast network endpoint must be multicast IPv4")
+        object.__setattr__(self, "mac", validate_network_mac(self.mac))
 
 
 @contextlib.contextmanager
@@ -157,6 +215,24 @@ def require_qemu_vfio_user(qemu: Path, timeout: float) -> None:
         raise GuestRunError("QEMU does not provide the vfio-user-pci device")
 
 
+def require_qemu_atomic_ports(qemu: Path, timeout: float) -> None:
+    """Check that root completion and switch routing are opt-in properties."""
+
+    for device, properties in (
+        ("pcie-root-port", ("x-atomic-comp32=", "x-atomic-comp64=")),
+        ("x3130-upstream", ("x-atomic-route=",)),
+        ("xio3130-downstream", ("x-atomic-route=",)),
+    ):
+        result = run_capability_probe(
+            [str(qemu), "-device", f"{device},help"],
+            f"QEMU {device} AtomicOp property probe",
+            timeout,
+        )
+        detail = "\n".join(part for part in (result.stdout, result.stderr) if part)
+        if result.returncode != 0 or any(prop not in detail for prop in properties):
+            raise GuestRunError(f"QEMU {device} lacks opt-in AtomicOp properties")
+
+
 def require_rocjitsu_vfio_user(rocjitsu: Path, timeout: float) -> None:
     """Require a rocjitsu binary built with its VFIO-user front end."""
 
@@ -198,7 +274,19 @@ def build_qemu_arguments(
     accelerator: str,
     memory: str,
     append: str,
+    socket_network: SocketNetwork | None = None,
+    p2v_switch_topology: bool = False,
+    p2v_atomic_root: bool = False,
+    smp: int = 1,
 ) -> list[str]:
+    if smp < 1:
+        raise GuestRunError("guest CPU count must be positive")
+    if socket_network is not None and len(socket_paths) > 4:
+        raise GuestRunError("socket networking supports at most four VFIO-user devices")
+    if p2v_switch_topology and len(socket_paths) not in (2, 4):
+        raise GuestRunError("P2V switch topology requires two or four GPU sockets")
+    if p2v_atomic_root and not p2v_switch_topology:
+        raise GuestRunError("P2V AtomicOp root requires the switch topology")
     cpu = "host,+hypervisor" if accelerator == "kvm" else "qemu64,+hypervisor"
     arguments = [
         str(qemu),
@@ -219,13 +307,47 @@ def build_qemu_arguments(
         "-append",
         append,
     ]
+    if smp != 1:
+        arguments.extend(["-smp", str(smp)])
+    if p2v_switch_topology:
+        root_port = (
+            "pcie-root-port,id=p2v-rp,bus=pcie.0,addr=0x4,chassis=1,slot=4,"
+            "x-speed=2_5,x-width=1"
+        )
+        upstream = "x3130-upstream,id=p2v-up,bus=p2v-rp,addr=0x0"
+        if p2v_atomic_root:
+            root_port += ",x-atomic-comp32=on,x-atomic-comp64=on"
+            upstream += ",x-atomic-route=on"
+        for bridge in (root_port, upstream):
+            arguments.extend(["-device", bridge])
+        for ordinal in range(len(socket_paths)):
+            downstream = (
+                f"xio3130-downstream,id=p2v-down-{ordinal},bus=p2v-up,"
+                f"addr=0x{ordinal:x},chassis={ordinal + 2},slot={ordinal}"
+            )
+            if p2v_atomic_root:
+                downstream += ",x-atomic-route=on"
+            arguments.extend(
+                [
+                    "-device",
+                    downstream,
+                ]
+            )
     for ordinal, socket_path in enumerate(socket_paths):
         device: dict[str, Any] = {
             "driver": "vfio-user-pci",
             "rombar": 0,
             "socket": {"type": "unix", "path": str(socket_path)},
         }
-        if len(socket_paths) > 1:
+        if p2v_switch_topology:
+            device.update(
+                {
+                    "bus": f"p2v-down-{ordinal}",
+                    "addr": "0x0",
+                    "id": f"rocjitsu-gpu-{ordinal}",
+                }
+            )
+        elif len(socket_paths) > 1 or socket_network is not None:
             # Keep low slots and the Q35 chipset's upper slots available.
             if ordinal + 4 >= 0x1C:
                 raise GuestRunError("too many VFIO-user devices for Q35 PCI slots")
@@ -240,6 +362,32 @@ def build_qemu_arguments(
             [
                 "-device",
                 json.dumps(device, separators=(",", ":"), sort_keys=True),
+            ]
+        )
+    if socket_network is not None:
+        netdev_id = "rocjitsu-net0"
+        netdev = (
+            f"socket,id={netdev_id},{socket_network.mode}={socket_network.endpoint}"
+        )
+        if socket_network.mode == "mcast":
+            netdev += ",localaddr=127.0.0.1"
+        arguments.extend(
+            [
+                "-netdev",
+                netdev,
+                "-device",
+                json.dumps(
+                    {
+                        "driver": "virtio-net-pci",
+                        "netdev": netdev_id,
+                        "mac": socket_network.mac,
+                        "bus": "pcie.0",
+                        "addr": "0x8",
+                        "id": "rocjitsu-nic0",
+                    },
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
             ]
         )
     arguments.extend(
@@ -502,6 +650,16 @@ def positive_seconds(value: str) -> float:
     return seconds
 
 
+def positive_cpu_count(value: str) -> int:
+    try:
+        count = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a positive CPU count") from error
+    if count < 1:
+        raise argparse.ArgumentTypeError("must be a positive CPU count")
+    return count
+
+
 def parse_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--kernel", required=True, type=Path)
@@ -518,7 +676,47 @@ def parse_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
         help="VFIO-user socket for one local GPU; repeat in GPU ordinal order",
     )
     parser.add_argument("--node", help="local node ID in a system manifest")
+    parser.add_argument(
+        "--fabric-effect-trace",
+        action="store_true",
+        help="capture directed local GPU effects in the VFIO server",
+    )
+    parser.add_argument(
+        "--p2v-switch-topology",
+        action="store_true",
+        help="place two or four GPUs behind one diagnostic X3130 switch",
+    )
+    parser.add_argument(
+        "--p2v-atomic-root",
+        action="store_true",
+        help="advertise 32/64-bit root completion and switch routing for a verified atomic DMA backend",
+    )
+    network_socket = parser.add_mutually_exclusive_group()
+    network_socket.add_argument(
+        "--net-socket-listen",
+        metavar="HOST:PORT",
+        help="listen for a QEMU socket network peer at a numeric IPv4 address",
+    )
+    network_socket.add_argument(
+        "--net-socket-connect",
+        metavar="HOST:PORT",
+        help="connect to a QEMU socket network peer at a numeric IPv4 address",
+    )
+    network_socket.add_argument(
+        "--net-socket-mcast",
+        metavar="GROUP:PORT",
+        help="join a same-host multicast Ethernet segment through the loopback interface",
+    )
+    parser.add_argument(
+        "--net-mac", metavar="MAC", help="unicast MAC for the socket network NIC"
+    )
     parser.add_argument("--accel", choices=("auto", "kvm", "tcg"), default="auto")
+    parser.add_argument(
+        "--smp",
+        type=positive_cpu_count,
+        default=1,
+        help="guest virtual CPUs (default: 1)",
+    )
     parser.add_argument("--memory", default="4G")
     parser.add_argument("--append", default="console=ttyS0 panic=-1")
     parser.add_argument(
@@ -536,12 +734,31 @@ def parse_arguments(arguments: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expect-log", action="append", default=[])
     parser.add_argument("--reject-log", action="append", default=[])
     parser.add_argument("--dry-run", action="store_true")
-    return parser.parse_args(arguments)
+    args = parser.parse_args(arguments)
+    has_network_socket = (
+        args.net_socket_listen is not None
+        or args.net_socket_connect is not None
+        or args.net_socket_mcast is not None
+    )
+    if has_network_socket != (args.net_mac is not None):
+        parser.error("--net-mac must be specified with a network socket option")
+    return args
 
 
 def main(arguments: list[str] | None = None) -> int:
     args = parse_arguments(arguments)
     try:
+        socket_network = None
+        if args.net_socket_listen is not None:
+            socket_network = SocketNetwork(
+                "listen", args.net_socket_listen, args.net_mac
+            )
+        elif args.net_socket_connect is not None:
+            socket_network = SocketNetwork(
+                "connect", args.net_socket_connect, args.net_mac
+            )
+        elif args.net_socket_mcast is not None:
+            socket_network = SocketNetwork("mcast", args.net_socket_mcast, args.net_mac)
         kernel = require_file(args.kernel, "guest kernel")
         initramfs = require_file(args.initramfs, "guest initramfs")
         qemu = require_executable(args.qemu, "QEMU")
@@ -554,11 +771,17 @@ def main(arguments: list[str] | None = None) -> int:
         socket_paths = validate_socket_paths(
             output, args.socket or [output / "vfio-user.sock"]
         )
+        if socket_network is not None and len(socket_paths) > 4:
+            raise GuestRunError(
+                "socket networking supports at most four VFIO-user devices"
+            )
 
         accelerator = select_accelerator(
             args.accel, available_accelerators(qemu, args.probe_timeout)
         )
         require_qemu_vfio_user(qemu, args.probe_timeout)
+        if args.p2v_atomic_root:
+            require_qemu_atomic_ports(qemu, args.probe_timeout)
         require_rocjitsu_vfio_user(rocjitsu, args.probe_timeout)
         qemu_arguments = build_qemu_arguments(
             qemu,
@@ -568,6 +791,10 @@ def main(arguments: list[str] | None = None) -> int:
             accelerator,
             args.memory,
             args.append,
+            socket_network,
+            args.p2v_switch_topology,
+            args.p2v_atomic_root,
+            args.smp,
         )
         server_arguments = [
             str(rocjitsu),
@@ -576,6 +803,8 @@ def main(arguments: list[str] | None = None) -> int:
         ]
         if args.node is not None:
             server_arguments.extend(["--node", args.node])
+        if args.fabric_effect_trace:
+            server_arguments.append("--fabric-effect-trace")
         for socket_path in socket_paths:
             server_arguments.extend(["--vfio-socket", str(socket_path)])
         if args.dry_run:

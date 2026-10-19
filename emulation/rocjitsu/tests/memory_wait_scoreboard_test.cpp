@@ -1330,6 +1330,52 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
   }
 }
 
+TEST(MemoryWaitExecutionTest, FlatLdsWaitUsesTheWavesAperture) {
+  constexpr uint64_t kSharedBase = 0x10000000;
+  for (uint64_t cu_base : {uint64_t{0}, uint64_t{0x20000000}}) {
+    SCOPED_TRACE(cu_base);
+    GpuMemory memory("wave_aperture_wait_memory");
+    L2Cache l2("wave_aperture_wait_l2");
+    ComputeUnitCore::Config config{};
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 32;
+    config.lds_size_kb = 64;
+    auto cu = ComputeUnitCore::create("wave_aperture_wait_cu", config, &memory, &l2);
+    cu->set_apertures(cu_base, cu_base ? cu_base + 0xffff : 0, 0, 0);
+    auto *wf = cu->dispatch_wf(0, 0x100, 128, 32, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+    wf->set_exec(1);
+    cu->write_vgpr(wf->vgpr_alloc().base, 0, kSharedBase + 4);
+    cu->write_vgpr(wf->vgpr_alloc().base + 1, 0, 0);
+
+    auto decoder = Decoder::create(config.arch);
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(
+        cdna5::build_vflat(cdna5::kFlatLoadB32Vflat,
+                           {.saddr = kModernNullSelector, .vdst = 8, .vaddr = 0}),
+        0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    auto &state = wf->ensure_memory_wait_scoreboard();
+    cu->track_memory_wait(*decoded.value(), *wf);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Ds), 1u);
+    EXPECT_EQ(state.outstanding(WaitCounterKind::Load), 0u);
+    std::vector<MemoryWaitScoreboard::Hazard> hazards;
+    state.bind(0x200, &hazards, [](void *p, const auto &hazard) {
+      static_cast<decltype(hazards) *>(p)->push_back(hazard);
+    });
+    state.access({RegClass::VGPR, 8, 1}, 1, 0xf, true);
+    ASSERT_EQ(hazards.size(), 1u);
+    hazards.clear();
+    state.wait(WaitCounterKind::Ds, 0);
+    state.access({RegClass::VGPR, 8, 1}, 1, 0xf, true);
+    EXPECT_TRUE(hazards.empty());
+  }
+}
+
 TEST(MemoryWaitExecutionTest, IncomingFlatOverwriteUsesItsOwnOrderingAndRoutedLanes) {
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3}) {
     for (uint64_t shared_lanes : {0u, 0b0101u, 0b1111u}) {

@@ -30,6 +30,16 @@ public:
     return status;
   }
 
+  QueuePrepareCloseStatus prepare_preempt_close() noexcept override {
+    if (registration_id_ == 0)
+      return QueuePrepareCloseStatus::Ready;
+    const QueuePrepareCloseStatus status =
+        command_processor_.prepare_preempt_queue_registration(registration_id_);
+    if (status == QueuePrepareCloseStatus::Ready)
+      registration_id_ = 0;
+    return status;
+  }
+
   QueueReconfigureStatus reconfigure(const QueueReconfigureRequest &request) override {
     if (format_ == QueuePacketFormat::Pm4)
       return command_processor_.update_pm4_queue_registration(registration_id_, request);
@@ -73,6 +83,7 @@ public:
         .address_space = request.identity.address_space,
         .interrupt_sink = request.identity.interrupt_sink,
         .process_id = request.identity.process_id,
+        .process_identity_kind = request.identity.process_identity_kind,
         .queue_id = request.identity.queue_id,
         .ring_base_va = request.ring.base_address,
         .ring_size = request.ring.size_bytes,

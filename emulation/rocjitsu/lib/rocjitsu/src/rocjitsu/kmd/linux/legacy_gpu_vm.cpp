@@ -4,6 +4,7 @@
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <utility>
 
@@ -22,6 +23,18 @@ constexpr VmAccessOutcome vm_access_outcome(CopyOutcome outcome) {
   return VmAccessOutcome::Malformed;
 }
 
+class FaultedDeferredTransfer final : public VmDeferredTransfer {
+public:
+  void submit() override {}
+  [[nodiscard]] VmAccessOutcome poll(std::span<std::byte>) override {
+    return VmAccessOutcome::Faulted;
+  }
+  [[nodiscard]] VmAccessOutcome reconcile_revocation(std::span<std::byte>) override {
+    return VmAccessOutcome::Revoked;
+  }
+  void cancel() noexcept override {}
+};
+
 } // namespace
 
 class LegacyGpuVmAdapter::Binding final : public AddressSpaceTranslator,
@@ -32,6 +45,10 @@ public:
       : memory_(std::move(memory)), address_space_(std::make_shared<LegacyAddressSpace>(*memory_)),
         vmid_(vmid), original_request_mutex_(registration.request_mutex),
         mutation_epoch_(std::move(registration.mutation_epoch)),
+        raw_write_gate_(std::move(registration.raw_write_gate)),
+        access_admission_(std::move(registration.access_admission)),
+        data_route_(std::move(registration.data_route)),
+        prepare_deferred_transfer_(std::move(registration.prepare_deferred_transfer)),
         frontend_lifetime_(std::move(frontend_lifetime)) {
     address_space_->register_process(vmid_, registration.page_table, registration.page_table_mutex,
                                      registration.page_table_generation,
@@ -47,21 +64,186 @@ public:
                                               std::span<const VmRamDwordStore> stores,
                                               Mtype instruction_mtype,
                                               Mtype expected_mtype) const override {
-    return &physical == static_cast<const PhysicalMemoryAccess *>(this) &&
-           address_space_->try_write_private_dwords(stores, vmid_, instruction_mtype,
+    if (&physical != static_cast<const PhysicalMemoryAccess *>(this) || stores.size() < 2 ||
+        stores.size() > VmRamDwordStore::kMaxBatch)
+      return false;
+    std::array<VmRawBackingWriteGate::Permit, VmRamDwordStore::kMaxBatch> permits;
+    std::size_t permit_count = 0;
+    for (const auto &store : stores) {
+      auto permit = try_begin_raw_write(store.address, sizeof(uint32_t));
+      if (!permit)
+        return false;
+      permits[permit_count++] = std::move(*permit);
+      const VmAccessAdmission admission =
+          admit_access(store.address, sizeof(uint32_t), VmAccessKind::Write);
+      if (!admission || !admission.direct_backing_write_allowed)
+        return false;
+    }
+    return address_space_->try_write_private_dwords(stores, vmid_, instruction_mtype,
                                                     expected_mtype, original_request_mutex_);
   }
 
   [[nodiscard]] bool try_read_uncached_ram(PhysicalMemoryAccess &physical, uint64_t address,
                                            std::span<std::byte> bytes) const override {
     return &physical == static_cast<const PhysicalMemoryAccess *>(this) &&
+           admit_access(address, bytes.size(), VmAccessKind::Read) &&
            address_space_->try_read_uncached_ram(address, bytes, vmid_, original_request_mutex_);
+  }
+
+  [[nodiscard]] bool raw_write_route_is_local(uint64_t address, std::size_t size) const {
+    if (!data_route_)
+      return true;
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
+      return false;
+    std::size_t checked = 0;
+    while (checked < size) {
+      const LegacyDataRoute route =
+          data_route_(address + checked, size - checked, VmAccessKind::Write);
+      if (route.route != VmDataRoute::Local || route.candidate != LegacyDeferredCandidate::None ||
+          route.first_extent_bytes == 0)
+        return false;
+      checked += std::min(route.first_extent_bytes, size - checked);
+    }
+    return true;
+  }
+
+  [[nodiscard]] VmAccessAdmission admit_access(uint64_t address, std::size_t size,
+                                               VmAccessKind access) const override {
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
+      return {.outcome = VmAccessOutcome::Malformed};
+    // The untokenized compatibility paths, including cache fills and borrowed
+    // host pointers, must never consume an owned candidate directly.
+    if (data_route_) {
+      if (access == VmAccessKind::Write) {
+        if (!raw_write_route_is_local(address, size))
+          return {.outcome = VmAccessOutcome::Faulted};
+      } else {
+        const LegacyDataRoute route = data_route_(address, size, access);
+        if (route.route != VmDataRoute::Local || route.candidate != LegacyDeferredCandidate::None)
+          return {.outcome = VmAccessOutcome::Faulted};
+      }
+      // Atomics also mutate backing without entering the deferred WRITE path.
+      if (access == VmAccessKind::Atomic && !raw_write_route_is_local(address, size))
+        return {.outcome = VmAccessOutcome::Faulted};
+    }
+    return access_admission_ ? access_admission_(address, size, access) : VmAccessAdmission{};
+  }
+
+  [[nodiscard]] VmAccessAdmission query_cache_write_grant(uint64_t address,
+                                                          std::size_t size) const override {
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
+      return {.outcome = VmAccessOutcome::Malformed};
+    // The frontend grant identifies a dirty cache tag even when its backing
+    // write requires an owned deferred effect. Never use this query to write.
+    return access_admission_ ? access_admission_(address, size, VmAccessKind::Write)
+                             : admit_access(address, size, VmAccessKind::Write);
+  }
+
+  [[nodiscard]] std::optional<VmRawBackingWriteGate::Permit>
+  try_begin_raw_write(uint64_t address, std::size_t size) const {
+    // Preserve the ordinary malformed-access outcome; validation below will
+    // reject this span before any backing effect can run.
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
+      return VmRawBackingWriteGate::Permit{};
+    if (raw_write_gate_)
+      return raw_write_gate_->try_acquire(address, size);
+    return VmRawBackingWriteGate::Permit{};
+  }
+
+  [[nodiscard]] VmDataRoute classify_data_route(uint64_t address, std::size_t size,
+                                                VmAccessKind access) const override {
+    if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
+      return VmDataRoute::Faulted;
+    return data_route_ ? data_route_(address, size, access).route : VmDataRoute::Local;
+  }
+
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_read(PhysicalMemoryAccess &physical, uint64_t address, std::size_t size,
+                        VmAccessKind access,
+                        const std::shared_ptr<VmTransferEffectGate> &) const override {
+    if (&physical != static_cast<const PhysicalMemoryAccess *>(this) || !data_route_ ||
+        access != VmAccessKind::Read || size == 0 ||
+        size - 1 > std::numeric_limits<uint64_t>::max() - address ||
+        data_route_(address, size, access).candidate != LegacyDeferredCandidate::Peer)
+      return std::nullopt;
+    // Untokenized callers must observe the deferred route and refuse it. They
+    // have no executing snapshot to authorize an owned effect.
+    return VmTransferToken(std::make_unique<FaultedDeferredTransfer>(), 1);
+  }
+
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_read(PhysicalMemoryAccess &physical, uint64_t address, std::size_t size,
+                        VmAccessKind access, const std::shared_ptr<VmTransferEffectGate> &gate,
+                        const GpuVmAccess &executing_access) const override {
+    if (&physical != static_cast<const PhysicalMemoryAccess *>(this) || !data_route_ ||
+        access != VmAccessKind::Read || size == 0 ||
+        size - 1 > std::numeric_limits<uint64_t>::max() - address)
+      return std::nullopt;
+    const auto route = data_route_(address, size, access);
+    if (route.candidate != LegacyDeferredCandidate::Peer)
+      return std::nullopt;
+    const size_t page_bytes = kLegacyPageSize - (address & (kLegacyPageSize - 1));
+    const size_t chunk = std::min({size, page_bytes, route.first_extent_bytes});
+    if (chunk == 0)
+      return VmTransferToken(std::make_unique<FaultedDeferredTransfer>(), 1);
+    auto operation = route.route == VmDataRoute::Deferred && prepare_deferred_transfer_
+                         ? prepare_deferred_transfer_(route.candidate, address, chunk, {}, false,
+                                                      gate, executing_access, address_space_)
+                         : nullptr;
+    if (!operation)
+      operation = std::make_unique<FaultedDeferredTransfer>();
+    return VmTransferToken(std::move(operation), chunk);
+  }
+
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_write(PhysicalMemoryAccess &physical, uint64_t address,
+                         std::span<const std::byte> bytes,
+                         const std::shared_ptr<VmTransferEffectGate> &) const override {
+    if (&physical != static_cast<const PhysicalMemoryAccess *>(this) || !data_route_ ||
+        bytes.empty() || bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address ||
+        data_route_(address, bytes.size(), VmAccessKind::Write).candidate ==
+            LegacyDeferredCandidate::None)
+      return std::nullopt;
+    return VmTransferToken(std::make_unique<FaultedDeferredTransfer>(), 1);
+  }
+
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_write(PhysicalMemoryAccess &physical, uint64_t address,
+                         std::span<const std::byte> bytes,
+                         const std::shared_ptr<VmTransferEffectGate> &gate,
+                         const GpuVmAccess &executing_access) const override {
+    if (&physical != static_cast<const PhysicalMemoryAccess *>(this) || !data_route_ ||
+        bytes.empty() || bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address)
+      return std::nullopt;
+    const auto route = data_route_(address, bytes.size(), VmAccessKind::Write);
+    if (route.candidate == LegacyDeferredCandidate::None)
+      return std::nullopt;
+    const size_t page_bytes = kLegacyPageSize - (address & (kLegacyPageSize - 1));
+    const size_t chunk = std::min({bytes.size(), page_bytes, route.first_extent_bytes});
+    if (chunk == 0)
+      return VmTransferToken(std::make_unique<FaultedDeferredTransfer>(), 1);
+    auto operation =
+        route.route == VmDataRoute::Deferred && prepare_deferred_transfer_
+            ? prepare_deferred_transfer_(route.candidate, address, chunk, bytes.first(chunk), true,
+                                         gate, executing_access, address_space_)
+            : nullptr;
+    const VmDeferredWriteMaintenance write_maintenance =
+        route.route == VmDataRoute::Deferred &&
+                route.candidate == LegacyDeferredCandidate::ControlledLocalWrite && operation
+            ? VmDeferredWriteMaintenance::ControlledLocalEndpoint
+            : VmDeferredWriteMaintenance::Caller;
+    if (!operation)
+      operation = std::make_unique<FaultedDeferredTransfer>();
+    return VmTransferToken(std::move(operation), chunk, write_maintenance);
   }
 
   [[nodiscard]] VmTranslationResult translate(uint64_t address, std::size_t size,
                                               VmAccessKind access) const override {
     if (size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - address)
       return {.outcome = VmAccessOutcome::Malformed, .translation = {}};
+    const VmAccessAdmission admission = admit_access(address, size, access);
+    if (!admission)
+      return {.outcome = admission.outcome, .translation = {}};
     const uint64_t page_bytes = kLegacyPageSize - (address & (kLegacyPageSize - 1));
     const auto policy = address_space_->translation_policy(address, vmid_);
     // A host extent ending inside the current GPU page is a hard boundary, not
@@ -96,6 +278,16 @@ public:
       return AddressSpaceTranslator::read_step(physical, address, bytes, access);
     if (bytes.empty() || bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address)
       return {.outcome = VmAccessOutcome::Malformed, .report_translation_fault = true};
+    if (data_route_) {
+      const auto route = data_route_(address, bytes.size(), access);
+      if (route.candidate != LegacyDeferredCandidate::None)
+        return {.outcome = VmAccessOutcome::Faulted, .report_translation_fault = true};
+      if (route.first_extent_bytes != 0)
+        bytes = bytes.first(std::min(bytes.size(), route.first_extent_bytes));
+    }
+    const VmAccessAdmission admission = admit_access(address, bytes.size(), access);
+    if (!admission)
+      return {.outcome = admission.outcome, .report_translation_fault = true};
     const auto step = address_space_->read_step(
         address, std::span<uint8_t>(reinterpret_cast<uint8_t *>(bytes.data()), bytes.size()),
         vmid_);
@@ -110,6 +302,20 @@ public:
       return AddressSpaceTranslator::write_step(physical, address, bytes);
     if (bytes.empty() || bytes.size() - 1 > std::numeric_limits<uint64_t>::max() - address)
       return {.outcome = VmAccessOutcome::Malformed, .report_translation_fault = true};
+    if (data_route_) {
+      const auto route = data_route_(address, bytes.size(), VmAccessKind::Write);
+      if (route.candidate != LegacyDeferredCandidate::None)
+        return {.outcome = VmAccessOutcome::Faulted, .report_translation_fault = true};
+      if (route.first_extent_bytes != 0)
+        bytes = bytes.first(std::min(bytes.size(), route.first_extent_bytes));
+    }
+    auto permit = try_begin_raw_write(address, bytes.size());
+    if (!permit)
+      return {.outcome = VmAccessOutcome::Unavailable};
+    const VmAccessAdmission admission = admit_access(address, bytes.size(), VmAccessKind::Write);
+    if (!admission || !admission.direct_backing_write_allowed)
+      return {.outcome = admission ? VmAccessOutcome::Faulted : admission.outcome,
+              .report_translation_fault = true};
     const auto step = address_space_->write_step(
         address,
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()),
@@ -162,6 +368,9 @@ public:
                                      std::span<std::byte> bytes) override {
     if (domain != VmMemoryDomain::Compatibility)
       return VmAccessOutcome::Malformed;
+    const VmAccessAdmission admission = admit_access(address, bytes.size(), VmAccessKind::Read);
+    if (!admission)
+      return admission.outcome;
     return vm_access_outcome(address_space_->read_block_strict(
         address, std::span<uint8_t>(reinterpret_cast<uint8_t *>(bytes.data()), bytes.size()),
         vmid_));
@@ -172,6 +381,9 @@ public:
                                                 VmAccessKind access) override {
     if (domain != VmMemoryDomain::Compatibility)
       return VmAccessOutcome::Malformed;
+    const VmAccessAdmission admission = admit_access(address, bytes.size(), access);
+    if (!admission)
+      return admission.outcome;
     if (access != VmAccessKind::Execute)
       return read(domain, address, bytes);
     return address_space_->read_block(
@@ -185,6 +397,14 @@ public:
                                       std::span<const std::byte> bytes) override {
     if (domain != VmMemoryDomain::Compatibility)
       return VmAccessOutcome::Malformed;
+    auto permit = try_begin_raw_write(address, bytes.size());
+    if (!permit)
+      return VmAccessOutcome::Unavailable;
+    const VmAccessAdmission admission = admit_access(address, bytes.size(), VmAccessKind::Write);
+    if (!admission)
+      return admission.outcome;
+    if (!admission.direct_backing_write_allowed)
+      return VmAccessOutcome::Faulted;
     return vm_access_outcome(address_space_->write_block_strict(
         address,
         std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()),
@@ -194,12 +414,19 @@ public:
   [[nodiscard]] bool try_read_contiguous(VmMemoryDomain domain, uint64_t address,
                                          std::span<std::byte> bytes) override {
     return domain == VmMemoryDomain::Compatibility &&
+           admit_access(address, bytes.size(), VmAccessKind::Read) &&
            address_space_->try_copy_contiguous(address, bytes.data(), bytes.size(), vmid_, false);
   }
 
   [[nodiscard]] bool try_write_contiguous(VmMemoryDomain domain, uint64_t address,
                                           std::span<const std::byte> bytes) override {
-    return domain == VmMemoryDomain::Compatibility &&
+    if (domain != VmMemoryDomain::Compatibility)
+      return false;
+    auto permit = try_begin_raw_write(address, bytes.size());
+    if (!permit)
+      return false;
+    const VmAccessAdmission admission = admit_access(address, bytes.size(), VmAccessKind::Write);
+    return admission && admission.direct_backing_write_allowed &&
            address_space_->try_copy_contiguous(address, const_cast<std::byte *>(bytes.data()),
                                                bytes.size(), vmid_, true);
   }
@@ -208,6 +435,9 @@ public:
                                              uint32_t width) override {
     if (domain != VmMemoryDomain::Compatibility)
       return {.outcome = VmAccessOutcome::Malformed, .value = 0};
+    const VmAccessAdmission admission = admit_access(address, width, VmAccessKind::Atomic);
+    if (!admission)
+      return {.outcome = admission.outcome, .value = 0};
     uint64_t value = 0;
     const VmAccessOutcome outcome =
         vm_access_outcome(address_space_->atomic_load(address, width, value, vmid_));
@@ -218,6 +448,14 @@ public:
                                              uint32_t width, uint64_t value) override {
     if (domain != VmMemoryDomain::Compatibility)
       return VmAccessOutcome::Malformed;
+    auto permit = try_begin_raw_write(address, width);
+    if (!permit)
+      return VmAccessOutcome::Unavailable;
+    const VmAccessAdmission admission = admit_access(address, width, VmAccessKind::Atomic);
+    if (!admission)
+      return admission.outcome;
+    if (!admission.direct_backing_write_allowed)
+      return VmAccessOutcome::Faulted;
     return vm_access_outcome(address_space_->atomic_store_strict(address, width, value, vmid_));
   }
 
@@ -227,6 +465,14 @@ public:
                                                              uint64_t desired) override {
     if (domain != VmMemoryDomain::Compatibility)
       return {.outcome = VmAccessOutcome::Malformed};
+    auto permit = try_begin_raw_write(address, width);
+    if (!permit)
+      return {.outcome = VmAccessOutcome::Unavailable};
+    const VmAccessAdmission admission = admit_access(address, width, VmAccessKind::Atomic);
+    if (!admission)
+      return {.outcome = admission.outcome};
+    if (!admission.direct_backing_write_allowed)
+      return {.outcome = VmAccessOutcome::Faulted};
     uint64_t observed = 0;
     bool exchanged = false;
     const CopyOutcome outcome = address_space_->atomic_compare_exchange_strict(
@@ -239,6 +485,14 @@ public:
                                               const AtomicMutation &mutation) override {
     if (domain != VmMemoryDomain::Compatibility)
       return VmAccessOutcome::Malformed;
+    auto permit = try_begin_raw_write(address, width);
+    if (!permit)
+      return VmAccessOutcome::Unavailable;
+    const VmAccessAdmission admission = admit_access(address, width, VmAccessKind::Atomic);
+    if (!admission)
+      return admission.outcome;
+    if (!admission.direct_backing_write_allowed)
+      return VmAccessOutcome::Faulted;
     const CopyOutcome outcome = address_space_->atomic_modify_strict(
         address, width,
         [&](uint8_t *bytes) {
@@ -267,6 +521,11 @@ public:
                                                 std::size_t size) const override {
     if (domain != VmMemoryDomain::Compatibility)
       return nullptr;
+    // A borrowed pointer is writable even when it was requested as a read.
+    if (!raw_write_route_is_local(address, size))
+      return nullptr;
+    if (!admit_access(address, size, VmAccessKind::Read))
+      return nullptr;
     return reinterpret_cast<std::byte *>(address_space_->resolve_host_ptr(address, vmid_, size));
   }
 
@@ -274,7 +533,17 @@ public:
                                                          uint64_t address) const override {
     if (domain != VmMemoryDomain::Compatibility)
       return {0, 0};
-    return address_space_->find_host_range(address, vmid_);
+    const auto range = address_space_->find_host_range(address, vmid_);
+    const auto *at_address = address_space_->resolve_host_ptr(address, vmid_, 1);
+    const auto host_address = reinterpret_cast<uint64_t>(at_address);
+    if (range.second == 0 || at_address == nullptr || host_address < range.first ||
+        host_address - range.first >= range.second || address < host_address - range.first)
+      return {0, 0};
+    const uint64_t gpu_begin = address - (host_address - range.first);
+    return raw_write_route_is_local(gpu_begin, range.second) &&
+                   admit_access(gpu_begin, range.second, VmAccessKind::Read)
+               ? range
+               : std::pair<uint64_t, uint64_t>{0, 0};
   }
 
   void report_fault(uint64_t address) const { address_space_->report_vm_fault(vmid_, address); }
@@ -303,6 +572,14 @@ private:
   // under the caller's VM-state lock, even after raw registry replacement.
   const std::shared_ptr<util::DistributedSharedMutex> original_request_mutex_;
   std::shared_ptr<const std::atomic<uint64_t>> mutation_epoch_;
+  std::shared_ptr<VmRawBackingWriteGate> raw_write_gate_;
+  std::function<VmAccessAdmission(uint64_t, std::size_t, VmAccessKind)> access_admission_;
+  std::function<LegacyDataRoute(uint64_t, std::size_t, VmAccessKind)> data_route_;
+  std::function<std::unique_ptr<VmDeferredTransfer>(
+      LegacyDeferredCandidate, uint64_t, std::size_t, std::span<const std::byte>, bool,
+      const std::shared_ptr<VmTransferEffectGate> &, const GpuVmAccess &,
+      std::shared_ptr<const LegacyAddressSpace>)>
+      prepare_deferred_transfer_;
   std::shared_ptr<void> frontend_lifetime_;
 };
 
@@ -368,7 +645,8 @@ AddressSpaceHandle LegacyGpuVmAdapter::register_address_space(
                                 {.page_table = page_table,
                                  .page_table_mutex = page_table_mutex,
                                  .page_table_generation = page_table_generation,
-                                 .request_mutex = std::move(request_mutex)},
+                                 .request_mutex = std::move(request_mutex),
+                                 .access_admission = {}},
                                 std::move(frontend_lifetime));
 }
 

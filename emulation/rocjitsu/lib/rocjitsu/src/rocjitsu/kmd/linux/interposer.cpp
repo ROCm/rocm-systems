@@ -72,9 +72,11 @@ RJ_DIAGNOSTIC_POP
 #include <map>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <pthread.h>
 #include <signal.h>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -134,6 +136,8 @@ struct GemObject {
 using rocjitsu::GemObject;
 
 namespace {
+
+constexpr int kLocalVmClosePending = INT_MAX;
 
 static_assert(std::atomic<bool>::is_always_lock_free,
               "fork child initialization requires a lock-free backend flag");
@@ -619,12 +623,42 @@ public:
   }
   bool initialized() const { return driver() != nullptr || remote() != nullptr; }
 
+  void retain_failed_local_vm(rj_vm_t *vm) {
+    rj_vm_t *head = pending_vm_destroys_.load(std::memory_order_relaxed);
+    do {
+      vm->pending_destroy_next = head;
+    } while (!pending_vm_destroys_.compare_exchange_weak(head, vm, std::memory_order_release,
+                                                         std::memory_order_relaxed));
+  }
+
+  void retry_failed_local_vms() {
+    rj_vm_t *current = pending_vm_destroys_.exchange(nullptr, std::memory_order_acquire);
+    while (current) {
+      rj_vm_t *next = current->pending_destroy_next;
+      current->pending_destroy_next = nullptr;
+      if (rj_vm_destroy_checked(current) != ROCJITSU_STATUS_SUCCESS)
+        retain_failed_local_vm(current);
+      current = next;
+    }
+  }
+
+  bool has_failed_local_vm() const {
+    return pending_vm_destroys_.load(std::memory_order_acquire) != nullptr;
+  }
+
+#ifdef RJ_INTERPOSER_TEST_HOOKS
+  bool waiting_for_local_vm_close_for_testing() const {
+    return waiting_for_local_vm_close_.load(std::memory_order_acquire);
+  }
+#endif
+
   /// @brief Record a process-exit shutdown request from the DSO finalizer.
   /// @details As an LD_PRELOAD library, librocjitsu.so can be finalized before HIP
   /// and ROCR. If they still hold app-facing KFD descriptors, this request stays
   /// pending and the VM is kept alive; their later close paths complete it. If the
   /// simulator is already idle, this tears the VM down now.
   void request_local_vm_shutdown() {
+    retry_failed_local_vms();
     // Declared before the lock so it is destroyed AFTER the lock is dropped; see
     // DoomedLocalVm.
     DoomedLocalVm doomed;
@@ -675,10 +709,14 @@ public:
   /// VM and leave this thread calling into freed memory. init_mutex_ is only ever
   /// taken by the construction/shutdown paths (never by the engine or ioctl paths),
   /// so holding it across the driver close() introduces no lock-order inversion.
-  void release_local_open() {
+  /// @return The driver's close status; failed final maintenance remains owned
+  /// by the KFD pending-close record and, if needed, the retained local VM.
+  int release_local_open() {
+    retry_failed_local_vms();
     // Declared before the lock so it is destroyed AFTER the lock is dropped; see
     // DoomedLocalVm.
     DoomedLocalVm doomed;
+    int close_result = 0;
     {
       std::lock_guard lock(init_mutex_);
       auto active_driver = driver();
@@ -693,11 +731,38 @@ public:
       // sound exactly when the process is already on its way out.
       if (active_driver && shutdown_requested_)
         active_driver->begin_local_shutdown();
-      if (active_driver)
-        active_driver->close();
+      if (active_driver) {
+        errno = 0;
+        close_result = active_driver->close();
+        if (close_result == -1)
+          close_result = -(errno != 0 ? errno : EIO);
+      }
       if (shutdown_requested_)
         doomed = shutdown_local_vm_if_idle_locked();
     }
+    auto teardown_status = doomed.close_status;
+    // A last owner can run checked VM destruction here. It must finish outside
+    // init_mutex_ but before a final fd close chooses its return status. An
+    // in-flight ioctl/mmap may still own an aliasing driver snapshot, so wait
+    // until its last release runs the VM deleter. Driver code never re-enters
+    // this interposer while holding such a snapshot.
+    doomed = DoomedLocalVm{};
+    if (teardown_status) {
+      int status = teardown_status->load(std::memory_order_acquire);
+      while (status == kLocalVmClosePending) {
+#ifdef RJ_INTERPOSER_TEST_HOOKS
+        waiting_for_local_vm_close_.store(true, std::memory_order_release);
+#endif
+        teardown_status->wait(kLocalVmClosePending, std::memory_order_acquire);
+        status = teardown_status->load(std::memory_order_acquire);
+      }
+#ifdef RJ_INTERPOSER_TEST_HOOKS
+      waiting_for_local_vm_close_.store(false, std::memory_order_release);
+#endif
+      if (close_result == 0)
+        close_result = status;
+    }
+    return close_result;
   }
 
   /// @brief Take a lifetime-extending snapshot of the active remote driver.
@@ -762,7 +827,7 @@ public:
   /// decrement-and-maybe-teardown runs under remote_mutex_ so it is serialized
   /// against retain and get_or_create_remote; retain can never observe a live
   /// remote and add a reference in the window where this is tearing one down.
-  void release_remote_open() {
+  int release_remote_open() {
     std::shared_ptr<RemoteDriver> dead;
     {
       std::lock_guard lock(remote_mutex_);
@@ -772,7 +837,7 @@ public:
       // reference.
       int prev = remote_open_refs_.load(std::memory_order_acquire);
       if (prev <= 0)
-        return;
+        return 0;
       remote_open_refs_.store(prev - 1, std::memory_order_release);
       if (prev == 1)
         dead = teardown_remote_locked();
@@ -782,7 +847,8 @@ public:
     // does not need the lock; holding remote_mutex_ across a blocking send/recv
     // would stall every other remote_mutex_ user behind an arbitrary-length RPC.
     if (dead)
-      dead->close();
+      return dead->close();
+    return 0;
   }
 
   /// @brief Result of get_or_create_remote(): the live driver plus the primary
@@ -962,12 +1028,11 @@ public:
   /// @details Local dups release the local process refcount; remote dups release
   /// the daemon connection refcount. release_remote_open() is a no-op when no
   /// remote reference is live, so a release that races a teardown is harmless.
-  void release_backend(DupBackend backend) {
+  int release_backend(DupBackend backend) {
     if (backend == DupBackend::Local) {
-      release_local_open();
-    } else {
-      release_remote_open();
+      return release_local_open();
     }
+    return release_remote_open();
   }
 
   /// @brief Reserve (retain) a reference on the backend that owns @p src_fd,
@@ -1039,9 +1104,9 @@ public:
       release_backend(backend);
   }
 
-  void untrack_dup(int fd) {
+  int untrack_dup(int fd) {
     if (fd < 0)
-      return;
+      return 0;
     DupBackend backend;
     bool was_tracked = false;
     {
@@ -1054,7 +1119,8 @@ public:
       }
     }
     if (was_tracked)
-      release_backend(backend);
+      return release_backend(backend);
+    return 0;
   }
 
   /// @brief Drop all KFD identity/references for an fd number that dup2/dup3 is
@@ -1411,17 +1477,16 @@ public:
 
     /// @brief Drop the reference. MUST NOT run with an interposer lock held: the
     /// local path takes init_mutex_ and can complete a pending teardown.
-    void release() {
+    int release() {
       if (!context_)
-        return;
+        return 0;
       auto *context = std::exchange(context_, nullptr);
       const bool was_remote = remote_ != nullptr;
       local_.reset();
       remote_.reset();
       if (was_remote)
-        context->release_remote_open();
-      else
-        context->release_local_open();
+        return context->release_remote_open();
+      return context->release_local_open();
     }
 
   private:
@@ -1515,7 +1580,7 @@ public:
   /// the lease must then be released with no interposer lock held (its local path
   /// takes init_mutex_ and can complete a pending teardown). Returning both makes
   /// that order structural instead of something each of the four release sites has
-  /// to reproduce: reap `file_id`, then let `lease` destruct.
+  /// to reproduce: reap `file_id`, then explicitly release `lease`.
   struct DrmFinalRelease {
     std::optional<uint64_t> file_id;
     DrmBackendLease lease;
@@ -1544,15 +1609,16 @@ public:
 
   /// @brief Cancel the file's PM4 queues, reap GEM, then drop the backend lease.
   /// @details Must run with NO interposer lock held.
-  void complete_drm_release(DrmFinalRelease release) {
+  int complete_drm_release(DrmFinalRelease release) {
     if (auto *driver = dynamic_cast<SimulatedKfd *>(release.lease.local().get()))
       for (const auto &[context_ring, queue] : release.queues)
         driver->retire_pm4_queue(queue.key);
     if (release.file_id)
       reap_gem_for_drm_file(*release.file_id);
-    // release.lease destructs here, dropping the open reference. For a local
-    // backend that routes through release_local_open(), which completes a pending
-    // process-exit shutdown exactly as the last KFD close would.
+    release.queues.clear();
+    // Release explicitly so the interposed close can report a final KFD or RPC
+    // error. Implicit RAII callers may ignore the result after cleanup.
+    return release.lease.release();
   }
 
   /// @brief Track a newly opened synthetic DRM fd.
@@ -2264,28 +2330,42 @@ public:
     // reference goes away — which is why it must never run ON the engine thread
     // (it would join itself); the engine never takes a driver snapshot, and
     // assert_not_engine_thread() enforces that.
-    local_vm_ = std::shared_ptr<rj_vm_t>(created_vm, [this, owner = getpid()](rj_vm_t *vm) {
-      if (!vm)
-        return;
-      if (getpid() != owner) {
-        // A forked child inherited this reference. The engine thread does not exist
-        // here, so joining it would hang, and the VM belongs to the parent, so
-        // destroying it would free state the parent still owns. Abandon it.
-        //
-        // A child never reaches this deleter under the fork-then-exec contract
-        // (owner_pid_ gates every entry point), but the guard is kept because the
-        // cost is one comparison and the failure mode -- a child joining a thread
-        // that does not exist -- is an unrecoverable hang.
-        return;
-      }
-      assert_not_engine_thread();
-      if (local_vm_thread_) {
-        rj_vm_request_exit(vm, "interposer VM destruction");
-        local_vm_thread_->join();
-        local_vm_thread_.reset();
-      }
-      rj_vm_destroy(vm);
-    });
+    auto close_status = std::make_shared<std::atomic<int>>(kLocalVmClosePending);
+    local_vm_close_status_ = close_status;
+    local_vm_ =
+        std::shared_ptr<rj_vm_t>(created_vm, [this, owner = getpid(), close_status](rj_vm_t *vm) {
+          if (!vm)
+            return;
+          if (getpid() != owner) {
+            // A forked child inherited this reference. The engine thread does not exist
+            // here, so joining it would hang, and the VM belongs to the parent, so
+            // destroying it would free state the parent still owns. Abandon it.
+            //
+            // A child never reaches this deleter under the fork-then-exec contract
+            // (owner_pid_ gates every entry point), but the guard is kept because the
+            // cost is one comparison and the failure mode -- a child joining a thread
+            // that does not exist -- is an unrecoverable hang.
+            close_status->store(-ECHILD, std::memory_order_release);
+            close_status->notify_all();
+            return;
+          }
+          assert_not_engine_thread();
+          if (local_vm_thread_) {
+            rj_vm_request_exit(vm, "interposer VM destruction");
+            local_vm_thread_->join();
+            local_vm_thread_.reset();
+          }
+          int result = 0;
+          if (rj_vm_destroy_checked(vm) != ROCJITSU_STATUS_SUCCESS) {
+            const int close_error = errno != 0 ? errno : EIO;
+            result = -close_error;
+            util::Logger::warn("rocjitsu: retained local VM after failed process close: ",
+                               std::strerror(close_error));
+            retain_failed_local_vm(vm);
+          }
+          close_status->store(result, std::memory_order_release);
+          close_status->notify_all();
+        });
     // soc is validated alongside vm because rj_vm_run() rejects a null soc BEFORE
     // entering engine->run(); catching it here fails the open with ENODEV instead
     // of relying on the engine thread's readiness backstop.
@@ -2346,6 +2426,7 @@ public:
   struct DoomedLocalVm {
     std::shared_ptr<GuestKfd> guest;
     std::shared_ptr<rj_vm_t> vm;
+    std::shared_ptr<std::atomic<int>> close_status;
   };
 
   /// @brief Release the interposer's own references to the local backend.
@@ -2359,6 +2440,7 @@ public:
     publish_driver(nullptr);
     guest_driver_.reset();
     local_vm_.reset();
+    local_vm_close_status_.reset();
   }
 
   /// @brief Launch the local VM engine on an owned (joinable) thread and wait for
@@ -2927,22 +3009,34 @@ public:
   }
 
   /// @brief Map a live GEM handle's backing through its synthetic mmap offset.
+  template <typename F>
   void *mmap_gem(const DrmFileToken &file, void *address, size_t size, int prot, int flags,
-                 uint64_t offset) {
-    std::lock_guard lock(fd_mutex_);
-    for (const auto &[handle, entry] : gem_entries_) {
-      if (!file || entry.handle_closed || entry.drm_file_id != file->id || !entry.mmap_offset ||
-          offset < entry.mmap_offset || offset - entry.mmap_offset >= entry.size)
-        continue;
-      uint64_t relative = offset - entry.mmap_offset;
-      if (!size || size > entry.size - relative)
+                 uint64_t offset, F &&with_mapping) {
+    std::shared_ptr<PrivateDrmFd> backing;
+    uint64_t relative = 0;
+    {
+      std::lock_guard lock(fd_mutex_);
+      for (const auto &[handle, entry] : gem_entries_) {
+        if (!file || entry.handle_closed || entry.drm_file_id != file->id || !entry.mmap_offset ||
+            offset < entry.mmap_offset || offset - entry.mmap_offset >= entry.size)
+          continue;
+        relative = offset - entry.mmap_offset;
+        if (!size || size > entry.size - relative)
+          break;
+        backing = entry.dmabuf_fd;
         break;
-      auto mapping_lock = rocjitsu::host_mapping_lock().lock_exclusive();
-      return entry.dmabuf_fd->use(
-          [&](int fd) { return real().mmap(address, size, prot, flags, fd, relative); });
+      }
     }
-    errno = EINVAL;
-    return MAP_FAILED;
+    if (!backing) {
+      errno = EINVAL;
+      return MAP_FAILED;
+    }
+    // The private fd survives a concurrent GEM_CLOSE. Finish the host syscall
+    // outside fd_mutex_ so SVM publication can take the driver locks first.
+    return with_mapping([&] {
+      return backing->use(
+          [&](int fd) { return real().mmap(address, size, prot, flags, fd, relative); });
+    });
   }
 
   /// @brief Attach existing BO metadata to a newly created KFD dma-buf import.
@@ -3234,7 +3328,18 @@ public:
         return -EINVAL;
       gem.cpu_ptr = p;
     }
-    if (replace && !evict_range_locked(drv, file->id, range, /*allow_missing=*/true))
+    auto va_transaction = drv->begin_gem_va_transaction();
+    if (!va_transaction)
+      return -ENODEV;
+    // Preflight before REPLACE evicts any old PTE or GEM interval. KFD may own
+    // a resident translation or an active grant without a PTE at this VA.
+    if (!prt) {
+      if (const int preflight = va_transaction->preflight_map(va_address, map_size, file->id);
+          preflight != 0)
+        return preflight;
+    }
+    if (replace && !evict_range_locked(*va_transaction, file->id, range,
+                                       /*allow_missing=*/true))
       return -EINVAL;
     // Record which SimulatedKfd's page table receives these PTEs so GEM_CLOSE (or a
     // DRM-file-close reap) unmaps through the driver that installed them, never a
@@ -3253,9 +3358,14 @@ public:
     // only returns false if the local process vanished mid-call; treat that as a
     // failed map (do not record the range) so GEM_VA reports the error rather than a
     // phantom success.
-    if (!prt && !drv->gem_va_map(va_address, host, map_size, gem.alloc_flags, gem.sealed_ram))
-      return -EINVAL;
+    if (!prt) {
+      if (const int result = va_transaction->map(va_address, host, map_size, gem.alloc_flags,
+                                                 gem.sealed_ram, file->id);
+          result != 0)
+        return result;
+    }
     gem.installed_vas.push_back(range);
+    va_transaction.reset();
     if (publish_timeline)
       signal_syncobj_locked(timeline, timeline_point);
     lock.unlock();
@@ -3293,9 +3403,13 @@ public:
     const GemMapping range{va_address, map_size};
     if (std::ranges::find(gem.installed_vas, range) == gem.installed_vas.end())
       return -EINVAL; // This handle does not own the exact range — do not touch PTEs.
-    if (!prt && !drv->gem_va_unmap(va_address, map_size))
+    auto va_transaction = drv->begin_gem_va_transaction();
+    if (!va_transaction)
+      return -ENODEV;
+    if (!prt && !va_transaction->unmap(va_address, map_size, file->id))
       return -EINVAL;
     std::erase(gem.installed_vas, range);
+    va_transaction.reset();
     if (publish_timeline)
       signal_syncobj_locked(timeline, timeline_point);
     lock.unlock();
@@ -3327,9 +3441,13 @@ public:
     auto *drv = drm_file_simulated(file);
     if (!drv)
       return -ENODEV;
-    if (!evict_range_locked(drv, file->id, GemMapping{va_address, map_size},
+    auto va_transaction = drv->begin_gem_va_transaction();
+    if (!va_transaction)
+      return -ENODEV;
+    if (!evict_range_locked(*va_transaction, file->id, GemMapping{va_address, map_size},
                             /*allow_missing=*/false))
       return -EINVAL;
+    va_transaction.reset();
     if (publish_timeline)
       signal_syncobj_locked(timeline, timeline_point);
     lock.unlock();
@@ -3634,6 +3752,7 @@ private:
     publish_driver(nullptr);
     doomed.guest = std::move(guest_driver_);
     doomed.vm = std::move(local_vm_);
+    doomed.close_status = std::move(local_vm_close_status_);
     guest_driver_.reset();
     local_vm_.reset();
     return doomed;
@@ -3645,6 +3764,13 @@ private:
   /// therefore not a sequence anyone has to remember to run in order — it is what
   /// happens when the last reference goes away.
   std::shared_ptr<rj_vm_t> local_vm_;
+  std::shared_ptr<std::atomic<int>> local_vm_close_status_;
+#ifdef RJ_INTERPOSER_TEST_HOOKS
+  std::atomic<bool> waiting_for_local_vm_close_{false};
+#endif
+  /// @brief VMs whose final close failed after the last shared owner retired.
+  /// They remain live until a later local close or shutdown request retries them.
+  std::atomic<rj_vm_t *> pending_vm_destroys_{nullptr};
   /// @brief Owner of the local VM engine loop; null when no local VM is running.
   /// @details Deliberately unique_ptr<std::thread>, NOT std::jthread: a jthread
   /// destructor always request_stop()+join()s, which would deadlock in the fork
@@ -3771,8 +3897,10 @@ private:
       // if the local process already vanished, in which case the page table is gone
       // and there is nothing to remove — either way the range must not remain
       // recorded, so the return value is intentionally not actionable here.
-      for (const auto &r : gem.installed_vas)
-        (void)gem.owner->gem_va_unmap(r.va_address, r.map_size);
+      auto va_transaction = gem.owner->begin_gem_va_transaction();
+      if (va_transaction)
+        for (const auto &r : gem.installed_vas)
+          (void)va_transaction->unmap(r.va_address, r.map_size, gem.drm_file_id);
     }
     if (gem.cpu_ptr && gem.size)
       InterposerContext::real().munmap(gem.cpu_ptr, gem.size);
@@ -3789,8 +3917,9 @@ private:
   /// existing host translations outside the update, including the original BO offset.
   /// Caller holds fd_mutex_. Return false if no range overlaps unless allow_missing,
   /// or if a resident unmap fails. Completed removals are not rolled back on failure.
-  [[nodiscard]] bool evict_range_locked(SimulatedKfd *drv, uint64_t drm_file_id,
-                                        const GemMapping &range, bool allow_missing) {
+  [[nodiscard]] bool evict_range_locked(SimulatedKfd::GemVaTransaction &va_transaction,
+                                        uint64_t drm_file_id, const GemMapping &range,
+                                        bool allow_missing) {
     bool evicted_any = false;
     auto evict = [&](std::vector<GemMapping> &ranges, bool resident) {
       for (size_t i = 0; i < ranges.size();) {
@@ -3802,7 +3931,7 @@ private:
         const uint64_t begin = std::max(old.va_address, range.va_address);
         const uint64_t end =
             std::min(old.va_address + old.map_size, range.va_address + range.map_size);
-        if (resident && !drv->gem_va_unmap(begin, end - begin))
+        if (resident && !va_transaction.unmap(begin, end - begin, drm_file_id))
           return false;
         ranges.erase(ranges.begin() + i);
         if (old.va_address < begin)
@@ -3882,6 +4011,12 @@ __attribute__((constructor)) static void init_interposer() { InterposerContext::
 } // namespace
 
 namespace {
+// Linux UAPI defines MREMAP_DONTUNMAP as 4, but older libc headers omit it.
+constexpr int kMremapDontunmapFlag = 4;
+#ifdef MREMAP_DONTUNMAP
+static_assert(MREMAP_DONTUNMAP == kMremapDontunmapFlag);
+#endif
+
 /// @brief Run a bare mapping syscall with the layout held still.
 ///
 /// @details An emulated atomic holds a raw pointer across a writability check
@@ -3896,9 +4031,138 @@ template <typename F> auto with_host_mapping_held(F &&syscall) {
   auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
   return syscall();
 }
+
+std::shared_ptr<LinuxKfd> snapshot_local_driver() { return InterposerContext::ctx.driver(); }
+
+template <typename Result, typename F>
+Result with_svm_host_vma_update(std::span<const std::pair<uint64_t, uint64_t>> ranges,
+                                Result failure, F &&syscall) {
+  Result result = failure;
+  const auto bare_mapping_change = [&] {
+    result = with_host_mapping_held(syscall);
+    return result != failure;
+  };
+  auto remote = InterposerContext::ctx.remote();
+  auto local = InterposerContext::ctx.driver();
+  if (remote && local) {
+    // Hold the remote RPC writer across the local operation as well. Both
+    // policies then observe one syscall, ordered with their SVM ioctl paths.
+    bool succeeded = false;
+    remote->run_host_vma_replacement(ranges, [&] {
+      local->run_host_vma_replacement(ranges, [&] {
+        succeeded = bare_mapping_change();
+        return succeeded;
+      });
+      return succeeded;
+    });
+  } else if (remote) {
+    remote->run_host_vma_replacement(ranges, bare_mapping_change);
+  } else if (local) {
+    local->run_host_vma_replacement(ranges, bare_mapping_change);
+  } else {
+    (void)bare_mapping_change();
+  }
+  return result;
+}
+
+void *mmap_local_driver(const std::shared_ptr<LinuxKfd> &driver, void *addr, size_t length,
+                        int prot, int flags, off_t offset) {
+  if (!(flags & MAP_FIXED) || !addr)
+    return driver->mmap(addr, length, prot, flags, offset);
+  auto remote = InterposerContext::ctx.remote();
+  if (!remote)
+    return driver->mmap(addr, length, prot, flags, offset);
+  const std::array replaced{
+      std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
+  void *mapped = MAP_FAILED;
+  bool changed = false;
+  remote->run_host_vma_replacement(replaced, [&] {
+    mapped = driver->mmap_observing_host_vma_change(addr, length, prot, flags, offset,
+                                                    [&] { changed = true; });
+    return changed;
+  });
+  return mapped;
+}
+
+int munmap_local_driver(const std::shared_ptr<LinuxKfd> &driver, void *addr, size_t length,
+                        const std::shared_ptr<RemoteDriver> &remote) {
+  if (!remote)
+    return driver->munmap(addr, length);
+  const std::array replaced{
+      std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
+  int result = -ENOENT;
+  bool changed = false;
+  remote->run_host_vma_replacement(replaced, [&] {
+    result = driver->munmap_observing_host_vma_change(addr, length, [&] { changed = true; });
+    return changed;
+  });
+  return result;
+}
 } // namespace
 
 extern "C" {
+
+#ifdef RJ_INTERPOSER_TEST_HOOKS
+RJ_INTERPOSER_EXPORT int rj_interposer_test_fail_next_alias_close_writeback() {
+  if (!InterposerContext::ctx.owned_by_current_process())
+    return -ECHILD;
+  auto driver = InterposerContext::ctx.driver();
+  auto *simulated = dynamic_cast<SimulatedKfd *>(driver.get());
+  if (!simulated)
+    return -ENODEV;
+  simulated->fail_next_alias_close_writeback_for_testing();
+  return 0;
+}
+
+RJ_INTERPOSER_EXPORT void rj_interposer_test_request_local_shutdown() {
+  if (InterposerContext::ctx.owned_by_current_process())
+    InterposerContext::ctx.request_local_vm_shutdown();
+}
+
+RJ_INTERPOSER_EXPORT int rj_interposer_test_has_pending_vm() {
+  return InterposerContext::ctx.has_failed_local_vm() ? 1 : 0;
+}
+
+RJ_INTERPOSER_EXPORT int rj_interposer_test_local_alias_count() {
+  auto driver = InterposerContext::ctx.driver();
+  auto *simulated = dynamic_cast<SimulatedKfd *>(driver.get());
+  if (!simulated)
+    return -ENODEV;
+  auto process = simulated->find_process(simulated->local_process_id());
+  return process ? static_cast<int>(process->gpu_alias_snapshot()->size()) : -ESRCH;
+}
+
+RJ_INTERPOSER_EXPORT int rj_interposer_test_gpu_access(uint32_t gpu_id, uint64_t address,
+                                                       size_t size) {
+  auto driver = InterposerContext::ctx.driver();
+  auto *simulated = dynamic_cast<SimulatedKfd *>(driver.get());
+  if (!simulated)
+    return -ENODEV;
+  auto process = simulated->find_process(simulated->local_process_id());
+  return process ? static_cast<int>(process->gpu_access_grant(gpu_id, address, size).allowed)
+                 : -ESRCH;
+}
+
+RJ_INTERPOSER_EXPORT int rj_interposer_test_local_ref_count() {
+  auto driver = InterposerContext::ctx.driver();
+  return driver ? static_cast<int>(driver->local_open_ref_count()) : -ENODEV;
+}
+
+RJ_INTERPOSER_EXPORT void *rj_interposer_test_hold_local_driver_snapshot() {
+  if (!InterposerContext::ctx.owned_by_current_process())
+    return nullptr;
+  auto driver = InterposerContext::ctx.driver();
+  return driver ? new (std::nothrow) std::shared_ptr<LinuxKfd>(std::move(driver)) : nullptr;
+}
+
+RJ_INTERPOSER_EXPORT void rj_interposer_test_release_local_driver_snapshot(void *snapshot) {
+  delete static_cast<std::shared_ptr<LinuxKfd> *>(snapshot);
+}
+
+RJ_INTERPOSER_EXPORT int rj_interposer_test_waiting_for_local_vm_close() {
+  return InterposerContext::ctx.waiting_for_local_vm_close_for_testing() ? 1 : 0;
+}
+#endif
 
 static std::string redirect_sysfs_path(const char *path);
 static std::string redirect_sys_dev_char(const char *path);
@@ -4450,7 +4714,11 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
     // fd and RPC connection are torn down only when the last reference is
     // released (teardown_remote), mirroring local-mode primary close which also
     // defers teardown to the last reference.
-    InterposerContext::ctx.release_remote_open();
+    const int result = InterposerContext::ctx.release_remote_open();
+    if (result < 0) {
+      errno = -result;
+      return -1;
+    }
     return 0;
   }
   InterposerContext::ctx.untrack_sysfs(fd);
@@ -4493,12 +4761,21 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
     // Reaps GEM while the backend is still open, then drops the lease. Releasing a
     // local lease routes through release_local_open(), so a final DRM close can
     // complete a pending process-exit shutdown exactly as a final KFD close does.
-    InterposerContext::ctx.complete_drm_release(std::move(drm_close.release));
+    const int result = InterposerContext::ctx.complete_drm_release(std::move(drm_close.release));
+    if (result < 0) {
+      errno = -result;
+      return -1;
+    }
     return 0;
   }
   if (InterposerContext::ctx.is_kfd_dup(fd)) {
-    InterposerContext::ctx.untrack_dup(fd);
-    return static_cast<int>(InterposerContext::real().close(fd));
+    const int backend_result = InterposerContext::ctx.untrack_dup(fd);
+    const int host_result = static_cast<int>(InterposerContext::real().close(fd));
+    if (backend_result < 0) {
+      errno = -backend_result;
+      return -1;
+    }
+    return host_result;
   }
   // Classify the fd against the local driver, then release the snapshot before
   // release_local_open() so that call can actually free the driver when this was
@@ -4514,7 +4791,11 @@ RJ_INTERPOSER_EXPORT int close(int fd) {
     // Route through release_local_open() (not a bare driver close) so the last
     // app-facing close also completes a pending process-exit shutdown, letting the
     // local VM be torn down once no KFD reference remains.
-    InterposerContext::ctx.release_local_open();
+    const int result = InterposerContext::ctx.release_local_open();
+    if (result < 0) {
+      errno = -result;
+      return -1;
+    }
     return 0;
   }
   if (is_owned_fd || InterposerContext::PrivateDrmFd::owns(fd))
@@ -5042,7 +5323,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
   }
 
   if (auto remote = InterposerContext::ctx.remote_lookup(fd))
-    return kfd_ioctl_ret(remote->ioctl(request, arg));
+    return kfd_ioctl_ret(remote->ioctl(request, arg, snapshot_local_driver));
   // Dispatch a tracked KFD fd by its RECORDED backend, not by "remote if any
   // remote is live". In mixed local+daemon mode a Local-tagged dup must route to
   // the local driver and a Remote-tagged dup to the remote connection; guessing
@@ -5103,7 +5384,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     // Classification done and no local snapshot held: dispatch the remote op on the
     // lifetime-extending snapshot captured above.
     if (remote_dispatch)
-      return kfd_ioctl_ret(remote_dispatch->ioctl(request, arg));
+      return kfd_ioctl_ret(remote_dispatch->ioctl(request, arg, snapshot_local_driver));
   }
   // Late-ioctl safety net: an AMDKFD ('K') ioctl may arrive on a tracked KFD fd
   // whose primary remote handle changed underneath it (e.g. a close/dup race in
@@ -5128,7 +5409,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     }
     if (have_backend && backend == InterposerContext::DupBackend::Remote) {
       if (auto remote = InterposerContext::ctx.remote())
-        return kfd_ioctl_ret(remote->ioctl(request, arg));
+        return kfd_ioctl_ret(remote->ioctl(request, arg, snapshot_local_driver));
     }
   }
 
@@ -5541,7 +5822,7 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
 
   assert(InterposerContext::real().ready());
   if (auto remote = InterposerContext::ctx.remote_lookup(fd))
-    return remote->mmap(addr, length, prot, flags, offset);
+    return remote->mmap(addr, length, prot, flags, offset, snapshot_local_driver);
 
   // Classify and dispatch the LOCAL branches on a driver snapshot, which keeps the
   // VM/GuestKfd alive for the duration. For a Remote-backed fd, capture a
@@ -5550,7 +5831,7 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
   {
 
     if (auto drv = InterposerContext::ctx.lookup(fd))
-      return drv->mmap(addr, length, prot, flags, offset);
+      return mmap_local_driver(drv, addr, length, prot, flags, offset);
 
     // Dispatch a tracked KFD dup by its RECORDED backend (as ioctl() does), not by
     // "remote if any remote is live", so routing follows the reference the dup
@@ -5560,7 +5841,7 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
       if (*backend == InterposerContext::DupBackend::Remote) {
         remote_mmap = InterposerContext::ctx.remote();
       } else if (auto drv = InterposerContext::ctx.driver()) {
-        return drv->mmap(addr, length, prot, flags, offset);
+        return mmap_local_driver(drv, addr, length, prot, flags, offset);
       }
     }
 
@@ -5573,7 +5854,14 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
       if (auto drm_file = InterposerContext::ctx.reserve_drm_file(fd)) {
         InterposerContext::DrmFileReservation held(InterposerContext::ctx, drm_file);
         if (static_cast<uint64_t>(offset) >= InterposerContext::kGemMmapOffsetBase)
-          return InterposerContext::ctx.mmap_gem(drm_file, addr, length, prot, flags, offset);
+          return InterposerContext::ctx.mmap_gem(
+              drm_file, addr, length, prot, flags, offset, [&](auto &&bare_mapping_change) {
+                if (!(flags & MAP_FIXED) || !addr)
+                  return with_host_mapping_held(bare_mapping_change);
+                const std::array replaced{
+                    std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
+                return with_svm_host_vma_update(replaced, MAP_FAILED, bare_mapping_change);
+              });
         const auto &lease = drm_file->backend_lease;
         // BOTH branches dispatch inside the reservation. Holding a shared_ptr keeps
         // the object allocated but not OPERATIONAL: if the reservation were released
@@ -5582,16 +5870,16 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
         // socket, and this mmap would then execute against a closed connection.
         // Keeping the lease alive across the call is the whole point of it.
         if (const auto &local = lease.local())
-          return local->mmap(addr, length, prot, flags, offset);
+          return mmap_local_driver(local, addr, length, prot, flags, offset);
         if (const auto &remote = lease.remote())
-          return remote->mmap(addr, length, prot, flags, offset);
+          return remote->mmap(addr, length, prot, flags, offset, snapshot_local_driver);
       }
     }
   }
   // Pin dropped: dispatch the remote op on the lifetime-extending snapshot so a
   // stalled daemon cannot block local-VM teardown.
   if (remote_mmap)
-    return remote_mmap->mmap(addr, length, prot, flags, offset);
+    return remote_mmap->mmap(addr, length, prot, flags, offset, snapshot_local_driver);
 
   if (fd < 0 && (flags & MAP_FIXED) && prot != PROT_NONE && addr) {
     int memfd_out = -1;
@@ -5613,7 +5901,9 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
         auto total = static_cast<off_t>(length) + memfd_offset;
         [[maybe_unused]] auto ft_rc = ftruncate(memfd_out, total);
         fallocate(memfd_out, 0, memfd_offset, static_cast<off_t>(length));
-        auto *raw = with_host_mapping_held([&] {
+        const std::array replaced{
+            std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
+        auto *raw = with_svm_host_vma_update(replaced, MAP_FAILED, [&] {
           return InterposerContext::real().mmap(
               addr, length, prot, (flags & ~MAP_ANONYMOUS) | MAP_SHARED, memfd_out, memfd_offset);
         });
@@ -5636,11 +5926,29 @@ static void *mmap_impl(void *addr, size_t length, int prot, int flags, int fd, o
     }
   }
   if ((flags & MAP_FIXED) && addr) {
-    if (auto driver = InterposerContext::ctx.driver())
+    if (auto driver = InterposerContext::ctx.driver()) {
+      if (auto remote = InterposerContext::ctx.remote()) {
+        const std::array replaced{
+            std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
+        void *mapped = MAP_FAILED;
+        remote->run_host_vma_replacement(replaced, [&] {
+          mapped =
+              driver->mmap_replacing_client_doorbell_views(addr, length, prot, flags, fd, offset);
+          return mapped != MAP_FAILED;
+        });
+        return mapped;
+      }
       return driver->mmap_replacing_client_doorbell_views(addr, length, prot, flags, fd, offset);
+    }
   }
-  return with_host_mapping_held(
-      [&] { return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset); });
+  if (!(flags & MAP_FIXED))
+    return with_host_mapping_held(
+        [&] { return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset); });
+  const std::array replaced{
+      std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
+  return with_svm_host_vma_update(replaced, MAP_FAILED, [&] {
+    return InterposerContext::real().mmap(addr, length, prot, flags, fd, offset);
+  });
 }
 
 RJ_INTERPOSER_EXPORT int mprotect(void *addr, size_t length, int prot) {
@@ -5689,8 +5997,27 @@ RJ_INTERPOSER_EXPORT void *mremap(void *old_address, size_t old_size, size_t new
     return raw_mremap_syscall(old_address, old_size, new_size, flags, new_address);
   if (!rj_owns_interposer_state())
     return InterposerContext::real().mremap(old_address, old_size, new_size, flags, new_address);
-  return with_host_mapping_held([&] {
-    return InterposerContext::real().mremap(old_address, old_size, new_size, flags, new_address);
+  std::array<std::pair<uint64_t, uint64_t>, 2> replaced{};
+  return with_svm_host_vma_update(replaced, MAP_FAILED, [&] {
+    void *mapped =
+        InterposerContext::real().mremap(old_address, old_size, new_size, flags, new_address);
+    if (mapped != MAP_FAILED) {
+      const long page_size = ::sysconf(_SC_PAGESIZE);
+      if (page_size > 0 && new_size <= SIZE_MAX - static_cast<size_t>(page_size - 1) &&
+          old_size <= SIZE_MAX - static_cast<size_t>(page_size - 1)) {
+        const size_t page = static_cast<size_t>(page_size);
+        const size_t old_rounded = ((old_size + page - 1) / page) * page;
+        const size_t new_rounded = ((new_size + page - 1) / page) * page;
+        const auto old_va = reinterpret_cast<uint64_t>(old_address);
+        if (mapped != old_address && !(flags & kMremapDontunmapFlag))
+          replaced[0] = {old_va, old_rounded};
+        else if (mapped == old_address && new_rounded < old_rounded)
+          replaced[0] = {old_va + new_rounded, old_rounded - new_rounded};
+        if (mapped != old_address)
+          replaced[1] = {reinterpret_cast<uint64_t>(mapped), new_rounded};
+      }
+    }
+    return mapped;
   });
 }
 
@@ -5701,22 +6028,32 @@ RJ_INTERPOSER_EXPORT int munmap(void *addr, size_t length) {
     return InterposerContext::real().munmap(addr, length);
 
   assert(InterposerContext::real().ready());
+  auto libc_result = [](int result) {
+    if (result < 0) {
+      errno = -result;
+      return -1;
+    }
+    return result;
+  };
   // Address-based unmap: try the live remote snapshot regardless of whether the
   // primary fd number is currently valid (a dup2/dup3 may have cleared it while
   // the connection stays alive via other refs).
   if (auto remote = InterposerContext::ctx.remote()) {
-    int ret = remote->munmap(addr, length);
+    int ret = remote->munmap(addr, length, snapshot_local_driver);
     if (ret != -ENOENT)
-      return ret;
+      return libc_result(ret);
   }
   {
     if (auto drv = InterposerContext::ctx.driver()) {
-      int ret = drv->munmap(addr, length);
+      int ret = munmap_local_driver(drv, addr, length, InterposerContext::ctx.remote());
       if (ret != -ENOENT)
-        return ret;
+        return libc_result(ret);
     }
   }
-  return with_host_mapping_held([&] { return InterposerContext::real().munmap(addr, length); });
+  const std::array replaced{
+      std::pair{reinterpret_cast<uint64_t>(addr), static_cast<uint64_t>(length)}};
+  return with_svm_host_vma_update(replaced, -1,
+                                  [&] { return InterposerContext::real().munmap(addr, length); });
 }
 
 } // extern "C"

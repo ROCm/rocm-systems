@@ -29,7 +29,8 @@ constexpr GpuGenerationDescriptor kGenerations[] = {
              .max_waves_per_simd = 16,
              .max_scratch_slots_per_cu = 32,
              .lds_size_kb = 320,
-         }},
+         },
+     .pcie = {.max_link_speed = 5, .max_link_width = 16}},
 };
 
 } // namespace

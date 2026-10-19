@@ -152,6 +152,8 @@ GpuPciDeviceSpec gpu_pci_spec_from_config(const config::KfdDeviceConfig &device,
   // The blocks are chosen here, next to the identity, so the two describe one
   // GPU.
   spec.discovery = discovery_spec_for(device);
+  if (const GpuGenerationDescriptor *generation = gpu_generations().find(device.gfx_target_version))
+    spec.pcie = generation->pcie;
   return spec;
 }
 

@@ -1513,6 +1513,8 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
           f.soc->set_plugin_group(f.plugin_group_);
           f.plugin_group_->onInit();
           auto *cu = f.cu();
+          constexpr uint64_t shared_base = uint64_t{1} << 48;
+          cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
           auto *wf = cu->dispatch_wf(0, 0x100, sgprs, 256, wave_size);
           ASSERT_NE(wf, nullptr);
           wf->set_exec(3);
@@ -1534,7 +1536,6 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
 
           // Model routing after aperture resolution. Only uniform shared
           // requests use LOCAL; all shared addresses are rewritten into LDS.
-          constexpr uint64_t shared_base = uint64_t{1} << 48;
           wf->set_lds_base(0x200);
           const bool local_route = shared_lanes == 3;
           auto data = std::make_unique<VectorMemState>(local_route ? LOCAL_MEM : GLOBAL_MEM);
@@ -1554,7 +1555,6 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
                 (shared_lanes & (uint64_t{1} << lane) ? wf->lds_base() + 0x40 : 0x1000) + lane * 4;
             data->per_lane_addr[lane] = effective_addresses[lane];
           }
-          cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
           for (unsigned lane = 0; lane < 2; ++lane) {
             cu->write_vgpr(wf->vgpr_alloc().base, lane, original_addresses[lane]);
             cu->write_vgpr(wf->vgpr_alloc().base + 1, lane, original_addresses[lane] >> 32);
@@ -1854,6 +1854,8 @@ TEST(RaceDetectorPluginTest, FlatCounterCapacityRequiresResolvedDomain) {
           ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
           f.soc->set_plugin_group(f.plugin_group_);
           f.plugin_group_->onInit();
+          constexpr uint64_t shared_base = uint64_t{1} << 32;
+          f.cu()->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
           auto *wf = f.cu()->dispatch_wf(0, 0x100, 104, 256);
           ASSERT_NE(wf, nullptr);
           wf->set_exec(1);
@@ -1909,8 +1911,6 @@ TEST(RaceDetectorPluginTest, FlatCounterCapacityRequiresResolvedDomain) {
             access.request_lane_mask = requests ? 1 : 0;
             access.flat_local_lane_mask = flat_lds && requests ? 1 : 0;
             f.plugin_group_->onAmdgpuMemoryAccessRouted(access, *flat, *wf);
-            constexpr uint64_t shared_base = uint64_t{1} << 32;
-            f.cu()->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
             f.cu()->write_vgpr(wf->vgpr_alloc().base, 0, 0x100);
             f.cu()->write_vgpr(wf->vgpr_alloc().base + 1, 0, flat_lds ? 1 : 2);
             // The core derives requests from architectural state before execution.

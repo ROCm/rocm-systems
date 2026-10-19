@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "async_vm_test_support.h"
 #include "legacy_gpu_memory_fixture.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
@@ -17,6 +18,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <future>
 #include <map>
 #include <memory>
@@ -26,6 +28,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #if defined(__SANITIZE_ADDRESS__)
@@ -45,7 +48,7 @@ constexpr bool kSanitizedVmMetadata = true;
 constexpr bool kSanitizedVmMetadata = false;
 #endif
 
-class TestPhysicalMemory final : public PhysicalMemoryAccess {
+class TestPhysicalMemory : public PhysicalMemoryAccess {
 public:
   VmAccessOutcome read(VmMemoryDomain domain, uint64_t address,
                        std::span<std::byte> bytes) override {
@@ -78,6 +81,74 @@ public:
   std::map<uint64_t, std::byte> system;
   std::map<uint64_t, std::byte> local;
   std::size_t read_calls = 0;
+};
+
+class DeferredSystemProbeMemory final : public TestPhysicalMemory {
+public:
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_system_read(uint64_t address, std::size_t length, VmAccessKind access,
+                               const std::shared_ptr<VmTransferEffectGate> &) override {
+    ++read_prepares;
+    last_address = address;
+    last_length = length;
+    EXPECT_EQ(access, VmAccessKind::Read);
+    return std::nullopt;
+  }
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_system_write(uint64_t address, std::span<const std::byte> bytes,
+                                const std::shared_ptr<VmTransferEffectGate> &) override {
+    ++write_prepares;
+    last_address = address;
+    last_length = bytes.size();
+    return std::nullopt;
+  }
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_system_read(uint64_t address, std::size_t length, VmAccessKind access,
+                               const std::shared_ptr<VmTransferEffectGate> &gate,
+                               const GpuVmAccess &executing_access, uint64_t gpu_va,
+                               const VmTranslation &selected_translation) override {
+    ++context_read_prepares;
+    seen_cache_identity = executing_access.cache_identity();
+    seen_cache_namespace = executing_access.cache_namespace();
+    seen_translation = selected_translation;
+    seen_gate = gate;
+    last_gpu_va = gpu_va;
+    last_address = address;
+    last_length = length;
+    last_kind = access;
+    return std::nullopt;
+  }
+  [[nodiscard]] std::optional<VmTransferToken>
+  prepare_deferred_system_write(uint64_t address, std::span<const std::byte> bytes,
+                                const std::shared_ptr<VmTransferEffectGate> &gate,
+                                const GpuVmAccess &executing_access, uint64_t gpu_va,
+                                const VmTranslation &selected_translation) override {
+    ++context_write_prepares;
+    seen_cache_identity = executing_access.cache_identity();
+    seen_cache_namespace = executing_access.cache_namespace();
+    seen_translation = selected_translation;
+    seen_gate = gate;
+    last_gpu_va = gpu_va;
+    last_address = address;
+    last_length = bytes.size();
+    last_kind = VmAccessKind::Write;
+    return std::nullopt;
+  }
+
+  std::size_t read_prepares = 0;
+  std::size_t write_prepares = 0;
+  std::size_t context_read_prepares = 0;
+  std::size_t context_write_prepares = 0;
+  // Keep only values: retaining the snapshot here would own this memory
+  // provider through its translator and form a reference cycle.
+  std::optional<uint64_t> seen_cache_identity;
+  std::optional<VmCacheNamespace> seen_cache_namespace;
+  std::optional<VmTranslation> seen_translation;
+  std::shared_ptr<VmTransferEffectGate> seen_gate;
+  uint64_t last_gpu_va = 0;
+  uint64_t last_address = 0;
+  std::size_t last_length = 0;
+  VmAccessKind last_kind = VmAccessKind::Read;
 };
 
 class ByteTranslator final : public AddressSpaceTranslator {
@@ -596,6 +667,116 @@ TEST(GpuVmTranslation, Gfx12WalkHonorsSystemMemoryRootFlag) {
   EXPECT_EQ(translated.translation.address, physical_page + 0x123);
 }
 
+TEST(GpuVmTranslation, Gfx12QueuePreparesOnlyTranslatedSystemData) {
+  auto physical = std::make_shared<DeferredSystemProbeMemory>();
+  constexpr uint64_t root = 0x1000;
+  constexpr uint64_t system_va = 0x8123;
+  constexpr uint64_t local_va = 0xa123;
+  constexpr uint64_t system_page = 0x9000;
+  constexpr uint64_t local_page = 0xb000;
+  map_4k(*physical, root, system_va, system_page, kValid | kSystem | kReadable | kWriteable);
+  map_4k(*physical, root, local_va, local_page, kValid | kReadable | kWriteable);
+  Gfx12PageTableTranslator translator(physical, root);
+  auto gate = std::make_shared<VmTransferEffectGate>();
+
+  EXPECT_FALSE(translator.prepare_deferred_read(*physical, system_va, 8, VmAccessKind::Read, gate));
+  EXPECT_EQ(physical->read_prepares, 1u);
+  EXPECT_EQ(physical->last_address, system_page + 0x123);
+  EXPECT_EQ(physical->last_length, 8u);
+  const std::array<std::byte, 4> value{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+  EXPECT_FALSE(translator.prepare_deferred_write(*physical, system_va, value, gate));
+  EXPECT_EQ(physical->write_prepares, 1u);
+  EXPECT_EQ(physical->last_address, system_page + 0x123);
+  EXPECT_EQ(physical->last_length, value.size());
+
+  EXPECT_FALSE(translator.prepare_deferred_read(*physical, local_va, 8, VmAccessKind::Read, gate));
+  EXPECT_FALSE(translator.prepare_deferred_write(*physical, local_va, value, gate));
+  EXPECT_EQ(physical->read_prepares, 1u);
+  EXPECT_EQ(physical->write_prepares, 1u);
+  EXPECT_GT(physical->read_calls, 0u) << "page-table/control reads remain synchronous";
+}
+
+TEST(GpuVmTranslation, Gfx12PageTablePassesExecutingSnapshotToSystemPreparation) {
+  auto physical = std::make_shared<DeferredSystemProbeMemory>();
+  constexpr uint64_t root = 0x1000;
+  constexpr uint64_t gpu_va = 0x8123;
+  constexpr uint64_t iova_page = 0x9000;
+  map_4k(*physical, root, gpu_va, iova_page, kValid | kSystem | kReadable | kWriteable);
+  physical->system[iova_page + 0x123] = std::byte{0x5a};
+  GpuVm vm;
+  const AddressSpaceHandle handle = vm.register_gfx12_address_space(7, root, physical);
+  ASSERT_TRUE(handle);
+  const std::optional<GpuVmAccess> access = vm.snapshot_pinned(handle);
+  ASSERT_TRUE(access);
+
+  std::array<std::byte, 1> read{};
+  VmTransferToken token;
+  std::size_t completed = 0;
+  EXPECT_EQ(access->read(gpu_va, read, completed, token), VmAccessOutcome::Complete);
+  EXPECT_EQ(read[0], std::byte{0x5a});
+  EXPECT_EQ(physical->context_read_prepares, 1u);
+  ASSERT_TRUE(physical->seen_cache_identity);
+  ASSERT_TRUE(physical->seen_cache_namespace);
+  EXPECT_EQ(*physical->seen_cache_identity, access->cache_identity());
+  EXPECT_EQ(*physical->seen_cache_namespace, access->cache_namespace());
+  EXPECT_EQ(physical->seen_gate, access->retain_effect_gate());
+  EXPECT_EQ(physical->last_gpu_va, gpu_va);
+  EXPECT_EQ(physical->last_address, iova_page + 0x123);
+  EXPECT_EQ(physical->last_length, read.size());
+  EXPECT_EQ(physical->last_kind, VmAccessKind::Read);
+  ASSERT_TRUE(physical->seen_translation);
+  EXPECT_EQ(physical->seen_translation->mtype, Mtype::RW);
+  EXPECT_TRUE(physical->seen_translation->permissions.readable);
+  EXPECT_TRUE(physical->seen_translation->permissions.writable);
+  EXPECT_FALSE(physical->seen_translation->permissions.executable);
+
+  constexpr std::array<std::byte, 1> write{std::byte{0x3c}};
+  completed = 0;
+  EXPECT_EQ(access->write(gpu_va, write, completed, token), VmAccessOutcome::Complete);
+  EXPECT_EQ(physical->context_write_prepares, 1u);
+  EXPECT_EQ(physical->last_gpu_va, gpu_va);
+  EXPECT_EQ(physical->last_address, iova_page + 0x123);
+  EXPECT_EQ(physical->last_length, write.size());
+  EXPECT_EQ(physical->last_kind, VmAccessKind::Write);
+  ASSERT_TRUE(physical->seen_translation);
+  EXPECT_EQ(physical->seen_translation->mtype, Mtype::RW);
+  EXPECT_TRUE(physical->seen_translation->permissions.readable);
+  EXPECT_TRUE(physical->seen_translation->permissions.writable);
+  EXPECT_FALSE(physical->seen_translation->permissions.executable);
+  EXPECT_EQ(physical->system[iova_page + 0x123], write[0]);
+}
+
+TEST(GpuVmTranslation, Gfx12PeerRewalkDistinguishesNcFromRwPteEncoding) {
+  auto physical = std::make_shared<TestPhysicalMemory>();
+  constexpr uint64_t root = 0x1000;
+  constexpr uint64_t gpu_va = 0x8123;
+  constexpr uint64_t iova_page = 0x9000;
+  constexpr uint64_t flags = kValid | kSystem | kReadable | kWriteable | kPdePte;
+  map_4k(*physical, root, gpu_va, iova_page, flags);
+
+  GpuVm vm;
+  const AddressSpaceHandle handle = vm.register_gfx12_address_space(7, root, physical);
+  ASSERT_TRUE(handle);
+  const auto access = vm.snapshot_pinned(handle);
+  ASSERT_TRUE(access);
+  const VmTranslationResult first = access->query_translation(gpu_va, 1, VmAccessKind::Read);
+  ASSERT_TRUE(first);
+  EXPECT_EQ(first.translation.mtype, Mtype::RW);
+  EXPECT_EQ(first.translation.gfx12_pte_mtype, Gfx12PteMtype::NC);
+
+  const uint64_t leaf_index = (gpu_va >> 12) & 0x1ff;
+  physical->store_qword(VmMemoryDomain::Local,
+                        kLowPageTables.back() + leaf_index * sizeof(uint64_t),
+                        iova_page | flags | (uint64_t{2} << 54));
+  const VmTranslationResult second = access->query_translation(gpu_va, 1, VmAccessKind::Read);
+  ASSERT_TRUE(second);
+  EXPECT_EQ(second.translation.mtype, first.translation.mtype);
+  EXPECT_EQ(second.translation.gfx12_pte_mtype, Gfx12PteMtype::RW);
+  EXPECT_EQ(access->validate_deferred_system_span(gpu_va, iova_page + 0x123, 1, VmAccessKind::Read,
+                                                  first.translation),
+            VmAccessOutcome::Revoked);
+}
+
 TEST(GpuVmTranslation, Gfx12WalkRejectsFinalLevelPde) {
   auto physical = std::make_shared<TestPhysicalMemory>();
   constexpr uint64_t root = 0x1000;
@@ -1029,6 +1210,34 @@ TEST(GpuVmTranslation, GpuVmUsesTranslatedBindingAndAdvancesEpochOnRootReplaceme
   EXPECT_FALSE(gpu_vm.invalidate(handle));
 }
 
+TEST(GpuVmTranslation, RootReplacementRotatesCacheWriteProofAndLineage) {
+  GpuVm gpu_vm;
+  auto physical = std::make_shared<TestPhysicalMemory>();
+  auto translator = std::make_shared<ByteTranslator>();
+  const AddressSpaceHandle handle = gpu_vm.register_translated(7, translator, physical);
+  ASSERT_TRUE(handle);
+  auto old = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(old);
+  EXPECT_EQ(old->cache_write_sequence(), 0u);
+  ASSERT_TRUE(old->admit_access(0x100, 4, VmAccessKind::Write));
+  EXPECT_EQ(old->cache_write_sequence(), 1u);
+
+  // An explicit root replacement starts a new proof even when it reuses the
+  // translator and physical objects. The retired pinned view keeps its proof.
+  ASSERT_TRUE(gpu_vm.replace_translated(handle, translator, physical));
+  auto replacement = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(replacement);
+  EXPECT_EQ(replacement->cache_write_sequence(), 0u);
+  EXPECT_EQ(old->cache_write_sequence(), 1u);
+  EXPECT_FALSE(old->same_root_lineage(*replacement));
+
+  ASSERT_TRUE(gpu_vm.invalidate(handle));
+  auto invalidated = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(invalidated);
+  EXPECT_TRUE(replacement->same_root_lineage(*invalidated));
+  EXPECT_EQ(invalidated->cache_write_sequence(), 0u);
+}
+
 TEST(GpuVmTranslation, InvalidationDrainsAnInFlightAccessAndRevokesOldSnapshots) {
   GpuVm gpu_vm;
   auto physical = std::make_shared<BlockingPhysicalMemory>();
@@ -1437,6 +1646,168 @@ TEST(GpuVmTranslation, LegacyBindingUsesTheSharedVmInterfaceWithoutClaimingPhysi
   EXPECT_EQ(gpu_vm.write(handle, virtual_address, value), VmAccessOutcome::Complete);
   EXPECT_EQ(backing[0x123], 0xa5);
 
+  EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
+}
+
+TEST(GpuVmTranslation, LegacyPrivateDwordBatchPreflightsRawWritePermission) {
+  constexpr uint32_t vmid = 7;
+  constexpr uint64_t address = 0x4000;
+  std::array<uint8_t, KfdProcess::kPageSize> backing{};
+  LegacyPageTable page_table;
+  page_table[address >> KfdProcess::kPageShift] = {backing.data(), Mtype::UC, backing.size(), 0};
+  page_table[address >> KfdProcess::kPageShift].host_extents.front().owner =
+      LegacyHostExtentOwner::DriverSealedRam;
+  util::DistributedSharedMutex page_table_mutex;
+  auto request_mutex = std::make_shared<util::DistributedSharedMutex>();
+  auto gate = std::make_shared<VmRawBackingWriteGate>();
+  GpuMemory memory("raw_batch");
+  GpuVm gpu_vm;
+  LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
+  bool deny_second = true;
+  const AddressSpaceHandle handle = legacy_vm.register_address_space(
+      vmid, {.page_table = &page_table,
+             .page_table_mutex = &page_table_mutex,
+             .request_mutex = request_mutex,
+             .access_admission =
+                 [&](uint64_t request_address, std::size_t, VmAccessKind) {
+                   return VmAccessAdmission{.direct_backing_write_allowed =
+                                                !(deny_second && request_address == address + 4)};
+                 },
+             .raw_write_gate = gate});
+  ASSERT_TRUE(handle);
+  const auto access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  const VmAccessAdmission admission = access->admit_access(address + 4, 4, VmAccessKind::Write);
+  EXPECT_TRUE(admission);
+  EXPECT_FALSE(admission.direct_backing_write_allowed);
+
+  const std::array<uint32_t, 2> values{0x12345678u, 0x87654321u};
+  const std::array<VmRamDwordStore, 2> stores{{
+      {address, reinterpret_cast<const uint8_t *>(&values[0])},
+      {address + 4, reinterpret_cast<const uint8_t *>(&values[1])},
+  }};
+  EXPECT_FALSE(access->try_write_private_dwords(stores, Mtype::UC, Mtype::UC));
+  EXPECT_TRUE(std::ranges::all_of(backing, [](uint8_t value) { return value == 0; }));
+
+  deny_second = false;
+  auto closed_store = gate->try_close(address + 4, sizeof(uint32_t));
+  ASSERT_TRUE(closed_store);
+  EXPECT_FALSE(access->try_write_private_dwords(stores, Mtype::UC, Mtype::UC));
+  EXPECT_TRUE(std::ranges::all_of(backing, [](uint8_t value) { return value == 0; }));
+  closed_store.reset();
+
+  auto closed_unrelated = gate->try_close(address + KfdProcess::kPageSize, KfdProcess::kPageSize);
+  ASSERT_TRUE(closed_unrelated);
+  ASSERT_TRUE(access->try_write_private_dwords(stores, Mtype::UC, Mtype::UC));
+  EXPECT_EQ(std::memcmp(backing.data(), values.data(), sizeof(values)), 0);
+  EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
+}
+
+TEST(GpuVmTranslation, RawWriteGateTracksMovedAndOutOfOrderTokens) {
+  VmRawBackingWriteGate gate;
+  auto first = gate.try_acquire(0x4000, 4);
+  auto second = gate.try_acquire(0x4004, 4);
+  ASSERT_TRUE(first);
+  ASSERT_TRUE(second);
+  EXPECT_FALSE(gate.try_close(0x4000, 8));
+
+  auto moved = std::move(*first);
+  first.reset();
+  moved = VmRawBackingWriteGate::Permit{};
+  auto closed_first = gate.try_close(0x4000, 4);
+  ASSERT_TRUE(closed_first);
+  second.reset();
+  EXPECT_FALSE(gate.try_acquire(0x4000, 4));
+
+  auto closed_second = gate.try_close(0x5000, 4);
+  ASSERT_TRUE(closed_second);
+  *closed_second = std::move(*closed_first);
+  closed_first.reset();
+  EXPECT_TRUE(gate.try_acquire(0x5000, 4));
+  EXPECT_FALSE(gate.try_acquire(0x4000, 4));
+  closed_second.reset();
+  EXPECT_TRUE(gate.try_acquire(0x4000, 4));
+}
+
+TEST(GpuVmTranslation, LegacyRawWritePermitSpansAdmissionAndBackingEffect) {
+  constexpr uint32_t vmid = 7;
+  constexpr uint64_t address = 0x4000;
+  constexpr uint64_t status_address = address + KfdProcess::kPageSize;
+  alignas(4096) std::array<uint8_t, 2 * KfdProcess::kPageSize> backing{};
+  LegacyPageTable page_table;
+  page_table[address >> KfdProcess::kPageShift] = {backing.data(), Mtype::UC, KfdProcess::kPageSize,
+                                                   0};
+  page_table[status_address >> KfdProcess::kPageShift] = {backing.data() + KfdProcess::kPageSize,
+                                                          Mtype::UC, KfdProcess::kPageSize, 0};
+  util::DistributedSharedMutex page_table_mutex;
+  auto gate = std::make_shared<VmRawBackingWriteGate>();
+  std::mutex pause_mutex;
+  std::condition_variable pause_condition;
+  bool entered = false;
+  bool resume = false;
+  std::atomic<uint32_t> admissions{0};
+  GpuMemory memory("raw_permit");
+  GpuVm gpu_vm;
+  LegacyGpuVmAdapter legacy_vm(gpu_vm, &memory);
+  const AddressSpaceHandle handle = legacy_vm.register_address_space(
+      vmid, {.page_table = &page_table,
+             .page_table_mutex = &page_table_mutex,
+             .request_mutex = {},
+             .access_admission =
+                 [&](uint64_t, std::size_t, VmAccessKind) {
+                   if (admissions.fetch_add(1) == 0) {
+                     std::unique_lock lock(pause_mutex);
+                     entered = true;
+                     pause_condition.notify_all();
+                     pause_condition.wait(lock, [&] { return resume; });
+                   }
+                   return VmAccessAdmission{};
+                 },
+             .raw_write_gate = gate});
+  ASSERT_TRUE(handle);
+  const auto access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  const uint32_t first = 0x12345678u;
+  const auto first_bytes = std::as_bytes(std::span(&first, 1));
+  VmAccessOutcome writer_outcome = VmAccessOutcome::Malformed;
+  std::thread writer([&] { writer_outcome = access->write(address, first_bytes); });
+  {
+    std::unique_lock lock(pause_mutex);
+    const bool paused =
+        pause_condition.wait_for(lock, std::chrono::seconds(5), [&] { return entered; });
+    EXPECT_TRUE(paused);
+    if (paused) {
+      EXPECT_FALSE(gate->try_close(address, KfdProcess::kPageSize));
+    }
+    resume = true;
+  }
+  pause_condition.notify_all();
+  writer.join();
+  EXPECT_EQ(writer_outcome, VmAccessOutcome::Complete);
+  EXPECT_EQ(std::memcmp(backing.data(), &first, sizeof(first)), 0);
+
+  auto unrelated_writer = gate->try_acquire(status_address, sizeof(uint32_t));
+  ASSERT_TRUE(unrelated_writer);
+  auto closed = gate->try_close(address, KfdProcess::kPageSize);
+  ASSERT_TRUE(closed);
+  const uint32_t second = 0x87654321u;
+  const auto second_bytes = std::as_bytes(std::span(&second, 1));
+  EXPECT_EQ(access->write(address, second_bytes), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(std::memcmp(backing.data(), &first, sizeof(first)), 0);
+
+  // Queue exception status lives in another allocation in the same process.
+  // Controlled publication must not drop its synchronous atomic notification.
+  constexpr uint32_t exception_status = 0x80000001u;
+  EXPECT_EQ(access->atomic_store(status_address, sizeof(exception_status), exception_status),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(std::memcmp(backing.data() + KfdProcess::kPageSize, &exception_status,
+                        sizeof(exception_status)),
+            0);
+
+  unrelated_writer.reset();
+  closed.reset();
+  EXPECT_EQ(access->write(address, second_bytes), VmAccessOutcome::Complete);
+  EXPECT_EQ(std::memcmp(backing.data(), &second, sizeof(second)), 0);
   EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
 }
 
@@ -2029,6 +2400,423 @@ TEST(GpuVmTranslation, LegacyVmidZeroGetsGenerationSafePassthroughBinding) {
   EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
   EXPECT_EQ(gpu_vm.gart_address_space(), gart);
   EXPECT_EQ(gpu_vm.active_address_spaces(), 1u);
+}
+
+TEST(GpuVmTranslation, LegacyControlledLocalWriteUsesOwnedBoundedTransfer) {
+  struct OwnedWrite {
+    std::vector<std::byte> payload;
+    std::shared_ptr<VmTransferEffectGate> gate;
+    uint8_t *target = nullptr;
+    std::size_t submissions = 0;
+    bool complete = false;
+  };
+  class OwnedWriteTransfer final : public VmDeferredTransfer {
+  public:
+    explicit OwnedWriteTransfer(std::shared_ptr<OwnedWrite> write) : write_(std::move(write)) {}
+    void submit() override { ++write_->submissions; }
+    VmAccessOutcome poll(std::span<std::byte>) override {
+      return write_->complete ? VmAccessOutcome::Complete : VmAccessOutcome::Unavailable;
+    }
+    VmAccessOutcome reconcile_revocation(std::span<std::byte>) override {
+      return write_->complete ? VmAccessOutcome::Complete : VmAccessOutcome::Revoked;
+    }
+    void cancel() noexcept override {}
+
+  private:
+    std::shared_ptr<OwnedWrite> write_;
+  };
+
+  constexpr uint32_t vmid = 7;
+  constexpr uint64_t address = 0x4ffc;
+  HostPage first_page;
+  HostPage second_page;
+  ASSERT_NE(first_page.data(), nullptr);
+  ASSERT_NE(second_page.data(), nullptr);
+  LegacyPageTable page_table;
+  page_table[4] = {first_page.data(), Mtype::CC};
+  page_table[5] = {second_page.data(), Mtype::CC};
+  util::DistributedSharedMutex page_table_mutex;
+  std::vector<std::shared_ptr<OwnedWrite>> prepared;
+  GpuMemory memory("memory");
+  GpuVm gpu_vm;
+  LegacyGpuVmAdapter adapter(gpu_vm, &memory);
+  const AddressSpaceHandle handle = adapter.register_address_space(
+      vmid, {.page_table = &page_table,
+             .page_table_mutex = &page_table_mutex,
+             .request_mutex = {},
+             .data_route =
+                 [](uint64_t request_address, std::size_t, VmAccessKind access) {
+                   if (access != VmAccessKind::Write)
+                     return LegacyDataRoute{};
+                   if (request_address < 0x4000 || request_address >= address + 8)
+                     return LegacyDataRoute{};
+                   if (request_address < address)
+                     return LegacyDataRoute{.first_extent_bytes = address - request_address};
+                   return LegacyDataRoute{
+                       .route = VmDataRoute::Deferred,
+                       // The first chunk crosses a page; later chunks reach a short extent.
+                       .first_extent_bytes = request_address < 0x5000 ? 8u : 2u,
+                       .candidate = LegacyDeferredCandidate::ControlledLocalWrite};
+                 },
+             .prepare_deferred_transfer =
+                 [&](LegacyDeferredCandidate candidate, uint64_t request_address, std::size_t size,
+                     std::span<const std::byte> bytes, bool write,
+                     const std::shared_ptr<VmTransferEffectGate> &gate,
+                     const GpuVmAccess &executing_access,
+                     std::shared_ptr<const LegacyAddressSpace> address_space)
+                 -> std::unique_ptr<VmDeferredTransfer> {
+               EXPECT_EQ(candidate, LegacyDeferredCandidate::ControlledLocalWrite);
+               EXPECT_TRUE(write);
+               EXPECT_EQ(bytes.size(), size);
+               EXPECT_EQ(gate, executing_access.retain_effect_gate());
+               EXPECT_NE(executing_access.cache_identity(), 0u);
+               EXPECT_EQ(executing_access.info().vmid, vmid);
+               EXPECT_TRUE(address_space->is_range_mapped(request_address, size, vmid));
+               auto operation = std::make_shared<OwnedWrite>();
+               operation->payload.assign(bytes.begin(), bytes.end());
+               operation->gate = gate;
+               operation->target = request_address < 0x5000
+                                       ? first_page.data() + (request_address - 0x4000)
+                                       : second_page.data() + (request_address - 0x5000);
+               prepared.push_back(operation);
+               return std::make_unique<OwnedWriteTransfer>(std::move(operation));
+             }});
+  ASSERT_TRUE(handle);
+  const auto access = gpu_vm.snapshot(handle);
+  ASSERT_TRUE(access);
+
+  const std::array<std::byte, 8> expected = {std::byte{1}, std::byte{2}, std::byte{3},
+                                             std::byte{4}, std::byte{5}, std::byte{6},
+                                             std::byte{7}, std::byte{8}};
+  auto source = expected;
+  std::size_t progress = 0;
+  EXPECT_EQ(access->classify_data_route(address, source.size(), VmAccessKind::Write),
+            VmDataRoute::Deferred);
+  EXPECT_EQ(access->admit_access(address, source.size(), VmAccessKind::Write).outcome,
+            VmAccessOutcome::Faulted);
+  std::array<std::byte, 4> read_back{};
+  EXPECT_EQ(access->read(address, read_back), VmAccessOutcome::Complete);
+  EXPECT_TRUE(std::ranges::all_of(read_back, [](std::byte value) { return value == std::byte{}; }));
+  EXPECT_EQ(access->write(address, source, progress), VmAccessOutcome::Malformed);
+  EXPECT_FALSE(access->try_write_contiguous(address, source));
+  EXPECT_EQ(access->admit_access(address - 4, 6, VmAccessKind::Write).outcome,
+            VmAccessOutcome::Faulted);
+  EXPECT_EQ(access->admit_access(address + 8, 1, VmAccessKind::Write).outcome,
+            VmAccessOutcome::Faulted);
+  EXPECT_FALSE(access->try_write_contiguous(address - 4, std::span(source).first(6)));
+  EXPECT_EQ(access->atomic_store(address, sizeof(uint32_t), 0xffffffff), VmAccessOutcome::Faulted);
+  EXPECT_EQ(access->atomic_store(address - 4, sizeof(uint64_t), 0xffffffffffffffff),
+            VmAccessOutcome::Faulted);
+  EXPECT_EQ(access->resolve_host_pointer(address, 1), nullptr);
+  EXPECT_EQ(access->resolve_host_pointer(address - 4, 6), nullptr);
+  EXPECT_EQ(access->resolve_host_pointer(address - 4, 8), nullptr);
+  EXPECT_EQ(access->host_range(address), (std::pair<uint64_t, uint64_t>{0, 0}));
+  EXPECT_EQ(access->host_range(address - 4), (std::pair<uint64_t, uint64_t>{0, 0}));
+  EXPECT_EQ(progress, 0u);
+  EXPECT_TRUE(prepared.empty());
+  EXPECT_EQ(first_page.data()[KfdProcess::kPageSize - 1], 0u);
+  const std::array<std::byte, 4> local_bytes{std::byte{9}, std::byte{10}, std::byte{11},
+                                             std::byte{12}};
+  EXPECT_EQ(access->write(address - 8, local_bytes), VmAccessOutcome::Complete);
+  for (std::size_t index = 0; index < local_bytes.size(); ++index)
+    EXPECT_EQ(first_page.data()[KfdProcess::kPageSize - 12 + index],
+              std::to_integer<uint8_t>(local_bytes[index]));
+
+  auto finish = [](const std::shared_ptr<OwnedWrite> &operation) {
+    ASSERT_EQ(operation->submissions, 1u);
+    ASSERT_TRUE(operation->gate->commit([&] {
+      std::memcpy(operation->target, operation->payload.data(), operation->payload.size());
+      operation->complete = true;
+    }));
+  };
+  VmTransferToken token;
+  EXPECT_EQ(access->write(address, source, progress, token), VmAccessOutcome::Unavailable);
+  ASSERT_EQ(prepared.size(), 1u);
+  EXPECT_EQ(prepared[0]->payload.size(), 4u);
+  EXPECT_EQ(prepared[0]->submissions, 1u);
+  EXPECT_EQ(first_page.data()[KfdProcess::kPageSize - 4], 0u);
+  source.fill(std::byte{0xff});
+  finish(prepared[0]);
+  EXPECT_EQ(access->write(address, source, progress, token), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(progress, 4u);
+
+  source = expected;
+  EXPECT_EQ(access->write(address, source, progress, token), VmAccessOutcome::Unavailable);
+  ASSERT_EQ(prepared.size(), 2u);
+  EXPECT_EQ(prepared[1]->payload.size(), 2u);
+  EXPECT_EQ(prepared[1]->submissions, 1u);
+  EXPECT_EQ(second_page.data()[0], 0u);
+  source.fill(std::byte{0xff});
+  finish(prepared[1]);
+  EXPECT_EQ(access->write(address, source, progress, token), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(progress, 6u);
+
+  source = expected;
+  EXPECT_EQ(access->write(address, source, progress, token), VmAccessOutcome::Unavailable);
+  ASSERT_EQ(prepared.size(), 3u);
+  EXPECT_EQ(prepared[2]->payload.size(), 2u);
+  EXPECT_EQ(prepared[2]->submissions, 1u);
+  EXPECT_EQ(second_page.data()[2], 0u);
+  source.fill(std::byte{0xff});
+  finish(prepared[2]);
+  EXPECT_EQ(access->write(address, source, progress, token), VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, expected.size());
+  EXPECT_FALSE(token.pending());
+  for (std::size_t index = 0; index < 4; ++index) {
+    EXPECT_EQ(first_page.data()[KfdProcess::kPageSize - 4 + index],
+              std::to_integer<uint8_t>(expected[index]));
+    EXPECT_EQ(second_page.data()[index], std::to_integer<uint8_t>(expected[index + 4]));
+  }
+  EXPECT_TRUE(gpu_vm.unregister_address_space(handle));
+}
+
+TEST(GpuVmTranslationTest, DeferredTokenOwnsTwoStepReadAndWriteAcrossOwnerEvents) {
+  test::AsyncVmHarness sim;
+  auto memory = std::make_shared<test::AsyncVmMemory>(*sim.owner, 0x200, 0x104, 0x108);
+  GpuVm vm;
+  const AddressSpaceHandle handle = vm.register_translated(7, memory, memory);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  const std::array<std::byte, 8> initial = {std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4},
+                                            std::byte{5}, std::byte{6}, std::byte{7}, std::byte{8}};
+  memory->store(0x100, initial);
+
+  std::array<std::byte, 8> read_result{};
+  std::size_t read_progress = 0;
+  VmTransferToken read_token;
+  EXPECT_EQ(access->read(0x100, read_result, read_progress, read_token),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(read_progress, 4u);
+  EXPECT_TRUE(read_token.pending());
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(memory->backing->read_effects, 0u);
+  EXPECT_EQ(read_result[4], std::byte{});
+  EXPECT_EQ(access->read(0x100, read_result, read_progress, read_token),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  (void)sim.engine.step();
+  EXPECT_EQ(access->read(0x100, read_result, read_progress, read_token), VmAccessOutcome::Complete);
+  EXPECT_EQ(read_progress, initial.size());
+  EXPECT_EQ(read_result, initial);
+  EXPECT_EQ(memory->backing->read_effects, 1u);
+  EXPECT_FALSE(read_token.pending());
+
+  std::array<std::byte, 8> write_source = {std::byte{9},  std::byte{10}, std::byte{11},
+                                           std::byte{12}, std::byte{13}, std::byte{14},
+                                           std::byte{15}, std::byte{16}};
+  const auto original_write = write_source;
+  std::size_t write_progress = 0;
+  VmTransferToken write_token;
+  EXPECT_EQ(access->write(0x100, write_source, write_progress, write_token),
+            VmAccessOutcome::Unavailable);
+  EXPECT_EQ(write_progress, 4u);
+  EXPECT_EQ(memory->backing->posts, 2u);
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+  write_source.fill(std::byte{0xff});
+  (void)sim.engine.step();
+  EXPECT_EQ(access->write(0x100, write_source, write_progress, write_token),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(write_progress, original_write.size());
+  EXPECT_EQ(memory->load(0x100, original_write.size()),
+            std::vector<std::byte>(original_write.begin(), original_write.end()));
+  EXPECT_EQ(memory->backing->write_effects, 1u);
+  EXPECT_EQ(memory->backing->posts, 2u);
+}
+
+TEST(GpuVmTranslationTest, TerminalDeferredFaultReportsItsRequestAddressOnce) {
+  test::AsyncVmHarness sim;
+  // Preparation owns a request, but its owner discovers that the selected
+  // backing extent cannot satisfy it after submission.
+  auto memory = std::make_shared<test::AsyncVmMemory>(*sim.owner, 0x100, 0x100, 0x104);
+  GpuVm vm;
+  std::vector<std::pair<uint64_t, VmAccessKind>> faults;
+  const auto handle =
+      vm.register_address_space(7, memory, memory, [&](uint64_t address, VmAccessKind kind) {
+        faults.emplace_back(address, kind);
+      });
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  std::array<std::byte, 4> result{std::byte{0xa5}, std::byte{0xa5}, std::byte{0xa5},
+                                  std::byte{0xa5}};
+  std::size_t progress = 0;
+  VmTransferToken token;
+  EXPECT_EQ(access->read(0x100, result, progress, token), VmAccessOutcome::Unavailable);
+  ASSERT_TRUE(token.pending());
+  ASSERT_TRUE(sim.engine.step());
+  EXPECT_EQ(access->read(0x100, result, progress, token), VmAccessOutcome::Faulted);
+  EXPECT_FALSE(token.pending());
+  EXPECT_EQ(progress, 0u);
+  EXPECT_EQ(result[0], std::byte{0xa5});
+  EXPECT_EQ(faults, (std::vector<std::pair<uint64_t, VmAccessKind>>{{0x100, VmAccessKind::Read}}));
+}
+
+TEST(GpuVmTranslationTest, CommittedDeferredChunkAdvancesOnceAcrossInvalidation) {
+  test::AsyncVmHarness sim;
+  auto memory = std::make_shared<test::AsyncVmMemory>(*sim.owner, 0x200, 0x100, 0x104);
+  GpuVm vm;
+  const AddressSpaceHandle handle = vm.register_translated(7, memory, memory);
+  const auto old_access = vm.snapshot(handle);
+  ASSERT_TRUE(old_access);
+  const std::array<std::byte, 8> initial = {std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4},
+                                            std::byte{5}, std::byte{6}, std::byte{7}, std::byte{8}};
+  memory->store(0x100, initial);
+
+  std::array<std::byte, 8> result{};
+  std::size_t progress = 0;
+  VmTransferToken token;
+  EXPECT_EQ(old_access->classify_data_route(0x100, 4, VmAccessKind::Read), VmDataRoute::Deferred);
+  EXPECT_EQ(old_access->classify_data_route(0x100, 4, VmAccessKind::Atomic), VmDataRoute::Faulted);
+  EXPECT_EQ(old_access->classify_data_route(0x104, 4, VmAccessKind::Read), VmDataRoute::Local);
+  EXPECT_EQ(old_access->read(0x100, result, progress, token), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(progress, 0u);
+  ASSERT_TRUE(sim.engine.step());
+  EXPECT_EQ(memory->backing->read_effects, 1u);
+  ASSERT_TRUE(vm.invalidate(handle));
+
+  EXPECT_EQ(old_access->read(0x100, result, progress, token), VmAccessOutcome::Revoked);
+  EXPECT_EQ(progress, 4u);
+  EXPECT_FALSE(token.pending());
+  EXPECT_TRUE(std::equal(initial.begin(), initial.begin() + 4, result.begin()));
+  const auto current_access = vm.snapshot(handle);
+  ASSERT_TRUE(current_access);
+  EXPECT_EQ(current_access->read(0x100, result, progress, token), VmAccessOutcome::Complete);
+  EXPECT_EQ(progress, initial.size());
+  EXPECT_EQ(result, initial);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(memory->backing->read_effects, 1u);
+}
+
+TEST(GpuVmTranslationTest, DeferredAccessRejectsUntokenizedAndExecutePaths) {
+  test::AsyncVmHarness sim;
+  auto memory = std::make_shared<test::AsyncVmMemory>(*sim.owner, 0x200, 0x100, 0x108);
+  GpuVm vm;
+  const auto access = vm.snapshot(vm.register_translated(7, memory, memory));
+  ASSERT_TRUE(access);
+  std::array<std::byte, 4> bytes{};
+  std::size_t progress = 0;
+  EXPECT_EQ(access->read(0x100, bytes, progress), VmAccessOutcome::Malformed);
+  EXPECT_EQ(access->write(0x100, bytes, progress), VmAccessOutcome::Malformed);
+  VmTransferToken token;
+  EXPECT_EQ(access->read(0x100, bytes, progress, token, VmAccessKind::Execute),
+            VmAccessOutcome::Malformed);
+  EXPECT_EQ(access->read(0x100, bytes, VmAccessKind::Execute), VmAccessOutcome::Malformed);
+  EXPECT_EQ(memory->backing->posts, 0u);
+  EXPECT_EQ(memory->backing->read_effects, 0u);
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+}
+
+TEST(GpuVmTranslationTest, DeferredSubmitRunsAfterVmLeaseAndRevocationFencesLateEffect) {
+  test::AsyncVmHarness sim;
+  auto memory = std::make_shared<test::AsyncVmMemory>(*sim.owner, 0x200, 0x100, 0x108);
+  GpuVm vm;
+  const AddressSpaceHandle handle = vm.register_translated(7, memory, memory);
+  const auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  std::promise<void> invalidated;
+  std::future<void> completion = invalidated.get_future();
+  std::thread revoker;
+  bool lease_released_at_submit = false;
+  memory->backing->submit_probe = [&] {
+    EXPECT_EQ(memory->backing->write_effects, 0u);
+    revoker = std::thread([&] {
+      EXPECT_TRUE(vm.invalidate(handle));
+      invalidated.set_value();
+    });
+    lease_released_at_submit =
+        completion.wait_for(std::chrono::milliseconds(500)) == std::future_status::ready;
+  };
+  std::array<std::byte, 4> source{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+  std::size_t progress = 0;
+  VmTransferToken token;
+  EXPECT_EQ(access->write(0x100, source, progress, token), VmAccessOutcome::Unavailable);
+  if (revoker.joinable())
+    revoker.join();
+  EXPECT_TRUE(lease_released_at_submit);
+  EXPECT_EQ(progress, 0u);
+  (void)sim.engine.step();
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+  EXPECT_EQ(access->write(0x100, source, progress, token), VmAccessOutcome::Revoked);
+  EXPECT_FALSE(token.pending());
+  EXPECT_GE(memory->backing->cancellations, 1u);
+}
+
+TEST(GpuVmTranslationTest, EffectGateDrainsEnteredEffectBeforeRevocationReturns) {
+  VmTransferEffectGate gate;
+  std::promise<void> entered;
+  std::promise<void> release;
+  std::promise<void> revoker_started;
+  std::promise<void> revoked;
+  auto entered_future = entered.get_future();
+  auto release_future = release.get_future();
+  auto revoker_started_future = revoker_started.get_future();
+  auto revoked_future = revoked.get_future();
+  std::thread effect([&] {
+    EXPECT_TRUE(gate.commit([&] {
+      entered.set_value();
+      release_future.wait();
+    }));
+  });
+  entered_future.wait();
+  std::thread revoker([&] {
+    revoker_started.set_value();
+    gate.revoke();
+    revoked.set_value();
+  });
+  revoker_started_future.wait();
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  bool entry_closed = false;
+  do {
+    entry_closed = !gate.commit([] {});
+    if (!entry_closed)
+      std::this_thread::yield();
+  } while (!entry_closed && std::chrono::steady_clock::now() < deadline);
+  EXPECT_TRUE(entry_closed);
+  EXPECT_EQ(revoked_future.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout);
+  release.set_value();
+  effect.join();
+  revoker.join();
+  EXPECT_EQ(revoked_future.wait_for(std::chrono::milliseconds(0)), std::future_status::ready);
+  EXPECT_FALSE(gate.commit([] {}));
+}
+
+TEST(GpuVmTranslationTest, RootReplacementFencesPostedWriteBeforeOwnerEvent) {
+  test::AsyncVmHarness sim;
+  auto memory = std::make_shared<test::AsyncVmMemory>(*sim.owner, 0x200, 0x100, 0x104);
+  GpuVm vm;
+  const AddressSpaceHandle handle = vm.register_translated(7, memory, memory);
+  const auto old_access = vm.snapshot(handle);
+  ASSERT_TRUE(old_access);
+  const std::array<std::byte, 4> source{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+  std::size_t progress = 0;
+  VmTransferToken token;
+  EXPECT_EQ(old_access->write(0x100, source, progress, token), VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(vm.replace_translated(handle, memory, memory));
+  (void)sim.engine.step();
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+  EXPECT_EQ(old_access->write(0x100, source, progress, token), VmAccessOutcome::Revoked);
+  EXPECT_FALSE(token.pending());
+}
+
+TEST(GpuVmTranslationTest, MalformedResumeCancelsPostedWriteBeforeOwnerEffect) {
+  test::AsyncVmHarness sim;
+  auto memory = std::make_shared<test::AsyncVmMemory>(*sim.owner, 0x200, 0x100, 0x104);
+  GpuVm vm;
+  const auto access = vm.snapshot(vm.register_translated(7, memory, memory));
+  ASSERT_TRUE(access);
+  const std::array<std::byte, 4> source{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+  std::size_t progress = 0;
+  VmTransferToken token;
+  EXPECT_EQ(access->write(0x100, source, progress, token), VmAccessOutcome::Unavailable);
+  EXPECT_TRUE(token.pending());
+  EXPECT_EQ(memory->backing->posts, 1u);
+  progress = source.size() + 1;
+  EXPECT_EQ(access->write(0x100, source, progress, token), VmAccessOutcome::Malformed);
+  EXPECT_FALSE(token.pending());
+  (void)sim.engine.step();
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+  EXPECT_GE(memory->backing->cancellations, 1u);
 }
 
 } // namespace

@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/amdgpu/sdma_ring_consumer.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <limits>
 #include <span>
@@ -55,8 +56,11 @@ SdmaRingConsumer::SdmaRingConsumer(GpuVm &gpu_vm, SdmaRingConfig config,
 
 SdmaRingConsumer::SdmaRingConsumer(GpuVm &gpu_vm, SdmaRingConfig config, SdmaPacketDialect dialect,
                                    SdmaPacketCallbacks callbacks)
-    : SdmaRingConsumer(gpu_vm, std::move(config),
-                       SdmaPacketProcessor(dialect, std::move(callbacks))) {}
+    : gpu_vm_(&gpu_vm), config_(std::move(config)),
+      ring_reader_(config_.ring_base, config_.ring_bytes),
+      cursor_journal_(config_.read_pointer_address, config_.initial_cursor),
+      ingress_handler_(callbacks.admit_memory_ingress),
+      packet_processor_(dialect, std::move(callbacks)) {}
 
 bool valid_sdma_ring_config(const SdmaRingConfig &config) {
   return config.address_space && config.ring_bytes != 0 &&
@@ -80,6 +84,10 @@ SdmaRingStatus SdmaRingConsumer::latch(SdmaRingStatus outcome) {
 }
 
 SdmaRingStatus SdmaRingConsumer::initialize_cursor() {
+  MemoryIngressAdmission admitted =
+      admit_control(config_.read_pointer_address, sizeof(uint64_t), VmAccessKind::Read);
+  if (admitted.outcome != VmAccessOutcome::Complete)
+    return map(admitted.outcome);
   const VmAccessOutcome outcome = cursor_journal_.initialize(*access_);
   if (outcome != VmAccessOutcome::Complete)
     return map(outcome);
@@ -99,8 +107,14 @@ SdmaRingStatus SdmaRingConsumer::ensure_packet_bytes(uint64_t producer,
     return SdmaRingStatus::Malformed;
 
   packet_bytes_.resize(required_bytes);
+  VmTransferIngress ingress;
+  if (ingress_handler_) {
+    ingress = [this](uint64_t address, std::size_t size, VmAccessKind access) {
+      return admit_control(address, size, access);
+    };
+  }
   const VmAccessOutcome outcome =
-      ring_reader_.read(*access_, cursor(), packet_bytes_, packet_fetch_progress_);
+      ring_reader_.read(*access_, cursor(), packet_bytes_, packet_fetch_progress_, ingress);
   if (outcome != VmAccessOutcome::Complete)
     return map(outcome);
 
@@ -109,12 +123,26 @@ SdmaRingStatus SdmaRingConsumer::ensure_packet_bytes(uint64_t producer,
   return SdmaRingStatus::Idle;
 }
 
-SdmaRingStatus SdmaRingConsumer::publish_cursor() { return map(cursor_journal_.publish()); }
+SdmaRingStatus SdmaRingConsumer::publish_cursor() {
+  MemoryIngressAdmission admitted =
+      admit_control(config_.read_pointer_address, sizeof(uint64_t), VmAccessKind::Write);
+  if (admitted.outcome != VmAccessOutcome::Complete)
+    return map(admitted.outcome);
+  return map(cursor_journal_.publish());
+}
+
+MemoryIngressAdmission SdmaRingConsumer::admit_control(uint64_t address, std::size_t size,
+                                                       VmAccessKind access) const {
+  if (!ingress_handler_)
+    return {};
+  const std::array spans{MemoryIngressSpan{address, size, access}};
+  return ingress_handler_(*access_, spans);
+}
 
 void SdmaRingConsumer::clear_packet() {
   packet_processor_.reset(continuation_);
   packet_bytes_.clear();
-  packet_fetch_progress_ = 0;
+  packet_fetch_progress_ = {};
   packet_words_.clear();
   pending_retirement_.reset();
   terminal_after_publication_.reset();
@@ -274,6 +302,8 @@ void SdmaRingConsumer::reset() {
   cursor_journal_.reset(config_.initial_cursor);
   terminal_.reset();
 }
+
+void SdmaRingConsumer::cancel_in_flight() noexcept { clear_in_flight(); }
 
 void SdmaRingConsumer::latch_callback_failure() noexcept {
   terminal_ = SdmaRingStatus::Faulted;

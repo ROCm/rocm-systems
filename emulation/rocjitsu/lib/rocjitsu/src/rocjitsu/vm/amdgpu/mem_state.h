@@ -57,6 +57,8 @@ struct TranslatedMemoryRequest {
   uint32_t data_offset = 0;
   uint32_t size = 0;
   uint64_t reordered_lane_mask = 0;
+  // Set during legacy KFD preflight; retained across deferred peer retries.
+  VmDataRoute route = VmDataRoute::Local;
 };
 
 /// @brief Retry state retained by a prepared translated memory instruction.
@@ -72,10 +74,15 @@ public:
   std::vector<uint8_t> reordered_data;
   std::size_t request_index = 0;
   std::size_t completed_bytes = 0;
+  VmTransferToken transfer_token;
   uint32_t atomic_lane = 0;
   uint64_t atomic_loaded_value = 0;
   bool initialized = false;
   bool atomic_loaded = false;
+  // A legacy binding may contain deferred peer requests. Retain the choice
+  // with its VM snapshot and request cursor across retries.
+  bool peer_data_route = false;
+  bool mixed_local_peer_route = false;
 };
 
 /// @brief Dynamic pipeline state for scalar memory instructions (SMEM).

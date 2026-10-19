@@ -83,6 +83,17 @@ public:
       se->spi().set_apertures(shared_base, shared_limit, private_base, private_limit);
   }
 
+  void set_vmid_apertures(uint32_t vmid, uint64_t shared_base, uint64_t shared_limit,
+                          uint64_t private_base, uint64_t private_limit) {
+    for (auto *se : shader_engines_)
+      se->spi().set_vmid_apertures(vmid, shared_base, shared_limit, private_base, private_limit);
+  }
+
+  void clear_vmid_apertures() {
+    for (auto *se : shader_engines_)
+      se->spi().clear_vmid_apertures();
+  }
+
   /// @brief Set the execution plugin group on CP and all CUs (shared ownership).
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
     cp_->set_plugin_group(pg);
