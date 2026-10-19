@@ -340,14 +340,16 @@ if [[ "${race_tests}" == true ]]; then
 
   for target in "${race_targets[@]}"; do
     read -r name config_path <<< "${target}"
+    skip_tests_config_path=""
     echo "::group::(race-${name}) pytest"
     artifact_dir="${corpus_work_dir}/.pytest-artifacts/race-${name}"
     cache_dir="${corpus_work_dir}/.pytest-cache/race-${name}"
     junit_xml="${junit_dir}/race-${name}.xml"
 
     first_run_status=0
-    run_pytest "${soft_timeout_seconds}" 0 "${name}" "${config_path}" "" \
-      "${artifact_dir}" "${cache_dir}" race --junitxml "${junit_xml}" || \
+    run_pytest "${soft_timeout_seconds}" 0 "${name}" "${config_path}" \
+      "${skip_tests_config_path}" "${artifact_dir}" "${cache_dir}" race \
+      --junitxml "${junit_xml}" || \
       first_run_status=$?
     if [[ -f "${junit_xml}" ]]; then
       junit_xml_paths+=("${junit_xml}")
@@ -368,7 +370,8 @@ if [[ "${race_tests}" == true ]]; then
 
     echo "::group::(race-${name}) pytest rerun failed tests"
     if run_pytest "${hard_timeout_seconds}" "${rerun_timeout_seconds}" \
-         "${name}" "${config_path}" "" "${artifact_dir}" "${cache_dir}" race \
+         "${name}" "${config_path}" "${skip_tests_config_path}" \
+         "${artifact_dir}" "${cache_dir}" race \
          --last-failed --last-failed-no-failures=none; then
       echo "::endgroup::"
       echo "::warning::Retried race (${name}) tests passed."
