@@ -502,12 +502,12 @@
 
   function readPlotTheme() {
     return {
-      paper: themeColor("--roofline-surface"),
+      paper: themeColor("--report-surface"),
       area: themeColor("--roofline-plot-area"),
       grid: themeColor("--roofline-plot-grid"),
-      text: themeColor("--roofline-text"),
-      overlay: themeColor("--roofline-bg-soft"),
-      overlayBorder: themeColor("--roofline-border"),
+      text: themeColor("--report-text"),
+      overlay: themeColor("--report-bg-soft"),
+      overlayBorder: themeColor("--report-border"),
       markerOutline: themeColor("--roofline-marker-outline"),
     };
   }
@@ -1359,24 +1359,24 @@
 
   function createPanelRow(opts) {
     var item = document.createElement("li");
-    item.className = "roofline-panel-item";
+    item.className = "report-panel-item";
     Object.keys(opts.dataset).forEach(function (key) {
       item.dataset[key] = opts.dataset[key];
     });
 
     var action = document.createElement("button");
     action.type = "button";
-    action.className = "roofline-panel-action";
+    action.className = "report-panel-action";
     if (opts.title) {
       action.setAttribute("aria-label", opts.title);
     }
 
     var swatch = document.createElement("span");
-    swatch.className = opts.swatchClass || "roofline-swatch";
+    swatch.className = opts.swatchClass || "report-swatch";
     swatch.style.backgroundColor = opts.color || FALLBACK_COLOR;
 
     var label = document.createElement("span");
-    label.className = opts.labelClass || "roofline-panel-name";
+    label.className = opts.labelClass || "report-panel-name";
     label.textContent = opts.label;
     if (opts.title) {
       RooflineKernelListTooltip.attachTooltipToKernelRow(action, label, opts.title);
@@ -1492,7 +1492,7 @@
           color: kernel.color,
           label: kernel.label,
           title: kernel.name,
-          labelClass: "roofline-panel-name roofline-kernel-name",
+          labelClass: "report-panel-name roofline-kernel-name",
           dataset: { index: String(index) },
           actionExtras: actionExtras,
           siblingControls: [buildOffPlotBadge(kernel)],
@@ -1515,7 +1515,7 @@
         createPanelRow({
           color: peakColors[roof.level] || FALLBACK_COLOR,
           label: roof.level,
-          swatchClass: "roofline-swatch roofline-roof-swatch",
+          swatchClass: "report-swatch roofline-roof-swatch",
           dataset: { trace: String(roof.traceIndex), level: roof.level },
           actionExtras: [aiaxis],
           siblingControls: [],
@@ -1569,7 +1569,7 @@
       var selected = state.selected.has(kernel.index);
       setRowState(item, selected, filtering && !selected);
       item.classList.toggle("filtered", !withinThreshold(kernel));
-      var swatch = item.querySelector(".roofline-swatch");
+      var swatch = item.querySelector(".report-swatch");
       if (swatch) {
         var colors = kernelPointColors(kernel, kernel.points);
         var banded = colors.some(function (color) {
