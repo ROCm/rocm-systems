@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -40,18 +41,16 @@ public:
   /// memory operations and debugger execution. The allocation guard also
   /// bypasses an unrelated decoder pool installed by the caller.
   /// @param enabled False bypasses reuse and table allocation while debugging.
-  DecodeResult decode(Decoder &decoder, uint64_t pc, uint32_t vmid, Words words,
-                      const DecodeErrorEmitter &emit_error, bool enabled = true) {
-    if (enabled && !entries_)
-      entries_ = std::make_unique<std::array<Entry, kNumEntries>>();
+  [[gnu::always_inline]] DecodeResult decode(Decoder &decoder, uint64_t pc, uint32_t vmid,
+                                             Words words, const DecodeErrorEmitter &emit_error,
+                                             bool enabled = true) {
     if (enabled && entries_) {
       auto &entry = (*entries_)[index(pc)];
       if (entry.instruction && entry.pc == pc && entry.vmid == vmid &&
           std::equal(words.begin(), words.end(), entry.words.begin()))
         return std::move(entry.instruction);
     }
-    Instruction::ScopedHeapAllocation heap_allocation;
-    return decoder.decode(words.data(), emit_error);
+    return decode_miss(decoder, words, emit_error, enabled);
   }
 
   /// @brief Return only completed, stateless instructions.
@@ -67,7 +66,7 @@ public:
         : cache_(cache), instruction_(instruction), pc_(pc), vmid_(vmid), words_(words),
           enabled_(enabled), exceptions_(std::uncaught_exceptions()) {}
 
-    ~ScopedReturn() {
+    [[gnu::always_inline]] ~ScopedReturn() {
       if (enabled_ && instruction_ && !instruction_->is_memory_op() && !instruction_->data() &&
           !borrows_fetch_buffer(*instruction_, words_) && std::uncaught_exceptions() == exceptions_)
         cache_.put(pc_, vmid_, words_, instruction_);
@@ -105,26 +104,39 @@ private:
 
   static size_t index(uint64_t pc) { return (pc / sizeof(uint32_t)) & (kNumEntries - 1); }
 
+  // Keep allocation and decoder setup out of the per-instruction cache-hit path.
+  RJ_NOINLINE DecodeResult decode_miss(Decoder &decoder, Words words,
+                                       const DecodeErrorEmitter &emit_error, bool enabled) {
+    if (enabled && !entries_)
+      entries_ = std::make_unique<std::array<Entry, kNumEntries>>();
+    Instruction::ScopedHeapAllocation heap_allocation;
+    return decoder.decode(words.data(), emit_error);
+  }
+
   static bool borrows_fetch_buffer(const Instruction &instruction, Words words) {
     const auto raw = reinterpret_cast<uintptr_t>(instruction.raw_encoding());
     const auto begin = reinterpret_cast<uintptr_t>(words.data());
     return raw >= begin && raw - begin < words.size_bytes();
   }
 
-  void put(uint64_t pc, uint32_t vmid, Words words, std::unique_ptr<Instruction> &instruction) {
+  [[gnu::always_inline]] void put(uint64_t pc, uint32_t vmid, Words words,
+                                  std::unique_ptr<Instruction> &instruction) {
     // A decode miss allocates the table before execution; returning an
     // instruction during stack unwinding must not allocate.
     if (!entries_)
       return;
     auto &entry = (*entries_)[index(pc)];
-    if (entry.instruction) {
-      Instruction::ScopedHeapAllocation heap_allocation;
-      entry.instruction.reset();
-    }
+    if (entry.instruction)
+      evict(entry);
     entry.pc = pc;
     entry.vmid = vmid;
     std::copy(words.begin(), words.end(), entry.words.begin());
     entry.instruction = std::move(instruction);
+  }
+
+  RJ_NOINLINE static void evict(Entry &entry) {
+    Instruction::ScopedHeapAllocation heap_allocation;
+    entry.instruction.reset();
   }
 
   std::unique_ptr<std::array<Entry, kNumEntries>> entries_;

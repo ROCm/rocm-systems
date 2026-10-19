@@ -235,8 +235,8 @@ static std::condition_variable g_blob_writes_done;
 static std::atomic<bool> g_reopen_after_fork{false};
 static std::mutex        g_reopen_mu;
 
-// In-memory set of blob hex keys already written to disk.
-// Eliminates the fs::exists() stat syscall on repeated blobs (common for weight tensors).
+// Keys of the blobs and code objects written to this archive, so repeated bytes
+// (common for weight tensors) are written once.
 // Protected by g_blob_mu (separate from g_file_mu to avoid head-of-line blocking).
 // flush() takes g_blob_mu while it holds g_file_mu, so never take them the other way round.
 // "co:" prefix for code objects matches the playback-side load_code_object key convention.
@@ -927,7 +927,7 @@ static void clear_archive_paths() {
 }
 
 // ---------------------------------------------------------------------------
-// open / close / flush / checkpoint
+// open / close / flush
 // ---------------------------------------------------------------------------
 
 // A failed open() keeps no archive path, so reopen_after_fork() does not open one
@@ -1090,10 +1090,9 @@ bool open(const char* output_dir) {
     return open_failed(out_dir, created_pid_dir);
   }
 
-  // Incomplete belongs to the archive, as in atfork_child: a failure recorded
-  // against one closed earlier in this process must not cost this one its
-  // trailer. So does the unreplayable list, which a forked child also drops here.
-  g_capture_incomplete.store(false, std::memory_order_relaxed);
+  // open() runs once at init, or in a forked child whose atfork_child() has
+  // already cleared the incomplete flag: a flag set since then is for a record
+  // this archive lost. The child drops the parent's unreplayable list here.
   {
     std::lock_guard<std::mutex> lk(g_unreplayable_mu);
     g_unreplayable_apis.clear();
@@ -1138,14 +1137,6 @@ bool open(const char* output_dir) {
     buffer_append_locked(&fh, sizeof(fh));
   }
   return true;
-}
-
-void checkpoint() {
-  BufWriteGuard lk;
-  if (g_events_fd < 0) return;
-  flush_buffer_locked();
-  HRR_FSYNC(g_events_fd);
-  g_events_since_ckpt = 0;
 }
 
 // Caller holds g_blob_mu. A claimed write ends here even after flush() has cut

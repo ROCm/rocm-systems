@@ -645,6 +645,9 @@ struct ncclPeerInfo {
   bool gpuCftMulticastSupport;
   bool gpuCftCountedSupport;
   uint32_t gitVersionHash;
+  // [RCCL] The rcclTuningPartition this rank asks for (RCCL_TUNING_PARTITION_MODE). The comm
+  // uses DPX only when every rank asks for it. Append later fields after this one.
+  int tuningPartition;
 };
 
 typedef enum ncclGroupTaskType {
@@ -743,6 +746,7 @@ struct ncclComm {
   int64_t busId; // my PCI bus ID in int format
   bool sideStreamAcquired; // whether this comm holds a side-stream scope ref
   int sideStreamPriority;  // priority key of the side stream this comm acquired
+  bool fabricTelemetryAcquired; // whether this comm holds a fabric telemetry session ref
   ncclAffinity cpuAffinity; // CPU affinity of the GPU
   int WarpSize;
   int cudaArch; // matches __CUDA_ARCH__ of device
