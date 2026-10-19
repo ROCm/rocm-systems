@@ -8,6 +8,7 @@
 /// See tests/fixtures/float_dot/README.md for the model's empirical basis.
 
 #include "dot_packed16.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 
 #include <algorithm>
 #include <array>
@@ -36,48 +37,63 @@ struct Term {
   }
 };
 
-/// @brief Factor encoding: exponent and fraction widths. OCP E4M3 has no
-/// infinity; S.1111.111 is its only NaN.
-template <int ExponentBits, int FractionBits, bool OcpE4m3 = false> struct FactorFormat {
-  static constexpr int exponent_bits = ExponentBits;
-  static constexpr int fraction_bits = FractionBits;
-  static constexpr int bias = (1 << (ExponentBits - 1)) - 1;
-  static constexpr bool ocp_e4m3 = OcpE4m3;
+/// @brief Factor encoding, named as in fp_format. OCP E4M3 has no infinity;
+/// S.1111.111 is its only NaN.
+template <unsigned ExponentBits, unsigned MantissaBits, bool OcpE4m3 = false> struct FactorFormat {
+  static constexpr unsigned kExponentBits = ExponentBits;
+  static constexpr unsigned kMantissaBits = MantissaBits;
+  static constexpr int kBias = (1 << (ExponentBits - 1)) - 1;
+  static constexpr bool kOcpE4m3 = OcpE4m3;
 };
-using F16Factor = FactorFormat<5, 10>;
-using Bf16Factor = FactorFormat<8, 7>;
+template <typename Fmt> using IeeeFactor = FactorFormat<Fmt::kExponentBits, Fmt::kMantissaBits>;
+using F16Factor = IeeeFactor<fp_format::F16>;
+using Bf16Factor = IeeeFactor<fp_format::BF16>;
 using Fp8Factor = FactorFormat<4, 3, true>;
 using Bf8Factor = FactorFormat<5, 2>;
 template <bool Bf16> using HalfFactor = std::conditional_t<Bf16, Bf16Factor, F16Factor>;
 
 template <typename Format> struct Factor {
-  static constexpr int fraction_bits = Format::fraction_bits;
-  static constexpr unsigned fraction_mask = (1u << fraction_bits) - 1;
-  static constexpr unsigned exponent_max = (1u << Format::exponent_bits) - 1;
+  static constexpr unsigned kMantissaBits = Format::kMantissaBits;
+  static constexpr unsigned kMantissaMask = (1u << kMantissaBits) - 1;
+  static constexpr unsigned kExponentMax = (1u << Format::kExponentBits) - 1;
   uint16_t bits;
 
-  unsigned exponent_field() const { return (bits >> fraction_bits) & exponent_max; }
-  unsigned fraction() const { return bits & fraction_mask; }
-  bool negative() const { return (bits >> (Format::exponent_bits + fraction_bits)) & 1; }
+  unsigned exponent_field() const { return (bits >> kMantissaBits) & kExponentMax; }
+  unsigned mantissa() const { return bits & kMantissaMask; }
+  bool negative() const { return (bits >> (Format::kExponentBits + kMantissaBits)) & 1; }
   bool nan() const {
-    if (exponent_field() != exponent_max)
+    if (exponent_field() != kExponentMax)
       return false;
-    return Format::ocp_e4m3 ? fraction() == fraction_mask : fraction() != 0;
+    return Format::kOcpE4m3 ? mantissa() == kMantissaMask : mantissa() != 0;
   }
   bool inf() const {
-    return !Format::ocp_e4m3 && exponent_field() == exponent_max && fraction() == 0;
+    return !Format::kOcpE4m3 && exponent_field() == kExponentMax && mantissa() == 0;
   }
   uint64_t significand() const {
-    return exponent_field() ? (1u << fraction_bits) | fraction() : fraction();
+    return exponent_field() ? (1u << kMantissaBits) | mantissa() : mantissa();
   }
-  int alignment_exponent() const { return int(std::max(exponent_field(), 1u)) - Format::bias; }
+  int alignment_exponent() const { return int(std::max(exponent_field(), 1u)) - Format::kBias; }
   template <typename Other> Term product(Factor<Other> other) const {
     return {significand() * other.significand(),
-            alignment_exponent() + other.alignment_exponent() - fraction_bits -
-                Factor<Other>::fraction_bits,
+            alignment_exponent() + other.alignment_exponent() - int(kMantissaBits) -
+                int(Factor<Other>::kMantissaBits),
             negative() != other.negative()};
   }
 };
+
+/// @brief How an instruction groups its products before adding C, and the NaN
+/// it returns for an invalid product (an infinity times zero, or opposite
+/// infinities). F16/BF16 DOT2 and WMMA align products in pairs; gfx1201
+/// FP8/BF8 DOT4 aligns all four together, and each eight-product FP8/BF8 WMMA
+/// step aligns two groups of four. Both FP8/BF8 forms return the factor-NaN
+/// payload.
+struct ProductPolicy {
+  std::size_t group;
+  uint32_t invalid_nan;
+};
+inline constexpr ProductPolicy kPairedProducts{2, kInvalidProductNan};
+inline constexpr ProductPolicy kFp8Dot4Products{4, kFactorNan};
+inline constexpr ProductPolicy kFp8WmmaProducts{4, kFactorNan};
 
 inline uint64_t shift_round_even(uint64_t value, int shift) {
   if (shift <= 0)
@@ -137,23 +153,20 @@ inline int64_t align(Term term, int grid, bool accumulator = false) {
 /// truncates the rounded FP32 result. Packed WMMA applies this narrowing after
 /// every step. Subnormal inputs and outputs are preserved. Integer arithmetic
 /// preserves observed NaN payloads and makes results independent of the host FP
-/// state. FP8/BF8 products differ in two ways: they align in groups of four (all
-/// of a DOT4, half of an FP8 WMMA step), and an invalid product returns the
-/// factor-NaN payload.
+/// state. Product grouping and the invalid-product NaN come from `Policy`; see
+/// gfx12_dot_detail::ProductPolicy.
 /// See tests/fixtures/float_dot/README.md for hardware qualification of
 /// https://github.com/ROCm/rocm-systems/issues/12056 on RDNA4.
-template <typename A, typename B, bool Packed, std::size_t N>
+template <typename Src0Format, typename Src1Format, gfx12_dot_detail::ProductPolicy Policy,
+          bool Packed, std::size_t N>
 inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &a, const std::array<uint16_t, N> &b,
                                 uint32_t acc, bool fp16_ovfl = false) {
+  static_assert(N == 2 || N == 4 || N == 8);
+  static_assert(Policy.group > 0 && N % Policy.group == 0);
   using namespace gfx12_dot_detail;
-  // 8-bit factors align products in groups of four, and an invalid product
-  // returns the factor-NaN payload. 16-bit factors align products in pairs.
-  constexpr bool kByteFactors = A::exponent_bits + A::fraction_bits < 8;
-  static_assert(N == 2 || N == 4 || (kByteFactors && N == 8));
-  constexpr std::size_t kGroup = kByteFactors ? 4 : 2;
-  constexpr uint32_t kInvalid = kByteFactors ? kFactorNan : kInvalidProductNan;
-  constexpr bool Bf16 = std::is_same_v<A, Bf16Factor>;
-  static_assert(!Packed || (std::is_same_v<A, B> && !kByteFactors));
+  constexpr bool Bf16 = std::is_same_v<Src0Format, Bf16Factor>;
+  static_assert(!Packed || (std::is_same_v<Src0Format, Src1Format> &&
+                            (Bf16 || std::is_same_v<Src0Format, F16Factor>)));
   const auto special = [](uint32_t bits) -> uint32_t {
     if constexpr (Packed)
       return dot_packed16::special<Bf16>(bits);
@@ -166,8 +179,8 @@ inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &a, const std::arr
   bool negative_inf = false;
   bool invalid = false;
   for (std::size_t i = 0; i < N; ++i) {
-    const Factor<A> left{a[i]};
-    const Factor<B> right{b[i]};
+    const Factor<Src0Format> left{a[i]};
+    const Factor<Src1Format> right{b[i]};
     if (left.nan() || right.nan())
       return special(kFactorNan);
     invalid |= (left.inf() && !right.significand()) || (right.inf() && !left.significand());
@@ -185,13 +198,13 @@ inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &a, const std::arr
   }
   // Factor NaNs, then invalid products, precede an accumulator NaN.
   if (invalid || (positive_inf && negative_inf))
-    return special(kInvalid);
+    return special(Policy.invalid_nan);
   if ((acc & 0x7fffffff) > 0x7f800000)
     return special(acc | kQuietNanBit);
   positive_inf |= acc == 0x7f800000;
   negative_inf |= acc == 0xff800000;
   if (positive_inf || negative_inf)
-    return special(positive_inf && negative_inf ? kInvalid
+    return special(positive_inf && negative_inf ? Policy.invalid_nan
                    : negative_inf               ? 0xff800000
                                                 : 0x7f800000);
 
@@ -206,11 +219,11 @@ inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &a, const std::arr
   const int c_floor = Packed && !Bf16 ? -14 : -126;
   const int grid = std::max(product_grid, std::max(c_floor, c.leading_exponent()) - 26);
   int64_t total = align(c, grid, grid > c_floor);
-  for (std::size_t i = 0; i < N; i += kGroup) {
+  for (std::size_t i = 0; i < N; i += Policy.group) {
     const int group_grid =
-        *std::max_element(product_grids.begin() + i, product_grids.begin() + i + kGroup);
+        *std::max_element(product_grids.begin() + i, product_grids.begin() + i + Policy.group);
     int64_t group = 0;
-    for (std::size_t j = i; j < i + kGroup; ++j)
+    for (std::size_t j = i; j < i + Policy.group; ++j)
       group += align(products[j], group_grid);
     total += align(Term{uint64_t(group < 0 ? -group : group), group_grid, group < 0}, grid);
   }
@@ -229,7 +242,8 @@ template <bool Bf16, bool Packed, std::size_t N>
 inline uint32_t gfx12_dot_bits(const std::array<uint16_t, N> &a, const std::array<uint16_t, N> &b,
                                uint32_t acc, bool fp16_ovfl = false) {
   using Half = gfx12_dot_detail::HalfFactor<Bf16>;
-  return gfx12_dot_terms<Half, Half, Packed>(a, b, acc, fp16_ovfl);
+  return gfx12_dot_terms<Half, Half, gfx12_dot_detail::kPairedProducts, Packed>(a, b, acc,
+                                                                                fp16_ovfl);
 }
 
 template <bool Bf16, std::size_t N>
@@ -263,16 +277,16 @@ inline uint16_t gfx12_dot2_packed16(uint16_t a0, uint16_t b0, uint16_t a1, uint1
 
 /// @brief GFX12 V_DOT4_F32_{FP8,BF8}_{FP8,BF8}: four OCP FP8 (E4M3) or BF8 (E5M2)
 /// products from packed bytes plus an F32 accumulator.
-template <bool Bf8A, bool Bf8B>
+template <bool Src0Bf8, bool Src1Bf8>
 inline uint32_t gfx12_dot4_f32_fp8(uint32_t a, uint32_t b, uint32_t acc) {
   using namespace gfx12_dot_detail;
   const auto bytes = [](uint32_t v) {
     return std::array<uint16_t, 4>{uint16_t(v & 0xff), uint16_t((v >> 8) & 0xff),
                                    uint16_t((v >> 16) & 0xff), uint16_t(v >> 24)};
   };
-  using A = std::conditional_t<Bf8A, Bf8Factor, Fp8Factor>;
-  using B = std::conditional_t<Bf8B, Bf8Factor, Fp8Factor>;
-  return gfx12_dot_terms<A, B, false>(bytes(a), bytes(b), acc);
+  using Src0Format = std::conditional_t<Src0Bf8, Bf8Factor, Fp8Factor>;
+  using Src1Format = std::conditional_t<Src1Bf8, Bf8Factor, Fp8Factor>;
+  return gfx12_dot_terms<Src0Format, Src1Format, kFp8Dot4Products, false>(bytes(a), bytes(b), acc);
 }
 
 /// @brief One GFX12 FP8/BF8 WMMA step: eight native FP8 (E4M3) or BF8 (E5M2)
@@ -286,8 +300,9 @@ inline uint32_t gfx12_dot8_f32(const std::array<uint8_t, 8> &src0,
     std::copy(bytes.begin(), bytes.end(), factors.begin());
     return factors;
   };
-  using A = std::conditional_t<Src0Fp8, Fp8Factor, Bf8Factor>;
-  using B = std::conditional_t<Src1Fp8, Fp8Factor, Bf8Factor>;
-  return gfx12_dot_terms<A, B, false>(widen(src0), widen(src1), acc);
+  using Src0Format = std::conditional_t<Src0Fp8, Fp8Factor, Bf8Factor>;
+  using Src1Format = std::conditional_t<Src1Fp8, Fp8Factor, Bf8Factor>;
+  return gfx12_dot_terms<Src0Format, Src1Format, kFp8WmmaProducts, false>(widen(src0), widen(src1),
+                                                                          acc);
 }
 } // namespace rocjitsu::amdgpu
