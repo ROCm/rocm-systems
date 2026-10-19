@@ -15,24 +15,27 @@
 //! stops workers, then releases native resources; partial failure keeps enough
 //! state for a safe retry.
 
+use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::mem::ManuallyDrop;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::thread::JoinHandle;
 use std::time::Duration;
 
 use rocddi::device::Device;
 use rocddi::device::gpu::queue::{
-    QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
-    QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, SdmaEngineSelection,
+    MAX_PRIVATE_SEGMENT_BYTES, QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority,
+    QueueProducerMode, QueueRequest, QueueRingMemory, QueueScratch, QueueTransport,
+    SdmaEngineSelection, plan_scratch,
 };
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use rocddi::topology::GpuInfo;
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
+use crate::queue_intercept::{InterceptQueue, QueueNotifier};
 use crate::runtime::{CallbackScope, VM_FAULT_CONDVAR, boundary, initialized_mut, lock, map_error};
 use crate::signal::{AmdSignal, AsyncCopyClock};
 
@@ -43,28 +46,40 @@ const AQL_PACKET_BYTES: usize = 64;
 const AQL_PACKET_TYPE_KERNEL_DISPATCH: u16 = 2;
 const AQL_PACKET_TYPE_MASK: u16 = 0xff;
 const AQL_PRIVATE_SEGMENT_SIZE_OFFSET: usize = 24;
-const MAX_PRIVATE_SEGMENT_BYTES: u32 = 262_128;
-const SCRATCH_ALIGNMENT: u64 = 256;
 const GPU_PAGE_BYTES: u64 = 4096;
+
+/// Serializes counted-pool decisions while native queue creation is unlocked.
+static COUNTED_CREATE_GATE: Mutex<()> = Mutex::new(());
+/// Preserves one cooperative queue per agent while its native creation runs.
+static COOPERATIVE_CREATE_GATE: Mutex<()> = Mutex::new(());
 
 /// Dedicated device-visible signals used to stop a queue and report errors.
 struct QueueEventSignal {
+    /// GPU-visible backing for the inactive and error signals.
     _allocation: Allocation,
+    /// Native event and mailbox shared by process queues.
     shared_event: Arc<QueueSharedEvent>,
+    /// CPU address of the queue inactive signal.
     inactive_address: usize,
+    /// CPU address of the queue error signal.
     error_address: usize,
 }
 
 /// Process-shared KFD event and mailbox backing queue event signals.
 pub(crate) struct QueueSharedEvent {
+    /// Native event owner retained through queue callback delivery.
     event: crate::platform::event::SignalEvent,
+    /// Mailbox address written by device-visible signals.
     mailbox: usize,
+    /// Native event ID paired with that mailbox.
     event_id: u32,
 }
 
 impl QueueEventSignal {
-    fn create(runtime: &mut crate::runtime::Runtime, device_index: usize) -> Result<Self, Status> {
-        let event = if let Some(event) = &runtime.queue_event {
+    fn shared_event(
+        runtime: &mut crate::runtime::HsaState,
+    ) -> Result<Arc<QueueSharedEvent>, Status> {
+        let event = if let Some(event) = &runtime.queue_state.queue_event {
             event.clone()
         } else {
             let (event, mailbox, event_id) =
@@ -74,15 +89,22 @@ impl QueueEventSignal {
                 mailbox,
                 event_id,
             });
-            runtime.queue_event = Some(event.clone());
+            runtime.queue_state.queue_event = Some(event.clone());
             event
         };
-        let allocation = runtime.gpus[device_index]
-            .device
+        Ok(event)
+    }
+
+    fn create(
+        event: Arc<QueueSharedEvent>,
+        device: &Device,
+        host_page_size: usize,
+    ) -> Result<Self, Status> {
+        let allocation = device
             .allocate(
                 MemoryKind::System,
-                GPU_PAGE_BYTES.max(runtime.host_page_size as u64),
-                runtime.host_page_size as u64,
+                GPU_PAGE_BYTES.max(host_page_size as u64),
+                host_page_size as u64,
                 DeviceAccess::READ | DeviceAccess::WRITE,
             )
             .map_err(map_error)?;
@@ -158,28 +180,76 @@ impl QueueEventSignal {
 /// `teardown_started` makes destruction resumable: once native inactivation
 /// succeeds, a later retry proceeds directly to final queue destruction.
 pub(crate) struct Queue {
+    /// Direct native queue and all retained transport backing.
     pub(crate) native: rocddi::device::gpu::queue::Queue,
+    /// Public or intercept-proxy queue pointer returned to callers.
+    pub(crate) public_handle: usize,
+    /// Controls when profiler callbacks may mention this queue.
+    scratch_event_visibility: ScratchEventVisibility,
+    /// Retains the doorbell signal published in the HSA queue header.
     _doorbell: Box<AmdSignal>,
+    /// Retains the native event and queue error signals.
     inactive_signal: Arc<QueueEventSignal>,
+    /// Stop flag observed by the queue event worker.
     event_alive: Arc<AtomicBool>,
+    /// Worker joined before the native queue is destroyed.
     event_worker: Option<JoinHandle<()>>,
+    /// Current scratch backing retained while the queue can use it.
     scratch: Option<Allocation>,
-    // A failed control update may have published the candidate address.
-    // Retain it through native destruction even if a later update succeeds.
+    /// Candidate backing from failed control updates. Native code may have
+    /// accepted its address, so it remains live through destruction.
     uncertain_scratch: Vec<Allocation>,
+    /// HSA agent that owns the queue.
     pub(crate) agent: HsaAgent,
+    /// Native queue ID used by KFD event reporting.
     hardware_id: u32,
+    /// Counted-queue pool to which this queue may be returned.
     counted_pool_key: Option<(u64, u32)>,
+    /// Cooperative handles borrowing this native queue.
     cooperative_refs: u32,
+    /// Queue ring placement requested at creation.
     ring_memory: QueueRingMemory,
+    /// Native execution has been stopped successfully.
     inactivated: bool,
+    /// Current compute-unit mask for scratch sizing and updates.
     cu_mask: Vec<u32>,
+    /// Caller callback for queue errors.
     callback: QueueErrorCallback,
+    /// Borrowed callback argument retained through event delivery.
     callback_data: CallbackArg,
+    /// Whether an observed event reported a VM fault.
     pub(crate) vm_faulted: bool,
+    /// Last observed GPU fault address.
     pub(crate) vm_fault_address: u64,
+    /// Last observed native fault reason flags.
     pub(crate) vm_fault_reason: u32,
+    /// Native destruction has begun and can only be resumed.
     teardown_started: bool,
+}
+
+impl Queue {
+    /// Publishes a proxy handle only after its control and forwarding worker
+    /// are ready. Queue event callbacks read these fields under the runtime
+    /// lock, so they cannot observe a partially installed proxy.
+    pub(crate) fn attach_intercept(
+        &mut self,
+        public_handle: usize,
+        callback: QueueErrorCallback,
+        callback_data: CallbackArg,
+    ) {
+        self.public_handle = public_handle;
+        self.callback = callback;
+        self.callback_data = callback_data;
+    }
+}
+
+/// Whether scratch lifecycle events may use a public queue handle.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ScratchEventVisibility {
+    /// Failed construction has no public queue handle for tool callbacks.
+    Unpublished,
+    /// Published scratch releases are reported even for initial scratch.
+    Published,
 }
 
 fn stop_queue_event_worker(
@@ -205,6 +275,7 @@ fn stop_queue_event_worker(
 fn destroy_native_queue(
     native: &mut rocddi::device::gpu::queue::Queue,
     teardown_started: &mut bool,
+    callback: &mut dyn FnMut(),
 ) -> Result<(), rocddi::Error> {
     if !*teardown_started {
         native.inactivate()?;
@@ -212,28 +283,33 @@ fn destroy_native_queue(
     }
     // SAFETY: Inactivation stopped GPU queue consumption. The HSA caller must
     // not publish through this queue concurrently with its destruction.
-    unsafe { native.destroy() }
+    unsafe { native.destroy_with_retained_transport(callback) }
 }
 
 pub(crate) fn destroy_runtime_queue(queue: &mut Queue) -> Result<(), rocddi::Error> {
     stop_queue_event_worker(&queue.event_alive, &mut queue.event_worker)?;
-    destroy_native_queue(&mut queue.native, &mut queue.teardown_started)
+    let public = queue.public_handle as *const HsaQueue;
+    let published = queue.scratch_event_visibility == ScratchEventVisibility::Published;
+    let mut release_scratch = || {
+        if let Some(scratch) = queue.scratch.take() {
+            if published {
+                crate::tool_events::free_start(public);
+                drop(scratch);
+                crate::tool_events::free_end(public);
+            } else {
+                drop(scratch);
+            }
+        }
+    };
+    destroy_native_queue(
+        &mut queue.native,
+        &mut queue.teardown_started,
+        &mut release_scratch,
+    )
 }
 
 pub(crate) fn destroy_runtime_sdma_queue(queue: &mut SdmaQueue) -> Result<(), rocddi::Error> {
-    destroy_native_queue(&mut queue.native, &mut queue.teardown_started)
-}
-
-fn abandon_unpublished_queue<D: 'static>(
-    native: rocddi::device::gpu::queue::Queue,
-    dependencies: D,
-    status: Status,
-) -> Status {
-    // SAFETY: This queue has no public producer. The owner tuple retains every
-    // external GPU address that a GPU engine could still reach after failed
-    // cleanup.
-    unsafe { native.abandon_unpublished_with_dependencies(dependencies) }
-        .map_or_else(map_error, |()| status)
+    destroy_native_queue(&mut queue.native, &mut queue.teardown_started, &mut || {})
 }
 
 // Native and soft queue controls expose at least 128-byte-aligned handles.
@@ -243,11 +319,14 @@ fn abandon_unpublished_queue<D: 'static>(
 const COUNTED_QUEUE_HANDLE_BIT: usize = 64;
 const SDMA_QUEUE_HANDLE_BIT: usize = 128;
 
-#[repr(C, align(128))]
 /// Stable storage for the public prefix copied from a shared hardware queue.
+#[repr(C, align(128))]
 struct CountedQueuePublic {
+    /// Native queue pointer shared by this logical handle.
     hardware_queue: usize,
+    /// Keeps the public header at the counted-handle tag offset.
     _padding: [u8; COUNTED_QUEUE_HANDLE_BIT - std::mem::size_of::<usize>()],
+    /// HSA queue prefix copied from the native hardware queue.
     header: [u8; std::mem::size_of::<HsaQueue>()],
 }
 
@@ -255,8 +334,11 @@ const _: () = assert!(std::mem::offset_of!(CountedQueuePublic, header) == COUNTE
 
 /// Logical counted-queue handle borrowing one pooled hardware queue.
 pub(crate) struct CountedQueue {
+    /// Stable public header allocated for this logical handle.
     public: Box<CountedQueuePublic>,
+    /// Shared native queue borrowed from the counted pool.
     pub(crate) hardware_queue: usize,
+    /// Agent and priority identifying the pool entry.
     pub(crate) pool_key: (u64, u32),
 }
 
@@ -301,22 +383,29 @@ impl CountedQueue {
 
 /// Hardware queue retained by a counted-queue pool with its live borrower count.
 pub(crate) struct CountedHardwareQueue {
+    /// Public pointer of the pooled native queue.
     pub(crate) queue: usize,
+    /// Logical counted handles currently borrowing that queue.
     pub(crate) use_count: u32,
 }
 
-#[repr(C, align(64))]
 /// Aligned packet storage for a host-only soft queue.
+#[repr(C, align(64))]
 struct SoftPacket([u8; AQL_PACKET_BYTES]);
 
 /// Host-only queue whose indices remain valid without a native GPU transport.
 pub(crate) struct SoftQueue {
+    /// Stable host-only control page.
     _control: Box<SoftQueueControl>,
+    /// Host-only AQL packet ring.
     _ring: Vec<SoftPacket>,
+    /// Signal used as this queue's public doorbell.
     doorbell_signal: HsaSignal,
+    /// Whether host publication may still advance the queue.
     active: bool,
 }
 
+/// Fixed-size control page used by a host-only soft queue.
 #[repr(C, align(256))]
 struct SoftQueueControl([u64; 32]);
 
@@ -330,9 +419,13 @@ impl SoftQueue {
 /// separate from rocddi's byte-index control page, which has no HSA prefix.
 #[repr(C, align(256))]
 struct SdmaQueueControl {
+    /// Host address of the native SDMA read index.
     read_index_host_address: usize,
+    /// Host address of the native SDMA write index.
     write_index_host_address: usize,
+    /// Keeps the public header at the SDMA-handle tag offset.
     _padding: [u8; SDMA_QUEUE_HANDLE_BIT - 2 * std::mem::size_of::<usize>()],
+    /// HSA queue prefix exposed to callers.
     header: [u8; std::mem::size_of::<HsaQueue>()],
 }
 
@@ -340,79 +433,113 @@ const _: () = assert!(std::mem::offset_of!(SdmaQueueControl, header) == SDMA_QUE
 
 /// One SDMA public handle borrowing the ring and indices of its native owner.
 pub(crate) struct SdmaQueue {
+    /// Direct native queue and its retained transport backing.
     pub(crate) native: rocddi::device::gpu::queue::Queue,
+    /// Public HSA control prefix and borrowed index addresses.
     _control: Box<SdmaQueueControl>,
+    /// Doorbell signal retained while producers may use it.
     _doorbell: Box<AmdSignal>,
+    /// HSA GPU agent that owns this queue.
     agent: HsaAgent,
+    /// Native queue ID used for error reporting.
     hardware_id: u32,
+    /// Native destruction progress retained across retries.
     teardown_started: bool,
 }
 
-/// Validated scratch allocation geometry derived from one queue request.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct ScratchPlan {
-    byte_length: u64,
-    maximum_private_segment_byte_length: u32,
-    maximum_wave_count: u32,
+/// HSA queue handles and policy kept for one initialized HSA generation.
+///
+/// Native queue execution and transport backing live in rocddi. This state
+/// tracks the public HSA headers, optional interception, and counted handles.
+pub(crate) struct QueueState {
+    /// Next public queue identity.
+    next_queue_id: u64,
+    /// Shared native event used for queue error notifications.
+    queue_event: Option<Arc<QueueSharedEvent>>,
+    /// Public AQL queues keyed by queue pointer.
+    pub(crate) queues: HashMap<usize, Queue>,
+    /// Tool interception proxies keyed by public queue pointer.
+    pub(crate) intercept_queues: HashMap<usize, Arc<InterceptQueue>>,
+    /// Optional internal hook called for newly created queues.
+    pub(crate) internal_queue_notifier: Option<(QueueNotifier, CallbackArg)>,
+    /// Agent identities with cooperative queue teardown in progress.
+    cooperative_teardown: HashSet<u64>,
+    /// Public SDMA queues keyed by queue pointer.
+    sdma_queues: HashMap<usize, SdmaQueue>,
+    /// Software queues keyed by queue pointer.
+    soft_queues: HashMap<usize, SoftQueue>,
+    /// Counted queue handles keyed by public queue pointer.
+    counted_queues: HashMap<usize, CountedQueue>,
+    /// Idle counted hardware queues grouped by agent and priority.
+    counted_queue_pools: HashMap<(u64, u32), Vec<CountedHardwareQueue>>,
+    /// Public counted queue pointers already released by the caller.
+    released_counted_queues: HashSet<usize>,
+    /// Maximum counted queues accepted by this HSA generation.
+    counted_queue_limit: usize,
+    /// Ring size selected for counted hardware queues.
+    counted_queue_size: u32,
 }
 
-fn scratch_plan(
-    gpu: GpuInfo,
-    private_segment_size: u32,
-    lanes_per_wave: u32,
-) -> Result<ScratchPlan, Status> {
-    if private_segment_size == 0 || private_segment_size > MAX_PRIVATE_SEGMENT_BYTES {
-        return Err(OUT_OF_RESOURCES);
+impl QueueState {
+    pub(crate) fn new() -> Self {
+        Self {
+            next_queue_id: 0,
+            queue_event: None,
+            queues: HashMap::new(),
+            intercept_queues: HashMap::new(),
+            internal_queue_notifier: None,
+            cooperative_teardown: HashSet::new(),
+            sdma_queues: HashMap::new(),
+            soft_queues: HashMap::new(),
+            counted_queues: HashMap::new(),
+            counted_queue_pools: HashMap::new(),
+            released_counted_queues: HashSet::new(),
+            counted_queue_limit: 4,
+            counted_queue_size: 16_384,
+        }
     }
-    if (gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping) != (12, 0, 1)
-        || gpu.wavefront_size != 32
-        || gpu.xcc_count != 1
-        || !matches!(lanes_per_wave, 32 | 64)
-    {
-        return Err(OUT_OF_RESOURCES);
+
+    pub(crate) fn allocate_id(&mut self) -> Result<u64, Status> {
+        let id = self.next_queue_id;
+        self.next_queue_id = id.checked_add(1).ok_or(OUT_OF_RESOURCES)?;
+        Ok(id)
     }
-    let lane_alignment = u32::try_from(SCRATCH_ALIGNMENT)
-        .ok()
-        .and_then(|alignment| alignment.checked_div(lanes_per_wave))
-        .filter(|alignment| *alignment != 0)
-        .ok_or(OUT_OF_RESOURCES)?;
-    let aligned_private = private_segment_size
-        .checked_add(lane_alignment - 1)
-        .map(|size| size / lane_alignment * lane_alignment)
-        .ok_or(OUT_OF_RESOURCES)?;
-    let engines = gpu
-        .shader_engine_count_per_xcc
-        .checked_mul(gpu.xcc_count)
-        .filter(|engines| *engines != 0)
-        .ok_or(OUT_OF_RESOURCES)?;
-    let maximum_waves = gpu
-        .compute_unit_count
-        .checked_mul(gpu.maximum_scratch_wave_count_per_compute_unit)
-        .ok_or(OUT_OF_RESOURCES)?;
-    let wave_bytes = u64::from(aligned_private)
-        .checked_mul(u64::from(lanes_per_wave))
-        .ok_or(OUT_OF_RESOURCES)?;
-    let representable_bytes = u64::from(u32::MAX) / GPU_PAGE_BYTES * GPU_PAGE_BYTES;
-    let representable_waves = u32::try_from(representable_bytes / wave_bytes)
-        .unwrap_or(u32::MAX)
-        .min(maximum_waves);
-    let maximum_wave_count = representable_waves / engines * engines;
-    if maximum_wave_count == 0 {
-        return Err(OUT_OF_RESOURCES);
+
+    /// Stops every public queue before its native backing can be released.
+    /// An uncertain native outcome requires retaining the whole HSA generation
+    /// because a queue may still reach its memory and signal objects.
+    pub(crate) fn shutdown(&mut self) -> bool {
+        let mut intercept_stop_failed = false;
+        for intercept in self.intercept_queues.values() {
+            intercept_stop_failed |= intercept.stop().is_err();
+        }
+        if intercept_stop_failed {
+            return false;
+        }
+        let mut queue_cleanup_uncertain = false;
+        for (_, mut queue) in self.queues.drain() {
+            if destroy_runtime_queue(&mut queue).is_err() {
+                std::mem::forget(queue);
+                queue_cleanup_uncertain = true;
+            }
+        }
+        for (_, mut queue) in self.sdma_queues.drain() {
+            if destroy_runtime_sdma_queue(&mut queue).is_err() {
+                std::mem::forget(queue);
+                queue_cleanup_uncertain = true;
+            }
+        }
+        if queue_cleanup_uncertain {
+            return false;
+        }
+        self.counted_queues.clear();
+        self.intercept_queues.clear();
+        self.counted_queue_pools.clear();
+        self.released_counted_queues.clear();
+        self.queue_event = None;
+        self.soft_queues.clear();
+        true
     }
-    let required = wave_bytes
-        .checked_mul(u64::from(maximum_wave_count))
-        .ok_or(OUT_OF_RESOURCES)?;
-    let byte_length = required
-        .checked_add(GPU_PAGE_BYTES - 1)
-        .map(|size| size / GPU_PAGE_BYTES * GPU_PAGE_BYTES)
-        .filter(|size| u32::try_from(*size).is_ok())
-        .ok_or(OUT_OF_RESOURCES)?;
-    Ok(ScratchPlan {
-        byte_length,
-        maximum_private_segment_byte_length: aligned_private,
-        maximum_wave_count,
-    })
 }
 
 fn allocate_scratch(
@@ -421,7 +548,7 @@ fn allocate_scratch(
     private_segment_size: u32,
     lanes_per_wave: u32,
 ) -> Result<(Allocation, QueueScratch), Status> {
-    let plan = scratch_plan(gpu, private_segment_size, lanes_per_wave)?;
+    let plan = plan_scratch(gpu, private_segment_size, lanes_per_wave).map_err(map_error)?;
     let allocation = device
         .gpu()
         .and_then(|gpu| gpu.allocate_queue_scratch(plan.byte_length))
@@ -430,13 +557,13 @@ fn allocate_scratch(
         device_address: allocation.info().device_address,
         byte_length: plan.byte_length,
         maximum_private_segment_byte_length: plan.maximum_private_segment_byte_length,
-        lanes_per_wave,
+        lanes_per_wave: plan.lanes_per_wave,
         maximum_wave_count: plan.maximum_wave_count,
     };
     Ok((allocation, scratch))
 }
 
-fn dispatch_private_segment(queue: &Queue) -> Option<u32> {
+fn dispatch_private_segment(queue: &Queue) -> Option<(u32, u64)> {
     let info = queue.native.info();
     let packet_count = info.ring_size_bytes / AQL_PACKET_BYTES as u64;
     if packet_count == 0 || !packet_count.is_power_of_two() {
@@ -472,21 +599,29 @@ fn dispatch_private_segment(queue: &Queue) -> Option<u32> {
         let private =
             unsafe { ((packet + AQL_PRIVATE_SEGMENT_SIZE_OFFSET) as *const u32).read_volatile() };
         if private != 0 {
-            return Some(private);
+            return Some((private, read + offset));
         }
     }
     None
 }
 
+/// Queue error callback detached from the registry lock before invocation.
 struct PendingCallback {
+    /// Application callback to invoke synchronously.
     callback: unsafe extern "C" fn(Status, *mut HsaQueue, *mut c_void),
+    /// HSA status derived from native error details.
     status: Status,
+    /// Public queue pointer passed to the callback.
     queue: usize,
+    /// Caller-owned callback argument.
     data: CallbackArg,
 }
 
+/// Result of processing one queue event before native rearming.
 struct QueueEventOutcome {
+    /// Callback to run after leaving the registry lock, if any.
     callback: Option<PendingCallback>,
+    /// Whether the native event should be armed for another notification.
     rearm: bool,
 }
 
@@ -517,21 +652,21 @@ fn queue_error_status(error: u64) -> Status {
 }
 
 fn pending_callback(
-    runtime: &crate::runtime::Runtime,
+    runtime: &crate::runtime::HsaState,
     key: usize,
     status: Status,
 ) -> Option<PendingCallback> {
-    let queue = runtime.queues.get(&key)?;
+    let queue = runtime.queue_state.queues.get(&key)?;
     Some(PendingCallback {
         callback: queue.callback?,
         status,
-        queue: key,
+        queue: queue.public_handle,
         data: queue.callback_data,
     })
 }
 
 fn pending_error_callback(
-    runtime: &mut crate::runtime::Runtime,
+    runtime: &mut crate::runtime::HsaState,
     key: usize,
     status: Status,
 ) -> Option<PendingCallback> {
@@ -539,13 +674,13 @@ fn pending_error_callback(
         // Publish the affected queue so a running system event worker can
         // attach the process fault's address and reason.
         let details = runtime.vm_fault_details;
-        let queue = runtime.queues.get_mut(&key)?;
+        let queue = runtime.queue_state.queues.get_mut(&key)?;
         queue.vm_faulted = true;
         if let Some((_, address, reason)) = details.filter(|(agent, _, _)| *agent == queue.agent) {
             queue.vm_fault_address = address;
             queue.vm_fault_reason = reason;
         }
-        if runtime.system_event_worker_started {
+        if runtime.system_event_worker.is_some() {
             VM_FAULT_CONDVAR.notify_all();
             return None;
         }
@@ -563,19 +698,19 @@ fn update_scratch_owner<T>(
     uncertain: &mut Vec<T>,
     candidate: T,
     update: impl FnOnce() -> Result<(), Status>,
-) -> Result<(), Status> {
+) -> Result<Option<T>, Status> {
     uncertain.try_reserve(1).map_err(|_| OUT_OF_RESOURCES)?;
     uncertain.push(candidate);
     update()?;
-    *current = uncertain.pop();
-    Ok(())
+    Ok(std::mem::replace(current, uncertain.pop()))
 }
 
-fn handle_queue_event(
-    runtime: &mut crate::runtime::Runtime,
-    key: usize,
-    observed: SignalValue,
-) -> Option<QueueEventOutcome> {
+fn handle_queue_event(key: usize, observed: SignalValue) -> Option<QueueEventOutcome> {
+    let mut guard = lock().ok()?;
+    let runtime = guard.as_mut()?;
+    if !runtime.queue_state.queues.contains_key(&key) {
+        return None;
+    }
     let error = observed as u64;
     if error & 0x401 == 0 {
         return Some(QueueEventOutcome {
@@ -583,50 +718,95 @@ fn handle_queue_event(
             rearm: false,
         });
     }
-    let (index, private_segment_size) = {
-        let queue = runtime.queues.get(&key)?;
+    let (device, gpu, public, private_segment_size, dispatch_id) = {
+        let queue = runtime.queue_state.queues.get(&key)?;
         let index = runtime.gpu_index(queue.agent)?;
-        let Some(private_segment_size) = dispatch_private_segment(queue) else {
+        let Some((private_segment_size, dispatch_id)) = dispatch_private_segment(queue) else {
             return Some(QueueEventOutcome {
                 callback: pending_callback(runtime, key, ERROR),
                 rearm: false,
             });
         };
-        (index, private_segment_size)
+        (
+            runtime.gpus[index].device.clone(),
+            runtime.gpus[index].info,
+            queue.public_handle,
+            private_segment_size,
+            dispatch_id,
+        )
     };
+    drop(guard);
     let lanes_per_wave = if error & 0x400 != 0 { 32 } else { 64 };
-    let result = allocate_scratch(
-        &runtime.gpus[index].device,
-        runtime.gpus[index].info,
-        private_segment_size,
-        lanes_per_wave,
-    )
-    .and_then(|(allocation, scratch)| {
-        let queue = runtime.queues.get_mut(&key).ok_or(INVALID_QUEUE)?;
-        update_scratch_owner(
+    crate::tool_events::alloc_start(public as *const HsaQueue, dispatch_id);
+    let allocated = allocate_scratch(&device, gpu, private_segment_size, lanes_per_wave);
+    let mut guard = if let Ok(guard) = lock() {
+        guard
+    } else {
+        crate::tool_events::alloc_end(public as *const HsaQueue, dispatch_id, 0, 0);
+        return None;
+    };
+    let Some(runtime) = guard.as_mut() else {
+        drop(guard);
+        crate::tool_events::alloc_end(public as *const HsaQueue, dispatch_id, 0, 0);
+        return None;
+    };
+    let Some(queue) = runtime.queue_state.queues.get_mut(&key) else {
+        drop(guard);
+        crate::tool_events::alloc_end(public as *const HsaQueue, dispatch_id, 0, 0);
+        return None;
+    };
+    let result = allocated.and_then(|(allocation, scratch)| {
+        let old = update_scratch_owner(
             &mut queue.scratch,
             &mut queue.uncertain_scratch,
             allocation,
             || {
-                // SAFETY: The command processor's inactive signal reports a
-                // stopped queue's scratch fault. Both old and candidate
-                // allocations remain owned if the update fails or unwinds.
+                // SAFETY: The inactive signal reports a stopped queue. Both
+                // old and candidate allocations remain owned if the update
+                // fails or unwinds.
                 unsafe { queue.native.set_scratch(scratch) }.map_err(map_error)
             },
         )?;
+        let old_visible = queue.scratch_event_visibility == ScratchEventVisibility::Published;
         queue.inactive_signal.release_queue();
-        Ok(())
+        Ok((scratch, old, old_visible))
     });
-    Some(match result {
-        Ok(()) => QueueEventOutcome {
-            callback: None,
-            rearm: true,
-        },
-        Err(status) => QueueEventOutcome {
-            callback: pending_callback(runtime, key, status),
-            rearm: false,
-        },
-    })
+    let (size, slots) = result.as_ref().map_or((0, 0), |(scratch, _, _)| {
+        (
+            scratch.byte_length as usize,
+            scratch.maximum_wave_count as usize,
+        )
+    });
+    let (outcome, old, old_visible) = match result {
+        Ok((_, old, old_visible)) => (
+            QueueEventOutcome {
+                callback: None,
+                rearm: true,
+            },
+            old,
+            old_visible,
+        ),
+        Err(status) => (
+            QueueEventOutcome {
+                callback: pending_callback(runtime, key, status),
+                rearm: false,
+            },
+            None,
+            false,
+        ),
+    };
+    drop(guard);
+    if let Some(old) = old {
+        if old_visible {
+            crate::tool_events::free_start(public as *const HsaQueue);
+            drop(old);
+            crate::tool_events::free_end(public as *const HsaQueue);
+        } else {
+            drop(old);
+        }
+    }
+    crate::tool_events::alloc_end(public as *const HsaQueue, dispatch_id, size, slots);
+    Some(outcome)
 }
 
 fn queue_event_worker(
@@ -648,7 +828,7 @@ fn queue_event_worker(
             let Some(runtime) = guard.as_mut() else {
                 return;
             };
-            if !runtime.queues.contains_key(&key) {
+            if !runtime.queue_state.queues.contains_key(&key) {
                 return;
             }
             let callback = pending_error_callback(runtime, key, queue_error_status(error as u64));
@@ -664,17 +844,7 @@ fn queue_event_worker(
                 None
             } else if inactive_armed {
                 inactive_armed = false;
-                let mut guard = match lock() {
-                    Ok(guard) => guard,
-                    Err(_) => return,
-                };
-                let Some(runtime) = guard.as_mut() else {
-                    return;
-                };
-                if !runtime.queues.contains_key(&key) {
-                    return;
-                }
-                handle_queue_event(runtime, key, observed).and_then(|outcome| {
+                handle_queue_event(key, observed).and_then(|outcome| {
                     inactive_armed = outcome.rearm;
                     outcome.callback
                 })
@@ -698,22 +868,26 @@ fn queue_event_worker(
     }
 }
 
-fn hardware_queue_key(runtime: &crate::runtime::Runtime, queue: *const HsaQueue) -> Option<usize> {
+fn hardware_queue_key(runtime: &crate::runtime::HsaState, queue: *const HsaQueue) -> Option<usize> {
     let key = queue as usize;
-    runtime.counted_queues.get(&key).map_or_else(
-        || runtime.queues.contains_key(&key).then_some(key),
+    if let Some(intercept) = runtime.queue_state.intercept_queues.get(&key) {
+        return Some(intercept.lower);
+    }
+    runtime.queue_state.counted_queues.get(&key).map_or_else(
+        || runtime.queue_state.queues.contains_key(&key).then_some(key),
         |queue| Some(queue.hardware_queue),
     )
 }
 
 fn counted_pool_key(
-    runtime: &crate::runtime::Runtime,
+    runtime: &crate::runtime::HsaState,
     queue: *const HsaQueue,
 ) -> Option<(u64, u32)> {
     let key = queue as usize;
-    runtime.counted_queues.get(&key).map_or_else(
+    runtime.queue_state.counted_queues.get(&key).map_or_else(
         || {
             runtime
+                .queue_state
                 .queues
                 .get(&key)
                 .and_then(|queue| queue.counted_pool_key)
@@ -722,10 +896,13 @@ fn counted_pool_key(
     )
 }
 
-fn queue_known(runtime: &crate::runtime::Runtime, queue: *const HsaQueue) -> bool {
+fn queue_known(runtime: &crate::runtime::HsaState, queue: *const HsaQueue) -> bool {
     !queue.is_null()
         && (hardware_queue_key(runtime, queue).is_some()
-            || runtime.soft_queues.contains_key(&(queue as usize)))
+            || runtime
+                .queue_state
+                .soft_queues
+                .contains_key(&(queue as usize)))
 }
 
 fn least_used_counted_queue(pool: &[CountedHardwareQueue]) -> Option<usize> {
@@ -743,13 +920,13 @@ fn queue_priority(priority: u32) -> Option<QueuePriority> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 /// # Safety
 /// `queue` must point to writable output storage for the complete call. The
 /// callback and its data must remain valid until native queue teardown and
 /// completion of the final event callback.
+#[allow(clippy::too_many_arguments)]
 unsafe fn create_hardware_queue(
-    runtime: &mut crate::runtime::Runtime,
+    expected_generation: Option<u64>,
     agent: HsaAgent,
     size: u32,
     queue_type: u32,
@@ -762,55 +939,27 @@ unsafe fn create_hardware_queue(
     queue: *mut *mut HsaQueue,
     created_log: &mut Option<(u64, usize)>,
 ) -> Status {
-    let Some(index) = runtime.gpu_index(agent) else {
-        return INVALID_AGENT;
-    };
-    let cooperative = queue_type == QUEUE_TYPE_COOPERATIVE;
-    if cooperative {
-        if runtime.gpus[index].info.gws_count == 0 {
-            return INVALID_QUEUE_CREATION;
-        }
-        if runtime.cooperative_teardown.contains(&agent.handle) {
-            return OUT_OF_RESOURCES;
-        }
-        if let Some((public, record)) = runtime
-            .queues
-            .iter_mut()
-            .find(|(_, record)| record.agent == agent && record.cooperative_refs != 0)
-        {
-            if record.inactivated
-                || record.teardown_started
-                || !record.event_alive.load(Ordering::Acquire)
-            {
-                return OUT_OF_RESOURCES;
-            }
-            if ring_memory != record.ring_memory {
-                return INVALID_QUEUE_CREATION;
-            }
-            let Some(refs) = record.cooperative_refs.checked_add(1) else {
-                return OUT_OF_RESOURCES;
-            };
-            if priority != QueuePriority::Normal {
-                if let Err(error) = record.native.set_priority(priority) {
-                    return map_error(error);
-                }
-            }
-            if let Some(mask) = cu_mask {
-                if let Err(error) = record.native.set_cu_mask(&mask) {
-                    return map_error(error);
-                }
-                record.cu_mask = mask;
-            }
-            record.cooperative_refs = refs;
-            // SAFETY: This queue is still registered and the caller supplied
-            // writable output for the returned shared public handle.
-            unsafe { queue.write(*public as *mut HsaQueue) };
-            return SUCCESS;
-        }
+    struct Prepared {
+        generation: u64,
+        id: u64,
+        device: Device,
+        gpu: GpuInfo,
+        event: Arc<QueueSharedEvent>,
+        host_page_size: usize,
+        stop: Arc<AtomicBool>,
+        tracker: Arc<crate::runtime::InFlightTracker>,
+        _token: crate::runtime::InFlightToken,
     }
-    // ROCr's cooperative queue uses one internal 16 KiB AQL ring without
-    // caller-specific scratch or callback state. AMD queue descriptors can
-    // still adjust its priority and CU mask.
+
+    let cooperative = queue_type == QUEUE_TYPE_COOPERATIVE;
+    let _cooperative_gate = if cooperative {
+        match COOPERATIVE_CREATE_GATE.lock() {
+            Ok(guard) => Some(guard),
+            Err(_) => return ERROR,
+        }
+    } else {
+        None
+    };
     let (size, callback, data, private_segment_size) = if cooperative {
         (
             16_384 / AQL_PACKET_BYTES as u32,
@@ -822,18 +971,109 @@ unsafe fn create_hardware_queue(
     } else {
         (size, callback, data, private_segment_size)
     };
-    let ring_size_bytes = match u64::from(size).checked_mul(AQL_PACKET_BYTES as u64) {
-        Some(size) => size,
-        None => return INVALID_QUEUE_CREATION,
+    let Some(ring_size_bytes) = u64::from(size).checked_mul(AQL_PACKET_BYTES as u64) else {
+        return INVALID_QUEUE_CREATION;
     };
-    let id = match runtime.allocate_queue_id() {
-        Ok(id) => id,
-        Err(status) => return status,
+    let prepared = {
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        let Some(generation) = guard.active_generation() else {
+            return NOT_INITIALIZED;
+        };
+        if expected_generation.is_some_and(|expected| expected != generation) {
+            return INVALID_RUNTIME_STATE;
+        }
+        let runtime = match initialized_mut(&mut guard) {
+            Ok(runtime) => runtime,
+            Err(status) => return status,
+        };
+        let Some(index) = runtime.gpu_index(agent) else {
+            return INVALID_AGENT;
+        };
+        if cooperative {
+            if runtime.gpus[index].info.gws_count == 0 {
+                return INVALID_QUEUE_CREATION;
+            }
+            if runtime
+                .queue_state
+                .cooperative_teardown
+                .contains(&agent.handle)
+            {
+                return OUT_OF_RESOURCES;
+            }
+            if let Some((public, record)) = runtime
+                .queue_state
+                .queues
+                .iter_mut()
+                .find(|(_, record)| record.agent == agent && record.cooperative_refs != 0)
+            {
+                if record.inactivated
+                    || record.teardown_started
+                    || !record.event_alive.load(Ordering::Acquire)
+                {
+                    return OUT_OF_RESOURCES;
+                }
+                if ring_memory != record.ring_memory {
+                    return INVALID_QUEUE_CREATION;
+                }
+                let Some(refs) = record.cooperative_refs.checked_add(1) else {
+                    return OUT_OF_RESOURCES;
+                };
+                if priority != QueuePriority::Normal {
+                    if let Err(error) = record.native.set_priority(priority) {
+                        return map_error(error);
+                    }
+                }
+                if let Some(mask) = cu_mask.as_ref() {
+                    if let Err(error) = record.native.set_cu_mask(mask) {
+                        return map_error(error);
+                    }
+                    record.cu_mask.clone_from(mask);
+                }
+                record.cooperative_refs = refs;
+                // SAFETY: The shared public queue remains in the registry.
+                unsafe { queue.write(*public as *mut HsaQueue) };
+                return SUCCESS;
+            }
+        }
+        let id = match runtime.queue_state.allocate_id() {
+            Ok(id) => id,
+            Err(status) => return status,
+        };
+        if private_segment_size != u32::MAX && private_segment_size > MAX_PRIVATE_SEGMENT_BYTES {
+            return OUT_OF_RESOURCES;
+        }
+        let event = match QueueEventSignal::shared_event(runtime) {
+            Ok(event) => event,
+            Err(status) => return status,
+        };
+        if runtime.queue_state.queues.try_reserve(1).is_err() {
+            return OUT_OF_RESOURCES;
+        }
+        let tracker = runtime.inflight.clone();
+        let Some(token) = tracker.enter() else {
+            return OUT_OF_RESOURCES;
+        };
+        Prepared {
+            generation,
+            id,
+            device: runtime.gpus[index].device.clone(),
+            gpu: runtime.gpus[index].info,
+            event,
+            host_page_size: runtime.host_page_size,
+            stop: runtime.stop_workers.clone(),
+            tracker,
+            _token: token,
+        }
     };
-    if private_segment_size != u32::MAX && private_segment_size > MAX_PRIVATE_SEGMENT_BYTES {
-        return OUT_OF_RESOURCES;
-    }
-    let inactive_signal = match QueueEventSignal::create(runtime, index) {
+
+    let inactive_signal = match QueueEventSignal::create(
+        prepared.event.clone(),
+        &prepared.device,
+        prepared.host_page_size,
+    ) {
         Ok(signal) => Arc::new(signal),
         Err(status) => return status,
     };
@@ -842,33 +1082,25 @@ unsafe fn create_hardware_queue(
             (None, None)
         } else {
             match allocate_scratch(
-                &runtime.gpus[index].device,
-                runtime.gpus[index].info,
+                &prepared.device,
+                prepared.gpu,
                 private_segment_size,
-                runtime.gpus[index].info.wavefront_size,
+                prepared.gpu.wavefront_size,
             ) {
                 Ok((allocation, scratch)) => (Some(allocation), Some(scratch)),
                 Err(status) => return status,
             }
         };
-    // From CREATE onward the command processor may retain both external
-    // addresses. Stage every allocation needed for public registration before
-    // that call so successful creation can be published without another
-    // allocation.
-    if runtime.queues.try_reserve(1).is_err() {
-        return OUT_OF_RESOURCES;
-    }
     let mut doorbell = Box::new(AmdSignal::doorbell(0, 0));
     let event_alive = Arc::new(AtomicBool::new(true));
     let worker_alive = event_alive.clone();
     let worker_signal = inactive_signal.clone();
-    let stop = runtime.stop_workers.clone();
     let saved_cu_mask = cu_mask.unwrap_or_default();
+    let mut creation_guard = UnpublishedQueueGuard::new(&prepared.tracker);
     let (native, (inactive_signal, scratch_allocation)) =
-        match runtime.gpus[index].device.gpu().and_then(|gpu| {
-            // SAFETY: The supplied owner tuple retains the AQL event
-            // signals and scratch backing through native creation and, on
-            // success, remains with the queue until its destruction.
+        match prepared.device.gpu().and_then(|gpu| {
+            // SAFETY: The owner tuple retains all external GPU addresses
+            // through native creation, including an ambiguous CREATE result.
             unsafe {
                 gpu.create_queue_with_dependencies(
                     QueueRequest {
@@ -894,6 +1126,9 @@ unsafe fn create_hardware_queue(
         }) {
             Ok(created) => created,
             Err(error) => {
+                if !matches!(error, rocddi::Error::QueueBackingMayBeLive { .. }) {
+                    creation_guard.disarm();
+                }
                 return if cooperative && error.kind() == rocddi::ErrorKind::Busy {
                     OUT_OF_RESOURCES
                 } else if error.kind() == rocddi::ErrorKind::Unsupported {
@@ -903,17 +1138,16 @@ unsafe fn create_hardware_queue(
                 };
             }
         };
-    // An unwind in frontend setup must not drop backing still reachable by
-    // this unpublished native queue. Explicit rejection uses the native
-    // abandonment transaction below to release it only after DESTROY succeeds.
+    // If setup unwinds, keep the native queue and its external backing live.
     let mut pending = ManuallyDrop::new((native, inactive_signal, scratch_allocation));
     if !saved_cu_mask.is_empty() {
         if let Err(error) = pending.0.set_cu_mask(&saved_cu_mask) {
-            let (native, inactive_signal, scratch_allocation) = ManuallyDrop::into_inner(pending);
-            return abandon_unpublished_queue(
+            let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
+            return abandon_unpublished_tracked(
                 native,
-                (inactive_signal, scratch_allocation),
+                (signal, scratch),
                 map_error(error),
+                &mut creation_guard,
             );
         }
     }
@@ -921,21 +1155,62 @@ unsafe fn create_hardware_queue(
     if info.write_index_host_address < WRITE_INDEX_OFFSET
         || info.read_index_host_address < READ_INDEX_OFFSET
     {
-        let (native, inactive_signal, scratch_allocation) = ManuallyDrop::into_inner(pending);
-        return abandon_unpublished_queue(native, (inactive_signal, scratch_allocation), ERROR);
+        let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
+        return abandon_unpublished_tracked(native, (signal, scratch), ERROR, &mut creation_guard);
     }
     let public = info.write_index_host_address - WRITE_INDEX_OFFSET;
-    if info.read_index_host_address - READ_INDEX_OFFSET != public
-        || public % 256 != 0
-        || runtime.queues.contains_key(&public)
-    {
-        let (native, inactive_signal, scratch_allocation) = ManuallyDrop::into_inner(pending);
-        return abandon_unpublished_queue(native, (inactive_signal, scratch_allocation), ERROR);
+    if info.read_index_host_address - READ_INDEX_OFFSET != public || public % 256 != 0 {
+        let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
+        return abandon_unpublished_tracked(native, (signal, scratch), ERROR, &mut creation_guard);
     }
     *doorbell = AmdSignal::doorbell(info.doorbell_host_address, public);
     let doorbell_handle = (&raw mut *doorbell) as usize as u64;
-    // SAFETY: rocddi's AQL queue control allocation is the public
-    // amd_queue_v2_t layout and remains exclusively owned by native.
+    let mut guard = match lock() {
+        Ok(guard) => guard,
+        Err(status) => {
+            let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
+            return abandon_unpublished_tracked(
+                native,
+                (signal, scratch),
+                status,
+                &mut creation_guard,
+            );
+        }
+    };
+    if guard.active_generation() != Some(prepared.generation) {
+        drop(guard);
+        let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
+        return abandon_unpublished_tracked(
+            native,
+            (signal, scratch),
+            INVALID_RUNTIME_STATE,
+            &mut creation_guard,
+        );
+    }
+    let Some(runtime) = guard.as_mut() else {
+        drop(guard);
+        let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
+        return abandon_unpublished_tracked(
+            native,
+            (signal, scratch),
+            NOT_INITIALIZED,
+            &mut creation_guard,
+        );
+    };
+    if runtime.queue_state.queues.try_reserve(1).is_err()
+        || runtime.queue_state.queues.contains_key(&public)
+    {
+        drop(guard);
+        let (native, signal, scratch) = ManuallyDrop::into_inner(pending);
+        return abandon_unpublished_tracked(
+            native,
+            (signal, scratch),
+            OUT_OF_RESOURCES,
+            &mut creation_guard,
+        );
+    }
+    // SAFETY: The public control pointer is unique in the registry, and
+    // rocddi retains this AQL control allocation until native teardown.
     unsafe {
         let header = public as *mut HsaQueue;
         (*header).queue_type = queue_type;
@@ -946,14 +1221,15 @@ unsafe fn create_hardware_queue(
         };
         (*header).size = size;
         (*header).reserved = 0;
-        (*header).id = id;
+        (*header).id = prepared.id;
     }
-    let hardware_id = u32::try_from(id).unwrap_or(u32::MAX);
     let (native, inactive_signal, scratch_allocation) = ManuallyDrop::into_inner(pending);
-    runtime.queues.insert(
+    runtime.queue_state.queues.insert(
         public,
         Queue {
             native,
+            public_handle: public,
+            scratch_event_visibility: ScratchEventVisibility::Unpublished,
             _doorbell: doorbell,
             inactive_signal,
             event_alive,
@@ -961,7 +1237,7 @@ unsafe fn create_hardware_queue(
             scratch: scratch_allocation,
             uncertain_scratch: Vec::new(),
             agent,
-            hardware_id,
+            hardware_id: u32::try_from(prepared.id).unwrap_or(u32::MAX),
             counted_pool_key: None,
             cooperative_refs: u32::from(cooperative),
             ring_memory,
@@ -975,27 +1251,80 @@ unsafe fn create_hardware_queue(
             teardown_started: false,
         },
     );
-    runtime.released_counted_queues.remove(&public);
-    let Ok(event_worker) = thread::Builder::new()
+    runtime.queue_state.released_counted_queues.remove(&public);
+    let event_worker = thread::Builder::new()
         .name("rocddi-queue-events".into())
-        .spawn(move || queue_event_worker(&stop, &worker_alive, &worker_signal, public))
-    else {
-        let Some(mut record) = runtime.queues.remove(&public) else {
+        .spawn(move || queue_event_worker(&prepared.stop, &worker_alive, &worker_signal, public));
+    let Ok(event_worker) = event_worker else {
+        let Some(mut record) = runtime.queue_state.queues.remove(&public) else {
+            prepared.tracker.quarantine();
             return ERROR;
         };
+        drop(guard);
         if destroy_runtime_queue(&mut record).is_err() {
             std::mem::forget(record);
+        } else {
+            creation_guard.disarm();
         }
         return OUT_OF_RESOURCES;
     };
-    let Some(record) = runtime.queues.get_mut(&public) else {
+    let Some(record) = runtime.queue_state.queues.get_mut(&public) else {
+        prepared.tracker.quarantine();
         return ERROR;
     };
     record.event_worker = Some(event_worker);
-    // SAFETY: The caller supplied writable output storage.
+    record.scratch_event_visibility = ScratchEventVisibility::Published;
+    // SAFETY: The caller supplied writable output storage, and the registry
+    // now owns the complete queue and its event worker.
     unsafe { queue.write(public as *mut HsaQueue) };
-    *created_log = Some((id, public));
+    *created_log = Some((prepared.id, public));
+    creation_guard.disarm();
     SUCCESS
+}
+
+/// Quarantines an HSA generation if native creation unwinds or leaves an
+/// unpublished queue whose cleanup cannot be proven complete.
+struct UnpublishedQueueGuard<'a> {
+    tracker: &'a crate::runtime::InFlightTracker,
+    armed: bool,
+}
+
+impl<'a> UnpublishedQueueGuard<'a> {
+    fn new(tracker: &'a crate::runtime::InFlightTracker) -> Self {
+        Self {
+            tracker,
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for UnpublishedQueueGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            self.tracker.quarantine();
+        }
+    }
+}
+
+fn abandon_unpublished_tracked<D: 'static>(
+    native: rocddi::device::gpu::queue::Queue,
+    dependencies: D,
+    status: Status,
+    guard: &mut UnpublishedQueueGuard<'_>,
+) -> Status {
+    // SAFETY: No public producer has observed the queue. The dependencies
+    // retain every external GPU address until native teardown succeeds.
+    match unsafe { native.abandon_unpublished_with_dependencies(dependencies) } {
+        Ok(()) => {
+            guard.disarm();
+            status
+        }
+        Err(error) => map_error(error),
+    }
 }
 
 fn validated_sdma_engine(info: QueueTransport, size: u32) -> Option<u32> {
@@ -1026,7 +1355,7 @@ fn validated_sdma_engine(info: QueueTransport, size: u32) -> Option<u32> {
 /// `queue` addresses writable output storage. The caller serializes native
 /// queue publication and destruction with all producers.
 unsafe fn create_sdma_queue(
-    runtime: &mut crate::runtime::Runtime,
+    expected_generation: Option<u64>,
     agent: HsaAgent,
     size_bytes: u32,
     selection: SdmaEngineSelection,
@@ -1034,16 +1363,43 @@ unsafe fn create_sdma_queue(
     queue: *mut *mut HsaQueue,
     created_log: &mut Option<(u64, usize, u32)>,
 ) -> Status {
-    let Some(index) = runtime.gpu_index(agent) else {
-        return INVALID_AGENT;
+    let (generation, id, device, tracker, _token) = {
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
+        let Some(generation) = guard.active_generation() else {
+            return NOT_INITIALIZED;
+        };
+        if expected_generation.is_some_and(|expected| expected != generation) {
+            return INVALID_RUNTIME_STATE;
+        }
+        let runtime = match initialized_mut(&mut guard) {
+            Ok(runtime) => runtime,
+            Err(status) => return status,
+        };
+        let Some(index) = runtime.gpu_index(agent) else {
+            return INVALID_AGENT;
+        };
+        let id = match runtime.queue_state.allocate_id() {
+            Ok(id) => id,
+            Err(status) => return status,
+        };
+        if runtime.queue_state.sdma_queues.try_reserve(1).is_err() {
+            return OUT_OF_RESOURCES;
+        }
+        let tracker = runtime.inflight.clone();
+        let Some(token) = tracker.enter() else {
+            return OUT_OF_RESOURCES;
+        };
+        (
+            generation,
+            id,
+            runtime.gpus[index].device.clone(),
+            tracker,
+            token,
+        )
     };
-    let id = match runtime.allocate_queue_id() {
-        Ok(id) => id,
-        Err(status) => return status,
-    };
-    if runtime.sdma_queues.try_reserve(1).is_err() {
-        return OUT_OF_RESOURCES;
-    }
     let mut control = Box::new(SdmaQueueControl {
         read_index_host_address: 0,
         write_index_host_address: 0,
@@ -1051,9 +1407,10 @@ unsafe fn create_sdma_queue(
         header: [0; std::mem::size_of::<HsaQueue>()],
     });
     let mut doorbell = Box::new(AmdSignal::doorbell(0, 0));
-    let native = match runtime.gpus[index].device.gpu().and_then(|gpu| {
+    let mut creation_guard = UnpublishedQueueGuard::new(&tracker);
+    let native = match device.gpu().and_then(|gpu| {
         // SAFETY: SDMA creation passes no external GPU addresses. The queue
-        // stays unpublished until its complete transport is validated below.
+        // remains unpublished until its transport has been validated.
         unsafe {
             gpu.create_queue(QueueRequest {
                 ring_size_bytes: u64::from(size_bytes),
@@ -1068,24 +1425,32 @@ unsafe fn create_sdma_queue(
     }) {
         Ok(native) => native,
         Err(error) if error.kind() == rocddi::ErrorKind::Unsupported => {
+            creation_guard.disarm();
             return INVALID_QUEUE_CREATION;
         }
-        Err(error) => return map_error(error),
+        Err(error) => {
+            if !matches!(error, rocddi::Error::QueueBackingMayBeLive { .. }) {
+                creation_guard.disarm();
+            }
+            return map_error(error);
+        }
     };
     let info = native.info();
     let Some(engine_id) = validated_sdma_engine(info, size_bytes) else {
-        return abandon_unpublished_queue(native, (), INVALID_QUEUE_CREATION);
+        return abandon_unpublished_tracked(
+            native,
+            (),
+            INVALID_QUEUE_CREATION,
+            &mut creation_guard,
+        );
     };
     let public = control.header.as_mut_ptr().cast::<HsaQueue>();
     let public_key = public as usize;
-    if runtime.sdma_queues.contains_key(&public_key) {
-        return abandon_unpublished_queue(native, (), ERROR);
-    }
     control.read_index_host_address = info.read_index_host_address;
     control.write_index_host_address = info.write_index_host_address;
     *doorbell = AmdSignal::doorbell(info.doorbell_host_address, public_key);
     // SAFETY: The public header has HsaQueue alignment and remains owned by
-    // this record until successful native queue destruction.
+    // the SDMA record until successful native queue destruction.
     unsafe {
         public.write(HsaQueue {
             queue_type: QUEUE_TYPE_SINGLE,
@@ -1099,7 +1464,25 @@ unsafe fn create_sdma_queue(
             id,
         });
     }
-    runtime.sdma_queues.insert(
+    let mut guard = match lock() {
+        Ok(guard) => guard,
+        Err(status) => return abandon_unpublished_tracked(native, (), status, &mut creation_guard),
+    };
+    if guard.active_generation() != Some(generation) {
+        drop(guard);
+        return abandon_unpublished_tracked(native, (), INVALID_RUNTIME_STATE, &mut creation_guard);
+    }
+    let Some(runtime) = guard.as_mut() else {
+        drop(guard);
+        return abandon_unpublished_tracked(native, (), NOT_INITIALIZED, &mut creation_guard);
+    };
+    if runtime.queue_state.sdma_queues.try_reserve(1).is_err()
+        || runtime.queue_state.sdma_queues.contains_key(&public_key)
+    {
+        drop(guard);
+        return abandon_unpublished_tracked(native, (), OUT_OF_RESOURCES, &mut creation_guard);
+    }
+    runtime.queue_state.sdma_queues.insert(
         public_key,
         SdmaQueue {
             native,
@@ -1110,14 +1493,18 @@ unsafe fn create_sdma_queue(
             teardown_started: false,
         },
     );
-    // SAFETY: The caller supplied writable output storage and the registry
-    // now owns the native queue and both public allocations.
+    // SAFETY: The registry owns the queue before the caller sees this header.
     unsafe { queue.write(public) };
     *created_log = Some((id, public_key, engine_id));
+    creation_guard.disarm();
     SUCCESS
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_queue_create")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_queue_create(
     agent: HsaAgent,
     size: u32,
@@ -1139,19 +1526,11 @@ pub unsafe extern "C" fn hsa_queue_create(
         {
             return INVALID_ARGUMENT;
         }
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
-        };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
         let mut created_log = None;
         // SAFETY: The HSA caller supplies writable queue output and retains callback data.
         let status = unsafe {
             create_hardware_queue(
-                runtime,
+                None,
                 agent,
                 size,
                 queue_type,
@@ -1168,15 +1547,18 @@ pub unsafe extern "C" fn hsa_queue_create(
             )
         };
         let log = created_log.and_then(|(id, public)| {
-            runtime.prepare_log(
-                AMD_LOG_FLAG_INFO,
-                format_args!(
-                    "created AQL queue id={id} agent=0x{:x} address=0x{public:x} packets={size}",
-                    agent.handle
-                ),
-            )
+            lock().ok().and_then(|guard| {
+                guard.as_ref().and_then(|runtime| {
+                    runtime.prepare_log(
+                        AMD_LOG_FLAG_INFO,
+                        format_args!(
+                            "created AQL queue id={id} agent=0x{:x} address=0x{public:x} packets={size}",
+                            agent.handle
+                        ),
+                    )
+                })
+            })
         });
-        drop(guard);
         if let Some(log) = log {
             log.write();
         }
@@ -1184,7 +1566,11 @@ pub unsafe extern "C" fn hsa_queue_create(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_counted_queue_acquire")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
     agent: HsaAgent,
     queue_type: u32,
@@ -1195,64 +1581,74 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
     queue: *mut *mut HsaQueue,
 ) -> Status {
     boundary(|| {
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
+        let Ok(_creation_gate) = COUNTED_CREATE_GATE.lock() else {
+            return ERROR;
         };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        if queue.is_null() {
-            return INVALID_ARGUMENT;
-        }
-        let Some(native_priority) = queue_priority(priority) else {
-            return INVALID_ARGUMENT;
-        };
-        if queue_type != QUEUE_TYPE_MULTI {
-            return INVALID_QUEUE_CREATION;
-        }
-        if runtime.gpu_index(agent).is_none() {
-            return INVALID_AGENT;
-        }
-        if runtime.counted_queues.try_reserve(1).is_err()
-            || runtime.counted_queue_pools.try_reserve(1).is_err()
-        {
-            return OUT_OF_RESOURCES;
-        }
-
         let pool_key = (agent.handle, priority);
-        let create_new = runtime
-            .counted_queue_pools
-            .get(&pool_key)
-            .map_or(0, Vec::len)
-            < runtime.counted_queue_limit;
-        if create_new
-            && runtime
+        let (generation, create_new, counted_queue_size, existing, native_priority) = {
+            let mut guard = match lock() {
+                Ok(guard) => guard,
+                Err(status) => return status,
+            };
+            let Some(generation) = guard.active_generation() else {
+                return NOT_INITIALIZED;
+            };
+            let runtime = match initialized_mut(&mut guard) {
+                Ok(runtime) => runtime,
+                Err(status) => return status,
+            };
+            if queue.is_null() {
+                return INVALID_ARGUMENT;
+            }
+            let Some(native_priority) = queue_priority(priority) else {
+                return INVALID_ARGUMENT;
+            };
+            if queue_type != QUEUE_TYPE_MULTI {
+                return INVALID_QUEUE_CREATION;
+            }
+            if runtime.gpu_index(agent).is_none() {
+                return INVALID_AGENT;
+            }
+            if runtime.queue_state.counted_queues.try_reserve(1).is_err()
+                || runtime
+                    .queue_state
+                    .counted_queue_pools
+                    .try_reserve(1)
+                    .is_err()
+            {
+                return OUT_OF_RESOURCES;
+            }
+            let pool = runtime
+                .queue_state
                 .counted_queue_pools
                 .entry(pool_key)
-                .or_default()
-                .try_reserve(1)
-                .is_err()
-        {
-            return OUT_OF_RESOURCES;
-        }
-
+                .or_default();
+            let create_new = pool.len() < runtime.queue_state.counted_queue_limit;
+            if create_new && pool.try_reserve(1).is_err() {
+                return OUT_OF_RESOURCES;
+            }
+            (
+                generation,
+                create_new,
+                runtime.queue_state.counted_queue_size,
+                least_used_counted_queue(pool),
+                native_priority,
+            )
+        };
         let mut created_log = None;
         let hardware_queue = if create_new {
             let mut created = std::ptr::null_mut();
-            let counted_queue_size = runtime.counted_queue_size;
-            // SAFETY: This stack output is writable and the HSA caller retains callback data.
+            // SAFETY: The stack output is writable; the callback data remains
+            // owned by the HSA caller until the resulting queue is destroyed.
             let status = unsafe {
                 create_hardware_queue(
-                    runtime,
+                    Some(generation),
                     agent,
                     counted_queue_size,
                     queue_type,
                     native_priority,
                     callback,
-                    // SAFETY: The C caller retains and synchronizes callback data
-                    // through queue destruction and the last event callback.
+                    // SAFETY: The C caller retains the callback argument.
                     CallbackArg::new(data),
                     0,
                     QueueRingMemory::System,
@@ -1264,12 +1660,42 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
             if status != SUCCESS {
                 return OUT_OF_RESOURCES;
             }
-            let hardware_queue = created as usize;
-            let Some(record) = runtime.queues.get_mut(&hardware_queue) else {
+            created as usize
+        } else {
+            let Some(existing) = existing else {
+                return OUT_OF_RESOURCES;
+            };
+            existing
+        };
+        let mut guard = match lock() {
+            Ok(guard) => guard,
+            Err(status) => {
+                if create_new {
+                    // SAFETY: The newly created internal queue was not returned.
+                    unsafe { hsa_queue_destroy(hardware_queue as *mut HsaQueue) };
+                }
+                return status;
+            }
+        };
+        if guard.active_generation() != Some(generation) {
+            drop(guard);
+            if create_new {
+                // SAFETY: No public counted handle was returned to the caller.
+                unsafe { hsa_queue_destroy(hardware_queue as *mut HsaQueue) };
+            }
+            return INVALID_RUNTIME_STATE;
+        }
+        let runtime = match initialized_mut(&mut guard) {
+            Ok(runtime) => runtime,
+            Err(status) => return status,
+        };
+        if create_new {
+            let Some(record) = runtime.queue_state.queues.get_mut(&hardware_queue) else {
                 return ERROR;
             };
             record.counted_pool_key = Some(pool_key);
             runtime
+                .queue_state
                 .counted_queue_pools
                 .entry(pool_key)
                 .or_default()
@@ -1277,28 +1703,17 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
                     queue: hardware_queue,
                     use_count: 0,
                 });
-            // SAFETY: create_hardware_queue retains a complete public queue
-            // control mapping with an aligned properties word.
+            // SAFETY: The native AQL control mapping is live and its properties
+            // word is aligned through the complete counted queue lifetime.
             unsafe {
-                (*created
-                    .cast::<u8>()
+                (*(hardware_queue as *mut u8)
                     .add(QUEUE_PROPERTIES_OFFSET)
                     .cast::<AtomicU32>())
                 .fetch_or(AMD_QUEUE_PROPERTIES_ENABLE_PROFILING, Ordering::Release);
             }
-            hardware_queue
-        } else {
-            let Some(hardware_queue) = runtime
-                .counted_queue_pools
-                .get(&pool_key)
-                .and_then(|pool| least_used_counted_queue(pool))
-            else {
-                return OUT_OF_RESOURCES;
-            };
-            hardware_queue
-        };
-
+        }
         let Some(entry) = runtime
+            .queue_state
             .counted_queue_pools
             .get_mut(&pool_key)
             .and_then(|pool| pool.iter_mut().find(|entry| entry.queue == hardware_queue))
@@ -1308,22 +1723,22 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
         let Some(use_count) = entry.use_count.checked_add(1) else {
             return OUT_OF_RESOURCES;
         };
-        // SAFETY: The selected hardware queue remains owned by the counted
-        // pool until runtime shutdown.
+        // SAFETY: The selected hardware queue remains owned by the pool until
+        // the runtime generation is shut down.
         let mut counted = unsafe { CountedQueue::new(hardware_queue, pool_key) };
         let public = counted.public_pointer();
         let key = public as usize;
         entry.use_count = use_count;
-        runtime.released_counted_queues.remove(&key);
-        runtime.counted_queues.insert(key, counted);
+        runtime.queue_state.released_counted_queues.remove(&key);
+        runtime.queue_state.counted_queues.insert(key, counted);
         // SAFETY: The caller supplied writable output storage.
         unsafe { queue.write(public) };
         let log = created_log.and_then(|(id, public)| {
             runtime.prepare_log(
                 AMD_LOG_FLAG_INFO,
                 format_args!(
-                    "created AQL queue id={id} agent=0x{:x} address=0x{public:x} packets={}",
-                    agent.handle, runtime.counted_queue_size
+                    "created AQL queue id={id} agent=0x{:x} address=0x{public:x} packets={counted_queue_size}",
+                    agent.handle
                 ),
             )
         });
@@ -1335,7 +1750,11 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_acquire(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_counted_queue_release")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_counted_queue_release(queue: *mut HsaQueue) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -1350,10 +1769,11 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_release(queue: *mut HsaQueue) -> 
             return INVALID_ARGUMENT;
         }
         let key = queue as usize;
-        let Some(counted) = runtime.counted_queues.remove(&key) else {
+        let Some(counted) = runtime.queue_state.counted_queues.remove(&key) else {
             return ERROR;
         };
         let Some(entry) = runtime
+            .queue_state
             .counted_queue_pools
             .get_mut(&counted.pool_key)
             .and_then(|pool| {
@@ -1361,20 +1781,24 @@ pub unsafe extern "C" fn hsa_amd_counted_queue_release(queue: *mut HsaQueue) -> 
                     .find(|entry| entry.queue == counted.hardware_queue)
             })
         else {
-            runtime.counted_queues.insert(key, counted);
+            runtime.queue_state.counted_queues.insert(key, counted);
             return ERROR;
         };
         let Some(use_count) = entry.use_count.checked_sub(1) else {
-            runtime.counted_queues.insert(key, counted);
+            runtime.queue_state.counted_queues.insert(key, counted);
             return ERROR;
         };
         entry.use_count = use_count;
-        runtime.released_counted_queues.insert(key);
+        runtime.queue_state.released_counted_queues.insert(key);
         SUCCESS
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_soft_queue_create")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_soft_queue_create(
     region: HsaRegion,
     size: u32,
@@ -1412,10 +1836,10 @@ pub unsafe extern "C" fn hsa_soft_queue_create(
         {
             return INVALID_REGION;
         }
-        if !runtime.owns_signal(doorbell_signal) {
+        if !runtime.signal_state.owns_signal(doorbell_signal) {
             return INVALID_SIGNAL;
         }
-        if runtime.soft_queues.try_reserve(1).is_err() {
+        if runtime.queue_state.soft_queues.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
         let count = size as usize;
@@ -1430,13 +1854,13 @@ pub unsafe extern "C" fn hsa_soft_queue_create(
         }
         let mut control = Box::new(SoftQueueControl([0_u64; 32]));
         let public = control.0.as_mut_ptr().cast::<HsaQueue>();
-        let id = match runtime.allocate_queue_id() {
+        let id = match runtime.queue_state.allocate_id() {
             Ok(id) => id,
             Err(status) => return status,
         };
         // The queue publishes this handle in its header. Retain its backing
         // even if the caller destroys the public signal first.
-        if let Err(status) = runtime.retain_async_signal(doorbell_signal) {
+        if let Err(status) = runtime.signal_state.retain_async_signal(doorbell_signal) {
             return status;
         }
         // SAFETY: The boxed control record is aligned for HsaQueue and the
@@ -1452,7 +1876,7 @@ pub unsafe extern "C" fn hsa_soft_queue_create(
                 id,
             });
         }
-        runtime.soft_queues.insert(
+        runtime.queue_state.soft_queues.insert(
             public as usize,
             SoftQueue {
                 _control: control,
@@ -1479,6 +1903,7 @@ fn full_cu_mask(compute_units: u32) -> Vec<u32> {
     mask
 }
 
+/// Initialized input prefix copied from an extensible queue descriptor.
 struct QueueCreateInput {
     version: u16,
     flags: u16,
@@ -1540,7 +1965,11 @@ unsafe fn copy_queue_create_mask(
     unsafe { copy_cu_mask(compute.cu_mask, count) }.map(Some)
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_queue_create")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_queue_create(
     agent: HsaAgent,
     descriptors: *mut HsaAmdQueueCreateDesc,
@@ -1550,17 +1979,22 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
         if descriptors.is_null() || descriptor_count == 0 {
             return INVALID_ARGUMENT;
         }
-        let mut guard = match lock() {
-            Ok(guard) => guard,
-            Err(status) => return status,
+        let generation = {
+            let guard = match lock() {
+                Ok(guard) => guard,
+                Err(status) => return status,
+            };
+            let Some(runtime) = guard.as_ref() else {
+                return NOT_INITIALIZED;
+            };
+            if runtime.gpu_index(agent).is_none() {
+                return INVALID_AGENT;
+            }
+            let Some(generation) = guard.active_generation() else {
+                return INVALID_RUNTIME_STATE;
+            };
+            generation
         };
-        let runtime = match initialized_mut(&mut guard) {
-            Ok(runtime) => runtime,
-            Err(status) => return status,
-        };
-        if runtime.gpu_index(agent).is_none() {
-            return INVALID_AGENT;
-        }
         let mut first_error = SUCCESS;
         let mut logs = Vec::new();
         for index in 0..descriptor_count as usize {
@@ -1626,7 +2060,7 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
                 // call. SDMA packet production begins only after publication.
                 let status = unsafe {
                     create_sdma_queue(
-                        runtime,
+                        Some(generation),
                         agent,
                         input.queue_size_bytes,
                         selection,
@@ -1638,13 +2072,13 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
                 if status != SUCCESS {
                     fail(status);
                 } else if let Some((id, public, engine)) = created_log {
-                    if let Some(log) = runtime.prepare_log(
+                    if let Some(log) = lock().ok().and_then(|guard| guard.as_ref().and_then(|runtime| runtime.prepare_log(
                         AMD_LOG_FLAG_INFO,
                         format_args!(
                             "created SDMA queue id={id} agent=0x{:x} address=0x{public:x} engine={engine} bytes={}",
                             agent.handle, input.queue_size_bytes
                         ),
-                    ) {
+                    ))) {
                         if logs.try_reserve(1).is_ok() {
                             logs.push(log);
                         }
@@ -1694,7 +2128,7 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
             // SAFETY: The admitted descriptor supplies writable output and retained callback data.
             let status = unsafe {
                 create_hardware_queue(
-                    runtime,
+                    Some(generation),
                     agent,
                     packet_count,
                     compute.queue_type,
@@ -1713,20 +2147,19 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
             if status != SUCCESS {
                 fail(status);
             } else if let Some((id, public)) = created_log {
-                if let Some(log) = runtime.prepare_log(
+                if let Some(log) = lock().ok().and_then(|guard| guard.as_ref().and_then(|runtime| runtime.prepare_log(
                     AMD_LOG_FLAG_INFO,
                     format_args!(
                         "created AQL queue id={id} agent=0x{:x} address=0x{public:x} packets={packet_count}",
                         agent.handle
                     ),
-                ) {
+                ))) {
                     if logs.try_reserve(1).is_ok() {
                         logs.push(log);
                     }
                 }
             }
         }
-        drop(guard);
         for log in logs {
             log.write();
         }
@@ -1734,7 +2167,11 @@ pub unsafe extern "C" fn hsa_amd_queue_create(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_queue_cu_set_mask")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
     queue: *const HsaQueue,
     bit_count: u32,
@@ -1758,7 +2195,12 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
         if bit_count % 32 != 0 || (bit_count != 0 && mask.is_null()) {
             return INVALID_ARGUMENT;
         }
-        let Some(agent) = runtime.queues.get(&hardware_key).map(|record| record.agent) else {
+        let Some(agent) = runtime
+            .queue_state
+            .queues
+            .get(&hardware_key)
+            .map(|record| record.agent)
+        else {
             return INVALID_QUEUE;
         };
         let Some(gpu_index) = runtime.gpu_index(agent) else {
@@ -1775,7 +2217,7 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
                 Err(status) => return status,
             }
         };
-        let Some(record) = runtime.queues.get_mut(&hardware_key) else {
+        let Some(record) = runtime.queue_state.queues.get_mut(&hardware_key) else {
             return INVALID_QUEUE;
         };
         match record.native.set_cu_mask(&selected) {
@@ -1788,7 +2230,11 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_set_mask(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_queue_cu_get_mask")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_queue_cu_get_mask(
     queue: *const HsaQueue,
     bit_count: u32,
@@ -1811,7 +2257,7 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_get_mask(
         if bit_count == 0 || bit_count % 32 != 0 {
             return INVALID_ARGUMENT;
         }
-        let Some(record) = runtime.queues.get(&hardware_key) else {
+        let Some(record) = runtime.queue_state.queues.get(&hardware_key) else {
             return INVALID_QUEUE;
         };
         let Some(gpu_index) = runtime.gpu_index(record.agent) else {
@@ -1834,7 +2280,11 @@ pub unsafe extern "C" fn hsa_amd_queue_cu_get_mask(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_queue_set_priority")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_queue_set_priority(queue: *mut HsaQueue, priority: u32) -> Status {
     boundary(|| {
         let mut guard = match lock() {
@@ -1848,7 +2298,11 @@ pub unsafe extern "C" fn hsa_amd_queue_set_priority(queue: *mut HsaQueue, priori
         if queue.is_null() {
             return INVALID_ARGUMENT;
         }
-        if runtime.sdma_queues.contains_key(&(queue as usize)) {
+        if runtime
+            .queue_state
+            .sdma_queues
+            .contains_key(&(queue as usize))
+        {
             // This entry point applies only to compute queues.
             return INVALID_QUEUE;
         }
@@ -1861,7 +2315,7 @@ pub unsafe extern "C" fn hsa_amd_queue_set_priority(queue: *mut HsaQueue, priori
         let Some(priority) = queue_priority(priority) else {
             return INVALID_ARGUMENT;
         };
-        let Some(record) = runtime.queues.get_mut(&hardware_key) else {
+        let Some(record) = runtime.queue_state.queues.get_mut(&hardware_key) else {
             return INVALID_QUEUE;
         };
         record
@@ -1871,7 +2325,11 @@ pub unsafe extern "C" fn hsa_amd_queue_set_priority(queue: *mut HsaQueue, priori
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_queue_inactivate")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
     boundary(|| {
         if queue.is_null() {
@@ -1885,8 +2343,40 @@ pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
+        if let Some(intercept) = runtime
+            .queue_state
+            .intercept_queues
+            .get(&(queue as usize))
+            .cloned()
+        {
+            if CallbackScope::active() {
+                return INVALID_RUNTIME_STATE;
+            }
+            drop(guard);
+            if let Err(status) = intercept.stop() {
+                return status;
+            }
+            let mut guard = match lock() {
+                Ok(guard) => guard,
+                Err(status) => return status,
+            };
+            let runtime = match initialized_mut(&mut guard) {
+                Ok(runtime) => runtime,
+                Err(status) => return status,
+            };
+            return runtime.queue_state.queues.get_mut(&intercept.lower).map_or(
+                INVALID_QUEUE,
+                |record| {
+                    record.inactivated = true;
+                    record
+                        .native
+                        .inactivate()
+                        .map_or_else(map_error, |()| SUCCESS)
+                },
+            );
+        }
         if let Some(hardware_key) = hardware_queue_key(runtime, queue) {
-            if let Some(record) = runtime.queues.get_mut(&hardware_key) {
+            if let Some(record) = runtime.queue_state.queues.get_mut(&hardware_key) {
                 // A shared cooperative queue must not be returned by a later
                 // create once any holder starts inactivating it.
                 record.inactivated = true;
@@ -1896,13 +2386,13 @@ pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
                     .map_or_else(map_error, |()| SUCCESS);
             }
         }
-        if let Some(record) = runtime.sdma_queues.get_mut(&(queue as usize)) {
+        if let Some(record) = runtime.queue_state.sdma_queues.get_mut(&(queue as usize)) {
             return record
                 .native
                 .inactivate()
                 .map_or_else(map_error, |()| SUCCESS);
         }
-        if let Some(record) = runtime.soft_queues.get_mut(&(queue as usize)) {
+        if let Some(record) = runtime.queue_state.soft_queues.get_mut(&(queue as usize)) {
             record.inactivate();
             return SUCCESS;
         }
@@ -1910,7 +2400,11 @@ pub unsafe extern "C" fn hsa_queue_inactivate(queue: *mut HsaQueue) -> Status {
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_queue_destroy")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
     boundary(|| {
         #[allow(
@@ -1928,6 +2422,24 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
         if CallbackScope::active() {
             return INVALID_RUNTIME_STATE;
         }
+        let intercept = {
+            let guard = match lock() {
+                Ok(guard) => guard,
+                Err(status) => return status,
+            };
+            let runtime = match guard.as_ref() {
+                Some(runtime) => runtime,
+                None => return NOT_INITIALIZED,
+            };
+            runtime
+                .queue_state
+                .intercept_queues
+                .get(&(queue as usize))
+                .cloned()
+        };
+        if let Some(intercept) = intercept {
+            return crate::queue_intercept::destroy(&intercept);
+        }
         let key = queue as usize;
         let (mut record, cooperative_agent) = {
             let mut guard = match lock() {
@@ -1938,7 +2450,10 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                 Ok(runtime) => runtime,
                 Err(status) => return status,
             };
-            let cooperative_agent = if let Some(record) = runtime.queues.get_mut(&key) {
+            let cooperative_agent = if let Some(record) = runtime.queue_state.queues.get_mut(&key) {
+                if record.public_handle != key {
+                    return INVALID_QUEUE;
+                }
                 if record.counted_pool_key.is_some() {
                     return INVALID_QUEUE;
                 }
@@ -1951,18 +2466,25 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                 None
             };
             if let Some(agent) = cooperative_agent {
-                if runtime.cooperative_teardown.try_reserve(1).is_err() {
+                if runtime
+                    .queue_state
+                    .cooperative_teardown
+                    .try_reserve(1)
+                    .is_err()
+                {
                     return OUT_OF_RESOURCES;
                 }
-                runtime.cooperative_teardown.insert(agent);
+                runtime.queue_state.cooperative_teardown.insert(agent);
             }
-            let record = if let Some(record) = runtime.queues.remove(&key) {
+            let record = if let Some(record) = runtime.queue_state.queues.remove(&key) {
                 RemovedQueue::Aql(record)
-            } else if let Some(record) = runtime.sdma_queues.remove(&key) {
+            } else if let Some(record) = runtime.queue_state.sdma_queues.remove(&key) {
                 RemovedQueue::Sdma(record)
             } else {
-                return if let Some(soft) = runtime.soft_queues.remove(&key) {
-                    runtime.release_async_signal(soft.doorbell_signal);
+                return if let Some(soft) = runtime.queue_state.soft_queues.remove(&key) {
+                    runtime
+                        .signal_state
+                        .release_async_signal(soft.doorbell_signal);
                     SUCCESS
                 } else {
                     INVALID_QUEUE
@@ -1983,7 +2505,7 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                 let log = lock().ok().and_then(|mut guard| {
                     guard.as_mut().and_then(|runtime| {
                         if let Some(agent) = cooperative_agent {
-                            runtime.cooperative_teardown.remove(&agent);
+                            runtime.queue_state.cooperative_teardown.remove(&agent);
                         }
                         runtime.prepare_log(
                             AMD_LOG_FLAG_INFO,
@@ -2007,14 +2529,14 @@ pub unsafe extern "C" fn hsa_queue_destroy(queue: *mut HsaQueue) -> Status {
                     return status;
                 };
                 if let Some(agent) = cooperative_agent {
-                    runtime.cooperative_teardown.remove(&agent);
+                    runtime.queue_state.cooperative_teardown.remove(&agent);
                 }
                 match record {
                     RemovedQueue::Aql(record) => {
-                        runtime.queues.insert(key, record);
+                        runtime.queue_state.queues.insert(key, record);
                     }
                     RemovedQueue::Sdma(record) => {
-                        runtime.sdma_queues.insert(key, record);
+                        runtime.queue_state.sdma_queues.insert(key, record);
                     }
                 }
                 status
@@ -2072,7 +2594,11 @@ unsafe fn with_queue_index<R>(
     Some(operation(index))
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_queue_load_read_index_relaxed")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_queue_load_read_index_relaxed(queue: *const HsaQueue) -> u64 {
     // SAFETY: The caller owns a live queue while accessing its index.
     unsafe {
@@ -2083,7 +2609,11 @@ pub unsafe extern "C" fn hsa_queue_load_read_index_relaxed(queue: *const HsaQueu
     .unwrap_or(0)
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_queue_load_read_index_scacquire")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_queue_load_read_index_scacquire(queue: *const HsaQueue) -> u64 {
     // SAFETY: The caller owns a live queue while accessing its index.
     unsafe {
@@ -2094,14 +2624,22 @@ pub unsafe extern "C" fn hsa_queue_load_read_index_scacquire(queue: *const HsaQu
     .unwrap_or(0)
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_queue_load_read_index_acquire")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_queue_load_read_index_acquire(queue: *const HsaQueue) -> u64 {
     // SAFETY: This deprecated entry point has the same contract as the
     // sequentially-consistent acquire spelling.
     unsafe { hsa_queue_load_read_index_scacquire(queue) }
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_queue_load_write_index_relaxed")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_queue_load_write_index_relaxed(queue: *const HsaQueue) -> u64 {
     // SAFETY: The caller owns a live queue while accessing its index.
     unsafe {
@@ -2112,7 +2650,11 @@ pub unsafe extern "C" fn hsa_queue_load_write_index_relaxed(queue: *const HsaQue
     .unwrap_or(0)
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_queue_load_write_index_scacquire")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_queue_load_write_index_scacquire(queue: *const HsaQueue) -> u64 {
     // SAFETY: The caller owns a live queue while accessing its index.
     unsafe {
@@ -2123,7 +2665,11 @@ pub unsafe extern "C" fn hsa_queue_load_write_index_scacquire(queue: *const HsaQ
     .unwrap_or(0)
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_queue_load_write_index_acquire")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_queue_load_write_index_acquire(queue: *const HsaQueue) -> u64 {
     // SAFETY: This deprecated entry point has the same contract as the
     // sequentially-consistent acquire spelling.
@@ -2165,7 +2711,8 @@ unsafe fn queue_add(queue: *const HsaQueue, value: u64, order: Ordering) -> u64 
 
 macro_rules! queue_store_entry {
     ($name:ident, $offset:expr, $order:expr) => {
-        #[unsafe(no_mangle)]
+        #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
+        #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(queue: *const HsaQueue, value: u64) {
             // SAFETY: The public entry point preserves the HSA queue contract.
             unsafe { queue_store(queue, $offset, value, $order) };
@@ -2175,7 +2722,8 @@ macro_rules! queue_store_entry {
 
 macro_rules! queue_compare_exchange_entry {
     ($name:ident, $success:expr, $failure:expr) => {
-        #[unsafe(no_mangle)]
+        #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
+        #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(queue: *const HsaQueue, expected: u64, value: u64) -> u64 {
             // SAFETY: The public entry point preserves the HSA queue contract.
             unsafe { queue_compare_exchange(queue, expected, value, $success, $failure) }
@@ -2185,7 +2733,8 @@ macro_rules! queue_compare_exchange_entry {
 
 macro_rules! queue_add_entry {
     ($name:ident, $order:expr) => {
-        #[unsafe(no_mangle)]
+        #[cfg_attr(all(target_arch = "x86_64", not(test)), unsafe(export_name = concat!("__hsa_impl_", stringify!($name))))]
+        #[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
         pub unsafe extern "C" fn $name(queue: *const HsaQueue, value: u64) -> u64 {
             // SAFETY: The public entry point preserves the HSA queue contract.
             unsafe { queue_add(queue, value, $order) }
@@ -2269,7 +2818,11 @@ queue_store_entry!(
     Ordering::Release
 );
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_profiling_set_profiler_enabled")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_profiling_set_profiler_enabled(
     queue: *mut HsaQueue,
     enable: i32,
@@ -2303,7 +2856,11 @@ pub unsafe extern "C" fn hsa_amd_profiling_set_profiler_enabled(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_queue_get_info")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_queue_get_info(
     queue: *mut HsaQueue,
     attribute: u32,
@@ -2322,10 +2879,14 @@ pub unsafe extern "C" fn hsa_amd_queue_get_info(
             None => return NOT_INITIALIZED,
         };
         let input_key = queue as usize;
-        if runtime.released_counted_queues.contains(&input_key) {
+        if runtime
+            .queue_state
+            .released_counted_queues
+            .contains(&input_key)
+        {
             return INVALID_ARGUMENT;
         }
-        if let Some(record) = runtime.sdma_queues.get(&input_key) {
+        if let Some(record) = runtime.queue_state.sdma_queues.get(&input_key) {
             let info = record.native.info();
             // SAFETY: Each supported attribute writes its public C type.
             unsafe {
@@ -2356,9 +2917,16 @@ pub unsafe extern "C" fn hsa_amd_queue_get_info(
             }
             return SUCCESS;
         }
-        let counted = runtime.counted_queues.get(&input_key);
-        let hardware_key = counted.map_or(input_key, |queue| queue.hardware_queue);
-        let Some(record) = runtime.queues.get(&hardware_key) else {
+        let counted = runtime.queue_state.counted_queues.get(&input_key);
+        let hardware_key = runtime
+            .queue_state
+            .intercept_queues
+            .get(&input_key)
+            .map_or_else(
+                || counted.map_or(input_key, |queue| queue.hardware_queue),
+                |queue| queue.lower,
+            );
+        let Some(record) = runtime.queue_state.queues.get(&hardware_key) else {
             return INVALID_QUEUE;
         };
         // SAFETY: Each match arm writes the public type for the queried attribute.
@@ -2373,6 +2941,7 @@ pub unsafe extern "C" fn hsa_amd_queue_get_info(
                         counted.map_or(record.counted_pool_key, |queue| Some(queue.pool_key));
                     let use_count = if let Some(pool_key) = pool_key {
                         runtime
+                            .queue_state
                             .counted_queue_pools
                             .get(&pool_key)
                             .and_then(|pool| pool.iter().find(|entry| entry.queue == hardware_key))
@@ -2409,7 +2978,11 @@ pub unsafe extern "C" fn hsa_amd_queue_get_info(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_queue_signal_external_semaphore")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_queue_signal_external_semaphore(
     queue: *mut HsaQueue,
     semaphore: HsaAmdExternalSemaphore,
@@ -2436,7 +3009,11 @@ pub unsafe extern "C" fn hsa_amd_queue_signal_external_semaphore(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_queue_wait_external_semaphore")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_queue_wait_external_semaphore(
     queue: *mut HsaQueue,
     semaphore: HsaAmdExternalSemaphore,
@@ -2463,7 +3040,11 @@ pub unsafe extern "C" fn hsa_amd_queue_wait_external_semaphore(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_profiling_get_dispatch_time")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
     agent: HsaAgent,
     signal: HsaSignal,
@@ -2485,7 +3066,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
             let Some(index) = runtime.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
-            if !runtime.owns_signal(signal) {
+            if !runtime.signal_state.owns_signal(signal) {
                 return INVALID_SIGNAL;
             }
             // SAFETY: owns_signal validated the handle while the runtime lock
@@ -2515,7 +3096,11 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_dispatch_time(
     })
 }
 
-#[unsafe(no_mangle)]
+#[cfg_attr(
+    all(target_arch = "x86_64", not(test)),
+    unsafe(export_name = "__hsa_impl_hsa_amd_profiling_get_async_copy_time")
+)]
+#[cfg_attr(any(not(target_arch = "x86_64"), test), unsafe(no_mangle))]
 pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
     signal: HsaSignal,
     time: *mut ProfilingTime,
@@ -2532,7 +3117,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
             if time.is_null() {
                 return INVALID_ARGUMENT;
             }
-            if !runtime.owns_signal(signal) {
+            if !runtime.signal_state.owns_signal(signal) {
                 return INVALID_SIGNAL;
             }
             // SAFETY: owns_signal validated the handle while the registry
@@ -2547,6 +3132,7 @@ pub unsafe extern "C" fn hsa_amd_profiling_get_async_copy_time(
                 return ERROR;
             }
             let Some(profile) = runtime
+                .signal_state
                 .async_signal_refs
                 .get(&(signal.handle as usize))
                 .and_then(|record| record.copy_profile)
@@ -2600,7 +3186,7 @@ mod tests {
         let new_drops = Arc::new(AtomicUsize::new(0));
         let mut current = Some(DropCount(old_drops.clone()));
         let mut uncertain = Vec::new();
-        assert_eq!(
+        assert!(matches!(
             update_scratch_owner(
                 &mut current,
                 &mut uncertain,
@@ -2608,7 +3194,7 @@ mod tests {
                 || Err(ERROR),
             ),
             Err(ERROR)
-        );
+        ));
         assert_eq!(old_drops.load(Ordering::Acquire), 0);
         assert_eq!(new_drops.load(Ordering::Acquire), 0);
         assert_eq!(uncertain.len(), 1);
@@ -2783,7 +3369,7 @@ mod tests {
         }
     }
 
-    #[repr(C, align(128))]
+    #[repr(C, align(256))]
     struct PublicQueueStorage([u8; 256]);
 
     #[test]
@@ -2841,21 +3427,6 @@ mod tests {
             assert_eq!(hsa_queue_add_write_index_relaxed(public, 2), 23);
             assert_eq!((*write).load(Ordering::Relaxed), 25);
             assert_eq!(hsa_queue_load_write_index_relaxed(public), 25);
-        }
-    }
-
-    fn gfx1201() -> GpuInfo {
-        GpuInfo {
-            gfx_major: 12,
-            gfx_minor: 0,
-            gfx_stepping: 1,
-            wavefront_size: 32,
-            compute_unit_count: 64,
-            maximum_wave_count_per_compute_unit: 32,
-            maximum_scratch_wave_count_per_compute_unit: 32,
-            xcc_count: 1,
-            shader_engine_count_per_xcc: 2,
-            ..GpuInfo::default()
         }
     }
 
@@ -2955,52 +3526,6 @@ mod tests {
     }
 
     #[test]
-    fn gfx1201_dynamic_scratch_covers_every_native_wave_slot() {
-        assert_eq!(
-            scratch_plan(gfx1201(), 1024, 32),
-            Ok(ScratchPlan {
-                byte_length: 64 * 1024 * 1024,
-                maximum_private_segment_byte_length: 1024,
-                maximum_wave_count: 2048,
-            })
-        );
-    }
-
-    #[test]
-    fn scratch_plan_aligns_per_lane_size_and_rejects_unqualified_targets() {
-        assert_eq!(
-            scratch_plan(gfx1201(), 1025, 32),
-            Ok(ScratchPlan {
-                byte_length: 1032 * 32 * 2048,
-                maximum_private_segment_byte_length: 1032,
-                maximum_wave_count: 2048,
-            })
-        );
-
-        let mut unsupported = gfx1201();
-        unsupported.gfx_stepping = 0;
-        assert_eq!(scratch_plan(unsupported, 1024, 32), Err(OUT_OF_RESOURCES));
-        assert_eq!(scratch_plan(gfx1201(), 0, 32), Err(OUT_OF_RESOURCES));
-        assert_eq!(
-            scratch_plan(gfx1201(), MAX_PRIVATE_SEGMENT_BYTES + 1, 32),
-            Err(OUT_OF_RESOURCES)
-        );
-        assert_eq!(scratch_plan(gfx1201(), 1024, 16), Err(OUT_OF_RESOURCES));
-    }
-
-    #[test]
-    fn gfx1201_wave64_scratch_covers_twice_the_wave32_storage() {
-        assert_eq!(
-            scratch_plan(gfx1201(), 1024, 64),
-            Ok(ScratchPlan {
-                byte_length: 128 * 1024 * 1024,
-                maximum_private_segment_byte_length: 1024,
-                maximum_wave_count: 2048,
-            })
-        );
-    }
-
-    #[test]
     fn firmware_queue_errors_map_to_public_status_codes() {
         assert_eq!(queue_error_status(2), INCOMPATIBLE_ARGUMENTS);
         assert_eq!(queue_error_status(4), INVALID_ALLOCATION);
@@ -3084,7 +3609,7 @@ mod tests {
                     .unwrap();
             });
             ready_rx.recv().unwrap();
-            let guard = crate::runtime::RUNTIME.lock().unwrap();
+            let guard = crate::runtime::LIFECYCLE.lock().unwrap();
             go_tx.send(()).unwrap();
             let value = done_rx.recv_timeout(Duration::from_millis(200));
             drop(guard);

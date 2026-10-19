@@ -18,3 +18,7 @@ resolves external symbols; and publishes the completed image.
 For gfx1250 code objects, it also plans and writes kernel entry trampolines
 when the object lacks the required prefetch prologue. The caller supplies the
 device addresses and executable backing for those stubs.
+
+`rocloader` uses rocelf to interpret AMD HSA code objects and construct
+device-resident images. `libhsa` retains the HSA C ABI and opaque handle
+registry.
