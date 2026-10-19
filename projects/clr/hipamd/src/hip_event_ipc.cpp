@@ -8,12 +8,7 @@
 
 #include "hip_event.hpp"
 #include <cstring>
-#if !defined(_MSC_VER)
-#include <sys/mman.h>
-#include <unistd.h>
-#else
-#include <io.h>
-#endif
+#include <random>
 
 // ================================================================================================
 namespace hip {
@@ -29,26 +24,26 @@ bool IPCEventEmulated::createIpcEventShmemIfNeeded() {
     return true;
   }
 
-  // Generate unique IPC name
-#if !defined(_MSC_VER)
-  static std::atomic<int> counter{0};
-  ipc_evt_.ipc_name_ = "/hip_" + std::to_string(getpid()) + "_" + std::to_string(counter++);
-  // A leftover can only come from a dead process with the same pid; another user's object
-  // can't be removed here (sticky /dev/shm), and the exclusive create below then fails.
-  shm_unlink(ipc_evt_.ipc_name_.c_str());
-#else
-  char name_template[] = "/hip_XXXXXX";
-  _mktemp_s(name_template, sizeof(name_template));
-  ipc_evt_.ipc_name_ = name_template;
-  ipc_evt_.ipc_name_.replace(0, 5, "/hip_");
-#endif
-
-  // Create memory-mapped file for shared memory; never reuse an existing object
+  // Generate a name unique per event: "/hip_<pid>_<counter>" (at most 27 chars, fits the handle).
+  // The name may already exist: a dead process with the same pid may have left it behind, a
+  // live process in another PID namespace sharing /dev/shm may own it, or on Windows a peer may
+  // still hold the mapping open. Never remove an object this process did not create; on a
+  // collision move on to the next counter value. The counter starts at a random value so
+  // processes that share a pid don't walk the same sequence of names.
+  static std::atomic<uint32_t> counter{std::random_device{}()};
+  constexpr int kMaxCreateAttempts = 16;
   auto** shmem_ptr = reinterpret_cast<void**>(&ipc_evt_.ipc_shmem_);
-  if (!amd::Os::MemoryMapFileTruncated(ipc_evt_.ipc_name_.c_str(),
-                                       const_cast<const void**>(shmem_ptr),
-                                       sizeof(hip::ihipIpcEventShmem_t),
-                                       amd::Os::ShmMode::kCreateNew)) {
+  bool created = false;
+  for (int attempt = 0; attempt < kMaxCreateAttempts && !created; ++attempt) {
+    ipc_evt_.ipc_name_ = "/hip_" + std::to_string(amd::Os::getProcessId()) + "_" +
+        std::to_string(counter++);
+    // Create memory-mapped file for shared memory; never reuse an existing object
+    created = amd::Os::MemoryMapFileTruncated(ipc_evt_.ipc_name_.c_str(),
+                                              const_cast<const void**>(shmem_ptr),
+                                              sizeof(hip::ihipIpcEventShmem_t),
+                                              amd::Os::ShmMode::kCreateNew);
+  }
+  if (!created) {
     ipc_evt_.ipc_name_.clear();  // not ours: the destructor must not unlink it
     return false;
   }
