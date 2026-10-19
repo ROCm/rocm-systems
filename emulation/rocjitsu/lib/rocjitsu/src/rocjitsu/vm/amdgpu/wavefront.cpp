@@ -9,6 +9,8 @@
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 
+#include <algorithm>
+
 namespace rocjitsu {
 namespace amdgpu {
 
@@ -25,6 +27,18 @@ void Wavefront::update_activity_counts(bool was_active, bool was_runnable) {
     return;
   const bool active = !is_halted();
   const bool runnable = active && !debug_paused();
+  if (active != was_active) {
+    if (active) {
+      cu_.active_slot_limit_ = std::max(cu_.active_slot_limit_, wf_id_ + 1);
+    } else if (wf_id_ + 1 == cu_.active_slot_limit_) {
+      while (cu_.active_slot_limit_ != 0) {
+        const auto &last = cu_.wfs_[cu_.active_slot_limit_ - 1];
+        if (last && !last->is_halted())
+          break;
+        --cu_.active_slot_limit_;
+      }
+    }
+  }
   const uint64_t delta = (uint64_t(active) - uint64_t(was_active)) +
                          ((uint64_t(runnable) - uint64_t(was_runnable)) << 32);
   const uint64_t previous = cu_.wave_activity_.fetch_add(delta, std::memory_order_release);
