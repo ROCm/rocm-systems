@@ -149,6 +149,9 @@ __launch_bounds__(1024)
     out[2 * pk] = acc0;
     out[2 * pk + 1] = acc1;
 
+    // After an abort acc0/acc1 are partial sums; publishing them under this
+    // epoch's flag would let a peer that has not aborted accept them as final.
+    if (aborted) continue;
     #pragma unroll
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
