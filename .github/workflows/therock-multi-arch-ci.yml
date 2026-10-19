@@ -12,7 +12,8 @@
 # - Supports prebuilt stages to skip certain build stages
 # - Better parallelization across GPU architectures
 
-# TheRock ref: pinned to ROCm/TheRock release/bkc/therock-10.2-20261013.
+# TheRock ref: pinned to ROCm/TheRock commit 1af9f82e1a2de22642d7ca0ace0630813728cd15
+# (head of release/bkc/therock-10.2-20261013).
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
 
 # =============================================================================
@@ -123,7 +124,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: release/bkc/therock-10.2-20261013
+          ref: 1af9f82e1a2de22642d7ca0ace0630813728cd15 # 2026-10-19
           path: _therock
           # _therock_utils + (cone-mode) root BUILD_TOPOLOGY.toml and
           # build_tools/project_mappings.json are needed to map changed projects
@@ -172,7 +173,7 @@ jobs:
 
   setup:
     needs: configure
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@release/bkc/therock-10.2-20261013
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@1af9f82e1a2de22642d7ca0ace0630813728cd15 # 2026-10-19
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
@@ -198,7 +199,7 @@ jobs:
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
-      ref: release/bkc/therock-10.2-20261013
+      ref: 1af9f82e1a2de22642d7ca0ace0630813728cd15 # 2026-10-19
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
       # NOTE: MI455 machine is down - test-runs-on set to "" until back online (was: linux-mi455-gpu-rocm)
@@ -230,7 +231,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@release/bkc/therock-10.2-20261013
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@1af9f82e1a2de22642d7ca0ace0630813728cd15 # 2026-10-19
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -242,7 +243,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: release/bkc/therock-10.2-20261013
+      ref: 1af9f82e1a2de22642d7ca0ace0630813728cd15 # 2026-10-19
     permissions:
       contents: read
       id-token: write
@@ -255,7 +256,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@release/bkc/therock-10.2-20261013
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@1af9f82e1a2de22642d7ca0ace0630813728cd15 # 2026-10-19
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
@@ -265,7 +266,7 @@ jobs:
       # Empty string when run_all_tests=true triggers full test run in downstream workflow
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: release/bkc/therock-10.2-20261013
+      ref: 1af9f82e1a2de22642d7ca0ace0630813728cd15 # 2026-10-19
     permissions:
       contents: read
       id-token: write
@@ -284,7 +285,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: release/bkc/therock-10.2-20261013
+          ref: 1af9f82e1a2de22642d7ca0ace0630813728cd15 # 2026-10-19
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
