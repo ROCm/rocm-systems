@@ -40,6 +40,15 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   path is now validated against the target's mount namespace before attaching, failing
   cleanly with a diagnostic instead.
 
+### Fixed
+
+- hipFile sampling no longer writes zero-valued Storage samples when there was no
+  measurement. With `ROCPROFSYS_USE_HIPFILE=ON` and `HIPFILE_STATS_LEVEL=0`, the existing
+  warning is followed by disabling hipFile sampling for the run. When the application has
+  not performed hipFile I/O, samples are omitted until a GPU becomes active; a stored zero
+  still means that counter was measured and did not increase. CPU and GPU tracks from the
+  same run are unchanged.
+
 ### Removed
 
 - Legacy direct Perfetto tracing mode. Perfetto traces are now always generated from the
