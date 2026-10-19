@@ -541,8 +541,8 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
 
 // ===========================================================================
 // Which devices replay loads a registration's code object on. HIP loaded it on
-// the device current when the fat binary was registered, and on a host with
-// GPUs of more than one kind it may load on no other. The workload registers
+// the device current when the fat binary was registered; on a host with GPUs
+// of more than one kind it loads only on GPUs of its own kind. The workload registers
 // with device 1 current, then launches the kernel on device 0, which on GPUs of
 // one kind uses the same code object; on GPUs of two kinds it cannot, and both
 // halves skip.

@@ -708,7 +708,9 @@ so kernels and `__device__` globals resolve as they do for module loads. HIP bui
 a loaded code object for one device, so replay keeps a module per code object and
 device, and pre-loads each code object on every device a registration naming it, a
 module load or a kernel launch used it on, the device current on that thread at
-that event; on a host with GPUs of more than one kind it may load on no other. Archives from before this
+that event, and on no other, since on a host with GPUs of more than one kind a code
+object loads only on GPUs of its own kind. Failing to load on one of those devices
+is fatal like any pre-load failure (`--continue-on-error` carries on). Archives from before this
 change still carry a blob, which playback loads with `hipModuleLoadData` on the
 current device, keyed like any other module.
 

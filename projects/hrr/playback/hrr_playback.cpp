@@ -874,8 +874,11 @@ static void used_code_object(const hrr::Event& ev, uint64_t& lo, uint64_t& hi) {
 // naming it, a module load or a kernel launch, each on the device current on
 // its thread, which the hipSetDevice events before it on that thread give,
 // clamped as replaying them clamps it. HIP builds a loaded code object for one
-// device, so the same code object used on two devices needs a module on each,
-// and on a host with GPUs of more than one kind it may load on no other.
+// device, so the same code object used on two devices needs a module on each.
+// Replay loads it on those devices only, because on a host with GPUs of more
+// than one kind a code object loads only on GPUs of the kind it was built for.
+// A failed load on one of them is fatal like any pre-load failure: what capture
+// ran from it on that device cannot replay.
 static std::unordered_map<std::string, std::vector<int>> code_object_devices(
     const hrr::Archive& archive, int device_count) {
   std::unordered_map<std::string, std::vector<int>> devices;
@@ -950,6 +953,8 @@ static bool run_pass(PlaybackContext& ctx,
           if (dev != start_dev && log)
               printf("[HRR] Pre-loading code object %s on device %d, where capture "
                      "used it\n", hex.c_str(), dev);
+          // dev is below hipGetDeviceCount (code_object_devices clamps it), and
+          // hipSetDevice fails only for a device out of that range.
           const bool moved = dev != start_dev && hipSetDevice(dev) == hipSuccess;
           loaded = ctx.load_module(lo, hi) != nullptr;
           if (moved) (void)hipSetDevice(start_dev);
