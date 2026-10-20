@@ -27,6 +27,7 @@ from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
+    SDWA_ROUNDED_F16_OPS,
 )
 import textwrap
 import re
@@ -1028,6 +1029,8 @@ class CodeGenerator:
     def _sdwa_output_policy(sem: InstructionSemantics | None) -> str:
         if sem and sem.name in FLUSH_NEAREST_F32_OPS:
             return ', amdgpu::sdwa::OutputPolicy::FLUSH_NEAREST'
+        if sem and sem.name in SDWA_ROUNDED_F16_OPS:
+            return ', amdgpu::sdwa::OutputPolicy::ROUNDED'
         return ''
 
     @staticmethod
@@ -1061,12 +1064,12 @@ class CodeGenerator:
     def _apply_sdwa_f16_omod(
         body: str, instruction: str, *, transcendental: bool = False
     ) -> str:
-        """Retain the producer's legacy SDWA F16 OMOD ordering.
+        """Keep the producer's current SDWA F16 OMOD ordering.
 
         TRANS producers already return rounded halves; ordinary producers scale
         before narrowing. Arithmetic producers retain their MODE-aware helper.
-        This ordering lacks SDWA hardware validation; VOP3 captures do not
-        establish it. Migrating SDWA requires separate capture evidence.
+        gfx1030 SDWA captures round before OMOD; SDWA_ROUNDED_F16_OPS follow
+        that order and the rest await their own captures.
         """
         helper = 'finish_rounded_f16' if transcendental else 'round_f16_result'
         body = body.replace(

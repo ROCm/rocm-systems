@@ -3396,33 +3396,22 @@ void VFractF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, [&](auto a) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a) {
-          if (wf.fp16_ovfl())
-            return ([](auto a) {
-              auto f = util::f16_to_f32_simd(a);
-              return util::f32_to_f16_ovfl_simd(f - util::floor_simd(f));
-            })(a);
-          return ([](auto a) {
-            auto f = util::f16_to_f32_simd(a);
-            return util::f32_to_f16_simd(f - util::floor_simd(f));
-          })(a);
-        })(std::bit_cast<util::native<uint32_t>>(a)));
+        return std::bit_cast<util::native<uint32_t>>(
+            (amdgpu::fract::Operation<amdgpu::fp_format::F16>{amdgpu::fract::Policy::make(
+                wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64())})(
+                std::bit_cast<util::native<uint32_t>>(a)));
       }))
     return;
   uint64_t exec = wf.exec();
+  const auto fract_policy =
+      amdgpu::fract::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(
-            *this, wf,
-            [&]() {
-              auto v = util::f16_to_f32(
-                  static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-              return v - std::floor(v);
-            }(),
-            wf.fp16_ovfl()));
+        amdgpu::fract::evaluate<amdgpu::fp_format::F16>(
+            amdgpu::RegisterAccess(wf).read_lane(src0, lane), fract_policy));
   }
 }
 
@@ -3445,33 +3434,22 @@ RJ_NOINLINE void VFractF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, [&](auto a) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a) {
-          if (wf.fp16_ovfl())
-            return ([](auto a) {
-              auto f = util::f16_to_f32_simd(a);
-              return util::f32_to_f16_ovfl_simd(f - util::floor_simd(f));
-            })(a);
-          return ([](auto a) {
-            auto f = util::f16_to_f32_simd(a);
-            return util::f32_to_f16_simd(f - util::floor_simd(f));
-          })(a);
-        })(std::bit_cast<util::native<uint32_t>>(a)));
+        return std::bit_cast<util::native<uint32_t>>(
+            (amdgpu::fract::Operation<amdgpu::fp_format::F16>{amdgpu::fract::Policy::make(
+                wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64())})(
+                std::bit_cast<util::native<uint32_t>>(a)));
       }))
     return;
   uint64_t exec = wf.exec();
+  const auto fract_policy =
+      amdgpu::fract::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>(
         *this, wf, vdst, lane,
-        amdgpu::sdwa::round_f16_result(
-            *this, wf,
-            [&]() {
-              auto v = util::f16_to_f32(
-                  static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-              return v - std::floor(v);
-            }(),
-            wf.fp16_ovfl()));
+        amdgpu::fract::evaluate<amdgpu::fp_format::F16>(
+            amdgpu::RegisterAccess(wf).read_lane(src0, lane), fract_policy));
   }
   dpp_write_mask_scope_.restore();
 }
