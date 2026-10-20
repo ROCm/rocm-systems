@@ -39,8 +39,8 @@ modes, and the notice it prints on stderr names the one it runs in:
 
 - **metadata-only**, the default: the rows marked "both" below. No host buffer, no by-value
   kernel argument and no code object is written, and none is hashed either. The
-  `events.bin` header carries `HRR_FILE_FLAG_METADATA_ONLY`, `hrr-playback --info` prints
-  `Contents: withheld`, and replay refuses the first call that needs a withheld item.
+  `events.bin` header carries `HRR_FILE_FLAG_METADATA_ONLY`, `hrr-playback --info` reports
+  the contents as `withheld`, and replay refuses the first call that needs a withheld item.
 - **contents**, with `HIP_HRR_CAPTURE_CONTENT=1` as well: every row below. This is what
   replay needs.
 
@@ -55,13 +55,14 @@ The "Mode" column states which mode records each item.
 | Event timestamps, from a monotonic clock (not the date or time of day) | `events.bin` | both | — kept |
 | Device properties passed to `hipChooseDevice`, the whole `hipDeviceProp_t`: device and architecture names, PCI ids and, in the current layout, the UUID and LUID | `events.bin` | both | — kept, the call's answer depends on them |
 | Scalar values passed to a HIP call: memset fill values, memset graph nodes included; the values `hipStreamWriteValue32/64`, `hipStreamWaitValue32/64` and `hipStreamBatchMemOp` write or wait for; attribute and limit values such as those given to `hipMemPoolSetAttribute`. Each is at most 8 bytes, given to the call rather than read from a buffer | `events.bin` | both | — kept, as sizes and flags are; replay needs them |
+| Strings passed to a HIP call, up to 255 characters each: the `hipLinkAddFile` path, the `hipLinkAddData` input name, the `hipGetProcAddress` symbol and the names of `__device__` variables | `events.bin` | both | — kept, replay needs them |
 | Other structures passed into a HIP call, copied whole, such as copy, memset, graph node, allocation, pool and launch-attribute parameters. Padding, reserved and unused union bytes are copied as the caller left them | `events.bin` | both | — kept, replay needs it |
 | Host buffers copied to or from the device, byte for byte, unencrypted. For a serving stack this includes prompts and generated output as token ids, which the model's public tokeniser reverses, and the model weights | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Host memory registered with `hipHostRegister`: the whole range, byte for byte, as it was at registration, whether or not it is ever copied | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Pinned host memory a kernel reads: at each launch whose arguments point into memory from `hipHostMalloc`, `hipMallocHost` or `hipHostRegister`, the whole allocation, byte for byte, as it was before the launch, whether or not the kernel reads all of it, again each time its contents changed. Allocations over `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64 MiB unless set) are skipped, and `HIP_HRR_HOST_SNAPSHOTS=0` turns this off | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | By-value kernel argument bytes, a struct whole with any device pointers inside it, and the values pushed with `hipSetupArgument`. Whole-argument pointers are addresses and are kept in both modes | `events.bin` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880): size and zeros in metadata-only mode |
 | Code objects the process loaded (the application's own GPU binary code) | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
-| Linker input buffers passed to `hipLinkAddData`, every byte, with their names, including inputs the call rejected and inputs never linked or loaded | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
+| Linker input buffers passed to `hipLinkAddData`, every byte, including inputs the call rejected and inputs never linked or loaded | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Whole fat binary bundles, including targets HIP never loads | `blobs/` | contents | [AIRUNTIME-2858](https://amd-hub.atlassian.net/browse/AIRUNTIME-2858): only the code objects HIP loads |
 | Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): stripped |
 | Framework allocator layout, when a region producer ran beside capture | `regions/` | both | — kept, written only by an opt-in producer |

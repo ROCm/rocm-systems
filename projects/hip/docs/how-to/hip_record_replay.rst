@@ -81,7 +81,7 @@ host buffer, no by-value kernel argument (a struct argument is withheld whole,
 device pointers inside it included) and no code object. Scalar values passed to
 a HIP call are kept in both modes, such as a memset fill value or the value
 ``hipStreamWriteValue32`` writes. ``--info`` reads such an archive as usual and
-prints ``Contents: withheld``; a replay stops at the first call that needs the
+reports its contents as ``withheld``; a replay stops at the first call that needs the
 missing contents and says that content mode would have recorded them.
 
 The archive is a directory, not a single file, and it holds one ``pid-<pid>/``
@@ -106,7 +106,10 @@ workload moved, so a short run of a big model produces gigabytes.
 
   A content-mode archive holds the recorded buffers verbatim, so anything the
   workload had in host memory is readable in it. Treat an archive as you would treat the input
-  data of the run it came from.
+  data of the run it came from. A metadata-only archive is not safe to share either: it
+  still names every kernel the run launched, and records the strings passed to HIP calls,
+  such as a linked file's path or a symbol looked up by name, and the device properties
+  passed to ``hipChooseDevice``.
 
 Your first replay
 =======================================================

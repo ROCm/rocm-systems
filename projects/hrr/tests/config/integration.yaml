@@ -235,6 +235,7 @@ cases:
   Unit_HRR_PinnedHostFreed_Direct: {}
   Unit_HRR_PinnedHostLarge_Direct: {}
   Unit_HRR_PinnedHostMalloc_Direct: {}
+  Unit_HRR_PinnedHostMetadataOnlyNoSnapshot: {}
   Unit_HRR_PinnedHostModule_Direct: {}
   Unit_HRR_PinnedHostRegister_Direct: {}
   Unit_HRR_PinnedHostRoundtrip: {}

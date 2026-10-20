@@ -306,6 +306,10 @@ struct PinnedSnapshot {
   PinnedSnapshot(hipFunction_t f, void** params, void** extra,
                  const void* kbuf = nullptr, size_t ksz = 0) {
     t_snaps.clear();
+    // Metadata-only: write_blob would withhold the copy, so none is taken, and
+    // no allocation over the cap is noted as unreplayable. By-value arguments
+    // are recorded as zeros, so no struct word is flagged as a pinned pointer.
+    if (!hrr_capture_content()) return;
     if (!f || !hrr_host_snapshots_enabled() || g_pinned_count.load(std::memory_order_relaxed) == 0)
       return;
     if (!params && !kbuf && extra) parse_kernel_extra(extra, kbuf, ksz);
@@ -3041,9 +3045,11 @@ void hip_capture_init() {
     // whatever the log level, since the traces carry argument bytes. This runs
     // only once the writer is open, so a refused open claims nothing.
     if (hrr_dbg_args_enabled()) {
+      // Metadata-only capture nulls by-value bytes before the dump reads them.
       fprintf(stderr,
-              "[HRR capture] HIP_HRR_DEBUG_ARGS is set: kernel argument bytes and "
-              "host-to-device copy destinations are also written to the log\n");
+              "[HRR capture] HIP_HRR_DEBUG_ARGS is set: kernel %s and host-to-device "
+              "copy destinations are also written to the log\n",
+              hrr_capture_content() ? "argument bytes" : "pointer argument values");
       if (AMD_LOG_LEVEL < amd::LOG_INFO) AMD_LOG_LEVEL = amd::LOG_INFO;
     }
 #if !defined(DEBUG)

@@ -544,8 +544,9 @@ expected-output blobs.
 `hipHostRegister` registers existing host (CPU) memory as pinned for faster GPU transfers
 or direct GPU access via the mapped flag. At capture time:
 
-- `capture_hipHostRegister` calls the real function, then snapshots the host buffer as a
-  content-addressed blob. The blob hash is stored in `hrr_args_hipHostRegister.blob_hash_lo/hi`.
+- `capture_hipHostRegister` calls the real function, then, in content mode, snapshots the
+  host buffer as a content-addressed blob. The blob hash is stored in
+  `hrr_args_hipHostRegister.blob_hash_lo/hi`; metadata-only capture stores the withheld hash.
 - A process-global `g_pinned_reg_map` (`mutex` + `unordered_map<void*, size_t>`) records
   `(hostPtr → sizeBytes)`. This is needed because `hipHostUnregister` receives only the
   pointer with no size.
@@ -567,7 +568,8 @@ call records; replay would run it on whatever its fresh buffer holds. Capture tr
 ranges of `hipHostMalloc`, `hipMallocHost` and `hipHostRegister` (dropped on `hipHostFree`, `hipFreeHost`,
 `hipFree` and `hipHostUnregister`). Before each launch it reads the 8-byte-aligned words of
 the arguments, by-value structs included; for each tracked allocation a word points into,
-it copies the whole allocation under the tracking lock, writes the copy as a blob and adds a
+it copies the whole allocation under the tracking lock (in content mode only; metadata-only
+capture takes no snapshot), writes the copy as a blob and adds a
 record (base, offset 0, length, blob hash, direction 0) to the launch event, unless the hash
 and the launch stream equal those of the allocation's last record. Struct words pointing into such an allocation
 are flagged for translation like
@@ -604,8 +606,8 @@ Kept deliberately simple:
 - A restore is ordered on the launch stream only; work on other streams reading the buffer
   is not waited for, which is why a launch on another stream records again.
 
-**Threat model.** The snapshots put into the archive host memory the application never
-handed to a HIP call: for a serving stack, token IDs, sampling state and request metadata,
+**Threat model.** In content mode the snapshots put into the archive host memory the
+application never handed to a HIP call: for a serving stack, token IDs, sampling state and request metadata,
 including stale bytes from earlier requests in a reused buffer. The archive must be
 handled as at least as sensitive as the workload's data. Replay treats every record as
 untrusted input and writes only inside a pinned host allocation it made itself, never
