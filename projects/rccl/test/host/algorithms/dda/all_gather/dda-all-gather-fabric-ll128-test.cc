@@ -87,9 +87,10 @@ TEST_F(DdaAllGatherFabricLL128Microtest, Eligible_BaselineFp32) {
   EXPECT_TRUE(Eligible(4));
 }
 
-TEST_F(DdaAllGatherFabricLL128Microtest, Eligible_DdaLLZeroRejects) {
+// LL128 is gated by RCCL_DDA_LL128 alone; RCCL_DDA_LL only controls the LL tier.
+TEST_F(DdaAllGatherFabricLL128Microtest, Eligible_DdaLLZeroDoesNotGateLL128) {
   params_["RCCL_DDA_LL"] = 0;
-  EXPECT_FALSE(Eligible(4));
+  EXPECT_TRUE(Eligible(4));
 }
 
 TEST_F(DdaAllGatherFabricLL128Microtest, Eligible_NeedsCommAndBootstrap) {
