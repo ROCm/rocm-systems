@@ -27,6 +27,15 @@ SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+# Arch chain of write_metric_library_family().
+METRIC_LIBRARY_FAMILY_PARENTS = {
+    "gfx_base": None,
+    "gfx_c1": "gfx_base",
+    "gfx_c2": "gfx_c1",
+    "gfx_c3": "gfx_c2",
+    "gfx_c4": "gfx_c3",
+}
+
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
     "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
@@ -258,3 +267,68 @@ def normalize_kernel_name(name: str) -> str:
 def normalize_kernel_names(names: Set[str]) -> Set[str]:
     """Return the normalized form of each name in ``names``."""
     return {normalize_kernel_name(name) for name in names}
+
+
+def write_text_file(path: Path, text: str) -> Path:
+    """Write a text file, creating its directory, and return its path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def write_metric_library_family(root: Path) -> dict[str, Path]:
+    """Write a synthetic family: a base and a four-deep chain of compute.yaml files.
+
+    gfx_base defines three metrics; each child changes one thing: gfx_c1 a unit, gfx_c2
+    adds a metric, gfx_c3 removes one, gfx_c4 changes a formula and removes a field.
+
+    Returns:
+        Each arch's file, keyed by arch.
+    """
+    yaml_by_arch = {
+        "gfx_base": """\
+compute.ipc:
+  name: IPC
+  formula: SUM(SQ_INSTS_VALU) / SUM(SQ_BUSY_CYCLES)
+  unit: Instructions per Cycle
+  description: ""
+compute.salu_util:
+  name: SALU Utilization
+  formula: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: How busy the SALU was.
+compute.valu_util:
+  name: VALU Utilization
+  formula: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: How busy the VALU was.
+  peak: 100
+""",
+        "gfx_c1": """\
+inherit: ../gfx_base/compute.yaml
+compute.salu_util:
+  unit: Pct
+""",
+        "gfx_c2": """\
+inherit: ../gfx_c1/compute.yaml
+compute.mfma_flops_f8:
+  name: MFMA FLOPs (F8)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F8) / SUM($denom)
+  unit: FLOP
+  description: F8 MFMA operations per normUnit.
+""",
+        "gfx_c3": """\
+inherit: ../gfx_c2/compute.yaml
+compute.ipc: !remove
+""",
+        "gfx_c4": """\
+inherit: ../gfx_c3/compute.yaml
+compute.valu_util:
+  formula: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * 2)
+  peak: !remove
+""",
+    }
+    return {
+        arch: write_text_file(root / arch / "compute.yaml", text)
+        for arch, text in yaml_by_arch.items()
+    }
