@@ -52,6 +52,7 @@ from amdisa.fieldless_policy import (
 )
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
+    F32_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
     INTEGER_RESULT_OPERATIONS,
     InstructionSemantics,
@@ -6646,8 +6647,8 @@ class CodeGenerator:
                     'f64_i32',
                     'f64_u32',
                 )
-                is_f32_to_integer = (
-                    cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
+                is_f32_input_conversion = (
+                    cls == 'vector_unary' and dtype in F32_INPUT_CONVERSION_DTYPES
                 )
                 is_f16_input_conversion = (
                     cls == 'vector_unary' and dtype in F16_INPUT_CONVERSION_DTYPES
@@ -6657,7 +6658,7 @@ class CodeGenerator:
                     and (
                         is_float_op
                         or is_integer_to_float
-                        or is_f32_to_integer
+                        or is_f32_input_conversion
                         or is_f16_input_conversion
                     )
                     and not is_true16_mov
@@ -6670,7 +6671,8 @@ class CodeGenerator:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
                     integer_result = (
-                        is_f32_to_integer or op in INTEGER_RESULT_OPERATIONS
+                        dtype in F32_TO_INTEGER_DTYPES
+                        or op in INTEGER_RESULT_OPERATIONS
                     )
                     if 'clamp' in inst_fields and not integer_result:
                         ef.add('clamp')

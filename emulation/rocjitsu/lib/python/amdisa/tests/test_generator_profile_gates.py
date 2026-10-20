@@ -3536,6 +3536,22 @@ def test_generated_classified_alu_latches_trapsts_before_simd_return(
     assert body.count('wf.set_trapsts(wf.trapsts() | alu_causes);') == 1
 
 
+def test_generated_f32_to_f64_conversion_applies_vop3_modifiers(
+    execute_shared_path: Path,
+):
+    execute_shared = execute_shared_path.read_text()
+    body = _shared_execute_body(
+        execute_shared, 'v_cvt_f64_f32_vop3', 'v_cvt_f64_i32_vop1'
+    )
+
+    assert (
+        '!inst.inst_.abs && !inst.inst_.neg && !inst.inst_.omod && '
+        '!inst.inst_.clamp' in body
+    )
+    assert 'amdgpu::source_modifier::apply_to_float' in body
+    assert 'amdgpu::output_modifier::apply<amdgpu::fp_format::F64>' in body
+
+
 def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     execute_shared_path: Path,
     gfx1250_generated_root: Path,

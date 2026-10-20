@@ -3,11 +3,11 @@
 
 /// @file vop3_cvt_f64_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3 form
-/// of the six mixed-width f64<->32-bit conversions on CDNA4. Their scalar
-/// generated bodies drop the abs/neg/omod/clamp modifier reads (verified
-/// per-op), so the VOP3 form is bit-identical to the VOP1 form and reuses the
-/// existing try_execute_cvt_{f64_to_b32, b32_to_f64}_simd glue via a `_vop3 ->
-/// _vop1` fallback in simd_probe_line. The process runs one fixed execute mode
+/// of the six mixed-width f64<->32-bit conversions on CDNA4. Unmodified VOP3
+/// encodings are bit-identical to their VOP1 forms and reuse the existing
+/// try_execute_cvt_{f64_to_b32, b32_to_f64}_simd glue via a `_vop3 -> _vop1`
+/// fallback in simd_probe_line. V_CVT_F64_F32 takes this shortcut only when its
+/// source and destination modifiers are inactive. The process runs one fixed execute mode
 /// (RJ_FORCE_SCALAR, immutable); each case runs TWICE in the same process -- once
 /// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC
 /// -- and the destination word pairs are asserted equal with EXPECT_EQ
