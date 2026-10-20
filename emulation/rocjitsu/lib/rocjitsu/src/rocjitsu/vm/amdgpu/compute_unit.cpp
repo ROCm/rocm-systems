@@ -1657,13 +1657,16 @@ void AsyncInstructionWindow::materialize() {
 void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
                                               uint32_t wave_size, bool has_accvgprs) {
   // CDNA4 MFMA and the default gfx1250 allowlist have cheap encoding filters.
-  // On a cache hit,
-  // non-candidates use the ordinary issue body, including its fetchability and
+  // For retained dispatch bindings and legacy memory, resident non-candidates
+  // use the ordinary issue body, including its fetchability and
   // debugger checks. A cache miss uses full decoding below.
   // This hint never executes a cached word or bypasses instruction validation.
   if (async_mma_policy::supported(arch())) {
     uint32_t word;
-    if (inst_cache_.peek_word(active->pc, active->process_id(), word)) {
+    const GpuVmAccess *vm_access = active->vm_access();
+    const bool resident = vm_access ? inst_cache_.peek_word(*vm_access, active->pc, word)
+                                    : inst_cache_.peek_word(active->pc, active->process_id(), word);
+    if (resident) {
       if (!async_mma_policy::encoding_may_be_candidate(arch(), word)) {
         issue_instruction(active);
         if (active->is_halted())
