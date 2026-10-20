@@ -1331,8 +1331,10 @@ void SDMAQueue::SdmaThread(SDMAQueue* queue) {
         // HACK: We use WAIT_STATE_ACTIVE because SDMA occasionally misses
         // interrupts. Reason is still unknown.
         hsa_signal_value_t value = hsakmt_hsa_signal_wait_relaxed(
-            hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
-        assert(value == poll_val);
+            hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, kMaxWaitTimeoutTicks, HSA_WAIT_STATE_ACTIVE);
+        if (value != poll_val) {
+          pr_err("poll signal %llu != %llu, stalled for more than %llu ticks?\n", value, poll_val, kMaxWaitTimeoutTicks);
+        }
 
         memset(poll_pkt, 0, skip * sizeof(*poll_pkt));
         poll_pkt += skip;

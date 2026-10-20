@@ -367,6 +367,8 @@ public:
   GpuMemory* GetAmdQueueMemory(void) const { return amd_queue_memory_; }
 
 private:
+  static constexpr uint64_t kMaxWaitTimeoutTicks = 5000000000ULL;
+
   GpuMemory* amd_queue_memory_ = nullptr;
   bool native_sdma_ = false;
 
@@ -456,4 +458,3 @@ private:
 
 } // namespace thunk
 } // namespace wsl
-
