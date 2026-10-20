@@ -6,8 +6,7 @@
 #
 
 # Include common build rules
-include ../../../../../makefiles/common.mk
-include ../../../../../makefiles/examples.mk
+include ../../../makefiles/rccl_examples.mk
 
 # Target executable
 TARGET = rmsnorm_multimem
@@ -20,18 +19,20 @@ RMSNORM_INC = ../../include
 # Build configuration
 INCLUDES += -I$(COMMON_INC) -I$(RMSNORM_INC)
 
-# Source files
+# Source files (.cu is hipified into $(HIPIFY_DIR) at build time)
 SOURCES = main.cu utils.cc
 # utils.cc is a shared helper in common/src, compiled per-example into a local
 # utils.o so parallel example builds do not race on one shared object.
 # vpath NAME DIR tells make to search DIR for the prerequisite NAME, so the
 # %.o: %.cc rule below finds utils.cc in $(COMMON_SRC) and builds a local utils.o.
 vpath utils.cc $(COMMON_SRC)
-OBJECTS = $(SOURCES:.cu=.o)
-OBJECTS := $(OBJECTS:.cc=.o)
+OBJECTS = $(patsubst %.cu,$(HIPIFY_DIR)/%.cu.o,$(filter %.cu,$(SOURCES))) \
+          $(patsubst %.cc,%.o,$(filter %.cc,$(SOURCES)))
 
-# Header dependencies (rmsnorm_utils.cuh needed for main.cu)
-CU_HEADERS = $(RMSNORM_INC)/rmsnorm_utils.cuh
+# Header dependencies (rmsnorm_utils.cuh needed for main.cu). It includes
+# <cuda_runtime.h>, so main.cu compiles against its hipified copy.
+vpath rmsnorm_utils.cuh $(RMSNORM_INC)
+CU_HEADERS = $(HIPIFY_DIR)/rmsnorm_utils.cuh
 
 # Default target
 all: $(TARGET)
@@ -45,9 +46,8 @@ else
 endif
 	@echo "Built target $@"
 
-# Compile CUDA files with rmsnorm header dependency
-%.o: %.cu $(CU_HEADERS)
-	$(NVCC) $(NVCUFLAGS) $(INCLUDES) -c $< -o $@
+# Compile the hipified main.cu against the hipified rmsnorm header
+$(HIPIFY_DIR)/main.cu.o: $(CU_HEADERS)
 
 # Compile C++ files
 %.o: %.cc
@@ -70,7 +70,7 @@ endif
 
 # Clean build artifacts
 clean:
-	rm -f $(OBJECTS) $(TARGET)
+	rm -rf $(OBJECTS) $(TARGET) $(HIPIFY_DIR)
 
 # Install target
 install: $(TARGET)
