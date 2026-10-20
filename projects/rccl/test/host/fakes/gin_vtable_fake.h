@@ -72,6 +72,8 @@ struct FakeGinVtable {
   uintptr_t nextCollComm = 0x5000;
   int listenToken = 0;
   int regToken = 0;
+  int ginCtxToken = 0;
+  ncclNetDeviceHandle_t ginDevHandle{};
 
   static FakeGinVtable*& currentPtr() {
     static FakeGinVtable* p = nullptr;
@@ -128,10 +130,18 @@ struct FakeGinVtable {
     return ncclSuccess;
   }
 
-  static ncclResult_t CreateContext(void* /*collComm*/, ncclGinConfig_t* /*config*/, void** /*ginCtx*/,
-                                    ncclNetDeviceHandle_t** /*devHandle*/) {
-    ++current().createContextCalls;
-    return current().createContextResult;
+  // On success write both out-params the way the in-tree GIN fakes do; gin_host
+  // rejects a null ginCtx or a null / empty-handle devHandle.
+  static ncclResult_t CreateContext(void* /*collComm*/, ncclGinConfig_t* /*config*/, void** ginCtx,
+                                    ncclNetDeviceHandle_t** devHandle) {
+    FakeGinVtable& self = current();
+    ++self.createContextCalls;
+    if (self.createContextResult != ncclSuccess) return self.createContextResult;
+    self.ginDevHandle.handle = &self.ginCtxToken;
+    self.ginDevHandle.needsProxyProgress = 0;
+    if (ginCtx) *ginCtx = &self.ginCtxToken;
+    if (devHandle) *devHandle = &self.ginDevHandle;
+    return ncclSuccess;
   }
 
   static ncclResult_t RegMrSym(void* /*collComm*/, void* /*data*/, size_t /*size*/, int /*type*/,
