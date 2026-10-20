@@ -66,6 +66,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdcd` no longer crashes listing more than 128 (`RDC_MAX_NUM_DEVICES`) GPUs and GPU partitions; `rdc_device_get_all()` lists the first 128.
 
+- `field_id_string()` returns `INVALID` for a field ID that RDC does not know, for example one that a newer `rdcd` reports. It read past the end of RDC's field table, which could crash the program.
+
+- Log lines that several threads write at the same time no longer run into each other.
+
+- `rdc_group_gpu_create()` with `RDC_GROUP_DEFAULT` fails, and creates no group, when it cannot add one of the GPUs. It returned success with that GPU missing, or failed and left the group behind.
+
+- A path that `get_rocm_path()` returned no longer changes when the function is called again, and the function is safe to call from several threads.
+
 ## RDC 1.3.1 for ROCm 7.14.0
 
 ### Added

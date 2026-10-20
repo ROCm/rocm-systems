@@ -24,6 +24,9 @@ THE SOFTWARE.
 
 #include <fstream>
 #include <map>
+#include <mutex>
+#include <set>
+#include <string>
 
 #include "common/rdc_fields_supported.h"
 #include "rdc/rdc.h"
@@ -459,7 +462,11 @@ rdc_status_t rdc_config_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_i
 
 const char* field_id_string(rdc_field_t field_id) {
   amd::rdc::fld_id2name_map_t& field_id_to_descript = amd::rdc::get_field_id_description_from_id();
-  return field_id_to_descript.find(field_id)->second.label.c_str();
+  auto found = field_id_to_descript.find(field_id);
+  if (found == field_id_to_descript.end()) {
+    return "INVALID";  // the label of RDC_FI_INVALID
+  }
+  return found->second.label.c_str();
 }
 
 rdc_field_t get_field_id_from_name(const char* name) {
@@ -590,19 +597,31 @@ rdc_status_t rdc_instance_profile_get(rdc_handle_t p_rdc_handle, uint32_t entity
       ->rdc_instance_profile_get(entity_index, resource_type, profile);
 }
 
+// Keeps every path that get_rocm_path() returns, so that each returned pointer keeps its
+// value whatever later calls, from any thread, return.
+static const char* intern_rocm_path(const std::string& path) {
+  static std::mutex mutex;
+  static std::set<std::string> paths;
+  std::lock_guard<std::mutex> lock(mutex);
+  return paths.insert(path).first->c_str();
+}
+
 const char* get_rocm_path(const char* search_string) {
   // set default rocm path in case lookup fails
-  static std::string rocm_path("/opt/rocm");
+  std::string rocm_path("/opt/rocm");
   const char* rocm_path_env = getenv("ROCM_PATH");
   if (rocm_path_env != nullptr) {
     rocm_path = rocm_path_env;
+  }
+  if (search_string == nullptr || search_string[0] == '\0') {
+    return intern_rocm_path(rocm_path);
   }
 
   std::ifstream file("/proc/self/maps");
 
   if (!file.is_open()) {
     RDC_LOG(RDC_DEBUG, "CANT OPEN FILE");
-    return rocm_path.c_str();
+    return intern_rocm_path(rocm_path);
   }
 
   std::string line;
@@ -622,8 +641,8 @@ const char* get_rocm_path(const char* search_string) {
     // appending "../" should result in "/opt/rocm/lib/.." or similar
     rocm_path += "..";
     RDC_LOG(RDC_DEBUG, "FOUND SOMETHING!");
-    return rocm_path.c_str();
+    return intern_rocm_path(rocm_path);
   }
 
-  return rocm_path.c_str();
+  return intern_rocm_path(rocm_path);
 }

@@ -1246,6 +1246,8 @@ rdc_status_t rdc_device_get_component_version(rdc_handle_t p_rdc_handle, rdc_com
  *  group API calls.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval For RDC_GROUP_DEFAULT, the first error from listing the GPUs or adding one
+ *  of them to the group. No group is created then.
  */
 rdc_status_t rdc_group_gpu_create(rdc_handle_t p_rdc_handle, rdc_group_type_t type,
                                   const char* group_name, rdc_gpu_group_t* p_rdc_group_id);
@@ -1567,7 +1569,8 @@ const char* rdc_status_string(rdc_status_t status);
 /**
  *  @brief Get the name of a field
  *
- *  @details return the string in human readable format.
+ *  @details return the string in human readable format. A field ID that RDC does not
+ *  know, for example one from a newer RDC, gets "INVALID", the name of RDC_FI_INVALID.
  *
  *  @param[in] field_id The field id.
  *
@@ -1853,6 +1856,19 @@ rdc_status_t rdc_config_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
  */
 rdc_status_t rdc_config_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
 
+/**
+ *  @brief Get the ROCm directory
+ *
+ *  @details Returns the parent of the directory of the first file mapped into this
+ *  process whose path contains search_string, for example "/opt/rocm/lib/.." for
+ *  "librdc.so". Without such a file, or for a NULL or empty search_string, returns the
+ *  ROCM_PATH environment variable, or "/opt/rocm" if it is not set. Safe to call from
+ *  several threads.
+ *
+ *  @param[in] search_string The name of a library to look for, such as "librdc.so".
+ *
+ *  @retval The path. It keeps its value until the process exits.
+ */
 const char* get_rocm_path(const char* search_string);
 
 /**

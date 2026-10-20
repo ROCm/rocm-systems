@@ -29,6 +29,7 @@ THE SOFTWARE.
 
 #include <list>
 #include <memory>
+#include <set>
 #include <vector>
 
 #include "rdc/rdc.h"
@@ -139,6 +140,119 @@ TEST(RdcTelemetryModuleTest, ReportsUnsupportedFieldsOnlyWhenThereAreSome) {
   EXPECT_EQ(reports[0].values[0].gpu_index, 3u);
   EXPECT_EQ(reports[0].values[0].field_value.field_id, RDC_FI_MEM_CLOCK);
   EXPECT_EQ(reports[0].values[0].field_value.status, RDC_ST_NOT_SUPPORTED);
+}
+
+// A library that supports `count` field IDs from `first` on and returns `status` from watch,
+// unwatch and value_get, counting those calls.
+class ScriptedLibrary : public RdcTelemetry {
+ public:
+  ScriptedLibrary(uint32_t first, uint32_t count, rdc_status_t status)
+      : first_(first), count_(count), status_(status) {}
+
+  rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS],
+                                          uint32_t* field_count) override {
+    for (uint32_t i = 0; i < count_; i++) {
+      field_ids[i] = first_ + i;
+    }
+    *field_count = count_;
+    return RDC_ST_OK;
+  }
+
+  rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t*, uint32_t, rdc_field_value_f,
+                                              void*) override {
+    value_gets++;
+    return status_;
+  }
+
+  rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t*, uint32_t) override {
+    watches++;
+    return status_;
+  }
+
+  rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t*, uint32_t) override {
+    unwatches++;
+    return status_;
+  }
+
+  int value_gets = 0;
+  int watches = 0;
+  int unwatches = 0;
+
+ private:
+  const uint32_t first_;
+  const uint32_t count_;
+  const rdc_status_t status_;
+};
+
+// Two libraries of 5,000 fields each: more than the MAX_NUM_FIELDS (8,192) that the caller's
+// array holds. This array has room for twice that, so an overrun lands in its guard words
+// instead of the heap.
+TEST(RdcTelemetryModuleTest, QueriesAtMostMaxNumFields) {
+  auto first = std::make_shared<ScriptedLibrary>(1, 5000, RDC_ST_OK);
+  auto second = std::make_shared<ScriptedLibrary>(6000, 5000, RDC_ST_OK);
+  RdcTelemetryModule module(std::list<RdcTelemetryPtr>{first, second});
+  constexpr uint32_t kGuard = 0xA5A5A5A5;
+  std::vector<uint32_t> field_ids(2 * MAX_NUM_FIELDS, kGuard);
+  uint32_t count = 0;
+  EXPECT_EQ(module.rdc_telemetry_fields_query(field_ids.data(), &count), RDC_ST_MAX_LIMIT);
+  EXPECT_EQ(count, static_cast<uint32_t>(MAX_NUM_FIELDS));
+  for (size_t i = MAX_NUM_FIELDS; i < field_ids.size(); i++) {
+    ASSERT_EQ(field_ids[i], kGuard) << "a field ID was written at index " << i;
+  }
+}
+
+TEST(RdcTelemetryModuleTest, QueriesEveryLibrarysFields) {
+  auto first = std::make_shared<ScriptedLibrary>(4000, 3, RDC_ST_OK);
+  auto second = std::make_shared<ScriptedLibrary>(5000, 2, RDC_ST_OK);
+  RdcTelemetryModule module(std::list<RdcTelemetryPtr>{first, second});
+  std::vector<uint32_t> field_ids(MAX_NUM_FIELDS);
+  uint32_t count = 0;
+  ASSERT_EQ(module.rdc_telemetry_fields_query(field_ids.data(), &count), RDC_ST_OK);
+  ASSERT_LE(count, static_cast<uint32_t>(MAX_NUM_FIELDS));
+  std::vector<uint32_t> got(field_ids.begin(), field_ids.begin() + count);
+  EXPECT_EQ(got, (std::vector<uint32_t>{4000, 4001, 4002, 5000, 5001}));
+}
+
+// A library's failure comes back to the caller, and the other library still gets each call.
+TEST(RdcTelemetryModuleTest, ReturnsALibrarysFailure) {
+  auto failing = std::make_shared<ScriptedLibrary>(4000, 1, RDC_ST_NOT_SUPPORTED);
+  auto working = std::make_shared<ScriptedLibrary>(5000, 1, RDC_ST_OK);
+  RdcTelemetryModule module(std::list<RdcTelemetryPtr>{failing, working});
+  std::vector<rdc_gpu_field_t> fields = {{0, static_cast<rdc_field_t>(4000)},
+                                         {0, static_cast<rdc_field_t>(5000)}};
+  std::vector<Report> reports;
+
+  EXPECT_EQ(module.rdc_telemetry_fields_watch(fields.data(), fields.size()), RDC_ST_NOT_SUPPORTED);
+  EXPECT_EQ(module.rdc_telemetry_fields_unwatch(fields.data(), fields.size()),
+            RDC_ST_NOT_SUPPORTED);
+  EXPECT_EQ(module.rdc_telemetry_fields_value_get(fields.data(), fields.size(), record, &reports),
+            RDC_ST_NOT_SUPPORTED);
+  EXPECT_EQ(failing->watches, 1);
+  EXPECT_EQ(working->watches, 1);
+  EXPECT_EQ(working->unwatches, 1);
+  EXPECT_EQ(working->value_gets, 1);
+}
+
+// When several libraries fail, each one still gets every call.
+TEST(RdcTelemetryModuleTest, CallsEveryLibraryWhenSeveralFail) {
+  auto first = std::make_shared<ScriptedLibrary>(4000, 1, RDC_ST_NOT_SUPPORTED);
+  auto second = std::make_shared<ScriptedLibrary>(5000, 1, RDC_ST_UNKNOWN_ERROR);
+  RdcTelemetryModule module(std::list<RdcTelemetryPtr>{first, second});
+  std::vector<rdc_gpu_field_t> fields = {{0, static_cast<rdc_field_t>(4000)},
+                                         {0, static_cast<rdc_field_t>(5000)}};
+  std::vector<Report> reports;
+  const std::set<rdc_status_t> failures = {RDC_ST_NOT_SUPPORTED, RDC_ST_UNKNOWN_ERROR};
+
+  EXPECT_EQ(failures.count(module.rdc_telemetry_fields_watch(fields.data(), fields.size())), 1u);
+  EXPECT_EQ(failures.count(module.rdc_telemetry_fields_unwatch(fields.data(), fields.size())), 1u);
+  EXPECT_EQ(failures.count(module.rdc_telemetry_fields_value_get(fields.data(), fields.size(),
+                                                                 record, &reports)),
+            1u);
+  for (const auto& library : {first, second}) {
+    EXPECT_EQ(library->watches, 1);
+    EXPECT_EQ(library->unwatches, 1);
+    EXPECT_EQ(library->value_gets, 1);
+  }
 }
 
 }  // namespace
