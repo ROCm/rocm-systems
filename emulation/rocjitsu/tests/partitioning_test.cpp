@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "config_test_util.h"
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
@@ -11,6 +12,7 @@
 #include "rocjitsu/vm/rj_vm_impl.h"
 #include "rocjitsu/vm/soc.h"
 #include "scoped_temp.h"
+#include "util/diagnostic.h"
 
 #include "simdojo/sim/component.h"
 #include "simdojo/sim/simulation.h"
@@ -80,8 +82,12 @@ struct PartitionedTopology {
   bool partitioned = false;
 };
 
-PartitionedTopology build_partitioned_topology(uint32_t num_threads) {
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+util::FailureOr<PartitionedTopology>
+build_partitioned_topology(uint32_t num_threads, util::DiagnosticEmitter emit_error) {
+  auto loaded_result = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, emit_error);
+  if (loaded_result.failed())
+    return util::Result::failure();
+  auto loaded = std::move(loaded_result).value();
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = num_threads;
@@ -92,7 +98,7 @@ PartitionedTopology build_partitioned_topology(uint32_t num_threads) {
   bool partitioned = amdgpu::partition_topology_by_xcds(engine->topology(), soc, num_threads);
   engine->create();
 
-  return {std::move(loaded), soc, memory, std::move(engine), partitioned};
+  return PartitionedTopology{std::move(loaded), soc, memory, std::move(engine), partitioned};
 }
 
 void expect_subtree_partition(simdojo::Component *component, simdojo::PartitionID expected) {
@@ -160,11 +166,13 @@ TEST(CpuDispatchBudgetTest, ExplicitWidthRemainsPerSoc) {
 
 TEST(CpuDispatchBudgetTest, SingleGpuDefaultsToAutomaticAndMultiGpuToSerialDispatch) {
   {
-    auto loaded = config::load_config(CONFIG_KMD_PATH, rocjitsu::kEmbeddedSchema);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(CONFIG_KMD_PATH, loaded));
     EXPECT_EQ(loaded.cpu_dispatch_threads, 0u);
   }
   {
-    auto loaded = config::load_config(CONFIG_2GPU_PATH, rocjitsu::kEmbeddedSchema);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(CONFIG_2GPU_PATH, loaded));
     EXPECT_EQ(loaded.cpu_dispatch_threads, 1u);
   }
 }
@@ -178,13 +186,17 @@ TEST(CpuDispatchBudgetTest, JsonDistinguishesOmittedZeroAndExplicitSchemaDefault
   for (const auto &c : {Case{"{}", false, 1}, Case{R"({"cpu_dispatch_threads":0})", true, 0},
                         Case{R"({"cpu_dispatch_threads":1})", true, 1}}) {
     SCOPED_TRACE(c.json);
-    config::with_parsed_simulation_config_json(
-        c.json, rocjitsu::kEmbeddedSchema, [&](const fb::SimulationConfig *parsed) {
+    util::StringDiagnostic diagnostic;
+    auto result = config::with_parsed_simulation_config_json(
+        c.json, rocjitsu::kEmbeddedSchema, diagnostic.emitter(),
+        [&](const fb::SimulationConfig *parsed) -> util::Result {
           EXPECT_EQ(
               flatbuffers::IsFieldPresent(parsed, fb::SimulationConfig::VT_CPU_DISPATCH_THREADS),
               c.present);
           EXPECT_EQ(parsed->cpu_dispatch_threads(), c.value);
+          return util::Result::success();
         });
+    ASSERT_TRUE(result.succeeded()) << diagnostic.message();
   }
 }
 
@@ -309,8 +321,13 @@ TEST(ExecutionThreadBudgetTest, AutomaticPlansStayWithinAffinityAndCapacity) {
 TEST(ExecutionThreadBudgetTest, MetadataMatchesBuiltTopology) {
   for (const auto &path :
        {CONFIG_PATH, CONFIG_2GPU_PATH, CONFIG_1XCD_PATH, CONFIG_CDNA5_PATH, CONFIG_RDNA4_PATH}) {
-    auto settings = config::load_execution_thread_settings(path, rocjitsu::kEmbeddedSchema);
-    auto loaded = config::load_config(path, rocjitsu::kEmbeddedSchema, 48);
+    util::StringDiagnostic settings_diagnostic;
+    auto settings_result = config::load_execution_thread_settings(path, rocjitsu::kEmbeddedSchema,
+                                                                  settings_diagnostic.emitter());
+    ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
+    auto settings = std::move(settings_result).value();
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config(path, loaded, 48));
     auto plan = settings.resolve(48);
     EXPECT_EQ(plan.engines, loaded.execution_threads.engines);
     EXPECT_EQ(plan.dispatch, loaded.execution_threads.dispatch);
@@ -373,7 +390,8 @@ TEST(ExecutionThreadBudgetTest, CountsOnlySocsThatTheLoaderConstructs) {
     }
   }
 })";
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 4);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded, 4));
   ASSERT_TRUE(loaded.extra_gpu_builds.empty());
   ASSERT_EQ(loaded.build_result.num_xcds, 2u);
   EXPECT_EQ(loaded.execution_threads.engines, 2u);
@@ -385,13 +403,15 @@ TEST(ExecutionThreadBudgetTest, CountsOnlySocsThatTheLoaderConstructs) {
 TEST(ExecutionThreadBudgetTest, ShippedServerChoicesAndExplicitSerial) {
   auto json = config_json_with_num_threads(CONFIG_PATH, 0);
   json.insert(json.find('{') + 1, R"("cpu_thread_budget":32,)");
-  auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 64);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded, 64));
   EXPECT_EQ(loaded.execution_threads.engines, 8u);
   EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{17}));
   EXPECT_EQ(loaded.execution_threads.helpers, 8u);
   EXPECT_EQ(loaded.async_resources->helpers(), 8u);
   json.insert(json.find('{') + 1, R"("cpu_dispatch_threads":1,"async_helper_threads":0,)");
-  auto serial = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 64);
+  config::LoadedConfig serial;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, serial, 64));
   EXPECT_EQ(serial.cpu_dispatch_threads, 1u);
   EXPECT_EQ(serial.execution_threads.dispatch, (std::vector<uint32_t>{1}));
   EXPECT_EQ(serial.execution_threads.helpers, 0u);
@@ -406,15 +426,15 @@ TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
   FailureOr<std::string> relaunched = config::json_with_cpu_thread_budget(json, 4);
   ASSERT_TRUE(relaunched.succeeded());
 
-  const config::LoadedConfig loaded =
-      config::load_config_from_string(relaunched.value(), rocjitsu::kEmbeddedSchema, 64);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(relaunched.value(), loaded, 64));
   EXPECT_EQ(loaded.cpu_thread_budget, 4u);
   EXPECT_EQ(loaded.execution_threads.engines, 2u);
   EXPECT_EQ(loaded.execution_threads.dispatch, (std::vector<uint32_t>{3}));
   EXPECT_EQ(loaded.execution_threads.helpers, 0u);
 
-  const config::LoadedConfig untouched =
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 64);
+  config::LoadedConfig untouched;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, untouched, 64));
   EXPECT_EQ(untouched.cpu_thread_budget, 32u);
   EXPECT_EQ(untouched.execution_threads.engines, 8u);
   EXPECT_EQ(untouched.execution_threads.dispatch, (std::vector<uint32_t>{17}));
@@ -422,26 +442,35 @@ TEST(ExecutionThreadBudgetTest, LaunchBudgetReplanesOnlyTheConfigItRewrites) {
 }
 
 TEST(ExecutionThreadBudgetTest, PresetsKeepSiblingTablesConsistent) {
+  util::StringDiagnostic config_diagnostic;
   for (const auto &paths :
        {std::vector<std::string>{"gfx950_mi355x.json", "gfx950_mi355x_kmd.json"},
         std::vector<std::string>{"gfx942_cdna3.json", "gfx942_cdna3_kmd.json"}}) {
-    const auto expected = config::load_execution_thread_settings(
-                              std::string(CONFIG_DIR) + "/" + paths[0], rocjitsu::kEmbeddedSchema)
-                              .choices;
-    for (const auto &path : paths)
-      EXPECT_EQ(config::load_execution_thread_settings(std::string(CONFIG_DIR) + "/" + path,
-                                                       rocjitsu::kEmbeddedSchema)
-                    .choices,
-                expected)
-          << path;
+    util::StringDiagnostic expected_diagnostic;
+    auto expected_result = config::load_execution_thread_settings(
+        std::string(CONFIG_DIR) + "/" + paths[0], rocjitsu::kEmbeddedSchema,
+        expected_diagnostic.emitter());
+    ASSERT_TRUE(expected_result.succeeded()) << expected_diagnostic.message();
+    const auto expected = std::move(expected_result).value().choices;
+    for (const auto &path : paths) {
+      auto settings = config::load_execution_thread_settings(std::string(CONFIG_DIR) + "/" + path,
+                                                             rocjitsu::kEmbeddedSchema,
+                                                             config_diagnostic.emitter());
+      ASSERT_TRUE(settings.succeeded()) << config_diagnostic.message();
+      EXPECT_EQ(settings.value().choices, expected) << path;
+    }
   }
 }
 
 TEST(ExecutionThreadBudgetTest, MultiGpuPresetsKeepSerialDefaultsAndAllowDispatchOverrides) {
   for (const auto &[name, gpus] : {std::pair{"gfx950_mi355x_kmd_2gpu.json", 2u},
                                    std::pair{"gfx1250_mi455x_kmd_4gpu.json", 4u}}) {
-    auto settings = config::load_execution_thread_settings(std::string(CONFIG_DIR) + "/" + name,
-                                                           rocjitsu::kEmbeddedSchema);
+    util::StringDiagnostic settings_diagnostic;
+    auto settings_result = config::load_execution_thread_settings(
+        std::string(CONFIG_DIR) + "/" + name, rocjitsu::kEmbeddedSchema,
+        settings_diagnostic.emitter());
+    ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
+    auto settings = std::move(settings_result).value();
     EXPECT_EQ(settings.request.engines, 1u);
     EXPECT_EQ(settings.request.dispatch, 1u);
     for (auto choice : settings.choices)
@@ -468,8 +497,12 @@ TEST(ExecutionThreadBudgetTest, MultiGpuPresetsKeepSerialDefaultsAndAllowDispatc
 
 TEST(ExecutionThreadBudgetTest, OlderCdnaPresetsUseDispatchWorkers) {
   for (const auto *name : {"gfx90a_mi210_kmd.json", "gfx942_cdna3.json", "gfx942_cdna3_kmd.json"}) {
-    auto settings = config::load_execution_thread_settings(std::string(CONFIG_DIR) + "/" + name,
-                                                           rocjitsu::kEmbeddedSchema);
+    util::StringDiagnostic settings_diagnostic;
+    auto settings_result = config::load_execution_thread_settings(
+        std::string(CONFIG_DIR) + "/" + name, rocjitsu::kEmbeddedSchema,
+        settings_diagnostic.emitter());
+    ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
+    auto settings = std::move(settings_result).value();
     settings.request.budget = 1;
     auto serial = settings.resolve(64);
     EXPECT_EQ(serial.engines, 1u);
@@ -483,8 +516,12 @@ TEST(ExecutionThreadBudgetTest, OlderCdnaPresetsUseDispatchWorkers) {
 
 TEST(ExecutionThreadBudgetTest, DesktopTablesStopAtTheMeasuredCeiling) {
   for (const auto *name : {"gfx1100_w7900", "gfx1151", "gfx1201_r9700"}) {
-    auto settings = config::load_execution_thread_settings(
-        std::string(CONFIG_DIR) + "/" + name + ".json", rocjitsu::kEmbeddedSchema);
+    util::StringDiagnostic settings_diagnostic;
+    auto settings_result = config::load_execution_thread_settings(
+        std::string(CONFIG_DIR) + "/" + name + ".json", rocjitsu::kEmbeddedSchema,
+        settings_diagnostic.emitter());
+    ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
+    auto settings = std::move(settings_result).value();
     for (uint32_t budget : {24u, 32u, 64u}) {
       settings.request.budget = budget;
       auto plan = settings.resolve(128);
@@ -500,8 +537,12 @@ TEST(ExecutionThreadBudgetTest, DisablingHelpersKeepsSynchronousServerGranules) 
   };
   for (const auto *name : {"gfx950_mi355x.json", "gfx1250_mi455x.json"}) {
     const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
-    auto settings = config::load_execution_thread_settings(std::string(CONFIG_DIR) + "/" + name,
-                                                           rocjitsu::kEmbeddedSchema);
+    util::StringDiagnostic settings_diagnostic;
+    auto settings_result = config::load_execution_thread_settings(
+        std::string(CONFIG_DIR) + "/" + name, rocjitsu::kEmbeddedSchema,
+        settings_diagnostic.emitter());
+    ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
+    auto settings = std::move(settings_result).value();
     settings.request.helpers = 0;
     for (Case c : {Case{1, 1, 1}, Case{2, 1, 2}, Case{4, cdna5 ? 1u : 2u, cdna5 ? 4u : 3u},
                    Case{8, 2, 7}, Case{16, 8, 9}, Case{24, 8, 17}, Case{32, 8, cdna5 ? 25u : 17u},
@@ -522,8 +563,12 @@ TEST(ExecutionThreadBudgetTest, ServerPresetsAddHelpersWithoutDisplacingCpuWorke
     SCOPED_TRACE(name);
     const bool cdna5 = std::string_view(name) == "gfx1250_mi455x.json";
     const uint32_t max_cpu = cdna5 ? 40 : 24;
-    auto settings = config::load_execution_thread_settings(std::string(CONFIG_DIR) + "/" + name,
-                                                           rocjitsu::kEmbeddedSchema);
+    util::StringDiagnostic settings_diagnostic;
+    auto settings_result = config::load_execution_thread_settings(
+        std::string(CONFIG_DIR) + "/" + name, rocjitsu::kEmbeddedSchema,
+        settings_diagnostic.emitter());
+    ASSERT_TRUE(settings_result.succeeded()) << settings_diagnostic.message();
+    auto settings = std::move(settings_result).value();
     for (uint32_t affinity = 1; affinity <= 128; ++affinity) {
       const auto plan = settings.resolve(affinity);
       ASSERT_EQ(plan.dispatch.size(), 1u);
@@ -563,7 +608,10 @@ TEST(ExecutionThreadBudgetTest, AsyncPoolsBelongToTheirVm) {
 }
 
 TEST(XcdPartitioningTest, EightThreadsMapsEachCdna4XcdToItsOwnPartition) {
-  auto topology = build_partitioned_topology(8);
+  util::StringDiagnostic diagnostic;
+  auto topology_result = build_partitioned_topology(8, diagnostic.emitter());
+  ASSERT_TRUE(topology_result.succeeded()) << diagnostic.message();
+  auto topology = std::move(topology_result).value();
 
   ASSERT_TRUE(topology.partitioned);
   ASSERT_EQ(topology.engine->topology().partitions().size(), 8u);
@@ -574,7 +622,10 @@ TEST(XcdPartitioningTest, EightThreadsMapsEachCdna4XcdToItsOwnPartition) {
 }
 
 TEST(XcdPartitioningTest, FourThreadsDistributesCdna4XcdsRoundRobinWithoutSplits) {
-  auto topology = build_partitioned_topology(4);
+  util::StringDiagnostic diagnostic;
+  auto topology_result = build_partitioned_topology(4, diagnostic.emitter());
+  ASSERT_TRUE(topology_result.succeeded()) << diagnostic.message();
+  auto topology = std::move(topology_result).value();
 
   ASSERT_TRUE(topology.partitioned);
   ASSERT_EQ(topology.engine->topology().partitions().size(), 4u);
@@ -585,7 +636,8 @@ TEST(XcdPartitioningTest, FourThreadsDistributesCdna4XcdsRoundRobinWithoutSplits
 }
 
 TEST(XcdPartitioningTest, ClampPartitionCountUsesAllNonNullSocs) {
-  auto loaded = config::load_config(CONFIG_2GPU_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_2GPU_PATH, loaded));
   ASSERT_EQ(loaded.extra_gpu_builds.size(), 1u);
 
   auto *soc0 = loaded.soc();
@@ -604,7 +656,8 @@ TEST(XcdPartitioningTest, ClampPartitionCountUsesAllNonNullSocs) {
 }
 
 TEST(XcdPartitioningTest, ZeroPartitionsIsNoopWithoutManualPartitions) {
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   simdojo::Topology topology;
   topology.set_root(loaded.take_root());
@@ -626,7 +679,8 @@ TEST(XcdPartitioningTest, NoXcdsIsNoopWithoutManualPartitions) {
 }
 
 TEST(XcdPartitioningTest, SinglePartitionAssignsAllComponentsToZero) {
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   simdojo::Topology topology;
   topology.set_root(loaded.take_root());
@@ -639,7 +693,10 @@ TEST(XcdPartitioningTest, SinglePartitionAssignsAllComponentsToZero) {
 }
 
 TEST(XcdPartitioningTest, ThreeThreadsDistributesCdna4XcdsRoundRobinWithoutSplits) {
-  auto topology = build_partitioned_topology(3);
+  util::StringDiagnostic diagnostic;
+  auto topology_result = build_partitioned_topology(3, diagnostic.emitter());
+  ASSERT_TRUE(topology_result.succeeded()) << diagnostic.message();
+  auto topology = std::move(topology_result).value();
 
   ASSERT_TRUE(topology.partitioned);
   ASSERT_EQ(topology.engine->topology().partitions().size(), 3u);
@@ -650,7 +707,8 @@ TEST(XcdPartitioningTest, ThreeThreadsDistributesCdna4XcdsRoundRobinWithoutSplit
 }
 
 TEST(XcdPartitioningTest, SpanOverMultipleSocsUsesGlobalXcdIndex) {
-  auto loaded = config::load_config(CONFIG_2GPU_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_2GPU_PATH, loaded));
   ASSERT_EQ(loaded.extra_gpu_builds.size(), 1u);
 
   auto root = std::make_unique<simdojo::CompositeComponent>("system");
@@ -674,7 +732,8 @@ TEST(XcdPartitioningTest, SpanOverMultipleSocsUsesGlobalXcdIndex) {
 }
 
 TEST(XcdPartitioningTest, RejectsSocOutsideTopologyWithoutChangingPartitionState) {
-  auto loaded = config::load_config(CONFIG_2GPU_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_2GPU_PATH, loaded));
   ASSERT_EQ(loaded.extra_gpu_builds.size(), 1u);
 
   auto *soc0 = loaded.soc();
@@ -696,7 +755,10 @@ TEST(XcdPartitioningTest, RejectsSocOutsideTopologyWithoutChangingPartitionState
 }
 
 TEST(XcdPartitioningTest, NonXcdComponentsStayOnPartitionZero) {
-  auto topology = build_partitioned_topology(8);
+  util::StringDiagnostic diagnostic;
+  auto topology_result = build_partitioned_topology(8, diagnostic.emitter());
+  ASSERT_TRUE(topology_result.succeeded()) << diagnostic.message();
+  auto topology = std::move(topology_result).value();
 
   ASSERT_TRUE(topology.partitioned);
   EXPECT_EQ(topology.soc->partition_id(), 0u);
@@ -781,7 +843,8 @@ TEST(XcdPartitioningTest, CApiDoesNotWarnWhenThreadCountIsUnchanged) {
 }
 
 TEST(XcdPartitioningTest, DefaultsRespectHostBudgetAndXcdTopology) {
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   ASSERT_NE(soc, nullptr);
   ASSERT_EQ(soc->num_xcds(), 8u);
@@ -805,15 +868,16 @@ TEST(XcdPartitioningTest, DefaultsRespectHostBudgetAndXcdTopology) {
   // The shipped config omits num_threads, so loading it resolves the default.
   EXPECT_EQ(loaded.engine_config.num_threads, loaded.execution_threads.engines);
   // Its four-thread granule uses two engines and two retained dispatch workers.
-  const auto four_threads =
-      config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, /*host_threads=*/4);
+  config::LoadedConfig four_threads;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, four_threads, /*host_threads=*/4));
   EXPECT_EQ(four_threads.engine_config.num_threads, 2u);
   EXPECT_EQ(four_threads.execution_threads.dispatch, (std::vector<uint32_t>{3}));
   EXPECT_EQ(four_threads.execution_threads.helpers, 0u);
 }
 
 TEST(XcdPartitioningTest, DefaultThreadCountAggregatesSocsAndFloorsAtOne) {
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   ASSERT_NE(soc, nullptr);
 
@@ -845,7 +909,8 @@ TEST(XcdPartitioningTest, DefaultThreadCountAggregatesSocsAndFloorsAtOne) {
 // them, and only load_config() covers extra_gpu_builds.
 TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
   const std::string json = config_json_with_num_threads(CONFIG_2GPU_PATH, 0);
-  config::LoadedConfig loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
 
   SoC *soc = loaded.soc();
   ASSERT_NE(soc, nullptr);
@@ -859,15 +924,11 @@ TEST(XcdPartitioningTest, LoaderResolvesZeroThreadsAcrossExtraGpuBuilds) {
 
   // Zero selects the multi-GPU table, which preserves one engine while
   // allowing the dispatch pools to share the host budget.
-  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 16)
-                .engine_config.num_threads,
-            1u);
-  EXPECT_EQ(
-      config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 9).engine_config.num_threads,
-      1u);
-  EXPECT_EQ(config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, 64)
-                .engine_config.num_threads,
-            1u);
+  for (uint32_t host_threads : {16u, 9u, 64u}) {
+    config::LoadedConfig from_host_width;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, from_host_width, host_threads));
+    EXPECT_EQ(from_host_width.engine_config.num_threads, 1u);
+  }
   EXPECT_EQ(loaded.engine_config.num_threads, loaded.execution_threads.engines);
 }
 
@@ -907,9 +968,8 @@ TEST(XcdPartitioningTest, ShippedConfigsOmitNumThreadsExceptTheDocumentedPin) {
       // difference: resolving against the live affinity of a one-CPU runner
       // turns a pin of 0 -- which opts back into the default -- into 1 as
       // surely as a real pin does. At 64 the config has to carry the literal 1.
-      const config::LoadedConfig pinned =
-          config::load_config(entry.path().string(), rocjitsu::kEmbeddedSchema,
-                              /*host_threads=*/64);
+      config::LoadedConfig pinned;
+      ASSERT_TRUE(test::load_valid_config(entry.path().string(), pinned, /*host_threads=*/64));
       EXPECT_EQ(pinned.engine_config.num_threads, 1u)
           << entry.path().filename() << " must pin num_threads to exactly 1";
     } else {

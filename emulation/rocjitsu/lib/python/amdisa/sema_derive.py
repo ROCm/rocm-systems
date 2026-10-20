@@ -35,6 +35,7 @@ from amdisa.sema_effects import inline_binary_op_effects
 from amdisa.sema_properties import InstructionProperty, derive_properties
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
+    F32_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
     is_float_relation,
 )
@@ -1150,7 +1151,7 @@ class _VectorUnary(_ScalarDeriver):
                 src0 = _cast(_src(0, SemaType.F16), SemaType.F16)
                 if dtype == 'f32_f16':
                     call_name = 'cvt_f32_f16_valu'
-            elif dtype in F32_TO_INTEGER_DTYPES:
+            elif dtype in F32_INPUT_CONVERSION_DTYPES:
                 # Expose the floating source to VOP3 modifier enrichment, then
                 # pass register bits to the conversion helper.
                 src0 = SemaNode(
@@ -1172,6 +1173,7 @@ class _VectorUnary(_ScalarDeriver):
                 'f32_ubyte3': SemaType.F32,
                 'f64_i32': SemaType.F64,
                 'f64_u32': SemaType.F64,
+                'f64_f32': SemaType.F64,
             }.get(dtype)
             if float_result is not None:
                 # The conversion helper returns register bits. Expose the
