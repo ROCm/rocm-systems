@@ -1,0 +1,47 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+name: RCCL default behavior tests
+
+# Tests for .github/scripts/rccl_check_default_behavior.py. Do not make this a
+# required check: it installs pytest from PyPI, and neither an outage nor a
+# failing test should block PRs that do not touch the checker.
+
+on:
+  pull_request:
+    paths:
+      - .github/scripts/rccl_check_default_behavior.py
+      - .github/scripts/tests/conftest.py
+      - .github/scripts/tests/rccl_check_default_behavior_test.py
+      - .github/workflows/rccl-default-behavior.yml
+      - .github/workflows/rccl-default-behavior-test.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test the RCCL env-var changelog check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          # The tree-wide parse test reads every file under projects/rccl/src.
+          sparse-checkout: |
+            .github/scripts
+            projects/rccl/src
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Install pytest
+        run: python3 -m pip install --disable-pip-version-check pytest
+
+      - name: Run the tests
+        run: python3 -m pytest .github/scripts/tests/rccl_check_default_behavior_test.py

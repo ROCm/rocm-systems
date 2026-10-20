@@ -335,6 +335,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "presets",
         "tool_runner",
         "cli_help",
+        "rocsys",
         "hpc",
         "hip",
         "scratch_memory",
@@ -345,6 +346,7 @@ def pytest_configure(config: pytest.Config) -> None:
         "selective_regions",
         "minimal",
         "rank_filter",
+        "rocattach",
         "pytest_impl",
     ]
     for label in non_functional_markers + generic_functional_markers:
@@ -498,11 +500,13 @@ def pytest_collection_modifyitems(config, items) -> None:
             _msg = overflow_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "attach" in item.keywords:
+        # Use the marker, not the keyword. A parametrize id such as "python"
+        # or "attach" is also a keyword and must not skip help-forward tests.
+        if item.get_closest_marker("attach"):
             _msg = attach_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
-        if "python" in item.keywords:
+        if item.get_closest_marker("python"):
             _msg = python_base_unavailable_reason(rocprof_config)
             if _msg is not None:
                 item.add_marker(pytest.mark.skip(reason=_msg))
@@ -1709,6 +1713,7 @@ def _build_rocprofsys_config_header() -> list[str]:
         _row("Avail:", rocprof_config.rocprofsys_avail),
         _row("Causal:", rocprof_config.rocprofsys_causal),
         _row("Python:", rocprof_config.rocprofsys_python),
+        _row("Attach:", rocprof_config.rocprofsys_attach),
         "-" * 70,
         "Executables:",
         _row("MPI:", cap.mpiexec_exec),
@@ -2595,6 +2600,8 @@ def assert_perfetto(subtests, tests_dir, request, test_output_dir):
         depths: Optional[list[int]] = None,
         label_substrings: Optional[list[str]] = None,
         counter_names: Optional[list[str]] = None,
+        counter_names_present: Optional[list[str]] = None,
+        counter_names_zero: Optional[list[str]] = None,
         check_counter_pairing: bool = False,
         key_names: Optional[list[str]] = None,
         key_counts: Optional[list[int]] = None,
@@ -2629,6 +2636,8 @@ def assert_perfetto(subtests, tests_dir, request, test_output_dir):
                 depths=depths,
                 label_substrings=label_substrings,
                 counter_names=counter_names,
+                counter_names_present=counter_names_present,
+                counter_names_zero=counter_names_zero,
                 check_counter_pairing=check_counter_pairing,
                 key_names=key_names,
                 key_counts=key_counts,

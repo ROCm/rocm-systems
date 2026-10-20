@@ -1,9 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "legacy_gpu_memory_fixture.h"
+
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
-#include "rocjitsu/vm/amdgpu/aql/aql_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
@@ -48,27 +50,27 @@ class CommandProcessorCloseTestAccess {
 public:
   static bool fetch_first_queue(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.aql_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1)
       return false;
-    command_processor.fetch_from_queue(command_processor.aql_queues_.front(), 0);
+    command_processor.fetch_from_queue(command_processor.compute_queues_.front(), 0);
     return true;
   }
 
   static bool retain_cursor_publication(CommandProcessor &command_processor, GpuVmAccess access,
                                         uint64_t cursor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.aql_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1)
       return false;
-    command_processor.aql_queues_.front().read_pointer_journal.retire(cursor, cursor,
-                                                                      std::move(access));
+    command_processor.compute_queues_.front().read_pointer_journal.retire(cursor, cursor,
+                                                                          std::move(access));
     return true;
   }
 
   static bool retry_cursor_publication(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.aql_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1)
       return false;
-    AqlQueueRecord &queue = command_processor.aql_queues_.front();
+    ComputeQueueRecord &queue = command_processor.compute_queues_.front();
     queue.faulted = true;
     command_processor.fetch_from_queue(queue, 0);
     return !queue.read_pointer_journal.publication_pending();
@@ -76,9 +78,9 @@ public:
 
   static bool retain_idle_completion_publication(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.aql_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1)
       return false;
-    AqlQueueRecord &queue = command_processor.aql_queues_.front();
+    ComputeQueueRecord &queue = command_processor.compute_queues_.front();
     queue.idle_publication.phase = QueueIdlePublicationPhase::StoreMailbox;
     queue.publication_retry_pending = true;
     return true;
@@ -86,9 +88,9 @@ public:
 
   static bool clear_idle_completion_publication(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.aql_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1)
       return false;
-    AqlQueueRecord &queue = command_processor.aql_queues_.front();
+    ComputeQueueRecord &queue = command_processor.compute_queues_.front();
     queue.idle_publication.reset();
     queue.publication_retry_pending = false;
     return true;
@@ -96,9 +98,9 @@ public:
 
   static bool mark_publication_faulted(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.aql_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1)
       return false;
-    command_processor.aql_queues_.front().publication_faulted = true;
+    command_processor.compute_queues_.front().publication_faulted = true;
     return true;
   }
 };
@@ -231,7 +233,7 @@ TEST(GpuVmService, UnroutedIdentityBindingCoexistsWithRoutedVmidZero) {
   EXPECT_TRUE(gpu_vm.snapshot(gart));
   EXPECT_FALSE(gpu_vm.snapshot(gart)->info().ready);
   readback.fill(std::byte{0});
-  EXPECT_EQ(internal_access->read(0x4000, readback), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(internal_access->read(0x4000, readback), VmAccessOutcome::Revoked);
   EXPECT_EQ(readback, (std::array<std::byte, 4>{}));
 
   EXPECT_TRUE(gpu_vm.reset());
@@ -277,6 +279,17 @@ public:
     return VmAccessOutcome::Complete;
   }
 
+  AtomicLoadResult atomic_load(VmMemoryDomain domain, uint64_t address, uint32_t width) override {
+    if (domain != VmMemoryDomain::System || (width != 2 && width != 4 && width != 8) ||
+        address > bytes_.size() || width > bytes_.size() - address)
+      return {.outcome = VmAccessOutcome::Faulted};
+    if (address == observed_load_address)
+      observed_load_widths.push_back(width);
+    uint64_t value = 0;
+    std::memcpy(&value, bytes_.data() + address, width);
+    return {.outcome = VmAccessOutcome::Complete, .value = value};
+  }
+
   VmAccessOutcome atomic_store(VmMemoryDomain domain, uint64_t address, uint32_t width,
                                uint64_t value) override {
     if (domain != VmMemoryDomain::System || (width != 4 && width != 8) || address > bytes_.size() ||
@@ -284,6 +297,8 @@ public:
       return VmAccessOutcome::Faulted;
     }
     atomic_store_calls_.fetch_add(1, std::memory_order_relaxed);
+    if (address == unavailable_store_address && store_outcome != VmAccessOutcome::Complete)
+      return store_outcome;
     std::memcpy(bytes_.data() + address, &value, width);
     return VmAccessOutcome::Complete;
   }
@@ -294,10 +309,231 @@ public:
 
   void reset_atomic_store_calls() { atomic_store_calls_.store(0, std::memory_order_relaxed); }
 
+  uint64_t observed_load_address = std::numeric_limits<uint64_t>::max();
+  std::vector<uint32_t> observed_load_widths;
+  uint64_t unavailable_store_address = std::numeric_limits<uint64_t>::max();
+  VmAccessOutcome store_outcome = VmAccessOutcome::Complete;
+
 private:
   std::vector<std::byte> bytes_;
   std::atomic<std::size_t> atomic_store_calls_ = 0;
 };
+
+// Control translation spans, physical offsets and per-operand failures
+// independently to exercise batched admission and retry behavior.
+class AtomicLaneAddressSpace final : public AddressSpaceTranslator, public PhysicalMemoryAccess {
+public:
+  VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
+    ++translation_calls;
+    if (address == translation_failure || address / 8 >= values.size())
+      return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    return {.outcome = VmAccessOutcome::Complete,
+            .translation = {.domain = domains[address / 8],
+                            .address = address + physical_base,
+                            .contiguous_bytes =
+                                address == short_translation
+                                    ? size - 1
+                                    : std::min<uint64_t>(span_bytes, sizeof(values) - address),
+                            .mtype = Mtype::RW,
+                            .permissions = {.readable = true, .writable = true}}};
+  }
+
+  VmAccessOutcome read(VmMemoryDomain, uint64_t, std::span<std::byte>) override {
+    return VmAccessOutcome::Faulted;
+  }
+  VmAccessOutcome write(VmMemoryDomain, uint64_t, std::span<const std::byte>) override {
+    return VmAccessOutcome::Faulted;
+  }
+  VmAccessOutcome atomic_modify(VmMemoryDomain domain, uint64_t address, uint32_t width,
+                                const AtomicMutation &mutation) override {
+    if (address == physical_failure)
+      return physical_outcome;
+    if (address < physical_base || address - physical_base >= sizeof(values))
+      return VmAccessOutcome::Malformed;
+    const uint64_t index = (address - physical_base) / 8;
+    if (domain != domains[index])
+      return VmAccessOutcome::Malformed;
+    modified_addresses.push_back(address);
+    mutation(std::as_writable_bytes(std::span(&values[index], 1)).first(width));
+    return VmAccessOutcome::Complete;
+  }
+
+  uint64_t physical_base = 0;
+  uint64_t span_bytes = 8;
+  mutable uint32_t translation_calls = 0;
+  std::vector<uint64_t> modified_addresses;
+  std::array<uint64_t, 4> values{};
+  std::array<VmMemoryDomain, 4> domains = {VmMemoryDomain::System, VmMemoryDomain::System,
+                                           VmMemoryDomain::System, VmMemoryDomain::System};
+  uint64_t translation_failure = UINT64_MAX;
+  uint64_t short_translation = UINT64_MAX;
+  uint64_t physical_failure = UINT64_MAX;
+  VmAccessOutcome physical_outcome = VmAccessOutcome::Unavailable;
+};
+
+TEST(GpuVmService, AtomicLanesPreserveOrderAcrossDomainsAndSparseMasks) {
+  for (uint32_t width : {4u, 8u}) {
+    SCOPED_TRACE(width);
+    GpuVm vm;
+    auto backing = std::make_shared<AtomicLaneAddressSpace>();
+    backing->values = {10, 20, 0, 0};
+    backing->domains[1] = VmMemoryDomain::Local;
+    const auto handle = vm.register_translated(7, backing, backing);
+    auto access = vm.snapshot(handle);
+    ASSERT_TRUE(access);
+    std::array<uint64_t, 64> addresses{};
+    addresses[2] = 8;
+    constexpr uint64_t mask = (uint64_t{1} << 63) | 0x5;
+    std::vector<uint32_t> lanes;
+    std::vector<uint64_t> observed;
+    uint32_t next = 0;
+    EXPECT_EQ(access->atomic_modify_lanes(
+                  addresses, mask, width,
+                  [&](uint32_t lane, std::span<std::byte> bytes) {
+                    uint64_t value = 0;
+                    std::memcpy(&value, bytes.data(), width);
+                    lanes.push_back(lane);
+                    observed.push_back(value);
+                    ++value;
+                    std::memcpy(bytes.data(), &value, width);
+                  },
+                  next),
+              VmAccessOutcome::Complete);
+    EXPECT_EQ(next, addresses.size());
+    EXPECT_EQ(lanes, (std::vector<uint32_t>{0, 2, 63}));
+    EXPECT_EQ(observed, (std::vector<uint64_t>{10, 20, 11}));
+    EXPECT_EQ(backing->values, (std::array<uint64_t, 4>{12, 21, 0, 0}));
+  }
+}
+
+TEST(GpuVmService, AtomicLanesReuseNonIdentityTranslationAtDistinctOffsets) {
+  GpuVm vm;
+  auto backing = std::make_shared<AtomicLaneAddressSpace>();
+  backing->physical_base = 0x1000;
+  backing->span_bytes = sizeof(backing->values);
+  backing->values = {0, 10, 20, 30};
+  const auto handle = vm.register_translated(7, backing, backing);
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  constexpr std::array<uint64_t, 3> addresses = {8, 16, 24};
+  uint32_t next = 0;
+  EXPECT_EQ(access->atomic_modify_lanes(
+                addresses, 0x7, 8,
+                [](uint32_t lane, std::span<std::byte> bytes) {
+                  uint64_t value;
+                  std::memcpy(&value, bytes.data(), sizeof(value));
+                  value += lane + 1;
+                  std::memcpy(bytes.data(), &value, sizeof(value));
+                },
+                next),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(next, addresses.size());
+  EXPECT_EQ(backing->translation_calls, 1u);
+  EXPECT_EQ(backing->modified_addresses, (std::vector<uint64_t>{0x1008, 0x1010, 0x1018}));
+  EXPECT_EQ(backing->values, (std::array<uint64_t, 4>{0, 11, 22, 33}));
+}
+
+TEST(GpuVmService, AtomicLanePhysicalFailurePrecedesLaterTranslationFault) {
+  for (VmAccessOutcome first_failure : {VmAccessOutcome::Unavailable, VmAccessOutcome::Faulted}) {
+    SCOPED_TRACE(static_cast<int>(first_failure));
+    GpuVm vm;
+    auto backing = std::make_shared<AtomicLaneAddressSpace>();
+    backing->physical_failure = 8;
+    backing->physical_outcome = first_failure;
+    backing->translation_failure = 16;
+    std::vector<uint64_t> faults;
+    const auto handle = vm.register_unrouted_address_space(7, backing, backing,
+                                                           [&](uint64_t address, VmAccessKind) {
+                                                             faults.push_back(address);
+                                                             EXPECT_EQ(backing->values[0], 1u);
+                                                             EXPECT_EQ(backing->values[1], 1u);
+                                                           });
+    auto access = vm.snapshot(handle);
+    ASSERT_TRUE(access);
+    constexpr std::array<uint64_t, 4> addresses = {0, 8, 16, 24};
+    const auto increment = [](uint32_t, std::span<std::byte> bytes) {
+      uint64_t value;
+      std::memcpy(&value, bytes.data(), sizeof(value));
+      ++value;
+      std::memcpy(bytes.data(), &value, sizeof(value));
+    };
+    uint32_t next = 0;
+    EXPECT_EQ(access->atomic_modify_lanes(addresses, 0xf, 8, increment, next), first_failure);
+    EXPECT_EQ(next, 1u);
+    EXPECT_TRUE(faults.empty());
+    EXPECT_EQ(backing->values, (std::array<uint64_t, 4>{1, 0, 0, 0}));
+    if (first_failure != VmAccessOutcome::Unavailable)
+      continue;
+    backing->physical_failure = UINT64_MAX;
+    EXPECT_EQ(access->atomic_modify_lanes(addresses, 0xf, 8, increment, next),
+              VmAccessOutcome::Faulted);
+    EXPECT_EQ(next, 2u);
+    EXPECT_EQ(faults, (std::vector<uint64_t>{16}));
+    EXPECT_EQ(backing->values, (std::array<uint64_t, 4>{1, 1, 0, 0}));
+  }
+}
+
+TEST(GpuVmService, AtomicLanesCommitPrefixBeforeMalformedOperand) {
+  for (bool short_span : {false, true}) {
+    SCOPED_TRACE(short_span);
+    GpuVm vm;
+    auto backing = std::make_shared<AtomicLaneAddressSpace>();
+    if (short_span)
+      backing->short_translation = 16;
+    std::vector<uint64_t> faults;
+    const auto handle = vm.register_unrouted_address_space(
+        7, backing, backing, [&](uint64_t address, VmAccessKind) { faults.push_back(address); });
+    auto access = vm.snapshot(handle);
+    ASSERT_TRUE(access);
+    const std::array<uint64_t, 4> addresses = {0, 8, short_span ? 16u : 17u, 24};
+    std::vector<uint32_t> lanes;
+    uint32_t next = 0;
+    EXPECT_EQ(access->atomic_modify_lanes(
+                  addresses, 0xf, 8,
+                  [&](uint32_t lane, std::span<std::byte>) { lanes.push_back(lane); }, next),
+              VmAccessOutcome::Malformed);
+    EXPECT_EQ(next, 2u);
+    EXPECT_EQ(lanes, (std::vector<uint32_t>{0, 1}));
+    EXPECT_EQ(faults, (std::vector<uint64_t>{addresses[2]}));
+  }
+}
+
+TEST(GpuVmService, AtomicLanesRejectOversizedBatchesBeforeMutation) {
+  GpuVm vm;
+  auto backing = std::make_shared<AtomicLaneAddressSpace>();
+  const auto handle = vm.register_translated(7, backing, backing);
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  std::array<uint64_t, 65> addresses{};
+  uint32_t next = 0;
+  const auto mutation = [](uint32_t, std::span<std::byte>) { FAIL() << "unexpected mutation"; };
+  EXPECT_EQ(access->atomic_modify_lanes(addresses, UINT64_MAX, 4, mutation, next),
+            VmAccessOutcome::Malformed);
+  EXPECT_EQ(backing->atomic_modify_lanes(VmMemoryDomain::System, addresses, UINT64_MAX, 4, mutation,
+                                         next),
+            VmAccessOutcome::Malformed);
+  EXPECT_EQ(next, 0u);
+}
+
+TEST(GpuVmService, AtomicLanesRejectMissingMutationAtFirstActiveLane) {
+  GpuVm vm;
+  auto backing = std::make_shared<AtomicLaneAddressSpace>();
+  std::vector<uint64_t> faults;
+  const auto handle = vm.register_unrouted_address_space(
+      7, backing, backing, [&](uint64_t address, VmAccessKind) { faults.push_back(address); });
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  constexpr std::array<uint64_t, 3> addresses = {0, 8, 16};
+  uint32_t next = 0;
+  EXPECT_EQ(access->atomic_modify_lanes(addresses, 0x6, 4, {}, next), VmAccessOutcome::Malformed);
+  EXPECT_EQ(next, 1u);
+  EXPECT_EQ(faults, (std::vector<uint64_t>{8}));
+  EXPECT_EQ(backing->values, (std::array<uint64_t, 4>{}));
+  next = 0;
+  EXPECT_EQ(access->atomic_modify_lanes(addresses, 0, 4, {}, next), VmAccessOutcome::Complete);
+  EXPECT_EQ(next, addresses.size());
+  EXPECT_EQ(faults.size(), 1u);
+}
 
 AddressSpaceHandle register_byte_address_space(GpuVm &gpu_vm, uint32_t vmid, uint8_t value) {
   auto access = std::make_shared<ByteAddressSpace>(value);
@@ -321,7 +557,7 @@ QueueRegistrationRequest queue_request(AddressSpaceHandle address_space,
 
 QueueRegistrationRequest queue_request(AddressSpaceHandle address_space, CommandProcessor &owner,
                                        uint32_t queue_id) {
-  return queue_request(address_space, make_aql_queue_binding_factory(owner), queue_id);
+  return queue_request(address_space, make_compute_queue_binding_factory(owner), queue_id);
 }
 
 enum class BlockedQueueOperation : uint8_t {
@@ -563,7 +799,7 @@ TEST(GpuVmService, TwoQueuesRetainOneAddressSpace) {
   AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x2a);
   command_processor.set_gpu_vm(&gpu_vm);
   const std::shared_ptr<QueueBindingFactory> binding_factory =
-      make_aql_queue_binding_factory(command_processor);
+      make_compute_queue_binding_factory(command_processor);
 
   QueueHandle first = queues.register_queue(queue_request(address_space, binding_factory, 1));
   QueueHandle second = queues.register_queue(queue_request(address_space, binding_factory, 2));
@@ -633,14 +869,14 @@ TEST(CommandProcessorDoorbell, TransportNotificationDoesNotWaitForQueueExecution
   CommandProcessor command_processor("cp");
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
-  AqlQueueConfig queue{.address_space = address_space,
-                       .process_id = 7,
-                       .queue_id = 1,
-                       .ring_base_va = 0x100,
-                       .ring_size = 4096,
-                       .read_ptr_va = 0x80,
-                       .write_ptr_va = 0x88,
-                       .last_doorbell = 4};
+  ComputeQueueConfig queue{.address_space = address_space,
+                           .process_id = 7,
+                           .queue_id = 1,
+                           .ring_base_va = 0x100,
+                           .ring_size = 4096,
+                           .read_ptr_va = 0x80,
+                           .write_ptr_va = 0x88,
+                           .last_doorbell = 4};
   const uint64_t registration = command_processor.register_queue(queue);
 
   std::promise<void> locked;
@@ -672,14 +908,14 @@ TEST(CommandProcessorDoorbell, StaleRegistrationCannotNotifyReusedQueueIdentity)
   CommandProcessor command_processor("cp");
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
-  AqlQueueConfig queue{.address_space = address_space,
-                       .process_id = 7,
-                       .queue_id = 1,
-                       .ring_base_va = 0x100,
-                       .ring_size = 4096,
-                       .read_ptr_va = 0x80,
-                       .write_ptr_va = 0x88,
-                       .last_doorbell = 4};
+  ComputeQueueConfig queue{.address_space = address_space,
+                           .process_id = 7,
+                           .queue_id = 1,
+                           .ring_base_va = 0x100,
+                           .ring_size = 4096,
+                           .read_ptr_va = 0x80,
+                           .write_ptr_va = 0x88,
+                           .last_doorbell = 4};
   const uint64_t stale = command_processor.register_queue(queue);
   command_processor.unregister_queue(queue.queue_id, queue.process_id);
 
@@ -735,6 +971,138 @@ TEST(CommandProcessorPacketFetch, UnretiredPacketDoesNotRepublishUnchangedCursor
 
   EXPECT_TRUE(command_processor.unregister_queue_registration(registration));
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
+TEST(CommandProcessorPacketFetch, AqlSlotReleasePrecedesCursorAndRetriesItsAdmissionSnapshot) {
+  for (const auto outcome :
+       {VmAccessOutcome::Complete, VmAccessOutcome::Unavailable, VmAccessOutcome::Faulted}) {
+    SCOPED_TRACE(static_cast<int>(outcome));
+    GpuVm gpu_vm;
+    auto backing = std::make_shared<ByteAddressSpace>(0);
+    const auto address_space = gpu_vm.register_translated(7, backing, backing);
+    ASSERT_TRUE(address_space);
+    constexpr uint64_t read_pointer = 0x80, write_pointer = 0x88, ring = 0x100, gate = 0x300;
+    constexpr uint32_t first_word = 0xbeef1503;
+    hsa_barrier_and_packet_t packet{};
+    packet.header = first_word & 0xffff;
+    packet.reserved0 = first_word >> 16;
+    packet.dep_signal[0].handle = gate;
+    ASSERT_EQ(gpu_vm.write(address_space, ring, std::as_bytes(std::span(&packet, 1))),
+              VmAccessOutcome::Complete);
+    ASSERT_EQ(gpu_vm.atomic_store(address_space, write_pointer, 8, 1), VmAccessOutcome::Complete);
+    ASSERT_EQ(gpu_vm.atomic_store(address_space, gate + 8, 8, 1), VmAccessOutcome::Complete);
+    CommandProcessor cp("cp");
+    cp.set_gpu_vm(&gpu_vm);
+    const auto registration = cp.register_queue({
+        .address_space = address_space,
+        .process_id = 7,
+        .queue_id = 1,
+        .ring_base_va = ring,
+        .ring_size = kAqlPacketBytes,
+        .read_ptr_va = read_pointer,
+        .write_ptr_va = write_pointer,
+        .doorbell_va = 0x90,
+        .doorbell_mode = QueueDoorbellMode::VmPolled,
+    });
+    ASSERT_NE(registration, 0u);
+    backing->observed_load_address = ring;
+    ASSERT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+    EXPECT_EQ(backing->observed_load_widths, (std::vector<uint32_t>{2, 4}));
+    EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 0u);
+    EXPECT_EQ(gpu_vm.atomic_load(address_space, ring, 4).value, first_word);
+    ASSERT_EQ(gpu_vm.atomic_store(address_space, gate + 8, 8, 0), VmAccessOutcome::Complete);
+    backing->unavailable_store_address = ring;
+    backing->store_outcome = outcome;
+    ASSERT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+    EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 1u);
+    EXPECT_EQ(gpu_vm.atomic_load(address_space, read_pointer, 8).value,
+              outcome == VmAccessOutcome::Complete ? 1u : 0u);
+    EXPECT_EQ(gpu_vm.atomic_load(address_space, ring, 4).value,
+              outcome == VmAccessOutcome::Complete ? (first_word & ~0xffu) | 1 : first_word);
+    if (outcome == VmAccessOutcome::Unavailable) {
+      EXPECT_EQ(cp.prepare_unregister_queue_registration(registration),
+                QueuePrepareCloseStatus::Busy);
+      auto replacement = std::make_shared<ByteAddressSpace>(0);
+      ASSERT_TRUE(gpu_vm.replace_translated(address_space, replacement, replacement));
+      backing->store_outcome = VmAccessOutcome::Complete;
+      ASSERT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+      EXPECT_EQ(backing->atomic_load(VmMemoryDomain::System, ring, 4).value,
+                (first_word & ~0xffu) | 1);
+      EXPECT_EQ(backing->atomic_load(VmMemoryDomain::System, read_pointer, 8).value, 1u);
+      EXPECT_EQ(gpu_vm.atomic_load(address_space, ring, 4).value, 0u);
+      EXPECT_EQ(gpu_vm.atomic_load(address_space, read_pointer, 8).value, 0u);
+      EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 1u);
+      EXPECT_FALSE(cp.queue_faulted_for_test(1, 7));
+    } else if (outcome == VmAccessOutcome::Faulted) {
+      EXPECT_TRUE(cp.queue_faulted_for_test(1, 7));
+      EXPECT_EQ(cp.prepare_unregister_queue_registration(registration),
+                QueuePrepareCloseStatus::Faulted);
+    }
+    EXPECT_TRUE(cp.unregister_queue_registration(registration));
+    EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+  }
+}
+
+TEST(CommandProcessorPacketFetch, ConcurrentHeaderPublishersMakeThePacketBodyVisible) {
+  for (const bool publish_dword : {false, true}) {
+    SCOPED_TRACE(publish_dword);
+    LegacyPageTable page_table;
+    util::DistributedSharedMutex page_table_mutex;
+    test::LegacyGpuMemoryFixture memory("memory");
+    memory.set_passthrough(true);
+    memory.register_process(7, &page_table, &page_table_mutex);
+    auto &gpu_vm = memory.gpu_vm();
+    const auto address_space = gpu_vm.find_vmid(7);
+    ASSERT_TRUE(address_space);
+    alignas(64) hsa_barrier_and_packet_t packet{};
+    packet.header = HSA_PACKET_TYPE_INVALID;
+    alignas(8) uint64_t read_pointer = 0, write_pointer = 1, doorbell = 0;
+    alignas(8) uint64_t gate[2] = {0, 1};
+    CommandProcessor cp("cp");
+    cp.set_gpu_vm(&gpu_vm);
+    const auto registration = cp.register_queue({
+        .address_space = *address_space,
+        .process_id = 7,
+        .queue_id = 1,
+        .ring_base_va = reinterpret_cast<uint64_t>(&packet),
+        .ring_size = kAqlPacketBytes,
+        .read_ptr_va = reinterpret_cast<uint64_t>(&read_pointer),
+        .write_ptr_va = reinterpret_cast<uint64_t>(&write_pointer),
+        .doorbell_va = reinterpret_cast<uint64_t>(&doorbell),
+        .doorbell_mode = QueueDoorbellMode::VmPolled,
+    });
+    ASSERT_NE(registration, 0u);
+    ASSERT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+    EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 0u);
+
+    std::atomic<bool> published = false;
+    std::thread producer([&] {
+      packet.dep_signal[0].handle = reinterpret_cast<uint64_t>(gate);
+      if (publish_dword) {
+        std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(&packet))
+            .store(HSA_PACKET_TYPE_BARRIER_AND, std::memory_order_release);
+      } else {
+        packet.reserved0 = 0;
+        std::atomic_ref<uint16_t>(packet.header)
+            .store(HSA_PACKET_TYPE_BARRIER_AND, std::memory_order_release);
+      }
+      // This flag must not provide the acquire edge being tested.
+      published.store(true, std::memory_order_relaxed);
+    });
+    do {
+      EXPECT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+      EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 0u);
+    } while (!published.load(std::memory_order_relaxed));
+    EXPECT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+    EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 0u);
+    producer.join();
+    EXPECT_FALSE(cp.queue_faulted_for_test(1, 7));
+    std::atomic_ref<uint64_t>(gate[1]).store(0, std::memory_order_release);
+    ASSERT_TRUE(CommandProcessorCloseTestAccess::fetch_first_queue(cp));
+    EXPECT_EQ(cp.accepted_entry_count_for_test(1, 7), 1u);
+    EXPECT_EQ(read_pointer, 1u);
+    EXPECT_TRUE(cp.unregister_queue_registration(registration));
+  }
 }
 
 TEST(CommandProcessorPacketFetch, ReservedWriteIndexWaitsForInitialDoorbellPublication) {
@@ -800,14 +1168,14 @@ TEST(CommandProcessorVmFault, FaultsEveryFanoutReplicaAndDropsPresentAndFutureWo
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 41;
   constexpr uint32_t kDispatchId = 19;
-  AqlQueueConfig queue{.address_space = address_space,
-                       .process_id = kProcessId,
-                       .queue_id = kQueueId,
-                       .ring_base_va = 0x100,
-                       .ring_size = 4096,
-                       .read_ptr_va = 0x80,
-                       .write_ptr_va = 0x88,
-                       .xcd_fanout = true};
+  ComputeQueueConfig queue{.address_space = address_space,
+                           .process_id = kProcessId,
+                           .queue_id = kQueueId,
+                           .ring_base_va = 0x100,
+                           .ring_size = 4096,
+                           .read_ptr_va = 0x80,
+                           .write_ptr_va = 0x88,
+                           .xcd_fanout = true};
   (void)owner.register_queue(queue);
 
   auto grid = std::make_shared<GridCompletion>();
@@ -966,7 +1334,7 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
   EXPECT_EQ(new_access->cache_namespace().address_space, address_space);
 
   std::array<std::byte, 1> value{std::byte{0x5a}};
-  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Revoked);
   EXPECT_EQ(value[0], std::byte{0x5a});
   EXPECT_EQ(new_access->read(0, value), VmAccessOutcome::Complete);
   EXPECT_EQ(std::to_integer<uint8_t>(value[0]), 0x22);
@@ -975,9 +1343,9 @@ TEST(GpuVmService, AccessSnapshotIsRevokedAndNamespacesItsTranslationEpoch) {
   EXPECT_FALSE(gpu_vm.snapshot(address_space));
   EXPECT_FALSE(new_access->is_current());
   value[0] = std::byte{0x5a};
-  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Revoked);
   EXPECT_EQ(value[0], std::byte{0x5a});
-  EXPECT_EQ(new_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(new_access->read(0, value), VmAccessOutcome::Revoked);
 }
 
 TEST(GpuVmService, ExplicitInvalidationRevokesTheAccessSnapshot) {
@@ -995,7 +1363,7 @@ TEST(GpuVmService, ExplicitInvalidationRevokesTheAccessSnapshot) {
   EXPECT_TRUE(refreshed->is_current());
   EXPECT_NE(old_access->cache_namespace(), refreshed->cache_namespace());
   std::array<std::byte, 1> value{std::byte{0x5a}};
-  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Unavailable);
+  EXPECT_EQ(old_access->read(0, value), VmAccessOutcome::Revoked);
   EXPECT_EQ(value[0], std::byte{0x5a});
   EXPECT_EQ(refreshed->read(0, value), VmAccessOutcome::Complete);
   EXPECT_EQ(value[0], std::byte{0x11});
@@ -1018,6 +1386,93 @@ TEST(GpuVmService, PolicyCacheDoesNotRetainSnapshotBacking) {
   EXPECT_FALSE(weak_backing.expired());
   snapshot.reset();
   EXPECT_TRUE(weak_backing.expired());
+}
+
+TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
+  class PagePolicy final : public AddressSpaceTranslator {
+  public:
+    VmTranslationResult translate(uint64_t, std::size_t, VmAccessKind) const override { return {}; }
+
+    VmMtypeSnapshot snapshot_mtype(uint64_t address) const override {
+      ++queries;
+      return {.mtype = mtype,
+              .begin = address & ~uint64_t{4095},
+              .size = 4096,
+              .mutation_epoch = epoch,
+              .captured_epoch = epoch->load()};
+    }
+
+    std::shared_ptr<std::atomic<uint64_t>> epoch = std::make_shared<std::atomic<uint64_t>>(0);
+    Mtype mtype = Mtype::RW;
+    mutable uint32_t queries = 0;
+  };
+
+  GpuVm vm;
+  auto policy = std::make_shared<PagePolicy>();
+  auto backing = std::make_shared<ByteAddressSpace>(0);
+  const auto handle = vm.register_translated(77, policy, backing);
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  VmMtypeCache cache;
+  cache.clear();
+  cache.clear(); // Clearing an already-empty table is idempotent.
+  for (uint32_t repeat = 0; repeat < 3; ++repeat)
+    for (uint64_t page = 0; page < 8; ++page)
+      EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::RW);
+  EXPECT_EQ(policy->queries, 8u);
+
+  {
+    VmMtypeCache copied(cache);
+    VmMtypeCache assigned;
+    assigned = copied;
+    VmMtypeCache moved(std::move(assigned));
+    EXPECT_FALSE(access->cached_private_uc_hint(0, assigned));
+    EXPECT_EQ(access->query_mtype(0, moved), Mtype::RW);
+    EXPECT_EQ(policy->queries, 8u);
+    // Clearing/refilling the copy cannot overwrite another cache's entries.
+    policy->mtype = Mtype::CC;
+    moved.clear();
+    EXPECT_EQ(access->query_mtype(0, moved), Mtype::CC);
+    EXPECT_EQ(access->query_mtype(0, cache), Mtype::RW);
+    EXPECT_EQ(access->query_mtype(0, copied), Mtype::RW);
+    EXPECT_EQ(policy->queries, 9u);
+  }
+
+  policy->epoch->fetch_add(1);
+  policy->mtype = Mtype::UC;
+  for (uint64_t page = 0; page < 8; ++page)
+    EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::UC);
+  EXPECT_EQ(policy->queries, 17u);
+
+  // Explicit clearing must release every retained token and force fresh policy
+  // queries even when the binding and mutation epoch themselves do not change.
+  cache.clear();
+  cache.clear(); // Clearing an already-empty table is idempotent.
+  EXPECT_EQ(policy->epoch.use_count(), 1);
+  policy->mtype = Mtype::CC;
+  for (uint64_t page = 0; page < 8; ++page)
+    EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::CC);
+  EXPECT_EQ(policy->queries, 25u);
+
+  // A different VM generation may reuse the same epoch token. Entries from
+  // every page must be invalidated even when the token itself is unchanged.
+  auto replacement = std::make_shared<PagePolicy>();
+  replacement->epoch = policy->epoch;
+  ASSERT_TRUE(vm.replace_translated(handle, replacement, backing));
+  auto new_access = vm.snapshot(handle);
+  ASSERT_TRUE(new_access);
+  for (uint64_t page = 0; page < 8; ++page) {
+    EXPECT_FALSE(access->query_mtype(page * 4096, cache));
+    EXPECT_EQ(new_access->query_mtype(page * 4096, cache), Mtype::RW);
+  }
+  EXPECT_EQ(replacement->queries, 8u);
+
+  // An expired generation still owns cache entries until they are cleared.
+  ASSERT_TRUE(vm.unregister_address_space(handle));
+  access.reset();
+  new_access.reset();
+  cache.clear();
+  EXPECT_EQ(policy->epoch.use_count(), 2);
 }
 
 TEST(GpuVmService, GenerationsShareFaultReporterWithoutCopyingItsTarget) {
@@ -1175,7 +1630,7 @@ TEST(GpuVmService, ConcurrentSnapshotsPreserveRootEpochAndRetirement) {
           if (outcome == VmAccessOutcome::Complete)
             EXPECT_EQ(value[0], std::byte(access->info().translation_epoch & 255));
           else
-            EXPECT_EQ(outcome, VmAccessOutcome::Unavailable);
+            EXPECT_EQ(outcome, VmAccessOutcome::Revoked);
         }
         EXPECT_EQ(gpu_vm.find_vmid(7), handle);
         EXPECT_TRUE(gpu_vm.lookup(handle)->ready);
@@ -1204,7 +1659,7 @@ TEST(GpuVmService, ConcurrentSnapshotsPreserveRootEpochAndRetirement) {
   for (const auto &access : pinned) {
     ASSERT_TRUE(access);
     std::array<std::byte, 1> value{std::byte{0xff}};
-    EXPECT_EQ(access->read(0, value), VmAccessOutcome::Unavailable);
+    EXPECT_EQ(access->read(0, value), VmAccessOutcome::Revoked);
     EXPECT_EQ(value[0], std::byte{0xff});
   }
 }
@@ -1508,7 +1963,7 @@ TEST(GpuVmService, FailedSecondAqlBindingCreationLeavesTheOriginalQueueUsable) {
   AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
   const std::shared_ptr<QueueBindingFactory> binding_factory =
-      make_aql_queue_binding_factory(command_processor);
+      make_compute_queue_binding_factory(command_processor);
   const QueueRegistrationRequest request = queue_request(address_space, binding_factory, 1);
 
   const QueueHandle original = queues.register_queue(request);
@@ -1533,7 +1988,7 @@ TEST(GpuVmService, AqlBindingFactoryRejectsInvalidRingLayoutsBeforeRegistration)
   CommandProcessor command_processor("cp");
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   const std::shared_ptr<QueueBindingFactory> binding_factory =
-      make_aql_queue_binding_factory(command_processor);
+      make_compute_queue_binding_factory(command_processor);
   const QueueRingLayout valid = queue_request(address_space, binding_factory, 1).ring;
 
   std::array<QueueRingLayout, 9> invalid{};
@@ -1569,7 +2024,7 @@ TEST(GpuVmService, ExplicitDoorbellAqlBindingPreservesKfdQueueAbi) {
   command_processor.set_gpu_vm(&gpu_vm);
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   QueueRegistrationRequest request =
-      queue_request(address_space, make_aql_queue_binding_factory(command_processor), 1);
+      queue_request(address_space, make_compute_queue_binding_factory(command_processor), 1);
   request.doorbell = {.mode = QueueDoorbellMode::Explicit, .offset = 0x40};
   request.abi = QueueAbi::KfdAql;
 
@@ -1587,15 +2042,15 @@ TEST(CommandProcessorQueueRegistration, RejectsInvalidAqlRingLayoutsAtDirectBoun
   CommandProcessor command_processor("cp");
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
-  AqlQueueConfig valid{.address_space = address_space,
-                       .process_id = 7,
-                       .queue_id = 1,
-                       .ring_base_va = 0x100,
-                       .ring_size = 64,
-                       .read_ptr_va = 0x80,
-                       .write_ptr_va = 0x88};
+  ComputeQueueConfig valid{.address_space = address_space,
+                           .process_id = 7,
+                           .queue_id = 1,
+                           .ring_base_va = 0x100,
+                           .ring_size = 64,
+                           .read_ptr_va = 0x80,
+                           .write_ptr_va = 0x88};
 
-  std::array<AqlQueueConfig, 10> invalid{};
+  std::array<ComputeQueueConfig, 10> invalid{};
   invalid.fill(valid);
   invalid[0].ring_base_va = 0;
   invalid[1].ring_base_va += 1;
@@ -1608,7 +2063,7 @@ TEST(CommandProcessorQueueRegistration, RejectsInvalidAqlRingLayoutsAtDirectBoun
   invalid[8].write_ptr_va += 1;
   invalid[9].doorbell_mode = QueueDoorbellMode::VmPolled;
 
-  for (AqlQueueConfig &config : invalid)
+  for (ComputeQueueConfig &config : invalid)
     EXPECT_EQ(command_processor.register_queue(std::move(config)), 0u);
   EXPECT_EQ(command_processor.registered_queue_count_for_test(), 0u);
 
@@ -1624,13 +2079,13 @@ TEST(CommandProcessorQueueRegistration, RejectsInvalidAqlRingLayoutsAtDirectBoun
 }
 
 TEST(CommandProcessorQueueRegistration, RequiresAnAddressSpaceAndUsesTheConfiguredInternalOne) {
-  AqlQueueConfig queue{.address_space = {},
-                       .process_id = 0,
-                       .queue_id = 1,
-                       .ring_base_va = 0x100,
-                       .ring_size = 64,
-                       .read_ptr_va = 0x80,
-                       .write_ptr_va = 0x88};
+  ComputeQueueConfig queue{.address_space = {},
+                           .process_id = 0,
+                           .queue_id = 1,
+                           .ring_base_va = 0x100,
+                           .ring_size = 64,
+                           .read_ptr_va = 0x80,
+                           .write_ptr_va = 0x88};
   CommandProcessor unbound("unbound");
   EXPECT_EQ(unbound.register_queue(queue), 0u);
 
@@ -1739,7 +2194,7 @@ TEST(GpuVmService, AqlReconfigureRejectsInvalidRingGeometry) {
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
   const std::shared_ptr<QueueBindingFactory> binding_factory =
-      make_aql_queue_binding_factory(command_processor);
+      make_compute_queue_binding_factory(command_processor);
   const QueueHandle queue = queues.register_queue(queue_request(address_space, binding_factory, 1));
   ASSERT_TRUE(queue);
 
@@ -1850,7 +2305,7 @@ TEST(GpuVmService, StaleAqlBindingCannotChangeOrRemoveReusedQueueIdentity) {
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
   const std::shared_ptr<QueueBindingFactory> binding_factory =
-      make_aql_queue_binding_factory(command_processor);
+      make_compute_queue_binding_factory(command_processor);
   const QueueRegistrationRequest request = queue_request(address_space, binding_factory, 1);
 
   QueueBindingCreateResult stale = binding_factory->create_binding(request);
@@ -2018,7 +2473,7 @@ TEST(CommandProcessorQueueRegistration, FailedFanoutRollsBackOnlyNewReplicas) {
   rejecting_peer.set_gpu_vm(&gpu_vm);
   owner.set_xcd_topology(0, {&owner, &first_peer, &rejecting_peer});
 
-  AqlQueueConfig existing{};
+  ComputeQueueConfig existing{};
   existing.address_space = address_space;
   existing.process_id = 7;
   existing.queue_id = 11;
@@ -2028,7 +2483,7 @@ TEST(CommandProcessorQueueRegistration, FailedFanoutRollsBackOnlyNewReplicas) {
   existing.write_ptr_va = 0x88;
   rejecting_peer.register_queue(existing);
 
-  AqlQueueConfig fanout = existing;
+  ComputeQueueConfig fanout = existing;
   fanout.xcd_fanout = true;
   EXPECT_EQ(owner.register_queue(fanout), 0u);
 

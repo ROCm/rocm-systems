@@ -8,7 +8,7 @@
 /// Every other fan-out regression registers an AqlQueue straight against a
 /// command processor: vmid 0, no process page table, and a kernel that touches
 /// no private memory. This brings the driver up instead, creates a compute queue
-/// through CREATE_QUEUE -- the path that sets AqlQueueConfig::xcd_fanout -- and
+/// through CREATE_QUEUE -- the path that sets ComputeQueueConfig::xcd_fanout -- and
 /// dispatches a kernel that really does spill, behind a real process page table.
 ///
 /// What that reaches, and what it does not: the scratch *addressing* contract is
@@ -26,6 +26,7 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
@@ -41,7 +42,6 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/amd_hsa_queue.h"
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
@@ -273,7 +273,7 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
 
   // The premise of the whole test: without a private segment the dispatch never
   // reaches the scratch path at all.
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   std::memcpy(&kd, reinterpret_cast<const void *>(kernel_object), sizeof(kd));
   ASSERT_GT(kd.private_segment_fixed_size, 0u)
