@@ -51,14 +51,7 @@ extern struct ncclIbvSymbols ibvSymbols;
 namespace {
 
 using RcclUnitTesting::CaptureLog;
-
-bool Has(const std::string& log, const char* needle) { return log.find(needle) != std::string::npos; }
-
-// Each comm is ~1 MB; keep it off the stack. Value-initialised, like the calloc production uses.
-template <typename Comm>
-std::unique_ptr<Comm> NewComm() {
-  return std::unique_ptr<Comm>(new Comm());
-}
+using RcclUnitTesting::LogHas;
 
 class NetIbCastSchedulerMicrotest : public ::testing::Test {
  protected:
@@ -74,6 +67,11 @@ class NetIbCastSchedulerMicrotest : public ::testing::Test {
     IbCastQpSchedProxyPrevMsgSz = 0;
     if (IbCastQpSchedLogStream) fclose(IbCastQpSchedLogStream);
     IbCastQpSchedLogStream = nullptr;
+    free(logText_);
+    for (auto& dev : IbCastDevs) {
+      dev.devName[0] = '\0';
+      dev.speed = 0;
+    }
     ncclDebugMask = 0;
     ncclDebugLevelMask = 0;
   }
@@ -96,6 +94,8 @@ class NetIbCastSchedulerMicrotest : public ::testing::Test {
   }
 
   std::map<std::string, int64_t> params_;
+  char* logText_ = nullptr;  // backs an open_memstream log stream
+  size_t logLen_ = 0;
   ScopedHook<int64_t(const char*, int64_t)> loadParam_{g_loadParam,
                                                        [this](const char* env, int64_t d) { return Param(env, d); }};
 };
@@ -115,7 +115,7 @@ TEST_F(NetIbCastSchedulerMicrotest, UseQpSched_ForcedOnWithByOrder_WarnsButStays
   bool on = false;
   const std::string log = CaptureLog([&] { on = rcclUseIbCastQpSched(); });
   EXPECT_TRUE(on);
-  EXPECT_TRUE(Has(log, "unsupported combination")) << log;
+  EXPECT_TRUE(LogHas(log, "unsupported combination")) << log;
 
   params_["RCCL_IB_QP_SCHED_ENABLE"] = 0;
   EXPECT_TRUE(CaptureLog([&] { on = rcclUseIbCastQpSched(); }).empty());
@@ -128,7 +128,7 @@ TEST_F(NetIbCastSchedulerMicrotest, UseQpSched_ByOrderByDefault_DisablesWithAWar
   bool on = true;
   const std::string log = CaptureLog([&] { on = rcclUseIbCastQpSched(); });
   EXPECT_FALSE(on);
-  EXPECT_TRUE(Has(log, "disabling the QP scheduler, split-data and WRR")) << log;
+  EXPECT_TRUE(LogHas(log, "disabling the QP scheduler, split-data and WRR")) << log;
 }
 
 TEST_F(NetIbCastSchedulerMicrotest, UseQpSched_NetIbCastForcesItOnAinicCaseInsensitively) {
@@ -279,7 +279,7 @@ TEST_F(NetIbCastSchedulerLogMicrotest, InitParms_LogPathUnwritable_DisablesLoggi
   EXPECT_FALSE(p.logEnable);
   EXPECT_TRUE(p.enable);
   EXPECT_EQ(IbCastQpSchedLogStream, nullptr);
-  EXPECT_TRUE(Has(log, "fopen failed")) << log;
+  EXPECT_TRUE(LogHas(log, "fopen failed")) << log;
 }
 
 TEST_F(NetIbCastSchedulerLogMicrotest, InitParms_FileNameAllocationFails_ReturnsInternalError) {
@@ -289,15 +289,13 @@ TEST_F(NetIbCastSchedulerLogMicrotest, InitParms_FileNameAllocationFails_Returns
   const std::string log = CaptureLog([&] { p = Init(ncclInternalError); });
   EXPECT_EQ(calloc.calls, 1);
   EXPECT_FALSE(p.logEnable);
-  EXPECT_TRUE(Has(log, "calloc failed")) << log;
+  EXPECT_TRUE(LogHas(log, "calloc failed")) << log;
 }
 
 TEST_F(NetIbCastSchedulerMicrotest, LogSched_WritesOneLinePerQp) {
-  char* buf = nullptr;
-  size_t len = 0;
-  IbCastQpSchedLogStream = open_memstream(&buf, &len);
+  IbCastQpSchedLogStream = open_memstream(&logText_, &logLen_);
   ASSERT_NE(IbCastQpSchedLogStream, nullptr);
-  auto comm = NewComm<ncclIbSendComm>();
+  auto comm = std::make_unique<ncclIbSendComm>();
   comm->base.nqps = 2;
   comm->base.vProps.ndevs = 1;
   comm->devs[0].base.ibDevN = 3;
@@ -306,19 +304,15 @@ TEST_F(NetIbCastSchedulerMicrotest, LogSched_WritesOneLinePerQp) {
   comm->base.qpTxStats[1].rtt = 1500.0;
   IbCastLogSched(comm.get());
   fflush(IbCastQpSchedLogStream);
-  const std::string out(buf, len);
+  const std::string out(logText_, logLen_);
   char head[64];
   snprintf(head, sizeof(head), "comm %p: num qp's 2 ndevs 1\n", (void*)comm.get());
   EXPECT_EQ(out.rfind(head, 0), 0u) << out;
-  EXPECT_TRUE(Has(out, "  qp[01]: dev[0]=mlx5_3 (ibDev 3): minW=0.2500 curW=0.5000 maxW=0.7500 lat=1.50us\n")) << out;
-  fclose(IbCastQpSchedLogStream);
-  IbCastQpSchedLogStream = nullptr;
-  free(buf);
-  IbCastDevs[3].devName[0] = '\0';
+  EXPECT_TRUE(LogHas(out, "  qp[01]: dev[0]=mlx5_3 (ibDev 3): minW=0.2500 curW=0.5000 maxW=0.7500 lat=1.50us\n")) << out;
 }
 
 TEST_F(NetIbCastSchedulerMicrotest, UpdateSchedParmsTry_ByOrder_LeavesTheCommAlone) {
-  auto comm = NewComm<ncclIbSendComm>();
+  auto comm = std::make_unique<ncclIbSendComm>();
   comm->base.recvMatchingScheme = BY_ORDER;
   castGlobalQpSchedParms.splitDataMin = 123;
   IbCastUpdateSchedParmsTry(&comm->base, 1, 64);
@@ -327,7 +321,7 @@ TEST_F(NetIbCastSchedulerMicrotest, UpdateSchedParmsTry_ByOrder_LeavesTheCommAlo
 }
 
 TEST_F(NetIbCastSchedulerMicrotest, UpdateSchedParmsTry_FirstCall_CopiesTheGlobalParmsOnce) {
-  auto comm = NewComm<ncclIbSendComm>();
+  auto comm = std::make_unique<ncclIbSendComm>();
   castGlobalQpSchedParms.splitDataMin = 123;
   IbCastUpdateSchedParmsTry(&comm->base, 1, 64);
   EXPECT_TRUE(comm->base.schedParmsInit);
@@ -338,7 +332,7 @@ TEST_F(NetIbCastSchedulerMicrotest, UpdateSchedParmsTry_FirstCall_CopiesTheGloba
 }
 
 TEST_F(NetIbCastSchedulerMicrotest, UpdateSchedParmsTry_NewEpoch_AdoptsTheStagedParmsOnce) {
-  auto comm = NewComm<ncclIbSendComm>();
+  auto comm = std::make_unique<ncclIbSendComm>();
   comm->base.resetRttDone = true;
   stagedSchedParms.prodEpoch = 2;
   stagedSchedParms.collType = ncclFuncAllReduce;
@@ -352,7 +346,7 @@ TEST_F(NetIbCastSchedulerMicrotest, UpdateSchedParmsTry_NewEpoch_AdoptsTheStaged
   EXPECT_FALSE(comm->base.resetRttDone);
   EXPECT_EQ(IbCastQpSchedProxyPrevCollType, ncclFuncAllReduce);
   EXPECT_EQ(IbCastQpSchedProxyPrevMsgSz, (size_t)1 << 20);
-  EXPECT_TRUE(Has(log, "CollType = All_Reduce  MsgSz = 1048576  ChunkSz = 4096  NumChunks = 2")) << log;
+  EXPECT_TRUE(LogHas(log, "CollType = All_Reduce  MsgSz = 1048576  ChunkSz = 4096  NumChunks = 2")) << log;
 
   stagedSchedParms.parms.splitDataMin = 888;
   comm->base.resetRttDone = true;
@@ -364,8 +358,8 @@ TEST_F(NetIbCastSchedulerMicrotest, UpdateSchedParmsTry_NewEpoch_AdoptsTheStaged
 
 // A second comm adopting the same epoch sees no coll/size change, so it adopts silently.
 TEST_F(NetIbCastSchedulerMicrotest, UpdateSchedParmsTry_UnchangedCollAndSize_AdoptsWithoutLogging) {
-  auto a = NewComm<ncclIbSendComm>();
-  auto b = NewComm<ncclIbRecvComm>();
+  auto a = std::make_unique<ncclIbSendComm>();
+  auto b = std::make_unique<ncclIbRecvComm>();
   stagedSchedParms.prodEpoch = 1;
   stagedSchedParms.collType = ncclFuncBroadcast;
   stagedSchedParms.msgSz = 8;
@@ -386,13 +380,13 @@ class NetIbCastSchedulerCollNameMicrotest : public NetIbCastSchedulerMicrotest,
                                             public ::testing::WithParamInterface<CollName> {};
 
 TEST_P(NetIbCastSchedulerCollNameMicrotest, UpdateSchedParmsTry_LogsTheCollectiveName) {
-  auto comm = NewComm<ncclIbSendComm>();
+  auto comm = std::make_unique<ncclIbSendComm>();
   stagedSchedParms.prodEpoch = 1;
   stagedSchedParms.collType = GetParam().coll;
   stagedSchedParms.msgSz = 64;
   LogInfo();
   const std::string log = CaptureLog([&] { IbCastUpdateSchedParmsTry(&comm->base, 1, 64); });
-  EXPECT_TRUE(Has(log, (std::string("CollType = ") + GetParam().text + "  MsgSz = 64").c_str())) << log;
+  EXPECT_TRUE(LogHas(log, (std::string("CollType = ") + GetParam().text + "  MsgSz = 64").c_str())) << log;
 }
 
 INSTANTIATE_TEST_SUITE_P(Colls, NetIbCastSchedulerCollNameMicrotest,
@@ -405,7 +399,7 @@ INSTANTIATE_TEST_SUITE_P(Colls, NetIbCastSchedulerCollNameMicrotest,
 class NetIbCastSchedulerTxMicrotest : public NetIbCastSchedulerMicrotest {
  protected:
   void SetUp() override {
-    comm_ = NewComm<ncclIbSendComm>();
+    comm_ = std::make_unique<ncclIbSendComm>();
     comm_->base.nqps = 2;
   }
   void Rtts(double a, double b, uint64_t minSampleOfA) {
@@ -489,10 +483,6 @@ class NetIbCastSchedulerTxStatsMicrotest : public NetIbCastSchedulerTxMicrotest 
     remap_.qpIndex = 1;
     remap_.tx.bytes = 125;
     remap_.tx.startTimeNs = 1000;
-  }
-  void TearDown() override {
-    IbCastDevs[5].speed = 0;
-    NetIbCastSchedulerTxMicrotest::TearDown();
   }
   void SampleAt(uint64_t nowNs) {
     ScopedHook clock(g_clockGettime, [nowNs](clockid_t clk, timespec* ts) {
@@ -669,7 +659,7 @@ TEST_F(NetIbCastSchedulerTxMicrotest, Remap_HandsOutFreeSlotsUntilExhausted) {
   const std::string log = CaptureLog([&] { res = IbCastQpSchedGetRemap(&base(), 1, 0, &none); });
   EXPECT_EQ(res, ncclInternalError);
   EXPECT_EQ(none, nullptr);
-  EXPECT_TRUE(Has(log, "unable to allocate remap buffer")) << log;
+  EXPECT_TRUE(LogHas(log, "unable to allocate remap buffer")) << log;
 
   ASSERT_EQ(IbCastQpSchedFreeRemap(&base().remapWrId[5]), ncclSuccess);
   ASSERT_EQ(IbCastQpSchedGetRemap(&base(), 9, 1, &none), ncclSuccess);
@@ -844,7 +834,6 @@ TEST_F(NetIbCastSchedulerTxMicrotest, ResiliencyInspect_NeedsAContextAndCopiesIt
   res->ndevs = NCCL_IB_MAX_DEVS_PER_NIC + 2;
   ASSERT_EQ(ncclIbCastGetResiliencyState(comm_.get(), &out), ncclSuccess);
   EXPECT_EQ(out.ndevs, NCCL_IB_MAX_DEVS_PER_NIC + 2);
-  base().resiliency = nullptr;
 }
 
 }  // namespace

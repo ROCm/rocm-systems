@@ -41,13 +41,7 @@ extern FILE* IbCastQpSchedLogStream;  // scheduler.cc, whose IbCastLogSched the 
 namespace {
 
 using RcclUnitTesting::CaptureLog;
-
-bool Has(const std::string& log, const char* needle) { return log.find(needle) != std::string::npos; }
-
-template <typename Comm>
-std::unique_ptr<Comm> NewComm() {
-  return std::unique_ptr<Comm>(new Comm());
-}
+using RcclUnitTesting::LogHas;
 
 constexpr uint64_t kCtsFifoAddr = 0x7000000;
 constexpr uint64_t kCmplsAddr = 0x9000000;
@@ -71,8 +65,8 @@ class NetIbCastP2pMicrotest : public ::testing::Test {
       mr_[d].rkey = kRkey + d;
       mh_.mrs[d] = &mr_[d];
     }
-    send_ = NewComm<ncclIbSendComm>();
-    recv_ = NewComm<ncclIbRecvComm>();
+    send_ = std::make_unique<ncclIbSendComm>();
+    recv_ = std::make_unique<ncclIbRecvComm>();
   }
 
   void TearDown() override {
@@ -85,8 +79,14 @@ class NetIbCastP2pMicrotest : public ::testing::Test {
     memset(rcclTelemetryDevs, 0, sizeof(rcclTelemetryDevs));
     IbCastQpSharingGlobalEnable = false;
     for (auto& e : g_IbCastCommTable) e = {};
-    for (int d = 0; d < 2; d++) IbCastDevs[d].stats.fatalErrorCount = 0;
+    for (int d = 0; d < 2; d++) {
+      IbCastDevs[d].stats.fatalErrorCount = 0;
+      IbCastDevs[d].speed = 0;
+    }
     IbCastArThreshold = arThreshold_;
+    if (IbCastQpSchedLogStream) fclose(IbCastQpSchedLogStream);
+    IbCastQpSchedLogStream = nullptr;
+    free(logText_);
   }
 
   // nqps QPs spread over ndevs fake devices: activeQps[ndevs * q + d] is the q-th QP of device d, as connect.cc
@@ -186,6 +186,8 @@ class NetIbCastP2pMicrotest : public ::testing::Test {
   std::unique_ptr<ncclIbSendComm> send_;
   std::unique_ptr<ncclIbRecvComm> recv_;
   const int64_t arThreshold_ = IbCastArThreshold;
+  char* logText_ = nullptr;  // backs an open_memstream log stream
+  size_t logLen_ = 0;
 };
 
 using NetIbCastP2pRequestMicrotest = NetIbCastP2pMicrotest;
@@ -217,7 +219,7 @@ TEST_F(NetIbCastP2pRequestMicrotest, GetRequest_AllSlotsBusy_Fails) {
   const std::string log = CaptureLog([&] { res = IbCastGetRequest(&send_->base, &req); });
   EXPECT_EQ(res, ncclInternalError);
   EXPECT_EQ(req, nullptr);
-  EXPECT_TRUE(Has(log, "unable to allocate requests")) << log;
+  EXPECT_TRUE(LogHas(log, "unable to allocate requests")) << log;
 }
 
 TEST_F(NetIbCastP2pRequestMicrotest, AddEvent_CountsPerDeviceAndRecordsItsBase) {
@@ -243,7 +245,7 @@ TEST_F(NetIbCastP2pRequestMicrotest, RetrieveAsIndex_RejectsIndexesPastTheTable)
   const std::string log =
       CaptureLog([&] { res = IbCastRequestRetrieveAsIndex(send_->base.reqs, NET_IB_MAX_REQUESTS, &req); });
   EXPECT_EQ(res, ncclInternalError);
-  EXPECT_TRUE(Has(log, "Invalid request index 256")) << log;
+  EXPECT_TRUE(LogHas(log, "Invalid request index 256")) << log;
 }
 
 TEST_F(NetIbCastP2pRequestMicrotest, CtsFifoAccessors_ReadBothLayouts) {
@@ -309,7 +311,7 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_CommNotReady_FailsWithoutARequest) {
   const std::string log = CaptureLog([&] { res = Isend(64, 1, &req); });
   EXPECT_EQ(res, ncclInternalError);
   EXPECT_EQ(req, nullptr);
-  EXPECT_TRUE(Has(log, "comm->base.ready == 0")) << log;
+  EXPECT_TRUE(LogHas(log, "comm->base.ready == 0")) << log;
 }
 
 TEST_F(NetIbCastP2pIsendMicrotest, Isend_FatalErrorSeen_FailsBeforeTouchingTheFifo) {
@@ -361,7 +363,7 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_CtsWithoutAddressOrKey_IsRejectedWithTh
     ncclResult_t res = ncclSuccess;
     const std::string log = CaptureLog([&] { res = Isend(64, 1, &req); });
     EXPECT_EQ(res, ncclInternalError) << which;
-    EXPECT_TRUE(Has(log, "peer 10.1.2.3<4242> posted incorrect receive info")) << log;
+    EXPECT_TRUE(LogHas(log, "peer 10.1.2.3<4242> posted incorrect receive info")) << log;
   }
   EXPECT_TRUE(verbs_[0].sends.empty());
 }
@@ -645,9 +647,7 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_PastTheUpdateDeadline_RefreshesWeightsA
   base.schedParms.logInterval = 1000000000;
   base.qpTxStats[0] = {50, 0, 1, 100.0};
   base.qpTxStats[1] = {50, 0, 1, 300.0};
-  char* text = nullptr;
-  size_t len = 0;
-  IbCastQpSchedLogStream = open_memstream(&text, &len);
+  IbCastQpSchedLogStream = open_memstream(&logText_, &logLen_);
   for (int round = 0; round < 2; round++) {
     base.nextQpTxSchedUpdateNs = round == 0 ? 0 : 1;
     base.nextSchedLogNs = round == 0 ? 0 : 1;
@@ -660,10 +660,8 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_PastTheUpdateDeadline_RefreshesWeightsA
   EXPECT_TRUE(base.qpTxSchedInit);
   EXPECT_DOUBLE_EQ(base.qpTxSched[0].weight, 5.0 / 6.0);
   fflush(IbCastQpSchedLogStream);
-  EXPECT_TRUE(Has(std::string(text, len), "num qp's 2 ndevs 1")) << std::string(text, len);
-  fclose(IbCastQpSchedLogStream);
-  IbCastQpSchedLogStream = nullptr;
-  free(text);
+  const std::string text(logText_, logLen_);
+  EXPECT_TRUE(LogHas(text, "num qp's 2 ndevs 1")) << text;
 }
 
 class NetIbCastP2pRetransmitMicrotest : public NetIbCastP2pMicrotest {
@@ -752,7 +750,7 @@ TEST_F(NetIbCastP2pIsendMicrotest, Isend_PostSendFails_ReturnsSystemErrorAndKeep
   ncclResult_t res = ncclSuccess;
   const std::string log = CaptureLog([&] { res = Isend(64, 1, &req); });
   EXPECT_EQ(res, ncclSystemError);
-  EXPECT_TRUE(Has(log, "ibv_post_send() failed")) << log;
+  EXPECT_TRUE(LogHas(log, "ibv_post_send() failed")) << log;
   EXPECT_EQ(send_->base.fifoHead, 0u);
 }
 
@@ -1219,7 +1217,6 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_SendWithSchedulerTiming_FeedsTheRttStats)
   EXPECT_EQ(done, 1);
   EXPECT_EQ(base.qpTxStats[0].numMeasurements, 1u);
   EXPECT_EQ(base.qpTxStats[1].numMeasurements, 1u);
-  IbCastDevs[0].speed = 0;
 }
 
 TEST_F(NetIbCastP2pTestMicrotest, Test_RecvByIndexSingleQp_WaitsForTheCtsThenReportsTheSize) {
@@ -1368,9 +1365,9 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_ErrorCompletionWithoutResiliency_FailsWit
   const std::string log = CaptureLog([&] { res = Test(req, &done, nullptr); });
   EXPECT_EQ(res, ncclRemoteError);
   EXPECT_EQ(done, 0);
-  EXPECT_TRUE(Has(log, "Got CQE with error")) << log;
-  EXPECT_TRUE(Has(log, "Got completion from peer 10.1.2.3<4242> with status=IBV_WC_RETRY_EXC_ERR(12)")) << log;
-  EXPECT_TRUE(Has(log, "vendor_err=129  localGid fe80::1 remoteGidsfe80::2 hca mlx5_0")) << log;
+  EXPECT_TRUE(LogHas(log, "Got CQE with error")) << log;
+  EXPECT_TRUE(LogHas(log, "Got completion from peer 10.1.2.3<4242> with status=IBV_WC_RETRY_EXC_ERR(12)")) << log;
+  EXPECT_TRUE(LogHas(log, "vendor_err=129  localGid fe80::1 remoteGidsfe80::2 hca mlx5_0")) << log;
   EXPECT_EQ(rcclTelemetryDevs[0].num_cq_errors, 1u);
 }
 
@@ -1381,8 +1378,8 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_ErrorCompletionOnInfiniband_LogsNoGids) {
   verbs_[0].Complete(0, IBV_WC_RECV_RDMA_WITH_IMM, 0, IBV_WC_WR_FLUSH_ERR);
   int done = 0;
   const std::string log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclRemoteError); });
-  EXPECT_TRUE(Has(log, "vendor_err=0  hca mlx5_0")) << log;
-  EXPECT_FALSE(Has(log, "localGid")) << log;
+  EXPECT_TRUE(LogHas(log, "vendor_err=0  hca mlx5_0")) << log;
+  EXPECT_FALSE(LogHas(log, "localGid")) << log;
 }
 
 // With resiliency every device is polled, errors go to the resiliency layer, and its progress runs first.
@@ -1424,7 +1421,6 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_Resiliency_HandsErrorsOverAndDrivesProgre
   });
   ASSERT_EQ(Test(req, &done, nullptr), ncclSuccess);
   EXPECT_EQ(done, 1);
-  recv_->base.resiliency = nullptr;
 }
 
 // Pins AICOMRCCL-3078; a fix flips this pin.
@@ -1439,7 +1435,6 @@ TEST_F(NetIbCastP2pTestMicrotest, RequestIsComplete_KnownBug_ResiliencyErrorRead
   EXPECT_EQ(Test(req, &done, nullptr), ncclSuccess);
   EXPECT_EQ(done, 1);
   EXPECT_EQ(Req(req)->type, NCCL_NET_IB_REQ_UNUSED);
-  recv_->base.resiliency = nullptr;
 }
 
 TEST_F(NetIbCastP2pTestMicrotest, Test_PollingDetails) {
@@ -1481,7 +1476,7 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_SenderGetsTheWrongRequestType_Fails) {
   verbs_[0].Complete(0, IBV_WC_RDMA_WRITE, 0);
   int done = 0;
   std::string log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclInternalError); });
-  EXPECT_TRUE(Has(log, "Sender expected a 'send' request but got 'Flush'")) << log;
+  EXPECT_TRUE(LogHas(log, "Sender expected a 'send' request but got 'Flush'")) << log;
 }
 
 TEST_F(NetIbCastP2pTestMicrotest, Test_SenderEventUnderflow_FailsUnlessResilient) {
@@ -1502,7 +1497,7 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_SenderEventUnderflow_FailsUnlessResilient
   Req(req)->events[0] = -1;
   verbs_[0].Complete(1, IBV_WC_RDMA_WRITE, 0);
   std::string log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclInternalError); });
-  EXPECT_TRUE(Has(log, "<= 0")) << log;
+  EXPECT_TRUE(LogHas(log, "devIndex=0, reqIdx=0 <= 0")) << log;
 
   auto res = std::make_unique<ncclIbResiliency>();
   send_->base.resiliency = res.get();
@@ -1513,7 +1508,6 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_SenderEventUnderflow_FailsUnlessResilient
   });
   ASSERT_EQ(Test(req, &done, nullptr), ncclSuccess);
   EXPECT_EQ(Req(req)->events[0], -2);
-  send_->base.resiliency = nullptr;
 }
 
 TEST_F(NetIbCastP2pTestMicrotest, Test_CompletionForAnEmptySlot_Fails) {
@@ -1524,7 +1518,7 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_CompletionForAnEmptySlot_Fails) {
   verbs_[0].Complete(9, IBV_WC_RDMA_WRITE, 0);
   int done = 0;
   std::string log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclInternalError); });
-  EXPECT_TRUE(Has(log, "could not retreive a request")) << log;
+  EXPECT_TRUE(LogHas(log, "could not retreive a request")) << log;
 }
 
 TEST_F(NetIbCastP2pTestMicrotest, Test_ReceiverRequestStates) {
@@ -1539,7 +1533,7 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_ReceiverRequestStates) {
   wc.imm_data = htobe32(7);
   recv_->recvReqs[7] = &recv_->base.reqs[50];
   std::string log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclInternalError); });
-  EXPECT_TRUE(Has(log, "Receiver expected a 'recv' request but got 'Unused'")) << log;
+  EXPECT_TRUE(LogHas(log, "Receiver expected a 'recv' request but got 'Unused'")) << log;
 
   auto res = std::make_unique<ncclIbResiliency>();
   recv_->base.resiliency = res.get();
@@ -1560,8 +1554,7 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_ReceiverRequestStates) {
 
   verbs_[0].Complete(1, IBV_WC_SEND, 0);
   log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclInternalError); });
-  EXPECT_TRUE(Has(log, "Unknown completion")) << log;
-  recv_->base.resiliency = nullptr;
+  EXPECT_TRUE(LogHas(log, "Unknown completion")) << log;
 }
 
 TEST_F(NetIbCastP2pTestMicrotest, Test_RecvWithSharing_UsesTheEncodedSlot) {
@@ -1583,7 +1576,7 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_SharedQp_RoutesCompletionsToTheOwningComm
   WireSend(1, 1, BY_ID);
   IbCastQpSharingGlobalEnable = true;
   send_->base.qpSharing.netIbCommId = 1;
-  auto other = NewComm<ncclIbSendComm>();
+  auto other = std::make_unique<ncclIbSendComm>();
   other->base.isSend = true;
   other->base.recvMatchingScheme = BY_ID;
   other->base.qpSharing.netIbCommId = 2;
@@ -1610,7 +1603,7 @@ TEST_F(NetIbCastP2pTestMicrotest, Test_SharedQp_RoutesCompletionsToTheOwningComm
   // Receive side: the immediate's commId routes BY_ID data to the owning recv comm.
   WireRecv(1, 1, BY_ID);
   recv_->base.qpSharing.netIbCommId = 3;
-  auto otherRecv = NewComm<ncclIbRecvComm>();
+  auto otherRecv = std::make_unique<ncclIbRecvComm>();
   otherRecv->base.recvMatchingScheme = BY_ID;
   g_IbCastCommTable[5] = {otherRecv.get(), false, true};
   ncclIbRequest& rreq = otherRecv->base.reqs[0];
@@ -1700,18 +1693,18 @@ TEST_F(NetIbCastP2pByOrderMicrotest, ByOrder_SendFailures) {
   int done = 0;
   verbs_[0].Complete(8, IBV_WC_RDMA_WRITE, 0);
   std::string log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclInternalError); });
-  EXPECT_TRUE(Has(log, "could not retreive a request")) << log;
+  EXPECT_TRUE(LogHas(log, "could not retreive a request")) << log;
 
   Req(req)->type = NCCL_NET_IB_REQ_RECV;
   verbs_[0].Complete(0, IBV_WC_RDMA_WRITE, 0);
   log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclInternalError); });
-  EXPECT_TRUE(Has(log, "Sender expected a 'send' request but got 'Recv'")) << log;
+  EXPECT_TRUE(LogHas(log, "Sender expected a 'send' request but got 'Recv'")) << log;
 
   Req(req)->type = NCCL_NET_IB_REQ_SEND;
   Req(req)->events[0] = -1;
   verbs_[0].Complete(0, IBV_WC_RDMA_WRITE, 0);
   log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclInternalError); });
-  EXPECT_TRUE(Has(log, "<= 0")) << log;
+  EXPECT_TRUE(LogHas(log, "devIndex=0, reqIdx=0 <= 0")) << log;
 
   auto res = std::make_unique<ncclIbResiliency>();
   send_->base.resiliency = res.get();
@@ -1722,7 +1715,6 @@ TEST_F(NetIbCastP2pByOrderMicrotest, ByOrder_SendFailures) {
   verbs_[0].Complete(0, IBV_WC_RDMA_WRITE, 0);
   ASSERT_EQ(Test(req, &done, nullptr), ncclSuccess);
   EXPECT_EQ(Req(req)->events[0], -2);
-  send_->base.resiliency = nullptr;
 }
 
 TEST_F(NetIbCastP2pByOrderMicrotest, ByOrder_RecvDataAndCts_CompleteTheRequest) {
@@ -1759,16 +1751,16 @@ TEST_F(NetIbCastP2pByOrderMicrotest, ByOrder_RecvFlushAndFailures) {
   const uint64_t idx = Req(req) - recv_->base.reqs;
   verbs_[0].Complete(NET_IB_MAX_REQUESTS, IBV_WC_RECV_RDMA_WITH_IMM, 0);
   std::string log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclInternalError); });
-  EXPECT_TRUE(Has(log, "Invalid request index")) << log;
+  EXPECT_TRUE(LogHas(log, "Invalid request index")) << log;
 
   verbs_[0].Complete(idx, IBV_WC_SEND, 0);
   log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclInternalError); });
-  EXPECT_TRUE(Has(log, "Unknown completion")) << log;
+  EXPECT_TRUE(LogHas(log, "Unknown completion")) << log;
 
   recv_->base.reqs[100].type = NCCL_NET_IB_REQ_UNUSED;
   verbs_[0].Complete(100, IBV_WC_RECV_RDMA_WITH_IMM, 0);
   log = CaptureLog([&] { EXPECT_EQ(Test(req, &done, nullptr), ncclInternalError); });
-  EXPECT_TRUE(Has(log, "Receiver expected a 'recv' request but got 'Unused'")) << log;
+  EXPECT_TRUE(LogHas(log, "Receiver expected a 'recv' request but got 'Unused'")) << log;
 
   // Resiliency tolerates a stale data completion: it only drains the counter.
   auto res = std::make_unique<ncclIbResiliency>();
@@ -1781,7 +1773,6 @@ TEST_F(NetIbCastP2pByOrderMicrotest, ByOrder_RecvFlushAndFailures) {
   verbs_[0].Complete(100, IBV_WC_RECV_RDMA_WITH_IMM, 0);
   ASSERT_EQ(Test(req, &done, nullptr), ncclSuccess);
   EXPECT_EQ(recv_->base.reqs[100].events[0], -1);
-  recv_->base.resiliency = nullptr;
 }
 
 TEST_F(NetIbCastP2pByOrderMicrotest, ByOrder_WrongScheme_IsRejected) {
@@ -1790,7 +1781,7 @@ TEST_F(NetIbCastP2pByOrderMicrotest, ByOrder_WrongScheme_IsRejected) {
   wc.opcode = IBV_WC_RDMA_WRITE;
   const std::string log =
       CaptureLog([&] { EXPECT_EQ(IbCastCompletionEventByOrder(&recv_->base, &wc, 0), ncclInternalError); });
-  EXPECT_TRUE(Has(log, "recvMatchingScheme not supported")) << log;
+  EXPECT_TRUE(LogHas(log, "recvMatchingScheme not supported")) << log;
 }
 
 class NetIbCastP2pFaultMicrotest : public NetIbCastP2pMicrotest {
@@ -1857,7 +1848,6 @@ TEST_F(NetIbCastP2pFaultMicrotest, CheckErrorFatal_OnlyFlushAndRetryExceededAreR
   EXPECT_FALSE(fatal);
   ASSERT_EQ(ncclIbCastFaultCheckErrorFatal(send_.get(), IBV_WC_REM_ACCESS_ERR, &fatal), ncclSuccess);
   EXPECT_TRUE(fatal);
-  send_->base.resiliency = nullptr;
 }
 
 // The ops bridges translate (comm, qpIdx) into the QP's context and qp_num and arm the real ops-fault shims.

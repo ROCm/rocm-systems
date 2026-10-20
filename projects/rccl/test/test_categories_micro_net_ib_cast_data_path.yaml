@@ -8,6 +8,7 @@ test_categories:
     test_patterns:
       - "NetIbCastP2p*"
       - "NetIbCastScheduler*"
+      - "Colls/NetIbCastSchedulerCollNameMicrotest.*"
       - "NetIbOpsFault*"
     exclude_windows:
       - "*"

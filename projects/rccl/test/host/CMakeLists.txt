@@ -107,6 +107,29 @@ foreach(_path_cc "${_rccl_src_root}/graph/topo.cc" "${CMAKE_CURRENT_LIST_DIR}/fa
 endforeach()
 rccl_assert_source_line("${_rccl_src_root}/transport/net_ib_cast/p2p.cc"
   "int cqMaxPollEvent = 4;" "net-ib-cast-p2p-test.cc: kPollBatch")
+# The net_ib_cast connect / qp_sharing fakes repeat these params; both copies must agree.
+foreach(_param
+    "NCCL_PARAM(IbCastTimeout, \"IB_TIMEOUT\", 20)"
+    "NCCL_PARAM(IbCastRetryCnt, \"IB_RETRY_CNT\", 7)"
+    "NCCL_PARAM(IbCastPkey, \"IB_PKEY\", 0)"
+    "NCCL_PARAM(IbCastQpsPerConn, \"IB_QPS_PER_CONNECTION\", 2)"
+    "NCCL_PARAM(IbCastUseInline, \"IB_USE_INLINE\", 0)"
+    "NCCL_PARAM(IbCastGdrFlushDisable, \"GDR_FLUSH_DISABLE\", 1)"
+    "NCCL_PARAM(IbCastSl, \"IB_SL\", -1)"
+    "NCCL_PARAM(IbCastTc, \"IB_TC\", -1)"
+    "RCCL_PARAM(IbCastUDMAPolicy, \"IB_UDMA_POLICY\", 0)")
+  rccl_assert_source_line("${_rccl_src_root}/transport/net_ib_cast/connect.cc"
+    "${_param}" "fakes/net_ib_cast_connect_fakes.cc")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_connect_fakes.cc"
+    "${_param}" "the connect.cc default")
+endforeach()
+# fakes/net_ib_cast_common_fakes.cc copies IbCastStatsCheckFatalCount's gate from common.cc.
+foreach(_common_cc "${_rccl_src_root}/transport/net_ib_cast/common.cc"
+    "${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_common_fakes.cc")
+  rccl_assert_source_line("${_common_cc}"
+    "if (ncclParamIbCastAsyncEvents() && COMPILER_ATOMIC_LOAD(&stat->fatalErrorCount, std::memory_order_relaxed)) {"
+    "fakes/net_ib_cast_common_fakes.cc: DefaultIbCastStatsCheckFatalCount")
+endforeach()
 unset(_rccl_src_root)
 
 # Define the per-target micro-test source lists shared by BOTH build paths.

@@ -23,7 +23,10 @@ using RcclUnitTesting::CaptureLog;
 
 class NetIbOpsFaultMicrotest : public ::testing::Test {
  protected:
-  void TearDown() override { ncclIbOpsFaultRemove(&scene_.ctx); }
+  void TearDown() override {
+    ncclIbOpsFaultRemove(&scene_.ctx);
+    ncclIbOpsFaultRemove(&other_.ctx);
+  }
 
   void Install() { ASSERT_EQ(ncclIbOpsFaultInstall(&scene_.ctx), ncclSuccess); }
 
@@ -33,6 +36,7 @@ class NetIbOpsFaultMicrotest : public ::testing::Test {
   uint32_t QpNum(int qp) const { return scene_.qps[qp].qp_num; }
 
   IbVerbsScene scene_;
+  IbVerbsScene other_{"mlx5_1"};
   ibv_send_wr wr_{};
   ibv_recv_wr rwr_{};
   ibv_wc wcs_[4]{};
@@ -176,18 +180,17 @@ TEST_F(NetIbOpsFaultMicrotest, PostRecv_AnyArmsEveryQpAndLeavesSendAlone) {
 // A shim reached through a context that is not registered has no real op to call.
 TEST_F(NetIbOpsFaultMicrotest, Shims_UnregisteredContext_FailInsteadOfCrashing) {
   Install();
-  IbVerbsScene other("mlx5_1");
-  other.ctx.ops = scene_.ctx.ops;
+  other_.ctx.ops = scene_.ctx.ops;
   ibv_send_wr* sbad = nullptr;
   ibv_recv_wr* rbad = nullptr;
-  EXPECT_EQ(other.ctx.ops.post_send(&other.qps[0], &wr_, &sbad), EFAULT);
+  EXPECT_EQ(other_.ctx.ops.post_send(&other_.qps[0], &wr_, &sbad), EFAULT);
   EXPECT_EQ(sbad, &wr_);
-  EXPECT_EQ(other.ctx.ops.post_send(&other.qps[0], &wr_, nullptr), EFAULT);
-  EXPECT_EQ(other.ctx.ops.post_recv(&other.qps[0], &rwr_, &rbad), EFAULT);
+  EXPECT_EQ(other_.ctx.ops.post_send(&other_.qps[0], &wr_, nullptr), EFAULT);
+  EXPECT_EQ(other_.ctx.ops.post_recv(&other_.qps[0], &rwr_, &rbad), EFAULT);
   EXPECT_EQ(rbad, &rwr_);
-  EXPECT_EQ(other.ctx.ops.post_recv(&other.qps[0], &rwr_, nullptr), EFAULT);
-  EXPECT_EQ(other.ctx.ops.poll_cq(&other.cq, 4, wcs_), -1);
-  EXPECT_TRUE(scene_.sends.empty() && other.sends.empty() && scene_.recvs.empty() && other.recvs.empty());
+  EXPECT_EQ(other_.ctx.ops.post_recv(&other_.qps[0], &rwr_, nullptr), EFAULT);
+  EXPECT_EQ(other_.ctx.ops.poll_cq(&other_.cq, 4, wcs_), -1);
+  EXPECT_TRUE(scene_.sends.empty() && other_.sends.empty() && scene_.recvs.empty() && other_.recvs.empty());
 }
 
 TEST_F(NetIbOpsFaultMicrotest, PollCq_Unarmed_ReturnsTheRealCompletions) {
@@ -300,17 +303,16 @@ TEST_F(NetIbOpsFaultMicrotest, Clear_DisarmsEveryFaultButKeepsTheShims) {
 
 // Contexts are registered independently: arming or removing one leaves the other's faults in place.
 TEST_F(NetIbOpsFaultMicrotest, Registry_IsKeyedPerContext) {
-  IbVerbsScene other("mlx5_1");
   Install();
-  ASSERT_EQ(ncclIbOpsFaultInstall(&other.ctx), ncclSuccess);
-  ASSERT_EQ(ncclIbOpsFaultArmPostSend(&other.ctx, NCCL_IB_OPS_FAULT_QP_ANY, EIO), ncclSuccess);
+  ASSERT_EQ(ncclIbOpsFaultInstall(&other_.ctx), ncclSuccess);
+  ASSERT_EQ(ncclIbOpsFaultArmPostSend(&other_.ctx, NCCL_IB_OPS_FAULT_QP_ANY, EIO), ncclSuccess);
   ibv_send_wr* bad = nullptr;
   EXPECT_EQ(Send(0, &bad), 0);
-  EXPECT_EQ(other.ctx.ops.post_send(&other.qps[0], &wr_, &bad), EIO);
+  EXPECT_EQ(other_.ctx.ops.post_send(&other_.qps[0], &wr_, &bad), EIO);
   ASSERT_EQ(ncclIbOpsFaultRemove(&scene_.ctx), ncclSuccess);
-  EXPECT_EQ(other.ctx.ops.post_send(&other.qps[0], &wr_, &bad), EIO);
-  ASSERT_EQ(ncclIbOpsFaultRemove(&other.ctx), ncclSuccess);
-  EXPECT_EQ(other.ctx.ops.post_send(&other.qps[0], &wr_, &bad), 0);
+  EXPECT_EQ(other_.ctx.ops.post_send(&other_.qps[0], &wr_, &bad), EIO);
+  ASSERT_EQ(ncclIbOpsFaultRemove(&other_.ctx), ncclSuccess);
+  EXPECT_EQ(other_.ctx.ops.post_send(&other_.qps[0], &wr_, &bad), 0);
 }
 
 }  // namespace
