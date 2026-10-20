@@ -70,6 +70,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed JAX and PyTorch PC sampling finalization failures when GPU code object addresses are reused.
 
+* Correct the L2 cache hit rate over all channels (table 18.1) on MI100 and MI200.
+
 ### Upcoming changes
 
 ### Known issues
