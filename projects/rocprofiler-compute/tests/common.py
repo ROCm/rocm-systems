@@ -279,8 +279,9 @@ def write_text_file(path: Path, text: str) -> Path:
 def write_metric_library_family(root: Path) -> dict[str, Path]:
     """Write a synthetic family: a base and a four-deep chain of compute.yaml files.
 
-    gfx_base defines three metrics; each child changes one thing: gfx_c1 a unit, gfx_c2
-    adds a metric, gfx_c3 removes one, gfx_c4 changes a formula and removes a field.
+    gfx_base defines three metrics; each child changes one thing: gfx_c1 a description,
+    gfx_c2 adds a metric, gfx_c3 removes one, gfx_c4 changes a formula and removes a
+    field.
 
     Returns:
         Each arch's file, keyed by arch.
@@ -307,7 +308,7 @@ compute.valu_util:
         "gfx_c1": """\
 inherit: ../gfx_base/compute.yaml
 compute.salu_util:
-  unit: Pct
+  description: How often the SALU was busy.
 """,
         "gfx_c2": """\
 inherit: ../gfx_c1/compute.yaml

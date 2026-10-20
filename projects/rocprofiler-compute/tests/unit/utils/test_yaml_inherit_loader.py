@@ -79,7 +79,9 @@ def test_four_deep_chain(tmp_path):
     ]
     assert "peak" not in document["compute.valu_util"]
     assert document["compute.valu_util"]["formula"].endswith("* 2)")
-    assert document["compute.salu_util"]["unit"] == "Pct"
+    assert (
+        document["compute.salu_util"]["description"] == "How often the SALU was busy."
+    )
 
 
 def test_each_chain_level_sees_only_its_ancestors(tmp_path):

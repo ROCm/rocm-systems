@@ -278,15 +278,23 @@ DISPLAY_VARIANTS["gfx1250"] = {
 }
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
-UNIT_VARIANTS = {
-    arch: _CDNA_UNIT_VARIANTS
-    for arch in ("gfx908", "gfx90a", "gfx940", "gfx941", "gfx942")
+UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942")}
+# gfx940 and gfx941 label integer ops in FLOPs.
+_GFX940_UNIT_VARIANTS = {
+    **_CDNA_UNIT_VARIANTS,
+    "11.3.1": ("IOPs (Total)", "(FLOPs + $normUnit)"),
+    "11.3.7": ("INT8 OPs", "(FLOPs + $normUnit)"),
 }
+UNIT_VARIANTS["gfx940"] = _GFX940_UNIT_VARIANTS
+UNIT_VARIANTS["gfx941"] = _GFX940_UNIT_VARIANTS
 UNIT_VARIANTS["gfx115x"] = {
-    "3.3.0": ("TCP Read Requests", "(Requests + $normUnit)"),
-    "3.3.1": ("TCP Write Requests", "(Requests + $normUnit)"),
     "3.4.0": ("LDS Req", "(Requests + $normUnit)"),
     "7.2.4": ("LDS Allocation", "Bytes"),
+    "9.2.0": ("Total Requests", "(Count + $normUnit)"),
+    "9.2.1": ("Read Requests", "(Count + $normUnit)"),
+    "9.2.2": ("Write Requests", "(Count + $normUnit)"),
+    "9.4.0": ("GL1 Read Requests", "(Count + $normUnit)"),
+    "9.4.2": ("GL1 Write Requests", "(Count + $normUnit)"),
 }
 UNIT_VARIANTS["gfx1250"] = {
     "2.1.17": ("Active WGPs", "WGPs per Cycle"),
@@ -328,13 +336,17 @@ def validate(metric_dir: Path, analysis_dir: Optional[Path] = None) -> list[str]
     With analysis_dir, also check each valid arch against its analysis configs.
     """
     errors: list[str] = []
+    valid_archs = []
     for arch in METRIC_LIBRARY_PARENT_ARCH:
         if not (metric_dir / arch).is_dir():
             continue
         arch_errors = validate_arch(metric_dir, arch)
+        if not arch_errors:
+            valid_archs.append(arch)
         if not arch_errors and analysis_dir is not None:
             arch_errors = equivalence_errors(metric_dir, analysis_dir, arch)
         errors.extend(arch_errors)
+    errors.extend(_name_unit_errors(metric_dir, valid_archs))
     errors.extend(
         f"[{path.name}] is not a known metric library arch"
         for path in sorted(metric_dir.iterdir())
@@ -600,6 +612,20 @@ def _shared_value_errors(
     ]
 
 
+def _name_unit_errors(metric_dir: Path, archs: list[str]) -> list[str]:
+    """Check that each metric id has one name and one unit on every arch (D8)."""
+    values = defaultdict(lambda: defaultdict(list))
+    for arch in archs:
+        for metric_id, metric in load_metric_library(metric_dir, arch).metrics.items():
+            values[metric_id][(metric["name"], metric["unit"])].append(arch)
+    return [
+        f"{metric_id}: one name and unit on every arch, not "
+        + "; ".join(f"{name!r} [{unit}] on {on}" for (name, unit), on in found.items())
+        for metric_id, found in sorted(values.items())
+        if len(found) > 1
+    ]
+
+
 def _arch_ceilings(arch: str) -> set[str]:
     """Return the ceilings the roofline benchmark measures on any device of arch."""
     return set().union(
@@ -722,9 +748,14 @@ def _unit_errors(
     for row, metric_id in zip(rows, metric_ids):
         if row.unit is None or metric_id is None:
             continue
-        label, unit = unit_variants.get(
-            row.legacy_id, (row.label, library.metrics[metric_id]["unit"])
-        )
+        metric_unit = library.metrics[metric_id]["unit"]
+        label, unit = unit_variants.get(row.legacy_id, (row.label, metric_unit))
+        if row.legacy_id in unit_variants and unit == metric_unit:
+            errors.append(
+                f"[{arch}] {row.legacy_id} {row.label}: the unit of {metric_id}; "
+                "remove it from UNIT_VARIANTS"
+            )
+            continue
         if _in_seconds(row):
             unit = SECONDS_SCALE_UNITS.get(unit, unit)
         if row.label != label:
