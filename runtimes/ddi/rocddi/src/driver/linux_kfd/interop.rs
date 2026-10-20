@@ -38,11 +38,35 @@ impl LinuxKfdDriver {
         descriptor: BorrowedFd<'_>,
     ) -> Result<Owned<KfdVirtualMemory>, Error> {
         self.ensure_open()?;
-        KfdVirtualMemory::import(descriptor.as_raw_fd(), self.allocator)
+        let kfd = self.kfd()?;
+        KfdVirtualMemory::import_with_kfd(descriptor.as_raw_fd(), &kfd)
     }
 
     pub(crate) fn export_virtual_memory(memory: &KfdVirtualMemory) -> Result<DmaBuf, Error> {
         memory.export_dma_buf()
+    }
+
+    pub(crate) fn fabric_virtual_memory_ready(memory: &KfdVirtualMemory) -> Result<bool, Error> {
+        memory.fabric_ready()
+    }
+
+    pub(crate) fn export_fabric_virtual_memory(
+        memory: &KfdVirtualMemory,
+    ) -> Result<[u8; 16], Error> {
+        memory.export_fabric_handle()
+    }
+
+    pub(crate) fn import_fabric_virtual_memory(
+        &self,
+        device: &DeviceState,
+        fabric: [u8; 16],
+    ) -> Result<Owned<KfdVirtualMemory>, Error> {
+        self.ensure_open()?;
+        device.vm.check()?;
+        let render = device.vm.render()?;
+        let dma_buf = drm::import_fabric_handle(render, fabric)
+            .map_err(|source| native_error("DRM UALink fabric import", source))?;
+        KfdVirtualMemory::import(dma_buf.as_raw_fd())
     }
 
     pub(crate) fn import_dma_buf(
@@ -206,12 +230,7 @@ impl LinuxKfdDriver {
         let event_page_handle = event_page
             .map(|page| page.signal_event_page_handle(&device.vm))
             .transpose()?;
-        KfdSignalEvent::create(
-            device.vm.kfd_owner(),
-            event_page_handle,
-            device.vm.allocator(),
-            page_offered,
-        )
+        KfdSignalEvent::create(device.vm.kfd_owner(), event_page_handle, page_offered)
     }
 
     pub(crate) fn destroy_kfd_signal_event(event: &mut KfdSignalEvent) -> Result<(), Error> {

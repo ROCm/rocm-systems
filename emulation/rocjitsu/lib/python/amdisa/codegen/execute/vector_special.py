@@ -10,8 +10,11 @@ saturating packs, arithmetic, lane permutations, and packed type conversion.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
+    apply_output,
+    output_policy_decl,
     vop3_src_mod,
     vop3_dst_mod,
 )
@@ -55,14 +58,6 @@ def _fp8_rne_encode_call(cvt_fn: str, value_expr: str, use_fp16_ovfl: bool) -> s
     if use_fp16_ovfl:
         return f'{cvt_fn}({value_expr}, wf.fp16_ovfl())'
     return f'{cvt_fn}({value_expr})'
-
-
-def _fp8_sr_encode_call(
-    cvt_fn: str, value_expr: str, seed_expr: str, use_fp16_ovfl: bool
-) -> str:
-    if use_fp16_ovfl:
-        return f'{cvt_fn}({value_expr}, {seed_expr}, wf.fp16_ovfl())'
-    return f'{cvt_fn}({value_expr}, {seed_expr})'
 
 
 def _shared_inst_operand(opnd: str) -> bool:
@@ -717,8 +712,8 @@ def gen_vector_mad_64_32(
     D.u64 = S0.u32 * S1.u32 + S2.u64 (unsigned)
 
     Sources S0 and S1 are 32-bit; the accumulator S2 and result D are
-    64-bit VGPR pairs. The unsigned SDST-encoded form also writes the per-lane
-    carry-out mask to SDST.
+    64-bit VGPR pairs. SDST holds unsigned carry-out or signed bit 64 of the
+    65-bit sum, independently of integer saturation.
     """
     writes_carry = len(dst) > 1
     L = []
@@ -739,10 +734,13 @@ def gen_vector_mad_64_32(
         )
         L.append('    uint64_t product = static_cast<uint64_t>(s0 * s1);')
         L.append('    uint64_t result = product + s2;')
-        if writes_carry or integer_clamp:
+        if integer_clamp:
             L.append('    bool overflow = amdgpu::signed_add_overflows(product, s2);')
         if writes_carry:
-            L.append('    if (overflow)')
+            # SDST is bit 64 of the signed 65-bit sum, independent of saturation.
+            L.append(
+                '    if (((product >> 63) ^ (s2 >> 63) ^ (result < product)) != 0)'
+            )
             L.append('      carry |= 1ULL << lane;')
         if integer_clamp:
             L.append('    if (inst_.clamp && overflow) {')
@@ -1015,10 +1013,8 @@ def _gen_division_result(
     L = ['  uint64_t exec = wf.exec();']
     if operation == 'fmas':
         L.append('  const uint64_t vcc = wf.vcc_mask();')
-    elif is_vop3:
-        L.append(
-            f'  const uint32_t omod = amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_{mode}(), wf.ieee_mode(), inst_.omod);'
-        )
+    if is_vop3:
+        L.append(output_policy_decl(dtype or 'f32'))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     for index, operand in enumerate(src):
@@ -1031,16 +1027,11 @@ def _gen_division_result(
     L.append(
         f'    {fp_type} result = div_{operation}(s0, s1, s2, {post_scale}wf.fp_round_mode_{mode}(), wf.fp_denorm_mode_{mode}());'
     )
-    if operation == 'fixup' and is_vop3:
-        L.append(
-            f'    result = div_apply_omod(result, wf.fp_round_mode_{mode}(), omod);'
-        )
-        L.append(
-            '    if (inst_.clamp) result = amdgpu::clamp_floating_result(result, wf);'
-        )
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).{write}({dst[0]}, lane, std::bit_cast<{bits}>(result));'
-    )
+    result = f'std::bit_cast<{bits}>(result)'
+    if is_vop3:
+        # Both scale the rounded result, then clamp (checked on gfx1201).
+        result = apply_output(dtype or 'f32', result)
+    L.append(f'    amdgpu::RegisterAccess(wf).{write}({dst[0]}, lane, {result});')
     L.append('  }')
     return '\n'.join(L)
 
@@ -1379,6 +1370,8 @@ def gen_vector_cvt_pk(
     """Generate pack/convert instructions."""
     L = []
     L.append('  uint64_t exec = wf.exec();')
+    if cls == 'vector_cvt_pknorm' and dtype == 'f16':
+        L.append(input_policy.policy_decl('f16'))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if cls == 'vector_cvt_pk_u8_f32':
@@ -1403,18 +1396,22 @@ def gen_vector_cvt_pk(
     elif cls == 'vector_cvt_pknorm':
         if dtype == 'f16':
             if is_vop3:
-                L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[0], opsel, 0)}));'
-                )
-                L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[1], opsel, 1)}));'
-                )
+                reads = [_read_vop3_true16_src(src[i], opsel, i) for i in range(2)]
             else:
+                reads = [
+                    f'amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane)'
+                    for i in range(2)
+                ]
+            abs_field = 'inst_.abs' if has_abs else '0u'
+            for i, read in enumerate(reads):
                 L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)));'
+                    f'    uint32_t s{i}_bits = amdgpu::input_denormal::prepare<amdgpu::fp_format::F16>('
+                    f'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
+                    f'static_cast<uint32_t>({read}), {i}, {abs_field}, inst_.neg), '
+                    f'{input_policy.NAME});'
                 )
                 L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)));'
+                    f'    float s{i} = util::f16_to_f32(static_cast<uint16_t>(s{i}_bits));'
                 )
         else:
             L.append(
@@ -1423,9 +1420,15 @@ def gen_vector_cvt_pk(
             L.append(
                 f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
             )
-        if is_vop3:
+        if is_vop3 and dtype != 'f16':
             L.extend(vop3_src_mod('s0', 0, has_abs))
             L.extend(vop3_src_mod('s1', 1, has_abs))
+        # Round to nearest even under every MODE.FP_ROUND setting. The ISA applies
+        # FP_ROUND to VALU float operations, and the packed NORM entries
+        # (V_CVT_PK_NORM_* and V_CVT_PKNORM_*) give no exception. gfx1100 and
+        # gfx1201 captures of V_CVT_PK_NORM_{I,U}16_{F16,F32} nevertheless do not
+        # change with FP_ROUND. CDNA1-5, RDNA1-2 and RDNA3.5 reuse this rounding
+        # without hardware verification.
         if op == 'i16':
             L.append('    auto cvt_i16 = [](float f) -> int16_t {')
             L.append('      if (std::isnan(f)) return 0;')
@@ -2329,17 +2332,6 @@ def _parse_scalef32_op(op: str):
         raise ValueError(f'cannot determine direction for {op}: {dst_fmt} vs {src_fmt}')
 
     return stochastic, mode, dst_fmt, src_fmt, direction
-
-
-def _read_as_f32(src_name: str, src_fmt: str) -> str:
-    """Return C++ expression to read a source value as float."""
-    if src_fmt == 'f32':
-        return f'std::bit_cast<float>(static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane({src_name}, lane)))'
-    elif src_fmt == 'f16':
-        return f'util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_name}, lane) & 0xFFFF))'
-    elif src_fmt == 'bf16':
-        return f'util::bf16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src_name}, lane) & 0xFFFF))'
-    raise ValueError(f'unsupported source format: {src_fmt}')
 
 
 def _write_as_fmt(dst_name: str, dst_fmt: str, val_expr: str) -> str:

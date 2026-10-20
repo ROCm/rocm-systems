@@ -11,11 +11,13 @@ pub(crate) mod interop;
 mod kernel_queue;
 pub(super) mod memory;
 mod operations;
+mod pc_sampling;
 mod queue;
 mod registered_host;
 pub(super) mod sys;
 mod sysfs;
 mod uapi;
+use crate::memory::storage::TryPush;
 use crate::os::linux::{
     errno, file as os_file, memory as os_memory, process_identity as os_process,
 };
@@ -24,30 +26,35 @@ mod vmem;
 use crate::device::gpu::kernel_queue::{
     KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
 };
-use crate::device::gpu::profiling::ClockCounters;
+use crate::device::gpu::profiling::{
+    ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet, PcSamplingIntervalUnit,
+    PcSamplingMethod, PcSamplingRequest,
+};
 use crate::device::gpu::queue::{QueuePriority, QueueRequest, QueueScratch, QueueTransport};
 use crate::driver::{
     AddressSpaceInfo, AllocationOperations, CachedInfo, Driver, EndpointSelector, GpuDriver,
+    GpuInstrumentationOperations, GpuKernelQueueOperations, GpuUserQueueOperations,
     KernelQueueResource, UserQueueResource, VirtualMemoryOperations,
 };
 use crate::error::error;
-use crate::host_storage::{Allocator, Owned, Shared};
 use crate::memory::interop::linux::{
     AisFileOperation, AisFileResult, DmaBuf, KfdIpcMemoryHandle, KfdSvmAccess, KfdSvmAttribute,
     KfdSvmLocation,
 };
+use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationDesc, AllocationLimits, DeviceAccess, HostMappingPolicy, HostRegistration,
-    MemoryKind, OwnedMemoryKind, VirtualAddressInfo, VirtualMemoryInfo,
+    MemoryKind, VirtualAddressInfo, VirtualMemoryInfo,
 };
 use crate::os::native_error;
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, GpuPresentation};
+use crate::topology::{Endpoint, EndpointDetails, EndpointDetailsKind};
 use crate::{Error, ErrorKind};
 pub(crate) use allocation::LinuxAllocation;
 pub(crate) use event::KfdSignalEvent;
 pub(crate) use kernel_queue::KfdKernelQueue;
 pub(crate) use memory::KfdEventSubscription;
+pub(crate) use pc_sampling::KfdPcSampling;
 pub(crate) use queue::KfdQueue;
 use std::fs::OpenOptions;
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
@@ -60,41 +67,48 @@ pub(crate) use vmem::{
 
 /// Linux KFD driver with lazy activation under a selected lifetime policy.
 ///
-/// Construction records policy and allocator state only. The first explicit GPU
-/// activation opens KFD, establishes the retained VM bindings, and enables the
-/// runtime under the KFD connection's locks so concurrent callers cannot
-/// publish partial state. PROCESS sessions share one process-local connection.
+/// Construction records policy only. The first GPU activation opens KFD,
+/// establishes VM bindings, and enables the runtime under the connection's
+/// locks. Process-lifetime sessions share one process-local connection.
 pub(crate) struct LinuxKfdDriver {
-    allocator: Allocator,
-    driver_instance: u64,
+    /// Distinguishes this wrapper from other sessions' KFD drivers.
+    driver_instance: crate::driver::DriverInstanceId,
+    /// Rejects inherited state before accessing locks or native handles.
     process: u32,
+    /// Rejects new work once shutdown begins.
     closing: bool,
+    /// Maximum lifetime permitted for this driver's acquired context.
     lifetime: DriverContextLifetime,
+    /// Records whether this instance joined the process-owned context.
     joined_primary: AtomicBool,
+    /// Connection and bindings used for a session-owned context.
     local: KfdContextResources,
 }
 
-/// Connection and VM bindings for one KFD context. A process-lifetime context
-/// uses the system allocator so no session callback can outlive its instance.
+/// Connection and VM bindings for one KFD context.
 struct KfdContextResources {
-    allocator: Allocator,
+    /// Native connection opened on first activation.
     kfd: OnceLock<Shared<sys::Kfd>>,
+    /// Prevents two callers from opening separate connections at once.
     initialization: Mutex<()>,
+    /// Activated GPU VMs and their loss-event owner.
     bindings: memory::VmBindings,
 }
 
 /// Primary KFD context resources shared by process-lifetime sessions.
 struct ProcessState {
-    // KFD keeps the exact primary DRM file object after a session closes.
-    // Retain the system-allocated connection and bindings until process exit so
-    // a later session can reacquire that same VM instead of receiving EBUSY.
+    /// Retained connection and VM bindings. KFD holds the exact primary DRM
+    /// file after session shutdown, so this owner remains until process exit.
     resources: Option<KfdContextResources>,
+    /// Sessions that still require KFD runtime enablement.
     joined_sessions: u64,
 }
 
 /// Process-local lock and identity for the shared primary KFD context.
 struct ProcessSlot {
+    /// Forked children replace the inherited slot before touching its lock.
     process: u32,
+    /// Serializes primary-context activation and shutdown across sessions.
     state: Mutex<ProcessState>,
 }
 
@@ -179,9 +193,11 @@ impl CachedInfo for KfdQueue {
 /// Lightweight session device reference retaining its activated VM.
 #[derive(Clone)]
 pub(crate) struct DeviceState {
+    /// Activated native VM retained by this device and its resources.
     vm: Shared<memory::DeviceVm>,
+    /// KFD topology identity revalidated during activation.
     native: sysfs::KfdNode,
-    lifetime: DriverContextLifetime,
+    /// GPU clock frequency queried from the activated native device.
     gpu_counter_frequency_hz: u64,
 }
 
@@ -203,14 +219,25 @@ impl DeviceState {
 }
 
 impl KfdContextResources {
-    fn new(allocator: Allocator) -> Self {
+    fn new() -> Self {
         Self {
-            allocator,
             kfd: OnceLock::new(),
             initialization: Mutex::new(()),
-            bindings: memory::VmBindings::new(allocator),
+            bindings: memory::VmBindings::new(),
         }
     }
+
+    fn activate_device(
+        &self,
+        lifetime: DriverContextLifetime,
+        native: &sysfs::KfdNode,
+    ) -> Result<Shared<memory::DeviceVm>, Error> {
+        let kfd = self.kfd()?;
+        kfd.prepare_context(lifetime)
+            .map_err(|source| native_error("KFD context selection", source))?;
+        self.bindings.device(&kfd, native)
+    }
+
     fn kfd(&self) -> Result<Shared<sys::Kfd>, Error> {
         if self.kfd.get().is_none() {
             let _guard = self
@@ -223,7 +250,7 @@ impl KfdContextResources {
                     .write(true)
                     .open("/dev/kfd")
                     .map_err(|e| native_error("KFD endpoint open", e))?;
-                let kfd = Shared::new(sys::Kfd::new(file, self.allocator), self.allocator)?;
+                let kfd = Shared::new(sys::Kfd::new(file))?;
                 let _ = self.kfd.set(kfd);
             }
         }
@@ -257,28 +284,24 @@ impl LinuxKfdDriver {
     const TOPOLOGY_ROOT: &'static str = "/sys/class/kfd/kfd/topology";
     const DRM_ROOT: &'static str = "/sys/class/drm";
     #[cfg(test)]
-    pub(crate) fn new(allocator: Allocator) -> Self {
-        Self::with_context_lifetime(allocator, DriverContextLifetime::Session)
+    pub(crate) fn new() -> Self {
+        Self::with_context_lifetime(DriverContextLifetime::Session)
     }
 
-    pub(crate) fn with_context_lifetime(
-        allocator: Allocator,
-        lifetime: DriverContextLifetime,
-    ) -> Self {
+    pub(crate) fn with_context_lifetime(lifetime: DriverContextLifetime) -> Self {
         Self {
-            allocator,
             driver_instance: crate::driver::new_driver_instance(),
             process: std::process::id(),
             closing: false,
             lifetime,
             joined_primary: AtomicBool::new(false),
-            local: KfdContextResources::new(allocator),
+            local: KfdContextResources::new(),
         }
     }
 
     fn ensure_open(&self) -> Result<(), Error> {
-        // Reject inherited instances before touching allocator callbacks,
-        // filesystem state, or a mutex that may have been held across fork.
+        // Reject inherited instances before touching filesystem state or a
+        // mutex that may have been held across fork.
         os_process::check_process(self.process)
             .map_err(|e| native_error("session process check", e))?;
         if self.closing {
@@ -346,9 +369,8 @@ impl LinuxKfdDriver {
     fn encode_svm_attributes(
         &self,
         attributes: &[KfdSvmAttribute],
-    ) -> Result<crate::host_storage::Buffer<uapi::SvmAttribute>, Error> {
-        let mut native =
-            crate::host_storage::Buffer::try_with_capacity(attributes.len(), self.allocator)?;
+    ) -> Result<Vec<uapi::SvmAttribute>, Error> {
+        let mut native = crate::memory::storage::try_vec_with_capacity(attributes.len())?;
         for attribute in attributes {
             let encoded = match *attribute {
                 KfdSvmAttribute::PreferredLocation(location) => uapi::SvmAttribute {
@@ -482,11 +504,7 @@ impl LinuxKfdDriver {
 impl Driver for LinuxKfdDriver {
     type DeviceState = DeviceState;
 
-    fn allocator(&self) -> Allocator {
-        self.allocator
-    }
-
-    fn driver_instance(&self) -> u64 {
+    fn driver_instance(&self) -> crate::driver::DriverInstanceId {
         self.driver_instance
     }
     fn context_lifetime(&self) -> DriverContextLifetime {
@@ -535,19 +553,28 @@ impl Driver for LinuxKfdDriver {
         sysfs::enumerate(
             Self::TOPOLOGY_ROOT,
             Self::DRM_ROOT,
-            self.allocator,
-            &mut |mut endpoint| {
-                endpoint.driver_instance = self.driver_instance;
-                visitor(endpoint)
-            },
+            self.driver_instance,
+            visitor,
         )
     }
     fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error> {
         self.ensure_open()?;
-        let mut endpoint =
-            sysfs::open_endpoint(Self::TOPOLOGY_ROOT, Self::DRM_ROOT, id, self.allocator)?;
-        endpoint.driver_instance = self.driver_instance;
-        Ok(endpoint)
+        sysfs::open_endpoint(
+            Self::TOPOLOGY_ROOT,
+            Self::DRM_ROOT,
+            self.driver_instance,
+            id,
+        )
+    }
+    fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
+        self.ensure_open()?;
+        if endpoint.gpu().is_none() {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "the Linux KFD driver reports only GPU endpoints",
+            ));
+        }
+        Ok(operations::query_endpoint_details(endpoint))
     }
     fn activate(&self, endpoint: &Endpoint) -> Result<DeviceState, Error> {
         if endpoint.gpu().is_none() {
@@ -577,10 +604,7 @@ impl Driver for LinuxKfdDriver {
             ));
         };
         let vm = if self.lifetime == DriverContextLifetime::Session {
-            let kfd = self.local.kfd()?;
-            kfd.prepare_context(self.lifetime)
-                .map_err(|source| native_error("KFD context selection", source))?;
-            self.local.bindings.device(&kfd, &native)?
+            self.local.activate_device(self.lifetime, &native)?
         } else {
             let slot = primary_slot();
             let mut state = slot
@@ -598,28 +622,18 @@ impl Driver for LinuxKfdDriver {
                 // Its session must discharge runtime enablement on shutdown.
                 self.joined_primary.store(true, Ordering::Release);
             }
-            let resources = state
-                .resources
-                .get_or_insert_with(|| KfdContextResources::new(Allocator::system()));
-            let kfd = resources.kfd()?;
-            kfd.prepare_context(self.lifetime)
-                .map_err(|source| native_error("KFD context selection", source))?;
-            resources.bindings.device(&kfd, &native)?
+            let resources = state.resources.get_or_insert_with(KfdContextResources::new);
+            resources.activate_device(self.lifetime, &native)?
         };
         let gpu_counter_frequency_hz = vm
             .render()
             .ok()
-            .and_then(|render| drm::device_info_prefix(render).ok())
-            .filter(|info| {
-                endpoint
-                    .pci
-                    .is_some_and(|pci| info.device_id == pci.device_id)
-            })
-            .map_or(0, |info| u64::from(info.gpu_counter_frequency_khz) * 1000);
+            .and_then(|render| operations::matching_device_info(endpoint, render))
+            .and_then(operations::device_counter_frequency_hz)
+            .unwrap_or(0);
         Ok(DeviceState {
             vm,
             native,
-            lifetime: self.lifetime,
             gpu_counter_frequency_hz,
         })
     }
@@ -644,7 +658,7 @@ mod tests {
     use crate::session::{DriverContextLifetime, Session};
     #[test]
     fn construction_is_inert_for_both_lifetime_policies() {
-        let native = LinuxKfdDriver::new(Allocator::default());
+        let native = LinuxKfdDriver::new();
         assert!(native.local.kfd.get().is_none());
         assert!(native.local.bindings.is_empty_for_test());
         for policy in [
@@ -658,7 +672,7 @@ mod tests {
 
     #[test]
     fn inherited_instance_rejects_work_before_mutating_state() {
-        let mut native = LinuxKfdDriver::new(Allocator::default());
+        let mut native = LinuxKfdDriver::new();
         native.process = std::process::id().wrapping_add(1);
         let mut visited = false;
         assert_eq!(

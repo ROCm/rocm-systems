@@ -13,8 +13,7 @@
 /// AccMode governs how the accumulator source (src2) is resolved:
 ///   - Unified:  CDNA3/4 — VGPR and AccVGPR share a single file; encoding
 ///               range 256-511 = VGPR, 768-1023 = AccVGPR (alias).
-///   - Separate: CDNA2 — dedicated AccVGPR file, src2 ranges differ.
-///   - VgprOnly: CDNA1 — no AccVGPR; src2 is always a VGPR or constant.
+///   - Separate: CDNA1/2 — dedicated AccVGPR file, src2 ranges differ.
 ///
 /// Key conventions:
 ///   - Output D[i][j]: i is the register dimension (matrix column),
@@ -56,8 +55,7 @@ namespace amdgpu {
 /// Accumulator register mode, determined by CDNA generation.
 enum class AccMode {
   Unified,  ///< CDNA3/4: VGPR and AccVGPR are in a unified file.
-  Separate, ///< CDNA2: dedicated AccVGPR file (encoding base 512 for dst).
-  VgprOnly, ///< CDNA1: no AccVGPR; src2 is always a VGPR or constant.
+  Separate, ///< CDNA1/2: dedicated AccVGPR file.
 };
 
 struct InputLoc {
@@ -168,13 +166,6 @@ uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &const_acc
         });
         return vb + ACC_VGPR_OFFSET + static_cast<uint32_t>(src2_ev - 256);
       }
-      return vb + static_cast<uint32_t>(src2_ev - 256);
-    }
-    const_acc = get_const();
-    return dst;
-  } else if constexpr (Mode == AccMode::VgprOnly) {
-    if (src2_ev >= 256 && src2_ev <= 511) {
-      const_acc = ACC_FROM_VGPR;
       return vb + static_cast<uint32_t>(src2_ev - 256);
     }
     const_acc = get_const();
@@ -4981,6 +4972,54 @@ inline SmfmacDenseLoc smfmac_dense_loc(uint32_t k, uint32_t col) {
     static_assert(N == 32);
     return {32 * ((k % 16) / 8) + col, 8 * (k / 16) + (k % 8)};
   }
+}
+
+/// Signed I8 SMFMAC produces I32 for compact 16x16x64 / 32x32x32 and wide
+/// 16x16x128 / 32x32x64 shapes, using the same byte and selector layout as FP8.
+/// Snapshot all results before writing D: the in-place accumulator can overlap
+/// either packed input or the sparse selector registers. For FP16_OVFL=0,
+/// unsigned accumulation preserves the low 32 bits without host signed overflow.
+template <uint32_t M, uint32_t N, uint32_t K>
+void exec_smfmac_i32_i8(auto &cu, uint32_t dst, uint32_t s0, uint32_t s1, uint32_t idx_base,
+                        uint32_t cbsz, uint32_t abid) {
+  static_assert(M == N &&
+                ((M == 16 && (K == 64 || K == 128)) || (M == 32 && (K == 32 || K == 64))));
+  constexpr bool wide = (M == 16 && K == 128) || (M == 32 && K == 64);
+  constexpr auto layout = wide ? SmfmacLayout::Cdna4Fp8 : SmfmacLayout::Cdna3Fp8;
+  // CDNA3 section 7.4 and CDNA4 section 7.5: compact byte layouts use ABID
+  // to select one of two metadata sets only when CBSZ[1:0] is zero. The wide
+  // CDNA4 forms consume the entire word and ignore CBSZ/ABID.
+  const uint32_t index_shift = !wide && (cbsz & 3u) == 0 ? 16 * (abid & 1u) : 0;
+  auto regs = RegisterAccess(cu);
+  auto read_byte = [&](uint32_t base, uint32_t element, uint32_t lane) -> int32_t {
+    const uint32_t word = regs.read_vgpr(base + element / 4, lane);
+    return std::bit_cast<int8_t>(static_cast<uint8_t>(word >> (8 * (element % 4))));
+  };
+  std::array<uint32_t, M * N> results;
+  for (uint32_t row = 0; row < M; ++row) {
+    for (uint32_t col = 0; col < N; ++col) {
+      const auto out = output_loc_32(M, N, row, col, 0);
+      uint32_t acc = regs.read_vgpr(dst + out.reg, out.lane);
+      for (uint32_t q = 0; q < K / 4; ++q) {
+        const auto first = smfmac_sparse_loc<layout, M, K>(row, q, 0);
+        const uint32_t selectors =
+            regs.read_vgpr(idx_base, first.lane) >> (index_shift + 4 * first.nibble);
+        for (uint32_t s = 0; s < 2; ++s) {
+          const auto a_loc = smfmac_sparse_loc<layout, M, K>(row, q, s);
+          const uint32_t k = 4 * q + ((selectors >> (2 * s)) & 3u);
+          const auto b_loc = smfmac_dense_loc<layout, N>(k, col);
+          acc += static_cast<uint32_t>(read_byte(s0, a_loc.element, a_loc.lane) *
+                                       read_byte(s1, b_loc.element, b_loc.lane));
+        }
+      }
+      results[row * N + col] = acc;
+    }
+  }
+  for (uint32_t row = 0; row < M; ++row)
+    for (uint32_t col = 0; col < N; ++col) {
+      const auto out = output_loc_32(M, N, row, col, 0);
+      regs.write_vgpr(dst + out.reg, out.lane, results[row * N + col]);
+    }
 }
 
 template <typename Extract>

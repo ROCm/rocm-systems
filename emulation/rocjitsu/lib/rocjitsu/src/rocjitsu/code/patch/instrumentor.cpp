@@ -145,10 +145,7 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
 // (kernel_descriptor_translator.cpp's arch_has_accvgpr / uses_gfx90a_accum_offset)
 // and code_object_patcher.cpp (target_uses_gfx90a_accum_offset). They should be
 // consolidated into isa/isa_traits.h alongside arch_is_cdna_4_or_lower/arch_is_rdna,
-// but the
-// arch_has_accvgpr copies disagree on CDNA1 (this one follows the physical AGPR file;
-// DBT's follows the HasAccVgpr trait, which models CDNA1 as zero), so unifying needs a
-// deliberate CDNA1-semantics decision. Kept DBI-local until then.
+// preserving the separate gfx908 allocation and the gfx90a unified allocation.
 
 // All CDNA generations (gfx908/gfx90a/gfx942/gfx950) have an AccVGPR file.
 // RDNA/gfx1250 have none.
@@ -197,9 +194,9 @@ struct KernelVgprBounds {
 
 // Decode @p desc's VGPR allocation for @p arch.
 KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
-                                    const rocr::llvm::amdhsa::kernel_descriptor_t &desc) {
-  const uint32_t granulated = AMDHSA_BITS_GET(
-      desc.compute_pgm_rsrc1, rocr::llvm::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
+                                    const rocjitsu::amdhsa::kernel_descriptor_t &desc) {
+  const uint32_t granulated = RJ_AMDHSA_BITS_GET(
+      desc.compute_pgm_rsrc1, rocjitsu::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT);
   // The descriptor encoding granule is wave-size dependent on RDNA (8 for
   // Wave32, 4 for Wave64); using the Wave32 granule for a Wave64 kernel would
   // overcount the allocation and let the SGPR bridge scan pick an unallocated
@@ -212,8 +209,8 @@ KernelVgprBounds kernel_vgpr_bounds(rj_code_arch_t arch,
   // separately) have no ACCUM_OFFSET field, so the whole allocation is ordinary.
   const uint32_t accum_base =
       arch_has_unified_vgpr_allocation(arch)
-          ? (AMDHSA_BITS_GET(desc.compute_pgm_rsrc3,
-                             rocr::llvm::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+          ? (RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc3,
+                                rocjitsu::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
              1) *
                 4
           : total;
