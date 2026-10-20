@@ -108,9 +108,9 @@ Panel Config:
           max: MAX(TCP_TOTAL_WRITEBACK_INVALIDATES_sum / $denom)
           unit: (Requests + $normUnit)
         L1-L2 BW:
-          avg: SUM(128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp))
-          max: MAX((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp))
+          avg: 128 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+          min: 128 * MIN((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / (End_Timestamp - Start_Timestamp))
+          max: 128 * MAX((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / (End_Timestamp - Start_Timestamp))
           unit: Gbps
         Tag RAM 0 Req:
           avg: SUM(TCP_TAGRAM0_REQ_sum) / SUM($denom)
