@@ -5,6 +5,8 @@
  ************************************************************************/
 
 // vecElementAdd<T> adds a[k] + b[k] per element in memory order, bit-exact with a host reference.
+// The fp8 adds (ddaLLAddPayload, ddaLL128AddWord, vecElementAdd) are instead checked against core
+// RCCL's hadd2 / hadd2_b, so DDA and the core reduce kernels round the same way.
 
 #include <algorithm>
 #include <cmath>
@@ -16,11 +18,15 @@
 
 #include "DeviceTestBase.hpp"
 #include "algorithms/dda/device/CollCommon.h"
+#include "algorithms/dda/device/CollCommon_ll128.h"
 #include "gtest/gtest.h"
 
 namespace RcclUnitTesting {
 
 namespace {
+
+using dda::common::fp8e4m3;
+using dda::common::fp8e5m2;
 
 template <typename T>
 __global__ void VecElementAddKernel(const uint4* a, const uint4* b, uint4* out, int n) {
@@ -28,6 +34,89 @@ __global__ void VecElementAddKernel(const uint4* a, const uint4* b, uint4* out, 
   if (i < n) {
     out[i] = dda::common::vecElementAdd<T>(a[i], b[i]);
   }
+}
+
+constexpr uint32_t kFp8Pairs = 256 * 256;
+
+struct Fp8AddMismatches {
+  uint32_t llPayload;
+  uint32_t ll128Word;
+  uint32_t vec16B;
+  uint32_t firstBadPair;
+};
+
+// Core RCCL's fp8 pair add, which converts two lanes per instruction and so shares no conversion
+// with the pk8 add DDA uses. The pair's second element is zero.
+template <typename Tag>
+__device__ uint8_t CoreFp8Add(uint8_t a, uint8_t b) {
+  if constexpr (std::is_same<Tag, fp8e4m3>::value) {
+    return static_cast<uint8_t>(hadd2(a, b) & 0xff);
+  } else {
+    return static_cast<uint8_t>(hadd2_b(a, b) & 0xff);
+  }
+}
+
+// Places pair p in each of the Lanes byte lanes in turn, with unrelated pairs in the other lanes so a
+// lane that leaks into another shows up too, and counts lanes where `add` disagrees with CoreFp8Add.
+template <typename Tag, int Lanes, typename Add>
+__device__ void CheckFp8Lanes(uint32_t p, uint32_t salt, Add add, uint32_t* mismatches, uint32_t* firstBadPair) {
+  for (int lane = 0; lane < Lanes; ++lane) {
+    uint8_t a[Lanes], b[Lanes], expected[Lanes], sum[Lanes];
+    for (int k = 0; k < Lanes; ++k) {
+      const uint32_t q = (k == lane) ? p : ((p * 2654435761u + k * salt) & 0xffff);
+      a[k] = q & 0xff;
+      b[k] = q >> 8;
+      expected[k] = CoreFp8Add<Tag>(a[k], b[k]);
+    }
+    add(a, b, sum);
+    for (int k = 0; k < Lanes; ++k) {
+      if (sum[k] != expected[k]) {
+        atomicAdd(mismatches, 1u);
+        atomicCAS(firstBadPair, 0xffffffffu, p);
+      }
+    }
+  }
+}
+
+// One thread per (a, b) byte pair, through each width DDA adds fp8 at: an LL packet's two payload
+// dwords, an LL128 word, and a 16B vector. Templated on the tag rather than rccl_float8, which names
+// different types in the host and gfx942 device passes.
+template <typename Tag>
+__global__ void Fp8AddMatchesCoreKernel(Fp8AddMismatches* out) {
+  const uint32_t p = blockIdx.x * blockDim.x + threadIdx.x;
+  if (p >= kFp8Pairs) {
+    return;
+  }
+  CheckFp8Lanes<Tag, 8>(
+    p, 40503u,
+    [](const uint8_t* a, const uint8_t* b, uint8_t* sum) {
+      uint32_t acc[2], d[2];
+      __builtin_memcpy(acc, a, 8);
+      __builtin_memcpy(d, b, 8);
+      dda::common::ddaLLAddPayload<Tag>(acc[0], acc[1], d[0], d[1]);
+      __builtin_memcpy(sum, acc, 8);
+    },
+    &out->llPayload, &out->firstBadPair);
+  CheckFp8Lanes<Tag, 8>(
+    p, 3266489917u,
+    [](const uint8_t* a, const uint8_t* b, uint8_t* sum) {
+      uint64_t wa, wb;
+      __builtin_memcpy(&wa, a, 8);
+      __builtin_memcpy(&wb, b, 8);
+      const uint64_t s = dda::common::ddaLL128AddWord<Tag>(wa, wb);
+      __builtin_memcpy(sum, &s, 8);
+    },
+    &out->ll128Word, &out->firstBadPair);
+  CheckFp8Lanes<Tag, 16>(
+    p, 2246822519u,
+    [](const uint8_t* a, const uint8_t* b, uint8_t* sum) {
+      uint4 wa, wb;
+      __builtin_memcpy(&wa, a, 16);
+      __builtin_memcpy(&wb, b, 16);
+      const uint4 s = dda::common::vecElementAdd<Tag>(wa, wb);
+      __builtin_memcpy(sum, &s, 16);
+    },
+    &out->vec16B, &out->firstBadPair);
 }
 
 template <typename E>
@@ -137,6 +226,22 @@ protected:
         << std::hex << "element " << std::dec << i << " a=0x" << std::hex << +cases[i].a << " b=0x" << +cases[i].b;
     }
   }
+
+  // DDA admits fp8 only on gfx1250; elsewhere its fp8 add traps.
+  template <typename Tag>
+  void ExpectFp8MatchesCoreForAllPairs() {
+    if (!isGfx1250()) {
+      GTEST_SKIP() << "DDA fp8 requires gfx1250";
+    }
+    DeviceBuffer<Fp8AddMismatches> d(1);
+    d.upload(Fp8AddMismatches{0, 0, 0, 0xffffffffu});
+    Fp8AddMatchesCoreKernel<Tag><<<gridFor(kFp8Pairs), kDefaultBlockSize>>>(d.ptr);
+    syncAndCheck();
+    const Fp8AddMismatches h = d.download();
+    EXPECT_EQ(h.llPayload, 0u) << "ddaLLAddPayload; first mismatching (a, b) pair 0x" << std::hex << h.firstBadPair;
+    EXPECT_EQ(h.ll128Word, 0u) << "ddaLL128AddWord; first mismatching (a, b) pair 0x" << std::hex << h.firstBadPair;
+    EXPECT_EQ(h.vec16B, 0u) << "vecElementAdd; first mismatching (a, b) pair 0x" << std::hex << h.firstBadPair;
+  }
 };
 
 TEST_F(DdaVecElementAdd, FloatCraftedLanes) {
@@ -226,6 +331,14 @@ TEST_F(DdaVecElementAdd, Bf16MatchesHostReference) {
                              << b[i];
     }
   }
+}
+
+TEST_F(DdaVecElementAdd, Fp8E4m3MatchesCoreForAllPairs) {
+  ExpectFp8MatchesCoreForAllPairs<fp8e4m3>();
+}
+
+TEST_F(DdaVecElementAdd, Fp8E5m2MatchesCoreForAllPairs) {
+  ExpectFp8MatchesCoreForAllPairs<fp8e5m2>();
 }
 
 } // namespace RcclUnitTesting

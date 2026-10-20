@@ -110,15 +110,25 @@ fn validate_backing(vm: &DeviceVm, memory: &KfdVirtualMemory) -> Result<(), Erro
 
 /// One imported physical backing and its host/device views at a common VA.
 pub(crate) struct DrmImportedSystem {
+    /// Creating render VM retained through import cleanup.
     owner: Shared<DeviceVm>,
+    /// Imported physical backing owner.
     memory: Option<Owned<KfdVirtualMemory>>,
+    /// Common virtual address reservation.
     address: Option<Owned<KfdVirtualAddress>>,
+    /// Device mapping of the imported backing.
     mapping: Option<Owned<KfdVirtualDeviceMapping>>,
+    /// Host mapping of the imported backing.
     host: Option<Owned<KfdVirtualHostMapping>>,
+    /// Byte offset into the source DMA-BUF.
     source_offset: u64,
+    /// Public byte extent requested by the caller.
     logical_size: u64,
+    /// Native physical extent covering that request.
     native_size: u64,
+    /// Stable identity of the imported physical backing.
     physical_backing_id: [u64; 2],
+    /// Prevents new mappings once release begins.
     freeing: bool,
 }
 

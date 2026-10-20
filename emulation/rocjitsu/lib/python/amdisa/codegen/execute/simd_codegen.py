@@ -3160,10 +3160,12 @@ def _simd_probe_line(
                 ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {_fp16_ovfl_cpp_op(cpp_op)});'
                 return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
             return probe
-        # VOP3 twins of the mixed-width f64<->b32 cvt ops. The f64->b32 VOP3
-        # bodies drop the abs/neg/omod/clamp modifier reads (verified per-op),
-        # so routing through the existing cvt glue is bit-exact. The b32->f64
-        # bodies apply OMOD and CLAMP, so they use the glue only without them. (A symmetric
+        # VOP3 twins of the mixed-width f64<->b32 cvt ops use raw VOP1 SIMD
+        # glue. The F32-to-F64 scalar body applies source and destination
+        # modifiers, so it uses that glue only when none are active. The
+        # F64-source forms retain their legacy shortcut here; this is not
+        # evidence that their VOP3 modifier fields are architecturally ignored.
+        # (A symmetric
         # SIMD_VOP1_UNARY_F64 fallback was considered but explicitly NOT added:
         # the f64-unary VOP3 forms apply modifiers via apply_vop3_*_mod_f64 —
         # routed through SIMD_VOP3_UNARY_FP64 above instead — and the rcp/rsq
@@ -3178,8 +3180,14 @@ def _simd_probe_line(
         speccvtinv3 = SIMD_CVT_B32_TO_F64.get(base + '_vop1')
         if speccvtinv3 is not None:
             in_t, cpp_op = speccvtinv3
-            # The glue has no output modifiers; the scalar body applies OMOD and CLAMP.
+            # The glue has no modifiers; the scalar body applies the relevant
+            # source and destination fields.
             probe = f'    ROCJITSU_TRY_SIMD_CVT_B32_TO_F64({in_t}, {cpp_op});'
+            if base == 'v_cvt_f64_f32':
+                return (
+                    '  if (!inst.inst_.abs && !inst.inst_.neg && '
+                    f'!inst.inst_.omod && !inst.inst_.clamp) {{\n{probe}\n  }}'
+                )
             return f'  if (!inst.inst_.omod && !inst.inst_.clamp) {{\n{probe}\n  }}'
     return None
 

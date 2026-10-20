@@ -53,6 +53,8 @@ cases:
   Unit_HRR_CaptureCapabilities: {}
   Unit_HRR_CaptureCapabilitiesImport_Direct: {}
   Unit_HRR_CaptureCapabilities_Direct: {}
+  Unit_HRR_CaptureClosesArchiveDirs: {}
+  Unit_HRR_CaptureClosesArchiveDirs_Direct: {}
   Unit_HRR_CaptureCrashDuringFork: {}
   Unit_HRR_CaptureCrashDuringFork_Direct: {}
   Unit_HRR_CaptureCrashOnSmallStack: {}
@@ -66,11 +68,18 @@ cases:
   Unit_HRR_CaptureMarksUnwrittenFilesIncomplete: {}
   Unit_HRR_CaptureMovesEarlierArchiveAside: {}
   Unit_HRR_CaptureRefusesPlantedLinks: {}
+  Unit_HRR_CaptureRenamedArchive_Direct: {}
   Unit_HRR_CaptureReplayRoundtrip: {}
   Unit_HRR_CaptureStartNotice: {}
   Unit_HRR_CaptureSurvivesUnusableOutputPath: {}
+  Unit_HRR_CaptureWritesThroughCheckedDirs: {}
   Unit_HRR_ChevronLaunchRoundtrip: {}
   Unit_HRR_ChevronLaunch_Direct: {}
+  Unit_HRR_CloseDuringCrashManifest: {}
+  Unit_HRR_CloseDuringCrashManifest_Direct: {}
+  Unit_HRR_CodeObjectScrub: {}
+  Unit_HRR_CodeObjectScrubWalker: {}
+  Unit_HRR_CodeObjectScrub_Direct: {}
   Unit_HRR_ConfigureCallRoundtrip: {}
   Unit_HRR_ConfigureCall_Direct: {}
   Unit_HRR_ContextRoundtrip: {}
@@ -105,10 +114,14 @@ cases:
   Unit_HRR_DiskSpace_SmallBlobsCountedInBlocks_Direct: {}
   Unit_HRR_DiskSpace_StopWhileExiting: {}
   Unit_HRR_DiskSpace_StopWhileExiting_Direct: {}
+  Unit_HRR_DiskSpace_StopsAfterRename: {}
+  Unit_HRR_DiskSpace_StopsAfterRename_Direct: {}
   Unit_HRR_DiskSpace_StopsBeforeReserve: {}
   Unit_HRR_DiskSpace_StopsBeforeReserve_Direct: {}
+  Unit_HRR_DispatchSwap_ChildKeepsInheritedPreload: {}
   Unit_HRR_DispatchSwap_Direct: {}
   Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer: {}
+  Unit_HRR_DispatchSwap_Preload_Direct: {}
   Unit_HRR_DispatchSwap_Unreplayable_Direct: {}
   Unit_HRR_DispatchSwap_WrapperOutlivesCapture: {}
   Unit_HRR_DivergenceAbortRoundtrip: {}
@@ -140,6 +153,8 @@ cases:
   Unit_HRR_ForkAfterCaptureShutdown_Direct: {}
   Unit_HRR_ForkBetweenCaptureFlushAndClose: {}
   Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct: {}
+  Unit_HRR_ForkDuringBlobWrite: {}
+  Unit_HRR_ForkDuringBlobWrite_Direct: {}
   Unit_HRR_ForkWhileNotingUnreplayable: {}
   Unit_HRR_ForkWhileNotingUnreplayable_Direct: {}
   Unit_HRR_ForkWhileRecording: {}

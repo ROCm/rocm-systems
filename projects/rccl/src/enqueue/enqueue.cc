@@ -4907,6 +4907,16 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
   return ncclSuccess;
 }
 
+void rcclLogCollInfo(const struct ncclInfo& info) {
+  INFO(NCCL_COLL,
+       "%s: opCount %lx sendbuff %p recvbuff %p acc %p count %zu datatype %d op %d root %d comm %p [nranks=%d] stream "
+       "%p task %d globalrank %d",
+       info.opName, info.comm->opCount, info.sendbuff, info.recvbuff, info.acc, info.count, info.datatype, info.op,
+       info.root, info.comm, info.comm->nRanks, info.stream,
+       info.comm->planner.nTasksP2p + info.comm->planner.nTasksColl,
+       info.comm->localRankToRank[info.comm->localRank]);
+}
+
 ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   // Early-out on invalid or revoked communicator
   ncclResult_t ret = CommCheck(info->comm, info->opName, "comm");
@@ -4951,13 +4961,7 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
   }
   NCCLCHECKGOTO(ArgsCheck(info), ret, fail);
 
-  INFO(NCCL_COLL,
-       "%s: opCount %lx sendbuff %p recvbuff %p acc %p count %zu datatype %d op %d root %d comm %p [nranks=%d] stream "
-       "%p task %d globalrank %d",
-       info->opName, info->comm->opCount, info->sendbuff, info->recvbuff, info->acc, info->count, info->datatype,
-       info->op, info->root, info->comm, info->comm->nRanks, info->stream,
-       info->comm->planner.nTasksP2p + info->comm->planner.nTasksColl,
-       info->comm->localRankToRank[info->comm->localRank]);
+  rcclLogCollInfo(*info);
   TRACE_CALL("nccl%s(%" PRIx64 ",%" PRIx64 ",%zu,%d,%d,%d,%p,%p)", info->opName,
              reinterpret_cast<int64_t>(info->sendbuff), reinterpret_cast<int64_t>(info->recvbuff), info->count,
              info->datatype, info->op, info->root, info->comm, info->stream);

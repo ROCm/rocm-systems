@@ -11,6 +11,7 @@
 #include "rocjitsu/code/builders/smem_builders.h"
 #include "rocjitsu/code/builders/spill_builders.h"
 #include "rocjitsu/code/builders/vector_builders.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
@@ -23,12 +24,6 @@
 #include "rocjitsu/isa/register_set.h"
 
 #include "../dbi_test_util.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -2444,7 +2439,7 @@ InstrumentedCodeObjectDebug patch_five_log_buffer_args(const std::vector<uint8_t
 // A kernarg kernel that declares a wider VGPR window admits the fifth argument:
 // 16 unified VGPRs with the AGPR window at v8 leaves v0..v7 ordinary.
 TEST(InstrumentorEntryPrologue, AWiderVgprAllocationAdmitsAFifthArgument) {
-  namespace kd = rocr::llvm::amdhsa;
+  namespace kd = rocjitsu::amdhsa;
   const auto target = test::make_kernarg_kernel_elf(
       {0xBF800000u, 0xBF800000u}, /*private_bytes=*/0, EF_AMDGPU_MACH_AMDGCN_GFX950,
       kTestKernargSize, /*wave32=*/false, /*granulated_sgpr_count=*/3, /*entry_text_offset=*/0,
@@ -2458,10 +2453,11 @@ TEST(InstrumentorEntryPrologue, AWiderVgprAllocationAdmitsAFifthArgument) {
   const auto kernels = scan_kernel_descriptors(target, text->sectionOffset(), text->size());
   ASSERT_EQ(kernels.size(), 1u);
   const kd::kernel_descriptor_t &desc = kernels.front().descriptor;
-  EXPECT_EQ(
-      AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
-      1u);
-  EXPECT_EQ(AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET), 1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc1,
+                               kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+            1u);
+  EXPECT_EQ(RJ_AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET),
+            1u);
 
   const auto result = patch_five_log_buffer_args(target);
   ASSERT_TRUE(result.errors.empty()) << result.errors.front();

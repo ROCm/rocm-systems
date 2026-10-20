@@ -75,8 +75,11 @@ impl std::error::Error for InvalidAllocator {}
 #[derive(Clone, Copy, Debug)]
 #[cfg(any(test, feature = "allocator-test-hooks"))]
 pub struct Allocator {
+    /// Opaque state passed back to test allocation callbacks.
     user_data: *mut c_void,
+    /// Optional callback replacing the system allocator in tests.
     allocate: Option<AllocateFn>,
+    /// Callback paired with `allocate` for deallocation.
     free: Option<FreeFn>,
 }
 
@@ -197,8 +200,9 @@ thread_local! {
 /// Restores the previous allocation fault hook when the current scope ends.
 #[cfg(any(test, feature = "allocator-test-hooks"))]
 pub struct AllocatorScope {
+    /// Prior thread-local policy restored when this guard drops.
     previous: Allocator,
-    // A scope must be dropped on the thread whose CURRENT slot it replaced.
+    /// Keeps the guard on the thread whose allocator slot it replaced.
     _not_send: PhantomData<Rc<()>>,
 }
 
@@ -221,9 +225,13 @@ fn normalized_layout(layout: Layout) -> Result<Layout, AllocationError> {
         .map_err(|_| AllocationError)
 }
 
+/// One fallibly allocated metadata block and the policy used to release it.
 pub(super) struct RawBlock {
+    /// Start of the aligned allocation.
     pub(super) pointer: NonNull<u8>,
+    /// Exact layout required for deallocation.
     pub(super) layout: Layout,
+    /// Test allocator retained across changes to the thread-local hook.
     #[cfg(any(test, feature = "allocator-test-hooks"))]
     pub(super) allocator: Allocator,
 }
