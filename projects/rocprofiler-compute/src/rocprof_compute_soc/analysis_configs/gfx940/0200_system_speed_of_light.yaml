@@ -105,7 +105,7 @@ Panel Config:
           peak: 100
           pct_of_peak: false
         vL1D Cache BW:
-          value: 64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp)
+          value: 128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
           peak: $max_sclk / 1000 * 128 * $cu_per_gpu
           pct_of_peak: true

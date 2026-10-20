@@ -45,12 +45,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
 
-* On gfx940 and gfx941, vL1D cache bandwidth in System Speed-of-Light and the vL1D Cache panel counts 64 bytes per cache access, as the roofline does.
-
-* On gfx940 and gfx941, L2-Fabric read bandwidth in the Memory Chart and the L2 Cache panel counts 128-byte reads as 128 bytes (they were counted as 64), as System Speed-of-Light does.
-
-* vL1D-L2 bandwidth in the vL1D Cache panel counts every request at the size the roofline uses: 64 bytes on gfx940 and gfx941, 128 bytes on gfx942 and gfx950.
-
 ### Removed
 
 * Removed the experimental `--gui` and `--tui` analyze modes and the `--random-port` option. Use the default CLI analyze mode for terminal output, or `--output-format db` to explore results in ROCm Optiq.

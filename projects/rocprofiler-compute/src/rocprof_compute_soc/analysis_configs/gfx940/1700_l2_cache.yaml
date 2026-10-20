@@ -21,7 +21,7 @@ Panel Config:
           value: 100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
           unit: Percent
         L2-Fabric Read BW:
-          value: SUM(128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
+          value: SUM(TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
           unit: GB/s
         L2-Fabric Write and Atomic BW:
           value: SUM(TCC_EA0_WRREQ_64B_sum * 64 + (TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
@@ -40,13 +40,9 @@ Panel Config:
         unit: Unit
       metric:
         Read BW:
-          avg: SUM(128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
-          min: MIN(((128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum
-            - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp
-            - Start_Timestamp)))
-          max: MAX(((128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum
-            - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp
-            - Start_Timestamp)))
+          avg: SUM(TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
+          min: MIN((TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) * 64) / (End_Timestamp - Start_Timestamp))
+          max: MAX((TCC_EA0_RDREQ_32B_sum * 32 + (TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) * 64) / (End_Timestamp - Start_Timestamp))
           unit: Gbps
         HBM Read Traffic:
           avg: 100 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)
