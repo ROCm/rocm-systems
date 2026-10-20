@@ -132,6 +132,42 @@ class CocoPathsTest(unittest.TestCase):
         )
 
 
+class HostTestsOnlyTest(unittest.TestCase):
+    HOST = "projects/rccl/test/host/net-test.cc"
+
+    def test_host_tests_and_docs_on_develop(self):
+        for changed in [
+            [self.HOST],
+            [self.HOST, "projects/rccl/test/host/fakes/os_fakes.cc"],
+            [self.HOST, "projects/rccl/README.md", "docs/index.md"],
+        ]:
+            with self.subTest(changed=changed):
+                self.assertTrue(detect.host_tests_only(changed, "develop"))
+
+    def test_other_branches(self):
+        for branch in ["", "main", "rccl-develop", "rocprofiler-compute-develop"]:
+            with self.subTest(branch=branch):
+                self.assertFalse(detect.host_tests_only([self.HOST], branch))
+
+    def test_any_other_change(self):
+        # Anything outside test/host may change librccl or the perf gate itself.
+        for other in [
+            "projects/rccl/src/init.cc",
+            "projects/rccl/test/CMakeLists.txt",
+            "projects/rccl/test/hostile.cc",
+            "projects/rccl-tests/src/all_reduce.cu",
+            "projects/hip/src/hip.cc",
+            ".github/workflows/rccl_perf_regression.yml",
+        ]:
+            with self.subTest(other=other):
+                self.assertFalse(detect.host_tests_only([self.HOST, other], "develop"))
+
+    def test_no_code_changes(self):
+        for changed in [[], ["projects/rccl/README.md"]]:
+            with self.subTest(changed=changed):
+                self.assertFalse(detect.host_tests_only(changed, "develop"))
+
+
 class TouchesCocoTest(unittest.TestCase):
     def test_matched(self):
         self.assertTrue(detect.touches_coco(["projects/rccl/src/init.cc"]))
@@ -157,31 +193,41 @@ class MainTest(unittest.TestCase):
             return output.read_text()
 
     def test_emits_false_for_an_untouched_pr(self):
-        self.assertEqual(self._run_main(["docs/index.md"]), "rccl=false\n")
+        self.assertEqual(
+            self._run_main(["docs/index.md"]),
+            "rccl=false\nhost_tests_only=false\n",
+        )
 
     def test_emits_true_for_a_touched_pr(self):
-        self.assertEqual(self._run_main(["projects/rccl/src/init.cc"]), "rccl=true\n")
+        self.assertEqual(
+            self._run_main(["projects/rccl/src/init.cc"]),
+            "rccl=true\nhost_tests_only=false\n",
+        )
 
-    def test_emits_false_for_a_host_test_only_pr_to_develop(self):
+    def test_emits_host_only_for_a_host_test_only_pr_to_develop(self):
         changed = [
             "projects/rccl/test/host/net-test.cc",
             "projects/rccl/test/host/fakes/os_fakes.cc",
         ]
         self.assertEqual(
-            self._run_main(changed, "--base-branch", "develop"), "rccl=false\n"
+            self._run_main(changed, "--base-branch", "develop"),
+            "rccl=false\nhost_tests_only=true\n",
         )
 
-    def test_emits_true_for_a_host_test_only_pr_elsewhere(self):
+    def test_emits_rccl_for_a_host_test_only_pr_elsewhere(self):
         changed = ["projects/rccl/test/host/net-test.cc"]
-        self.assertEqual(self._run_main(changed), "rccl=true\n")
-        self.assertEqual(
-            self._run_main(changed, "--base-branch", "main"), "rccl=true\n"
-        )
+        for args in [(), ("--base-branch", "main")]:
+            with self.subTest(args=args):
+                self.assertEqual(
+                    self._run_main(changed, *args),
+                    "rccl=true\nhost_tests_only=false\n",
+                )
 
-    def test_emits_true_for_host_tests_plus_rccl_code(self):
+    def test_emits_rccl_for_host_tests_plus_rccl_code(self):
         changed = ["projects/rccl/test/host/net-test.cc", "projects/rccl/src/net.cc"]
         self.assertEqual(
-            self._run_main(changed, "--base-branch", "develop"), "rccl=true\n"
+            self._run_main(changed, "--base-branch", "develop"),
+            "rccl=true\nhost_tests_only=false\n",
         )
 
 

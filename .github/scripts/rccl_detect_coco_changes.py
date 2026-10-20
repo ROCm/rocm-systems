@@ -2,9 +2,10 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Decide whether a pull request touches anything the RCCL coco suites test.
+"""Classify a pull request's changed files for RCCL CI gating.
 
-Emits ``rccl=true|false`` for the `changes` job in rccl-coco-pr.yml.
+Emits ``rccl=true|false`` for the `changes` job in rccl-coco-pr.yml, and
+``host_tests_only=true|false`` for the one in rccl_perf_regression.yml.
 """
 
 import argparse
@@ -64,6 +65,14 @@ def coco_paths(changed_files: Iterable[str], base_branch: str = "") -> list[str]
     ]
 
 
+def host_tests_only(changed_files: Iterable[str], base_branch: str = "") -> bool:
+    """Whether every non-doc change is a host-only test on HOST_TEST_BRANCHES."""
+    if base_branch not in HOST_TEST_BRANCHES:
+        return False
+    code = [f for f in changed_files if not matches_paths([f], SKIPPABLE_PATH_PATTERNS)]
+    return bool(code) and all(matches_paths([f], HOST_TEST_PATH_PATTERNS) for f in code)
+
+
 def touches_coco(changed_files: Iterable[str], base_branch: str = "") -> bool:
     """Whether the coco suites must run for this file list."""
     changed_files = list(changed_files)
@@ -101,7 +110,14 @@ def main(argv: list[str]) -> int:
     # A file moved into an excluded path must still count as removed from its old one.
     changed_files = get_modified_paths(args.base_ref, no_renames=True)
     touched = touches_coco(changed_files, args.base_branch)
-    set_github_output({"rccl": "true" if touched else "false"})
+    host_only = host_tests_only(changed_files, args.base_branch)
+    logging.info("Host-only test changes on %r: %s", args.base_branch, host_only)
+    set_github_output(
+        {
+            "rccl": "true" if touched else "false",
+            "host_tests_only": "true" if host_only else "false",
+        }
+    )
     return 0
 
 
