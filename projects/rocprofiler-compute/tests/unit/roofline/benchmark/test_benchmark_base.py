@@ -21,17 +21,14 @@ import pytest
 
 import roofline.benchmark.benchmark_base as benchmark_base
 import utils.utils_profile as utils_profile
+from roofline import run_benchmark
 from roofline.benchmark import ceilings
 
 try:
-    from roofline.benchmark.gfx9.benchmark_gfx90a import Bench_gfx90a
-    from roofline.benchmark.gfx9.benchmark_gfx942 import Bench_gfx942
-    from roofline.benchmark.gfx9.benchmark_gfx950 import Bench_gfx950
-    from roofline.benchmark.gfx11.benchmark_gfx1150 import Bench_gfx1150
-    from roofline.benchmark.gfx11.benchmark_gfx1151 import Bench_gfx1151
-    from roofline.benchmark.gfx11.benchmark_gfx1152 import Bench_gfx1152
-    from roofline.benchmark.gfx11.benchmark_gfx1153 import Bench_gfx1153
-    from roofline.benchmark.gfx12.benchmark_gfx1250 import Bench_gfx1250
+    # Every device with a benchmark class, imported as load_bench() imports it.
+    BENCH_CLASSES = [
+        run_benchmark.bench_class(device) for device in ceilings.UNSUPPORTED_DATA_TYPES
+    ]
 except OSError as hip_load_error:
     # hip_interface and hiprtc_interface dlopen the ROCm libraries at import.
     pytest.skip(
@@ -42,17 +39,6 @@ except OSError as hip_load_error:
 # =============================================================================
 # Test data
 # =============================================================================
-
-BENCH_CLASSES = [
-    Bench_gfx90a,
-    Bench_gfx942,
-    Bench_gfx950,
-    Bench_gfx1150,
-    Bench_gfx1151,
-    Bench_gfx1152,
-    Bench_gfx1153,
-    Bench_gfx1250,
-]
 
 # set_cache_kernel_selector() derives a kernel name per level present here, so
 # every level is populated to exercise the whole selector.
@@ -131,11 +117,6 @@ def runs_benchmark(bench, test_key):
 # =============================================================================
 # Tests
 # =============================================================================
-
-
-def test_every_benchmarked_device_has_a_class():
-    devices = {bench_class.__name__[len("Bench_") :] for bench_class in BENCH_CLASSES}
-    assert devices == set(ceilings.UNSUPPORTED_DATA_TYPES)
 
 
 @pytest.mark.parametrize("bench_class", BENCH_CLASSES, ids=lambda cls: cls.__name__)

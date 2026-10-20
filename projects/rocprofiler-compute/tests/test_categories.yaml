@@ -30,6 +30,7 @@ test_categories:
       - test_rocpd_data
       - test_roofline_calc
       - test_roofline_main
+      - test_run_benchmark
       - test_report_shell
       - test_profiler_base
       - test_pc_sampling_profile
@@ -110,6 +111,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_run_benchmark
       - test_report_shell
       - test_rocpd_data
       - test_conftest
@@ -213,6 +215,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_run_benchmark
       - test_report_shell
       - test_rocpd_data
       - test_conftest
@@ -316,6 +319,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_run_benchmark
       - test_report_shell
       - test_rocpd_data
       - test_conftest
