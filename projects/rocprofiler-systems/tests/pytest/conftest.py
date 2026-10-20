@@ -10,13 +10,12 @@ This module provides shared fixtures and configuration for all test modules.
 from __future__ import annotations
 from pathlib import Path
 from functools import lru_cache
-from typing import Any, Callable, Generator, Mapping, Optional, Sequence
+from typing import Any, Callable, Generator, Mapping, Optional
 
 import re
 import os
 import sys
 import json
-import shlex
 import shutil
 import signal
 import traceback
@@ -834,7 +833,6 @@ def assert_resolved_settings(
     result: TestResult,
     expected: Mapping[str, Any],
     *,
-    cli_args: Optional[Sequence[str]] = None,
     metadata_file: Optional[Path] = None,
 ) -> None:
     """Fail unless every key in ``expected`` is present with an equal value.
@@ -842,7 +840,6 @@ def assert_resolved_settings(
     Reads ``metadata.json`` from the run's default output directory, or from
     ``metadata_file`` when the run writes it to a custom path. Only the keys in
     ``expected`` are checked, and all mismatches are reported together.
-    ``cli_args`` is shown in the failure message and is not compared.
     """
     __tracebackhide__ = True
     if metadata_file is None:
@@ -858,10 +855,8 @@ def assert_resolved_settings(
         elif settings[key] != value:
             problems.append(f"{key}: got {settings[key]!r}, expected {value!r}")
     if problems:
-        args = f" for `{shlex.join(cli_args)}`" if cli_args else ""
         pytest.fail(
-            f"{metadata_file}: resolved settings mismatch{args}:\n  "
-            + "\n  ".join(problems)
+            f"{metadata_file}: resolved settings mismatch:\n  " + "\n  ".join(problems)
         )
 
 

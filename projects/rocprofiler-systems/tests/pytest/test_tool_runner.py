@@ -110,7 +110,6 @@ class TestReplaceEnvNoDuplicates(RocprofsysTest):
         assert_resolved_settings(
             result,
             {"ROCPROFSYS_TRACE": False},
-            cli_args=["--preset=profile-only"],
         )
         assert result.perfetto_file is None, (
             f"profile-only should disable tracing, but found a perfetto trace "
@@ -188,7 +187,6 @@ class TestOutputFormatSelection(RocprofsysTest):
                 "ROCPROFSYS_USE_ROCPD": True,
                 "ROCPROFSYS_PROFILE": False,
             },
-            cli_args=["--output-format", "proto", "rocpd"],
         )
         assert result.perfetto_file is not None, "expected a perfetto trace file"
         assert result.rocpd_files, "expected at least one rocpd database file"
@@ -228,7 +226,6 @@ class TestOutputFormatSelection(RocprofsysTest):
                 "ROCPROFSYS_TRACE": False,
                 "ROCPROFSYS_PROFILE": False,
             },
-            cli_args=["--output-format", "rocpd"],
         )
         assert result.perfetto_file is None, (
             f"rocpd-only should not produce a perfetto trace, found "
@@ -309,7 +306,6 @@ class TestOutputFormatSelection(RocprofsysTest):
                 "ROCPROFSYS_USE_ROCPD": False,
                 "ROCPROFSYS_PROFILE": False,
             },
-            cli_args=["--output-format", "proto"],
         )
         assert result.perfetto_file is not None, "expected a perfetto trace file"
         assert not result.rocpd_files, (
@@ -351,7 +347,6 @@ class TestOutputFormatSelection(RocprofsysTest):
         assert_resolved_settings(
             result,
             {"ROCPROFSYS_TRACE": True, "ROCPROFSYS_PROFILE": False},
-            cli_args=["--output-format", format_token],
         )
         assert result.perfetto_file is not None, "expected a perfetto trace file"
         assert result.perfetto_file.suffix == ".pftrace", (
@@ -443,7 +438,6 @@ class TestConfigOutput(RocprofsysTest):
                 "ROCPROFSYS_OUTPUT_PATH": str(output_dir),
                 "ROCPROFSYS_OUTPUT_PREFIX": output_prefix,
             },
-            cli_args=["-c", str(empty_cfg), "-o", str(output_dir), output_prefix],
             metadata_file=metadata_file,
         )
 
@@ -534,7 +528,7 @@ class TestCliFlagEnvMapping(RocprofsysTest):
             ],
         )
 
-        assert_resolved_settings(result, expected_settings, cli_args=flag_args)
+        assert_resolved_settings(result, expected_settings)
 
         if artifact_kind == "trace":
             assert result.perfetto_file is not None, (
@@ -589,7 +583,6 @@ class TestWaitDuration(RocprofsysTest):
         assert_resolved_settings(
             result,
             {"ROCPROFSYS_TRACE_DELAY": 1.5, "ROCPROFSYS_SAMPLING_DELAY": 1.5},
-            cli_args=["-w", "1.5"],
         )
 
     def test_duration_sets_duration_envs(self, target, cpu_workload):
@@ -610,7 +603,6 @@ class TestWaitDuration(RocprofsysTest):
         assert_resolved_settings(
             result,
             {"ROCPROFSYS_TRACE_DURATION": 2.5, "ROCPROFSYS_SAMPLING_DURATION": 2.5},
-            cli_args=["-d", "2.5"],
         )
 
 # =============================================================================
@@ -637,7 +629,6 @@ class TestTracePeriods(RocprofsysTest):
         assert_resolved_settings(
             result,
             {"ROCPROFSYS_TRACE_PERIODS": "0:2"},
-            cli_args=["--periods", "0:2"],
         )
 
     def test_repeated_periods_are_space_joined(self, target, cpu_workload):
@@ -657,7 +648,6 @@ class TestTracePeriods(RocprofsysTest):
         assert_resolved_settings(
             result,
             {"ROCPROFSYS_TRACE_PERIODS": "0:2 3:2"},
-            cli_args=["--periods", "0:2", "--periods", "3:2"],
         )
 
     def test_trace_periods_flag_sets_env(self, target, cpu_workload):
@@ -671,7 +661,6 @@ class TestTracePeriods(RocprofsysTest):
         assert_resolved_settings(
             result,
             {"ROCPROFSYS_TRACE_PERIODS": "0:2"},
-            cli_args=["--trace-periods", "0:2"],
         )
 
 
@@ -701,7 +690,6 @@ class TestTraceClockId(RocprofsysTest):
         assert_resolved_settings(
             result,
             {"ROCPROFSYS_TRACE_PERIOD_CLOCK_ID": "cputime"},
-            cli_args=flag_args,
         )
 
 
@@ -737,7 +725,6 @@ class TestModeCoverage(RocprofsysTest):
                 "ROCPROFSYS_USE_PROCESS_SAMPLING": False,
                 "ROCPROFSYS_USE_CODE_COVERAGE": True,
             },
-            cli_args=self.MODE_FLAGS,
         )
         if result.perfetto_file is not None:
             pytest.fail(
@@ -797,7 +784,6 @@ class TestProfileDiff(RocprofsysTest):
                 "ROCPROFSYS_DIFF_OUTPUT": True,
                 "ROCPROFSYS_INPUT_PATH": str(baseline),
             },
-            cli_args=flag_args,
         )
         if any(baseline.glob("*.diff.*")):
             pytest.fail(f"--profile-diff wrote a diff file into the baseline {baseline}")
@@ -860,7 +846,6 @@ class TestSamplingCputimeSignal(RocprofsysTest):
         assert_resolved_settings(
             result,
             {"ROCPROFSYS_SAMPLING_CPUTIME_SIGNAL": int(self.CPUTIME_SIGNAL)},
-            cli_args=self.SIGNAL_FLAGS,
         )
         self.assert_perfetto(
             result,
@@ -898,7 +883,6 @@ class TestCpuMetrics(RocprofsysTest):
                 "ROCPROFSYS_CPU_FREQ_ENABLED": True,
                 "ROCPROFSYS_SAMPLING_CPUS": "0",
             },
-            cli_args=self.CPU_METRICS_FLAGS,
         )
         # Workload still has to show up in the trace.
         self.assert_perfetto(
@@ -952,9 +936,7 @@ class TestDeviceSamplingArtifacts(RocprofsysTest):
 
         # -D must set the device-sampling env var.
         self.assert_regex(result, pass_regex=[r"ROCPROFSYS_USE_AMD_SMI=true"])
-        assert_resolved_settings(
-            result, {"ROCPROFSYS_USE_AMD_SMI": True}, cli_args=["-D"]
-        )
+        assert_resolved_settings(result, {"ROCPROFSYS_USE_AMD_SMI": True})
 
         assert (
             result.perfetto_file is not None

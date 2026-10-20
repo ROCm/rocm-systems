@@ -281,7 +281,6 @@ class TestTranspose(RocprofsysTest):
         assert_resolved_settings(
             result,
             {"ROCPROFSYS_TRACE_PERIODS": "0:60"},
-            cli_args=sampling_args,
         )
         self.assert_perfetto(
             result,
