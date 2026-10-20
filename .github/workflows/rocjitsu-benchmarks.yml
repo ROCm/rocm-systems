@@ -394,6 +394,8 @@ jobs:
               fi
             fi
 
+            # Even after a successful raw-only push (or an unchanged archive),
+            # report catalog failure so the skipped dashboard update stays visible.
             if git diff --cached --quiet; then exit "${CATALOG_FAILED}"; fi
             git commit -m "Publish benchmark ${GITHUB_RUN_ID}.${BENCHMARK_RUN_ATTEMPT}"
             if git push origin "HEAD:${RESULTS_BRANCH}"; then exit "${CATALOG_FAILED}"; fi
