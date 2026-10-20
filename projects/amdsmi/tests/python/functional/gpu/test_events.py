@@ -5,6 +5,7 @@
 """GPU events: GPU counter and event notification."""
 
 import os
+import time
 import unittest
 from collections import defaultdict
 
@@ -31,6 +32,47 @@ def _api_msg(api, **args):
     """Render the '### api(arg=value):' header printed above each call's verdict."""
     rendered = ", ".join(f"{name}={value}" for name, value in args.items())
     return f"\t### {api}({rendered}):"
+
+
+# Event message fields are separated by two spaces, e.g. "ns: 5  pid: 7".
+FIELD_SEPARATOR = "  "
+NANOS_PER_SECOND = 1_000_000_000
+HEXADECIMAL = 16
+RESET_SEQUENCE_FIELD = "reset sequence number"
+NO_LONGER_RUNNING = "no longer running"
+
+
+def _message_parts(message):
+    """The "label: value" parts of an event message, without empty ones."""
+    return [part.strip() for part in message.split(FIELD_SEPARATOR) if part.strip()]
+
+
+def _message_fields(message):
+    """An event message as {label: value}, e.g. {"ns": "5", "pid": "7"}."""
+    fields = {}
+    for part in _message_parts(message):
+        label, separator, value = part.partition(":")
+        if separator:
+            fields[label.strip()] = value.strip()
+    return fields
+
+
+def _decimal_and_hex(value):
+    """22215 -> "22215 (0x56c7)": the kernel sends ids in hex, sysfs shows them in decimal."""
+    return f"{value} (0x{value:x})"
+
+
+def _boot_time_ns():
+    """The clock the kernel stamps events with; it includes time spent suspended."""
+    return time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+
+
+def _process_name(pid):
+    try:
+        with open(f"/proc/{pid}/comm", encoding="utf-8") as comm:
+            return comm.read().strip() or NO_LONGER_RUNNING
+    except OSError:
+        return NO_LONGER_RUNNING
 
 
 def _reset_groups(processors):
@@ -229,6 +271,41 @@ class TestGpuEvents(unittest.TestCase):
                 )
         return
 
+    def _check_event_fields(self, gpu_idx, fields, kfd_id, window_start_ns, window_end_ns):
+        """Compare an event's fields with sources the library's parser does not use.
+
+        node is the KFD gpu_id (amdsmi_get_gpu_kfd_info kfd_id; a device without one is already
+        reported by the caller), ns is on the boot-time clock and must fall inside this test's
+        window, and pid is shown with its process name (the kernel reports it in the host's PID
+        namespace). Returns the problems found.
+        """
+        problems = []
+        if "node" in fields and kfd_id is not None:
+            node = int(fields["node"], HEXADECIMAL)
+            matches = node == kfd_id
+            self.common.print(
+                f"\t\t  node {_decimal_and_hex(node)} {'==' if matches else '!='} "
+                f"kfd_id of gpu {gpu_idx}"
+            )
+            if not matches:
+                problems.append(
+                    f"gpu {gpu_idx}: node {_decimal_and_hex(node)} is not kfd_id "
+                    f"{_decimal_and_hex(kfd_id)}"
+                )
+        if "ns" in fields:
+            ns = int(fields["ns"])
+            seconds_after_start = (ns - window_start_ns) / NANOS_PER_SECOND
+            self.common.print(f"\t\t  ns is {seconds_after_start:.3f} s after this test started")
+            if not window_start_ns <= ns <= window_end_ns:
+                problems.append(f"gpu {gpu_idx}: ns {ns} is outside this test's window")
+        if "pid" in fields:
+            pid = int(fields["pid"])
+            this_process = " (this process)" if pid == os.getpid() else ""
+            self.common.print(f"\t\t  pid {pid}: {_process_name(pid)}{this_process}")
+            if pid <= 0:
+                problems.append(f"gpu {gpu_idx}: pid {pid} is not positive")
+        return problems
+
     def test_gpu_event(self):
         self.common.print_func_name("")
 
@@ -257,6 +334,8 @@ class TestGpuEvents(unittest.TestCase):
 
         missing_events = []
         unexpected_events = []
+        field_problems = []
+        window_start_ns = _boot_time_ns()
         reset_events = ("GPU_PRE_RESET", "GPU_POST_RESET")
         max_reads = 100  # only a guard; the loop normally ends on NO_DATA
         with self.common.status_sweep():
@@ -285,6 +364,25 @@ class TestGpuEvents(unittest.TestCase):
                 if not streams:
                     continue
 
+                # KFD gpu_id per device. Every device must report one: it is what the events'
+                # node field is checked against. None stands for a failure recorded here.
+                kfd_ids = {}
+                for i, gpu in streams:
+                    kfd_info = None
+                    msg = _api_msg("amdsmi_get_gpu_kfd_info", gpu=i)
+                    with self.common.expect_status(msg, success):
+                        kfd_info = amdsmi.amdsmi_get_gpu_kfd_info(gpu)
+                    kfd_id = None
+                    if kfd_info is not None:
+                        if isinstance(kfd_info["kfd_id"], int):
+                            kfd_id = kfd_info["kfd_id"]
+                            self.common.print(f"\t\tkfd_id={_decimal_and_hex(kfd_id)}")
+                        else:
+                            field_problems.append(
+                                f"gpu {i}: kfd_id is not supported ({kfd_info['kfd_id']})"
+                            )
+                    kfd_ids[i] = kfd_id
+
                 # Trigger (opt-in): reset the group to generate reset events.
                 reset_index, reset_gpu = streams[0]
                 if trigger_reset:
@@ -306,15 +404,17 @@ class TestGpuEvents(unittest.TestCase):
                     msg = _api_msg("amdsmi_get_gpu_event_notification", timeout_ms=timeout_ms)
                     with self.common.expect_status(msg, get_accept):
                         notifications = amdsmi.amdsmi_get_gpu_event_notification(timeout_ms)
+                    read_done_ns = _boot_time_ns()
                     if notifications is None:
                         break
                     self.common.print(f"\t\tnum_elem={notifications['num_elem']}")
-                    records.extend(notifications["data"])
+                    records.extend((record, read_done_ns) for record in notifications["data"])
 
                 # Records carry processor_handle as a raw address (int).
                 index_by_handle = {gpu.value: i for i, gpu in streams}
                 seen_events = {i: set() for i, _ in streams}
-                for event_data in records:
+                reset_sequences = {i: {name: set() for name in reset_events} for i, _ in streams}
+                for event_data, read_done_ns in records:
                     i = index_by_handle.get(event_data["processor_handle"])
                     if i is None:
                         self.common.print(f"\t\tSKIPPED event for another GPU: {event_data}")
@@ -325,9 +425,27 @@ class TestGpuEvents(unittest.TestCase):
                         event_name = f"UNKNOWN({event_data['event']})"
                     seen_events[i].add(event_name)
                     # message fields are double-space separated; render as "a | b | c".
-                    fields = [f.strip() for f in event_data["message"].split("  ") if f.strip()]
+                    fields = _message_parts(event_data["message"])
                     details = " | ".join(fields) if fields else "(no details)"
                     self.common.print(f"\t\t[gpu={i}] {event_name:<16} {details}")
+
+                    event_fields = _message_fields(event_data["message"])
+                    field_problems.extend(
+                        self._check_event_fields(
+                            i, event_fields, kfd_ids[i], window_start_ns, read_done_ns
+                        )
+                    )
+                    if event_name in reset_events and RESET_SEQUENCE_FIELD in event_fields:
+                        reset_sequences[i][event_name].add(event_fields[RESET_SEQUENCE_FIELD])
+
+                # PRE and POST of one reset carry the same sequence number.
+                for i, by_event in reset_sequences.items():
+                    pre, post = (by_event[name] for name in reset_events)
+                    if pre != post:
+                        field_problems.append(
+                            f"gpu {i}: GPU_PRE_RESET sequence numbers {sorted(pre)} "
+                            f"differ from GPU_POST_RESET {sorted(post)}"
+                        )
 
                 # A forced reset must produce both reset events on every device in the group;
                 # without one, neither may appear.
@@ -355,5 +473,8 @@ class TestGpuEvents(unittest.TestCase):
         self.assertFalse(
             unexpected_events,
             f"reset events received without amdsmi_reset_gpu: {unexpected_events}",
+        )
+        self.assertFalse(
+            field_problems, f"event fields disagree with other sources: {field_problems}"
         )
         return
