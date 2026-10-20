@@ -136,6 +136,8 @@ function(rccl_define_micro_source_lists)
     fakes/recorder_fakes.cc
     fakes/utils_fakes.cc
     fakes/collective_stubs.cc
+    fakes/os_fakes.cc
+    fakes/socket_fakes.cc
     fakes/devcomm_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc

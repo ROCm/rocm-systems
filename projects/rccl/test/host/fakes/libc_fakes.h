@@ -9,13 +9,6 @@
 
 // Controllable seams for the libc socket / stdio / process / heap surface.
 //
-// For units whose external dependencies are libc rather than HIP or nccl --
-// src/ras/client.cc, src/ras/client_support.cc, src/graph/rccl_graph_gen.cc
-// (heap), and diagnostics/ib_write_bw.cc (which uses only gethostname/access;
-// prefer these over libc_interposers.cc's process-wide one) use this surface
-// today; misc/socket.cc and bootstrap.cc are the obvious next candidates. A
-// libc-only unit needs no HIP runtime and no nccl fakes at all.
-//
 // fakes/libc_seam.h macro-renames each call in the unit under test to the
 // matching micro_* trampoline, which dispatches through the std::function slot
 // declared here. Install per-test behaviour with ScopedHook; ResetLibcFakes()
@@ -82,7 +75,7 @@ struct MicroReadStep {
 ssize_t DeliverReadStep(const MicroReadStep& step, void* buf, size_t count);
 
 // ---------------------------------------------------------------------------
-// Seams. Each defaults to the success behaviour described in the .cc.
+// Seams. Each default is defined in the .cc.
 // ---------------------------------------------------------------------------
 extern std::function<ssize_t(int, const void*, size_t)> g_write;
 extern std::function<ssize_t(int, void*, size_t)> g_read;

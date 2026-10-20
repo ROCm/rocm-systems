@@ -20,6 +20,7 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -27,25 +28,12 @@
 
 #include <gtest/gtest.h>
 
-// ras-test.cc already defines several ncclSocket* names in this binary; keep these doubles TU-local.
-#define ncclSocketDefaultMagic NetSocketTestSocketDefaultMagic
-#define ncclSocketInit NetSocketTestSocketInit
-#define ncclSocketMove NetSocketTestSocketMove
-#define ncclSocketListen NetSocketTestSocketListen
-#define ncclSocketGetAddr NetSocketTestSocketGetAddr
-#define ncclSocketConnect NetSocketTestSocketConnect
-#define ncclSocketReady NetSocketTestSocketReady
-#define ncclSocketAccept NetSocketTestSocketAccept
-#define ncclSocketProgress NetSocketTestSocketProgress
-#define ncclSocketClose NetSocketTestSocketClose
-#define ncclSocketToString NetSocketTestSocketToString
-#define ncclFindInterfaces NetSocketTestFindInterfaces
-#define ncclOsRealpath NetSocketTestOsRealpath
-
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/libc_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/os_fakes.h"
+#include "fakes/socket_fakes.h"
 
 #include "comm.h"
 #include "core.h"
@@ -59,7 +47,6 @@
 
 namespace {
 
-constexpr uint64_t kMagic = 0x5eedULL;
 constexpr uint16_t kListenPort = 40000;
 
 ncclSocketAddress DevAddr(int i) {
@@ -81,40 +68,20 @@ struct FakeSockets {
 };
 FakeSockets g_sock;
 
-ncclResult_t DefaultSockInit(ncclSocket* sock, const ncclSocketAddress* addr, uint64_t magic, ncclSocketType type,
-                             volatile uint32_t* abortFlag, int asyncFlag, int customRetry) {
-  std::memset(sock, 0, sizeof(*sock));
-  if (addr) sock->addr = *addr;
-  sock->magic = magic;
-  sock->type = type;
-  sock->abortFlag = abortFlag;
-  sock->asyncFlag = asyncFlag;
-  sock->customRetry = customRetry;
-  sock->socketDescriptor = NCCL_INVALID_SOCKET;
-  sock->state = ncclSocketStateInitialized;
-  return ncclSuccess;
-}
-
-ncclResult_t DefaultSockListen(ncclSocket* sock) {
+ncclResult_t StreamListen(ncclSocket* sock) {
   sock->socketDescriptor = g_sock.nextFd++;
   sock->addr.sin.sin_port = htons(kListenPort);
   sock->state = ncclSocketStateReady;
   return ncclSuccess;
 }
 
-ncclResult_t DefaultSockGetAddr(ncclSocket* sock, ncclSocketAddress* addr) {
-  if (sock->state != ncclSocketStateReady) return ncclInternalError;
-  *addr = sock->addr;
-  return ncclSuccess;
-}
-
-ncclResult_t DefaultSockConnect(ncclSocket* sock) {
+ncclResult_t StreamConnect(ncclSocket* sock) {
   sock->socketDescriptor = g_sock.nextFd++;
   sock->state = ncclSocketStateConnecting;
   return ncclSuccess;
 }
 
-ncclResult_t DefaultSockAccept(ncclSocket* sock, ncclSocket*, bool) {
+ncclResult_t StreamAccept(ncclSocket* sock, ncclSocket*, bool) {
   std::lock_guard<std::mutex> lock(g_sock.mu);
   sock->socketDescriptor = g_sock.nextFd++;
   sock->state = ncclSocketStateAccepting;
@@ -125,16 +92,7 @@ ncclResult_t DefaultSockAccept(ncclSocket* sock, ncclSocket*, bool) {
   return ncclSuccess;
 }
 
-ncclResult_t DefaultSockReady(ncclSocket* sock, int* running) {
-  if (sock->state == ncclSocketStateError || sock->state == ncclSocketStateClosed) return ncclRemoteError;
-  if (sock->state == ncclSocketStateConnecting || sock->state == ncclSocketStateAccepting) {
-    sock->state = ncclSocketStateReady;
-  }
-  *running = sock->state == ncclSocketStateReady;
-  return ncclSuccess;
-}
-
-ncclResult_t DefaultSockProgress(int op, ncclSocket* sock, void* ptr, int size, int* offset, bool*) {
+ncclResult_t StreamProgress(int op, ncclSocket* sock, void* ptr, int size, int* offset, bool*) {
   std::lock_guard<std::mutex> lock(g_sock.mu);
   size_t n = std::min(static_cast<size_t>(size - *offset), g_sock.chunk);
   char* at = static_cast<char*>(ptr) + *offset;
@@ -150,7 +108,7 @@ ncclResult_t DefaultSockProgress(int op, ncclSocket* sock, void* ptr, int size, 
   return ncclSuccess;
 }
 
-ncclResult_t DefaultSockClose(ncclSocket* sock, bool) {
+ncclResult_t StreamClose(ncclSocket* sock, bool) {
   std::lock_guard<std::mutex> lock(g_sock.mu);
   if (sock->state > ncclSocketStateNone && sock->socketDescriptor != NCCL_INVALID_SOCKET) {
     g_sock.closed.push_back(sock->socketDescriptor);
@@ -160,34 +118,13 @@ ncclResult_t DefaultSockClose(ncclSocket* sock, bool) {
   return ncclSuccess;
 }
 
-ncclResult_t DefaultFindInterfaces(char*, ncclSocketAddress*, int, int, int*) { return ncclInternalError; }
-
-char* DefaultOsRealpath(const char*, char*) { return nullptr; }
-
-std::function<ncclResult_t(ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType, volatile uint32_t*, int,
-                           int)>
-    g_sockInit = DefaultSockInit;
-std::function<ncclResult_t(ncclSocket*)> g_sockListen = DefaultSockListen;
-std::function<ncclResult_t(ncclSocket*, ncclSocketAddress*)> g_sockGetAddr = DefaultSockGetAddr;
-std::function<ncclResult_t(ncclSocket*)> g_sockConnect = DefaultSockConnect;
-std::function<ncclResult_t(ncclSocket*, ncclSocket*, bool)> g_sockAccept = DefaultSockAccept;
-std::function<ncclResult_t(ncclSocket*, int*)> g_sockReady = DefaultSockReady;
-std::function<ncclResult_t(int, ncclSocket*, void*, int, int*, bool*)> g_sockProgress = DefaultSockProgress;
-std::function<ncclResult_t(ncclSocket*, bool)> g_sockClose = DefaultSockClose;
-std::function<ncclResult_t(char*, ncclSocketAddress*, int, int, int*)> g_findInterfaces = DefaultFindInterfaces;
-std::function<char*(const char*, char*)> g_osRealpath = DefaultOsRealpath;
-
-void ResetSocketFakes() {
-  g_sockInit = DefaultSockInit;
-  g_sockListen = DefaultSockListen;
-  g_sockGetAddr = DefaultSockGetAddr;
-  g_sockConnect = DefaultSockConnect;
-  g_sockAccept = DefaultSockAccept;
-  g_sockReady = DefaultSockReady;
-  g_sockProgress = DefaultSockProgress;
-  g_sockClose = DefaultSockClose;
-  g_findInterfaces = DefaultFindInterfaces;
-  g_osRealpath = DefaultOsRealpath;
+void InstallSocketStreams() {
+  ResetSocketFakes();
+  g_ncclSocketListen = StreamListen;
+  g_ncclSocketConnect = StreamConnect;
+  g_ncclSocketAccept = StreamAccept;
+  g_ncclSocketProgress = StreamProgress;
+  g_ncclSocketClose = StreamClose;
   g_sock.sent.clear();
   g_sock.inbound.clear();
   g_sock.closed.clear();
@@ -196,45 +133,21 @@ void ResetSocketFakes() {
   g_sock.chunk = SIZE_MAX;
 }
 
+// Reports "not ready" on the n-th (0-based) Ready call and defers to the default otherwise.
+std::function<ncclResult_t(ncclSocket*, int*)> NotReadyOnCall(int n) {
+  auto calls = std::make_shared<int>(0);
+  return [calls, n](ncclSocket* sock, int* running) {
+    if ((*calls)++ == n) {
+      *running = 0;
+      return ncclSuccess;
+    }
+    return DefaultNcclSocketReady(sock, running);
+  };
+}
+
 ncclResult_t ProfilerA(void**, int, void*, int64_t, void*) { return ncclSuccess; }
 ncclResult_t ProfilerB(void**, int, void*, int64_t, void*) { return ncclSuccess; }
 }  // namespace
-
-uint64_t NetSocketTestSocketDefaultMagic() { return kMagic; }
-ncclResult_t NetSocketTestSocketInit(struct ncclSocket* sock, const union ncclSocketAddress* addr, uint64_t magic,
-                                     enum ncclSocketType type, volatile uint32_t* abortFlag, int asyncFlag,
-                                     int customRetry) {
-  return g_sockInit(sock, addr, magic, type, abortFlag, asyncFlag, customRetry);
-}
-void NetSocketTestSocketMove(struct ncclSocket* dst, struct ncclSocket* src) {
-  std::memcpy(dst, src, sizeof(*dst));
-  src->socketDescriptor = NCCL_INVALID_SOCKET;
-  src->acceptSocketDescriptor = NCCL_INVALID_SOCKET;
-  src->state = ncclSocketStateNone;
-}
-ncclResult_t NetSocketTestSocketListen(struct ncclSocket* sock) { return g_sockListen(sock); }
-ncclResult_t NetSocketTestSocketGetAddr(struct ncclSocket* sock, union ncclSocketAddress* addr) {
-  return g_sockGetAddr(sock, addr);
-}
-ncclResult_t NetSocketTestSocketConnect(struct ncclSocket* sock) { return g_sockConnect(sock); }
-ncclResult_t NetSocketTestSocketReady(struct ncclSocket* sock, int* running) { return g_sockReady(sock, running); }
-ncclResult_t NetSocketTestSocketAccept(struct ncclSocket* sock, struct ncclSocket* listenSock, bool retry) {
-  return g_sockAccept(sock, listenSock, retry);
-}
-ncclResult_t NetSocketTestSocketProgress(int op, struct ncclSocket* sock, void* ptr, int size, int* offset,
-                                         bool* closed) {
-  return g_sockProgress(op, sock, ptr, size, offset, closed);
-}
-ncclResult_t NetSocketTestSocketClose(struct ncclSocket* sock, bool wait) { return g_sockClose(sock, wait); }
-const char* NetSocketTestSocketToString(const union ncclSocketAddress*, char* buf, size_t bufLen, const int) {
-  std::snprintf(buf, bufLen, "peer");
-  return buf;
-}
-ncclResult_t NetSocketTestFindInterfaces(char* ifNames, union ncclSocketAddress* ifAddrs, int ifNameMaxSize,
-                                         int maxIfs, int* nIfs) {
-  return g_findInterfaces(ifNames, ifAddrs, ifNameMaxSize, maxIfs, nIfs);
-}
-char* NetSocketTestOsRealpath(const char* path, char* resolvedPath) { return g_osRealpath(path, resolvedPath); }
 
 #include "fakes/libc_seam.h"
 #include NET_SOCKET_COMMON_CC_PATH
@@ -260,7 +173,7 @@ std::string Pattern(size_t n) {
 class NetSocketMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    ResetSocketFakes();
+    InstallSocketStreams();
     g_loadParam = [this](const char* env, int64_t deftVal) {
       auto it = params_.find(env);
       return it == params_.end() ? deftVal : it->second;
@@ -276,6 +189,7 @@ class NetSocketMicrotest : public ::testing::Test {
     netRefCount = 0;
     ncclProfilerFunction = nullptr;
     ResetSocketFakes();
+    ResetOsFakes();
     ResetLibcFakes();
     ResetNcclFakes();
     ResetHipFakes();
@@ -297,7 +211,8 @@ class NetSocketMicrotest : public ::testing::Test {
   }
 
   void InstallInterfaces(std::vector<std::string> names) {
-    g_findInterfaces = [names](char* ifNames, ncclSocketAddress* ifAddrs, int ifNameMaxSize, int maxIfs, int* nIfs) {
+    g_ncclFindInterfaces = [names](char* ifNames, ncclSocketAddress* ifAddrs, int ifNameMaxSize, int maxIfs,
+                                   int* nIfs) {
       EXPECT_EQ(ifNameMaxSize, MAX_IF_NAME_SIZE);
       EXPECT_EQ(maxIfs, MAX_IFS);
       for (size_t i = 0; i < names.size(); i++) {
@@ -396,7 +311,7 @@ class NetSocketDevicesMicrotest : public NetSocketMicrotest {
 TEST_F(NetSocketDevicesMicrotest, InitDevices_InterfacesFound_RecordsNameAddressAndPciPath) {
   InstallInterfaces({"eth0", "ib1"});
   std::vector<std::string> asked;
-  ScopedHook realpath(g_osRealpath, [&](const char* path, char*) -> char* {
+  ScopedHook realpath(g_ncclOsRealpath, [&](const char* path, char*) -> char* {
     asked.push_back(path);
     return std::string(path) == "/sys/class/net/eth0/device" ? strdup("/sys/devices/pci0000:00/0000:00:01.0")
                                                              : nullptr;
@@ -416,7 +331,7 @@ TEST_F(NetSocketDevicesMicrotest, InitDevices_InterfacesFound_RecordsNameAddress
 
 TEST_F(NetSocketDevicesMicrotest, InitDevices_AlreadyInitialized_SkipsDiscovery) {
   ncclNetIfs = 1;
-  ScopedHook find(g_findInterfaces, [](char*, ncclSocketAddress*, int, int, int*) { return ncclInternalError; });
+  ScopedHook find(g_ncclFindInterfaces, [](char*, ncclSocketAddress*, int, int, int*) { return ncclInternalError; });
 
   EXPECT_EQ(ncclNetSocketInitDevices("test"), ncclSuccess);
 
@@ -425,7 +340,7 @@ TEST_F(NetSocketDevicesMicrotest, InitDevices_AlreadyInitialized_SkipsDiscovery)
 }
 
 TEST_F(NetSocketDevicesMicrotest, InitDevices_DiscoveryFails_ReturnsErrorAndStaysUninitialized) {
-  ScopedHook find(g_findInterfaces, [](char*, ncclSocketAddress*, int, int, int* nIfs) {
+  ScopedHook find(g_ncclFindInterfaces, [](char*, ncclSocketAddress*, int, int, int* nIfs) {
     *nIfs = 3;
     return ncclSystemError;
   });
@@ -527,7 +442,7 @@ TEST_F(NetSocketDevicesMicrotest, GetSpeed_CloseFails_ReturnsSystemError) {
 
 TEST_F(NetSocketDevicesMicrotest, CreateListener_DeviceOutOfRange_ReturnsInternalErrorWithoutSocket) {
   SetDevices(2);
-  ScopedHook init(g_sockInit, DefaultSockInit);
+  ScopedHook init(g_ncclSocketInit, DefaultNcclSocketInit);
   for (int dev : {-1, 2}) {
     SCOPED_TRACE(dev);
     ncclSocket sock{};
@@ -541,15 +456,15 @@ TEST_F(NetSocketDevicesMicrotest, CreateListener_DeviceOutOfRange_ReturnsInterna
 
 TEST_F(NetSocketDevicesMicrotest, CreateListener_ValidDevice_ListensAndPublishesBoundAddressAndMagic) {
   SetDevices(2);
-  ScopedHook listenHook(g_sockListen, DefaultSockListen);
+  ScopedHook listenHook(g_ncclSocketListen, StreamListen);
   ncclSocket sock{};
   ncclSocketAddress connectAddr{};
   uint64_t magic = 0;
 
   ASSERT_EQ(ncclNetSocketCreateListener("test", 1, &sock, &connectAddr, &magic), ncclSuccess);
 
-  EXPECT_EQ(magic, kMagic);
-  EXPECT_EQ(sock.magic, kMagic);
+  EXPECT_EQ(magic, NCCL_SOCKET_MAGIC);
+  EXPECT_EQ(sock.magic, NCCL_SOCKET_MAGIC);
   EXPECT_EQ(sock.type, ncclSocketTypeNetSocket);
   EXPECT_EQ(sock.abortFlag, nullptr);
   EXPECT_EQ(sock.asyncFlag, 1);
@@ -565,16 +480,16 @@ TEST_F(NetSocketDevicesMicrotest, CreateListener_SocketStepFails_PropagatesError
   ncclSocketAddress addr{};
   uint64_t magic = 0;
   {
-    ScopedHook init(g_sockInit, [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType,
+    ScopedHook init(g_ncclSocketInit, [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType,
                                    volatile uint32_t*, int, int) { return ncclSystemError; });
     EXPECT_EQ(ncclNetSocketCreateListener("test", 0, &sock, &addr, &magic), ncclSystemError);
   }
   {
-    ScopedHook listenHook(g_sockListen, [](ncclSocket*) { return ncclRemoteError; });
+    ScopedHook listenHook(g_ncclSocketListen, [](ncclSocket*) { return ncclRemoteError; });
     EXPECT_EQ(ncclNetSocketCreateListener("test", 0, &sock, &addr, &magic), ncclRemoteError);
   }
   {
-    ScopedHook getAddr(g_sockGetAddr, [](ncclSocket*, ncclSocketAddress*) { return ncclInvalidArgument; });
+    ScopedHook getAddr(g_ncclSocketGetAddr, [](ncclSocket*, ncclSocketAddress*) { return ncclInvalidArgument; });
     EXPECT_EQ(ncclNetSocketCreateListener("test", 0, &sock, &addr, &magic), ncclInvalidArgument);
   }
 }
@@ -732,7 +647,7 @@ class NetSocketThreadsMicrotest : public NetSocketMicrotest {
   }
 
   void InstallVendorFile() {
-    g_osRealpath = [this](const char* path, char*) {
+    g_ncclOsRealpath = [this](const char* path, char*) {
       realpathAsked_ = path;
       return strdup("/sys/devices/pci0000:00/0000:00:03.0/vendor");
     };
@@ -747,7 +662,7 @@ class NetSocketThreadsMicrotest : public NetSocketMicrotest {
 
 TEST_F(NetSocketThreadsMicrotest, GetNsockNthread_ExplicitCounts_UsesThemWithoutProbingVendor) {
   SetThreads(2, 3);
-  ScopedHook realpath(g_osRealpath, DefaultOsRealpath);
+  ScopedHook realpath(g_ncclOsRealpath, [](const char*, char*) -> char* { return nullptr; });
 
   ASSERT_EQ(GetCounts(), ncclSuccess);
 
@@ -874,7 +789,7 @@ TEST_F(NetSocketListenMicrotest, Listen_ValidDevice_PublishesHandleAndRecordsCou
   auto* lComm = static_cast<ncclNetSocketListenComm*>(listenComm);
   EXPECT_EQ(handle->connectAddr.sin.sin_addr.s_addr, DevAddr(1).sin.sin_addr.s_addr);
   EXPECT_EQ(handle->connectAddr.sin.sin_port, htons(kListenPort));
-  EXPECT_EQ(handle->magic, kMagic);
+  EXPECT_EQ(handle->magic, NCCL_SOCKET_MAGIC);
   EXPECT_EQ(handle->nSocks, 6);
   EXPECT_EQ(handle->nThreads, 2);
   EXPECT_EQ(handle->stage.state, ncclNetSocketCommStateStart);
@@ -898,7 +813,7 @@ TEST_F(NetSocketListenMicrotest, Listen_InvalidDevice_ReturnsInternalErrorWithou
 
 TEST_F(NetSocketListenMicrotest, Listen_ListenerFails_ClosesSocketAndPropagatesError) {
   SetDevices(1);
-  ScopedHook listenHook(g_sockListen, [](ncclSocket* sock) {
+  ScopedHook listenHook(g_ncclSocketListen, [](ncclSocket* sock) {
     sock->socketDescriptor = 55;
     return ncclSystemError;
   });
@@ -913,7 +828,7 @@ TEST_F(NetSocketListenMicrotest, Listen_ListenerFails_ClosesSocketAndPropagatesE
 TEST_F(NetSocketListenMicrotest, Listen_ThreadProbeFails_ClosesListenerAndPropagatesError) {
   SetDevices(1);
   SetThreads(-2, -2);
-  ScopedHook realpath(g_osRealpath, [](const char*, char*) { return strdup("/vendor"); });
+  ScopedHook realpath(g_ncclOsRealpath, [](const char*, char*) { return strdup("/vendor"); });
   ScopedHook openHook(g_open, [](const char*, int, mode_t) { return 11; });
   g_readScript = {{-1, EIO, ""}};
   int listenFd = g_sock.nextFd;
@@ -942,7 +857,7 @@ TEST_F(NetSocketListenMicrotest, CloseListen_ReadyListener_ClosesSocket) {
 TEST_F(NetSocketListenMicrotest, CloseListen_UnreadyListener_SkipsClose) {
   auto* lComm = static_cast<ncclNetSocketListenComm*>(calloc(1, sizeof(ncclNetSocketListenComm)));
   lComm->sock.state = ncclSocketStateInitialized;
-  ScopedHook closeHook(g_sockClose, DefaultSockClose);
+  ScopedHook closeHook(g_ncclSocketClose, StreamClose);
 
   EXPECT_EQ(ncclNetSocketCloseListen(lComm), ncclSuccess);
 
@@ -952,7 +867,7 @@ TEST_F(NetSocketListenMicrotest, CloseListen_UnreadyListener_SkipsClose) {
 TEST_F(NetSocketListenMicrotest, CloseListen_ReadyCheckFails_PropagatesError) {
   auto* lComm = static_cast<ncclNetSocketListenComm*>(calloc(1, sizeof(ncclNetSocketListenComm)));
   ReadySocket(&lComm->sock);
-  ScopedHook ready(g_sockReady, [](ncclSocket*, int*) { return ncclRemoteError; });
+  ScopedHook ready(g_ncclSocketReady, [](ncclSocket*, int*) { return ncclRemoteError; });
 
   EXPECT_EQ(ncclNetSocketCloseListen(lComm), ncclRemoteError);
 
@@ -998,7 +913,7 @@ class NetSocketConnectMicrotest : public NetSocketMicrotest {
 
 TEST_F(NetSocketConnectMicrotest, Connect_DeviceOutOfRange_ReturnsInternalError) {
   MakeHandle(1, 1);
-  ScopedHook init(g_sockInit, DefaultSockInit);
+  ScopedHook init(g_ncclSocketInit, DefaultNcclSocketInit);
   void* sendComm = nullptr;
 
   EXPECT_EQ(Connect(&sendComm, -1), ncclInternalError);
@@ -1015,7 +930,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_AllSocketsReady_SendsEachIndexAndRetur
     return hipSuccess;
   });
   std::vector<ncclSocket*> inits;
-  ScopedHook init(g_sockInit, [&](ncclSocket* sock, const ncclSocketAddress* addr, uint64_t magic,
+  ScopedHook init(g_ncclSocketInit, [&](ncclSocket* sock, const ncclSocketAddress* addr, uint64_t magic,
                                   ncclSocketType type, volatile uint32_t* abortFlag, int asyncFlag, int retry) {
     inits.push_back(sock);
     EXPECT_EQ(std::memcmp(addr, &handle_.connectAddr, sizeof(*addr)), 0);
@@ -1023,7 +938,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_AllSocketsReady_SendsEachIndexAndRetur
     EXPECT_EQ(type, ncclSocketTypeNetSocket);
     EXPECT_EQ(abortFlag, nullptr);
     EXPECT_EQ(asyncFlag, 1);
-    return DefaultSockInit(sock, addr, magic, type, abortFlag, asyncFlag, retry);
+    return DefaultNcclSocketInit(sock, addr, magic, type, abortFlag, asyncFlag, retry);
   });
   void* sendComm = nullptr;
 
@@ -1045,7 +960,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_AllSocketsReady_SendsEachIndexAndRetur
 
 TEST_F(NetSocketConnectMicrotest, Connect_NoDataSockets_ConnectsControlSocketOnly) {
   MakeHandle(0, 0);
-  ScopedHook init(g_sockInit, DefaultSockInit);
+  ScopedHook init(g_ncclSocketInit, DefaultNcclSocketInit);
   void* sendComm = nullptr;
 
   ASSERT_EQ(Connect(&sendComm), ncclSuccess);
@@ -1058,15 +973,8 @@ TEST_F(NetSocketConnectMicrotest, Connect_NoDataSockets_ConnectsControlSocketOnl
 
 TEST_F(NetSocketConnectMicrotest, Connect_FirstSocketNotReady_ResumesWithoutReconnecting) {
   MakeHandle(1, 1);
-  ScopedHook init(g_sockInit, DefaultSockInit);
-  int calls = 0;
-  ScopedHook ready(g_sockReady, [&](ncclSocket* sock, int* running) {
-    if (calls++ == 0) {
-      *running = 0;
-      return ncclSuccess;
-    }
-    return DefaultSockReady(sock, running);
-  });
+  ScopedHook init(g_ncclSocketInit, DefaultNcclSocketInit);
+  ScopedHook ready(g_ncclSocketReady, NotReadyOnCall(0));
   void* sendComm = this;
 
   ASSERT_EQ(Connect(&sendComm), ncclSuccess);
@@ -1081,15 +989,8 @@ TEST_F(NetSocketConnectMicrotest, Connect_FirstSocketNotReady_ResumesWithoutReco
 
 TEST_F(NetSocketConnectMicrotest, Connect_LaterSocketNotReady_ResumesOnThatSocket) {
   MakeHandle(2, 1);
-  ScopedHook init(g_sockInit, DefaultSockInit);
-  int calls = 0;
-  ScopedHook ready(g_sockReady, [&](ncclSocket* sock, int* running) {
-    if (calls++ == 1) {
-      *running = 0;
-      return ncclSuccess;
-    }
-    return DefaultSockReady(sock, running);
-  });
+  ScopedHook init(g_ncclSocketInit, DefaultNcclSocketInit);
+  ScopedHook ready(g_ncclSocketReady, NotReadyOnCall(1));
   void* sendComm = this;
 
   ASSERT_EQ(Connect(&sendComm), ncclSuccess);
@@ -1108,11 +1009,12 @@ TEST_F(NetSocketConnectMicrotest, Connect_LaterSocketNotReady_ResumesOnThatSocke
 
 TEST_F(NetSocketConnectMicrotest, Connect_IndexNotSent_ReturnsNoCommAndResumesSend) {
   MakeHandle(1, 1);
-  ScopedHook connectHook(g_sockConnect, DefaultSockConnect);
+  ScopedHook connectHook(g_ncclSocketConnect, StreamConnect);
   int calls = 0;
-  ScopedHook progress(g_sockProgress, [&](int op, ncclSocket* sock, void* ptr, int size, int* offset, bool* closed) {
+  ScopedHook progress(g_ncclSocketProgress,
+                      [&](int op, ncclSocket* sock, void* ptr, int size, int* offset, bool* closed) {
     if (calls++ == 0) return ncclSuccess;
-    return DefaultSockProgress(op, sock, ptr, size, offset, closed);
+    return StreamProgress(op, sock, ptr, size, offset, closed);
   });
   void* sendComm = this;
 
@@ -1132,7 +1034,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_IndexNotSent_ReturnsNoCommAndResumesSe
 TEST_F(NetSocketConnectMicrotest, Connect_SocketStepFails_PropagatesError) {
   {
     MakeHandle(1, 1);
-    ScopedHook init(g_sockInit, [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType,
+    ScopedHook init(g_ncclSocketInit, [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType,
                                    volatile uint32_t*, int, int) { return ncclSystemError; });
     void* sendComm = this;
     EXPECT_EQ(Connect(&sendComm), ncclSystemError);
@@ -1141,7 +1043,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_SocketStepFails_PropagatesError) {
   }
   {
     MakeHandle(1, 1);
-    ScopedHook connectHook(g_sockConnect, [](ncclSocket*) { return ncclRemoteError; });
+    ScopedHook connectHook(g_ncclSocketConnect, [](ncclSocket*) { return ncclRemoteError; });
     void* sendComm = this;
     EXPECT_EQ(Connect(&sendComm), ncclRemoteError);
     EXPECT_EQ(sendComm, nullptr);
@@ -1149,7 +1051,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_SocketStepFails_PropagatesError) {
   }
   {
     MakeHandle(1, 1);
-    ScopedHook ready(g_sockReady, [](ncclSocket*, int*) { return ncclInvalidUsage; });
+    ScopedHook ready(g_ncclSocketReady, [](ncclSocket*, int*) { return ncclInvalidUsage; });
     void* sendComm = this;
     EXPECT_EQ(Connect(&sendComm), ncclInvalidUsage);
     EXPECT_EQ(sendComm, nullptr);
@@ -1157,7 +1059,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_SocketStepFails_PropagatesError) {
   }
   {
     MakeHandle(1, 1);
-    ScopedHook progress(g_sockProgress,
+    ScopedHook progress(g_ncclSocketProgress,
                         [](int, ncclSocket*, void*, int, int*, bool*) { return ncclInternalError; });
     void* sendComm = this;
     EXPECT_EQ(Connect(&sendComm), ncclInternalError);
@@ -1169,7 +1071,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_SocketStepFails_PropagatesError) {
 TEST_F(NetSocketConnectMicrotest, Connect_GetDeviceFails_ReturnsCudaErrorBeforeConnecting) {
   MakeHandle(1, 1);
   ScopedHook device(g_hipGetDevice, [](int*) { return hipErrorNoDevice; });
-  ScopedHook init(g_sockInit, DefaultSockInit);
+  ScopedHook init(g_ncclSocketInit, DefaultNcclSocketInit);
   void* sendComm = this;
 
   EXPECT_EQ(Connect(&sendComm), ncclUnhandledCudaError);
@@ -1206,7 +1108,7 @@ class NetSocketAcceptMicrotest : public NetSocketMicrotest {
 
   ncclResult_t Accept(void** recvComm) { return ncclNetSocketAccept(lComm_, recvComm, nullptr); }
 
-  // Accept already freed the rejected socket.
+  // Production frees the rejected socket but leaves stage->sock pointing at it (AICOMRCCL-3105).
   void ForgetStagedSocket() { lComm_->stage.sock = nullptr; }
 };
 
@@ -1217,18 +1119,18 @@ TEST_F(NetSocketAcceptMicrotest, Accept_PeerSendsIndices_PlacesEachConnectionAnd
     return hipSuccess;
   });
   std::vector<ncclSocket*> inits;
-  ScopedHook init(g_sockInit, [&](ncclSocket* sock, const ncclSocketAddress* addr, uint64_t magic,
+  ScopedHook init(g_ncclSocketInit, [&](ncclSocket* sock, const ncclSocketAddress* addr, uint64_t magic,
                                   ncclSocketType type, volatile uint32_t* abortFlag, int asyncFlag, int retry) {
     inits.push_back(sock);
     EXPECT_EQ(addr, nullptr);
-    return DefaultSockInit(sock, addr, magic, type, abortFlag, asyncFlag, retry);
+    return DefaultNcclSocketInit(sock, addr, magic, type, abortFlag, asyncFlag, retry);
   });
   std::vector<ncclSocket*> accepted;
-  ScopedHook acceptHook(g_sockAccept, [&](ncclSocket* sock, ncclSocket* listenSock, bool retry) {
+  ScopedHook acceptHook(g_ncclSocketAccept, [&](ncclSocket* sock, ncclSocket* listenSock, bool retry) {
     accepted.push_back(sock);
     EXPECT_EQ(listenSock, &lComm_->sock);
     EXPECT_EQ(sock->state, ncclSocketStateInitialized);
-    return DefaultSockAccept(sock, listenSock, retry);
+    return StreamAccept(sock, listenSock, retry);
   });
   g_sock.acceptIndices = {2, 0, 1};
   int firstFd = g_sock.nextFd;
@@ -1268,15 +1170,8 @@ TEST_F(NetSocketAcceptMicrotest, Accept_Completes_ResetsListenerStage) {
 TEST_F(NetSocketAcceptMicrotest, Accept_FirstSocketNotReady_ResumesWithoutAcceptingAgain) {
   MakeListenComm(1, 1);
   g_sock.acceptIndices = {0, 1};
-  ScopedHook acceptHook(g_sockAccept, DefaultSockAccept);
-  int calls = 0;
-  ScopedHook ready(g_sockReady, [&](ncclSocket* sock, int* running) {
-    if (calls++ == 0) {
-      *running = 0;
-      return ncclSuccess;
-    }
-    return DefaultSockReady(sock, running);
-  });
+  ScopedHook acceptHook(g_ncclSocketAccept, StreamAccept);
+  ScopedHook ready(g_ncclSocketReady, NotReadyOnCall(0));
   void* recvComm = this;
 
   ASSERT_EQ(Accept(&recvComm), ncclSuccess);
@@ -1292,15 +1187,8 @@ TEST_F(NetSocketAcceptMicrotest, Accept_FirstSocketNotReady_ResumesWithoutAccept
 TEST_F(NetSocketAcceptMicrotest, Accept_LaterSocketNotReady_ResumesOnThatSocket) {
   MakeListenComm(1, 1);
   g_sock.acceptIndices = {1, 0};
-  ScopedHook acceptHook(g_sockAccept, DefaultSockAccept);
-  int calls = 0;
-  ScopedHook ready(g_sockReady, [&](ncclSocket* sock, int* running) {
-    if (calls++ == 1) {
-      *running = 0;
-      return ncclSuccess;
-    }
-    return DefaultSockReady(sock, running);
-  });
+  ScopedHook acceptHook(g_ncclSocketAccept, StreamAccept);
+  ScopedHook ready(g_ncclSocketReady, NotReadyOnCall(1));
   int firstFd = g_sock.nextFd;
   void* recvComm = this;
 
@@ -1320,8 +1208,8 @@ TEST_F(NetSocketAcceptMicrotest, Accept_LaterSocketNotReady_ResumesOnThatSocket)
 TEST_F(NetSocketAcceptMicrotest, Accept_IndexNotReceived_ReturnsNoCommAndResumes) {
   MakeListenComm(1, 1);
   std::vector<int> acceptedFds;
-  ScopedHook acceptHook(g_sockAccept, [&](ncclSocket* sock, ncclSocket* listenSock, bool retry) {
-    ncclResult_t ret = DefaultSockAccept(sock, listenSock, retry);
+  ScopedHook acceptHook(g_ncclSocketAccept, [&](ncclSocket* sock, ncclSocket* listenSock, bool retry) {
+    ncclResult_t ret = StreamAccept(sock, listenSock, retry);
     acceptedFds.push_back(sock->socketDescriptor);
     return ret;
   });
@@ -1356,6 +1244,20 @@ TEST_F(NetSocketAcceptMicrotest, Accept_IndexOutOfRange_ClosesConnectionAndRetur
   ForgetStagedSocket();
 }
 
+// AICOMRCCL-3105
+TEST_F(NetSocketAcceptMicrotest, DISABLED_Accept_AfterRejectedIndex_StartsNewHandshake) {
+  MakeListenComm(1, 1);
+  g_sock.acceptIndices = {2};
+  void* recvComm = this;
+  ASSERT_EQ(Accept(&recvComm), ncclInternalError);
+
+  g_sock.acceptIndices = {1, 0};
+  ASSERT_EQ(Accept(&recvComm), ncclSuccess);
+
+  ASSERT_NE(recvComm, nullptr);
+  Track(recvComm);
+}
+
 TEST_F(NetSocketAcceptMicrotest, Accept_DuplicateIndex_ClosesDuplicateKeepsFirstAndReturnsInternalError) {
   MakeListenComm(1, 1);
   g_sock.acceptIndices = {0, 0};
@@ -1373,7 +1275,7 @@ TEST_F(NetSocketAcceptMicrotest, Accept_DuplicateIndex_ClosesDuplicateKeepsFirst
 TEST_F(NetSocketAcceptMicrotest, Accept_SocketStepFails_PropagatesError) {
   {
     MakeListenComm(1, 1);
-    ScopedHook acceptHook(g_sockAccept, [](ncclSocket*, ncclSocket*, bool) { return ncclSystemError; });
+    ScopedHook acceptHook(g_ncclSocketAccept, [](ncclSocket*, ncclSocket*, bool) { return ncclSystemError; });
     void* recvComm = this;
     EXPECT_EQ(Accept(&recvComm), ncclSystemError);
     EXPECT_EQ(recvComm, nullptr);
@@ -1381,7 +1283,7 @@ TEST_F(NetSocketAcceptMicrotest, Accept_SocketStepFails_PropagatesError) {
   }
   {
     MakeListenComm(1, 1);
-    ScopedHook ready(g_sockReady, [](ncclSocket*, int*) { return ncclRemoteError; });
+    ScopedHook ready(g_ncclSocketReady, [](ncclSocket*, int*) { return ncclRemoteError; });
     void* recvComm = this;
     EXPECT_EQ(Accept(&recvComm), ncclRemoteError);
     EXPECT_EQ(recvComm, nullptr);
@@ -1389,7 +1291,7 @@ TEST_F(NetSocketAcceptMicrotest, Accept_SocketStepFails_PropagatesError) {
   }
   {
     MakeListenComm(1, 1);
-    ScopedHook progress(g_sockProgress,
+    ScopedHook progress(g_ncclSocketProgress,
                         [](int, ncclSocket*, void*, int, int*, bool*) { return ncclInternalError; });
     void* recvComm = this;
     EXPECT_EQ(Accept(&recvComm), ncclInternalError);
@@ -1400,7 +1302,7 @@ TEST_F(NetSocketAcceptMicrotest, Accept_SocketStepFails_PropagatesError) {
 TEST_F(NetSocketAcceptMicrotest, Accept_GetDeviceFails_ReturnsCudaErrorBeforeAccepting) {
   MakeListenComm(1, 1);
   ScopedHook device(g_hipGetDevice, [](int*) { return hipErrorNoDevice; });
-  ScopedHook acceptHook(g_sockAccept, DefaultSockAccept);
+  ScopedHook acceptHook(g_ncclSocketAccept, StreamAccept);
   void* recvComm = this;
 
   EXPECT_EQ(Accept(&recvComm), ncclUnhandledCudaError);
@@ -1502,9 +1404,9 @@ class NetSocketTransferMicrotest : public NetSocketMicrotest {
   // Only the first progress call moves bytes.
   void BlockAfterFirstProgress() {
     progressCalls_ = 0;
-    g_sockProgress = [this](int op, ncclSocket* sock, void* ptr, int size, int* offset, bool* closed) {
+    g_ncclSocketProgress = [this](int op, ncclSocket* sock, void* ptr, int size, int* offset, bool* closed) {
       if (progressCalls_++ > 0) return ncclSuccess;
-      return DefaultSockProgress(op, sock, ptr, size, offset, closed);
+      return StreamProgress(op, sock, ptr, size, offset, closed);
     };
   }
 };
@@ -1536,7 +1438,7 @@ TEST_F(NetSocketTransferMicrotest, Test_LargeSend_SendsSizeFrameBeforePayload) {
   EXPECT_EQ(done_, 0);
   EXPECT_EQ(Sent(comm->ctrlSock), SizeFrame(1000));
 
-  g_sockProgress = DefaultSockProgress;
+  g_ncclSocketProgress = StreamProgress;
   ASSERT_EQ(Poll(req), ncclSuccess);
 
   EXPECT_EQ(done_, 1);
@@ -1558,7 +1460,7 @@ TEST_F(NetSocketTransferMicrotest, Test_SendUpToInlineSize_CarriesPayloadInSizeF
     BlockAfterFirstProgress();
     ASSERT_EQ(Poll(Isend(comm, &data[0], inlineSize + 1)), ncclSuccess);
     EXPECT_EQ(done_, 0);
-    g_sockProgress = DefaultSockProgress;
+    g_ncclSocketProgress = StreamProgress;
   }
 }
 
@@ -1567,9 +1469,10 @@ TEST_F(NetSocketTransferMicrotest, Test_SendNotAccepted_ReturnsNotDoneAndSendsOn
   std::string data = Pattern(50);
   void* req = Isend(comm, &data[0], data.size());
   int calls = 0;
-  ScopedHook progress(g_sockProgress, [&](int op, ncclSocket* sock, void* ptr, int size, int* offset, bool* closed) {
+  ScopedHook progress(g_ncclSocketProgress,
+                      [&](int op, ncclSocket* sock, void* ptr, int size, int* offset, bool* closed) {
     if (calls++ == 0) return ncclSuccess;
-    return DefaultSockProgress(op, sock, ptr, size, offset, closed);
+    return StreamProgress(op, sock, ptr, size, offset, closed);
   });
 
   ASSERT_EQ(Poll(req), ncclSuccess);
@@ -1690,6 +1593,24 @@ TEST_F(NetSocketTransferMicrotest, Test_RecvNothingArrived_ReturnsNotDoneUntilDa
   EXPECT_EQ(buf.substr(0, 10), payload);
 }
 
+// AICOMRCCL-3104
+TEST_F(NetSocketTransferMicrotest, DISABLED_Test_RecvInlinePayloadAfterSizeFrame_CompletesWithPayload) {
+  ncclNetSocketComm* comm = MakeComm(0, 0);
+  std::string payload = Pattern(50);
+  std::string buf(100, '\0');
+  void* req = Irecv(comm, &buf[0], buf.size());
+  QueueInbound(comm->ctrlSock, SizeFrame(50));
+  ASSERT_EQ(Poll(req), ncclSuccess);
+  ASSERT_EQ(done_, 0);
+
+  QueueInbound(comm->ctrlSock, payload);
+  ASSERT_EQ(Poll(req), ncclSuccess);
+
+  EXPECT_EQ(done_, 1);
+  EXPECT_EQ(size_, 50);
+  EXPECT_EQ(buf.substr(0, 50), payload);
+}
+
 TEST_F(NetSocketTransferMicrotest, Test_RecvPartialPayload_CompletesAcrossCalls) {
   ncclNetSocketComm* comm = MakeComm(0, 0);
   std::string payload = Pattern(1000);
@@ -1723,7 +1644,7 @@ TEST_F(NetSocketTransferMicrotest, Test_RecvTruncatedAndPeerAddressUnavailable_P
   std::string buf(100, '\0');
   void* req = Irecv(comm, &buf[0], buf.size());
   QueueInbound(comm->ctrlSock, SizeFrame(101));
-  ScopedHook getAddr(g_sockGetAddr, [](ncclSocket*, ncclSocketAddress*) { return ncclRemoteError; });
+  ScopedHook getAddr(g_ncclSocketGetAddr, [](ncclSocket*, ncclSocketAddress*) { return ncclRemoteError; });
 
   EXPECT_EQ(Poll(req), ncclRemoteError);
 }
@@ -1744,7 +1665,7 @@ TEST_F(NetSocketTransferMicrotest, Test_RecvSenderEqualToPosted_Completes) {
 TEST_F(NetSocketTransferMicrotest, Test_SizeExchangeFails_PropagatesError) {
   ncclNetSocketComm* comm = MakeComm(0, 0);
   char data[8] = {};
-  ScopedHook progress(g_sockProgress, [](int, ncclSocket*, void*, int, int*, bool*) { return ncclRemoteError; });
+  ScopedHook progress(g_ncclSocketProgress, [](int, ncclSocket*, void*, int, int*, bool*) { return ncclRemoteError; });
 
   EXPECT_EQ(Poll(Isend(comm, data, sizeof(data))), ncclRemoteError);
   EXPECT_EQ(Poll(Irecv(comm, data, sizeof(data))), ncclRemoteError);
@@ -1754,9 +1675,10 @@ TEST_F(NetSocketTransferMicrotest, Test_PayloadFails_PropagatesError) {
   ncclNetSocketComm* comm = MakeComm(0, 0);
   std::string data = Pattern(1000);
   int calls = 0;
-  ScopedHook progress(g_sockProgress, [&](int op, ncclSocket* sock, void* ptr, int size, int* offset, bool* closed) {
+  ScopedHook progress(g_ncclSocketProgress,
+                      [&](int op, ncclSocket* sock, void* ptr, int size, int* offset, bool* closed) {
     if (calls++ > 0) return ncclRemoteError;
-    return DefaultSockProgress(op, sock, ptr, size, offset, closed);
+    return StreamProgress(op, sock, ptr, size, offset, closed);
   });
 
   EXPECT_EQ(Poll(Isend(comm, &data[0], data.size())), ncclRemoteError);
@@ -1777,23 +1699,31 @@ class NetSocketTaskMicrotest : public NetSocketTransferMicrotest {
   static void FinishTasks(ncclNetSocketRequest* req, int count) {
     for (int i = 0; i < count; i++) req->tasks[i]->offset = req->tasks[i]->size;
   }
+
+  // A 1000-byte send split into two 500-byte data-socket tasks, after the first poll.
+  ncclNetSocketRequest* PostSplitSend() {
+    SetParam("SOCKET_MIN_TASKSIZE", 16);
+    comm_ = MakeComm(2, 1);
+    PreprovisionQueues(comm_, 8);
+    data_ = Pattern(1000);
+    auto* req = static_cast<ncclNetSocketRequest*>(Isend(comm_, &data_[0], data_.size()));
+    EXPECT_EQ(Poll(req), ncclSuccess);
+    return req;
+  }
+
+  ncclNetSocketComm* comm_ = nullptr;
+  std::string data_;
 };
 
 TEST_F(NetSocketTaskMicrotest, Test_LargeSend_SplitsPayloadIntoOneTaskPerDataSocket) {
-  SetParam("SOCKET_MIN_TASKSIZE", 16);
-  ncclNetSocketComm* comm = MakeComm(2, 1);
-  PreprovisionQueues(comm, 8);
-  std::string data = Pattern(1000);
-  auto* req = static_cast<ncclNetSocketRequest*>(Isend(comm, &data[0], data.size()));
-
-  ASSERT_EQ(Poll(req), ncclSuccess);
+  ncclNetSocketRequest* req = PostSplitSend();
 
   EXPECT_EQ(done_, 0);
-  EXPECT_EQ(Sent(comm->ctrlSock), SizeFrame(1000));
+  EXPECT_EQ(Sent(comm_->ctrlSock), SizeFrame(1000));
   ASSERT_EQ(req->nSubs, 2);
-  EXPECT_EQ(req->tasks[0]->data, &data[0]);
+  EXPECT_EQ(req->tasks[0]->data, &data_[0]);
   EXPECT_EQ(req->tasks[0]->size, 500);
-  EXPECT_EQ(req->tasks[1]->data, &data[500]);
+  EXPECT_EQ(req->tasks[1]->data, &data_[500]);
   EXPECT_EQ(req->tasks[1]->size, 500);
 }
 
@@ -1857,12 +1787,7 @@ TEST_F(NetSocketTaskMicrotest, Test_LargeRecv_SplitsSenderSizeAcrossDataSockets)
 }
 
 TEST_F(NetSocketTaskMicrotest, Test_SomeTasksPending_ReturnsNotDone) {
-  SetParam("SOCKET_MIN_TASKSIZE", 16);
-  ncclNetSocketComm* comm = MakeComm(2, 1);
-  PreprovisionQueues(comm, 8);
-  std::string data = Pattern(1000);
-  auto* req = static_cast<ncclNetSocketRequest*>(Isend(comm, &data[0], data.size()));
-  ASSERT_EQ(Poll(req), ncclSuccess);
+  ncclNetSocketRequest* req = PostSplitSend();
   FinishTasks(req, 1);
 
   ASSERT_EQ(Poll(req), ncclSuccess);
@@ -1871,12 +1796,7 @@ TEST_F(NetSocketTaskMicrotest, Test_SomeTasksPending_ReturnsNotDone) {
 }
 
 TEST_F(NetSocketTaskMicrotest, Test_AllTasksFinished_CompletesAndReleasesTasks) {
-  SetParam("SOCKET_MIN_TASKSIZE", 16);
-  ncclNetSocketComm* comm = MakeComm(2, 1);
-  PreprovisionQueues(comm, 8);
-  std::string data = Pattern(1000);
-  auto* req = static_cast<ncclNetSocketRequest*>(Isend(comm, &data[0], data.size()));
-  ASSERT_EQ(Poll(req), ncclSuccess);
+  ncclNetSocketRequest* req = PostSplitSend();
   FinishTasks(req, 2);
 
   ASSERT_EQ(Poll(req), ncclSuccess);
@@ -1885,16 +1805,11 @@ TEST_F(NetSocketTaskMicrotest, Test_AllTasksFinished_CompletesAndReleasesTasks) 
   EXPECT_EQ(size_, 1000);
   EXPECT_EQ(req->tasks[0]->used, 0);
   EXPECT_EQ(req->tasks[1]->used, 0);
-  EXPECT_EQ(Isend(comm, &data[0], data.size()), req);
+  EXPECT_EQ(Isend(comm_, &data_[0], data_.size()), req);
 }
 
 TEST_F(NetSocketTaskMicrotest, Test_AllTasksFinishedWithNullSizeOut_Completes) {
-  SetParam("SOCKET_MIN_TASKSIZE", 16);
-  ncclNetSocketComm* comm = MakeComm(2, 1);
-  PreprovisionQueues(comm, 8);
-  std::string data = Pattern(1000);
-  auto* req = static_cast<ncclNetSocketRequest*>(Isend(comm, &data[0], data.size()));
-  ASSERT_EQ(Poll(req), ncclSuccess);
+  ncclNetSocketRequest* req = PostSplitSend();
   FinishTasks(req, 2);
 
   ASSERT_EQ(ncclNetSocketTest(req, &done_, nullptr), ncclSuccess);
@@ -1903,17 +1818,37 @@ TEST_F(NetSocketTaskMicrotest, Test_AllTasksFinishedWithNullSizeOut_Completes) {
 }
 
 TEST_F(NetSocketTaskMicrotest, Test_TaskFailed_ReturnsTaskError) {
-  SetParam("SOCKET_MIN_TASKSIZE", 16);
-  ncclNetSocketComm* comm = MakeComm(2, 1);
-  PreprovisionQueues(comm, 8);
-  std::string data = Pattern(1000);
-  auto* req = static_cast<ncclNetSocketRequest*>(Isend(comm, &data[0], data.size()));
-  ASSERT_EQ(Poll(req), ncclSuccess);
+  ncclNetSocketRequest* req = PostSplitSend();
   req->tasks[1]->result = ncclRemoteError;
 
   EXPECT_EQ(Poll(req), ncclRemoteError);
 
   EXPECT_EQ(done_, 0);
+}
+
+TEST_F(NetSocketTaskMicrotest, Test_NoFreeTaskSlot_ReturnsInternalError) {
+  SetParam("SOCKET_MIN_TASKSIZE", 16);
+  ncclNetSocketComm* comm = MakeComm(2, 1);
+  PreprovisionQueues(comm, 2);
+  comm->threadResources[0].threadTaskQueue.tasks[1].used = 1;
+  std::string data = Pattern(1000);
+
+  EXPECT_EQ(Poll(Isend(comm, &data[0], data.size())), ncclInternalError);
+}
+
+// AICOMRCCL-3106
+TEST_F(NetSocketTaskMicrotest, DISABLED_Test_SplitFailed_LaterPollDoesNotUseControlSocket) {
+  SetParam("SOCKET_MIN_TASKSIZE", 16);
+  ncclNetSocketComm* comm = MakeComm(2, 1);
+  PreprovisionQueues(comm, 2);
+  comm->threadResources[0].threadTaskQueue.tasks[1].used = 1;
+  std::string data = Pattern(1000);
+  void* req = Isend(comm, &data[0], data.size());
+  ASSERT_EQ(Poll(req), ncclInternalError);
+
+  Poll(req);
+
+  EXPECT_EQ(Sent(comm->ctrlSock), SizeFrame(1000));
 }
 
 TEST_F(NetSocketTaskMicrotest, GetTask_ConsecutiveTasks_RotateAcrossSocketsAndThreads) {
@@ -1975,14 +1910,12 @@ class NetSocketHelperThreadMicrotest : public NetSocketMicrotest {
   ncclNetSocketComm* comm_ = nullptr;
   ncclNetSocketThreadResources* res_ = nullptr;
   ncclNetSocketTask* tasks_ = nullptr;
-  ncclProfilerInfo pInfo_{};
 
   void SetUp() override {
     NetSocketMicrotest::SetUp();
     comm_ = MakeComm(2, 1);
     res_ = &comm_->threadResources[0];
     res_->comm = comm_;
-    res_->pInfo = &pInfo_;
     res_->threadTaskQueue.tasks = static_cast<ncclNetSocketTask*>(calloc(4, sizeof(ncclNetSocketTask)));
     res_->threadTaskQueue.len = 4;
     tasks_ = res_->threadTaskQueue.tasks;
@@ -2034,7 +1967,7 @@ TEST_F(NetSocketHelperThreadMicrotest, SocketThread_FreeAndFinishedTasks_AreNotP
   SetTask(1, NCCL_SOCKET_SEND, b, 1);
   tasks_[1].offset = tasks_[1].size;
   res_->stop = 1;
-  ScopedHook progress(g_sockProgress, DefaultSockProgress);
+  ScopedHook progress(g_ncclSocketProgress, StreamProgress);
 
   EXPECT_EQ(persistentSocketThread(res_), nullptr);
 
@@ -2046,7 +1979,7 @@ TEST_F(NetSocketHelperThreadMicrotest, SocketThread_ProgressFails_RecordsErrorAn
   SetTask(0, NCCL_SOCKET_SEND, a, 0);
   SetTask(1, NCCL_SOCKET_SEND, b, 1);
   res_->stop = 1;
-  ScopedHook progress(g_sockProgress, [](int, ncclSocket*, void*, int, int*, bool*) { return ncclRemoteError; });
+  ScopedHook progress(g_ncclSocketProgress, [](int, ncclSocket*, void*, int, int*, bool*) { return ncclRemoteError; });
 
   EXPECT_EQ(persistentSocketThread(res_), nullptr);
 
@@ -2055,7 +1988,7 @@ TEST_F(NetSocketHelperThreadMicrotest, SocketThread_ProgressFails_RecordsErrorAn
   EXPECT_EQ(tasks_[1].offset, 0);
 }
 
-TEST_F(NetSocketHelperThreadMicrotest, SocketThread_Idle_WakesForNewTaskAndExitsOnStop) {
+TEST_F(NetSocketHelperThreadMicrotest, SocketThread_TaskPostedToRunningThread_IsDrivenThenThreadStops) {
   std::thread helper(persistentSocketThread, res_);
   std::string data = Pattern(40);
   {
@@ -2110,8 +2043,8 @@ TEST_F(NetSocketMultiSocketMicrotest, Test_LargeRecv_GathersPayloadFromDataSocke
   EXPECT_EQ(TestUntilDone(req, &size), ncclSuccess);
 
   EXPECT_EQ(size, 1000);
-  EXPECT_EQ(buf, payload);
   EXPECT_EQ(CloseComm(comm), ncclSuccess);
+  EXPECT_EQ(buf, payload);
 }
 
 TEST_F(NetSocketMultiSocketMicrotest, Test_ConsecutiveRequests_StartOnNextDataSocket) {
@@ -2131,10 +2064,10 @@ TEST_F(NetSocketMultiSocketMicrotest, Test_DataSocketFails_ReturnsSocketError) {
   SetParam("SOCKET_MIN_TASKSIZE", 16);
   ncclNetSocketComm* comm = MakeComm(2, 1);
   ncclSocket* failing = &comm->socks[1];
-  ScopedHook progress(g_sockProgress, [failing](int op, ncclSocket* sock, void* ptr, int size, int* offset,
+  ScopedHook progress(g_ncclSocketProgress, [failing](int op, ncclSocket* sock, void* ptr, int size, int* offset,
                                                 bool* closed) {
     if (sock == failing) return ncclRemoteError;
-    return DefaultSockProgress(op, sock, ptr, size, offset, closed);
+    return StreamProgress(op, sock, ptr, size, offset, closed);
   });
   std::string data = Pattern(1000);
   void* req = Isend(comm, &data[0], data.size());
@@ -2184,14 +2117,20 @@ TEST_F(NetSocketCloseMicrotest, Close_SocketSlotsBeyondNSocks_AreNotTouched) {
   EXPECT_EQ(g_sock.closed, fds);
 }
 
-TEST_F(NetSocketCloseMicrotest, Close_EveryThreadSlotInUse_Succeeds) {
+TEST_F(NetSocketCloseMicrotest, Close_EveryThreadSlotInUse_FreesEveryTaskQueue) {
   ncclNetSocketComm* comm = MakeComm(MAX_THREADS, MAX_THREADS);
+  std::vector<void*> queues;
   for (ncclNetSocketThreadResources& res : comm->threadResources) {
     res.threadTaskQueue.tasks = static_cast<ncclNetSocketTask*>(calloc(1, sizeof(ncclNetSocketTask)));
     res.threadTaskQueue.len = 1;
+    queues.push_back(res.threadTaskQueue.tasks);
   }
 
   EXPECT_EQ(CloseComm(comm), ncclSuccess);
+
+  for (void* queue : queues) {
+    EXPECT_NE(std::find(g_freedPointers.begin(), g_freedPointers.end(), queue), g_freedPointers.end());
+  }
 }
 
 TEST_F(NetSocketCloseMicrotest, Close_SocketNotReady_SkipsClose) {
@@ -2206,7 +2145,7 @@ TEST_F(NetSocketCloseMicrotest, Close_SocketNotReady_SkipsClose) {
 
 TEST_F(NetSocketCloseMicrotest, Close_ReadyCheckFails_PropagatesError) {
   ncclNetSocketComm* comm = MakeComm(0, 0);
-  ScopedHook ready(g_sockReady, [](ncclSocket*, int*) { return ncclRemoteError; });
+  ScopedHook ready(g_ncclSocketReady, [](ncclSocket*, int*) { return ncclRemoteError; });
 
   EXPECT_EQ(CloseComm(comm), ncclRemoteError);
 

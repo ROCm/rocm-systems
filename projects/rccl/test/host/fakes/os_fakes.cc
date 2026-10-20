@@ -132,6 +132,10 @@ ncclResult_t ncclOsGetNumaNodeAffinity(unsigned int, char* affinityStr, size_t m
   return ncclSuccess;
 }
 
+static char* DefaultNcclOsRealpath(const char*, char*) { return nullptr; }
+std::function<char*(const char*, char*)> g_ncclOsRealpath = DefaultNcclOsRealpath;
+char* ncclOsRealpath(const char* path, char* resolvedPath) { return g_ncclOsRealpath(path, resolvedPath); }
+
 void ResetOsFakes() {
   g_ncclOsCpuCountValue = 0;
   g_ncclOsCpuCountCalls = 0;
@@ -147,4 +151,5 @@ void ResetOsFakes() {
   g_pciComputePartition = kDefaultComputePartition;
   g_pciComputePartitionCalls = 0;
   g_lastPciComputePartitionBusId.clear();
+  g_ncclOsRealpath = DefaultNcclOsRealpath;
 }

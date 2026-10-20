@@ -171,6 +171,16 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `rasTimeoutFactorNs`, and `rasTimeoutFactorSec` symbols so it can link beside
     `fakes/ras_param_fakes.cc` and the `ras-test.cc` timeout fake in the shared
     microtest binary.
+  - `transport/net_socket.cc` and `transport/net_socket/common.cc`
+    (`NET_SOCKET_CC_PATH`, `NET_SOCKET_COMMON_CC_PATH`, from
+    `net-socket-test.cc`); suites `NetSocket*Microtest.*`. Three disabled tests
+    pin production bugs and are enabled with their fixes:
+    `NetSocketTransferMicrotest.DISABLED_Test_RecvInlinePayloadAfterSizeFrame_CompletesWithPayload`
+    ([AICOMRCCL-3104](https://amd-hub.atlassian.net/browse/AICOMRCCL-3104)),
+    `NetSocketAcceptMicrotest.DISABLED_Accept_AfterRejectedIndex_StartsNewHandshake`
+    ([AICOMRCCL-3105](https://amd-hub.atlassian.net/browse/AICOMRCCL-3105)), and
+    `NetSocketTaskMicrotest.DISABLED_Test_SplitFailed_LaterPollDoesNotUseControlSocket`
+    ([AICOMRCCL-3106](https://amd-hub.atlassian.net/browse/AICOMRCCL-3106)).
   - `tuning/tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from
     `tuning-general-test.cc`); suite `TuningGeneralMicrotest.*`. Covers the
     shared step-count, hardware-index, time-estimation, thread-threshold,
@@ -503,6 +513,7 @@ symbol.
 | `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
 | `src/misc/param.cc` + `getenv` interposition | `fakes/env_fakes.cc` |
 | `src/misc/rocmwrap.cc` | `fakes/rocmwrap_fakes.cc` |
+| `src/misc/socket.cc` | `fakes/socket_fakes.{h,cc}` |
 | `src/misc/strongstream.cc` | `fakes/strongstream_stubs.cc` |
 | `src/misc/utils.cc` | `fakes/utils_fakes.cc` |
 | `src/os/linux.cc` | `fakes/os_fakes.cc` |

@@ -53,6 +53,9 @@ extern std::string g_pciComputePartition;
 extern int g_pciComputePartitionCalls;
 extern std::string g_lastPciComputePartitionBusId;
 
+// Default: the path does not exist (NULL).
+extern std::function<char*(const char*, char*)> g_ncclOsRealpath;
+
 void ResetOsFakes();
 
 #endif  // RCCL_TEST_HOST_OS_FAKES_H_
