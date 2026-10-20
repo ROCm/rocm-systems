@@ -171,11 +171,18 @@ typedef struct {
  * @brief The backend options for the rocJpeg library.
  *
  * This enum defines the available backend options for the rocJpeg library.
- * The backend can be either hardware or hybrid.
+ * The backend can be hardware, hybrid, or CPU.
  */
 typedef enum {
     ROCJPEG_BACKEND_HARDWARE = 0, /**< Hardware backend option. */
-    ROCJPEG_BACKEND_HYBRID = 1    /**< Hybrid backend option. */
+    ROCJPEG_BACKEND_HYBRID = 1,   /**< Hybrid backend option. */
+    ROCJPEG_BACKEND_CPU = 2       /**< CPU backend option. Decodes baseline JPEG streams on the CPU with the accurate
+                                       integer inverse DCT, as libjpeg-turbo does by default, and copies the output
+                                       to the destination buffers, which are device memory as for the hardware
+                                       backend. It supports rocJpegDecode with ROCJPEG_OUTPUT_NATIVE,
+                                       ROCJPEG_OUTPUT_YUV_PLANAR, and ROCJPEG_OUTPUT_Y without cropping; other
+                                       decode functions, output formats, and cropping return
+                                       ROCJPEG_STATUS_NOT_IMPLEMENTED. */
 } RocJpegBackend;
 
 /**

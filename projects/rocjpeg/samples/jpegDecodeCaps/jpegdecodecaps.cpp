@@ -136,7 +136,8 @@ void ShowHelpAndExit(const char *option = nullptr) {
     std::cout << "Options:" << std::endl
     << "-d  GPU device ID (0 for the first device, 1 for the second, etc.); optional; default: 0" << std::endl
     << "-be rocJPEG backend (0 for hardware-accelerated JPEG decoding using VCN," << std::endl
-    << "    1 for hybrid JPEG decoding using CPU and GPU HIP kernels (currently not supported)); optional; default: 0" << std::endl;
+    << "    1 for hybrid JPEG decoding using CPU and GPU HIP kernels (currently not supported)," << std::endl
+    << "    2 for JPEG decoding on the CPU); optional; default: 0" << std::endl;
     exit(option ? 1 : 0);
 }
 
@@ -188,8 +189,8 @@ int main(int argc, char **argv) {
             if (++i == argc) {
                 ShowHelpAndExit("-be");
             }
-            if (!ParseInt(argv[i], ROCJPEG_BACKEND_HARDWARE, ROCJPEG_BACKEND_HYBRID, &parsed)) {
-                std::cerr << "Error: invalid backend '" << argv[i] << "'; expected 0 or 1." << std::endl;
+            if (!ParseInt(argv[i], ROCJPEG_BACKEND_HARDWARE, ROCJPEG_BACKEND_CPU, &parsed)) {
+                std::cerr << "Error: invalid backend '" << argv[i] << "'; expected 0, 1, or 2." << std::endl;
                 return 1;
             }
             backend = static_cast<RocJpegBackend>(parsed);
@@ -222,7 +223,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    const char *backend_name = (backend == ROCJPEG_BACKEND_HARDWARE) ? "HARDWARE" : "HYBRID";
+    const char *backend_name = (backend == ROCJPEG_BACKEND_HARDWARE) ? "HARDWARE" : (backend == ROCJPEG_BACKEND_HYBRID) ? "HYBRID" : "CPU";
     std::cout << "JPEG decoder capabilities for GPU device " << device_id << " - " << hip_dev_prop.name
               << " [" << hip_dev_prop.gcnArchName << "] on PCI bus " << pci_bus_id << std::endl << std::endl;
 
@@ -263,7 +264,10 @@ int main(int argc, char **argv) {
     if (decode_caps.hw_rgb_subsampling_mask != 0) {
         rgb_conversion = "hardware (" + SubsamplingsString(decode_caps.hw_rgb_subsampling_mask) + ")";
     }
-    uint32_t sw_rgb_subsampling_mask = decode_caps.subsampling_mask & ~decode_caps.hw_rgb_subsampling_mask;
+    // Without an RGB output format there is no color conversion to report.
+    const uint32_t rgb_output_formats = (1u << ROCJPEG_OUTPUT_RGB) | (1u << ROCJPEG_OUTPUT_RGB_PLANAR);
+    uint32_t sw_rgb_subsampling_mask = (decode_caps.output_format_mask & rgb_output_formats)
+                                       ? decode_caps.subsampling_mask & ~decode_caps.hw_rgb_subsampling_mask : 0;
     if (sw_rgb_subsampling_mask != 0) {
         rgb_conversion += (rgb_conversion.empty() ? "" : ", ");
         rgb_conversion += "software (" + SubsamplingsString(sw_rgb_subsampling_mask) + ")";
@@ -279,7 +283,7 @@ int main(int argc, char **argv) {
               << std::setw(label_width) << "Max components" << ": " << static_cast<int>(decode_caps.max_components) << std::endl
               << std::setw(label_width) << "ROI (crop) decode" << ": "
               << (decode_caps.roi_decode ? (decode_caps.hw_roi_decode ? "yes (hardware)" : "yes (software)") : "no") << std::endl
-              << std::setw(label_width) << "RGB color conversion" << ": " << rgb_conversion << std::endl
+              << std::setw(label_width) << "RGB color conversion" << ": " << (rgb_conversion.empty() ? "none" : rgb_conversion) << std::endl
               << std::endl;
 
     // One row per output format; two columns (pixel format, number of planes) per supported chroma subsampling,

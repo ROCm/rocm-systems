@@ -22,6 +22,8 @@ Handles need to be created to decode and parse JPEG streams.
       int device_id,
       RocJpegHandle *handle);
 
+``ROCJPEG_BACKEND_HARDWARE`` decodes with the VCN JPEG decoder. ``ROCJPEG_BACKEND_CPU`` decodes on the CPU with the accurate integer inverse DCT that libjpeg-turbo uses by default, and copies the output to the same device buffers as the hardware backend. It is intended as a reference for testing the hardware backend. It currently supports ``rocJpegDecode()`` with the ``ROCJPEG_OUTPUT_NATIVE``, ``ROCJPEG_OUTPUT_YUV_PLANAR``, and ``ROCJPEG_OUTPUT_Y`` output formats without cropping; ``rocJpegGetDecoderCaps()`` reports what it supports. ``ROCJPEG_BACKEND_HYBRID`` is not implemented.
+
 
 ``rocJpegStreamCreate()`` returns a ``rocJpegStreamHandle``, which is a pointer used to represent an instance of a JPEG stream. The instance of ``rocJpegStreamHandle`` is used to parse the JPEG stream and to store the JPEG stream parameters.
 

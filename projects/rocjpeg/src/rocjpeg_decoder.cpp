@@ -109,6 +109,8 @@ RocJpegStatus RocJpegDecoder::InitializeDecoder() {
     } else if (backend_ == ROCJPEG_BACKEND_HYBRID) {
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_NOT_IMPLEMENTED;
+    } else if (backend_ == ROCJPEG_BACKEND_CPU) {
+        // The CPU backend decodes on the host and only uses HIP to copy the output to the destination buffers.
     } else {
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
@@ -189,6 +191,35 @@ RocJpegStatus RocJpegDecoder::GetDecoderCaps(RocJpegDecodeCaps *decode_caps) con
             }
             break;
         }
+        case ROCJPEG_BACKEND_CPU: {
+            static const RocJpegSurfaceFormat cpu_surface_formats[ROCJPEG_NUM_CHROMA_SUBSAMPLINGS] = {
+                ROCJPEG_SURFACE_FORMAT_YUV444P, // ROCJPEG_CSS_444
+                ROCJPEG_SURFACE_FORMAT_YUV440P, // ROCJPEG_CSS_440
+                ROCJPEG_SURFACE_FORMAT_YUYV,    // ROCJPEG_CSS_422
+                ROCJPEG_SURFACE_FORMAT_NV12,    // ROCJPEG_CSS_420
+                ROCJPEG_SURFACE_FORMAT_NONE,    // ROCJPEG_CSS_411, rejected by RocJpegStreamParser
+                ROCJPEG_SURFACE_FORMAT_Y8,      // ROCJPEG_CSS_400
+            };
+            decode_caps->is_supported = 1;
+            decode_caps->roi_decode = 0;
+            decode_caps->hw_roi_decode = 0;
+            decode_caps->max_components = NUM_COMPONENTS - 1;
+            // Images are decoded one at a time.
+            decode_caps->num_jpeg_cores = 1;
+            decode_caps->min_width = 1;
+            decode_caps->min_height = 1;
+            decode_caps->max_width = MAX_SAFE_DIMENSION;
+            decode_caps->max_height = MAX_SAFE_DIMENSION;
+            for (int css = 0; css < ROCJPEG_NUM_CHROMA_SUBSAMPLINGS; css++) {
+                decode_caps->native_surface_format[css] = cpu_surface_formats[css];
+                if (cpu_surface_formats[css] != ROCJPEG_SURFACE_FORMAT_NONE) {
+                    decode_caps->subsampling_mask |= (1u << css);
+                }
+            }
+            decode_caps->coding_process_mask = (1u << ROCJPEG_CODING_PROCESS_BASELINE);
+            decode_caps->output_format_mask = (1u << ROCJPEG_OUTPUT_NATIVE) | (1u << ROCJPEG_OUTPUT_YUV_PLANAR) | (1u << ROCJPEG_OUTPUT_Y);
+            break;
+        }
         default:
             FunctionExitLog(g_rocjpeg_logger);
             return ROCJPEG_STATUS_NOT_IMPLEMENTED;
@@ -226,6 +257,73 @@ RocJpegStatus RocJpegDecoder::ValidateCropRectangle(const RocJpegDecodeParams &d
 }
 
 /**
+ * @brief Decodes an image with the CPU backend and copies the output to the destination.
+ *
+ * Luma is width x height and chroma has the size rocJpegGetImageInfo reports, so every output format has the same
+ * layout as the hardware backend writes with the native surface formats reported for the CPU backend.
+ *
+ * @param jpeg_stream_params The parsed JPEG stream parameters.
+ * @param decode_params The decode parameters.
+ * @param destination The destination image.
+ * @return The status of the operation.
+ */
+RocJpegStatus RocJpegDecoder::DecodeOnCpu(const JpegStreamParameters &jpeg_stream_params, const RocJpegDecodeParams &decode_params, RocJpegImage *destination) {
+    const auto &crop = decode_params.crop_rectangle;
+    if (crop.left != 0 || crop.top != 0 || crop.right != 0 || crop.bottom != 0) {
+        ErrorLog(g_rocjpeg_logger, "Cropping is not implemented for the CPU backend!");
+        return ROCJPEG_STATUS_NOT_IMPLEMENTED;
+    }
+    // Check the output before decoding, so that an unsupported request does not decode the image first.
+    RocJpegStatus rocjpeg_status = RocJpegCpuDecoder::CheckOutput(decode_params.output_format, jpeg_stream_params.chroma_subsampling);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        return rocjpeg_status;
+    }
+
+    CpuDecodedImage image;
+    rocjpeg_status = RocJpegCpuDecoder::Decode(jpeg_stream_params, image);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        return rocjpeg_status;
+    }
+
+    CpuOutput output;
+    rocjpeg_status = RocJpegCpuDecoder::LayOutOutput(jpeg_stream_params, image, decode_params.output_format, output);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        return rocjpeg_status;
+    }
+    const CpuOutputPlane *planes = output.planes;
+    const int num_planes = output.num_planes;
+
+    // A plane with no rows or no columns (chroma of a 1-pixel image) has nothing to copy and needs no buffer.
+    for (int i = 0; i < num_planes; i++) {
+        if (planes[i].rows == 0 || planes[i].row_bytes == 0) {
+            continue;
+        }
+        if (destination->channel[i] == nullptr || destination->pitch[i] < planes[i].row_bytes) {
+            ErrorLog(g_rocjpeg_logger, "Output channel " + ROCJPEG_TOSTR(i) + " is missing or its pitch is smaller than " +
+                     ROCJPEG_TOSTR(planes[i].row_bytes) + " bytes");
+            return ROCJPEG_STATUS_INVALID_PARAMETER;
+        }
+    }
+    for (int i = 0; i < num_planes; i++) {
+        if (planes[i].rows == 0 || planes[i].row_bytes == 0) {
+            continue;
+        }
+        if (hipMemcpy2DAsync(destination->channel[i], destination->pitch[i], planes[i].data, planes[i].stride,
+                             planes[i].row_bytes, planes[i].rows, hipMemcpyHostToDevice, hip_stream_) != hipSuccess) {
+            ErrorLog(g_rocjpeg_logger, "Failed to copy output channel " + ROCJPEG_TOSTR(i) + " to the destination");
+            (void)hipStreamSynchronize(hip_stream_);
+            return ROCJPEG_STATUS_EXECUTION_FAILED;
+        }
+    }
+    // The host planes are released on return, so wait for the copies to finish.
+    if (hipStreamSynchronize(hip_stream_) != hipSuccess) {
+        ErrorLog(g_rocjpeg_logger, "Failed to copy the output to the destination");
+        return ROCJPEG_STATUS_EXECUTION_FAILED;
+    }
+    return ROCJPEG_STATUS_SUCCESS;
+}
+
+/**
  * @brief Decodes a JPEG image using the RocJpegDecoder.
  *
  * This function decodes a JPEG image from the provided JPEG stream handle and decode parameters,
@@ -255,6 +353,11 @@ RocJpegStatus RocJpegDecoder::Decode(RocJpegStreamHandle jpeg_stream_handle, con
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
+    if (backend_ == ROCJPEG_BACKEND_CPU) {
+        RocJpegStatus rocjpeg_status = DecodeOnCpu(*jpeg_stream_params, *decode_params, destination);
+        FunctionExitLog(g_rocjpeg_logger);
+        return rocjpeg_status;
+    }
 
     VASurfaceID current_surface_id;
     CHECK_ROCJPEG(jpeg_vaapi_decoder_.SubmitDecode(jpeg_stream_params, current_surface_id, decode_params));
@@ -278,6 +381,11 @@ RocJpegStatus RocJpegDecoder::DecodeAsync(RocJpegStreamHandle jpeg_stream_handle
         CriticalLog(g_rocjpeg_logger, "Null pointer");
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    if (backend_ == ROCJPEG_BACKEND_CPU) {
+        ErrorLog(g_rocjpeg_logger, "rocJpegDecodeAsync is not implemented for the CPU backend!");
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_NOT_IMPLEMENTED;
     }
     if (pending_decodes_.count(destination) > 0) {
         ErrorLog(g_rocjpeg_logger, "An async decode is already pending for this destination!");
@@ -466,6 +574,11 @@ RocJpegStatus RocJpegDecoder::DecodeBatched(RocJpegStreamHandle *jpeg_streams, i
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
+    if (backend_ == ROCJPEG_BACKEND_CPU) {
+        ErrorLog(g_rocjpeg_logger, "rocJpegDecodeBatched is not implemented for the CPU backend!");
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_NOT_IMPLEMENTED;
+    }
     if (!pending_decodes_.empty()) {
         ErrorLog(g_rocjpeg_logger, "Asynchronous decodes are pending for this handle!");
         FunctionExitLog(g_rocjpeg_logger);
@@ -530,6 +643,11 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_strea
         ErrorLog(g_rocjpeg_logger, "Invalid batch_size: " + ROCJPEG_TOSTR(batch_size));
         FunctionExitLog(g_rocjpeg_logger);
         return ROCJPEG_STATUS_INVALID_PARAMETER;
+    }
+    if (backend_ == ROCJPEG_BACKEND_CPU) {
+        ErrorLog(g_rocjpeg_logger, "rocJpegDecodeBatchedAsync is not implemented for the CPU backend!");
+        FunctionExitLog(g_rocjpeg_logger);
+        return ROCJPEG_STATUS_NOT_IMPLEMENTED;
     }
 
     {

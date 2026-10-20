@@ -772,6 +772,206 @@ int RocJpegApiNegativeTests::TestInvalidDecodeBatched() {
     return EXIT_SUCCESS;
 }
 
+int RocJpegApiNegativeTests::TestCpuBackend() {
+    std::cout << "info: Executing test cases for the CPU backend" << std::endl;
+    RocJpegHandle cpu_handle = nullptr;
+    RocJpegStatus rocjpeg_status = rocJpegCreate(ROCJPEG_BACKEND_CPU, 0, &cpu_handle);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "rocJpegCreate with the CPU backend: Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        if (cpu_handle != nullptr) {
+            rocJpegDestroy(cpu_handle);
+        }
+        return EXIT_FAILURE;
+    }
+    // Every return below goes through this, so the handle and the output buffers are always released.
+    RocJpegImage image = {};
+    auto finish = [&](int result) {
+        for (int c = 0; c < 3; c++) {
+            if (image.channel[c] != nullptr) {
+                (void)hipFree(image.channel[c]);
+            }
+        }
+        rocJpegDestroy(cpu_handle);
+        return result;
+    };
+
+    // Scenario 1: The capabilities describe what the CPU backend implements.
+    RocJpegDecodeCaps decode_caps;
+    memset(&decode_caps, 0xFF, sizeof(decode_caps));
+    rocjpeg_status = rocJpegGetDecoderCaps(cpu_handle, &decode_caps);
+    const uint32_t expected_subsamplings = (1u << ROCJPEG_CSS_444) | (1u << ROCJPEG_CSS_440) | (1u << ROCJPEG_CSS_422) |
+                                           (1u << ROCJPEG_CSS_420) | (1u << ROCJPEG_CSS_400);
+    const uint32_t expected_formats = (1u << ROCJPEG_OUTPUT_NATIVE) | (1u << ROCJPEG_OUTPUT_YUV_PLANAR) | (1u << ROCJPEG_OUTPUT_Y);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS || decode_caps.is_supported != 1 || decode_caps.roi_decode != 0 ||
+        decode_caps.hw_roi_decode != 0 || decode_caps.num_jpeg_cores != 1 || decode_caps.min_width != 1 ||
+        decode_caps.min_height != 1 || decode_caps.subsampling_mask != expected_subsamplings ||
+        decode_caps.output_format_mask != expected_formats ||
+        decode_caps.coding_process_mask != (1u << ROCJPEG_CODING_PROCESS_BASELINE) ||
+        decode_caps.hw_rgb_subsampling_mask != 0 || decode_caps.hw_rgb_output_format_mask != 0) {
+        std::cerr << "Unexpected RocJpegDecodeCaps for the CPU backend (" << rocJpegGetErrorName(rocjpeg_status) << ")" << std::endl;
+        return finish(EXIT_FAILURE);
+    }
+
+    // Scenario 2: Both seeds are below the VCN minimum size, which the CPU backend does not have. Decode them in
+    // every supported output format, and check that the output was written.
+    const size_t kPitch = 64;
+    for (int c = 0; c < 3; c++) {
+        if (hipMalloc(&image.channel[c], kPitch * 16) != hipSuccess) {
+            std::cerr << "hipMalloc failed" << std::endl;
+            return finish(EXIT_FAILURE);
+        }
+        image.pitch[c] = kPitch;
+    }
+    const std::vector<uint8_t> *seeds[] = {&ColorSeedJpeg(), &GraySeedJpeg()};
+    const RocJpegOutputFormat supported_formats[] = {ROCJPEG_OUTPUT_NATIVE, ROCJPEG_OUTPUT_YUV_PLANAR, ROCJPEG_OUTPUT_Y};
+    for (const std::vector<uint8_t> *seed : seeds) {
+        rocjpeg_status = rocJpegStreamParse(seed->data(), seed->size(), rocjpeg_stream_handle_);
+        if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+            std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing a seed JPEG but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return finish(EXIT_FAILURE);
+        }
+        for (RocJpegOutputFormat format : supported_formats) {
+            if (hipMemset(image.channel[0], 0xA5, kPitch * 16) != hipSuccess) {
+                std::cerr << "hipMemset failed" << std::endl;
+                return finish(EXIT_FAILURE);
+            }
+            RocJpegDecodeParams decode_params = {};
+            decode_params.output_format = format;
+            rocjpeg_status = rocJpegDecode(cpu_handle, rocjpeg_stream_handle_, &decode_params, &image);
+            uint8_t first_row[8] = {};
+            if (rocjpeg_status == ROCJPEG_STATUS_SUCCESS &&
+                hipMemcpy(first_row, image.channel[0], sizeof(first_row), hipMemcpyDeviceToHost) != hipSuccess) {
+                rocjpeg_status = ROCJPEG_STATUS_EXECUTION_FAILED;
+            }
+            bool written = false;
+            for (uint8_t value : first_row) {
+                written = written || value != 0xA5;
+            }
+            if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS || !written) {
+                std::cerr << "rocJpegDecode with the CPU backend, output format " << format << ": Expected ROCJPEG_STATUS_SUCCESS "
+                          << "and written output but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+                return finish(EXIT_FAILURE);
+            }
+        }
+    }
+
+    // Scenario 3: The output formats, cropping, and decode functions the CPU backend does not implement yet.
+    rocjpeg_status = rocJpegStreamParse(ColorSeedJpeg().data(), ColorSeedJpeg().size(), rocjpeg_stream_handle_);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the 16x16 seed JPEG but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return finish(EXIT_FAILURE);
+    }
+    RocJpegDecodeParams rgb_params = {};
+    rgb_params.output_format = ROCJPEG_OUTPUT_RGB;
+    RocJpegDecodeParams rgb_planar_params = {};
+    rgb_planar_params.output_format = ROCJPEG_OUTPUT_RGB_PLANAR;
+    RocJpegDecodeParams crop_params = {};
+    crop_params.output_format = ROCJPEG_OUTPUT_Y;
+    crop_params.crop_rectangle.right = 8;
+    crop_params.crop_rectangle.bottom = 8;
+    RocJpegDecodeParams y_params = {};
+    y_params.output_format = ROCJPEG_OUTPUT_Y;
+    RocJpegStreamHandle stream_handles[1] = {rocjpeg_stream_handle_};
+    struct {
+        const char *name;
+        RocJpegStatus status;
+    } not_implemented[] = {
+        {"rocJpegDecode with ROCJPEG_OUTPUT_RGB", rocJpegDecode(cpu_handle, rocjpeg_stream_handle_, &rgb_params, &image)},
+        {"rocJpegDecode with ROCJPEG_OUTPUT_RGB_PLANAR", rocJpegDecode(cpu_handle, rocjpeg_stream_handle_, &rgb_planar_params, &image)},
+        {"rocJpegDecode with a crop rectangle", rocJpegDecode(cpu_handle, rocjpeg_stream_handle_, &crop_params, &image)},
+        {"rocJpegDecodeAsync", rocJpegDecodeAsync(cpu_handle, rocjpeg_stream_handle_, &y_params, &image)},
+        {"rocJpegDecodeBatched", rocJpegDecodeBatched(cpu_handle, stream_handles, 1, &y_params, &image)},
+        {"rocJpegDecodeBatchedAsync", rocJpegDecodeBatchedAsync(cpu_handle, stream_handles, 1, &y_params, &image)},
+    };
+    for (const auto &check : not_implemented) {
+        if (check.status != ROCJPEG_STATUS_NOT_IMPLEMENTED) {
+            std::cerr << check.name << " with the CPU backend: Expected ROCJPEG_STATUS_NOT_IMPLEMENTED but got "
+                      << rocJpegGetErrorName(check.status) << std::endl;
+            return finish(EXIT_FAILURE);
+        }
+    }
+
+    // Scenario 4: An output channel that is missing, or whose pitch is smaller than a row, is rejected.
+    RocJpegDecodeParams planar_params = {};
+    planar_params.output_format = ROCJPEG_OUTPUT_YUV_PLANAR;
+    RocJpegImage missing_channel = image;
+    missing_channel.channel[2] = nullptr;
+    RocJpegImage short_pitch = image;
+    short_pitch.pitch[0] = 15;
+    struct {
+        const char *name;
+        RocJpegStatus status;
+    } invalid[] = {
+        {"a missing output channel", rocJpegDecode(cpu_handle, rocjpeg_stream_handle_, &planar_params, &missing_channel)},
+        {"a pitch smaller than a row", rocJpegDecode(cpu_handle, rocjpeg_stream_handle_, &planar_params, &short_pitch)},
+    };
+    for (const auto &check : invalid) {
+        if (check.status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecode with the CPU backend and " << check.name << ": Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(check.status) << std::endl;
+            return finish(EXIT_FAILURE);
+        }
+    }
+
+    // Scenario 5: Headers the parser accepts that need care in the CPU backend, made by patching the 16x16 seed.
+    // SOF0: FF C0, length (2), precision, height (2), width (2), component count, then 3 bytes per component
+    // (ID, sampling factors, quantization table). SOS: FF DA, length (2), component count, then 2 bytes per component
+    // (ID, Huffman tables).
+    const std::vector<uint8_t> &color_seed = ColorSeedJpeg();
+    const size_t sof = FindStructuralMarker(color_seed, 0xC0);
+    const size_t sos = FindStructuralMarker(color_seed, 0xDA);
+    if (sof >= color_seed.size() || sos >= color_seed.size()) {
+        std::cerr << "The 16x16 seed JPEG has no SOF0 or SOS marker" << std::endl;
+        return finish(EXIT_FAILURE);
+    }
+    auto decode_variant = [&](const std::vector<uint8_t> &variant, RocJpegOutputFormat format, RocJpegImage *destination) {
+        RocJpegStatus status = rocJpegStreamParse(variant.data(), variant.size(), rocjpeg_stream_handle_);
+        if (status != ROCJPEG_STATUS_SUCCESS) {
+            return status;
+        }
+        RocJpegDecodeParams params = {};
+        params.output_format = format;
+        return rocJpegDecode(cpu_handle, rocjpeg_stream_handle_, &params, destination);
+    };
+    struct VariantCheck {
+        const char *name;
+        RocJpegStatus status;
+        RocJpegStatus expected;
+    };
+    // Y 2x2 with chroma 2x1 is labelled 4:2:2, but its chroma is full width and half height, so the output layout
+    // of the label does not fit the decoded planes.
+    std::vector<uint8_t> mislabelled = color_seed;
+    mislabelled[sof + 10 + 3 + 1] = 0x21;
+    mislabelled[sof + 10 + 6 + 1] = 0x21;
+    // Every component has ID 1; the scan still codes them in frame order.
+    std::vector<uint8_t> repeated_ids = color_seed;
+    for (int c = 0; c < 3; c++) {
+        repeated_ids[sof + 10 + 3 * c] = 1;
+        repeated_ids[sos + 5 + 2 * c] = 1;
+    }
+    // A 1-pixel-wide 4:2:0 image has 0-pixel-wide chroma planes, which need no output buffers.
+    std::vector<uint8_t> one_pixel_wide = color_seed;
+    one_pixel_wide[sof + 7] = 0;
+    one_pixel_wide[sof + 8] = 1;
+    RocJpegImage luma_only = image;
+    luma_only.channel[1] = nullptr;
+    luma_only.channel[2] = nullptr;
+    VariantCheck variants[] = {
+        {"4:2:2 label with 4:4:0 geometry, native", decode_variant(mislabelled, ROCJPEG_OUTPUT_NATIVE, &image), ROCJPEG_STATUS_JPEG_NOT_SUPPORTED},
+        {"4:2:2 label with 4:4:0 geometry, YUV planar", decode_variant(mislabelled, ROCJPEG_OUTPUT_YUV_PLANAR, &image), ROCJPEG_STATUS_JPEG_NOT_SUPPORTED},
+        {"repeated component IDs", decode_variant(repeated_ids, ROCJPEG_OUTPUT_NATIVE, &image), ROCJPEG_STATUS_SUCCESS},
+        {"1-pixel-wide 4:2:0 image without chroma buffers", decode_variant(one_pixel_wide, ROCJPEG_OUTPUT_YUV_PLANAR, &luma_only), ROCJPEG_STATUS_SUCCESS},
+    };
+    for (const auto &check : variants) {
+        if (check.status != check.expected) {
+            std::cerr << "rocJpegDecode with the CPU backend and " << check.name << ": Expected " << rocJpegGetErrorName(check.expected)
+                      << " but got " << rocJpegGetErrorName(check.status) << std::endl;
+            return finish(EXIT_FAILURE);
+        }
+    }
+    return finish(EXIT_SUCCESS);
+}
+
 int RocJpegApiNegativeTests::TestInvalidGetDecoderCaps() {
     std::cout << "info: Executing negative test cases for the rocJpegGetDecoderCaps API" << std::endl;
     RocJpegDecodeCaps decode_caps = {};
@@ -1687,7 +1887,7 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
 int RocJpegApiNegativeTests::RunTests() {
     if (TestInvalidStreamCreate() || TestInvalidStreamParse () || TestInvalidStreamDestroy() || TestInvalidCreate() || TestInvalidDestroy() ||
         TestInvalidGetImageInfo() || TestInvalidDecode() || TestInvalidDecodeBatched() || TestInvalidGetErrorName() ||
-        TestInvalidGetDecoderCaps() || TestStreamParseFuzz()) {
+        TestInvalidGetDecoderCaps() || TestCpuBackend() || TestStreamParseFuzz()) {
         std::cerr << "One or more negative tests failed." << std::endl;
         return EXIT_FAILURE;
     } else {

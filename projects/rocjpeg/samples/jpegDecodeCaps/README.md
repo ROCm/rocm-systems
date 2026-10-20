@@ -31,5 +31,6 @@ make -j
 ```shell
 ./jpegdecodecaps -d  <[device id] - specify the GPU device id for the desired device (use 0 for the first device, 1 for the second device, and so on) [optional - default: 0]>
                  -be <[backend] - select rocJPEG backend (0 for hardware-accelerated JPEG decoding using VCN,
-                                                         1 for hybrid JPEG decoding using CPU and GPU HIP kernels (currently not supported)) [optional - default: 0]>
+                                                         1 for hybrid JPEG decoding using CPU and GPU HIP kernels (currently not supported),
+                                                         2 for JPEG decoding on the CPU) [optional - default: 0]>
 ```

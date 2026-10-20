@@ -19,7 +19,8 @@ make -j
 ```shell
 ./jpegdecode -i     <[input path] - input path to a single JPEG image or a directory containing JPEG images - [required]>
              -be    <[backend] - select rocJPEG backend (0 for hardware-accelerated JPEG decoding using VCN,
-                                                         1 for hybrid JPEG decoding using CPU and GPU HIP kernels (currently not supported)) [optional - default: 0]>
+                                                         1 for hybrid JPEG decoding using CPU and GPU HIP kernels (currently not supported),
+                                                         2 for JPEG decoding on the CPU (native, yuv_planar, and y output formats without cropping)) [optional - default: 0]>
              -fmt   <[output format] - select rocJPEG output format for decoding, one of the [native, yuv_planar, y, rgb, rgb_planar] [optional - default: native]>
              -o     <[output path] - path to an output file or a path to a directory - write decoded images to a file or directory based on selected output format [optional]>
             -crop  <[crop rectangle] - crop rectangle for output in a comma-separated format: left,top,right,bottom - [optional]>

@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include "../api/rocjpeg/rocjpeg.h"
 #include "rocjpeg_api_stream_handle.h"
 #include "rocjpeg_parser.h"
+#include "rocjpeg_cpu_decoder.h"
 #include "rocjpeg_commons.h"
 #include "rocjpeg_vaapi_decoder.h"
 #include "rocjpeg_hip_kernels.h"
@@ -220,6 +221,19 @@ private:
     * @return ROCJPEG_STATUS_SUCCESS if the crop rectangle is valid, ROCJPEG_STATUS_INVALID_PARAMETER otherwise.
     */
    static RocJpegStatus ValidateCropRectangle(const RocJpegDecodeParams &decode_params, const JpegStreamParameters &jpeg_stream_params);
+
+   /**
+    * @brief Decodes an image with the CPU backend and copies the output to the destination.
+    *
+    * The output has the same layout as the hardware backend produces with the native surface format reported for
+    * the CPU backend: YUV444P, YUV440P, YUYV, NV12, or Y8.
+    * @param jpeg_stream_params The parsed JPEG stream parameters.
+    * @param decode_params The decode parameters. Only ROCJPEG_OUTPUT_NATIVE, ROCJPEG_OUTPUT_YUV_PLANAR, and
+    *        ROCJPEG_OUTPUT_Y without cropping are supported.
+    * @param destination The destination image.
+    * @return The status of the operation.
+    */
+   RocJpegStatus DecodeOnCpu(const JpegStreamParameters &jpeg_stream_params, const RocJpegDecodeParams &decode_params, RocJpegImage *destination);
 
    /**
     * @brief Waits for the submitted surfaces and copies/converts the decoded output.

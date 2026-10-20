@@ -10,6 +10,7 @@ Documentation for rocJPEG is available at
 * Added the `rocJpegGetDecoderCaps` API and the `RocJpegDecodeCaps` structure to query the decode capabilities of a rocJPEG handle, including the number of JPEG cores, the supported JPEG coding processes, image resolutions, chroma subsamplings, and output formats, the native output surface format of each chroma subsampling as verified with the VA-API driver, and the hardware ROI decode and color conversion support.
 * Added the `RocJpegSurfaceFormat` enum to describe the layout of the decoded image produced by the VCN JPEG decoder, and the `RocJpegCodingProcess` enum to report the supported JPEG coding processes.
 * Added the `jpegDecodeCaps` sample to demonstrate the `rocJpegGetDecoderCaps` API.
+* Added the `ROCJPEG_BACKEND_CPU` backend, which decodes baseline JPEG streams on the CPU with the accurate integer inverse DCT that libjpeg-turbo uses by default. It supports `rocJpegDecode` with the `ROCJPEG_OUTPUT_NATIVE`, `ROCJPEG_OUTPUT_YUV_PLANAR`, and `ROCJPEG_OUTPUT_Y` output formats without cropping, and provides a reference for testing the hardware backend.
 
 ### Changed
 

@@ -140,6 +140,42 @@ add_test(
 
 add_test(
   NAME
+    jpeg-decode-cpu-fmt-native
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecode"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecode"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecode"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -be 2
+)
+
+add_test(
+  NAME
+    jpeg-decode-cpu-fmt-yuv-planar
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecode"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecode"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecode"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -be 2 -fmt yuv_planar
+)
+
+add_test(
+  NAME
+    jpeg-decode-cpu-fmt-y
+  COMMAND
+    "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${ROCM_PATH}/share/rocjpeg/samples/jpegDecode"
+                              "${CMAKE_CURRENT_BINARY_DIR}/jpegDecode"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "jpegdecode"
+            -i ${ROCM_PATH}/share/rocjpeg/images/ -be 2 -fmt y
+)
+
+add_test(
+  NAME
     jpeg-decode-crop-fmt-native
   COMMAND
     "${CMAKE_CTEST_COMMAND}"
