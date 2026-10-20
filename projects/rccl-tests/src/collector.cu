@@ -642,6 +642,19 @@ NetworkCounterSnapshot NetCounterCollectSnapshot(
 // Delta computation
 // =====================================================================
 
+// after - before. A decrease is taken as one 48-bit wrap (bnxt_re sysfs
+// counters are 48 bits wide); false if it cannot be one.
+static bool CounterDelta(uint64_t after, uint64_t before, uint64_t* delta) {
+  const uint64_t wrap48 = 1ULL << 48;
+  if (after >= before) {
+    *delta = after - before;
+    return true;
+  }
+  if (before >= wrap48 || after >= wrap48) { return false; }
+  *delta = after + wrap48 - before;
+  return true;
+}
+
 bool NetCounterComputeDelta(
     const NetworkCounterSnapshot& before,
     const NetworkCounterSnapshot& after,
@@ -654,7 +667,9 @@ bool NetCounterComputeDelta(
       if (!PrefixMatches(LookupKey(desc), entry.first)) { continue; }
       auto it = before.counters.find(entry.first);
       if (it == before.counters.end()) { continue; }
-      *delta += entry.second - it->second;
+      uint64_t d = 0;
+      if (!CounterDelta(entry.second, it->second, &d)) { return false; }
+      *delta += d;
       found = true;
     }
   } else {
@@ -662,8 +677,7 @@ bool NetCounterComputeDelta(
     auto a = after.counters.find(desc.name);
     bool sameSource = before.debugfs_counters.count(desc.name) == after.debugfs_counters.count(desc.name);
     if (b != before.counters.end() && a != after.counters.end() && sameSource) {
-      *delta = a->second - b->second;
-      found = true;
+      found = CounterDelta(a->second, b->second, delta);
     }
   }
   return found;
