@@ -209,7 +209,7 @@ vl1d.permission_misses:
   description: >-
     The total number of translation requests that missed in the UTCL1 due to a permission
     error, per normalization unit. This is unused and expected to be zero in most
-    configurations for modern CDNA\u2122 accelerators.
+    configurations for modern CDNA accelerators.
 vl1d.rd_req:
   name: Read Req
   formula: SUM(TCP_TOTAL_READ_sum) / SUM($denom)

@@ -32,6 +32,10 @@ does not re-validate the files it loads.
 | `coll_level` | str | no | Accumulation level, e.g. `SQ_LEVEL_WAVES` |
 | `avg_mode` | str | no | Phase 2, with runtime wrapper generation; not in Phase A. Default `weighted` (`SUM(X)/SUM(Y)`). Set to `simple` for metrics that use `AVG()` instead. |
 
+`name`, `unit` and `description` are plain ASCII, as every config file is: `->` for an
+arrow, no trademark mark, and no `\uXXXX` escapes (a block scalar shows those as
+literal text).
+
 **Aggregation columns belong to the views.** In Phase A, `formula` is the expression of
 the row's main column, aggregation included (e.g. `100 * SUM(TCC_HIT_sum) /
 SUM(TCC_HIT_sum + TCC_MISS_sum)`). A row's other columns (`min`, `max`, `std dev`, ...)

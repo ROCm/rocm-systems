@@ -31,7 +31,7 @@ td.rd_insts:
     unit. This is expected to be the sum of global/generic and spill/stack reads in
     the address processor.
 td.tc_stall:
-  name: "Cache RAM \u2192 Data-Return Stall"
+  name: Cache RAM -> Data-Return Stall
   formula: 100 * SUM(TD_TC_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-

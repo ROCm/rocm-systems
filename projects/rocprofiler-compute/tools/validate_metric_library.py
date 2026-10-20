@@ -313,6 +313,12 @@ def _metric_errors(entry: object, source: str, item: str) -> list[str]:
     for field in ("unit", "description"):
         if not isinstance(entry[field], str):
             errors.append(f"[{source}] {item}: '{field}' must be a string")
+    errors.extend(
+        f"[{source}] {item}: '{field}' must be plain ASCII, without \\u escapes"
+        for field in ("name", "unit", "description")
+        if isinstance(entry[field], str)
+        and (not entry[field].isascii() or "\\u" in entry[field])
+    )
     if isinstance(entry["unit"], str) and entry["unit"] in UNIT_ALIASES:
         errors.append(
             f"[{source}] {item}: 'unit' {entry['unit']!r} is an alias; "
