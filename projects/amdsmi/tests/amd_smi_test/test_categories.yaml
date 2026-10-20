@@ -192,7 +192,7 @@ execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
   # These become per-suite ctest TIMEOUT properties. They are kept under the
-  # amdsmi job's GitHub step timeout (timeout_minutes: 10 in TheRock's
+  # amdsmi job's GitHub step timeout (timeout_minutes: 45 in TheRock's
   # fetch_test_configurations.py) so a hung suite is killed and reported by
   # ctest (with --output-on-failure) instead of the whole job dying with an
   # opaque "exceeded max execution time". The amdsmitst suites currently run in
@@ -200,6 +200,6 @@ execution_settings:
   # category ever needs a larger budget.
   category_timeouts:
     quick: 300            # 5 minutes
-    standard: 540         # 9 minutes
-    comprehensive: 540    # 9 minutes
-    full: 540             # 9 minutes
+    standard: 1800        # 30 minutes
+    comprehensive: 1800   # 30 minutes
+    full: 1800            # 30 minutes

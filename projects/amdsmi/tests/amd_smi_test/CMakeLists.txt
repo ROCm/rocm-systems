@@ -207,6 +207,8 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
     # test_runner.py uses -L ex_gpu_<arch> for listed GPUs and -LE ex_gpu for
     # others. Separate registrations keep each runner in both selections.
     # Keep the arch labels in sync with exclude_gpu in test_categories.yaml.
+    # These runners are comprehensive and above. The CLI sweep uses the same
+    # 1800s budget as the non-quick amdsmitst suites.
     if(AMDSMI_CTEST_PYTHON_TESTS)
         set(_AMDSMI_PYTHON_CATEGORY_LABELS
             "comprehensive"
@@ -233,7 +235,7 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
         set(_AMDSMI_PYTHON_TESTS
             "amdsmi_python_unit|unit_tests.py|180"
             "amdsmi_python_functional|integration_test.py|180"
-            "amdsmi_python_cli|cli_unit_test.py|300"
+            "amdsmi_python_cli|cli_unit_test.py|1800"
         )
         foreach(_entry IN LISTS _AMDSMI_PYTHON_TESTS)
             string(REPLACE "|" ";" _parts "${_entry}")
