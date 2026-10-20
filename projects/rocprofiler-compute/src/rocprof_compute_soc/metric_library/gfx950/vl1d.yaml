@@ -1,11 +1,11 @@
 inherit: ../gfx942/vl1d.yaml
-vl1d.access_lat:
-  name: L1 Access Latency
+vl1d.access_lat_norm:
+  name: L1 Access Latency Cycles
   formula: SUM(TCP_TCP_LATENCY_sum) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    Calculated as the average number of cycles that a vL1D cache line request spent
-    in the vL1D cache pipeline.
+    The total number of cycles vL1D cache line requests spent in the vL1D cache pipeline,
+    summed over all requests, per normalization unit.
 vl1d.ai:
   formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F8 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / (128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum))
 vl1d.average_lat:
@@ -116,14 +116,6 @@ vl1d.l2_rd_average_lat:
     Average latency to get a read response from L2 (TCC), including reads and atomics
     with return. Weighted average across all CUs (SUM/SUM gives more weight to CUs
     with more accesses). Equation: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum)
-vl1d.l2_rd_lat:
-  name: L1-L2 Read Latency
-  formula: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM($denom)
-  unit: (Cycles + $normUnit)
-  description: >-
-    Calculated as the average number of cycles that the vL1D cache took to issue and
-    receive read requests from the L2 Cache. This number also includes requests for
-    atomics with return values.
 vl1d.l2_rd_lat_avg:
   name: L2 read latency
   formula: AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)
@@ -132,6 +124,14 @@ vl1d.l2_rd_lat_avg:
     Latency to get a read response from L2 (TCC), including reads and atomics with
     return. Ratio of averages across CUs (AVG/AVG gives equal weight to each CU).
     Equation: AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)
+vl1d.l2_rd_lat_norm:
+  name: L1-L2 Read Latency Cycles
+  formula: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The total number of cycles the vL1D cache took to issue and receive read requests
+    from the L2 Cache, summed over all requests (including atomics with return values),
+    per normalization unit.
 vl1d.l2_throughput_reads_writes:
   name: L1-L2 throughput (reads + writes)
   formula: SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) / SUM(TCP_GATE_EN2_sum)
@@ -156,14 +156,6 @@ vl1d.l2_wr_average_lat:
     and atomics without return. Weighted average across all CUs (SUM/SUM gives more
     weight to CUs with more accesses). Equation: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum)
     / SUM(TCP_TCC_WRITE_REQ_sum)
-vl1d.l2_wr_lat:
-  name: L1-L2 Write Latency
-  formula: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM($denom)
-  unit: (Cycles + $normUnit)
-  description: >-
-    Calculated as the average number of cycles that the vL1D cache took to issue and
-    receive acknowledgement of a write request to the L2 Cache. This number also includes
-    requests for atomics without return values.
 vl1d.l2_wr_lat_avg:
   name: L2 write latency
   formula: AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)
@@ -172,6 +164,14 @@ vl1d.l2_wr_lat_avg:
     Latency to get a write acknowledgment from L2 (TCC), including writes and atomics
     without return. Ratio of averages across CUs (AVG/AVG gives equal weight to each
     CU). Equation: AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)
+vl1d.l2_wr_lat_norm:
+  name: L1-L2 Write Latency Cycles
+  formula: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The total number of cycles the vL1D cache took to issue and receive acknowledgement
+    of write requests to the L2 Cache, summed over all requests (including atomics
+    without return values), per normalization unit.
 vl1d.lat:
   name: L1 latency
   formula: AVG(TCP_TCP_LATENCY_sum) / AVG(TCP_TOTAL_ACCESSES_sum)
