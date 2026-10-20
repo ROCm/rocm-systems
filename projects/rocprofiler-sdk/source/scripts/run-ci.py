@@ -716,28 +716,37 @@ if __name__ == "__main__":
                     fdata = inpf.read()
                     print(fdata)
 
-    if _GCOVR_GENERATE_CMD:
-        print("\n\n\n###### Generating Cobertura XML... ######")
-        print(
-            "###### GCOVR command: '{}'... ######\n".format(" ".join(_GCOVR_GENERATE_CMD))
+        # generate the coverage report even when tests fail, but not when no
+        # tests ran (e.g. the build failed): gcovr would report 0% coverage
+        has_gcda = any(
+            glob.iglob(os.path.join(args.binary_dir, "**", "*.gcda"), recursive=True)
         )
-        with open("/dev/null", "w") as devnull:
-            run(_GCOVR_GENERATE_CMD, stderr=devnull)
-
-            codecov_dir = os.path.join(args.source_dir, ".codecov")
-            codecov_xml = os.path.join(codecov_dir, f"{args.coverage}.xml")
-            codecov_md = os.path.join(codecov_dir, f"{args.coverage}.md")
-
-            PYCOBERTURA_CMD = which("pycobertura", require=False)
-            if PYCOBERTURA_CMD:
-                run(
-                    [
-                        PYCOBERTURA_CMD,
-                        "show",
-                        "--format",
-                        "markdown",
-                        "--output",
-                        codecov_md,
-                        codecov_xml,
-                    ]
+        if _GCOVR_GENERATE_CMD and not has_gcda:
+            print("\n\n\n###### No .gcda files, skipping coverage report ######")
+        elif _GCOVR_GENERATE_CMD:
+            print("\n\n\n###### Generating Cobertura XML... ######")
+            print(
+                "###### GCOVR command: '{}'... ######\n".format(
+                    " ".join(_GCOVR_GENERATE_CMD)
                 )
+            )
+            with open("/dev/null", "w") as devnull:
+                run(_GCOVR_GENERATE_CMD, stderr=devnull)
+
+                codecov_dir = os.path.join(args.source_dir, ".codecov")
+                codecov_xml = os.path.join(codecov_dir, f"{args.coverage}.xml")
+                codecov_md = os.path.join(codecov_dir, f"{args.coverage}.md")
+
+                PYCOBERTURA_CMD = which("pycobertura", require=False)
+                if PYCOBERTURA_CMD:
+                    run(
+                        [
+                            PYCOBERTURA_CMD,
+                            "show",
+                            "--format",
+                            "markdown",
+                            "--output",
+                            codecov_md,
+                            codecov_xml,
+                        ]
+                    )
