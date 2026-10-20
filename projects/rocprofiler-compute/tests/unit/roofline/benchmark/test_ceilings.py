@@ -11,7 +11,7 @@ from common import SRC
 from roofline.benchmark import ceilings
 
 
-def test_unsupported_data_types_are_not_measured():
+def test_measured_ceilings_skip_unsupported_data_types():
     assert "MFMAF8Flops" not in ceilings.measured_ceilings("gfx90a")
     assert "MFMAF8Flops" in ceilings.measured_ceilings("gfx942")
 
@@ -26,14 +26,14 @@ def test_arch_without_a_benchmark_measures_nothing():
 
 
 def test_unsupported_data_types_are_family_data_types():
+    """A misspelled data type would be silently measured."""
     for device, data_types in ceilings.UNSUPPORTED_DATA_TYPES.items():
         assert set(data_types) <= set(ceilings.FAMILY_CEILINGS[device[:-2]]), device
 
 
 def test_imports_no_rocm_library():
-    """tools/validate_metric_library.py reads ceilings on hosts without ROCm."""
     code = (
-        "import sys; import roofline.run_benchmark, roofline.benchmark.ceilings; "
+        "import sys, roofline.run_benchmark, roofline.benchmark.ceilings; "
         "sys.exit(any(name.startswith('utils.hip') for name in sys.modules))"
     )
     subprocess.run([sys.executable, "-c", code], cwd=SRC, check=True)
