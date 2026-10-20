@@ -19,6 +19,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
@@ -340,7 +341,10 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
     });
     Hook(g_ibvCreateCq, [this](ibv_cq** ret, ibv_context* ctx, int cqe, void* cqCtx, ibv_comp_channel*, int) {
       verbs_.cqSizes.push_back(cqe);
-      if (createCqResult_ != ncclSuccess) return createCqResult_;
+      if (createCqResult_ != ncclSuccess) {
+        *ret = nullptr;
+        return createCqResult_;
+      }
       verbs_.cqs.emplace_back();
       ibv_cq* cq = &verbs_.cqs.back();
       memset(cq, 0, sizeof(*cq));
@@ -356,7 +360,10 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
       return destroyCqResult_;
     });
     Hook(g_ibvCreateQp, [this](ibv_qp** ret, ibv_pd* pd, ibv_qp_init_attr* attr) {
-      if (createQpResult_ != ncclSuccess) return createQpResult_;
+      if (createQpResult_ != ncclSuccess) {
+        *ret = nullptr;
+        return createQpResult_;
+      }
       *ret = verbs_.NewQp(pd, attr->qp_type);
       (*ret)->qp_context = attr->qp_context;
       verbs_.creates.push_back({*ret, pd, *attr});
@@ -520,18 +527,15 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
                          ncclNetDeviceHandle_t** recvDev = nullptr) {
     void* sc = nullptr;
     void* rc = nullptr;
-    for (int i = 0; i < 4096 && (!sc || !rc); i++) {
-      if (!sc) {
-        ncclResult_t r = IbCastConnect(ctx, dev, handle, &sc, sendDev);
-        if (r != ncclSuccess) return r;
-      }
-      if (!rc) {
-        ncclResult_t r = IbCastAccept(listenComm, &rc, recvDev);
-        if (r != ncclSuccess) return r;
-      }
+    ncclResult_t res = ncclSuccess;
+    for (int i = 0; i < 4096 && (!sc || !rc) && res == ncclSuccess; i++) {
+      if (!sc) res = IbCastConnect(ctx, dev, handle, &sc, sendDev);
+      if (!rc && res == ncclSuccess) res = IbCastAccept(listenComm, &rc, recvDev);
     }
+    // A side that finished before the other failed still gets closed in TearDown.
     if (sc) sendComms_.push_back(sc);
     if (rc) recvComms_.push_back(rc);
+    if (res != ncclSuccess) return res;
     *send = static_cast<ncclIbSendComm*>(sc);
     *recv = static_cast<ncclIbRecvComm*>(rc);
     return sc && rc ? ncclSuccess : ncclInProgress;
@@ -600,7 +604,7 @@ class NetIbCastConnectMicrotest : public ::testing::Test {
 TEST_F(NetIbCastConnectMicrotest, Handshake_WiresEverySenderQpToItsReceiverPeer) {
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   ASSERT_NE(s, nullptr);
   ASSERT_NE(r, nullptr);
   ASSERT_EQ(s->base.nqps, 2);  // IB_QPS_PER_CONNECTION default, one device each side
@@ -636,7 +640,7 @@ TEST_F(NetIbCastConnectMicrotest, Handshake_WiresEverySenderQpToItsReceiverPeer)
 TEST_F(NetIbCastConnectMicrotest, Handshake_ExchangesFifoAndCompletionRecordAddressesAndKeys) {
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   EXPECT_EQ(r->remCtsFifo.addr, reinterpret_cast<uint64_t>(s->ctsFifo));
   EXPECT_EQ(r->remCtsFifo.rkeys[0], s->devs[0].ctsFifoMr->rkey);
   EXPECT_EQ(s->remCmplsRecords.addr, reinterpret_cast<uint64_t>(r->cmplsRecords));
@@ -649,7 +653,7 @@ TEST_F(NetIbCastConnectMicrotest, Handshake_ExchangesFifoAndCompletionRecordAddr
 TEST_F(NetIbCastConnectMicrotest, Close_ReleasesEveryVerbsObjectTheHandshakeTook) {
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   EXPECT_FALSE(verbs_.live.empty());
   Forget(s);
   Forget(r);
@@ -1581,7 +1585,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, PartialSocketProgress_ResumesEverySta
   sockets_.chunk = 97;
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   ASSERT_NE(s, nullptr);
   EXPECT_EQ(verbs_.Rtr(s->base.qps[1].qp)->attr.dest_qp_num, r->base.qps[1].qp->qp_num);
 }
@@ -1671,7 +1675,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, QpCount_FollowsTheConnectionAndP2pPar
   Param("RCCL_IB_QPS_PER_P2P", 1);
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   EXPECT_EQ(s->base.nqps, 3);
   EXPECT_EQ(r->base.nqps, 3);
   EXPECT_EQ(s->base.isP2p, 0);
@@ -1688,7 +1692,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, QpCount_FollowsTheConnectionAndP2pPar
 TEST_F(NetIbCastConnectHandshakeMicrotest, ServiceLevelAndTrafficClass_DefaultToZero) {
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   EXPECT_EQ(verbs_.Rtr(s->base.qps[0].qp)->attr.ah_attr.sl, 0);
   EXPECT_EQ(verbs_.Rtr(s->base.qps[0].qp)->attr.ah_attr.grh.traffic_class, 0);
   EXPECT_EQ(verbs_.Rtr(r->base.qps[0].qp)->attr.ah_attr.grh.traffic_class, 0);
@@ -1731,6 +1735,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, InfinibandLink_UsesNoTrafficClass) {
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
   const std::string log = InfoLog([&] { Connected(&s, &r); });
+  ASSERT_FALSE(HasFatalFailure());
   ASSERT_NE(s, nullptr);
   EXPECT_EQ(s->base.qps[0].rtrAttr.tc, 0xff);
   EXPECT_EQ(r->base.qps[0].rtrAttr.tc, 106);  // the receiver copies the sender's value regardless
@@ -1759,7 +1764,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, Ece_SenderAppliesTheReceiversReducedE
   queryEceOptions_ = 0x3;
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   // Receiver: set the sender's ECE, then query the reduced one; sender: set that.
   ASSERT_EQ(setEce_.size(), 4u);
   EXPECT_EQ(setEce_[0].first, r->base.qps[0].qp);
@@ -1776,18 +1781,18 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, Ece_DisabledOrUnsupported_IsClearedOn
   Param("IB_ECE_ENABLE", 0);
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   EXPECT_TRUE(setEce_.empty());
   EXPECT_EQ(s->base.qps[0].eceSupported, 0);
   EXPECT_EQ(r->base.qps[0].eceSupported, 0);
   Param("IB_ECE_ENABLE", 1);
   eceSupported_ = 0;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   EXPECT_TRUE(setEce_.empty());
   EXPECT_EQ(s->base.qps[0].eceSupported, 0);
   eceSupported_ = 1;
   setEceSupported_ = 0;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   EXPECT_EQ(setEce_.size(), 2u);  // the receiver's set reports no support, so it never queries back
   EXPECT_EQ(s->base.qps[0].eceSupported, 0);
   EXPECT_EQ(r->base.qps[0].eceSupported, 0);
@@ -1814,7 +1819,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, CtsOffload_ForcesByOrderAndOptionalRe
   IbCastOffloadEnabled = true;
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   EXPECT_TRUE(s->useCtsOffload);
   EXPECT_TRUE(r->useCtsOffload);
   EXPECT_EQ(s->base.recvMatchingScheme, BY_ORDER);
@@ -1828,7 +1833,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, OptionalRecvCompletion_NeedsBothSides
   optRecv_ = true;
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   EXPECT_TRUE(s->base.optRecvCompletion);
   EXPECT_TRUE(r->base.optRecvCompletion);
   // Sender opts out: the receiver's later flag ANDs the sender's false in.
@@ -1865,7 +1870,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, OooRq_CreatesOutOfOrderQpsWhenBothSid
   }
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   ASSERT_NE(s, nullptr);
   EXPECT_TRUE(s->base.localOooRq);
   EXPECT_TRUE(s->base.remOooRq);
@@ -1916,7 +1921,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, Prepost_PostsEveryReceiveSlotOnEveryQ
   prepost_ = true;
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   EXPECT_EQ(verbs_.postRecvs, 2 * NET_IB_MAX_REQUESTS);
   verbs_.postRecvFailAt = verbs_.postRecvs + 3;
   void* lc = nullptr;
@@ -1934,7 +1939,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, Telemetry_ClassifiesSenderDataAndRece
   }
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   ch = rcclTelemetryChannel(0, 0);
   ASSERT_NE(ch, nullptr);
   EXPECT_EQ(ch->num_data_qp - data0, 3);  // two sender QPs and the receiver's non-CTS QP
@@ -2049,11 +2054,11 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, SubnetAware_PrefixLengthOutOfRange_Fa
 TEST_F(NetIbCastConnectHandshakeMicrotest, CqSize_CoversThreeCompletionsPerRequestPerQpAndRespectsMaxCqe) {
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   const int want = 3 * NET_IB_MAX_REQUESTS * ncclParamIbCastQpsPerConn();
   EXPECT_EQ(verbs_.cqSizes, (std::vector<int>{want, want}));
   IbCastDevs[0].maxCqe = 1000;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   EXPECT_EQ(verbs_.cqSizes.back(), 1000);
   EXPECT_EQ(verbs_.cqSizes[verbs_.cqSizes.size() - 2], 1000);
 }
@@ -2176,11 +2181,13 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, SocketProgressFailure_FailsEveryStage
   sockets_.failProgress = [](int, const ncclSocket*) { return false; };
 }
 
-TEST_F(NetIbCastConnectHandshakeMicrotest, AcceptWithoutAPendingConnection_Fails) {
+TEST_F(NetIbCastConnectHandshakeMicrotest, SocketAcceptFailure_FailsAndDropsTheStage) {
   void* lc = nullptr;
   Listen(0, &lc);
+  ScopedHook accept(g_ncclSocketAccept, [](ncclSocket*, ncclSocket*, bool) { return ncclRemoteError; });
   void* rc = nullptr;
-  EXPECT_EQ(IbCastAccept(lc, &rc, nullptr), ncclInternalError);
+  EXPECT_EQ(IbCastAccept(lc, &rc, nullptr), ncclRemoteError);
+  EXPECT_EQ(rc, nullptr);
   EXPECT_EQ(static_cast<ncclIbListenComm*>(lc)->stage, nullptr);
 }
 
@@ -2282,7 +2289,7 @@ TEST_F(NetIbCastConnectResiliencyMicrotest, Prepost_PostsTheResiliencyQueueDepth
   prepost_ = true;
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   EXPECT_EQ(verbs_.postRecvs, 2 * 9);
 }
 
@@ -2491,6 +2498,7 @@ TEST_F(NetIbCastConnectFlushMicrotest, DmaBufParamOff_FallsBackToGdrOrNoFlush) {
   EXPECT_EQ(r->flushEnabled, 1);
   Hook(g_ibCastGdrSupport, [] { return ncclSystemError; });
   r = Accepted();
+  ASSERT_NE(r, nullptr);
   EXPECT_EQ(r->flushEnabled, 0);
   EXPECT_EQ(r->devs[0].gpuFlush.qp.qp, nullptr);
 }
@@ -2533,10 +2541,14 @@ TEST_F(NetIbCastConnectFlushMicrotest, NoRelaxedOrderingOff_SkipsTheGpuWord) {
 
 TEST_F(NetIbCastConnectFlushMicrotest, OffloadOrTheDisableParam_TurnsFlushOff) {
   Param("GDR_FLUSH_DISABLE", 1);
-  EXPECT_EQ(Accepted()->flushEnabled, 0);
+  ncclIbRecvComm* r = Accepted();
+  ASSERT_NE(r, nullptr);
+  EXPECT_EQ(r->flushEnabled, 0);
   Param("GDR_FLUSH_DISABLE", 0);
   IbCastOffloadEnabled = true;
-  EXPECT_EQ(Accepted()->flushEnabled, 0);
+  r = Accepted();
+  ASSERT_NE(r, nullptr);
+  EXPECT_EQ(r->flushEnabled, 0);
 }
 
 TEST_F(NetIbCastConnectFlushMicrotest, GpuWordFailures_FailTheAcceptAndRestoreTheCaptureMode) {
@@ -2635,7 +2647,7 @@ TEST_F(NetIbCastConnectCloseMicrotest, PartlyBuiltComms_SkipMissingQpsAndMrs) {
 TEST_F(NetIbCastConnectCloseMicrotest, Telemetry_FoldsTheCommsCqPollsIntoItsFirstDevice) {
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   rcclTelemetryEnabled = 1;
   const uint64_t before = rcclTelemetryDevs[0].cq_poll_count;
   s->base.telCqPollCount = 5;
@@ -2650,7 +2662,7 @@ TEST_F(NetIbCastConnectCloseMicrotest, Telemetry_FoldsTheCommsCqPollsIntoItsFirs
 TEST_F(NetIbCastConnectCloseMicrotest, DestroyFailure_StopsTheClose) {
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connected(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s, &r));
   Forget(s);
   Forget(r);
   ScopedHook qp(g_ibvDestroyQp, [](ibv_qp*) { return ncclSystemError; });
@@ -2688,7 +2700,7 @@ class NetIbCastConnectSharingMicrotest : public NetIbCastConnectMicrotest {
 TEST_F(NetIbCastConnectSharingMicrotest, FirstConnection_MakesEachSideAPrimaryOwner) {
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connect(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connect(&s, &r));
   EXPECT_TRUE(IbCastCommIsPrimary(&s->base));
   EXPECT_TRUE(IbCastCommIsPrimary(&r->base));
   EXPECT_EQ(s->base.qpSharing.netIbCommId, 1);
@@ -2725,11 +2737,11 @@ TEST_F(NetIbCastConnectSharingMicrotest, Ainic_ScalesSharedQpDepthByTheMultiplie
   cqeCap_ = 3 * NET_IB_MAX_REQUESTS * ncclParamIbCastQpsPerConn() * 3;  // the device grants 3x, not 8x
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
-  Connect(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connect(&s, &r));
   EXPECT_EQ(verbs_.CreateOf(s->base.qps[0].qp)->attr.cap.max_send_wr, 2u * NET_IB_MAX_REQUESTS * 3);
   EXPECT_EQ(verbs_.CreateOf(r->base.qps[0].qp)->attr.cap.max_recv_wr, (uint32_t)NET_IB_MAX_REQUESTS * 3);
   cqeCap_ = 1;  // below one multiple: the depth never drops under 1x
-  Connect(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connect(&s, &r));
   EXPECT_EQ(verbs_.CreateOf(s->base.qps[0].qp)->attr.cap.max_send_wr, 2u * NET_IB_MAX_REQUESTS);
 }
 
@@ -2737,10 +2749,10 @@ TEST_F(NetIbCastConnectSharingMicrotest, OneGroup_SecondConnectionReusesTheQpsAn
   Param("RCCL_IB_COMM_NGROUPS", 1);
   ncclIbSendComm *s1 = nullptr, *s2 = nullptr;
   ncclIbRecvComm *r1 = nullptr, *r2 = nullptr;
-  Connect(&s1, &r1);
+  ASSERT_NO_FATAL_FAILURE(Connect(&s1, &r1));
   const size_t creates = verbs_.creates.size();
   const size_t modifies = verbs_.modifies.size();
-  Connect(&s2, &r2);
+  ASSERT_NO_FATAL_FAILURE(Connect(&s2, &r2));
   EXPECT_EQ(verbs_.creates.size(), creates);
   EXPECT_EQ(verbs_.modifies.size(), modifies);
   EXPECT_TRUE(IbCastCommIsSecondary(&s2->base));
@@ -2774,8 +2786,8 @@ TEST_F(NetIbCastConnectSharingMicrotest, Close_SharedResourcesOutliveTheirFirstO
     SCOPED_TRACE(primaryFirst);
     ncclIbSendComm *s1 = nullptr, *s2 = nullptr;
     ncclIbRecvComm *r1 = nullptr, *r2 = nullptr;
-    Connect(&s1, &r1);
-    Connect(&s2, &r2);
+    ASSERT_NO_FATAL_FAILURE(Connect(&s1, &r1));
+    ASSERT_NO_FATAL_FAILURE(Connect(&s2, &r2));
     ibv_qp* shared = s1->base.qps[0].qp;
     ibv_cq* cq = s1->devs[0].base.cq;
     if (primaryFirst) CloseAll({s1, r1});
@@ -2789,8 +2801,9 @@ TEST_F(NetIbCastConnectSharingMicrotest, Close_SharedResourcesOutliveTheirFirstO
     EXPECT_EQ(UsedSlots(), 0);
     std::set<const void*> unique(verbs_.destroyed.begin(), verbs_.destroyed.end());
     EXPECT_EQ(unique.size(), verbs_.destroyed.size());
-    const std::string log = CaptureLog([] { IbCastValidateSharedQpPool(); });
-    EXPECT_FALSE(LogHas(log, "LEAK")) << log;
+    EXPECT_EQ(std::count_if(std::begin(g_IbCastCommTable), std::end(g_IbCastCommTable),
+                            [](const IbCastCommTableEntry& e) { return e.used; }),
+              0);
     verbs_.destroyed.clear();
   }
 }
@@ -2798,7 +2811,7 @@ TEST_F(NetIbCastConnectSharingMicrotest, Close_SharedResourcesOutliveTheirFirstO
 TEST_F(NetIbCastConnectSharingMicrotest, DefaultGroups_RotateConnectionsAcrossFourGroups) {
   std::vector<ncclIbSendComm*> s(5);
   std::vector<ncclIbRecvComm*> r(5);
-  for (int i = 0; i < 5; i++) Connect(&s[i], &r[i]);
+  for (int i = 0; i < 5; i++) ASSERT_NO_FATAL_FAILURE(Connect(&s[i], &r[i]));
   for (int i = 0; i < 4; i++) {
     EXPECT_EQ(s[i]->base.qpSharing.groupIdx, i);
     EXPECT_EQ(r[i]->base.qpSharing.groupIdx, i);
@@ -2816,13 +2829,14 @@ TEST_F(NetIbCastConnectSharingMicrotest, SharedFlushQp_IsReusedAndReleasedWithIt
   Hook(g_ibCastGdrSupport, [] { return ncclSuccess; });
   ncclIbSendComm *s1 = nullptr, *s2 = nullptr;
   ncclIbRecvComm *r1 = nullptr, *r2 = nullptr;
-  Connect(&s1, &r1);
+  ASSERT_NO_FATAL_FAILURE(Connect(&s1, &r1));
   ibv_qp* flush = r1->devs[0].gpuFlush.qp.qp;
   IbCastSharedQp* slot = Slot(flush, false);
   ASSERT_NE(slot, nullptr);
   EXPECT_EQ(slot->key.qpIdx, IBCAST_FLUSH_QP_IDX);
   EXPECT_EQ(slot->devIndex, 0);
   const std::string log = InfoLog([&] { Connect(&s2, &r2); });
+  ASSERT_FALSE(HasFatalFailure());
   EXPECT_EQ(r2->devs[0].gpuFlush.qp.qp, flush);
   EXPECT_EQ(slot->refcount, 2);
   EXPECT_TRUE(LogHas(log, "SECONDARY recv sharing flush QP")) << log;
@@ -2838,11 +2852,12 @@ TEST_F(NetIbCastConnectSharingMicrotest, SecondaryWithoutASharedFlushQp_WarnsAnd
   Param("RCCL_IB_COMM_NGROUPS", 1);
   ncclIbSendComm *s1 = nullptr, *s2 = nullptr;
   ncclIbRecvComm *r1 = nullptr, *r2 = nullptr;
-  Connect(&s1, &r1);
+  ASSERT_NO_FATAL_FAILURE(Connect(&s1, &r1));
   Param("GDR_FLUSH_DISABLE", 0);
   Param("RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING", 0);
   Hook(g_ibCastGdrSupport, [] { return ncclSuccess; });
   const std::string log = CaptureLog([&] { Connect(&s2, &r2); });
+  ASSERT_FALSE(HasFatalFailure());
   EXPECT_TRUE(LogHas(log, "SECONDARY recv could not find shared flush QP for dev=0 group=0")) << log;
   EXPECT_EQ(r2->devs[0].gpuFlush.qp.qp, nullptr);
   CloseAll({s1, r1, s2, r2});
@@ -2854,13 +2869,14 @@ TEST_F(NetIbCastConnectSharingMicrotest, CommIdsExhausted_FallBackToPrivateQps) 
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
   const std::string log = CaptureLog([&] { Connect(&s, &r); });
+  ASSERT_FALSE(HasFatalFailure());
   EXPECT_TRUE(LogHas(log, "commId pool exhausted")) << log;
   EXPECT_FALSE(IbCastCommIsSharing(&s->base));
   EXPECT_FALSE(IbCastCommIsSharing(&r->base));
   EXPECT_EQ(UsedSlots(), 0);
   // Only the receiver runs out: the sender still shares, the receiver does not.
   g_IbCastNextCommId = IBCAST_MAX_COMMS - 1;
-  Connect(&s, &r);
+  ASSERT_NO_FATAL_FAILURE(Connect(&s, &r));
   EXPECT_TRUE(IbCastCommIsPrimary(&s->base));
   EXPECT_FALSE(IbCastCommIsSharing(&r->base));
   EXPECT_EQ(s->remCommId, 0);
@@ -2907,6 +2923,7 @@ TEST_F(NetIbCastConnectSharingMicrotest, FlushSlotExhausted_KeepsAPrivateFlushQp
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
   const std::string log = CaptureLog([&] { Connect(&s, &r); });
+  ASSERT_FALSE(HasFatalFailure());
   EXPECT_TRUE(LogHas(log, "secondaries will not be able to share it")) << log;
   ibv_qp* flush = r->devs[0].gpuFlush.qp.qp;
   ASSERT_NE(flush, nullptr);
@@ -2919,10 +2936,11 @@ TEST_F(NetIbCastConnectSharingMicrotest, ReceiverMissingASharedSlot_FallsBackToP
   Param("RCCL_IB_COMM_NGROUPS", 1);
   ncclIbSendComm *s1 = nullptr, *s2 = nullptr;
   ncclIbRecvComm *r1 = nullptr, *r2 = nullptr;
-  Connect(&s1, &r1);
+  ASSERT_NO_FATAL_FAILURE(Connect(&s1, &r1));
   // Re-key the receiver's second slot so the group still counts it but a lookup misses it.
   Slot(r1->base.qps[1].qp, false)->key.ibDevN = 2;
   const std::string log = CaptureLog([&] { Connect(&s2, &r2); });
+  ASSERT_FALSE(HasFatalFailure());
   EXPECT_TRUE(LogHas(log, "SECONDARY recv: could not find shared QP for qpIdx=1 group=0")) << log;
   EXPECT_FALSE(IbCastCommIsSharing(&r2->base));
   EXPECT_EQ(r2->base.qpSharing.groupIdx, -1);
@@ -2935,8 +2953,8 @@ TEST_F(NetIbCastConnectSharingMicrotest, CloseSend_KnownBug_QpNumberCollisionAcr
   // Two primaries on different NICs; each HCA numbers its QPs from the same base.
   ncclIbSendComm *a = nullptr, *b = nullptr;
   ncclIbRecvComm *ra = nullptr, *rb = nullptr;
-  Connect(&a, &ra, /*dev=*/0, /*listenDev=*/0);
-  Connect(&b, &rb, /*dev=*/1, /*listenDev=*/1);
+  ASSERT_NO_FATAL_FAILURE(Connect(&a, &ra, /*dev=*/0, /*listenDev=*/0));
+  ASSERT_NO_FATAL_FAILURE(Connect(&b, &rb, /*dev=*/1, /*listenDev=*/1));
   ASSERT_TRUE(IbCastCommIsPrimary(&b->base));
   ASSERT_EQ(a->base.qps[0].qp->qp_num, b->base.qps[0].qp->qp_num);
   ibv_qp* aQp = a->base.qps[0].qp;
@@ -2955,8 +2973,8 @@ TEST_F(NetIbCastConnectSharingMicrotest, CleanupGroupCqs_KnownBug_ReleasesTheGro
   // Two primaries of one group, on two local NICs, to the same remote NIC.
   ncclIbSendComm *a = nullptr, *b = nullptr;
   ncclIbRecvComm *ra = nullptr, *rb = nullptr;
-  Connect(&a, &ra, /*dev=*/0, /*listenDev=*/0);
-  Connect(&b, &rb, /*dev=*/1, /*listenDev=*/0);
+  ASSERT_NO_FATAL_FAILURE(Connect(&a, &ra, /*dev=*/0, /*listenDev=*/0));
+  ASSERT_NO_FATAL_FAILURE(Connect(&b, &rb, /*dev=*/1, /*listenDev=*/0));
   ASSERT_TRUE(IbCastCommIsPrimary(&b->base));
   ASSERT_EQ(b->base.qpSharing.groupIdx, a->base.qpSharing.groupIdx);
   ibv_cq* bCq = b->devs[0].base.cq;
@@ -2972,10 +2990,11 @@ TEST_F(NetIbCastConnectSharingMicrotest, SenderSetup_KnownBug_FallbackLeaksTheSl
   Param("RCCL_IB_COMM_NGROUPS", 1);
   ncclIbSendComm *a = nullptr, *c = nullptr;
   ncclIbRecvComm *ra = nullptr, *rc = nullptr;
-  Connect(&a, &ra, /*dev=*/0);
+  ASSERT_NO_FATAL_FAILURE(Connect(&a, &ra, /*dev=*/0));
   ibv_qp* shared = a->base.qps[0].qp;
   // A fused sender finds slot 0 of the group but not slot 1, and falls back.
   const std::string log = CaptureLog([&] { Connect(&c, &rc, /*dev=*/2); });
+  ASSERT_FALSE(HasFatalFailure());
   ASSERT_TRUE(LogHas(log, "QP sharing SECONDARY: could not find shared QP for qpIdx=1")) << log;
   ASSERT_FALSE(IbCastCommIsSharing(&c->base));
   EXPECT_EQ(Slot(shared, true)->refcount, 2);
@@ -3106,8 +3125,8 @@ TEST_F(NetIbCastConnectResiliencyMicrotest, SenderQpsToRts_KnownBug_SharingSecon
   });
   ncclIbSendComm *s1 = nullptr, *s2 = nullptr;
   ncclIbRecvComm *r1 = nullptr, *r2 = nullptr;
-  Connected(&s1, &r1);
-  Connected(&s2, &r2);
+  ASSERT_NO_FATAL_FAILURE(Connected(&s1, &r1));
+  ASSERT_NO_FATAL_FAILURE(Connected(&s2, &r2));
   ASSERT_TRUE(IbCastCommIsSecondary(&s2->base));
   ASSERT_TRUE(IbCastCommIsSecondary(&r2->base));
   // The secondary sender never created resiliency QPs and its secondary peer sent none,
