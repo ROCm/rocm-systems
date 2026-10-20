@@ -1,0 +1,294 @@
+inherit: ../gfx942/l2.yaml
+l2.ai:
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F8 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512) / (128 * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum))
+l2.atomic_bw:
+  name: Atomic Bandwidth
+  formula: 32 * SUM(TCC_ATOMIC_SECTORS_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total number of bytes looked up in the L2 cache for atomic requests, divided by
+    total duration.
+l2.bypass_req:
+  name: Bypass Req
+  formula: SUM(TCC_BYPASS_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Number of L2 cache bypass requests measured at the tag block. These requests skip
+    normal cache lookup and go directly to memory, typically for uncacheable or write-combined
+    memory accesses.
+l2.chan_fabric_rd_stall_hbm:
+  name: L2-Fabric Read Stall (HBM)
+  formula: SUM(TO_INT(TCC_EA0_RDREQ_DRAM_CREDIT_STALL[::_1])) / SUM($denom)
+  unit: ''
+  description: ''
+l2.chan_fabric_rd_stall_infinity_fabric:
+  name: L2-Fabric Read Stall (Infinity Fabric)
+  formula: SUM(TO_INT(TCC_EA0_RDREQ_GMI_CREDIT_STALL[::_1])) / SUM($denom)
+  unit: ''
+  description: ''
+l2.chan_fabric_rd_stall_pcie:
+  name: L2-Fabric Read Stall (PCIe)
+  formula: SUM(TO_INT(TCC_EA0_RDREQ_IO_CREDIT_STALL[::_1])) / SUM($denom)
+  unit: ''
+  description: ''
+l2.chan_fabric_wr_stall_hbm:
+  name: L2-Fabric Write Stall (HBM)
+  formula: SUM(TO_INT(TCC_EA0_WRREQ_DRAM_CREDIT_STALL[::_1])) / SUM($denom)
+  unit: ''
+  description: ''
+l2.chan_fabric_wr_stall_infinity_fabric:
+  name: L2-Fabric Write Stall (Infinity Fabric)
+  formula: SUM(TO_INT(TCC_EA0_WRREQ_GMI_CREDIT_STALL[::_1])) / SUM($denom)
+  unit: ''
+  description: ''
+l2.chan_fabric_wr_stall_pcie:
+  name: L2-Fabric Write Stall (PCIe)
+  formula: SUM(TO_INT(TCC_EA0_WRREQ_IO_CREDIT_STALL[::_1])) / SUM($denom)
+  unit: ''
+  description: ''
+l2.coherent_cached_req_rate:
+  name: Coherent cached request rate
+  formula: 100 * SUM(TCC_CC_REQ_sum) / SUM(TCC_REQ_sum)
+  unit: Percent
+  description: >-
+    The percentage of L2 requests that are coherently cached (CC). These requests
+    participate in cache coherence protocols. Equation: 100 * (SUM(TCC_CC_REQ_sum)
+    / SUM(TCC_REQ_sum))
+l2.eviction_rate:
+  name: L2 eviction rate
+  formula: 100 * SUM(TCC_NORMAL_EVICT_sum) / SUM(TCC_REQ_sum)
+  unit: Percent
+  description: >-
+    The percentage of L2 requests that result in cache line evictions due to capacity.
+    Equation: 100 * (SUM(TCC_NORMAL_EVICT_sum) / SUM(TCC_REQ_sum))
+l2.input_buffer_req:
+  name: Input Buffer Req
+  formula: SUM(TCC_IB_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Number of raw memory requests received through the L2 cache Input Buffer (IB)
+    from compute units and other hardware clients. This counts all incoming requests
+    before cache lookup processing and represents the total incoming demand on the
+    L2 cache.
+l2.input_buffer_stall_rate:
+  name: L2 input buffer stall rate
+  formula: 100 * SUM(TCC_IB_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    The percentage of active L2 cycles where the input buffer output was stalled,
+    meaning L2 cannot accept new requests from L1. A high rate (>= 10%) indicates
+    L2 is backpressuring L1 (L1-to-L2 interface bottleneck). Equation: 100 * (SUM(TCC_IB_STALL_sum)
+    / SUM(TCC_BUSY_sum))
+l2.input_buffer_stalled_on_l2:
+  name: Input Buffer Stalled on L2
+  formula: SUM(TCC_IB_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+l2.lat_fifo_full_rate:
+  name: L2 latency FIFO full rate
+  formula: 100 * SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    The percentage of active L2 cycles where the latency FIFO was full, indicating
+    too many requests are pending in the L2 cache. Equation: 100 * (SUM(TCC_LATENCY_FIFO_FULL_sum)
+    / SUM(TCC_BUSY_sum))
+l2.non_coherent_req_rate:
+  name: Non-coherent request rate
+  formula: 100 * SUM(TCC_NC_REQ_sum) / SUM(TCC_REQ_sum)
+  unit: Percent
+  description: >-
+    The percentage of L2 requests that are non-coherent (NC). Non-coherent requests
+    bypass cache coherence checks, typically used for streaming or write-only data.
+    Equation: 100 * (SUM(TCC_NC_REQ_sum) / SUM(TCC_REQ_sum))
+l2.normalized_l2_hits:
+  name: Normalized L2 hits
+  formula: SUM(TCC_HIT_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Hits/s
+  description: >-
+    L2 cache hits per second of kernel execution. Normalized to wall-clock time for
+    absolute throughput measurement. Equation: SUM(TCC_HIT_sum) / (SUM(End_Timestamp
+    - Start_Timestamp) / 1000000000)
+l2.normalized_l2_input_buffer_stall:
+  name: Normalized L2 - Input buffer stall
+  formula: 100 * SUM(TCC_IB_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that the L2 input buffer was stalled, preventing
+    L2 from accepting new requests from L1. Averaged across all L2 channels. High
+    values indicate the L1-to-L2 interface is a bottleneck. Equation: 100 * (SUM(TCC_IB_STALL_sum)
+    / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan))
+l2.normalized_l2_lat_fifo_full:
+  name: Normalized L2 - Latency FIFO full
+  formula: 100 * SUM(TCC_LATENCY_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that the L2 latency FIFO was full because too many
+    requests were in flight inside L2. Averaged across all L2 channels. High values
+    indicate L2 internal congestion. Equation: 100 * (SUM(TCC_LATENCY_FIFO_FULL_sum)
+    / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan))
+l2.normalized_l2_misses:
+  name: Normalized L2 misses
+  formula: SUM(TCC_MISS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Misses/s
+  description: >-
+    L2 cache misses per second of kernel execution. Normalized to wall-clock time
+    for absolute throughput measurement. Equation: SUM(TCC_MISS_sum) / (SUM(End_Timestamp
+    - Start_Timestamp) / 1000000000)
+l2.normalized_l2_rd_req:
+  name: Normalized L2 read requests
+  formula: SUM(TCC_READ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Requests/s
+  description: >-
+    L2 read requests per second of kernel execution. Normalized to wall-clock time
+    for absolute throughput measurement. Equation: SUM(TCC_READ_sum) / (SUM(End_Timestamp
+    - Start_Timestamp) / 1000000000)
+l2.normalized_l2_source_fifo_full:
+  name: Normalized L2 - Source FIFO full
+  formula: 100 * SUM(TCC_SRC_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that the L2 write data (source) FIFO was full, meaning
+    the write data path into L2 was saturated. Averaged across all L2 channels. Equation:
+    100 * (SUM(TCC_SRC_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan))
+l2.normalized_l2_tag_stall:
+  name: Normalized L2 - Tag stall
+  formula: 100 * SUM(TCC_TAG_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that the L2 tag pipeline was stalled for any reason.
+    Averaged across all L2 channels. This is the primary L2 bottleneck indicator,
+    covering all internal TCC stall causes. Equation: 100 * (SUM(TCC_TAG_STALL_sum)
+    / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $total_l2_chan))
+l2.normalized_l2_total_req:
+  name: Normalized L2 total requests
+  formula: SUM(TCC_REQ_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Requests/s
+  description: >-
+    Total L2 requests per second of kernel execution. Normalized to wall-clock time
+    for absolute throughput measurement. Equation: SUM(TCC_REQ_sum) / (SUM(End_Timestamp
+    - Start_Timestamp) / 1000000000)
+l2.normalized_l2_wr_req:
+  name: Normalized L2 write requests
+  formula: SUM(TCC_WRITE_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Requests/s
+  description: >-
+    L2 write requests per second of kernel execution. Normalized to wall-clock time
+    for absolute throughput measurement. Equation: SUM(TCC_WRITE_sum) / (SUM(End_Timestamp
+    - Start_Timestamp) / 1000000000)
+l2.num_chan:
+  name: Num L2 Channels
+  formula: $total_l2_chan
+  unit: Count
+  description: ''
+l2.probe_eviction_rate:
+  name: Probe eviction rate
+  formula: 100 * SUM(TCC_PROBE_EVICT_sum) / SUM(TCC_PROBE_sum)
+  unit: Percent
+  description: >-
+    The percentage of probe requests that result in cache line evictions or invalidations.
+    High values indicate external coherence traffic is evicting useful data. Equation:
+    100 * (SUM(TCC_PROBE_EVICT_sum) / SUM(TCC_PROBE_sum))
+l2.probe_req_rate:
+  name: Probe request rate
+  formula: SUM(TCC_PROBE_sum) / SUM(TCC_BUSY_sum)
+  unit: Requests per Cycle
+  description: >-
+    The number of external probe requests (for cache coherence) per active L2 cycle.
+    High probe rates indicate significant coherence traffic. Equation: SUM(TCC_PROBE_sum)
+    / SUM(TCC_BUSY_sum)
+l2.rd_bw:
+  name: Read Bandwidth
+  formula: 32 * SUM(TCC_READ_SECTORS_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total number of bytes looked up in the L2 cache for read requests, divided by
+    total duration.
+l2.rd_req_rate:
+  name: L2 read request rate
+  formula: SUM(TCC_READ_sum) / SUM(TCC_BUSY_sum)
+  unit: Requests per Cycle
+  description: >-
+    The number of L2 read requests per active L2 cycle, across all L2 channels. Equation:
+    SUM(TCC_READ_sum) / SUM(TCC_BUSY_sum)
+l2.stalled_on_lat_fifo:
+  name: L2 Stalled on Latency FIFO
+  formula: SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+l2.stalled_on_wr_data_fifo:
+  name: Stalled on Write Data FIFO
+  formula: SUM(TCC_SRC_FIFO_FULL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+l2.tag_stall_rate:
+  name: L2 tag stall rate
+  formula: 100 * SUM(TCC_TAG_STALL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    The percentage of active L2 cycles where the tag pipeline was stalled for any
+    reason. A high rate (>= 10%) indicates the L2 tag pipeline is a bottleneck. Equation:
+    100 * (SUM(TCC_TAG_STALL_sum) / SUM(TCC_BUSY_sum))
+l2.tcc_busy:
+  name: TCC_BUSY
+  formula: SUM(TCC_BUSY_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+l2.tcc_probe_evict:
+  name: TCC_PROBE_EVICT
+  formula: SUM(TCC_PROBE_EVICT_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+l2.tcc_tag_stall:
+  name: TCC_TAG_STALL
+  formula: SUM(TCC_TAG_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+l2.tcc_too_many_ea_wrreqs_stall:
+  name: TCC_TOO_MANY_EA_WRREQS_STALL
+  formula: SUM(TCC_TOO_MANY_EA_WRREQS_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+l2.total_req_rate:
+  name: L2 total request rate
+  formula: SUM(TCC_REQ_sum) / SUM(TCC_BUSY_sum)
+  unit: Requests per Cycle
+  description: >-
+    The total number of L2 requests per active L2 cycle, across all L2 channels. Equation:
+    SUM(TCC_REQ_sum) / SUM(TCC_BUSY_sum)
+l2.uncached_req_rate:
+  name: Uncached request rate
+  formula: 100 * SUM(TCC_UC_REQ_sum) / SUM(TCC_REQ_sum)
+  unit: Percent
+  description: >-
+    The percentage of L2 requests that are uncached (UC). Uncached requests bypass
+    the L2 cache entirely, going directly to memory. Equation: 100 * (SUM(TCC_UC_REQ_sum)
+    / SUM(TCC_REQ_sum))
+l2.wr_bw:
+  name: Write Bandwidth
+  formula: 32 * SUM(TCC_WRITE_SECTORS_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total number of bytes looked up in the L2 cache for write requests, divided by
+    total duration.
+l2.wr_data_fifo_full_rate:
+  name: L2 write data FIFO full rate
+  formula: 100 * SUM(TCC_SRC_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)
+  unit: Percent
+  description: >-
+    The percentage of active L2 cycles where the source data FIFO was full, indicating
+    the write data path is saturated. Equation: 100 * (SUM(TCC_SRC_FIFO_FULL_sum)
+    / SUM(TCC_BUSY_sum))
+l2.wr_req_rate:
+  name: L2 write request rate
+  formula: SUM(TCC_WRITE_sum) / SUM(TCC_BUSY_sum)
+  unit: Requests per Cycle
+  description: >-
+    The number of L2 write requests per active L2 cycle, across all L2 channels. Equation:
+    SUM(TCC_WRITE_sum) / SUM(TCC_BUSY_sum)
+l2.writeback_rate:
+  name: L2 writeback rate
+  formula: 100 * SUM(TCC_WRITEBACK_sum) / SUM(TCC_REQ_sum)
+  unit: Percent
+  description: >-
+    The percentage of L2 requests that result in dirty cache line writebacks to memory.
+    Equation: 100 * (SUM(TCC_WRITEBACK_sum) / SUM(TCC_REQ_sum))

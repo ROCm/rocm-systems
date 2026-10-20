@@ -68,6 +68,15 @@ def gfx90a_copy(tmp_path, monkeypatch):
     return copy_shipped_trees(tmp_path, ["gfx908", "gfx90a"])
 
 
+@pytest.fixture
+def gfx950_copy(tmp_path, monkeypatch):
+    """Copies of the gfx950 chain's metric library and analysis configs."""
+    monkeypatch.setattr(MetricLibrary, "_cache", {})
+    return copy_shipped_trees(
+        tmp_path, ["gfx908", "gfx90a", "gfx940", "gfx942", "gfx950"]
+    )
+
+
 def copy_shipped_trees(root, archs):
     library = root / "metric_library"
     configs = root / "analysis_configs"
@@ -190,6 +199,17 @@ def test_metrics_cannot_share_a_name(tree):
         "[gfx_base] ['compute.valu_util', 'compute.valu_util_copy']: share a name; "
         "name each after what it measures" in validate(tree)
     )
+
+
+def test_listed_ids_may_share_a_formula(tree, monkeypatch):
+    monkeypatch.setattr(
+        validate_metric_library,
+        "SHARED_FORMULA_IDS",
+        {"compute.valu_util_copy": "compute.valu_util"},
+    )
+    second = BASE_METRIC.replace("valu_util", "valu_util_copy")
+    write_base_metrics(tree, BASE_METRIC + second)
+    assert not any("share a formula" in error for error in validate(tree))
 
 
 def test_child_file_must_inherit_from_its_parent(tree):
@@ -363,6 +383,22 @@ def test_changed_row_measured_peak(gfx90a_copy):
     replace_in(path, "$LDSBw_empirical_peak", "$L2Bw_empirical_peak")
     errors = validate(library, configs)
     assert any("4.1.11 LDS Bandwidth: peak $L2Bw_empirical_peak" in e for e in errors)
+
+
+def test_shared_formula_rows_show_the_id_their_label_names(gfx950_copy):
+    """MXF8 rows read the F8 counter but are checked against compute.mfma_flops_mxf8."""
+    library, configs = gfx950_copy
+    replace_in(
+        configs / "gfx950" / "0400_roofline.yaml",
+        "$MFMAMXF8Flops_empirical_peak",
+        "$MFMAF8Flops_empirical_peak",
+    )
+    errors = validate(library, configs)
+    assert any(
+        "MFMA FLOPs (MXF8): peak $MFMAF8Flops_empirical_peak is neither" in error
+        and error.endswith("compute.mfma_flops_mxf8")
+        for error in errors
+    )
 
 
 def test_changed_rewritten_display_variant(gfx908_copy):

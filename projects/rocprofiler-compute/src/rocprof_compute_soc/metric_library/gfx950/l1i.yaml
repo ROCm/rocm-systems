@@ -1,0 +1,9 @@
+inherit: ../gfx908/l1i.yaml
+l1i.bw:
+  description: >-
+    The number of bytes looked up in the L1I cache per unit time.
+l1i.hit_rate_excl_dup:
+  description: >-
+    The percent of L1I requests that hit on a previously loaded line the cache. Calculated
+    as the ratio of the number of L1I requests that hit over the number of all L1I
+    requests.
