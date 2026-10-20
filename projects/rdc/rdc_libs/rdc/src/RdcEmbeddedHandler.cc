@@ -23,6 +23,9 @@ THE SOFTWARE.
 
 #include <string.h>
 
+#include <algorithm>
+#include <atomic>
+
 #include "amd_smi/amdsmi.h"
 #include "common/rdc_fields_supported.h"
 #include "rdc/rdc.h"
@@ -175,8 +178,19 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_all(uint32_t gpu_index_list[RDC_
     return status;
   }
 
+  // gpu_index_list holds RDC_MAX_NUM_DEVICES entries.
+  int64_t total = std::max<int64_t>(device_count.value.l_int, 0);
+  if (total > RDC_MAX_NUM_DEVICES) {
+    static std::atomic<bool> reported{false};
+    if (!reported.exchange(true)) {
+      RDC_LOG(RDC_ERROR, "RDC lists " << RDC_MAX_NUM_DEVICES << " of the " << total
+                                      << " GPUs and GPU partitions");
+    }
+    total = RDC_MAX_NUM_DEVICES;
+  }
+
   // Assign the index to the index list
-  *count = device_count.value.l_int;
+  *count = static_cast<uint32_t>(total);
   for (uint32_t i = 0; i < *count; i++) {
     gpu_index_list[i] = i;
   }

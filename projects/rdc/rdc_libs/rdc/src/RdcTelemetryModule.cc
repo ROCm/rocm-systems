@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcTelemetryModule.h"
 
+#include <algorithm>
 #include <memory>
 
 #include "rdc_lib/RdcException.h"
@@ -108,11 +109,13 @@ RdcTelemetryModule::RdcTelemetryModule(std::list<RdcTelemetryPtr> telemetry_modu
 void RdcTelemetryModule::get_fields_for_module(
     rdc_gpu_field_t* fields, uint32_t fields_count,
     std::map<RdcTelemetryPtr, std::vector<rdc_gpu_field_t>>& fields_in_module,
-    std::vector<rdc_gpu_field_value_t>& unsupport_fields) {
+    std::vector<rdc_gpu_field_value_t>& unsupport_fields) const {
   for (uint32_t findex = 0; findex < fields_count; findex++) {
-    RdcTelemetryPtr module = fields_id_module_[fields[findex].field_id];
-    if (module) {
-      fields_in_module[module].push_back(fields[findex]);
+    // find(), not operator[], which would add an entry for every unknown field: only the
+    // constructor fills the map.
+    auto found = fields_id_module_.find(fields[findex].field_id);
+    if (found != fields_id_module_.end()) {
+      fields_in_module[found->second].push_back(fields[findex]);
     } else {
       RDC_LOG(RDC_DEBUG, "Unsupported field " << field_id_string(fields[findex].field_id));
       rdc_gpu_field_value_t value;
@@ -137,15 +140,20 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_value_get(rdc_gpu_field_t*
   std::vector<rdc_gpu_field_value_t> unsupport_fields;
   get_fields_for_module(fields, fields_count, fields_to_fetch, unsupport_fields);
 
-  auto ite = fields_to_fetch.begin();
-  for (; ite != fields_to_fetch.end(); ite++) {
-    rdc_gpu_field_t f[MAX_NUM_FIELDS];
-    std::copy(ite->second.begin(), ite->second.end(), f);
-    ite->first->rdc_telemetry_fields_value_get(f, ite->second.size(), callback, user_data);
+  for (auto& [module, due] : fields_to_fetch) {
+    // A library takes at most MAX_NUM_FIELDS fields per call, but the watches due in one
+    // update can hold more.
+    for (size_t first = 0; first < due.size(); first += MAX_NUM_FIELDS) {
+      const size_t n = std::min<size_t>(MAX_NUM_FIELDS, due.size() - first);
+      module->rdc_telemetry_fields_value_get(&due[first], static_cast<uint32_t>(n), callback,
+                                             user_data);
+    }
   }
 
   // Notify the caller unsupported fields
-  callback(&unsupport_fields[0], unsupport_fields.size(), user_data);
+  if (!unsupport_fields.empty()) {
+    callback(unsupport_fields.data(), static_cast<uint32_t>(unsupport_fields.size()), user_data);
+  }
 
   return RDC_ST_OK;
 }

@@ -1178,9 +1178,11 @@ rdc_status_t rdc_field_update_all(rdc_handle_t p_rdc_handle, uint32_t wait_for_u
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[out] gpu_index_list Array reference to fill GPU indexes present on
- *  the system.
+ *  the system. At most ::RDC_MAX_NUM_DEVICES GPUs and GPU partitions are
+ *  listed; any beyond that are not.
  *
- *  @param[out] count Number of GPUs returned in gpu_index_list.
+ *  @param[out] count Number of GPUs returned in gpu_index_list, at most
+ *  ::RDC_MAX_NUM_DEVICES.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */

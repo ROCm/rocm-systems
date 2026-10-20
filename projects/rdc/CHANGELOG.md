@@ -62,6 +62,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - GPU indexes no longer shift when AMD SMI fails to identify a GPU, unless AMD SMI also lists CPUs and no identified GPU shares that GPU's socket. That GPU keeps its index and is reported as unavailable until AMD SMI identifies it: `rdci discovery` lists it as `unavailable`, `rdci link` shows no links for it, `rdci topo` shows no link to it, and its fields read N/A instead of another GPU's values.
 
+- `rdcd` no longer crashes when the watches due in one update read more than 8,192 GPU-field pairs from AMD SMI, for example two `rdci dmon` sessions of 128 fields on 64 GPUs each.
+
+- `rdcd` no longer crashes listing more than 128 (`RDC_MAX_NUM_DEVICES`) GPUs and GPU partitions; `rdc_device_get_all()` lists the first 128.
+
 ## RDC 1.3.1 for ROCm 7.14.0
 
 ### Added
