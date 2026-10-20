@@ -609,6 +609,8 @@ namespace hip {
     const std::vector<amd::Device*>& devices() const { return context_->devices(); }
     unsigned int getFlags() const { return flags_; }
     void setFlags(unsigned int flags) { flags_ = flags; }
+    hipFuncCache_t getCacheConfig() const { return cacheConfig_; }
+    void setCacheConfig(hipFuncCache_t config) { cacheConfig_ = config; }
 
     // --- Peer access ---
 
@@ -702,6 +704,7 @@ namespace hip {
     int deviceId_;                             //!< Cached device ID (avoids linear scan)
     Stream* null_stream_ = nullptr;            //!< Default (null/legacy) stream
     unsigned int flags_;                       //!< Device flags (e.g. hipDeviceScheduleSpin)
+    hipFuncCache_t cacheConfig_ = hipFuncCachePreferNone;  //!< hipDeviceSetCacheConfig value
     std::vector<int> userEnabledPeers_;        //!< Peer device IDs enabled via hipEnablePeerAccess
     std::atomic<bool> isActive_{false};        //!< True once any work has been submitted
 
