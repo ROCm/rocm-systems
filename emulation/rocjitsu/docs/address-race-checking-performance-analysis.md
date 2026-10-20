@@ -8,6 +8,11 @@ optimization order that preserves findings and retained coverage.
 For checker semantics and correctness limits, see
 [Address race diagnostics](memory-wait-diagnostics.md#address-race-diagnostics)
 and [Address race checking gaps](address-race-checking-gaps.md).
+For condensed review artifacts, see
+[Address-race checks: the 2% decision](address-race-overhead.md) and
+[Core race families versus the legacy plugin](synthetic-race-performance-comparison.md).
+The synthetic and source-family programs are preserved in the
+[address-race performance workload package](../tests/memory-diagnostics/performance/README.md).
 
 ## Conclusions
 
