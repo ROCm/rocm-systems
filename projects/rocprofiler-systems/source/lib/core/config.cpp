@@ -3718,25 +3718,34 @@ get_first_mpi_env_uint(const std::vector<std::string>& env_var_options,
     return std::nullopt;
 }
 
-[[nodiscard]] std::optional<std::uint64_t>
+#endif
+}  // namespace
+
+std::optional<std::uint64_t>
 get_mpi_rank_from_env()
 {
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
     // global rank env-vars: user-provided, then runtime-specific
     return get_first_mpi_env_uint({ get_rank_filter_id(), "MPI_RANKID", "PMI_RANK",
                                     "MV2_COMM_WORLD_RANK", "OMPI_COMM_WORLD_RANK",
                                     "SLURM_PROCID" },
                                   "MPI rank");
+#else
+    return std::nullopt;
+#endif
 }
 
-[[nodiscard]] std::optional<std::uint64_t>
+std::optional<std::uint64_t>
 get_mpi_world_size_from_env()
 {
+#if ROCPROFSYS_MPI_OR_MPI_HEADERS_ENABLED
     return get_first_mpi_env_uint({ "OMPI_COMM_WORLD_SIZE", "MV2_COMM_WORLD_SIZE",
                                     "PMI_SIZE", "SLURM_NTASKS", "SLURM_NPROCS" },
                                   "MPI world size");
-}
+#else
+    return std::nullopt;
 #endif
-}  // namespace
+}
 
 namespace output_filtering
 {
