@@ -404,12 +404,18 @@ public:
 
 private:
   friend class GpuVmAccess;
-  static constexpr std::size_t kSnapshotCount = 64;
+  static constexpr std::size_t kSnapshotCount = 128;
   using Snapshots = std::array<VmMtypeSnapshot, kSnapshotCount>;
+  // Interleaved lanes revisit short page runs in widely separated rows.
+  // Offset each 128-page block by eight slots to separate those runs without
+  // mirroring adjacent pages at block boundaries; adding page >> 10 spreads
+  // 4 MiB strides. Runs of up to 119 pages are conflict-free, but pages about
+  // 120 apart can alias. Range and mutation-token checks validate every hit.
+  [[nodiscard]] static std::size_t snapshot_index(uint64_t address) {
+    const uint64_t page = address >> 12;
+    return (page + ((page >> 7) << 3) + (page >> 10)) % kSnapshotCount;
+  }
   std::weak_ptr<GpuVmAccessState> access_state_;
-  // Interleaved lanes can revisit several pages in one request.
-  // Hashing by 4 KiB page avoids discarding their copied policy on every lane;
-  // each snapshot still validates its translator-provided range and epoch.
   std::unique_ptr<Snapshots> snapshots_;
 };
 

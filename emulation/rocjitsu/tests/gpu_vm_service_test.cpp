@@ -1475,6 +1475,117 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
   EXPECT_EQ(policy->epoch.use_count(), 2);
 }
 
+TEST(GpuVmService, PolicyCacheReusesStridedPagesAndRevalidatesPrivateHints) {
+  constexpr uint64_t kRowStride = 256 * 1024;
+  class StridedPagePolicy final : public AddressSpaceTranslator {
+  public:
+    VmTranslationResult translate(uint64_t, std::size_t, VmAccessKind) const override { return {}; }
+
+    VmMtypeSnapshot snapshot_mtype(uint64_t address) const override {
+      ++queries;
+      const uint64_t captured_epoch = epoch->load();
+      const bool private_uc = (address / kRowStride + captured_epoch) % 2 == 0;
+      return {.mtype = private_uc ? Mtype::UC : Mtype::RW,
+              .may_batch_private_uc = private_uc,
+              .may_batch_private_ram = private_uc,
+              .begin = address & ~uint64_t{4095},
+              .size = 4096,
+              .mutation_epoch = epoch,
+              .captured_epoch = captured_epoch};
+    }
+
+    std::shared_ptr<std::atomic<uint64_t>> epoch = std::make_shared<std::atomic<uint64_t>>(0);
+    mutable uint32_t queries = 0;
+  };
+
+  GpuVm vm;
+  auto policy = std::make_shared<StridedPagePolicy>();
+  auto backing = std::make_shared<ByteAddressSpace>(0);
+  const auto handle = vm.register_translated(77, policy, backing);
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  VmMtypeCache cache;
+
+  // Interleaved rows separated by 256 KiB collided in the original page-indexed
+  // table. Keep their different policies and hints resident across revisits.
+  for (uint32_t repeat = 0; repeat < 3; ++repeat) {
+    for (uint64_t row = 0; row < 8; ++row) {
+      const uint64_t address = 0x100000000 + row * kRowStride;
+      const bool private_uc = row % 2 == 0;
+      EXPECT_EQ(access->query_mtype(address, cache), private_uc ? Mtype::UC : Mtype::RW);
+      EXPECT_EQ(access->cached_private_uc_hint(address + 128, cache), private_uc);
+      EXPECT_EQ(access->cached_private_ram_mtype(address + 128, cache),
+                private_uc ? std::optional{Mtype::UC} : std::nullopt);
+    }
+  }
+  EXPECT_EQ(policy->queries, 8u);
+
+  // Cached hints must reject stale policy before a fresh lookup replaces it.
+  policy->epoch->fetch_add(1);
+  for (uint64_t row = 0; row < 8; ++row) {
+    const uint64_t address = 0x100000000 + row * kRowStride;
+    EXPECT_FALSE(access->cached_private_uc_hint(address, cache));
+    EXPECT_FALSE(access->cached_private_ram_mtype(address, cache));
+    const bool private_uc = row % 2 != 0;
+    EXPECT_EQ(access->query_mtype(address, cache), private_uc ? Mtype::UC : Mtype::RW);
+    EXPECT_EQ(access->cached_private_uc_hint(address, cache), private_uc);
+    EXPECT_EQ(access->cached_private_ram_mtype(address, cache),
+              private_uc ? std::optional{Mtype::UC} : std::nullopt);
+  }
+  EXPECT_EQ(policy->queries, 16u);
+}
+
+TEST(GpuVmService, PolicyCacheReusesContiguousAndTiledPages) {
+  class PagePolicy final : public AddressSpaceTranslator {
+  public:
+    VmTranslationResult translate(uint64_t, std::size_t, VmAccessKind) const override { return {}; }
+
+    VmMtypeSnapshot snapshot_mtype(uint64_t address) const override {
+      ++queries;
+      return {.mtype = Mtype::RW,
+              .begin = address & ~uint64_t{4095},
+              .size = 4096,
+              .mutation_epoch = epoch,
+              .captured_epoch = epoch->load()};
+    }
+
+    std::shared_ptr<std::atomic<uint64_t>> epoch = std::make_shared<std::atomic<uint64_t>>(0);
+    mutable uint32_t queries = 0;
+  };
+
+  GpuVm vm;
+  auto policy = std::make_shared<PagePolicy>();
+  const auto handle = vm.register_translated(77, policy, std::make_shared<ByteAddressSpace>(0));
+  auto access = vm.snapshot(handle);
+  ASSERT_TRUE(access);
+  VmMtypeCache cache;
+  auto check_reuse = [&](uint64_t base, uint64_t rows, uint64_t columns, uint64_t stride) {
+    SCOPED_TRACE(base);
+    SCOPED_TRACE(rows);
+    SCOPED_TRACE(columns);
+    SCOPED_TRACE(stride);
+    cache.clear();
+    policy->queries = 0;
+    for (uint32_t repeat = 0; repeat < 3; ++repeat)
+      for (uint64_t row = 0; row < rows; ++row)
+        for (uint64_t column = 0; column < columns; ++column)
+          EXPECT_EQ(access->query_mtype(base + row * stride + column * 4096, cache), Mtype::RW);
+    EXPECT_EQ(policy->queries, rows * columns);
+  };
+
+  // Preserve contiguous locality across allocation and index-block boundaries.
+  constexpr uint64_t kRegionBase = 0x100000000;
+  for (uint64_t offset : {512 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 64 * 1024 * 1024})
+    check_reuse(kRegionBase + offset - 32 * 4096, 1, 64, 0);
+
+  // Tiled rows must spread without limiting a larger row set to the same slots.
+  // The 4 MiB pitch also requires indexing bits beyond the initial block offset.
+  constexpr uint64_t kRowStride = 256 * 1024;
+  check_reuse(kRegionBase, 8, 8, kRowStride);
+  check_reuse(kRegionBase, 32, 1, kRowStride);
+  check_reuse(kRegionBase, 8, 1, 4 * 1024 * 1024);
+}
+
 TEST(GpuVmService, GenerationsShareFaultReporterWithoutCopyingItsTarget) {
   class Reporter {
   public:
