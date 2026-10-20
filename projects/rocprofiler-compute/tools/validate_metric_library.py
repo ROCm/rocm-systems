@@ -209,7 +209,8 @@ DISPLAY_VARIANTS["gfx950"] = {
     "4.1.12": _ROOFLINE_L2_BW_128B,
     "4.1.14": _ROOFLINE_LDS_BW,
     "11.2.9": _PIPELINE_MFMA_UTIL,
-    # Panel 3000 shows each latency as SUM/SUM and as AVG/AVG over the same rows.
+    # Panel 3000 shows each latency as SUM/SUM and as AVG/AVG over the same rows: the
+    # counters are summed across CUs (channels), so both give the same value.
     "30.2.6": (
         "L1 latency",
         "vl1d.average_lat",
@@ -224,6 +225,46 @@ DISPLAY_VARIANTS["gfx950"] = {
         "L2 write latency",
         "vl1d.l2_wr_average_lat",
         "AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)",
+    ),
+    "30.2.14": (
+        "UTCL1 latency",
+        "vl1d.utcl1_average_lat",
+        "AVG(TCP_CLIENT_UTCL1_INFLIGHT_sum) / AVG(TCP_UTCL1_REQUEST_sum)",
+    ),
+    "30.2.16": (
+        "UTCL1 to UTCL2 latency",
+        "vl1d.utcl1_to_utcl2_average_lat",
+        "AVG(TCP_UTCL1_UTCL2_INFLIGHT_sum) / AVG(TCP_UTCL1_TRANSLATION_MISS_sum)",
+    ),
+    "30.8.4": (
+        "L2 to EA read latency",
+        "fabric.rd_lat",
+        "AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)",
+    ),
+    "30.8.6": (
+        "L2 to EA write latency",
+        "fabric.wr_lat",
+        "AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)",
+    ),
+    "30.8.8": (
+        "L2 to EA atomic latency",
+        "fabric.atomic_lat",
+        "AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)",
+    ),
+    "30.14.11": (
+        "EA read latency",
+        "fabric.rd_lat",
+        "AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)",
+    ),
+    "30.14.13": (
+        "EA write latency",
+        "fabric.wr_lat",
+        "AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)",
+    ),
+    "30.14.15": (
+        "EA atomic latency",
+        "fabric.atomic_lat",
+        "AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)",
     ),
     "30.7.1": (
         "L2 utilization",
@@ -264,6 +305,12 @@ UNIT_VARIANTS["gfx950"] = {
     "30.14.10": ("EA read average latency", "Cycles per Request"),
     "30.14.12": ("EA write average latency", "Cycles per Request"),
     "30.14.14": ("EA atomic average latency", "Cycles per Request"),
+    "30.8.4": ("L2 to EA read latency", "Cycles per Request"),
+    "30.8.6": ("L2 to EA write latency", "Cycles per Request"),
+    "30.8.8": ("L2 to EA atomic latency", "Cycles per Request"),
+    "30.14.11": ("EA read latency", "Cycles per Request"),
+    "30.14.13": ("EA write latency", "Cycles per Request"),
+    "30.14.15": ("EA atomic latency", "Cycles per Request"),
 }
 
 

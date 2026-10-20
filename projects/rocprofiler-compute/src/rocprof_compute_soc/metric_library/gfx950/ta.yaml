@@ -39,24 +39,21 @@ ta.l1_cache_ta_addr_stalled_by_tcp:
   unit: Percent
   description: >-
     Measures cycles the TA address path is stalled by TCP (L1 cache). A high rate
-    indicates TCP backpressure. Equation: SUM((TA_ADDR_STALLED_BY_TC_CYCLES_sum *
-    100)) / SUM(TA_TA_BUSY_sum)
+    indicates TCP backpressure.
 ta.l1_cache_ta_addr_stalled_by_td:
   name: L1 Cache - TA addr stalled by TD
   formula: 100 * SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum) / SUM(TA_TA_BUSY_sum)
   unit: Percent
   description: >-
     Measures cycles the TA address path is stalled by TD (texture data). A high rate
-    indicates TD return path congestion. Equation: SUM((TA_ADDR_STALLED_BY_TD_CYCLES_sum
-    * 100)) / SUM(TA_TA_BUSY_sum)
+    indicates TD return path congestion.
 ta.l1_cache_ta_addresser_stalled:
   name: L1 Cache - TA addresser stalled
   formula: 100 * SUM(TA_ADDRESSER_STALLED_CYCLES_sum) / SUM(TA_TA_BUSY_sum)
   unit: Percent
   description: >-
     Measures total cycles the TA addresser is stalled. High values indicate address
-    generation bottlenecks. Equation: SUM((TA_ADDRESSER_STALLED_CYCLES_sum * 100))
-    / SUM(TA_TA_BUSY_sum)
+    generation bottlenecks.
 ta.l1_cache_ta_coalesce_rate:
   name: L1 Cache - TA coalesce rate
   formula: 100 * 4 * SUM(TA_BUFFER_WAVEFRONTS_sum) / SUM(TA_BUFFER_TOTAL_CYCLES_sum)
@@ -65,16 +62,14 @@ ta.l1_cache_ta_coalesce_rate:
     Measures the TA's capability in coalescing Buffer or Flat addresses. TA can pass
     4 unique addresses per cycle. The optimal rate is 100% (4 cycles per wavefront),
     the worst case rate is 25% (16 cycles per wavefront). A low rate (<= 50%) indicates
-    poor address locality. Equation: SUM(((4 * TA_BUFFER_WAVEFRONTS_sum) * 100)) /
-    SUM(TA_BUFFER_TOTAL_CYCLES_sum)
+    poor address locality.
 ta.l1_cache_ta_data_stalled_by_tcp:
   name: L1 Cache - TA data stalled by TCP
   formula: 100 * SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum) / SUM(TA_TA_BUSY_sum)
   unit: Percent
   description: >-
     Measures cycles the TA data path is stalled by TCP (L1 cache). A high rate indicates
-    TCP write data backpressure. Equation: SUM((TA_DATA_STALLED_BY_TC_CYCLES_sum *
-    100)) / SUM(TA_TA_BUSY_sum)
+    TCP write data backpressure.
 ta.normalized_l1_cache_ta_addr_stalled_by_tcp:
   name: Normalized L1 Cache - TA addr stalled by TCP
   formula: 100 * SUM(TA_ADDR_STALLED_BY_TC_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
@@ -82,8 +77,7 @@ ta.normalized_l1_cache_ta_addr_stalled_by_tcp:
   description: >-
     Percentage of GPU active time that TA could not send addresses to TCP (L1 Cache)
     because TCP was not ready. Averaged across all CUs. High values indicate L1 cache
-    congestion backing up into the address path. Equation: ((SUM(TA_ADDR_STALLED_BY_TC_CYCLES_sum)
-    / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
+    congestion backing up into the address path.
 ta.normalized_l1_cache_ta_addr_stalled_by_td:
   name: Normalized L1 Cache - TA addr stalled by TD
   formula: 100 * SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
@@ -91,8 +85,7 @@ ta.normalized_l1_cache_ta_addr_stalled_by_td:
   description: >-
     Percentage of GPU active time that TA could not process new addresses because
     the TD (texture data) return path was backed up. Averaged across all CUs. High
-    values indicate congestion in the data return path. Equation: ((SUM(TA_ADDR_STALLED_BY_TD_CYCLES_sum)
-    / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
+    values indicate congestion in the data return path.
 ta.normalized_l1_cache_ta_addresser_stalled:
   name: Normalized L1 Cache - TA addresser stalled
   formula: 100 * SUM(TA_ADDRESSER_STALLED_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
@@ -100,8 +93,7 @@ ta.normalized_l1_cache_ta_addresser_stalled:
   description: >-
     Percentage of GPU active time that TA's address generation logic was stalled for
     any reason. Averaged across all CUs. High values indicate address computation
-    bottlenecks in the L1 front-end. Equation: ((SUM(TA_ADDRESSER_STALLED_CYCLES_sum)
-    / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
+    bottlenecks in the L1 front-end.
 ta.normalized_l1_cache_ta_data_stalled_by_tcp:
   name: Normalized L1 Cache - TA data stalled by TCP
   formula: 100 * SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
@@ -109,23 +101,20 @@ ta.normalized_l1_cache_ta_data_stalled_by_tcp:
   description: >-
     Percentage of GPU active time that TA could not send write or store data to TCP
     (L1 Cache) because TCP's data path was full. Averaged across all CUs. High values
-    indicate L1 cache write-side congestion. Equation: ((SUM(TA_DATA_STALLED_BY_TC_CYCLES_sum)
-    / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
+    indicate L1 cache write-side congestion.
 ta.normalized_ta_processing_rate:
   name: Normalized TA processing rate
   formula: SUM(TA_TOTAL_WAVEFRONTS_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
   unit: Instructions/s
   description: >-
     Wavefronts processed by TA per second of kernel execution. Normalized to wall-clock
-    time for absolute throughput measurement. Equation: SUM(TA_TOTAL_WAVEFRONTS_sum)
-    / (SUM((End_Timestamp - Start_Timestamp)) / 1000000000)
+    time for absolute throughput measurement.
 ta.processing_rate:
   name: TA processing rate
   formula: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM(TA_TA_BUSY_sum)
   unit: Instructions per Cycle
   description: >-
     The number of wavefronts TA processes per busy cycle. Measures TA throughput efficiency.
-    Equation: SUM(TA_TOTAL_WAVEFRONTS_sum) / SUM(TA_TA_BUSY_sum)
 ta.spill_coalescable_insts:
   name: Spill/Stack Coalesceable Instr
   formula: SUM(TA_BUFFER_COALESCEABLE_WAVEFRONTS_sum) / SUM($denom)
