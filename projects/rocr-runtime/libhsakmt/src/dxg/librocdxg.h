@@ -306,7 +306,8 @@ uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id);
 
 bool is_ipc_sysmemfd(uint64_t fd);
 
-HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, uint32_t NodeId, bool alloc_va, bool is_ipc_memfd,
+HSAKMT_STATUS import_dmabuf_fd(uint64_t DMABufFd, HSAuint64 NumberOfNodes, HSAuint32* NodeArray,
+                               bool alloc_va, bool is_ipc_memfd,
                                wsl::thunk::GpuMemoryHandle* GpuMemHandle, bool is_kmt_handle,
                                uint64_t size_hint = 0);
 
