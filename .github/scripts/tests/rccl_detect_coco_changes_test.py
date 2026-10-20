@@ -4,6 +4,8 @@
 """Tests for rccl_detect_coco_changes.py."""
 
 import os
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -12,6 +14,10 @@ from unittest import mock
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import rccl_detect_coco_changes as detect
+
+HOST_TEST_WORKFLOW = (
+    Path(__file__).resolve().parents[2] / "workflows" / "rccl-host-unit-tests.yml"
+)
 
 
 class CocoPathsTest(unittest.TestCase):
@@ -69,6 +75,48 @@ class CocoPathsTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertEqual(detect.coco_paths([path]), [])
 
+    def test_host_only_test_paths_are_excluded_on_develop(self):
+        for path in [
+            "projects/rccl/test/host/CMakeLists.txt",
+            "projects/rccl/test/host/run_host_tests.sh",
+            "projects/rccl/test/host/fakes/os_fakes.cc",
+            "projects/rccl/test/host/transport/rma-socket-test.cc",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(detect.coco_paths([path], "develop"), [])
+
+    def test_host_only_test_paths_match_off_develop(self):
+        # rccl-host-unit-tests.yml does not run there, so coco is the only check.
+        path = "projects/rccl/test/host/net-test.cc"
+        for branch in ["", "main", "rccl-develop", "rocprofiler-compute-develop"]:
+            with self.subTest(branch=branch):
+                self.assertEqual(detect.coco_paths([path], branch), [path])
+
+    def test_host_test_lookalikes_still_match(self):
+        for path in [
+            "projects/rccl/test",
+            "projects/rccl/test/host",
+            "projects/rccl/test/CMakeLists.txt",
+            "projects/rccl/test/common/TestBed.cpp",
+            "projects/rccl/test/hostile.cc",
+            "projects/rccl/test/hostfoo/x.cc",
+            "projects/rccl/src/test/host/x.cc",
+            "projects/rccl-tests/test/host/x.cc",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(detect.coco_paths([path], "develop"), [path])
+
+    def test_coco_paths_alongside_host_tests_still_match(self):
+        host = "projects/rccl/test/host/net-test.cc"
+        for path in [
+            "projects/rccl/src/init.cc",
+            "projects/rccl/test/CMakeLists.txt",
+            "projects/rccl-tests/src/all_reduce.cu",
+            ".github/workflows/rccl-coco-pr.yml",
+        ]:
+            with self.subTest(path=path):
+                self.assertEqual(detect.coco_paths([host, path], "develop"), [path])
+
     def test_code_alongside_docs_still_matches(self):
         self.assertEqual(
             detect.coco_paths(["projects/rccl/README.md", "projects/rccl/src/init.cc"]),
@@ -95,7 +143,7 @@ class TouchesCocoTest(unittest.TestCase):
 class MainTest(unittest.TestCase):
     """The GITHUB_OUTPUT string is what the workflow actually consumes."""
 
-    def _run_main(self, changed_files):
+    def _run_main(self, changed_files, *extra_args):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "github_output"
             output.touch()
@@ -104,8 +152,8 @@ class MainTest(unittest.TestCase):
             ) as diff, mock.patch.dict(
                 os.environ, {"GITHUB_OUTPUT": os.fspath(output)}
             ):
-                self.assertEqual(detect.main(["--base-ref", "HEAD^"]), 0)
-            diff.assert_called_once_with("HEAD^")
+                self.assertEqual(detect.main(["--base-ref", "HEAD^", *extra_args]), 0)
+            diff.assert_called_once_with("HEAD^", no_renames=True)
             return output.read_text()
 
     def test_emits_false_for_an_untouched_pr(self):
@@ -113,6 +161,91 @@ class MainTest(unittest.TestCase):
 
     def test_emits_true_for_a_touched_pr(self):
         self.assertEqual(self._run_main(["projects/rccl/src/init.cc"]), "rccl=true\n")
+
+    def test_emits_false_for_a_host_test_only_pr_to_develop(self):
+        changed = [
+            "projects/rccl/test/host/net-test.cc",
+            "projects/rccl/test/host/fakes/os_fakes.cc",
+        ]
+        self.assertEqual(
+            self._run_main(changed, "--base-branch", "develop"), "rccl=false\n"
+        )
+
+    def test_emits_true_for_a_host_test_only_pr_elsewhere(self):
+        changed = ["projects/rccl/test/host/net-test.cc"]
+        self.assertEqual(self._run_main(changed), "rccl=true\n")
+        self.assertEqual(
+            self._run_main(changed, "--base-branch", "main"), "rccl=true\n"
+        )
+
+    def test_emits_true_for_host_tests_plus_rccl_code(self):
+        changed = ["projects/rccl/test/host/net-test.cc", "projects/rccl/src/net.cc"]
+        self.assertEqual(
+            self._run_main(changed, "--base-branch", "develop"), "rccl=true\n"
+        )
+
+
+class GetModifiedPathsTest(unittest.TestCase):
+    """A move into test/host must still report the coco path it left."""
+
+    def test_no_renames_reports_both_sides_of_a_move(self):
+        with tempfile.TemporaryDirectory() as tmp:
+
+            # Isolate from the caller's git config, hooks and repo.
+            env = {
+                k: v
+                for k, v in os.environ.items()
+                if k not in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE")
+            }
+            env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+
+            def git(*args):
+                subprocess.run(
+                    ["git", "-C", tmp, *args],
+                    check=True,
+                    capture_output=True,
+                    env=env,
+                )
+
+            src = "projects/rccl/src/x.cc"
+            dst = "projects/rccl/test/host/x.cc"
+            git("init", "-q")
+            git("config", "user.email", "t@example.com")
+            git("config", "user.name", "t")
+            (Path(tmp) / src).parent.mkdir(parents=True)
+            (Path(tmp) / src).write_text("int x;\n" * 20)
+            git("add", ".")
+            git("commit", "-qm", "base")
+            (Path(tmp) / dst).parent.mkdir(parents=True)
+            git("mv", src, dst)
+            git("commit", "-qm", "move")
+
+            cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with mock.patch.dict(os.environ, env, clear=True):
+                    both = detect.get_modified_paths("HEAD^", no_renames=True)
+            finally:
+                os.chdir(cwd)
+
+        self.assertEqual(both, {src, dst})
+        self.assertTrue(detect.touches_coco(both, "develop"))
+
+
+class HostTestWorkflowTest(unittest.TestCase):
+    """Skipping coco is only safe where rccl-host-unit-tests.yml runs instead."""
+
+    def test_branches_match_host_test_workflow(self):
+        text = HOST_TEST_WORKFLOW.read_text(encoding="utf-8")
+        block = re.search(r"^\s*branches:\s*\n((?:\s*-\s*\S+\n)+)", text, re.M)
+        self.assertIsNotNone(block, f"no branches list in {HOST_TEST_WORKFLOW}")
+        branches = set(re.findall(r"-\s*'?([^'\s]+)'?", block.group(1)))
+        self.assertEqual(branches, set(detect.HOST_TEST_BRANCHES))
+
+    def test_host_test_workflow_covers_all_of_rccl(self):
+        text = HOST_TEST_WORKFLOW.read_text(encoding="utf-8")
+        self.assertIn("- 'projects/rccl/**'", text)
+        self.assertNotIn("paths-ignore", text)
 
 
 if __name__ == "__main__":
