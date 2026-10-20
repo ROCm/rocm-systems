@@ -72,10 +72,13 @@ The last line of every file is a summary, written on every clean finalize:
              "dropped_proxy_ops": 0, "dropped_proxy_steps": 0,
              "overflow_proxy_ops": 0, "stale_proxy_steps": 0,
              "outstanding_proxy_ops": 0, "outstanding_proxy_steps": 0,
-             "write_error": false, "coll_pool_size": 256,
-             "proxy_op_pool_size": 1024, "proxy_step_pool_size": 4096,
+             "write_error": false, "coll_pool_size": 4096,
+             "proxy_op_pool_size": 65536, "proxy_step_pool_size": 65536,
              "max_proxy_ops_per_coll": 256, "complete": true}}
 ```
+
+The `*_pool_size` fields are capacities. Each pool starts small and grows on
+demand up to that size, so deep enqueue queues do not drop data.
 
 - `dropped_collectives` — never got a pool slot because the pool was full.
 - `leaked_collectives` — got a slot but never completed, because RCCL's teardown

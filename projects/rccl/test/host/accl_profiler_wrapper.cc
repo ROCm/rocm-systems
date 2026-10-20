@@ -28,21 +28,27 @@ extern "C" {
   // Coll pool slot of a coll handle, or -1 if the handle is not in the pool.
   int test_acclCollSlot(void* ctxv, void* collv) {
     struct acclCommContext* ctx = (struct acclCommContext*)ctxv;
-    int idx = (int)((struct acclCollInfo*)collv - ctx->collPool);
-    return (idx >= 0 && idx < ACCL_COLL_POOL_SIZE) ? idx : -1;
+    pthread_mutex_lock(&ctx->collPool.mutex);
+    int idx = acclPoolIndex(&ctx->collPool, collv);
+    pthread_mutex_unlock(&ctx->collPool.mutex);
+    return idx;
   }
   // Proxy-op pool slot of an op handle, or -1 if the handle is not in the pool.
   int test_acclProxyOpSlot(void* ctxv, void* opv) {
     struct acclCommContext* ctx = (struct acclCommContext*)ctxv;
-    int idx = (int)((struct acclProxyOpInfo*)opv - ctx->proxyOpPool);
-    return (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE) ? idx : -1;
+    pthread_mutex_lock(&ctx->proxyOpPool.mutex);
+    int idx = acclPoolIndex(&ctx->proxyOpPool, opv);
+    pthread_mutex_unlock(&ctx->proxyOpPool.mutex);
+    return idx;
   }
   // glibc marks a destroyed mutex with __kind == -1. That is the only way to see
   // "this mutex has been destroyed" without locking it, which would be UB.
   int test_acclProxyOpMutexDestroyed(void* ctxv, int slot) {
     struct acclCommContext* ctx = (struct acclCommContext*)ctxv;
-    if (slot < 0 || slot >= ACCL_PROXY_OP_POOL_SIZE) return -1;
-    return ctx->proxyOpPool[slot].mutex.__data.__kind == -1 ? 1 : 0;
+    if (slot < 0 || slot >= acclPoolSlots(&ctx->proxyOpPool)) return -1;
+    struct acclProxyOpInfo* op =
+        (struct acclProxyOpInfo*)acclPoolSlot(&ctx->proxyOpPool, slot);
+    return op->mutex.__data.__kind == -1 ? 1 : 0;
   }
   // Descriptor behind the output FILE*, so a test can break writes on it.
   int test_acclOutputFd(void* ctxv) {
@@ -52,8 +58,17 @@ extern "C" {
   // Current tenancy of a proxy-op slot; a step pins this at start.
   unsigned long test_acclProxyOpGeneration(void* ctxv, int slot) {
     struct acclCommContext* ctx = (struct acclCommContext*)ctxv;
-    if (slot < 0 || slot >= ACCL_PROXY_OP_POOL_SIZE) return 0;
-    return (unsigned long)ctx->proxyOpPool[slot].generation;
+    if (slot < 0 || slot >= acclPoolSlots(&ctx->proxyOpPool)) return 0;
+    return (unsigned long)((struct acclProxyOpInfo*)acclPoolSlot(&ctx->proxyOpPool, slot))
+        ->generation;
+  }
+  // Proxy-op slots allocated so far: grows by one chunk each time the pool runs out.
+  int test_acclProxyOpPoolSlots(void* ctxv) {
+    struct acclCommContext* ctx = (struct acclCommContext*)ctxv;
+    pthread_mutex_lock(&ctx->proxyOpPool.mutex);
+    int n = acclPoolSlots(&ctx->proxyOpPool);
+    pthread_mutex_unlock(&ctx->proxyOpPool.mutex);
+    return n;
   }
   void test_acclWriteDummyRecord(void* ctx) {
     struct acclCompletedRecord rec;

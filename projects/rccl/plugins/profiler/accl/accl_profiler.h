@@ -58,6 +58,7 @@ struct acclProxyOpInfo {
   uint64_t type;
   void*    parentObj;    // points to acclCollInfo (the coll event handle)
   void*    commCtx;      // owning acclCommContext (for pool free)
+  int      poolIdx;      // this slot's index in ctx->proxyOpPool
   uint8_t  channelId;
   int      peer;
   int      nSteps;
@@ -179,10 +180,34 @@ struct acclCompletedRecord {
   int hasGpuTiming;
 };
 
-// Pool sizes (per communicator)
-#define ACCL_COLL_POOL_SIZE 256
-#define ACCL_PROXY_OP_POOL_SIZE 1024
-#define ACCL_PROXY_STEP_POOL_SIZE 4096
+// Pool capacities (per communicator). Each pool starts with one chunk and adds
+// another when it runs out, up to the capacity. RCCL can queue hundreds of
+// collectives ahead of the GPU and every queued one already holds its proxy
+// ops, so a fixed pool sized for the common case drops the deep-queue ones.
+#define ACCL_COLL_POOL_CHUNK 256
+#define ACCL_COLL_POOL_SIZE (ACCL_COLL_POOL_CHUNK * 16)
+#define ACCL_PROXY_OP_POOL_CHUNK 1024
+#define ACCL_PROXY_OP_POOL_SIZE (ACCL_PROXY_OP_POOL_CHUNK * 64)
+#define ACCL_PROXY_STEP_POOL_CHUNK 4096
+#define ACCL_PROXY_STEP_POOL_SIZE (ACCL_PROXY_STEP_POOL_CHUNK * 16)
+#define ACCL_POOL_MAX_CHUNKS 64
+
+// Slots are addressed by index: chunk * chunkSlots + offset. Chunks never move
+// or shrink, so a slot pointer handed to RCCL stays valid for the context's
+// life. Free slots form a LIFO list through next[], so alloc and free stay O(1)
+// however far the pool has grown. Every field is guarded by mutex.
+struct acclPool {
+  pthread_mutex_t mutex;
+  size_t   elemSize;
+  int      chunkSlots;
+  int      maxChunks;
+  long     slotMutexOff;   // offset of each slot's pthread_mutex_t, or -1
+  int      nChunks;
+  int      freeHead;       // -1 when every slot of every chunk is in use
+  char*    chunks[ACCL_POOL_MAX_CHUNKS];
+  int*     used[ACCL_POOL_MAX_CHUNKS];
+  int*     next[ACCL_POOL_MAX_CHUNKS];
+};
 
 // Per-communicator context (owns all pools)
 struct acclCommContext {
@@ -221,17 +246,9 @@ struct acclCommContext {
   pthread_mutex_t outputMutex;
 
   // Per-comm pools
-  struct acclCollInfo      collPool[ACCL_COLL_POOL_SIZE];
-  int                      collPoolUsed[ACCL_COLL_POOL_SIZE];
-  pthread_mutex_t          collPoolMutex;
-
-  struct acclProxyOpInfo   proxyOpPool[ACCL_PROXY_OP_POOL_SIZE];
-  int                      proxyOpPoolUsed[ACCL_PROXY_OP_POOL_SIZE];
-  pthread_mutex_t          proxyOpPoolMutex;
-
-  struct acclProxyStepInfo proxyStepPool[ACCL_PROXY_STEP_POOL_SIZE];
-  int                      proxyStepPoolUsed[ACCL_PROXY_STEP_POOL_SIZE];
-  pthread_mutex_t          proxyStepPoolMutex;
+  struct acclPool collPool;       // struct acclCollInfo
+  struct acclPool proxyOpPool;    // struct acclProxyOpInfo
+  struct acclPool proxyStepPool;  // struct acclProxyStepInfo
 };
 
 #endif
