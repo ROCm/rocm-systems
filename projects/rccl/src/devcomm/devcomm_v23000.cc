@@ -93,7 +93,8 @@ static_assert(offsetof(struct ncclDevComm_v23000, worldGinBarrier) == 232);
 static_assert(sizeof(struct ncclDevComm_v23000) == 240);
 
 static ncclResult_t ncclDevCommRequirementsFilter_v23000(ncclComm_t comm, ncclDevCommRequirements_t* reqs) {
-  reqs->ginType = comm->sharedRes->ginState.backends[0].ginType;
+  struct ncclGinState* ginState = &comm->sharedRes->ginState;
+  reqs->ginType = ginState->finalized ? NCCL_GIN_TYPE_NONE : ginState->backends[0].ginType;
   return ncclSuccess;
 }
 

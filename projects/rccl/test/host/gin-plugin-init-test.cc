@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 
 #include "nccl.h"
 #include "comm.h"
@@ -198,6 +199,101 @@ TEST_F(GinPluginInitTest, DoesNotFinalizeWhenInitPointerIsNull) {
   ASSERT_EQ(runInit(), ncclSuccess);
   EXPECT_EQ(pluginLib_.state, ncclGinPluginStateDisabled);
   EXPECT_EQ(fake_.initCalls, 0);
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+}
+
+// AICOMRCCL-2739: ncclGinFinalize is the only path that finalizes a plugin for
+// a connected comm, which is both the per-comm context delete and the refCount
+// decrement. ncclGinHostFinalize used to memset ginState before this ran, so
+// the loop below saw numActiveBackends == 0 and skipped both.
+//
+// The other half of the pairing -- ncclGinHostFinalize preserving these records
+// and marking backends closed -- lives in gin-host-finalize-test.cc
+// (rccl-UnitTestsMicroGinHost). gin_host.cc cannot join this binary because
+// dev_runtime_micro_fakes.cc already defines the GIN host entry points for
+// dev-runtime-test.cc. GinMPIDeviceTests.CommDestroy_FreesAnvilInitContext
+// covers the Anvil init-context path end to end.
+class GinFinalizeTest : public GinPluginInitTest {
+ protected:
+  std::unique_ptr<ncclSharedResources> sharedRes_ = std::make_unique<ncclSharedResources>();
+
+  void SetUp() override {
+    GinPluginInitTest::SetUp();
+    pluginLib_.state = ncclGinPluginStateEnabled;
+    pluginLibs[0] = pluginLib_;
+    pluginLibs[0].refCount = kInitialRefCount;
+    comm_.sharedRes = sharedRes_.get();
+  }
+
+  void TearDown() override {
+    std::memset(pluginLibs, 0, sizeof(pluginLibs));
+    GinPluginInitTest::TearDown();
+  }
+
+  // Stands in for a backend record left by ncclGinPluginAssignToComm.
+  void addActiveBackend(void* ginInstance) {
+    struct ncclGinState* ginState = &sharedRes_->ginState;
+    int idx = ginState->numActiveBackends++;
+    ginState->backends[idx].pluginIndex = 0;
+    ginState->backends[idx].ginInstance = ginInstance;
+    ginState->backends[idx].ncclGin = &gin_;
+  }
+
+  static constexpr int kInitialRefCount = 3;
+};
+
+TEST_F(GinFinalizeTest, ConnectedBackend_FinalizesContextAndDropsRefCount) {
+  void* ctx = std::malloc(8);
+  fake_.lastCtx = ctx;
+  addActiveBackend(ctx);
+
+  EXPECT_EQ(ncclGinFinalize(&comm_), ncclSuccess);
+  EXPECT_EQ(fake_.finalizeCalls, 1);
+  EXPECT_EQ(pluginLibs[0].refCount, kInitialRefCount - 1);
+  EXPECT_EQ(fake_.lastCtx, nullptr);  // Finalize() free()d the context it was handed
+}
+
+TEST_F(GinFinalizeTest, NeverConnected_NoBackendsIsANoOp) {
+  ASSERT_EQ(sharedRes_->ginState.numActiveBackends, 0);
+
+  EXPECT_EQ(ncclGinFinalize(&comm_), ncclSuccess);
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+  EXPECT_EQ(pluginLibs[0].refCount, kInitialRefCount);
+}
+
+// A new shared split after a sibling's host finalize must not re-arm supported
+// (that would let it reconnect through a ginInstance whose owning comm may be
+// freed), nor finalize the records early: ncclGinFinalize owns that.
+TEST_F(GinFinalizeTest, FinalizedBackends_SetDefaultBackendLeavesThemForGinFinalize) {
+  void* ctx = std::malloc(8);
+  fake_.lastCtx = ctx;
+  addActiveBackend(ctx);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+  ginState->finalized = true;
+  ginState->supported = false;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_PROXY)), ncclSuccess);
+  EXPECT_FALSE(ginState->supported);
+  EXPECT_EQ(ginState->numActiveBackends, 1);
+  EXPECT_EQ(fake_.finalizeCalls, 0);
+
+  EXPECT_EQ(ncclGinFinalize(&comm_), ncclSuccess);
+  EXPECT_EQ(fake_.finalizeCalls, 1);
+  EXPECT_EQ(pluginLibs[0].refCount, kInitialRefCount - 1);
+}
+
+// Control for the case above: a live backend in the global mask re-arms supported.
+TEST_F(GinFinalizeTest, LiveBackend_SetDefaultBackendArmsSupported) {
+  void* ctx = std::malloc(8);
+  fake_.lastCtx = ctx;
+  addActiveBackend(ctx);
+  struct ncclGinState* ginState = &sharedRes_->ginState;
+  ginState->backends[0].ginType = NCCL_GIN_TYPE_PROXY;
+
+  EXPECT_EQ(ncclGinSetDefaultBackend(&comm_, BIT(NCCL_GIN_TYPE_PROXY)), ncclSuccess);
+  EXPECT_TRUE(ginState->supported);
+  EXPECT_EQ(ginState->numActiveBackends, 1);
   EXPECT_EQ(fake_.finalizeCalls, 0);
 }
 

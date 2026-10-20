@@ -66,6 +66,15 @@ extern int g_initChannelLastId;
 // note a failing commFree bails before free(comm), so such a test must free it itself.
 extern std::vector<std::string> g_cleanupCallOrder;
 extern ncclResult_t g_ncclCeFinalizeResult;
+
+// src/init.cc commFree records these and returns the first GIN error after the
+// sharedRes frees. ncclRmaProxyFinalize still returns immediately.
+extern ncclResult_t g_ncclGinFinalizeResult;
+extern int g_ncclGinFinalizeCalls;
+extern ncclResult_t g_ncclGinHostFinalizeResult;
+extern int g_ncclGinHostFinalizeCalls;
+extern ncclResult_t g_ncclRmaProxyFinalizeResult;
+extern int g_ncclRmaProxyFinalizeCalls;
 // src/plugin/tuner.cc: the comm commCleanup forwarded to ncclTunerPluginUnload.
 extern struct ncclComm* g_ncclTunerPluginUnloadLastComm;
 
