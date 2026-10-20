@@ -760,15 +760,16 @@ TEST_F(ParamEnvFileMicrotest, SetEnvFile_KnownBug_TruncatesNamesAndValuesTo1023)
 class ParamEnvFileMicrotestIsolated : public ParamEnvFileMicrotest {};
 
 // initEnv() latches behind std::call_once, so each source order needs a fresh process.
-TEST_F(ParamEnvFileMicrotestIsolated, InitEnv_ReadsTheUserFileThenEtcOnce) {
+TEST_F(ParamEnvFileMicrotestIsolated, InitEnv_ReadsTheUserFileThenEtcThenRunOnce) {
   RUN_ISOLATED_TEST("Param_InitEnv_UserFile", [this]() {
     std::string user = WriteFile("U=1\n");
     g_fopenRedirect["/etc/rccl.conf"] = WriteFile("E=2\n");
+    g_fopenRedirect["/var/run/rccl.conf"] = WriteFile("R=3\n");
     setenv("NCCL_CONF_FILE", user.c_str(), 1);
     initEnv();
     initEnv();
-    EXPECT_EQ((std::vector<std::string>{user, "/etc/rccl.conf"}), g_opened);
-    EXPECT_EQ((Pairs{{"U", "1"}, {"E", "2"}}), g_setEnv);
+    EXPECT_EQ((std::vector<std::string>{user, "/etc/rccl.conf", "/var/run/rccl.conf"}), g_opened);
+    EXPECT_EQ((Pairs{{"U", "1"}, {"E", "2"}, {"R", "3"}}), g_setEnv);
     for (const auto& path : files_) std::remove(path.c_str());  // TearDown does not run in the child
   });
 }
@@ -776,20 +777,23 @@ TEST_F(ParamEnvFileMicrotestIsolated, InitEnv_ReadsTheUserFileThenEtcOnce) {
 TEST_F(ParamEnvFileMicrotestIsolated, InitEnv_EmptyConfFileFallsBackToHome) {
   RUN_ISOLATED_TEST("Param_InitEnv_Home", []() {
     g_fopenRedirect["/etc/rccl.conf"] = "/nonexistent/param_test.conf";
+    g_fopenRedirect["/var/run/rccl.conf"] = "/nonexistent/param_test.conf";
     setenv("NCCL_CONF_FILE", "", 1);
     setenv("HOME", "/param/test/home", 1);
     initEnv();
-    EXPECT_EQ((std::vector<std::string>{"/param/test/home/.rccl.conf", "/etc/rccl.conf"}), g_opened);
+    EXPECT_EQ((std::vector<std::string>{"/param/test/home/.rccl.conf", "/etc/rccl.conf", "/var/run/rccl.conf"}),
+              g_opened);
   });
 }
 
-TEST_F(ParamEnvFileMicrotestIsolated, InitEnv_WithoutConfFileOrHomeReadsOnlyEtc) {
+TEST_F(ParamEnvFileMicrotestIsolated, InitEnv_WithoutConfFileOrHomeReadsOnlySystemFiles) {
   RUN_ISOLATED_TEST("Param_InitEnv_EtcOnly", []() {
     g_fopenRedirect["/etc/rccl.conf"] = "/nonexistent/param_test.conf";
+    g_fopenRedirect["/var/run/rccl.conf"] = "/nonexistent/param_test.conf";
     unsetenv("NCCL_CONF_FILE");
     unsetenv("HOME");
     initEnv();
-    EXPECT_EQ((std::vector<std::string>{"/etc/rccl.conf"}), g_opened);
+    EXPECT_EQ((std::vector<std::string>{"/etc/rccl.conf", "/var/run/rccl.conf"}), g_opened);
   });
 }
 
