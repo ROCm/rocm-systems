@@ -354,8 +354,6 @@ TEST(RcclCeAllReduceEligibility, RcclUseCeAllReduce_Isolated)
         {"ZeroCountRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 0, ncclSum, ncclFloat32, false, baseEnv},
         {"UnsupportedOpRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclAvg, ncclFloat32, false, baseEnv},
         {"Float8Rejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat8e4m3, false, baseEnv},
-        {"MessageTooLargeRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO,
-         (kCeArMaxMsgBytesDefault / sizeof(float)) + 4, ncclSum, ncclFloat32, false, baseEnv},
         // One node, but the LSA team is narrower than the comm.
         {"SplitLsaTeamRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 4096, ncclSum, ncclFloat32, false, baseEnv, "", 2},
         {"SplitLsaTeamSixRanksRejected_Isolated", 6, 1, true, NCCL_CTA_POLICY_ZERO, 4098, ncclSum, ncclFloat32, false, baseEnv, "", 3},
@@ -480,6 +478,50 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingSel
                 EXPECT_EQ(res, ncclSuccess);
                 EXPECT_EQ(decision.algo, RCCL_CE_REGISTERED)
                     << "FORCE unregistered above staging still enqueues CE up to the 2-shot cap";
+            })
+            .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
+                              {"RCCL_FORCE_CE_ALLREDUCE", "1"},
+                              {"RCCL_DDA_ENABLE", "0"}})
+            .withTimeout(std::chrono::seconds(30))
+            .withNumGpus(0));
+
+    ProcessIsolatedTestRunner::ExecutionOptions options;
+    options.stopOnFirstFailure = false;
+    options.verboseLogging = true;
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
+}
+
+// The 2-shot cap is enforced by rcclSelectAllReduce. rcclUseCeAr2Shot has no size check.
+// query stays false so the ring fallback does not run getAlgoInfo on this mock.
+TEST(RcclCeAllReduceEligibility, SelectAllReduce_MessageTooLargeDeclinesCe_Isolated)
+{
+    if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
+
+    ProcessIsolatedTestRunner::registerTest(
+        ProcessIsolatedTestRunner::TestConfig(
+            "MessageTooLargeDeclinesCe_Isolated",
+            []()
+            {
+                CeAllReduceMockComm mock;
+                mock.comm.nRanks = 4;
+                mock.comm.devrState.lsaSize = mock.comm.nRanks;
+                mock.comm.nNodes = 1;
+                mock.comm.symmetricSupport = true;
+                mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+                mock.comm.ceColl.ceARTmpBuf = nullptr;
+
+                const size_t count =
+                    (kCeArMaxMsgBytesDefault / sizeof(float)) + static_cast<size_t>(mock.comm.nRanks);
+                ASSERT_EQ(count % static_cast<size_t>(mock.comm.nRanks), 0u);
+                ASSERT_GT(count * sizeof(float), kCeArMaxMsgBytesDefault);
+
+                rcclCollDecision decision{};
+                ncclResult_t res = rcclSelectAllReduce(
+                    mock.get(), reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x2000), count, ncclFloat32,
+                    ncclProd, /*stream=*/nullptr, /*query=*/false, /*graphCapturingHint=*/false, &decision);
+                EXPECT_EQ(res, ncclSuccess);
+                EXPECT_NE(decision.algo, RCCL_CE_REGISTERED);
+                EXPECT_NE(decision.algo, RCCL_CE_2SHOT);
             })
             .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
                               {"RCCL_FORCE_CE_ALLREDUCE", "1"},
