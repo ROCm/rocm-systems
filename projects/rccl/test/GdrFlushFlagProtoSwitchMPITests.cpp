@@ -15,8 +15,8 @@
 // Ops are enqueued back-to-back on one stream without synchronizing, so the
 // proxy and kernels of one protocol are still in flight when the next op starts
 // on the other protocol. Each test then checks data on every rank and walks the
-// NET recv connectors: every published descriptor must use the expected QP count
-// and already be satisfied by its flags.
+// NET recv connectors: every published descriptor must name QPs the connection
+// can use and already be satisfied by its flags.
 //
 // Run with >= 2 nodes. NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 selects LL128 (instead of
 // LL) for small P2P on gfx942/gfx950; run under both settings and under each
@@ -49,7 +49,16 @@ protected:
         return (v && *v) ? atoi(v) : def;
     }
     static int configuredQps() { return std::max(1, envInt("NCCL_IB_QPS_PER_CONNECTION", 1)); }
-    static int expectedFlagCount() { return envInt("NCCL_IB_SPLIT_DATA_ON_QPS", 0) ? configuredQps() : 1; }
+    // Whether `count` flags from `first` are what a connection with either the
+    // regular or the P2P (RCCL_IB_QPS_PER_P2P) QP count would use.
+    static bool validQpSet(int first, int count) {
+        const bool split = envInt("NCCL_IB_SPLIT_DATA_ON_QPS", 0) != 0;
+        for (int nqps : {configuredQps(), envInt("RCCL_IB_QPS_PER_P2P", 0)}) {
+            if (nqps <= 0) continue;
+            if (count == (split ? nqps : 1) && first % count == 0 && first + count <= nqps) return true;
+        }
+        return false;
+    }
     static uint64_t loadFlag(const uint64_t* flags, int q) {
         return __atomic_load_n(flags + q * (NCCL_GDR_FLUSH_FLAG_STRIDE / sizeof(uint64_t)), __ATOMIC_ACQUIRE);
     }
@@ -79,7 +88,6 @@ protected:
     // past its sequence.
     FlagState InspectFlagState(ncclComm_t comm) {
         FlagState st;
-        const int count = expectedFlagCount();
         for (int c = 0; c < MAXCHANNELS; c++) {
             struct ncclChannel* ch = &comm->channels[c];
             if (ch->peers == nullptr) continue;
@@ -101,15 +109,14 @@ protected:
                         const int n = (int)(desc >> NCCL_GDR_FLUSH_COUNT_SHIFT);
                         const int first = (int)((desc >> NCCL_GDR_FLUSH_FIRST_SHIFT) & 0xff);
                         const uint64_t seq = desc & NCCL_GDR_FLUSH_SEQ_MASK;
-                        bool ok = n == count && first % count == 0 && first + n <= configuredQps();
+                        bool ok = validQpSet(first, n);
                         for (int q = first; ok && q < first + n; q++) ok = loadFlag(flags, q) >= seq;
                         if (!ok) {
                             if (st.badDescs++ == 0) {
                                 st.firstBad = "channel " + std::to_string(c) + " peer " + std::to_string(peer) +
                                               " conn " + std::to_string(ci) + " slot " + std::to_string(s) +
                                               ": first " + std::to_string(first) + " count " + std::to_string(n) +
-                                              " (expected " + std::to_string(count) + ") seq " +
-                                              std::to_string(seq) + " flag" + std::to_string(first) + " " +
+                                              " seq " + std::to_string(seq) + " flag" + std::to_string(first) + " " +
                                               std::to_string(loadFlag(flags, first));
                             }
                         }
