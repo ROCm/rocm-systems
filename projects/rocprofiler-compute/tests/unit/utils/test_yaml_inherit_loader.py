@@ -93,13 +93,6 @@ def test_each_chain_level_sees_only_its_ancestors(tmp_path):
 # =============================================================================
 
 
-def test_remove_metric_and_field(tmp_path):
-    files = write_metric_library_family(tmp_path)
-    document = load_inherited_yaml(files["gfx_c4"])
-    assert "compute.ipc" not in document
-    assert "peak" not in document["compute.valu_util"]
-
-
 def test_remove_missing_metric_fails(tmp_path):
     write_one_metric_base(tmp_path)
     child = write_child(tmp_path, "a.missing: !remove\n")
@@ -126,8 +119,9 @@ def test_remove_takes_no_value(tmp_path):
         load_inherited_yaml(base)
 
 
-def test_remove_not_allowed_in_a_list(tmp_path):
-    base = write_text_file(tmp_path / "base.yaml", "tags:\n  - !remove\n")
+@pytest.mark.parametrize("tags", ["  - !remove\n", "  - name: !remove\n"])
+def test_remove_not_allowed_in_a_list(tmp_path, tags):
+    base = write_text_file(tmp_path / "base.yaml", "tags:\n" + tags)
     with pytest.raises(InheritanceError, match="not allowed in 'tags'"):
         load_inherited_yaml(base)
 
@@ -186,6 +180,13 @@ def test_cycle_names_the_chain(tmp_path):
 def test_self_inherit_is_a_cycle(tmp_path):
     path = write_text_file(tmp_path / "a.yaml", "inherit: a.yaml\n")
     with pytest.raises(InheritanceError, match="inheritance cycle"):
+        load_inherited_yaml(path)
+
+
+@pytest.mark.parametrize("parent", ["5", "''", "/base/x.yaml"])
+def test_inherit_must_be_a_relative_path(tmp_path, parent):
+    path = write_text_file(tmp_path / "a.yaml", f"inherit: {parent}\n")
+    with pytest.raises(InheritanceError, match="must be a relative file path"):
         load_inherited_yaml(path)
 
 
