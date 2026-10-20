@@ -152,6 +152,11 @@ do_host_tests() {
     "rccl-HostUnitTests:$XML_FILE"
     "rccl-UnitTestsMicro:$SCRIPT_DIR/host_tests_micro.xml"
     "rccl-UnitTestsMicroWarpSpeed:$SCRIPT_DIR/host_tests_micro_warpspeed.xml"
+    "rccl-UnitTestsMicroCrypt:$SCRIPT_DIR/host_tests_micro_crypt.xml"
+    "rccl-UnitTestsMicroStrongstream:$SCRIPT_DIR/host_tests_micro_strongstream.xml"
+    "rccl-UnitTestsMicroUtils:$SCRIPT_DIR/host_tests_micro_utils.xml"
+    "rccl-UnitTestsMicroArgcheck:$SCRIPT_DIR/host_tests_micro_argcheck.xml"
+    "rccl-UnitTestsMicroCpuset:$SCRIPT_DIR/host_tests_micro_cpuset.xml"
     "rccl-UnitTestsMicroInit:$SCRIPT_DIR/host_tests_micro_init.xml"
     "rccl-UnitTestsMicroInit-uncached:$SCRIPT_DIR/host_tests_micro_init_uncached.xml"
     # FAULT_INJECTION defaults ON, so this variant is the arm that ships; init.cc
