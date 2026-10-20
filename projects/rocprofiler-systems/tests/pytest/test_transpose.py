@@ -258,6 +258,42 @@ class TestTranspose(RocprofsysTest):
             rules_files=trace_delay_rules,
         )
 
+    @pytest.mark.timeout(120)
+    @pytest.mark.rocpd("transpose_env")
+    @pytest.mark.parametrize("mode", ["sampling"])
+    def test_trace_periods_open_window(self, mode, transpose_env, validation_rules_dir):
+        """Related to the above `test_trace_delay_gates_gpu_contexts`, but tests the
+        `--trace-periods` flag instead of `TRACE_DELAY`.
+        Same short run that should complete before the 60 second window closes.
+        This test uses the command line argument instead of the environment variable.
+        Assert that the command line argument is resolved to the expected value.
+        """
+        sampling_args = ["--trace-periods", "0:60"]
+        result = self.run_test(
+            mode,
+            "transpose",
+            env=transpose_env,
+            sampling_args=sampling_args,
+            run_args=self.TWO_KERNELS_RUN_ARGS,
+            check_target_arch=True,
+        )
+        self.assert_regex(result)
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE_PERIODS": "0:60"},
+            cli_args=sampling_args,
+        )
+        self.assert_perfetto(
+            result,
+            label_substrings=["transpose_a"],
+            subtest_name="open window recorded transpose_a",
+        )
+        self.assert_rocpd(
+            result,
+            subtest_name="open window recorded kernels in rocpd",
+            rules_files=[validation_rules_dir / "default-rules.json"],
+        )
+
     @pytest.mark.locks
     @pytest.mark.timeout(60)
     @pytest.mark.parametrize(
@@ -439,46 +475,4 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
             result,
             subtest_name="ROCpd GPU perf counter validation",
             rules_files=[rules_dir / "gpu-perf-counter-rules.json"],
-        )
-
-
-# Open --trace-periods on HIP only. Closed/duration claims stay out of pytest
-# (see test_trace_delay_gates_gpu_contexts and test_time_window.py).
-
-
-@pytest.mark.sampling
-@pytest.mark.timeout(120)
-@pytest.mark.class_name("sample-transpose-trace-periods")
-@pytest.mark.rocpd("transpose_env")
-class TestSampleTransposeTracePeriods(RocprofsysTest):
-    """Open --trace-periods window records transpose kernels in Perfetto/ROCpd."""
-
-    # Short run + long open window (same shape as the TRACE_DELAY=60 gate test).
-    RUN_ARGS = ["1", "2", "2"]
-    PERIOD_FLAGS = ["--trace-periods", "0:60"]
-
-    def test_open_window_records_kernels(self, transpose_env, validation_rules_dir):
-        result = self.run_test(
-            "sampling",
-            target="transpose",
-            env=transpose_env,
-            run_args=self.RUN_ARGS,
-            sampling_args=self.PERIOD_FLAGS,
-            check_target_arch=True,
-        )
-        self.assert_regex(result)
-        assert_resolved_settings(
-            result,
-            {"ROCPROFSYS_TRACE_PERIODS": "0:60"},
-            cli_args=self.PERIOD_FLAGS,
-        )
-        self.assert_perfetto(
-            result,
-            label_substrings=["transpose_a"],
-            subtest_name="open window recorded transpose_a",
-        )
-        self.assert_rocpd(
-            result,
-            subtest_name="open window recorded kernels in rocpd",
-            rules_files=[validation_rules_dir / "default-rules.json"],
         )
