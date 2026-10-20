@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -73,6 +74,33 @@ EVENT_HEADER_BYTES = 32
 # in playback/hrr_reader.cpp), however large the file is.
 MAX_RECORD_BYTES = 64 * 1024 * 1024
 
+# Capture zeroes these ELF sections in every code object it stores, since they
+# hold the compiler build, source file names and build paths; and it writes the
+# manifest's hardware identifiers blank. `verify` reports what is left of both.
+# See projects/clr/hipamd/src/hrr/hip_capture_scrub.h.
+BUNDLE_MAGIC = b"__CLANG_OFFLOAD_BUNDLE__"
+COMPRESSED_BUNDLE_MAGIC = b"CCOB"
+# `blobs/` holds buffer contents as well as fat binaries, so the fat binaries
+# are the blobs a `__hipRegisterFatBinary` record names: its hrr_api_id_t, and
+# where the record keeps the hash after the event header and `uint64 ret`.
+# The id is per archive format version (hrr_api_args.h): v8 put two compiler
+# APIs ahead of it, v9 one more, and v10 left it where it was. A v7 archive may
+# hold either numbering, so that and any other version leaves the fat binaries
+# unscanned. tools/tests/test_skill_api_ids.py fails when HRR_VERSION moves
+# past this table.
+REGISTER_FAT_BINARY = {8: 549, 9: 550, 10: 550}
+FAT_BINARY_HASH_OFFSET = EVENT_HEADER_BYTES + 8
+HARDWARE_ID_FIELDS = ("pci", "uuid", "luid")
+# Capture cannot zero what the GPU loads, so `verify` looks there for strings
+# such as "/home/dev/src/model.hip" or "C:\src\model.hip": a NUL-terminated
+# string that starts with "/" or a drive letter and has at least two components,
+# in a loaded, non-executable section. A component is any bytes from 0x20 up,
+# so spaces and UTF-8 names count.
+SHT_PROGBITS, SHF_ALLOC, SHF_EXECINSTR = 1, 0x2, 0x4
+ABSOLUTE_PATH = re.compile(
+    rb"(?<=\0)(?:/[\x20-\xff]+/|[A-Za-z]:[\\/][\x20-\xff]+[\\/])[\x20-\xff]+(?=\0)"
+)
+
 
 @dataclass
 class ProcessArchive:
@@ -92,6 +120,16 @@ class ProcessArchive:
     hip_runtime_version: str | None = None
     format_version: int | None = None
     holds_an_event: bool = False
+    # Manifest fields that name the individual GPU and are not blank.
+    hardware_ids: list[str] = field(default_factory=list)
+    # Code objects and fat binaries still holding a .comment or .debug* section.
+    debug_info_files: int = 0
+    # Code objects and fat binaries whose loaded data holds an absolute path.
+    path_files: int = 0
+    # Compressed fat binaries, which cannot be checked without decompressing.
+    unchecked_fat_binaries: int = 0
+    # False when events.bin is in a format version whose fat binary id is unknown.
+    fat_binaries_scanned: bool = True
 
     @property
     def recorded(self) -> bool:
@@ -164,6 +202,120 @@ def _dir_stats(path: Path) -> tuple[int, int]:
         except OSError:
             continue
     return files, total
+
+
+def _elf_findings(data: bytes) -> tuple[bool, bool]:
+    """What an ELF64 image still carries: (a .comment or .debug* section that
+    is not all zero, an absolute path string in its loaded data).
+
+    Allocated sections count too: capture leaves them as they are, so they are
+    exactly the ones that can still carry a build path, such as the source path
+    a device assert() prints, which sits in .rodata.
+    """
+    debug_info = path = False
+    if len(data) < 64 or data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
+        return debug_info, path
+    shoff = struct.unpack_from("<Q", data, 0x28)[0]
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 0x3A)
+    if shentsize != 64 or shstrndx >= shnum or shoff + shnum * 64 > len(data):
+        return debug_info, path
+    names, names_size = struct.unpack_from("<QQ", data, shoff + shstrndx * 64 + 24)
+    if names + names_size > len(data):
+        return debug_info, path
+    for i in range(shnum):
+        name, kind, flags, _, offset, size = struct.unpack_from("<IIQQQQ", data, shoff + i * 64)
+        if kind == SHT_PROGBITS and flags & SHF_ALLOC and not flags & SHF_EXECINSTR:
+            path = path or bool(ABSOLUTE_PATH.search(b"\0" + data[offset : offset + size]))
+        end = data.find(b"\0", names + name, names + names_size)
+        if name >= names_size or end < 0:
+            continue  # the name does not end inside the string table
+        label = data[names + name : end]
+        if label != b".comment" and not label.startswith(b".debug"):
+            continue
+        if kind == 8:  # SHT_NOBITS: nothing in the file
+            continue
+        debug_info = debug_info or bool(data[offset : offset + size].strip(b"\0"))
+    return debug_info, path
+
+
+def _code_object_findings(data: bytes) -> tuple[bool, bool]:
+    """The same, for an ELF or across the entries of an uncompressed offload bundle."""
+    if not data.startswith(BUNDLE_MAGIC):
+        return _elf_findings(data)
+    debug_info = path = False
+    pos = len(BUNDLE_MAGIC)
+    if len(data) < pos + 8:
+        return debug_info, path
+    (count,) = struct.unpack_from("<Q", data, pos)
+    pos += 8
+    for _ in range(count):
+        if len(data) < pos + 24:
+            break
+        offset, size, id_size = struct.unpack_from("<QQQ", data, pos)
+        pos += 24 + id_size
+        entry = _elf_findings(data[offset : offset + size])
+        debug_info, path = debug_info or entry[0], path or entry[1]
+    return debug_info, path
+
+
+def _fat_binary_blobs(pid_dir: Path) -> list[Path] | None:
+    """The blob files that `__hipRegisterFatBinary` records in `events.bin` name,
+    or None when the format version does not say which id those records have.
+
+    The first bytes of a blob cannot say this: a host buffer may well open with
+    "CCOB" or hold an offload bundle. Records are walked by their declared
+    length, as the reader does, up to the first one that is torn.
+    """
+    events = pid_dir / "events.bin"
+    hashes: set[str] = set()
+    try:
+        size = events.stat().st_size
+        with events.open("rb") as handle:
+            head = handle.read(HEADER_BYTES)
+            if len(head) < HEADER_BYTES or struct.unpack_from("<I", head)[0] != HEADER_MAGIC:
+                return []
+            register_fat_binary = REGISTER_FAT_BINARY.get(struct.unpack_from("<H", head, 4)[0])
+            if register_fat_binary is None:
+                return None
+            pos = HEADER_BYTES
+            while pos + EVENT_HEADER_BYTES <= size:
+                record = handle.read(EVENT_HEADER_BYTES)
+                event_type, length = struct.unpack_from("<H24xI", record)
+                if length < EVENT_HEADER_BYTES or length > min(size - pos, MAX_RECORD_BYTES):
+                    break
+                if event_type == register_fat_binary and length >= FAT_BINARY_HASH_OFFSET + 16:
+                    record += handle.read(FAT_BINARY_HASH_OFFSET + 16 - EVENT_HEADER_BYTES)
+                    lo, hi = struct.unpack_from("<QQ", record, FAT_BINARY_HASH_OFFSET)
+                    hashes.add(f"{lo:016x}{hi:016x}")  # hash_hex() in the capture writer
+                pos += length
+                handle.seek(pos)
+    except OSError:
+        pass
+    return [pid_dir / "blobs" / h[:2] / f"{h}.blob" for h in sorted(hashes)]
+
+
+def _scan_code_objects(pid_dir: Path, proc: ProcessArchive) -> None:
+    """Count the stored code objects that still carry build information.
+
+    Every file under `code_objects/` is one; under `blobs/` only the fat
+    binaries are, and the events say which those are.
+    """
+    fat_binaries = _fat_binary_blobs(pid_dir)
+    proc.fat_binaries_scanned = fat_binaries is not None
+    candidates = sorted((pid_dir / "code_objects").glob("*")) + (fat_binaries or [])
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if data.startswith(COMPRESSED_BUNDLE_MAGIC):
+            proc.unchecked_fat_binaries += 1
+            continue
+        debug_info, path = _code_object_findings(data)
+        proc.debug_info_files += debug_info
+        proc.path_files += path
 
 
 def _archive_format_version(events: Path) -> int | None:
@@ -246,6 +398,7 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
     proc.holds_an_event = _holds_an_event(events)
     proc.blob_files, _ = _dir_stats(pid_dir / "blobs")
     proc.code_object_files, _ = _dir_stats(pid_dir / "code_objects")
+    _scan_code_objects(pid_dir, proc)
 
     manifest, error = _read_manifest(pid_dir / "manifest.json")
     proc.manifest_error = error
@@ -280,6 +433,12 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
         runtime = metadata.get("runtime") if isinstance(metadata, dict) else None
         if isinstance(runtime, dict):
             proc.hip_runtime_version = typed(runtime, "hip_runtime_version", str)
+        devices = metadata.get("devices") if isinstance(metadata, dict) else None
+        for device in devices if isinstance(devices, list) else []:
+            props = device.get("properties") if isinstance(device, dict) else None
+            for key in HARDWARE_ID_FIELDS:
+                if isinstance(props, dict) and props.get(key) and key not in proc.hardware_ids:
+                    proc.hardware_ids.append(key)
 
     if proc.pid is None and pid_dir.name.startswith("pid-"):
         suffix = pid_dir.name[len("pid-") :]
@@ -703,6 +862,16 @@ def render(report: ArchiveReport) -> str:
         )
         if proc.parent_pid:
             lines.append(f"    parent pid: {proc.parent_pid}")
+        hardware = ", ".join(proc.hardware_ids) if proc.hardware_ids else "blank"
+        build_info = (
+            f".comment/.debug* in {proc.debug_info_files} code objects, "
+            f"absolute paths in {proc.path_files}"
+        )
+        if proc.unchecked_fat_binaries:
+            build_info += f", {proc.unchecked_fat_binaries} compressed fat binaries not checked"
+        if not proc.fat_binaries_scanned:
+            build_info += f", fat binaries not checked (archive format v{proc.format_version})"
+        lines.append(f"    hardware identifiers: {hardware}   {build_info}")
 
     incomplete = [p for p in report.processes if p.complete is False]
     if incomplete:
@@ -767,6 +936,11 @@ def to_dict(report: ArchiveReport) -> dict:
                 "blob_files": p.blob_files,
                 "code_object_files": p.code_object_files,
                 "finalized": p.finalized,
+                "hardware_ids": p.hardware_ids,
+                "debug_info_files": p.debug_info_files,
+                "path_files": p.path_files,
+                "unchecked_fat_binaries": p.unchecked_fat_binaries,
+                "fat_binaries_scanned": p.fat_binaries_scanned,
             }
             for p in report.processes
         ],

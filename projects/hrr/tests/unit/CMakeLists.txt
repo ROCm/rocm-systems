@@ -21,6 +21,18 @@ set_target_properties(hrr-unit-tests PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON)
 
+# Capture's code object scrubber lives in CLR and needs nothing but <cstring>,
+# so it is compiled in here and fed malformed images on its own. A checkout of
+# projects/hrr without the CLR sources still registers its cases, as skipped,
+# so the binary keeps matching tests/config/unit.yaml.
+target_sources(hrr-unit-tests PRIVATE hrr_scrub_test.cc)
+set(HRR_CAPTURE_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../../clr/hipamd/src/hrr)
+if(EXISTS ${HRR_CAPTURE_SRC}/hip_capture_scrub.cpp)
+  target_sources(hrr-unit-tests PRIVATE ${HRR_CAPTURE_SRC}/hip_capture_scrub.cpp)
+  target_include_directories(hrr-unit-tests PRIVATE ${HRR_CAPTURE_SRC})
+  target_compile_definitions(hrr-unit-tests PRIVATE HRR_HAVE_CAPTURE_SCRUB=1)
+endif()
+
 # ../include makes the local harness headers (hrr_test_common.hh,
 # hrr_test_process.hh) available. hrr_reader.h, hip_playback.h, and
 # hrr/hrr_api_args.h come transitively from hrr::reader.

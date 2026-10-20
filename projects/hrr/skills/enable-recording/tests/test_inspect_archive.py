@@ -562,6 +562,218 @@ def test_json_output_is_machine_readable(tmp_path, capsys):
     assert payload["processes"][0]["pid"] == 99
 
 
+def make_elf(sections: dict[str, bytes], allocated: tuple[str, ...] = ()) -> bytes:
+    """A minimal ELF64 little-endian image holding `sections`, then .shstrtab.
+
+    Sections named in `allocated` carry SHF_ALLOC.
+    """
+    names = b"\0"
+    offsets = {}
+    for name in [*sections, ".shstrtab"]:
+        offsets[name] = len(names)
+        names += name.encode() + b"\0"
+    body = b"\0" * 64
+    headers = [struct.pack("<IIQQQQIIQQ", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)]
+    for name, data in [*sections.items(), (".shstrtab", names)]:
+        headers.append(
+            struct.pack(
+                "<IIQQQQIIQQ",
+                offsets[name], 1, 2 if name in allocated else 0, 0, len(body), len(data), 0, 0, 1, 0,
+            )
+        )
+        body += data
+    ident = b"\x7fELF" + bytes([2, 1, 1]) + b"\0" * 9
+    header = ident + struct.pack(
+        "<HHIQQQIHHHHHH", 3, 224, 1, 0, 0, len(body), 0, 64, 0, 0, 64, len(headers), len(headers) - 1
+    )
+    return header + body[64:] + b"".join(headers)
+
+
+def make_bundle(elf: bytes) -> bytes:
+    """An uncompressed offload bundle: an empty host entry, then `elf`."""
+    host, target = b"host-x86_64-unknown-linux-gnu-", b"hipv4-amdgcn-amd-amdhsa--gfx950"
+    table = inspect_archive.BUNDLE_MAGIC + struct.pack("<Q", 2)
+    start = len(table) + 2 * 24 + len(host) + len(target)
+    table += struct.pack("<QQQ", start, 0, len(host)) + host
+    table += struct.pack("<QQQ", start, len(elf), len(target)) + target
+    return table + elf
+
+
+def register_fat_binary(
+    pid_dir: Path, lo: int, hi: int, data: bytes, event_id: int = inspect_archive.REGISTER_FAT_BINARY[9]
+) -> None:
+    """Store `data` as the capture writer stores a fat binary, and append the
+    `__hipRegisterFatBinary` record that names it to `events.bin`.
+    """
+    name = f"{lo:016x}{hi:016x}"
+    (pid_dir / "blobs" / name[:2]).mkdir(parents=True, exist_ok=True)
+    (pid_dir / "blobs" / name[:2] / f"{name}.blob").write_bytes(data)
+    record = struct.pack("<HQQQI2x", event_id, 2, 0, 0, 64)
+    record += struct.pack("<QQQQ", 0, lo, hi, len(data))
+    with (pid_dir / "events.bin").open("ab") as handle:
+        handle.write(record)
+
+
+def test_verify_reports_hardware_identifiers_and_build_info(tmp_path, capsys):
+    """A capture that will be shared should name neither the GPU nor the build
+    tree, and `verify` is where whoever approves the transfer looks.
+    """
+    leaky = make_process(tmp_path, 31, format_version=9)
+    manifest = json.loads((leaky / "manifest.json").read_text())
+    manifest["metadata"] = {
+        "devices": [{"properties": {"name": "gfx950", "pci": "0:134:0", "uuid": "ab12", "luid": ""}}]
+    }
+    (leaky / "manifest.json").write_text(json.dumps(manifest))
+    (leaky / "code_objects").mkdir()
+    (leaky / "code_objects" / "a.hsaco").write_bytes(make_elf({".comment": b"AMD clang version 23\0"}))
+    register_fat_binary(
+        leaky, 0xFF01, 1, make_bundle(make_elf({".text": b"\1" * 8, ".debug_line_str": b"/app/build\0"}))
+    )
+    register_fat_binary(leaky, 0xFF02, 2, b"CCOB" + b"\1" * 20)
+
+    clean = make_process(tmp_path, 32)
+    manifest = json.loads((clean / "manifest.json").read_text())
+    manifest["metadata"] = {"devices": [{"properties": {"pci": "", "uuid": "", "luid": ""}}]}
+    (clean / "manifest.json").write_text(json.dumps(manifest))
+    (clean / "code_objects").mkdir()
+    (clean / "code_objects" / "a.hsaco").write_bytes(
+        make_elf({".text": b"\1" * 8, ".comment": b"\0" * 21, ".debug_str": b"\0" * 11})
+    )
+    # Buffer contents are not code objects, whatever bytes they hold.
+    (clean / "blobs" / "blob-0").write_bytes(make_elf({".comment": b"user data\0"})[4:])
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    procs = {p["pid"]: p for p in json.loads(capsys.readouterr().out)["processes"]}
+    assert procs[31]["hardware_ids"] == ["pci", "uuid"]
+    assert procs[31]["debug_info_files"] == 2
+    assert procs[31]["unchecked_fat_binaries"] == 1
+    assert procs[32]["hardware_ids"] == []
+    assert procs[32]["debug_info_files"] == 0
+    assert procs[32]["unchecked_fat_binaries"] == 0
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback"])
+    text = capsys.readouterr().out
+    assert (
+        "hardware identifiers: pci, uuid   .comment/.debug* in 2 code objects, "
+        "absolute paths in 0, 1 compressed fat binaries not checked" in text
+    )
+    assert "hardware identifiers: blank   .comment/.debug* in 0 code objects, absolute paths in 0" in text
+
+
+def test_an_allocated_comment_still_counts_as_build_info(tmp_path, capsys):
+    """Capture zeroes only non-allocated sections, so an allocated .comment
+    reaches the archive as it was; `verify` must not call it clean.
+    """
+    pid_dir = make_process(tmp_path, 33)
+    (pid_dir / "code_objects").mkdir()
+    (pid_dir / "code_objects" / "a.hsaco").write_bytes(
+        make_elf({".comment": b"/home/dev/build\0"}, allocated=(".comment",))
+    )
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    assert json.loads(capsys.readouterr().out)["processes"][0]["debug_info_files"] == 1
+
+
+def test_an_absolute_path_in_loaded_data_is_reported(tmp_path, capsys):
+    """A device assert() keeps its source file name in .rodata, which the GPU
+    loads, so capture leaves it and `verify` has to say it is there. Machine
+    code and sections the GPU never loads are not read as strings.
+    """
+    leaky = make_process(tmp_path, 35)
+    (leaky / "code_objects").mkdir()
+    (leaky / "code_objects" / "a.hsaco").write_bytes(
+        make_elf({".rodata": b"p >= 0\0/home/dev/src/k.hip\0"}, allocated=(".rodata",))
+    )
+    clean = make_process(tmp_path, 36)
+    (clean / "code_objects").mkdir()
+    (clean / "code_objects" / "a.hsaco").write_bytes(
+        make_elf({".rodata": b"p >= 0\0k.hip\0//\0C:\\k.hip\0", ".note": b"\0/a/b\0"}, allocated=(".rodata",))
+    )
+    text = bytearray(make_elf({".text": b"\0/a/b\0"}, allocated=(".text",)))
+    struct.pack_into("<Q", text, len(text) - 2 * 64 + 8, 6)  # .text: SHF_ALLOC | SHF_EXECINSTR
+    (clean / "code_objects" / "b.hsaco").write_bytes(text)
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    procs = {p["pid"]: p for p in json.loads(capsys.readouterr().out)["processes"]}
+    assert procs[35]["path_files"] == 1
+    assert procs[36]["path_files"] == 0
+    assert procs[35]["debug_info_files"] == procs[36]["debug_info_files"] == 0
+
+
+@pytest.mark.parametrize(
+    "string",
+    [
+        b"/home/dev/build tree/k.hip",
+        "/home/dév/src/k.hip".encode(),
+        b"C:\\Users\\dev\\k.hip",
+        b"D:/src/k.hip",
+    ],
+)
+def test_paths_with_spaces_non_ascii_or_a_drive_letter_are_reported(tmp_path, capsys, string):
+    """A build tree may sit under a directory with a space or a non-ASCII name,
+    or on a Windows drive; its assert() strings are build paths all the same.
+    """
+    pid_dir = make_process(tmp_path, 37)
+    (pid_dir / "code_objects").mkdir()
+    (pid_dir / "code_objects" / "a.hsaco").write_bytes(
+        make_elf({".rodata": b"p >= 0\0" + string + b"\0"}, allocated=(".rodata",))
+    )
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    assert json.loads(capsys.readouterr().out)["processes"][0]["path_files"] == 1
+
+
+def test_only_blobs_registered_as_fat_binaries_are_checked(tmp_path, capsys):
+    """`blobs/` also holds host buffers, whose bytes can be anything: a 4-byte
+    buffer "CCOB", or an offload bundle the application keeps in memory. Only
+    the blobs a `__hipRegisterFatBinary` record names are fat binaries.
+    """
+    pid_dir = make_process(tmp_path, 34, format_version=9)
+    leaky = make_bundle(make_elf({".text": b"\1" * 8, ".debug_str": b"/app/build\0"}))
+    for name, data in (("aa" + "0" * 30, b"CCOB"), ("ab" + "0" * 30, leaky)):
+        (pid_dir / "blobs" / name[:2]).mkdir()
+        (pid_dir / "blobs" / name[:2] / f"{name}.blob").write_bytes(data)
+    register_fat_binary(pid_dir, 0xAC, 3, leaky)
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    proc = json.loads(capsys.readouterr().out)["processes"][0]
+    assert proc["debug_info_files"] == 1
+    assert proc["unchecked_fat_binaries"] == 0
+
+
+def test_fat_binaries_are_found_by_the_id_of_the_archive_version(tmp_path, capsys):
+    """`__hipRegisterFatBinary` was id 549 in format v8 and is 550 in v9 and
+    v10. A v7 archive may hold either, so `verify` says it did not look rather
+    than report no build information.
+    """
+    leaky = make_bundle(make_elf({".text": b"\1" * 8, ".debug_str": b"/app/build\0"}))
+    cases = {40: (8, 549), 41: (8, 550), 42: (9, 550), 43: (10, 550), 39: (7, 549)}
+    for pid, (version, event_id) in cases.items():
+        register_fat_binary(make_process(tmp_path, pid, format_version=version), pid, 1, leaky, event_id)
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    procs = {p["pid"]: p for p in json.loads(capsys.readouterr().out)["processes"]}
+    assert [procs[pid]["debug_info_files"] for pid in cases] == [1, 0, 1, 1, 0]
+    assert [procs[pid]["fat_binaries_scanned"] for pid in cases] == [True, True, True, True, False]
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback"])
+    assert "fat binaries not checked (archive format v7)" in capsys.readouterr().out
+
+
+def test_a_section_name_ends_inside_its_string_table(tmp_path, capsys):
+    """Capture skips a section whose name has no terminator inside the string
+    table; `verify` must not complete `.comm` into `.comment` from the bytes
+    after the table either.
+    """
+    pid_dir = make_process(tmp_path, 44)
+    (pid_dir / "code_objects").mkdir()
+    elf = make_elf({".comment": b"AMD clang version 23\0"})
+    (pid_dir / "code_objects" / "a.hsaco").write_bytes(elf)
+    cut = bytearray(elf)
+    struct.pack_into("<Q", cut, len(cut) - 64 + 32, 1 + len(".comm"))  # .shstrtab's sh_size
+    (pid_dir / "code_objects" / "b.hsaco").write_bytes(cut)
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    assert json.loads(capsys.readouterr().out)["processes"][0]["debug_info_files"] == 1
+
+
 def test_the_json_verdict_is_one_of_the_four_documented_ones(tmp_path, capsys):
     """`--json` used to know only `recorded` and `empty`, so a consumer could
     not tell an archive with no events from a directory no process ever opened.
