@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -40,11 +41,12 @@ namespace code_object
 {
 namespace hsa
 {
-using context_t                = context::context;
-using user_data_t              = rocprofiler_user_data_t;
-using context_user_data_map_t  = std::unordered_map<const context_t*, user_data_t>;
-using synchronized_user_data_t = common::Synchronized<context_user_data_map_t>;
-using context_array_t          = context::context_array_t;
+using context_t                  = context::context;
+using user_data_t                = rocprofiler_user_data_t;
+using context_user_data_map_t    = std::unordered_map<const context_t*, user_data_t>;
+using synchronized_user_data_t   = common::Synchronized<context_user_data_map_t>;
+using context_array_t            = context::context_array_t;
+using synchronized_context_set_t = common::Synchronized<std::unordered_set<const context_t*>>;
 
 struct kernel_symbol
 {
@@ -60,8 +62,8 @@ struct kernel_symbol
     kernel_symbol& operator=(const kernel_symbol&) = delete;
     kernel_symbol& operator                        =(kernel_symbol&&) noexcept;
 
-    std::atomic<bool> beg_notified = false;
-    std::atomic<bool> end_notified = false;
+    synchronized_context_set_t beg_notified = {};
+    synchronized_context_set_t end_notified = {};
     // zero until the symbol's host function is registered; identical for every context
     std::atomic<uint64_t>    host_function_id = 0;
     const std::string*       name             = nullptr;

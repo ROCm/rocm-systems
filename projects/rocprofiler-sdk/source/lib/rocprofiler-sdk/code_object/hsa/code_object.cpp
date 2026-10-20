@@ -30,7 +30,6 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_loader.h>
 
-#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <string_view>
@@ -49,8 +48,12 @@ code_object::operator=(code_object&& rhs) noexcept
 {
     if(this != &rhs)
     {
-        beg_notified.store(rhs.beg_notified.load());
-        end_notified.store(rhs.end_notified.load());
+        rhs.beg_notified.wlock([this](auto& rhs_notified) {
+            beg_notified.wlock([&](auto& notified) { notified = std::move(rhs_notified); });
+        });
+        rhs.end_notified.wlock([this](auto& rhs_notified) {
+            end_notified.wlock([&](auto& notified) { notified = std::move(rhs_notified); });
+        });
         uri             = rhs.uri;
         hsa_executable  = rhs.hsa_executable;
         hsa_code_object = rhs.hsa_code_object;
@@ -61,6 +64,7 @@ code_object::operator=(code_object&& rhs) noexcept
         });
         rocp_data.uri = (uri) ? uri->c_str() : nullptr;
         symbols       = std::move(rhs.symbols);
+        contexts      = std::move(rhs.contexts);
     }
 
     return *this;
