@@ -264,7 +264,7 @@ public:
   ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem, gpusize *gpu_va = nullptr);
   uint32_t RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t* mailbox);
   bool UnregisterEvent(uint32_t event_id, HANDLE event_handle);
-  static HSAKMT_STATUS WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_elems, bool wait_all, uint32_t msec);
+  static HSAKMT_STATUS WaitOnMultipleEvents(HsaEvent* events[], uint64_t event_ages[], uint32_t num_elems, bool wait_all, uint32_t msec);
   device_init_result InitStatus() const { return init_status_; }
   uint32_t GbAddrConfig() const { return device_info_.gb_addr_config; }
 
@@ -352,4 +352,3 @@ NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices);
 
 } // namespace thunk
 } // namespace wsl
-

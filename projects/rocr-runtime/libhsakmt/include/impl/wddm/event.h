@@ -24,6 +24,10 @@ namespace wsl {
 namespace thunk {
 
 #if defined(WIN32)
+
+struct WaitQueue;
+struct WaitEntry;
+
 /**
  ***********************************************************************************************************************
  * @brief Interrupt based event for HSA signals implementation (Windows)
@@ -42,6 +46,11 @@ class EventWin final : public HsaEvent {
   bool Set() const;
   bool Reset() const;
   bool Wait(std::chrono::duration<float> timeout) const;
+  static HSAKMT_STATUS WaitOnMultipleEvents(HsaEvent* events[], uint64_t event_ages[],
+                                            uint32_t num_elems, bool wait_all, uint32_t msec);
+
+  static HSAKMT_STATUS QueryMultipleEvents(HsaEvent* events[], uint64_t event_ages[],
+                                           uint32_t num_elems, bool wait_all);
 
   typedef void* EventHandle;
 
@@ -59,6 +68,17 @@ class EventWin final : public HsaEvent {
 
   EventWin(const EventWin&) = delete;
   EventWin& operator=(const EventWin&) = delete;
+
+  void AddWaitEntry(WaitEntry* ent);
+  void RemoveWaitEntry(WaitEntry* ent);
+
+  static void OnKmdEvent(PTP_CALLBACK_INSTANCE _instance, void* ctx, PTP_WAIT _wait,
+                         TP_WAIT_RESULT _wait_result);
+  void RegisterKMDEvent(uint64_t age);
+
+  std::atomic_uint64_t cur_waiting_age_, cur_age_, refcnt_;
+  std::atomic<WaitQueue*> qhead_;
+  PTP_WAIT tpwait_obj;
 };
 
 using Event = EventWin;
@@ -83,8 +103,8 @@ class EventLnx final : public HsaEvent {
   bool Set() const;
   bool Reset() const;
   bool Wait(std::chrono::duration<float> timeout) const;
-  static HSAKMT_STATUS WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_elems,
-                                            bool wait_all, uint32_t msec);
+  static HSAKMT_STATUS WaitOnMultipleEvents(HsaEvent* events[], uint64_t event_ages[],
+                                            uint32_t num_elems, bool wait_all, uint32_t msec);
 
  private:
   int efd_;

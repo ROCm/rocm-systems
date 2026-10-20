@@ -1531,54 +1531,14 @@ bool WDDMDevice::UnregisterEvent(uint32_t event_id, HANDLE event_handle) {
 }
 
 // ================================================================================================
-HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_elems,
+HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint64_t event_ages[], uint32_t num_elems,
                                                bool wait_all, uint32_t msec) {
   // num_elems sizes a stack allocation below; bound it to the event table width.
   if (num_elems > kNumberOfHsaEvents) {
     pr_err("event count %u exceeds maximum %u\n", num_elems, kNumberOfHsaEvents);
     return HSAKMT_STATUS_INVALID_PARAMETER;
   }
-#if defined(WIN32)
-  HANDLE* event_handles_ = reinterpret_cast<HANDLE*>(_alloca(sizeof(HANDLE) * num_elems));
-  for (uint32_t i = 0; i < num_elems; ++i) {
-    event_handles_[i] = reinterpret_cast<Event*>(events[i])->GetHandle();
-  }
-  uint32_t time = 0;
-  uint32_t kWaitTimeout = 6000;  // 6 seconds
-  if (!dxg_runtime->disable_wait_timeout_ && (msec > kWaitTimeout)) {
-    msec = kWaitTimeout;
-  }
-  auto wait_msec = (num_elems <= MAXIMUM_WAIT_OBJECTS) ? msec : 1;
-  while (time < msec) {
-    int32_t size_to_process = static_cast<int>(num_elems);
-    // WaitForMultipleObjects can only handle MAXIMUM_WAIT_OBJECTS (64) events at a time.
-    // For larger counts, loop through chunks with 1ms timeout per iteration for
-    // responsiveness. Not efficient, but unavoidable given Windows API constraints.
-    for (uint32_t i = 0; (i <= (num_elems / MAXIMUM_WAIT_OBJECTS)) && (size_to_process > 0); ++i) {
-      auto events_limit = std::min(size_to_process, MAXIMUM_WAIT_OBJECTS);
-      const DWORD ret_code = WaitForMultipleObjects(
-          events_limit, &event_handles_[i * MAXIMUM_WAIT_OBJECTS], wait_all, wait_msec);
-      if (ret_code >= WAIT_OBJECT_0 &&
-          ret_code <= (WAIT_OBJECT_0 + events_limit - 1)) {
-        return HSAKMT_STATUS_SUCCESS;
-      } else if (ret_code == WAIT_TIMEOUT) {
-        // Timeout occurred, continue to next chunk of events.
-        time += wait_msec;
-        if (time >= msec) {
-          break;
-        }
-      } else {
-        // Wait failed with an error.
-        pr_err("WaitForMultipleObjects failed with code %d\n", ret_code);
-        return HSAKMT_STATUS_WAIT_FAILURE;
-      }
-      size_to_process -= MAXIMUM_WAIT_OBJECTS;
-    }
-  }
-#else
-  return Event::WaitOnMultipleEvents(events, num_elems, wait_all, msec);
-#endif
-  return HSAKMT_STATUS_WAIT_TIMEOUT;
+  return Event::WaitOnMultipleEvents(events, event_ages, num_elems, wait_all, msec);
 }
 
 bool WDDMDevice::GetKmdDbgVersion(struct Wkmi::KmdDbgVersion* version) const {

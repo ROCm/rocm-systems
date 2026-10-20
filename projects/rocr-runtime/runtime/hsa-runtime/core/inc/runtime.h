@@ -568,7 +568,11 @@ class Runtime {
       kfd_version.supports_event_age = true;
 
     if (thunkLoader()->IsDXG()) {
+#if !defined(_WIN32)
       kfd_version.supports_event_age = false;
+#else
+      kfd_version.supports_event_age = true;
+#endif
     }
 
     kfd_version.supports_metadata_prefetch = false;
