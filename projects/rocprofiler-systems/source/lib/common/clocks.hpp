@@ -26,8 +26,8 @@ read(clockid_t clock_id) noexcept
 
 namespace rocprofsys::inline common::clocks::timeline
 {
-/// Must match the rocprofiler-sdk host clock so the CPU and SDK events won't line up in
-/// the trace; the SDK backend tests static_assert this.
+/// Must match the rocprofiler-sdk host clock so that CPU and SDK events line up in the
+/// trace; the SDK backend tests static_assert this.
 inline constexpr clockid_t k_timeline_clock_id = CLOCK_BOOTTIME;
 
 /// Absolute timeline clock for CPU and call-stack event stamps.
