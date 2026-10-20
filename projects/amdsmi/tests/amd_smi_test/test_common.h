@@ -32,6 +32,12 @@ uint32_t ProcessCmdline(AMDSMITstGlobals* test, int arg_cnt, char** arg_list);
 uint32_t GetTestVerbosity();
 void SetTestVerbosity(uint32_t verbosity);
 
+// Path of a data file a test reads. The tests package installs it in <test binary
+// dir>/<installed_subdir>/<name>, which is preferred; otherwise this returns `source_path`, the
+// build-tree location, for runs from the build directory.
+std::string FindTestDataFile(const std::string& installed_subdir, const std::string& name,
+                             const std::string& source_path);
+
 void PrintTestHeader(uint32_t dv_ind);
 const char* GetPerfLevelStr(amdsmi_dev_perf_level_t lvl);
 const char* GetBlockNameStr(amdsmi_gpu_block_t id);
