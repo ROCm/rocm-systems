@@ -12,7 +12,7 @@
 ### Changed
 
 * The hipFile CMake options have been renamed from `AIS_*` to `HIPFILE_*` (e.g., `AIS_CXX_STANDARD` is now `HIPFILE_CXX_STANDARD`). The old `AIS_*` names still work but are deprecated and emit a CMake deprecation warning.
-* The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now defaults to `OFF` .
+* The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now defaults to `OFF`.
 
 ### Fixed
 
@@ -20,10 +20,13 @@
 * hipFile now returns `hipFileGetNewFDFailed` instead of `hipFileInternalError` when the process or system runs out of file descriptors. API calls that need a new file descriptor, such as `hipFileHandleRegister()`, can return this error.
 * `ais-check` no longer reports an LVM parity RAID logical volume (`raid4`, `raid5`, `raid6`) as fastpath capable.
 * The `HIPFILE_WARN_UNSAFE_BUFFER_OPS` CMake option now applies the clang `-Wunsafe-buffer-usage` and `-fsafe-buffer-usage-suggestions` flags to C++ sources. Previously, the flags were never passed to the compiler.
+* Per-GPU I/O statistics are now attributed to the GPU that owns the I/O buffer instead of the caller's active HIP device. Previously, `hipFileGetStatsL3()` and `ais-stats` could report counters against the wrong GPU when the active device differed from the buffer's device.
 
 ### Removed
 
 ### Known issues
+
+* The bandwidth reported by `ais-stats` and the Stats API is derived from the sum of the per-operation latencies instead of the elapsed wall-clock time, so when several threads issue I/O concurrently, the reported bandwidth is understated by roughly the number of concurrent threads. See [issue #11919](https://github.com/ROCm/rocm-systems/issues/11919).
 
 ## hipFile 0.5.0 for ROCm 10.1.0
 
