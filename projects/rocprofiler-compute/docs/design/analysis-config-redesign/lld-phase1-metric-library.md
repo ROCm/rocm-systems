@@ -63,7 +63,7 @@ types each device skips. The validator checks, for every arch:
   rates `I8Ops`, `I32Ops` and `I64Ops`, and `MALLBw`, which analyze skips: no row shows
   them as a peak), or in `ARCH_CEILINGS_WITHOUT_METRIC` for the rates one arch's roofline
   combines or does not show (the gfx950 F4 and F6 MFMA rates, the gfx115x F16 and BF16
-  VALU rates);
+  VALU rates, the gfx1250 VALU rates, whose rows show theoretical peaks);
 - no metric names a ceiling the arch does not measure.
 
 So a new ceiling, or a new arch, fails validation until a metric claims each ceiling.
@@ -539,8 +539,9 @@ compares the library with today's analysis configs:
   panel 3000).
 - **Built-in variables:** the library variables equal `get_build_in_vars()`.
 - **Peaks:** every row's `peak` is its metric's `peak` or `peak_empirical`, and every
-  library peak is the peak of some row that shows the metric (a measured peak on an arch
-  without a roofline benchmark is skipped). A display variant names its metric id for
+  library peak is the peak of some row that shows the metric (a measured peak whose
+  ceiling the benchmark does not measure on the arch is skipped, as on gfx908, which has
+  no benchmark). A display variant names its metric id for
   this check, and a hidden row (`value: None`) names it by its label.
 
 The reference side is today's tree, read through the production loaders in the same run,
@@ -665,11 +666,12 @@ families have keep the CDNA names (`l1i`, `sl1d`, `lds`, `compute`, `wave`, `dis
 metric it still shows; a changed equation is an override of that id, never a new id. Two
 placements of one id that disagree within an arch are a Kind 3 case for review, and two
 ids with the same formula on one arch are one metric: the validator rejects them, and
-they are merged into one id (each panel's label becomes a view label in Phase 2). The one
-exception is listed in `SHARED_FORMULA_IDS`: the same counters bounded by a different
-measured ceiling (gfx950 counts MXF8 MFMA work in the F8 counter, so
-`compute.mfma_flops_mxf8` shares the formula of `compute.mfma_flops_f8`); a row whose
-label names the listed id shows that id.
+they are merged into one id (each panel's label becomes a view label in Phase 2). The
+exceptions are listed in `SHARED_FORMULA_IDS`: the same counters bounded by a different
+measured ceiling (gfx950 and gfx1250 count MXF8 matrix work in the F8 counter, so
+`compute.mfma_flops_mxf8` shares the formula of `compute.mfma_flops_f8`, and
+`compute.wmma_flops_mxfp8` that of `compute.wmma_flops_fp8`); a row whose label names
+the listed id shows that id.
 
 | Category | Hardware | File | Example IDs |
 |---|---|---|---|
@@ -692,6 +694,12 @@ label names the listed id shows that id.
 | `gl2` | RDNA GL2 cache, apart from the concepts shared with `l2` | `gl2.yaml` | `gl2.hit_rate`, `gl2.fabric_rd_bw` |
 | `gcea` | gfx115x Graphics Core Efficiency Arbiter (DRAM interface) | `gcea.yaml` | `gcea.dram_rd_bw` |
 | `wgp` | RDNA workgroup processor | `wgp.yaml` | `wgp.util` |
+| `glarb` | gfx1250 GL1-GL2 arbiter (GLARBA, GLARBC) | `glarb.yaml` | `glarb.glarbc_util` |
+| `ea` | gfx1250 Efficiency Arbiter (HBM and remote memory interface) | `ea.yaml` | `ea.dram_rd_bw` |
+| `ch` | gfx1250 Central Hub (CHA, CHC) | `ch.yaml` | `ch.chc_util` |
+| `utcl1` | gfx1250 L1 address translation cache | `utcl1.yaml` | `utcl1.lookup_hit_rate` |
+| `txa` | gfx1250 texture addresser (TX_VCA counters) | `txa.yaml` | `txa.req_bus_util` |
+| `txd` | gfx1250 texture data (TX_VCD counters) | `txd.yaml` | `txd.util` |
 
 The numeric positional IDs (e.g. `"11.2.2"`) are row positions in `analysis_configs`;
 the metric library does not store them.

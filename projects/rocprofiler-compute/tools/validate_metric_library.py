@@ -96,11 +96,17 @@ ARCH_CEILINGS_WITHOUT_METRIC = {
     "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
     # The roofline shows the F32 and F64 VALU rates only.
     "gfx115x": ("FP16Flops", "BF16Flops"),
+    # The VALU rows show theoretical peaks.
+    "gfx1250": ("FP16Flops", "FP32Flops", "FP64Flops"),
 }
 VARIABLE_FIELDS = ("formula",)
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
-# by a different measured ceiling. gfx950 counts MXF8 MFMA work in the F8 counter.
-SHARED_FORMULA_IDS = {"compute.mfma_flops_mxf8": "compute.mfma_flops_f8"}
+# by a different measured ceiling. gfx950 and gfx1250 count MXF8 matrix work in the F8
+# counter.
+SHARED_FORMULA_IDS = {
+    "compute.mfma_flops_mxf8": "compute.mfma_flops_f8",
+    "compute.wmma_flops_mxfp8": "compute.wmma_flops_fp8",
+}
 
 # A row's equation comes from the first of these columns it has; a row with none
 # shows one equation in each of its table's value columns.
@@ -263,6 +269,13 @@ DISPLAY_VARIANTS["gfx115x"] = {
         "SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)",
     ),
 }
+DISPLAY_VARIANTS["gfx1250"] = {
+    "3.3.4": (
+        "GL0 Hit Rate",
+        "gl0.hit_rate",
+        "SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum) * 100",
+    ),
+}
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
 UNIT_VARIANTS = {
@@ -274,6 +287,19 @@ UNIT_VARIANTS["gfx115x"] = {
     "3.3.1": ("TCP Write Requests", "(Requests + $normUnit)"),
     "3.4.0": ("LDS Req", "(Requests + $normUnit)"),
     "7.2.4": ("LDS Allocation", "Bytes"),
+}
+UNIT_VARIANTS["gfx1250"] = {
+    "2.1.17": ("Active WGPs", "WGPs per Cycle"),
+    "3.4.0": ("LDS Load Requests", "(Requests + $normUnit)"),
+    "3.4.1": ("LDS Store Requests", "(Requests + $normUnit)"),
+    "3.4.2": ("LDS Atomic Requests", "(Requests + $normUnit)"),
+    "3.4.3": ("Async Load Requests", "(Requests + $normUnit)"),
+    "3.4.4": ("Async Store Requests", "(Requests + $normUnit)"),
+    "3.4.14": ("TDM Load Requests", "(Requests + $normUnit)"),
+    "3.4.15": ("TDM Store Requests", "(Requests + $normUnit)"),
+    "6.2.0": ("Dispatched Workgroups", "Count"),
+    "6.2.1": ("Dispatched Wavefronts", "Count"),
+    "7.2.5": ("LDS Allocation", "Bytes"),
 }
 UNIT_VARIANTS["gfx950"] = {
     **_CDNA_UNIT_VARIANTS,
@@ -723,15 +749,17 @@ def _peak_errors(
 
     Each row's peak is its metric's "peak" or "peak_empirical", and each library peak
     is the peak of a row that shows the metric. A Bytes/s row shows its peak in Bytes/s.
-    A measured peak on an arch the roofline benchmark does not run on is skipped.
+    A row's measured peak is skipped where the roofline benchmark does not measure that
+    ceiling on the arch (always, on an arch without a benchmark).
     """
-    benchmarked = bool(_arch_ceilings(arch))
+    measured = _arch_ceilings(arch)
     errors = []
     shown_fields = defaultdict(set)
     for row, metric_id in zip(rows, metric_ids):
         if row.peak is None or metric_id is None:
             continue
-        if not benchmarked and EMPIRICAL_PEAK_RE.search(row.peak):
+        ceiling = EMPIRICAL_PEAK_RE.search(row.peak)
+        if ceiling and ceiling.group(1) not in measured:
             continue
         metric = library.metrics[metric_id]
         fields = [
