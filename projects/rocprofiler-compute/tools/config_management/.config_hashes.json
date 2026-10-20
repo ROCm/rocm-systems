@@ -58,7 +58,7 @@
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "351893abac99742209bceb12d7d76484",
         "1600_vector_l1_data_cache.yaml": "01ed84754c71856d59a726849f0caede",
         "1700_l2_cache.yaml": "8d98c1933a53493cec6decb0c0caab1e",
-        "1800_l2_cache_per_channel.yaml": "127a2f5a0b9e63a3237b47afaf340b53",
+        "1800_l2_cache_per_channel.yaml": "17eb4dec1b555d6fb7e6e11cffe36622",
         "2100_pc_sampling.yaml": "613f224a198140f0dfdbd4116bbb38db"
       }
     },
@@ -80,7 +80,7 @@
         "1500_address_processing_unit_and_data_return_path_ta_td.yaml": "ffd35eb8edecdb23c58b308c8fbb49fe",
         "1600_vector_l1_data_cache.yaml": "01ed84754c71856d59a726849f0caede",
         "1700_l2_cache.yaml": "8b00ecb89ac2bad083a7dd7f3170218f",
-        "1800_l2_cache_per_channel.yaml": "4fd355a30be1172eaf9b74bb45038568",
+        "1800_l2_cache_per_channel.yaml": "5fba55606e7a4cc31d745be8254d41f4",
         "2100_pc_sampling.yaml": "613f224a198140f0dfdbd4116bbb38db"
       }
     },
