@@ -74,8 +74,6 @@ start_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
                                       std::string_view{ _name }, _args...);
         }
     }
-    _bundle.push(_tid);
-    _bundle.start();
 }
 
 template <typename... Args>
@@ -96,14 +94,6 @@ stop_bundle(bundle_t& _bundle, std::int64_t _tid, Args&&... _args)
     }
 
     LOG_TRACE("Stopping bundle '{}' in thread {}...", _bundle.key(), _tid);
-    auto _wc = *_bundle.get<comp::wall_clock>();
-    _wc.stop();
-    // update data
-    _bundle.store(std::plus<double>{}, _wc.get() * _wc.unit());
-    // stop all
-    _bundle.stop();
-    // exclude popping wall-clock
-    _bundle.pop(_tid);
     if constexpr(sizeof...(Args) > 0)
     {
         if(const char* _name = nullptr;
