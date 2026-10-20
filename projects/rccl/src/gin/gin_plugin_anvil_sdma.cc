@@ -30,10 +30,11 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <unordered_map>
 #include <vector>
 
 static std::map<void*, int> bufferRegRefcount;
-static std::map<uintptr_t, int> g_signalSpanRefcount;
+static std::unordered_map<uintptr_t, int> g_signalSpanRefcount;
 static std::mutex pluginMutex;
 
 // Per-rank comm objects whose LSA-signal peer connectivity has already been

@@ -443,7 +443,7 @@ void ncclGinDevCommClearFields(struct ncclDevComm* devComm) {
   devComm->ginConnectionStride_rcp32 = 0;
   devComm->ginContextStride = 0;
   memset(devComm->ginNetDeviceTypes, 0, sizeof(devComm->ginNetDeviceTypes));
-  memset(devComm->ginHandles, 0, sizeof(devComm->ginHandles));
+  for (auto& handle : devComm->ginHandles) handle = nullptr;
 }
 
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
