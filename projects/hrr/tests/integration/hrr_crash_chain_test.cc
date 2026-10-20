@@ -431,7 +431,7 @@ TEST_CASE("Unit_HRR_CaptureCrashChainRecording_Direct", "[.][hrr-direct]") {
 
   HRR_HIP_CHECK(hipSetDevice(0));
   std::atomic<bool> done{false};
-  std::atomic<int> copies{0}, failed{0};
+  std::atomic<int> copies{0}, failed{0}, ready{0};
   std::vector<std::thread> recorders;
   for (int t = 0; t < kRecorders; ++t) {
     recorders.emplace_back([&] {
@@ -439,17 +439,24 @@ TEST_CASE("Unit_HRR_CaptureCrashChainRecording_Direct", "[.][hrr-direct]") {
       int* d = nullptr;
       if (hipSetDevice(0) != hipSuccess || hipMalloc(&d, h.size() * sizeof(int)) != hipSuccess) {
         ++failed;
+        ++ready;
         return;
       }
-      while (!done.load()) {
+      bool first = true;
+      do {
         if (hipMemcpy(d, h.data(), h.size() * sizeof(int), hipMemcpyHostToDevice) == hipSuccess)
           ++copies;
         else
           ++failed;
-      }
+        if (first) ++ready;
+        first = false;
+      } while (!done.load());
     });
   }
-  usleep(50 * 1000);
+  // A thread's first HIP calls can build CLR's blit kernels through comgr, and
+  // LLVM's own SIGSEGV handler, installed over CLR's, deletes comgr's temporary
+  // files: raise only once every recorder is past them.
+  while (ready.load() < kRecorders) usleep(1000);
   for (int i = 0; i < kRecoveredSignals; ++i) {
     raise(SIGSEGV);
     usleep(1000);
