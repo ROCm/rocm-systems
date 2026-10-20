@@ -61,15 +61,20 @@ __device__ __forceinline__ uint64_t ddaLL128LoadWord(const uint64_t* p) {
 }
 
 // Element-wise add of the T-elements packed into two 8B payload words. An 8B
-// word holds 2 x fp32 or 4 x fp16/bf16; each 4B half is folded with the shared
-// vecElementAdd<T> (which handles the per-type packing), then recombined.
+// word holds 2 x fp32, 4 x fp16/bf16 or 8 x fp8. fp8 adds the whole word at
+// once; other types fold each 4B half with the shared vecElementAdd<T> (which
+// handles the per-type packing), then recombine.
 template <typename T>
 __device__ __forceinline__ uint64_t ddaLL128AddWord(uint64_t a, uint64_t b) {
-  if constexpr (std::is_same<T, bf16>::value) __atomic_signal_fence(__ATOMIC_SEQ_CST);
-  const uint32_t lo = vecElementAdd<T>((uint32_t)a, (uint32_t)b);
-  if constexpr (std::is_same<T, bf16>::value) __atomic_signal_fence(__ATOMIC_SEQ_CST);
-  const uint32_t hi = vecElementAdd<T>((uint32_t)(a >> 32), (uint32_t)(b >> 32));
-  return ((uint64_t)hi << 32) | (uint64_t)lo;
+  if constexpr (is_fp8_v<T>) {
+    return vecElementAddFp8x8<T>(a, b);
+  } else {
+    if constexpr (std::is_same<T, bf16>::value) __atomic_signal_fence(__ATOMIC_SEQ_CST);
+    const uint32_t lo = vecElementAdd<T>((uint32_t)a, (uint32_t)b);
+    if constexpr (std::is_same<T, bf16>::value) __atomic_signal_fence(__ATOMIC_SEQ_CST);
+    const uint32_t hi = vecElementAdd<T>((uint32_t)(a >> 32), (uint32_t)(b >> 32));
+    return ((uint64_t)hi << 32) | (uint64_t)lo;
+  }
 }
 
 // ---- Register-packed slice geometry (16B per lane) ----
@@ -86,6 +91,15 @@ constexpr int kDdaLL128DataBytesPerSlice =
   (kDdaLL128WireWordsPerSlice - kDdaLL128FlagWordsPerSlice) * 8; // 1920
 static_assert(kDdaLL128WireBytesPerSlice % (int)kDdaLL128LineBytes == 0,
               "a slice must be a whole number of lines");
+
+// Per-rank slot in 8B wire words. nStagingAreas is 1 for one-shot publish/reduce
+// and 2 for two-shot (publish plus write-back). Shared by all-reduce, all-gather
+// and reduce-scatter so the four tiers carve the bank the same way.
+constexpr size_t ddaLL128SlotWords(size_t bankSize, int nRanks, int nStagingAreas) {
+  return ddaLLSlotPkts(bankSize,
+                       sizeof(uint64_t) * (size_t)nRanks * (size_t)nStagingAreas,
+                       (size_t)kDdaLL128WireWordsPerSlice);
+}
 
 // The last lane of each line's lane group owns that line's flag word: lanes
 // 7,15,23,31 for a 128-byte line

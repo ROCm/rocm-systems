@@ -23,8 +23,19 @@ if TYPE_CHECKING:
 # Floating-source conversions that accept VOP3 ABS/NEG before integer conversion.
 F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32_f32'})
 
+# Mixed-type conversions that accept VOP3 ABS/NEG on an F32 source.
+F32_INPUT_CONVERSION_DTYPES = F32_TO_INTEGER_DTYPES | {'f64_f32'}
+
 # Mixed-type conversions that accept VOP3 ABS/NEG on a floating half source.
 F16_INPUT_CONVERSION_DTYPES = frozenset({'i16_f16', 'u16_f16', 'f32_f16'})
+
+# Floating-source operations with integer results; OMOD and CLAMP do not apply.
+# This covers operation-keyed cases only. F32-to-integer conversions use
+# F32_TO_INTEGER_DTYPES, and V_CVT_I16_F16/V_CVT_U16_F16 use
+# sema_enrich._NO_DST_MODIFIER_INSTRUCTIONS.
+INTEGER_RESULT_OPERATIONS = frozenset(
+    {'frexp_exp_f32', 'frexp_exp_f16', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'}
+)
 
 # Floating VOPC relations that read their sources; F and T/TRU are constants.
 FLOAT_COMPARE_RELATIONS = frozenset(
