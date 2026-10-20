@@ -41,3 +41,21 @@ add_test(NAME rdc_race_tests COMMAND rdc_race_tests)
 
 # Each race test adds its test file and the RDC sources it drives below, in a
 # target_sources() block of its own.
+
+# RdcModuleMgrImpl makes its telemetry and diagnostic modules on first use, and
+# rdcd's clients can ask for them from several threads at once. Compiles the
+# module manager, the two modules it makes, the library loader and the logger,
+# with stand-ins for the AMD SMI, ROCr and ROCp modules in the test file; CMake
+# compiles a source that another block lists too only once.
+target_sources(
+    rdc_race_tests
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_module_mgr_race.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcModuleMgrImpl.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcTelemetryModule.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcDiagnosticModule.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/bootstrap/src/RdcLibraryLoader.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/bootstrap/src/RdcLogger.cc
+)
+target_include_directories(rdc_race_tests PRIVATE ${PROJECT_SOURCE_DIR} ${AMD_SMI_INCLUDE_DIR})
+target_link_libraries(rdc_race_tests PRIVATE ${CMAKE_DL_LIBS})

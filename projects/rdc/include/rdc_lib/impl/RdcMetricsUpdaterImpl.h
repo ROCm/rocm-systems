@@ -23,6 +23,7 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_IMPL_RDCMETRICSUPDATERIMPL_H_
 
 #include <atomic>
+#include <chrono>              // NOLINT(build/c++11)
 #include <condition_variable>  // NOLINT(build/c++11)
 #include <future>              // NOLINT(build/c++11)
 #include <memory>
@@ -39,22 +40,32 @@ class RdcMetricsUpdaterImpl final : public RdcMetricsUpdater {
   void start() override;
   // Returns once both threads have finished; start() may be called again after it.
   void stop() override;
+  void wake() override;
+  // Between two updates the update loop sleeps until the watch table's next update is
+  // due, at least check_frequency microseconds and at most max_wait (100 ms with the
+  // first constructor), or until wake() or stop().
   explicit RdcMetricsUpdaterImpl(const RdcWatchTablePtr& watch_table,
                                  const uint32_t check_frequency);
+  RdcMetricsUpdaterImpl(const RdcWatchTablePtr& watch_table, uint32_t check_frequency,
+                        std::chrono::milliseconds max_wait);
   ~RdcMetricsUpdaterImpl();
 
  private:
   // Sleeps for `period`, or until stop().
   template <typename Duration>
   void pause(Duration period);
+  // Sleeps until the next update is due, or until wake() or stop().
+  void sleep_until_next_update();
 
   RdcWatchTablePtr watch_table_;
   std::atomic<bool> started_;
-  std::mutex mutex_;  // with cv_, wakes the threads from pause() on stop()
+  bool woken_ = false;  // set by wake() under mutex_, cleared by the update loop
+  std::mutex mutex_;    // with cv_, wakes the threads from their sleeps
   std::condition_variable cv_;
-  std::future<void> updater_;        // keep the future of updater
-  std::future<void> notif_updater_;  // keep the future of notif updater
-  const uint32_t _check_frequency;   // Check frequency in milliseconds
+  std::future<void> updater_;                 // keep the future of updater
+  std::future<void> notif_updater_;           // keep the future of notif updater
+  const uint32_t _check_frequency;            // shortest sleep between updates, in microseconds
+  const std::chrono::milliseconds max_wait_;  // longest sleep between updates
 };
 
 }  // namespace rdc

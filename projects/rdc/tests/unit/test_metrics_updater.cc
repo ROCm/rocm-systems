@@ -22,7 +22,9 @@ THE SOFTWARE.
 
 // RdcMetricsUpdaterImpl runs the update and notification loops of embedded RDC.
 // stop() must return only once both loops have finished, so that nothing calls
-// AMD SMI after RDC releases it, and start() must work again after stop().
+// AMD SMI after RDC releases it, and start() must work again after stop(). Between
+// updates the update loop sleeps until the watch table's next update is due, but
+// no longer than its longest wait, and wake() cuts that sleep short.
 // RdcMetricsUpdaterImpl.cc is compiled into this binary with the watch table
 // below standing in for RDC's.
 
@@ -45,7 +47,8 @@ namespace {
 using amd::rdc::RdcMetricsUpdaterImpl;
 using std::chrono::milliseconds;
 
-// Counts updates; while held, an update waits for release().
+// Counts updates; while held, an update waits for release(). Reports the next
+// update as due at once, or after set_next_update_ms().
 class TestWatchTable : public amd::rdc::RdcWatchTable {
  public:
   rdc_status_t rdc_field_update_all() override {
@@ -64,6 +67,10 @@ class TestWatchTable : public amd::rdc::RdcWatchTable {
     cv_.notify_all();
     return RDC_ST_OK;
   }
+  uint64_t ms_until_next_update() override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return next_update_ms_;
+  }
 
   void hold() {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -75,6 +82,10 @@ class TestWatchTable : public amd::rdc::RdcWatchTable {
       held_ = false;
     }
     cv_.notify_all();
+  }
+  void set_next_update_ms(uint64_t ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    next_update_ms_ = ms;
   }
   // Waits until an update is running, or more than `count` updates have started.
   bool wait_for_update(int count) {
@@ -134,6 +145,7 @@ class TestWatchTable : public amd::rdc::RdcWatchTable {
   bool held_ = false;
   int listens_ = 0;
   uint32_t longest_listen_ms_ = 0;
+  uint64_t next_update_ms_ = 0;
 };
 
 TEST(MetricsUpdater, StopWaitsForTheUpdateInProgress) {
@@ -201,6 +213,84 @@ TEST(MetricsUpdater, NotificationListensAreShort) {
   ASSERT_TRUE(table->wait_for_listen()) << "no notification listen started";
   updater.stop();
   EXPECT_LE(table->longest_listen_ms(), 1000u) << "a listen longer than 1 s delays stop()";
+}
+
+// With nothing due, the update loop sleeps for its longest wait (100 ms by default)
+// between updates, instead of waking up every check_frequency microseconds.
+TEST(MetricsUpdater, SleepsWhileNothingIsDue) {
+  auto table = std::make_shared<TestWatchTable>();
+  table->set_next_update_ms(60000);
+  RdcMetricsUpdaterImpl updater(table, 1000);
+  updater.start();
+  ASSERT_TRUE(table->wait_for_update(0));
+  int first = table->updates();
+  std::this_thread::sleep_for(milliseconds(1000));
+  int updates = table->updates() - first;
+  updater.stop();
+  // About 10; a loop that wakes up every millisecond makes about 1000.
+  EXPECT_LE(updates, 30) << updates << " updates in 1 s with nothing due";
+}
+
+// An update that is due comes on time.
+TEST(MetricsUpdater, UpdatesWhenAnUpdateIsDue) {
+  auto table = std::make_shared<TestWatchTable>();
+  table->set_next_update_ms(20);
+  RdcMetricsUpdaterImpl updater(table, 1000);
+  updater.start();
+  ASSERT_TRUE(table->wait_for_update(0));
+  int first = table->updates();
+  std::this_thread::sleep_for(milliseconds(1000));
+  int updates = table->updates() - first;
+  updater.stop();
+  // About 50; a loop that always sleeps for 100 ms makes about 10.
+  EXPECT_GE(updates, 20) << updates << " updates in 1 s with one due every 20 ms";
+}
+
+// wake() runs an update at once, however long the loop would sleep otherwise.
+TEST(MetricsUpdater, WakeRunsAnUpdate) {
+  auto table = std::make_shared<TestWatchTable>();
+  table->set_next_update_ms(60000);
+  RdcMetricsUpdaterImpl updater(table, 1000, std::chrono::minutes(1));
+  updater.start();
+  ASSERT_TRUE(table->wait_for_update(0));
+  int first = table->updates();
+  updater.wake();
+  EXPECT_TRUE(table->wait_for_update(first)) << "no update within 30 s of wake()";
+  updater.stop();
+}
+
+// A wake() during an update is not lost: another update follows instead of a sleep.
+TEST(MetricsUpdater, WakeDuringAnUpdateIsNotLost) {
+  auto table = std::make_shared<TestWatchTable>();
+  table->set_next_update_ms(60000);
+  RdcMetricsUpdaterImpl updater(table, 1000, std::chrono::minutes(1));
+  table->hold();
+  updater.start();
+  ASSERT_TRUE(table->wait_for_update(0)) << "no update started";
+  int first = table->updates();
+  updater.wake();
+  table->release();
+  EXPECT_TRUE(table->wait_for_update(first)) << "the wake() during the update was lost";
+  updater.stop();
+}
+
+// stop() does not wait for the next update to fall due.
+TEST(MetricsUpdater, StopDoesNotWaitForTheNextUpdate) {
+  auto table = std::make_shared<TestWatchTable>();
+  table->set_next_update_ms(60000);
+  RdcMetricsUpdaterImpl updater(table, 1000, std::chrono::minutes(1));
+  updater.start();
+  ASSERT_TRUE(table->wait_for_update(0));
+  std::promise<void> stopped;
+  std::thread stopper([&] {
+    updater.stop();
+    stopped.set_value();
+  });
+  if (stopped.get_future().wait_for(std::chrono::seconds(30)) != std::future_status::ready) {
+    ADD_FAILURE() << "stop() did not return within 30 s";
+    std::_Exit(1);  // the blocked thread cannot be joined
+  }
+  stopper.join();
 }
 
 }  // namespace

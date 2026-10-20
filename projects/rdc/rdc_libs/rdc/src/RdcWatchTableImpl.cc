@@ -991,6 +991,23 @@ rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
   return RDC_ST_OK;
 }
 
+uint64_t RdcWatchTableImpl::ms_until_next_update() {
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  uint64_t now = static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
+
+  std::lock_guard<std::mutex> guard(watch_mutex_);
+  // As rdc_field_update_all() decides: the clean-up runs once more than a second has
+  // passed, and a field falls due update_freq microseconds after its last update.
+  uint64_t next = last_cleanup_time_ + 1001;
+  for (const auto& field : fields_to_watch_) {
+    if (field.second.is_watching) {
+      next = std::min(next, field.second.last_update_time + field.second.update_freq / 1000);
+    }
+  }
+  return next > now ? next - now : 0;
+}
+
 rdc_status_t RdcWatchTableImpl::rdc_notif_update_cache(rdc_evnt_notification_t* events,
                                                        uint32_t num_events) {
   if (events == nullptr || num_events == 0) {

@@ -31,6 +31,8 @@ class RdcMetricsUpdater {
  public:
   virtual void start() = 0;
   virtual void stop() = 0;
+  // Runs the next update at once, instead of when the next watched field falls due.
+  virtual void wake() = 0;
 };
 
 typedef std::shared_ptr<RdcMetricsUpdater> RdcMetricsUpdaterPtr;

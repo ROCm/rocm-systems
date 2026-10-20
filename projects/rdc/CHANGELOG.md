@@ -62,6 +62,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - GPU indexes no longer shift when AMD SMI fails to identify a GPU, unless AMD SMI also lists CPUs and no identified GPU shares that GPU's socket. That GPU keeps its index and is reported as unavailable until AMD SMI identifies it: `rdci discovery` lists it as `unavailable`, `rdci link` shows no links for it, `rdci topo` shows no link to it, and its fields read N/A instead of another GPU's values.
 
+- An idle `rdcd`, or RDC in embedded mode, no longer checks for field updates every millisecond.
+
+- `rdc_shutdown()` before `rdc_stop_embedded()` no longer crashes the process.
+
+- `rdc_start_embedded()` and `rdc_connect()` return `RDC_ST_FAIL_LOAD_MODULE` when `librdc.so` or `librdc_client.so` comes from another RDC build and needs a function that is missing, instead of stopping the process when it first calls that function.
+
+- `rdcd` and RDC in embedded mode no longer crash when several clients or threads ask for background field updates at the same time, or start the first diagnostics at the same time.
+
 ## RDC 1.3.1 for ROCm 7.14.0
 
 ### Added
