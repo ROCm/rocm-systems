@@ -69,11 +69,11 @@ void SimulationEngine::shutdown() {
   if (!created_)
     return;
 
-  // Signal done. Workers will see this after the next barrier and exit.
+  // Lifecycle cleanup requires run() to have returned. A foreign thread stops
+  // an active engine through request_exit(), then joins its runner first.
   done_.store(true, std::memory_order_release);
 
-  // In single-threaded mode, wake idle CV. In multi-threaded mode,
-  // threads will see done_ after their current barrier epoch completes.
+  // Preserve the terminal publication while the contexts are still alive.
   wake_partition(0);
 
   workers_.clear();
@@ -384,7 +384,7 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       // Primaries still active so wait for an async event. With wall-clock
       // sync, use a timed sleep+check loop so we can advance sim time
       // proportionally to elapsed wall time during idle periods. Without
-      // pacing, use atomic::wait() for an efficient unbounded wait.
+      // pacing, block on the publication flag until a producer changes it.
       pacer_.pause();
       {
         auto timeout = pacer_.idle_wait_duration();
@@ -395,19 +395,25 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
             std::this_thread::sleep_for(timeout);
           }
         } else {
-          // Unbounded idle wait with periodic done_ check. Using a short
-          // sleep loop instead of atomic::wait avoids lost-notification races
-          // between request_exit() and the wait entry point.
-          using namespace std::chrono_literals;
+          // All foreign-thread exit paths publish a wake after storing done_.
+          // A publication before wait() changes its expected value; a later
+          // publication notifies the waiter. Only this worker consumes the
+          // flag, so it cannot change true->false while this thread waits.
           while (!ctx.idle_wakeup_.load(std::memory_order_acquire) &&
                  !done_.load(std::memory_order_acquire)) {
-            std::this_thread::sleep_for(1ms);
+            ctx.idle_wakeup_.wait(false, std::memory_order_acquire);
           }
         }
       }
       if (done_.load(std::memory_order_acquire))
         break;
-      ctx.idle_wakeup_.store(false, std::memory_order_release);
+      // Consume the notification atomically with respect to producers. A plain
+      // store can overwrite a concurrent wake without acquiring the producer's
+      // preceding writes (async work or a primary-count decrement), leaving the
+      // event or termination checks stale and the worker asleep. An exchange
+      // either acquires those writes or leaves a later producer's notification
+      // set for the next idle wait.
+      ctx.idle_wakeup_.exchange(false, std::memory_order_acq_rel);
 
       // After waking from idle, resume the pacing clock.
       pacer_.resume();
@@ -508,21 +514,21 @@ void SimulationEngine::idle_wait_quiescent() {
   // doorbell, so a run that is merely idle never becomes busy again.
   //
   // This runs in the barrier's completion function, which means every other
-  // worker is already parked inside the barrier -- so one bounded sleep here
-  // idles the whole engine, with no wakeup to lose and no peer left waiting on a
-  // partition that decided to sleep on its own.
+  // worker is already parked inside the barrier. Thus only its completion can
+  // consume the engine's idle publication flag (stored in context zero), even
+  // when different partitions complete successive epochs.
   //
-  // Bounded rather than unbounded: the loop must come back often enough to keep
-  // re-checking termination, and the exit paths that set done_ do not all post an
-  // async event. A 1ms cap costs an idle engine a thousand near-empty epochs a
-  // second, and the 50us poll keeps the added doorbell latency well inside the
-  // 100us cadence the command processor's own poll thread already runs at.
-  using namespace std::chrono_literals;
-  const auto deadline = std::chrono::steady_clock::now() + 1ms;
+  // Async insertion into ANY partition, the last primary release and request_exit all
+  // publish here. Internal done_ stores run on this thread or before workers start,
+  // so cannot leave a completion asleep. Return on even a
+  // stale publication: its acquire exchange orders the next epoch's event and
+  // termination checks after the producer. Clearing and then continuing to wait
+  // without those checks could strand a last-primary release.
+  auto &wakeup = contexts_[0]->idle_wakeup_;
   while (!done_.load(std::memory_order_acquire) && !any_async_pending()) {
-    if (std::chrono::steady_clock::now() >= deadline)
+    if (wakeup.exchange(false, std::memory_order_acq_rel))
       return;
-    std::this_thread::sleep_for(50us);
+    wakeup.wait(false, std::memory_order_acquire);
   }
 }
 
@@ -606,6 +612,11 @@ bool SimulationEngine::all_primaries_done() const {
 }
 
 bool SimulationEngine::check_termination(Tick lbts) {
+  // Async events posted during this epoch are absent from the published LBTS.
+  // Drain them in the next epoch before deciding that work is finished or that
+  // the next event exceeds the tick limit (notably terminal CP cancellation).
+  if (any_async_pending())
+    return false;
   if (all_primaries_done()) {
     // All primaries have signaled done. Enter draining phase: continue
     // processing until the system is fully quiescent (all incoming queues
@@ -619,7 +630,7 @@ bool SimulationEngine::check_termination(Tick lbts) {
   }
   // Multi-threaded max_ticks: terminate when global LBTS reaches max_ticks.
   if (config_.max_ticks > 0 && config_.num_threads > 1) {
-    if (lbts >= config_.max_ticks) {
+    if (lbts != TICK_MAX && lbts >= config_.max_ticks) {
       set_exit(ExitReason::COMPLETED, config_.max_ticks, "max ticks reached");
       done_.store(true, std::memory_order_release);
       return true;
@@ -644,10 +655,14 @@ bool SimulationEngine::check_termination(Tick lbts) {
 }
 
 void SimulationEngine::wake_partition_locked(PartitionID pid) {
-  if (config_.num_threads != 1 || pid >= contexts_.size())
+  if (pid >= contexts_.size())
     return;
-  PartitionContext &ctx = *contexts_[pid];
-  ctx.idle_wakeup_.store(true, std::memory_order_release);
+  // Multi-threaded quiescence has one waiter: the barrier completion, which may
+  // run on any partition. Route all async/exit/primary publications to one flag.
+  PartitionContext &ctx = *contexts_[0];
+  // Keep concurrent producers in one release sequence so consuming the wake
+  // acquires every publication, including one followed by a delayed older wake.
+  ctx.idle_wakeup_.exchange(true, std::memory_order_release);
   ctx.idle_wakeup_.notify_one();
 }
 
@@ -670,11 +685,9 @@ void SimulationEngine::request_exit(std::string reason, int code) {
     done_.store(true, std::memory_order_release);
   }
 
-  // In single-threaded mode, wake the idle wait. Guarded: the engine thread may be
-  // inside shutdown() destroying the contexts while the host thread requests exit.
+  // Wake the idle wait. Guarded: the engine thread may be inside shutdown()
+  // destroying the contexts while the host thread requests exit.
   wake_partition(0);
-  // In multi-threaded mode, done_ is checked after each barrier epoch.
-  // No explicit wake needed since threads will see it at the next barrier.
 }
 
 void SimulationEngine::schedule_event_async(Event *event, Tick timestamp,
@@ -702,9 +715,9 @@ void SimulationEngine::schedule_event_async(Event *event, Tick timestamp,
     aq.pending.store(true, std::memory_order_release);
   }
 
-  // Wake the target partition so idle workers pick up the new event.
+  // Publish to context zero so the single worker or quiescent barrier completion
+  // resumes event processing, regardless of the event's target partition.
   wake_partition_locked(pid);
-  // In multi-threaded mode, async events are drained at each barrier epoch.
 }
 
 void SimulationEngine::schedule_event_now(Event *event, std::unique_ptr<Message> message) {
