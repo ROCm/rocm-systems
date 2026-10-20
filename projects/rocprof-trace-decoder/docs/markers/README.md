@@ -176,7 +176,8 @@ per-lane addresses for all lanes. When at least one qualifying operation is
 traced, the funcmap records the wave size as `W:64` or `W:32`, and address-trace
 header IDs get `R:ID:extra_payload_count=N` metadata for the number of following
 payload records. Markers without an `R:` row have an implicit count of zero. The
-rolling decoder associates each header and payload with its wave generation.
+decoder groups payload words with their header in the reported
+`(cu, simd, wave_id)` stream.
 Consumers reconstruct addresses and apply the EXEC mask using the documented
 payload protocol.
 
@@ -417,10 +418,12 @@ Example output:
         1104 cu=0 simd=0 wave=3 id=4 kind=3 flags=- checkpoint
 ```
 
-Payload-bearing markers are emitted as additional records:
+Multi-packet markers carry their payload as an attached array of `uint32_t`
+words. The printing sample shows each word beneath its marker:
 
 ```
-        1120 cu=0 simd=0 wave=3 payload[0/1]=0x0000002a payload_value
+        1120 cu=0 simd=0 wave=3 id=5 kind=point flags=- payload_value
+    payload[0/1]=0x0000002a
 ```
 
 ### Weighted cost model
@@ -476,21 +479,13 @@ Clock packing cannot be combined with any marker that has an `R:` payload row.
 Numeric point and enter markers keep their legacy values; bare exits use the
 packed form because their value is indistinguishable from a generated exit.
 
-The packed clock is a truncated sample at instruction issue. Shaderdata and
-shader clocks have an unknown fixed phase per physical SIMD, so `att_tool.py`
-cancels it by comparing clock/time deltas to an arbitrary header in the same
-SIMD/layout. It takes the minimum from the complete domain and applies the
-relative correction retroactively. Apply this only to headers, never `R:`
-payloads. `Funcmap::marker_encoding` exposes
-`marker_id_mask()`, `packed_shader_clock_mask()`, and
-`shader_clock_source_mask()`; without `M:` metadata those describe the legacy
-full-width ID layout.
+The packed clock is a truncated sample read before trace emission. Marker
+consumers use the timestamp in `marker.shaderdata.time`. Raw `SHADERDATA`
+callbacks retain packed values and arrival timestamps.
 
-`att_tool.py` applies that correction by default and masks each recognized
-header to its ordinary legacy-form marker value for existing viewers. Use
-`--no-decode-markers` to preserve packed values and arrival timestamps.
-For externally packed payload blocks it may normalize a recognized header,
-but does not apply timestamp correction.
+Use `--no-decode-markers` to preserve raw values and arrival times in
+`att_tool.py` JSON. Its default marker processing is described in
+[SPEC.md](SPEC.md).
 
 For packed code objects, `att_tool.py` adds six-column `sqtt_funcmap` rows and
 packed-layout/payload tables to `code.json`. Readers that do not know them

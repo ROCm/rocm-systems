@@ -34,11 +34,9 @@
 #include <shared_mutex>
 #include <unordered_map>
 
-#ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
-#    include "rocprof_trace_decoder/cxx/code_printing.hpp"
+#include "rocprof_trace_decoder/cxx/code_printing.hpp"
 
 using AddressTable = rocprof_trace_decoder::codeobj::CodeobjAddressTranslate;
-#endif
 
 class Pipestate
 {
@@ -123,12 +121,10 @@ public:
     uint64_t trace_header = 0;
     Pipestate pipestate{};
 
-#ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
     HandleData() : instance(std::make_shared<AddressTable>()) {}
 
     WriteLock<AddressTable> decoder() const { return {instance, decoder_mut}; }
     ReadLock<AddressTable> decoder_read() const { return {instance, decoder_mut}; }
-#endif
 
     static std::mutex& get_map_mutex()
     {
@@ -169,8 +165,6 @@ public:
 private:
     std::shared_mutex mtx;
 
-#ifndef ROCPROF_TRACE_DECODER_COMGR_DISABLED
     mutable std::shared_mutex decoder_mut{};
     std::shared_ptr<AddressTable> instance;
-#endif
 };
