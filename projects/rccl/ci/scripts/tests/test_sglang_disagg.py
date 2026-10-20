@@ -180,7 +180,8 @@ class BannerLogsTest(unittest.TestCase):
 
 
 class AllocationScriptTest(TempWork):
-    def run_allocation(self, workload: str, env: dict) -> tuple[list[str], str]:
+    def run_allocation(self, workload: str, env: dict,
+                       built_images: list[str] | None = None) -> tuple[list[str], str]:
         popen = mock.MagicMock()
         popen.return_value.wait.return_value = 0
         phases = [(tm.BASELINE, self.work / "ab" / tm.BASELINE)]
@@ -189,9 +190,22 @@ class AllocationScriptTest(TempWork):
                 mock.patch.object(tm.subprocess, "run"):
             tm.run_ab_in_one_allocation(
                 phases, self.work, 4, workload, tm.WORKLOAD_CONFIGS[workload],
-                RUBY, timeout_minutes=1)
+                RUBY, timeout_minutes=1, built_images=built_images)
         cmd = popen.call_args.args[0]
         return cmd, (self.work / "ab" / "run_phases.sh").read_text()
+
+    def test_built_images_removed_from_every_node_after_the_phases(self):
+        images = ["rocm/sgl-dev:t-mad-36339bd8-run1-abc", "rocm/sgl-dev:t-rccl-gfx950-run1-abc"]
+        _, script = self.run_allocation(WORKLOAD, {}, built_images=images)
+        lines = script.splitlines()
+        cleanup = next(i for i, line in enumerate(lines) if "cleanup_images.sh" in line)
+        self.assertGreater(cleanup, max(i for i, line in enumerate(lines)
+                                        if line.startswith("madengine run")))
+        self.assertIn('--ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1', lines[cleanup])
+        self.assertTrue(lines[cleanup].endswith(" ".join(images) + " || true"))
+        self.assertTrue((self.work / "ab" / "cleanup_images.sh").is_file())
+        _, script = self.run_allocation(WORKLOAD, {})
+        self.assertNotIn("cleanup_images.sh", script)
 
     def test_dns_preflight_for_sglang_only(self):
         _, script = self.run_allocation(WORKLOAD, {})
