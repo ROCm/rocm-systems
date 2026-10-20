@@ -57,20 +57,20 @@ def measured(monkeypatch):
 def gfx908_copy(tmp_path, monkeypatch):
     """Copies of the gfx908 metric library and analysis configs: (library, configs)."""
     monkeypatch.setattr(MetricLibrary, "_cache", {})
-    library = tmp_path / "metric_library"
-    configs = tmp_path / "analysis_configs"
-    shutil.copytree(default_metric_library_dir() / "gfx908", library / "gfx908")
-    shutil.copytree(ANALYSIS_CONFIGS / "gfx908", configs / "gfx908")
-    return library, configs
+    return copy_shipped_trees(tmp_path, ["gfx908"])
 
 
 @pytest.fixture
 def gfx90a_copy(tmp_path, monkeypatch):
     """Copies of the gfx908 and gfx90a metric library and analysis configs."""
     monkeypatch.setattr(MetricLibrary, "_cache", {})
-    library = tmp_path / "metric_library"
-    configs = tmp_path / "analysis_configs"
-    for arch in ("gfx908", "gfx90a"):
+    return copy_shipped_trees(tmp_path, ["gfx908", "gfx90a"])
+
+
+def copy_shipped_trees(root, archs):
+    library = root / "metric_library"
+    configs = root / "analysis_configs"
+    for arch in archs:
         shutil.copytree(default_metric_library_dir() / arch, library / arch)
         shutil.copytree(ANALYSIS_CONFIGS / arch, configs / arch)
     return library, configs
@@ -142,11 +142,23 @@ def test_main_reports_errors(tree, monkeypatch, capsys):
         ),
         ("unit: Percent", "unit: Percent\n  id: x", "'id' is not a known field"),
         ("unit: Percent", "unit: Percent\n  unit: Pct", "duplicate keys ['unit']"),
+        ("unit: Percent", "unit: [Percent]", "'unit' must be a string"),
+        ('description: ""', "description: 5", "'description' must be a string"),
+        (
+            "unit: Percent",
+            "unit: Percent\n  coll_level: 5",
+            "'coll_level' must be a string",
+        ),
     ],
 )
 def test_metric_errors(tree, old, new, message):
     write_base_metrics(tree, BASE_METRIC.replace(old, new))
     assert any(message in error for error in validate(tree))
+
+
+def test_metric_must_be_a_mapping(tree):
+    write_base_metrics(tree, BASE_METRIC + "compute.zzz: 5\n")
+    assert "[gfx_base/compute.yaml] compute.zzz: must be a mapping" in validate(tree)
 
 
 def test_id_category_must_be_the_file_name(tree):
@@ -164,8 +176,13 @@ def test_keys_must_be_sorted(tree):
     assert any("[gfx_base/compute.yaml] keys are not sorted" in e for e in errors)
 
 
-def test_metrics_cannot_share_a_formula(tree):
-    second = BASE_METRIC.replace("valu_util", "valu_util_copy")
+@pytest.mark.parametrize(
+    "formula", ["SUM(SQ_ACTIVE_INST_VALU)", "ROUND(SUM(SQ_ACTIVE_INST_VALU), 0)"]
+)
+def test_metrics_cannot_share_a_formula(tree, formula):
+    second = BASE_METRIC.replace("valu_util", "valu_util_copy").replace(
+        "SUM(SQ_ACTIVE_INST_VALU)", formula
+    )
     write_base_metrics(tree, BASE_METRIC + second)
     errors = validate(tree)
     assert any(
@@ -185,6 +202,13 @@ def test_child_file_must_inherit_from_its_parent(tree):
     )
 
 
+def test_inherit_must_name_a_path(tree):
+    replace_in(tree / "gfx_c1" / "compute.yaml", "../gfx_base/compute.yaml", "5")
+    errors = validate(tree)
+    assert "[gfx_c1/compute.yaml] must inherit from gfx_base/compute.yaml" in errors
+    assert any("must be a relative file path" in error for error in errors)
+
+
 def test_base_file_cannot_inherit(tree):
     write_base_metrics(tree, "inherit: ../gfx_c1/compute.yaml\n" + BASE_METRIC)
     errors = validate(tree)
@@ -199,9 +223,16 @@ def test_merge_errors_are_reported(tree):
     assert any("cannot remove 'compute.missing'" in error for error in validate(tree))
 
 
-def test_variables_need_a_formula(tree):
-    write_text_file(tree / "gfx_base" / "variables.yaml", "X:\n  value: 1\n")
-    assert any("'formula' is required" in error for error in validate(tree))
+@pytest.mark.parametrize(
+    "text, message",
+    [
+        ("X:\n  value: 1\n", "'formula' is required"),
+        ("X:\n  formula: ' '\n", "'formula' must be a non-empty string"),
+    ],
+)
+def test_variables_need_a_formula(tree, text, message):
+    write_text_file(tree / "gfx_base" / "variables.yaml", text)
+    assert any(message in error for error in validate(tree))
 
 
 def test_unmeasured_ceiling(tree):
@@ -242,8 +273,13 @@ def test_unknown_arch_directory(tree):
 # =============================================================================
 
 
-def test_gfx908_copy_matches(gfx908_copy):
-    assert validate(*gfx908_copy) == []
+def test_schema_errors_skip_the_equivalence_check(gfx908_copy):
+    library, configs = gfx908_copy
+    replace_in(library / "gfx908" / "grbm.yaml", "unit: Cycles", "unit: Gbps")
+    assert validate(library, configs) == [
+        "[gfx908/grbm.yaml] grbm.gui_active_cycles: 'unit' 'Gbps' is an alias; "
+        "use 'GB/s'"
+    ]
 
 
 def test_changed_library_formula(gfx908_copy):
@@ -272,6 +308,24 @@ def test_counters_follow_coll_level(gfx908_copy, monkeypatch):
     assert any("counters missing" in error for error in validate(*gfx908_copy))
 
 
+def test_extra_library_counter(gfx908_copy):
+    library, configs = gfx908_copy
+    replace_in(
+        library / "gfx908" / "grbm.yaml",
+        "unit: Cycles\n",
+        "unit: Cycles\n  coll_level: SQ_EXTRA_LEVEL\n",
+    )
+    errors = validate(library, configs)
+    assert "[gfx908] extra counters: ['SQ_EXTRA_LEVEL']" in errors
+
+
+def test_changed_unit(gfx908_copy):
+    library, configs = gfx908_copy
+    replace_in(library / "gfx908" / "cp.yaml", "unit: Percent", "unit: Cycles")
+    errors = validate(library, configs)
+    assert any("unit 'Percent' is not 'Cycles' (cp.cpc_l2_util)" in e for e in errors)
+
+
 def test_changed_variable(gfx908_copy):
     library, configs = gfx908_copy
     replace_in(
@@ -288,8 +342,23 @@ def test_changed_row_peak(gfx908_copy):
     assert any("is neither the 'peak' nor the 'peak_empirical'" in e for e in errors)
 
 
-def test_gfx90a_copy_matches(gfx90a_copy):
-    assert validate(*gfx90a_copy) == []
+def test_changed_hidden_row_peak(gfx908_copy):
+    library, configs = gfx908_copy
+    path = configs / "gfx908" / "0200_system_speed_of_light.yaml"
+    replace_in(path, "$cu_per_gpu * 512 / 1000", "$cu_per_gpu * 999 / 1000")
+    errors = validate(library, configs)
+    assert any("2.1.1 MFMA FLOPs (BF16): peak" in error for error in errors)
+
+
+def test_library_peak_must_be_shown(gfx908_copy):
+    library, configs = gfx908_copy
+    replace_in(
+        library / "gfx908" / "cp.yaml",
+        "CPC_CPC_TCIU_IDLE)\n  unit: Percent\n",
+        "CPC_CPC_TCIU_IDLE)\n  unit: Percent\n  peak: 100\n",
+    )
+    errors = validate(library, configs)
+    assert "[gfx908] cp.cpc_l2_util: no analysis config row shows its 'peak'" in errors
 
 
 def test_changed_row_measured_peak(gfx90a_copy):
@@ -298,6 +367,29 @@ def test_changed_row_measured_peak(gfx90a_copy):
     replace_in(path, "$LDSBw_empirical_peak", "$L2Bw_empirical_peak")
     errors = validate(library, configs)
     assert any("4.1.11 LDS Bandwidth: peak $L2Bw_empirical_peak" in e for e in errors)
+
+
+def test_changed_rewritten_display_variant(gfx908_copy):
+    library, configs = gfx908_copy
+    replace_in(
+        configs / "gfx908" / "0400_roofline.yaml",
+        "* 4 * $lds_banks_per_cu) / SUM(End",
+        "* 8 * $lds_banks_per_cu) / SUM(End",
+    )
+    errors = validate(library, configs)
+    assert any("4.1.11 LDS Bandwidth: not the listed form" in e for e in errors)
+
+
+def test_changed_scaled_display_variant(gfx90a_copy):
+    """3.1.26 is checked even though row 17.2.0 also shows fabric.rd_bw."""
+    library, configs = gfx90a_copy
+    replace_in(
+        configs / "gfx90a" / "0300_memory_chart.yaml",
+        "TCC_EA_RDREQ_32B_sum) * 64) / (SUM(End",
+        "TCC_EA_RDREQ_32B_sum) * 128) / (SUM(End",
+    )
+    errors = validate(library, configs)
+    assert any("3.1.26 L2-Fabric Read BW: not the listed form" in e for e in errors)
 
 
 def test_renamed_display_variant(gfx908_copy):

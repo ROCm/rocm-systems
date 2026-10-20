@@ -18,10 +18,12 @@ For every arch in src/rocprof_compute_soc/metric_library/, check that:
   6. no two metrics on the arch share a formula;
   7. units use one spelling;
   8. the library matches analysis_configs: every equation a row shows is a library
-     formula (except DISPLAY_VARIANTS), every formula is shown, the no-filter counters
-     equal detect_counters(), the variables equal get_build_in_vars(), and every
-     row's peak is its metric's "peak" or "peak_empirical". Check 8 is temporary;
-     see "Equivalence with analysis_configs" below.
+     formula (DISPLAY_VARIANTS list the rows that show one in another form), every
+     formula is shown, every row's unit is its metric's unit (except UNIT_VARIANTS),
+     each row's peak is its metric's "peak" or "peak_empirical" and each library peak
+     is shown by a row, the no-filter counters equal detect_counters(), and the
+     variables equal get_build_in_vars(). Check 8 is temporary; see "Equivalence with
+     analysis_configs" below.
 """
 
 import re
@@ -29,7 +31,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, NamedTuple, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
@@ -44,6 +46,7 @@ from roofline.run_benchmark import BENCHMARKING_SUPPORTED  # noqa: E402
 from utils.metric_library import (  # noqa: E402
     METRIC_LIBRARY_PARENT_ARCH,
     VARIABLES_FILENAME,
+    MetricLibrary,
     arch_files,
     default_metric_library_dir,
     load_metric_library,
@@ -92,8 +95,6 @@ VARIABLE_FIELDS = ("formula",)
 ANALYSIS_CONFIGS = (
     Path(config.rocprof_compute_home) / "rocprof_compute_soc" / "analysis_configs"
 )
-# Any arch of a canonical config arch gives the same gpu series.
-SERIES_ARCH = {"gfx115x": "gfx1151"}
 # A row's equation comes from the first of these columns it has.
 MAIN_FORMS = ("avg", "value", "expr")
 ROUND_RE = re.compile(r"^\s*ROUND\((.*),\s*\d+\s*\)\s*$", re.DOTALL)
@@ -102,26 +103,46 @@ SECONDS_SCALE = "/(SUM(End_Timestamp-Start_Timestamp)/1e9)"
 NANOSECONDS = "/SUM(End_Timestamp-Start_Timestamp)"
 # TODO(AIPROFCOMP-820): remove with the row equation check when the old panel files are
 # deleted (see "Equivalence with analysis_configs" below).
-# Rows showing a metric in another display form (positional id -> label, metric id): a
-# Bytes/s scale (the library keeps GB/s) or the same equation rewritten.
+# Rows showing a metric in another display form (positional id -> label, metric id,
+# row equation). Without a row equation, the row shows the formula in Bytes/s (the
+# library keeps GB/s); with one, the row writes the formula differently.
 _CDNA_DISPLAY_VARIANTS = {
-    "3.1.16": ("VL1_L2 Read BW", "vl1d.l2_rd_bw"),
-    "3.1.17": ("VL1_L2 Write BW", "vl1d.l2_wr_bw"),
-    "3.1.18": ("VL1_L2 Atomic BW", "vl1d.l2_atomic_bw"),
-    "3.1.21": ("sL1D_L2 Read BW", "sl1d.l2_rd_bw"),
-    "3.1.24": ("IL1_L2 Read BW", "l1i.l2_bw"),
-    "3.1.26": ("L2-Fabric Read BW", "fabric.rd_bw"),
-    "3.1.27": ("L2-Fabric Write and Atomic BW", "fabric.wr_atomic_bw"),
-    "4.1.9": ("L2 Cache Bandwidth", "vl1d.l2_bw"),
-    "4.1.11": ("LDS Bandwidth", "lds.theoretical_bw"),
+    "3.1.16": ("VL1_L2 Read BW", "vl1d.l2_rd_bw", None),
+    "3.1.17": ("VL1_L2 Write BW", "vl1d.l2_wr_bw", None),
+    "3.1.18": ("VL1_L2 Atomic BW", "vl1d.l2_atomic_bw", None),
+    "3.1.21": ("sL1D_L2 Read BW", "sl1d.l2_rd_bw", None),
+    "3.1.24": ("IL1_L2 Read BW", "l1i.l2_bw", None),
+    "3.1.26": ("L2-Fabric Read BW", "fabric.rd_bw", None),
+    "3.1.27": ("L2-Fabric Write and Atomic BW", "fabric.wr_atomic_bw", None),
+    "4.1.9": (
+        "L2 Cache Bandwidth",
+        "vl1d.l2_bw",
+        "64 * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+        "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) "
+        "/ SUM(End_Timestamp - Start_Timestamp)",
+    ),
+    "4.1.11": (
+        "LDS Bandwidth",
+        "lds.theoretical_bw",
+        "SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu) "
+        "/ SUM(End_Timestamp - Start_Timestamp)",
+    ),
 }
 DISPLAY_VARIANTS = {
     "gfx908": _CDNA_DISPLAY_VARIANTS,
     "gfx90a": {
         **_CDNA_DISPLAY_VARIANTS,
-        "11.2.7": ("MFMA Utilization", "compute.mfma_util"),
+        "11.2.7": (
+            "MFMA Utilization",
+            "compute.mfma_util",
+            "100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) "
+            "/ (4 * SUM($cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))",
+        ),
     },
 }
+# Rows whose unit differs from their metric's (positional id -> label, unit).
+_CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
+UNIT_VARIANTS = {"gfx908": _CDNA_UNIT_VARIANTS, "gfx90a": _CDNA_UNIT_VARIANTS}
 
 
 def validate(metric_dir: Path, analysis_dir: Optional[Path] = None) -> list[str]:
@@ -163,7 +184,11 @@ def validate_arch(metric_dir: Path, arch: str) -> list[str]:
             errors.extend(_variables_errors(document, source))
         else:
             errors.extend(_metrics_errors(document, source, path.stem))
-            metrics.update(document)
+            metrics.update(
+                (metric_id, entry)
+                for metric_id, entry in document.items()
+                if isinstance(entry, dict)
+            )
     errors.extend(_ceiling_errors(arch, metrics))
     errors.extend(_shared_formula_errors(arch, metrics))
     return errors
@@ -178,10 +203,16 @@ def equivalence_errors(metric_dir: Path, analysis_dir: Path, arch: str) -> list[
         _canonical(metric["formula"]): metric_id
         for metric_id, metric in library.metrics.items()
     }
+    names = {
+        metric["name"].casefold(): metric_id
+        for metric_id, metric in library.metrics.items()
+    }
+    metric_ids = [_row_metric_id(row, variants, formulas, names) for row in rows]
     return [
-        *_row_errors(arch, rows, formulas, variants),
-        *_unshown_errors(arch, rows, formulas, variants),
-        *_peak_errors(arch, rows, formulas, variants, library),
+        *_row_errors(arch, rows, metric_ids, library),
+        *_unshown_errors(arch, rows, metric_ids, library),
+        *_unit_errors(arch, rows, metric_ids, library),
+        *_peak_errors(arch, rows, metric_ids, library),
         *_counter_errors(arch, library, analysis_dir),
         *_builtin_var_errors(arch, library),
     ]
@@ -226,7 +257,10 @@ def _parent_errors(
 ) -> list[str]:
     if parent_path is None:
         return [] if named is None else [f"[{source}] has no parent file to inherit"]
-    if named is None or (path.parent / named).resolve() != parent_path.resolve():
+    if (
+        not isinstance(named, str)
+        or (path.parent / named).resolve() != parent_path.resolve()
+    ):
         expected = f"{parent_path.parent.name}/{parent_path.name}"
         return [f"[{source}] must inherit from {expected}"]
     return []
@@ -279,7 +313,7 @@ def _metric_errors(entry: object, source: str, item: str) -> list[str]:
     for field in ("unit", "description"):
         if not isinstance(entry[field], str):
             errors.append(f"[{source}] {item}: '{field}' must be a string")
-    if entry["unit"] in UNIT_ALIASES:
+    if isinstance(entry["unit"], str) and entry["unit"] in UNIT_ALIASES:
         errors.append(
             f"[{source}] {item}: 'unit' {entry['unit']!r} is an alias; "
             f"use {UNIT_ALIASES[entry['unit']]!r}"
@@ -334,11 +368,11 @@ def _ceiling_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
 def _shared_formula_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
     ids_by_formula = defaultdict(list)
     for metric_id, metric in metrics.items():
-        ids_by_formula[str(metric.get("formula"))].append(metric_id)
+        ids_by_formula[_canonical(metric.get("formula"))].append(metric_id)
     return [
         f"[{arch}] {metric_ids}: share a formula; merge them into one id"
-        for metric_ids in ids_by_formula.values()
-        if len(metric_ids) > 1
+        for formula, metric_ids in ids_by_formula.items()
+        if formula is not None and len(metric_ids) > 1
     ]
 
 
@@ -366,76 +400,144 @@ def _arch_ceilings(arch: str) -> set[str]:
 # ---------------------------------------------------------------------------
 
 
+def _row_metric_id(
+    row: "_Row",
+    variants: dict[str, tuple],
+    formulas: dict[str, str],
+    names: dict[str, str],
+) -> Optional[str]:
+    """Return the id of the metric a row shows, or None if it shows none.
+
+    A row without an equation (value: None) is hidden; its label names the metric.
+    """
+    if row.legacy_id in variants:
+        metric_id = variants[row.legacy_id][1]
+        return metric_id if metric_id in formulas.values() else None
+    if row.equation is None:
+        return names.get(row.label.casefold())
+    return formulas.get(row.equation)
+
+
 def _row_errors(
     arch: str,
-    rows: list[tuple],
-    formulas: dict[str, str],
-    variants: dict[str, tuple[str, str]],
+    rows: list["_Row"],
+    metric_ids: list[Optional[str]],
+    library: MetricLibrary,
 ) -> list[str]:
+    variants = DISPLAY_VARIANTS.get(arch, {})
     errors = []
-    for legacy_id, label, equation, _ in rows:
-        if legacy_id in variants:
-            if label != variants[legacy_id][0]:
-                errors.append(f"[{arch}] {legacy_id} is now {label!r}; update variants")
-        elif equation is not None and equation not in formulas:
-            errors.append(f"[{arch}] {legacy_id} {label}: not a library formula")
-    return errors
-
-
-def _unshown_errors(
-    arch: str,
-    rows: list[tuple],
-    formulas: dict[str, str],
-    variants: dict[str, tuple[str, str]],
-) -> list[str]:
-    shown = {equation for _, _, equation, _ in rows}
-    shown |= {
-        equation.replace(SECONDS_SCALE, NANOSECONDS)
-        for legacy_id, _, equation, _ in rows
-        if legacy_id in variants and equation
-    }
-    return [
-        f"[{arch}] {metric_id}: no analysis config row shows its formula"
-        for formula, metric_id in formulas.items()
-        if formula not in shown
-    ]
-
-
-def _peak_errors(
-    arch: str,
-    rows: list[tuple],
-    formulas: dict[str, str],
-    variants: dict[str, tuple[str, str]],
-    library: Any,
-) -> list[str]:
-    """Check that each row's peak is its metric's "peak" or "peak_empirical".
-
-    A measured peak on an arch the roofline benchmark does not run on is skipped.
-    """
-    benchmarked = bool(_arch_ceilings(arch))
-    errors = []
-    for legacy_id, label, equation, peak in rows:
-        if peak is None or (not benchmarked and EMPIRICAL_PEAK_RE.search(peak)):
-            continue
-        if legacy_id in variants:
-            metric_id = variants[legacy_id][1]
-        else:
-            metric_id = formulas.get(equation)
-        if metric_id is None:
-            continue
-        metric = library.metrics[metric_id]
-        if peak not in (
-            _canonical(metric.get("peak")),
-            _canonical(metric.get("peak_empirical")),
-        ):
+    for row, metric_id in zip(rows, metric_ids):
+        if row.legacy_id in variants:
+            errors.extend(_variant_errors(arch, row, variants[row.legacy_id], library))
+        elif row.equation is not None and metric_id is None:
             errors.append(
-                f"[{arch}] {legacy_id} {label}: peak {peak} is neither the 'peak' nor "
-                f"the 'peak_empirical' of {metric_id}"
+                f"[{arch}] {row.legacy_id} {row.label}: not a library formula"
             )
     return errors
 
 
-def _counter_errors(arch: str, library: Any, analysis_dir: Path) -> list[str]:
+def _variant_errors(
+    arch: str, row: "_Row", variant: tuple, library: MetricLibrary
+) -> list[str]:
+    label, metric_id, row_equation = variant
+    if row.label != label:
+        return [f"[{arch}] {row.legacy_id} is now {row.label!r}; update variants"]
+    if metric_id not in library.metrics:
+        return [f"[{arch}] {row.legacy_id} {label}: no metric {metric_id}"]
+    if row_equation:
+        expected = _canonical(row_equation)
+    else:
+        formula = _canonical(library.metrics[metric_id]["formula"])
+        expected = formula.replace(NANOSECONDS, SECONDS_SCALE)
+    if row.equation == expected:
+        return []
+    return [f"[{arch}] {row.legacy_id} {label}: not the listed form of {metric_id}"]
+
+
+def _unshown_errors(
+    arch: str,
+    rows: list["_Row"],
+    metric_ids: list[Optional[str]],
+    library: MetricLibrary,
+) -> list[str]:
+    shown = {
+        metric_id
+        for row, metric_id in zip(rows, metric_ids)
+        if row.equation is not None
+    }
+    return [
+        f"[{arch}] {metric_id}: no analysis config row shows its formula"
+        for metric_id in library.metrics
+        if metric_id not in shown
+    ]
+
+
+def _unit_errors(
+    arch: str,
+    rows: list["_Row"],
+    metric_ids: list[Optional[str]],
+    library: MetricLibrary,
+) -> list[str]:
+    unit_variants = UNIT_VARIANTS.get(arch, {})
+    errors = []
+    for row, metric_id in zip(rows, metric_ids):
+        if row.unit is None or metric_id is None:
+            continue
+        label, unit = unit_variants.get(
+            row.legacy_id, (row.label, library.metrics[metric_id]["unit"])
+        )
+        if row.label != label:
+            errors.append(
+                f"[{arch}] {row.legacy_id} is now {row.label!r}; update unit variants"
+            )
+        elif UNIT_ALIASES.get(row.unit, row.unit) != unit:
+            errors.append(
+                f"[{arch}] {row.legacy_id} {row.label}: unit {row.unit!r} is not "
+                f"{unit!r} ({metric_id})"
+            )
+    return errors
+
+
+def _peak_errors(
+    arch: str,
+    rows: list["_Row"],
+    metric_ids: list[Optional[str]],
+    library: MetricLibrary,
+) -> list[str]:
+    """Check that row peaks and library peaks match, both ways.
+
+    Each row's peak is its metric's "peak" or "peak_empirical", and each library peak
+    is the peak of a row that shows the metric. A measured peak on an arch the roofline
+    benchmark does not run on is skipped.
+    """
+    benchmarked = bool(_arch_ceilings(arch))
+    errors = []
+    shown_peaks = defaultdict(set)
+    for row, metric_id in zip(rows, metric_ids):
+        if row.peak is None or metric_id is None:
+            continue
+        if not benchmarked and EMPIRICAL_PEAK_RE.search(row.peak):
+            continue
+        shown_peaks[metric_id].add(row.peak)
+        metric = library.metrics[metric_id]
+        if row.peak not in (
+            _canonical(metric.get("peak")),
+            _canonical(metric.get("peak_empirical")),
+        ):
+            errors.append(
+                f"[{arch}] {row.legacy_id} {row.label}: peak {row.peak} is neither the "
+                f"'peak' nor the 'peak_empirical' of {metric_id}"
+            )
+    errors.extend(
+        f"[{arch}] {metric_id}: no analysis config row shows its '{field}'"
+        for metric_id, metric in library.metrics.items()
+        for field in ("peak", "peak_empirical")
+        if field in metric and _canonical(metric[field]) not in shown_peaks[metric_id]
+    )
+    return errors
+
+
+def _counter_errors(arch: str, library: MetricLibrary, analysis_dir: Path) -> list[str]:
     has_membw_panel = any(
         (analysis_dir / arch).glob(f"{MEMBW_ANALYSIS_PANEL_ID}_*.yaml")
     )
@@ -452,7 +554,7 @@ def _counter_errors(arch: str, library: Any, analysis_dir: Path) -> list[str]:
     return errors
 
 
-def _builtin_var_errors(arch: str, library: Any) -> list[str]:
+def _builtin_var_errors(arch: str, library: MetricLibrary) -> list[str]:
     actual = {
         name: _canonical(variable["formula"])
         for name, variable in library.variables.items()
@@ -466,10 +568,8 @@ def _builtin_var_errors(arch: str, library: Any) -> list[str]:
     return [f"[{arch}] variables differ from get_build_in_vars()"]
 
 
-def _row_equations(
-    arch_dir: Path,
-) -> Iterator[tuple[str, str, Optional[str], Optional[str]]]:
-    """Yield (positional id, label, equation, peak) for each equation in arch_dir."""
+def _row_equations(arch_dir: Path) -> Iterator["_Row"]:
+    """Yield each equation a row of arch_dir shows."""
     for panel in load_panel_configs([str(arch_dir)]).values():
         for source in panel["data source"]:
             table = source.get("metric_table")
@@ -483,11 +583,12 @@ def _row_equations(
                 legacy_id = f"{table['id'] // 100}.{table['id'] % 100}.{index}"
                 forms = [form for form in MAIN_FORMS if form in row][:1] or list(row)
                 for form in forms:
-                    yield (
+                    yield _Row(
                         legacy_id,
                         label,
                         _canonical(row[form]),
                         _canonical(row.get("peak")),
+                        row.get("unit"),
                     )
 
 
@@ -512,19 +613,19 @@ def _make_soc(arch: str, analysis_dir: Path, membw_analysis: bool) -> OmniSoC_Ba
         set_selected=None,
     )
     machine_specs = SimpleNamespace(
-        gpu_arch=SERIES_ARCH.get(arch, arch),
+        gpu_arch=arch,
         gpu_series=_gpu_series(arch),
         l2_banks=16,
         num_xcd=1,
         rocminfo_lines=None,
     )
     soc = OmniSoC_Base(args, machine_specs)
-    soc.set_arch(SERIES_ARCH.get(arch, arch))
+    soc.set_arch(arch)
     return soc
 
 
 def _gpu_series(arch: str) -> Optional[str]:
-    return mi_gpu_specs.get_gpu_series(SERIES_ARCH.get(arch, arch))
+    return mi_gpu_specs.get_gpu_series(arch)
 
 
 # ---------------------------------------------------------------------------
@@ -562,6 +663,16 @@ def _text_errors(
         for field in fields
         if not isinstance(entry.get(field), str) or not entry[field].strip()
     ]
+
+
+class _Row(NamedTuple):
+    """One equation an analysis config row shows."""
+
+    legacy_id: str
+    label: str
+    equation: Optional[str]
+    peak: Optional[str]
+    unit: Optional[str]
 
 
 if __name__ == "__main__":
