@@ -304,7 +304,6 @@ that line:
 An instruction from inlined code counts in full toward every line of its inline
 stack. For example, an instruction that reads ``blockDim.x`` counts toward both
 the HIP header lines that implement it and the application line that reads it.
-An instruction whose source line is ``?`` adds to no source line.
 
 .. _pc-sampling-note:
 
