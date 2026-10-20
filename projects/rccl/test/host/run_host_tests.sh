@@ -192,6 +192,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroRocmwrap:$SCRIPT_DIR/host_tests_micro_rocmwrap.xml"
     "rccl-UnitTestsMicroAmdsmiWrap:$SCRIPT_DIR/host_tests_micro_amdsmi_wrap.xml"
     "rccl-UnitTestsMicroRomeModels:$SCRIPT_DIR/host_tests_micro_rome_models.xml"
+    "rccl-UnitTestsMicroTopo:$SCRIPT_DIR/host_tests_micro_topo.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
     "rccl-UnitTestsMicroGraph:$SCRIPT_DIR/host_tests_micro_graph.xml"
     "rccl-UnitTestsMicroRmaProxy:$SCRIPT_DIR/host_tests_micro_rma_proxy.xml"
