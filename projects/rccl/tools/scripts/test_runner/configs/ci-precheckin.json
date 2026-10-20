@@ -243,6 +243,17 @@
         {"name": "UtilityHostOnly_AllTests", "description": "nccl_device/utility.h compiled as plain C++ (host testAbort overload)", "test_filter": "*"}
       ]
     },
+    "unit_tests_micro_dda_coll": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroDdaColl",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "DdaCollMicrotests", "description": "Host-only algorithms/dda collective launchers microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
     "unit_tests_gdr": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsGdr",
@@ -456,6 +467,12 @@
       "name": "RCCL Unit Tests - nccl::utility plain-C++ build",
       "description": "rccl-UnitTestsUtilityHostOnly (nccl_device/utility.h as plain C++, CPU-only)",
       "config": "unit_tests_utility_host_only",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - algorithms/dda collective launchers",
+      "description": "rccl-UnitTestsMicroDdaColl (host-only algorithms/dda collective launchers microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_dda_coll",
       "enabled": true
     },
     {

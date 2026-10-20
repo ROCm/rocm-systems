@@ -276,6 +276,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   guard-less positional pair `libc_seam.h` / `libc_seam_undef.h` must bracket
   the production source include, after system headers and before test
   helpers. CMake pins the copied `ncclFuncStr` table to `src/init.cc`.
+- **`rccl-UnitTestsMicroDdaColl`**: the DDA launchers
+  `algorithms/dda/{all_gather,alltoall,reduce_scatter}/dda_*.cu` and the fabric
+  `all_reduce/dda_all_reduce_fabric*.cu` (each via `DDA_<UNIT>_CC_PATH`, from
+  `algorithms/dda/<coll>/<unit>-test.cc`); suites `Dda<Unit>Microtest`. Launches are recorded
+  through `DdaCollSeams.h`, not run. Its own binary: `rccl-UnitTestsMicro` links
+  `fakes/dda_fakes.cc`, which defines the same DDA entry points.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
@@ -966,6 +972,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroInit      # init.cc tests
 ./build/rccl-UnitTestsMicroInit-uncached
 ./build/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
+./build/rccl-UnitTestsMicroDdaColl            # src/algorithms/dda/*/dda_*.cu launchers
 ./build/rccl-UnitTestsMicroEnqueue            # enqueue.cc tests
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests

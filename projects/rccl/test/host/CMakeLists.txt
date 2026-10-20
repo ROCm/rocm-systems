@@ -78,6 +78,27 @@ foreach(_func_str_line
   rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/client-support-test.cc" "${_func_str_line}"
     "the production ncclFuncStr table")
 endforeach()
+# dda-coll-seams.cc copies these rccl_wrap.cc DDA param defaults; pin both copies.
+foreach(_dda_param
+    "RCCL_PARAM(DdaLL, \"DDA_LL\", 1)"
+    "RCCL_PARAM(DdaLLOneShotThreshold, \"DDA_LL_ONESHOT_THRESHOLD\", (size_t)(1) * 1024 * 1024)"
+    "RCCL_PARAM(DdaLL128OneShotThreshold, \"DDA_LL128_ONESHOT_THRESHOLD\", (size_t)(4) * 1024 * 1024)")
+  rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc" "${_dda_param}" "algorithms/dda/dda-coll-seams.cc")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/dda-coll-seams.cc" "${_dda_param}"
+    "the rccl_wrap.cc DDA param")
+endforeach()
+rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc"
+  "RCCL_PARAM(DdaLLTwoShotThreshold, \"DDA_LL_TWOSHOT_THRESHOLD\", (size_t)(2) * 1024 * 1024)"
+  "dda-coll-seams.cc: DefaultDdaLLTwoShotThreshold()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/dda-coll-seams.cc"
+  "DefaultDdaLLTwoShotThreshold(const ncclComm*) { return (size_t)(2) * 1024 * 1024; }"
+  "the rccl_wrap.cc DdaLLTwoShotThreshold default")
+rccl_assert_source_line("${_rccl_src_root}/rccl_wrap.cc"
+  "RCCL_PARAM(DdaLL128TwoShotThreshold, \"DDA_LL128_TWOSHOT_THRESHOLD\", (size_t)(64) * 1024 * 1024)"
+  "dda-coll-seams.cc: DefaultDdaLL128TwoShotThreshold()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/algorithms/dda/dda-coll-seams.cc"
+  "DefaultDdaLL128TwoShotThreshold(const ncclComm*) { return (size_t)(64) * 1024 * 1024; }"
+  "the rccl_wrap.cc DdaLL128TwoShotThreshold default")
 unset(_func_str_line)
 # fakes/topo_stubs.cc copies the AMD arm of topoPathTypeStr; pin both copies to one spelling.
 foreach(_path_cc "${_rccl_src_root}/graph/topo.cc" "${CMAKE_CURRENT_LIST_DIR}/fakes/topo_stubs.cc")
@@ -263,6 +284,30 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/graph/rccl_graph_gen.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # src/algorithms/dda/{all_gather,all_reduce,alltoall,reduce_scatter}/dda_*.cu launchers. Own binary:
+  # rccl-UnitTestsMicro links fakes/dda_fakes.cc, which defines the same DDA entry points.
+  set(TEST_MICRO_DDA_COLL_SOURCE_FILES
+    algorithms/dda/all_gather/dda-all-gather-fabric-test.cc
+    algorithms/dda/all_gather/dda-all-gather-fabric-ll-test.cc
+    algorithms/dda/all_gather/dda-all-gather-fabric-ll128-test.cc
+    algorithms/dda/all_gather/dda-all-gather-ipc-test.cc
+    algorithms/dda/all_reduce/dda-all-reduce-fabric-test.cc
+    algorithms/dda/all_reduce/dda-all-reduce-fabric-ll-test.cc
+    algorithms/dda/all_reduce/dda-all-reduce-fabric-ll128-test.cc
+    algorithms/dda/alltoall/dda-alltoall-fabric-test.cc
+    algorithms/dda/alltoall/dda-alltoall-fabric-ll-test.cc
+    algorithms/dda/alltoall/dda-alltoall-fabric-ll128-test.cc
+    algorithms/dda/alltoall/dda-alltoall-ipc-test.cc
+    algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-test.cc
+    algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll-test.cc
+    algorithms/dda/reduce_scatter/dda-reduce-scatter-fabric-ll128-test.cc
+    algorithms/dda/reduce_scatter/dda-reduce-scatter-ipc-test.cc
+    algorithms/dda/dda-coll-seams.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -1184,6 +1229,35 @@ if(_MICRO_BUILD_SYM_KERNELS)
 elseif(NOT BUILD_TESTS)
   message(WARNING "Skipping sym-kernels-index-test.cc for rccl-UnitTestsMicro: missing ${RCCL_HOST_HIPIFY_DIR}/gensrc/symmetric/sym_kernels_host.cc")
 endif()
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroDdaColl
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroDdaColl
+  SOURCES ${TEST_MICRO_DDA_COLL_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    DDA_ALL_GATHER_FABRIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric.cu.cpp"
+    DDA_ALL_GATHER_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu.cpp"
+    DDA_ALL_GATHER_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu.cpp"
+    DDA_ALL_GATHER_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_ipc.cu.cpp"
+    DDA_ALL_REDUCE_FABRIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric.cu.cpp"
+    DDA_ALL_REDUCE_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu.cpp"
+    DDA_ALL_REDUCE_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu.cpp"
+    DDA_ALLTOALL_FABRIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric.cu.cpp"
+    DDA_ALLTOALL_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp"
+    DDA_ALLTOALL_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp"
+    DDA_ALLTOALL_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_ipc.cu.cpp"
+    DDA_REDUCE_SCATTER_FABRIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric.cu.cpp"
+    DDA_REDUCE_SCATTER_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll.cu.cpp"
+    DDA_REDUCE_SCATTER_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_fabric_ll128.cu.cpp"
+    DDA_REDUCE_SCATTER_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/reduce_scatter/dda_reduce_scatter_ipc.cu.cpp"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda_coll.yaml")
+# The launchers define __global__ kernels; an embedded empty GPU binary keeps clang from referencing an
+# undefined __hip_fatbin_<cuid>. Registration is faked in dda-coll-seams.cc.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary" "")
+target_compile_options(rccl-UnitTestsMicroDdaColl PRIVATE
+  "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroRmaProxy
