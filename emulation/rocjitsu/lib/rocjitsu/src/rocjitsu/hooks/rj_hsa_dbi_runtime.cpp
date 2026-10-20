@@ -36,6 +36,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <ranges>
 #include <string>
 #include <sys/stat.h>
@@ -180,19 +181,25 @@ void unretain(hsa_executable_t executable, const Blob &bytes) {
     g_state.executables.erase(map_it);
 }
 
-std::vector<Blob> take_retained(hsa_executable_t executable) {
+size_t retained_count(hsa_executable_t executable) {
   std::lock_guard lock(g_state.storage_mutex);
-  auto node = g_state.executables.extract(executable.handle);
-  return node.empty() ? std::vector<Blob>{} : std::move(node.mapped());
+  const auto it = g_state.executables.find(executable.handle);
+  return it == g_state.executables.end() ? 0 : it->second.size();
 }
 
-void restore_retained(hsa_executable_t executable, std::vector<Blob> buffers) {
-  if (buffers.empty())
-    return;
+// Releases the first @p count buffers retained for @p executable. Any retained
+// after they were counted belong to an executable created with the same handle
+// once the destroy returned, and stay.
+void release_retained(hsa_executable_t executable, size_t count) {
   std::lock_guard lock(g_state.storage_mutex);
-  std::vector<Blob> &retained = g_state.executables[executable.handle];
-  retained.insert(retained.end(), std::make_move_iterator(buffers.begin()),
-                  std::make_move_iterator(buffers.end()));
+  const auto it = g_state.executables.find(executable.handle);
+  if (it == g_state.executables.end())
+    return;
+  std::vector<Blob> &buffers = it->second;
+  const auto released = static_cast<std::ptrdiff_t>(std::min(count, buffers.size()));
+  buffers.erase(buffers.begin(), buffers.begin() + released);
+  if (buffers.empty())
+    g_state.executables.erase(it);
 }
 
 bool install(HsaApiTable *table) {
@@ -268,9 +275,13 @@ void uninstall() {
     if (core->hsa_system_get_major_extension_table_fn == system_get_major_extension_table)
       core->hsa_system_get_major_extension_table_fn = original->get_extension_table;
   }
-  // ROCr destroys its loader after OnUnload, so loaded bytes stay retained.
   g_state.vendor_reader.store(nullptr, std::memory_order_release);
   g_state.core = nullptr;
+  // ROCr destroys its loader after OnUnload, so loaded bytes stay retained.
+  // Captured readers are dropped: the runtime can hand their handles to new
+  // readers before the hook is reinstalled, and the hook would not see those.
+  std::lock_guard storage_lock(g_state.storage_mutex);
+  g_state.readers.clear();
 }
 
 Blob copy_bytes(const void *data, size_t size) {
@@ -311,8 +322,8 @@ Blob read_file_region(hsa_file_t file, size_t offset, size_t requested_size) {
 
 // A reader whose bytes cannot be captured still works: its loads go through
 // unchanged and are counted as unknown readers. Any bytes already stored under
-// its handle belong to an earlier reader whose destroy the hook never saw, such
-// as one that outlived OnUnload, so they are dropped.
+// its handle belong to an earlier reader whose destroy the hook never saw, so
+// they are dropped.
 void capture_reader(hsa_code_object_reader_t reader, Blob bytes) {
   if (bytes != nullptr)
     store_reader(reader, std::move(bytes));
@@ -330,6 +341,29 @@ std::string join_errors(const std::vector<std::string> &errors) {
   return joined;
 }
 
+// Destroys a reader the lower API created, and clears the caller's handle,
+// unless released first. Armed as soon as the reader exists, so an exception
+// from the hook's own work afterwards cannot leak it.
+class ReaderGuard {
+public:
+  ReaderGuard(const OriginalApi &api, hsa_code_object_reader_t *reader)
+      : api_(api), reader_(reader) {}
+  ReaderGuard(const ReaderGuard &) = delete;
+  ReaderGuard &operator=(const ReaderGuard &) = delete;
+  ~ReaderGuard() {
+    if (reader_ == nullptr)
+      return;
+    (void)api_.destroy_reader(*reader_);
+    *reader_ = {};
+  }
+
+  void release() { reader_ = nullptr; }
+
+private:
+  const OriginalApi &api_;
+  hsa_code_object_reader_t *reader_;
+};
+
 hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, const Blob &bytes,
                               const char *options, hsa_loaded_code_object_t *loaded,
                               const OriginalApi &api) {
@@ -337,6 +371,9 @@ hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, co
   const hsa_status_t reader_status = api.create_memory(bytes->data(), bytes->size(), &owned_reader);
   if (reader_status != HSA_STATUS_SUCCESS)
     return reader_status;
+  // ROCr is done with the reader once the load returns; the bytes it read are
+  // retained below.
+  const ReaderGuard reader_guard(api, &owned_reader);
 
   // ROCr aliases a memory reader's bytes into the loaded code object, so they
   // must live until the executable is destroyed. Reserve their slot before the
@@ -345,7 +382,6 @@ hsa_status_t load_owned_bytes(hsa_executable_t executable, hsa_agent_t agent, co
   const hsa_status_t status = api.load_agent(executable, agent, owned_reader, options, loaded);
   if (status != HSA_STATUS_SUCCESS)
     unretain(executable, bytes);
-  (void)api.destroy_reader(owned_reader);
   return status;
 }
 
@@ -359,8 +395,11 @@ hsa_status_t HSA_API reader_create_from_memory(const void *code_object, size_t s
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     const hsa_status_t status = api->create_memory(code_object, size, reader);
-    if (status == HSA_STATUS_SUCCESS)
-      capture_reader(*reader, copy_bytes(code_object, size));
+    if (status != HSA_STATUS_SUCCESS)
+      return status;
+    ReaderGuard reader_guard(*api, reader);
+    capture_reader(*reader, copy_bytes(code_object, size));
+    reader_guard.release();
     return status;
   });
 }
@@ -374,8 +413,11 @@ hsa_status_t HSA_API reader_create_from_file(hsa_file_t file, hsa_code_object_re
     if (api == nullptr)
       return HSA_STATUS_ERROR;
     const hsa_status_t status = api->create_file(file, reader);
-    if (status == HSA_STATUS_SUCCESS)
-      capture_reader(*reader, read_file_region(file, 0, 0));
+    if (status != HSA_STATUS_SUCCESS)
+      return status;
+    ReaderGuard reader_guard(*api, reader);
+    capture_reader(*reader, read_file_region(file, 0, 0));
+    reader_guard.release();
     return status;
   });
 }
@@ -386,11 +428,17 @@ hsa_status_t vendor_reader_create(hsa_file_t file, size_t offset, size_t size,
     if (reader == nullptr)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     const VendorReaderCreate original = g_state.vendor_reader.load(std::memory_order_acquire);
-    if (original == nullptr)
+    // Readers from the extension are destroyed through the core API.
+    const std::shared_ptr<const OriginalApi> api =
+        g_state.active_api.load(std::memory_order_acquire);
+    if (original == nullptr || api == nullptr)
       return HSA_STATUS_ERROR;
     const hsa_status_t status = original(file, offset, size, reader);
-    if (status == HSA_STATUS_SUCCESS)
-      capture_reader(*reader, read_file_region(file, offset, size));
+    if (status != HSA_STATUS_SUCCESS)
+      return status;
+    ReaderGuard reader_guard(*api, reader);
+    capture_reader(*reader, read_file_region(file, offset, size));
+    reader_guard.release();
     return status;
   });
 }
@@ -445,13 +493,12 @@ hsa_status_t HSA_API executable_destroy(hsa_executable_t executable) {
         g_state.active_api.load(std::memory_order_acquire);
     if (api == nullptr)
       return HSA_STATUS_ERROR;
-    // Taken out before the destroy and freed after it: ROCr reads the bytes
-    // until it returns, and an executable created with the same handle once
-    // it has must not lose its own.
-    std::vector<Blob> retained = take_retained(executable);
+    // Released only once the destroy succeeds: ROCr reads the bytes until it
+    // returns, and an executable whose destroy fails keeps using them.
+    const size_t retained = retained_count(executable);
     const hsa_status_t status = api->destroy_executable(executable);
-    if (status != HSA_STATUS_SUCCESS)
-      restore_retained(executable, std::move(retained));
+    if (status == HSA_STATUS_SUCCESS)
+      release_retained(executable, retained);
     return status;
   });
 }

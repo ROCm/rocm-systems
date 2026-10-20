@@ -43,4 +43,19 @@ namespace rocjitsu {
   return false;
 }
 
+/// @brief Whether an instruction reads the PC.
+///
+/// @details True for s_getpc_b64 (s_get_pc_i64 on gfx1250) and for calls,
+/// which the decoder all give a PC source operand. s_add_pc_i64 models the PC
+/// only as its destination, and the PC-relative prefetches carry no PC operand,
+/// so neither is reported.
+[[nodiscard]] inline bool reads_pc(const Instruction &inst) {
+  for (int i = 0; i < inst.num_src_operands(); ++i) {
+    const auto *operand = inst.src_operand(i);
+    if (operand && operand->to_special_reg_class() == RegClass::PC)
+      return true;
+  }
+  return false;
+}
+
 } // namespace rocjitsu

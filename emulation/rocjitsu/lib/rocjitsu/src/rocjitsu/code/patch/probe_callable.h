@@ -249,6 +249,12 @@ struct ProbeCallable {
 ///     operands do not name every register it reads and writes, and
 ///   - end in `s_setpc_b64 s[30:31]`.
 ///
+/// Only the body's instructions are copied, not the probe object's data, so
+/// the body must not reference any: no global, `__constant__` variable, string
+/// literal, or library routine that reads a table. A linked probe reaches such
+/// data through s_getpc_b64 and an offset with no relocation left, which is not
+/// detected here.
+///
 /// On success the returned ProbeCallable carries the ABI derived from
 /// AmdGpuFuncReturnS30S31 and @p num_arg_dwords. Returns std::nullopt (with a
 /// reason written to @p error_out, if non-null) on any failure.
