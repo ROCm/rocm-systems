@@ -10,6 +10,7 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/code_object.h"
 
 #include "../dbi_test_util.h"
@@ -147,6 +148,58 @@ TEST(KernelDescriptorScan, WrappingSymtabRangeIsRejected) {
   const auto [text_off, text_sz] = clean_text_coords(code);
   const auto image = make_gfx950_wrapping_symtab_elf(code, /*private_bytes=*/64);
   EXPECT_TRUE(scan_kernel_descriptors({image.data(), image.size()}, text_off, text_sz).empty());
+}
+
+TEST(KernelDescriptorScan, UnalignedImageSpanDoesNotRequireNativeElfAlignment) {
+  const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
+  const auto [text_off, text_sz] = clean_text_coords(code);
+  const auto image = make_gfx950_kernel_elf(code, 64);
+  std::vector<uint8_t> storage(image.size() + 1);
+  std::memcpy(storage.data() + 1, image.data(), image.size());
+  const auto found = scan_kernel_descriptors(std::span(storage).subspan(1), text_off, text_sz);
+  ASSERT_EQ(found.size(), 1u);
+  EXPECT_EQ(found.front().kernel_name, "test_kernel");
+}
+
+TEST(KernelDescriptorScan, UnalignedSectionAndSymbolTablesAreReadAsBytes) {
+  const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
+  const auto [text_off, text_sz] = clean_text_coords(code);
+  auto image = make_gfx950_kernel_elf(code, 64);
+  Elf64_Ehdr header{};
+  std::memcpy(&header, image.data(), sizeof(header));
+  std::vector<Elf64_Shdr> sections(header.e_shnum);
+  std::memcpy(sections.data(), image.data() + header.e_shoff, sections.size() * sizeof(Elf64_Shdr));
+  for (auto &section : sections) {
+    if (section.sh_type != SHT_SYMTAB)
+      continue;
+    const std::vector<uint8_t> symbols(image.begin() + section.sh_offset,
+                                       image.begin() + section.sh_offset + section.sh_size);
+    while (image.size() % 8 != 1)
+      image.push_back(0);
+    section.sh_offset = image.size();
+    image.insert(image.end(), symbols.begin(), symbols.end());
+  }
+  while (image.size() % 8 != 1)
+    image.push_back(0);
+  header.e_shoff = image.size();
+  const auto bytes = std::as_bytes(std::span(sections));
+  image.insert(image.end(), reinterpret_cast<const uint8_t *>(bytes.data()),
+               reinterpret_cast<const uint8_t *>(bytes.data()) + bytes.size());
+  std::memcpy(image.data(), &header, sizeof(header));
+  ASSERT_EQ(scan_kernel_descriptors(image, text_off, text_sz).size(), 1u);
+}
+
+TEST(KernelDescriptorScan, OverflowingDescriptorEntryDisplacementIsRejected) {
+  const std::vector<uint32_t> code = {kMovV3V2, 0xbf810000u};
+  const auto [text_off, text_sz] = clean_text_coords(code);
+  auto image = make_gfx950_kernel_elf(code, 64);
+  const auto original = scan_kernel_descriptors(image, text_off, text_sz);
+  ASSERT_EQ(original.size(), 1u);
+  KD descriptor = original.front().descriptor;
+  descriptor.kernel_code_entry_byte_offset = INT64_MAX;
+  std::memcpy(image.data() + original.front().descriptor_file_offset, &descriptor,
+              sizeof(descriptor));
+  EXPECT_TRUE(scan_kernel_descriptors(image, text_off, text_sz).empty());
 }
 
 // A `.kd` whose 64-byte descriptor extends past its owning section's sh_size into the

@@ -178,3 +178,94 @@ if(TARGET consan_original_fixtures)
     )
     rj_add_gtest_tests(consan_image_test)
 endif()
+
+if(RJ_BUILD_CONSAN_RUNTIME AND TARGET consan_original_fixtures)
+    add_executable(
+        consan_hsa_plugin_test
+        ${PROJECT_SOURCE_DIR}/tests/code/consan/hsa_plugin_test.cpp
+    )
+    target_link_libraries(
+        consan_hsa_plugin_test
+        PRIVATE
+            rocjitsu_hsa_tools_headers
+            rocjitsu_consan_contract
+            GTest::gtest_main
+            Threads::Threads
+            ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(consan_hsa_plugin_test PRIVATE_INCLUDES WARNINGS)
+    add_dependencies(consan_hsa_plugin_test hsa_consan consan_artifact_fixture)
+    target_compile_definitions(
+        consan_hsa_plugin_test
+        PRIVATE
+            CONSAN_PLUGIN_FIXTURE="$<TARGET_FILE:hsa_consan>"
+            CONSAN_ORIGINAL_FIXTURE="${_fixture_dir}/race.hsaco"
+            CONSAN_ARTIFACT_FIXTURE="${_artifact}"
+    )
+    rj_add_gtest_tests(consan_hsa_plugin_test)
+endif()
+
+if(
+    RJ_BUILD_CONSAN_RUNTIME
+    AND TARGET consan_original_fixtures
+    AND EXISTS "${ROCM_PATH}/lib/libhsa-runtime64.so"
+)
+    add_executable(
+        consan_hsa_runner
+        ${PROJECT_SOURCE_DIR}/tests/dbi/consan_hsa_runner.cpp
+    )
+    target_include_directories(
+        consan_hsa_runner
+        PRIVATE ${ROCJITSU_SRC_DIR} ${ROCJITSU_INCLUDE_DIR}
+    )
+    target_include_directories(
+        consan_hsa_runner
+        SYSTEM
+        PRIVATE ${ROCM_PATH}/include
+    )
+    target_link_libraries(
+        consan_hsa_runner
+        PRIVATE ${ROCM_PATH}/lib/libhsa-runtime64.so ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(consan_hsa_runner WARNINGS)
+    foreach(
+        _case
+        race
+        disjoint
+        read_read
+        collision
+        single_lane
+        repeat
+        alias
+        immediate
+        four_ranges
+        exhausted
+        empty
+        branched
+        wrong-artifact
+        bad-geometry
+        profiling
+        reused-signal
+    )
+        add_test(
+            NAME ConSanRuntimeHardware.${_case}
+            COMMAND
+                ${Python3_EXECUTABLE} -B
+                ${PROJECT_SOURCE_DIR}/tests/dbi/consan_runtime_e2e.py --prepare
+                $<TARGET_FILE:rj_consan_prepare> --runner
+                $<TARGET_FILE:consan_hsa_runner> --inspect
+                $<TARGET_FILE:consan_capture_inspect> --plugin
+                $<TARGET_FILE:hsa_consan> --fixtures ${_fixture_dir} --source
+                ${PROJECT_SOURCE_DIR} --root ${RJ_CONSAN_TEST_ARTIFACT_ROOT}
+                --case ${_case}
+        )
+        set_tests_properties(
+            ConSanRuntimeHardware.${_case}
+            PROPERTIES
+                SKIP_RETURN_CODE 77
+                RESOURCE_LOCK consan-gfx1100
+                TIMEOUT 120
+                LABELS "consan;physical-gpu"
+        )
+    endforeach()
+endif()
