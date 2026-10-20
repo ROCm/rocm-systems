@@ -27,6 +27,7 @@ from rocprof_compute_soc.soc_base import (
     flat_counters_in_perfmon_file,
 )
 from utils.utils_common import canonical_config_arch, convert_metric_id_to_panel_info
+from utils.utils_counter_defs import extract_counters_and_variables
 
 # =============================================================================
 # Fixtures
@@ -53,11 +54,11 @@ GFX1250_PERFMON_CONFIG = {
 
 # CP Utilization (metric id 17.1.1): a GRBM ratio whose numerator and
 # denominator must land in the same perfmon pass.
-CP_UTIL_METRIC_YAML = (
-    "avg: 100 * SUM(GRBM_CP_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)\n"
-    "min: 100 * MIN(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)\n"
-    "max: 100 * MAX(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)\n"
-)
+CP_UTIL_METRIC_EXPRESSIONS = [
+    "100 * SUM(GRBM_CP_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum)",
+    "100 * MIN(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)",
+    "100 * MAX(GRBM_CP_BUSY_sum / GRBM_GUI_ACTIVE_sum)",
+]
 
 # One unique synthetic counter per metric table, so the counter set returned by
 # detect_counters() reveals exactly which tables were selected.
@@ -67,6 +68,30 @@ TABLE_3013_COUNTER = "TCC_EA_COUNTER"  # block 30, table 3013
 FIXTURE_COUNTERS = {BASELINE_COUNTER, TABLE_3012_COUNTER, TABLE_3013_COUNTER}
 
 HBM_TRAFFIC_METRIC_NAMES = {"HBM Read Traffic", "HBM Write and Atomic Traffic"}
+
+# Every counter name outside the expressions is unique, so any leak from a
+# comment, description, metric name or coll_level shows up in the result.
+PROSE_ANALYSIS_CONFIG = """\
+# SQ_COMMENT_COUNTER in a comment
+Panel Config:
+  id: 200
+  title: Speed of Light
+  data source:
+  - metric_table:
+      id: 201
+      title: SQ_TITLE_COUNTER table
+      header:
+        metric: Metric
+        avg: Avg
+        unit: Unit
+      metric:
+        SQ_METRIC_NAME_COUNTER:
+          avg: SUM(SQ_LEVEL_WAVES_ACCUM) / SUM(SQ_BUSY_CYCLES)  # SQ_TRAILING_COUNTER
+          unit: Wavefronts
+          coll_level: SQ_LEVEL_WAVES
+  metrics_description:
+    SQ_METRIC_NAME_COUNTER: Uses SQ_DESCRIPTION_COUNTER.
+"""
 
 
 @pytest.fixture
@@ -87,6 +112,9 @@ Panel Config:
   data source:
   - metric_table:
       id: 201
+      header:
+        metric: Metric
+        value: Value
       metric:
         Baseline:
           value: SUM({BASELINE_COUNTER})
@@ -97,11 +125,17 @@ Panel Config:
   data source:
   - metric_table:
       id: 3012
+      header:
+        metric: Metric
+        value: Value
       metric:
         L2 Bottleneck Detection Indicators:
           value: SUM({TABLE_3012_COUNTER})
   - metric_table:
       id: 3013
+      header:
+        metric: Metric
+        value: Value
       metric:
         EA Interface:
           value: SUM({TABLE_3013_COUNTER})
@@ -173,7 +207,7 @@ def apply_cp_util_priority_patches(soc: OmniSoC_Base, patch_stack: ExitStack) ->
             soc,
             "_iter_arch_analysis_yaml_metrics",
             return_value=iter([
-                ("1700", 1701, 1, "CP Utilization", CP_UTIL_METRIC_YAML)
+                ("1700", 1701, 1, "CP Utilization", CP_UTIL_METRIC_EXPRESSIONS)
             ]),
         )
     )
@@ -627,7 +661,7 @@ def test_expand_tcc_no_templates(perfmon_config):
 
 
 # =============================================================================
-# _append_analysis_yaml_for_filter_token alias handling
+# _append_expressions_for_filter_token alias handling
 # =============================================================================
 
 
@@ -642,7 +676,7 @@ def test_filter_token_unknown_alias_exits_instead_of_keyerror(monkeypatch):
         lambda arch: {"lds": "10"},
     )
     with pytest.raises(SystemExit):
-        OmniSoC_Base._append_analysis_yaml_for_filter_token(
+        OmniSoC_Base._append_expressions_for_filter_token(
             _fake_soc_for_filter_token(), "SQ", {}, "/cfg", []
         )
 
@@ -652,13 +686,13 @@ def test_filter_token_known_alias_resolves_without_crash(monkeypatch):
         "rocprof_compute_soc.soc_base.get_arch_alias_to_panel_id",
         lambda arch: {"lds": "10"},
     )
-    texts: list[str] = []
+    expressions: list[str] = []
     # Alias resolves to block id 10 -> file id "1000", absent from the
     # empty config dict, so the token is skipped with a warning, not a crash.
-    OmniSoC_Base._append_analysis_yaml_for_filter_token(
-        _fake_soc_for_filter_token(), "lds", {}, "/cfg", texts
+    OmniSoC_Base._append_expressions_for_filter_token(
+        _fake_soc_for_filter_token(), "lds", {}, "/cfg", expressions
     )
-    assert texts == []
+    assert expressions == []
 
 
 # =============================================================================
@@ -722,6 +756,40 @@ def test_membw_analysis_counter_selection(
 
     assert counters & FIXTURE_COUNTERS == expected_counters
     assert effective_filter_blocks == filter_blocks
+
+
+# =============================================================================
+# Counters come only from metric expressions
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "filter_blocks",
+    [
+        pytest.param([], id="no_filter"),
+        pytest.param(["2"], id="file"),
+        pytest.param(["2.1"], id="table"),
+        pytest.param(["2.1.0"], id="metric"),
+    ],
+)
+def test_detect_counters_reads_only_metric_expressions(
+    membw_analysis_soc: OmniSoC_Base, filter_blocks: list[str]
+) -> None:
+    """Comments, titles, descriptions, metric names and coll_level add no
+    counters, whichever way the metric is selected."""
+    config_root = Path(membw_analysis_soc.get_args().config_dir) / "gfx950"
+    (config_root / "0200_baseline.yaml").write_text(
+        PROSE_ANALYSIS_CONFIG, encoding="utf-8"
+    )
+    membw_analysis_soc.get_args().filter_blocks = filter_blocks
+
+    counters, _ = membw_analysis_soc.detect_counters()
+
+    formula_counters, _ = extract_counters_and_variables(
+        "", membw_analysis_soc._mspec.gpu_series
+    )
+    formula_counters |= {"SQ_LEVEL_WAVES_ACCUM", "SQ_BUSY_CYCLES"}
+    assert counters == formula_counters
 
 
 # =============================================================================

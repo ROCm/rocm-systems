@@ -122,10 +122,6 @@ def run_soc_detect_and_coalesce(
     soc.set_perfmon_config(perfmon_config)
 
     counters, _unused_filter_blocks = soc.detect_counters()
-    # Same as OmniSoC_Base.perfmon_filter before perfmon_coalesce: drop
-    # SQ_ACCUM_PREV_HIRES here; it is injected again when LEVEL counters are
-    # allocated so pass grouping matches profiling.
-    counters = counters - {"SQ_ACCUM_PREV_HIRES"}
     if not counters:
         return set(), []
 
@@ -272,11 +268,11 @@ def generate_bucket_metrics(
         panel_id,
         metric_idx,
         metric_name,
-        metric_yaml,
+        expressions,
     ) in iter_analysis_config_metrics(config_dir / config_arch, set()):
         total_metrics += 1
         hardware_counters, _unused_builtin_vars = extract_counters_and_variables(
-            metric_yaml, gpu_series, include_supported_denom=False
+            "\n".join(expressions), gpu_series, include_supported_denom=False
         )
         buckets: set[str] = set()
         for formula_counter in hardware_counters:

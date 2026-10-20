@@ -18,6 +18,7 @@ Metric ID format X.Y.Z:
 import sys
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -32,6 +33,7 @@ from utils.utils_common import canonical_config_arch  # noqa: E402
 from utils.utils_counter_defs import (  # noqa: E402
     counter_to_block,
     extract_counters_and_variables,
+    metric_expressions,
 )
 
 # ---------------------------------------------------------------------------
@@ -51,17 +53,16 @@ def resolve_metric_id(metric_id: str) -> tuple[int | None, int | None]:
     return x * 100 + y, z
 
 
-def load_analysis_configs(arch: str) -> dict[int, dict[str, dict]]:
-    """Return {metric_table_id: {metric_name: formula_dict}} for *arch*.
+def load_analysis_configs(arch: str) -> dict[int, dict[str, Any]]:
+    """Return {metric_table_id: metric_table} for *arch*.
 
-    Metric name ordering is preserved (dict insertion order), so
-    ``list(result[table_id])`` gives the ordered name list needed for
-    index-based lookups.
+    Metric names keep their YAML order, so list(result[table_id]["metric"])
+    gives the names for index-based lookups.
     """
     arch_dir = ANALYSIS_DIR / (canonical_config_arch(arch) or arch)
     if not arch_dir.is_dir():
         return {}
-    result: dict[int, dict[str, dict]] = {}
+    result: dict[int, dict[str, Any]] = {}
     for config_path in sorted(arch_dir.glob("*.yaml")):
         data = yaml.safe_load(config_path.read_text())
         panel = (data or {}).get("Panel Config", {})
@@ -70,9 +71,8 @@ def load_analysis_configs(arch: str) -> dict[int, dict[str, dict]]:
             table_id = mt.get("id")
             if table_id is None:
                 continue
-            metrics = mt.get("metric", {})
-            if metrics:
-                result[table_id] = dict(metrics)
+            if mt.get("metric"):
+                result[table_id] = mt
     return result
 
 
@@ -110,17 +110,6 @@ def load_gpu_series_mapping() -> dict[str, str]:
     return result
 
 
-def _flatten_formula_values(d: dict) -> str:
-    """Recursively collect all string values from a metric formula dict."""
-    parts: list[str] = []
-    for v in d.values():
-        if isinstance(v, str):
-            parts.append(v)
-        elif isinstance(v, dict):
-            parts.append(_flatten_formula_values(v))
-    return "\n".join(parts)
-
-
 # ---------------------------------------------------------------------------
 # Validation (single pass over all sets files)
 # ---------------------------------------------------------------------------
@@ -141,7 +130,7 @@ def validate() -> list[str]:
 
         for s in sets_data.get("sets", []):
             set_option = s.get("set_option", "<unknown>")
-            formula_texts: list[str] = []
+            expressions: list[str] = []
 
             for entry in s.get("metric", []):
                 for metric_id_raw, expected_name in entry.items():
@@ -165,8 +154,8 @@ def validate() -> list[str]:
                         )
                         continue
 
-                    table_metrics = analysis[table_id]
-                    metric_names = list(table_metrics)
+                    table = analysis[table_id]
+                    metric_names = list(table["metric"])
                     if idx >= len(metric_names):
                         errors.append(
                             f"[{arch}] set '{set_option}': index {idx} out of "
@@ -192,16 +181,12 @@ def validate() -> list[str]:
                             f"Full table: {metric_names}"
                         )
 
-                    # Collect formula text for single-pass check
-                    formula = table_metrics.get(actual)
-                    if formula is not None:
-                        formula_texts.append(
-                            _flatten_formula_values(formula)
-                            if isinstance(formula, dict)
-                            else str(formula)
-                        )
+                    # Expressions for the single-pass check
+                    expressions.extend(
+                        metric_expressions(table, table["metric"][actual])
+                    )
 
-            if not formula_texts:
+            if not expressions:
                 continue
 
             for target_arch in target_arches:
@@ -218,7 +203,7 @@ def validate() -> list[str]:
                     continue
 
                 counters, _ = extract_counters_and_variables(
-                    "\n".join(formula_texts), gpu_series
+                    "\n".join(expressions), gpu_series
                 )
                 # *_ACCUM is the per-bucket alias for SQ_ACCUM_PREV_HIRES, which is
                 # injected automatically by the profiler for level counters
