@@ -52,7 +52,7 @@ sl1d.req_bw:
   unit: GB/s
   description: Total Scalar Data Cache request bandwidth.
 sl1d.req_bw_norm:
-  name: Dcache Request Bandwidth
+  name: Dcache Request Bytes
   formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM($denom)
   unit: (Bytes + $normUnit)
   description: Total Scalar Data Cache bandwidth.

@@ -4,7 +4,7 @@ wave.dispatched_threads:
   unit: Threads
   description: Total work-items dispatched.
 wave.dispatched_wavefronts:
-  name: Dispatched Wavefronts
+  name: WGP Dispatched Wavefronts
   formula: AVG(SQG_WAVES_sum)
   unit: Wavefronts
   description: Total wavefronts dispatched.

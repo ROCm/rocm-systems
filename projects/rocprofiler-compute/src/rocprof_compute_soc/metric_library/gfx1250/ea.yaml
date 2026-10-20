@@ -154,7 +154,7 @@ ea.stalled_by_sdp_io_wr:
     Percentage of EA-busy cycles the EA is stalled by downstream memory pipeline on
     PCI-E and other IO write path.
 ea.util:
-  name: Utilization
+  name: EA Utilization
   formula: 100 * SUM(GC_EA_SE_BUSY_CYCLE_sum) / SUM(GC_EA_SE_CYCLE_sum)
   unit: Percent
   description: >-

@@ -25,7 +25,7 @@ glarb.glarba_return_bus_util:
   unit: Percent
   description: Percentage of cycles the GL2-to-GL1 return bus is active.
 glarb.glarba_util:
-  name: Utilization
+  name: GLARBA Utilization
   formula: 100 * SUM(GLARBA_BUSY_sum) / SUM(GLARBA_CYCLE_sum)
   unit: Percent
   description: >-
@@ -101,7 +101,7 @@ glarb.glarbc_return_arbitration_lat:
   unit: Cycles
   description: ''
 glarb.glarbc_util:
-  name: Utilization
+  name: GLARBC Utilization
   formula: 100 * SUM(GLARBC_BUSY_sum) / SUM(GLARBC_CYCLE_sum)
   unit: Percent
   description: >-

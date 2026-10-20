@@ -1,8 +1,3 @@
-txa.ai_gl0:
-  name: AI GL0
-  formula: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum)
-  unit: FLOPs/Byte
-  description: Arithmetic intensity relative to GL0 data bandwidth.
 txa.async_barrier_inst:
   name: Async Barrier Instruction
   formula: SUM(TX_VCA_ASYNC_BARRIER_WAVEFRONT_sum) / SUM($denom)
@@ -187,7 +182,7 @@ txa.req_bus_stall_rate:
   description: >-
     Percentage of cycles the TXA-to-GL0 request data bus is stalled.
 txa.req_bus_util:
-  name: Request Bus Utilization
+  name: Shader-TXA Request Bus Utilization
   formula: 100 * SUM(TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
   unit: Percent
   description: >-
@@ -240,12 +235,12 @@ txa.tdm_store_bw:
   unit: GB/s
   description: Total TDM store bandwidth.
 txa.util:
-  name: Utilization
+  name: TXA Utilization
   formula: 100 * SUM(TX_VCA_VCA_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
   unit: Percent
   description: Percentage of cycles the TXA is processing memory requests.
 txa.vmw_req_bus_util:
-  name: Request Bus Util
+  name: TXA-VMW Request Bus Utilization
   formula: 100 * SUM(TX_VCA_VMEMREQ_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
   unit: Percent
   description: >-

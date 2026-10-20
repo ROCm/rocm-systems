@@ -1,5 +1,5 @@
 gl2.atomic_req:
-  name: Atomic Requests
+  name: GL2 Atomic Requests
   formula: SUM(GL2C_ATOMIC_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
@@ -68,14 +68,14 @@ gl2.misses:
     Core Efficiency Arbiter). High miss counts indicate heavy memory traffic. Consider
     improving data locality or reducing working set size.
 gl2.rd_req:
-  name: Read Requests
+  name: GL2 Read Requests
   formula: SUM(GL2C_READ_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
     Number of read requests to the GL2 cache. High read counts indicate memory-intensive
     load operations. Compare with hit rate to assess GL2 cache effectiveness for reads.
 gl2.total_req:
-  name: Total Requests
+  name: GL2 Total Requests
   formula: SUM(GL2C_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
@@ -95,7 +95,7 @@ gl2.wr_bw:
     Achieved write bandwidth at the GL2 cache level. This represents total write traffic
     from GL1 caches to GL2. High bandwidth indicates memory-intensive write patterns.
 gl2.wr_req:
-  name: Write Requests
+  name: GL2 Write Requests
   formula: SUM(GL2C_WRITE_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
