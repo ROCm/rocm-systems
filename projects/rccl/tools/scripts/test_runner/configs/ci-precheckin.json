@@ -463,6 +463,17 @@
         {"name": "RomeModelsMicrotests", "description": "Host-only graph/rome_models.cc microtests (no GPU, no HIP/RCCL runtime); covers parseGraphLight RCCL_TREES input validation", "test_filter": "*"}
       ]
     },
+    "unit_tests_micro_topo": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroTopo",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "TopoMicrotests", "description": "Host-only src/graph microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
     "unit_tests_micro_dda": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroDda",
@@ -642,6 +653,12 @@
       "name": "RCCL Microtests - rome_models.cc",
       "description": "rccl-UnitTestsMicroRomeModels (host-only rome_models.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_rome_models",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - src/graph",
+      "description": "rccl-UnitTestsMicroTopo (host-only src/graph microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_topo",
       "enabled": true
     },
     {
