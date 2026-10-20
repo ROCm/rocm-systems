@@ -2220,7 +2220,7 @@ def read_exported_source_files(result_path):
         exported_path: contents
         for exported_path, contents in exported_files.items()
         if source_snapshot_analysis.SOURCE_EXPORT_DIRECTORY_NAME in exported_path.parts
-        # The line counts beside each copy are checked on their own.
+        # The per-source-line files beside each copy have their own test.
         and not exported_path.name.endswith(
             per_source_line_export.SOURCE_LINE_FILE_SUFFIX
         )
@@ -3308,7 +3308,7 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
 
 
 def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path):
-    """A captured file's line counts sit next to its copy and name their ISA rows."""
+    """A source file's per-source-line file sits beside its copy and cites ISA rows."""
     workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
     analyzer, result_path = make_csv_run_analyzer(
         tmp_path,

@@ -11,7 +11,6 @@ import pytest
 
 from pc_sampling.per_source_line_export import (
     WorkloadSourceLineExport,
-    _build_source_line_header,
     _format_isa_references,
     _format_number_ranges,
     _resolve_source_line_export_path,
@@ -19,8 +18,23 @@ from pc_sampling.per_source_line_export import (
     export_per_source_line_files,
 )
 
-# The reference a line no instruction came from carries.
-NO_ISA_REFERENCES = json.dumps([[None, None, None, None, None]])
+ISA_REFERENCE_FIELDS = (
+    "kernel_uuid",
+    "short_name",
+    "code_object_id",
+    "pid",
+    "instruction_line_number",
+)
+# The one reference that a source line without instructions carries.
+NO_ISA_REFERENCE = (None, None, None, None, None)
+
+
+def make_isa_references_json(*isa_references):
+    """Encode references as the per-source-line select returns them."""
+    return json.dumps([
+        dict(zip(ISA_REFERENCE_FIELDS, isa_reference))
+        for isa_reference in isa_references
+    ])
 
 
 def make_source_line_row(
@@ -48,7 +62,7 @@ def make_source_line_row(
         None,
         None,
         *stall_reason_counts,
-        json.dumps([list(isa_reference) for isa_reference in isa_references]),
+        make_isa_references_json(*isa_references),
     )
 
 
@@ -59,7 +73,7 @@ def read_exported_rows(export_path):
 
 
 def test_resolve_source_line_export_path_sits_beside_the_source_copy():
-    """The counts file is named after the exported source it describes."""
+    """The file is named after the exported copy of the source file."""
     export_path = _resolve_source_line_export_path(
         Path("/results/per_kernel_pc_sampling"),
         ("vector_copy", "MI300X_A1", "/home/u/app/vcopy.cpp"),
@@ -69,31 +83,6 @@ def test_resolve_source_line_export_path_sits_beside_the_source_copy():
         "/results/per_kernel_pc_sampling/vector_copy/MI300X_A1"
         "/source/home/u/app/vcopy.cpp_pc_sampling.csv"
     )
-
-
-def test_build_source_line_header_places_stall_reasons_before_references():
-    """The reasons a workload observed become columns of their own."""
-    header = _build_source_line_header(["NONE", "WAITCNT"])
-
-    assert header == [
-        "Source line number",
-        "Source line",
-        "Total count",
-        "Active count",
-        "Stall count",
-        "Wave occupancy percent",
-        "Active thread percent",
-        "Stall NONE",
-        "Stall WAITCNT",
-        "ISA references",
-    ]
-
-
-def test_build_source_line_header_carries_no_stall_columns_without_reasons():
-    """A host_trap workload records no stall reason, so it gets no column."""
-    header = _build_source_line_header([])
-
-    assert header[-2:] == ["Active thread percent", "ISA references"]
 
 
 @pytest.mark.parametrize(
@@ -110,15 +99,15 @@ def test_format_number_ranges(ascending_numbers, expected):
     assert _format_number_ranges(ascending_numbers) == expected
 
 
-def test_format_isa_references_lists_one_entry_per_isa_file():
-    """References group by ISA file, in kernel, code object and process order."""
-    isa_references_json = json.dumps([
-        [8, "vecAdd", 5, 42, 3],
-        [7, "vecCopy", 5, 43, 2],
-        [7, "vecCopy", 5, 42, 4],
-        [7, "vecCopy", 5, 42, 2],
-        [7, "vecCopy", 5, 42, 3],
-    ])
+def test_format_isa_references_lists_one_isa_file_per_line():
+    """References are grouped by ISA file, in kernel, code object and pid order."""
+    isa_references_json = make_isa_references_json(
+        (8, "vecAdd", 5, 42, 3),
+        (7, "vecCopy", 5, 43, 2),
+        (7, "vecCopy", 5, 42, 4),
+        (7, "vecCopy", 5, 42, 2),
+        (7, "vecCopy", 5, 42, 3),
+    )
 
     assert _format_isa_references(isa_references_json) == (
         "vecCopy_uuid_7/isa_code_object_id_5_pid_42.csv:2-4\n"
@@ -127,22 +116,24 @@ def test_format_isa_references_lists_one_entry_per_isa_file():
     )
 
 
-def test_format_isa_references_names_a_kernel_with_no_short_name():
-    """A kernel with no short name points at the folder its ISA uses."""
-    isa_references_json = json.dumps([[7, None, 5, 42, 1]])
+def test_format_isa_references_names_a_kernel_without_a_short_name():
+    """A kernel without a short name is referenced by the folder its ISA uses."""
+    isa_references_json = make_isa_references_json((7, None, 5, 42, 1))
 
     assert _format_isa_references(isa_references_json) == (
         "kernel_uuid_7/isa_code_object_id_5_pid_42.csv:1"
     )
 
 
-def test_format_isa_references_is_empty_for_a_line_no_instruction_came_from():
-    """A line without instructions joins one all-null reference, which is dropped."""
-    assert _format_isa_references(NO_ISA_REFERENCES) == ""
+def test_format_isa_references_is_empty_for_a_line_without_instructions():
+    """The all-null reference of a line without instructions is dropped."""
+    isa_references_json = make_isa_references_json(NO_ISA_REFERENCE)
+
+    assert _format_isa_references(isa_references_json) == ""
 
 
 def test_write_per_source_line_files_opens_one_file_per_source_file(tmp_path):
-    """Each captured source file gets its own counts file."""
+    """Each captured source file gets its own per-source-line file."""
     source_line_rows = [
         make_source_line_row(file_path="/s/a.cpp", line_number=1),
         make_source_line_row(file_path="/s/a.cpp", line_number=2),
@@ -161,8 +152,8 @@ def test_write_per_source_line_files_opens_one_file_per_source_file(tmp_path):
     ]
 
 
-def test_write_per_source_line_files_leaves_unsampled_counts_empty(tmp_path):
-    """A line no sample landed on carries no counts and no references."""
+def test_write_per_source_line_files_writes_header_and_rows(tmp_path):
+    """Stall reasons sit between the percentages and the ISA references."""
     source_line_rows = [
         make_source_line_row(
             line_number=1,
@@ -171,7 +162,7 @@ def test_write_per_source_line_files_leaves_unsampled_counts_empty(tmp_path):
             issue_count=None,
             stall_count=None,
             stall_reason_counts=(None,),
-            isa_references=((None, None, None, None, None),),
+            isa_references=(NO_ISA_REFERENCE,),
         ),
         make_source_line_row(line_number=2, stall_reason_counts=(4,)),
     ]
@@ -186,22 +177,35 @@ def test_write_per_source_line_files_leaves_unsampled_counts_empty(tmp_path):
         / "s"
         / "a.cpp_pc_sampling.csv"
     )
-    assert exported_rows[1] == ["1", "// header", "", "", "", "", "", "", ""]
-    assert exported_rows[2] == [
-        "2",
-        "int a;",
-        "3",
-        "2",
-        "1",
-        "",
-        "",
-        "4",
-        "vecCopy_uuid_7/isa_code_object_id_5_pid_42.csv:1",
+    assert exported_rows == [
+        [
+            "Source line number",
+            "Source line",
+            "Total count",
+            "Active count",
+            "Stall count",
+            "Wave occupancy percent",
+            "Active thread percent",
+            "Stall WAITCNT",
+            "ISA references",
+        ],
+        ["1", "// header", "", "", "", "", "", "", ""],
+        [
+            "2",
+            "int a;",
+            "3",
+            "2",
+            "1",
+            "",
+            "",
+            "4",
+            "vecCopy_uuid_7/isa_code_object_id_5_pid_42.csv:1",
+        ],
     ]
 
 
 def test_write_per_source_line_files_writes_nothing_without_rows(tmp_path):
-    """A workload with no captured source leaves no folder behind."""
+    """A workload without captured source files leaves no folder behind."""
     file_count = _write_per_source_line_files(tmp_path / "per_kernel", iter([]), [])
 
     assert file_count == 0
@@ -209,7 +213,7 @@ def test_write_per_source_line_files_writes_nothing_without_rows(tmp_path):
 
 
 def test_export_per_source_line_files_writes_each_workloads_files(tmp_path):
-    """Every workload's rows land under that workload's own folder."""
+    """The rows of each workload land under the folder of that workload."""
     export_per_source_line_files(
         tmp_path,
         [
