@@ -53,6 +53,7 @@ inline std::optional<uint32_t> parse_uint32(std::string_view text) {
 }
 
 /// @brief Read a config file into a string.
+/// @param emit_error Destination for failure diagnostics.
 /// @returns File contents on success, or failure after emitting a diagnostic
 /// containing @p path when the file cannot be opened or read.
 inline util::FailureOr<std::string> read_config_file(const std::string &path,
@@ -75,6 +76,7 @@ inline util::FailureOr<std::string> read_config_file(const std::string &path,
 /// any values they need inside @p callback rather than retaining raw pointers.
 /// The callback must return util::FailureOr<T> or util::Result so parsing failures
 /// can be returned through the same result type.
+/// @param emit_error Destination for failure diagnostics.
 /// @param skip_unexpected_fields Preserve the general simulation config's
 /// forward-compatible unknown-field behavior when true; use false for strict
 /// sub-configs whose misspelled keys could change execution behavior.
@@ -121,6 +123,7 @@ inline PciDeviceConfig pci_device_from_fb(const fb::PciDeviceInfo *pci) {
 /// @details The resulting config owns its strings and IP versions so it is safe
 /// after the FlatBuffers parser storage goes out of scope.
 /// @param json_path JSON path of @p device, used in validation diagnostics.
+/// @param emit_error Destination for failure diagnostics.
 inline util::FailureOr<KfdDeviceConfig> kfd_device_from_fb(const fb::KfdDeviceInfo *device,
                                                            std::string_view json_path,
                                                            util::DiagnosticEmitter emit_error) {

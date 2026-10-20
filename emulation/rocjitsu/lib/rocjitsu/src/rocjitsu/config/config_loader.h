@@ -98,25 +98,25 @@ struct ExecutionThreadSettings {
 };
 
 /// @brief Read only a config's thread requests and topology dimensions.
+/// @details Allocates no simulator components or worker threads. File-reading
+/// and parsing failures emit a diagnostic and return failure.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
 /// @returns Settings for evaluating allocation, or failure after emitting a diagnostic.
-/// @details File-reading and parsing failures emit a diagnostic and return failure.
 /// @throws std::invalid_argument when required allocation metadata is invalid.
-/// @details Allocates no simulator components or worker threads.
 util::FailureOr<ExecutionThreadSettings>
 load_execution_thread_settings(const std::string &json_path, const std::string &schema_text,
                                util::DiagnosticEmitter emit_error);
 
 /// @brief Read thread requests and topology dimensions from config JSON text.
 /// @details Same as the path overload, for a config a launch has already rewritten
-/// in memory and does not need to place on disk.
+/// in memory and does not need to place on disk. Parsing failures emit a diagnostic
+/// and return failure.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
 /// @returns Settings for evaluating allocation, or failure after emitting a diagnostic.
-/// @details Parsing failures emit a diagnostic and return failure.
 /// @throws std::invalid_argument when required allocation metadata is invalid.
 util::FailureOr<ExecutionThreadSettings>
 load_execution_thread_settings_from_string(const std::string &json, const std::string &schema_text,
@@ -265,15 +265,15 @@ struct DeviceIdentityConfig {
 };
 
 /// @brief Read only a config's device identity and bus shape.
+/// @details Building the topology allocates the whole simulated machine, which
+/// for a large part is gigabytes of register files. A front end that only needs
+/// to know which GPU to present should not pay for a machine it never runs.
+/// File-reading, parsing, and device conversion failures emit a diagnostic
+/// and return failure. Other validation and allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
 /// @returns The identity and bus shape, or failure after emitting a diagnostic.
-/// @details File-reading, parsing, and device conversion failures emit a diagnostic
-/// and return failure. Other validation and allocation exceptions propagate.
-/// @details Building the topology allocates the whole simulated machine, which
-/// for a large part is gigabytes of register files. A front end that only needs
-/// to know which GPU to present should not pay for a machine it never runs.
 util::FailureOr<DeviceIdentityConfig> load_device_identity(const std::string &json_path,
                                                            const std::string &schema_text,
                                                            util::DiagnosticEmitter emit_error);
@@ -300,12 +300,12 @@ util::Result validate_config(const std::string &json_path, const std::string &sc
                              util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON file.
+/// @details File-reading, parsing, and KFD/DBT device conversion failures emit a
+/// diagnostic and return failure. Other validation and allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
 /// @returns LoadedConfig with engine parameters and built topology, or failure.
-/// @details File-reading, parsing, and KFD/DBT device conversion failures emit a
-/// diagnostic and return failure. Other validation and allocation exceptions propagate.
 util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
                                           const std::string &schema_text,
                                           util::DiagnosticEmitter emit_error);
@@ -315,38 +315,38 @@ util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
 /// @details Like the three-argument overload, but uses @p host_threads as the
 /// affinity input to the shared execution budget. Zero means indeterminate and
 /// gives an automatic budget of one. An explicit cpu_thread_budget overrides it.
+/// File-reading, parsing, and KFD/DBT device conversion failures emit a diagnostic
+/// and return failure. Other validation and allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
 /// @param host_threads Affinity width used for automatic budget selection.
 /// @returns LoadedConfig with engine parameters and built topology, or failure.
-/// @details File-reading, parsing, and KFD/DBT device conversion failures emit a
-/// diagnostic and return failure. Other validation and allocation exceptions propagate.
 util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
                                           const std::string &schema_text,
                                           util::DiagnosticEmitter emit_error,
                                           uint32_t host_threads);
 
 /// @brief Load simulation config from a JSON string.
+/// @details Parsing and KFD/DBT device conversion failures emit a diagnostic and
+/// return failure. Other validation and allocation exceptions propagate.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
 /// @returns LoadedConfig with engine parameters and built topology, or failure.
-/// @details Parsing and KFD/DBT device conversion failures emit a diagnostic and
-/// return failure. Other validation and allocation exceptions propagate.
 util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
                                                       const std::string &schema_text,
                                                       util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON string against a stated host width.
 /// @details See the four-argument @ref load_config overload.
+/// Parsing and KFD/DBT device conversion failures emit a diagnostic and
+/// return failure. Other validation and allocation exceptions propagate.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.
 /// @param host_threads Affinity width for automatic selection; zero gives a budget of one.
 /// @returns LoadedConfig with engine parameters and built topology, or failure.
-/// @details Parsing and KFD/DBT device conversion failures emit a diagnostic and
-/// return failure. Other validation and allocation exceptions propagate.
 util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
                                                       const std::string &schema_text,
                                                       util::DiagnosticEmitter emit_error,
