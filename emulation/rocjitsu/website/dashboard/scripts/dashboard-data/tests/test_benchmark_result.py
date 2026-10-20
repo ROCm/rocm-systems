@@ -830,6 +830,7 @@ git('update-ref', ref, new, old)
         'RESULTS_DOWNLOAD_DIR': str(download),
         'RESULTS_BRANCH': 'gh-pages-rocjitsu',
         'GITHUB_RUN_ID': '123',
+        # Publish attempt 2 reruns only failed jobs; files still come from benchmark attempt 1.
         'GITHUB_RUN_ATTEMPT': publish_attempt,
         'BENCHMARK_RUN_ATTEMPT': '1',
         'DASHBOARD_VALIDATOR': str(VALIDATOR),
