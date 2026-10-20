@@ -1006,7 +1006,7 @@ HIP_TEST_CASE(Unit_hipMallocFromPoolAsync_ManagedPool) {
   int device = 0;
   HIP_CHECK(hipGetDevice(&device));
   checkMempoolSupported(device);
-  if (!isManagedMemorySupportedOnDevice(device)) {
+  if (!HipTest::isManagedMemorySupportedOnDevice(device)) {
     HIP_SKIP_TEST("Managed memory not supported on this device");
   }
 
