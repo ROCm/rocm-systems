@@ -367,8 +367,10 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
     auto generate_event = [&](int64_t time, rocprofiler_thread_trace_decoder_event_type_t type)
     { stitch.sendEvent(type, time, 0, 0, 0, false, false); };
 
+    stitch.markerSetRegisters(csregister);
     while (generator.valid())
     {
+        if (records.status() != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return;
         Token token = generator.next();
 
         switch (token.type)
@@ -450,7 +452,8 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
                 }
                 else
                     it.first->second = wave_addr;
-                stitch.markerWaveStart(wstart.cu, wstart.simd, wstart.wave, wave_addr);
+                if (wstart.count <= 64)
+                    stitch.markerWaveStart(wstart.cu, wstart.simd, wstart.wave, wave_addr);
                 break;
             }
             case TOKEN_WAVE_END:
@@ -673,7 +676,7 @@ void MISQTTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen,
     if (!occupancy.empty()) send_occupancy();
     if (csregister.realtime.size()) stitch.sendRealtime(csregister.realtime);
     records.flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, shaderdata);
-    stitch.flushMarkers();
+    stitch.finishMarkers();
 
     info.realtime_frequency = csregister.realtime_frequency;
     info.counter_frequency = csregister.counter_frequency;

@@ -70,6 +70,7 @@ struct TestCallbackData
     int wave_count = 0;
     std::vector<rocprofiler_thread_trace_decoder_shaderdata_t> shaderdata;
     std::vector<rocprofiler_thread_trace_decoder_marker_t> markers;
+    std::vector<std::vector<uint32_t>> marker_payloads;
 };
 
 rocprofiler_thread_trace_decoder_status_t test_callback(
@@ -91,8 +92,17 @@ rocprofiler_thread_trace_decoder_status_t test_callback(
     }
     else if (type == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER)
     {
-        auto* records = static_cast<rocprofiler_thread_trace_decoder_marker_t*>(data);
-        cbdata->markers.insert(cbdata->markers.end(), records, records + size);
+        auto* cursor = static_cast<const unsigned char*>(data);
+        for (uint64_t i = 0; i < size; ++i)
+        {
+            const auto& record = *reinterpret_cast<const rocprofiler_thread_trace_decoder_marker_t*>(cursor);
+            cbdata->markers.push_back(record);
+            cbdata->marker_payloads.emplace_back();
+            auto& payload = cbdata->marker_payloads.back();
+            if (record.payload_count) payload.assign(record.payload, record.payload + record.payload_count);
+            cbdata->markers.back().payload = payload.empty() ? nullptr : payload.data();
+            cursor += record.size;
+        }
     }
 
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
@@ -178,7 +188,9 @@ TEST_F(StitcherTest, RollingMarkerStreamUsesWaveFuncmapAndPayloadState)
     addMarker(funcmap, FuncmapEntryKind::Point, 2, "value", 1);
     mock_service->funcmaps.emplace(7, &funcmap);
 
-    Stitcher stitcher(mock_service, test_callback, &cbdata);
+    RecordFilter filter{};
+    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 0);
+    Stitcher stitcher(mock_service, test_callback, &cbdata, filter);
     pcinfo_t kernel{0x100, 7};
     stitcher.markerWaveStart(0, 1, 2, kernel);
     std::vector<rocprofiler_thread_trace_decoder_shaderdata_t> shaderdata{};
@@ -197,26 +209,26 @@ TEST_F(StitcherTest, RollingMarkerStreamUsesWaveFuncmapAndPayloadState)
     stitcher.flushMarkers();
 
     ASSERT_EQ(cbdata.shaderdata.size(), 4u);
-    ASSERT_EQ(cbdata.markers.size(), 4u);
+    ASSERT_EQ(cbdata.markers.size(), 3u);
 
-    EXPECT_EQ(cbdata.markers[0].marker_id, 1u);
-    EXPECT_STREQ(cbdata.markers[0].name, "scope");
+    EXPECT_EQ(cbdata.markers[0].metadata->marker_id, 1u);
+    EXPECT_STREQ(cbdata.markers[0].metadata->name, "scope");
     EXPECT_EQ(
         cbdata.markers[0].marker_flags,
         ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_ENTER | ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE
     );
     EXPECT_EQ(cbdata.markers[0].kernel_entry.code_object_id, 7u);
-    EXPECT_EQ(cbdata.markers[0].code_object_id, 7u);
+    EXPECT_EQ(cbdata.markers[0].metadata->code_object_id, 7u);
 
-    EXPECT_EQ(cbdata.markers[1].marker_id, 2u);
-    EXPECT_EQ(cbdata.markers[1].payload_count, 1u);
-    EXPECT_EQ(cbdata.markers[2].record_kind, ROCPROFILER_THREAD_TRACE_DECODER_MARKER_RECORD_PAYLOAD);
-    EXPECT_EQ(cbdata.markers[2].payload_index, 0u);
-    EXPECT_EQ(cbdata.markers[2].shaderdata.value, 0xDEADBEEFu);
+    EXPECT_EQ(cbdata.markers[1].metadata->marker_id, 2u);
+    EXPECT_EQ(cbdata.markers[1].metadata->payload_count, 1u);
+    ASSERT_EQ(cbdata.markers[1].payload_count, 1u);
+    ASSERT_NE(cbdata.markers[1].payload, nullptr);
+    EXPECT_EQ(cbdata.markers[1].payload[0], 0xDEADBEEFu);
 
-    EXPECT_EQ(cbdata.markers[3].marker_id, 1u);
-    EXPECT_EQ(cbdata.markers[3].marker_flags, ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_EXIT_PREVIOUS);
-    EXPECT_EQ(cbdata.markers[3].delay, 0);
+    EXPECT_EQ(cbdata.markers[2].metadata->marker_id, 1u);
+    EXPECT_EQ(cbdata.markers[2].marker_flags, ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_EXIT_PREVIOUS);
+    EXPECT_EQ(cbdata.markers[2].shaderdata.time, 14);
 }
 
 TEST_F(StitcherTest, MarkerOnlyImmediateFilterSuppressesRawShaderdata)
@@ -249,7 +261,9 @@ TEST_F(StitcherTest, MarkerStreamReplaysAfterResolutionAndMarksEachWaveGeneratio
     addMarker(funcmap, FuncmapEntryKind::Point, 4, "point");
     mock_service->funcmaps.emplace(12, &funcmap);
 
-    Stitcher stitcher(mock_service, test_callback, &cbdata);
+    RecordFilter filter{};
+    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 0);
+    Stitcher stitcher(mock_service, test_callback, &cbdata, filter);
 
     stitcher.markerWaveStart(1, 2, 3, pcinfo_t{0x200, 0});
     stitcher.processShaderdata(markerShaderdata(11, 4u << 2, 1, 2, 3));
@@ -277,7 +291,9 @@ TEST_F(StitcherTest, PacketLossStopsMarkerDecodingForCurrentWaveGeneration)
     addMarker(funcmap, FuncmapEntryKind::Point, 5, "point");
     mock_service->funcmaps.emplace(13, &funcmap);
 
-    Stitcher stitcher(mock_service, test_callback, &cbdata);
+    RecordFilter filter{};
+    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 0);
+    Stitcher stitcher(mock_service, test_callback, &cbdata, filter);
     stitcher.markerWaveStart(0, 0, 0, pcinfo_t{0x10, 13});
     stitcher.processShaderdata(markerShaderdata(2, 5u << 2));
     stitcher.markerPacketLoss();
@@ -297,7 +313,9 @@ TEST_F(StitcherTest, InterleavedWavesResolveSameMarkerIdInDifferentCodeObjects)
     mock_service->funcmaps.emplace(21, &first);
     mock_service->funcmaps.emplace(22, &second);
 
-    Stitcher stitcher(mock_service, test_callback, &cbdata);
+    RecordFilter filter{};
+    filter.set(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 0);
+    Stitcher stitcher(mock_service, test_callback, &cbdata, filter);
     stitcher.markerWaveStart(0, 0, 1, pcinfo_t{0x10, 21});
     stitcher.markerWaveStart(0, 0, 2, pcinfo_t{0x20, 22});
     stitcher.processShaderdata(markerShaderdata(2, 6u << 2, 0, 0, 2));
@@ -305,10 +323,10 @@ TEST_F(StitcherTest, InterleavedWavesResolveSameMarkerIdInDifferentCodeObjects)
     stitcher.flushMarkers();
 
     ASSERT_EQ(cbdata.markers.size(), 2u);
-    EXPECT_STREQ(cbdata.markers[0].name, "second");
-    EXPECT_EQ(cbdata.markers[0].code_object_id, 22u);
-    EXPECT_STREQ(cbdata.markers[1].name, "first");
-    EXPECT_EQ(cbdata.markers[1].code_object_id, 21u);
+    EXPECT_STREQ(cbdata.markers[0].metadata->name, "second");
+    EXPECT_EQ(cbdata.markers[0].metadata->code_object_id, 22u);
+    EXPECT_STREQ(cbdata.markers[1].metadata->name, "first");
+    EXPECT_EQ(cbdata.markers[1].metadata->code_object_id, 21u);
 }
 
 TEST_F(StitcherTest, StitchDoesNotCallbackTwice)

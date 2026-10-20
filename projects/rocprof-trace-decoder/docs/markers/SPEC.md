@@ -131,12 +131,16 @@ Any marker with `R:extra_payload_count > 0`, including address traces and
 named `sqtt_marker_data()` records, requires `SQTT_SHADER_CLOCK_BITS=0`.
 Clock packing is disabled by default; an explicit nonzero setting is an error.
 
-The sampled window lets a decoder compensate for the variable delay between
-the trace instruction issuing and its shaderdata record appearing in SQTT.
-Shaderdata and shader-clock timestamps have the same rate but an unknown fixed
-phase per physical SIMD. Do not compare them directly. For each **marker
-header** (never an `R:`-declared raw payload), choose any header `r` in the
-same physical SIMD/layout only as a coordinate origin and calculate:
+The existing timing heuristic attempts to estimate relative delay using this
+sampled window. It assumes equal rates and an unknown fixed phase shared by
+shaderdata and sampled shader clocks within each physical SIMD. That assumption
+does not account for independent wave clocks or drift after 4096 idle cycles.
+The trace data currently passed to marker processing does not identify those
+clock discontinuities. The following describes the implementation, not a
+validated hardware timing model.
+
+For each **marker header** (never an `R:`-declared raw payload), the heuristic
+uses a header `r` in the same physical SIMD/layout as a coordinate origin:
 
 ```text
 window_mask = (1ULL << (clock_bits + shader_clock_shift)) - 1
@@ -149,17 +153,29 @@ relative = (((record_time - r.record_time) -
 
 Within each `(shader engine, CU, SIMD, clock_bits, shader_clock_shift)` domain,
 the implementation assumes the relative delta stays within the signed sampled
-window. Collect the complete domain before selecting `minimum_relative`, then
-shift every header earlier by
+window. It collects the complete domain before selecting `minimum_relative`,
+then shifts every header earlier by
 `max(0, relative - minimum_relative - (bucket_size - 1))`. The coordinate
-origin is not a chronological anchor: a later lower value corrects earlier
-headers retroactively.
+origin is not a chronological anchor: a later lower value changes earlier
+estimates retroactively. This normalization cannot recover absolute latency.
+Synthetic tests verify the arithmetic and callback behavior, not clock
+comparability across waves, idle drift handling, or hardware timing accuracy.
 
-`att_tool.py` applies this correction while writing JSON by default;
-`--no-decode-markers` preserves the packed values and arrival timestamps. It
-rewrites each corrected header to the legacy `(id << 2) | flags` form. For an
-externally produced packed payload block, JSON output may normalize a
-recognized header but does not apply timestamp correction.
+Native clock correction is disabled by default. Setting the environment
+variable `ROCPROF_TRACE_DECODER_MARKER_CLOCK_CORRECTION=1` (exactly `1`) before
+the library loads enables it for experiments: the decoder then calibrates each input SE
+buffer in an extra pass before delivering callbacks and adjusts
+`marker.shaderdata.time` internally. Without correction, the marker
+timestamp remains the arrival time. The original packed header value remains
+in `marker.shaderdata.value`. Payload words are never clock samples.
+
+Raw `SHADERDATA` callbacks preserve arrival timestamps and packed values.
+The existing `att_tool.py` JSON postprocessor applies this heuristic and
+normalizes recognized headers to the legacy `(id << 2) | flags` form by default,
+independently of the native setting. Use `--no-decode-markers` to
+preserve raw values and arrival times in JSON. For externally produced packed
+payload blocks, JSON headers are normalized but their timestamps are not
+adjusted. The marker samples use the marker timestamp supplied by the C decoder.
 
 ### Semantic rules
 
@@ -539,8 +555,9 @@ same instant), so attributing synthetic weight to it would distort the time
 visualization. Inspect point events through
 `ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER` or
 `samples/markers/print_markers.py`. `sqtt_marker_data()` emits the point marker
-header followed by one raw payload record; the decoder emits that payload as a
-marker payload record using the header's `R:id:extra_payload_count=1` metadata.
+header followed by one raw payload record; the decoder attaches that word to
+the marker's `uint32_t` payload array using the header's
+`R:id:extra_payload_count=1` metadata.
 
 ### Named marker processing
 
@@ -644,17 +661,21 @@ PYTHONPATH=python python3 samples/markers/perfetto.py -d /tmp/perfetto_out \
 
 ### Decoding markers from SQTT trace data
 
-The decoder associates shaderdata with the active wave generation, selects the
-funcmap through the wave's code object, and emits marker callbacks:
+The decoder uses wave events to associate shaderdata with a code object,
+selects its funcmap, and emits marker callbacks. The scope samples reset state
+at `NEW_WAVE`; the reported hardware coordinates and this flag do not establish
+stable wave identity across context save and restore (CWSR).
 
 ```python
-from rocprof_trace_decoder import Decoder
+from rocprof_trace_decoder import Decoder, RecordType
 
 with Decoder() as decoder:
+    decoder.set_record_filter([RecordType.INFO, RecordType.MARKER])
     decoder.load_code_object(code_object, load_id, 0, len(code_object))
     records = decoder.parse(att_data, isa=code_index)
     for marker in records.markers:
-        print(marker.name, marker.marker_flags, marker.shaderdata.time)
+        print(marker.name, marker.marker_flags, marker.shaderdata.time,
+              marker.payload)
 ```
 
 The marker type (function, user, point) is determined by looking up the ID
@@ -962,20 +983,22 @@ which is a byte offset into LDS (source lane ID * 4). These intrinsics are
 
 ### Decoder integration
 
-Address trace blocks are represented by a decoded marker header followed by
-marker payload records.
+Address trace blocks are represented by one decoded marker with a contiguous
+array of raw `uint32_t` payload words. `payload_count` is the observed length;
+`metadata->payload_count` is the declared length. `INCOMPLETE` indicates a
+truncated block.
 
 Because SQTT hardware captures `s_ttracedata` from all active waves into a
 single time-ordered buffer, records from concurrent waves are interleaved.
-The decoder demultiplexes records by `(cu, simd, wave_id)` before parsing
-address blocks, ensuring each wave's multi-record sequence (header + exec +
-addresses) is processed contiguously.
+The decoder demultiplexes records by `(cu, simd, wave_id)` before grouping a
+header's declared payload words into its array. These coordinates are hardware
+slots, and do not establish a persistent wave identity across CWSR.
 
-For each wave's marker payload stream, a protocol consumer:
+For each complete marker, a protocol consumer:
 
 1. Recognizes address trace headers by resolving the marker ID against the
    funcmap and checking for the `addr_trace_` prefix
-2. Reads `exec_lo` and `exec_hi` from the next two records
+2. Reads `exec_lo` and `exec_hi` from the first two payload words
 3. Determines the protocol from the funcmap name prefix:
    - Memory/LDS/atomic/permute: reads `wave_size` lane tokens (2 per lane for 64-bit, 1 for 32-bit)
    - Buffer: reads 3 fixed tokens (rsrc_lo, rsrc_hi, soffset), then `wave_size` voffset tokens
@@ -984,5 +1007,6 @@ For each wave's marker payload stream, a protocol consumer:
 5. For buffer ops, reconstructs addresses: `base + soffset + voffset[lane]`
 
 `samples/markers/address_trace.py` demonstrates protocol-specific address
-reconstruction, EXEC filtering, and stride output using public marker payload
-records.
+reconstruction, EXEC filtering, and stride output using attached marker payloads.
+Request raw `SHADERDATA` records as well when individual payload arrival times
+or flags are required.

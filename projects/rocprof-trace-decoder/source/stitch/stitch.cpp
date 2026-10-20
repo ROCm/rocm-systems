@@ -393,6 +393,7 @@ void Stitcher::stitch(WaveDataInternal& wave)
 
     if (wave.callbackComplete) return;
     wave.callbackComplete = true;
+    if (!records().enabled(RADT(WAVE)) || records().status() != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return;
 
     if (!pctranslator) pctranslator = std::make_unique<PCTranslator>(raw_code, codeobj_service, gfxip);
 

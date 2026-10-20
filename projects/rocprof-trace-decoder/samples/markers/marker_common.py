@@ -71,7 +71,7 @@ def load_marker_traces(args):
 
 
 def marker_time(marker) -> int:
-    return marker.shaderdata.time - marker.delay
+    return marker.shaderdata.time
 
 
 def marker_selected(marker, args=None) -> bool:

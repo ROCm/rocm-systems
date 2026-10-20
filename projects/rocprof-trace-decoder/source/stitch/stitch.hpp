@@ -194,7 +194,10 @@ public:
     {
         records().flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INST_OTHER_SIMD, vec);
     }
-    void processShaderdata(const att_shader_data_t& record);
+    void processShaderdata(const att_shader_data_t& record)
+    {
+        if (marker_stream) processMarkerShaderdata(record);
+    }
     void sendRealtime(std::vector<att_decoder_realtime_t>& vec)
     {
         records().flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME, vec);
@@ -203,11 +206,19 @@ public:
     {
         records().flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_OCCUPANCY, vec);
     };
+    // Lets marker state retry delayed code-object attribution as the stream advances.
+    void markerSetRegisters(CSRegisterHandler& registers);
     void markerWaveStart(uint8_t cu, uint8_t simd, uint8_t wave_id, pcinfo_t kernel_entry);
     void markerWaveEnd(uint8_t cu, uint8_t simd, uint8_t wave_id, pcinfo_t kernel_entry);
+    void markerContextSave(uint8_t cu, uint8_t simd, uint8_t wave_id);
+    void markerContextRestore(uint8_t cu, uint8_t simd, uint8_t wave_id);
     void markerResolveAll(CSRegisterHandler& registers);
     void markerPacketLoss();
     void flushMarkers();
+    void finishMarkers();
+    void beginMarkerCalibration();
+    void endMarkerCalibration();
+    void copyMarkerCalibration(const Stitcher& other);
 
     void sendEvent(
         rocprofiler_thread_trace_decoder_event_type_t type,
@@ -242,6 +253,7 @@ public:
 
 private:
     std::pair<size_t, barrier_list_t> stitchWave(class WaveDataInternal& wave);
+    void processMarkerShaderdata(const att_shader_data_t& record);
 
     std::shared_ptr<ICodeServicer> codeobj_service{};
     std::unordered_map<int, int> jumps{};

@@ -10,6 +10,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(${TTD_PROJECT_SOURCE_DIR}/cmake/version.cmake)
+find_package(Threads REQUIRED)
 
 function(create_system_gtest_targets)
     find_path(GTEST_INCLUDE_DIR NAMES gtest/gtest.h)
@@ -123,6 +124,7 @@ set(TEST_FILES
     segment_test.cpp
     stitch_utils_test.cpp
     stitch_test.cpp
+    marker_stream_test.cpp
     trace_parser_test.cpp
     gfx9_test.cpp
     gfx10_test.cpp
@@ -165,18 +167,21 @@ function(add_unit_test_executable TARGET_NAME SANITIZER_TYPE)
     target_compile_definitions(${TARGET_NAME} PRIVATE ${TTD_VERSION_COMPILE_DEFS})
 
     if(NOT SANITIZER_TYPE STREQUAL "regular")
-        if(DISABLE_COMGR)
-            target_compile_definitions(${TARGET_NAME} PRIVATE ROCPROF_TRACE_DECODER_COMGR_DISABLED)
-        else()
-            if(DEFINED ROCM_INCLUDE_DIR)
-                target_include_directories(${TARGET_NAME} PRIVATE ${ROCM_INCLUDE_DIR})
-            endif()
-            if(DEFINED COMGR_LIB)
-                target_link_libraries(${TARGET_NAME} PRIVATE ${COMGR_LIB})
-            endif()
+        # Recompiled decoder sources need the same selected disassembler as
+        # the production library, without linking its unsanitized objects.
+        get_target_property(decoder_definitions rocprof-trace-decoder-static INTERFACE_COMPILE_DEFINITIONS)
+        get_target_property(decoder_includes rocprof-trace-decoder-static INTERFACE_INCLUDE_DIRECTORIES)
+        get_target_property(decoder_libraries rocprof-trace-decoder-static INTERFACE_LINK_LIBRARIES)
+        if(decoder_definitions)
+            target_compile_definitions(${TARGET_NAME} PRIVATE ${decoder_definitions})
+        endif()
+        if(decoder_includes)
+            target_include_directories(${TARGET_NAME} PRIVATE ${decoder_includes})
+        endif()
+        if(decoder_libraries)
+            target_link_libraries(${TARGET_NAME} PRIVATE ${decoder_libraries})
         endif()
     endif()
-
     target_link_libraries(${TARGET_NAME} PRIVATE GTest::gtest_main GTest::gmock_main)
 
     if(SANITIZER_TYPE STREQUAL "asan")
@@ -222,6 +227,11 @@ gtest_discover_tests(
     unit_tests_logging
     PROPERTIES LABELS "unit-tests;regular;logging" ENVIRONMENT "SQTT_LOGGING=1"
     TEST_PREFIX "logging/")
+
+add_test(NAME marker-clock-correction COMMAND unit_tests --gtest_filter=MarkerApiTest.Calibrates*)
+set_tests_properties(
+    marker-clock-correction PROPERTIES LABELS "unit-tests;regular" ENVIRONMENT
+                                       "ROCPROF_TRACE_DECODER_MARKER_CLOCK_CORRECTION=1")
 
 add_test(NAME api-lifetime COMMAND api_lifetime_test)
 set_tests_properties(api-lifetime PROPERTIES LABELS "unit-tests;regular;lifetime")

@@ -18,7 +18,7 @@ __all__ = [
     "Marker",
     "MarkerFlags",
     "MarkerKind",
-    "MarkerRecordKind",
+    "MarkerMetadata",
     "Occupancy",
     "OtherSimdInstruction",
     "Pc",
@@ -49,7 +49,8 @@ class DecoderInfo(IntEnum):
     DATA_LOST = 1
     STITCH_INCOMPLETE = 2
     WAVE_INCOMPLETE = 3
-    LAST = 4
+    MARKER_INCOMPLETE = 4
+    LAST = 5
 
 
 class WaveStateType(IntEnum):
@@ -122,12 +123,6 @@ class ShaderDataFlags(IntEnum):
     PRIV = 1
 
 
-class MarkerRecordKind(IntEnum):
-    HEADER = 0
-    PAYLOAD = 1
-    LAST = 2
-
-
 class MarkerKind(IntEnum):
     UNKNOWN = 0
     FUNCTION = 1
@@ -141,7 +136,8 @@ class MarkerFlags(IntFlag):
     EXIT_PREVIOUS = 0x1
     ENTER = 0x2
     NEW_WAVE = 0x4
-    LAST = 0x4
+    INCOMPLETE = 0x8
+    LAST = 0x8
 
 
 class RecordType(IntEnum):
@@ -243,22 +239,52 @@ class ShaderData:
     reserved: int
 
 
-@dataclass
-class Marker:
+@dataclass(frozen=True)
+class MarkerMetadata:
+    """Immutable marker declaration, shared by records from the same parse."""
+
     size: int
-    shaderdata: ShaderData
-    kernel_entry: Pc
     code_object_id: int
     name: str | None
     source_location: str | None
     marker_id: int
-    record_kind: MarkerRecordKind
-    marker_kind: MarkerKind
-    marker_flags: MarkerFlags
-    payload_index: int
+    marker_kind: MarkerKind | int
     payload_count: int
-    delay: int
-    reserved: int
+    wave_size: int
+    reserved: bytes
+
+
+@dataclass
+class Marker:
+    """One logical marker and its owned Python payload words."""
+
+    size: int
+    shaderdata: ShaderData
+    kernel_entry: Pc
+    metadata: MarkerMetadata
+    payload: list[int]
+    marker_flags: MarkerFlags
+    payload_count: int
+
+    @property
+    def code_object_id(self) -> int:
+        return self.metadata.code_object_id
+
+    @property
+    def name(self) -> str | None:
+        return self.metadata.name
+
+    @property
+    def source_location(self) -> str | None:
+        return self.metadata.source_location
+
+    @property
+    def marker_id(self) -> int:
+        return self.metadata.marker_id
+
+    @property
+    def marker_kind(self) -> MarkerKind | int:
+        return self.metadata.marker_kind
 
 
 @dataclass

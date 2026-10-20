@@ -82,20 +82,20 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
         return cluster_id;
     };
 
-    auto consume_packet_loss = [&](int64_t time)
-    {
-        bool lost = std::exchange(generator.packetlost, false);
-        if (!lost) return false;
-        info.bPacketLost = true;
-        stitch.markerPacketLoss();
-        stitch.sendEvent(ROCPROF_TRACE_DECODER_EVENT_PACKET_LOSS, time, 0, 0, 0, false, false);
-        return true;
-    };
+    // The generator's sticky loss flag also controls which tokens it returns, so
+    // leave it alone. Markers stop decoding as soon as it is raised.
+    bool marker_loss = false;
+    stitch.markerSetRegisters(csregister);
 
     while (generator.nextValid())
     {
+        if (records.status() != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return;
         Token token = generator.next();
-        bool packet_lost = consume_packet_loss(token.time);
+        if (generator.packetlost != marker_loss)
+        {
+            marker_loss = generator.packetlost;
+            if (marker_loss) stitch.markerPacketLoss();
+        }
 
         switch (token.type)
         {
@@ -260,6 +260,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
                     if (isCtxSave)
                     {
+                        stitch.markerContextSave(start.SACU(), start.simd, start.wid);
                         auto it = running_waves.find(start.getGPULocation());
                         if (it != running_waves.end())
                         {
@@ -280,6 +281,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     }
                     else if (isCtxResr)
                     {
+                        stitch.markerContextRestore(start.SACU(), start.simd, start.wid);
                         pcinfo_t addr{0, 0};
                         if (auto it = saved_waves.find(start.getGPULocation()); it != saved_waves.end())
                             addr = it->second;
@@ -303,7 +305,7 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
                     break;
                 }
 
-                if (packet_lost && running_waves.find(start.getGPULocation()) != running_waves.end())
+                if (generator.packetlost && running_waves.find(start.getGPULocation()) != running_waves.end())
                 {
                     add_occupancy({
                         {0, 0},
@@ -632,12 +634,17 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
             }
             default:
                 if (generator.realtime.size() >= MAX_ACCUM_RECORDS) stitch.sendRealtime(generator.realtime);
+                if (generator.packetlost)
+                {
+                    info.bPacketLost = true;
+                    stitch.sendEvent(ROCPROF_TRACE_DECODER_EVENT_PACKET_LOSS, token.time, 0, 0, 0, false, false);
+                    generator.packetlost = false;
+                }
                 break;
         }
         if (records.immediate(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME) && !generator.realtime.empty())
             stitch.sendRealtime(generator.realtime);
     }
-    consume_packet_loss(generator.get_time());
 
     for (auto& slot : SIMD)
         for (auto& wave : slot) wave.lookbackpcs(csregister);
@@ -648,10 +655,11 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
 
     info.realtime_frequency = csregister.realtime_frequency;
     info.counter_frequency = csregister.counter_frequency;
+    info.bPacketLost |= generator.packetlost;
 
     if (generator.realtime.size()) stitch.sendRealtime(generator.realtime);
     records.flush(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA, shaderdata);
-    stitch.flushMarkers();
+    stitch.finishMarkers();
     if (other_simd.size()) stitch.sendOtherSimd(other_simd);
 
     info.globaltime = generator.get_time();

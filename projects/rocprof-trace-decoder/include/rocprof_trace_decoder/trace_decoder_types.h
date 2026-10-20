@@ -47,6 +47,7 @@ typedef enum rocprofiler_thread_trace_decoder_info_t
     ROCPROFILER_THREAD_TRACE_DECODER_INFO_DATA_LOST,
     ROCPROFILER_THREAD_TRACE_DECODER_INFO_STITCH_INCOMPLETE,
     ROCPROFILER_THREAD_TRACE_DECODER_INFO_WAVE_INCOMPLETE,
+    ROCPROFILER_THREAD_TRACE_DECODER_INFO_MARKER_INCOMPLETE, ///< Marker data is incomplete or unavailable.
     ROCPROFILER_THREAD_TRACE_DECODER_INFO_LAST
 } rocprofiler_thread_trace_decoder_info_t;
 
@@ -225,13 +226,6 @@ typedef struct rocprofiler_thread_trace_decoder_shaderdata_t
     uint32_t reserved;
 } rocprofiler_thread_trace_decoder_shaderdata_t;
 
-typedef enum rocprofiler_thread_trace_decoder_marker_record_kind_t
-{
-    ROCPROFILER_THREAD_TRACE_DECODER_MARKER_RECORD_HEADER = 0,
-    ROCPROFILER_THREAD_TRACE_DECODER_MARKER_RECORD_PAYLOAD,
-    ROCPROFILER_THREAD_TRACE_DECODER_MARKER_RECORD_LAST
-} rocprofiler_thread_trace_decoder_marker_record_kind_t;
-
 typedef enum rocprofiler_thread_trace_decoder_marker_kind_t
 {
     ROCPROFILER_THREAD_TRACE_DECODER_MARKER_KIND_UNKNOWN = 0,
@@ -247,31 +241,51 @@ typedef enum rocprofiler_thread_trace_decoder_marker_flags_t
     ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_EXIT_PREVIOUS = 0x1,
     ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_ENTER = 0x2,
     ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE = 0x4,
-    ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_LAST = ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_NEW_WAVE
+    ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_INCOMPLETE = 0x8, ///< Some declared payload words are missing.
+    ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_LAST = ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_INCOMPLETE
 } rocprofiler_thread_trace_decoder_marker_flags_t;
 
 /**
- * @brief Decoded SQTT marker or one of its declared payload records.
+ * @brief Immutable description shared by occurrences of a marker in a code object.
  *
- * Source shaderdata is embedded by value. name and source_location are valid
- * for the duration of the callback.
+ * The descriptor and its strings remain valid until the parse call returns.
+ * name and source_location may be NULL when unavailable. Unknown marker IDs
+ * have UNKNOWN kind. A marker is identified by the pair (code_object_id, marker_id).
  */
-typedef struct rocprofiler_thread_trace_decoder_marker_t
+typedef struct rocprofiler_thread_trace_decoder_marker_metadata_t
 {
     uint64_t size;
-    rocprofiler_thread_trace_decoder_shaderdata_t shaderdata;
-    rocprofiler_thread_trace_decoder_pc_t kernel_entry;
     uint64_t code_object_id;
     const char* name;
     const char* source_location;
-    uint32_t marker_id;     ///< Bare exits report the ID of the scope being exited.
-    uint32_t record_kind;   ///< rocprofiler_thread_trace_decoder_marker_record_kind_t
-    uint32_t marker_kind;   ///< rocprofiler_thread_trace_decoder_marker_kind_t
-    uint32_t marker_flags;  ///< bitmask of rocprofiler_thread_trace_decoder_marker_flags_t
-    uint32_t payload_index; ///< UINT32_MAX for a header, otherwise zero-based
-    uint32_t payload_count;
-    int32_t delay; ///< Marker issue-to-arrival delay in cycles. Zero until implemented.
-    uint32_t reserved;
+    uint32_t marker_id;     ///< Bare exits identify the popped scope, or zero if unmatched.
+    uint32_t marker_kind;   ///< rocprofiler_thread_trace_decoder_marker_kind_t.
+    uint32_t payload_count; ///< 32-bit payload words declared for this marker's header.
+    uint8_t wave_size;      ///< 32 or 64, or zero if unknown.
+    uint8_t reserved[3];
+} rocprofiler_thread_trace_decoder_marker_metadata_t;
+
+/**
+ * @brief One decoded marker with a contiguous array of raw payload words.
+ *
+ * The record and payload are valid during the callback. Advance through a batch
+ * by each record's size in bytes. There is no global timestamp ordering.
+ * NEW_WAVE marks a boundary at which consumers reset scope state for the reported
+ * (cu, simd, wave_id) slot. Preserve callback order within each slot.
+ * EXIT_PREVIOUS and ENTER together mean pop then push. With neither flag set,
+ * the marker is a point event.
+ * shaderdata.time is the decoded marker timestamp. Original arrival timestamps
+ * and per-word flags are available through SHADERDATA records.
+ */
+typedef struct rocprofiler_thread_trace_decoder_marker_t
+{
+    uint64_t size;                                           ///< Byte stride to the next marker in a callback batch.
+    rocprofiler_thread_trace_decoder_shaderdata_t shaderdata; ///< Header value, location, and marker timestamp.
+    rocprofiler_thread_trace_decoder_pc_t kernel_entry;
+    const rocprofiler_thread_trace_decoder_marker_metadata_t* metadata;
+    const uint32_t* payload; ///< Raw words; NULL if payload_count is zero.
+    uint32_t marker_flags;   ///< bitmask of rocprofiler_thread_trace_decoder_marker_flags_t.
+    uint32_t payload_count;  ///< Observed words; below the declared count only if INCOMPLETE or a bare exit.
 } rocprofiler_thread_trace_decoder_marker_t;
 
 /**
@@ -413,7 +427,7 @@ typedef enum rocprofiler_thread_trace_decoder_record_request_flags_t
 
 typedef struct rocprofiler_thread_trace_decoder_record_request_t
 {
-    uint64_t size; ///< Must equal sizeof(rocprofiler_thread_trace_decoder_record_request_t).
+    uint64_t size; ///< Size in bytes, including any extension fields. Initialize to sizeof(this structure).
     rocprofiler_thread_trace_decoder_record_type_t type; ///< Record type to enable.
     uint32_t flags; ///< bitmask of rocprofiler_thread_trace_decoder_record_request_flags_t.
 } rocprofiler_thread_trace_decoder_record_request_t;
@@ -421,7 +435,7 @@ typedef struct rocprofiler_thread_trace_decoder_record_request_t
 typedef struct rocprofiler_thread_trace_decoder_record_filter_t
 {
     uint64_t size;                                                    ///< Size of this structure.
-    const rocprofiler_thread_trace_decoder_record_request_t* records; ///< Enabled record requests.
+    const rocprofiler_thread_trace_decoder_record_request_t* records; ///< Requests, each advanced by its size field.
     uint64_t record_count;                                            ///< Number of entries in records.
 } rocprofiler_thread_trace_decoder_record_filter_t;
 

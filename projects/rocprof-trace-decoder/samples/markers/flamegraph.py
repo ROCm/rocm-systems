@@ -14,16 +14,14 @@ from marker_common import (
     marker_selected,
     marker_time,
 )
-from rocprof_trace_decoder import MarkerFlags, MarkerRecordKind
+from rocprof_trace_decoder import MarkerFlags
 
 
 def folded_stacks(markers, args=None) -> dict[str, int]:
     states: dict[tuple[int, int, int, int], tuple[list[str], int]] = {}
     folded: dict[str, int] = defaultdict(int)
 
-    for marker in sorted(markers, key=marker_time):
-        if marker.record_kind != MarkerRecordKind.HEADER:
-            continue
+    for marker in markers:
         if not marker_selected(marker, args):
             continue
         time = marker_time(marker)
