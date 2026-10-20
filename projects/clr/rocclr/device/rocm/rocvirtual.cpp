@@ -1618,7 +1618,7 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 
   // Mark the flag indicating if a dispatch is outstanding.
   // We are not waiting after every dispatch.
-  SetStateFlag(kHasPendingDispatch);
+  hasPendingDispatch_ = true;
 
   // Wait on signal ?
   if (blocking) {
@@ -1637,11 +1637,12 @@ bool VirtualGPU::dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header, ui
 void VirtualGPU::adjustHeader(uint16_t& header) {
   setFenceDirty(true);
 
-  if (TestAndClearStateFlag(kAddSystemScope)) {
+  if (addSystemScope_) {
     header &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
                 HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE |
                HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    addSystemScope_ = false;
   }
 
   auto expected_fence_state = extractAqlBits(header, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
@@ -1798,7 +1799,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
        (firstSetup & 0xFF) == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH);
   const bool firstHeaderRequestedBarrier =
       firstPacketIsKernel && ((firstHeader & kBarrierBit) != 0);
-  if (TestAndClearStateFlag(kAddSystemScope)) {
+  if (addSystemScope_) {
     firstHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
     firstHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE);
     lastHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
@@ -1810,6 +1811,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
       firstHeader &= ~(HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
       firstHeader |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     }
+    addSystemScope_ = false;
   }
 
   uint8_t* queueBase = static_cast<uint8_t*>(gpu_queue_->base_address);
@@ -2139,7 +2141,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
     chunk_size = std::min(chunk_size * 2, kPeriod);
   }
 
-  SetStateFlag(kHasPendingDispatch);
+  hasPendingDispatch_ = true;
 
   auto* finalLastSlot = reinterpret_cast<hsa_kernel_dispatch_packet_t*>(
       queueBase + (lastIndex & queueMask) * kPacketSize);
@@ -2147,7 +2149,7 @@ bool VirtualGPU::dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>&
   // Skip the pending dispatch only when both conditions are met: a completion
   // signal tracks the last packet and the fence is already clean (system scope).
   if (finalLastSlot->completion_signal.handle != 0 && !isFenceDirty()) {
-    ClearStateFlag(kHasPendingDispatch);
+    hasPendingDispatch_ = false;
   }
 
   TrackQueueProgress(*finalLastSlot, lastIndex, pre_patched);
@@ -2371,12 +2373,12 @@ void VirtualGPU::ResetQueueStates() {
 
 // ================================================================================================
 bool VirtualGPU::releaseGpuMemoryFence(bool skip_cpu_wait) {
-  if (GetStateFlag(kHasPendingDispatch) || isFenceDirty() || !Barriers().IsExternalSignalListEmpty()) {
+  if (hasPendingDispatch_ || isFenceDirty() || !Barriers().IsExternalSignalListEmpty()) {
     // Dispatch barrier packet into the queue
     dispatchBarrierPacket(kBarrierPacketHeader);
-    ClearStateFlag(kHasPendingDispatch);
+    hasPendingDispatch_ = false;
     skippedDispatches_ = 0;
-    ClearStateFlag(kRetainExternalSignals);
+    retainExternalSignals_ = false;
   }
   // Any fence/flush ends the coalescing window for event records.
   SetCoalesceWindow(0, nullptr);
@@ -2395,6 +2397,7 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
                        const std::vector<uint32_t>& cuMask, amd::CommandQueue::Priority priority,
                        bool dedicated_queue)
     : device::VirtualDevice(device),
+      state_(0),
       gpu_queue_(nullptr),
       roc_device_(device),
       virtualQueue_(nullptr),
@@ -2420,10 +2423,10 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
   // Initialize the last signal and dispatch flags
   timestamp_ = nullptr;
   command_ = nullptr;
-  // state_ initialized to 0 in member initializer
-  if (profiling) SetStateFlag(kProfiling);
-  if (cooperative) SetStateFlag(kCooperative);
+  hasPendingDispatch_ = false;
   skippedDispatches_ = 0;
+  profiling_ = profiling;
+  cooperative_ = cooperative;
 
   // Initialize barrier and barrier value packets
   barrier_packet_.header = kInvalidAql;
@@ -2479,16 +2482,14 @@ VirtualGPU::~VirtualGPU() {
 
   delete blitMgr_;
 
-  if (GetStateFlag(kTrackingCreated)) {
+  if (tracking_created_) {
     std::scoped_lock l(execution());
     AcquireHwQueueIfNeeded();
     // Windows requires an interrupt in more cases than Linux for OS fence updates
-    if (IS_WINDOWS) SetStateFlag(kForceIrq);
+    force_irq_ = IS_WINDOWS;
     // Force extra barrier to make sure OS gets an interrupt,
     // but avoid if the PM4 emulation, since PM4 path can deadlock during device destruction
-    if (IS_WINDOWS && !dev().IsPm4Emulation()) {
-      SetStateFlag(kHasPendingDispatch);
-    }
+    hasPendingDispatch_ |= IS_WINDOWS && !dev().IsPm4Emulation();
     // Release the resources of signal
     releaseGpuMemoryFence();
   }
@@ -2537,7 +2538,7 @@ VirtualGPU::~VirtualGPU() {
   }
 
   if (gpu_queue_ != nullptr) {
-    roc_device_.releaseQueue(gpu_queue_, cuMask_, GetStateFlag(kCooperative));
+    roc_device_.releaseQueue(gpu_queue_, cuMask_, cooperative_);
   }
 
   if (hostcallBuffer_) {
@@ -2551,7 +2552,7 @@ VirtualGPU::~VirtualGPU() {
 bool VirtualGPU::create() {
   // Pick a reasonable queue size
   uint32_t queue_size = ROC_AQL_QUEUE_SIZE;
-  SetGpuQueue(roc_device_.acquireQueue(queue_size, GetStateFlag(kCooperative), cuMask_, priority_, false,
+  SetGpuQueue(roc_device_.acquireQueue(queue_size, cooperative_, cuMask_, priority_, false,
                                        dedicated_queue_));
   if (!gpu_queue_) return false;
 
@@ -2591,11 +2592,8 @@ bool VirtualGPU::create() {
   }
 
   // Allocate signal tracker for ROCr copy queue
-  bool tracking_created = Barriers().Create();
-  if (tracking_created) {
-    SetStateFlag(kTrackingCreated);
-  }
-  if (!tracking_created) {
+  tracking_created_ = Barriers().Create();
+  if (!tracking_created_) {
     LogError("Could not create signal for copy queue!");
     return false;
   }
@@ -2772,12 +2770,13 @@ void VirtualGPU::ReleaseHwQueue() {
   // Try to release queue to the pool of active queues.
   // Use tryLock() since this may be called from the HsaAmdSignalHandler
   // and blocking here could cause deadlock
-  if (roc_device_.settings().dynamic_queues_ > 0 && !GetStateFlag(kCooperative) &&
-      (cuMask_.size() == 0)) {
+  if (roc_device_.settings().dynamic_queues_ > 0 && (cuMask_.size() == 0)) {
     // If tryLock fails, skip the release - the queue will be released
     // on next opportunity
     if (execution().try_lock()) {
-      if (gpu_queue_ != nullptr) {
+      // Check cooperative_ under the lock: it shares a bitfield byte with the flags the submit
+      // path writes under this lock, so an unlocked read is a data race for ThreadSanitizer.
+      if (!cooperative_ && gpu_queue_ != nullptr) {
         if (IsQueueIdle()) {
           last_hwq_ = gpu_queue_;
           if (roc_device_.ReleaseActiveQueue(gpu_queue_, priority_)) {
@@ -2862,7 +2861,7 @@ void VirtualGPU::profilingBegin(amd::Command& command, bool sdmaProfiling) {
     }
   }
 
-  if (!GetStateFlag(kRetainExternalSignals)) {
+  if (!retainExternalSignals_) {
     Barriers().ClearExternalSignals();
   }
   for (auto it = command.eventWaitList().begin(); it < command.eventWaitList().end(); ++it) {
@@ -5144,7 +5143,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
       aqlHeaderWithOrder &= kAqlHeaderMask;
     }
     if (vcmd->getCommandEntryScope() == amd::Device::kCacheStateSystem) {
-      SetStateFlag(kAddSystemScope);
+      addSystemScope_ = true;
     }
   }
 
@@ -5292,8 +5291,8 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
 
     // Add a dependency into the current queue on the coop queue
     Barriers().AddExternalSignal(queue->Barriers().GetLastSignal());
-    SetStateFlag(kHasPendingDispatch);
-    SetStateFlag(kRetainExternalSignals);
+    hasPendingDispatch_ = true;
+    retainExternalSignals_ = true;
 
     queue->profilingEnd();
   } else {
@@ -5328,7 +5327,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
   if (vcmd.CpuWaitRequested()) {
-    if (IS_WINDOWS) SetStateFlag(kForceIrq);
+    force_irq_ = IS_WINDOWS;
     // It should be safe to call flush directly if there are not pending dispatches without
     // HSA signal callback
     AcquireHwQueueIfNeeded();
@@ -5356,7 +5355,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
         // observe correct readiness even though no new barrier was dispatched.
         AttachHwEvent(command_, last_barrier_hw_event_);
         profilingEnd();
-        ClearStateFlag(kForceIrq);
+        force_irq_ = false;
         return;
       }
       // IPC event record: if ipc_s is non-zero, first dispatch a NOP barrier with
@@ -5382,13 +5381,13 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
         }
       } else {
         // Submit a barrier with a cache flushes.
-        if (IS_WINDOWS) SetStateFlag(kForceIrq);
+        force_irq_ = IS_WINDOWS;
         if (settings.barrier_value_packet_ && vcmd.profilingInfo().marker_ts_) {
           dispatchBarrierValuePacket(kBarrierVendorPacketHeader, true);
         } else {
           dispatchBarrierPacket(kBarrierPacketHeader, false);
         }
-        ClearStateFlag(kHasPendingDispatch);
+        hasPendingDispatch_ = false;
       }
     }
     // A record sets the window to its own event and barrier signal; a wait/other
@@ -5397,7 +5396,7 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     SetCoalesceWindow(ev, ev != 0 ? command_->HwEvent() : nullptr);
     profilingEnd();
   }
-  ClearStateFlag(kForceIrq);
+  force_irq_ = false;
 }
 
 // ================================================================================================
