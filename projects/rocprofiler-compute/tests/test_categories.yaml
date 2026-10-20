@@ -8,6 +8,7 @@ test_categories:
       - test_evaluation_pipeline
       - test_metric_evaluator
       - test_utils_counter_defs
+      - test_yaml_inherit_loader
       - test_parser
       - test_argparser
       - test_profile_section
@@ -97,6 +98,7 @@ test_categories:
       - test_evaluation_pipeline
       - test_metric_evaluator
       - test_utils_counter_defs
+      - test_yaml_inherit_loader
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -198,6 +200,7 @@ test_categories:
       - test_evaluation_pipeline
       - test_metric_evaluator
       - test_utils_counter_defs
+      - test_yaml_inherit_loader
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -299,6 +302,7 @@ test_categories:
       - test_evaluation_pipeline
       - test_metric_evaluator
       - test_utils_counter_defs
+      - test_yaml_inherit_loader
       - test_parser
       - test_argparser
       - test_analyze_commands
