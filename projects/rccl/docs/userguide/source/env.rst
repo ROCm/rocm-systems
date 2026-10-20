@@ -444,13 +444,15 @@ NCCL_GIN_IB_TC
 (since 2.30.7)
 
 Defines the InfiniBand traffic class for GPU-initiated networking (GIN)
-connections, independently of NCCL_IB_TC. GIN traffic can then use a different
+connections on both the IB proxy and rocSHMEM GDA backends, independently of
+NCCL_IB_TC. GIN traffic can then use a different
 RoCE traffic class from the collective and point-to-point connections, which
 keep using NCCL_IB_TC. The one-sided host RMA operations run on the same IB
 proxy backend and therefore also use this traffic class.
 
-In RCCL, only the IB proxy GIN backend (``NCCL_GIN_TYPE=2``) reads this variable.
-The RCCL device API and GIN how-to describes the other backends.
+In RCCL, both the IB proxy GIN backend (``NCCL_GIN_TYPE=2``) and the rocSHMEM
+GDA backend (``NCCL_GIN_TYPE=6``) read this variable. The RCCL device API and
+GIN how-to describes the backends and their precedence.
 
 Values accepted
 ^^^^^^^^^^^^^^^
