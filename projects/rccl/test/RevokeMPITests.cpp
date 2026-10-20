@@ -684,6 +684,9 @@ void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
     DdaFabricMPI::abortJobUnlessAllRanksDrained(DdaFabricMPI::waitStreamBounded(stream, kDrainTimeout),
                                                 "DDA wait after ncclCommRevoke");
 
+    // The revoked parent still has unconsumed barrier flags, so DDA must not run on it again.
+    ASSERT_MPI_EQ(ncclInvalidUsage, ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, parent, stream));
+
     std::vector<int> excludeList;
     bool             isExcluded = false;
     computeSymmetricExclude(rank, worldSize, excludeList, isExcluded);
@@ -846,12 +849,13 @@ TEST_F(RevokeDdaMPITest, IncompleteCollective_DdaAlltoAllLl128)
 
 // NCCL_SHRINK_ABORT can leave the parent's LL epochs and barrier mailboxes out of step across
 // ranks, so the survivors' parent must stop selecting DDA while the child keeps working.
-TEST_F(RevokeDdaMPITest, ShrinkAbort_DisablesDdaOnParent)
+// Shared body: GTEST_SKIP() returns from here, so call it as the last statement of a test.
+static void runShrinkAbortDisablesDda(MPITestBase& test)
 {
-    ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+    ASSERT_MPI_EQ(ncclSuccess, test.createTestCommunicator());
 
-    ncclComm_t       parent = getActiveCommunicator();
-    hipStream_t      stream = getActiveStream();
+    ncclComm_t       parent = test.getActiveCommunicator();
+    hipStream_t      stream = test.getActiveStream();
     constexpr size_t kCount = 100;
 
     void* sendBuf = nullptr;
@@ -869,9 +873,7 @@ TEST_F(RevokeDdaMPITest, ShrinkAbort_DisablesDdaOnParent)
         return res == ncclSuccess ? algo : -1;
     };
     const auto isDda = [](int algo) {
-        return algo == kDdaLL || algo == kDdaLL128
-               || algo == static_cast<int>(rcclAddonAlgos_t::RCCL_DDA_FABRIC_VMM)
-               || algo == static_cast<int>(rcclAddonAlgos_t::RCCL_DDA_IPC);
+        return algo == kDdaLL || algo == kDdaLL128 || algo == kDdaVmm || algo == kDdaIpc;
     };
 
     const std::string skipReason
@@ -899,6 +901,11 @@ TEST_F(RevokeDdaMPITest, ShrinkAbort_DisablesDdaOnParent)
     ASSERT_MPI_EQ(ncclSuccess, childRes);
     DdaFabricMPI::abortJobUnlessAllRanksDrained(DdaFabricMPI::waitStreamBounded(stream, kDrainTimeout),
                                                 "child AllReduce after NCCL_SHRINK_ABORT");
+}
+
+TEST_F(RevokeDdaMPITest, ShrinkAbort_DisablesDdaOnParent)
+{
+    runShrinkAbortDisablesDda(*this);
 }
 
 /**
@@ -1021,6 +1028,12 @@ TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAllReduce)
     runIncompleteDdaRevokeShrink(*this, {ncclFuncAllReduce, 1024, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
 }
 
+// 512 KiB is above the 256 KiB flat/tree split, so this reaches the three-barrier ddaAllReduceTreeIpc.
+TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAllReduceTree)
+{
+    runIncompleteDdaRevokeShrink(*this, {ncclFuncAllReduce, 131072, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
+}
+
 TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAllGather)
 {
     runIncompleteDdaRevokeShrink(*this, {ncclFuncAllGather, 1024, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
@@ -1035,6 +1048,11 @@ TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcReduceScatter)
 TEST_F(RevokeDdaIpcMPITest, IncompleteCollective_DdaIpcAlltoAll)
 {
     runIncompleteDdaRevokeShrink(*this, {ncclFuncAlltoAll, 1024, kDdaIpc, NCCL_PROTO_SIMPLE, {}});
+}
+
+TEST_F(RevokeDdaIpcMPITest, ShrinkAbort_DisablesDdaOnParent)
+{
+    runShrinkAbortDisablesDda(*this);
 }
 
 static void computeAsymmetricExclude(int worldRank, int worldSize,
