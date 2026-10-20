@@ -22,7 +22,7 @@ from pc_sampling.pc_sampling_csv_export import (
     resolve_isa_relative_path,
     write_grouped_csv_files,
 )
-from utils.analysis_orm import PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT
+from utils.analysis_orm import per_kernel_isa_file_key_columns
 from utils.logger import console_debug, console_warning
 
 PER_KERNEL_DIRECTORY_NAME = "per_kernel_pc_sampling"
@@ -107,7 +107,7 @@ def _write_per_kernel_isa_files(
     """Write one workload's grouped ISA rows, and return the number of files."""
     return write_grouped_csv_files(
         isa_rows,
-        PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT,
+        len(per_kernel_isa_file_key_columns()),
         build_header(BASE_COLUMNS, stall_reasons, TRAILING_COLUMNS),
         partial(_resolve_isa_export_path, per_kernel_directory),
         _number_instruction_lines,
