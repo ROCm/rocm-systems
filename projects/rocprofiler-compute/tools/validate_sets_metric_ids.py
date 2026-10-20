@@ -28,7 +28,10 @@ GPU_SPEC_PATH = PROJECT_ROOT / "src" / "utils" / "mi_gpu_spec.yaml"
 
 # Make src/ importable so we can reuse the canonical counter definitions.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
-from utils.utils_common import canonical_config_arch  # noqa: E402
+from utils.utils_common import (  # noqa: E402
+    canonical_config_arch,
+    convert_metric_id_to_panel_info,
+)
 from utils.utils_counter_defs import (  # noqa: E402
     counter_to_block,
     extract_counters_and_variables,
@@ -37,18 +40,6 @@ from utils.utils_counter_defs import (  # noqa: E402
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def resolve_metric_id(metric_id: str) -> tuple[int | None, int | None]:
-    """Parse 'X.Y.Z' into (metric_table_id, metric_index)."""
-    tokens = metric_id.split(".")
-    if len(tokens) < 3:
-        return None, None
-    try:
-        x, y, z = int(tokens[0]), int(tokens[1]), int(tokens[2])
-    except ValueError:
-        return None, None
-    return x * 100 + y, z
 
 
 def load_analysis_configs(arch: str) -> dict[int, dict[str, dict]]:
@@ -147,7 +138,10 @@ def validate() -> list[str]:
                 for metric_id_raw, expected_name in entry.items():
                     metric_id = str(metric_id_raw)
                     expected_name = str(expected_name)
-                    table_id, idx = resolve_metric_id(metric_id)
+                    try:
+                        _, table_id, idx = convert_metric_id_to_panel_info(metric_id)
+                    except ValueError:
+                        table_id = idx = None
 
                     # --- Check 1: metric ID maps to correct name ---
                     if table_id is None or idx is None:
