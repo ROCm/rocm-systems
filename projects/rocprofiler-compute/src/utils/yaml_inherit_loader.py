@@ -49,7 +49,7 @@ def load_inherited_yaml(path: Path) -> dict[str, Any]:
 def _parent_path(path: Path, parent: object) -> Optional[Path]:
     if parent is None:
         return None
-    if not isinstance(parent, str) or not parent:
+    if not isinstance(parent, str) or not parent or Path(parent).is_absolute():
         raise InheritanceError(f"{path}: '{INHERIT_KEY}' must be a relative file path")
     parent_path = (path.parent / parent).resolve()
     if not parent_path.is_file():
@@ -91,11 +91,19 @@ def _remove_key(mapping: dict[str, Any], key: str, source: str) -> None:
 def _merge_value(base: object, override: object, key: str, source: str) -> object:
     if isinstance(override, dict):
         return _merge_mappings(base if isinstance(base, dict) else {}, override, source)
-    if isinstance(override, list) and any(
-        isinstance(item, Remove) for item in override
-    ):
+    if isinstance(override, list) and _contains_remove(override):
         raise InheritanceError(f"{source}: '{REMOVE_TAG}' is not allowed in '{key}'")
     return copy.deepcopy(override)
+
+
+def _contains_remove(value: object) -> bool:
+    if isinstance(value, Remove):
+        return True
+    if isinstance(value, dict):
+        return any(_contains_remove(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_remove(item) for item in value)
+    return False
 
 
 def _construct_remove(loader: "InheritLoader", node: yaml.Node) -> "Remove":
