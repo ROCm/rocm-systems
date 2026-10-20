@@ -22,7 +22,7 @@ dispatch.kernel_time:
 dispatch.lds_allocation:
   name: LDS Allocation
   formula: AVG(LDS_Per_Workgroup)
-  unit: Bytes
+  unit: Bytes per Workgroup
   description: >-
     The number of bytes of LDS memory (or, shared memory) allocated per workgroup.
     Note: This may also be larger than what was requested at compile time due to both
