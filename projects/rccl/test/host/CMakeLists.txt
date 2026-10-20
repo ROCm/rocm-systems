@@ -1826,6 +1826,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastQpSharing
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroNetIbCastConnect
 # ---------------------------------------------------------------------------
+# In-build the hipified sources only exist once hipify_all runs, so mark this oracle TU GENERATED.
+set_source_files_properties(${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc PROPERTIES GENERATED TRUE)
 rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastConnect
   SOURCES ${TEST_MICRO_NET_IB_CAST_CONNECT_SOURCE_FILES}
   EXTRA_INCLUDES
