@@ -114,7 +114,8 @@ TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
     return;
   } else {
     ForceScalarOverride force_simd(false);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -205,7 +206,8 @@ TEST(ExecutionPluginTest, ValuSimdWriteObservationUsesActiveExecMask) {
     return;
   } else {
     ForceScalarOverride force_simd(false);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -241,7 +243,8 @@ TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
     return;
   } else {
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -304,7 +307,8 @@ TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
 
 TEST(ExecutionPluginTest, DppOutOfBoundsObservationHonorsBoundCtrl) {
   ForceScalarOverride force_simd(false);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -353,7 +357,8 @@ TEST(ExecutionPluginTest, DppOutOfBoundsObservationHonorsBoundCtrl) {
 
 TEST(ExecutionPluginTest, DppSourceDestinationAliasStagesBeforeWriting) {
   ForceScalarOverride force_simd(false);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -641,7 +646,8 @@ TEST(ExecutionPluginTest, Dpp64BitSourceSimdStagesBothPhysicalDwords) {
   }
   ForceScalarOverride force_simd(false);
   ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -675,7 +681,8 @@ TEST(ExecutionPluginTest, Dpp64BitSourceSimdStagesBothPhysicalDwords) {
 TEST(ExecutionPluginTest, DppInstructionReuseRestagesOriginalSource) {
   ForceScalarOverride force_scalar(true);
   ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
@@ -759,7 +766,8 @@ TEST(ExecutionPluginTest, SdwaFp8ConversionsIgnoreNumericalOutputModifiers) {
 TEST(ExecutionPluginTest, Sdwa64BitDestinationWritesLegalConversionResult) {
   ForceScalarOverride force_scalar(true);
   ScopedIsaExecutionBackend execution_backend_scope{&cdna3::execution_backend()};
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna3");
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"cdna3"));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -803,7 +811,8 @@ TEST(ExecutionPluginTest, Sdwa64BitDestinationWritesLegalConversionResult) {
 TEST(ExecutionPluginTest, SdwaInstructionReuseRestagesOriginalSource) {
   ForceScalarOverride force_scalar(true);
   ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
@@ -835,7 +844,8 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
   for (bool force_scalar : {true, false}) {
     SCOPED_TRACE(force_scalar ? "scalar" : "simd");
     ForceScalarOverride execution_mode(force_scalar);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
     ASSERT_NE(wf, nullptr);
@@ -917,7 +927,8 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
 
 TEST(ExecutionPluginTest, SdwaVop2Src1SelectorReportsExactBytes) {
   ForceScalarOverride force_scalar(true);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -963,7 +974,8 @@ TEST(ExecutionPluginTest, SdwaVop2Src1SelectorReportsExactBytes) {
 
 TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
   ForceScalarOverride force_scalar(true);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1019,7 +1031,8 @@ TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
 }
 
 TEST(ExecutionPluginTest, SgprWriteObservationUsesExplicitWavePhysicalBlock) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   constexpr uint32_t kRequestedSgprs = 40;
@@ -1060,7 +1073,8 @@ TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) 
     return;
   } else {
     ForceScalarOverride force_simd(false);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1150,7 +1164,8 @@ TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) 
 
 TEST(ExecutionPluginTest, SdwaClampIsAppliedInsideArchitecturalDestinationWrite) {
   ForceScalarOverride force_simd(false);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1209,7 +1224,8 @@ TEST(ExecutionPluginTest, SdwaF16ClampPrecedesDestinationPlacement) {
   };
   for (bool force_scalar : {false, true}) {
     ForceScalarOverride scalar_override(force_scalar);
-    PluginFixture fixture(/*num_wf_slots=*/1);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
     OrderingPlugin *plugin = fixture.attach_ordering_plugin();
     amdgpu::ComputeUnitCore *compute_unit = fixture.cu();
     amdgpu::Wavefront *wavefront = compute_unit->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1270,7 +1286,8 @@ TEST(ExecutionPluginTest, SdwaF16ClampPrecedesDestinationPlacement) {
 TEST(ExecutionPluginTest, SdwaPackedF16ClampTreatsEachHalfIndependently) {
   for (bool force_scalar : {false, true}) {
     ForceScalarOverride scalar_override(force_scalar);
-    PluginFixture fixture(/*num_wf_slots=*/1);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
     amdgpu::ComputeUnitCore *compute_unit = fixture.cu();
     amdgpu::Wavefront *wavefront = compute_unit->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
     ASSERT_NE(wavefront, nullptr);
@@ -1326,7 +1343,9 @@ TEST(ExecutionPluginTest, SdwaPackedConversionClampsBothHalvesBeforePlacement) {
     SCOPED_TRACE(arch_name);
     for (bool force_scalar : {false, true}) {
       ForceScalarOverride scalar_override(force_scalar);
-      PluginFixture fixture(/*num_wf_slots=*/1, arch_name, /*wavefront_size=*/32);
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(
+          fixture.initialize(/*num_wf_slots=*/1, arch_name, /*wavefront_size=*/32));
       OrderingPlugin *plugin = fixture.attach_ordering_plugin();
       amdgpu::ComputeUnitCore *cu = fixture.cu();
       amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1389,7 +1408,8 @@ TEST(ExecutionPluginTest, SdwaPackedConversionClampsBothHalvesBeforePlacement) {
 TEST(ExecutionPluginTest, SdwaIntegerResultsDoNotUseFloatingClamp) {
   for (bool force_scalar : {false, true}) {
     ForceScalarOverride scalar_override(force_scalar);
-    PluginFixture fixture(/*num_wf_slots=*/1);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
     amdgpu::ComputeUnitCore *compute_unit = fixture.cu();
     amdgpu::Wavefront *wavefront = compute_unit->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
     ASSERT_NE(wavefront, nullptr);
@@ -1427,7 +1447,8 @@ TEST(ExecutionPluginTest, SdwaIntegerResultsDoNotUseFloatingClamp) {
 
 TEST(ExecutionPluginTest, SdwaClampHonorsDx10ClampMode) {
   ForceScalarOverride force_simd(false);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
@@ -1467,7 +1488,8 @@ TEST(ExecutionPluginTest, SdwaClampHonorsDx10ClampMode) {
 
 TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsOnlySelectedBytes) {
   ForceScalarOverride force_simd(false);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -1514,7 +1536,9 @@ TEST(ExecutionPluginTest, SgprBlockOwnersTrackPhysicalAllocationAndSlotReuseAcro
 
   for (const TargetCase target : {TargetCase{"cdna4", 64, 104}, TargetCase{"cdna5", 32, 128}}) {
     SCOPED_TRACE(target.arch);
-    PluginFixture f(/*num_wf_slots=*/3, target.arch, target.wave_size, target.sgprs_per_wf);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(
+        f.initialize(/*num_wf_slots=*/3, target.arch, target.wave_size, target.sgprs_per_wf));
     auto *plugin = f.attach_ordering_plugin();
     const uint32_t first_sgpr_count = target.sgprs_per_wf / 2;
     auto *first = f.cu()->dispatch_wf(/*wg_id=*/10, /*pc=*/0, first_sgpr_count,
@@ -1571,7 +1595,8 @@ TEST(ExecutionPluginTest, VopdIntegerSimdRejectsUnsupportedWaveAndModifiers) {
     return try_execute_vopd_integer_pair_simd<8, 16, 17>(wf, x, y);
   };
 
-  PluginFixture wave64(/*num_wf_slots=*/1);
+  PluginFixture wave64;
+  ASSERT_NO_FATAL_FAILURE(wave64.initialize(/*num_wf_slots=*/1));
   auto *wide = wave64.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/32);
   ASSERT_NE(wide, nullptr);
   ASSERT_EQ(wide->wf_size(), 64u);
@@ -2026,7 +2051,8 @@ TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {
     return;
   } else {
     ForceScalarOverride force_simd(false);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -2079,7 +2105,8 @@ TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
   } else {
     ForceScalarOverride force_simd(false);
     amdgpu::fp_mode::detail::ScopedFenv floating_environment(0);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -2107,7 +2134,8 @@ TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
 }
 
 TEST(ExecutionPluginTest, MfmaReadObservationUsesLaneMasks) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -2128,7 +2156,8 @@ TEST(ExecutionPluginTest, MfmaReadObservationUsesLaneMasks) {
 }
 
 TEST(ExecutionPluginTest, MfmaReadObservationSkipsConstantAccumulator) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -2148,7 +2177,8 @@ TEST(ExecutionPluginTest, MfmaReadObservationSkipsConstantAccumulator) {
 }
 
 TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaAbidZeroPrefixRejectsBeforeExecuteCallbacks) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   const auto scale = make_cdna4_mfma_scale_words(45, /*abid=*/0, vgpr_src(96), vgpr_src(97));
   const std::array<uint32_t, 5> code = {scale[0], scale[1], scale[2], scale[3], S_ENDPGM};
@@ -2163,7 +2193,8 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaAbidZeroPrefixRejectsBeforeExecuteC
 }
 
 TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaCompoundAdvancesCallbacksByFullPrefixSize) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   const auto scale = make_cdna4_mfma_scale_words(45, /*abid=*/1, vgpr_src(96), vgpr_src(97));
   const std::array<uint32_t, 5> code = {scale[0], scale[1], scale[2], scale[3], S_ENDPGM};
@@ -2189,7 +2220,8 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaScaleReadsUseSelectedByteMask) {
   constexpr uint32_t kScaleB = 97;
 
   for (uint32_t byte = 0; byte < 4; ++byte) {
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -2251,7 +2283,8 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaInlineScalesDoNotReadVgprs) {
   constexpr uint32_t kSrc1 = 16;
   constexpr uint32_t kAccumulator = 32;
 
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -2455,7 +2488,8 @@ TEST(ExecutionPluginTest, MfmaF32NativeWidthFastPathUsesRegionReads) {
       GTEST_SKIP() << "f32 MFMA shape is not divisible by the native SIMD width";
 
     ForceScalarOverride force_simd(false);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);

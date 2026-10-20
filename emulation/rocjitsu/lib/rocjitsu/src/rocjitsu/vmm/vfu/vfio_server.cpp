@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/virtual_machine.h"
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
 #include "simdojo/sim/simulation.h"
+#include "util/diagnostic.h"
 #include "util/log.h"
 
 #include "embedded_schema.h"
@@ -159,7 +160,13 @@ int run_vfio_server_impl(const std::string &config_path, const std::string &sock
   }
   config::LoadedConfig loaded;
   try {
-    loaded = config::load_config(config_path, kEmbeddedSchema);
+    util::StringDiagnostic diagnostic;
+    auto maybe_loaded = config::load_config(config_path, kEmbeddedSchema, diagnostic.emitter());
+    if (maybe_loaded.failed()) {
+      util::Logger::warn(std::format("vfu: cannot read {}: {}", config_path, diagnostic.message()));
+      return 1;
+    }
+    loaded = std::move(maybe_loaded.value());
   } catch (const std::exception &error) {
     util::Logger::warn(std::format("vfu: cannot read {}: {}", config_path, error.what()));
     return 1;

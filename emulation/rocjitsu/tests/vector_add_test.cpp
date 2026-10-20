@@ -9,8 +9,10 @@
 /// CPU golden reference.
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "test_paths.h"
+#include "util/diagnostic.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
@@ -36,7 +38,6 @@
 #include <cstdint>
 #include <cstring>
 #include <memory>
-#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -80,7 +81,8 @@ void run_vector_add(uint32_t dispatch_threads, VectorAddRunResult &result) {
   ASSERT_NE(co, nullptr);
 
   // Build the simulation engine with CDNA4 topology.
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   // Vary only the CPU-side dispatch pool: pin a single engine worker so the
@@ -210,7 +212,8 @@ TEST(VectorAddStressTest, AllCUsGoldenReference_MultiThreaded) {
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = TOTAL_XCDS;
@@ -294,7 +297,8 @@ void run_fanout_golden_reference(uint32_t num_threads) {
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = num_threads;
@@ -362,19 +366,21 @@ void run_fanout_golden_reference(uint32_t num_threads) {
 //
 // @param acquire_scope HSA_FENCE_SCOPE_AGENT to fence, HSA_FENCE_SCOPE_NONE for
 // the control that shows the fence is what produced the result.
-// @returns Number of elements that disagree with the golden reference, or nullopt
-// if the run never happened. Deliberately not a count: zero mismatches is the
-// PASSING result for the agent-scope case, so returning it when a prerequisite is
-// missing would report a dispatch that never ran as a clean one.
-std::optional<unsigned> run_fanout_with_primed_peer_caches(uint32_t acquire_scope) {
+// @returns Number of elements that disagree with the golden reference, or failure
+// if the dispatch could not run. Zero mismatches means the dispatch ran successfully.
+util::FailureOr<unsigned> run_fanout_with_primed_peer_caches(uint32_t acquire_scope,
+                                                             util::DiagnosticEmitter emit_error) {
   Executable exec(kernel_path("vector_add"));
-  EXPECT_TRUE(exec.is_valid()) << "Failed to load vector_add.o";
+  if (!exec.is_valid())
+    return emit_error.emit() << "Failed to load vector_add.o";
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
-  EXPECT_NE(co, nullptr);
   if (!co)
-    return std::nullopt;
+    return emit_error.emit() << "vector_add.o has no gfx950 code object";
 
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  auto loaded_result = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema, emit_error);
+  if (loaded_result.failed())
+    return util::Result::failure();
+  auto loaded = std::move(loaded_result).value();
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   // Primes peer caches by hand and installs no partition policy, so pin one
@@ -407,9 +413,8 @@ std::optional<unsigned> run_fanout_with_primed_peer_caches(uint32_t acquire_scop
   std::vector<uint8_t> sink(vec_bytes);
   for (uint32_t xi = 0; xi < TOTAL_XCDS; ++xi) {
     auto *l2 = soc->xcd(xi)->l2_cache();
-    EXPECT_NE(l2, nullptr) << "xcd" << xi << " has no L2 to prime";
     if (!l2)
-      return std::nullopt;
+      return emit_error.emit() << "xcd" << xi << " has no L2 to prime";
     l2->read(A_ADDR, sink.data(), static_cast<uint32_t>(vec_bytes));
     l2->read(B_ADDR, sink.data(), static_cast<uint32_t>(vec_bytes));
   }
@@ -425,9 +430,8 @@ std::optional<unsigned> run_fanout_with_primed_peer_caches(uint32_t acquire_scop
   memory->load_image(reinterpret_cast<const uint8_t *>(&args), sizeof(args), KERNARG_ADDR);
 
   auto *cp = soc->assign_queue_owner_cp(/*queue_ordinal=*/0);
-  EXPECT_NE(cp, nullptr);
   if (!cp)
-    return std::nullopt;
+    return emit_error.emit() << "no command processor owns the fan-out queue";
   auto queue = test::make_fanout_queue(memory, cp);
 
   // 4. One fanned-out dispatch carrying the requested acquire scope. Only the
@@ -461,9 +465,10 @@ std::optional<unsigned> run_fanout_with_primed_peer_caches(uint32_t acquire_scop
 // With an agent-scope acquire, every shard invalidates its own XCD's caches on
 // its own thread and reads the updated inputs.
 TEST(VectorAddStressTest, FanoutAgentAcquireReachesEveryXcdsCaches) {
-  auto mismatches = run_fanout_with_primed_peer_caches(HSA_FENCE_SCOPE_AGENT);
-  ASSERT_TRUE(mismatches.has_value()) << "the primed fan-out dispatch never ran";
-  EXPECT_EQ(*mismatches, 0u)
+  util::StringDiagnostic diagnostic;
+  auto mismatches = run_fanout_with_primed_peer_caches(HSA_FENCE_SCOPE_AGENT, diagnostic.emitter());
+  ASSERT_TRUE(mismatches.succeeded()) << diagnostic.message();
+  EXPECT_EQ(mismatches.value(), 0u)
       << "a peer XCD computed from inputs it had cached before they were updated";
 }
 
@@ -471,9 +476,10 @@ TEST(VectorAddStressTest, FanoutAgentAcquireReachesEveryXcdsCaches) {
 // out clean -- otherwise the test above proves nothing about the acquire path
 // and the priming is what is broken.
 TEST(VectorAddStressTest, FanoutWithoutAcquireKeepsStalePeerCaches) {
-  auto mismatches = run_fanout_with_primed_peer_caches(HSA_FENCE_SCOPE_NONE);
-  ASSERT_TRUE(mismatches.has_value()) << "the primed fan-out dispatch never ran";
-  EXPECT_GT(*mismatches, 0u)
+  util::StringDiagnostic diagnostic;
+  auto mismatches = run_fanout_with_primed_peer_caches(HSA_FENCE_SCOPE_NONE, diagnostic.emitter());
+  ASSERT_TRUE(mismatches.succeeded()) << diagnostic.message();
+  EXPECT_GT(mismatches.value(), 0u)
       << "priming did not make any XCD stale, so the acquire test is vacuous";
 }
 
@@ -546,7 +552,8 @@ void run_fanout_signal_ordering(uint32_t num_threads) {
   auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
   ASSERT_NE(co, nullptr);
 
-  auto loaded = config::load_config(CONFIG_PATH, rocjitsu::kEmbeddedSchema);
+  config::LoadedConfig loaded;
+  ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
   auto *soc = loaded.soc();
   auto *memory = loaded.memory();
   loaded.engine_config.num_threads = num_threads;

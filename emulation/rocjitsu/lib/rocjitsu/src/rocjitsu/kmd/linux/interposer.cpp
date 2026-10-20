@@ -31,6 +31,7 @@
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
+#include "util/diagnostic.h"
 
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
@@ -3433,7 +3434,15 @@ public:
       }
 
       try {
-        auto dbt_guest = rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff);
+        util::StringDiagnostic diagnostic;
+        auto maybe_dbt_guest =
+            rocjitsu::config::load_dbt_guest_config_from_handoff(*handoff, diagnostic.emitter());
+        if (maybe_dbt_guest.failed()) {
+          util::Logger::warn("rocjitsu: failed to load child config: ", diagnostic.message());
+          destroy_local_vm();
+          return nullptr;
+        }
+        auto dbt_guest = std::move(maybe_dbt_guest.value());
         if (dbt_guest.enabled) {
           LinuxKfd *execution_driver = nullptr;
           const bool simulator_backend =

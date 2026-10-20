@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/pci/ip_discovery.h"
+#include "util/diagnostic.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_common.h"
@@ -641,11 +642,16 @@ TEST(GpuGenerations, PartialDirectDeviceTopologyIsRejected) {
 }
 
 TEST(GpuGenerations, ParsedOmittedTopologyKeepsGenerationDefaults) {
-  rocjitsu::config::KfdDeviceConfig device = rocjitsu::config::with_parsed_simulation_config_json(
+  util::StringDiagnostic diagnostic;
+  auto device_result = rocjitsu::config::with_parsed_simulation_config_json(
       R"({"vm":{"gpu":{"device":{"gfx_target_version":120500,"num_sdma_engines":0}}}})",
-      rocjitsu::kEmbeddedSchema, [](const rocjitsu::fb::SimulationConfig *config) {
-        return rocjitsu::config::kfd_device_from_fb(config->vm()->gpu()->device(), "vm.gpu.device");
+      rocjitsu::kEmbeddedSchema, diagnostic.emitter(),
+      [&](const rocjitsu::fb::SimulationConfig *config) {
+        return rocjitsu::config::kfd_device_from_fb(config->vm()->gpu()->device(), "vm.gpu.device",
+                                                    diagnostic.emitter());
       });
+  ASSERT_TRUE(device_result.succeeded()) << diagnostic.message();
+  auto device = std::move(device_result).value();
   ASSERT_TRUE(rocjitsu::resolve_gpu_generation_topology(device));
 
   const rocjitsu::GpuPciDeviceSpec spec = rocjitsu::gpu_pci_spec_from_config(device, {});
@@ -662,11 +668,16 @@ TEST(GpuGenerations, ParsedOmittedTopologyKeepsGenerationDefaults) {
 }
 
 TEST(GpuGenerations, ParsedTopologyFieldExplicitlyOverridesGenerationDefault) {
-  rocjitsu::config::KfdDeviceConfig device = rocjitsu::config::with_parsed_simulation_config_json(
+  util::StringDiagnostic diagnostic;
+  auto device_result = rocjitsu::config::with_parsed_simulation_config_json(
       R"({"vm":{"gpu":{"device":{"gfx_target_version":120500,"wave_front_size":64,"num_sdma_engines":0}}}})",
-      rocjitsu::kEmbeddedSchema, [](const rocjitsu::fb::SimulationConfig *config) {
-        return rocjitsu::config::kfd_device_from_fb(config->vm()->gpu()->device(), "vm.gpu.device");
+      rocjitsu::kEmbeddedSchema, diagnostic.emitter(),
+      [&](const rocjitsu::fb::SimulationConfig *config) {
+        return rocjitsu::config::kfd_device_from_fb(config->vm()->gpu()->device(), "vm.gpu.device",
+                                                    diagnostic.emitter());
       });
+  ASSERT_TRUE(device_result.succeeded()) << diagnostic.message();
+  auto device = std::move(device_result).value();
   ASSERT_TRUE(rocjitsu::resolve_gpu_generation_topology(device));
 
   const rocjitsu::GpuPciDeviceSpec spec = rocjitsu::gpu_pci_spec_from_config(device, {});

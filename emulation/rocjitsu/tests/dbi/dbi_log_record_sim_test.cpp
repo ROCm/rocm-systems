@@ -191,7 +191,8 @@ protected:
     const std::span<uint8_t> image = LogBufferTestAccess::bytes(*buffer);
     out.before.assign(image.begin(), image.end());
 
-    test::DbiSim sim(t_.sim_arch, t_.wave_size);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(t_.sim_arch, t_.wave_size));
     sim.set_kernarg(wrapper);
     sim.set_entry_offset(kernel.entry);
     sim.write_memory(kBufferAddr, image);
