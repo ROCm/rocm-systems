@@ -8,6 +8,7 @@ Imported by both the main runtime code and lightweight tooling such as
 """
 
 import re
+from typing import Any
 
 from utils.logger import console_error
 
@@ -117,6 +118,29 @@ BLOCK_REMAP: dict[str, str] = {"SQC": "SQ", "SP": "SQ"}
 # ---------------------------------------------------------------------------
 # Stateless counter-parsing helpers
 # ---------------------------------------------------------------------------
+
+
+def metric_value_keys(table: dict[str, Any]) -> set[str]:
+    """Metric keys whose values are columns of a metric_table: the header's
+    keys except metric, expr, and the display-only coll_level and alias."""
+    return set(table["header"]) - {"metric", "expr", "coll_level", "alias"}
+
+
+def metric_expressions(table: dict[str, Any], metric: dict[str, Any]) -> list[str]:
+    """Return the expressions of one metric of a metric_table.
+
+    simple_box tables keep their one expression in expr; other tables use
+    metric_value_keys. Empty and "None" values are left out.
+    """
+    if table.get("cli_style") == "simple_box":
+        keys = {"expr"}
+    else:
+        keys = metric_value_keys(table)
+    return [
+        value
+        for key, value in metric.items()
+        if key in keys and isinstance(value, str) and value and value != "None"
+    ]
 
 
 def parse_counters_text(text: str) -> tuple[set[str], set[str]]:

@@ -8,6 +8,7 @@ import pytest
 from utils.utils_counter_defs import (
     extract_counters_and_variables,
     get_build_in_vars,
+    metric_expressions,
 )
 
 # =============================================================================
@@ -119,3 +120,35 @@ class TestExtractCountersAndVariables:
         assert formula_only == {"GRBM_CP_BUSY_sum", "GRBM_GUI_ACTIVE_sum"}
         assert "SQ_WAVES" in with_denom
         assert "SQ_WAVES" not in formula_only
+
+
+# =============================================================================
+# Tests for utils.utils_counter_defs.metric_expressions
+# =============================================================================
+
+
+class TestMetricExpressions:
+    """Tests for utils.utils_counter_defs.metric_expressions."""
+
+    def test_reads_only_keys_the_header_declares(self):
+        table = {"header": {"metric": "Metric", "avg": "Avg", "unit": "Unit"}}
+        metric = {
+            "avg": "SUM(SQ_WAVES)",
+            "unit": "Waves",
+            "coll_level": "SQ_LEVEL_WAVES",
+            "tips": "See SQ_BUSY_CYCLES",
+        }
+        assert metric_expressions(table, metric) == ["SUM(SQ_WAVES)", "Waves"]
+
+    def test_skips_empty_and_none_values(self):
+        table = {"header": {"metric": "Metric", "avg": "Avg", "peak": "Peak"}}
+        assert metric_expressions(table, {"avg": "None", "peak": 5}) == []
+        assert metric_expressions(table, {"avg": "", "peak": None}) == []
+
+    def test_simple_box_reads_only_expr(self):
+        table = {
+            "header": {"metric": "Metric", "expr": "Expression", "unit": "Unit"},
+            "cli_style": "simple_box",
+        }
+        metric = {"expr": "TCC_HIT[::_1]", "unit": "Hits"}
+        assert metric_expressions(table, metric) == ["TCC_HIT[::_1]"]
