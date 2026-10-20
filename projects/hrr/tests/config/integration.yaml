@@ -41,7 +41,12 @@ cases:
   Unit_HRR_ApiMatrix_SptCoopLaunch_Direct: {}
   Unit_HRR_ApiMatrix_SptKernelLaunch_Direct: {}
   Unit_HRR_ApiMatrix_T0_Roundtrip: {}
-  Unit_HRR_ApiMatrix_T1_Roundtrip: {}
+  Unit_HRR_ApiMatrix_T1_Roundtrip:
+    skip:
+      - when: {emulator: true}
+        kind: disabled
+        reason: "hipIpcGetMemHandle fails under rocJitsu since the shared runtime API headers change (hsa_amd_ipc_memory_create returns HSA_STATUS_ERROR)"
+        issue: "https://github.com/ROCm/rocm-systems/issues/13803"
   Unit_HRR_ApiMatrix_T2_Roundtrip: {}
   Unit_HRR_ApiMatrix_T3_Roundtrip: {}
   Unit_HRR_ApiMatrix_T4_Roundtrip:
@@ -57,7 +62,12 @@ cases:
   Unit_HRR_CaptureActiveMarker: {}
   Unit_HRR_CaptureActiveMarker_Direct: {}
   Unit_HRR_CaptureArchiveIsPrivate: {}
-  Unit_HRR_CaptureCapabilities: {}
+  Unit_HRR_CaptureCapabilities:
+    skip:
+      - when: {emulator: true}
+        kind: disabled
+        reason: "hipIpcGetMemHandle fails under rocJitsu since the shared runtime API headers change (hsa_amd_ipc_memory_create returns HSA_STATUS_ERROR)"
+        issue: "https://github.com/ROCm/rocm-systems/issues/13803"
   Unit_HRR_CaptureCapabilitiesImport_Direct: {}
   Unit_HRR_CaptureCapabilities_Direct: {}
   Unit_HRR_CaptureCrashDuringFork: {}
