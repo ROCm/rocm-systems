@@ -187,9 +187,12 @@ implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
 **Scope.** Equation formatting applies to YAML files under:
 
 - `src/rocprof_compute_soc/analysis_configs/gfx*/*.yaml`
+- `src/rocprof_compute_soc/metric_library/gfx*/*.yaml`
 
 Template files (`*_template.yaml`) and build artifacts are excluded. Only values
-under these keys are treated as equations: `value`, `avg`, `min`, `max`, `peak`.
+under these keys are treated as equations: `value`, `avg`, `min`, `max`, `peak`,
+and in metric library files `formula` and `peak_empirical`. In metric library
+files, the formatter also sorts the top-level keys, with `inherit` first.
 
 **Rules.**
 
