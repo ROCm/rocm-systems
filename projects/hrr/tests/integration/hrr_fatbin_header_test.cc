@@ -24,6 +24,10 @@
  *     digested the bundle.
  * The workload calls __hipRegisterFatBinary itself with bundles laid out in
  * memory the way clang-offload-bundler lays them out, valid and altered.
+ *
+ * Every code object capture stores, in a fat binary or under code_objects/,
+ * has its .comment and .debug* sections zeroed: they hold the compiler build
+ * and the build paths, and the GPU never loads them.
  */
 
 #include "hrr_test_common.hh"
@@ -303,9 +307,11 @@ void** register_fat_binary(const void* bundle) {
   return __hipRegisterFatBinary(new Wrapper{kHipfMagic, 1, bundle, nullptr});
 }
 
-// A kernel writing 1, or with `global`, the value of that __device__ global.
+// A kernel writing 1, or with `global`, the value of that __device__ global,
+// compiled with `options`.
 std::vector<uint8_t> compile_code_object(const std::string& kernel,
-                                         const std::string& global = "") {
+                                         const std::string& global = "",
+                                         std::vector<const char*> options = {}) {
   const std::string src =
       (global.empty() ? std::string() : "extern \"C\" __device__ int " + global + " = " +
                                             std::to_string(kGlobalInit) + ";\n") +
@@ -314,7 +320,8 @@ std::vector<uint8_t> compile_code_object(const std::string& kernel,
   hiprtcProgram prog = nullptr;
   HRR_HIPRTC_CHECK(hiprtcCreateProgram(&prog, src.c_str(), "hrr_fatbin_probe.hip", 0,
                                        nullptr, nullptr));
-  if (hiprtcCompileProgram(prog, 0, nullptr) != HIPRTC_SUCCESS) {
+  if (hiprtcCompileProgram(prog, static_cast<int>(options.size()), options.data()) !=
+      HIPRTC_SUCCESS) {
     size_t log_sz = 0;
     (void)hiprtcGetProgramLogSize(prog, &log_sz);
     std::string log(log_sz, '\0');
@@ -709,6 +716,175 @@ HRR_TEST_CASE(Unit_HRR_FatBinGlobalCopy) {
   CHECK(rc == 0);
   CHECK(out.find("symbol '" + std::string(kDeviceGlobal) + "' is not in any") ==
         std::string::npos);
+}
+
+// ===========================================================================
+// Code objects are stored without their build paths and compiler build.
+// ===========================================================================
+namespace {
+// One probe is registered in a fat binary, the other loaded as a module, so
+// each leaves its own code object.
+constexpr char kScrubFatBinKernel[] = "hrr_scrub_fatbin_probe";
+constexpr char kScrubModuleKernel[] = "hrr_scrub_module_probe";
+}  // namespace
+
+TEST_CASE("Unit_HRR_CodeObjectScrub_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  hipDeviceProp_t prop{};
+  HRR_HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  const std::string target = std::string(kTargetPrefix) + prop.gcnArchName;
+  // Both are built with debug information, which is what puts the source file
+  // name and build directory into a code object. This one is registered in a
+  // fat binary, of which capture stores the code object HIP loads.
+  REQUIRE(register_fat_binary(pin(valid_bundle(
+              target, compile_code_object(kScrubFatBinKernel, "", {"-g"})))) != nullptr);
+
+  // Loaded as a module, and launched so replay runs the stored copy.
+  const std::vector<uint8_t> co = compile_code_object(kScrubModuleKernel, "", {"-g"});
+  hipModule_t mod = nullptr;
+  HRR_HIP_CHECK(hipModuleLoadData(&mod, co.data()));
+  hipFunction_t fn = nullptr;
+  HRR_HIP_CHECK(hipModuleGetFunction(&fn, mod, kScrubModuleKernel));
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, sizeof(int)));
+  HRR_HIP_CHECK(hipMemset(d, 0, sizeof(int)));
+  void* args[] = {&d};
+  HRR_HIP_CHECK(hipModuleLaunchKernel(fn, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr));
+  int h = 0;
+  HRR_HIP_CHECK(hipMemcpy(&h, d, sizeof(int), hipMemcpyDeviceToHost));
+  REQUIRE(h == 1);
+  HRR_HIP_CHECK(hipFree(d));
+  HRR_HIP_CHECK(hipModuleUnload(mod));
+}
+
+namespace {
+struct ScrubCount {
+  size_t elves = 0;
+  size_t sections = 0;  // non-empty .comment and .debug* sections
+  size_t left = 0;      // of those, still holding a non-zero byte
+  size_t typed = 0;     // of those, not SHT_NOBITS, so DWARF readers parse them
+};
+
+// Walks the section headers of an ELF64 image independently of capture's own
+// parser and counts the sections capture has to scrub. False if the image does
+// not parse, including a section name that does not end inside the string table.
+bool count_scrub_sections(const uint8_t* p, size_t size, ScrubCount& c) {
+  auto u16 = [&](size_t at) { uint16_t v; std::memcpy(&v, p + at, 2); return v; };
+  auto u32 = [&](size_t at) { uint32_t v; std::memcpy(&v, p + at, 4); return v; };
+  auto u64 = [&](size_t at) { uint64_t v; std::memcpy(&v, p + at, 8); return v; };
+  if (size < 64 || std::memcmp(p, "\x7f" "ELF", 4) != 0 || u16(0x3a) != 64) return false;
+  const uint64_t shoff = u64(0x28);
+  const uint16_t shnum = u16(0x3c);
+  const uint16_t shstrndx = u16(0x3e);
+  if (shoff > size || uint64_t{shnum} * 64 > size - shoff || shstrndx >= shnum) return false;
+  const uint64_t names = u64(shoff + shstrndx * 64 + 24);
+  const uint64_t names_size = u64(shoff + shstrndx * 64 + 32);
+  if (names > size || names_size > size - names) return false;
+  ++c.elves;
+  for (uint16_t i = 0; i < shnum; ++i) {
+    const size_t sh = shoff + size_t{i} * 64;
+    const uint32_t at = u32(sh);
+    if (at >= names_size) return false;
+    const char* s = reinterpret_cast<const char*>(p + names + at);
+    const size_t name_len = strnlen(s, names_size - at);
+    if (name_len == names_size - at) return false;
+    const std::string name(s, name_len);
+    if (name != ".comment" && name.rfind(".debug", 0) != 0) continue;
+    const uint64_t off = u64(sh + 24), len = u64(sh + 32);
+    if (len == 0) continue;
+    if (off > size || len > size - off) return false;
+    ++c.sections;
+    if (u32(sh + 4) != 8 /*SHT_NOBITS*/) ++c.typed;
+    if (std::any_of(p + off, p + off + len, [](uint8_t b) { return b != 0; })) ++c.left;
+  }
+  return true;
+}
+}  // namespace
+
+HRR_TEST_CASE(Unit_HRR_CodeObjectScrub) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_code_object_scrub.hrr");
+  // Replay checks the kernel's result, so the scrubbed copy loads and runs.
+  hrr_run_roundtrip("Unit_HRR_CodeObjectScrub_Direct", cap.path);
+
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(hrr_single_process_archive(cap.path).string(), arc));
+
+  // The code objects the loaded fat binaries' registrations name; no
+  // registration names a blob.
+  std::vector<std::string> registered;
+  for (const auto& ev : arc.events) {
+    if (ev.header().event_type != HRR_API_HIPREGISTERFATBINARY) continue;
+    const auto* a =
+        reinterpret_cast<const hrr_args___hipRegisterFatBinary*>(ev.raw_payload.data());
+    CHECK(a->blob_size == 0);
+    if (a->ret && (a->blob_hash_lo || a->blob_hash_hi))
+      registered.push_back(hrr::hash_hex(a->blob_hash_lo, a->blob_hash_hi));
+  }
+
+  // Every stored code object is scrubbed, the module's and the one HIP took
+  // from the fat binary alike; each probe is counted where it is found.
+  ScrubCount module_count, bundle_count;
+  size_t module_files = 0, bundle_files = 0;
+  for (const auto& [hex, path] : arc.code_objects) {
+    INFO("Code object " << path);
+    std::vector<uint8_t> image;
+    REQUIRE(hrr::read_file_capped(path, image));
+    CHECK_FALSE(contains(image, "clang version"));
+    CHECK_FALSE(contains(image, "hrr_fatbin_probe.hip"));
+    if (contains(image, kScrubFatBinKernel)) {
+      CHECK(std::find(registered.begin(), registered.end(), hex) != registered.end());
+      ++bundle_files;
+      REQUIRE(count_scrub_sections(image.data(), image.size(), bundle_count));
+    } else {
+      if (contains(image, kScrubModuleKernel)) ++module_files;
+      REQUIRE(count_scrub_sections(image.data(), image.size(), module_count));
+    }
+  }
+  CHECK(module_files == 1);
+  CHECK(bundle_files == 1);
+
+  INFO("Module code objects: " << module_count.elves << " ELF, " << module_count.sections
+                               << " sections, " << module_count.left << " not zeroed, "
+                               << module_count.typed << " not SHT_NOBITS");
+  INFO("Fat binary code objects: " << bundle_count.elves << " ELF, " << bundle_count.sections
+                                   << " sections, " << bundle_count.left << " not zeroed, "
+                                   << bundle_count.typed << " not SHT_NOBITS");
+  // The probe was built with -g, so both copies had something to zero.
+  CHECK(module_count.sections >= 2);
+  CHECK(bundle_count.sections >= 2);
+  CHECK(module_count.left == 0);
+  CHECK(bundle_count.left == 0);
+  // Retyped, so a debugger on the replay sees no debug information rather than zeros.
+  CHECK(module_count.typed == 0);
+  CHECK(bundle_count.typed == 0);
+}
+
+// The walker reads a section name only inside its string table, even when the
+// bytes after the table would complete a name it looks for.
+HRR_TEST_CASE(Unit_HRR_CodeObjectScrubWalker) {
+  std::vector<uint8_t> elf(80 + 2 * 64, 0);
+  auto put = [&](size_t at, uint64_t v, size_t n) { std::memcpy(elf.data() + at, &v, n); };
+  std::memcpy(elf.data(), "\x7f" "ELF", 4);
+  elf[4] = 2;  // ELFCLASS64
+  elf[5] = 1;  // ELFDATA2LSB
+  put(0x28, 80, 8);  // e_shoff
+  put(0x3a, 64, 2);  // e_shentsize
+  put(0x3c, 2, 2);   // e_shnum
+  put(0x3e, 1, 2);   // e_shstrndx
+  std::memcpy(elf.data() + 64, "\0.comment", 10);
+  // Section 1 is the string table, named at offset 1, and declares only "\0.comm".
+  const size_t sh = 80 + 64;
+  put(sh, 1, 4);
+  put(sh + 4, 3 /*SHT_STRTAB*/, 4);
+  put(sh + 24, 64, 8);
+  put(sh + 32, 6, 8);
+  ScrubCount c;
+  CHECK_FALSE(count_scrub_sections(elf.data(), elf.size(), c));
+  // Declared up to its terminator, the same table parses.
+  put(sh + 32, 10, 8);
+  c = ScrubCount{};
+  CHECK(count_scrub_sections(elf.data(), elf.size(), c));
+  CHECK(c.sections == 1);
 }
 
 #endif  // HRR_TEST_EXE

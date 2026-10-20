@@ -236,7 +236,17 @@ capture.hrr/
 - **code_objects/** — code objects, content-addressed by hash (device images
   extracted by the runtime, for `hipModuleLoad` too); a launch
   records the hash so kernels sharing a name (Triton emits many `triton_`)
-  still resolve to the code object they came from
+  still resolve to the code object they came from. Their `.comment` and
+  `.debug*` sections, which hold the compiler build and the build paths of
+  debug information, are zeroed and retyped `SHT_NOBITS` before they are
+  stored, so a debugger on a replay sees no debug information. Of a fat
+  binary, compressed or not, only the code object HIP loads is stored, here
+  and scrubbed the same way. What the GPU loads is not touched: kernel
+  names stay, and so does a string a kernel keeps, such as the source path
+  a device `assert()` prints. `hipLinkAddData` inputs are stored as they
+  were passed.
+- **manifest.json** — counts, versions and device properties; the GPU's PCI
+  address, UUID and LUID are written blank
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
 
 Code objects read back from the runtime must start with `\x7fELF`,

@@ -46,6 +46,9 @@ cases:
   Unit_HRR_Recovery_TornPayload: {}
   Unit_HRR_Recovery_TrailerCountMismatch: {}
   Unit_HRR_Recovery_TrailerOvercounts: {}
+  Unit_HRR_Scrub_RefusesOutOfBoundsTables: {}
+  Unit_HRR_Scrub_SkipsUnterminatedName: {}
+  Unit_HRR_Scrub_ZeroesAndRetypesBuildInfo: {}
   Unit_HRR_TranslatePtr_ExactMatch: {}
   Unit_HRR_TranslatePtr_OutOfRange_ReturnsNull: {}
   Unit_HRR_TranslatePtr_SubAlloc_ReturnsOffset: {}

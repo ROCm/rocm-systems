@@ -48,14 +48,15 @@ every capture is a contents capture.
 | Sequence of successful HIP calls, with sizes, flags, device addresses, handles, thread ids | `events.bin` | both | — kept, replay needs it |
 | Kernel names, mangled but read back with `c++filt`; they describe the model's architecture and precision | `events.bin` | both | — kept, triage names the failing kernel |
 | Event timestamps, from a monotonic clock (not the date or time of day) | `events.bin` | both | — kept |
-| Device properties passed to `hipChooseDevice`, the whole `hipDeviceProp_t`: device and architecture names, PCI ids and, in the current layout, the UUID and LUID | `events.bin` | both | — kept, the call's answer depends on them |
+| Device properties passed to `hipChooseDevice`, the whole `hipDeviceProp_t` with the device and architecture names; its UUID, LUID and PCI ids are written as zeros | `events.bin` | both | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): UUID, LUID and PCI ids blanked; the rest is kept, the call's answer depends on it |
 | Other structures passed into a HIP call, copied whole, such as copy, memset, graph node, allocation, pool and launch-attribute parameters. Padding, reserved and unused union bytes are copied as the caller left them | `events.bin` | both | — kept, replay needs it |
 | Host buffers copied to or from the device, byte for byte, unencrypted. For a serving stack this includes prompts and generated output as token ids, which the model's public tokeniser reverses, and the model weights | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Host memory registered with `hipHostRegister`: the whole range, byte for byte, as it was at registration, whether or not it is ever copied | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Kernel argument bytes | `events.bin` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Code objects the process loaded (the application's own GPU binary code); of a fat binary, only the code object HIP loads, not the whole bundle, since [AIRUNTIME-2858](https://amd-hub.atlassian.net/browse/AIRUNTIME-2858). Archives from before held the whole bundle, with targets HIP never loads, in `blobs/` | `code_objects/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
-| Linker input buffers passed to `hipLinkAddData`, every byte, with their names, including inputs the call rejected and inputs never linked or loaded | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
-| Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): stripped |
+| Linker input buffers passed to `hipLinkAddData`, every byte, with their names, including inputs the call rejected and inputs never linked or loaded. A SPIR-V or LLVM bitcode input keeps its compiler identification and, built with `-g`, its source and build directories; capture does not scrub them | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
+| Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/` | contents | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): zeroed in every code object stored, including the one HIP takes from a compressed (`CCOB`) fat binary. Archives that held whole bundles kept them in compressed ones |
+| Strings in the code the GPU loads, such as the absolute source path a device `assert()` prints | `code_objects/` | contents | — kept, the kernel uses them; `verify` counts code objects holding an absolute path |
 | Framework allocator layout, when a region producer ran beside capture | `regions/` | both | — kept, written only by an opt-in producer |
 | Marker that capture is running: on Linux the boot id and the process start time in clock ticks since boot; on Windows the process creation date and time. A normal exit removes it; a process that crashes or is killed leaves it | `active` | both | — kept, region producers read it |
 
@@ -68,10 +69,11 @@ The per-process `manifest.json` also holds `pid`, `parent_pid`, `complete`, `eve
 | `total_global_mem`, `multi_processor_count`, `warp_size`, `max_threads_per_block` | yes | — |
 | `clock_rate_khz`, `memory_clock_rate_khz`, `memory_bus_width`, `l2_cache_size` | yes | — |
 | `integrated`, `managed_memory`, `memory_pools_supported`, `compute_mode` | yes | — |
-| `uuid`, `pci`, `luid`, `luid_device_node_mask`: identify the individual GPU and its slot | no | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): blanked |
+| `luid_device_node_mask`, a node mask rather than an identifier | yes | — |
+| `uuid`, `pci`, `luid`: identify the individual GPU and its slot | written blank | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881) |
 
-This table covers `manifest.json` only. A `hipChooseDevice` call can carry the same
-identifiers in `events.bin`, as listed above.
+This table covers `manifest.json` only. The copy of the device properties a
+`hipChooseDevice` call keeps in `events.bin` has the same identifiers blanked, as listed above.
 
 ## Never recorded
 

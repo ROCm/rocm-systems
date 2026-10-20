@@ -3908,9 +3908,9 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16PreservesAccumulatorLayout) {
     wf->halt();
 }
 
-TEST(Gfx1250WmmaTest, Bf16F32K32Bf16ScalarUsesFusedMac) {
-  amdgpu::GpuMemory gpu_mem("gfx1250_wmma_bf16f32_fused_mem");
-  amdgpu::L2Cache l2("gfx1250_wmma_bf16f32_fused_l2");
+TEST(Gfx1250WmmaTest, Bf16F32K32Bf16MatchesF32DotOverflow) {
+  amdgpu::GpuMemory gpu_mem("gfx1250_wmma_bf16f32_dot_mem");
+  amdgpu::L2Cache l2("gfx1250_wmma_bf16f32_dot_l2");
 
   amdgpu::ComputeUnitCore::Config cfg{};
   cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
@@ -3945,12 +3945,21 @@ TEST(Gfx1250WmmaTest, Bf16F32K32Bf16ScalarUsesFusedMac) {
   const auto c = amdgpu::wmma_output_loc_32(16, 16, /*row=*/0, /*col=*/0);
   cu->write_vgpr(c_base + c.reg, c.lane, 0xFF7FFFFFu); // -FLT_MAX
 
-  ForceScalarGuard force_scalar(/*force_scalar=*/true);
-  amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, d_base, a_base, b_base, c_base);
+  // Both forms round the dot before adding C. Its overflow remains infinite,
+  // even though fusing this product with -FLT_MAX would give a finite result.
+  for (bool scalar : {false, true}) {
+    SCOPED_TRACE(testing::Message() << "scalar=" << scalar);
+    ForceScalarGuard force_scalar(scalar);
+    amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*cu, d_base, a_base, b_base, c_base);
+    const auto out = amdgpu::wmma_output_loc_16(16, 16, /*row=*/0, /*col=*/0);
+    const uint32_t word = cu->read_vgpr(d_base + out.reg, out.lane);
+    EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), 0x7F80u);
 
-  const auto out = amdgpu::wmma_output_loc_16(16, 16, /*row=*/0, /*col=*/0);
-  const uint32_t word = cu->read_vgpr(d_base + out.reg, out.lane);
-  EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), 0x7380u);
+    const uint32_t f32_d_base = vb + 50;
+    amdgpu::exec_wmma_f32_16x16x32_bf16(*cu, f32_d_base, a_base, b_base, c_base);
+    const auto f32_out = amdgpu::wmma_output_loc_32(16, 16, /*row=*/0, /*col=*/0);
+    EXPECT_EQ(cu->read_vgpr(f32_d_base + f32_out.reg, f32_out.lane), 0x7F800000u);
+  }
 
   if (!wf->is_halted())
     wf->halt();
@@ -10363,8 +10372,8 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 0, 0x4400u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 2, 0, 0x4800u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 3, 0, 0x3c00u},
-        // Current, hardware-unverified SDWA behavior: scaling and directed guest
-        // rounding apply to the same wide result.
+        // Current emulator SDWA behavior, not capture-backed: scaling and
+        // directed guest rounding apply to the same wide result.
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x1000u, 1, 1u << 2, 0x4001u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x1000u, 1, 2u << 2, 0x4000u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 2u << 6, 0x4000u},
@@ -10373,8 +10382,10 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 2u << 4, 0x4400u},
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 0, 0x4400beefu,
                   amdgpu::sdwa::WORD_1},
-        // Pin legacy scaling before F16 narrowing for overflow and tiny results.
-        // SDWA has no capture evidence for this order; VOP3 captures do not validate it.
+        // Pin the emulator's scaling before F16 narrowing for overflow and tiny
+        // results. On gfx1030, SDWA ADD_F16 0x7bff + 0x7bff with div:2 gives
+        // 0x7c00, so the overflow case differs from hardware until SDWA
+        // arithmetic migrates; the tiny cases are not captured.
         ValueCase{architecture.add_f16, false, true, 0x7bffu, 0x7bffu, 3, 0, 0x7bffu},
         ValueCase{architecture.mul_f16, false, true, 0x0400u, 0x3800u, 2, 0, 0x0800u},
         ValueCase{architecture.mul_f16, false, true, 0x0400u, 0x3c00u, 3, 0, 0},
