@@ -10,7 +10,6 @@
 #include "rocjitsu/isa/target_registry.h"
 
 #include <cassert>
-#include <iterator>
 #include <optional>
 #include <utility>
 
@@ -27,19 +26,6 @@ namespace {
 [[nodiscard]] rj_code_arch_t target_arch(rj_code_target_id_t target) {
   const IsaTargetDescriptor *descriptor = default_isa_target_registry().find(target);
   return descriptor == nullptr ? ROCJITSU_CODE_ARCH_INVALID : descriptor->architecture_id;
-}
-
-[[nodiscard]] std::vector<KernelDescriptorInfo> kernels(const AmdGpuCodeObject &object) {
-  const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(object.image_data()),
-                                       object.image_size());
-  std::vector<KernelDescriptorInfo> found;
-  for (const Section *text : object.text_sections()) {
-    std::vector<KernelDescriptorInfo> in_text =
-        scan_kernel_descriptors(image, text->sectionOffset(), text->size());
-    found.insert(found.end(), std::make_move_iterator(in_text.begin()),
-                 std::make_move_iterator(in_text.end()));
-  }
-  return found;
 }
 
 } // namespace
@@ -87,7 +73,7 @@ DbiInstrumentation instrument_each_block(std::span<const uint8_t> elf, const Dbi
   }
   // Checked before decoding: most HIP code objects hold many kernels, and
   // refusing those should not cost a decode of their .text.
-  const std::vector<KernelDescriptorInfo> kernel_list = kernels(object);
+  const std::vector<KernelDescriptorInfo> kernel_list = scan_object_kernel_descriptors(object);
   if (kernel_list.size() != 1) {
     out.decision = DbiLoadDecision::NotSingleKernel;
     return out;

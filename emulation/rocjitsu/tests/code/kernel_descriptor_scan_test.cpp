@@ -93,6 +93,17 @@ TEST(KernelDescriptorScan, SingleKernelDecodesAllFields) {
 // A descriptor whose decoded entry lands outside .text is dropped. Rewrite the
 // fixture descriptor's entry so it points at the descriptor's own (.rodata)
 // address instead of .text, then confirm the walk excludes it.
+// The object-wide scan covers each .text section and keeps every descriptor.
+TEST(KernelDescriptorScan, ObjectScanFindsEveryKernel) {
+  const auto image = make_gfx950_two_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/0);
+  const AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  const std::vector<KernelDescriptorInfo> found = scan_object_kernel_descriptors(obj);
+  ASSERT_EQ(found.size(), 2u);
+  EXPECT_EQ(found[0].kernel_name, "test_kernel0");
+  EXPECT_EQ(found[1].kernel_name, "test_kernel1");
+}
+
 TEST(KernelDescriptorScan, EntryOutsideTextIsDropped) {
   auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
   const auto located = scan_via_text_section(image);

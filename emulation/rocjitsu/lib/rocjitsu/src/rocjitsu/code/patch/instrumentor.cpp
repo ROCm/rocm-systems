@@ -827,11 +827,7 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   decoder_ = std::move(decoder);
   std::vector<uint64_t> kernel_entries;
   if (obj_.text_sections().size() == 1) {
-    const Section *text = obj_.text_sections().front();
-    const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
-                                         obj_.image_size());
-    for (const KernelDescriptorInfo &kernel :
-         scan_kernel_descriptors(image, text->sectionOffset(), text->size()))
+    for (const KernelDescriptorInfo &kernel : scan_object_kernel_descriptors(obj_))
       kernel_entries.push_back(kernel.entry_text_offset);
   }
   // Decoding from the kernel entries leaves padding and unreferenced functions
@@ -891,6 +887,19 @@ std::optional<std::span<const uint8_t>> Instrumentor::anchor_text(std::string *e
 const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offset) const {
   auto it = offset_to_inst_.find(anchor_offset);
   return it == offset_to_inst_.end() ? nullptr : it->second;
+}
+
+std::string Instrumentor::undecoded_anchor_error(uint64_t anchor_offset, uint64_t text_size) const {
+  const std::string message = "no decoded instruction starts at the requested anchor_offset = " +
+                              std::to_string(anchor_offset);
+  if (anchor_offset >= text_size)
+    return message + ": it is past the end of .text";
+  if (block_for_offset(build_block_offset_index(blocks_), anchor_offset) != nullptr)
+    return message + ": it is inside a decoded instruction";
+  if (!kernel_entries_.empty())
+    return message + ": it is not in code reachable from a kernel entry, which is all that is "
+                     "decoded";
+  return message;
 }
 
 std::optional<std::vector<const BasicBlock *>> Instrumentor::kernel_blocks(uint64_t entry,
@@ -1056,8 +1065,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   for (const auto &pt : points_) {
     const Instruction *anchor = find_instruction_at_offset(pt.anchor_offset);
     if (anchor == nullptr) {
-      out.errors.emplace_back("no decoded instruction starts at the requested anchor_offset = " +
-                              std::to_string(pt.anchor_offset));
+      out.errors.push_back(undecoded_anchor_error(pt.anchor_offset, text_bytes.size()));
       continue;
     }
 

@@ -634,7 +634,7 @@ TEST(Instrumentor, RejectsAlignedOffsetPastLastInstruction) {
   auto result = instrumentor.validate_points();
   EXPECT_TRUE(result.sites.empty());
   ASSERT_FALSE(result.errors.empty());
-  EXPECT_NE(result.errors.front().find("no decoded instruction"), std::string::npos)
+  EXPECT_NE(result.errors.front().find("past the end of .text"), std::string::npos)
       << "error was: " << result.errors.front();
 }
 
@@ -654,7 +654,27 @@ TEST(Instrumentor, RejectsOffsetInteriorToMultiWordInstruction) {
   auto result = instrumentor.validate_points();
   EXPECT_TRUE(result.sites.empty());
   ASSERT_FALSE(result.errors.empty());
-  EXPECT_NE(result.errors.front().find("no decoded instruction"), std::string::npos)
+  EXPECT_NE(result.errors.front().find("inside a decoded instruction"), std::string::npos)
+      << "error was: " << result.errors.front();
+}
+
+TEST(Instrumentor, RejectsOffsetNoKernelReaches) {
+  // .text: the kernel [v_mov v3, v2][s_endpgm], then a function nothing calls
+  // [v_mov v2, 0][s_endpgm]. Decoding starts at the kernel entry, so offset 8
+  // is never decoded.
+  auto image =
+      make_gfx950_kernel_elf({kMovV3V2, 0xBF810000u, kMovV2Zero, 0xBF810000u}, /*private_bytes=*/0);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+
+  Instrumentor instrumentor(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  instrumentor.add_point_by_offset(/*anchor_offset=*/8);
+
+  auto result = instrumentor.validate_points();
+  EXPECT_TRUE(result.sites.empty());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("not in code reachable from a kernel entry"),
+            std::string::npos)
       << "error was: " << result.errors.front();
 }
 

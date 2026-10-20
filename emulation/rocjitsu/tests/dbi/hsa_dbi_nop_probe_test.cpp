@@ -37,6 +37,7 @@ RJ_DIAGNOSTIC_POP
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_symbol.h"
@@ -50,6 +51,7 @@ RJ_DIAGNOSTIC_POP
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -149,26 +151,20 @@ protected:
     probe_body_words_ = callable->body_words;
     ASSERT_FALSE(probe_body_words_.empty());
 
-    // Decode .text and collect relocatable anchors. Decode-and-search so the
-    // test stays stable across compiler revisions.
-    auto decoder = Decoder::create(params_.arch);
-    ASSERT_NE(decoder, nullptr);
-    auto block_result = BasicBlock::build(*co, *decoder, params_.arch);
-    ASSERT_TRUE(block_result.succeeded());
-    auto blocks = std::move(block_result).value();
-    ASSERT_FALSE(co->text_sections().empty());
-    const auto *text = co->text_sections().front();
-    const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
-                                              text->size());
-
+    // The candidates are the first instruction of each of the kernel's blocks
+    // that can anchor one. Only the kernel's own blocks count: .text can also
+    // hold functions the kernel never reaches, laid out ahead of it.
+    const std::vector<KernelDescriptorInfo> kernels = scan_object_kernel_descriptors(*co);
+    ASSERT_EQ(kernels.size(), 1u) << params_.kernel_fixture << ".o should hold one kernel";
     std::vector<uint64_t> candidates;
-    for (const auto &block : blocks) {
-      uint64_t cur = block->start_offset();
-      for (const Instruction &inst : block->instructions()) {
-        if (is_relocatable_anchor(inst, cur, text_bytes, params_.arch))
-          candidates.push_back(cur);
-        cur += static_cast<uint64_t>(inst.size());
-      }
+    {
+      Instrumentor scout(*co, params_.arch);
+      const std::optional<std::vector<const BasicBlock *>> blocks =
+          scout.kernel_blocks(kernels.front().entry_text_offset, &err);
+      ASSERT_TRUE(blocks) << err;
+      for (const BasicBlock *block : *blocks)
+        if (const std::optional<uint64_t> anchor = scout.first_anchor(*block))
+          candidates.push_back(*anchor);
     }
     ASSERT_FALSE(candidates.empty()) << "No relocatable anchor in " << params_.kernel_fixture
                                      << ".o; did the compiler change the lowering?";

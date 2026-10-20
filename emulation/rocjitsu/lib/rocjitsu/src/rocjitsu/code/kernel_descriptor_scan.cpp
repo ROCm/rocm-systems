@@ -4,11 +4,13 @@
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
+#include "rocjitsu/code/code_object.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <unordered_set>
@@ -188,6 +190,19 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
     }
   }
   return out;
+}
+
+std::vector<KernelDescriptorInfo> scan_object_kernel_descriptors(const CodeObject &object) {
+  const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(object.image_data()),
+                                       object.image_size());
+  std::vector<KernelDescriptorInfo> kernels;
+  for (const Section *text : object.text_sections()) {
+    std::vector<KernelDescriptorInfo> found =
+        scan_kernel_descriptors(image, text->sectionOffset(), text->size());
+    kernels.insert(kernels.end(), std::make_move_iterator(found.begin()),
+                   std::make_move_iterator(found.end()));
+  }
+  return kernels;
 }
 
 uint8_t kernel_wavefront_size(rj_code_arch_t arch, const KD &desc) {

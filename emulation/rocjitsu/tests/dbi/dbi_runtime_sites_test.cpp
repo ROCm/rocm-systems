@@ -188,8 +188,9 @@ TEST(DbiRuntimeSites, LeavesKernelThatMakesACallUnpatched) {
 }
 
 TEST(DbiRuntimeSites, LeavesKernelWithAnUnresolvedJumpUnpatched) {
-  // s[4:5] rather than the link pair: a live s[30:31] is refused earlier, by
-  // the Instrumentor, as PatchFailed.
+  // s[4:5] rather than the link pair: a live s[30:31] would also make the
+  // Instrumentor refuse the object, so this gate would not be the only thing
+  // keeping it unpatched.
   const rj_code_arch_t arch = kGfx950.arch;
   const std::vector<uint32_t> text = {kMovV2Zero, build_s_setpc_b64(/*s[4:5]=*/4, arch)};
   const DbiInstrumentation result = instrument(kernel(kGfx950, text), probe(kGfx950));
