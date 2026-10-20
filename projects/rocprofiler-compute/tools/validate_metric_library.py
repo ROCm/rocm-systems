@@ -117,6 +117,10 @@ _CDNA_DISPLAY_VARIANTS = {
 }
 DISPLAY_VARIANTS = {
     "gfx908": _CDNA_DISPLAY_VARIANTS,
+    "gfx90a": {
+        **_CDNA_DISPLAY_VARIANTS,
+        "11.2.7": ("MFMA Utilization", "compute.mfma_util"),
+    },
 }
 
 
