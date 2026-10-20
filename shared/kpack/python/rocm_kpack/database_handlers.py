@@ -133,20 +133,7 @@ LIBRARY_ARCH_DIR_STEPPING_ALIASES = {
 def resolve_stepping_alias(
     preceding_parts: tuple[str, ...], part: str
 ) -> Optional[str]:
-    """Return the base arch if `part` is a known stepping-directory alias
-    immediately inside the library subtree it's documented for, else None.
-
-    `preceding_parts` is the path components before `part` (e.g.
-    `("stage", "lib", "hipblaslt", "library")`); a match requires it to end
-    with that library's own path components (e.g. `("hipblaslt", "library")`),
-    not just contain them anywhere.
-
-    Unlike _TensileHandler.detect() (which is scoped to one handler's own
-    _library_dir), this checks every library in
-    LIBRARY_ARCH_DIR_STEPPING_ALIASES: callers like the architecture-
-    separation verifier examine files across every library at once, not
-    through a single handler instance.
-    """
+    """Return the base arch for a known alias directly under its library path."""
     for library_dir, aliases in LIBRARY_ARCH_DIR_STEPPING_ALIASES.items():
         base = aliases.get(part)
         prefix = tuple(library_dir.split("/"))
