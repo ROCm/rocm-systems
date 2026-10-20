@@ -14,7 +14,6 @@
 #include <fmt/format.h>
 
 #include <cstdint>
-#include <optional>
 #include <stdexcept>
 
 namespace rocprofsys::domains::buffered
@@ -66,9 +65,6 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
         return;
     }
 
-    const auto beg_timestamp_ns = record->start_timestamp;
-    const auto end_timestamp_ns = record->end_timestamp;
-
     const std::uint64_t stream_id =
         rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
 
@@ -100,20 +96,6 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
         SdkBackend::get_parent_stack_id(record->correlation_id),
         SdkBackend::get_memory_copy_dst_address(*record),
         SdkBackend::get_memory_copy_src_address(*record), stream_id });
-
-    if(Externals::get_use_timemory())
-    {
-        if(const auto sequent_tid =
-               Externals::get_thread_info_sequent_tid(record->thread_id))
-        {
-            const auto bundle_name =
-                fmt::format("memory_copy: {} -> {}", src_agent->logical_node_id,
-                            dst_agent->logical_node_id);
-
-            Externals::write_timemory_bundle(bundle_name, *sequent_tid,
-                                             end_timestamp_ns - beg_timestamp_ns);
-        }
-    }
 }
 
 template <policies::domain_service::backend   SdkBackend,
