@@ -15,7 +15,8 @@
 #include <mutex>
 
 #include "comm.h"
-#include "info.h"
+
+#include "info.h"  // the collective overload reads ncclInfo fields
 
 ncclResult_t g_recorderResult = ncclSuccess;
 std::vector<std::string> g_recorderLabels;
