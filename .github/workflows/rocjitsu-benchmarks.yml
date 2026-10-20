@@ -341,46 +341,56 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
+          DESTINATION="raw-benchmarks/github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
+          DATA=rocjitsu-dashboard/data
+          NAME="github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}-default.json"
+          CATALOG_REFERENCE_FAILED=0
+          if [[ "${DASHBOARD_READY}" == true ]]; then
+            if ! CATALOG="$(jq -er \
+              '.testCatalog | select(type == "string") | select(test("^test-catalogs/[A-Za-z0-9._-]+\\.json\\z"))' \
+              "${RESULTS_DOWNLOAD_DIR}/dashboard/${NAME}")"; then
+              echo "Invalid dashboard test catalog reference; publishing raw only." >&2
+              CATALOG_REFERENCE_FAILED=1
+            fi
+          fi
+
           # Another writer may update the publication branch before our push.
           # Retry from the latest branch with three attempts, reapplying files and merging the index.
           for ATTEMPT in 1 2 3; do
             git fetch origin "${RESULTS_BRANCH}"
             git checkout --detach FETCH_HEAD
 
-            DESTINATION="raw-benchmarks/github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
+            # Publish the raw benchmark JSON.
             mkdir -p "${DESTINATION}"
             cp "${RESULTS_DOWNLOAD_DIR}/raw/run.json" "${DESTINATION}/raw.json"
             git add -- "${DESTINATION}/raw.json"
 
-            if [[ "${DASHBOARD_READY}" == true ]]; then
-              DATA=rocjitsu-dashboard/data
-              NAME="github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}-default.json"
-              mkdir -p "${DATA}/runs"
-              cp "${RESULTS_DOWNLOAD_DIR}/dashboard/${NAME}" "${DATA}/runs/${NAME}"
-              if ! CATALOG="$(jq -er \
-                '.testCatalog | select(type == "string") | select(test("^test-catalogs/[A-Za-z0-9._-]+\\.json\\z"))' \
-                "${DATA}/runs/${NAME}")"; then
-                echo "Invalid dashboard test catalog reference." >&2
-                exit 1
-              fi
+            # Recheck the catalog against the latest publication branch.
+            CATALOG_FAILED="${CATALOG_REFERENCE_FAILED}"
+            if [[ "${DASHBOARD_READY}" == true && "${CATALOG_FAILED}" -eq 0 ]]; then
               CATALOG_PATH="$(realpath -m -- "${DATA}/${CATALOG}")"
-              if [[ "${CATALOG_PATH}" != "$(realpath -- "${DATA}")/"* || ! -f "${CATALOG_PATH}" ]]; then
-                echo "Required dashboard test catalog is missing or outside the data directory: ${CATALOG}" >&2
-                exit 1
+              if [[ "${CATALOG_PATH}" != "$(realpath -m -- "${DATA}")/"* || ! -f "${CATALOG_PATH}" ]]; then
+                echo "Required dashboard test catalog is missing or outside the data directory; publishing raw only: ${CATALOG}" >&2
+                CATALOG_FAILED=1
               fi
-              if [[ ! -f "${DATA}/index.json" ]]; then
-                printf '{"runFiles":[]}\n' > "${DATA}/index.json"
+              # Publish the dashboard benchmark JSON and update the index.json.
+              if [[ "${CATALOG_FAILED}" -eq 0 ]]; then
+                mkdir -p "${DATA}/runs"
+                cp "${RESULTS_DOWNLOAD_DIR}/dashboard/${NAME}" "${DATA}/runs/${NAME}"
+                if [[ ! -f "${DATA}/index.json" ]]; then
+                  printf '{"runFiles":[]}\n' > "${DATA}/index.json"
+                fi
+                jq --arg file "runs/${NAME}" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                  '.runFiles = ((.runFiles // []) + [$file] | unique) | .generatedAt = $now' \
+                  "${DATA}/index.json" > "${DATA}/index.json.tmp"
+                mv "${DATA}/index.json.tmp" "${DATA}/index.json"
+                git add -- "${DATA}/runs/${NAME}" "${DATA}/index.json"
               fi
-              jq --arg file "runs/${NAME}" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-                '.runFiles = ((.runFiles // []) + [$file] | unique) | .generatedAt = $now' \
-                "${DATA}/index.json" > "${DATA}/index.json.tmp"
-              mv "${DATA}/index.json.tmp" "${DATA}/index.json"
-              git add -- "${DATA}/runs/${NAME}" "${DATA}/index.json"
             fi
 
-            if git diff --cached --quiet; then exit 0; fi
+            if git diff --cached --quiet; then exit "${CATALOG_FAILED}"; fi
             git commit -m "Publish benchmark ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
-            if git push origin "HEAD:${RESULTS_BRANCH}"; then exit 0; fi
+            if git push origin "HEAD:${RESULTS_BRANCH}"; then exit "${CATALOG_FAILED}"; fi
             if [[ "${ATTEMPT}" -lt 3 ]]; then sleep 2; fi
           done
           echo "Publication failed after 3 attempts" >&2

@@ -336,9 +336,17 @@ def test_copy_and_index_preserve_history(tmp_path, existing, publication_catalog
     body = next(
         step['run'] for step in steps() if step['name'] == 'Publish benchmark files'
     )
-    copy_body = body[
-        body.index('  DESTINATION=') : body.index('  if git diff --cached')
+    setup_body = body[
+        body.index('DESTINATION=') : body.index('# Another writer may update')
     ]
+    copy_body = (
+        setup_body
+        + body[
+            body.index('  mkdir -p "${DESTINATION}"') : body.index(
+                '  if git diff --cached'
+            )
+        ]
+    )
     copies = [{'run': copy_body}]
     env['DASHBOARD_READY'] = 'true'
     for _ in range(2):
@@ -413,13 +421,23 @@ def test_publication_catalog_path(tmp_path, publication_catalog, catalog_case):
     body = next(
         step['run'] for step in steps() if step['name'] == 'Publish benchmark files'
     )
-    dashboard_body = body[
-        body.index('  if [[ "${DASHBOARD_READY}"') : body.index(
-            '  if git diff --cached'
+    dashboard_setup = body[
+        body.index('DATA=rocjitsu-dashboard/data') : body.index(
+            '# Another writer may update'
         )
     ]
+    dashboard_body = (
+        dashboard_setup
+        + body[body.index('  CATALOG_FAILED=') : body.index('  if git diff --cached')]
+    )
     result = subprocess.run(
-        ['bash', '-euo', 'pipefail', '-c', dashboard_body],
+        [
+            'bash',
+            '-euo',
+            'pipefail',
+            '-c',
+            dashboard_body + '\nexit "${CATALOG_FAILED}"\n',
+        ],
         cwd=publication,
         env={
             **os.environ,
@@ -440,6 +458,7 @@ def test_publication_catalog_path(tmp_path, publication_catalog, catalog_case):
     else:
         assert result.returncode != 0, result.stdout + result.stderr
         assert (data / 'index.json').read_bytes() == original_index
+        assert not (data / 'runs').exists()
 
 
 def test_benchmark_artifact_contract():
@@ -586,6 +605,10 @@ def test_workflow_shell_and_source_contracts():
         (True, True, 'present'),
         (False, True, 'missing'),
         (False, True, 'removed-on-race'),
+        (False, True, 'added-on-race'),
+        (False, True, 'archived-missing'),
+        (False, True, 'archived-existing-run'),
+        (False, True, 'invalid'),
     ],
 )
 def test_publication_retry(
@@ -608,24 +631,44 @@ def test_publication_retry(
             text=True,
         ).stdout.strip()
 
+    result, output, original = convert(tmp_path)
+    assert result.returncode == 0, result.stderr
     seed.mkdir()
     git(seed, 'init', '-q', '-b', 'gh-pages-rocjitsu')
     git(seed, 'config', 'user.name', 'Fixture')
     git(seed, 'config', 'user.email', 'fixture@example.invalid')
+    git(seed, 'config', '--local', 'commit.gpgsign', 'false')
     data = seed / 'rocjitsu-dashboard/data'
     data.mkdir(parents=True)
     catalog = data / 'test-catalogs' / (publication_catalog['id'] + '.json')
-    if catalog_state != 'missing':
+    if catalog_state in ('present', 'removed-on-race'):
         catalog.parent.mkdir()
         catalog.write_text(json.dumps(publication_catalog))
     (data / 'index.json').write_text(
         json.dumps({'runFiles': ['runs/older.json'], 'custom': 'keep'})
     )
+    if catalog_state.startswith('archived-'):
+        archive = seed / 'raw-benchmarks/github-123-attempt-1/raw.json'
+        archive.parent.mkdir(parents=True)
+        archive.write_bytes(original)
+    if catalog_state == 'archived-existing-run':
+        previous_run = data / 'runs' / output.name
+        previous_run.parent.mkdir()
+        previous_run.write_text('preserve existing dashboard bytes\n')
+        (data / 'index.json').write_text(
+            json.dumps(
+                {
+                    'runFiles': ['runs/older.json', 'runs/' + output.name],
+                    'custom': 'keep',
+                }
+            )
+        )
     git(seed, 'add', '.')
     git(seed, 'commit', '-qm', 'Initial fixture')
     initial = git(seed, 'rev-parse', 'HEAD')
     initial_index = (data / 'index.json').read_bytes()
     subprocess.run([real_git, 'clone', '-q', str(seed), str(publication)], check=True)
+    git(publication, 'config', '--local', 'commit.gpgsign', 'false')
     git(seed, 'checkout', '-qb', 'race')
     (data / 'index.json').write_text(
         json.dumps(
@@ -635,18 +678,23 @@ def test_publication_retry(
     (seed / 'concurrent.txt').write_text('preserve concurrent writer')
     if catalog_state == 'removed-on-race':
         catalog.unlink()
+    elif catalog_state == 'added-on-race':
+        catalog.parent.mkdir()
+        catalog.write_text(json.dumps(publication_catalog))
     race_index = (data / 'index.json').read_bytes()
     git(seed, 'add', '.')
     git(seed, 'commit', '-qm', 'Concurrent writer fixture')
     race = git(seed, 'rev-parse', 'HEAD')
-    result, output, original = convert(tmp_path)
-    assert result.returncode == 0, result.stderr
     download = tmp_path / 'download'
     (download / 'raw').mkdir(parents=True)
     (download / 'raw/run.json').write_bytes(original)
     if dashboard_ready:
         (download / 'dashboard').mkdir()
         shutil.copy2(output, download / 'dashboard' / output.name)
+        if catalog_state == 'invalid':
+            invalid = json.loads(output.read_text())
+            invalid['testCatalog'] = '../outside.json'
+            (download / 'dashboard' / output.name).write_text(json.dumps(invalid))
     wrapper = tmp_path / 'bin'
     wrapper.mkdir()
     wrapper_code = r"""import os, pathlib, subprocess, sys
@@ -697,28 +745,36 @@ git('update-ref', ref, new, old)
         capture_output=True,
         text=True,
     )
-    if dashboard_ready and catalog_state != 'present':
-        assert result.returncode != 0, result.stdout + result.stderr
+    catalog_ok = catalog_state in ('present', 'added-on-race')
+    catalog_failed = dashboard_ready and not catalog_ok
+    counter = tmp_path / 'push-count'
+    if catalog_state.startswith('archived-'):
+        assert result.returncode == 1, result.stdout + result.stderr
         assert 'catalog' in result.stderr.lower()
-        counter = tmp_path / 'push-count'
-        if catalog_state == 'removed-on-race':
-            assert counter.read_text() == '1'
-            expected_head, expected_index = race, race_index
-        else:
-            assert not counter.exists()
-            expected_head, expected_index = initial, initial_index
-        assert git(publication, 'rev-parse', 'HEAD') == expected_head
-        assert git(seed, 'rev-parse', 'gh-pages-rocjitsu') == expected_head
+        assert not counter.exists()
+        assert git(publication, 'rev-parse', 'HEAD') == initial
+        assert git(seed, 'rev-parse', 'gh-pages-rocjitsu') == initial
         assert (
             publication / 'rocjitsu-dashboard/data/index.json'
-        ).read_bytes() == expected_index
-        return
-    assert int((tmp_path / 'push-count').read_text()) == (3 if always_fail else 2)
-    assert result.returncode == (1 if always_fail else 0), result.stderr
+        ).read_bytes() == initial_index
+        if catalog_state == 'archived-existing-run':
+            assert (
+                publication / 'rocjitsu-dashboard/data/runs' / output.name
+            ).read_text() == 'preserve existing dashboard bytes\n'
+        else:
+            assert not (
+                publication / 'rocjitsu-dashboard/data/runs' / output.name
+            ).exists()
+    else:
+        assert counter.exists(), result.stdout + result.stderr
+        assert int(counter.read_text()) == (3 if always_fail else 2)
+        assert result.returncode == (
+            1 if always_fail or catalog_failed else 0
+        ), result.stderr
     if always_fail:
         assert git(seed, 'rev-parse', 'gh-pages-rocjitsu') == race
         assert 'Publication failed after 3 attempts' in result.stderr
-    else:
+    elif not catalog_state.startswith('archived-'):
         index = json.loads(
             git(seed, 'show', 'gh-pages-rocjitsu:rocjitsu-dashboard/data/index.json')
         )
@@ -727,11 +783,23 @@ git('update-ref', ref, new, old)
             and 'runs/older.json' in index['runFiles']
         )
         assert index['custom'] == 'keep'
-        assert ('runs/' + output.name in index['runFiles']) == dashboard_ready
+        assert ('runs/' + output.name in index['runFiles']) == (
+            dashboard_ready and catalog_ok
+        )
         assert (
             git(seed, 'show', 'gh-pages-rocjitsu:concurrent.txt')
             == 'preserve concurrent writer'
         )
+        git(seed, 'merge-base', '--is-ancestor', race, 'gh-pages-rocjitsu')
+        if catalog_failed:
+            assert 'catalog' in result.stderr.lower()
+            assert not (
+                publication / 'rocjitsu-dashboard/data/runs' / output.name
+            ).exists()
+            assert (
+                publication / 'rocjitsu-dashboard/data/index.json'
+            ).read_bytes() == race_index
+    if not always_fail:
         published = subprocess.check_output(
             [
                 real_git,
@@ -759,6 +827,7 @@ def test_develop_history_gate(tmp_path):
     git('init', '-q', '-b', 'develop')
     git('config', 'user.name', 'Fixture')
     git('config', 'user.email', 'fixture@example.invalid')
+    git('config', '--local', 'commit.gpgsign', 'false')
     git('commit', '--allow-empty', '-qm', 'Initial develop')
     ancestor = git('rev-parse', 'HEAD')
     git('commit', '--allow-empty', '-qm', 'Develop tip')
