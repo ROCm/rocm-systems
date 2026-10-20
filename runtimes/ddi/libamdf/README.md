@@ -4,9 +4,10 @@
 # libamdf
 
 libamdf implements the AMDF C API in Rust over [rocddi](../rocddi/README.md).
-`amdf_query_api` negotiates core ABI v5; the GPU extension supports v1. The
-XDNA extension is not implemented. The [AMDF headers](../../api-headers/include/amdf/)
-define the public contract, including arguments, ownership, and error behavior.
+`amdf_query_api` negotiates core ABI v11; the GPU extension supports v3 and
+the observation extension supports v1. The XDNA extension is not implemented.
+The [AMDF headers](../../api-headers/include/amdf/) define the public contract,
+including arguments, ownership, and error behavior.
 The Rust modules are private implementation details.
 
 ## Runtime model
@@ -23,7 +24,9 @@ INSTANCE GPU activation requires a secondary context supported by KFD UAPI
 The CMake build stages `libamdf.a` and a `libamdf.so` alias of the shared image
 that also exports HSA. Each ABI owns a separate rocddi session and public
 handles; process-lifetime KFD contexts share rocddi's process-local backend
-state. A separately linked static archive has its own copy of that state.
+state. The shared image also coordinates the native signal-event page across
+AMDF and HSA; only GPUs mapped to an installed page report native events.
+A separately linked static archive has its own copy of that state.
 
 ## Current support
 

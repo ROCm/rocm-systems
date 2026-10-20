@@ -803,7 +803,8 @@ TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAc
 }
 
 TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
-  PluginFixture fixture;
+  PluginFixture fixture(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32,
+                        /*sgprs_per_wf=*/128);
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   constexpr uint64_t kSharedBase = 0x1234'0000'0000'0000;
@@ -811,7 +812,7 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   constexpr uint64_t kLdsAddress = kSharedBase | 0x0000'0020;
   cu->set_apertures(kSharedBase, kSharedBase | 0xffff'ffff, 0, 0);
   auto *wave = cu->dispatch_wf_at(/*wf_id=*/1, /*wg_id=*/7, /*pc=*/0x320,
-                                  /*num_sgprs=*/104, /*num_vgprs=*/256);
+                                  /*num_sgprs=*/128, /*num_vgprs=*/256);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(0b111);
   wave->set_lds_base(0x400);
@@ -827,15 +828,15 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   state->per_lane_addr[0] = kDdsAddress;
   state->per_lane_addr[1] = kLdsAddress;
   state->per_lane_addr[2] = 0x2000;
-  auto load = prepare_cdna4_flat_load_for_routing(*cu, *wave, std::move(state));
+  auto load = prepare_flat_load_for_routing(*cu, *wave, std::move(state));
   ASSERT_NE(load, nullptr);
   test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave);
 
   ASSERT_EQ(plugin->accesses.size(), 1u);
   const auto &access = plugin->accesses.front();
-  EXPECT_EQ(access.route, MemoryRoute::LOCAL);
+  EXPECT_EQ(access.route, MemoryRoute::GLOBAL);
   EXPECT_EQ(access.decoded_space, DecodedMemorySpace::FLAT);
-  EXPECT_TRUE(access.normalized_to_local);
+  EXPECT_FALSE(access.normalized_to_local);
   EXPECT_EQ(access.flat_local_lane_mask, 0b010u);
   EXPECT_EQ(access.flat_dds_lane_mask, 0b001u);
   EXPECT_EQ(access.scratch_lane_mask, 0u);
@@ -844,6 +845,10 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   EXPECT_EQ(access.pre_routing_addresses[0], kDdsAddress);
   EXPECT_EQ(access.pre_routing_addresses[1], kLdsAddress);
   EXPECT_EQ(access.pre_routing_addresses[2], 0x2000u);
+  EXPECT_EQ(access.addresses[0], 0x80000440u);
+  EXPECT_EQ(access.addresses[1], 0x420u);
+  EXPECT_EQ(access.addresses[2], 0x2000u);
+  EXPECT_EQ(access.execution_addresses, access.addresses);
   auto *scoreboard = wave->memory_wait_scoreboard();
   ASSERT_NE(scoreboard, nullptr);
   EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
@@ -856,52 +861,60 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
 }
 
-TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLaneIsGlobal) {
-  PluginFixture fixture;
-  auto *plugin = fixture.attach_memory_observation_plugin();
-  auto *cu = fixture.cu();
-  constexpr uint64_t kSharedBase = 0x1000'0000;
-  cu->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
-  auto *wave = cu->dispatch_wf_at(/*wf_id=*/1, /*wg_id=*/7, /*pc=*/0x340,
-                                  /*num_sgprs=*/104, /*num_vgprs=*/256);
-  ASSERT_NE(wave, nullptr);
-  wave->set_exec(0b1111);
+TEST(RoutedMemoryObservationTest, MixedFlatReportsEffectiveAddressesWithoutChangingExecution) {
+  for (uint32_t global_lane : {0u, 1u}) {
+    SCOPED_TRACE(global_lane);
+    PluginFixture fixture;
+    auto *plugin = fixture.attach_memory_observation_plugin();
+    auto *cu = fixture.cu();
+    constexpr uint64_t kSharedBase = 0x1000'0000;
+    cu->set_apertures(kSharedBase, kSharedBase + 0xffff, 0, 0);
+    auto *wave = cu->dispatch_wf_at(/*wf_id=*/1, /*wg_id=*/7, /*pc=*/0x340,
+                                    /*num_sgprs=*/104, /*num_vgprs=*/256);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(0b1111);
+    wave->set_lds_base(0x400);
 
-  auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
-  state->wf_size = wave->wf_size();
-  state->elem_size = 4;
-  state->num_elems = 1;
-  state->is_load = true;
-  state->dst_reg_base = wave->vgpr_alloc().base + 2;
-  state->exec_mask = 0b1111;
-  state->lane_mask = 0b0111;
-  state->per_lane_addr[0] = 0x2000;
-  state->per_lane_addr[1] = kSharedBase + 0x20;
-  state->per_lane_addr[2] = kSharedBase + 0x28;
-  auto load = prepare_cdna4_flat_load_for_routing(*cu, *wave, std::move(state));
-  ASSERT_NE(load, nullptr);
-  test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave);
+    auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+    state->wf_size = wave->wf_size();
+    state->elem_size = 4;
+    state->num_elems = 1;
+    state->is_load = true;
+    state->dst_reg_base = wave->vgpr_alloc().base + 2;
+    state->exec_mask = 0b1111;
+    state->lane_mask = 0b0111;
+    for (uint32_t lane = 0; lane < 4; ++lane)
+      state->per_lane_addr[lane] = lane == global_lane ? 0x2000 : kSharedBase + 0x20 + lane * 4;
+    auto load = prepare_flat_load_for_routing(*cu, *wave, std::move(state));
+    ASSERT_NE(load, nullptr);
+    test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave);
 
-  ASSERT_EQ(plugin->accesses.size(), 1u);
-  const auto &access = plugin->accesses.front();
-  EXPECT_EQ(access.route, MemoryRoute::GLOBAL);
-  EXPECT_EQ(access.decoded_space, DecodedMemorySpace::FLAT);
-  EXPECT_FALSE(access.normalized_to_local);
-  EXPECT_EQ(access.flat_local_lane_mask, 0b0110u);
-  EXPECT_TRUE(access.pre_routing_addresses.empty());
-  EXPECT_EQ(access.addresses[0], 0x2000u);
-  EXPECT_EQ(access.addresses[1], kSharedBase + 0x20);
-  EXPECT_EQ(access.addresses[2], kSharedBase + 0x28);
-  auto *scoreboard = wave->memory_wait_scoreboard();
-  ASSERT_NE(scoreboard, nullptr);
-  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
-  EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
-  scoreboard->wait(WaitCounterKind::Load, 0);
-  const auto shared = access.flat_local_lane_mask | access.flat_dds_lane_mask;
-  scoreboard->access({RegClass::VGPR, 2, 1}, access.active_lane_mask & ~shared, 0xf, false);
-  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
-  scoreboard->access({RegClass::VGPR, 2, 1}, shared, 0xf, false);
-  EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+    ASSERT_EQ(plugin->accesses.size(), 1u);
+    const auto &access = plugin->accesses.front();
+    EXPECT_EQ(access.route, MemoryRoute::GLOBAL);
+    EXPECT_EQ(access.decoded_space, DecodedMemorySpace::FLAT);
+    EXPECT_FALSE(access.normalized_to_local);
+    EXPECT_EQ(access.flat_local_lane_mask, 0b0111u & ~(uint64_t{1} << global_lane));
+    ASSERT_EQ(access.pre_routing_addresses.size(), wave->wf_size());
+    for (uint32_t lane = 0; lane < 3; ++lane) {
+      EXPECT_EQ(access.pre_routing_addresses[lane],
+                lane == global_lane ? 0x2000 : kSharedBase + 0x20 + lane * 4);
+      EXPECT_EQ(access.addresses[lane], lane == global_lane ? 0x2000 : 0x420 + lane * 4);
+    }
+    // An active but invalid lane does not acquire an effective LDS address.
+    EXPECT_EQ(access.addresses[3], kSharedBase + 0x2c);
+    EXPECT_EQ(access.execution_addresses, access.addresses);
+    auto *scoreboard = wave->memory_wait_scoreboard();
+    ASSERT_NE(scoreboard, nullptr);
+    EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
+    EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Ds), 1u);
+    scoreboard->wait(WaitCounterKind::Load, 0);
+    const auto shared = access.flat_local_lane_mask | access.flat_dds_lane_mask;
+    scoreboard->access({RegClass::VGPR, 2, 1}, access.request_lane_mask & ~shared, 0xf, false);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+    scoreboard->access({RegClass::VGPR, 2, 1}, shared, 0xf, false);
+    EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+  }
 }
 
 TEST(RoutedMemoryObservationTest, AnExplicitGlobalAccessIgnoresTheSharedAperture) {
