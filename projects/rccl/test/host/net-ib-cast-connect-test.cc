@@ -890,7 +890,7 @@ class NetIbCastConnectQpMicrotest : public NetIbCastConnectMicrotest {
     return a;
   }
   ibv_cq cq_ = {};
-  ibv_pd pd_ = {.context = &ctx_[0]};
+  ibv_pd pd_ = {&ctx_[0]};
 };
 
 TEST_F(NetIbCastConnectQpMicrotest, Init_MovesToInitWithPortPkeyAndAccess) {
@@ -2050,7 +2050,7 @@ TEST_F(NetIbCastConnectHandshakeMicrotest, CqSize_CoversThreeCompletionsPerReque
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
   Connected(&s, &r);
-  const int want = 3 * NET_IB_MAX_REQUESTS * 2;
+  const int want = 3 * NET_IB_MAX_REQUESTS * ncclParamIbCastQpsPerConn();
   EXPECT_EQ(verbs_.cqSizes, (std::vector<int>{want, want}));
   IbCastDevs[0].maxCqe = 1000;
   Connected(&s, &r);
@@ -2716,13 +2716,13 @@ TEST_F(NetIbCastConnectSharingMicrotest, FirstConnection_MakesEachSideAPrimaryOw
     EXPECT_EQ(ss->key.peerAddr.sin.sin_addr.s_addr, sockets_.listenAddr.sin.sin_addr.s_addr);
     EXPECT_EQ(rs->key.peerAddr.sin.sin_addr.s_addr, sockets_.nextClientAddr.sin.sin_addr.s_addr);
   }
-  const int cq = 3 * NET_IB_MAX_REQUESTS * 2 * 8;  // IB_QP_DEPTH_MULTIPLIER default
+  const int cq = 3 * NET_IB_MAX_REQUESTS * ncclParamIbCastQpsPerConn() * rcclParamIbCastQpDepthMultiplier();
   EXPECT_EQ(verbs_.cqSizes, (std::vector<int>{cq, cq}));
 }
 
 TEST_F(NetIbCastConnectSharingMicrotest, Ainic_ScalesSharedQpDepthByTheMultiplierTheCqAchieved) {
   IbCastAinicRoce = true;
-  cqeCap_ = 3 * NET_IB_MAX_REQUESTS * 2 * 3;  // the device grants a 3x CQ, not 8x
+  cqeCap_ = 3 * NET_IB_MAX_REQUESTS * ncclParamIbCastQpsPerConn() * 3;  // the device grants 3x, not 8x
   ncclIbSendComm* s = nullptr;
   ncclIbRecvComm* r = nullptr;
   Connect(&s, &r);
