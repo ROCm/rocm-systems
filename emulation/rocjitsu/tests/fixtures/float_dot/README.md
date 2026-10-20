@@ -88,23 +88,23 @@ C as ABS, integer half selection) without a capture.
 
 ### The negative-C floor unit
 
-A negative C whose bits all fall below the alignment grid still subtracts one
-unit. `gfx12_dot_terms` floors C's alignment exponent at 2^-14 for packed F16
-and 2^-126 otherwise, and the unit applies at or below that floor, so the two
-output formats reach it from different directions:
+On `gfx1201`, a negative C whose bits all fall below the alignment grid still
+subtracts one unit. `gfx12_dot_terms` floors C's alignment exponent at 2^-14
+for packed F16 and 2^-126 otherwise, and the unit applies at or below that
+floor, so the two output formats reach it from different directions:
 
-- **At 2^-126**, only BF16 products are small enough. This is the rule this
-  change extends from packed F16 to the F32 and packed-BF16 outputs.
-- **At 2^-14**, F16 products alone reach it. That rule is unchanged here, and
-  gfx11 does not apply it: `{0x6400 x 0x3c00, 0x3e00 x 0x3c00}` with
-  C=`0x8001` gives `0x6401` on gfx1201 and `0x6402` on gfx1100.
+- **At 2^-126**, only BF16 products are small enough. `gfx1201` applies the
+  unit for the F32 and packed-BF16 outputs; `gfx1100` does not.
+- **At 2^-14**, F16 products alone reach it. `gfx1201` applies the unit and
+  `gfx1100` does not: `{0x6400 x 0x3c00, 0x3e00 x 0x3c00}` with C=`0x8001`
+  gives `0x6401` on gfx1201 and `0x6402` on gfx1100.
 
 | Caller | Floor | Evidence |
 | --- | --- | --- |
 | VOP3P `V_DOT2_F32_BF16` | 2^-126 | First DOT probe lanes that only this rule matches |
 | `V_WMMA_F32_16X16X16_BF16`, `V_WMMA_BF16_16X16X16_BF16` | 2^-126 | WMMA C-floor probe; `Gfx12Dot.WmmaTinyNegativeAccumulatorSubtractsFloorUnit` |
 | True16 `V_DOT2_BF16_BF16` | 2^-126 | Witness probe; `Bf16TinyNegativeAccumulator` |
-| VOPD `V_DUAL_DOT2ACC_F32_BF16` | 2^-126 | Witness probe, both cards; no decoded case, since this PR adds no VOPD test harness |
+| VOPD `V_DUAL_DOT2ACC_F32_BF16` | 2^-126 | Witness probe: `gfx1201` applies the unit, `gfx1100` matches the gfx11 rule without it. No decoded case; there is no VOPD test harness |
 | True16 `V_DOT2_F16_F16`, `V_WMMA_F16_16X16X16_F16` | 2^-14 | Witness probe; `F16TinyNegativeAccumulator`. The WMMA form shares the step but has no lane of its own |
 
 The broad corpora do not reach either boundary: disabling the unit at 2^-14
