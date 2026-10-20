@@ -64,15 +64,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-extern "C" {
-typedef void (*rocprofiler_register_iterate_hsa_executables_cb_t)(hsa_executable_t, void*);
-
-int
-rocprofiler_register_iterate_hsa_executables(
-    rocprofiler_register_iterate_hsa_executables_cb_t callback,
-    void*                                             user_data);
-}
-
 namespace rocprofiler
 {
 namespace code_object
@@ -180,7 +171,7 @@ get_names()
 
 namespace
 {
-using hsa_loader_table_t             = hsa_ven_amd_loader_1_01_pfn_t;
+using hsa_loader_table_t             = hsa_ven_amd_loader_1_03_pfn_t;
 using context_t                      = context::context;
 using user_data_t                    = rocprofiler_user_data_t;
 using context_array_t                = context::context_array_t;
@@ -1429,11 +1420,32 @@ initialize(HsaApiTable* table)
 
     get_status_string_function() = core_table.hsa_status_string_fn;
 
-    auto _status = core_table.hsa_system_get_major_extension_table_fn(
-        HSA_EXTENSION_AMD_LOADER, 1, sizeof(hsa_loader_table_t), &get_loader_table());
+    // rocr-runtime currently returns an error if anything other than major_version==1 is passed,
+    // although it copies all the later versions symbols into it if the passed sizeof(...) is large
+    // enough. However, we query whether major_version==3 exists just in case that ever changes.
+    auto amd_loader_major_version = 1;
+    for(auto _major_version : {3, 2, 1})
+    {
+        uint16_t _minor_version = 0;
+        auto     _supported     = false;
+        auto     _ret           = core_table.hsa_system_major_extension_supported_fn(
+            HSA_EXTENSION_AMD_LOADER, _major_version, &_minor_version, &_supported);
+        if(_ret == HSA_STATUS_SUCCESS && _supported)
+        {
+            amd_loader_major_version = _major_version;
+            break;
+        }
+    }
+
+    auto _status = core_table.hsa_system_get_major_extension_table_fn(HSA_EXTENSION_AMD_LOADER,
+                                                                      amd_loader_major_version,
+                                                                      sizeof(hsa_loader_table_t),
+                                                                      &get_loader_table());
 
     ROCP_ERROR_IF(_status != HSA_STATUS_SUCCESS)
-        << "hsa_system_get_major_extension_table failed: " << get_status_string(_status);
+        << fmt::format("hsa_system_get_major_extension_table failed with ec={}: {}",
+                       static_cast<int>(_status),
+                       get_status_string(_status));
 
     if(_status == HSA_STATUS_SUCCESS)
     {
@@ -1538,42 +1550,33 @@ initialize(RocAttachDispatchTable* attach_table)
 void
 iterate_hsa_executables()
 {
-    if(auto* _hsa_executables = get_executables(); _hsa_executables)
-    {
-        // don't hold rlock since executable_freeze_internal acquires wlock
-        auto _executables = _hsa_executables->get();
+    // HSA has not been initialized yet
+    if(!get_loader_table().hsa_ven_amd_loader_iterate_executables) return;
 
-        // add executables from rocprofiler-register which may have been recorded before
-        // rocprofiler-sdk was initialized
-        {
-            if(void* _sym = ::dlsym(RTLD_DEFAULT, "rocprofiler_register_iterate_hsa_executables");
-               _sym)
-            {
-                auto _executables_cb = [](hsa_executable_t itr, void* user_data) {
-                    constexpr auto null_hsa_executable = hsa_executable_t{0};
-
-                    auto* _executables_v = static_cast<executable_array_t*>(user_data);
-                    if(_executables_v && itr != null_hsa_executable)
-                    {
-                        if(std::find(_executables_v->begin(), _executables_v->end(), itr) ==
-                           _executables_v->end())
-                            _executables_v->emplace_back(itr);
-                    }
-                };
-
-                auto _func =
-                    reinterpret_cast<decltype(rocprofiler_register_iterate_hsa_executables)*>(_sym);
-
-                _func(_executables_cb, &_executables);
-            }
-        }
-
-        for(const auto& itr : _executables)
-        {
+    auto ret = get_loader_table().hsa_ven_amd_loader_iterate_executables(
+        [](hsa_executable_t executable, void* /*data*/) -> hsa_status_t {
             constexpr auto null_hsa_executable = hsa_executable_t{0};
-            if(itr != null_hsa_executable) executable_freeze_internal(itr);
-        }
-    }
+            auto           _status             = HSA_STATUS_SUCCESS;
+            if(executable != null_hsa_executable)
+            {
+                if(auto _ret = executable_freeze_internal(executable); _ret != HSA_STATUS_SUCCESS)
+                {
+                    ROCP_WARNING << fmt::format(
+                        "Failed to parse code object info for hsa_executable_t{{.handle={}}}: "
+                        "ec={} :: {}",
+                        executable.handle,
+                        static_cast<std::underlying_type_t<hsa_status_t>>(_ret),
+                        get_status_string(_ret));
+                    _status = _ret;
+                }
+            }
+            return _status;
+        },
+        nullptr);
+
+    ROCP_WARNING_IF(ret != HSA_STATUS_SUCCESS)
+        << fmt::format("Failed to iterate HSA executables for code object information: {}",
+                       get_status_string(ret));
 }
 }  // namespace code_object
 }  // namespace rocprofiler
