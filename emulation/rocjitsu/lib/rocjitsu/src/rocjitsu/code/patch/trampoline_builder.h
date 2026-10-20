@@ -142,7 +142,10 @@ struct TrampolinePlan {
   /// The argument VGPRs are the only member not chosen dead -- the ABI fixes them
   /// -- so they are the only one that can intersect the live set.
   RegisterSet builder_clobbers;
-  uint32_t before_word_count = 0;   ///< Envelope words emitted before the relocated original.
+  /// Arch-agnostic envelope words before the relocated original. The spill
+  /// bracket, the boundary drains and the GFX9 wait-state pad are accounted by
+  /// emit_probe_call, not here.
+  uint32_t before_word_count = 0;
   uint64_t probe_target_offset = 0; ///< .text-relative byte offset of the copied probe body.
 
   /// VGPRs to save/restore around the call; emit_probe_call brackets each with a
@@ -234,6 +237,12 @@ public:
   /// Requires @p plan.is_probe_call (i.e. plan_probe_call() succeeded). Builds
   /// the call envelope from the planned resources and @p plan.probe_target_offset
   /// then delegates to build() for layout and branch math.
+  ///
+  /// On GFX9 (CDNA1-4), which does not interlock them, a restored SGPR or M0 is
+  /// spaced from the relocated original by the wait states its readers need: one
+  /// s_nop tops up what the instructions after the restore already supply. That
+  /// word is not part of before_word_count, since it depends on the spill sets,
+  /// which are filled after planning.
   ///
   /// Returns std::nullopt and writes a diagnostic to @p error_out (if non-null)
   /// when the plan is not a probe call, the synthesized envelope size disagrees
