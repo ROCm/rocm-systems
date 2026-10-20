@@ -62,7 +62,7 @@ types each device skips. The validator checks, for every arch:
 
 - every ceiling the benchmark measures on a device of the arch is the `peak_empirical`
   of exactly one metric, or is listed in `CEILINGS_WITHOUT_METRIC` (the VALU integer
-  rates `I8Ops`, `I32Ops`, `I64Ops`, `MALLBw`, which analyze skips, and the gfx950
+  rates `I8Ops`, `I32Ops` and `I64Ops`; `MALLBw`, which analyze skips; and the gfx950
   `MFMAF4Flops` and `MFMAF6Flops`, where the roofline shows only the combined F6F4 rate:
   no row shows them as a peak);
 - no metric names a ceiling the arch does not measure.

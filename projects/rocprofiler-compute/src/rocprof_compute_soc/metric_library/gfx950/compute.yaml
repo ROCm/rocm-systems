@@ -35,8 +35,7 @@ compute.l1_cache_vmem_stalled_by_l1_cache:
   unit: Percent
   description: >-
     Measures backpressure from TCP to SQ. A high stall rate (>= 10%) indicates that
-    TCP stall is backpressured to SQ. Equation: SUM((SQ_VMEM_TA_CMD_FIFO_FULL * 100))
-    / SUM(SQ_BUSY_CYCLES)
+    TCP stall is backpressured to SQ.
 compute.mfma_flops_bf16:
   peak: $max_sclk * $cu_per_gpu * 4096 / 1000
 compute.mfma_flops_f16:
@@ -72,8 +71,7 @@ compute.normalized_l1_cache_vmem_stalled_by_l1_cache:
   description: >-
     Percentage of GPU active time that SQ could not dispatch VMEM instructions because
     the L1 Cache (TCP) command FIFO was full. Averaged across all CUs. High values
-    mean L1 cache cannot keep up with memory instruction demand. Equation: ((SUM(SQ_VMEM_TA_CMD_FIFO_FULL)
-    / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)) * 100)
+    mean L1 cache cannot keep up with memory instruction demand.
 compute.num_cus:
   name: Num CUs
   formula: $cu_per_gpu
@@ -107,8 +105,7 @@ compute.vmem_issue_rate:
   formula: SUM(SQ_INSTS_VMEM) / SUM(SQ_WAVE_CYCLES)
   unit: Instructions per Cycle
   description: >-
-    The number of VMEM instructions issued by the SQ (CU) per wave cycle. Equation:
-    SUM(SQ_INSTS_VMEM) / SUM(SQ_WAVE_CYCLES)
+    The number of VMEM instructions issued by the SQ (CU) per wave cycle.
 compute.vmem_ta_addr_stall:
   description: ''
 compute.vmem_ta_cmd_stall:

@@ -47,7 +47,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * On gfx940 and gfx941, vL1D cache bandwidth in System Speed-of-Light and the vL1D Cache panel counts 64 bytes per cache access, as the roofline does.
 
-* On gfx940 and gfx941, L2-Fabric read bandwidth in the Memory Chart and the L2 Cache panel counts 128-byte reads, as System Speed-of-Light does.
+* On gfx940 and gfx941, L2-Fabric read bandwidth in the Memory Chart and the L2 Cache panel counts 128-byte reads as 128 bytes (they were counted as 64), as System Speed-of-Light does.
 
 * vL1D-L2 bandwidth in the vL1D Cache panel counts every request at the size the roofline uses: 64 bytes on gfx940 and gfx941, 128 bytes on gfx942 and gfx950.
 
