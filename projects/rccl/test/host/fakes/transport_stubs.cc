@@ -37,6 +37,9 @@ struct ncclTopoGraph;
 // NCCL_PARAM does not cover it.
 int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
 
+// src/transport/net.cc:212, read by net_ib_cast/common.cc.
+int64_t ncclParamNetOptionalRecvCompletion() { return g_loadParam("NET_OPTIONAL_RECV_COMPLETION", 1); }
+
 // src/plugin/net.cc: initTransportsRank's GDR probe.
 int g_gdrSupportValue = 0;
 int g_gdrSupportCalls = 0;
