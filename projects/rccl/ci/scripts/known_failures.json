@@ -31,7 +31,9 @@
     "test_coalescing_manager_collective_timing_enabled_True": "missing_duration_ms",
     "test_individual_send_recv_op_sizes0_timing_enabled_True": "missing_duration_ms",
     "test_individual_send_recv_op_sizes1_timing_enabled_True": "missing_duration_ms",
-    "test_extra_cuda_context": "extra_context_heuristic"
+    "test_extra_cuda_context": "extra_context_heuristic",
+    "test_comm_recursive_split_group": "split_group_parent_guard",
+    "test_nccl_backend_4gpu_module": "nccl_backend_4gpu_hang"
   },
   "categories": {
     "missing_duration_ms": "RCCL flight recorder trace omits duration_ms field",
@@ -41,6 +43,8 @@
     "trace_entry_mismatch": "Trace entry structure differs from upstream NCCL",
     "missing_dump_pipe": "RCCL does not create flight recorder dump pipe",
     "pg_timeout_semantics": "extend_pg_timeout adds to existing vs sets absolute value",
-    "extra_context_heuristic": "Test infers an extra HIP context from >70% device memory growth across a collective; on ROCm the growth is a ROCr runtime allocation, not a second context and not RCCL memory. Magnitude is build- and arch-dependent, and the ratio also varies with node co-tenancy (AICOMRCCL-2469)"
+    "extra_context_heuristic": "Test infers an extra HIP context from >70% device memory growth across a collective; on ROCm the growth is a ROCr runtime allocation, not a second context and not RCCL memory. Magnitude is build- and arch-dependent, and the ratio also varies with node co-tenancy (AICOMRCCL-2469)",
+    "split_group_parent_guard": "Upstream PyTorch #195758 (e8430bed0, 2026-09-03) made split_group reject a parent process group that was bound to a device_id but has not yet run a collective. The test splits recursively without issuing one. Surfaced when this suite moved off a frozen wheel onto the current ROCm nightly; the guard's sibling tests pass on ROCm, so this is not pure upstream drift (AICOMRCCL-3107)",
+    "nccl_backend_4gpu_hang": "ACTIVE DEFECT, not a feature gap: the 4-GPU DDP module test hangs with both ranks unresponsive and is killed at the 300s timeout. Suppressed only to keep the suite's signal readable while the hang is investigated — remove this entry as soon as AICOMRCCL-2468 is fixed (AICOMRCCL-2468)"
   }
 }
