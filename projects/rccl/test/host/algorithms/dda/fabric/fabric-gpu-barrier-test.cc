@@ -49,7 +49,7 @@ struct BarrierState {
   int selfRank;
   int nRanks;
   FlagType** peerFlags;
-  dda::common::DdaAbortSignal abortSignal;
+  dda::common::DdaKernelParams params;
   bool aborted;
 };
 static_assert(sizeof(BarrierState) == sizeof(FabricGpuBarrier), "FabricGpuBarrier layout changed");
@@ -102,7 +102,7 @@ class FabricGpuBarrierMicrotest : public ::testing::Test {
     nRanks_ = nRanks;
     selfRank_ = selfRank;
     result_ = FabricGpuBarrier::mallocAndInit(nRanks, nBlocks, selfRank, kBootstrap, manager,
-                                              dda::common::DdaAbortSignal{kAbortFlag});
+                                              dda::common::DdaKernelParams{kAbortFlag});
     return result_;
   }
 
@@ -292,7 +292,7 @@ TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_AllSucceed_BarrierCarriesGeometr
   EXPECT_EQ(state.selfRank, kRank);
   EXPECT_EQ(state.nRanks, kNRanks);
   EXPECT_EQ(state.peerFlags, r.first->peerFlagsDev->get());
-  EXPECT_EQ(state.abortSignal.flag, kAbortFlag);
+  EXPECT_EQ(state.params.flag, kAbortFlag);
 }
 
 TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_WithManager_TracksFlagBufferAndUntracksPeerMappingsInIt) {

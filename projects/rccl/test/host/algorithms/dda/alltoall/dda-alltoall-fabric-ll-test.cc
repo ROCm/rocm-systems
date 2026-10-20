@@ -175,7 +175,7 @@ TEST_F(DdaAlltoallFabricLLMicrotest, Launch_PassesBuffersPerPeerBytesAndEpoch) {
   EXPECT_EQ(launch.Arg<int>(4), 1);
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
-  EXPECT_EQ(launch.Arg<dda::common::DdaAbortSignal>(8).flag, comm().abortFlagDev);
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(8).flag, comm().abortFlagDev);
 }
 
 // One block per peer up to 256 packets (2 KiB) per peer, then one per 256 packets, at most 8 per peer.

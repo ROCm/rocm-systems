@@ -51,7 +51,7 @@ __launch_bounds__(512)
                                       int selfRank, int nRanksRt,
                                       uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
                                       int epochLen,                          // number of cells in epochDev
-                                      DdaAbortSignal abortSignal) {
+                                      DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;             // grid.x == nRanks: one column/peer
@@ -113,7 +113,7 @@ __launch_bounds__(512)
     uint32_t* out = reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perChunkBytes);
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
-      if (!ddaLLWaitLineFlags(&src[pk], flag, abortSignal, d0, f0, d1, f1)) {
+      if (!ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1)) {
         break; // poll is the outermost loop; the ddaSetLLEpoch below still runs
       }
       out[2 * pk] = d0;

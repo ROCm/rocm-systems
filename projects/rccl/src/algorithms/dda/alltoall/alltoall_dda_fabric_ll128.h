@@ -56,7 +56,7 @@ __launch_bounds__(1024)
                                          int selfRank, int nRanksRt,
                                          uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                          int epochLen, // number of cells in epochDev
-                                         DdaAbortSignal abortSignal) {
+                                         DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x; // grid.x == nRanks: one column/peer
@@ -135,7 +135,7 @@ __launch_bounds__(1024)
     for (size_t ln = lnBegin + group; ln < lnEnd; ln += groups) {
       const size_t base = ln * (size_t)kDdaLL128DataElems;
       // all 16 lanes poll the shared flag word (broadcast); unfenced.
-      if (!ddaLL128WaitFlag(&src[ln].w[kDdaLL128FlagElem], (uint64_t)flag, abortSignal)) {
+      if (!ddaLL128WaitFlag(&src[ln].w[kDdaLL128FlagElem], (uint64_t)flag, params)) {
         break; // poll is the outermost loop; the ddaSetLLEpoch below still runs
       }
       if (lane < kDdaLL128DataElems) {

@@ -93,7 +93,7 @@ class DdaReduceScatterFabricLL128Microtest : public ::testing::Test {
     EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
     EXPECT_EQ(launch.Arg<size_t>(8), (recvcount * sizeof(T) + 1919) / 1920);
     EXPECT_EQ(launch.Arg<size_t>(9), (comm().ddaScratchBytes / 2) / 16 * 16);
-    EXPECT_EQ(launch.Arg<dda::common::DdaAbortSignal>(10).flag, comm().abortFlagDev);
+    EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
   }
 
   DdaFabricMockComm mock_;

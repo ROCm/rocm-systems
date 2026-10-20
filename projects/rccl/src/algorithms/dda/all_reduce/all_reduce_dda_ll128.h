@@ -59,7 +59,7 @@ __launch_bounds__(512)
                                         int epochLen, // number of cells in epochDev
                                         size_t slicesTotal, // slices this call actually uses
                                         size_t bankSize, // scratch bank size (from host)
-                                        DdaAbortSignal abortSignal) {
+                                        DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -124,7 +124,7 @@ __launch_bounds__(512)
       } else {
         const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
         if (!ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane,
-                              abortSignal)) {
+                              params)) {
           ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
           return;
         }

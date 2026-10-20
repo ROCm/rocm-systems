@@ -26,7 +26,7 @@ namespace RcclUnitTesting {
 
 namespace {
 
-using dda::common::DdaAbortSignal;
+using dda::common::DdaKernelParams;
 using dda::common::DeviceMailbox;
 using dda::common::IpcGpuBarrier;
 
@@ -48,7 +48,7 @@ struct BarrierImage {
   int nBlocks;
   int selfRank;
   std::array<DeviceMailbox, kRanks> mailboxes;
-  DdaAbortSignal abortSignal;
+  DdaKernelParams params;
   bool aborted;
 };
 static_assert(sizeof(MailboxImage) == sizeof(DeviceMailbox), "DeviceMailbox layout changed");
@@ -93,20 +93,20 @@ __global__ void mailboxMessagePassing(DeviceMailbox* dataMb, DeviceMailbox* ackM
   unsigned long long mismatches = 0;
   for (int it = 0; it < iters; ++it) {
     if (it > 0) {
-      ackMb[self].waitFlagWithMemFence(dst, b, DdaAbortSignal{});
+      ackMb[self].waitFlagWithMemFence(dst, b, DdaKernelParams{});
     }
     for (int i = 0; i < kMpWords; ++i) {
       outSlot[i] = payloadValue(self, it, b, i);
     }
-    dataMb[dst].setFlagWithMemFence(self, b, DdaAbortSignal{});
-    dataMb[self].waitFlagWithMemFence(src, b, DdaAbortSignal{});
+    dataMb[dst].setFlagWithMemFence(self, b, DdaKernelParams{});
+    dataMb[self].waitFlagWithMemFence(src, b, DdaKernelParams{});
     for (int i = 0; i < kMpWords; ++i) {
       if (inSlot[i] != payloadValue(src, it, b, i)) {
         mismatches++;
       }
     }
     if (it + 1 < iters) {
-      ackMb[src].setFlagWithMemFence(self, b, DdaAbortSignal{});
+      ackMb[src].setFlagWithMemFence(self, b, DdaKernelParams{});
     }
   }
   if (mismatches != 0) {

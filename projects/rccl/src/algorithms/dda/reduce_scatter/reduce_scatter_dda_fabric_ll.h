@@ -60,7 +60,7 @@ __launch_bounds__(512)
                                            int selfRank, int nRanksRt,
                                            uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                            int epochLen, // number of cells in epochDev
-                                           DdaAbortSignal abortSignal) {
+                                           DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = recvcount * sizeof(T);
@@ -100,7 +100,7 @@ __launch_bounds__(512)
       const int peer = (selfRank + r) % nRanks;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
       uint32_t d0, f0, d1, f1;
-      if (!ddaLLWaitLineFlags(&src[pk], flag, abortSignal, d0, f0, d1, f1)) {
+      if (!ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1)) {
         ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
         return;
       }

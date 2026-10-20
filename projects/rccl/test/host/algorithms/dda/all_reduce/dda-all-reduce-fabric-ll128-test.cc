@@ -90,7 +90,7 @@ class DdaAllReduceFabricLL128Microtest : public ::testing::Test {
     EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
     EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
     EXPECT_EQ(launch.Arg<size_t>(8), lines);
-    EXPECT_EQ(launch.Arg<dda::common::DdaAbortSignal>(9).flag, comm().abortFlagDev);
+    EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(9).flag, comm().abortFlagDev);
   }
 
   DdaFabricMockComm mock_;

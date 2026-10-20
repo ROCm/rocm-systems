@@ -44,7 +44,7 @@ public:
   // Allocates this rank's flag buffer, exchanges peer flag-buffer pointers via
   // fabric shareable handles and builds a device-resident pointer table.
   static __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier> mallocAndInit(
-    int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager, DdaAbortSignal abortSignal);
+    int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager, DdaKernelParams params);
 
   template <bool hasPreviousMemAccess, bool hasSubsequentMemAccess>
   __device__ __forceinline__ void syncOnSameBlockIdx() {
@@ -78,9 +78,9 @@ public:
 
       // Signal the peer that this rank reached the barrier for this block.
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
-        signaled = putFlag<std::memory_order_relaxed>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), abortSignal_);
+        signaled = putFlag<std::memory_order_relaxed>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), params_);
       } else {
-        signaled = putFlag<std::memory_order_release>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), abortSignal_);
+        signaled = putFlag<std::memory_order_release>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), params_);
       }
       if (!signaled) {
         gaveUp = true;
@@ -90,9 +90,9 @@ public:
       // Wait for the peer's signal in this rank's own buffer.
       bool arrived = false;
       if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
-        arrived = waitFlag<std::memory_order_relaxed>(selfBuf + getFlagIdx(peerRank, blockIdx.x), abortSignal_);
+        arrived = waitFlag<std::memory_order_relaxed>(selfBuf + getFlagIdx(peerRank, blockIdx.x), params_);
       } else {
-        arrived = waitFlag<std::memory_order_acquire>(selfBuf + getFlagIdx(peerRank, blockIdx.x), abortSignal_);
+        arrived = waitFlag<std::memory_order_acquire>(selfBuf + getFlagIdx(peerRank, blockIdx.x), params_);
       }
       if (!arrived) {
         gaveUp = true;
@@ -119,12 +119,12 @@ private:
   int selfRank_{-1};
   int nRanks_{-1};
   FlagType** peerFlags_{nullptr};
-  DdaAbortSignal abortSignal_{};
+  DdaKernelParams params_{};
   // Sticky for the rest of the kernel and uniform across the signaling lanes; see IpcGpuBarrier::aborted_.
   bool aborted_{false};
 
-  __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags, DdaAbortSignal abortSignal)
-    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags), abortSignal_(abortSignal) {}
+  __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags, DdaKernelParams params)
+    : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags), params_(params) {}
 
   __device__ inline int getFlagIdx(int rank, int block) {
     return block * nRanks_ + rank;

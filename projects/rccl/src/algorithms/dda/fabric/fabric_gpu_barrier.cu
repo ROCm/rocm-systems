@@ -19,7 +19,7 @@ namespace dda::common {
 
 /* static */ __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>
 FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager,
-                                DdaAbortSignal abortSignal) {
+                                DdaKernelParams params) {
   if (nRanks <= 0 || nRanks > kDdaMaxNranks || selfRank < 0 || selfRank >= nRanks || nBlocks <= 0) {
     WARN("FabricGpuBarrier::mallocAndInit: invalid geometry nRanks=%d, selfRank=%d, nBlocks=%d",
          nRanks, selfRank, nBlocks);
@@ -96,7 +96,7 @@ FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* boo
     return {nullptr, FabricGpuBarrier{}};
   }
 
-  FabricGpuBarrier barrier(nBlocks, selfRank, nRanks, static_cast<FlagType**>(peerFlagsDev->get()), abortSignal);
+  FabricGpuBarrier barrier(nBlocks, selfRank, nRanks, static_cast<FlagType**>(peerFlagsDev->get()), params);
 
   auto resources = std::make_unique<FabricGpuBarrierResources>();
   resources->fabricMemHandler = std::move(memHandler);

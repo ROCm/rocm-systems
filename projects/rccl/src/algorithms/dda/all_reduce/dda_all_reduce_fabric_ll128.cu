@@ -102,24 +102,24 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void*
   INFO(NCCL_COLL, "DDA fabric AllReduce LL128: nRanks=%d bytes=%zu numLines=%zu grid=%u block=%u", nRanks, bytes,
        numLines, grid.x, block.x);
 
-  const dda::common::DdaAbortSignal abortSignal{comm->abortFlagDev};
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   // NRANKS_CT 4/8: unrolled reduce loop; 0: runtime fallback.
   switch (nRanks) {
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines, abortSignal);
+                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines, params);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines, abortSignal);
+                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines, params);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines, abortSignal);
+                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines, params);
     break;
   }
 

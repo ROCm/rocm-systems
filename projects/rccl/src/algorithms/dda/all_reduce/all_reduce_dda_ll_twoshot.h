@@ -81,7 +81,7 @@ __launch_bounds__(1024)
                                         uint32_t* __restrict__ epochDev,    // per-block LL epoch cells (shared AG+AR)
                                         int epochLen,                       // number of cells in epochDev
                                         size_t bankSize,                  // scratch bank size (from host)
-                                        DdaAbortSignal abortSignal) {
+                                        DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
@@ -143,7 +143,7 @@ __launch_bounds__(1024)
       const int peer = (selfRank + r) % nRanks;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
       uint32_t d0 = 0, f0, d1 = 0, f1;
-      if (!aborted) aborted = !ddaLLWaitLineFlags(&src[pk], flag, abortSignal, d0, f0, d1, f1);
+      if (!aborted) aborted = !ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1);
       ddaLLAddPayload<T>(acc0, acc1, d0, d1);
     }
     out[2 * pk] = acc0;
@@ -169,7 +169,7 @@ __launch_bounds__(1024)
       uint32_t *peer_out = reinterpret_cast<uint32_t*>(recvbuff) + peer * nPk_rank * 2;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
       uint32_t d0 = 0, f0, d1 = 0, f1;
-      if (!aborted) aborted = !ddaLLWaitLineFlags(&src[pk], flag, abortSignal, d0, f0, d1, f1);
+      if (!aborted) aborted = !ddaLLWaitLineFlags(&src[pk], flag, params, d0, f0, d1, f1);
       peer_out[2 * pk] = d0;
       peer_out[2 * pk + 1] = d1;
     }
