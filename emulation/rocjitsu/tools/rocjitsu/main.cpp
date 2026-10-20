@@ -351,16 +351,20 @@ bool resolve_host_gpu(rocjitsu::config::DbtGuestConfig *dbt_guest,
   return false;
 }
 
-std::vector<KfdGpuOrdinal>
+util::FailureOr<std::vector<KfdGpuOrdinal>>
 dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
-                           const rocjitsu::config::DbtGuestConfig &dbt_guest) {
+                           const rocjitsu::config::DbtGuestConfig &dbt_guest,
+                           util::DiagnosticEmitter emit_error) {
   if (dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Hardware)
     return real_kfd_gpu_ordinals();
 
   const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
       dbt_config_path, dbt_guest.host.simulator_config_path);
-  rocjitsu::config::LoadedConfig loaded =
-      rocjitsu::config::load_config(host_config_path, rocjitsu::kEmbeddedSchema);
+  auto maybe_loaded =
+      rocjitsu::config::load_config(host_config_path, rocjitsu::kEmbeddedSchema, emit_error);
+  if (maybe_loaded.failed())
+    return util::Result::failure();
+  const auto &loaded = maybe_loaded.value();
   std::vector<rocjitsu::config::KfdDeviceConfig> devices = loaded.devices;
   if (devices.empty() && loaded.device.present)
     devices.push_back(loaded.device);
@@ -531,10 +535,12 @@ int main(int argc, char *argv[]) {
   // configs in the same process tree keep their own settings.
   util::StringDiagnostic launch_config_diagnostic;
   auto config_json_for_this_launch = [&]() -> rocjitsu::FailureOr<std::string> {
-    std::string json = rocjitsu::config::read_config_file(abs_config);
+    auto json = rocjitsu::config::read_config_file(abs_config, launch_config_diagnostic.emitter());
+    if (json.failed())
+      return util::Result::failure();
     if (overrides.empty())
-      return json;
-    return rocjitsu::config::json_with_launch_overrides(json, overrides,
+      return std::move(json.value());
+    return rocjitsu::config::json_with_launch_overrides(json.value(), overrides,
                                                         launch_config_diagnostic.emitter());
   };
 
@@ -550,8 +556,14 @@ int main(int argc, char *argv[]) {
                                  launch_config_diagnostic.message());
         return 1;
       }
-      auto settings = rocjitsu::config::load_execution_thread_settings_from_string(
-          json.value(), rocjitsu::kEmbeddedSchema);
+      auto maybe_settings = rocjitsu::config::load_execution_thread_settings_from_string(
+          json.value(), rocjitsu::kEmbeddedSchema, launch_config_diagnostic.emitter());
+      if (maybe_settings.failed()) {
+        std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+      auto &settings = maybe_settings.value();
       const uint32_t host = rocjitsu::amdgpu::available_host_threads();
       std::cout
           << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
@@ -631,9 +643,23 @@ int main(int argc, char *argv[]) {
 
   rocjitsu::config::DbtGuestConfig dbt_guest_config;
   try {
-    dbt_guest_config = rocjitsu::config::load_dbt_guest_config_from_file(abs_config);
-    if (!dbt_guest_config.enabled)
-      rocjitsu::config::validate_config(abs_config, rocjitsu::kEmbeddedSchema);
+    auto maybe_dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(
+        abs_config, launch_config_diagnostic.emitter());
+    if (maybe_dbt_guest.failed()) {
+      std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                               launch_config_diagnostic.message());
+      return 1;
+    }
+    dbt_guest_config = std::move(maybe_dbt_guest.value());
+    if (!dbt_guest_config.enabled) {
+      auto validated = rocjitsu::config::validate_config(abs_config, rocjitsu::kEmbeddedSchema,
+                                                         launch_config_diagnostic.emitter());
+      if (validated.failed()) {
+        std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+    }
   } catch (const std::exception &e) {
     std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
     return 1;
@@ -691,7 +717,14 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     try {
-      dbt_execution_gpus = dbt_execution_gpu_ordinals(abs_config, dbt_guest_config);
+      auto maybe_gpus = dbt_execution_gpu_ordinals(abs_config, dbt_guest_config,
+                                                   launch_config_diagnostic.emitter());
+      if (maybe_gpus.failed()) {
+        std::cerr << std::format("rocjitsu: failed to load DBT execution topology: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+      dbt_execution_gpus = std::move(maybe_gpus.value());
     } catch (const std::exception &e) {
       std::cerr << std::format("rocjitsu: failed to load DBT execution topology: {}\n", e.what());
       return 1;

@@ -3327,6 +3327,7 @@ class TestExecutor:
                        "rccl-UnitTestsMicroGinHost",
                        "rccl-UnitTestsMicroRomeModels",
                        "rccl-UnitTestsMicroDda",
+                       "rccl-UnitTestsMicroTopo",
                        "rccl-UnitTestsMicroDebug",
                        "rccl-UnitTestsMicroApiTrace",
                        "rccl-UnitTestsMicroRecorder",

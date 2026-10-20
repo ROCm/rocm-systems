@@ -626,7 +626,6 @@ add_executable(
     matrix_coexecution_test.cpp
     packed_fmac_constants_test.cpp
     matrix_coexecution_lifetime_test.cpp
-    scaling_thread_counts_test.cpp
     sparse_memory_test.cpp
     cpu_dispatch_pool_test.cpp
     simdojo_sim_test.cpp
@@ -1459,16 +1458,6 @@ rj_add_test(
         "bin/rj_dbt_translate"
         "bin/rj_decode_benchmark"
 )
-
-# --- Scaling test (standalone executable) ---
-
-add_executable(scaling_test scaling_test.cpp)
-target_link_libraries(
-    scaling_test
-    PRIVATE ${RJ_OBJECT_LIBS} util flatbuffers Threads::Threads
-)
-target_compile_options(scaling_test PRIVATE -O2)
-rj_configure_target(scaling_test TEST)
 
 # --- Interposer tests run through the rocjitsu CLI launcher ---
 # All tests that need the simulated GPU go through:
