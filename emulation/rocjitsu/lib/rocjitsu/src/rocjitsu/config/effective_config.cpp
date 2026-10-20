@@ -13,7 +13,6 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
-#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -323,17 +322,14 @@ FailureOr<std::string> json_with_cpu_thread_budget(std::string_view json, uint32
   if (rewritten.failed())
     return Result::failure();
 
-  // The schema parser reports a bad document by throwing. Callers of this function
-  // handle failure through the returned result, so that message is emitted here.
-  uint32_t applied = 0;
-  try {
-    applied = with_parsed_simulation_config_json(
-        rewritten.value(), rocjitsu::kEmbeddedSchema,
-        [](const fb::SimulationConfig *config) { return config->cpu_thread_budget(); });
-  } catch (const std::runtime_error &error) {
-    return emit_error.emit() << error.what();
-  }
-  if (applied != budget)
+  FailureOr<uint32_t> applied = with_parsed_simulation_config_json(
+      rewritten.value(), rocjitsu::kEmbeddedSchema, emit_error,
+      [](const fb::SimulationConfig *config) -> FailureOr<uint32_t> {
+        return config->cpu_thread_budget();
+      });
+  if (applied.failed())
+    return Result::failure();
+  if (applied.value() != budget)
     return emit_error.emit() << "cannot apply cpu_thread_budget to the simulation config";
   return std::move(rewritten.value());
 }
@@ -356,18 +352,17 @@ FailureOr<std::string> json_with_launch_overrides(std::string_view json,
     if (result.failed())
       return Result::failure();
     rewritten = std::move(result.value());
-    try {
-      const auto applied = with_parsed_simulation_config_json(
-          rewritten, rocjitsu::kEmbeddedSchema, [](const fb::SimulationConfig *config) {
-            return config->wait_checking()
-                       ? parse_wait_checking(config->wait_checking()->string_view())
-                       : std::nullopt;
-          });
-      if (applied != overrides.wait_checking)
-        return emit_error.emit() << "cannot apply wait_checking to the simulation config";
-    } catch (const std::runtime_error &error) {
-      return emit_error.emit() << error.what();
-    }
+    auto applied = with_parsed_simulation_config_json(
+        rewritten, rocjitsu::kEmbeddedSchema, emit_error,
+        [](const fb::SimulationConfig *config) -> FailureOr<std::optional<WaitChecking>> {
+          return config->wait_checking()
+                     ? parse_wait_checking(config->wait_checking()->string_view())
+                     : std::nullopt;
+        });
+    if (applied.failed())
+      return Result::failure();
+    if (applied.value() != overrides.wait_checking)
+      return emit_error.emit() << "cannot apply wait_checking to the simulation config";
   }
   return rewritten;
 }
@@ -375,15 +370,11 @@ FailureOr<std::string> json_with_launch_overrides(std::string_view json,
 FailureOr<std::string> write_effective_config(const std::string &source_path,
                                               const LaunchOverrides &overrides, pid_t pid,
                                               const util::DiagnosticEmitter &emit_error) {
-  // Reading the source throws when the file cannot be opened. The launch path
-  // reports that through the same result as a rewrite or publish failure.
-  std::string source_json;
-  try {
-    source_json = read_config_file(source_path);
-  } catch (const std::runtime_error &error) {
-    return emit_error.emit() << error.what();
-  }
-  FailureOr<std::string> json = json_with_launch_overrides(source_json, overrides, emit_error);
+  FailureOr<std::string> source_json = read_config_file(source_path, emit_error);
+  if (source_json.failed())
+    return Result::failure();
+  FailureOr<std::string> json =
+      json_with_launch_overrides(source_json.value(), overrides, emit_error);
   if (json.failed())
     return Result::failure();
 

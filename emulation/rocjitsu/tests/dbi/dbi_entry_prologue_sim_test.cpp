@@ -324,11 +324,10 @@ protected:
     out.entry = *entry;
   }
 
-  test::DbiSim make_sim(const PatchedKernel &kernel) {
-    test::DbiSim sim(a_.sim_arch, a_.wave_size);
+  void initialize_sim(test::DbiSim &sim, const PatchedKernel &kernel) {
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(a_.sim_arch, a_.wave_size));
     sim.set_kernarg(wrapper_);
     sim.set_entry_offset(kernel.entry);
-    return sim;
   }
 
   // The kernarg pair is destroyed between the prologue and the site, and the
@@ -338,7 +337,8 @@ protected:
   }
 
   void expect_probe_receives_the_payload_pointer(const PatchedKernel &kernel) {
-    test::DbiSim sim = make_sim(kernel);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, kernel));
     const std::vector<std::vector<uint32_t>> regs =
         sim.run_and_read_vgprs(kernel.text, kernel.scratch, {/*v2=*/2, /*v3=*/3});
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
@@ -358,7 +358,8 @@ protected:
     std::vector<uint32_t> sabotaged = delivery_.text;
     ASSERT_NO_FATAL_FAILURE(nop_payload_load(sabotaged));
 
-    test::DbiSim sim = make_sim(delivery_);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, delivery_));
     const std::vector<std::vector<uint32_t>> regs =
         sim.run_and_read_vgprs(sabotaged, delivery_.scratch, {/*v2=*/2, /*v3=*/3});
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
@@ -379,7 +380,8 @@ protected:
   }
 
   void expect_guest_kernarg_pointer_is_restored(const PatchedKernel &kernel) {
-    test::DbiSim sim = make_sim(kernel);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, kernel));
     const uint64_t seen = read_guest_kernarg_pointer(sim, kernel.text, kernel.scratch);
     EXPECT_EQ(seen, kGuestKernargSentinel)
         << "the guest's kernarg pointer was not restored at entry";
@@ -417,7 +419,8 @@ protected:
     }
     ASSERT_EQ(replaced, 2u) << "did not find both kernarg-pointer restores";
 
-    test::DbiSim sim = make_sim(restore_);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, restore_));
     EXPECT_EQ(read_guest_kernarg_pointer(sim, sabotaged, restore_.scratch),
               test::DbiSim::KERNARG_ADDR)
         << "without the restore the guest must still see the CP's wrapper pointer";
@@ -426,7 +429,8 @@ protected:
   // The kernel really comes back to the entry, so the re-entry tests are not
   // passing on one that never did.
   void expect_two_passes_through_the_entry(const PatchedKernel &kernel) {
-    test::DbiSim sim = make_sim(kernel);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, kernel));
     const auto s6 = sim.run_and_read_sgpr64(kernel.text, kernel.scratch, 6);
     ASSERT_TRUE(s6.has_value()) << "kernel did not run to completion";
     EXPECT_EQ(static_cast<uint32_t>(*s6), 2u);
@@ -445,11 +449,13 @@ protected:
 
     // The kernel has to finish and take both passes, or a fault or a hang
     // would pass this control as readily as a second prologue run.
-    test::DbiSim sim = make_sim(loop_restore_);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, loop_restore_));
     const std::vector<std::vector<uint32_t>> regs =
         sim.run_and_read_vgprs(sabotaged, loop_restore_.scratch, {/*v2=*/2, /*v3=*/3});
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";
-    test::DbiSim count_sim = make_sim(loop_restore_);
+    test::DbiSim count_sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(count_sim, loop_restore_));
     const auto s6 = count_sim.run_and_read_sgpr64(sabotaged, loop_restore_.scratch, 6);
     ASSERT_TRUE(s6.has_value()) << "kernel did not run to completion";
     ASSERT_EQ(static_cast<uint32_t>(*s6), 2u);
@@ -465,7 +471,8 @@ protected:
   void expect_dispatch_at_the_original_entry_skips_the_prologue() {
     PatchedKernel original = delivery_;
     original.entry = 0;
-    test::DbiSim sim = make_sim(original);
+    test::DbiSim sim;
+    ASSERT_NO_FATAL_FAILURE(initialize_sim(sim, original));
     const std::vector<std::vector<uint32_t>> regs =
         sim.run_and_read_vgprs(original.text, original.scratch, {/*v2=*/2, /*v3=*/3});
     ASSERT_EQ(regs[0].size(), a_.wave_size) << "kernel did not run to completion";

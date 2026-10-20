@@ -4,10 +4,10 @@
 #pragma once
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "halt_snapshot_plugin.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -62,7 +62,6 @@
 #include <optional>
 #include <set>
 #include <shared_mutex>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -112,12 +111,13 @@ struct Gfx1250Sim {
   std::shared_ptr<ExecutionPluginGroup> plugin_group;
   test::HaltSnapshotPlugin *snapshot = nullptr;
 
-  Gfx1250Sim() : loaded(config::load_config(kGfx1250ConfigPath, rocjitsu::kEmbeddedSchema)) {
+  void initialize() {
+    ASSERT_TRUE(load_valid_config(kGfx1250ConfigPath, loaded));
     build();
   }
 
-  explicit Gfx1250Sim(const std::string &config_json)
-      : loaded(config::load_config_from_string(config_json, rocjitsu::kEmbeddedSchema)) {
+  void initialize(const std::string &config_json) {
+    ASSERT_TRUE(load_valid_config_from_string(config_json, loaded));
     build();
   }
 
