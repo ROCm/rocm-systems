@@ -20,19 +20,7 @@
 #include <cstdint>
 #include <functional>
 
-#include "nccl.h"
-
-struct ibv_context;
-struct ibv_device;
-struct ibv_pd;
-struct ibv_mr;
-struct ibv_cq;
-struct ibv_comp_channel;
-struct ibv_qp;
-struct ibv_qp_attr;
-struct ibv_qp_init_attr;
-struct ibv_ece;
-union ibv_gid;
+#include "ibvwrap.h"
 
 extern std::function<ncclResult_t(struct ibv_pd** /*ret*/, struct ibv_context* /*context*/)> g_ibvAllocPd;
 extern std::function<ncclResult_t(struct ibv_pd* /*pd*/)> g_ibvDeallocPd;
@@ -64,6 +52,33 @@ extern std::function<ncclResult_t(struct ibv_context* /*context*/, uint8_t /*por
 extern std::function<ncclResult_t(struct ibv_qp* /*qp*/, struct ibv_ece* /*ece*/, int* /*supported*/)> g_ibvQueryEce;
 extern std::function<ncclResult_t(struct ibv_qp* /*qp*/, struct ibv_ece* /*ece*/, int* /*supported*/)> g_ibvSetEce;
 extern std::function<const char*(struct ibv_device* /*device*/)> g_ibvGetDeviceName;
+
+extern std::function<ncclResult_t()> g_ibvSymbols;
+extern std::function<ncclResult_t()> g_ibvForkInit;
+extern std::function<ncclResult_t(struct ibv_device*** /*ret*/, int* /*num_devices*/)> g_ibvGetDeviceList;
+extern std::function<ncclResult_t(struct ibv_device** /*list*/)> g_ibvFreeDeviceList;
+extern std::function<ncclResult_t(struct ibv_context** /*ret*/, struct ibv_device* /*device*/)> g_ibvOpenDevice;
+extern std::function<ncclResult_t(struct ibv_context* /*context*/)> g_ibvCloseDevice;
+extern std::function<ncclResult_t(struct ibv_context* /*context*/, struct ibv_async_event* /*event*/)>
+    g_ibvGetAsyncEvent;
+extern std::function<ncclResult_t(struct ibv_async_event* /*event*/)> g_ibvAckAsyncEvent;
+extern std::function<ncclResult_t(char** /*ret*/, enum ibv_event_type /*event*/)> g_ibvEventTypeStr;
+extern std::function<ncclResult_t(struct ibv_context* /*context*/, struct ibv_device_attr* /*device_attr*/)>
+    g_ibvQueryDevice;
+extern std::function<ncclResult_t(struct ibv_context* /*context*/, uint8_t /*port_num*/,
+                                  struct ibv_port_attr* /*port_attr*/)>
+    g_ibvQueryPort;
+extern std::function<ncclResult_t(struct ibv_context* /*context*/, uint8_t /*port_num*/, uint64_t* /*speed*/)>
+    g_ibvQueryPortSpeed;
+extern std::function<ncclResult_t(struct ibv_qp* /*qp*/, struct ibv_qp_attr* /*attr*/, int /*attr_mask*/,
+                                  struct ibv_qp_init_attr* /*init_attr*/)>
+    g_ibvQueryQp;
+extern std::function<ncclResult_t(struct ibv_mr** /*ret*/, struct ibv_pd* /*pd*/, void* /*addr*/, size_t /*length*/,
+                                  uint64_t /*iova*/, int /*access*/)>
+    g_ibvRegMrIova2;
+extern std::function<struct ibv_mr*(struct ibv_pd* /*pd*/, uint64_t /*offset*/, size_t /*length*/, uint64_t /*iova*/,
+                                    int /*fd*/, int /*access*/)>
+    g_ibvDirectRegDmabufMr;
 
 void ResetIbvwrapFakes();
 

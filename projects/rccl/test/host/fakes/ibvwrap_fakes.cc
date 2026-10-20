@@ -79,6 +79,71 @@ std::function<ncclResult_t(struct ibv_qp*, struct ibv_ece*, int*)> g_ibvSetEce =
 static const char* DefaultIbvGetDeviceName(struct ibv_device*) { return nullptr; }
 std::function<const char*(struct ibv_device*)> g_ibvGetDeviceName = DefaultIbvGetDeviceName;
 
+static ncclResult_t DefaultIbvSymbols() { return ncclSystemError; }
+std::function<ncclResult_t()> g_ibvSymbols = DefaultIbvSymbols;
+
+static ncclResult_t DefaultIbvForkInit() { return ncclSystemError; }
+std::function<ncclResult_t()> g_ibvForkInit = DefaultIbvForkInit;
+
+static ncclResult_t DefaultIbvGetDeviceList(struct ibv_device*** ret, int* num_devices) {
+  if (ret) *ret = nullptr;
+  if (num_devices) *num_devices = 0;
+  return ncclSystemError;
+}
+std::function<ncclResult_t(struct ibv_device***, int*)> g_ibvGetDeviceList = DefaultIbvGetDeviceList;
+
+static ncclResult_t DefaultIbvFreeDeviceList(struct ibv_device**) { return ncclSuccess; }
+std::function<ncclResult_t(struct ibv_device**)> g_ibvFreeDeviceList = DefaultIbvFreeDeviceList;
+
+static ncclResult_t DefaultIbvOpenDevice(struct ibv_context** ret, struct ibv_device*) {
+  if (ret) *ret = nullptr;
+  return ncclSystemError;
+}
+std::function<ncclResult_t(struct ibv_context**, struct ibv_device*)> g_ibvOpenDevice = DefaultIbvOpenDevice;
+
+static ncclResult_t DefaultIbvCloseDevice(struct ibv_context*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ibv_context*)> g_ibvCloseDevice = DefaultIbvCloseDevice;
+
+static ncclResult_t DefaultIbvGetAsyncEvent(struct ibv_context*, struct ibv_async_event*) { return ncclSystemError; }
+std::function<ncclResult_t(struct ibv_context*, struct ibv_async_event*)> g_ibvGetAsyncEvent = DefaultIbvGetAsyncEvent;
+
+static ncclResult_t DefaultIbvAckAsyncEvent(struct ibv_async_event*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ibv_async_event*)> g_ibvAckAsyncEvent = DefaultIbvAckAsyncEvent;
+
+static ncclResult_t DefaultIbvEventTypeStr(char** ret, enum ibv_event_type) {
+  if (ret) *ret = nullptr;
+  return ncclSystemError;
+}
+std::function<ncclResult_t(char**, enum ibv_event_type)> g_ibvEventTypeStr = DefaultIbvEventTypeStr;
+
+static ncclResult_t DefaultIbvQueryDevice(struct ibv_context*, struct ibv_device_attr*) { return ncclSystemError; }
+std::function<ncclResult_t(struct ibv_context*, struct ibv_device_attr*)> g_ibvQueryDevice = DefaultIbvQueryDevice;
+
+static ncclResult_t DefaultIbvQueryPort(struct ibv_context*, uint8_t, struct ibv_port_attr*) { return ncclSystemError; }
+std::function<ncclResult_t(struct ibv_context*, uint8_t, struct ibv_port_attr*)> g_ibvQueryPort = DefaultIbvQueryPort;
+
+static ncclResult_t DefaultIbvQueryPortSpeed(struct ibv_context*, uint8_t, uint64_t*) { return ncclSystemError; }
+std::function<ncclResult_t(struct ibv_context*, uint8_t, uint64_t*)> g_ibvQueryPortSpeed = DefaultIbvQueryPortSpeed;
+
+static ncclResult_t DefaultIbvQueryQp(struct ibv_qp*, struct ibv_qp_attr*, int, struct ibv_qp_init_attr*) {
+  return ncclSystemError;
+}
+std::function<ncclResult_t(struct ibv_qp*, struct ibv_qp_attr*, int, struct ibv_qp_init_attr*)>
+    g_ibvQueryQp = DefaultIbvQueryQp;
+
+static ncclResult_t DefaultIbvRegMrIova2(struct ibv_mr** ret, struct ibv_pd*, void*, size_t, uint64_t, int) {
+  if (ret) *ret = nullptr;
+  return ncclSystemError;
+}
+std::function<ncclResult_t(struct ibv_mr**, struct ibv_pd*, void*, size_t, uint64_t, int)>
+    g_ibvRegMrIova2 = DefaultIbvRegMrIova2;
+
+static struct ibv_mr* DefaultIbvDirectRegDmabufMr(struct ibv_pd*, uint64_t, size_t, uint64_t, int, int) {
+  return nullptr;
+}
+std::function<struct ibv_mr*(struct ibv_pd*, uint64_t, size_t, uint64_t, int, int)>
+    g_ibvDirectRegDmabufMr = DefaultIbvDirectRegDmabufMr;
+
 ASSERT_HOOK_MATCHES_PROD(g_ibvAllocPd, wrap_ibv_alloc_pd);
 ASSERT_HOOK_MATCHES_PROD(g_ibvDeallocPd, wrap_ibv_dealloc_pd);
 ASSERT_HOOK_MATCHES_PROD(g_ibvDirectRegMr, wrap_direct_ibv_reg_mr);
@@ -95,6 +160,21 @@ ASSERT_HOOK_MATCHES_PROD(g_ibvQueryGid, wrap_ibv_query_gid);
 ASSERT_HOOK_MATCHES_PROD(g_ibvQueryEce, wrap_ibv_query_ece);
 ASSERT_HOOK_MATCHES_PROD(g_ibvSetEce, wrap_ibv_set_ece);
 ASSERT_HOOK_MATCHES_PROD(g_ibvGetDeviceName, wrap_ibv_get_device_name);
+ASSERT_HOOK_MATCHES_PROD(g_ibvSymbols, wrap_ibv_symbols);
+ASSERT_HOOK_MATCHES_PROD(g_ibvForkInit, wrap_ibv_fork_init);
+ASSERT_HOOK_MATCHES_PROD(g_ibvGetDeviceList, wrap_ibv_get_device_list);
+ASSERT_HOOK_MATCHES_PROD(g_ibvFreeDeviceList, wrap_ibv_free_device_list);
+ASSERT_HOOK_MATCHES_PROD(g_ibvOpenDevice, wrap_ibv_open_device);
+ASSERT_HOOK_MATCHES_PROD(g_ibvCloseDevice, wrap_ibv_close_device);
+ASSERT_HOOK_MATCHES_PROD(g_ibvGetAsyncEvent, wrap_ibv_get_async_event);
+ASSERT_HOOK_MATCHES_PROD(g_ibvAckAsyncEvent, wrap_ibv_ack_async_event);
+ASSERT_HOOK_MATCHES_PROD(g_ibvEventTypeStr, wrap_ibv_event_type_str);
+ASSERT_HOOK_MATCHES_PROD(g_ibvQueryDevice, wrap_ibv_query_device);
+ASSERT_HOOK_MATCHES_PROD(g_ibvQueryPort, wrap_ibv_query_port);
+ASSERT_HOOK_MATCHES_PROD(g_ibvQueryPortSpeed, wrap_ibv_query_port_speed);
+ASSERT_HOOK_MATCHES_PROD(g_ibvQueryQp, wrap_ibv_query_qp);
+ASSERT_HOOK_MATCHES_PROD(g_ibvRegMrIova2, wrap_ibv_reg_mr_iova2);
+ASSERT_HOOK_MATCHES_PROD(g_ibvDirectRegDmabufMr, wrap_direct_ibv_reg_dmabuf_mr);
 
 ncclResult_t wrap_ibv_alloc_pd(struct ibv_pd** ret, struct ibv_context* context) {
   return g_ibvAllocPd(ret, context);
@@ -137,6 +217,42 @@ ncclResult_t wrap_ibv_set_ece(struct ibv_qp* qp, struct ibv_ece* ece, int* suppo
   return g_ibvSetEce(qp, ece, supported);
 }
 const char* wrap_ibv_get_device_name(struct ibv_device* device) { return g_ibvGetDeviceName(device); }
+ncclResult_t wrap_ibv_symbols(void) { return g_ibvSymbols(); }
+ncclResult_t wrap_ibv_fork_init(void) { return g_ibvForkInit(); }
+ncclResult_t wrap_ibv_get_device_list(struct ibv_device*** ret, int* num_devices) {
+  return g_ibvGetDeviceList(ret, num_devices);
+}
+ncclResult_t wrap_ibv_free_device_list(struct ibv_device** list) { return g_ibvFreeDeviceList(list); }
+ncclResult_t wrap_ibv_open_device(struct ibv_context** ret, struct ibv_device* device) {
+  return g_ibvOpenDevice(ret, device);
+}
+ncclResult_t wrap_ibv_close_device(struct ibv_context* context) { return g_ibvCloseDevice(context); }
+ncclResult_t wrap_ibv_get_async_event(struct ibv_context* context, struct ibv_async_event* event) {
+  return g_ibvGetAsyncEvent(context, event);
+}
+ncclResult_t wrap_ibv_ack_async_event(struct ibv_async_event* event) { return g_ibvAckAsyncEvent(event); }
+ncclResult_t wrap_ibv_event_type_str(char** ret, enum ibv_event_type event) { return g_ibvEventTypeStr(ret, event); }
+ncclResult_t wrap_ibv_query_device(struct ibv_context* context, struct ibv_device_attr* device_attr) {
+  return g_ibvQueryDevice(context, device_attr);
+}
+ncclResult_t wrap_ibv_query_port(struct ibv_context* context, uint8_t port_num, struct ibv_port_attr* port_attr) {
+  return g_ibvQueryPort(context, port_num, port_attr);
+}
+ncclResult_t wrap_ibv_query_port_speed(struct ibv_context* context, uint8_t port_num, uint64_t* speed) {
+  return g_ibvQueryPortSpeed(context, port_num, speed);
+}
+ncclResult_t wrap_ibv_query_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int attr_mask,
+                               struct ibv_qp_init_attr* init_attr) {
+  return g_ibvQueryQp(qp, attr, attr_mask, init_attr);
+}
+ncclResult_t wrap_ibv_reg_mr_iova2(struct ibv_mr** ret, struct ibv_pd* pd, void* addr, size_t length, uint64_t iova,
+                                   int access) {
+  return g_ibvRegMrIova2(ret, pd, addr, length, iova, access);
+}
+struct ibv_mr* wrap_direct_ibv_reg_dmabuf_mr(struct ibv_pd* pd, uint64_t offset, size_t length, uint64_t iova, int fd,
+                                             int access) {
+  return g_ibvDirectRegDmabufMr(pd, offset, length, iova, fd, access);
+}
 
 // Plain string helpers: pure functions of their argument, nothing to control.
 const char* ibvWcStatusStr(enum ibv_wc_status status) {
@@ -161,4 +277,19 @@ void ResetIbvwrapFakes() {
   g_ibvQueryEce = DefaultIbvQueryEce;
   g_ibvSetEce = DefaultIbvSetEce;
   g_ibvGetDeviceName = DefaultIbvGetDeviceName;
+  g_ibvSymbols = DefaultIbvSymbols;
+  g_ibvForkInit = DefaultIbvForkInit;
+  g_ibvGetDeviceList = DefaultIbvGetDeviceList;
+  g_ibvFreeDeviceList = DefaultIbvFreeDeviceList;
+  g_ibvOpenDevice = DefaultIbvOpenDevice;
+  g_ibvCloseDevice = DefaultIbvCloseDevice;
+  g_ibvGetAsyncEvent = DefaultIbvGetAsyncEvent;
+  g_ibvAckAsyncEvent = DefaultIbvAckAsyncEvent;
+  g_ibvEventTypeStr = DefaultIbvEventTypeStr;
+  g_ibvQueryDevice = DefaultIbvQueryDevice;
+  g_ibvQueryPort = DefaultIbvQueryPort;
+  g_ibvQueryPortSpeed = DefaultIbvQueryPortSpeed;
+  g_ibvQueryQp = DefaultIbvQueryQp;
+  g_ibvRegMrIova2 = DefaultIbvRegMrIova2;
+  g_ibvDirectRegDmabufMr = DefaultIbvDirectRegDmabufMr;
 }
