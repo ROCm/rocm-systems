@@ -81,8 +81,9 @@ New module `src/utils/layer3_reader.py`.
    itself stays uniform; only the view's display changes.
 
 Display adjustments such as unit scaling, rounding and aggregation wrappers belong in code,
-not in static YAML. Moving the remaining ones into code is a follow-up outside this
-redesign.
+not in static YAML. The views must reproduce every column of today's tables (`min`, `max`,
+`std dev`, ...) before Stage 8 deletes the panel files: the metric library keeps only each
+row's main column.
 
 `views_to_panel_configs(views: list[ViewDefinition], library: MetricLibrary) -> OrderedDict[int, dict]`:
 
@@ -259,14 +260,15 @@ Every production reader of the old analysis config tree moves to the new path:
 `load_panel_configs()` in `utils/utils_common.py` then has no production caller. The
 unused copy in `utils/file_io.py` is deleted.
 
-**Fallback for one release:** the old panel config files and `load_panel_configs()`
-stay for one release after the cutover, behind a hidden option that routes every reader
-above back to them. If the new path misbehaves in the field, users and support can switch
-back without a new build. The next release removes the option, the old files, the old
-loader and the tooling listed below.
+**Fallback for one release:** the new path becomes the default, and the old path stays
+for one release behind a hidden option that routes every reader above back to it: the old
+panel config files, `load_panel_configs()`, the YAML counter scan in `detect_counters()`
+and the hardcoded built-in variables. If the new path misbehaves in the field, users and
+support can switch back without a new build. The next release removes the option and all
+of the old path, along with the tooling listed below.
 
 **`generate_configs()` in `analysis_base.py`** -- the new path replaces the
-`load_panel_configs()` call and becomes the only path (Phase 1 adds no runtime switch):
+`load_panel_configs()` call as the default path:
 
 ```python
 library = load_metric_library(METRIC_LIBRARY_DIR, arch)
@@ -274,14 +276,14 @@ views = load_views(view_dirs, arch, library)
 ac.panel_configs = views_to_panel_configs(views, library)
 ```
 
-The call to `load_panel_configs()` for analysis configs is removed.
+The `load_panel_configs()` call moves behind the fallback option.
 
-**`detect_counters()` in `soc_base.py`** -- remove the old YAML-text-scanning path.
-Counter detection goes through `MetricLibrary.get_counters_for_metrics()`
-unconditionally.
+**`detect_counters()` in `soc_base.py`** -- counter detection goes through
+`MetricLibrary.get_counters_for_metrics()` by default; the YAML-text scan moves behind the
+fallback option.
 
-**`get_build_in_vars()` in `utils_counter_defs.py`** -- remove the hardcoded
-dicts. The function loads from `MetricLibrary.variables` unconditionally.
+**`get_build_in_vars()` in `utils_counter_defs.py`** -- loads from
+`MetricLibrary.variables` by default; the hardcoded dicts move behind the fallback option.
 
 **`-b` / `--filter-blocks`** -- string metric IDs are the primary format. Numeric
 IDs produce a deprecation warning with the equivalent string ID:
@@ -318,7 +320,9 @@ canonical source.
 ### Validation
 
 - Full regression: entire test suite (`ctest` + Python tests) with the new path as
-  the only path. Zero failures.
+  the default. Zero failures.
+- Columns: the views reproduce every column of every analysis config table, not only the
+  main one, before any panel file is deleted.
 - Output equivalence: for every architecture, compare analyze text output to a
   golden file captured before migration.
 - Counter extraction: for every architecture, compare `detect_counters()` output to

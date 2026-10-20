@@ -242,10 +242,10 @@ breakages through typos or missed propagation.
 | Stage | `-b` accepts | Default | Warning |
 |---|---|---|---|
 | Before migration | Numeric only (`11.2.3`) | -- | -- |
-| Stages 3-7 | Both numeric and string | Numeric | None |
+| Stages 3-7 | Numeric only (`11.2.3`) | Numeric | None |
 | Stage 8 | Both numeric and string | String | Numeric produces deprecation warning |
 | Post-migration (future) | String only | String | Numeric rejected |
 
-During the transition, numeric IDs are resolved via the `legacy_id` field in
-`MetricLibrary`. After Stage 8, a hardcoded final mapping handles the deprecation
+Until the Phase 2 views, numeric IDs are positions in the analysis configs, as today;
+string IDs need the row links that the views add. After Stage 8, a hardcoded final mapping handles the deprecation
 window until numeric IDs are removed entirely (not in this LLD's scope).
