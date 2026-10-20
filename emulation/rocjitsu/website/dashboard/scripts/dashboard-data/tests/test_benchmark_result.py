@@ -332,6 +332,7 @@ def test_copy_and_index_preserve_history(tmp_path, existing, publication_catalog
         'RESULTS_DOWNLOAD_DIR': str(download),
         'GITHUB_RUN_ID': '123',
         'GITHUB_RUN_ATTEMPT': '1',
+        'BENCHMARK_RUN_ATTEMPT': '1',
     }
     body = next(
         step['run'] for step in steps() if step['name'] == 'Publish benchmark files'
@@ -445,6 +446,7 @@ def test_publication_catalog_path(tmp_path, publication_catalog, catalog_case):
             'RESULTS_DOWNLOAD_DIR': str(download.parent),
             'GITHUB_RUN_ID': '123',
             'GITHUB_RUN_ATTEMPT': '1',
+            'BENCHMARK_RUN_ATTEMPT': '1',
         },
         capture_output=True,
         text=True,
@@ -505,6 +507,7 @@ def test_benchmark_artifact_contract():
         'BENCHMARK_WORKFLOW_SHA': '${{ github.sha }}',
     }
     assert doc['jobs']['benchmark']['outputs'] == {
+        'run_attempt': '${{ steps.metadata.outputs.run_attempt }}',
         'raw_ready': "${{ steps.upload_raw.outcome == 'success' }}",
         'dashboard_ready': "${{ steps.upload_dashboard.outcome == 'success' }}",
     }
@@ -525,6 +528,15 @@ def test_benchmark_artifact_contract():
     assert downloads['Download dashboard JSON']['if'] == (
         "${{ needs.benchmark.outputs.dashboard_ready == 'true' }}"
     )
+    assert doc['jobs']['publish']['env'] == {
+        'BENCHMARK_RUN_ATTEMPT': '${{ needs.benchmark.outputs.run_attempt }}',
+        'RESULTS_ARTIFACT': (
+            'rocjitsu-benchmark-${{ github.run_id }}-'
+            '${{ needs.benchmark.outputs.run_attempt }}'
+        ),
+    }
+    metadata = benchmark['Record benchmark metadata']['run']
+    assert "printf 'run_attempt=%s\\n' \"${GITHUB_RUN_ATTEMPT}\"" in metadata
 
 
 @pytest.mark.parametrize(
@@ -597,6 +609,7 @@ def test_workflow_shell_and_source_contracts():
     assert '/workflow-source/' in benchmark['Prepare dashboard benchmark result']['run']
 
 
+@pytest.mark.parametrize('publish_attempt', ['1', '2'])
 @pytest.mark.parametrize(
     'always_fail,dashboard_ready,catalog_state',
     [
@@ -612,7 +625,12 @@ def test_workflow_shell_and_source_contracts():
     ],
 )
 def test_publication_retry(
-    tmp_path, always_fail, dashboard_ready, catalog_state, publication_catalog
+    tmp_path,
+    always_fail,
+    dashboard_ready,
+    catalog_state,
+    publication_catalog,
+    publish_attempt,
 ):
     # All Git operations are local. The git wrapper intercepts push before Git
     # can execute it and simulates a branch race using local fetch/update-ref.
@@ -733,7 +751,8 @@ git('update-ref', ref, new, old)
         'RESULTS_DOWNLOAD_DIR': str(download),
         'RESULTS_BRANCH': 'gh-pages-rocjitsu',
         'GITHUB_RUN_ID': '123',
-        'GITHUB_RUN_ATTEMPT': '1',
+        'GITHUB_RUN_ATTEMPT': publish_attempt,
+        'BENCHMARK_RUN_ATTEMPT': '1',
     }
     body = next(
         step['run'] for step in steps() if step['name'] == 'Publish benchmark files'

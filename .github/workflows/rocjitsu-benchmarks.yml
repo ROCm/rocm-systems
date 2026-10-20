@@ -41,6 +41,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      run_attempt: ${{ steps.metadata.outputs.run_attempt }}
       raw_ready: ${{ steps.upload_raw.outcome == 'success' }}
       dashboard_ready: ${{ steps.upload_dashboard.outcome == 'success' }}
     container:
@@ -111,6 +112,7 @@ jobs:
           {
             printf 'commit_message=%s\n' "${COMMIT_MESSAGE}"
             printf 'machine=%s\n' "${RUNNER_NAME}"
+            printf 'run_attempt=%s\n' "${GITHUB_RUN_ATTEMPT}"
           } >> "${GITHUB_OUTPUT}"
 
       - name: Checkout benchmark corpus
@@ -305,6 +307,10 @@ jobs:
   publish:
     name: Publish benchmark results
     needs: benchmark
+    # Failed-job reruns reuse artifacts from the successful benchmark attempt.
+    env:
+      BENCHMARK_RUN_ATTEMPT: ${{ needs.benchmark.outputs.run_attempt }}
+      RESULTS_ARTIFACT: rocjitsu-benchmark-${{ github.run_id }}-${{ needs.benchmark.outputs.run_attempt }}
     if: ${{ !cancelled() && github.ref == 'refs/heads/develop' && needs.benchmark.outputs.raw_ready == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -341,9 +347,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          DESTINATION="raw-benchmarks/github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}"
+          DESTINATION="raw-benchmarks/github-${GITHUB_RUN_ID}-attempt-${BENCHMARK_RUN_ATTEMPT}"
           DATA=rocjitsu-dashboard/data
-          NAME="github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}-default.json"
+          NAME="github-${GITHUB_RUN_ID}-attempt-${BENCHMARK_RUN_ATTEMPT}-default.json"
           CATALOG_REFERENCE_FAILED=0
           if [[ "${DASHBOARD_READY}" == true ]]; then
             if ! CATALOG="$(jq -er \
@@ -389,7 +395,7 @@ jobs:
             fi
 
             if git diff --cached --quiet; then exit "${CATALOG_FAILED}"; fi
-            git commit -m "Publish benchmark ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+            git commit -m "Publish benchmark ${GITHUB_RUN_ID}.${BENCHMARK_RUN_ATTEMPT}"
             if git push origin "HEAD:${RESULTS_BRANCH}"; then exit "${CATALOG_FAILED}"; fi
             if [[ "${ATTEMPT}" -lt 3 ]]; then sleep 2; fi
           done
