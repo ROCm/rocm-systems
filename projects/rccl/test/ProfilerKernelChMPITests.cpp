@@ -389,6 +389,18 @@ protected:
             << what << ": KernelCh delivered on the thread that issued the collectives";
         for(long tid : proxyThreadIds())
             EXPECT_EQ(0u, s.kernelChTids.count(tid)) << what << ": KernelCh delivered on a proxy thread";
+        // The host task that posts the work delivers its Coll/P2p events; on a graph
+        // replay that is HIP's host callback thread, not the caller.
+        std::set<long> taskTids;
+        for(const auto& r : recs)
+        {
+            if(!isTask(r)) continue;
+            taskTids.insert(r.startTid);
+            if(r.stopTid) taskTids.insert(r.stopTid);
+        }
+        for(long tid : taskTids)
+            EXPECT_EQ(0u, s.kernelChTids.count(tid))
+                << what << ": KernelCh delivered on thread " << tid << ", which also delivered Coll/P2p events";
         EXPECT_EQ(0u, anomalies_()) << what << ": recorder saw unbalanced start/stop calls";
         return s;
     }
@@ -449,13 +461,20 @@ protected:
     {
         *graph = nullptr;
         *exec = nullptr;
-        bool ok = hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal) == hipSuccess;
-        if(ok)
+        // Agreed before any rank captures: with runtime connect, the first captured
+        // collective sets up connections with its peers.
+        bool began = hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal) == hipSuccess;
+        std::string beginReason = agreeOn(!began, "stream capture did not begin");
+        if(!beginReason.empty())
         {
-            for(int i = 0; i < ops; i++)
-                if(ncclAllReduce(send_, recv_, count, ncclFloat, ncclSum, comm, stream) != ncclSuccess) ok = false;
-            if(hipStreamEndCapture(stream, graph) != hipSuccess) ok = false;
+            if(began && hipStreamEndCapture(stream, graph) == hipSuccess && *graph) (void)hipGraphDestroy(*graph);
+            *graph = nullptr;
+            return beginReason;
         }
+        bool ok = true;
+        for(int i = 0; i < ops; i++)
+            if(ncclAllReduce(send_, recv_, count, ncclFloat, ncclSum, comm, stream) != ncclSuccess) ok = false;
+        if(hipStreamEndCapture(stream, graph) != hipSuccess) ok = false;
         if(ok && hipGraphInstantiate(exec, *graph, nullptr, nullptr, 0) != hipSuccess) ok = false;
         std::string reason = agreeOn(!ok, "graph capture or instantiation failed");
         if(!reason.empty())
