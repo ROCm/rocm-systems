@@ -160,9 +160,12 @@ DISPLAY_VARIANTS = {
         "11.2.7": _PIPELINE_MFMA_UTIL,
     },
 }
+DISPLAY_VARIANTS["gfx941"] = DISPLAY_VARIANTS["gfx940"]
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
-UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx940")}
+UNIT_VARIANTS = {
+    arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx940", "gfx941")
+}
 
 
 def validate(metric_dir: Path, analysis_dir: Optional[Path] = None) -> list[str]:
