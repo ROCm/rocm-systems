@@ -283,6 +283,11 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
         }
       }
     } else {
+#if TDM_LL128_ON
+      // This fallback stages through the same per-warp scratch the TDM store leg
+      // hands the mover, so drain the previous slice's store before clobbering it.
+      tdmDrain();
+#endif
       // Not aligned. Stage the smallest 16 byte aligned region subsuming the
       // buffer into shmem.
       int misalignment = reinterpret_cast<uintptr_t>(src) % 16;
