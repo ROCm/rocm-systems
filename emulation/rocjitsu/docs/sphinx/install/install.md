@@ -40,7 +40,8 @@ checkout to download only the rocJITsu project:
 git clone --filter=blob:none --sparse \
     https://github.com/ROCm/rocm-systems.git
 cd rocm-systems
-git sparse-checkout set projects/rocjitsu
+git sparse-checkout set emulation/rocjitsu runtimes/api-headers
+cd emulation/rocjitsu
 ```
 
 ### Build commands
@@ -114,6 +115,7 @@ inside the source tree by default. To relocate the download directory
 |--------|---------|-------------|
 | `RJ_SANITIZER` | *(empty)* | Enable a sanitizer build. Accepted values: `asan`, `ubsan`, `tsan`, `msan`. |
 | `RJ_CLANG_TIDY` | `OFF` | Enable clang-tidy static analysis during the build. |
+| `RJ_RUNTIME_API_HEADERS_SOURCE_DIR` | `../../runtimes/api-headers` | Source directory of the shared runtime API headers. For detached rocJITsu checkouts, use a matching revision. |
 | `LTO` | `OFF` | Enable link-time optimization (IPO) for `Release` and `RelWithDebInfo` configurations. Incompatible with `RJ_SANITIZER`; setting both causes a fatal error. |
 | `ROCJITSU_ENABLE_VFIO` | `OFF` | Build Linux VFIO-user support. Requires CMake 3.28 or later and Linux 6.1 or later UAPI headers. |
 | `RJ_ENABLE_EXPENSIVE_CHECKS` | `OFF` | Enable expensive exhaustive test suites such as MFMA and WMMA SIMD bit-exactness checks. |

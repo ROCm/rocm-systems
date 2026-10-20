@@ -1762,7 +1762,7 @@ private:
       // system-scope atomic: an application thread incrementing the same address
       // participates in it, which a read-modify-write split across two syscalls
       // could not offer -- both sides would read the same value and one update
-      // would be lost. The vendored HSA contract requires that scope for
+      // would be lost. The HSA memory model requires that scope for
       // fine-grained system memory, so the alternative to doing it properly is
       // refusing to do it at all, not doing it approximately.
       //

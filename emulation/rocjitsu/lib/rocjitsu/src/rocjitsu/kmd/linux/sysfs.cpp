@@ -9,7 +9,7 @@
 #include "rocjitsu/kmd/linux/rpc.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_sysfs.h"
+#include "uapi/linux/kfd_sysfs.h"
 RJ_DIAGNOSTIC_POP
 
 #include <cerrno>

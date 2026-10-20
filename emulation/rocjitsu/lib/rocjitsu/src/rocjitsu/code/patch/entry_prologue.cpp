@@ -17,7 +17,7 @@
 namespace rocjitsu {
 
 namespace {
-using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+using KD = amdhsa::kernel_descriptor_t;
 } // namespace
 
 uint32_t dbi_entry_storage_floor(KernelBlockScope blocks, const KD &desc, rj_code_arch_t arch) {

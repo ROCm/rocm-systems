@@ -10,16 +10,12 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
@@ -53,7 +49,7 @@ static constexpr uint64_t B_ADDR = 0x200000;
 static constexpr uint64_t C_ADDR = 0x300000;
 static constexpr uint64_t KERNARG_ADDR = 0x400000;
 
-using KD = rocr::llvm::amdhsa::kernel_descriptor_t;
+using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
 KD read_kd(const CodeObject &co) {
   for (const auto *sec : co.rodata_sections())

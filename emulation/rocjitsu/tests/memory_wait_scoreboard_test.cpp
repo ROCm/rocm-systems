@@ -1038,7 +1038,7 @@ TEST(MemoryWaitExecutionTest, MessageResultsCheckM0AndOnlyConsumedExecWords) {
 }
 
 TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComplete) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (bool zero_exec : {false, true}) {
     for (unsigned threshold : {0u, 1u, 2u}) {
       SCOPED_TRACE(zero_exec);
@@ -1059,7 +1059,7 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComp
       append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 258, .vdst = 3}));
       append_instruction(code, S_ENDPGM_GFX12);
       uint32_t properties = 0;
-      AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+      RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
       Gfx1250Sim sim(memory_wait_test_config());
       write_global_u32(*sim.memory, 0x400000, 0x12345678);
       auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
@@ -1138,7 +1138,7 @@ TEST(MemoryWaitExecutionTest, ReusedInstructionResolvesCurrentSourceAndDestinati
 }
 
 TEST(MemoryWaitExecutionTest, ScalarMissingWaitWarnsWithoutChangingTheResult) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (bool wait : {false, true}) {
     SCOPED_TRACE(wait);
     std::vector<uint32_t> code;
@@ -1148,7 +1148,7 @@ TEST(MemoryWaitExecutionTest, ScalarMissingWaitWarnsWithoutChangingTheResult) {
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 5}));
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
-    AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
     Gfx1250Sim sim(memory_wait_test_config());
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
@@ -1545,7 +1545,7 @@ TEST(MemoryWaitExecutionTest, LegacyImageOverwritesCheckTheIncomingCompletionCla
 }
 
 TEST(MemoryWaitExecutionTest, BarrierObserversPreservePendingResults) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   class BarrierSnapshot final : public ExecutionPlugin {
   public:
     BarrierSnapshot() : ExecutionPlugin("barrier_snapshot") {}
@@ -1573,7 +1573,7 @@ TEST(MemoryWaitExecutionTest, BarrierObserversPreservePendingResults) {
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 5}));
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
-    AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                    false, properties, 16);
@@ -1734,7 +1734,7 @@ TEST(MemoryWaitExecutionTest, Wave64MaskReadChecksPendingVccHighWord) {
 }
 
 TEST(MemoryWaitExecutionTest, ScalarVccLoadChecksOnlyTheConsumedOrWrittenWords) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (unsigned destination : {106u, 107u}) {
     for (unsigned consumer : {0u, 1u, 2u, 3u, 4u}) {
       for (bool wait : {false, true}) {
@@ -1761,7 +1761,7 @@ TEST(MemoryWaitExecutionTest, ScalarVccLoadChecksOnlyTheConsumedOrWrittenWords) 
                              cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 106, .sdst = 4}));
         append_instruction(code, S_ENDPGM_GFX12);
         uint32_t properties = 0;
-        AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+        RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
         Gfx1250Sim sim(memory_wait_test_config());
         write_global_u32(*sim.memory, 0x400000, 1);
         auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
@@ -2068,7 +2068,7 @@ TEST(MemoryWaitExecutionTest, NarrowStoresCheckOnlyConsumedBytes) {
 }
 
 TEST(MemoryWaitExecutionTest, GlobalFlatResultNeedsOnlyItsLoadCounter) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (unsigned waits : {0u, 1u, 2u, 3u}) {
     SCOPED_TRACE(waits);
     std::vector<uint32_t> code;
@@ -2083,7 +2083,7 @@ TEST(MemoryWaitExecutionTest, GlobalFlatResultNeedsOnlyItsLoadCounter) {
     append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 258, .vdst = 3}));
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
-    AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
     Gfx1250Sim sim(memory_wait_test_config());
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
@@ -2098,7 +2098,7 @@ TEST(MemoryWaitExecutionTest, GlobalFlatResultNeedsOnlyItsLoadCounter) {
 }
 
 TEST(MemoryWaitExecutionTest, VectorWaitDiagnosticsCanBeSilenced) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (unsigned mode = 0; mode < 5; ++mode) {
     SCOPED_TRACE(mode);
     std::vector<uint32_t> code;
@@ -2116,7 +2116,7 @@ TEST(MemoryWaitExecutionTest, VectorWaitDiagnosticsCanBeSilenced) {
       append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0}));
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
-    AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
     Gfx1250Sim sim(memory_wait_test_config(mode == 3 ? "off" : "warn"));
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
@@ -2304,7 +2304,7 @@ std::array<uint64_t, 2> run_xcnt_kernel(std::vector<uint32_t> code,
                                         std::string_view xcnt_setting = "warn", unsigned vgprs = 32,
                                         std::string_view memory_setting = "warn",
                                         std::string_view wait_checking = "") {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   append_instruction(code, S_WAIT_KMCNT_0_GFX12);
   append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0}));
   append_instruction(code, cdna5::build_sopp(cdna5::kSWaitStorecntSopp, {.simm16 = 0}));
@@ -2315,7 +2315,7 @@ std::array<uint64_t, 2> run_xcnt_kernel(std::vector<uint32_t> code,
   Gfx1250Sim sim(config);
   write_global_u32(*sim.memory, 0x400000, 0x12345678);
   uint32_t properties = 0;
-  AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
   auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, vgprs, 2, false, false,
                                  false, properties, 16);
   test::AqlQueue queue(sim.memory, sim.cp());
@@ -3635,7 +3635,7 @@ TEST(MemoryWaitShadowTest, RangeQueriesMatchIndividualBitsAtWordAndBankBoundarie
 }
 
 TEST(MemoryWaitExecutionTest, WaterfallKeepsPendingResultsInTheirIssuingLanesAndBank) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (bool rmw : {false, true})
     for (unsigned bank : {0u, 1u, 3u})
       for (int wait : {-1, 0, 1})
@@ -3688,7 +3688,7 @@ TEST(MemoryWaitExecutionTest, WaterfallKeepsPendingResultsInTheirIssuingLanesAnd
             emit(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 258, .vdst = 3}));
           emit(S_ENDPGM_GFX12);
           uint32_t properties = 0;
-          AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+          RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
           Gfx1250Sim sim(memory_wait_test_config());
           write_global_u32(*sim.memory, 0x400000, 0x12345678);
           const auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 1024, 2,
@@ -3764,7 +3764,7 @@ TEST_F(MemoryWaitScoreboardTest, PendingBitsMatchLiveEventsThroughMixedRetiremen
 }
 
 TEST(MemoryWaitExecutionTest, MemoryProducerOverwriteIsCheckedBeforeExecution) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   class BeforeObserver final : public ExecutionPlugin {
   public:
     BeforeObserver(uint64_t pc, ComputeUnitCore *cu)
@@ -3812,7 +3812,7 @@ TEST(MemoryWaitExecutionTest, MemoryProducerOverwriteIsCheckedBeforeExecution) {
       sim.plugin_group->add(std::move(observer));
       sim.soc->set_plugin_group(sim.plugin_group);
       uint32_t properties = 0;
-      AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+      RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
       write_global_u32(*sim.memory, 0x400000, 0x12345678);
       const auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false,
                                            false, false, properties, 16);
