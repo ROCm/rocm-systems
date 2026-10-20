@@ -1,0 +1,306 @@
+inherit: ../gfx908/compute.yaml
+compute.bf16_ops:
+  name: BF16 OPs
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_BF16) / SUM($denom)
+  unit: (FLOPs + $normUnit)
+  description: >-
+    The total number of 16-bit brain floating-point operations executed on either
+    the VALU or MFMA units, per normalization unit.
+compute.branch_util:
+  name: Branch Utilization
+  formula: 100 * SUM(SQ_ACTIVE_INST_MISC) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Indicates what percent of the kernel's duration the branch unit was busy executing
+    instructions. Computed as the ratio of the total number of cycles spent by the
+    scheduler issuing branch instructions over the total CU cycles
+  peak: 100
+compute.f16_ops:
+  name: F16 OPs
+  formula: SUM(64 * SQ_INSTS_VALU_ADD_F16 + 64 * SQ_INSTS_VALU_MUL_F16 + 64 * SQ_INSTS_VALU_TRANS_F16 + 128 * SQ_INSTS_VALU_FMA_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16) / SUM($denom)
+  unit: (FLOPs + $normUnit)
+  description: >-
+    The total number of 16-bit floating-point operations executed on either the VALU
+    or MFMA units, per normalization unit.
+compute.f32_ops:
+  name: F32 OPs
+  formula: SUM(64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32) / SUM($denom)
+  unit: (FLOPs + $normUnit)
+  description: >-
+    The total number of 32-bit floating-point operations executed on either the VALU
+    or MFMA units, per normalization unit.
+compute.f64_ops:
+  name: F64 OPs
+  formula: SUM(64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / SUM($denom)
+  unit: (FLOPs + $normUnit)
+  description: >-
+    The total number of 64-bit floating-point operations executed on either the VALU
+    or MFMA units, per normalization unit.
+compute.flops_per_norm:
+  name: FLOPs (Total)
+  formula: SUM(64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_FMA_F16 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F16 + 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 + 64 * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_FMA_F32 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F32 + 64 * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + SQ_INSTS_VALU_FMA_F64 * 2) + 512 * SQ_INSTS_VALU_MFMA_MOPS_F64) / SUM($denom)
+  unit: (FLOPs + $normUnit)
+  description: >-
+    The total number of floating-point operations executed on either the VALU or MFMA
+    units, per normalization unit.
+compute.inst_mix_conversion:
+  name: Conversion
+  formula: SUM(SQ_INSTS_VALU_CVT) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of type conversion instructions (such as converting data to or
+    from F32\u2194F64) issued to the VALU per normalization unit.
+compute.inst_mix_f16_add:
+  name: F16-ADD
+  formula: SUM(SQ_INSTS_VALU_ADD_F16) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of addition instructions operating on 16-bit floating-point operands
+    issued to the VALU per normalization unit.
+compute.inst_mix_f16_fma:
+  name: F16-FMA
+  formula: SUM(SQ_INSTS_VALU_FMA_F16) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of fused multiply-add instructions operating on 16-bit floating-point
+    operands issued to the VALU per normalization unit.
+compute.inst_mix_f16_mul:
+  name: F16-MUL
+  formula: SUM(SQ_INSTS_VALU_MUL_F16) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of multiplication instructions operating on 16-bit floating-point
+    operands issued to the VALU per normalization unit.
+compute.inst_mix_f16_trans:
+  name: F16-Trans
+  formula: SUM(SQ_INSTS_VALU_TRANS_F16) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of transcendental instructions (e.g., sqrt) operating on 16-bit
+    floating-point operands issued to the VALU per normalization unit.
+compute.inst_mix_f32_add:
+  name: F32-ADD
+  formula: SUM(SQ_INSTS_VALU_ADD_F32) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of addition instructions operating on 32-bit floating-point operands
+    issued to the VALU per normalization unit.
+compute.inst_mix_f32_fma:
+  name: F32-FMA
+  formula: SUM(SQ_INSTS_VALU_FMA_F32) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of fused multiply-add instructions operating on 32-bit floating-point
+    operands issued to the VALU per normalization unit.
+compute.inst_mix_f32_mul:
+  name: F32-MUL
+  formula: SUM(SQ_INSTS_VALU_MUL_F32) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of multiplication instructions operating on 32-bit floating-point
+    operands issued to the VALU per normalization unit.
+compute.inst_mix_f32_trans:
+  name: F32-Trans
+  formula: SUM(SQ_INSTS_VALU_TRANS_F32) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of transcendental instructions (such as sqrt) operating on 32-bit
+    floating-point operands issued to the VALU per normalization unit.
+compute.inst_mix_f64_add:
+  name: F64-ADD
+  formula: SUM(SQ_INSTS_VALU_ADD_F64) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of addition instructions operating on 64-bit floating-point operands
+    issued to the VALU per normalization unit.
+compute.inst_mix_f64_fma:
+  name: F64-FMA
+  formula: SUM(SQ_INSTS_VALU_FMA_F64) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of fused multiply-add instructions operating on 64-bit floating-point
+    operands issued to the VALU per normalization unit.
+compute.inst_mix_f64_mul:
+  name: F64-MUL
+  formula: SUM(SQ_INSTS_VALU_MUL_F64) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of multiplication instructions operating on 64-bit floating-point
+    operands issued to the VALU per normalization unit.
+compute.inst_mix_f64_trans:
+  name: F64-Trans
+  formula: SUM(SQ_INSTS_VALU_TRANS_F64) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of transcendental instructions (such as sqrt) operating on 64-bit
+    floating-point operands issued to the VALU per normalization unit.
+compute.inst_mix_int32:
+  name: INT32
+  formula: SUM(SQ_INSTS_VALU_INT32) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of instructions operating on 32-bit integer operands issued to
+    the VALU per normalization unit.
+compute.inst_mix_int64:
+  name: INT64
+  formula: SUM(SQ_INSTS_VALU_INT64) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of instructions operating on 64-bit integer operands issued to
+    the VALU per normalization unit.
+compute.inst_mix_mfma:
+  name: MFMA
+  formula: SUM(SQ_INSTS_MFMA) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of matrix fused multiply-add instructions issued.
+compute.inst_mix_mfma_bf16:
+  name: MFMA-BF16
+  formula: SUM(SQ_INSTS_VALU_MFMA_BF16) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of 16-bit brain floating point MFMA instructions issued per normalization
+    unit.
+compute.inst_mix_mfma_f16:
+  name: MFMA-F16
+  formula: SUM(SQ_INSTS_VALU_MFMA_F16) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of 16-bit floating point MFMA instructions issued per normalization
+    unit.
+compute.inst_mix_mfma_f32:
+  name: MFMA-F32
+  formula: SUM(SQ_INSTS_VALU_MFMA_F32) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of 32-bit floating-point MFMA instructions issued per normalization
+    unit.
+compute.inst_mix_mfma_f64:
+  name: MFMA-F64
+  formula: SUM(SQ_INSTS_VALU_MFMA_F64) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of 64-bit floating-point MFMA instructions issued per normalization
+    unit.
+compute.inst_mix_mfma_i8:
+  name: MFMA-I8
+  formula: SUM(SQ_INSTS_VALU_MFMA_I8) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of 8-bit integer MFMA instructions issued per normalization unit.
+compute.inst_mix_valu:
+  name: VALU
+  formula: SUM(SQ_INSTS_VALU - SQ_INSTS_MFMA) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of vector arithmetic logic unit (VALU) operations issued. These
+    are the workhorses of the compute unit, and are used to execute a wide range of
+    instruction types including floating point operations, non-uniform address calculations,
+    transcendental operations, integer operations, shifts, conditional evaluation,
+    etc.
+compute.inst_mix_vmem:
+  name: VMEM
+  formula: SUM(SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of vector memory operations issued. These include most loads,
+    stores and atomic operations and all accesses to generic, global, private and
+    texture memory.
+compute.int8_ops:
+  name: INT8 OPs
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_I8) / SUM($denom)
+  unit: (IOPS + $normUnit)
+  description: >-
+    The total number of 8-bit integer operations executed on either the VALU or MFMA
+    units, per normalization unit.
+compute.iops_per_norm:
+  name: IOPs (Total)
+  formula: SUM(64 * (SQ_INSTS_VALU_INT32 + SQ_INSTS_VALU_INT64) + SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / SUM($denom)
+  unit: (IOPS + $normUnit)
+  description: >-
+    The total number of integer operations executed on either the VALU or MFMA units,
+    per normalization unit.
+compute.mfma_flops_bf16:
+  peak: $max_sclk * $cu_per_gpu * 1024 / 1000
+  peak_empirical: $MFMABF16Flops_empirical_peak
+compute.mfma_flops_f16:
+  peak_empirical: $MFMAF16Flops_empirical_peak
+compute.mfma_flops_f32:
+  peak_empirical: $MFMAF32Flops_empirical_peak
+compute.mfma_flops_f64:
+  peak_empirical: $MFMAF64Flops_empirical_peak
+compute.mfma_inst_cycles:
+  name: MFMA Instruction Cycles
+  formula: SUM(SQ_VALU_MFMA_BUSY_CYCLES) / SUM(SQ_INSTS_MFMA)
+  unit: Cycles per Instruction
+  description: >-
+    The average duration of MFMA instructions in this kernel in cycles. Computed as
+    the ratio of the total number of cycles the MFMA unit was busy over the total
+    number of MFMA instructions.
+compute.mfma_iops_int8:
+  peak_empirical: $MFMAI8Ops_empirical_peak
+compute.mfma_util:
+  name: MFMA Utilization
+  formula: 100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) / (4 * SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+  unit: Percent
+  description: >-
+    Indicates what percent of the kernel's duration the MFMA unit was busy executing
+    instructions. Computed as the ratio of the total number of cycles the MFMA was
+    busy over the total CU cycles.
+  peak: 100
+compute.smem_lat:
+  name: SMEM Latency
+  formula: SUM(SQ_INST_LEVEL_SMEM_ACCUM) / SUM(SQ_INSTS_SMEM)
+  unit: Cycles
+  description: >-
+    The average number of round-trip cycles (that is, from issue to data return /
+    acknowledgment) required for a SMEM instruction to complete.
+compute.valu_active_threads:
+  peak: 64
+compute.valu_flops:
+  name: VALU FLOPs
+  formula: 64 * SUM(SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + SQ_INSTS_VALU_TRANS_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + SQ_INSTS_VALU_TRANS_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + SQ_INSTS_VALU_TRANS_F64 + 2 * SQ_INSTS_VALU_FMA_F64) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total floating-point operations executed per second on the VALU. Note: this
+    does not include any floating-point operations from MFMA instructions.
+  peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
+compute.valu_flops_f16:
+  peak_empirical: $FP16Flops_empirical_peak
+compute.valu_flops_f32:
+  peak_empirical: $FP32Flops_empirical_peak
+compute.valu_flops_f64:
+  peak_empirical: $FP64Flops_empirical_peak
+compute.vmem_lat:
+  name: VMEM Latency
+  formula: SUM(SQ_INST_LEVEL_VMEM_ACCUM) / SUM(SQ_INSTS_VMEM)
+  unit: Cycles
+  description: >-
+    The average number of round-trip cycles (that is, from issue to data return /
+    acknowledgment) required for a VMEM instruction to complete.
+compute.vmem_ta_addr_stall:
+  name: "Sequencer \u2192 TA Address Stall"
+  formula: SUM(SQ_VMEM_TA_ADDR_FIFO_FULL) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+compute.vmem_ta_cmd_stall:
+  name: "Sequencer \u2192 TA Command Stall"
+  formula: SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+compute.vmem_ta_data_stall:
+  name: "Sequencer \u2192 TA Data Stall"
+  formula: SUM(SQ_VMEM_WR_TA_DATA_FIFO_FULL) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+compute.vmem_util:
+  name: VMEM Utilization
+  formula: 100 * SUM(SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Indicates what percent of the kernel's duration the VMEM unit was busy executing
+    instructions, including both global/generic and spill/scratch operations (see
+    the VMEM instruction count metrics) for more detail). Does not include VALU operations.
+    Computed as the ratio of the total number of cycles spent by the scheduler issuing
+    VMEM instructions over the total CU cycles.
+  peak: 100

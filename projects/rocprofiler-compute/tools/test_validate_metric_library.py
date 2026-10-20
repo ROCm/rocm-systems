@@ -64,6 +64,18 @@ def gfx908_copy(tmp_path, monkeypatch):
     return library, configs
 
 
+@pytest.fixture
+def gfx90a_copy(tmp_path, monkeypatch):
+    """Copies of the gfx908 and gfx90a metric library and analysis configs."""
+    monkeypatch.setattr(MetricLibrary, "_cache", {})
+    library = tmp_path / "metric_library"
+    configs = tmp_path / "analysis_configs"
+    for arch in ("gfx908", "gfx90a"):
+        shutil.copytree(default_metric_library_dir() / arch, library / arch)
+        shutil.copytree(ANALYSIS_CONFIGS / arch, configs / arch)
+    return library, configs
+
+
 def write_base_metrics(root, text):
     write_text_file(root / "gfx_base" / "compute.yaml", text)
 
@@ -274,6 +286,18 @@ def test_changed_row_peak(gfx908_copy):
     replace_in(path, "peak: $max_sclk / 1000 * 64 *", "peak: $max_sclk / 1000 * 32 *")
     errors = validate(library, configs)
     assert any("is neither the 'peak' nor the 'peak_empirical'" in e for e in errors)
+
+
+def test_gfx90a_copy_matches(gfx90a_copy):
+    assert validate(*gfx90a_copy) == []
+
+
+def test_changed_row_measured_peak(gfx90a_copy):
+    library, configs = gfx90a_copy
+    path = configs / "gfx90a" / "0400_roofline.yaml"
+    replace_in(path, "$LDSBw_empirical_peak", "$L2Bw_empirical_peak")
+    errors = validate(library, configs)
+    assert any("4.1.11 LDS Bandwidth: peak $L2Bw_empirical_peak" in e for e in errors)
 
 
 def test_renamed_display_variant(gfx908_copy):
