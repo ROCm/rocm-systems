@@ -103,6 +103,13 @@ enum class SimdFastPath : uint8_t {
   VOP3_TERNARY_TRUE16_RAW_FP16,
   VOP3_FMA_FP16,
   VOP_WORDS,
+  VOP1_UNARY,
+  VOP2_BINARY,
+  VOP3_BINARY,
+  VOP3_BINARY_TRUE16_SRC,
+  VOP3_TERNARY,
+  CVT_F64_TO_B32,
+  CVT_B32_TO_F64,
 };
 
 namespace detail {
@@ -4785,14 +4792,20 @@ template <bool Vop3, typename Inst>
 /// commas) pass through as one token sequence. Relies on the kernel's `inst`
 /// and `wf` parameters being in scope.
 #define ROCJITSU_TRY_SIMD_VOP2_BINARY(T, ...)                                                      \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop2_simd<T>(inst, wf, __VA_ARGS__))                  \
-  return
+  if (::rocjitsu::amdgpu::try_execute_binary_vop2_simd<T>(inst, wf, __VA_ARGS__)) {                \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP2_BINARY);                                            \
+    return;                                                                                        \
+  }
 
 /// VOP1 unary counterpart of ROCJITSU_TRY_SIMD_VOP2_BINARY. Variadic in the
 /// operator argument so functor lambdas pass through as one token sequence.
 #define ROCJITSU_TRY_SIMD_VOP1_UNARY(Tin, Tout, ...)                                               \
-  if (::rocjitsu::amdgpu::try_execute_unary_vop1_simd<Tin, Tout>(inst, wf, __VA_ARGS__))           \
-  return
+  if (::rocjitsu::amdgpu::try_execute_unary_vop1_simd<Tin, Tout>(inst, wf, __VA_ARGS__)) {         \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP1_UNARY);                                             \
+    return;                                                                                        \
+  }
 
 /// Carry-VOP2 counterpart. The wrapper-owned writer merges DPP-suppressed
 /// lanes and applies the target wave-width policy before the VCC commit.
@@ -4896,8 +4909,11 @@ template <bool Vop3, typename Inst>
 #define ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(Tout, ...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(Tout, ...)                                                \
-  if (::rocjitsu::amdgpu::try_execute_cvt_f64_to_b32_simd<Tout>(inst, wf, __VA_ARGS__))            \
-  return
+  if (::rocjitsu::amdgpu::try_execute_cvt_f64_to_b32_simd<Tout>(inst, wf, __VA_ARGS__)) {          \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::CVT_F64_TO_B32);                                         \
+    return;                                                                                        \
+  }
 #endif
 
 /// Mixed-width cvt counterpart, 32-bit source -> f64 dst. `Tin` is the 32-bit
@@ -4906,8 +4922,11 @@ template <bool Vop3, typename Inst>
 #define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...) static_cast<void>(inst)
 #else
 #define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...)                                                 \
-  if (::rocjitsu::amdgpu::try_execute_cvt_b32_to_f64_simd<Tin>(inst, wf, __VA_ARGS__))             \
-  return
+  if (::rocjitsu::amdgpu::try_execute_cvt_b32_to_f64_simd<Tin>(inst, wf, __VA_ARGS__)) {           \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::CVT_B32_TO_F64);                                         \
+    return;                                                                                        \
+  }
 #endif
 
 /// VOP3 v_cvt_f32_f16 counterpart. Generic form reads src0.l; TRUE16 form
@@ -4997,14 +5016,20 @@ template <bool Vop3, typename Inst>
 /// VOP3 integer/bitwise binary counterpart (reads src0/src1, no modifiers).
 /// `T` is the 32-bit integer lane type; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_INT(T, ...)                                                  \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<T>(inst, wf, __VA_ARGS__))                  \
-  return
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<T>(inst, wf, __VA_ARGS__)) {                \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_BINARY);                                            \
+    return;                                                                                        \
+  }
 
 /// VOP3 binary counterpart for true16 source selectors with a full b32 result,
 /// such as v_pack_b32_f16.
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC(T, ...)                                           \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop3_true16_src_simd<T>(inst, wf, __VA_ARGS__))       \
-  return
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_true16_src_simd<T>(inst, wf, __VA_ARGS__)) {     \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_BINARY_TRUE16_SRC);                                 \
+    return;                                                                                        \
+  }
 
 /// VOP3 f16 binary counterpart: same packed path as the integer form, but bails
 /// to the (modifier-applying) scalar body when any abs/neg/omod/clamp field is
@@ -5164,8 +5189,11 @@ template <bool Vop3, typename Inst>
 /// VOP3 integer/bitwise ternary counterpart (reads src0/src1/src2, no
 /// modifiers). `T` is the 32-bit integer lane type; variadic in the functor.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT(T, ...)                                                 \
-  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<T>(inst, wf, __VA_ARGS__))                 \
-  return
+  if (::rocjitsu::amdgpu::try_execute_ternary_vop3_simd<T>(inst, wf, __VA_ARGS__)) {               \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_TERNARY);                                           \
+    return;                                                                                        \
+  }
 
 /// VOP3 ternary counterpart for true16 SRC0/SRC1 plus full-width SRC2/result.
 #define ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01(T, ...)                                        \
