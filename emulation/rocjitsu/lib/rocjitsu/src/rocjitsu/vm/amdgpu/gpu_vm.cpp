@@ -419,7 +419,7 @@ std::optional<Mtype> GpuVmAccess::query_mtype(uint64_t address, VmMtypeCache &ca
   const bool same_generation = cache.snapshots_ &&
                                !cache.access_state_.owner_before(access_state_) &&
                                !access_state_.owner_before(cache.access_state_);
-  const std::size_t index = (address >> 12) % VmMtypeCache::kSnapshotCount;
+  const std::size_t index = VmMtypeCache::snapshot_index(address);
   if (same_generation && access_state_->valid.load(std::memory_order_acquire)) {
     const auto &snapshot = (*cache.snapshots_)[index];
     if (snapshot.unchanged(address))
@@ -447,7 +447,7 @@ bool GpuVmAccess::cached_private_uc_hint(uint64_t address, const VmMtypeCache &c
     return false;
   const bool same_generation = !cache.access_state_.owner_before(access_state_) &&
                                !access_state_.owner_before(cache.access_state_);
-  const auto &snapshot = (*cache.snapshots_)[(address >> 12) % VmMtypeCache::kSnapshotCount];
+  const auto &snapshot = (*cache.snapshots_)[VmMtypeCache::snapshot_index(address)];
   return same_generation && access_state_->valid.load(std::memory_order_acquire) &&
          snapshot.may_batch_private_uc && snapshot.unchanged(address);
 }
@@ -458,7 +458,7 @@ std::optional<Mtype> GpuVmAccess::cached_private_ram_mtype(uint64_t address,
     return std::nullopt;
   const bool same_generation = !cache.access_state_.owner_before(access_state_) &&
                                !access_state_.owner_before(cache.access_state_);
-  const auto &snapshot = (*cache.snapshots_)[(address >> 12) % VmMtypeCache::kSnapshotCount];
+  const auto &snapshot = (*cache.snapshots_)[VmMtypeCache::snapshot_index(address)];
   if (same_generation && access_state_->valid.load(std::memory_order_acquire) &&
       snapshot.may_batch_private_ram && snapshot.unchanged(address))
     return snapshot.mtype;
