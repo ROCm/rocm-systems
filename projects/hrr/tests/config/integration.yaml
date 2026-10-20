@@ -270,7 +270,11 @@ cases:
   Unit_HRR_ReplaceKernelBadSpec: {}
   Unit_HRR_ReplaceKernelMissingCO: {}
   Unit_HRR_ReplaceKernelRoundtrip: {}
-  Unit_HRR_SecureExecIgnoresCaptureOutput: {}
+  Unit_HRR_SecureExecIgnoresCaptureOutput:
+    skip:
+      - when: {emulator: true}
+        kind: unsupported
+        reason: "The loader ignores LD_PRELOAD in the set-group-ID copy, which drops the rocJitsu interposer and leaves the copy with no device"
   Unit_HRR_SecureExecProbe_Direct: {}
   Unit_HRR_ShutdownWhileChildOpensArchive: {}
   Unit_HRR_ShutdownWhileChildOpensArchive_Direct: {}
