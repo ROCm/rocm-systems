@@ -278,7 +278,7 @@ Roofline micro-benchmark support varies by :ref:`SoC family <def-soc>` independe
    * - AMD Ryzen APU integrated graphics (RDNA4M; gfx1170/gfx1171)
      - ✅
      - ✅
-     - Added in ROCm Compute Profiler 3.10.0. Uses Wave Matrix Multiply Accumulate (WMMA) in place of MFMA.
+     - Added in ROCm Compute Profiler 3.10.0. Roofline benchmarks VALU throughput only; WMMA benchmarking is not enabled.
    * - AMD Instinct MI50, MI60 (Vega 20)
      - ❌
      - ❌
