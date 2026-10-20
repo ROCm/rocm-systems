@@ -268,4 +268,175 @@ if(
                 LABELS "consan;physical-gpu"
         )
     endforeach()
+    if(RJ_BUILD_CONSAN_ANALYZER)
+        foreach(
+            _case
+            race
+            disjoint
+            read_read
+            collision
+            single_lane
+            repeat
+            repeat_race
+            alias
+            immediate
+            four_ranges
+            exhausted
+            empty
+            branched
+            wrong-artifact
+            bad-geometry
+            profiling
+            reused-signal
+            utf8_entry
+        )
+            set(_scenario ${_case})
+            set(_entry_options)
+            if(_case STREQUAL "utf8_entry")
+                set(_scenario disjoint)
+                set(_entry_options --utf8-entry)
+            endif()
+            add_test(
+                NAME ConSanE2E.${_case}
+                COMMAND
+                    ${Python3_EXECUTABLE} -B
+                    ${PROJECT_SOURCE_DIR}/tests/dbi/consan_e2e.py --prepare
+                    $<TARGET_FILE:rj_consan_prepare> --runner
+                    $<TARGET_FILE:consan_hsa_runner> --inspect
+                    $<TARGET_FILE:consan_capture_inspect> --plugin
+                    $<TARGET_FILE:hsa_consan> --analyze
+                    $<TARGET_FILE:rj_consan_analyze> --fixtures ${_fixture_dir}
+                    --source ${PROJECT_SOURCE_DIR} --root
+                    ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --case ${_scenario}
+                    ${_entry_options}
+            )
+            set_tests_properties(
+                ConSanE2E.${_case}
+                PROPERTIES
+                    SKIP_RETURN_CODE 77
+                    RESOURCE_LOCK consan-gfx1100
+                    TIMEOUT 120
+                    LABELS "consan;physical-gpu"
+            )
+        endforeach()
+    endif()
+endif()
+
+# Representative three-process paths. Required simulator cases never turn an
+# absent agent into a skip; physical registrations explicitly allow absence.
+if(RJ_BUILD_CONSAN_ANALYZER AND TARGET consan_hsa_runner)
+    function(
+        consan_add_target_e2e
+        environment
+        gpu
+        wave
+        kind
+        scenario
+        threads
+    )
+        set(_name
+            ConSan${environment}E2E.${gpu}.wave${wave}.${kind}.${scenario}
+        )
+        set(_case ${scenario})
+        if(_case STREQUAL "partial")
+            set(_case disjoint)
+        endif()
+        set(_execution_options)
+        if(environment STREQUAL "Sim")
+            if(gpu STREQUAL "gfx942")
+                set(_config gfx942_cdna3_kmd)
+            elseif(gpu STREQUAL "gfx950")
+                set(_config gfx950_mi355x_kmd)
+            elseif(gpu STREQUAL "gfx1100")
+                set(_config gfx1100_w7900)
+            elseif(gpu STREQUAL "gfx1201")
+                set(_config gfx1201_r9700)
+            else()
+                set(_config gfx1250_mi455x)
+            endif()
+            list(
+                APPEND _execution_options
+                --launcher
+                $<TARGET_FILE:rocjitsu_bin>
+                --config
+                ${PROJECT_SOURCE_DIR}/configs/${_config}.json
+                --require-agent
+            )
+        endif()
+        add_test(
+            NAME ${_name}
+            COMMAND
+                ${Python3_EXECUTABLE} -B
+                ${PROJECT_SOURCE_DIR}/tests/dbi/consan_e2e.py --prepare
+                $<TARGET_FILE:rj_consan_prepare> --runner
+                $<TARGET_FILE:consan_hsa_runner> --inspect
+                $<TARGET_FILE:consan_capture_inspect> --plugin
+                $<TARGET_FILE:hsa_consan> --analyze
+                $<TARGET_FILE:rj_consan_analyze> --fixtures ${_fixture_dir}
+                --source ${PROJECT_SOURCE_DIR} --root
+                ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --case ${_case} --target ${gpu}
+                --wave-size ${wave} --threads ${threads} --fixture-kind ${kind}
+                ${_execution_options}
+        )
+        set_tests_properties(${_name} PROPERTIES TIMEOUT 120)
+        if(environment STREQUAL "Sim")
+            rj_test_runtime_dir_env(_runtime ${_name})
+            set_tests_properties(
+                ${_name}
+                PROPERTIES
+                    LABELS "consan;simulator;required-consan"
+                    ENVIRONMENT "${_runtime}"
+            )
+        else()
+            set_tests_properties(
+                ${_name}
+                PROPERTIES
+                    LABELS "consan;physical-gpu"
+                    SKIP_RETURN_CODE 77
+                    RESOURCE_LOCK consan-gfx1100
+            )
+        endif()
+    endfunction()
+    foreach(
+        _mode
+        IN
+        ITEMS
+            gfx942:64
+            gfx950:64
+            gfx1100:32
+            gfx1100:64
+            gfx1201:32
+            gfx1201:64
+            gfx1250:32
+    )
+        string(REPLACE ":" ";" _parts ${_mode})
+        list(GET _parts 0 _gpu)
+        list(GET _parts 1 _wave)
+        math(EXPR _threads "2 * ${_wave}")
+        consan_add_target_e2e(Sim ${_gpu} ${_wave} assembly high_lane ${_threads})
+        set(_kind hip)
+        if(_gpu STREQUAL "gfx1250")
+            set(_kind assembly)
+        endif()
+        foreach(_scenario IN ITEMS race disjoint read_read)
+            consan_add_target_e2e(Sim ${_gpu} ${_wave} ${_kind} ${_scenario} ${_threads})
+            if(_gpu STREQUAL "gfx1100")
+                consan_add_target_e2e(Physical ${_gpu} ${_wave} ${_kind} ${_scenario} ${_threads})
+            endif()
+        endforeach()
+        if(_gpu STREQUAL "gfx1100")
+            consan_add_target_e2e(Physical ${_gpu} ${_wave} assembly high_lane ${_threads})
+            math(EXPR _threads "3 * ${_wave} + 1")
+            consan_add_target_e2e(Physical ${_gpu} ${_wave} hip partial ${_threads})
+        endif()
+    endforeach()
+endif()
+
+if(RJ_BUILD_CONSAN_ANALYZER)
+    add_test(
+        NAME ConSanRequiredCoverage.Guards
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${PROJECT_SOURCE_DIR}/tests/code/consan/test_required.py
+    )
 endif()

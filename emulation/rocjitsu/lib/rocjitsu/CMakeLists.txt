@@ -40,6 +40,11 @@ option(
     "Build the experimental standalone ConSan HSA plugin"
     OFF
 )
+option(
+    RJ_BUILD_CONSAN_ANALYZER
+    "Build the standalone offline ConSan analyzer"
+    OFF
+)
 
 add_subdirectory(src/rocjitsu/code/analysis)
 add_subdirectory(src/rocjitsu/code)
