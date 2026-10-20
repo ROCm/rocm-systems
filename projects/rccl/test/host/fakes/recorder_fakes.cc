@@ -12,6 +12,8 @@
 
 #include "recorder_fakes.h"
 
+#include <mutex>
+
 #include "comm.h"
 #include "info.h"
 
@@ -59,7 +61,12 @@ ncclResult_t Recorder::record(rcclCall_t type, const void* sendbuff, void* recvb
                               const size_t[], const size_t rdispls[]) {  // send/recv-based
   return g_recorderCall({type, sendbuff, recvbuff, count, root, sendcounts, rdispls});
 }
+// Production records from whatever thread entered the API, so tests that drive one entry point
+// from two threads at once land here concurrently. Unsynchronised emplace_back corrupts the heap.
+// Readers run single-threaded after the fact, so only the writer side needs the lock.
 void Recorder::record(const char* label) {                             // non-replayable
+  static std::mutex labelsMutex;
+  std::lock_guard<std::mutex> lock(labelsMutex);
   g_recorderLabels.emplace_back(label ? label : "");
 }
 void Recorder::record(ncclComm_t*, int, const int*) {}                 // CommInitAll
