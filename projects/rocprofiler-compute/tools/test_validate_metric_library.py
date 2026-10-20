@@ -83,6 +83,13 @@ def gfx950_copy(tmp_path, monkeypatch):
     )
 
 
+@pytest.fixture
+def gfx1250_copy(tmp_path, monkeypatch):
+    """Copies of the gfx1250 metric library and analysis configs."""
+    monkeypatch.setattr(MetricLibrary, "_cache", {})
+    return copy_shipped_trees(tmp_path, ["gfx1250"])
+
+
 def copy_shipped_trees(root, archs):
     library = root / "metric_library"
     configs = root / "analysis_configs"
@@ -300,19 +307,23 @@ def test_metrics_cannot_share_a_ceiling(tree, measured):
 def test_ceiling_without_metric_cannot_be_used(tree, measured):
     write_base_metrics(tree, with_peak_empirical(BASE_METRIC, "I8Ops"))
     errors = validate(tree)
-    assert any("I8Ops is in CEILINGS_WITHOUT_METRIC" in error for error in errors)
+    assert any("I8Ops is listed as a ceiling without a metric" in e for e in errors)
 
 
-def test_an_id_has_one_name_and_unit_on_every_arch(tree):
+@pytest.mark.parametrize(
+    "field, shown",
+    [("name: SALU Busy", "'SALU Busy' [Percent]"), ("unit: Cycles", "[Cycles]")],
+)
+def test_an_id_has_one_name_and_unit_on_every_arch(tree, field, shown):
     replace_in(
         tree / "gfx_c1" / "compute.yaml",
         "compute.salu_util:\n",
-        "compute.salu_util:\n  name: SALU Busy\n",
+        f"compute.salu_util:\n  {field}\n",
     )
     errors = validate(tree)
     assert any(
         error.startswith("compute.salu_util: one name and unit on every arch")
-        and "'SALU Busy' [Percent]" in error
+        and shown in error
         for error in errors
     )
 
@@ -507,6 +518,40 @@ def test_variant_position_must_exist(gfx908_copy, monkeypatch):
     )
     errors = validate(*gfx908_copy)
     assert "[gfx908] UNIT_VARIANTS lists 99.9.9, but no row has that position" in errors
+
+
+def test_only_bytes_per_second_rows_are_scaled(gfx90a_copy):
+    """3.1.26 keeps its Bytes/s equation but claims GB/s: 1e9 off, so an error."""
+    library, configs = gfx90a_copy
+    replace_in(
+        configs / "gfx90a" / "0300_memory_chart.yaml",
+        "/ 1e9)\n          unit: Bytes/s\n        L2-Fabric Write",
+        "/ 1e9)\n          unit: GB/s\n        L2-Fabric Write",
+    )
+    errors = validate(library, configs)
+    assert any("3.1.26 L2-Fabric Read BW: not a library formula" in e for e in errors)
+
+
+def test_unknown_measured_peak_is_an_error(gfx1250_copy):
+    """gfx1250 skips WMMA-F64, so its row peak is not checked; a typo still is."""
+    library, configs = gfx1250_copy
+    replace_in(
+        configs / "gfx1250" / "0400_roofline.yaml",
+        "$WMMAF64Flops_empirical_peak",
+        "$WMMAF64Flopz_empirical_peak",
+    )
+    errors = validate(library, configs)
+    assert any("peak $WMMAF64Flopz_empirical_peak is neither" in e for e in errors)
+
+
+def test_arch_ceiling_without_metric_must_be_measured(gfx115x_copy, monkeypatch):
+    monkeypatch.setitem(
+        validate_metric_library.ARCH_CEILINGS_WITHOUT_METRIC,
+        "gfx115x",
+        ("FP16Flops", "BF16Flops", "MFMAF8Flops"),
+    )
+    errors = validate(*gfx115x_copy)
+    assert any("lists MFMAF8Flops, which the roofline" in e for e in errors)
 
 
 def test_bytes_per_second_row_shows_its_peak_scaled(gfx115x_copy):
