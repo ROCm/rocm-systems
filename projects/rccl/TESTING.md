@@ -16,12 +16,13 @@ A practical reference for new hires. Covers every test suite, when to use it, wh
 8. [Suite E — `rccl-UnitTestsMPI` (Multi-Process / Multi-GPU)](#8-suite-e--rccl-unittestsmpi-multi-process--multi-gpu)
 9. [Suite F — `rccl-UnitTestsAltRsmi` (AltRsmi Special Linkage, Debug Only)](#9-suite-f--rccl-unittestsaltrsmi-altrsmi-special-linkage-debug-only)
 10. [Suite G — `rccl-UnitTestsFixtures` device/ (GPU Kernel Tests)](#10-suite-g--rccl-unittestsfixturesdevice-gpu-kernel-tests)
-11. [The Python Test Runner](#11-the-python-test-runner)
-12. [Multi-Node Testing with `mnctl`](#12-multi-node-testing-with-mnctl)
-13. [Test Infrastructure Reference](#13-test-infrastructure-reference)
-14. [Decision Guide — Which Suite?](#14-decision-guide--which-suite)
-15. [Day-to-Day Cheat Sheet](#15-day-to-day-cheat-sheet)
-16. [rccl-tests — Performance and Correctness](#16-rccl-tests--performance-and-correctness)
+11. [Suites H and I — Host-Only Tests (`test/host/`)](#11-suites-h-and-i--host-only-tests-testhost)
+12. [The Python Test Runner](#12-the-python-test-runner)
+13. [Multi-Node Testing with `mnctl`](#13-multi-node-testing-with-mnctl)
+14. [Test Infrastructure Reference](#14-test-infrastructure-reference)
+15. [Decision Guide — Which Suite?](#15-decision-guide--which-suite)
+16. [Day-to-Day Cheat Sheet](#16-day-to-day-cheat-sheet)
+17. [rccl-tests — Performance and Correctness](#17-rccl-tests--performance-and-correctness)
 
 ---
 
@@ -34,8 +35,9 @@ RCCL is a multi-GPU, multi-node collective-communication library. Testing it req
 - **Static-variable tests** — RCCL code frequently caches `getenv()` results in static variables that are initialised once per process and never reset. Standard GTest runs all tests in one process, so test order affects results. These tests need process isolation (`fork()` a fresh child per test).
 - **Collective-operation tests** need multiple communicating processes, one per GPU. A single process cannot meaningfully exercise AllReduce, AllGather, and similar operations. These tests use MPI.
 - **GPU kernel tests** run device-side (`__global__`) code directly from the host, requiring a HIP kernel launch harness.
+- **Host-only tests** (`test/host/`) take the opposite approach: they compile RCCL source straight into the test binary and link neither `librccl.so` nor the HIP runtime, so `static` helpers and individual failure branches become reachable on a CPU-only machine in milliseconds. See [Section 11](#11-suites-h-and-i--host-only-tests-testhost).
 
-Each of these situations corresponds to a separate test binary. `test/CMakeLists.txt` is the single authoritative source for which source files belong to which binary; consult it whenever you are unsure.
+Each of these situations corresponds to a separate test binary. `test/CMakeLists.txt` is the single authoritative source for which source files belong to which binary (for the host-only suites, `test/host/CMakeLists.txt`); consult it whenever you are unsure.
 
 ---
 
@@ -51,6 +53,9 @@ test/
 │                             RAII guards, device buffers, error-check macros
 ├── device/                 ← GPU kernel (device-side) tests and DeviceTestBase fixture
 ├── graph/                  ← graph / XML subsystem tests
+├── host/                   ← host-only (CPU, no-GPU) suites: rccl-HostUnitTests
+│                             and the rccl-UnitTestsMicro* microtests, their
+│                             fakes/, and run_host_tests.sh
 ├── transport/              ← MPI transport-layer tests (P2P, SHM, NET, IB)
 ├── proxy_trace/            ← proxy-trace subsystem tests
 └── latency_profiler/       ← latency-profiler subsystem tests
@@ -77,6 +82,8 @@ Top-level `test/*.cpp` files are collective tests, fixture tests, and MPI tests;
 | `rccl-UnitTestsFixturesDebug` | **Debug only** | No | Internal symbols hidden in Release (`ncclIbMalloc`, enqueue, proxy, etc.) |
 | `rccl-UnitTestsMPI` | **Debug only** | **Yes** | Multi-process collective behaviour, transport-layer (P2P/SHM/NET/IB), multi-node |
 | `rccl-UnitTestsAltRsmi` | **Debug only** | No | `alt_rsmi.cc` compiled with `ARSMI_TEST_BUILD` to expose static variables |
+| `rccl-HostUnitTests` | Host pipeline / standalone only | No | Host-only (no GPU, no `librccl.so`) functional tests compiled against real RCCL source |
+| `rccl-UnitTestsMicro*` | Release **or** Debug (or standalone) | No | Host-only microtests: one unit under test per binary, `static` helpers and failure branches via fakes |
 
 ---
 
@@ -96,10 +103,10 @@ Top-level `test/*.cpp` files are collective tests, fixture tests, and MPI tests;
 `install.sh` is the canonical build wrapper. Tests are compiled when you pass `-t` (or `--tests_build`).
 
 ```bash
-# Release build — public tests only (Suites A and B)
+# Release build — public tests only (Suites A, B, I)
 ./install.sh -t -l                          # -l = local GPU only (faster)
 
-# Debug build — all non-MPI suites (A, B, C, F, G)
+# Debug build — all non-MPI suites (A, B, C, F, G, I)
 ./install.sh --debug -t -l
 
 # Debug build + MPI suites (all suites including E)
@@ -432,7 +439,107 @@ Create `test/device/MyKernelTests.cpp`, inherit from `DeviceTestBase`, and follo
 
 ---
 
-## 11. The Python Test Runner
+## 11. Suites H and I — Host-Only Tests (`test/host/`)
+
+### What they test
+
+`test/host/` holds the **host-only** (CPU, no-GPU) test suites. They compile RCCL production source *directly into the test binary* instead of reaching it through `librccl.so`, link neither `librccl.so` nor the HIP runtime, and need no GPU, no proxy threads, and no network. They run in milliseconds, so they are the fastest feedback loop in the repository and the place where internal, `static`-linked logic and individual failure branches get covered.
+
+There are two families:
+
+| Suite | Binary | What it is |
+|---|---|---|
+| **H** | `rccl-HostUnitTests` | Functional tests compiled with `hipcc --offload-host-only` against the real hipified RCCL headers — `mem_manager.cc`, `alt_rsmi.cc`, `bootstrap.cc`, `kernel_config.cc`, `rome_topo_consensus.cc`, plus header-only tests (`bitops.h`, `comm.h`, …) that were previously trapped behind a `hip::device` link dependency. |
+| **I** | `rccl-UnitTestsMicro*` (~40 binaries) | *Microtests*: one unit under test per binary. The test TU `#include`s the hipified `.cc` (e.g. `P2P_CC_PATH`), so `static` helpers are directly callable, and every external symbol it reaches is supplied by a controllable `std::function` seam in `test/host/fakes/`. |
+
+> **Host-only means *where the code runs*.** The microtests additionally mean *no HIP-runtime linkage* — a test moved here cannot rely on `hip::host` symbols it used to get for free in `rccl-UnitTests`.
+
+### Layout
+
+```
+test/host/
+├── CMakeLists.txt          ← dual-mode: in-RCCL-build and standalone
+├── MICROTEST_README.md     ← the authoritative microtest guide
+├── SUMMARY.md              ← rccl-HostUnitTests overview
+├── run_host_tests.sh       ← single entry point for the whole pipeline
+├── <stem>-test.cc          ← one test TU per unit under test
+├── fakes/                  ← seams, named after the production TU that
+│                             DEFINES the symbol (never after the test target)
+├── algorithms/             ← dda / collective-algorithm microtests
+└── cmake/                  ← helper modules (rccl_add_micro_binary, …)
+```
+
+### Naming (microtests)
+
+One unit under test fixes every other name. For a unit at `src/<dirs>/<stem>.cc`:
+
+| Thing | Rule | `src/gin/gin_host.cc` |
+|---|---|---|
+| Path macro | `<STEM>_CC_PATH` | `GIN_HOST_CC_PATH` |
+| Test TU | `test/host/<stem>-test.cc` (`_` → `-`) | `gin-host-test.cc` |
+| Binary | `rccl-UnitTestsMicro<Stem>` | `rccl-UnitTestsMicroGinHost` |
+| gtest suites | all start with `<Stem>` | `GinHostProxyAffinityMicrotest` |
+| CTest categories | `test/test_categories_micro_<stem>.yaml` | `…_micro_gin_host.yaml` |
+| JUnit XML | `host_tests_micro_<stem>.xml` | `host_tests_micro_gin_host.xml` |
+| Runner config | `unit_tests_micro_<stem>` | `unit_tests_micro_gin_host` |
+
+A new binary must be named in four places: `rccl_add_micro_binary()` in `test/host/CMakeLists.txt`, the `binaries` array in `run_host_tests.sh`, the `test_configurations` + `test_suites` pair in `configs/ci-precheckin.json`, and the microtest list in `lib/test_executor.py` that llvm-cov reads as `--object`.
+
+### Adding a test
+
+1. **Pick the unit.** If its `.cc` is already `#include`d by a test TU, go to step 3. Otherwise add a `<STEM>_CC_PATH` macro in `test/host/CMakeLists.txt` pointing at the hipified copy, and give the unit its own binary so its file-scope state stays isolated.
+2. **Register the source** in `rccl_define_micro_source_lists()` in `test/host/CMakeLists.txt`, and add any new suite pattern to the target's `test/test_categories_micro*.yaml`.
+3. **Write the `TEST` / fixture.** Use a fixture whose `TearDown()` calls the unit's reset entry point (`ResetP2pFakes()`, …). Install per-test behaviour with `ScopedHook` (`test/host/ScopedHook.h`) rather than editing a fake's default.
+4. **Only exercise faked seams.** A missing external shows up as a link error; a wrongly defaulted hook as an unexpected call. Fakes live in the file named after the production TU that *defines* the symbol.
+5. **Build, run, and re-render coverage** to confirm the new branch is hit.
+
+Read `test/host/MICROTEST_README.md` before adding anything here — it is the standing record of the scaffolding, the per-dependency recipes, and the units currently under test.
+
+### Building and running
+
+`run_host_tests.sh` is the single source of truth for every command the pipeline needs; CI runs each phase as its own step.
+
+```bash
+cd projects/rccl/test/host
+
+./run_host_tests.sh              # all: rccl-configure → hipify → configure →
+                                 #      build → run → coverage
+./run_host_tests.sh build        # one phase at a time
+./run_host_tests.sh run --gtest_filter='BitOps*'
+./run_host_tests.sh coverage     # llvm-cov/lcov reports from the run's profraw
+```
+
+Useful knobs: `ROCM_PATH`, `GPU_TARGETS`, `BUILD_TYPE`, `BUILD_DIR`, `GTEST_FILTER`, `LOG_FILE`, `XML_FILE`, and `HOST_TEST_SHUFFLE` (set it empty to disable gtest shuffling while bisecting a failure).
+
+As part of a normal RCCL build (`./install.sh -t`), `test/host/CMakeLists.txt` is pulled in via `add_subdirectory(host)` and builds the **microtest** targets only (Suite I); `rccl-HostUnitTests` is built by the standalone configuration and by `run_host_tests.sh`. The in-build binaries land under `build/{release,debug}/test/host/`:
+
+```bash
+./install.sh -l -t -j $(nproc)
+cd build/release && make -j $(nproc) rccl-UnitTestsMicro   # tight inner loop
+./build/release/test/host/rccl-UnitTestsMicro \
+    --gtest_filter='P2pMicrotest.IpcRegisterBuffer_NullRegRecordIsNoOp'
+```
+
+The same `CMakeLists.txt` can also be configured standalone, without building all of librccl (ROCm is still a prerequisite — `hipcc --offload-host-only` against the real ROCm headers):
+
+```bash
+cd projects/rccl/test/host
+cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DRCCL_BUILD_DIR=/path/to/projects/rccl/build/release
+cmake --build build -j"$(nproc)"
+./build/rccl-HostUnitTests
+./build/rccl-UnitTestsMicro
+```
+
+Some binaries are preprocessor variants rather than duplicates (`-uncached`, `-faultinj`, `-devlinker`, `-roctx`): the code under test gates those arms at the preprocessor, so one compile can only ever reach one of them.
+
+### Coverage
+
+The host binaries build with llvm source-based coverage by default (`-DHOST_TEST_COVERAGE=ON`; set `OFF` to disable). `./run_host_tests.sh coverage` renders per-binary text/HTML reports plus an overall line/branch union via lcov — the CI metric. For a single unit, run the binary under `LLVM_PROFILE_FILE=…` and use ROCm's `llvm-profdata`/`llvm-cov` scoped to the *hipified* source path; see the Coverage section of `MICROTEST_README.md`. The intended loop is: find an uncovered branch, work out what state reaches it, add a `TEST()`, re-render, note the branch in the commit message.
+
+---
+
+## 12. The Python Test Runner
 
 The Python test runner (`tools/scripts/test_runner/test_runner.py`) is the preferred way to run tests in CI and for systematic coverage sweeps. It reads a JSON config, optionally builds RCCL, dispatches each test individually via `--gtest_filter`, manages per-test timeouts and environment variables, and produces a summary report. It can also re-run failed tests with an escalated debug environment.
 
@@ -492,9 +599,11 @@ The annotated template at `tools/scripts/test_runner/configs/test_config_sample.
 
 To register a new test: add an entry to the `tests` array of the appropriate `test_configurations` block in `ci-precheckin.json` (for single-node tests) or `mi300x_mellanox_ib.json` (for MPI/network tests).
 
+The host-only suites have their own `unit_tests_micro_<stem>` configurations in `ci-precheckin.json`; a new microtest binary must be added there (and to `lib/test_executor.py`'s microtest list, which llvm-cov reads as `--object`) as well as to `test/host/CMakeLists.txt` and `run_host_tests.sh`.
+
 ---
 
-## 12. Multi-Node Testing with `mnctl`
+## 13. Multi-Node Testing with `mnctl`
 
 `docker/mnctl/` is a pure Python 3 tool (no pip dependencies) that builds ROCm Docker containers, deploys them across multiple nodes, wires up inter-container SSH, and leaves you with a ready-to-use MPI cluster.
 
@@ -539,7 +648,7 @@ Full documentation: `docker/mnctl/README.md`.
 
 ---
 
-## 13. Test Infrastructure Reference
+## 14. Test Infrastructure Reference
 
 ### Headers you will use most
 
@@ -558,12 +667,16 @@ Full documentation: `docker/mnctl/README.md`.
 | `common/TestChecks.hpp` | `RCCL_TEST_CHECK`, `HIP_TEST_CHECK`, `MPICHECK`, `TEST_INFO`, `TEST_WARN`, … |
 | `common/EnvVars.hpp` | RAII `SetEnvVar`/`UnsetEnvVar` helpers |
 | `common/TransportUtils.hpp` | Helpers for constructing minimal `ncclComm`/`ncclChannel` structures in transport tests (Suite C) |
+| `host/ScopedHook.h` | Installs, counts and auto-restores a fake's `std::function` seam (Suites H/I) |
+| `host/fakes/*.h` | Controllable seams for externals, named after the production TU that defines the symbol (Suites H/I) |
 
 ### Documentation files in the repo
 
 | File | Content |
 |------|---------|
 | `test/README.md` | Test suite overview |
+| `test/host/MICROTEST_README.md` | Host-only microtest guide: scaffolding, fakes, naming, coverage |
+| `test/host/SUMMARY.md` | `rccl-HostUnitTests` overview (what it contains, how it links) |
 | `test/common/ProcessIsolatedTestFramework.md` | Full `ProcessIsolatedTestRunner` documentation |
 | `test/common/MPITestFramework.md` | Full MPI test framework documentation |
 | `docker/mnctl/README.md` | `mnctl` multi-node Docker tool |
@@ -585,11 +698,15 @@ Full documentation: `docker/mnctl/README.md`.
 
 ---
 
-## 14. Decision Guide — Which Suite?
+## 15. Decision Guide — Which Suite?
 
 ```mermaid
 flowchart TD
-    A([Start]) --> B{"Collective operation?\n(AllReduce, AllGather,\nBroadcast, …)"}
+    A([Start]) --> H{"Can the behaviour be reached\non a CPU, with every external\ndependency replaced by a fake?"}
+
+    H -- "Yes (host logic, static helper,\nerror branch)" --> SH["**Suites H/I** — test/host/\nMicrotest: #include the unit's .cc,\nfake its externals\nFollow test/host/MICROTEST_README.md"]
+
+    H -- No --> B{"Collective operation?\n(AllReduce, AllGather,\nBroadcast, …)"}
 
     B -- Yes --> SA["**Suite A** — rccl-UnitTests\nUse TestBed::RunSimpleSweep()\nFollow any existing *Tests.cpp"]
 
@@ -615,15 +732,15 @@ flowchart TD
 
 ---
 
-## 15. Day-to-Day Cheat Sheet
+## 16. Day-to-Day Cheat Sheet
 
 ### Build commands
 
 ```bash
-# Release (Suites A, B, G)
+# Release (Suites A, B, G, I)
 ./install.sh -t -l
 
-# Debug (Suites A, B, C, F, G)
+# Debug (Suites A, B, C, F, G, I)
 ./install.sh --debug -t -l
 
 # Debug + MPI (all suites)
@@ -656,6 +773,20 @@ NCCL_DEBUG=INFO RCCL_MPI_LOG_ALL_RANKS=1 \
 
 # Suite G (runs inside Suite B binary)
 ./build/release/test/rccl-UnitTestsFixtures --gtest_filter="MyKernelTest.*"
+
+# Suite I — host-only microtests, no GPU required
+./build/release/test/host/rccl-UnitTestsMicro --gtest_filter="P2pMicrotest.*"
+# Suite H is built by the host pipeline / standalone configure, not install.sh
+```
+
+### Host-only pipeline
+
+```bash
+cd projects/rccl/test/host
+./run_host_tests.sh                     # build + run + coverage, end to end
+./run_host_tests.sh build
+./run_host_tests.sh run --gtest_filter='BitOps*'
+./run_host_tests.sh coverage
 ```
 
 ### Python test runner
@@ -765,9 +896,9 @@ LD_LIBRARY_PATH=/opt/rocm/lib HSA_FORCE_FINE_GRAIN_PCIE=1 python3 -m pytest
 
 ---
 
-## 16. rccl-tests — Performance and Correctness
+## 17. rccl-tests — Performance and Correctness
 
-`projects/rccl-tests/` is a standalone performance and correctness tool for RCCL. It is complementary to the unit-test suites (A–C, E–G): the unit tests verify correctness and internal behaviour through GTest, while rccl-tests measures bandwidth and latency at scale and double-checks numerical correctness across collective types, data types, and reduction operations. Typical use cases are performance regression hunting, multi-node characterisation, and validating new hardware configurations.
+`projects/rccl-tests/` is a standalone performance and correctness tool for RCCL. It is complementary to the unit-test suites (A–C, E–I): the unit tests verify correctness and internal behaviour through GTest, while rccl-tests measures bandwidth and latency at scale and double-checks numerical correctness across collective types, data types, and reduction operations. Typical use cases are performance regression hunting, multi-node characterisation, and validating new hardware configurations.
 
 Unlike the unit tests, rccl-tests is a separate project with its own build system. It lives at `projects/rccl-tests/` and is built independently of RCCL's `install.sh`.
 
@@ -928,7 +1059,7 @@ LD_LIBRARY_PATH=/opt/rocm/lib HSA_FORCE_FINE_GRAIN_PCIE=1 \
 
 ### Relationship to the RCCL unit tests
 
-| | rccl-tests | RCCL unit tests (A–C, E–G) |
+| | rccl-tests | RCCL unit tests (A–C, E–I) |
 |-|------------|-----------------------|
 | **Purpose** | Bandwidth, latency, numerical correctness at scale | Functional correctness, internal invariants |
 | **Build** | Separate project (`projects/rccl-tests/`) | Part of `projects/rccl/` via `install.sh -t` |
