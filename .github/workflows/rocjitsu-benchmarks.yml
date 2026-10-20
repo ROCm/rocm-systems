@@ -35,7 +35,15 @@ jobs:
       ran: ${{ steps.benchmark.outcome == 'success' || steps.benchmark.outcome == 'failure' }}
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
-      options: --user 0:0
+      options: >-
+        --user 0:0
+        --cgroup-parent=benchmark.slice
+        --cgroupns=host
+        --cpuset-cpus=0-63
+        --security-opt seccomp=unconfined
+        --volume /sys/fs/cgroup:/sys/fs/cgroup:ro
+        --volume /sys/kernel/sched_ext:/sys/kernel/sched_ext:ro
+        --volume /sys/devices/system/cpu:/sys/devices/system/cpu:ro
       env:
         DEBIAN_FRONTEND: noninteractive
 
@@ -60,7 +68,8 @@ jobs:
             git \
             libclang-rt-dev \
             libdrm-dev \
-            ninja-build
+            ninja-build \
+            util-linux
 
       - name: Checkout rocm-systems
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -116,12 +125,12 @@ jobs:
         id: benchmark
         working-directory: ${{ env.CORPUS_SOURCE_DIR }}
         run: |
-          "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
+          taskset -c 0-15 "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
             --rocjitsu-source-dir "${ROCJITSU_SOURCE_DIR}" \
             --build-dir "${ROCJITSU_BUILD_DIR}" \
             --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json" \
             --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json" \
-            --run-wrapper "\"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
+            --run-wrapper "/usr/bin/python3 -E -s \"${ROCJITSU_SOURCE_DIR}/scripts/benchmark-runner/benchmark_run.py\" -- \"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
             --manifest benchmarks/suites/nightly.toml \
             --output "${ROCJITSU_RESULT_DIR}"
 
@@ -223,7 +232,7 @@ jobs:
                 --data-dir "${GITHUB_WORKSPACE}/publication/rocjitsu-dashboard/data" \
                 --run-id "${RUN_ID}" \
                 --repository "https://github.com/${GITHUB_REPOSITORY}" \
-                --environment-id "rocjitsu-benchmark-u2404-4150afe4-rocm-10.1.0a20260812" \
+                --environment-id "rocjitsu-benchmark-u2404-4150afe4-rocm-10.1.0a20260812-stable-runner-v1" \
                 --expected-sha "${GITHUB_SHA}" \
                 --expected-corpus-sha "${CORPUS_SHA}" \
                 --machine-id "${BENCHMARK_MACHINE}" \

@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Run an unprivileged benchmark with CPU allocation checks, affinity, and ASLR disabled."""
+"""Run a benchmark with CPU allocation checks, affinity, and ASLR disabled."""
 
 import argparse
 import os
@@ -20,6 +20,7 @@ from cpu_policy import (
     CPU_ROOT,
     check_policy,
     cpu_list,
+    format_cpus,
 )
 
 CGROUP_ROOT = Path('/sys/fs/cgroup')
@@ -41,11 +42,15 @@ def check_cpus() -> None:
         cpu_list(CGROUP_ROOT / 'benchmark.slice/cpuset.cpus.effective')
         != BENCHMARK_ALLOWED_CPUS
     ):
-        raise RuntimeError('benchmark.slice must allow exactly CPUs 0-63')
+        raise RuntimeError(
+            f'benchmark.slice must allow exactly CPUs {format_cpus(BENCHMARK_ALLOWED_CPUS)}'
+        )
     current = CGROUP_ROOT / membership[0]
     allowed = cpu_list(current / 'cpuset.cpus.effective')
     if not BENCHMARK_CPUS <= allowed <= BENCHMARK_ALLOWED_CPUS:
-        raise RuntimeError('benchmark cgroup must allow 16-63 within CPUs 0-63')
+        raise RuntimeError(
+            f'benchmark cgroup must allow {format_cpus(BENCHMARK_CPUS)} within CPUs {format_cpus(BENCHMARK_ALLOWED_CPUS)}'
+        )
     for unit in CGROUP_ROOT.iterdir():
         if not unit.is_dir() or unit.name == 'benchmark.slice':
             continue
@@ -67,8 +72,6 @@ def check_scheduler() -> tuple[str, int]:
 
 
 def run(command: list[str]) -> int:
-    if os.geteuid() == 0:
-        raise RuntimeError('benchmark commands must run as an unprivileged user')
     check_cpus()
     check_policy(CPU_ROOT)
     scheduler = check_scheduler()
@@ -82,7 +85,7 @@ def run(command: list[str]) -> int:
             pending.append(signum)
         else:
             try:
-                os.killpg(child.pid, signum)
+                child.send_signal(signum)
             except ProcessLookupError:
                 pass
 
@@ -91,10 +94,12 @@ def run(command: list[str]) -> int:
             handlers[signum] = signal.signal(signum, forward)
         os.sched_setaffinity(0, BENCHMARK_CPUS)
         if os.sched_getaffinity(0) != BENCHMARK_CPUS:
-            raise RuntimeError("benchmark affinity must be exactly 16-63")
+            raise RuntimeError(
+                f'benchmark affinity must be exactly {format_cpus(BENCHMARK_CPUS)}'
+            )
+        # Keep descendants in the harness's process group for timeout cleanup.
         child = subprocess.Popen(
             ["/usr/bin/setarch", os.uname().machine, "-R", *command],
-            start_new_session=True,
         )
         for signum in pending:
             forward(signum, None)

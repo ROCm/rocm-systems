@@ -10,9 +10,11 @@ import os
 from pathlib import Path
 import time
 
-from cpu_policy import CPU_ROOT, FREQUENCY_KHZ, check_policy, policy_settings, read
+from cpu_policy import CPU_ROOT, check_policy, policy_settings, read
 
 SCHED_ROOT = Path('/sys/kernel/sched_ext')
+SCHEDULER_READY_TIMEOUT_SECONDS = 30
+SCHEDULER_READY_POLL_SECONDS = 0.1
 
 
 def write(path: Path, value: str | int) -> None:
@@ -25,14 +27,14 @@ def apply(cpu_root: Path) -> None:
         # Lower min first when necessary to respect the kernel's min <= max rule.
         if path.name == 'scaling_max_freq':
             minimum = path.with_name('scaling_min_freq')
-            if int(read(minimum)) > FREQUENCY_KHZ:
-                write(minimum, FREQUENCY_KHZ)
+            if int(read(minimum)) > int(value):
+                write(minimum, value)
         write(path, value)
     check_policy(cpu_root)
 
 
 def wait_ready(sched_root: Path) -> None:
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + SCHEDULER_READY_TIMEOUT_SECONDS
     while True:
         try:
             if read(sched_root / 'state') == 'enabled':
@@ -40,8 +42,10 @@ def wait_ready(sched_root: Path) -> None:
         except OSError:
             pass
         if time.monotonic() >= deadline:
-            raise ValueError('Bpfland did not become ready within 30 seconds')
-        time.sleep(0.1)
+            raise ValueError(
+                f'Bpfland did not become ready within {SCHEDULER_READY_TIMEOUT_SECONDS} seconds'
+            )
+        time.sleep(SCHEDULER_READY_POLL_SECONDS)
 
 
 def main() -> None:

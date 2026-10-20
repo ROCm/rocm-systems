@@ -1,37 +1,30 @@
 # Set up a benchmark runner
 
-Configure CPU allocation, fixed frequency and idle settings, and Bpfland to
-reduce benchmark noise. Stop the Actions runner before changing these settings.
-
-The configuration files are in
+Reduce benchmark noise with CPU reservation, fixed frequency, idle controls,
+and Bpfland. Configuration files are in
 [`scripts/benchmark-runner`](../scripts/benchmark-runner/).
 
 ## Prerequisites
 
-- A Linux host with systemd, cgroup v2, sched_ext support, Python 3, and
+- A Linux host with systemd, cgroup v2, sched_ext support, Python 3.10 or newer, and
   util-linux (`setarch`).
-- **64 physical cores and 128 online logical CPUs**, with SMT sibling pairs
-  `N,N+64`. Use the fixed CPU masks only with this layout.
-- CPU controls supporting a fixed 3.2 GHz frequency, performance governor/EPP,
-  and idle-state disabling.
 - A `scx_bpfland` 1.1.3 binary built from revision
   `fead94e15184e957469b346b129f412641691bbe`. The service uses default arguments;
   use the same build across runners.
 - An existing GitHub Actions runner service using `runsvc.sh`.
 
-The allocation reserves CPUs `16-63` for benchmarks. Runner control activity
-uses `0-15`; background processes use `0-15,64-79`. CPUs `80-127`, the benchmark
-cores' SMT siblings, remain excluded from background work.
+The supplied configuration uses **64 physical cores and 128 online logical CPUs**,
+with SMT sibling pairs `N,N+64`: benchmarks use `16-63`, runner control activity
+uses `0-15`, and background processes use `0-15,64-79`. The benchmark cores'
+SMT siblings (`80-127`) remain excluded.
 
 ## Install the host configuration
 
-Disable conflicting scheduler and power-management services. Review existing
-CPU restrictions before installing the drop-ins below; preserve any narrower
-allocation.
+Stop the Actions runner and disable conflicting scheduler and power-management
+services. Preserve any narrower CPU restrictions when installing the drop-ins.
 
-Set `SRC`, `BPFLAND`, `EXPECTED_SHA256`, and `RUNNER_USER` for the installation.
-Use the shown destination paths, which match the service files. Run the
-installation commands as root:
+Set the four placeholders below and run as root. Keep the destination paths,
+which match the service files:
 
 ```bash
 set -euo pipefail
@@ -68,24 +61,21 @@ systemd-analyze verify "${SYSTEMD_DIR}/rocjitsu-bpfland.service" "${SYSTEMD_DIR}
 systemctl enable rocjitsu-bpfland.service
 ```
 
-`rocjitsu-bpfland.service` runs `host_setup.py` before starting Bpfland. Setup
-validates the CPU topology and required controls before writing settings. It
-applies fixed 3.2 GHz min/max limits, performance governor/EPP, boost disabling
-on reserved cores and their SMT siblings, and idle-state disabling for exit
-latency ≥10 μs. If per-policy boost controls are unavailable, it disables boost
-globally. Setup verifies the resulting settings. The service then starts Bpfland
-and waits for scheduler readiness.
-CPU setup runs again each time the service starts, including automatic restarts.
+On each start, `rocjitsu-bpfland.service` runs `host_setup.py`, then starts
+Bpfland and waits for readiness. Setup validates topology and controls, then
+applies and verifies these settings on reserved cores and their SMT siblings:
 
-The policy stays applied between jobs. Stopping the service doesn't restore
-defaults. If setup fails after partial writes, resolve it with the runner
-offline before continuing.
+- Min/max frequency set to the CPPC nominal frequency (`acpi_cppc/nominal_freq`).
+- Governor and EPP set to performance; boost disabled (globally if per-policy boost
+  controls are unavailable).
+- Idle states with exit latency ≥10 μs disabled.
+
+Stopping the service doesn't restore defaults. Resolve any partial setup
+failure before restarting the runner.
 
 ## Configure the Actions runner
 
-Install `runner.conf` as a drop-in for the existing runner service. Replace the
-unit name below with the actual `actions.runner.*.service` unit. Use the same
-variables from the installation shell:
+In the same shell, set `RUNNER_UNIT` and install the runner drop-in:
 
 ```bash
 RUNNER_UNIT=actions.runner.REPLACE_WITH_ACTUAL_UNIT.service
@@ -98,15 +88,19 @@ systemctl daemon-reload
 systemctl cat "${RUNNER_UNIT}"
 ```
 
-The drop-in places the runner in `benchmark.slice` with initial affinity
-`0-15`, leaving the wrapper able to select `16-63` for benchmark children. It
-inherits the slice's swap limit and waits for Bpfland before starting the
-runner. If Bpfland stops, the runner stops too; restart the runner after
-scheduler maintenance.
+The runner uses `benchmark.slice` (CPUs `0-63`, no swap) with initial affinity
+`0-15`. It waits for Bpfland and stops if Bpfland stops; restart the runner
+after scheduler maintenance.
 
 Reboot after installing the files so existing background processes pick up the
 CPU restrictions. Bpfland starts at boot and applies the CPU policy before the
 runner starts.
+
+The [benchmark workflow](https://github.com/ROCm/rocm-systems/blob/develop/.github/workflows/rocjitsu-benchmarks.yml)
+sets the Docker CPU limits, host mounts for validation, and
+`seccomp=unconfined` for `setarch -R`. Docker must use the systemd cgroup driver
+with cgroup v2. The container runs under `benchmark.slice`, inheriting its swap
+limit; the harness uses CPUs `0-15` and wrapped workloads use `16-63`.
 
 ## Run benchmarks
 
@@ -114,13 +108,11 @@ Run the wrapper inside the Actions runner service context. Set `INSTALL_DIR`
 to the installation path in that shell:
 
 ```bash
-/usr/bin/python3 "${INSTALL_DIR}/benchmark_run.py" -- \
+/usr/bin/python3 -E -s "${INSTALL_DIR}/benchmark_run.py" -- \
   /PATH_TO_RELEASE_BENCHMARK --WORKLOAD_ARGUMENTS
 ```
 
-The wrapper checks the effective benchmark and background cgroup CPU masks
-and CPU policy before and after execution and confirms affinity `16-63` before
-launching the command. It also requires Bpfland to be enabled and rejects results if the
-scheduler identity or enable sequence changes during execution, including
-internal Bpfland restarts. It doesn't serialize runs; schedule one benchmark
-job at a time.
+The wrapper selects CPUs `16-63`, disables ASLR, and checks CPU allocation,
+CPU policy, and Bpfland before and after execution. It rejects results if the
+policy drifts or Bpfland restarts. Schedule one benchmark job at a time;
+the wrapper doesn't serialize runs.
