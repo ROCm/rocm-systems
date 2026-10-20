@@ -83,14 +83,16 @@ if(EXISTS "${HRR_HIPAMD_SRC}/hip_dispatch_load.hpp")
   # means something with TSan, so it is built when the compiler supports it. It needs
   # hip_dispatch_load.hpp and nothing from HIP, so the probe below covers the one thing
   # that can fail to link: the TSan runtime. GCC's TSan runtime aborts at startup ("unexpected memory mapping") on kernels
-  # with vm.mmap_rnd_bits=32; run it under `setarch $(uname -m) -R` there.
+  # with vm.mmap_rnd_bits=32; the ctest case runs it under `setarch $(uname -m) -R`.
   include(CheckCXXSourceCompiles)
   set(CMAKE_REQUIRED_FLAGS -fsanitize=thread)
   set(CMAKE_REQUIRED_LINK_OPTIONS -fsanitize=thread)
   check_cxx_source_compiles("int main() { return 0; }" HRR_HAVE_TSAN)
   unset(CMAKE_REQUIRED_FLAGS)
   unset(CMAKE_REQUIRED_LINK_OPTIONS)
-  if(HRR_HAVE_TSAN)
+  # Not on Windows: MSVC ignores -fsanitize=thread with a warning, so the probe passes
+  # without TSan, and the test needs __atomic_store_n.
+  if(HRR_HAVE_TSAN AND NOT WIN32)
     add_executable(hrr-unit-tests-tsan hrr_dispatch_load_tsan_test.cc)
     set_target_properties(hrr-unit-tests-tsan PROPERTIES
       CXX_STANDARD 17
@@ -101,7 +103,11 @@ if(EXISTS "${HRR_HIPAMD_SRC}/hip_dispatch_load.hpp")
     target_link_libraries(hrr-unit-tests-tsan PRIVATE Threads::Threads)
     # Building the unit tests builds this one too, so a plain ctest run includes it.
     add_dependencies(hrr-unit-tests hrr-unit-tests-tsan)
-    add_test(NAME hrr-unit-tests-tsan COMMAND hrr-unit-tests-tsan)
+    # Under setarch -R where it works (see above); Docker's seccomp refuses it, so
+    # run the test directly there.
+    add_test(NAME hrr-unit-tests-tsan
+      COMMAND sh -c "if setarch \"$(uname -m)\" -R true 2>/dev/null; then exec setarch \"$(uname -m)\" -R \"$0\"; else exec \"$0\"; fi"
+              $<TARGET_FILE:hrr-unit-tests-tsan>)
   endif()
 endif()
 
