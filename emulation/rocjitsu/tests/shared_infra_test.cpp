@@ -3201,6 +3201,21 @@ TEST(DppPermuteTest, RowShareAndXmask) {
   EXPECT_EQ(dpp_permute(0x161, 17, 64, oob), 16);
 }
 
+TEST(DppPermuteTest, OutOfBoundsClassificationMatchesLaneMapping) {
+  using namespace amdgpu::dpp;
+  for (uint32_t control = 0; control <= ROW_XMASK_MAX; ++control) {
+    if (!dpp_ctrl_is_valid(control, true, true, true))
+      continue;
+    bool any_oob = false;
+    for (int lane = 0; lane < 64; ++lane) {
+      bool oob = false;
+      dpp_permute(control, lane, 64, oob);
+      any_oob |= oob;
+    }
+    EXPECT_EQ(dpp_ctrl_produces_oob(control), any_oob) << "control=" << control;
+  }
+}
+
 TEST(DppPermuteTest, RowBroadcasts) {
   using namespace amdgpu::dpp;
   bool oob = false;
@@ -3219,8 +3234,8 @@ TEST(DppPermuteTest, RowBroadcasts) {
   EXPECT_FALSE(oob);
 
   oob = false;
-  dpp_permute(ROW_BCAST15, 15, 64, oob);
-  EXPECT_TRUE(oob);
+  EXPECT_EQ(dpp_permute(ROW_BCAST15, 15, 64, oob), 15);
+  EXPECT_FALSE(oob);
 
   oob = false;
   EXPECT_EQ(dpp_permute(ROW_BCAST31, 32, 64, oob), 31);
@@ -3229,8 +3244,8 @@ TEST(DppPermuteTest, RowBroadcasts) {
   EXPECT_FALSE(oob);
 
   oob = false;
-  dpp_permute(ROW_BCAST31, 31, 64, oob);
-  EXPECT_TRUE(oob);
+  EXPECT_EQ(dpp_permute(ROW_BCAST31, 31, 64, oob), 31);
+  EXPECT_FALSE(oob);
 }
 
 TEST(DppPermuteTest, Dpp8SelectsWithinGroupsOfEight) {
@@ -3334,11 +3349,9 @@ TEST(DppPermuteTest, WriteMaskHonorsBoundCtrlAndBroadcastValidity) {
   EXPECT_EQ(mask, ~0ULL);
 
   mask = dpp_source_write_mask(64, ROW_BCAST15, 0, 1, ~0ULL, false);
-  EXPECT_EQ(mask, 0xFFFFFFFFFFFF0000ULL);
+  EXPECT_EQ(mask, ~0ULL);
   mask = dpp_source_write_mask(64, ROW_BCAST31, 0, 1, ~0ULL, false);
-  EXPECT_EQ(mask, 0xFFFFFFFF00000000ULL);
-  mask = dpp_source_write_mask(32, ROW_BCAST15, 0, 1, ~0ULL, false);
-  EXPECT_EQ(mask, 0xFFFF0000ULL);
+  EXPECT_EQ(mask, ~0ULL);
 
   EXPECT_EQ(dpp_row_bank_mask(64, 0xD, 0xF), 0xFFFFFFFF0000FFFFULL);
   EXPECT_EQ(dpp_row_bank_mask(64, 0xF, 0xD), 0xFF0FFF0FFF0FFF0FULL);
@@ -3729,32 +3742,43 @@ template <typename Traits> void cdna_generated_vop1_uses_shared_row_broadcast() 
 
   constexpr uint32_t kSrc = 4;
   constexpr uint32_t kDst = 8;
-  uint32_t vbase = wf->vgpr_alloc().base;
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    cu->write_vgpr(vbase + kSrc, lane, 0x1000u + lane);
-    cu->write_vgpr(vbase + kDst, lane, 0xDEAD0000u + lane);
+  const uint32_t vbase = wf->vgpr_alloc().base;
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard force_scalar_guard(force_scalar);
+    SCOPED_TRACE(force_scalar ? "scalar" : "simd");
+    for (bool alias : {false, true}) {
+      const uint32_t dst = alias ? kSrc : kDst;
+      SCOPED_TRACE(testing::Message() << "alias=" << alias);
+      for (uint32_t dpp_ctrl : {amdgpu::dpp::ROW_BCAST15, amdgpu::dpp::ROW_BCAST31}) {
+        SCOPED_TRACE(testing::Message() << "dpp_ctrl=" << dpp_ctrl);
+        for (uint32_t bound_ctrl : {0u, 1u}) {
+          SCOPED_TRACE(testing::Message() << "bound_ctrl=" << bound_ctrl);
+          // Seed the source last so it also wins when the destination aliases it.
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+            cu->write_vgpr(vbase + dst, lane, 0xDEAD0000u + lane);
+            cu->write_vgpr(vbase + kSrc, lane, 0x1000u + lane);
+          }
+          typename Traits::Vop1VopDppMachineInst raw{};
+          raw.src0 = amdgpu::SRC_DPP;
+          raw.vsrc0 = kSrc;
+          raw.vdst = dst;
+          raw.dpp_ctrl = dpp_ctrl;
+          raw.bound_ctrl = bound_ctrl;
+          raw.bank_mask = 0xF;
+          raw.row_mask = 0xF;
+          typename Traits::VMovB32Vop1 inst(
+              reinterpret_cast<const typename Traits::MachineInst *>(&raw));
+          inst.execute_impl(*wf);
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+            const uint32_t source = dpp_ctrl == amdgpu::dpp::ROW_BCAST15
+                                        ? (lane < 16 ? lane : (lane & ~15u) - 1)
+                                        : (lane < 32 ? lane : 31);
+            EXPECT_EQ(cu->read_vgpr(vbase + dst, lane), 0x1000u + source) << lane;
+          }
+        }
+      }
+    }
   }
-
-  typename Traits::Vop1VopDppMachineInst raw{};
-  raw.src0 = amdgpu::SRC_DPP;
-  raw.vsrc0 = kSrc;
-  raw.vdst = kDst;
-  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
-  raw.bound_ctrl = 1;
-  raw.bank_mask = 0xF;
-  raw.row_mask = 0xF;
-
-  typename Traits::VMovB32Vop1 inst(reinterpret_cast<const typename Traits::MachineInst *>(&raw));
-  inst.execute_impl(*wf);
-
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), 0u);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 15), 0u);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 16), 0x100Fu);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 31), 0x100Fu);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 32), 0x101Fu);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 47), 0x101Fu);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 48), 0x102Fu);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 63), 0x102Fu);
 }
 
 template <typename Traits> void cdna_generated_vop1_dpp_write_mask_honors_bound_ctrl() {
@@ -3791,7 +3815,7 @@ template <typename Traits> void cdna_generated_vop1_dpp_write_mask_honors_bound_
   raw.src0 = amdgpu::SRC_DPP;
   raw.vsrc0 = kSrc;
   raw.vdst = kDst;
-  raw.dpp_ctrl = amdgpu::dpp::ROW_BCAST15;
+  raw.dpp_ctrl = amdgpu::dpp::ROW_SHR1;
   raw.bound_ctrl = 0;
   raw.bank_mask = 0xF;
   raw.row_mask = 0xF;
@@ -3800,13 +3824,13 @@ template <typename Traits> void cdna_generated_vop1_dpp_write_mask_honors_bound_
   inst.execute_impl(*wf);
 
   EXPECT_EQ(cu->read_vgpr(vbase + kDst, 0), 0xDEAD0000u);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 15), 0xDEAD000Fu);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 16), 0x100Fu);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 31), 0x100Fu);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 32), 0x101Fu);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 47), 0x101Fu);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 48), 0x102Fu);
-  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 63), 0x102Fu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 15), 0x100Eu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 16), 0xDEAD0010u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 31), 0x101Eu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 32), 0xDEAD0020u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 47), 0x102Eu);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 48), 0xDEAD0030u);
+  EXPECT_EQ(cu->read_vgpr(vbase + kDst, 63), 0x103Eu);
 }
 
 template <typename Traits> void wave32_generated_vop1_dpp_write_mask_honors_bound_ctrl() {
