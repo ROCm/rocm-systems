@@ -1511,7 +1511,7 @@ The event wire format (finding H5):
   shrinking `reserved` to 2 bytes), so kernel launches with large serialized payloads
   (many args / long mangled names / large by-value structs) up to ~4 GiB are recorded
   normally instead of being dropped at 65535 bytes. This is the change that bumped
-  `HRR_VERSION` to 4; the current version is 9, see Archive Format above. The
+  `HRR_VERSION` to 4; the current version is 10, see Archive Format above. The
   writer's single-record buffer path now writes any oversized record straight through.
 - **Per-argument size limit (64 KiB) now fails loudly.** Each kernel arg's size is still
   a `uint16_t`. A by-value struct argument ≥ 64 KiB cannot be represented, so the launch
