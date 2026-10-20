@@ -9,12 +9,14 @@ For every arch in src/rocprof_compute_soc/metric_library/, check that:
   2. metrics and variables have the required fields and types; "peak" is a
      theoretical peak and "peak_empirical" a roofline benchmark ceiling;
   3. every ceiling the roofline benchmark measures on the arch is the
-     "peak_empirical" of exactly one metric, or is in CEILINGS_WITHOUT_METRIC;
+     "peak_empirical" of exactly one metric, or is in CEILINGS_WITHOUT_METRIC or the
+     arch's ARCH_CEILINGS_WITHOUT_METRIC, and each entry there is measured;
   4. metric ids look like "{category}.{subcategory}_{name}", name hardware rather than
      a view, and live in the file named after their category, so each id is unique on
      the arch;
-  5. no two metrics on the arch share a formula or a name;
-  6. units use one spelling;
+  5. no two metrics on the arch share a formula (except SHARED_FORMULA_IDS) or a name;
+  6. units use one spelling, and each metric id has one name and one unit on every
+     arch;
   7. the library matches analysis_configs: every equation a row shows is a library
      formula (DISPLAY_VARIANTS list the rows that show one in another form), every
      formula is shown, every row's unit is its metric's unit (except UNIT_VARIANTS),
@@ -40,7 +42,7 @@ from format_yaml import normalize_equation
 
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
-from roofline.benchmark.ceilings import measured_ceilings
+from roofline.benchmark.ceilings import ALL_CEILINGS, measured_ceilings
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED
 from utils.metric_library import (
     METRIC_LIBRARY_ID_RE,
@@ -549,13 +551,20 @@ def _ceiling_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
             errors.append(f"[{arch}] {metric_ids}: share the ceiling {ceiling}")
         elif ceiling in without_metric:
             errors.append(
-                f"[{arch}] {metric_ids}: {ceiling} is in CEILINGS_WITHOUT_METRIC"
+                f"[{arch}] {metric_ids}: {ceiling} is listed as a ceiling without a "
+                "metric"
             )
     errors.extend(
         f"[{arch}] the roofline benchmark measures {ceiling}, but no metric has it as "
         "'peak_empirical'; add it to the metric it bounds, or to "
-        "CEILINGS_WITHOUT_METRIC"
+        "CEILINGS_WITHOUT_METRIC or ARCH_CEILINGS_WITHOUT_METRIC"
         for ceiling in sorted(measured - set(users) - without_metric)
+    )
+    errors.extend(
+        f"[{arch}] ARCH_CEILINGS_WITHOUT_METRIC lists {ceiling}, which the roofline "
+        f"benchmark does not measure on {arch}; remove it"
+        for ceiling in ARCH_CEILINGS_WITHOUT_METRIC.get(arch, ())
+        if ceiling not in measured
     )
     return errors
 
@@ -781,7 +790,8 @@ def _peak_errors(
     Each row's peak is its metric's "peak" or "peak_empirical", and each library peak
     is the peak of a row that shows the metric. A Bytes/s row shows its peak in Bytes/s.
     A row's measured peak is skipped where the roofline benchmark does not measure that
-    ceiling on the arch (always, on an arch without a benchmark).
+    ceiling on the arch (always, on an arch without a benchmark); a ceiling no
+    benchmark writes is still an error.
     """
     measured = _arch_ceilings(arch)
     errors = []
@@ -790,7 +800,7 @@ def _peak_errors(
         if row.peak is None or metric_id is None:
             continue
         ceiling = EMPIRICAL_PEAK_RE.search(row.peak)
-        if ceiling and ceiling.group(1) not in measured:
+        if ceiling and ceiling.group(1) in ALL_CEILINGS - measured:
             continue
         metric = library.metrics[metric_id]
         fields = [
@@ -943,7 +953,7 @@ def _gpu_series(arch: str) -> Optional[str]:
 
 
 def _member_arch(arch: str) -> str:
-    """Return a GPU arch that uses arch's analysis configs (gfx1151 for gfx115x)."""
+    """Return a GPU arch that uses arch's analysis configs (gfx1150 for gfx115x)."""
     return next(
         gpu_arch
         for gpu_arch in sorted(mi_gpu_specs.get_gpu_series_dict())
