@@ -108,10 +108,6 @@ indicates whether the kernel has ``CONFIG_PCI_P2PDMA`` set in its config.
      - Rocky Linux 9.8 (Blue Onyx)
      - ``5.14.0-687.49.1.el9_8.x86_64``
      - Yes
-   * - sles-15.7
-     - openSUSE Leap 15.6
-     - ``6.4.0-150600.23.103-default``
-     - Yes
    * - sles-15.7-native
      - SLES 15 SP7
      - ``6.4.0-150700.53.81-default``
