@@ -60,9 +60,10 @@ types each device skips. The validator checks, for every arch:
 
 - every ceiling the benchmark measures on a device of the arch is the `peak_empirical`
   of exactly one metric, or is listed in `CEILINGS_WITHOUT_METRIC` (the VALU integer
-  rates `I8Ops`, `I32Ops` and `I64Ops`; `MALLBw`, which analyze skips; and the gfx950
-  `MFMAF4Flops` and `MFMAF6Flops`, where the roofline shows only the combined F6F4 rate:
-  no row shows them as a peak);
+  rates `I8Ops`, `I32Ops` and `I64Ops`, and `MALLBw`, which analyze skips: no row shows
+  them as a peak), or in `ARCH_CEILINGS_WITHOUT_METRIC` for the rates one arch's roofline
+  combines or does not show (the gfx950 F4 and F6 MFMA rates, the gfx115x F16 and BF16
+  VALU rates);
 - no metric names a ceiling the arch does not measure.
 
 So a new ceiling, or a new arch, fails validation until a metric claims each ceiling.
@@ -655,7 +656,10 @@ measures, and SQ instruction counters (`SQ_*INST*`) are `compute`. An arithmetic
 intensity combines SQ FLOPs with one memory level's bytes, and takes the category of that
 level (`l2.ai`). Memory categories use the names the docs and panels use (`l2`, `vl1d`,
 `sl1d`, `l1i`) rather than block names (`tcc`, `tcp`, `sqc`), which change between
-families.
+families. The RDNA bases use RDNA block names for the hardware CDNA has no category for
+(`gl0`, `gl1`, `gl2`, `gcea`, `wgp`, ...), and keep the CDNA id, and so the CDNA file, for
+a concept both families share (`l2.bw`, `wave.occupancy`, `lds.util`); units both
+families have keep the CDNA names (`l1i`, `sl1d`, `lds`, `compute`, `wave`, `dispatch`).
 
 **Identity across archs (row continuity).** A child arch keeps its parent's id for every
 metric it still shows; a changed equation is an override of that id, never a new id. Two
@@ -683,6 +687,11 @@ label names the listed id shows that id.
 | `td` | TD (data return) | `td.yaml` | `td.busy`, `td.spi_stall` |
 | `vl1d` | TCP (with TA inputs, e.g. coalescing: AMD defines the vL1D as TA + TC + TD) | `vl1d.yaml` | `vl1d.cache_bw`, `vl1d.l2_rd_bw`, `vl1d.ai` |
 | `wave` | SQ wave state: occupancy, wave cycles and their wait/active breakdown, save/restore | `wave.yaml` | `wave.occupancy`, `wave.cycles`, `wave.issue_wait_cycles` |
+| `gl0` | RDNA GL0 vector cache (TCP on gfx115x) | `gl0.yaml` | `gl0.hit_rate`, `gl0.gl1_rd_bw` |
+| `gl1` | RDNA GL1 cache | `gl1.yaml` | `gl1.hit_rate`, `gl1.gl2_bw` |
+| `gl2` | RDNA GL2 cache, apart from the concepts shared with `l2` | `gl2.yaml` | `gl2.hit_rate`, `gl2.fabric_rd_bw` |
+| `gcea` | gfx115x Graphics Core Efficiency Arbiter (DRAM interface) | `gcea.yaml` | `gcea.dram_rd_bw` |
+| `wgp` | RDNA workgroup processor | `wgp.yaml` | `wgp.util` |
 
 The numeric positional IDs (e.g. `"11.2.2"`) are row positions in `analysis_configs`;
 the metric library does not store them.
