@@ -11,6 +11,7 @@ on:
         type: string
       artifact_run_id:
         type: string
+        required: true
       workload:
         # A key of WORKLOAD_CONFIGS in test_madengine.py, which validates it.
         # workflow_call inputs cannot be typed as choice, so the list of
@@ -53,9 +54,13 @@ on:
       test_runs_on:
         type: string
         default: 'ruby-linux-slurm-scale-runner'
+      # No default: its RCCL is the A/B candidate, so the dispatcher picks the
+      # build. The latest TheRock run would carry TheRock's pinned RCCL, not
+      # this repository's.
       artifact_run_id:
-        description: 'Reuse artifacts from a previous build run ID'
+        description: 'rocm-systems run ID whose RCCL build is the A/B candidate (e.g. a develop nightly of TheRock CI for rccl)'
         type: string
+        required: true
       workload:
         description: 'MADEngine workload to run'
         type: choice
@@ -207,33 +212,15 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install -r requirements.txt
 
-      - name: Resolve TheRock artifact run
-        if: ${{ inputs.artifact_run_id == '' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          run_id="$(python3 -c "
-          import sys, contextlib
-          sys.path.insert(0, 'build_tools')
-          from find_latest_artifacts import find_latest_artifacts
-          with contextlib.redirect_stdout(sys.stderr):
-              results = find_latest_artifacts(
-                  artifact_groups=['${{ inputs.artifact_group }}'],
-                  verbose=True,
-              )
-          if not results:
-              print('No artifacts found for ${{ inputs.artifact_group }}', file=sys.stderr)
-              sys.exit(1)
-          print(results[0].workflow_run_id)
-          ")"
-          echo "Resolved TheRock run_id=${run_id}"
-          echo "ARTIFACT_RUN_ID=${run_id}" >> $GITHUB_ENV
-
       - name: Fetch RCCL artifacts
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          # `required` does not stop an API dispatch from passing an empty string.
+          if [ -z "${ARTIFACT_RUN_ID}" ]; then
+            echo "::error::artifact_run_id is required: it names the RCCL build tested as the candidate"
+            exit 1
+          fi
           python3 build_tools/install_rocm_from_artifacts.py \
             --run-id="${ARTIFACT_RUN_ID}" \
             --artifact-group="${{ inputs.artifact_group }}" \
