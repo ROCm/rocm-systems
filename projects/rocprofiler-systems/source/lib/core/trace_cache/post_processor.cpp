@@ -3,10 +3,12 @@
 
 #include "core/trace_cache/post_processor.hpp"
 
+#include "common/env_vars.hpp"
 #include "core/agent_manager.hpp"
 #include "core/config.hpp"
 #include "core/output/output_summary.hpp"
 #include "core/perfetto/engine.hpp"
+#include "core/timemory.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
@@ -14,6 +16,7 @@
 #include "core/trace_cache/sample_processor.hpp"
 #include "core/trace_cache/storage_parser_alias.hpp"
 #include "core/trace_cache/unified_memory_processor.hpp"
+#include "core/trace_cache/wall_clock_processor.hpp"
 #include "core/track_registry.hpp"
 #include "library/runtime.hpp"
 #include "logger/debug.hpp"
@@ -26,6 +29,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace rocprofsys::trace_cache
@@ -55,6 +59,33 @@ sum_storage_bytes(const std::vector<std::shared_ptr<data::processor_config_t>>& 
             utility::get_buffered_storage_filename(cfg->_ppid, cfg->_pid));
     }
     return total;
+}
+
+wall_clock_options
+make_wall_clock_options(const data::processor_config_t& process)
+{
+    auto const is_on = [](const char* name, bool fallback) {
+        return config::get_setting_value<bool>(std::string{ name }).value_or(fallback);
+    };
+    auto const files =
+        is_on(env_vars::FILE_OUTPUT, true) &&
+        config::output_filtering::is_file_output_enabled_for_current_mpi_rank();
+    auto const suffix =
+        process._pid == process._ppid
+            ? std::visit([](const auto& value) { return fmt::format("{}", value); },
+                         settings::default_process_suffix())
+            : std::to_string(process._pid);
+    return wall_clock_options{
+        .layout = { .flat     = is_on(env_vars::FLAT_PROFILE, false),
+                    .timeline = is_on(env_vars::TIMELINE_PROFILE, false) },
+        .text   = files && is_on(env_vars::TEXT_OUTPUT, true),
+        .json   = files && is_on(env_vars::JSON_OUTPUT, true),
+        .cout   = is_on(env_vars::COUT_OUTPUT, false),
+        .rank   = static_cast<std::int32_t>(config::get_mpi_rank_from_env().value_or(0)),
+        .mpi_size =
+            static_cast<std::int32_t>(config::get_mpi_world_size_from_env().value_or(1)),
+        .suffix = suffix,
+    };
 }
 
 void
@@ -102,6 +133,17 @@ configure_processors(
             _config->_agent_manager, _config->_pid);
         _coordinator->add_handler(storage.unified_memory_processor);
         LOG_DEBUG("Unified memory processor enabled for PID {}", _config->_pid);
+    }
+
+    if(_formats.is_wall_clock_enabled())
+    {
+        auto const options = make_wall_clock_options(*_config);
+        if(options.text || options.json || options.cout)
+        {
+            _coordinator->add_handler(std::make_shared<wall_clock_processor_t>(
+                _config->_metadata_registry, _config->_agent_manager, _config->_pid,
+                options));
+        }
     }
 
     return storage;
