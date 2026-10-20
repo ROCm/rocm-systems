@@ -290,8 +290,8 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
         return std::optional<tim::unwind::processed_entry>{};
     }
 
-    auto _v    = tim::unwind::processed_entry{};
-    _v.address = _entry.address();
+    auto _v                                           = tim::unwind::processed_entry{};
+    _v.address                                        = _entry.address();
     static constexpr std::size_t k_proc_name_buf_size = 4096;
     // Workaround for a regression introduced in libunwind 1.6.x: a null-pointer
     // dereference inside _ULx86_64_get_proc_name (via __sigaction at offset 0x38)
@@ -318,7 +318,8 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
         }
     }
 #else
-    _v.name = _entry.template get_name<k_proc_name_buf_size, true>(*_context_p, &_v.offset, &_v.error);
+    _v.name = _entry.template get_name<k_proc_name_buf_size, true>(*_context_p,
+                                                                   &_v.offset, &_v.error);
 #endif
 
     tim::unwind::processed_entry::construct(_v, &_cache_p->files);
