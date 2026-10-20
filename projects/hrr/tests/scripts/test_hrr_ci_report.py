@@ -54,6 +54,22 @@ class ClassifyTest(unittest.TestCase):
         self.assertEqual(rows[0]["conclusion"], "queued")
 
 
+class RocJitsuJobTest(unittest.TestCase):
+    def test_rocjitsu_job_counts_as_the_family_integration_job(self):
+        rows = rpt.classify_jobs(
+            [
+                {"name": "GPU / rocJitsu (gfx90a)", "conclusion": "success", "html_url": "u1"},
+                {"name": "GPU / rocJitsu (gfx94x)", "conclusion": "failure", "html_url": "u2"},
+            ]
+        )
+        self.assertEqual(
+            [(r["kind"], r["name"], r["conclusion"]) for r in rows],
+            [("Integration", "gfx90a", "success"), ("Integration", "gfx94x", "failure")],
+        )
+        families = [{"family": "gfx90a"}, {"family": "gfx94x"}]
+        self.assertEqual(rpt.missing_families(families, rows), [])
+
+
 class OverallTest(unittest.TestCase):
     def test_failure_or_cancel_fails(self):
         self.assertFalse(rpt.overall_ok(rpt.classify_jobs(JOBS), []))

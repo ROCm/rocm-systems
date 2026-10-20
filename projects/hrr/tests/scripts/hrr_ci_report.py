@@ -36,7 +36,8 @@ JOB_PATTERNS = (
     ("Script tests", re.compile(r"^HRR script tests$")),
     ("Unit", re.compile(r"(?:^|/ )Unit \((?P<name>[^)]+)\)$")),
     ("Build", re.compile(r"(?:^|/ )Build capture-enabled HIP and HRR$")),
-    ("Integration", re.compile(r"(?:^|/ )Integration \((?P<name>[^)]+)\)$")),
+    # The real-GPU job is "Integration (<family>)", the rocJitsu one "rocJitsu (<family>)".
+    ("Integration", re.compile(r"(?:^|/ )(?:Integration|rocJitsu) \((?P<name>[^)]+)\)$")),
 )
 BAD_CONCLUSIONS = {"failure", "cancelled", "timed_out", "startup_failure"}
 
