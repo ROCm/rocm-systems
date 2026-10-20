@@ -148,6 +148,7 @@ jobs:
           sparse-checkout: |
             emulation/rocjitsu
             projects/hrr/tests
+            runtimes/api-headers
             shared/machine-readable-isa
 
       - name: Checkout TheRock artifact tools
