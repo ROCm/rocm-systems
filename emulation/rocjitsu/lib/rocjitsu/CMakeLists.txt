@@ -30,8 +30,15 @@ target_include_directories(
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
+option(
+    RJ_BUILD_CONSAN_COMPILER
+    "Build the experimental offline ConSan compiler"
+    OFF
+)
+
 add_subdirectory(src/rocjitsu/code/analysis)
 add_subdirectory(src/rocjitsu/code)
+add_subdirectory(src/rocjitsu/code/consan)
 add_subdirectory(src/rocjitsu/isa)
 
 # Private static-analysis composition. It owns no default ISA registry: each
@@ -105,6 +112,10 @@ set_target_properties(
     rocjitsu_dbt_internal
     PROPERTIES POSITION_INDEPENDENT_CODE ON
 )
+
+if(RJ_BUILD_CONSAN_COMPILER)
+    add_subdirectory(src/rocjitsu/code/patch/consan)
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Fixed-profile gfx1250 B0-to-A0 translator. Its default registry contains

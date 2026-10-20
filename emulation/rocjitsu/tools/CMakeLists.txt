@@ -62,7 +62,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
     target_link_libraries(
         rj_pretranslate
-        PRIVATE rocjitsu_gfx1250_b0_to_a0 Threads::Threads ${CMAKE_DL_LIBS}
+        PRIVATE rocjitsu_gfx1250_b0_to_a0 util Threads::Threads ${CMAKE_DL_LIBS}
     )
     rj_configure_target(rj_pretranslate PRIVATE_INCLUDES WARNINGS)
     # Bind to the translator installed beside us. Two copies would carry two
@@ -72,4 +72,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rj_pretranslate
         PROPERTIES INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
     )
+endif()
+
+if(RJ_BUILD_CONSAN_COMPILER)
+    add_executable(rj_consan_prepare rj_consan_prepare.cpp)
+    target_link_libraries(
+        rj_consan_prepare
+        PRIVATE rocjitsu_consan_compiler rocjitsu_amdgpu_isa_model_registry
+    )
+    rj_configure_target(rj_consan_prepare PRIVATE_INCLUDES WARNINGS)
 endif()
