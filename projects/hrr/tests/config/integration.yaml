@@ -55,20 +55,26 @@ cases:
   Unit_HRR_CaptureCapabilities_Direct: {}
   Unit_HRR_CaptureClosesArchiveDirs: {}
   Unit_HRR_CaptureClosesArchiveDirs_Direct: {}
+  Unit_HRR_CaptureCrashChainBusyLog_Direct: {}
   Unit_HRR_CaptureCrashChainErrno_Direct: {}
   Unit_HRR_CaptureCrashChainFault_Direct: {}
   Unit_HRR_CaptureCrashChainIgnored_Direct: {}
   Unit_HRR_CaptureCrashChainLogRecovery_Direct: {}
   Unit_HRR_CaptureCrashChainRecording_Direct: {}
   Unit_HRR_CaptureCrashChainResetHand_Direct: {}
+  Unit_HRR_CaptureCrashChainTrap_Direct: {}
+  Unit_HRR_CaptureCrashChainUninstall_Direct: {}
   Unit_HRR_CaptureCrashChain_Direct: {}
   Unit_HRR_CaptureCrashChainsAsyncLogRecovers: {}
+  Unit_HRR_CaptureCrashChainsBusyLog: {}
   Unit_HRR_CaptureCrashChainsEarlierHandler: {}
   Unit_HRR_CaptureCrashChainsFaultKeepsThread: {}
+  Unit_HRR_CaptureCrashChainsKeepAfterUninstall: {}
   Unit_HRR_CaptureCrashChainsKeepErrno: {}
   Unit_HRR_CaptureCrashChainsKeepIgnore: {}
   Unit_HRR_CaptureCrashChainsRecoverWhileRecording: {}
   Unit_HRR_CaptureCrashChainsResetHandOnce: {}
+  Unit_HRR_CaptureCrashChainsTrapDies: {}
   Unit_HRR_CaptureCrashChainsWithAsyncLog: {}
   Unit_HRR_CaptureCrashDuringFork: {}
   Unit_HRR_CaptureCrashDuringFork_Direct: {}

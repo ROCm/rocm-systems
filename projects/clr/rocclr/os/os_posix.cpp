@@ -142,6 +142,30 @@ static std::atomic<Os::CrashCallback> crashCallbacks_[kMaxCrashCallbacks];
 static std::mutex crashHandlersLock_;
 static bool crashHandlersInstalled_ = false;  // Guarded by crashHandlersLock_
 
+// True for a fault that its instruction raises again when the thread retries it
+static bool faultsAgain(int sig, const siginfo_t* info) {
+  if (info == nullptr) {
+    return false;
+  }
+  const int code = info->si_code;
+  switch (sig) {
+    case SIGSEGV:
+#ifdef SEGV_PKUERR
+      if (code == SEGV_PKUERR) {
+        return true;
+      }
+#endif
+      return code == SEGV_MAPERR || code == SEGV_ACCERR;
+    case SIGBUS:
+      return code == BUS_ADRALN || code == BUS_ADRERR || code == BUS_OBJERR;
+    case SIGILL:
+    case SIGFPE:
+      return code > 0 && code != SI_KERNEL;
+    default:
+      return false;
+  }
+}
+
 static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
   // The earlier handler, and the thread if it recovers, see the errno of the fault
   const int savedErrno = errno;
@@ -168,7 +192,12 @@ static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
       !((old.sa_flags & SA_RESETHAND) && oldCrashHandlerSpent_[i].exchange(true))) {
     // Run it with the mask the kernel would have given it: the interrupted
     // thread's mask, its sa_mask, and the signal itself unless SA_NODEFER.
-    sigset_t mask = static_cast<ucontext_t*>(context)->uc_sigmask;
+    sigset_t mask;
+    if (context != nullptr) {
+      mask = static_cast<ucontext_t*>(context)->uc_sigmask;
+    } else {
+      pthread_sigmask(SIG_BLOCK, nullptr, &mask);
+    }
     sigset_t entry;
     sigorset(&mask, &mask, &old.sa_mask);
     if ((old.sa_flags & SA_NODEFER) == 0) {
@@ -186,10 +215,12 @@ static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
 
   // As without CLR's handler: a signal sent by a process to an ignored crash
   // signal is dropped. Anything else gets the default action on this thread. A
-  // fault the kernel raised (si_code > 0) faults again on return, so the core
-  // dump records it with its own thread and address; a sent one is sent again.
-  const bool fault = info != nullptr && info->si_code > 0 && sig != SIGABRT;
-  if (old.sa_handler == SIG_IGN && !fault) {
+  // fault its instruction raises again when retried faults again on return, so
+  // the core dump records it with its own thread and address. Anything else is
+  // raised again: a sent signal, a trap the kernel reports past its instruction
+  // (SI_KERNEL), a machine check.
+  const bool sent = info == nullptr || info->si_code <= 0;
+  if (old.sa_handler == SIG_IGN && sent) {
     return;
   }
   struct sigaction dfl;
@@ -197,7 +228,7 @@ static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
   sigemptyset(&dfl.sa_mask);
   dfl.sa_handler = SIG_DFL;
   sigaction(sig, &dfl, nullptr);
-  if (!fault) {
+  if (!faultsAgain(sig, info)) {
     raise(sig);
   }
 }
