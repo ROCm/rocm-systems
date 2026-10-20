@@ -146,8 +146,9 @@ typedef struct rj_vm_gpu_info_t {
 /// @param[out] vm The newly created VM handle.
 /// @retval ROCJITSU_STATUS_SUCCESS VM was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_INVALID_FILE The JSON file could not be opened.
-/// @retval ROCJITSU_STATUS_ERROR Parsing or construction failed.
+/// @retval ROCJITSU_STATUS_INVALID_FILE The file could not be opened or read,
+/// config parsing or validation failed, or an exception was caught during VM creation.
+/// @retval ROCJITSU_STATUS_ERROR The loaded configuration does not contain a SoC.
 RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm);
 
 /// @brief Create a VM from a JSON configuration string.
@@ -156,8 +157,9 @@ RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode,
 /// @param[in] mode VM creation mode (DEFAULT, LOCAL, or DAEMON).
 /// @param[out] vm The newly created VM handle.
 /// @retval ROCJITSU_STATUS_SUCCESS VM was created successfully.
-/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_ERROR Parsing or construction failed.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL, config parsing
+/// or validation failed, or an exception was caught during VM creation.
+/// @retval ROCJITSU_STATUS_ERROR The loaded configuration does not contain a SoC.
 RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode,
                                                    rj_vm_t **vm);
 

@@ -11,11 +11,13 @@
 #[cfg(test)]
 use super::test_driver;
 use super::{
-    AddressSpaceInfo, AllocationOperations, Driver, GpuDriver, KfdDriver, KfdEventSubscription,
-    linux_kfd,
+    AddressSpaceInfo, AllocationOperations, Driver, GpuDriver, GpuInstrumentationOperations,
+    GpuKernelQueueOperations, GpuUserQueueOperations, KfdDriver, KfdEventSubscription, linux_kfd,
 };
 use crate::device::event::DeviceEvent;
-use crate::device::gpu::profiling::ClockCounters;
+use crate::device::gpu::profiling::{
+    ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet,
+};
 use crate::memory::storage::Shared;
 use crate::session::DriverContextLifetime;
 use crate::topology::{Endpoint, EndpointDetails};
@@ -28,14 +30,29 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// Adding a driver implementation adds a variant here and in [`DeviceDriverState`]
 /// without adding GPU capabilities to the common [`Driver`] trait.
 pub(crate) enum DriverInstance {
+    /// One Linux KFD backend constructed for this session.
     LinuxKfd(Shared<KfdDriver>),
+    /// Test backend used to exercise routing without KFD.
     #[cfg(test)]
     Test(Shared<test_driver::TestDriver>),
 }
 
 impl DriverInstance {
+    /// Borrows the concrete KFD backend for Linux-specific interop.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "other installed drivers have no Linux KFD projection"
+    )]
+    pub(crate) fn linux_kfd(&self) -> Option<&Shared<KfdDriver>> {
+        match self {
+            Self::LinuxKfd(driver) => Some(driver),
+            #[cfg(test)]
+            Self::Test(_) => None,
+        }
+    }
+
     /// Returns the process-unique identity assigned to this driver instance.
-    pub(crate) fn instance_id(&self) -> u64 {
+    pub(crate) fn instance_id(&self) -> DriverInstanceId {
         match self {
             Self::LinuxKfd(driver) => driver.driver_instance(),
             #[cfg(test)]
@@ -137,18 +154,25 @@ impl DriverInstance {
 /// and all resources that borrow the driver have been released.
 #[derive(Clone)]
 pub(crate) enum DeviceDriverState {
+    /// Activated KFD GPU state and the driver that owns it.
     LinuxKfd {
+        /// Retains the exact driver instance through device cleanup.
         driver: Shared<KfdDriver>,
+        /// Native VM and endpoint facts acquired at activation.
         state: KfdDeviceState,
     },
+    /// Activated non-GPU fixture state and its owner.
     #[cfg(test)]
     Test {
+        /// Retains the fixture driver through resource cleanup.
         driver: Shared<test_driver::TestDriver>,
+        /// Fixture device state selected at activation.
         state: test_driver::TestDevice,
     },
 }
 
 impl DeviceDriverState {
+    /// Reports whether this driver can register host pages for an endpoint.
     pub(crate) fn supports_host_registration(&self, endpoint: &Endpoint) -> bool {
         match self {
             Self::LinuxKfd { driver, .. } => driver.supports_host_registration(endpoint),
@@ -203,6 +227,7 @@ impl DeviceDriverState {
         }
     }
 
+    /// Checks both driver ownership and native address-space identity.
     pub(crate) fn shares_address_domain(&self, other: &Self) -> bool {
         if !self.shares_driver_instance(other) {
             return false;
@@ -220,6 +245,7 @@ impl DeviceDriverState {
         }
     }
 
+    /// Returns inclusive device-address bounds cached at activation.
     pub(crate) fn address_range(&self) -> (u64, u64) {
         match self {
             Self::LinuxKfd { state, .. } => AddressSpaceInfo::address_range(state),
@@ -228,7 +254,7 @@ impl DeviceDriverState {
         }
     }
 
-    // The Result rejects other driver variants when they are installed.
+    /// Borrows a Linux KFD projection or rejects another driver family.
     #[allow(clippy::unnecessary_wraps)]
     pub(crate) fn linux_kfd(&self) -> Result<(&Shared<KfdDriver>, &KfdDeviceState), Error> {
         match self {
@@ -254,10 +280,12 @@ impl DeviceDriverState {
 
 /// Concrete observer retained behind the device-independent event contract.
 pub(crate) enum EventSubscription {
+    /// Linux KFD observer retained by the generic device event handle.
     LinuxKfd(KfdEventSubscription),
 }
 
 impl EventSubscription {
+    /// Reads the next event available to this observer.
     pub(crate) fn poll(&mut self) -> Result<Option<DeviceEvent>, Error> {
         match self {
             Self::LinuxKfd(subscription) => subscription.poll(),
@@ -271,7 +299,9 @@ impl EventSubscription {
 /// checks the driver instance and reopens the endpoint before using it.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum EndpointSelector {
+    /// KFD node identity captured during passive discovery.
     LinuxKfd(linux_kfd::LinuxSelector),
+    /// Driver-private selector for a future non-KFD backend.
     #[allow(dead_code)]
     Opaque(u64),
 }
@@ -282,16 +312,30 @@ pub(crate) enum EndpointSelector {
 )))]
 compile_error!("rocddi currently supports Linux x86-64 and AArch64");
 
+/// Activated device state returned by the concrete KFD driver.
 pub(crate) type KfdDeviceState = <KfdDriver as Driver>::DeviceState;
+/// Allocation owner returned by the concrete KFD driver.
 pub(crate) type KfdAllocation = <KfdDriver as AllocationOperations>::Allocation;
 
 static NEXT_DRIVER_INSTANCE: AtomicU64 = AtomicU64::new(1);
 
+/// Opaque identity of a constructed driver, retained by passive endpoints.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct DriverInstanceId(u64);
+
+#[cfg(test)]
+impl DriverInstanceId {
+    // The generator aborts before returning this reserved test identity.
+    pub(crate) const TEST: Self = Self(u64::MAX);
+}
+
 /// Allocates an identity for one constructed driver instance in this process.
-pub(crate) fn new_driver_instance() -> u64 {
-    NEXT_DRIVER_INSTANCE
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-        .unwrap_or_else(|_| std::process::abort())
+pub(crate) fn new_driver_instance() -> DriverInstanceId {
+    DriverInstanceId(
+        NEXT_DRIVER_INSTANCE
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
+            .unwrap_or_else(|_| std::process::abort()),
+    )
 }
 
 /// Borrowed GPU-only driver state established from an activated device.
@@ -333,6 +377,21 @@ impl GpuDriverRef<'_> {
     pub(crate) fn clock_counters(&self) -> Result<ClockCounters, Error> {
         match self {
             Self::LinuxKfd { driver, state } => driver.clock_counters(state),
+        }
+    }
+
+    pub(crate) fn pc_sampling_configurations(
+        &self,
+        set: PcSamplingConfigurationSet,
+    ) -> Result<Vec<PcSamplingConfiguration>, Error> {
+        match self {
+            Self::LinuxKfd { driver, state } => driver.pc_sampling_configurations(state, set),
+        }
+    }
+
+    pub(crate) fn surface_config(&self) -> Result<crate::device::gpu::GpuSurfaceConfig, Error> {
+        match self {
+            Self::LinuxKfd { driver, state } => driver.surface_config(state),
         }
     }
 

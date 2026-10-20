@@ -27,6 +27,7 @@ from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
+    SDWA_ROUNDED_F16_OPS,
 )
 import textwrap
 import re
@@ -52,6 +53,7 @@ from amdisa.fieldless_policy import (
 )
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
+    F32_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
     INTEGER_RESULT_OPERATIONS,
     InstructionSemantics,
@@ -1027,6 +1029,8 @@ class CodeGenerator:
     def _sdwa_output_policy(sem: InstructionSemantics | None) -> str:
         if sem and sem.name in FLUSH_NEAREST_F32_OPS:
             return ', amdgpu::sdwa::OutputPolicy::FLUSH_NEAREST'
+        if sem and sem.name in SDWA_ROUNDED_F16_OPS:
+            return ', amdgpu::sdwa::OutputPolicy::ROUNDED'
         return ''
 
     @staticmethod
@@ -1060,12 +1064,12 @@ class CodeGenerator:
     def _apply_sdwa_f16_omod(
         body: str, instruction: str, *, transcendental: bool = False
     ) -> str:
-        """Retain the producer's legacy SDWA F16 OMOD ordering.
+        """Keep the producer's current SDWA F16 OMOD ordering.
 
         TRANS producers already return rounded halves; ordinary producers scale
         before narrowing. Arithmetic producers retain their MODE-aware helper.
-        This ordering lacks SDWA hardware validation; VOP3 captures do not
-        establish it. Migrating SDWA requires separate capture evidence.
+        gfx1030 SDWA captures round before OMOD; SDWA_ROUNDED_F16_OPS follow
+        that order and the rest await their own captures.
         """
         helper = 'finish_rounded_f16' if transcendental else 'round_f16_result'
         body = body.replace(
@@ -4819,14 +4823,10 @@ class CodeGenerator:
                 5,
                 ('rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h', False),
             )
-        if (
-            needs_sdwa_helpers
-            and encoding_helper_header
-            != 'rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h'
-        ):
+        if needs_sdwa_helpers:
             _enc_h_includes.insert(
                 5,
-                ('rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h', False),
+                ('rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h', False),
             )
         class_def_file = CppFile(
             'encodings',
@@ -4874,10 +4874,6 @@ class CodeGenerator:
                     'rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h',
                     False,
                 ),
-            )
-        if needs_sdwa_helpers:
-            _enc_cpp_includes.insert(
-                1, ('rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h', False)
             )
         class_impl_file = CppFile(
             'encodings',
@@ -6654,8 +6650,8 @@ class CodeGenerator:
                     'f64_i32',
                     'f64_u32',
                 )
-                is_f32_to_integer = (
-                    cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
+                is_f32_input_conversion = (
+                    cls == 'vector_unary' and dtype in F32_INPUT_CONVERSION_DTYPES
                 )
                 is_f16_input_conversion = (
                     cls == 'vector_unary' and dtype in F16_INPUT_CONVERSION_DTYPES
@@ -6665,7 +6661,7 @@ class CodeGenerator:
                     and (
                         is_float_op
                         or is_integer_to_float
-                        or is_f32_to_integer
+                        or is_f32_input_conversion
                         or is_f16_input_conversion
                     )
                     and not is_true16_mov
@@ -6678,7 +6674,8 @@ class CodeGenerator:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
                     integer_result = (
-                        is_f32_to_integer or op in INTEGER_RESULT_OPERATIONS
+                        dtype in F32_TO_INTEGER_DTYPES
+                        or op in INTEGER_RESULT_OPERATIONS
                     )
                     if 'clamp' in inst_fields and not integer_result:
                         ef.add('clamp')

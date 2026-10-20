@@ -41,6 +41,7 @@
 #endif
 #include "impl/wddm/types.h"
 #include "impl/wddm/device.h"
+#include "impl/wddm/queue.h"
 #include "util/utils.h"
 #include "util/os.h"
 #include <topology.hpp>
@@ -924,6 +925,14 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.DrmRenderMinor = node_id;
   props.Capability2.ui32.AqlEmulationPm4_ =
       (device->IsAqlSupported() && device->DeviceInfo().hwsInfo.hwsMask.computeHwsEnabled) ? 0 : 1;
+
+  // Hardware/driver capability is the whole decision.
+  const bool native_sdma =
+      device->IsSdmaSupported() && device->NumSdmaEngine() != 0 &&
+      device->IsHwsEnabled(device->GetSdmaEngine(0));
+  props.NativeSDMASupported = native_sdma ? 1 : 0;
+  props.NativeSDMAEpilogueBytes =
+      native_sdma ? wsl::thunk::SDMAQueue::kHwQueueEpilogueBytes : 0;
 
   {
     const char* name = device->ProductName();
