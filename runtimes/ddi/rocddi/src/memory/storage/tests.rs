@@ -305,6 +305,19 @@ fn preallocated_shared_owner_publishes_without_another_allocation() {
 }
 
 #[test]
+fn vector_growth_failure_preserves_initialized_elements() {
+    let context = Context::default();
+    let _scope = context.allocator().scope();
+    let mut values = try_vec_with_capacity(1).unwrap();
+    values.try_push(7_u64).unwrap();
+    context.fail_allocate.store(true, Ordering::Relaxed);
+    assert_eq!(values.try_push(9), Err(AllocationError));
+    assert_eq!(values.as_slice(), &[7]);
+    assert_eq!(values.len(), 1);
+    assert_eq!(context.live_count(), 0);
+}
+
+#[test]
 fn system_storage_supports_owners_and_vectors() {
     let mut value = Owned::new(41).unwrap();
     *value += 1;
@@ -319,17 +332,4 @@ fn system_storage_supports_owners_and_vectors() {
     assert_eq!(buffer[99], 99);
     buffer.clear();
     assert!(buffer.is_empty());
-}
-
-#[test]
-fn vector_growth_failure_preserves_initialized_elements() {
-    let context = Context::default();
-    let _scope = context.allocator().scope();
-    let mut values = try_vec_with_capacity(1).unwrap();
-    values.try_push(7_u64).unwrap();
-    context.fail_allocate.store(true, Ordering::Relaxed);
-    assert_eq!(values.try_push(9), Err(AllocationError));
-    assert_eq!(values.as_slice(), &[7]);
-    assert_eq!(values.len(), 1);
-    assert_eq!(context.live_count(), 0);
 }
