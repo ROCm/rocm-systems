@@ -10,6 +10,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from roofline.benchmark import ceilings
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.metrics.common import ValuDualIssueDetector
@@ -29,53 +30,17 @@ from utils.utils_counter_defs import extract_counters_and_variables, get_build_i
 
 def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, float]:
     """Create empirical peaks dictionary."""
-    empirical_peaks = {}
+    if empirical_peaks_df.empty:
+        # Without roofline.csv, every ceiling is NaN.
+        return {
+            f"ammolite__{name}_empirical_peak": np.nan for name in ceilings.ALL_CEILINGS
+        }
 
-    if not empirical_peaks_df.empty:
-        peak_data_row = empirical_peaks_df.iloc[0]
-        for col in empirical_peaks_df.columns:
-            empirical_peaks[f"ammolite__{col}_empirical_peak"] = peak_data_row[col]
-    else:
-        peak_names = [
-            "FP16Flops",
-            "BF16Flops",
-            "FP32Flops",
-            "FP64Flops",
-            "I8Ops",
-            "I32Ops",
-            "I64Ops",
-            "MFMAF4Flops",
-            "MFMAF6Flops",
-            "MFMAF6F4Flops",
-            "MFMAF64Flops",
-            "MFMAF32Flops",
-            "MFMAF16Flops",
-            "MFMABF16Flops",
-            "MFMAMXF8Flops",
-            "MFMAF8Flops",
-            "MFMAI8Ops",
-            "WMMAF4Flops",
-            "WMMAF6Flops",
-            "WMMAF6F4Flops",
-            "WMMAF64Flops",
-            "WMMAF32Flops",
-            "WMMAF16Flops",
-            "WMMABF16Flops",
-            "WMMAMXF8Flops",
-            "WMMAF8Flops",
-            "WMMAI8Ops",
-            "HBMBw",
-            "MALLBw",
-            "L2Bw",
-            "L1Bw",
-            "L0Bw",
-            "LDSBw",
-        ]
-        # initialize peaks to NaN
-        for peak_name in peak_names:
-            empirical_peaks[f"ammolite__{peak_name}_empirical_peak"] = np.nan
-
-    return empirical_peaks
+    peak_data_row = empirical_peaks_df.iloc[0]
+    return {
+        f"ammolite__{col}_empirical_peak": peak_data_row[col]
+        for col in empirical_peaks_df.columns
+    }
 
 
 def create_sys_vars(sys_info: pd.Series) -> dict[str, int | float]:
