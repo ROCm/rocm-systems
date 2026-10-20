@@ -41,10 +41,8 @@ class ParseGinConfigTest(unittest.TestCase):
         self.assertEqual(parts[5], "--gtest_filter=GinRocshmemGdaTemplateTest.*")
 
     def test_pytest_kind_preserves_args(self) -> None:
-        # Both pytest files run through one case. parse_config and format_rows
-        # branch on neither bin nor kind -- format_rows joins positionally -- so
-        # a second standalone copy of this test could not fail on its own. The
-        # env lists differ in length so the join is pinned at both arities.
+        # Nothing in parse_config or format_rows branches on bin or kind; the two
+        # rows only pin the positional join at two env-list arities.
         cases = [
             (
                 "bcast-pytest",
@@ -86,6 +84,20 @@ class ParseGinConfigTest(unittest.TestCase):
                 self.assertEqual(parts[3], binary)
                 self.assertEqual(parts[4], expected_env)
                 self.assertEqual(parts[5], "-k GinSdma -v")
+
+    def test_shipped_gin_tests_json_pytest_bins_are_supported(self) -> None:
+        """Catch typos in shipped pytest entries before an 8-GPU node burns steps 1-6."""
+        shipped = Path(__file__).resolve().parent / "gin-tests.json"
+        config = parse_config(shipped)
+        supported = {"test_Broadcast.py", "test_ReduceScatterGinSdma.py"}
+        pytest_bins = {t.bin for t in config.tests if t.kind == "pytest"}
+        self.assertTrue(pytest_bins, "shipped gin-tests.json has no pytest entries")
+        self.assertTrue(
+            pytest_bins <= supported,
+            "unsupported pytest bin(s) in gin-tests.json: {}".format(
+                sorted(pytest_bins - supported)
+            ),
+        )
 
 
 def _write_json(data: dict) -> Path:

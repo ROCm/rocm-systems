@@ -20,10 +20,11 @@
 #                  (default: ${SLURM_SUBMIT_DIR:-$PWD}/nccl-debug)
 #   RCCL_TESTS_DIR     rccl-tests source tree (default: $WORKDIR/projects/rccl-tests)
 #   GIN_PYTEST_TIMEOUT Wall-clock cap for Broadcast pytest (default: 1800s)
-#   GIN_PYTEST_RS_TIMEOUT Wall-clock cap for ReduceScatter pytest (default: 3600s)
+#   GIN_PYTEST_RS_TIMEOUT Wall-clock cap for ReduceScatter pytest (default: 2400s)
 #   GIN_PYTEST_HW_CASES  Broadcast mpirun cases under -k GinSdma (default: 9).
 #                  Offline parser/tier guards do not launch and are not counted.
-#   GIN_PYTEST_RS_HW_CASES  ReduceScatter GinSdma mpirun cases (default: 25).
+#   GIN_PYTEST_RS_HW_CASES  ReduceScatter GinSdma mpirun cases. Unset → read
+#                  RS_HW_LAUNCH_COUNT from test_ReduceScatterGinSdma.py (27).
 #   RCCL_TESTS_BCAST_GIN_TYPE / RCCL_TESTS_RS_GIN_TYPE
 #                  NCCL_GIN_TYPE for Broadcast / ReduceScatter pytest (default: 7,
 #                  NCCL_GIN_TYPE_ANVIL_SDMA)
@@ -42,14 +43,14 @@ MSG_SIZE="${MSG_SIZE:-33554432}"
 BENCH_TIMEOUT="${BENCH_TIMEOUT:-600s}"
 BENCH_KILL_AFTER="${BENCH_KILL_AFTER:-30s}"
 GIN_PYTEST_TIMEOUT="${GIN_PYTEST_TIMEOUT:-1800s}"
-GIN_PYTEST_RS_TIMEOUT="${GIN_PYTEST_RS_TIMEOUT:-3600s}"
+# Trimmed from 3600s so the worst-case sum of sequential test caps
+# (11 x 600s + 1800s bcast + this) stays under gin.sbatch's 4h wall clock.
+GIN_PYTEST_RS_TIMEOUT="${GIN_PYTEST_RS_TIMEOUT:-2400s}"
 # Hardware launches selected by rccl-gin-bcast-pytest (-k GinSdma): 6 segmented
 # (2 sizes x 3 dtypes) + scatter-allgather + 2 hang guards.
 GIN_PYTEST_HW_CASES="${GIN_PYTEST_HW_CASES:-9}"
-# Hardware launches in test_ReduceScatterGinSdma.py: 12 CTA-ladder
-# (6 size/op pairs x 2 dtypes) + 6 narrowing-dtype (3 dtypes x sum/avg)
-# + 4 low-CTA SDMA (2 sizes x 2 dtypes) + 3 hang-guard dtypes.
-GIN_PYTEST_RS_HW_CASES="${GIN_PYTEST_RS_HW_CASES:-25}"
+# Fallback only; the pytest arm prefers RS_HW_LAUNCH_COUNT from the module.
+GIN_PYTEST_RS_HW_CASES="${GIN_PYTEST_RS_HW_CASES:-}"
 
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 WORKDIR="$(cd "${script_dir}/../../../.." && pwd)"
@@ -213,7 +214,7 @@ run_test() {
     rocshmem)   bin_path="${ROCSHMEM_TESTS_BIN_DIR}/${bin}" ;;
     rccl-tests) bin_path="${RCCL_TESTS_BIN_DIR}/${bin}" ;;
     fixtures)   bin_path="${RCCL_FIXTURES_BIN_DIR}/${bin}" ;;
-    pytest)     bench_timeout="${GIN_PYTEST_TIMEOUT}" ;;
+    pytest) ;;
     *) echo "  SKIP ${name}: unknown kind '${kind}'"; FAILED_RUNS+=("${name} (unknown kind)"); return ;;
   esac
   if [[ "${kind}" != "pytest" ]]; then
@@ -251,7 +252,19 @@ run_test() {
         pytest_exe="${RCCL_TESTS_BIN_DIR}/reduce_scatter_perf"
         pytest_enable="RCCL_TESTS_GIN_SDMA_RS"
         pytest_prefix="RS"
-        hw_cases="${GIN_PYTEST_RS_HW_CASES}"
+        if [[ -n "${GIN_PYTEST_RS_HW_CASES}" ]]; then
+          hw_cases="${GIN_PYTEST_RS_HW_CASES}"
+        else
+          hw_cases="$(python3 - "${pytest_file}" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+m = re.search(r"^RS_HW_LAUNCH_COUNT\s*=\s*(\d+)", text, re.M)
+if not m:
+    raise SystemExit("RS_HW_LAUNCH_COUNT not found in {}".format(sys.argv[1]))
+print(m.group(1))
+PY
+)"
+        fi
         outer_timeout="${GIN_PYTEST_RS_TIMEOUT}"
         ;;
       *)
