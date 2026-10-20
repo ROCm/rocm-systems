@@ -459,18 +459,51 @@ protected:
         (void)hipDeviceSynchronize();
     }
 
-    /** Return true iff device `buf` matches (seed + i) % 256 for all i. */
-    bool VerifyBuf(const void* buf, size_t size, int seed)
+    /** Check device `buf` against (seed + i) % 256, reporting where a mismatch starts
+     *  and what was read, so a payload that never landed (zeros) stands out. */
+    ::testing::AssertionResult VerifyBuf(const void* buf, size_t size, int seed)
     {
+        constexpr size_t kHexWindow = 16;
+        auto expectedAt = [seed](size_t i) { return static_cast<uint8_t>((seed + i) % 256); };
+
         std::vector<uint8_t> staging(size);
-        if(hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost) != hipSuccess)
-            return false;
+        hipError_t err = hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost);
+        if(err != hipSuccess)
+        {
+            return ::testing::AssertionFailure() << "hipMemcpy D2H failed: " << hipGetErrorString(err);
+        }
         (void)hipDeviceSynchronize();
+
+        size_t nBad = 0, first = 0;
+        bool   allZero = true;
         for(size_t i = 0; i < size; ++i)
         {
-            if(staging[i] != static_cast<uint8_t>((seed + i) % 256)) return false;
+            if(staging[i] == expectedAt(i)) continue;
+            if(nBad++ == 0) first = i;
+            allZero = allZero && staging[i] == 0;
         }
-        return true;
+        if(nBad == 0) return ::testing::AssertionSuccess();
+
+        std::string expectedHex, actualHex;
+        char        hex[4];
+        char        seedHex[16];
+        std::snprintf(seedHex, sizeof(seedHex), "0x%02x", seed);
+        for(size_t i = first; i < size && i < first + kHexWindow; ++i)
+        {
+            std::snprintf(hex, sizeof(hex), " %02x", expectedAt(i));
+            expectedHex += hex;
+            std::snprintf(hex, sizeof(hex), " %02x", staging[i]);
+            actualHex += hex;
+        }
+
+        return ::testing::AssertionFailure()
+               << nBad << " of " << size << " bytes mismatched (seed " << seedHex
+               << "), first at offset " << first
+               << (allZero ? "; all mismatching bytes are 0x00" : "")
+               << "\n  expected @" << first << ":" << expectedHex
+               << "\n  actual   @" << first << ":" << actualHex
+               << "\n  rank " << worldRank_ << ", nContexts " << GetNumContexts() << ", "
+               << (UseDmaBuf() ? "DmaBuf" : "RegMr");
     }
 
     /** Fill device `buf` with a constant byte (sentinel). */
