@@ -41,32 +41,63 @@ class ParseGinConfigTest(unittest.TestCase):
         self.assertEqual(parts[5], "--gtest_filter=GinRocshmemGdaTemplateTest.*")
 
     def test_pytest_kind_preserves_args(self) -> None:
-        config = parse_config(
-            _write_json(
-                {
-                    "mca": "",
-                    "debug_env": [],
-                    "tests": [
+        # Nothing in parse_config or format_rows branches on bin or kind; the two
+        # rows only pin the positional join at two env-list arities.
+        cases = [
+            (
+                "bcast-pytest",
+                "test_Broadcast.py",
+                ["NCCL_CUMEM_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1"],
+                "-x NCCL_CUMEM_ENABLE=1 -x HSA_NO_SCRATCH_RECLAIM=1",
+            ),
+            (
+                "rs-pytest",
+                "test_ReduceScatterGinSdma.py",
+                ["NCCL_CUMEM_ENABLE=1"],
+                "-x NCCL_CUMEM_ENABLE=1",
+            ),
+        ]
+        for name, binary, env, expected_env in cases:
+            with self.subTest(bin=binary):
+                config = parse_config(
+                    _write_json(
                         {
-                            "name": "bcast-pytest",
-                            "kind": "pytest",
-                            "bin": "test_Broadcast.py",
-                            "env": ["NCCL_CUMEM_ENABLE=1", "HSA_NO_SCRATCH_RECLAIM=1"],
-                            "args": "-k GinSdma -v",
+                            "mca": "",
+                            "debug_env": [],
+                            "tests": [
+                                {
+                                    "name": name,
+                                    "kind": "pytest",
+                                    "bin": binary,
+                                    "env": env,
+                                    "args": "-k GinSdma -v",
+                                }
+                            ],
                         }
-                    ],
-                }
-            )
+                    )
+                )
+                rows = format_rows(config)
+                test_row = next(r for r in rows if r.startswith("test" + _FIELD_SEP))
+                parts = test_row.split(_FIELD_SEP)
+                self.assertEqual(parts[1], name)
+                self.assertEqual(parts[2], "pytest")
+                self.assertEqual(parts[3], binary)
+                self.assertEqual(parts[4], expected_env)
+                self.assertEqual(parts[5], "-k GinSdma -v")
+
+    def test_shipped_gin_tests_json_pytest_bins_are_supported(self) -> None:
+        """Catch typos in shipped pytest entries before an 8-GPU node burns steps 1-6."""
+        shipped = Path(__file__).resolve().parent / "gin-tests.json"
+        config = parse_config(shipped)
+        supported = {"test_Broadcast.py", "test_ReduceScatterGinSdma.py"}
+        pytest_bins = {t.bin for t in config.tests if t.kind == "pytest"}
+        self.assertTrue(pytest_bins, "shipped gin-tests.json has no pytest entries")
+        self.assertTrue(
+            pytest_bins <= supported,
+            "unsupported pytest bin(s) in gin-tests.json: {}".format(
+                sorted(pytest_bins - supported)
+            ),
         )
-        rows = format_rows(config)
-        test_row = next(r for r in rows if r.startswith("test" + _FIELD_SEP))
-        parts = test_row.split(_FIELD_SEP)
-        self.assertEqual(parts[2], "pytest")
-        self.assertEqual(parts[3], "test_Broadcast.py")
-        self.assertEqual(
-            parts[4], "-x NCCL_CUMEM_ENABLE=1 -x HSA_NO_SCRATCH_RECLAIM=1"
-        )
-        self.assertEqual(parts[5], "-k GinSdma -v")
 
 
 def _write_json(data: dict) -> Path:
