@@ -20,7 +20,7 @@ the machine, see :doc:`./python-bindings`.
 Linux kernel requirements
 =========================
 
-hipFile's fastpath requires a Linux kernel built with PCIe peer-to-peer DMA (P2PDMA) support. When no fastpath is available, hipFile uses the fallback path by default, resulting in lower than expected throughput. 
+hipFile's fastpath requires a Linux kernel built with PCIe peer-to-peer DMA (P2PDMA) support. When no fastpath is available, hipFile uses the fallback path by default, resulting in lower than expected throughput.
 
 Use the following command to read the configuration of the running kernel and determine whether it supports P2PDMA:
 
@@ -107,10 +107,10 @@ Where:
 
 .. note::
 
-   hipFile has experimental support for NVMeoF and NFSoRDMA on Linux. 
+   hipFile has experimental support for NVMeoF and NFSoRDMA on Linux.
 
    ``amdgpu-dkms`` version 31.40 or later must be installed to use NVMeoF and NFSoRDMA.
-   
+
    NFSoRDMA requires ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS=true``.
 
    See :doc:`/reference/hipFile-io-backends` for information on file type rules.

@@ -54,7 +54,7 @@ This is a common cause of unexpected fallback-path use, because a distribution
 supported by ROCm doesn't necessarily ship a kernel with the option enabled. The
 Ubuntu 22.04 LTS default 5.15 kernel is one such case.
 
-`ais-check`` will report the problem as ``Kernel P2PDMA support : False``
+``ais-check`` will report the problem as ``Kernel P2PDMA support : False``:
 
 .. code-block:: none
 

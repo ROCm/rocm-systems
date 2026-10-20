@@ -12,7 +12,7 @@ instead.
 
 ``ais-check`` is located under ``tools/ais-check`` in the hipFile source tree and is installed in the ``bin`` directory of your ROCm installation unless hipFile was built with ``HIPFILE_INSTALL_TOOLS=OFF``.
 
-``ais-check`` must be run as root to produce accurate information. 
+``ais-check`` must be run as root to produce accurate information.
 
 .. code:: shell
 
@@ -23,7 +23,7 @@ Optional flags:
 | ``-v`` or ``--verbose``: Lists discovered HIP runtime libraries and whether each exports AIS symbols.
 | ``-q`` or ``--quiet``: Suppresses output and returns only an exit code.
 
-``ais-check`` exits with ``0`` when at least one volume is fastpath capable. It exits with a non-zero code otherwise. It will also output a short report that includes a table of mounted volumes and a summary block. 
+``ais-check`` exits with ``0`` when at least one volume is fastpath capable. It exits with a non-zero code otherwise. It will also output a short report that includes a table of mounted volumes and a summary block.
 
 When run with the verbose option, a list of discovered HIP runtime libraries is also included in the output.
 
