@@ -162,7 +162,7 @@ rocprofsys_get_address_space(patch_pointer_t const& _bpatch, int _cmdc, char** _
         {
             errprintf(-127,
                       "'%s' is a text file. rocprof-sys only supports instrumenting "
-                      "binary files",
+                      "binary files\n",
                       _name.c_str());
         }
 
@@ -214,13 +214,13 @@ rocprofsys_get_address_space(patch_pointer_t const& _bpatch, int _cmdc, char** _
             verbprintf(4, "[env] %s=%s\n", itr.first.c_str(), itr.second.c_str());
         }
 
-        if(_cmdc < 1) errprintf(-127, "No command provided");
+        if(_cmdc < 1) errprintf(-127, "No command provided\n");
 
         if(is_text_file(_cmdv[0]))
         {
             errprintf(-1,
                       "'%s' is a text file. rocprof-sys only supports instrumenting "
-                      "binary files",
+                      "binary files\n",
                       _cmdv[0]);
         }
 

@@ -289,14 +289,13 @@ auto _activate =
 
 //======================================================================================//
 //
-// instrument implementation
+// entry point
 //
 //======================================================================================//
 //
-namespace
-{
 int
-run_instrumentation(int argc, char** argv)
+main(int argc, char** argv)
+try
 {
     argv0 = argv[0];
 
@@ -2890,26 +2889,10 @@ run_instrumentation(int argc, char** argv)
         log_ofs->close();
     }
     return code;
-}
-}  // namespace
-
-//======================================================================================//
-//
-// entry point
-//
-//======================================================================================//
-//
-int
-main(int argc, char** argv)
+} catch(const std::exception& err)
 {
-    try
-    {
-        return run_instrumentation(argc, argv);
-    } catch(const std::exception& err)
-    {
-        std::cerr << "[rocprof-sys] error: " << err.what() << '\n';
-        return EXIT_FAILURE;
-    }
+    std::cerr << "[rocprof-sys] error: " << err.what() << '\n';
+    return EXIT_FAILURE;
 }
 
 //======================================================================================//
