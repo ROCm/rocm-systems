@@ -128,7 +128,7 @@ struct LegacyWaitcnt {
 [[nodiscard]] inline LegacyWaitcnt decode_legacy_waitcnt(uint32_t value, rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
     return decode_gfx11_waitcnt(value);
-  auto fields = decode_gfx9_waitcnt(value);
+  LegacyWaitcnt fields = decode_gfx9_waitcnt(value);
   // GFX10 retains the GFX9 positions but widens LGKM to six bits.
   if (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2)
     fields.lgkmcnt = (value >> 8u) & 0x3fu;

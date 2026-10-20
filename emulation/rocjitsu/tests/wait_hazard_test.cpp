@@ -420,29 +420,29 @@ TYPED_TEST(WaitHazardTest, PartialWaitCountsOperationsWithoutRegisterResults) {
 TYPED_TEST(WaitHazardTest, CombinedWaitKeepsCounterThresholdsIndependent) {
   struct Case {
     uint32_t opcode;
-    CounterDomain first;
+    CounterDomain load_or_store;
   };
   const Case cases[] = {
-      {0xbfc80000u, kLoad},
-      {0xbfc90000u, {WaitCounterKind::Store, WaitCounterType::STORECNT}},
+      {0xbfc80000u, kLoad},                                               // s_wait_loadcnt_dscnt
+      {0xbfc90000u, {WaitCounterKind::Store, WaitCounterType::STORECNT}}, // s_wait_storecnt_dscnt
   };
   for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
     for (const auto &c : cases) {
-      for (const uint32_t first_count : {0u, 1u, 63u}) {
+      for (const uint32_t load_or_store_count : {0u, 1u, 63u}) {
         for (const uint32_t ds_count : {0u, 1u, 63u}) {
           // Bits outside either six-bit field must not affect its threshold.
-          const uint32_t word = c.opcode | 0xc0c0u | (first_count << 8u) | ds_count;
+          const uint32_t word = c.opcode | 0xc0c0u | (load_or_store_count << 8u) | ds_count;
           SCOPED_TRACE(static_cast<unsigned>(arch));
           SCOPED_TRACE(word);
           TypeParam backend(arch);
           ASSERT_TRUE(backend.ready());
-          backend.load(c.first, 5);
-          backend.load(c.first, 6);
+          backend.load(c.load_or_store, 5);
+          backend.load(c.load_or_store, 6);
           backend.load(kDs, 7);
           backend.load(kDs, 8);
           backend.wait(word);
-          EXPECT_EQ(backend.reports(5), first_count == 63);
-          EXPECT_EQ(backend.reports(6), first_count != 0);
+          EXPECT_EQ(backend.reports(5), load_or_store_count == 63);
+          EXPECT_EQ(backend.reports(6), load_or_store_count != 0);
           EXPECT_EQ(backend.reports(7), ds_count == 63);
           EXPECT_EQ(backend.reports(8), ds_count != 0);
         }
