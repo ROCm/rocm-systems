@@ -932,9 +932,12 @@ static bool run_pass(PlaybackContext& ctx,
   // any kernel launch, preventing error 719 from corrupting module loads.
   if (log) printf("[HRR] Pre-loading %zu code objects...\n", archive.code_objects.size());
   size_t preload_failures = 0;
-  int device_count = 0, start_dev = 0;
+  // Every pass starts on device 0, as capture did and code_object_devices()
+  // assumes, not on the device the previous pass ended on.
+  int device_count = 0;
+  const int start_dev = 0;
   (void)hipGetDeviceCount(&device_count);
-  if (hipGetDevice(&start_dev) != hipSuccess) start_dev = 0;
+  (void)hipSetDevice(start_dev);
   const auto use_devices = code_object_devices(archive, device_count);
   for (const auto& [hex, fpath] : archive.code_objects) {
       // hex is "llllllllllllllllhhhhhhhhhhhhhhhh" (lo first, hi second)

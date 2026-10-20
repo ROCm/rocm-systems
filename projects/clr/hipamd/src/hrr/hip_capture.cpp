@@ -72,8 +72,13 @@
 #include <vector>
 
 #if defined(__linux__)
-#include <sys/uio.h>   // process_vm_readv()
+#include <fcntl.h>     // pipe2()
 #include <unistd.h>
+#elif defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>   // VirtualQuery()
 #endif
 
 static std::once_flag g_hrr_atexit_once;
@@ -1167,27 +1172,67 @@ static void forget_program_hash(const amd::Program* prog) {
 }
 
 // How many of the n bytes at p can be read, found page by page without reading
-// them: process_vm_readv on this process fails with EFAULT on a page that
-// cannot be read, where a plain read would fault. 0 when it cannot tell. Other
-// platforms do not check, and get n.
+// them. On Linux, write() of a page's first byte into a pipe fails with EFAULT
+// where a plain read would fault, and no sandbox refuses write(); on Windows,
+// VirtualQuery says whether the pages are committed and readable. 0 when it
+// cannot tell, as on any other platform.
 static size_t readable_extent(const void* p, size_t n) {
-#if defined(__linux__)
-  static const uintptr_t page = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
   const uintptr_t start = reinterpret_cast<uintptr_t>(p);
   size_t ok = 0;
+#if defined(__linux__)
+  static const uintptr_t page = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
+  int fds[2];
+  if (pipe2(fds, O_CLOEXEC | O_NONBLOCK) != 0) return 0;
   while (ok < n) {
     char byte;
-    iovec local{&byte, 1};
-    iovec remote{reinterpret_cast<void*>(start + ok), 1};
-    if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) != 1)
-      return errno == EFAULT ? ok : 0;
+    if (write(fds[1], reinterpret_cast<const void*>(start + ok), 1) != 1) {
+      if (errno != EFAULT) ok = 0;
+      break;
+    }
+    (void)!read(fds[0], &byte, 1);  // keep the pipe empty
     ok = std::min(n, static_cast<size_t>(((start + ok) | (page - 1)) + 1 - start));
   }
-  return ok;
+  close(fds[0]);
+  close(fds[1]);
+#elif defined(_WIN32)
+  constexpr DWORD kReadable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
+                              PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE |
+                              PAGE_EXECUTE_WRITECOPY;
+  while (ok < n) {
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!VirtualQuery(reinterpret_cast<const void*>(start + ok), &mbi, sizeof(mbi)) ||
+        mbi.State != MEM_COMMIT || !(mbi.Protect & kReadable) || (mbi.Protect & PAGE_GUARD))
+      break;
+    const uintptr_t end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+    ok = std::min(n, static_cast<size_t>(end - start));
+  }
 #else
-  (void)p;
-  return n;
+  (void)start;
 #endif
+  return ok;
+}
+
+// The extent of the ELF image at p, of at most n bytes, as its sections and
+// segments reach, or 0 if it is not well formed or any of that cannot be read.
+// Probes the header, then the header tables, then the extent they give, so a
+// declared size nothing bounds is never walked page by page.
+static uint64_t readable_elf_size(const uint8_t* p, size_t n) {
+  if (n < sizeof(Elf64_Ehdr) || readable_extent(p, sizeof(Elf64_Ehdr)) < sizeof(Elf64_Ehdr))
+    return 0;
+  Elf64_Ehdr eh;
+  std::memcpy(&eh, p, sizeof(eh));
+  uint64_t tables = sizeof(Elf64_Ehdr);
+  const uint64_t offs[2] = {eh.e_shoff, eh.e_phoff};
+  const uint64_t lens[2] = {uint64_t(eh.e_shnum) * eh.e_shentsize,
+                            uint64_t(eh.e_phnum) * eh.e_phentsize};
+  for (int i = 0; i < 2; ++i) {
+    if (!lens[i]) continue;
+    if (offs[i] > n || lens[i] > n - offs[i]) return 0;
+    tables = std::max<uint64_t>(tables, offs[i] + lens[i]);
+  }
+  if (readable_extent(p, tables) < tables) return 0;
+  const uint64_t size = amd::Elf::getElfSize(p, n);
+  return size && readable_extent(p, size) >= size ? size : 0;
 }
 
 // Hash an already-read device binary span, refusing anything that does not
@@ -1212,13 +1257,12 @@ static hrr_cap::Hash128 hash_program_image(const amd::Program* prog, const uint8
   // size. So hash no further than its sections and segments reach, and refuse
   // one whose headers reach past the memory that can be read.
   if (amd::Elf::isElfMagic(reinterpret_cast<const char*>(data))) {
-    const size_t readable = readable_extent(data, size);
-    const uint64_t elf_size = amd::Elf::getElfSize(data, readable);
+    const uint64_t elf_size = readable_elf_size(data, size);
     if (elf_size == 0) {
-      LogPrintfWarning("[HRR capture] program %p: ELF at %p does not fit the %llu of its"
-                       " %llu bytes that can be read — not recording a code object for it",
-                       (const void*)prog, (const void*)data, (unsigned long long)readable,
-                       (unsigned long long)size);
+      LogPrintfWarning("[HRR capture] program %p: ELF at %p is malformed or reaches past"
+                       " readable memory within its %llu bytes — not recording a code"
+                       " object for it",
+                       (const void*)prog, (const void*)data, (unsigned long long)size);
       return {0, 0};
     }
     size = static_cast<size_t>(elf_size);

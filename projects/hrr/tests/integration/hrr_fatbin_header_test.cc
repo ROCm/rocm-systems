@@ -276,21 +276,25 @@ const void* pin(const std::vector<uint8_t>& bytes) {
 }
 
 // Like pin(), but the bundle's last page is followed by one that cannot be
-// read, so a read that runs past the bundle faults. Windows keeps pin().
+// read, so a read that runs past the bundle faults.
 const void* pin_before_guard(const std::vector<uint8_t>& bytes) {
-#if defined(_WIN32)
-  return pin(bytes);
-#else
   constexpr size_t kGuard = 65536;  // a multiple of any page size in use
   const size_t span = (bytes.size() + kGuard - 1) / kGuard * kGuard;
+#if defined(_WIN32)
+  // Reserved but not committed: no access.
+  auto* p = static_cast<uint8_t*>(VirtualAlloc(nullptr, span + kGuard, MEM_RESERVE,
+                                               PAGE_NOACCESS));
+  REQUIRE(p != nullptr);
+  REQUIRE(VirtualAlloc(p, span, MEM_COMMIT, PAGE_READWRITE) == p);
+#else
   void* m = mmap(nullptr, span + kGuard, PROT_READ | PROT_WRITE,
                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   REQUIRE(m != MAP_FAILED);
   auto* p = static_cast<uint8_t*>(m);
   REQUIRE(mprotect(p + span, kGuard, PROT_NONE) == 0);
+#endif
   std::memcpy(p, bytes.data(), bytes.size());
   return p;
-#endif
 }
 
 void** register_fat_binary(const void* bundle) {
@@ -547,20 +551,37 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
 // one kind uses the same code object; on GPUs of two kinds it cannot, and both
 // halves skip.
 // ===========================================================================
-TEST_CASE("Unit_HRR_FatBinLoadDevice_Direct", "[.][hrr-direct]") {
-  // A __device__ global, registered before HIP initialises so that capture
-  // records it; the parent compiled it, since compiling initialises HIP.
-  const char* global_bundle = std::getenv(kGlobalBundleEnv);
-  if (!global_bundle) HRR_SKIP(kGlobalBundleEnv << " is not set");
+namespace {
+// Register a __device__ global and the kernel that returns it, from the bundle
+// at kGlobalBundleEnv's path, before HIP initialises so that capture records
+// them; the parent compiled it, since compiling initialises HIP.
+void register_global_bundle(const void* stub, int* shadow) {
+  const char* path = std::getenv(kGlobalBundleEnv);
+  if (!path) HRR_SKIP(kGlobalBundleEnv << " is not set");
   std::vector<uint8_t> bytes;
-  REQUIRE(hrr::read_file_capped(global_bundle, bytes));
-  void** global_handle = register_fat_binary(pin(bytes));
-  REQUIRE(global_handle != nullptr);
+  REQUIRE(hrr::read_file_capped(path, bytes));
+  void** handle = register_fat_binary(pin(bytes));
+  REQUIRE(handle != nullptr);
+  register_function(handle, stub, kGlobalKernel);
+  __hipRegisterVar(handle, shadow, const_cast<char*>(kDeviceGlobal),
+                   const_cast<char*>(kDeviceGlobal), 0, sizeof(int), 0, 0);
+}
+
+// The bundle register_global_bundle() reads, for device 0's GPU.
+void write_global_bundle(const fs::path& path) {
+  hipDeviceProp_t prop{};
+  HRR_HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  const auto b = valid_bundle(std::string(kTargetPrefix) + prop.gcnArchName,
+                              compile_code_object(kGlobalKernel, kDeviceGlobal));
+  std::ofstream(path, std::ios::binary)
+      .write(reinterpret_cast<const char*>(b.data()), static_cast<std::streamsize>(b.size()));
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_FatBinLoadDevice_Direct", "[.][hrr-direct]") {
   static int global_shadow = 0;
   static const char global_stub = 0;
-  register_function(global_handle, &global_stub, kGlobalKernel);
-  __hipRegisterVar(global_handle, &global_shadow, const_cast<char*>(kDeviceGlobal),
-                   const_cast<char*>(kDeviceGlobal), 0, sizeof(int), 0, 0);
+  register_global_bundle(&global_stub, &global_shadow);
 
   int n = 0;
   HRR_HIP_CHECK(hipGetDeviceCount(&n));
@@ -602,14 +623,7 @@ HRR_TEST_CASE(Unit_HRR_FatBinLoadDevice) {
   ScopedDir work(fs::temp_directory_path() / "hrr_fatbin_load_device.work");
   fs::create_directories(work.path);
   const fs::path global_bundle = work.path / "global.bundle";
-  {
-    hipDeviceProp_t prop{};
-    HRR_HIP_CHECK(hipGetDeviceProperties(&prop, 0));
-    const auto b = valid_bundle(std::string(kTargetPrefix) + prop.gcnArchName,
-                                compile_code_object(kGlobalKernel, kDeviceGlobal));
-    std::ofstream(global_bundle, std::ios::binary)
-        .write(reinterpret_cast<const char*>(b.data()), static_cast<std::streamsize>(b.size()));
-  }
+  write_global_bundle(global_bundle);
   { hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true,
                               /*capture_stderr=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
@@ -645,6 +659,56 @@ HRR_TEST_CASE(Unit_HRR_FatBinLoadDevice) {
   INFO("Replay:\n" << out);
   CHECK(rc == 0);
   CHECK(out.find("Pre-loading code object " + hex + " on device 1,") != std::string::npos);
+
+  // The warm-up pass a kernel filter adds ends on device 1; the timed pass
+  // still starts on device 0, where capture registered the global.
+  auto [rc_filtered, out_filtered] = hrr_playback_merged(archive, "--kernel-filter hrr_fatbin");
+  INFO("Filtered replay:\n" << out_filtered);
+  CHECK(rc_filtered == 0);
+}
+
+// ===========================================================================
+// A __device__ global registered before HIP initialises, copied to and back
+// with nothing launched. Capture records its code object only if it resolves
+// the global before it sweeps the fat binaries, since resolving it is what
+// makes HIP load that code object; replay binds the global there. Replay does
+// not replay symbol copies, so the binding is what is checked.
+// ===========================================================================
+TEST_CASE("Unit_HRR_FatBinGlobalCopy_Direct", "[.][hrr-direct]") {
+  static int shadow = 0;
+  static const char stub = 0;
+  register_global_bundle(&stub, &shadow);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  HRR_HIP_CHECK(hipMemcpyToSymbol(shadow, &kGlobalWritten, sizeof(int)));
+  int back = 0;
+  HRR_HIP_CHECK(hipMemcpyFromSymbol(&back, shadow, sizeof(int)));
+  CHECK(back == kGlobalWritten);
+}
+
+HRR_TEST_CASE(Unit_HRR_FatBinGlobalCopy) {
+  ScopedDir cap(fs::temp_directory_path() / "hrr_fatbin_global_copy.hrr");
+  ScopedDir work(fs::temp_directory_path() / "hrr_fatbin_global_copy.work");
+  fs::create_directories(work.path);
+  const fs::path global_bundle = work.path / "global.bundle";
+  write_global_bundle(global_bundle);
+  hrr_capture_direct("Unit_HRR_FatBinGlobalCopy_Direct", cap.path, 1,
+                     {{kGlobalBundleEnv, global_bundle.string()}});
+  const fs::path archive = hrr_single_process_archive(cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  // The global's code object is in the archive.
+  size_t holding = 0;
+  for (const auto& [hex, path] : arc.code_objects) {
+    std::vector<uint8_t> bytes;
+    REQUIRE(hrr::read_file_capped(path, bytes));
+    holding += contains(bytes, kDeviceGlobal);
+  }
+  CHECK(holding == 1);
+  auto [rc, out] = hrr_playback_merged(archive);
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+  CHECK(out.find("symbol '" + std::string(kDeviceGlobal) + "' is not in any") ==
+        std::string::npos);
 }
 
 #endif  // HRR_TEST_EXE
