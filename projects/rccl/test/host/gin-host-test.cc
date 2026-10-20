@@ -511,7 +511,7 @@ TEST_F(GinHostTest, ProgressErrorSetsAsyncResultAndExits) {
     // whole binary's timeout. A worker plus waitUntil fails this case instead.
     JoinProgressThreads worker(gs);
     worker.spawn([gs] { ncclGinProgress(gs, 0); });
-    ASSERT_TRUE(waitUntil([&] { return gs->asyncResult == ncclSystemError; }))
+    ASSERT_TRUE(waitUntil([&] { return __atomic_load_n(&gs->asyncResult, __ATOMIC_ACQUIRE) == ncclSystemError; }))
         << "ginProgress error did not stop the worker";
   }
   EXPECT_EQ(ncclSystemError, gs->asyncResult);
