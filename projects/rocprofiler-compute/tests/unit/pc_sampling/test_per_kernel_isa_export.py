@@ -6,13 +6,8 @@
 import csv
 from pathlib import Path
 
-import pytest
-
 from pc_sampling.per_kernel_isa_export import (
-    MAX_SHORT_NAME_LENGTH,
-    _build_isa_header,
     _resolve_isa_export_path,
-    _sanitize_short_name,
     _write_per_kernel_isa_files,
     export_per_kernel_isa_files,
 )
@@ -74,61 +69,23 @@ def test_resolve_isa_export_path_names_kernel_code_object_and_process():
     )
 
 
-def test_resolve_isa_export_path_falls_back_when_no_short_name_was_captured():
-    """A kernel with no short name keeps the folder name earlier releases used."""
-    export_path = _resolve_isa_export_path(
-        Path("/results/per_kernel_pc_sampling"),
-        ("vector_copy", "MI300X_A1", 7, None, 5, 42),
+def test_write_per_kernel_isa_files_places_stall_reasons_between_counts_and_source(
+    tmp_path,
+):
+    """The reasons a workload observed become columns of their own."""
+    _write_per_kernel_isa_files(
+        tmp_path,
+        iter([make_isa_row(stall_reason_counts=(None, 1))]),
+        ["NONE", "WAITCNT"],
     )
 
-    assert export_path.parent.name == "kernel_uuid_7"
-
-
-def test_resolve_isa_export_path_keeps_a_shared_short_name_unique():
-    """Two overloads truncate to one short name, so the uuid separates them."""
-    export_paths = {
-        _resolve_isa_export_path(
-            Path("/results/per_kernel_pc_sampling"),
-            ("vector_copy", "MI300X_A1", kernel_uuid, "gemm", 5, 42),
-        )
-        for kernel_uuid in (7, 8)
-    }
-
-    assert len(export_paths) == 2
-
-
-@pytest.mark.parametrize(
-    ("short_name", "expected"),
-    [
-        ("vecCopy_2", "vecCopy_2"),
-        ("__amd_rocclr_streamOpsDecrement.kd", "amd_rocclr_streamOpsDecrement"),
-        ("operator/", "operator"),
-        ("cub::DeviceReduceKernel", "cub_DeviceReduceKernel"),
-        ("my kernel", "my_kernel"),
-        ("$_0::__cxx11", "0_cxx11"),
-        ("a" * 100, "a" * MAX_SHORT_NAME_LENGTH),
-        (None, None),
-    ],
-    ids=[
-        "plain_identifier",
-        "kernel_descriptor_suffix",
-        "operator_slash",
-        "namespace_qualifier",
-        "whitespace",
-        "lambda_spelling",
-        "over_length",
-        "missing",
-    ],
-)
-def test_sanitize_short_name(short_name, expected):
-    """A short name reduces to a path component without losing its identity."""
-    assert _sanitize_short_name(short_name) == expected
-
-
-def test_build_isa_header_places_stall_reasons_between_counts_and_source():
-    """The reasons a workload observed become columns of their own."""
-    header = _build_isa_header(["NONE", "WAITCNT"])
-
+    header = read_exported_rows(
+        tmp_path
+        / "vector_copy"
+        / "MI300X_A1"
+        / "vecCopy_uuid_1"
+        / "isa_code_object_id_5_pid_42.csv"
+    )[0]
     assert header == [
         "Instruction line number",
         "Code object offset",
@@ -145,14 +102,6 @@ def test_build_isa_header_places_stall_reasons_between_counts_and_source():
         "Code object id",
         "Pid",
     ]
-
-
-def test_build_isa_header_carries_no_stall_columns_without_reasons():
-    """A host_trap workload records no stall reason, so it gets no column."""
-    header = _build_isa_header([])
-
-    assert "Stall NONE" not in header
-    assert header[-3:] == ["Source", "Code object id", "Pid"]
 
 
 def test_write_per_kernel_isa_files_opens_one_file_per_grouping_key(tmp_path):

@@ -538,10 +538,10 @@ PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT = len(per_kernel_isa_file_key_columns())
 
 
 def per_source_line_file_key_columns() -> List[Any]:
-    """Return the columns naming the file a per-source-line row is written to.
+    """Return the columns that name the file a per-source-line row is written to.
 
-    Like per_kernel_isa_file_key_columns, the select and the exporter's split
-    both read this one list.
+    The select and the exporter's split both read this list, so they stay in
+    step.
     """
     return [
         Workload.name.label("workload_name"),
@@ -692,10 +692,10 @@ class Database:
         workload_id: int,
         stall_reasons: List[str],
     ) -> Iterator[Tuple[Any, ...]]:
-        """Yield every line of one workload's captured sources, file by file.
+        """Yield every line of one workload's captured source files, file by file.
 
-        Rows arrive in the order the exporter writes them, through the raw
-        sqlite3 cursor so the full result set is never held in memory.
+        The rows arrive in the order the exporter writes them, through the raw
+        sqlite3 cursor, so the full result set is never held in memory.
         """
         yield from cls._stream_rows(
             cls._per_source_line_statement(workload_id, stall_reasons)
@@ -703,7 +703,7 @@ class Database:
 
     @classmethod
     def _stream_rows(cls, statement: Select[Any]) -> Iterator[Tuple[Any, ...]]:
-        """Yield a statement's rows through the session's raw sqlite3 cursor."""
+        """Yield the rows of a statement through the raw sqlite3 cursor."""
         raw_conn = cls._session.connection().connection
         yield from raw_conn.execute(
             str(
@@ -929,18 +929,18 @@ class Database:
         workload_id: int,
         stall_reasons: List[str],
     ) -> Select[Any]:
-        """Select every line of one workload's captured sources with its counts.
+        """Select every line of one workload's captured source files.
 
-        A line sums the per-kernel ISA rows of every instruction whose inline
-        stack names it, and lists where those rows sit. A ":?" frame names no
-        line, so it adds to none.
+        Each line sums the per-kernel ISA rows of the instructions whose inline
+        stack names that line, and references those rows. A ":?" frame names no
+        source line, so its instruction adds to no source line.
         """
         isa_lines = (
             Database
             ._per_kernel_isa_statement(workload_id, stall_reasons)
             .add_columns(
                 InstructionLine.instruction_uuid.label("instruction_uuid"),
-                # Numbers each ISA file's rows the way the ISA exporter does.
+                # Number the rows of each ISA file as the ISA exporter does.
                 func
                 .row_number()
                 .over(
@@ -955,7 +955,7 @@ class Database:
             )
             .subquery("isa_lines")
         )
-        # A stack naming one line twice still counts its instruction once there.
+        # Count an instruction once per line, even if its stack names the line twice.
         line_instructions = (
             select(
                 InstructionSourceLine.instruction_uuid,
@@ -985,11 +985,16 @@ class Database:
                     for stall_reason in stall_reasons
                 ),
                 func.json_group_array(
-                    func.json_array(
+                    func.json_object(
+                        "kernel_uuid",
                         isa_lines.c.kernel_uuid,
+                        "short_name",
                         isa_lines.c.kernel_short_name,
+                        "code_object_id",
                         isa_lines.c.code_object_id,
+                        "pid",
                         isa_lines.c.pid,
+                        "instruction_line_number",
                         isa_lines.c.instruction_line_number,
                     )
                 ).label("isa_references"),
@@ -1000,7 +1005,7 @@ class Database:
                 SourceLine.source_file_uuid == SourceFile.source_file_uuid,
             )
             .join(Workload, SourceFile.workload_id == Workload.workload_id)
-            # A line no instruction came from leaves the counts empty.
+            # Keep the lines that no instruction came from.
             .outerjoin(
                 line_instructions,
                 SourceLine.source_line_uuid == line_instructions.c.source_line_uuid,
@@ -1010,7 +1015,7 @@ class Database:
                 line_instructions.c.instruction_uuid == isa_lines.c.instruction_uuid,
             )
             .where(SourceFile.workload_id == workload_id)
-            # Only a captured file is exported, and only a known line is listed.
+            # Only captured files are exported, and only numbered lines are listed.
             .where(SourceFile.md5_checksum.is_not(None))
             .where(SourceLine.line_number.is_not(None))
             .group_by(SourceLine.source_line_uuid)
@@ -1022,9 +1027,9 @@ class Database:
         percent: ColumnElement[Any],
         sample_count: ColumnElement[Any],
     ) -> ColumnElement[Any]:
-        """Average per-instruction percentages over the samples behind them.
+        """Average per-instruction percentages, weighted by their sample counts.
 
-        An instruction with no percentage adds no weight.
+        An instruction without a percentage adds no weight.
         """
         return func.sum(percent * sample_count) / func.sum(
             case((percent.is_not(None), sample_count))

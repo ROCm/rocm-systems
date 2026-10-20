@@ -1123,7 +1123,7 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
 
 
 def test_per_source_line_select_leads_with_the_file_key_columns():
-    """The exporter slices the key off by count, so order and count must hold."""
+    """The exporter slices off the key by count, so the order and count must hold."""
     statement = Database._per_source_line_statement(workload_id=1, stall_reasons=[])
     leading_columns = list(statement.selected_columns)[
         :PER_SOURCE_LINE_FILE_KEY_COLUMN_COUNT
@@ -1137,7 +1137,7 @@ def test_per_source_line_select_leads_with_the_file_key_columns():
 
 
 def test_per_source_line_rows_sum_the_instructions_of_a_line(db_session):
-    """Counts and stall reasons add up; percentages average over samples."""
+    """Counts and stall reasons are summed, and percentages are sample-weighted."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_captured_source_file(db_session, workload, "/s/a.cpp", line_count=1)
@@ -1173,7 +1173,7 @@ def test_per_source_line_rows_sum_the_instructions_of_a_line(db_session):
     assert (row["count"], row["issue_count"], row["stall_count"]) == (8, 5, 3)
     assert (row["NONE"], row["WAITCNT"]) == (1, 2)
     assert row["wave_occupancy_percent"] == pytest.approx((50 * 3 + 10 * 5) / 8)
-    # The instruction with no percentage adds no weight.
+    # The instruction without a percentage adds no weight.
     assert row["active_thread_percent"] == pytest.approx(80.0)
 
 
@@ -1199,7 +1199,7 @@ def test_per_source_line_rows_credit_every_frame_of_an_inline_stack(db_session):
 
 
 def test_per_source_line_rows_count_an_instruction_once_per_line(db_session):
-    """A stack naming one line twice adds its instruction to that line once."""
+    """An instruction whose stack names one line twice counts once on that line."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
     add_captured_source_file(db_session, workload, "/s/a.cpp", line_count=2)
@@ -1218,8 +1218,10 @@ def test_per_source_line_rows_count_an_instruction_once_per_line(db_session):
 
 
 def test_per_source_line_rows_list_every_line_of_captured_files_only(db_session):
-    """Each captured line appears once, a ":?" frame adds to none, and an
-    uncaptured file has no copy to sit beside, so it is left out.
+    """Every numbered line of a captured file appears once.
+
+    A ":?" frame adds to no source line, and a file missing from the snapshot
+    is left out because it has no exported copy.
     """
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
@@ -1256,15 +1258,23 @@ def test_per_source_line_rows_list_every_line_of_captured_files_only(db_session)
         ("/s/a.cpp", 2): 3,
         ("/s/a.cpp", 3): None,
     }
-    # A line no instruction came from joins one all-null reference.
-    assert rows[0]["isa_references"] == [[None, None, None, None, None]]
+    # A line that no instruction came from has one all-null reference.
+    assert rows[0]["isa_references"] == [
+        {
+            "kernel_uuid": None,
+            "short_name": None,
+            "code_object_id": None,
+            "pid": None,
+            "instruction_line_number": None,
+        }
+    ]
 
 
 def test_per_source_line_rows_number_isa_rows_as_the_isa_file_does(db_session):
     """A reference names an instruction by its row in its kernel's ISA file.
 
-    Rows are numbered by offset within one kernel, code object and process, so
-    an unsampled instruction still holds its row.
+    Rows are numbered by offset within one kernel, code object and process, and
+    an unsampled instruction is numbered too.
     """
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", short_name="vecCopy", workload=workload)
@@ -1285,7 +1295,12 @@ def test_per_source_line_rows_number_isa_rows_as_the_isa_file_does(db_session):
 
     rows = fetch_per_source_line_rows(db_session, workload)
 
-    assert [row["isa_references"] for row in rows] == [
-        [[kernel.kernel_uuid, "vecCopy", 5, 42, 2]],
-        [[kernel.kernel_uuid, "vecCopy", 5, 42, 1]],
-    ]
+    assert [
+        [
+            (isa_reference["code_object_id"], isa_reference["instruction_line_number"])
+            for isa_reference in row["isa_references"]
+        ]
+        for row in rows
+    ] == [[(5, 2)], [(5, 1)]]
+    assert rows[0]["isa_references"][0]["kernel_uuid"] == kernel.kernel_uuid
+    assert rows[0]["isa_references"][0]["short_name"] == "vecCopy"
