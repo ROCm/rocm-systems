@@ -26,6 +26,8 @@ void ncclOsAlignedFree(void* ptr) { free(ptr); }
 
 ncclResult_t ncclOsInitialize() { return ncclSuccess; }
 uint64_t ncclOsGetPid() { return 4321; }
+ncclResult_t ncclOsSetFilesLimit() { return ncclSuccess; }
+char* ncclOsStrSep(char** stringp, const char* delim) { return strsep(stringp, delim); }
 size_t ncclOsGetPageSize() { return 4096; }
 size_t ncclOsGetCommMempoolMaxSize() { return 0; }  // src/os/linux.cc: 0 = no cap
 
