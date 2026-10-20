@@ -84,16 +84,22 @@ COMPRESSED_BUNDLE_MAGIC = b"CCOB"
 # are the blobs a `__hipRegisterFatBinary` record names: its hrr_api_id_t, and
 # where the record keeps the hash after the event header and `uint64 ret`.
 # The id is per archive format version (hrr_api_args.h): v8 put two compiler
-# APIs ahead of it and v9 one more. A v7 archive may hold either numbering, so
-# that and any other version leaves the fat binaries unscanned.
-REGISTER_FAT_BINARY = {8: 549, 9: 550}
+# APIs ahead of it, v9 one more, and v10 left it where it was. A v7 archive may
+# hold either numbering, so that and any other version leaves the fat binaries
+# unscanned. tools/tests/test_skill_api_ids.py fails when HRR_VERSION moves
+# past this table.
+REGISTER_FAT_BINARY = {8: 549, 9: 550, 10: 550}
 FAT_BINARY_HASH_OFFSET = EVENT_HEADER_BYTES + 8
 HARDWARE_ID_FIELDS = ("pci", "uuid", "luid")
 # Capture cannot zero what the GPU loads, so `verify` looks there for strings
-# such as "/home/dev/src/model.hip": a NUL-terminated string that starts with
-# "/" and has at least two components, in a loaded, non-executable section.
+# such as "/home/dev/src/model.hip" or "C:\src\model.hip": a NUL-terminated
+# string that starts with "/" or a drive letter and has at least two components,
+# in a loaded, non-executable section. A component is any bytes from 0x20 up,
+# so spaces and UTF-8 names count.
 SHT_PROGBITS, SHF_ALLOC, SHF_EXECINSTR = 1, 0x2, 0x4
-ABSOLUTE_PATH = re.compile(rb"(?<=\0)/[\x21-\x7e]+/[\x21-\x7e]+(?=\0)")
+ABSOLUTE_PATH = re.compile(
+    rb"(?<=\0)(?:/[\x20-\xff]+/|[A-Za-z]:[\\/][\x20-\xff]+[\\/])[\x20-\xff]+(?=\0)"
+)
 
 
 @dataclass

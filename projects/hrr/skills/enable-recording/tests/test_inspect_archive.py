@@ -686,7 +686,7 @@ def test_an_absolute_path_in_loaded_data_is_reported(tmp_path, capsys):
     clean = make_process(tmp_path, 36)
     (clean / "code_objects").mkdir()
     (clean / "code_objects" / "a.hsaco").write_bytes(
-        make_elf({".rodata": b"p >= 0\0k.hip\0//\0", ".note": b"\0/a/b\0"}, allocated=(".rodata",))
+        make_elf({".rodata": b"p >= 0\0k.hip\0//\0C:\\k.hip\0", ".note": b"\0/a/b\0"}, allocated=(".rodata",))
     )
     text = bytearray(make_elf({".text": b"\0/a/b\0"}, allocated=(".text",)))
     struct.pack_into("<Q", text, len(text) - 2 * 64 + 8, 6)  # .text: SHF_ALLOC | SHF_EXECINSTR
@@ -697,6 +697,28 @@ def test_an_absolute_path_in_loaded_data_is_reported(tmp_path, capsys):
     assert procs[35]["path_files"] == 1
     assert procs[36]["path_files"] == 0
     assert procs[35]["debug_info_files"] == procs[36]["debug_info_files"] == 0
+
+
+@pytest.mark.parametrize(
+    "string",
+    [
+        b"/home/dev/build tree/k.hip",
+        "/home/dév/src/k.hip".encode(),
+        b"C:\\Users\\dev\\k.hip",
+        b"D:/src/k.hip",
+    ],
+)
+def test_paths_with_spaces_non_ascii_or_a_drive_letter_are_reported(tmp_path, capsys, string):
+    """A build tree may sit under a directory with a space or a non-ASCII name,
+    or on a Windows drive; its assert() strings are build paths all the same.
+    """
+    pid_dir = make_process(tmp_path, 37)
+    (pid_dir / "code_objects").mkdir()
+    (pid_dir / "code_objects" / "a.hsaco").write_bytes(
+        make_elf({".rodata": b"p >= 0\0" + string + b"\0"}, allocated=(".rodata",))
+    )
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    assert json.loads(capsys.readouterr().out)["processes"][0]["path_files"] == 1
 
 
 def test_only_blobs_registered_as_fat_binaries_are_checked(tmp_path, capsys):
@@ -718,19 +740,19 @@ def test_only_blobs_registered_as_fat_binaries_are_checked(tmp_path, capsys):
 
 
 def test_fat_binaries_are_found_by_the_id_of_the_archive_version(tmp_path, capsys):
-    """`__hipRegisterFatBinary` was id 549 in format v8 and is 550 from v9. A v7
-    archive may hold either, so `verify` says it did not look rather than
-    report no build information.
+    """`__hipRegisterFatBinary` was id 549 in format v8 and is 550 in v9 and
+    v10. A v7 archive may hold either, so `verify` says it did not look rather
+    than report no build information.
     """
     leaky = make_bundle(make_elf({".text": b"\1" * 8, ".debug_str": b"/app/build\0"}))
-    cases = {40: (8, 549), 41: (8, 550), 42: (9, 550), 43: (7, 549)}
+    cases = {40: (8, 549), 41: (8, 550), 42: (9, 550), 43: (10, 550), 39: (7, 549)}
     for pid, (version, event_id) in cases.items():
         register_fat_binary(make_process(tmp_path, pid, format_version=version), pid, 1, leaky, event_id)
 
     inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
     procs = {p["pid"]: p for p in json.loads(capsys.readouterr().out)["processes"]}
-    assert [procs[pid]["debug_info_files"] for pid in cases] == [1, 0, 1, 0]
-    assert [procs[pid]["fat_binaries_scanned"] for pid in cases] == [True, True, True, False]
+    assert [procs[pid]["debug_info_files"] for pid in cases] == [1, 0, 1, 1, 0]
+    assert [procs[pid]["fat_binaries_scanned"] for pid in cases] == [True, True, True, True, False]
     inspect_archive.main(["--archive", str(tmp_path), "--no-playback"])
     assert "fat binaries not checked (archive format v7)" in capsys.readouterr().out
 

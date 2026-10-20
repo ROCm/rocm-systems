@@ -15,6 +15,8 @@
  */
 
 #include "hrr_test_common.hh"
+
+#ifdef HRR_HAVE_CAPTURE_SCRUB
 #include "hip_capture_scrub.h"
 
 #include <cstdint>
@@ -172,6 +174,15 @@ HRR_TEST_CASE(Unit_HRR_Scrub_RefusesOutOfBoundsTables) {
       CHECK(scrub_code_object(cut.data(), cut.size()) == 0);
     }
 }
+
+#else
+// projects/hrr was checked out without the CLR sources (tests/unit/CMakeLists.txt).
+#define HRR_SCRUB_NOT_BUILT(name) \
+  HRR_TEST_CASE(name) { HRR_SKIP("built without CLR's hip_capture_scrub.cpp"); }
+HRR_SCRUB_NOT_BUILT(Unit_HRR_Scrub_ZeroesAndRetypesBuildInfo)
+HRR_SCRUB_NOT_BUILT(Unit_HRR_Scrub_SkipsUnterminatedName)
+HRR_SCRUB_NOT_BUILT(Unit_HRR_Scrub_RefusesOutOfBoundsTables)
+#endif
 
 /**
  * @}
