@@ -287,6 +287,39 @@
         {"name": "DdaIpcMicrotests", "description": "Host-only dda_all_reduce_ipc.cu eligibility, datatype dispatch and flat/tree selection microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
     },
+    "unit_tests_micro_roctx_nvml": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroRoctxNvml",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "RoctxNvmlMicrotests", "description": "Host-only misc/roctx.cc + misc/nvmlwrap_stub.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_rocmwrap": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroRocmwrap",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "RocmwrapMicrotests", "description": "Host-only misc/rocmwrap.cc microtests (no GPU, no HIP/RCCL runtime); covers the cuMem VMM capability checks and rocmLibraryInit's ROCr/DMA-BUF setup", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_amdsmi_wrap": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroAmdsmiWrap",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "AmdsmiWrapMicrotests", "description": "Host-only misc/amdsmi_wrap.cc microtests (no GPU, no HIP/RCCL runtime); covers device, bus-id, link, firmware and fabric queries across the WSL2, amd_smi_lib and ARSMI backends", "test_filter": "*"}
+      ]
+    },
     "unit_tests_micro_rome_models": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroRomeModels",
@@ -381,6 +414,24 @@
       "name": "RCCL Microtests - dda_all_reduce_ipc.cu",
       "description": "rccl-UnitTestsMicroDdaIpc (host-only DDA IPC all-reduce eligibility/dispatch microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_dda_ipc",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - misc/roctx.cc + misc/nvmlwrap_stub.cc",
+      "description": "rccl-UnitTestsMicroRoctxNvml (host-only misc/roctx.cc + misc/nvmlwrap_stub.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_roctx_nvml",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - rocmwrap.cc",
+      "description": "rccl-UnitTestsMicroRocmwrap (host-only misc/rocmwrap.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_rocmwrap",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - amdsmi_wrap.cc",
+      "description": "rccl-UnitTestsMicroAmdsmiWrap (host-only misc/amdsmi_wrap.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_amdsmi_wrap",
       "enabled": true
     },
     {
