@@ -1384,6 +1384,13 @@ class GraphExecSegmented : public GraphExecBase {
                                          amd::AlignedVector64<uint8_t>& flatData,
                                          std::vector<uint32_t>& fullHeaders,
                                          std::vector<uint8_t>& flatMetadata);
+    // Write one packet and its metadata into existing flat-buffer slots, in the same layout
+    // appendPacketToFlatBuffer produces.
+    static void writePacketToFlatSlot(const uint8_t* pkt_raw, const uint8_t* metadata_raw,
+                                      uint8_t* dst, uint32_t* fullHeader, uint8_t* metadataDst);
+    // Rewrite flat-buffer slot |idx| in place from dispatchPackets[idx]. Requires the flat
+    // buffers to already hold one slot per dispatchPackets entry.
+    void rewriteFlatSlot(size_t idx);
     // Stamp the four packet headers of a 256-byte metadata slot with
     // HSA_PACKET_TYPE_INVALID (type=1) so the CP metadata-prefetch engine skips it.
     static void invalidateMetadataSlot(uint8_t* slot);
