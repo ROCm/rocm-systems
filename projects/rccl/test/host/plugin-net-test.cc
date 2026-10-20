@@ -793,7 +793,8 @@ TEST_F(PluginNetMicrotest, FinalizeSkipsACollNetThatIsNotEnabled) {
 }
 
 // A failing net or collnet finalize returns before the refcount drop, so the comm's reference is never released
-// and the library stays loaded for good. No ticket yet; a fix flips this pin.
+// and the library stays loaded for good.
+// Pins AICOMRCCL-3079; a fix flips this pin.
 TEST_F(PluginNetMicrotest, Finalize_KnownBug_AFailedPluginFinalizeKeepsTheRef) {
   g_libs["ext"] = {12, 12};
   BuildList("ext");
