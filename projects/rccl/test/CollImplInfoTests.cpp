@@ -39,8 +39,10 @@
 
 #include "StandaloneUtils.hpp"
 #include "common/CeAllReduceTestHelpers.hpp"  // isCeRuntimeDriverSupported
+#include "common/IsolatedChildSkip.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "common/SymmetricBufferHelpers.hpp"  // RCCLTestHelpers::SymBuf (RAII deregister+free)
+#include "common/SymmetricKernelLog.hpp"
 #include "rccl_common.h"  // rcclGetCollImplInfo, rcclSymKGetInfo, rcclGetAlgoName, rcclGetProtocolName, rcclAddonAlgos_t
 #include "sym_kernels.h"  // ncclSymkMaxBlocks
 
@@ -79,18 +81,6 @@ namespace RcclUnitTesting
       std::stringstream ss;
       ss << f.rdbuf();
       return ss.str();
-    }
-
-    // Returns the whitespace-delimited token that follows `key` in `line`, or "".
-    std::string TokenAfter(const std::string& line, const std::string& key)
-    {
-      size_t p = line.find(key);
-      if (p == std::string::npos) return "";
-      p += key.size();
-      while (p < line.size() && isspace((unsigned char)line[p])) p++;
-      size_t e = p;
-      while (e < line.size() && !isspace((unsigned char)line[e])) e++;
-      return line.substr(p, e - p);
     }
 
     // Names as produced by rcclGetProtocolName / ncclProtoToString.
@@ -136,15 +126,19 @@ namespace RcclUnitTesting
 
         // Live SYM is scheduled in enqueue: "<Func> [Symmetric]: ... Kernel AllGather_LL nchannels N".
         // Tensor Data Mover kernels (AllGather_TmaST, ...) are reported as SymTDM.
-        if (line.find(func + " [Symmetric]:") != std::string::npos)
+        const std::string symKernel = SymmetricKernelOnLine(line, func);
+        if (!symKernel.empty())
         {
-          std::string kernel = TokenAfter(line, "Kernel ");
-          std::string proto;
-          if (kernel.find("LL128") != std::string::npos) proto = "LL128";
-          else if (kernel.find("LL") != std::string::npos) proto = "LL";
-          else if (!kernel.empty()) proto = "SIMPLE";
-          const char* name = kernel.find("Tma") != std::string::npos ? "SymTDM" : "SYM";
-          addon = {true, name, !proto.empty(), proto, false, 0};
+          std::string proto = "SIMPLE";
+          if (symKernel.find("LL128") != std::string::npos)
+          {
+            proto = "LL128";
+          }
+          else if (symKernel.find("LL") != std::string::npos)
+          {
+            proto = "LL";
+          }
+          addon = {true, IsTdmSymmetricKernel(symKernel) ? "SymTDM" : "SYM", true, proto, false, 0};
         }
 
         if (func == "AllGather")
@@ -289,14 +283,7 @@ namespace RcclUnitTesting
     // Skips here, or hands the reason to the parent when it asked for one via kSkipFileEnv.
     void SkipSweep(const std::string& reason)
     {
-      const char* path = getenv(kSkipFileEnv);
-      if (path == nullptr)
-      {
-        GTEST_SKIP() << reason;
-      }
-      std::ofstream out(path);
-      out << reason;
-      EXPECT_TRUE(out.good()) << "cannot hand the skip to the parent via " << path << ": " << reason;
+      SkipOrHandToParent(kSkipFileEnv, reason);
     }
 
     // Why CE-registered AllReduce can never be selected on these comms, or "" when it can.
@@ -748,9 +735,7 @@ namespace RcclUnitTesting
       mode.ceAllReduce = true;
       RunSweep("AllReduce", ncclFuncAllReduce, (size_t)1 << 20, (size_t)64 << 20, mode);
     }).withEnvironment({{kSkipFileEnv, skipFile}, {"NCCL_CUMEM_ENABLE", "1"}}).withTimeout(std::chrono::seconds(180)));
-    std::string reason;
-    std::getline(std::ifstream(skipFile), reason);
-    remove(skipFile.c_str());
+    const std::string reason = TakeHandedSkip(skipFile);
     if (!reason.empty())
     {
       GTEST_SKIP() << reason;

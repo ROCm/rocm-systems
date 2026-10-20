@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <ostream>
 #include <string>
@@ -502,36 +503,28 @@ TEST_F(SymKernelMaskTest, ReduceScatterNRanksMultiplier_AtPerRank2GB_LLKernelCle
   EXPECT_FALSE(KernelBitSet(kmask, ncclSymkKernelId_ReduceScatter_LL));
 }
 
-// ---- ncclSymkAvailable/ncclSymkImplemented: the (coll,red,ty) support set independent of the generated switch ----
-
-// Dropping "&& ty != ncclFloat64" here would wrongly implement this pair; nothing else here would catch it.
-// rcclSymkKernelIdIsTma drives the SymTDM label, rcclSymkKernelIdIsLL the LL protocol label.
+// rcclSymkKernelIdIsTma drives the SymTDM label, rcclSymkKernelIdIsLL the LL protocol label; the names are the oracle.
 TEST_F(SymKernelMicrotest, KernelIdIsTma_OnlyTheTdmKernels) {
-  for (ncclSymkKernelId id : {ncclSymkKernelId_AllGather_TmaST, ncclSymkKernelId_AllGather_TmaSTMC,
-                              ncclSymkKernelId_AllReduce_RSxTmaLD_AGxTmaST, ncclSymkKernelId_ReduceScatter_TmaLD}) {
-    EXPECT_TRUE(rcclSymkKernelIdIsTma(id)) << ncclSymkKernelIdToString(id);
-  }
-  for (ncclSymkKernelId id : {ncclSymkKernelId_AllGather_ST, ncclSymkKernelId_AllGather_LL,
-                              ncclSymkKernelId_AllReduce_RSxLD_AGxST, ncclSymkKernelId_ReduceScatter_LD}) {
-    EXPECT_FALSE(rcclSymkKernelIdIsTma(id)) << ncclSymkKernelIdToString(id);
+  for (int id = 0; id < ncclSymkKernelId_Count; id++) {
+    const char* name = ncclSymkKernelIdToString(id);
+    EXPECT_EQ(std::strstr(name, "Tma") != nullptr, rcclSymkKernelIdIsTma(id)) << name;
   }
   EXPECT_FALSE(rcclSymkKernelIdIsTma(-1));
   EXPECT_FALSE(rcclSymkKernelIdIsTma(ncclSymkKernelId_Count));
 }
 
 TEST_F(SymKernelMicrotest, KernelIdIsLL_OnlyTheLLKernels) {
-  for (ncclSymkKernelId id :
-       {ncclSymkKernelId_AllGather_LL, ncclSymkKernelId_AllReduce_AGxLL_R, ncclSymkKernelId_ReduceScatter_LL}) {
-    EXPECT_TRUE(rcclSymkKernelIdIsLL(id)) << ncclSymkKernelIdToString(id);
-  }
-  for (ncclSymkKernelId id : {ncclSymkKernelId_AllGather_TmaST, ncclSymkKernelId_AllGather_ST,
-                              ncclSymkKernelId_ReduceScatter_LD}) {
-    EXPECT_FALSE(rcclSymkKernelIdIsLL(id)) << ncclSymkKernelIdToString(id);
+  for (int id = 0; id < ncclSymkKernelId_Count; id++) {
+    const char* name = ncclSymkKernelIdToString(id);
+    EXPECT_EQ(std::strstr(name, "LL") != nullptr, rcclSymkKernelIdIsLL(id)) << name;
   }
   EXPECT_FALSE(rcclSymkKernelIdIsLL(-1));
   EXPECT_FALSE(rcclSymkKernelIdIsLL(ncclSymkKernelId_Count));
 }
 
+// ---- ncclSymkAvailable/ncclSymkImplemented: the (coll,red,ty) support set independent of the generated switch ----
+
+// Dropping "&& ty != ncclFloat64" here would wrongly implement this pair; nothing else here would catch it.
 TEST_F(SymKernelMicrotest, SymkImplemented_AllReduceFloat64_NotImplemented) {
   EXPECT_FALSE(ncclSymkImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat64));
 }

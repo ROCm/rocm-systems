@@ -434,14 +434,14 @@ TEST_F(SchedulerMicrotest, SymBatchAligned16B_SendWindowOnly_UsesWindowOffsetFor
 // In-place AllGather/ReduceScatter shift one side by rank * slice. With a 24 B slice the local
 // offset check passes on ranks 0 and 2 but fails on 1 and 3; every rank must agree, or ranks pick
 // different symmetric kernels and grids and hang at the LSA barrier.
-static bool InPlaceAligned16B(ncclFunc_t func, int rank, size_t sliceBytes) {
+static bool InPlaceAligned16B(ncclFunc_t func, int rank, size_t sliceBytes, ncclDataType_t datatype = ncclInt8) {
   alignas(16) static char window[1024];
   ncclDevrWindow win{};
   win.userPtr = window;
   ncclTaskColl t{};
   t.func = func;
-  t.datatype = ncclInt8;
-  t.count = sliceBytes;
+  t.datatype = datatype;
+  t.count = sliceBytes / ncclTypeSize(datatype);
   t.sendWin = t.recvWin = &win;
   char* slice = window + size_t(rank) * sliceBytes;
   t.sendbuff = func == ncclFuncAllGather ? slice : window;
@@ -462,6 +462,17 @@ TEST_F(SchedulerMicrotest, SymBatchAligned16B_InPlaceAlignedSlice_TrueOnEveryRan
   for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncReduceScatter}) {
     for (int rank = 0; rank < 4; rank++) {
       EXPECT_TRUE(InPlaceAligned16B(func, rank, /*sliceBytes=*/32)) << "func " << int(func) << " rank " << rank;
+    }
+  }
+}
+
+// Slices of 6 and 8 float32: comparing element counts instead of bytes flips rank 2 and rank 0.
+TEST_F(SchedulerMicrotest, SymBatchAligned16B_InPlaceFloat32Slice_UsesBytesNotElements) {
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncReduceScatter}) {
+    for (int rank = 0; rank < 4; rank++) {
+      const std::string where = "func " + std::to_string(int(func)) + " rank " + std::to_string(rank);
+      EXPECT_FALSE(InPlaceAligned16B(func, rank, /*sliceBytes=*/24, ncclFloat32)) << where;
+      EXPECT_TRUE(InPlaceAligned16B(func, rank, /*sliceBytes=*/32, ncclFloat32)) << where;
     }
   }
 }
