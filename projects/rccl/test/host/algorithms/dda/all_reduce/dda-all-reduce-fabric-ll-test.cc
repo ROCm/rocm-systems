@@ -122,6 +122,13 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     for (ncclDataType_t datatype : {ncclInt8, ncclUint8, ncclInt32, ncclUint32, ncclInt64, ncclUint64, ncclFloat64}) {
       EXPECT_FALSE(Eligible(fn, 256, datatype)) << "datatype " << datatype;
     }
+    EXPECT_TRUE(Eligible(fn, 256, ncclFloat8e4m3));
+    EXPECT_TRUE(Eligible(fn, 256, ncclFloat8e5m2));
+    g_rcclDdaDatatypeSupported = [](const ncclComm*, ncclDataType_t datatype) { return datatype == ncclFloat8e5m2; };
+    EXPECT_FALSE(Eligible(fn, 128, ncclFloat16));
+    EXPECT_FALSE(Eligible(fn, 256, ncclFloat8e4m3));
+    EXPECT_TRUE(Eligible(fn, 256, ncclFloat8e5m2));
+    ResetDdaCollSeams();
     for (int nRanks : {1, 145}) {
       comm().nRanks = nRanks;
       EXPECT_FALSE(Eligible(fn, 64)) << "nRanks " << nRanks;
@@ -320,20 +327,28 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotFirstThenTwoShotElseIntern
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_EachDatatypeLaunchesItsOwnKernelForBothShots) {
   EXPECT_EQ(RunOneLL(64, ncclFloat16).kernel, (LLOneShot<half, 8>()));
   EXPECT_EQ(RunOneLL(64, ncclBfloat16).kernel, (LLOneShot<bf16, 8>()));
+  EXPECT_EQ(RunOneLL(256, ncclFloat8e4m3).kernel, (LLOneShot<dda::common::fp8e4m3, 8>()));
+  EXPECT_EQ(RunOneLL(256, ncclFloat8e5m2).kernel, (LLOneShot<dda::common::fp8e5m2, 8>()));
   EXPECT_EQ(RunOneLL(64, ncclFloat16).Arg<const half*>(2), kSendbuff);
   OnlyTwoShot();
   EXPECT_EQ(RunOneLL(512, ncclFloat16).kernel, (LLTwoShot<half, 8>()));
   EXPECT_EQ(RunOneLL(512, ncclBfloat16).kernel, (LLTwoShot<bf16, 8>()));
+  EXPECT_EQ(RunOneLL(2048, ncclFloat8e4m3).kernel, (LLTwoShot<dda::common::fp8e4m3, 8>()));
+  EXPECT_EQ(RunOneLL(2048, ncclFloat8e5m2).kernel, (LLTwoShot<dda::common::fp8e5m2, 8>()));
   EXPECT_EQ(RunOneLL(512, ncclBfloat16).Arg<bf16*>(1), kRecvbuff);
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_EachDatatypeLaunchesItsOwnKernelForBothShots) {
   EXPECT_EQ(RunOneLL128(64, ncclFloat16).kernel, (LL128OneShot<half, 8>()));
   EXPECT_EQ(RunOneLL128(64, ncclBfloat16).kernel, (LL128OneShot<bf16, 8>()));
+  EXPECT_EQ(RunOneLL128(256, ncclFloat8e4m3).kernel, (LL128OneShot<dda::common::fp8e4m3, 8>()));
+  EXPECT_EQ(RunOneLL128(256, ncclFloat8e5m2).kernel, (LL128OneShot<dda::common::fp8e5m2, 8>()));
   EXPECT_EQ(RunOneLL128(64, ncclFloat16).Arg<const half*>(2), kSendbuff);
   OnlyTwoShot();
   EXPECT_EQ(RunOneLL128(512, ncclFloat16).kernel, (LL128TwoShot<half, 8>()));
   EXPECT_EQ(RunOneLL128(512, ncclBfloat16).kernel, (LL128TwoShot<bf16, 8>()));
+  EXPECT_EQ(RunOneLL128(2048, ncclFloat8e4m3).kernel, (LL128TwoShot<dda::common::fp8e4m3, 8>()));
+  EXPECT_EQ(RunOneLL128(2048, ncclFloat8e5m2).kernel, (LL128TwoShot<dda::common::fp8e5m2, 8>()));
   EXPECT_EQ(RunOneLL128(512, ncclBfloat16).Arg<bf16*>(1), kRecvbuff);
 }
 

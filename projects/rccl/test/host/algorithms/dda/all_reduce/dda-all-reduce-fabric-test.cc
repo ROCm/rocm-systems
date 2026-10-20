@@ -138,12 +138,18 @@ TEST_F(DdaAllReduceFabricMicrotest, Eligible_OnlySum) {
   }
 }
 
-TEST_F(DdaAllReduceFabricMicrotest, Eligible_OnlyFloat32Float16Bfloat16) {
+TEST_F(DdaAllReduceFabricMicrotest, Eligible_OnlyDatatypesTheDdaGateAdmits) {
   EXPECT_TRUE(Eligible(8, ncclFloat16));
   EXPECT_TRUE(Eligible(8, ncclBfloat16));
   for (ncclDataType_t datatype : {ncclInt8, ncclUint8, ncclInt32, ncclUint32, ncclInt64, ncclUint64, ncclFloat64}) {
     EXPECT_FALSE(Eligible(16, datatype)) << "datatype " << datatype;
   }
+  EXPECT_TRUE(Eligible(16, ncclFloat8e4m3));
+  EXPECT_TRUE(Eligible(16, ncclFloat8e5m2));
+  g_rcclDdaDatatypeSupported = [](const ncclComm*, ncclDataType_t datatype) { return datatype == ncclFloat8e5m2; };
+  EXPECT_FALSE(Eligible(8, ncclFloat16));
+  EXPECT_FALSE(Eligible(16, ncclFloat8e4m3));
+  EXPECT_TRUE(Eligible(16, ncclFloat8e5m2));
 }
 
 TEST_F(DdaAllReduceFabricMicrotest, Eligible_PayloadUpToScratchAndMultipleOf16) {
@@ -198,6 +204,8 @@ TEST_F(DdaAllReduceFabricMicrotest, Launch_EachDatatypeLaunchesItsOwnKernel) {
   ExpectLaunchOf<float>(RunOne(16, ncclFloat32), 16);
   ExpectLaunchOf<half>(RunOne(16, ncclFloat16), 16);
   ExpectLaunchOf<bf16>(RunOne(16, ncclBfloat16), 16);
+  ExpectLaunchOf<dda::common::fp8e4m3>(RunOne(16, ncclFloat8e4m3), 16);
+  ExpectLaunchOf<dda::common::fp8e5m2>(RunOne(16, ncclFloat8e5m2), 16);
 }
 
 TEST_F(DdaAllReduceFabricMicrotest, Launch_TakesTheStopEventOnTheStream) {

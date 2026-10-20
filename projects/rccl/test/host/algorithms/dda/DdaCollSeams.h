@@ -87,12 +87,13 @@ bool SameBarrier(const Barrier& a, const Barrier& b) {
   return std::memcmp(&a, &b, sizeof(Barrier)) == 0;
 }
 
-// rccl_wrap.cc DDA thresholds; defaults match rccl_wrap.cc with no arch table and no env.
+// rccl_wrap.cc DDA thresholds and datatype gate; defaults match rccl_wrap.cc with no arch table and no env.
 extern std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold;
 extern std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold;
 extern std::function<size_t(const ncclComm*)> g_rcclDdaLLTwoShotThreshold;
 extern std::function<size_t(const ncclComm*)> g_rcclDdaLL128TwoShotThreshold;
 extern std::function<int(const ncclComm*)> g_rcclDdaFabricVmmBlocks;
+extern std::function<bool(const ncclComm*, ncclDataType_t)> g_rcclDdaDatatypeSupported;
 
 void ResetDdaCollSeams();
 

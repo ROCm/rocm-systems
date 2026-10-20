@@ -22,18 +22,35 @@ static size_t DefaultDdaLL128Threshold(const ncclComm*, ncclFunc_t) { return 0; 
 static size_t DefaultDdaLLTwoShotThreshold(const ncclComm*) { return (size_t)(2) * 1024 * 1024; }
 static size_t DefaultDdaLL128TwoShotThreshold(const ncclComm*) { return (size_t)(64) * 1024 * 1024; }
 static int DefaultDdaFabricVmmBlocks(const ncclComm* comm) { return comm != nullptr ? comm->ddaFabricMaxBlocks : 0; }
+static bool DefaultDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype) {
+  switch (datatype) {
+  case ncclFloat32:
+  case ncclFloat16:
+  case ncclBfloat16:
+    return true;
+  case ncclFloat8e4m3:
+  case ncclFloat8e5m2:
+    return comm != nullptr && comm->archName != nullptr && std::strncmp(comm->archName, "gfx1250", 7) == 0;
+  default:
+    return false;
+  }
+}
 
 std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold = DefaultDdaLLThreshold;
 std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
 std::function<size_t(const ncclComm*)> g_rcclDdaLLTwoShotThreshold = DefaultDdaLLTwoShotThreshold;
 std::function<size_t(const ncclComm*)> g_rcclDdaLL128TwoShotThreshold = DefaultDdaLL128TwoShotThreshold;
 std::function<int(const ncclComm*)> g_rcclDdaFabricVmmBlocks = DefaultDdaFabricVmmBlocks;
+std::function<bool(const ncclComm*, ncclDataType_t)> g_rcclDdaDatatypeSupported = DefaultDdaDatatypeSupported;
 
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLLThreshold(comm, func); }
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLL128Threshold(comm, func); }
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm) { return g_rcclDdaLLTwoShotThreshold(comm); }
 size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm) { return g_rcclDdaLL128TwoShotThreshold(comm); }
 int rcclDdaFabricVmmBlocks(const ncclComm* comm) { return g_rcclDdaFabricVmmBlocks(comm); }
+bool rcclDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype) {
+  return g_rcclDdaDatatypeSupported(comm, datatype);
+}
 
 void ResetDdaCollSeams() {
   g_ddaLaunches.clear();
@@ -42,6 +59,7 @@ void ResetDdaCollSeams() {
   g_rcclDdaLLTwoShotThreshold = DefaultDdaLLTwoShotThreshold;
   g_rcclDdaLL128TwoShotThreshold = DefaultDdaLL128TwoShotThreshold;
   g_rcclDdaFabricVmmBlocks = DefaultDdaFabricVmmBlocks;
+  g_rcclDdaDatatypeSupported = DefaultDdaDatatypeSupported;
 }
 
 // Weak so a shared definition in fakes/hip_fakes.cc takes over without a clash. The test TUs embed an empty GPU
