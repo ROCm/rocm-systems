@@ -146,12 +146,20 @@ profile_pop_disabled()
            get_profile_stack<CategoryT>() <= 0;
 }
 
+inline std::atomic<bool>&
+has_timemory_components()
+{
+    static std::atomic<bool> s_value{ false };
+    return s_value;
+}
+
 template <typename CategoryT, typename... Args>
 inline void
 push_timemory(CategoryT, std::string_view name, Args&&... args)
 {
-    // skip if category is disabled
-    if(category_push_disabled<CategoryT>())
+    // skip if no component records regions, or the category is disabled
+    if(!has_timemory_components().load(std::memory_order_relaxed) ||
+       category_push_disabled<CategoryT>())
     {
         return;
     }
@@ -243,8 +251,10 @@ template <typename CategoryT, typename... Args>
 inline void
 pop_timemory(CategoryT, std::string_view name, Args&&... args)
 {
-    // skip if category is disabled and not pushed on this thread
-    if(profile_pop_disabled<CategoryT>())
+    // skip if no component records regions, or the category is disabled and not
+    // pushed on this thread
+    if(!has_timemory_components().load(std::memory_order_relaxed) ||
+       profile_pop_disabled<CategoryT>())
     {
         return;
     }
