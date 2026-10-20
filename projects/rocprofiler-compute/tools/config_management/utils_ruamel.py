@@ -43,6 +43,16 @@ def save_yaml(data: Any, filepath: Union[str, Path]) -> None:
         RT_YAML.dump(data, f)
 
 
+def normalize_panel_id(panel_id: int) -> int:
+    """Panel number of a Panel Config id, e.g. 300 -> 3; template ids pass through."""
+    return panel_id // 100 if panel_id >= 100 else panel_id
+
+
+def normalize_table_id(table_id: int) -> int:
+    """Position of a table within its panel, e.g. 301 -> 1."""
+    return table_id % 100
+
+
 def strip_existing_header(yaml_data) -> None:
     ca = getattr(yaml_data, "ca", None)
     if not ca or not hasattr(ca, "comment") or ca.comment is None:

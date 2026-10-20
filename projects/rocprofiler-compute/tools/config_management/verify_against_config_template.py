@@ -71,14 +71,6 @@ def is_gfx12_ip_variant(arch_name: str) -> bool:
     return bool(re.fullmatch(r"gfx12[0-9a-f]{2}", arch_name, re.IGNORECASE))
 
 
-def normalize_panel_id(panel_id: int) -> int:
-    return panel_id // 100 if panel_id >= 100 else panel_id
-
-
-def normalize_table_id(table_id: int) -> int:
-    return table_id % 100
-
-
 @dataclass(frozen=True)
 class TemplateDataSource:
     type: str
@@ -124,7 +116,7 @@ def load_template(
             raise ValueError(
                 f"Template panels[{idx}].panel_id must be int, got {pid_raw!r}"
             )
-        pid = normalize_panel_id(pid_raw)
+        pid = cm_utils.normalize_panel_id(pid_raw)
 
         # Skip experimental panels from template validation
         is_experimental = bool(p.get("experimental", False))
@@ -157,7 +149,7 @@ def load_template(
             ds_out.append(
                 TemplateDataSource(
                     type=_as_str(ds["type"]),
-                    id=normalize_table_id(ds_id),
+                    id=cm_utils.normalize_table_id(ds_id),
                     title=_as_str(ds["title"]),
                 )
             )
@@ -189,7 +181,7 @@ def extract_panel_info(
         return None, {}, []
 
     pid_raw = panel_config.get("id")
-    pid = normalize_panel_id(pid_raw) if isinstance(pid_raw, int) else None
+    pid = cm_utils.normalize_panel_id(pid_raw) if isinstance(pid_raw, int) else None
 
     ds_extracted: list[dict[str, Any]] = []
     ds_list = panel_config.get("data source", [])
@@ -205,7 +197,7 @@ def extract_panel_info(
                 ):
                     ds_extracted.append({
                         "type": str(ds_type),
-                        "id": normalize_table_id(value["id"]),
+                        "id": cm_utils.normalize_table_id(value["id"]),
                         "title": _as_str(value.get("title")),
                     })
 
