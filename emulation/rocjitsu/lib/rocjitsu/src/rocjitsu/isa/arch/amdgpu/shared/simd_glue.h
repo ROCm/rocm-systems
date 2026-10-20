@@ -23,8 +23,10 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/floating_operation.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fract.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/input_denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ldexp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/minmax.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mixed_fma_simd.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
@@ -95,6 +97,7 @@ enum class SimdFastPath : uint8_t {
   VOP3_BINARY_FP16,
   VOP3_BINARY_MODE_FP16,
   VOP3_UNARY_FP16,
+  VOP3_LDEXP_RAW,
   VOP3_TERNARY_FP16,
   VOP3_TERNARY_TRUE16_RAW_FP16,
   VOP3_FMA_FP16,
@@ -798,10 +801,13 @@ inline auto flush_input_then(input_denormal::Policy policy, Op operation) {
 /// @brief Wrap a raw-bit operation with the instruction's source and output modifiers.
 /// @details Resolve MODE once, before the SIMD lane loop. The operation itself
 /// only needs to implement input flushing and produce destination-format bits.
+/// @param floating_sources Bit i set when source i is floating and takes ABS/NEG;
+/// LDEXP's integer exponent does not.
 template <typename Fmt, typename Inst, typename Op>
-inline auto vop3_float_operation(const Inst &inst, const Wavefront &wf, Op operation) {
+inline auto vop3_float_operation(const Inst &inst, const Wavefront &wf, Op operation,
+                                 uint32_t floating_sources = ~0u) {
   return floating_operation::WithModifiers<Fmt, Op>{
-      {inst.inst_.abs, inst.inst_.neg},
+      {inst.inst_.abs & floating_sources, inst.inst_.neg & floating_sources},
       output_modifier_policy<Fmt>(wf, inst.inst_.omod, inst.inst_.clamp),
       operation};
 }
@@ -3263,70 +3269,16 @@ template <typename Inst>
   return false;
 }
 
-/// VOP3 mixed-width LDEXP fast path with explicit guest FP controls.
-/// Reads src0 as native<float>, applies src0 abs/neg in f32, reads src1 as
-/// native<int32_t> (per-lane exponent), runs `op(a, e)`, applies
-/// result omod/clamp, then stores through a RegisterAccess write view.
+/// VOP3 F64 LDEXP fast path on raw encodings. Reads src0 as native<uint64_t>
+/// and the I32 exponent from src1's 32-bit lanes, widened to the value's lanes;
+/// `op` applies the modifiers and reads only the exponent's low 32 bits.
 template <typename Inst, typename Op>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_ldexp_vop3_fp32_simd(Inst &inst, Wavefront &wf, Op op) {
+[[nodiscard]] inline bool try_execute_ldexp_vop3_raw64_simd(Inst &inst, Wavefront &wf, Op op) {
   if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
       !inst.src1.simd_capable() || !inst.vdst.simd_capable())
     return false;
-  // The final floating clamp must not inherit host DAZ/FTZ or exception state.
-  fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f32());
-  using T = float32_t;
-  const uint32_t abs = inst.inst_.abs;
-  const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = effective_vop3_omod_f32(wf, inst.inst_.omod);
-  const uint32_t clamp = inst.inst_.clamp;
-  constexpr std::size_t W = util::native_width_v<T>;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand(inst.src0, exec);
-  auto exp_src = regs.read_operand(inst.src1, exec);
-  auto dst = regs.write_operand(inst.vdst, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    const auto a = apply_vop3_src_mod_f32<0>(src0.template load_native<T>(base), abs, neg);
-    const auto e = exp_src.template load_native<int32_t>(base);
-    const util::native<float> values = op(a, e);
-    const util::native<float> scaled([&](auto index) {
-      return div_apply_omod(static_cast<float>(values[index]), wf.fp_round_mode_f32(), omod);
-    });
-    const auto r = apply_vop3_dst_mod_f32(scaled, 0, clamp, floating_clamp_nan_to_zero(wf));
-    dst.template store_native<T>(base, r, chunk);
-  }
-  return true;
-}
-
-template <typename Inst, typename Op>
-[[nodiscard]] bool try_execute_ldexp_vop3_fp32_simd(Inst &, Wavefront &, Op) {
-  return false;
-}
-
-/// VOP3 mixed-width F64 LDEXP fast path with explicit guest FP controls.
-/// Reads src0 as native<double> via a 64-bit RegisterAccess operand view,
-/// applies src0 abs/neg in f64,
-/// reads src1 as narrow32<int32_t> (native_width64-wide), runs `op(a, e)`,
-/// applies result omod/clamp, and stores through a 64-bit RegisterAccess write
-/// view.
-template <typename Inst, typename Op>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_ldexp_vop3_fp64_simd(Inst &inst, Wavefront &wf, Op op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.vdst.simd_capable())
-    return false;
-  // Keep the final clamp in the same guest environment as the scalar path.
-  fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_f16_f64());
-  using T = double;
-  const uint32_t abs = inst.inst_.abs;
-  const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = effective_vop3_omod_f64(wf, inst.inst_.omod);
-  const uint32_t clamp = inst.inst_.clamp;
+  using T = uint64_t;
   constexpr std::size_t W = util::native_width64;
   const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
@@ -3338,20 +3290,16 @@ template <typename Inst, typename Op>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const auto a = apply_vop3_src_mod_f64<0>(src0.template load_native<T>(base), abs, neg);
-    const auto e = exp_src.template load_narrow<int32_t>(base);
-    const util::native<double> values = op(a, e);
-    const util::native<double> scaled([&](auto index) {
-      return div_apply_omod(static_cast<double>(values[index]), wf.fp_round_mode_f16_f64(), omod);
-    });
-    const auto r = apply_vop3_dst_mod_f64(scaled, 0, clamp, floating_clamp_nan_to_zero(wf));
-    dst.template store_native<T>(base, r, chunk);
+    const auto a = src0.template load_native<T>(base);
+    const auto e =
+        util::stdx::static_simd_cast<util::native<T>>(exp_src.template load_narrow<uint32_t>(base));
+    dst.template store_native<T>(base, op(a, e), chunk);
   }
   return true;
 }
 
 template <typename Inst, typename Op>
-[[nodiscard]] bool try_execute_ldexp_vop3_fp64_simd(Inst &, Wavefront &, Op) {
+[[nodiscard]] bool try_execute_ldexp_vop3_raw64_simd(Inst &, Wavefront &, Op) {
   return false;
 }
 
@@ -5073,6 +5021,44 @@ template <bool Vop3, typename Inst>
   return
 #endif
 
+/// LDEXP on raw encodings: ABS/NEG apply to the value, never to the exponent.
+#define ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP16(...)                                                 \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_simd<false, uint32_t>(                       \
+          inst, wf,                                                                                \
+          ::rocjitsu::amdgpu::vop3_float_operation<::rocjitsu::amdgpu::fp_format::F16>(            \
+              inst, wf, __VA_ARGS__, 1u),                                                          \
+          ::rocjitsu::amdgpu::SimdFastPath::VOP3_LDEXP_RAW))                                       \
+  return
+#define ROCJITSU_TRY_SIMD_VOP3_LDEXP_TRUE16_RAW_FP16(...)                                          \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_simd<true, uint32_t>(                        \
+          inst, wf,                                                                                \
+          ::rocjitsu::amdgpu::vop3_float_operation<::rocjitsu::amdgpu::fp_format::F16>(            \
+              inst, wf, __VA_ARGS__, 1u),                                                          \
+          ::rocjitsu::amdgpu::SimdFastPath::VOP3_LDEXP_RAW))                                       \
+  return
+#define ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP(...)                                                   \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_simd<uint32_t>(                                  \
+          inst, wf,                                                                                \
+          ::rocjitsu::amdgpu::vop3_float_operation<::rocjitsu::amdgpu::fp_format::F32>(            \
+              inst, wf, __VA_ARGS__, 1u))) {                                                       \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_LDEXP_RAW);                                         \
+    return;                                                                                        \
+  }
+#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
+#define ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64(...) static_cast<void>(inst)
+#else
+#define ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64(...)                                                 \
+  if (::rocjitsu::amdgpu::try_execute_ldexp_vop3_raw64_simd(                                       \
+          inst, wf,                                                                                \
+          ::rocjitsu::amdgpu::vop3_float_operation<::rocjitsu::amdgpu::fp_format::F64>(            \
+              inst, wf, __VA_ARGS__, 1u))) {                                                       \
+    ::rocjitsu::amdgpu::detail::record_simd_fast_path(                                             \
+        ::rocjitsu::amdgpu::SimdFastPath::VOP3_LDEXP_RAW);                                         \
+    return;                                                                                        \
+  }
+#endif
+
 /// Binary F64 arithmetic whose rounded result takes the shared output modifiers.
 #if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
 #define ROCJITSU_TRY_SIMD_VOP3_BINARY_ROUNDED_FP64(...) static_cast<void>(inst)
@@ -5241,20 +5227,6 @@ template <bool Vop3, typename Inst>
 #else
 #define ROCJITSU_TRY_SIMD_FMAC_VOP3_MODE_FP64()                                                    \
   if (::rocjitsu::amdgpu::try_execute_fmac_vop3_fp64_mode_simd(inst, wf))                          \
-  return
-#endif
-
-/// VOP3 ldexp counterpart (f32 src0 + int32 src1 exp). Variadic functor.
-#define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP32(...)                                                     \
-  if (::rocjitsu::amdgpu::try_execute_ldexp_vop3_fp32_simd(inst, wf, __VA_ARGS__))                 \
-  return
-
-/// VOP3 ldexp counterpart (f64 src0 + int32 src1 exp). Variadic functor.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-#define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP64(...) static_cast<void>(inst)
-#else
-#define ROCJITSU_TRY_SIMD_LDEXP_VOP3_FP64(...)                                                     \
-  if (::rocjitsu::amdgpu::try_execute_ldexp_vop3_fp64_simd(inst, wf, __VA_ARGS__))                 \
   return
 #endif
 
