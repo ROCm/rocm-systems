@@ -199,7 +199,8 @@ class CollectivesMicrotest : public ::testing::Test {
     int algo;
     const char* fn;
   };
-  void ExpectAddonArms(const std::vector<AddonArm>& arms, const std::function<ncclResult_t()>& call, ncclRedOp_t op) {
+  void ExpectAddonArms(const std::vector<AddonArm>& arms, const std::function<ncclResult_t()>& call, ncclRedOp_t op,
+                       const std::string& coll) {
     for (const AddonArm& arm : arms) {
       SCOPED_TRACE(arm.fn);
       Decide(arm.algo);
@@ -208,7 +209,8 @@ class CollectivesMicrotest : public ::testing::Test {
       fake.enqueued.clear();
       fake.addonResult = ncclRemoteError;
       EXPECT_EQ(ncclRemoteError, call());
-      EXPECT_EQ((std::vector<std::string>{"record", "select", "begin", arm.fn, "end"}), fake.trace);
+      EXPECT_EQ((std::vector<std::string>{"record", "select", "log " + coll, "begin", arm.fn, "end"}), fake.trace);
+      EXPECT_EQ(0u, comm_->opCount);  // only a successful launch advances it
       EXPECT_EQ(ncclRemoteError, fake.addonEndSeen);
       ASSERT_EQ(1u, fake.addons.size());
       EXPECT_EQ(send_.data(), fake.addons[0].sendbuff);
@@ -865,7 +867,7 @@ TEST_F(CollectivesMicrotest, AllGather_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_LL128, "ncclAllGatherDdaFabricLL128"},
                    {RCCL_DDA_FABRIC_VMM, "ncclAllGatherDdaFabric"},
                    {RCCL_DDA_IPC, "ncclAllGatherDdaIpc"}},
-                  [&] { return AllGather(); }, ncclNumOps);
+                  [&] { return AllGather(); }, ncclNumOps, "AllGather");
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllGather: taking DDA fabric LL path: nRanks=4 nNodes=1 sendcount=32"));
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "datatype=7 totalBytes=512"));
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllGather: taking DDA fabric LL128 path"));
@@ -989,9 +991,11 @@ class CollectivesHierarchicalMicrotest : public CollectivesMicrotest {
 TEST_F(CollectivesHierarchicalMicrotest, AllGather_InterThenIntraThenShuffle) {
   Decide(RCCL_HIERARCHICAL_ALLGATHER);
   EXPECT_EQ(ncclSuccess, AllGather());
-  EXPECT_EQ((std::vector<std::string>{"record", "select", "begin", "enqueue HierarchicalAllGather-Inter",
-                                      "enqueue HierarchicalAllGather-Intra", "launch", "end"}),
+  EXPECT_EQ((std::vector<std::string>{"record", "select", "log AllGather", "begin",
+                                      "enqueue HierarchicalAllGather-Inter", "enqueue HierarchicalAllGather-Intra",
+                                      "launch", "end"}),
             fake.trace);
+  EXPECT_EQ(1u, comm_->opCount);
   ASSERT_EQ(2u, directAsks_.size());
   EXPECT_EQ(inter_.get(), directAsks_[0].comm);
   EXPECT_EQ(kCount * kNodes * sizeof(float), directAsks_[0].msgSize);
@@ -1088,7 +1092,7 @@ TEST_F(CollectivesHierarchicalMicrotest, AllGather_InterDirectOnlyUpTo16Nodes) {
 TEST_F(CollectivesHierarchicalMicrotest, AllGather_EmptyCallLaunchesNothing) {
   Decide(RCCL_HIERARCHICAL_ALLGATHER);
   EXPECT_EQ(ncclSuccess, AllGather(0));
-  EXPECT_EQ((std::vector<std::string>{"record", "select", "begin", "end"}), fake.trace);
+  EXPECT_EQ((std::vector<std::string>{"record", "select", "log AllGather", "begin", "end"}), fake.trace);
 }
 
 TEST_F(CollectivesHierarchicalMicrotest, AllGather_EachStepFailureStopsTheRest) {
@@ -1141,7 +1145,8 @@ TEST_F(CollectivesHierarchicalMicrotest, ShuffleBlocksScaleWithTheGatheredBytes)
 TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_ShuffleThenIntraThenInter) {
   Decide(RCCL_HIERARCHICAL_REDUCESCATTER);
   EXPECT_EQ(ncclSuccess, ReduceScatter());
-  EXPECT_EQ((std::vector<std::string>{"record", "select", "begin", "launch", "enqueue HierarchicalReduceScatter-Intra",
+  EXPECT_EQ((std::vector<std::string>{"record", "select", "log ReduceScatter", "begin", "launch",
+                                      "enqueue HierarchicalReduceScatter-Intra",
                                       "enqueue HierarchicalReduceScatter-Inter", "end"}),
             fake.trace);
   ASSERT_EQ(1u, fake.launches.size());
@@ -1297,7 +1302,7 @@ TEST_F(CollectivesMicrotest, AlltoAll_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_LL128, "ncclAllToAllDdaFabricLL128"},
                    {RCCL_DDA_FABRIC_VMM, "ncclAllToAllDdaFabric"},
                    {RCCL_DDA_IPC, "ncclAllToAllDdaIpc"}},
-                  [&] { return AlltoAll(); }, ncclNumOps);
+                  [&] { return AlltoAll(); }, ncclNumOps, "AlltoAll");
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AlltoAll impl selected: algo ADDON"));
 }
 
@@ -1373,7 +1378,7 @@ TEST_F(CollectivesMicrotest, AllReduce_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_LL128, "ncclAllReduceDdaFabricLL128"},
                    {RCCL_DDA_FABRIC_VMM, "ncclAllReduceDdaFabric"},
                    {RCCL_DDA_IPC, "ncclAllReduceDdaIpc"}},
-                  [&] { return AllReduce(); }, ncclProd);
+                  [&] { return AllReduce(); }, ncclProd, "AllReduce");
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllReduce: taking DDA fabric LL path: nRanks=4 nNodes=1 count=32 datatype=7 "
                                     "bytes=128"));
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllReduce: taking DDA fabric LL128 path"));
@@ -1412,7 +1417,8 @@ TEST_F(CollectivesMicrotest, AllReduce_CeTwoShotRunsInsideAProfilerEvent) {
   Decide(RCCL_CE_2SHOT);
   fake.ceArResult = ncclRemoteError;
   EXPECT_EQ(ncclRemoteError, AllReduce());
-  EXPECT_EQ((std::vector<std::string>{"record", "select", "profStart", "begin", "ceAllReduce", "end", "profStop"}),
+  EXPECT_EQ((std::vector<std::string>{"record", "select", "profStart", "log AllReduce", "begin", "ceAllReduce", "end",
+                                      "profStop"}),
             fake.trace);
   EXPECT_EQ(ncclFuncAllReduce, fake.profArgs.func);
   EXPECT_EQ(ncclFloat32, fake.profArgs.datatype);
@@ -1500,7 +1506,7 @@ TEST_F(CollectivesMicrotest, ReduceScatter_DdaArmsLaunchAsAddons) {
                    {RCCL_DDA_FABRIC_LL128, "ncclReduceScatterDdaFabricLL128"},
                    {RCCL_DDA_FABRIC_VMM, "ncclReduceScatterDdaFabric"},
                    {RCCL_DDA_IPC, "ncclReduceScatterDdaIpc"}},
-                  [&] { return ReduceScatter(); }, ncclMin);
+                  [&] { return ReduceScatter(); }, ncclMin, "ReduceScatter");
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "ReduceScatter impl selected: algo ADDON"));
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "ReduceScatter: taking DDA fabric LL path: nRanks=4 nNodes=1 recvcount=32 "
                                     "datatype=7 bytes=128"));

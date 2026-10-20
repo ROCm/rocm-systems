@@ -77,6 +77,8 @@ ncclResult_t ncclEnqueueCheck(ncclInfo* info) {
   return PopEnqueueResult();
 }
 
+void rcclLogCollInfo(const ncclInfo& info) { fake.trace.push_back(std::string("log ") + info.opName); }
+
 ncclResult_t ncclParseCollConfig(const ncclCollConfig_t* config, ncclCollConfig_t* internal) {
   fake.parsedConfig = config;
   if (fake.parseResult != ncclSuccess) return fake.parseResult;
