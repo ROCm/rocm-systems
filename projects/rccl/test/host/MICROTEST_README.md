@@ -454,6 +454,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `fabric/fabric_gpu_barrier.cu` (`FABRIC_GPU_BARRIER_CC_PATH`, from
     `fabric-gpu-barrier-test.cc`); suites `FabricGpuBarrier*`.
 
+- **`rccl-UnitTestsMicroP2pResiliency`**: `src/transport/net_ib_cast/p2p_resiliency.cc`,
+  `p2p_resiliency_recovery.cc` and `p2p_resiliency_recovery_ainic.cc`, one test TU each
+  (`P2P_RESILIENCY*_CC_PATH`, suites `P2pResiliency*Microtest.*`), over the fake verbs
+  context in `P2pResiliencyScene.h`. Its own binary: the `net_ib_cast_*` fakes it links
+  stand in for `connect.cc`, `p2p.cc` and `common.cc`. See
+  `test_categories_micro_p2p_resiliency.yaml`.
+
 Everything below (seams, fakes, coverage) applies to all of them; the concrete examples
 use `p2p.cc`.
 
@@ -617,6 +624,9 @@ symbol.
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/net_ib/connect.cc` params (`ncclParamIbQpsPerConn`) | `fakes/transport_net_ib_fakes.cc` |
+| `src/transport/net_ib_cast/capability.cc` | `fakes/net_ib_cast_capability_fakes.cc` |
+| `src/transport/net_ib_cast/connect.cc` | `fakes/net_ib_cast_connect_fakes.cc` |
+| `src/transport/net_ib_cast/qp_sharing.cc` | `fakes/net_ib_cast_qp_sharing_fakes.cc` |
 | generated `sym_kernels_host.cc` (targets that do not compile it) | `fakes/sym_kernels_index_fakes.cc` |
 | rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
@@ -964,10 +974,10 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDda`,
-`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
-`rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
-librccl**. It compiles just the tests + fakes + the hipified unit-under-test
-sources.
+`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`,
+`rccl-UnitTestsMicroRmaProxy` and `rccl-UnitTestsMicroP2pResiliency` — **without
+configuring/building all of librccl**. It compiles just the tests + fakes + the
+hipified unit-under-test sources.
 
 Four of those names are preprocessor variants, not duplicates. `init.cc` gates
 part of its allocation path on `HIP_*_UNCACHED_MEMORY` and its fault-mask blocks
@@ -1025,6 +1035,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroProfiler           # src/plugin/profiler.cc + profiler_v1..v7.cc
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
 ./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
+./build/rccl-UnitTestsMicroP2pResiliency      # src/transport/net_ib_cast/p2p_resiliency*.cc tests
 ./build/rccl-HostUnitTests
 ./build/rccl-UnitTestsMicroRoctxNvml          # misc/roctx.cc + misc/nvmlwrap_stub.cc tests
 ./build/rccl-UnitTestsMicroRoctxNvml-roctx    # same, ROCTX_ENABLE arm
