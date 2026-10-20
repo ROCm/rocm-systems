@@ -25,7 +25,7 @@ Panel Config:
           value: ROUND(100 * SUM(SQC_ICACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum), 0)
           unit: Percent
         ICache Hit Rate:
-          value: ROUND(100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum), 0)
+          value: ROUND(100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum), 0)
           unit: Percent
         ICache Latency:
           value: ROUND(SUM(SQC_ICACHE_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_ICACHE_REQ_sum), 0)
@@ -56,7 +56,7 @@ Panel Config:
           value: ROUND(100 * SUM(SQC_DCACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum), 0)
           unit: Percent
         Dcache Hit Rate:
-          value: ROUND(100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum), 0)
+          value: ROUND(100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum), 0)
           unit: Percent
         Dcache Latency:
           value: ROUND(SUM(SQC_DCACHE_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_DCACHE_REQ_sum), 0)
