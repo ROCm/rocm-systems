@@ -26,7 +26,7 @@ from rocm_kpack.database_handlers import (
     AotritonHandler,
     ComposableKernelHandler,
     MIOpenHandler,
-    LIBRARY_ARCH_DIR_STEPPING_ALIASES,
+    resolve_stepping_alias,
 )
 from rocm_kpack.coff.kpack_transform import (
     HIPF_MAGIC as COFF_HIPF_MAGIC,
@@ -336,8 +336,12 @@ class ArtifactVerifier:
                         directory_arch = aotriton.detect(file, artifact)
                         if directory_arch is not None:
                             directory_arches.append(directory_arch)
-                    elif part in LIBRARY_ARCH_DIR_STEPPING_ALIASES:
-                        directory_arches.append(LIBRARY_ARCH_DIR_STEPPING_ALIASES[part])
+                    elif (
+                        alias_base := resolve_stepping_alias(
+                            directory_parts[:index], part
+                        )
+                    ) is not None:
+                        directory_arches.append(alias_base)
                     else:
                         directory_arches.extend(arch_pattern.findall(part))
                 # Handlers may preserve xnack features while filename/directory

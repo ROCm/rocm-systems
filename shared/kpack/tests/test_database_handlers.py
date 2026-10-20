@@ -193,6 +193,19 @@ class TestRocBLASHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx942-xnack+"
 
+    def test_detect_arch_subdir_stepping_not_applicable(self, handler, prefix_root):
+        """The gfx1250v0 stepping alias is scoped to hipBLASLt/hipSPARSELt and
+        must not apply to rocBLAS, even though rocBLAS shares the same
+        _TensileHandler base class. rocBLAS does not produce this directory
+        today, but if it ever did, a directory-only file should stay
+        unclassified rather than being silently merged into gfx1250."""
+        file_path = prefix_root / "lib/rocblas/library/gfx1250v0/TensileManifest.txt"
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
     def test_reject_wrong_directory(self, handler, prefix_root):
         """Test that files not in rocblas/library are rejected."""
         file_path = prefix_root / "lib/other/library/TensileLibrary_gfx1100.dat"

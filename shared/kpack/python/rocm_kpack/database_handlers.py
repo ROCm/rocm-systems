@@ -121,17 +121,46 @@ _LIBRARY_ARCH_DIR_PATTERN = re.compile(
     r"/library/(" + _GFX_ARCH_PATTERN.pattern + r")/"
 )
 
-# Known, explicit stepping-directory aliases. hipBLASLt ships gfx1250 A0 kernels
-# under library/gfx1250v0/, not a separate target -- it belongs to its base arch,
-# matching the arch in the filenames. This mirrors TensileLite's own explicit
-# build-alias table (tensilelite/Common/Architectures.py: ARCH_BUILD_ALIASES),
-# which defines this exact one entry and no others. Deliberately a literal
-# lookup, not a general "any arch + vN" pattern: only this one case is verified,
-# and a future stepping directory is not guaranteed to want the same treatment
-# (it may need its own bundle).
+# Known, explicit stepping-directory aliases, scoped to the library subtree
+# they're documented for (keyed by _library_dir). hipBLASLt and hipSPARSELt ship
+# gfx1250 A0 kernels under library/gfx1250v0/, not a separate target -- it
+# belongs to its base arch, matching the arch in the filenames. This mirrors
+# TensileLite's own explicit build-alias table (tensilelite/Common/
+# Architectures.py: ARCH_BUILD_ALIASES), which defines this exact one entry and
+# no others. Deliberately scoped per library and a literal lookup, not a
+# general "any arch + vN" pattern or a cross-library default: only this one
+# case, for these two libraries, is verified. Neither a different stepping,
+# nor a different library (e.g. rocBLAS, which does not produce this
+# directory today), is guaranteed to want the same treatment.
 LIBRARY_ARCH_DIR_STEPPING_ALIASES = {
-    "gfx1250v0": "gfx1250",
+    "hipblaslt/library": {"gfx1250v0": "gfx1250"},
+    "hipsparselt/library": {"gfx1250v0": "gfx1250"},
 }
+
+
+def resolve_stepping_alias(
+    preceding_parts: tuple[str, ...], part: str
+) -> Optional[str]:
+    """Return the base arch if `part` is a known stepping-directory alias
+    immediately inside the library subtree it's documented for, else None.
+
+    `preceding_parts` is the path components before `part` (e.g.
+    `("stage", "lib", "hipblaslt", "library")`); a match requires it to end
+    with that library's own path components (e.g. `("hipblaslt", "library")`),
+    not just contain them anywhere.
+
+    Unlike _TensileHandler.detect() (which is scoped to one handler's own
+    _library_dir), this checks every library in
+    LIBRARY_ARCH_DIR_STEPPING_ALIASES: callers like the architecture-
+    separation verifier examine files across every library at once, not
+    through a single handler instance.
+    """
+    for library_dir, aliases in LIBRARY_ARCH_DIR_STEPPING_ALIASES.items():
+        base = aliases.get(part)
+        prefix = tuple(library_dir.split("/"))
+        if base is not None and preceding_parts[-len(prefix) :] == prefix:
+            return base
+    return None
 
 
 class _TensileHandler(DatabaseHandler):
@@ -175,7 +204,9 @@ class _TensileHandler(DatabaseHandler):
         if dir_match:
             return dir_match.group(1)
 
-        for alias, base in LIBRARY_ARCH_DIR_STEPPING_ALIASES.items():
+        for alias, base in LIBRARY_ARCH_DIR_STEPPING_ALIASES.get(
+            self._library_dir, {}
+        ).items():
             if f"/library/{alias}/" in path_str:
                 return base
 

@@ -197,6 +197,18 @@ def test_verifier_maps_stepping_directory_to_base_arch(
     assert verifier.results[-1].passed == passed
 
 
+def test_verifier_stepping_alias_scoped_to_known_libraries(tmp_path):
+    """The gfx1250v0 alias is scoped to hipBLASLt/hipSPARSELt and must not
+    apply under rocblas/library/, even though the directory name matches."""
+    artifact = tmp_path / "blas_lib_gfx1250"
+    directory = artifact / "stage/lib/rocblas/library/gfx1250v0"
+    directory.mkdir(parents=True)
+    (directory / "TensileManifest.txt").write_text("data")
+    verifier = ArtifactVerifier(tmp_path, Toolchain())
+    verifier._check_architecture_separation([artifact])
+    assert not verifier.results[-1].passed
+
+
 @pytest.mark.parametrize(
     "directory",
     [
