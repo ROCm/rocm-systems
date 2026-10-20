@@ -185,11 +185,11 @@ if (ENABLE_ROCSHMEM_GIN AND TARGET roc::rocshmem)
     endfunction()
 
     # Binaries launched against a --rocshmem-gin librccl.so must RDC-link
-    # rocSHMEM so GIN host symbols resolve from the executable.
-    # alltoall_perf: device-api GIN matrix (-D 3/-D 4) and gin-tests.json.
-    # all_gather_perf / broadcast_perf: gin-tests.json Anvil SDMA (-D 3).
+    # rocSHMEM so GIN host symbols resolve from the executable. These are the
+    # binaries with GIN device paths: alltoall_perf (-D 3/-D 4), and
+    # all_gather_perf / broadcast_perf (Anvil SDMA, -D 3).
     # all_reduce_perf is omitted: it still does not build under
-    # ENABLE_ROCSHMEM_GIN (gin.sbatch uses `make -k` for the same reason).
+    # ENABLE_ROCSHMEM_GIN.
     foreach(_gin_rdc_bin IN ITEMS
         all_gather_perf
         alltoall_perf
