@@ -1,163 +1,197 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-//! Native control used by the implementation-neutral rocddi core.
+//! Private interface implemented by each concrete device driver.
 //!
-//! Discovery, activation, allocation, queue control, and host maintenance enter
-//! through domain-specific capability traits. Cached metadata queries stay in
-//! the core and need no native call. Resource owners carry their concrete cleanup state so a failed
-//! destruction can resume without replaying released IDs or requiring a global
-//! registry. These are internal implementation boundaries, not a second ABI.
-mod builtin;
-#[cfg(target_os = "linux")]
-pub(crate) mod linux_interop;
-use crate::host_storage::Owned;
-use crate::kernel_queue::{KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait};
-#[cfg(test)]
-use crate::memory::MemoryKind;
-use crate::memory::{
-    AllocationInfo, DeviceAccess, HostAllocationInfo, HostRegistration, OwnedMemoryKind,
-    VirtualAddressInfo, VirtualMemoryInfo,
-};
-use crate::profiling::ClockCounters;
-use crate::queue::{QueueRequest, QueueScratch, QueueTransport};
-use crate::session::SessionLifetime;
-use crate::topology::{Endpoint, GpuPresentation};
-use crate::{Error, ErrorKind};
-#[cfg(target_os = "linux")]
-pub(crate) use builtin::NativeSignalEvent;
-pub(crate) use builtin::PlatformDriver;
-use std::sync::atomic::{AtomicU64, Ordering};
+//! [`Driver`] owns discovery, activation, and shutdown. GPU capabilities are
+//! separate traits so each backend implements only the services it provides.
+//! Allocation and virtual-memory operations remain separate because their
+//! owners can be shared with other device families. Queue creation belongs to
+//! the matching GPU capability; queue operations belong to the returned owner.
 
-/// Cached lifecycle facts required for every activated endpoint kind.
-pub(crate) trait DeviceStateInfo: Clone {
-    fn has_observed_loss(&self) -> bool;
+mod instance;
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+mod linux_kfd;
+mod resources;
+#[cfg(test)]
+pub(crate) mod test_driver;
+#[cfg(test)]
+mod tests;
+
+pub(crate) use instance::{
+    DeviceDriverState, DriverInstance, DriverInstanceId, EndpointSelector, EventSubscription,
+    GpuDriverRef, KfdAllocation, KfdDeviceState, new_driver_instance,
+};
+pub(crate) use linux_kfd::KfdEventSubscription;
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+pub(crate) use linux_kfd::{
+    KfdKernelQueue, KfdPcSampling, KfdQueue, KfdSignalEvent, LinuxKfdDriver as KfdDriver,
+};
+pub(crate) use resources::{
+    AllocationState, KernelQueueState, PcSamplingState, QueueState, VirtualAddressState,
+    VirtualDeviceMappingState, VirtualHostMappingState, VirtualMemoryState,
+};
+
+use crate::device::gpu::kernel_queue::{
+    KernelCommand, KernelQueueFormat, KernelQueueStatus, KernelQueueWait,
+};
+use crate::device::gpu::profiling::{
+    ClockCounters, PcSamplingConfiguration, PcSamplingConfigurationSet, PcSamplingRequest,
+};
+use crate::device::gpu::queue::{QueueRequest, QueueScratch, QueueTransport};
+use crate::memory::storage::{Owned, Shared};
+use crate::memory::{
+    AllocationInfo, DeviceAccess, HostRegistration, MemoryKind, VirtualAddressInfo,
+    VirtualMemoryInfo,
+};
+use crate::session::DriverContextLifetime;
+use crate::topology::{Endpoint, EndpointDetails};
+use crate::{Error, ErrorKind};
+
+/// Inert constructors for the driver backends compiled into this target.
+/// Each session constructs fresh instances from this immutable catalog.
+pub(crate) type DriverFactory = fn(DriverContextLifetime) -> Result<DriverInstance, Error>;
+
+pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    new_linux_kfd,
+];
+
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+fn new_linux_kfd(lifetime: DriverContextLifetime) -> Result<DriverInstance, Error> {
+    Ok(DriverInstance::LinuxKfd(Shared::new(
+        KfdDriver::with_context_lifetime(lifetime),
+    )?))
 }
 
-/// Address-space facts required only by providers with device memory.
-pub(crate) trait AddressSpaceInfo: DeviceStateInfo {
+/// Address-space identity and bounds for devices that can map memory.
+///
+/// The core uses `shares_address_domain` to serialize overlapping mappings
+/// within one device address space. Equal domains must report compatible
+/// bounds. Mapping owners retain cloned state and share it across threads.
+/// These cached facts do not establish access to a range or report device loss.
+pub(crate) trait AddressSpaceInfo: Clone + Send + Sync {
+    /// Returns the inclusive address bounds captured at activation.
     fn address_range(&self) -> (u64, u64);
+    /// Reports whether two devices use the same native address space.
     fn shares_address_domain(&self, other: &Self) -> bool;
 }
 
-pub(crate) trait HostOwnerInfo {
-    fn cached_info(&self) -> HostAllocationInfo;
+/// Copies immutable facts cached by a driver-owned resource.
+///
+/// A caller takes the snapshot while the resource owner is live. The value is
+/// information, not a fresh driver query or permission to use an address after
+/// that owner has been released. Cleanup may invalidate the cached addresses.
+pub(crate) trait CachedInfo {
+    /// Copyable facts retained by the resource owner.
+    type Info: Copy;
+    /// Copies those facts without querying the driver again.
+    fn cached_info(&self) -> Self::Info;
 }
 
-pub(crate) trait AllocationOwnerInfo {
-    fn cached_info(&self) -> AllocationInfo;
-}
-
-pub(crate) trait VirtualAddressOwnerInfo {
-    fn cached_info(&self) -> VirtualAddressInfo;
-}
-
-pub(crate) trait VirtualMemoryOwnerInfo {
-    fn cached_info(&self) -> VirtualMemoryInfo;
-}
-
-pub(crate) trait QueueOwnerInfo {
-    fn cached_info(&self) -> QueueTransport;
-}
-
-/// Native owner types are split by capability. A CPU or NPU backend can
-/// implement discovery and host memory without supplying GPU queue owners.
-pub(crate) trait ProviderTypes {
-    type DeviceState: DeviceStateInfo;
-}
-
-pub(crate) trait HostTypes {
-    type HostAllocation: HostOwnerInfo;
-}
-
-pub(crate) trait AllocationTypes {
-    type Allocation: AllocationOwnerInfo;
-}
-
-pub(crate) trait VirtualMemoryTypes {
-    type VirtualAddress: VirtualAddressOwnerInfo;
-    type VirtualDeviceMapping;
-    type VirtualHostMapping;
-    type VirtualMemory: VirtualMemoryOwnerInfo;
-}
-
-pub(crate) trait QueueTypes {
-    type Queue: QueueOwnerInfo;
-}
-
-pub(crate) trait KernelQueueTypes {
-    type KernelQueue;
-}
-
-pub(crate) type DeviceState = <PlatformDriver as ProviderTypes>::DeviceState;
-pub(crate) use builtin::EndpointSelector;
-pub(crate) type NativeAllocation = <PlatformDriver as AllocationTypes>::Allocation;
-pub(crate) type NativeKernelQueue = <PlatformDriver as KernelQueueTypes>::KernelQueue;
-
-pub(crate) trait ProviderDriver: ProviderTypes + Send + Sync {
-    fn provider_instance(&self) -> u64;
-    fn supports_host_registration(&self, endpoint: &Endpoint, lifetime: SessionLifetime) -> bool;
+/// Operations common to every activated endpoint and its session.
+///
+/// The session owns one or more driver instances. Each driver's identity ties
+/// its passive endpoint snapshots to that instance; activation acquires that
+/// driver's state for one device.
+/// Discovery and opening are passive. The context lifetime is fixed when the
+/// driver is constructed and is reported to the owning session.
+/// Endpoint IDs must be unique among drivers installed in one session because
+/// callers can open an endpoint by ID alone. The session checks duplicates
+/// within and across drivers before publishing an enumeration.
+/// Shutdown may fail after partial cleanup and must permit a retry with the
+/// same instance. Capability traits add resource operations only when a caller
+/// needs them.
+pub(crate) trait Driver: Send + Sync {
+    /// State retained for one endpoint activated through this driver instance.
+    type DeviceState: Clone + Send + Sync;
+    /// Returns the identity stamped into this driver's passive endpoints.
+    fn driver_instance(&self) -> DriverInstanceId;
+    /// Returns the context policy fixed when this driver was constructed.
+    fn context_lifetime(&self) -> DriverContextLifetime;
+    /// Releases acquired context state; a failure must permit a later retry.
     fn shutdown(&mut self) -> Result<(), Error>;
+    /// Visits discovered endpoints without acquiring an execution context.
     fn enumerate(
         &self,
         visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
     ) -> Result<(), Error>;
+    /// Re-reads an endpoint by its driver-assigned ID without activating it.
     fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error>;
-    fn activate(
-        &self,
-        endpoint: &Endpoint,
-        lifetime: SessionLifetime,
-    ) -> Result<Self::DeviceState, Error>;
+    /// Queries optional information about a passive endpoint without
+    /// activating it. Kind-specific details must match the endpoint kind.
+    /// Drivers with no additional source return empty details.
+    fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
+        Ok(EndpointDetails::empty_for(endpoint))
+    }
+    /// Revalidates an endpoint and acquires its device state.
+    fn activate(&self, endpoint: &Endpoint) -> Result<Self::DeviceState, Error>;
 }
 
-/// Optional GPU display facts; non-GPU providers need no implementation.
-pub(crate) trait GpuPresentationDriver: ProviderDriver {
-    fn gpu_presentation(&self, endpoint: &Endpoint) -> GpuPresentation;
-}
-
-pub(crate) trait HostDriver: HostTypes + Send + Sync {
-    fn allocate_host(
-        &self,
-        size: u64,
-        alignment: u64,
-    ) -> Result<Owned<Self::HostAllocation>, Error>;
-    fn free_host(allocation: &mut Self::HostAllocation) -> Result<(), Error>;
-    fn host_page_size() -> Result<u64, Error>;
-    fn host_cache_line_size() -> Result<u32, Error>;
-    #[allow(unsafe_code)]
-    unsafe fn host_cache_control(pointer: usize, length: u64, line_size: u32) -> Result<(), Error>;
-}
-
-pub(crate) trait AllocationDriver: ProviderTypes + AllocationTypes + Send + Sync {
+/// Allocation, registration, and access operations on activated devices.
+///
+/// An allocation owner retains every native mapping dependency needed for
+/// cleanup. `free_allocation` must leave failed cleanup retryable. Registered
+/// host pages have an additional caller lifetime obligation stated below.
+pub(crate) trait AllocationOperations: Driver {
+    /// Native allocation and mapping state retained through cleanup.
+    type Allocation: CachedInfo<Info = AllocationInfo>;
+    /// Reports whether this endpoint can register caller-owned host pages.
+    fn supports_host_registration(&self, endpoint: &Endpoint) -> bool;
+    /// Checks that an allocation's native backing remains usable.
     fn check_allocation(allocation: &Self::Allocation) -> Result<(), Error>;
+    /// Reports whether the allocation uses device-local backing.
     fn allocation_is_device_local(allocation: &Self::Allocation) -> bool;
+    /// Replaces device access without retaining the input slice.
     fn set_allocation_access(
         _allocation: &mut Self::Allocation,
         _devices: &[&Self::DeviceState],
     ) -> Result<(), Error> {
         Err(Error::Operation {
             kind: ErrorKind::Unsupported,
-            detail: "provider does not support changing allocation access",
+            detail: "driver does not support changing allocation access",
         })
     }
+    /// Returns the allocation address visible to a selected device.
     fn allocation_device_address(
         allocation: &Self::Allocation,
         device: &Self::DeviceState,
     ) -> Result<u64, Error>;
+    /// Checks whether this device owns the allocation's native backing.
     fn allocation_is_owned_by(allocation: &Self::Allocation, device: &Self::DeviceState) -> bool;
+    /// A successful release is idempotent. After failure, a later call must
+    /// safely resume cleanup or report terminal uncertainty without replaying
+    /// an ambiguous native operation. The generic owner also calls this on Drop.
     fn free_allocation(allocation: &mut Self::Allocation) -> Result<(), Error>;
+    /// Allocates backing and establishes the requested device access.
     fn allocate_owned(
         &self,
         device: &Self::DeviceState,
         peers: &[&Self::DeviceState],
-        kind: OwnedMemoryKind,
+        kind: MemoryKind,
         size: u64,
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Owned<Self::Allocation>, Error>;
+    /// Registers caller or rocddi-owned host pages with the selected device.
+    ///
     /// # Safety
-    /// The caller keeps the complete host page cover mapped and synchronized
-    /// through successful free or, after ambiguous native failure, process exit.
+    /// The caller keeps borrowed pages mapped through successful free or,
+    /// after ambiguous driver failure, process exit. When `request.backing` is
+    /// present, the driver instead takes that lease into its native owner and
+    /// retains it through uncertain cleanup.
     #[allow(unsafe_code)]
     unsafe fn register_host(
         &self,
@@ -167,26 +201,27 @@ pub(crate) trait AllocationDriver: ProviderTypes + AllocationTypes + Send + Sync
     ) -> Result<Owned<Self::Allocation>, Error> {
         Err(Error::Operation {
             kind: ErrorKind::Unsupported,
-            detail: "provider does not support host registration",
+            detail: "driver does not support host registration",
         })
     }
 }
 
-/// GPU-only scratch aperture and MMIO page operations.
-pub(crate) trait GpuAuxAllocationDriver:
-    ProviderTypes + AllocationTypes + Send + Sync
-{
-    fn allocate_queue_scratch(
-        &self,
-        device: &Self::DeviceState,
-        size: u64,
-    ) -> Result<Owned<Self::Allocation>, Error>;
-    fn map_mmio_remap(&self, device: &Self::DeviceState) -> Result<Owned<Self::Allocation>, Error>;
-}
-
-pub(crate) trait VirtualMemoryDriver:
-    ProviderTypes + VirtualMemoryTypes + Send + Sync
-{
+/// Address reservation, physical backing, and virtual mapping operations.
+///
+/// Reservations, backing, and each mapping have separate owners. The core
+/// retains their dependencies through map and unmap; failed release must keep
+/// the affected owner available for retry. A failed map must satisfy the
+/// rollback or quarantine guarantees on the mapping methods below.
+pub(crate) trait VirtualMemoryOperations: Driver {
+    /// Native process address reservation retained until every mapping ends.
+    type VirtualAddress: CachedInfo<Info = VirtualAddressInfo>;
+    /// Mapping of physical backing into a device address space.
+    type VirtualDeviceMapping;
+    /// Mapping of physical backing into the host address space.
+    type VirtualHostMapping;
+    /// Driver-owned physical backing used by one or more mappings.
+    type VirtualMemory: CachedInfo<Info = VirtualMemoryInfo>;
+    /// Reserves an address range within the caller's permitted bounds.
     fn reserve_virtual_address(
         &self,
         bounds: (u64, u64),
@@ -194,18 +229,22 @@ pub(crate) trait VirtualMemoryDriver:
         alignment: u64,
         address: u64,
     ) -> Result<Owned<Self::VirtualAddress>, Error>;
+    /// Releases a reservation after its mappings are gone.
     fn free_virtual_address(address: &mut Self::VirtualAddress) -> Result<(), Error>;
+    /// Creates physical backing without mapping it into a device or host.
     fn create_virtual_memory(
         &self,
         device: &Self::DeviceState,
-        kind: OwnedMemoryKind,
+        kind: MemoryKind,
         size: u64,
         pinned: bool,
         uncached: bool,
     ) -> Result<Owned<Self::VirtualMemory>, Error>;
+    /// Releases physical backing after its mappings are gone.
     fn free_virtual_memory(memory: &mut Self::VirtualMemory) -> Result<(), Error>;
-    /// An error must leave no usable mapping owner. If native submission is
-    /// ambiguous, the provider marks the reservation unusable before returning.
+    /// Maps backing into a device address space.
+    /// An error must leave no usable mapping owner. If driver submission is
+    /// ambiguous, the driver marks the reservation unusable before returning.
     fn map_virtual_device(
         memory: &Self::VirtualMemory,
         reservation: &Self::VirtualAddress,
@@ -215,7 +254,9 @@ pub(crate) trait VirtualMemoryDriver:
         size: u64,
         permissions: DeviceAccess,
     ) -> Result<Owned<Self::VirtualDeviceMapping>, Error>;
+    /// Unmaps one device range, retaining its owner if cleanup fails.
     fn free_virtual_device_mapping(mapping: &mut Self::VirtualDeviceMapping) -> Result<(), Error>;
+    /// Maps backing into the host process address space.
     /// An error must leave the process range unmapped or restored to its
     /// reservation state so the core may release tentative interval occupancy.
     fn map_virtual_host(
@@ -225,90 +266,189 @@ pub(crate) trait VirtualMemoryDriver:
         offset: u64,
         size: u64,
         permissions: DeviceAccess,
-        allocator: crate::host_storage::Allocator,
     ) -> Result<Owned<Self::VirtualHostMapping>, Error>;
+    /// Unmaps one host range, retaining its owner if cleanup fails.
     fn free_virtual_host_mapping(mapping: &mut Self::VirtualHostMapping) -> Result<(), Error>;
 }
 
-pub(crate) trait QueueDriver: ProviderTypes + QueueTypes + Send + Sync {
-    fn supports_expert_scheduling(&self, device: &Self::DeviceState) -> Result<bool, Error>;
-    fn check_queue(queue: &Self::Queue) -> Result<(), Error>;
-    fn queue_progress(queue: &Self::Queue) -> Result<(u64, u64), Error>;
-    fn inactivate_queue(queue: &mut Self::Queue) -> Result<(), Error>;
-    fn set_queue_priority(
-        queue: &mut Self::Queue,
-        priority: crate::queue::QueuePriority,
+/// Operations on one driver-owned, directly published GPU queue.
+///
+/// The resource retains its native transport state. The core separately
+/// retains ring, signal, and scratch backing until native retirement is proved.
+/// Its device-state type ties queue mapping to the creating GPU driver.
+pub(crate) trait UserQueueResource: CachedInfo<Info = QueueTransport> {
+    /// Activated state required to map this queue for a producer.
+    type DeviceState;
+    /// Checks whether the native queue is still usable.
+    fn check(&self) -> Result<(), Error>;
+    /// Samples the native read and write positions without retiring work.
+    fn progress(&self) -> Result<(u64, u64), Error>;
+    /// Stops native execution while retaining the queue's backing.
+    fn inactivate(&mut self) -> Result<(), Error>;
+    /// Changes the native scheduling priority when supported.
+    fn set_priority(
+        &mut self,
+        priority: crate::device::gpu::queue::QueuePriority,
     ) -> Result<(), Error>;
-    fn set_queue_cu_mask(queue: &mut Self::Queue, mask: &[u32]) -> Result<(), Error>;
+    /// Replaces the set of compute units available to this queue.
+    fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error>;
+    /// Replaces queue scratch while retaining uncertain old backing.
+    ///
     /// # Safety
-    /// Firmware has stopped the queue, and the caller retains the new scratch
-    /// backing until a later successful replacement or native destruction.
+    /// The command processor has stopped the queue. The caller retains the new
+    /// scratch backing until a later successful replacement or driver
+    /// destruction.
     #[allow(unsafe_code)]
-    unsafe fn set_queue_scratch(
-        queue: &mut Self::Queue,
-        scratch: QueueScratch,
-    ) -> Result<(), Error>;
+    unsafe fn set_scratch(&mut self, scratch: QueueScratch) -> Result<(), Error>;
+    /// Destroys the native queue and releases its transport.
+    ///
     /// # Safety
     /// Producers and published transport mappings have been retired.
     #[allow(unsafe_code)]
-    unsafe fn destroy_queue(queue: &mut Self::Queue) -> Result<(), Error>;
+    unsafe fn destroy(&mut self) -> Result<(), Error>;
+    /// Runs once after native queue retirement while the public control
+    /// mapping is still live. A failed retirement does not run the callback.
+    ///
     /// # Safety
-    /// The caller retains all raw signal and scratch addresses that firmware
-    /// may reach, including after an ambiguous native creation result.
+    /// Producers and published transport mappings have been retired. The
+    /// callback may release external backing only after native retirement.
     #[allow(unsafe_code)]
-    unsafe fn create_queue(
-        &self,
-        device: &Self::DeviceState,
-        desc: QueueRequest,
-    ) -> Result<Owned<Self::Queue>, Error>;
-    fn map_queue(queue: &Self::Queue, device: &Self::DeviceState) -> Result<QueueTransport, Error>;
+    unsafe fn destroy_with_retained_transport(
+        &mut self,
+        callback: &mut dyn FnMut(),
+    ) -> Result<(), Error>;
+    /// Maps this queue's transport into another compatible device view.
+    fn map_device(&self, device: &Self::DeviceState) -> Result<QueueTransport, Error>;
 }
 
-pub(crate) trait KernelQueueDriver: ProviderTypes + KernelQueueTypes + Send + Sync {
-    fn available_sdma_rings(&self, device: &Self::DeviceState) -> Result<u32, Error>;
-    fn create_kernel_queue(
-        &self,
-        device: &Self::DeviceState,
-        format: KernelQueueFormat,
-    ) -> Result<Owned<Self::KernelQueue>, Error>;
+/// Operations on one kernel-mediated GPU submission queue.
+///
+/// The resource tracks accepted submissions and their completion. Failed or
+/// ambiguous teardown must keep command backing reachable for retry.
+pub(crate) trait KernelQueueResource {
+    /// Submits a command and returns the accepted submission identity.
+    ///
     /// # Safety
     /// The command range remains device-accessible, executable, and unchanged
-    /// until retirement or conclusive native teardown. An ambiguous native
+    /// until retirement or conclusive driver teardown. An ambiguous driver
     /// outcome must be returned as an accepted submission; `Err` proves that
     /// the command was rejected.
     #[allow(unsafe_code)]
-    unsafe fn submit_kernel_queue(
-        queue: &Self::KernelQueue,
-        command: KernelCommand,
-    ) -> Result<u64, Error>;
-    fn kernel_queue_status(queue: &Self::KernelQueue) -> KernelQueueStatus;
-    fn refresh_kernel_queue(queue: &Self::KernelQueue) -> Result<KernelQueueStatus, Error>;
-    fn wait_kernel_queue(
-        queue: &Self::KernelQueue,
+    unsafe fn submit(&self, command: KernelCommand) -> Result<u64, Error>;
+    /// Returns the last status already observed by this owner.
+    fn status(&self) -> KernelQueueStatus;
+    /// Queries the driver for current completion and failure status.
+    fn refresh_status(&self) -> Result<KernelQueueStatus, Error>;
+    /// Waits for a particular accepted submission to retire or time out.
+    fn wait(
+        &self,
         submission: u64,
         timeout_nanoseconds: u64,
         poll_duration_nanoseconds: u64,
     ) -> Result<KernelQueueWait, Error>;
-    fn destroy_kernel_queue(queue: &mut Self::KernelQueue) -> Result<(), Error>;
+    /// Releases the native queue after proving accepted submissions retired.
+    /// Uncertain cleanup keeps the native backing reachable for retry.
+    fn destroy(&mut self) -> Result<(), Error>;
 }
 
-/// Endpoint services that do not require a GPU execution engine.
-pub(crate) trait DeviceDriver: ProviderTypes + Send + Sync {
-    fn check(&self, device: &Self::DeviceState) -> Result<(), Error>;
-    fn available_memory(&self, device: &Self::DeviceState) -> Result<u64, Error>;
+/// Native registration state for one PC sampler.
+pub(crate) trait PcSamplingResource {
+    /// Begins collecting samples with this native registration.
+    fn start(&mut self) -> Result<(), Error>;
+    /// Stops collection while retaining the registration.
+    fn stop(&mut self) -> Result<(), Error>;
+    /// Releases the registration after sampling has stopped.
+    fn destroy(&mut self) -> Result<(), Error>;
+    /// Returns an unstarted adopted registration to its original owner after
+    /// a frontend fails to complete activation.
+    fn relinquish_adopted(&mut self) -> Result<(), Error>;
+}
+
+/// GPU queries and controls shared across operating-system drivers.
+///
+/// Allocation, virtual memory, queue, and instrumentation capabilities are
+/// independent. A GPU backend need not implement them to expose these queries.
+pub(crate) trait GpuDriver: Driver {
+    /// Sets the native VM's persisting L2 reservation in bytes.
     fn set_persisting_l2_cache_size(
         &self,
         device: &Self::DeviceState,
         size_bytes: u32,
     ) -> Result<(), Error>;
+    /// Queries currently available device memory in bytes.
+    fn available_memory(&self, device: &Self::DeviceState) -> Result<u64, Error>;
+    /// Returns the layout capabilities needed by GPU image consumers.
+    fn surface_config(
+        &self,
+        device: &Self::DeviceState,
+    ) -> Result<crate::device::gpu::GpuSurfaceConfig, Error>;
 }
 
-/// GPU-only timing, trap, and stream-monitor services.
-pub(crate) trait GpuProfilingDriver: DeviceDriver {
-    fn clock_counters(&self, device: &Self::DeviceState) -> Result<ClockCounters, Error>;
+/// Direct GPU queues and their queue-specific memory resources.
+pub(crate) trait GpuUserQueueOperations: GpuDriver + AllocationOperations {
+    /// Direct GPU queue retained by this driver's activated device state.
+    type UserQueue: UserQueueResource<DeviceState = Self::DeviceState>;
+    /// Reports whether this driver can use expert scheduling on the device.
+    fn supports_expert_scheduling(&self, device: &Self::DeviceState) -> Result<bool, Error>;
+    /// Creates a directly published GPU queue and retains its native backing.
+    ///
     /// # Safety
-    /// The handler code and argument storage remain backed and valid while
-    /// traps can reach them, including after an ambiguous native update.
+    /// The caller retains all raw signal and scratch addresses that the GPU
+    /// may reach, including after an ambiguous driver creation result.
+    #[allow(unsafe_code)]
+    unsafe fn create_user_queue(
+        &self,
+        device: &Self::DeviceState,
+        desc: QueueRequest,
+    ) -> Result<Owned<Self::UserQueue>, Error>;
+    /// Allocates GPU queue scratch with the normal allocation cleanup contract.
+    fn allocate_queue_scratch(
+        &self,
+        device: &Self::DeviceState,
+        size: u64,
+    ) -> Result<Owned<Self::Allocation>, Error>;
+    /// Maps the GPU queue MMIO transport page as an owned allocation.
+    fn map_mmio_remap(&self, device: &Self::DeviceState) -> Result<Owned<Self::Allocation>, Error>;
+}
+
+/// Kernel-mediated GPU submission queues, independent of direct queues.
+pub(crate) trait GpuKernelQueueOperations: GpuDriver {
+    /// Native queue that accepts driver-mediated command submissions.
+    type KernelQueue: KernelQueueResource;
+    /// Returns the number of native SDMA engines available for submission.
+    fn available_sdma_engines(&self, device: &Self::DeviceState) -> Result<u32, Error>;
+    /// Creates a driver-mediated queue for the requested command format.
+    fn create_kernel_queue(
+        &self,
+        device: &Self::DeviceState,
+        format: KernelQueueFormat,
+    ) -> Result<Owned<Self::KernelQueue>, Error>;
+}
+
+/// GPU counters, sampling, stream monitoring, and trap instrumentation.
+pub(crate) trait GpuInstrumentationOperations: GpuDriver {
+    /// Native PC sampling registration retained by this driver instance.
+    type PcSampling: PcSamplingResource;
+    /// Reads correlated GPU and system clock counters.
+    fn clock_counters(&self, device: &Self::DeviceState) -> Result<ClockCounters, Error>;
+    /// Lists supported or currently available native PC sampling modes.
+    fn pc_sampling_configurations(
+        &self,
+        device: &Self::DeviceState,
+        set: PcSamplingConfigurationSet,
+    ) -> Result<Vec<PcSamplingConfiguration>, Error>;
+    /// Creates a PC sampling registration, optionally reusing a trace ID.
+    fn create_pc_sampling(
+        &self,
+        device: &Self::DeviceState,
+        request: PcSamplingRequest,
+        existing_trace_id: Option<std::num::NonZeroU32>,
+    ) -> Result<Owned<Self::PcSampling>, Error>;
+    /// Installs handler code and memory addresses for GPU traps.
+    ///
+    /// # Safety
+    /// Handler code and argument storage remain backed while traps can reach
+    /// them, including after an ambiguous driver update.
     #[allow(unsafe_code)]
     unsafe fn set_trap_handler(
         &self,
@@ -316,10 +456,14 @@ pub(crate) trait GpuProfilingDriver: DeviceDriver {
         handler_address: u64,
         memory_address: u64,
     ) -> Result<(), Error>;
+    /// Acquires exclusive access to stream performance monitoring.
     fn spm_acquire(&self, device: &Self::DeviceState) -> Result<(), Error>;
+    /// Releases the stream performance monitor acquired by this owner.
     fn spm_release(&self, device: &Self::DeviceState) -> Result<(), Error>;
+    /// Replaces the GPU-writable destination for stream monitor records.
+    ///
     /// # Safety
-    /// The previous and new writable destinations remain live and exclude
+    /// Previous and new writable destinations remain live and exclude
     /// conflicting access until replacement, unset, or conclusive teardown.
     #[allow(unsafe_code)]
     unsafe fn spm_set_destination(
@@ -331,498 +475,4 @@ pub(crate) trait GpuProfilingDriver: DeviceDriver {
         destination: Option<usize>,
         data_loss: &mut bool,
     ) -> Result<(), Error>;
-}
-
-static NEXT_PROVIDER_INSTANCE: AtomicU64 = AtomicU64::new(1);
-
-pub(crate) fn new_provider_instance() -> u64 {
-    NEXT_PROVIDER_INSTANCE
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |id| id.checked_add(1))
-        .unwrap_or_else(|_| std::process::abort())
-}
-#[cfg(test)]
-#[allow(unsafe_code)]
-mod backend_contract_tests {
-    use super::*;
-    use crate::host_storage::Allocator;
-    use crate::memory::{HostCacheability, ProviderAllocation};
-    use crate::session::ProviderSession;
-    use crate::topology::{EndpointKind, TopologyKey};
-    use std::sync::Arc;
-    use std::sync::atomic::AtomicUsize;
-
-    const ID: [u8; 16] = [0x42; 16];
-
-    struct FakeDriver {
-        instance: u64,
-        host_drops: Arc<AtomicUsize>,
-        allocation_drops: Arc<AtomicUsize>,
-        fail_activation: bool,
-        fail_allocation: bool,
-        fail_shutdown: bool,
-    }
-
-    #[derive(Clone)]
-    struct FakeDevice {
-        id: [u8; 16],
-    }
-
-    struct FakeHost {
-        drops: Arc<AtomicUsize>,
-        fail_free: bool,
-        released: bool,
-    }
-
-    impl Drop for FakeHost {
-        fn drop(&mut self) {
-            self.drops.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    struct FakeAllocation {
-        device_id: [u8; 16],
-        drops: Arc<AtomicUsize>,
-        fail_free: bool,
-        released: bool,
-    }
-
-    impl Drop for FakeAllocation {
-        fn drop(&mut self) {
-            self.drops.fetch_add(1, Ordering::Relaxed);
-        }
-    }
-
-    fn failure(kind: crate::ErrorKind, detail: &'static str) -> Error {
-        Error::Operation { kind, detail }
-    }
-
-    impl FakeDriver {
-        fn new() -> Self {
-            Self {
-                instance: new_provider_instance(),
-                host_drops: Arc::new(AtomicUsize::new(0)),
-                allocation_drops: Arc::new(AtomicUsize::new(0)),
-                fail_activation: false,
-                fail_allocation: false,
-                fail_shutdown: false,
-            }
-        }
-
-        fn endpoint(&self) -> Endpoint {
-            let mut name = [0; 128];
-            name[..8].copy_from_slice(b"fake-cpu");
-            Endpoint {
-                id: ID,
-                name,
-                pci: None,
-                kind: EndpointKind::Cpu,
-                local_memory_bytes: 0,
-                host_visible_local_memory_bytes: 0,
-                host_local_cacheability: None::<HostCacheability>,
-                allocation_granularity: 4096,
-                address_bit_count: 48,
-                minimum_address: 0,
-                maximum_address: u64::MAX,
-                supported_permissions: DeviceAccess::READ | DeviceAccess::WRITE,
-                caches: None,
-                memory_links: None,
-                topology_key: TopologyKey {
-                    group: 0,
-                    member: 0,
-                },
-                provider_instance: self.instance,
-                native: EndpointSelector::Opaque(7),
-            }
-        }
-    }
-
-    impl DeviceStateInfo for FakeDevice {
-        fn has_observed_loss(&self) -> bool {
-            false
-        }
-    }
-
-    impl HostOwnerInfo for FakeHost {
-        fn cached_info(&self) -> HostAllocationInfo {
-            HostAllocationInfo {
-                host_address: 0,
-                size: if self.released { 0 } else { 4096 },
-            }
-        }
-    }
-
-    impl AllocationOwnerInfo for FakeAllocation {
-        fn cached_info(&self) -> AllocationInfo {
-            AllocationInfo {
-                device_address: if self.released { 0 } else { 0x10000 },
-                host_address: None,
-                size: if self.released { 0 } else { 4096 },
-                native_size: if self.released { 0 } else { 4096 },
-                physical_backing_id: [0; 2],
-            }
-        }
-    }
-
-    impl ProviderTypes for FakeDriver {
-        type DeviceState = FakeDevice;
-    }
-
-    impl HostTypes for FakeDriver {
-        type HostAllocation = FakeHost;
-    }
-
-    impl AllocationTypes for FakeDriver {
-        type Allocation = FakeAllocation;
-    }
-
-    impl ProviderDriver for FakeDriver {
-        fn provider_instance(&self) -> u64 {
-            self.instance
-        }
-
-        fn supports_host_registration(&self, _: &Endpoint, _: SessionLifetime) -> bool {
-            false
-        }
-
-        fn shutdown(&mut self) -> Result<(), Error> {
-            if self.fail_shutdown {
-                self.fail_shutdown = false;
-                return Err(failure(
-                    crate::ErrorKind::Driver,
-                    "injected shutdown failure",
-                ));
-            }
-            Ok(())
-        }
-
-        fn enumerate(
-            &self,
-            visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
-        ) -> Result<(), Error> {
-            visitor(self.endpoint())
-        }
-
-        fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error> {
-            if id != ID {
-                return Err(failure(
-                    crate::ErrorKind::InvalidArgument,
-                    "unknown fake endpoint",
-                ));
-            }
-            Ok(self.endpoint())
-        }
-
-        fn activate(&self, endpoint: &Endpoint, _: SessionLifetime) -> Result<FakeDevice, Error> {
-            if endpoint.provider_instance != self.instance
-                || endpoint.id != ID
-                || endpoint.native != EndpointSelector::Opaque(7)
-                || endpoint.kind != EndpointKind::Cpu
-            {
-                return Err(failure(
-                    crate::ErrorKind::InvalidArgument,
-                    "foreign fake endpoint",
-                ));
-            }
-            if self.fail_activation {
-                return Err(failure(
-                    crate::ErrorKind::Driver,
-                    "injected activation failure",
-                ));
-            }
-            Ok(FakeDevice { id: endpoint.id })
-        }
-    }
-
-    impl DeviceDriver for FakeDriver {
-        fn check(&self, device: &FakeDevice) -> Result<(), Error> {
-            if device.id == ID {
-                Ok(())
-            } else {
-                Err(failure(
-                    crate::ErrorKind::InvalidArgument,
-                    "foreign fake device",
-                ))
-            }
-        }
-
-        fn available_memory(&self, device: &FakeDevice) -> Result<u64, Error> {
-            self.check(device)?;
-            Ok(0)
-        }
-
-        fn set_persisting_l2_cache_size(
-            &self,
-            device: &FakeDevice,
-            _size_bytes: u32,
-        ) -> Result<(), Error> {
-            self.check(device)
-        }
-    }
-
-    impl HostDriver for FakeDriver {
-        fn allocate_host(&self, size: u64, alignment: u64) -> Result<Owned<FakeHost>, Error> {
-            if size != 4096 || alignment != 4096 {
-                return Err(failure(
-                    crate::ErrorKind::InvalidArgument,
-                    "fake host extent",
-                ));
-            }
-            Ok(Owned::new(
-                FakeHost {
-                    drops: self.host_drops.clone(),
-                    fail_free: true,
-                    released: false,
-                },
-                Allocator::system(),
-            )?)
-        }
-
-        fn free_host(allocation: &mut FakeHost) -> Result<(), Error> {
-            if allocation.fail_free {
-                allocation.fail_free = false;
-                return Err(failure(
-                    crate::ErrorKind::Driver,
-                    "injected host free failure",
-                ));
-            }
-            allocation.released = true;
-            Ok(())
-        }
-
-        fn host_page_size() -> Result<u64, Error> {
-            Ok(4096)
-        }
-
-        fn host_cache_line_size() -> Result<u32, Error> {
-            Ok(64)
-        }
-
-        unsafe fn host_cache_control(_: usize, _: u64, _: u32) -> Result<(), Error> {
-            Err(failure(
-                crate::ErrorKind::Unsupported,
-                "no fake cache control",
-            ))
-        }
-    }
-
-    impl AllocationDriver for FakeDriver {
-        fn allocation_is_device_local(_: &FakeAllocation) -> bool {
-            false
-        }
-        fn check_allocation(allocation: &FakeAllocation) -> Result<(), Error> {
-            if allocation.released {
-                Err(failure(
-                    crate::ErrorKind::InvalidArgument,
-                    "released fake allocation",
-                ))
-            } else {
-                Ok(())
-            }
-        }
-
-        fn allocation_device_address(
-            allocation: &FakeAllocation,
-            device: &FakeDevice,
-        ) -> Result<u64, Error> {
-            Self::check_allocation(allocation)?;
-            if allocation.device_id != device.id {
-                return Err(failure(
-                    crate::ErrorKind::InvalidArgument,
-                    "foreign fake device",
-                ));
-            }
-            Ok(0x10000)
-        }
-
-        fn allocation_is_owned_by(allocation: &FakeAllocation, device: &FakeDevice) -> bool {
-            allocation.device_id == device.id && !allocation.released
-        }
-
-        fn free_allocation(allocation: &mut FakeAllocation) -> Result<(), Error> {
-            if allocation.fail_free {
-                allocation.fail_free = false;
-                return Err(failure(
-                    crate::ErrorKind::Driver,
-                    "injected allocation free failure",
-                ));
-            }
-            allocation.released = true;
-            Ok(())
-        }
-
-        fn allocate_owned(
-            &self,
-            device: &FakeDevice,
-            peers: &[&FakeDevice],
-            kind: OwnedMemoryKind,
-            size: u64,
-            alignment: u64,
-            permissions: DeviceAccess,
-        ) -> Result<Owned<FakeAllocation>, Error> {
-            if !peers.is_empty()
-                || kind.get() != MemoryKind::System
-                || size != 4096
-                || alignment != 4096
-                || !permissions.contains(DeviceAccess::READ)
-            {
-                return Err(failure(
-                    crate::ErrorKind::InvalidArgument,
-                    "fake allocation request",
-                ));
-            }
-            if self.fail_allocation {
-                return Err(failure(
-                    crate::ErrorKind::Driver,
-                    "injected allocation failure",
-                ));
-            }
-            Ok(Owned::new(
-                FakeAllocation {
-                    device_id: device.id,
-                    drops: self.allocation_drops.clone(),
-                    fail_free: true,
-                    released: false,
-                },
-                Allocator::system(),
-            )?)
-        }
-    }
-
-    #[test]
-    fn non_gpu_provider_runs_through_core_session_lifecycle() -> Result<(), Error> {
-        let mut fake = FakeDriver::new();
-        let host_drops = fake.host_drops.clone();
-        let allocation_drops = fake.allocation_drops.clone();
-        fake.fail_shutdown = true;
-        let mut session =
-            ProviderSession::new(fake, SessionLifetime::Session, Allocator::system())?;
-        let mut discovered = Vec::new();
-        session.enumerate(&mut |endpoint| {
-            discovered.push(endpoint);
-            Ok(())
-        })?;
-        assert_eq!(discovered.len(), 1);
-        let endpoint = session.open_endpoint(discovered[0].id)?;
-        assert_eq!(endpoint.kind, EndpointKind::Cpu);
-        assert!(endpoint.pci.is_none());
-        assert!(!session.supports_host_registration(&endpoint));
-        assert!(session.activate(&FakeDriver::new().endpoint()).is_err());
-
-        let active = session.activate(&endpoint)?;
-        active.driver.check(&active.state)?;
-        assert_eq!(active.driver.available_memory(&active.state)?, 0);
-        assert!(matches!(
-            session.destroy(),
-            Err(error) if error.kind() == crate::ErrorKind::Busy
-        ));
-        let device_state = active.state.clone();
-        let active_driver = active.driver.clone();
-        drop(active);
-
-        let mut host = session.allocate_host(4096, 4096)?;
-        assert_eq!(host.info().size, 4096);
-        assert!(host.free().is_err());
-        assert_eq!(host_drops.load(Ordering::Relaxed), 0);
-        host.free()?;
-        drop(host);
-        assert_eq!(host_drops.load(Ordering::Relaxed), 1);
-
-        let mut allocation = ProviderAllocation::<FakeDriver>::new(active_driver.allocate_owned(
-            &device_state,
-            &[],
-            OwnedMemoryKind::try_from(MemoryKind::System)?,
-            4096,
-            4096,
-            DeviceAccess::READ,
-        )?);
-        assert_eq!(allocation.info().device_address, 0x10000);
-        allocation.check()?;
-        assert_eq!(allocation.device_address(&device_state)?, 0x10000);
-        assert!(allocation.originates_from(&device_state));
-        assert!(allocation.free().is_err());
-        assert_eq!(allocation_drops.load(Ordering::Relaxed), 0);
-        allocation.free()?;
-        drop(allocation);
-        assert_eq!(allocation_drops.load(Ordering::Relaxed), 1);
-        drop(active_driver);
-        assert!(session.destroy().is_err());
-        session.destroy()?;
-        Ok(())
-    }
-
-    #[test]
-    fn non_gpu_backend_contract_covers_discovery_activation_and_failed_cleanup() -> Result<(), Error>
-    {
-        let mut backend = FakeDriver::new();
-        let mut discovered = Vec::new();
-        backend.enumerate(&mut |endpoint| {
-            discovered.push(endpoint.id);
-            Ok(())
-        })?;
-        assert_eq!(discovered, [ID]);
-        let endpoint = backend.open_endpoint(ID)?;
-        assert!(endpoint.pci.is_none());
-        assert!(endpoint.gpu().is_none());
-        assert!(endpoint.linux_kfd_drm_info().is_none());
-        assert!(!backend.supports_host_registration(&endpoint, SessionLifetime::Session));
-
-        backend.fail_activation = true;
-        assert!(
-            backend
-                .activate(&endpoint, SessionLifetime::Session)
-                .is_err()
-        );
-        backend.fail_activation = false;
-        let device = backend.activate(&endpoint, SessionLifetime::Session)?;
-        assert!(!device.has_observed_loss());
-        backend.check(&device)?;
-        assert_eq!(backend.available_memory(&device)?, 0);
-
-        let mut host = backend.allocate_host(4096, 4096)?;
-        assert_eq!(host.cached_info().size, 4096);
-        assert!(FakeDriver::free_host(&mut host).is_err());
-        assert_eq!(backend.host_drops.load(Ordering::Relaxed), 0);
-        FakeDriver::free_host(&mut host)?;
-        drop(host);
-        assert_eq!(backend.host_drops.load(Ordering::Relaxed), 1);
-
-        backend.fail_allocation = true;
-        assert!(
-            backend
-                .allocate_owned(
-                    &device,
-                    &[],
-                    OwnedMemoryKind::try_from(MemoryKind::System)?,
-                    4096,
-                    4096,
-                    DeviceAccess::READ
-                )
-                .is_err()
-        );
-        assert_eq!(backend.allocation_drops.load(Ordering::Relaxed), 0);
-        backend.fail_allocation = false;
-        let mut allocation = backend.allocate_owned(
-            &device,
-            &[],
-            OwnedMemoryKind::try_from(MemoryKind::System)?,
-            4096,
-            4096,
-            DeviceAccess::READ,
-        )?;
-        assert_eq!(
-            FakeDriver::allocation_device_address(&allocation, &device)?,
-            0x10000
-        );
-        assert_eq!(allocation.cached_info().device_address, 0x10000);
-        assert!(FakeDriver::free_allocation(&mut allocation).is_err());
-        assert_eq!(backend.allocation_drops.load(Ordering::Relaxed), 0);
-        FakeDriver::free_allocation(&mut allocation)?;
-        drop(allocation);
-        assert_eq!(backend.allocation_drops.load(Ordering::Relaxed), 1);
-
-        backend.fail_shutdown = true;
-        assert!(backend.shutdown().is_err());
-        backend.shutdown()?;
-        Ok(())
-    }
 }

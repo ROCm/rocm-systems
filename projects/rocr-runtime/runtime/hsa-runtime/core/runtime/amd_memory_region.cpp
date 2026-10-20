@@ -306,6 +306,27 @@ hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute,
   return HSA_STATUS_SUCCESS;
 }
 
+bool MemoryRegion::SignalCapable() const {
+  switch (owner()->device_type()) {
+    case core::Agent::DeviceType::kAmdCpuDevice:
+      return fine_grain();
+    case core::Agent::DeviceType::kAmdGpuDevice: {
+      if (!IsPublic()) return false;
+      // The uncached (extended-scope fine-grained) pool on gfx94x/gfx95x, where the other pools
+      // are MTYPE RW and a binary completion store is not seen by another queue's CP; the
+      // coarse-grained pool on gfx125x.
+      const core::Isa* isa = owner()->supported_isas()[0];
+      const int32_t major = isa->GetMajorVersion();
+      const int32_t minor = isa->GetMinorVersion();
+      if ((major == 9) && ((minor == 4) || (minor == 5))) return extended_scope_fine_grain();
+      if ((major == 12) && (minor >= 5)) return !fine_grain() && !extended_scope_fine_grain();
+      return false;
+    }
+    default:
+      return false;
+  }
+}
+
 hsa_status_t MemoryRegion::GetPoolInfo(hsa_amd_memory_pool_info_t attribute,
                                        void* value) const {
   switch (attribute) {
@@ -344,6 +365,9 @@ hsa_status_t MemoryRegion::GetPoolInfo(hsa_amd_memory_pool_info_t attribute,
           *((size_t*)value) = 0;
           break;
       }
+      break;
+    case HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE:
+      *((bool*)value) = SignalCapable();
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -626,6 +650,16 @@ hsa_status_t MemoryRegion::Unlock(void* host_ptr) const {
     return HSA_STATUS_SUCCESS;
   }
 
+  // Lock leaves a userptr registration or an SVM registration (no thunk
+  // object). Any other object at host_ptr reserved this VA after the lock's
+  // registration was retired as stale; unmapping would tear down its mapping.
+  // The registration is already gone, so there is nothing left to unlock.
+  HsaPointerInfo info = {};
+  if (HSAKMT_CALL(hsaKmtQueryPointerInfo(host_ptr, &info)) == HSAKMT_STATUS_SUCCESS &&
+      info.Type != HSA_POINTER_REGISTERED_USER && info.Type != HSA_POINTER_UNKNOWN) {
+    return HSA_STATUS_SUCCESS;
+  }
+
   if (owner()->driver().MakeMemoryUnresident(host_ptr) != HSA_STATUS_SUCCESS) {
     assert(false && "Failed to unmap host pointer");
   }
@@ -650,8 +684,10 @@ void* MemoryRegion::BlockAllocator::alloc(size_t request_size, size_t& allocated
   // The block's driver identity is reconstructed from base address and length
   // on free (see BlockAllocator::free), so the handle is not retained here.
   core::DriverMemoryHandle handle{};
-  hsa_status_t err = region_.AllocateImpl(
-      bsize, core::MemoryRegion::AllocateRestrict | core::MemoryRegion::AllocateDirect, 0, &handle);
+  core::MemoryRegion::AllocateFlags flags = core::MemoryRegion::AllocateDirect;
+  if (region_.IsLocalMemory()) flags |= core::MemoryRegion::AllocateRestrict;
+
+  hsa_status_t err = region_.AllocateImpl(bsize, flags, 0, &handle);
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(err, "MemoryRegion::BlockAllocator::alloc failed.");
   assert(handle.vaddr != nullptr && "Region returned nullptr on success.");

@@ -53,6 +53,7 @@ hsaKmtDbgDisable;
 hsaKmtDbgGetDeviceData;
 hsaKmtDbgGetQueueData;
 hsaKmtGetClockCounters;
+hsaKmtGetClockCountersPrecise;
 hsaKmtPmcGetCounterProperties;
 hsaKmtPmcRegisterTrace;
 hsaKmtPmcUnregisterTrace;
@@ -102,6 +103,7 @@ hsaKmtAisReadWriteFile;
 hsaKmtGetMemoryHandle;
 #endif
 hsaKmtHandleImport;
+hsaKmtQueryDmaBufInfo;
 hsaKmtHandleExport;
 hsaKmtMemoryVaMap;
 hsaKmtMemoryVaUnmap;
@@ -112,6 +114,7 @@ hsaKmtMemoryCpuMap;
 hsaKmtSetSigbusDelay;
 hsaKmtGetAmdGPUDeviceFd;
 hsaKmtDtifMemoryCopy;
+hsaKmtSetPersistingCacheSize;
 local: *;
 };
 

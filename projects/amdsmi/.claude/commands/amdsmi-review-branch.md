@@ -1,7 +1,7 @@
 ---
 description: Review the current local branch using the AMD-SMI Review Agent
 allowed-tools: Bash(git:*), Read, Write, Glob, Grep, Task
-argument-hint: "[review-type ...] — style, tests, docs, architecture, security, performance, build, skeptic (or blank for comprehensive). Add 'fast' to skip rebuttal. Add 'no-build' to skip build step."
+argument-hint: "[review-type ...] — style, tests, docs, architecture, security, performance, build, skeptic, spec, maintainer (or blank for comprehensive). Add 'fast' to skip rebuttal. Add 'no-build' to skip build step."
 ---
 
 Review the current local branch using the AMD-SMI Review Agent.
@@ -9,7 +9,7 @@ Review the current local branch using the AMD-SMI Review Agent.
 ## Arguments
 
 - `$ARGUMENTS` contains: `[review-type ...]`
-- Valid types: `style`, `tests`, `docs`, `architecture`, `security`, `performance`, `build`, `skeptic`
+- Valid types: `style`, `tests`, `docs`, `architecture`, `security`, `performance`, `build`, `skeptic`, `spec`, `maintainer`
 - Special modifier: `fast` — skips the rebuttal round (comprehensive mode only)
 - Special modifier: `no-build` — skips the build & install step
 - If no types specified, perform a **comprehensive** review (all subagents, with rebuttal)

@@ -32,7 +32,10 @@ ncclResult_t ncclGroupEndInternal(ncclSimInfo_t*) { return ncclSuccess; }
 static ncclResult_t DefaultNcclGroupJobAbort(struct ncclGroupJob*) { return ncclSuccess; }
 std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;
 ncclResult_t ncclGroupJobAbort(struct ncclGroupJob* job) { return g_ncclGroupJobAbort(job); }
-ncclResult_t ncclGroupJobComplete(struct ncclGroupJob*) { return ncclSuccess; }
+
+static ncclResult_t DefaultNcclGroupJobComplete(struct ncclGroupJob*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobComplete = DefaultNcclGroupJobComplete;
+ncclResult_t ncclGroupJobComplete(struct ncclGroupJob* job) { return g_ncclGroupJobComplete(job); }
 
 static ncclResult_t DefaultCollPreconnect(struct ncclComm*, bool*) {
   FailLoudUnfaked("group_fakes", "ncclCollPreconnect");
@@ -53,6 +56,7 @@ int64_t ncclParamSingleProcMemRegEnable() { return g_loadParam("SINGLE_PROC_MEM_
 
 void ResetGroupFakes() {
   g_ncclGroupJobAbort = DefaultNcclGroupJobAbort;
+  g_ncclGroupJobComplete = DefaultNcclGroupJobComplete;
   g_ncclCollPreconnect = DefaultCollPreconnect;
   g_doLaunches = DefaultDoLaunches;
 }

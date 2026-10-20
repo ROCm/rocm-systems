@@ -21,6 +21,7 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+#include "DdaFabricMPITestFixture.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
@@ -77,14 +78,6 @@ bool launchesOnUserStream(int algo)
     }
 }
 
-bool isGfx1250Device()
-{
-    hipDeviceProp_t props{};
-    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
-        return false;
-    return std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
-}
-
 void fillRankScalar(void* buf, size_t nElem, int rank)
 {
     std::vector<float> host(nElem, static_cast<float>(rank + 1));
@@ -115,12 +108,6 @@ size_t twoShotCountForRanks(int nRanks)
         return 0;
     }
     return count;
-}
-
-bool logContainsNeedle(const MPIHelpers::TestLogAssertionContext& logCtx, const char* needle)
-{
-    const std::string merged = logCtx.readNcclDebugLog() + logCtx.readPerRankStderrLog();
-    return merged.find(needle) != std::string::npos;
 }
 
 // Kernel, copy and memset nodes of a graph. The captures below enqueue no work of their own, so
@@ -193,39 +180,19 @@ size_t countEventNodes(hipGraph_t graph, hipGraphNodeType type, hipEvent_t event
  * @class DdaAllReduceMPITest
  * @brief Shared fixture: COLL log capture and gfx1250 gate for DDA fabric LL tiers.
  */
-class DdaAllReduceMPITest : public MPITestBase
+class DdaAllReduceMPITest : public DdaFabricMPITest
 {
 protected:
-    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugGuard_;
-    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugSubsysGuard_;
-    std::unique_ptr<MPIHelpers::TestLogAssertionContext> logCtx_;
-
-    void SetUp() override
-    {
-        MPITestBase::SetUp();
-        debugGuard_       = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG", "INFO");
-        debugSubsysGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS", "NET,INIT,COLL,TUNING");
-        logCtx_           = std::make_unique<MPIHelpers::TestLogAssertionContext>(
-            MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
-    }
-
-    void TearDown() override
-    {
-        MPITestBase::TearDown();
-        logCtx_.reset();
-        debugSubsysGuard_.reset();
-        debugGuard_.reset();
-    }
-
     void runAllReduce(size_t count, const char* logNeedle, const char* testId)
     {
         if(!validateTestPrerequisites(kMinProcessesForMPI))
             GTEST_SKIP() << "Need at least 2 MPI ranks";
 
-        //if(!isGfx1250Device())
-        //    GTEST_SKIP() << "DDA fabric LL requires gfx1250";
+        DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric LL requires gfx1250"));
 
-        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+        DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason());
 
         int rank{}, nRanks{};
         ncclCommUserRank(getActiveCommunicator(), &rank);
@@ -241,6 +208,19 @@ protected:
         ASSERT_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
         DeviceBufferAutoGuard recvGuard(recvBuf);
 
+        // With fabric DDA up, RCCL must offer an LL tier for this message; a non-fabric pick is a selection regression.
+        int                algo = -1, protocol = -1, maxChannels = -1;
+        const ncclResult_t query
+            = rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, count, ncclFloat32,
+                                  ncclSum, sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &protocol,
+                                  &maxChannels);
+        EXPECT_EQ(ncclSuccess, query) << "Rank " << rank << ": rcclGetCollImplInfo failed";
+        const char* algoName = nullptr;
+        rcclGetAlgoName(algo, &algoName);
+        EXPECT_TRUE(algo == RCCL_DDA_FABRIC_LL || algo == RCCL_DDA_FABRIC_LL128)
+            << "Rank " << rank << ": " << testId << " selected " << (algoName ? algoName : "?")
+            << " (algo " << algo << "), not DDA fabric LL/LL128";
+
         fillRankScalar(sendBuf, count, rank);
         ASSERT_EQ(hipSuccess, hipMemset(recvBuf, 0, bytes));
 
@@ -254,7 +234,7 @@ protected:
                                             [expectedSum](size_t) { return expectedSum; }))
             << "Rank " << rank << ": DDA LL AllReduce verification failed";
 
-        const bool tookExpectedPath = logContainsNeedle(*logCtx_, logNeedle);
+        const bool tookExpectedPath = logContainsNeedle(logNeedle);
         EXPECT_TRUE(tookExpectedPath)
             << "Rank " << rank << ": " << testId
             << " did not log the expected DDA LL tier (needle: \"" << logNeedle << "\")";

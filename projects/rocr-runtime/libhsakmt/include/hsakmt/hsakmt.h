@@ -1022,6 +1022,21 @@ hsaKmtGetClockCounters(
     );
 
 /**
+  Gets GPU and CPU clock counters for particular Node.
+
+  GPU nodes are queried several times and the shortest complete sample is
+  returned. That reduces GPU/CPU clock correlation error from a delay between
+  the counter reads. CPU-only nodes are read once.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetClockCountersPrecise(
+    HSAuint32         NodeId,  //IN
+    HsaClockCounters* Counters //OUT
+    );
+
+/**
   Retrieves information on the available HSA counters
 */
 
@@ -1442,6 +1457,18 @@ hsaKmtHandleImport(
     const HsaHandleImportDesc* ImportDesc,
     HsaHandleImportResult* ImportResult,
     HsaHandleImportFlags* Flags
+);
+
+/**
+  Queries the placement and size of an allocation from its DMA-BUF fd.
+  The fd is not consumed. Returns HSAKMT_STATUS_NOT_SUPPORTED when the
+  kernel cannot describe the buffer.
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueryDmaBufInfo(
+    int DMABufFd,           // IN
+    HsaDmaBufInfo* Info     // OUT
 );
 
 HSAKMT_STATUS
