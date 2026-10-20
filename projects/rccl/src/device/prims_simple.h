@@ -931,7 +931,9 @@ __device__ void setDataPtrs(void const* inputBuf, void* outputBuf, uint64_t redO
       if (slot) {
         T* exchgPtr;
         directBuff = (T*)outputBuf;
-        while ((void*)atomicAdd((unsigned long long*)slot, 0) != nullptr && !checkAbort(flags, Aborted, spins));
+        while (__scoped_atomic_load_n((void* __attribute__((address_space(1)))*)slot, __ATOMIC_RELAXED,
+                                      __MEMORY_SCOPE_SYSTEM) != nullptr &&
+               !checkAbort(flags, Aborted, spins));
         if (P2p) {
           exchgPtr = (T*)outputBuf;
         } else {
@@ -948,7 +950,8 @@ __device__ void setDataPtrs(void const* inputBuf, void* outputBuf, uint64_t redO
       void* volatile* slot = ncclShmem.groups[group].sendConns[index]->ptrExchange;
       void* ptr;
       while (slot) {
-        ptr = (void*)atomicAdd((unsigned long long*)slot, 0);
+        ptr = __scoped_atomic_load_n((void* __attribute__((address_space(1)))*)slot, __ATOMIC_RELAXED,
+                                     __MEMORY_SCOPE_SYSTEM);
         if (ptr != nullptr || checkAbort(flags, Aborted, spins)) break;
       }
 
@@ -968,7 +971,8 @@ __device__ void setDataPtrs(void const* inputBuf, void* outputBuf, uint64_t redO
       // Wait for consumer to consume previous value before trampling it.
       if (slot && argSlot0 && argSlot1) {
         T* exchgPtr;
-        while (((void*)atomicAdd((unsigned long long*)slot, 0) != nullptr || *argSlot0 != 0 || *argSlot1 != 0) &&
+        while ((__scoped_atomic_load_n((void* __attribute__((address_space(1)))*)slot, __ATOMIC_RELAXED,
+                                       __MEMORY_SCOPE_SYSTEM) != nullptr || *argSlot0 != 0 || *argSlot1 != 0) &&
                !checkAbort(flags, Aborted, spins));
         // If there is no recv, then we are directly pulling from input buffer (e.g. directScatter)
         // Otherwise, we are pulling from output buffer (e.g. recvCopyDirectSend)
@@ -999,7 +1003,8 @@ __device__ void setDataPtrs(void const* inputBuf, void* outputBuf, uint64_t redO
       volatile uint64_t* argSlot1 = ncclShmem.groups[group].recvConns[index]->redOpArgExchange + 1;
       void* ptr;
       while (slot) {
-        ptr = (void*)atomicAdd((unsigned long long*)slot, 0);
+        ptr = __scoped_atomic_load_n((void* __attribute__((address_space(1)))*)slot, __ATOMIC_RELAXED,
+                                     __MEMORY_SCOPE_SYSTEM);
         if (ptr != nullptr || checkAbort(flags, Aborted, spins)) break;
       }
 
