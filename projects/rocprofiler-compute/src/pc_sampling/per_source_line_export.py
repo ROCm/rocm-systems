@@ -27,7 +27,7 @@ from pc_sampling.source_snapshot_analysis import (
     SOURCE_EXPORT_DIRECTORY_NAME,
     resolve_export_path,
 )
-from utils.analysis_orm import PER_SOURCE_LINE_FILE_KEY_COLUMN_COUNT
+from utils.analysis_orm import per_source_line_file_key_columns
 from utils.logger import console_debug
 
 SOURCE_LINE_FILE_SUFFIX = "_pc_sampling.csv"
@@ -112,7 +112,7 @@ def _write_per_source_line_files(
     """Write one workload's grouped source line rows, and return the file count."""
     return write_grouped_csv_files(
         source_line_rows,
-        PER_SOURCE_LINE_FILE_KEY_COLUMN_COUNT,
+        len(per_source_line_file_key_columns()),
         build_header(BASE_COLUMNS, stall_reasons, TRAILING_COLUMNS),
         partial(_resolve_source_line_export_path, export_directory),
         _format_source_line_rows,

@@ -534,23 +534,17 @@ def per_kernel_isa_file_key_columns() -> list[Any]:
     ]
 
 
-PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT = len(per_kernel_isa_file_key_columns())
-
-
 def per_source_line_file_key_columns() -> List[Any]:
     """Return the columns that name the file a per-source-line row is written to.
 
-    The select and the exporter's split both read this list, so they stay in
-    step.
+    The per-source-line query selects these columns first, and the exporter
+    uses their count to split them off each row.
     """
     return [
         Workload.name.label("workload_name"),
         Workload.sub_name.label("workload_sub_name"),
         SourceFile.file_path.label("file_path"),
     ]
-
-
-PER_SOURCE_LINE_FILE_KEY_COLUMN_COUNT = len(per_source_line_file_key_columns())
 
 
 class Database:
@@ -932,8 +926,7 @@ class Database:
         """Select every line of one workload's captured source files.
 
         Each line sums the per-kernel ISA rows of the instructions whose inline
-        stack names that line, and references those rows. A ":?" frame names no
-        source line, so its instruction adds to no source line.
+        stack names that line, and references those rows.
         """
         isa_lines = (
             Database
@@ -1015,8 +1008,9 @@ class Database:
                 line_instructions.c.instruction_uuid == isa_lines.c.instruction_uuid,
             )
             .where(SourceFile.workload_id == workload_id)
-            # Only captured files are exported, and only numbered lines are listed.
+            # Only captured files are exported.
             .where(SourceFile.md5_checksum.is_not(None))
+            # Skip "?" frames, which are stored without a line number.
             .where(SourceLine.line_number.is_not(None))
             .group_by(SourceLine.source_line_uuid)
             .order_by(SourceFile.file_path, SourceLine.line_number)
