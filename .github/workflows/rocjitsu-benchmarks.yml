@@ -360,7 +360,7 @@ jobs:
             fi
           fi
 
-          # Another writer may update the publication branch before our push.
+          # A concurrent writer may advance the publication branch before our push.
           # Retry from the latest branch with three attempts, reapplying files and merging the index.
           for ATTEMPT in 1 2 3; do
             git fetch origin "${RESULTS_BRANCH}"

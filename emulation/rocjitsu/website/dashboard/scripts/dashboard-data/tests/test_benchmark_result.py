@@ -337,9 +337,7 @@ def test_copy_and_index_preserve_history(tmp_path, existing, publication_catalog
     body = next(
         step['run'] for step in steps() if step['name'] == 'Publish benchmark files'
     )
-    setup_body = body[
-        body.index('DESTINATION=') : body.index('# Another writer may update')
-    ]
+    setup_body = body[body.index('DESTINATION=') : body.index('for ATTEMPT in 1 2 3')]
     copy_body = (
         setup_body
         + body[
@@ -423,9 +421,7 @@ def test_publication_catalog_path(tmp_path, publication_catalog, catalog_case):
         step['run'] for step in steps() if step['name'] == 'Publish benchmark files'
     )
     dashboard_setup = body[
-        body.index('DATA=rocjitsu-dashboard/data') : body.index(
-            '# Another writer may update'
-        )
+        body.index('DATA=rocjitsu-dashboard/data') : body.index('for ATTEMPT in 1 2 3')
     ]
     dashboard_body = (
         dashboard_setup
