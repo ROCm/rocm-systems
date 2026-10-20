@@ -115,3 +115,15 @@ repos:
         files: ^projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/gfx.*\.yaml$
         pass_filenames: true
         stages: [pre-commit]
+
+  # Local hook: metric-health utility scripts are not product code
+  - repo: local
+    hooks:
+      - id: metric-health-script-tests
+        name: Metric health utility script tests
+        entry: python projects/rocprofiler-compute/tools/run_metric_health_script_tests.py
+        language: python
+        additional_dependencies: [pytest==8.0.2, pyyaml==6.0.3]
+        files: ^projects/rocprofiler-compute/(scripts/run_metric_health_test_report\.sh|scripts/run_metric_health_test_report_local_driver\.sh|scripts/\.metric_health_sites\.env\.example|tools/generate_metric_health_report\.py|tools/run_metric_health_script_tests\.py)$
+        pass_filenames: false
+        stages: [pre-commit]
