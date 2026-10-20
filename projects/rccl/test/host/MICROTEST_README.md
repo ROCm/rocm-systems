@@ -454,6 +454,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `fabric/fabric_gpu_barrier.cu` (`FABRIC_GPU_BARRIER_CC_PATH`, from
     `fabric-gpu-barrier-test.cc`); suites `FabricGpuBarrier*`.
 
+- **`rccl-UnitTestsMicroNetIbCastDataPath`** — the net_ib_cast data path in
+  `src/transport/net_ib_cast/`: `p2p.cc` (`NET_IB_CAST_P2P_CC_PATH`, suites
+  `NetIbCastP2p*`), `scheduler.cc` (`NET_IB_CAST_SCHEDULER_CC_PATH`, suites
+  `NetIbCastScheduler*`) and `net_ib_ops_fault.cc` (`NET_IB_OPS_FAULT_CC_PATH`, suite
+  `NetIbOpsFault*`), driven through fake verbs devices (`IbVerbsScene.h`). One binary
+  because p2p.cc calls both units for real. See `test_categories_micro_net_ib_cast_data_path.yaml`.
+
 Everything below (seams, fakes, coverage) applies to all of them; the concrete examples
 use `p2p.cc`.
 
@@ -964,8 +971,8 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDda`,
-`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
-`rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
+`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep`,
+`rccl-UnitTestsMicroNetIbCastDataPath` and `rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
@@ -1025,6 +1032,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroProfiler           # src/plugin/profiler.cc + profiler_v1..v7.cc
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
 ./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
+./build/rccl-UnitTestsMicroNetIbCastDataPath  # net_ib_cast p2p/scheduler/ops-fault tests
 ./build/rccl-HostUnitTests
 ./build/rccl-UnitTestsMicroRoctxNvml          # misc/roctx.cc + misc/nvmlwrap_stub.cc tests
 ./build/rccl-UnitTestsMicroRoctxNvml-roctx    # same, ROCTX_ENABLE arm
