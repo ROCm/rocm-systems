@@ -469,6 +469,22 @@ inline struct ibv_wc P2pResiliencyWc(uint64_t wrId, enum ibv_wc_status status, e
   return wc;
 }
 
+// What connect does for a comm's resiliency context: Init, DeviceNumSet against nRemDevs, then
+// DevInit on every local device. recovery turns port recovery on as if its thread ran at Init.
+inline ncclIbResiliency* P2pResiliencyAttach(struct ncclIbNetCommBase* base, int nRemDevs, bool recovery) {
+  ncclIbResiliency* res = nullptr;
+  EXPECT_EQ(IbCastResiliencyInit(base, &res), ncclSuccess);
+  if (res == nullptr) return nullptr;
+  base->resiliency = res;
+  if (recovery) res->recoveryEnabled = true;
+  int ndevs = base->vProps.ndevs;
+  EXPECT_EQ(IbCastResiliencyDeviceNumSet(res, ndevs, nRemDevs), ncclSuccess);
+  for (int d = 0; d < ndevs; d++) {
+    EXPECT_EQ(IbCastResiliencyDevInit(res, d, &IbCastDevs[base->vProps.devs[d]]), ncclSuccess);
+  }
+  return res;
+}
+
 // For tests of the units' guards against a comm without the device's base.
 inline struct ncclIbNetCommDevBase* P2pResiliencyNoDevBase(struct ncclIbNetCommBase*, int) { return nullptr; }
 

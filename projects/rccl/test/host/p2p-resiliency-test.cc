@@ -37,23 +37,20 @@ class P2pResiliencyMicrotest : public ::testing::Test {
   void TearDown() override { IbCastResiliencyDestroy(&res_); }
 
   // A context over ndevs devices on both sides, with every device initialised.
-  ncclIbResiliencySend* MakeSender(int ndevs, int nqps) {
-    send_ = scene_.NewComm<ncclIbSendComm>(true, ndevs, nqps);
-    EXPECT_EQ(IbCastResiliencyInit(&send_->base, &res_), ncclSuccess);
-    send_->base.resiliency = res_;
-    EXPECT_EQ(IbCastResiliencyDeviceNumSet(res_, ndevs, ndevs), ncclSuccess);
-    for (int d = 0; d < ndevs; d++) EXPECT_EQ(IbCastResiliencyDevInit(res_, d, scene_.Dev(d)), ncclSuccess);
-    return (ncclIbResiliencySend*)res_;
-  }
-
-  ncclIbResiliency* MakeReceiver(int ndevs, int nqps) {
-    recv_ = scene_.NewComm<ncclIbRecvComm>(false, ndevs, nqps);
-    EXPECT_EQ(IbCastResiliencyInit(&recv_->base, &res_), ncclSuccess);
-    recv_->base.resiliency = res_;
-    EXPECT_EQ(IbCastResiliencyDeviceNumSet(res_, ndevs, ndevs), ncclSuccess);
-    for (int d = 0; d < ndevs; d++) EXPECT_EQ(IbCastResiliencyDevInit(res_, d, scene_.Dev(d)), ncclSuccess);
+  ncclIbResiliency* Make(bool isSend, int ndevs, int nqps, bool recovery = false) {
+    ncclIbNetCommBase* base;
+    if (isSend) {
+      send_ = scene_.NewComm<ncclIbSendComm>(true, ndevs, nqps);
+      base = &send_->base;
+    } else {
+      recv_ = scene_.NewComm<ncclIbRecvComm>(false, ndevs, nqps);
+      base = &recv_->base;
+    }
+    res_ = P2pResiliencyAttach(base, ndevs, recovery);
     return res_;
   }
+  ncclIbResiliencySend* MakeSender(int ndevs, int nqps) { return (ncclIbResiliencySend*)Make(true, ndevs, nqps); }
+  ncclIbResiliency* MakeReceiver(int ndevs, int nqps) { return Make(false, ndevs, nqps); }
 
   // The nreqs requests of a (multi-)send in slot id % NET_IB_MAX_REQUESTS.
   ncclIbRequest* SendRequest(uint64_t id, int nreqs = 1) {
@@ -418,29 +415,8 @@ TEST_F(P2pResiliencyMicrotest, SenderQpsToRts_RtrOrRtsFails_ReturnsTheError) {
   EXPECT_EQ(IbCastResiliencySenderQpsToRts(res_, &remote), ncclSystemError);
 }
 
-class P2pResiliencyRecoveryOnMicrotest : public P2pResiliencyMicrotest {
- protected:
-  // A context with port recovery on, as if the recovery thread had been running at Init.
-  ncclIbResiliency* MakeWithRecovery(bool isSend, int ndevs) {
-    ncclIbNetCommBase* base;
-    if (isSend) {
-      send_ = scene_.NewComm<ncclIbSendComm>(true, ndevs, ndevs);
-      base = &send_->base;
-    } else {
-      recv_ = scene_.NewComm<ncclIbRecvComm>(false, ndevs, ndevs);
-      base = &recv_->base;
-    }
-    EXPECT_EQ(IbCastResiliencyInit(base, &res_), ncclSuccess);
-    base->resiliency = res_;
-    res_->recoveryEnabled = true;
-    EXPECT_EQ(IbCastResiliencyDeviceNumSet(res_, ndevs, ndevs), ncclSuccess);
-    for (int d = 0; d < ndevs; d++) EXPECT_EQ(IbCastResiliencyDevInit(res_, d, scene_.Dev(d)), ncclSuccess);
-    return res_;
-  }
-};
-
-TEST_F(P2pResiliencyRecoveryOnMicrotest, SenderCreateQps_RecoveryEnabled_AlsoCreatesUdRecoveryQps) {
-  MakeWithRecovery(true, 2);
+TEST_F(P2pResiliencyMicrotest, SenderCreateQps_RecoveryEnabled_AlsoCreatesUdRecoveryQps) {
+  Make(true, 2, 2, true);
   ncclIbResiliencyInfo info = {};
   ASSERT_EQ(IbCastResiliencySenderCreateQps(res_, &info), ncclSuccess);
   ASSERT_EQ(scene_.qpCreates.size(), 4u);
@@ -449,8 +425,8 @@ TEST_F(P2pResiliencyRecoveryOnMicrotest, SenderCreateQps_RecoveryEnabled_AlsoCre
   EXPECT_EQ(info.portRecoveryQpsInfo[1].qpn, res_->portRecoveryQps[1].qp->qp_num);
 }
 
-TEST_F(P2pResiliencyRecoveryOnMicrotest, SenderQpsToRts_PeerWithoutRecovery_TurnsRecoveryOffAndFreesIt) {
-  MakeWithRecovery(true, 2);
+TEST_F(P2pResiliencyMicrotest, SenderQpsToRts_PeerWithoutRecovery_TurnsRecoveryOffAndFreesIt) {
+  Make(true, 2, 2, true);
   ncclIbResiliencyInfo info = {};
   ASSERT_EQ(IbCastResiliencySenderCreateQps(res_, &info), ncclSuccess);
   ibv_qp* recoveryQp0 = res_->portRecoveryQps[0].qp;
@@ -468,8 +444,8 @@ TEST_F(P2pResiliencyRecoveryOnMicrotest, SenderQpsToRts_PeerWithoutRecovery_Turn
   EXPECT_TRUE(scene_.ahAttrs.empty());
 }
 
-TEST_F(P2pResiliencyRecoveryOnMicrotest, SenderQpsToRts_PeerWithRecovery_ConnectsRecoveryQps) {
-  MakeWithRecovery(true, 2);
+TEST_F(P2pResiliencyMicrotest, SenderQpsToRts_PeerWithRecovery_ConnectsRecoveryQps) {
+  Make(true, 2, 2, true);
   ncclIbResiliencyInfo info = {};
   ASSERT_EQ(IbCastResiliencySenderCreateQps(res_, &info), ncclSuccess);
   ncclIbConnectionMetadata remote = P2pResiliencyRemoteInfo(2, true);
@@ -527,8 +503,8 @@ TEST_F(P2pResiliencyMicrotest, ReceiverQpsCreateToRts_StepFails_ReturnsTheError)
   EXPECT_EQ(IbCastResiliencyReceiverQpsCreateToRts(res_, &remote, &info), ncclSystemError);
 }
 
-TEST_F(P2pResiliencyRecoveryOnMicrotest, ReceiverQpsCreateToRts_PeerWithoutRecovery_TurnsRecoveryOff) {
-  MakeWithRecovery(false, 2);
+TEST_F(P2pResiliencyMicrotest, ReceiverQpsCreateToRts_PeerWithoutRecovery_TurnsRecoveryOff) {
+  Make(false, 2, 2, true);
   ncclIbConnectionMetadata remote = P2pResiliencyRemoteInfo(2, false);
   ncclIbResiliencyInfo info = {};
   ASSERT_EQ(IbCastResiliencyReceiverQpsCreateToRts(res_, &remote, &info), ncclSuccess);
@@ -541,8 +517,8 @@ TEST_F(P2pResiliencyRecoveryOnMicrotest, ReceiverQpsCreateToRts_PeerWithoutRecov
   EXPECT_EQ(info.portRecoveryQpsInfo[0].qpn, 0u);
 }
 
-TEST_F(P2pResiliencyRecoveryOnMicrotest, ReceiverQpsCreateToRts_PeerWithRecovery_CreatesRecoveryQps) {
-  MakeWithRecovery(false, 2);
+TEST_F(P2pResiliencyMicrotest, ReceiverQpsCreateToRts_PeerWithRecovery_CreatesRecoveryQps) {
+  Make(false, 2, 2, true);
   ncclIbConnectionMetadata remote = P2pResiliencyRemoteInfo(2, true);
   ncclIbResiliencyInfo info = {};
   ASSERT_EQ(IbCastResiliencyReceiverQpsCreateToRts(res_, &remote, &info), ncclSuccess);
@@ -603,37 +579,36 @@ TEST_F(P2pResiliencyMicrotest, QpReconfigure_EceSupported_RestoresEceBeforeRtr) 
 }
 
 // Each step's failure is reported through *success, not as an error, and stops the sequence.
-class P2pResiliencyQpReconfigureStepMicrotest : public P2pResiliencyMicrotest,
-                                                public ::testing::WithParamInterface<int> {};
-
-TEST_P(P2pResiliencyQpReconfigureStepMicrotest, QpReconfigure_StepFails_ReportsNotReconfigured) {
+TEST_F(P2pResiliencyMicrotest, QpReconfigure_StepFails_ReportsNotReconfigured) {
   const char* steps[] = {"RESET", "INIT", "ECE", "RTR", "RTS"};
-  const std::string failing = steps[GetParam()];
-  MakeSender(1, 1);
-  ncclIbQp* qp = &send_->base.qps[0];
-  qp->eceSupported = 1;
-  auto step = [&](const char* name) {
-    return [&, name](ncclIbQp* q) {
-      scene_.transitions.push_back({q, name, {}, {}, {}});
-      return failing == name ? ncclSystemError : ncclSuccess;
+  for (size_t failAt = 0; failAt < 5; failAt++) {
+    const std::string failing = steps[failAt];
+    MakeSender(1, 1);
+    ncclIbQp* qp = &send_->base.qps[0];
+    qp->eceSupported = 1;
+    auto step = [&](const char* name) {
+      return [&, name](ncclIbQp* q) {
+        scene_.transitions.push_back({q, name, {}, {}, {}});
+        return failing == name ? ncclSystemError : ncclSuccess;
+      };
     };
-  };
-  ScopedHook reset(g_ibCastQpReset, step("RESET"));
-  ScopedHook init(g_ibCastQpInit, step("INIT"));
-  ScopedHook rtr(g_ibCastQpRtr, step("RTR"));
-  ScopedHook rts(g_ibCastQpRts, step("RTS"));
-  ScopedHook ece(g_ibvSetEce, [&](ibv_qp*, ibv_ece*, int*) {
-    scene_.transitions.push_back({qp, "ECE", {}, {}, {}});
-    return failing == "ECE" ? ncclSystemError : ncclSuccess;
-  });
-  bool ok = true;
-  ASSERT_EQ(IbCastResiliencyQpReconfigure(res_, qp, &send_->devs[0].base, 0, &ok), ncclSuccess);
-  EXPECT_FALSE(ok);
-  ASSERT_EQ(scene_.transitions.size(), (size_t)GetParam() + 1);
-  EXPECT_EQ(scene_.transitions.back().step, failing);
+    ScopedHook reset(g_ibCastQpReset, step("RESET"));
+    ScopedHook init(g_ibCastQpInit, step("INIT"));
+    ScopedHook rtr(g_ibCastQpRtr, step("RTR"));
+    ScopedHook rts(g_ibCastQpRts, step("RTS"));
+    ScopedHook ece(g_ibvSetEce, [&](ibv_qp*, ibv_ece*, int*) {
+      scene_.transitions.push_back({qp, "ECE", {}, {}, {}});
+      return failing == "ECE" ? ncclSystemError : ncclSuccess;
+    });
+    bool ok = true;
+    ASSERT_EQ(IbCastResiliencyQpReconfigure(res_, qp, &send_->devs[0].base, 0, &ok), ncclSuccess) << failing;
+    EXPECT_FALSE(ok) << failing;
+    ASSERT_EQ(scene_.transitions.size(), failAt + 1) << failing;
+    EXPECT_EQ(scene_.transitions.back().step, failing);
+    scene_.transitions.clear();
+    IbCastResiliencyDestroy(&res_);
+  }
 }
-
-INSTANTIATE_TEST_SUITE_P(Steps, P2pResiliencyQpReconfigureStepMicrotest, ::testing::Range(0, 5));
 
 TEST_F(P2pResiliencyMicrotest, QpsReconfigure_NoDeviceBase_ReturnsInternalError) {
   MakeSender(1, 1);
@@ -698,8 +673,8 @@ TEST_F(P2pResiliencyMicrotest, Close_DestroysEveryCreatedProbingQp) {
   EXPECT_EQ(IbCastResiliencyClose(res_), ncclSystemError);
 }
 
-TEST_F(P2pResiliencyRecoveryOnMicrotest, Close_RecoveryEnabled_DestroysRecoveryQpsAndAhs) {
-  MakeWithRecovery(true, 2);
+TEST_F(P2pResiliencyMicrotest, Close_RecoveryEnabled_DestroysRecoveryQpsAndAhs) {
+  Make(true, 2, 2, true);
   ncclIbResiliencyInfo info = {};
   ASSERT_EQ(IbCastResiliencySenderCreateQps(res_, &info), ncclSuccess);
   ncclIbConnectionMetadata remote = P2pResiliencyRemoteInfo(2, true);
@@ -821,8 +796,8 @@ TEST_F(P2pResiliencyMicrotest, ReplaceQps_NoHealthyQp_ReturnsInternalError) {
   EXPECT_TRUE(LogHas(log, "Could not find a replacement QP")) << log;
 }
 
-TEST_F(P2pResiliencyRecoveryOnMicrotest, HandleCompletionError_RecoveryCannotStart_MarksDevicePermanent) {
-  MakeWithRecovery(false, 2);
+TEST_F(P2pResiliencyMicrotest, HandleCompletionError_RecoveryCannotStart_MarksDevicePermanent) {
+  Make(false, 2, 2, true);
   ScopedHook qpError(g_ibCastQpError, [](ncclIbQp*) { return ncclSystemError; });
   ibv_wc wc = P2pResiliencyWc(NCCL_IB_RECV_WR_ID_DUMMY, IBV_WC_WR_FLUSH_ERR, IBV_WC_RECV);
   ASSERT_EQ(IbCastResiliencyHandleCompletionError(res_, &wc, 1), ncclSuccess);
@@ -832,8 +807,8 @@ TEST_F(P2pResiliencyRecoveryOnMicrotest, HandleCompletionError_RecoveryCannotSta
   EXPECT_FALSE(res_->inProgress);
 }
 
-TEST_F(P2pResiliencyRecoveryOnMicrotest, HandleCompletionError_RecoveryStarts_QueuesTheDevice) {
-  MakeWithRecovery(false, 2);
+TEST_F(P2pResiliencyMicrotest, HandleCompletionError_RecoveryStarts_QueuesTheDevice) {
+  Make(false, 2, 2, true);
   ncclIbConnectionMetadata remote = P2pResiliencyRemoteInfo(2, true);
   ncclIbResiliencyInfo info = {};
   ASSERT_EQ(IbCastResiliencyReceiverQpsCreateToRts(res_, &remote, &info), ncclSuccess);

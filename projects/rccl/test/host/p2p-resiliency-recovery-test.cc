@@ -116,11 +116,7 @@ class P2pResiliencyRecoveryMicrotest : public ::testing::Test {
     } else {
       recv_ = scene_.NewComm<ncclIbRecvComm>(false, ndevs, nqps);
     }
-    EXPECT_EQ(IbCastResiliencyInit(Base(), &res_), ncclSuccess);
-    Base()->resiliency = res_;
-    res_->recoveryEnabled = true;
-    EXPECT_EQ(IbCastResiliencyDeviceNumSet(res_, ndevs, ndevs), ncclSuccess);
-    for (int d = 0; d < ndevs; d++) EXPECT_EQ(IbCastResiliencyDevInit(res_, d, scene_.Dev(d)), ncclSuccess);
+    res_ = P2pResiliencyAttach(Base(), ndevs, true);
     ncclIbConnectionMetadata remote = P2pResiliencyRemoteInfo(ndevs, true);
     ncclIbResiliencyInfo info = {};
     if (isSend) {
@@ -1220,7 +1216,10 @@ TEST_F(P2pResiliencyRecoveryThreadMicrotest, ThreadStop_KnownBug_ClearsTheFlagWi
   EXPECT_TRUE(clearedWhileWeHeldTheMutex);
   // Bounded: a stop that never finishes fails the test instead of hanging it.
   for (int i = 0; i < 10000 && !*stopped; i++) std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  ASSERT_TRUE(*stopped);
+  if (!*stopped) {
+    stopper.detach();
+    FAIL() << "IbCastPortRecoveryThreadStop did not return";
+  }
   stopper.join();
 }
 

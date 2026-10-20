@@ -139,14 +139,15 @@ TEST_F(P2pResiliencyRecoveryAinicMicrotest, RestoreAinic_FlushDisabled_LeavesFlu
   EXPECT_EQ(creates_.size(), 1u);
 }
 
-TEST_F(P2pResiliencyRecoveryAinicMicrotest, RestoreAinic_StepFails_ReturnsTheError) {
+TEST_F(P2pResiliencyRecoveryAinicMicrotest, RestoreAinic_StepFails_StopsWithTheError) {
   // Data QP destroy, create, init; then the same three for the flush QP.
   for (int failAt = 0; failAt < 6; failAt++) {
     Make(false, 1, 1, 0);
     WithFlushQp(0);
     int destroys = 0, creates = 0, inits = 0;
     ScopedHook destroy(g_ibvDestroyQp, [&](ibv_qp*) {
-      return (failAt == 0 && destroys++ == 0) || (failAt == 3 && destroys++ == 1) ? ncclSystemError : ncclSuccess;
+      int n = destroys++;
+      return (failAt == 0 && n == 0) || (failAt == 3 && n == 1) ? ncclSystemError : ncclSuccess;
     });
     ScopedHook create(g_ibCastQpCreate, [&](ncclIbQp* qp, ncclIbQpCreateAttr*) {
       qp->qp = scene_.NewQp();
@@ -158,6 +159,7 @@ TEST_F(P2pResiliencyRecoveryAinicMicrotest, RestoreAinic_StepFails_ReturnsTheErr
       return (failAt == 2 && n == 0) || (failAt == 5 && n == 1) ? ncclSystemError : ncclSuccess;
     });
     EXPECT_EQ(IbCastPortRecoveryQpsRestoreAinic(&ctx_), ncclSystemError) << failAt;
+    EXPECT_EQ(destroys + creates + inits, failAt + 1) << failAt;
   }
 }
 
@@ -224,7 +226,7 @@ TEST_F(P2pResiliencyRecoveryAinicMicrotest, QpsToRtsAinic_Receiver_PostsReceives
   EXPECT_EQ(scene_.transitions[5].step, "RTS");
 }
 
-TEST_F(P2pResiliencyRecoveryAinicMicrotest, QpsToRtsAinic_StepFails_ReturnsTheError) {
+TEST_F(P2pResiliencyRecoveryAinicMicrotest, QpsToRtsAinic_StepFails_StopsWithTheError) {
   // ECE, RTR, RTS, receive posting; then RTR and RTS of the flush QP.
   for (int failAt = 0; failAt < 6; failAt++) {
     ncclIbNetCommBase* base = Make(false, 1, 1, 0);
@@ -232,8 +234,11 @@ TEST_F(P2pResiliencyRecoveryAinicMicrotest, QpsToRtsAinic_StepFails_ReturnsTheEr
     base->qps[0].eceSupported = 1;
     ctx_.remoteQpns[0] = {0, 0x700};
     ctx_.nRemoteQpns = 1;
-    int rtrs = 0, rtss = 0;
-    ScopedHook ece(g_ibvSetEce, [&](ibv_qp*, ibv_ece*, int*) { return failAt == 0 ? ncclSystemError : ncclSuccess; });
+    int eces = 0, rtrs = 0, rtss = 0, posts = 0;
+    ScopedHook ece(g_ibvSetEce, [&](ibv_qp*, ibv_ece*, int*) {
+      eces++;
+      return failAt == 0 ? ncclSystemError : ncclSuccess;
+    });
     ScopedHook rtr(g_ibCastQpRtr, [&](ncclIbQp*) {
       int n = rtrs++;
       return (failAt == 1 && n == 0) || (failAt == 4 && n == 1) ? ncclSystemError : ncclSuccess;
@@ -242,9 +247,12 @@ TEST_F(P2pResiliencyRecoveryAinicMicrotest, QpsToRtsAinic_StepFails_ReturnsTheEr
       int n = rtss++;
       return (failAt == 2 && n == 0) || (failAt == 5 && n == 1) ? ncclSystemError : ncclSuccess;
     });
-    ScopedHook post(g_ibCastPostReceiveWorkRequestsOnQp,
-                    [&](ncclIbRecvComm*, ncclIbQp*) { return failAt == 3 ? ncclSystemError : ncclSuccess; });
+    ScopedHook post(g_ibCastPostReceiveWorkRequestsOnQp, [&](ncclIbRecvComm*, ncclIbQp*) {
+      posts++;
+      return failAt == 3 ? ncclSystemError : ncclSuccess;
+    });
     EXPECT_EQ(IbCastPortRecoveryQpsToRtsAinic(&ctx_), ncclSystemError) << failAt;
+    EXPECT_EQ(eces + rtrs + rtss + posts, failAt + 1) << failAt;
   }
 }
 
