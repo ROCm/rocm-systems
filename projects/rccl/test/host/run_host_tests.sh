@@ -159,6 +159,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroCpuset:$SCRIPT_DIR/host_tests_micro_cpuset.xml"
     "rccl-UnitTestsMicroInit:$SCRIPT_DIR/host_tests_micro_init.xml"
     "rccl-UnitTestsMicroInit-uncached:$SCRIPT_DIR/host_tests_micro_init_uncached.xml"
+    "rccl-UnitTestsMicroDdaColl:$SCRIPT_DIR/host_tests_micro_dda_coll.xml"
     # FAULT_INJECTION defaults ON, so this variant is the arm that ships; init.cc
     # gates its fault-mask blocks on ENABLE_FAULT_INJECTION at the preprocessor,
     # so one compile cannot cover both. See test/host/CMakeLists.txt.
@@ -174,8 +175,10 @@ do_host_tests() {
     "rccl-UnitTestsMicroCore:$SCRIPT_DIR/host_tests_micro_core.xml"
     "rccl-UnitTestsMicroCftDevRuntime:$SCRIPT_DIR/host_tests_micro_cft_dev_runtime.xml"
     "rccl-UnitTestsMicroConnect:$SCRIPT_DIR/host_tests_micro_connect.xml"
+    "rccl-UnitTestsMicroParam:$SCRIPT_DIR/host_tests_micro_param.xml"
     "rccl-UnitTestsMicroCe:$SCRIPT_DIR/host_tests_micro_ce.xml"
     "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
+    "rccl-UnitTestsMicroProfiler:$SCRIPT_DIR/host_tests_micro_profiler.xml"
     "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
     "rccl-UnitTestsMicroGinHostFinalize:$SCRIPT_DIR/host_tests_micro_gin_host_finalize.xml"
     "rccl-UnitTestsMicroDdaIpc:$SCRIPT_DIR/host_tests_micro_dda_ipc.xml"

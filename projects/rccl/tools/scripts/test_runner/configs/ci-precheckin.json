@@ -243,6 +243,17 @@
         {"name": "UtilityHostOnly_AllTests", "description": "nccl_device/utility.h compiled as plain C++ (host testAbort overload)", "test_filter": "*"}
       ]
     },
+    "unit_tests_micro_dda_coll": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroDdaColl",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "DdaCollMicrotests", "description": "Host-only algorithms/dda collective launchers microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
     "unit_tests_gdr": {
       "is_gtest": true,
       "binary": "rccl-UnitTestsGdr",
@@ -331,6 +342,17 @@
         {"name": "InitMicrotestsFaultInj", "description": "Host-only init.cc microtests, ENABLE_FAULT_INJECTION arm (the one that ships); covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
       ]
     },
+    "unit_tests_micro_param": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroParam",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "ParamMicrotests", "description": "Host-only param runtime microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
     "unit_tests_micro_enqueue": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroEnqueue",
@@ -351,6 +373,17 @@
       "timeout": 60,
       "tests": [
         {"name": "SymKernelsMicrotests", "description": "Host-only sym_kernels.cc/sym_kernels_host.cc microtests (no GPU, no HIP/RCCL runtime); contributes sym_kernels coverage", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_profiler": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroProfiler",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "ProfilerMicrotests", "description": "Host-only profiler plugin microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
     },
     "unit_tests_micro_gin_host": {
@@ -492,6 +525,12 @@
       "enabled": true
     },
     {
+      "name": "RCCL Microtests - algorithms/dda collective launchers",
+      "description": "rccl-UnitTestsMicroDdaColl (host-only algorithms/dda collective launchers microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_dda_coll",
+      "enabled": true
+    },
+    {
       "name": "RCCL Unit Tests - GDR Peer-Memory Detection",
       "description": "rccl-UnitTestsGdr (net_ib memory_peers sysfs scan, CPU-only)",
       "config": "unit_tests_gdr",
@@ -540,6 +579,12 @@
       "enabled": true
     },
     {
+      "name": "RCCL Microtests - param runtime",
+      "description": "rccl-UnitTestsMicroParam (host-only param runtime microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_param",
+      "enabled": true
+    },
+    {
       "name": "RCCL Microtests - enqueue.cc",
       "description": "rccl-UnitTestsMicroEnqueue (host-only enqueue.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_enqueue",
@@ -549,6 +594,12 @@
       "name": "RCCL Microtests - sym_kernels.cc",
       "description": "rccl-UnitTestsMicroSymKernels (host-only sym_kernels.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_symkernels",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - profiler plugin",
+      "description": "rccl-UnitTestsMicroProfiler (host-only profiler plugin microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_profiler",
       "enabled": true
     },
     {
