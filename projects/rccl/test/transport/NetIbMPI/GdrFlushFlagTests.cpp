@@ -36,8 +36,10 @@
 
 namespace {
 
+constexpr int      kDescFirstShift = 48;
 constexpr int      kDescCountShift = 56;
-constexpr uint64_t kDescSeqMask    = (1ULL << kDescCountShift) - 1;
+constexpr uint64_t kDescSeqMask    = (1ULL << kDescFirstShift) - 1;
+constexpr int      kFlagStrideU64  = 128 / sizeof(uint64_t); // NCCL_GDR_FLUSH_FLAG_STRIDE
 
 struct ObserverResult {
     unsigned long long mismatches;
@@ -47,15 +49,15 @@ struct ObserverResult {
 
 // Mirrors prims_simple waitGdrFlushFlag: one thread per block spins on the
 // per-QP flags, the block synchronizes, then every thread reads payload.
-__global__ void observeFlagsThenData(const uint64_t* flags, int count, uint64_t seq,
+__global__ void observeFlagsThenData(const uint64_t* flags, int first, int count, uint64_t seq,
                                      const uint8_t* data, size_t size, int seed,
                                      uint64_t timeoutTicks, ObserverResult* res) {
     __shared__ int timedOut;
     if (threadIdx.x == 0) {
         timedOut = 0;
         const uint64_t start = wall_clock64();
-        for (int q = 0; q < count && !timedOut; q++) {
-            while (*(volatile const uint64_t*)(flags + q) < seq) {
+        for (int q = first; q < first + count && !timedOut; q++) {
+            while (*(volatile const uint64_t*)(flags + q * kFlagStrideU64) < seq) {
                 if (wall_clock64() - start > timeoutTicks) {
                     timedOut = 1;
                     break;
@@ -79,7 +81,7 @@ __global__ void observeFlagsThenData(const uint64_t* flags, int count, uint64_t 
 
 class GdrFlushFlagTest : public NetIbMPITest {
 protected:
-    // Flag entries checked for stray writes beyond the QPs a request uses.
+    // Flag entries checked for stray writes beyond the connection's QPs.
     static constexpr int kFlagCheckEntries = 512;
     static constexpr int kTightTimeoutMs   = 10000;
     static constexpr int kMaxRecvs         = 8;
@@ -93,11 +95,29 @@ protected:
     static int  expectedFlagCount() {
         return envInt("NCCL_IB_SPLIT_DATA_ON_QPS", 0) ? configuredQps() : 1;
     }
-    static uint64_t makeDesc(int count, uint64_t seq) {
-        return ((uint64_t)count << kDescCountShift) | (seq & kDescSeqMask);
+    // A request's flags are the nQps consecutive QPs net_ib rotates it onto.
+    static int expectedFirstQp(uint64_t id) {
+        return (int)((id * expectedFlagCount()) % configuredQps());
+    }
+    static uint64_t makeDesc(int count, int first, uint64_t seq) {
+        return ((uint64_t)count << kDescCountShift) | ((uint64_t)first << kDescFirstShift) | (seq & kDescSeqMask);
+    }
+    static uint64_t expectedDesc(uint64_t id) {
+        return makeDesc(expectedFlagCount(), expectedFirstQp(id), id + 1);
+    }
+    // Records request `id` as the last flagged one on each QP it used.
+    static void noteFlagged(std::vector<uint64_t>& lastSeq, uint64_t id) {
+        for (int q = expectedFirstQp(id); q < expectedFirstQp(id) + expectedFlagCount(); q++)
+            lastSeq[q] = std::max(lastSeq[q], id + 1);
+    }
+    // First QP flag that differs from `lastSeq`, or -1.
+    static int firstUnexpectedQpFlag(const uint64_t* flags, const std::vector<uint64_t>& lastSeq) {
+        for (int q = 0; q < (int)lastSeq.size(); q++)
+            if (loadFlag(flags, q) != lastSeq[q]) return q;
+        return -1;
     }
     static uint64_t loadFlag(const uint64_t* flags, int q) {
-        return __atomic_load_n(flags + q, __ATOMIC_ACQUIRE);
+        return __atomic_load_n(flags + q * kFlagStrideU64, __ATOMIC_ACQUIRE);
     }
 
     int gdrPtrSupport() {
@@ -198,9 +218,9 @@ protected:
         return true;
     }
 
-    bool WaitFlags(const uint64_t* flags, int count, uint64_t seq, int timeoutMs = kTightTimeoutMs) {
+    bool WaitFlags(const uint64_t* flags, int first, int count, uint64_t seq, int timeoutMs = kTightTimeoutMs) {
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
-        for (int q = 0; q < count; q++) {
+        for (int q = first; q < first + count; q++) {
             while (loadFlag(flags, q) < seq) {
                 if (std::chrono::steady_clock::now() > deadline) return false;
             }
@@ -255,21 +275,22 @@ protected:
     }
 
     // Receiver-side checks after request `id` completed. The descriptor must
-    // name this request when it is flagged and stay put otherwise.
+    // name this request and its QPs when it is flagged and stay put otherwise.
     void CheckCompletion(void* recvComm, const uint64_t* flags, const std::vector<uint64_t>& snap,
                          bool flagged, uint64_t id, uint64_t descBefore, const char* what) {
         const int count = expectedFlagCount();
+        const int first = expectedFirstQp(id);
         const uint64_t desc = ncclIbGetGpuFlushFlagSeq(recvComm);
         if (flagged) {
-            EXPECT_EQ(desc, makeDesc(count, id + 1)) << what << ": descriptor of flagged request id " << id;
-            EXPECT_TRUE(WaitFlags(flags, count, id + 1))
-                << what << ": flags of QPs 0.." << count - 1 << " never reached " << id + 1;
+            EXPECT_EQ(desc, expectedDesc(id)) << what << ": descriptor of flagged request id " << id;
+            EXPECT_TRUE(WaitFlags(flags, first, count, id + 1))
+                << what << ": flags of QPs " << first << ".." << first + count - 1 << " never reached " << id + 1;
         } else {
             EXPECT_EQ(desc, descBefore) << what << ": unflagged request id " << id << " changed the descriptor";
         }
-        const int stray = firstStrayFlag(flags, count, snap);
-        EXPECT_EQ(stray, -1) << what << ": flag " << stray << " written beyond the " << count
-                             << " QP(s) a flagged request uses";
+        const int stray = firstStrayFlag(flags, configuredQps(), snap);
+        EXPECT_EQ(stray, -1) << what << ": flag " << stray << " written beyond the connection's " << configuredQps()
+                             << " QP(s)";
     }
 };
 
@@ -406,7 +427,7 @@ TEST_F(GdrFlushFlagTest, PerRequestGating_RandomHintsAndSizes) {
 
     std::mt19937 rng(20261019);
     const int kIters = 300;
-    uint64_t lastFlaggedSeq = 0;
+    std::vector<uint64_t> lastSeq(configuredQps(), 0);
     std::string err;
     for (int it = 0; it < kIters && !HasFailure(); it++) {
         const bool flagged = rng() & 1;
@@ -426,12 +447,12 @@ TEST_F(GdrFlushFlagTest, PerRequestGating_RandomHintsAndSizes) {
             EXPECT_EQ(got[0], (int)size) << "iter " << it;
             CheckCompletion(pair.recvComm, flags, snap, flagged, it, descBefore, "gating");
             if (flagged) {
-                lastFlaggedSeq = it + 1;
+                noteFlagged(lastSeq, it);
             } else {
-                for (int q = 0; q < expectedFlagCount(); q++)
-                    EXPECT_EQ(loadFlag(flags, q), lastFlaggedSeq) << "iter " << it << ": unflagged wrote flag " << q;
                 EXPECT_TRUE(FlushAndWait(pair.recvComm, 1, bufs, sizes, mhs, &err)) << err;
             }
+            const int bad = firstUnexpectedQpFlag(flags, lastSeq);
+            EXPECT_EQ(bad, -1) << "iter " << it << ": flag " << bad << " does not hold its QP's last flagged id + 1";
             EXPECT_TRUE(VerifyPattern(buffer, size, seed, &err))
                 << "iter " << it << " flagged=" << flagged << " size=" << size << ": " << err;
         } else {
@@ -496,6 +517,7 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
     std::mt19937 rng(777);
     std::mt19937 orderRng(4242);
     uint64_t nextId = 0;
+    std::vector<uint64_t> lastSeq(configuredQps(), 0);
     std::string err;
     for (int round = 0; round < kRounds; round++) {
         int anyFailed = HasFailure() ? 1 : 0;
@@ -547,8 +569,6 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
             for (int w = 0; w < kWindow; w++) pending[w] = w;
             std::shuffle(pending.begin(), pending.end(), orderRng);
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kTightTimeoutMs);
-            uint64_t maxFlaggedSeq = 0;
-            bool anyFlagged = false;
             while (!pending.empty() && !HasFailure()) {
                 for (size_t i = 0; i < pending.size();) {
                     Op& op = ops[pending[i]];
@@ -564,8 +584,7 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
                         EXPECT_EQ(got[r], (int)op.sizes[r]) << "round " << round << " id " << op.id << " sub " << r;
                     CheckCompletion(pair.recvComm, flags, snap, op.flagged, op.id, descBefore, "outstanding");
                     if (op.flagged) {
-                        anyFlagged = true;
-                        maxFlaggedSeq = std::max(maxFlaggedSeq, op.id + 1);
+                        noteFlagged(lastSeq, op.id);
                     } else {
                         EXPECT_TRUE(FlushAndWait(pair.recvComm, op.n, op.bufs, op.sizes, op.mhs, &err)) << err;
                     }
@@ -578,11 +597,8 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
                 ASSERT_LT(std::chrono::steady_clock::now(), deadline)
                     << "round " << round << ": " << pending.size() << " receives never completed";
             }
-            if (anyFlagged) {
-                for (int q = 0; q < expectedFlagCount(); q++)
-                    EXPECT_EQ(loadFlag(flags, q), maxFlaggedSeq)
-                        << "round " << round << ": flag " << q << " does not hold the last flagged id + 1";
-            }
+            const int bad = firstUnexpectedQpFlag(flags, lastSeq);
+            EXPECT_EQ(bad, -1) << "round " << round << ": flag " << bad << " does not hold its QP's last flagged id + 1";
         } else {
             std::vector<void*> sreqs;
             for (Op& op : ops) {
@@ -659,7 +675,7 @@ TEST_F(GdrFlushFlagTest, GpuObserver_PayloadVisibleOnceFlagSet) {
             int rt[1] = {it};
             void* rh[1] = {mhs[b]};
             ASSERT_TRUE(PostFlaggedRecv(pair.recvComm, true, 1, rb, rs, rt, rh, &req, &err)) << err;
-            hipLaunchKernelGGL(observeFlagsThenData, dim3(64), dim3(256), 0, stream, flags, count,
+            hipLaunchKernelGGL(observeFlagsThenData, dim3(64), dim3(256), 0, stream, flags, expectedFirstQp(it), count,
                                (uint64_t)it + 1, (const uint8_t*)bufs[b], size, seed, timeoutTicks, res);
             ASSERT_EQ(hipGetLastError(), hipSuccess);
         } else {
@@ -674,7 +690,7 @@ TEST_F(GdrFlushFlagTest, GpuObserver_PayloadVisibleOnceFlagSet) {
             EXPECT_EQ(res->mismatches, 0ull)
                 << "iter " << it << " size=" << size << (b ? " uncached" : " coarse")
                 << ": GPU read stale payload after the flag, first bad byte " << res->firstBad;
-            EXPECT_EQ(ncclIbGetGpuFlushFlagSeq(pair.recvComm), makeDesc(count, it + 1));
+            EXPECT_EQ(ncclIbGetGpuFlushFlagSeq(pair.recvComm), expectedDesc(it));
         } else {
             ASSERT_TRUE(TightSend(pair.sendComm, bufs[b], size, it, mhs[b], &req, &err)) << err;
             ASSERT_TRUE(TightWait(req, nullptr, &err)) << err;
@@ -803,7 +819,7 @@ TEST_F(GdrFlushFlagTest, MultiThread_IndependentCommsKeepOwnState) {
         NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
 
         std::mt19937 rng(1000 + threadIdx);
-        uint64_t lastFlaggedSeq = 0;
+        std::vector<uint64_t> lastSeq(configuredQps(), 0);
         std::string err;
         for (int it = 0; it < kIters; it++) {
             const bool flagged = rng() & 1;
@@ -821,17 +837,18 @@ TEST_F(GdrFlushFlagTest, MultiThread_IndependentCommsKeepOwnState) {
                 if (!TightWait(req, nullptr, &err)) return fail("iter " + std::to_string(it) + ": " + err);
                 const uint64_t desc = ncclIbGetGpuFlushFlagSeq(pair.recvComm);
                 if (flagged) {
-                    if (desc != makeDesc(count, it + 1))
+                    if (desc != expectedDesc(it))
                         return fail("iter " + std::to_string(it) + ": descriptor " + std::to_string(desc));
-                    if (!WaitFlags(flags, count, it + 1)) return fail("iter " + std::to_string(it) + ": flag late");
-                    lastFlaggedSeq = it + 1;
+                    if (!WaitFlags(flags, expectedFirstQp(it), count, it + 1))
+                        return fail("iter " + std::to_string(it) + ": flag late");
+                    noteFlagged(lastSeq, it);
                 } else {
                     if (desc != descBefore) return fail("iter " + std::to_string(it) + ": unflagged moved desc");
-                    if (loadFlag(flags, 0) != lastFlaggedSeq)
-                        return fail("iter " + std::to_string(it) + ": unflagged wrote flag 0");
                     if (!FlushAndWait(pair.recvComm, 1, rb, rs, rh, &err)) return fail(err);
                 }
-                if (firstStrayFlag(flags, count, snap) != -1) return fail("stray flag write");
+                if (firstUnexpectedQpFlag(flags, lastSeq) != -1)
+                    return fail("iter " + std::to_string(it) + ": a QP flag does not hold its last flagged id + 1");
+                if (firstStrayFlag(flags, configuredQps(), snap) != -1) return fail("stray flag write");
                 if (!VerifyPattern(buffer, size, seed, &err)) return fail("iter " + std::to_string(it) + ": " + err);
             } else {
                 if (initializeBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed)) != hipSuccess)

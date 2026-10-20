@@ -76,13 +76,13 @@ static int ncclIbCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const
 // Opt-in GDR flush through RO=0 GPU flags written by the sender after the
 // payload, one flag per QP: the RO=0 write is only ordered behind the payload
 // posted ahead of it on the same QP of one NIC, so it requires a single device.
-// Flagged requests use QPs 0..n-1 (QP 0 alone unless NCCL_IB_SPLIT_DATA_ON_QPS=1
-// spreads a request over all QPs) while the rest rotate over all QPs.
-// The GPU kernel waits on the flags and net.cc skips the proxy flush.
+// Flagged requests rotate over the QPs like the rest (all QPs at once with
+// NCCL_IB_SPLIT_DATA_ON_QPS=1); the GPU waits only on the flags of the QPs
+// that carried each step, and net.cc skips the proxy flush.
 RCCL_PARAM(IbGdrFlushFlag, "IB_GDR_FLUSH_FLAG", 0);
 
-static_assert(NCCL_IB_MAX_QPS * sizeof(uint64_t) <= GPU_PAGE_SIZE, "per-QP GDR flush flags must fit in one page");
-static_assert(NCCL_IB_MAX_QPS < 256, "per-QP GDR flush flag count is packed in 8 bits");
+static_assert(NCCL_IB_MAX_QPS * NCCL_GDR_FLUSH_FLAG_STRIDE <= GPU_PAGE_SIZE, "per-QP GDR flush flags must fit in one page");
+static_assert(NCCL_IB_MAX_QPS < 256, "per-QP GDR flush flag first index and count are packed in 8 bits each");
 
 static bool ncclIbFlagFlushEligible(struct ncclIbNetCommBase* base) {
   return rcclParamIbGdrFlushFlag() != 0 && base->vProps.ndevs == 1 && base->nDataQps == 1 &&
@@ -1438,7 +1438,8 @@ static ncclResult_t ncclIbFreeFlagFlush(struct ncclIbRecvComm* rComm) {
   return ncclSuccess;
 }
 
-// Allocates the receiver's GDR flush flags, one uint64_t per QP in one page.
+// Allocates the receiver's GDR flush flags, one uint64_t per QP in one page,
+// NCCL_GDR_FLUSH_FLAG_STRIDE bytes apart.
 // The page is registered without IBV_ACCESS_RELAXED_ORDERING so the NIC issues
 // flag writes with RO=0, which cannot pass the preceding (RO=1) payload writes
 // on the same QP. The proxy writes the flags and the per-step sequences through
@@ -1469,7 +1470,8 @@ static ncclResult_t ncclIbSetupFlagFlush(struct ncclIbRecvComm* rComm, struct nc
   }
   rComm->flagFlushGpuMem = (uint64_t*)ptr;
   rComm->flagFlushDmabufFd = -1;
-  for (int q = 0; q < rComm->base.nqps; q++) __atomic_store_n(rComm->flagFlushGpuMem + q, 0, __ATOMIC_RELAXED);
+  for (int q = 0; q < rComm->base.nqps; q++)
+    __atomic_store_n(rComm->flagFlushGpuMem + q * (NCCL_GDR_FLUSH_FLAG_STRIDE / sizeof(uint64_t)), 0, __ATOMIC_RELAXED);
   std::atomic_thread_fence(std::memory_order_seq_cst);
   ncclResult_t regRes = ncclSystemError;
   if (useDmaBuf) {

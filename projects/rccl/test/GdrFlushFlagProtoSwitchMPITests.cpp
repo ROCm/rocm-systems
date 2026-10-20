@@ -48,8 +48,10 @@ protected:
         const char* v = getenv(name);
         return (v && *v) ? atoi(v) : def;
     }
-    static int expectedFlagCount() {
-        return envInt("NCCL_IB_SPLIT_DATA_ON_QPS", 0) ? std::max(1, envInt("NCCL_IB_QPS_PER_CONNECTION", 1)) : 1;
+    static int configuredQps() { return std::max(1, envInt("NCCL_IB_QPS_PER_CONNECTION", 1)); }
+    static int expectedFlagCount() { return envInt("NCCL_IB_SPLIT_DATA_ON_QPS", 0) ? configuredQps() : 1; }
+    static uint64_t loadFlag(const uint64_t* flags, int q) {
+        return __atomic_load_n(flags + q * (NCCL_GDR_FLUSH_FLAG_STRIDE / sizeof(uint64_t)), __ATOMIC_ACQUIRE);
     }
 
     // Collective skip reason, empty to run.
@@ -68,7 +70,7 @@ protected:
     struct FlagState {
         int flagConns = 0;       // NET recv connectors with the flag mapped
         int publishedConns = 0;  // ... of which have a non-zero descriptor
-        int badDescs = 0;        // descriptors with a wrong QP count or an unmet flag
+        int badDescs = 0;        // descriptors with wrong QPs or an unmet flag
         std::string firstBad;
     };
 
@@ -97,16 +99,18 @@ protected:
                         if (desc == 0) continue;
                         published = true;
                         const int n = (int)(desc >> NCCL_GDR_FLUSH_COUNT_SHIFT);
+                        const int first = (int)((desc >> NCCL_GDR_FLUSH_FIRST_SHIFT) & 0xff);
                         const uint64_t seq = desc & NCCL_GDR_FLUSH_SEQ_MASK;
-                        bool ok = (n == count);
-                        for (int q = 0; ok && q < n; q++) ok = __atomic_load_n(flags + q, __ATOMIC_ACQUIRE) >= seq;
+                        bool ok = n == count && first % count == 0 && first + n <= configuredQps();
+                        for (int q = first; ok && q < first + n; q++) ok = loadFlag(flags, q) >= seq;
                         if (!ok) {
                             if (st.badDescs++ == 0) {
                                 st.firstBad = "channel " + std::to_string(c) + " peer " + std::to_string(peer) +
                                               " conn " + std::to_string(ci) + " slot " + std::to_string(s) +
-                                              ": count " + std::to_string(n) + " (expected " +
-                                              std::to_string(count) + ") seq " + std::to_string(seq) +
-                                              " flag0 " + std::to_string(__atomic_load_n(flags, __ATOMIC_ACQUIRE));
+                                              ": first " + std::to_string(first) + " count " + std::to_string(n) +
+                                              " (expected " + std::to_string(count) + ") seq " +
+                                              std::to_string(seq) + " flag" + std::to_string(first) + " " +
+                                              std::to_string(loadFlag(flags, first));
                             }
                         }
                     }

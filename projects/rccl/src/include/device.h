@@ -255,12 +255,16 @@ struct ncclConnInfo {
   uint64_t* gdrFlushSeq;
 };
 
-// A gdrFlushSeq entry packs the flag value in its low bits with the number of
-// per-QP flags, starting at flag 0, that must reach it. Zero means nothing to
-// wait for.
-#define NCCL_GDR_FLUSH_SEQ_BITS 56
+// A gdrFlushSeq entry packs the flag value in its low bits with the per-QP
+// flags that must reach it: `count` consecutive flags starting at flag `first`.
+// Zero means nothing to wait for.
+#define NCCL_GDR_FLUSH_SEQ_BITS 48
 #define NCCL_GDR_FLUSH_SEQ_MASK ((1ULL << NCCL_GDR_FLUSH_SEQ_BITS) - 1)
+#define NCCL_GDR_FLUSH_FIRST_SHIFT 48
 #define NCCL_GDR_FLUSH_COUNT_SHIFT 56
+// Byte distance between per-QP flags: each flag sits alone in a GPU L2
+// cacheline so NIC writes and GPU polls of different QPs never share one.
+#define NCCL_GDR_FLUSH_FLAG_STRIDE 128
 
 struct ncclProxyConnector {
   bool initialized;
