@@ -10,27 +10,29 @@
 //   (A) the size-adaptive CTA ladder (gin_sdma_reducescatter::reduceScatterCtas)
 //       evaluates identically on device and host, and
 //
-//   (B) the direct-LSA read-reduce addressing the production kernel uses --
-//       rank R reads element i of its owned slice from every peer's send buffer
-//       at offset R*count + i and folds in ascending source-rank order, and
+//   (B) the source fold both kernel tiers call (gin_sdma_reduce::foldSources)
+//       over the read-reduce addressing -- rank R reads pack p of its owned
+//       slice from every peer's send buffer at R*count and folds in ascending
+//       source-rank order -- for rank counts that reach every load batch, and
 //
 //   (C) the gin_sdma_reduce.h element ops, which must round back to T after
 //       every pairwise step to bit-match verifiable.cu.
 //
 // The simulation kernel below replaces ncclGetLsaPointer with plain peer send
-// buffers laid out as send[peer*(nRanks*count) + rank*count + i], matching the
-// slice offset implied by myBaseP = rank*count in the device kernel. It needs
-// neither librccl nor a GIN communicator. End-to-end datacheck with the real
-// GinReduceScatterKernel is covered by reduce_scatter_perf -D 3 in
-// test_ReduceScatterGinSdma.py.
+// buffers laid out as send[peer*(nRanks*count) + rank*count + i]. It needs
+// neither librccl nor a GIN communicator, so the barriers, the SDMA puts and
+// the source-0 prefetch of the real kernel are not exercised here; the
+// reduce_scatter_perf -D 3 datacheck covers those end to end.
 //
 // Requires a visible GPU at run time; skips cleanly (GTEST_SKIP) otherwise.
 
 #include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
+
+#include <hip/hip_runtime.h>
 
 // gin_sdma_reduce.h documents itself as "include after common.h", but common.h
 // is rccl-tests' MPI harness and this target has no business linking it.
@@ -153,33 +155,37 @@ TEST(ReduceScatterGpu, SdmaTierMatchesHost) {
   HIP_OK(hipFree(dOut));
 }
 
-// ---- (B) read-reduce addressing + ascending-rank sum -------------------------
+// ---- (B) read-reduce addressing + foldSources --------------------------------
 //
 // Layout mirrors GinReduceScatterKernel: send is [nRanks, nRanks, count] flattened
 // as send[peer * (nRanks*count) + ownerRank * count + i]. Rank R reduces over
-// source s in ascending order: out[R,i] = sum_s send[s][R][i].
+// source s in ascending order: out[R,i] = fold_s send[s][R][i].
 
 template <typename T>
-__global__ void rsReadReduceSimKernel(const T* send, T* recv, int nRanks, size_t count) {
+__global__ void rsFoldSimKernel(const T* send, T* recv, int nRanks, size_t count, int op) {
+  using Pack = gin_sdma_reduce::Pack<T>;
+  constexpr int VEC = Pack::kVec;
   const int rank = blockIdx.x;  // one CTA per rank (simple smoke layout)
   if (rank >= nRanks) return;
-  const size_t totalPerPeer = (size_t)nRanks * count;
-  const size_t myOff =
-      gin_sdma_reducescatter::reduceScatterSliceOffset(rank, count);
-  const int tid = threadIdx.x;
-  const int nthreads = blockDim.x;
-  for (size_t i = tid; i < count; i += nthreads) {
-    T acc = (T)0;
-    for (int s = 0; s < nRanks; ++s) {
-      const T* src = send + (size_t)s * totalPerPeer + myOff;
-      acc = acc + src[i];
-    }
-    recv[myOff + i] = acc;
+  const size_t perPeerPacks = (size_t)nRanks * count / VEC;
+  const size_t myBaseP = gin_sdma_reducescatter::reduceScatterSliceOffset(rank, count) / VEC;
+  const Pack* sendP = (const Pack*)send;
+  Pack* recvP = (Pack*)recv;
+  for (size_t pk = threadIdx.x; pk < count / VEC; pk += blockDim.x) {
+    auto load = [&](int s) { return sendP[(size_t)s * perPeerPacks + myBaseP + pk]; };
+    T acc[VEC];
+    gin_sdma_reduce::foldSources<T>(op, nRanks, load(0), load, acc);
+    Pack o;
+    for (int e = 0; e < VEC; e++) o.e[e] = gin_sdma_reduce::postOp<T>(op, acc[e], nRanks);
+    recvP[myBaseP + pk] = o;
   }
 }
 
-template <typename T>
-void runReadReduceCase(int nRanks, size_t count) {
+// value(peer, owner, i) fills the send buffers; the expected sum folds them in
+// ascending peer order in T on the host.
+template <typename T, typename ValueFn>
+void runFoldCase(int nRanks, size_t count, ValueFn value) {
+  ASSERT_EQ(count % gin_sdma_reduce::Pack<T>::kVec, 0u) << "count must tile 16-byte packs";
   const size_t perPeer = (size_t)nRanks * count;
   const size_t sendElts = (size_t)nRanks * perPeer;
 
@@ -187,15 +193,14 @@ void runReadReduceCase(int nRanks, size_t count) {
   for (int peer = 0; peer < nRanks; ++peer)
     for (int owner = 0; owner < nRanks; ++owner)
       for (size_t i = 0; i < count; ++i)
-        send[(size_t)peer * perPeer + (size_t)owner * count + i] =
-            (T)((peer * 9973 + owner * 131 + (uint32_t)i) & 0x7f);
+        send[(size_t)peer * perPeer + (size_t)owner * count + i] = value(peer, owner, i);
 
   std::vector<T> expected((size_t)nRanks * count, (T)0);
   for (int owner = 0; owner < nRanks; ++owner)
     for (size_t i = 0; i < count; ++i) {
-      T acc = (T)0;
-      for (int s = 0; s < nRanks; ++s)
-        acc = acc + send[(size_t)s * perPeer + (size_t)owner * count + i];
+      T acc = send[(size_t)owner * count + i];
+      for (int s = 1; s < nRanks; ++s)
+        acc = (T)(acc + send[(size_t)s * perPeer + (size_t)owner * count + i]);
       expected[(size_t)owner * count + i] = acc;
     }
 
@@ -205,7 +210,7 @@ void runReadReduceCase(int nRanks, size_t count) {
   HIP_OK(hipMemset(dRecv, 0, expected.size() * sizeof(T)));
   HIP_OK(hipMemcpy(dSend, send.data(), send.size() * sizeof(T), hipMemcpyHostToDevice));
 
-  rsReadReduceSimKernel<T><<<nRanks, 256>>>(dSend, dRecv, nRanks, count);
+  rsFoldSimKernel<T><<<nRanks, 256>>>(dSend, dRecv, nRanks, count, (int)ncclSum);
   HIP_OK(hipGetLastError());
   HIP_OK(hipDeviceSynchronize());
 
@@ -221,28 +226,37 @@ void runReadReduceCase(int nRanks, size_t count) {
   HIP_OK(hipFree(dRecv));
 }
 
-TEST(ReduceScatterGpu, ReadReduceAddressingInt32) {
-  if (!gpuAvailable()) GTEST_SKIP() << "no visible GPU";
-  for (int nr : {2, 4, 8})
-    for (size_t c : {(size_t)1, (size_t)17, (size_t)256, (size_t)1024})
-      runReadReduceCase<int32_t>(nr, c);
+// 2 and 3 reach only the one-source tail, 4 the two-source step, 7 the
+// four-source step plus the two-source step, 8 the eight-source batch alone,
+// and 12 and 16 the batch followed by four-source steps.
+constexpr int kFoldRankCounts[] = {2, 3, 4, 7, 8, 12, 16};
+
+template <typename T>
+T smallPattern(int peer, int owner, size_t i) {
+  return (T)((peer * 9973 + owner * 131 + (uint32_t)i) & 0x7f);
 }
 
-TEST(ReduceScatterGpu, ReadReduceAddressingInt8) {
+TEST(ReduceScatterGpu, FoldAddressingInt32) {
   if (!gpuAvailable()) GTEST_SKIP() << "no visible GPU";
-  for (int nr : {2, 4, 8})
-    for (size_t c : {(size_t)1, (size_t)129, (size_t)1024})
-      runReadReduceCase<int8_t>(nr, c);
+  for (int nr : kFoldRankCounts)
+    for (size_t c : {(size_t)4, (size_t)20, (size_t)256, (size_t)1024})
+      runFoldCase<int32_t>(nr, c, smallPattern<int32_t>);
 }
 
-TEST(ReduceScatterGpu, SliceBaseCountMatchesPackLayout) {
+TEST(ReduceScatterGpu, FoldAddressingInt8) {
   if (!gpuAvailable()) GTEST_SKIP() << "no visible GPU";
-  // sliceBaseCount alignment must divide count evenly for VEC=4 (int32 packs).
-  for (size_t total : {4096u, 4095u, 100u, 104u}) {
-    const size_t base = gin_sdma_reducescatter::sliceBaseCount(total, 4, 8);
-    EXPECT_EQ(base % 4, 0u) << "total=" << total;
-    EXPECT_LE(base * 8, total) << "total=" << total;
-  }
+  for (int nr : kFoldRankCounts)
+    for (size_t c : {(size_t)16, (size_t)144, (size_t)1024})
+      runFoldCase<int8_t>(nr, c, smallPattern<int8_t>);
+}
+
+// 2^24 + 1 rounds back to 2^24 in float, so folding source 0's 2^24 first
+// absorbs every later 1.0f and the result stays 2^24. Any fold that adds some
+// of the 1.0f sources together before meeting 2^24 lands higher.
+TEST(ReduceScatterGpu, FoldRunsInAscendingSourceOrder) {
+  if (!gpuAvailable()) GTEST_SKIP() << "no visible GPU";
+  auto value = [](int peer, int, size_t) { return peer == 0 ? 16777216.0f : 1.0f; };
+  for (int nr : kFoldRankCounts) runFoldCase<float>(nr, 64, value);
 }
 
 // ---- (C) reduce element ops: narrowing happens on every pairwise step -------
@@ -263,39 +277,73 @@ TEST(ReduceScatterGpu, SliceBaseCountMatchesPackLayout) {
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
 
+template <class T> __device__ double toDouble(T x) { return (double)(float)x; }
+__device__ double toDouble(double x) { return x; }
+
 template <class T>
-__global__ void reduceFoldKernel(const float* in, int n, int op, int rankN, float* out) {
+__global__ void reduceFoldKernel(const float* in, int n, int op, int rankN, double* out) {
   T acc = gin_sdma_reduce::preOp<T>(op, (T)in[0], rankN);
   for (int i = 1; i < n; ++i) {
     acc = gin_sdma_reduce::combine<T>(op, acc, gin_sdma_reduce::preOp<T>(op, (T)in[i], rankN));
   }
-  *out = (float)gin_sdma_reduce::postOp<T>(op, acc, rankN);
+  *out = toDouble(gin_sdma_reduce::postOp<T>(op, acc, rankN));
 }
 
+// rankN is in.size().
 template <class T>
-void runReduceFoldCase(const char* tname, float b, ncclRedOp_t op, const char* opName,
-                       float expected) {
-  const std::vector<float> in{b, 1, 1, 1, 1, 1, 1, 1};
+void runReduceFoldCase(const char* tname, const std::vector<float>& in, ncclRedOp_t op,
+                       const char* opName, double expected) {
   float* dIn = nullptr;
-  float* dOut = nullptr;
+  double* dOut = nullptr;
   HIP_OK(hipMalloc(&dIn, in.size() * sizeof(float)));
-  HIP_OK(hipMalloc(&dOut, sizeof(float)));
+  HIP_OK(hipMalloc(&dOut, sizeof(double)));
   HIP_OK(hipMemcpy(dIn, in.data(), in.size() * sizeof(float), hipMemcpyHostToDevice));
 
   reduceFoldKernel<T><<<1, 1>>>(dIn, (int)in.size(), (int)op, (int)in.size(), dOut);
   HIP_OK(hipGetLastError());
   HIP_OK(hipDeviceSynchronize());
 
-  float got = 0.0f;
-  HIP_OK(hipMemcpy(&got, dOut, sizeof(float), hipMemcpyDeviceToHost));
+  double got = 0.0;
+  HIP_OK(hipMemcpy(&got, dOut, sizeof(double), hipMemcpyDeviceToHost));
   // Exact compare: every expected value is representable in the element type
-  // and converts back to float without loss, so a tolerance would only hide
-  // the one-ulp difference this test is looking for.
+  // and converts back without loss, so a tolerance would only hide the
+  // one-ulp difference this test is looking for.
   EXPECT_EQ(got, expected) << tname << " " << opName;
 
   HIP_OK(hipFree(dIn));
   HIP_OK(hipFree(dOut));
 }
+
+template <class T>
+void runReduceFoldCase(const char* tname, float b, ncclRedOp_t op, const char* opName,
+                       double expected) {
+  runReduceFoldCase<T>(tname, {b, 1, 1, 1, 1, 1, 1, 1}, op, opName, expected);
+}
+
+#if HAVE_FP8
+// fp8: 3 and 2 mantissa bits, ulp(32) = 4 and 8. prod is left out because
+// SPECIALIZE_REDUCE_KERNEL never dispatches it for the fp8 types. 32, 4 and
+// 1 are exact in both the fnuz and the IEEE encodings, so gfx942 and gfx950
+// expect the same values.
+template <class E4m3, class E5m2>
+void runFp8FoldCases() {
+  runReduceFoldCase<E4m3>("fp8_e4m3", 32, ncclSum, "sum", 32.0);
+  runReduceFoldCase<E4m3>("fp8_e4m3", 32, ncclMax, "max", 32.0);
+  runReduceFoldCase<E4m3>("fp8_e4m3", 32, ncclMin, "min", 1.0);
+  runReduceFoldCase<E4m3>("fp8_e4m3", 32, ncclAvg, "avg", 4.0);
+
+  runReduceFoldCase<E5m2>("fp8_e5m2", 32, ncclSum, "sum", 32.0);
+  runReduceFoldCase<E5m2>("fp8_e5m2", 32, ncclMax, "max", 32.0);
+  runReduceFoldCase<E5m2>("fp8_e5m2", 32, ncclMin, "min", 1.0);
+  runReduceFoldCase<E5m2>("fp8_e5m2", 32, ncclAvg, "avg", 4.0);
+}
+
+[[maybe_unused]] bool gpuIsGfx942() {
+  hipDeviceProp_t prop;
+  if (hipGetDeviceProperties(&prop, 0) != hipSuccess) return false;
+  return strncmp(prop.gcnArchName, "gfx942", 6) == 0;
+}
+#endif
 
 TEST(ReduceScatterGpu, ReduceOpsNarrowEveryStep) {
   if (!gpuAvailable()) GTEST_SKIP() << "no visible GPU";
@@ -310,49 +358,69 @@ TEST(ReduceScatterGpu, ReduceOpsNarrowEveryStep) {
 
   // Controls. float avg premultiplies by 1/8 (exact here) and int32 avg sums
   // then integer-divides, which truncates 519/8 to 64.
-  runReduceFoldCase<float>("float", 512, ncclSum, "sum", 519.0f);
-  runReduceFoldCase<float>("float", 512, ncclProd, "prod", 512.0f);
-  runReduceFoldCase<float>("float", 512, ncclMax, "max", 512.0f);
-  runReduceFoldCase<float>("float", 512, ncclMin, "min", 1.0f);
-  runReduceFoldCase<float>("float", 512, ncclAvg, "avg", 64.875f);
+  runReduceFoldCase<float>("float", 512, ncclSum, "sum", 519.0);
+  runReduceFoldCase<float>("float", 512, ncclProd, "prod", 512.0);
+  runReduceFoldCase<float>("float", 512, ncclMax, "max", 512.0);
+  runReduceFoldCase<float>("float", 512, ncclMin, "min", 1.0);
+  runReduceFoldCase<float>("float", 512, ncclAvg, "avg", 64.875);
 
-  runReduceFoldCase<int32_t>("int32", 512, ncclSum, "sum", 519.0f);
-  runReduceFoldCase<int32_t>("int32", 512, ncclProd, "prod", 512.0f);
-  runReduceFoldCase<int32_t>("int32", 512, ncclMax, "max", 512.0f);
-  runReduceFoldCase<int32_t>("int32", 512, ncclMin, "min", 1.0f);
-  runReduceFoldCase<int32_t>("int32", 512, ncclAvg, "avg", 64.0f);
+  runReduceFoldCase<int32_t>("int32", 512, ncclSum, "sum", 519.0);
+  runReduceFoldCase<int32_t>("int32", 512, ncclProd, "prod", 512.0);
+  runReduceFoldCase<int32_t>("int32", 512, ncclMax, "max", 512.0);
+  runReduceFoldCase<int32_t>("int32", 512, ncclMin, "min", 1.0);
+  runReduceFoldCase<int32_t>("int32", 512, ncclAvg, "avg", 64.0);
+
+  runReduceFoldCase<double>("double", 512, ncclSum, "sum", 519.0);
+  runReduceFoldCase<double>("double", 512, ncclProd, "prod", 512.0);
+  runReduceFoldCase<double>("double", 512, ncclMax, "max", 512.0);
+  runReduceFoldCase<double>("double", 512, ncclMin, "min", 1.0);
 
   // half: 10 mantissa bits, ulp(4096) = 4, so 4096+1 stays 4096 seven times.
-  runReduceFoldCase<__half>("half", 4096, ncclSum, "sum", 4096.0f);
-  runReduceFoldCase<__half>("half", 4096, ncclProd, "prod", 4096.0f);
-  runReduceFoldCase<__half>("half", 4096, ncclMax, "max", 4096.0f);
-  runReduceFoldCase<__half>("half", 4096, ncclMin, "min", 1.0f);
-  runReduceFoldCase<__half>("half", 4096, ncclAvg, "avg", 512.0f);
+  runReduceFoldCase<__half>("half", 4096, ncclSum, "sum", 4096.0);
+  runReduceFoldCase<__half>("half", 4096, ncclProd, "prod", 4096.0);
+  runReduceFoldCase<__half>("half", 4096, ncclMax, "max", 4096.0);
+  runReduceFoldCase<__half>("half", 4096, ncclMin, "min", 1.0);
+  runReduceFoldCase<__half>("half", 4096, ncclAvg, "avg", 512.0);
 
 #if HAVE_BF16
   // bf16: 7 mantissa bits, ulp(512) = 4.
-  runReduceFoldCase<hip_bfloat16>("bf16", 512, ncclSum, "sum", 512.0f);
-  runReduceFoldCase<hip_bfloat16>("bf16", 512, ncclProd, "prod", 512.0f);
-  runReduceFoldCase<hip_bfloat16>("bf16", 512, ncclMax, "max", 512.0f);
-  runReduceFoldCase<hip_bfloat16>("bf16", 512, ncclMin, "min", 1.0f);
-  runReduceFoldCase<hip_bfloat16>("bf16", 512, ncclAvg, "avg", 64.0f);
+  runReduceFoldCase<hip_bfloat16>("bf16", 512, ncclSum, "sum", 512.0);
+  runReduceFoldCase<hip_bfloat16>("bf16", 512, ncclProd, "prod", 512.0);
+  runReduceFoldCase<hip_bfloat16>("bf16", 512, ncclMax, "max", 512.0);
+  runReduceFoldCase<hip_bfloat16>("bf16", 512, ncclMin, "min", 1.0);
+  runReduceFoldCase<hip_bfloat16>("bf16", 512, ncclAvg, "avg", 64.0);
 #endif
 
 #if HAVE_FP8
-  // fp8: 3 and 2 mantissa bits, ulp(32) = 4 and 8. prod is left out because
-  // SPECIALIZE_REDUCE_KERNEL never dispatches it for the fp8 types. 32, 4 and
-  // 1 are exact in both the fnuz and the IEEE encodings, so gfx942 and gfx950
-  // agree even though rccl_float8.h typedefs different types for them.
-  runReduceFoldCase<rccl_float8>("fp8_e4m3", 32, ncclSum, "sum", 32.0f);
-  runReduceFoldCase<rccl_float8>("fp8_e4m3", 32, ncclMax, "max", 32.0f);
-  runReduceFoldCase<rccl_float8>("fp8_e4m3", 32, ncclMin, "min", 1.0f);
-  runReduceFoldCase<rccl_float8>("fp8_e4m3", 32, ncclAvg, "avg", 4.0f);
-
-  runReduceFoldCase<rccl_bfloat8>("fp8_e5m2", 32, ncclSum, "sum", 32.0f);
-  runReduceFoldCase<rccl_bfloat8>("fp8_e5m2", 32, ncclMax, "max", 32.0f);
-  runReduceFoldCase<rccl_bfloat8>("fp8_e5m2", 32, ncclMin, "min", 1.0f);
-  runReduceFoldCase<rccl_bfloat8>("fp8_e5m2", 32, ncclAvg, "avg", 4.0f);
+  // rccl_float8.h makes rccl_float8 the fnuz type only in the gfx942 device
+  // pass, so the host pass names both encodings and runs the one the device
+  // image defines, as reduce_scatter.cu's dispatch does.
+#if __HIP_DEVICE_COMPILE__ || HIP_VERSION < 60300000
+  runFp8FoldCases<rccl_float8, rccl_bfloat8>();
+#else
+  if (gpuIsGfx942())
+    runFp8FoldCases<__hip_fp8_e4m3_fnuz, __hip_fp8_e5m2_fnuz>();
+  else
+    runFp8FoldCases<__hip_fp8_e4m3, __hip_fp8_e5m2>();
 #endif
+#endif
+}
+
+// verifiable.cu builds the double avg factor as 1.0 / rankN in double. 1/7 is
+// inexact, so a factor built in float, as avgFactor's primary template does
+// for the narrower types, sums to a different double.
+TEST(ReduceScatterGpu, DoubleAvgFactorIsBuiltInDouble) {
+  if (!gpuAvailable()) GTEST_SKIP() << "no visible GPU";
+  const int rankN = 7;
+  const double f = 1.0 / (double)rankN;
+  const double fFloat = (double)(1.0f / (float)rankN);
+  double expected = f, viaFloat = fFloat;
+  for (int i = 1; i < rankN; ++i) {
+    expected += f;
+    viaFloat += fFloat;
+  }
+  ASSERT_NE(expected, viaFloat);
+  runReduceFoldCase<double>("double", std::vector<float>(rankN, 1.0f), ncclAvg, "avg", expected);
 }
 
 #endif  // NCCL_VERSION_CODE >= 2.28

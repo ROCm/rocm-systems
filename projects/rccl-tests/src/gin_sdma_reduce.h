@@ -39,11 +39,23 @@
 
 namespace gin_sdma_reduce {
 
+// The fp8 encodings are the only one-byte non-integral element types. The
+// generic templates below exclude them: the host pass instantiates the kernels
+// for the gfx942 fnuz types as well as for rccl_float8, and those types convert
+// implicitly to several arithmetic types, so a + b on them is ambiguous. Every
+// fp8 type takes the float round trip verifiable.cu uses for rccl_float8.
+template <class T> struct IsFp8 : std::integral_constant<bool, sizeof(T) == 1 && !std::is_integral<T>::value> {};
+template <class T> using NotFp8 = typename std::enable_if<!IsFp8<T>::value, T>::type;
+template <class T> using Fp8 = typename std::enable_if<IsFp8<T>::value, T>::type;
+
 // ------------------------------- sum (a + b) -------------------------------
 // Template covers all integer types (int8/uint8/int32/uint32/int64/uint64) plus
 // float/double; the explicit overloads below are more specialized so they win
 // for the low-precision types (matching verifiable.cu::ReduceSum).
-template <class T> __device__ __forceinline__ T rsum(T a, T b) { return a + b; }
+template <class T> __device__ __forceinline__ NotFp8<T> rsum(T a, T b) { return a + b; }
+template <class T> __device__ __forceinline__ Fp8<T> rsum(T a, T b) {
+  return T(static_cast<float>(a) + static_cast<float>(b));
+}
 __device__ __forceinline__ __half rsum(__half a, __half b) {
   return __float2half(__half2float(a) + __half2float(b));
 }
@@ -52,17 +64,12 @@ __device__ __forceinline__ hip_bfloat16 rsum(hip_bfloat16 a, hip_bfloat16 b) {
   return hip_bfloat16(static_cast<float>(a) + static_cast<float>(b));
 }
 #endif
-#if HAVE_FP8
-__device__ __forceinline__ rccl_float8 rsum(rccl_float8 a, rccl_float8 b) {
-  return rccl_float8(static_cast<float>(a) + static_cast<float>(b));
-}
-__device__ __forceinline__ rccl_bfloat8 rsum(rccl_bfloat8 a, rccl_bfloat8 b) {
-  return rccl_bfloat8(static_cast<float>(a) + static_cast<float>(b));
-}
-#endif
 
 // ------------------------------- prod (a * b) ------------------------------
-template <class T> __device__ __forceinline__ T rprod(T a, T b) { return a * b; }
+template <class T> __device__ __forceinline__ NotFp8<T> rprod(T a, T b) { return a * b; }
+template <class T> __device__ __forceinline__ Fp8<T> rprod(T a, T b) {
+  return static_cast<T>(static_cast<float>(a) * static_cast<float>(b));
+}
 __device__ __forceinline__ __half rprod(__half a, __half b) {
   return __float2half(__half2float(a) * __half2float(b));
 }
@@ -71,18 +78,16 @@ __device__ __forceinline__ hip_bfloat16 rprod(hip_bfloat16 a, hip_bfloat16 b) {
   return hip_bfloat16(static_cast<float>(a) * static_cast<float>(b));
 }
 #endif
-#if HAVE_FP8
-__device__ __forceinline__ rccl_float8 rprod(rccl_float8 a, rccl_float8 b) {
-  return static_cast<rccl_float8>(static_cast<float>(a) * static_cast<float>(b));
-}
-__device__ __forceinline__ rccl_bfloat8 rprod(rccl_bfloat8 a, rccl_bfloat8 b) {
-  return static_cast<rccl_bfloat8>(static_cast<float>(a) * static_cast<float>(b));
-}
-#endif
 
 // ------------------------------- min / max ---------------------------------
-template <class T> __device__ __forceinline__ T rmin(T a, T b) { return a < b ? a : b; }
-template <class T> __device__ __forceinline__ T rmax(T a, T b) { return a > b ? a : b; }
+template <class T> __device__ __forceinline__ NotFp8<T> rmin(T a, T b) { return a < b ? a : b; }
+template <class T> __device__ __forceinline__ NotFp8<T> rmax(T a, T b) { return a > b ? a : b; }
+template <class T> __device__ __forceinline__ Fp8<T> rmin(T a, T b) {
+  return static_cast<float>(a) < static_cast<float>(b) ? a : b;
+}
+template <class T> __device__ __forceinline__ Fp8<T> rmax(T a, T b) {
+  return static_cast<float>(a) > static_cast<float>(b) ? a : b;
+}
 __device__ __forceinline__ __half rmin(__half a, __half b) {
   return __half2float(a) < __half2float(b) ? a : b;
 }
@@ -94,20 +99,6 @@ __device__ __forceinline__ hip_bfloat16 rmin(hip_bfloat16 a, hip_bfloat16 b) {
   return static_cast<float>(a) < static_cast<float>(b) ? a : b;
 }
 __device__ __forceinline__ hip_bfloat16 rmax(hip_bfloat16 a, hip_bfloat16 b) {
-  return static_cast<float>(a) > static_cast<float>(b) ? a : b;
-}
-#endif
-#if HAVE_FP8
-__device__ __forceinline__ rccl_float8 rmin(rccl_float8 a, rccl_float8 b) {
-  return static_cast<float>(a) < static_cast<float>(b) ? a : b;
-}
-__device__ __forceinline__ rccl_float8 rmax(rccl_float8 a, rccl_float8 b) {
-  return static_cast<float>(a) > static_cast<float>(b) ? a : b;
-}
-__device__ __forceinline__ rccl_bfloat8 rmin(rccl_bfloat8 a, rccl_bfloat8 b) {
-  return static_cast<float>(a) < static_cast<float>(b) ? a : b;
-}
-__device__ __forceinline__ rccl_bfloat8 rmax(rccl_bfloat8 a, rccl_bfloat8 b) {
   return static_cast<float>(a) > static_cast<float>(b) ? a : b;
 }
 #endif
@@ -158,6 +149,67 @@ postDivAvg(T x, int /*rankN*/) { return x; }
 template <class T> __device__ __forceinline__ T postOp(int op, T x, int rankN) {
   if (op == ncclAvg) return postDivAvg<T>(x, rankN);
   return x;
+}
+
+// ------------------------- 128-bit packed source fold -----------------------
+// The -D 3 kernels load, fold and store 16-byte packs of kVec elements.
+template <class T> struct alignas(16) Pack {
+  static constexpr int kVec = (sizeof(T) <= 16) ? (int)(16 / sizeof(T)) : 1;
+  T e[kVec];
+};
+
+// Folds the packs of sources 0..nRanks-1 into acc in ascending source order,
+// the order ncclVerifiablePrepareExpected uses. src0 is source 0's pack, which
+// the caller may already have prefetched; load(s) returns source s's pack for
+// s >= 1. With eight or more sources, seven loads are issued before the first
+// fold so their read latencies overlap; the rest go four, two, then one at a
+// time. acc holds the folded value before postOp.
+template <class T, class Load>
+__device__ __forceinline__ void foldSources(int op, int nRanks, const Pack<T>& src0, Load load,
+                                            T (&acc)[Pack<T>::kVec]) {
+  constexpr int VEC = Pack<T>::kVec;
+  int s;
+  if (nRanks >= 8) {
+    Pack<T> t[8];
+    t[0] = src0;
+    #pragma unroll
+    for (int j = 1; j < 8; j++) t[j] = load(j);
+    #pragma unroll
+    for (int e = 0; e < VEC; e++) acc[e] = preOp(op, t[0].e[e], nRanks);
+    #pragma unroll
+    for (int j = 1; j < 8; j++) {
+      #pragma unroll
+      for (int e = 0; e < VEC; e++) acc[e] = combine(op, acc[e], preOp(op, t[j].e[e], nRanks));
+    }
+    s = 8;
+  } else {
+    #pragma unroll
+    for (int e = 0; e < VEC; e++) acc[e] = preOp(op, src0.e[e], nRanks);
+    s = 1;
+  }
+  for (; s + 3 < nRanks; s += 4) {
+    Pack<T> a = load(s), b = load(s + 1), c = load(s + 2), d = load(s + 3);
+    #pragma unroll
+    for (int e = 0; e < VEC; e++) acc[e] = combine(op, acc[e], preOp(op, a.e[e], nRanks));
+    #pragma unroll
+    for (int e = 0; e < VEC; e++) acc[e] = combine(op, acc[e], preOp(op, b.e[e], nRanks));
+    #pragma unroll
+    for (int e = 0; e < VEC; e++) acc[e] = combine(op, acc[e], preOp(op, c.e[e], nRanks));
+    #pragma unroll
+    for (int e = 0; e < VEC; e++) acc[e] = combine(op, acc[e], preOp(op, d.e[e], nRanks));
+  }
+  for (; s + 1 < nRanks; s += 2) {
+    Pack<T> a = load(s), b = load(s + 1);
+    #pragma unroll
+    for (int e = 0; e < VEC; e++) acc[e] = combine(op, acc[e], preOp(op, a.e[e], nRanks));
+    #pragma unroll
+    for (int e = 0; e < VEC; e++) acc[e] = combine(op, acc[e], preOp(op, b.e[e], nRanks));
+  }
+  for (; s < nRanks; s++) {
+    Pack<T> v = load(s);
+    #pragma unroll
+    for (int e = 0; e < VEC; e++) acc[e] = combine(op, acc[e], preOp(op, v.e[e], nRanks));
+  }
 }
 
 }  // namespace gin_sdma_reduce
