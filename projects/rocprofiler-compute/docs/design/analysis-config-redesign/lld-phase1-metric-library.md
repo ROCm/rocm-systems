@@ -60,7 +60,8 @@ types each device skips. The validator checks, for every arch:
 
 - every ceiling the benchmark measures on a device of the arch is the `peak_empirical`
   of exactly one metric, or is listed in `CEILINGS_WITHOUT_METRIC` (the VALU integer
-  rates `I8Ops`, `I32Ops`, `I64Ops`, which no metric shows);
+  rates `I8Ops`, `I32Ops`, `I64Ops`, and `MALLBw`, which analyze skips: no metric shows
+  them);
 - no metric names a ceiling the arch does not measure.
 
 So a new ceiling, or a new arch, fails validation until a metric claims each ceiling.

@@ -1,0 +1,19 @@
+inherit: ../gfx90a/l2.yaml
+l2.ai:
+  formula: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + ) / (64 * SUM((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum))) )
+l2.bw:
+  peak: $max_sclk / 1000 * 128 * TO_INT($total_l2_chan)
+l2.chan_fabric_atomic:
+  formula: SUM(TO_INT(TCC_EA0_ATOMIC[::_1])) / SUM($denom)
+l2.chan_fabric_atomic_lat_cycles:
+  formula: TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1] if TCC_EA0_ATOMIC[::_1] != 0 else 0
+l2.chan_fabric_rd:
+  formula: SUM(TO_INT(TCC_EA0_RDREQ[::_1])) / SUM($denom)
+l2.chan_fabric_rd_lat_cycles:
+  formula: TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]
+l2.chan_fabric_wr_atomic:
+  formula: SUM(TO_INT(TCC_EA0_WRREQ[::_1])) / SUM($denom)
+l2.chan_fabric_wr_atomic_lat_cycles:
+  formula: TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]
+l2.chan_hit_rate_all:
+  formula: 100 * SUM(TCC_HIT[0] + TCC_HIT[1] + TCC_HIT[2] + TCC_HIT[3] + TCC_HIT[4] + TCC_HIT[5] + TCC_HIT[6] + TCC_HIT[7] + TCC_HIT[8] + TCC_HIT[9] + TCC_HIT[10] + TCC_HIT[11] + TCC_HIT[12] + TCC_HIT[13] + TCC_HIT[14] + TCC_HIT[15]) / SUM(TCC_MISS[0] + TCC_HIT[0] + TCC_MISS[1] + TCC_HIT[1] + TCC_MISS[2] + TCC_HIT[2] + TCC_MISS[3] + TCC_HIT[3] + TCC_MISS[4] + TCC_HIT[4] + TCC_MISS[5] + TCC_HIT[5] + TCC_MISS[6] + TCC_HIT[6] + TCC_MISS[7] + TCC_HIT[7] + TCC_MISS[8] + TCC_HIT[8] + TCC_MISS[9] + TCC_HIT[9] + TCC_MISS[10] + TCC_HIT[10] + TCC_MISS[11] + TCC_HIT[11] + TCC_MISS[12] + TCC_HIT[12] + TCC_MISS[13] + TCC_HIT[13] + TCC_MISS[14] + TCC_HIT[14] + TCC_MISS[15] + TCC_HIT[15])
