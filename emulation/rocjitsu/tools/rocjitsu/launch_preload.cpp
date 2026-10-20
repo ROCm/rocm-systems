@@ -90,7 +90,9 @@ std::string find_loaded_sanitizer_runtime(void *init_symbol, std::string_view ru
 #endif
 } // namespace
 
-LaunchEnvironment::LaunchEnvironment() {
+LaunchEnvironment::LaunchEnvironment(bool inherit_parent) {
+  if (!inherit_parent)
+    return;
   for (char **entry = environ; entry && *entry; ++entry)
     entries_.emplace_back(*entry);
 }
@@ -121,7 +123,7 @@ void LaunchEnvironment::prepend_path(const std::string &name, const std::string 
   set(name, value);
 }
 
-char *const *LaunchEnvironment::envp() {
+char **LaunchEnvironment::envp() {
   if (envp_dirty_) {
     envp_.clear();
     envp_.reserve(entries_.size() + 1);
@@ -169,7 +171,11 @@ void configure_dbt_guest_tool_environment(LaunchEnvironment &environment,
 }
 
 int execvp_with_environment(const char *file, char *const argv[], LaunchEnvironment &environment) {
-  return execvpe(file, argv, environment.envp());
+  char **old_environ = environ;
+  environ = environment.envp();
+  const int result = execvp(file, argv);
+  environ = old_environ;
+  return result;
 }
 
 } // namespace rocjitsu::cli

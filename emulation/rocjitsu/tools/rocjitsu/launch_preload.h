@@ -10,14 +10,14 @@ namespace rocjitsu::cli {
 
 class LaunchEnvironment {
 public:
-  LaunchEnvironment();
+  explicit LaunchEnvironment(bool inherit_parent = true);
   LaunchEnvironment(const LaunchEnvironment &) = delete;
   LaunchEnvironment &operator=(const LaunchEnvironment &) = delete;
 
   const char *get(const std::string &name) const;
   void set(const std::string &name, const std::string &value);
   void prepend_path(const std::string &name, const std::string &value);
-  char *const *envp();
+  char **envp();
 
 private:
   std::vector<std::string> entries_;

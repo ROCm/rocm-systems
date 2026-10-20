@@ -491,6 +491,449 @@ if(NOT IS_ABSOLUTE "${CMAKE_INSTALL_DATADIR}")
 endif()
 
 add_test(
+    NAME RocjitsuOptionCpuThreadBudget
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x
+        --option=cpu_thread_budget=1 --thread-budget-table
+)
+add_test(
+    NAME RocjitsuOptionShortCpuThreadBudget
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x -ocpu_thread_budget=1
+        --thread-budget-table
+)
+add_test(
+    NAME RocjitsuOptionDedicatedCpuThreadBudgetWins
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --cpu-thread-budget=1
+        --option=cpu_thread_budget=32 --thread-budget-table
+)
+add_test(
+    NAME RocjitsuOptionWaitChecking
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --option wait_checking=off
+        --thread-budget-table
+)
+set_tests_properties(
+    RocjitsuOptionCpuThreadBudget
+    RocjitsuOptionShortCpuThreadBudget
+    RocjitsuOptionDedicatedCpuThreadBudgetWins
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 1 \\| 1 \\| 0 \\| 1"
+)
+add_test(
+    NAME RocjitsuOptionRejectsInvalid
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--option;NO_EQUALS;--thread-budget-table"
+        "-DTEST_REGEX=--option expects KEY=VALUE" -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuOptionRejectsUnknown
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--option;unknown=1;--thread-budget-table"
+        "-DTEST_REGEX=unknown --option key 'unknown'" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuOptionRejectsInvalidWaitChecking
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--option;wait_checking=maybe;--thread-budget-table"
+        "-DTEST_REGEX=--option wait_checking requires on, off, or all" -P
+        ${_rj_cli_failure_script}
+)
+
+add_test(
+    NAME RocjitsuLaunchEnvOverride
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchEnvOverride
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --env RJ_CLI_ENV_TEST=ok --
+        /usr/bin/env
+)
+set_tests_properties(
+    RocjitsuLaunchEnvOverride
+    PROPERTIES PASS_REGULAR_EXPRESSION "RJ_CLI_ENV_TEST=ok"
+)
+add_test(
+    NAME RocjitsuLaunchEnvOverrideAssigned
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchEnvOverrideAssigned
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x
+        --env=RJ_CLI_ENV_ASSIGNED_TEST=ok -- /usr/bin/env
+)
+set_tests_properties(
+    RocjitsuLaunchEnvOverrideAssigned
+    PROPERTIES PASS_REGULAR_EXPRESSION "RJ_CLI_ENV_ASSIGNED_TEST=ok"
+)
+
+set(_rj_cli_child_path_dir "${CMAKE_CURRENT_BINARY_DIR}/child-path")
+set(_rj_cli_parent_path_dir "${CMAKE_CURRENT_BINARY_DIR}/parent-path")
+file(MAKE_DIRECTORY "${_rj_cli_child_path_dir}" "${_rj_cli_parent_path_dir}")
+file(
+    WRITE "${_rj_cli_child_path_dir}/rj-path-target"
+    [=[#!/bin/sh
+echo RJ_CLI_CHILD_PATH_LOOKUP=ok
+]=]
+)
+file(
+    WRITE "${_rj_cli_parent_path_dir}/rj-path-target"
+    [=[#!/bin/sh
+echo RJ_CLI_PARENT_PATH_LOOKUP=bad
+]=]
+)
+file(
+    CHMOD
+    "${_rj_cli_child_path_dir}/rj-path-target"
+    "${_rj_cli_parent_path_dir}/rj-path-target"
+    PERMISSIONS
+        OWNER_READ
+        OWNER_WRITE
+        OWNER_EXECUTE
+        GROUP_READ
+        GROUP_EXECUTE
+        WORLD_READ
+        WORLD_EXECUTE
+)
+add_test(
+    NAME RocjitsuLaunchEnvPathLookup
+    COMMAND
+        ${CMAKE_COMMAND} -E env "PATH=${_rj_cli_parent_path_dir}:$ENV{PATH}"
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchEnvPathLookup
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --env
+        "PATH=${_rj_cli_child_path_dir}:$ENV{PATH}" -- rj-path-target
+)
+set_tests_properties(
+    RocjitsuLaunchEnvPathLookup
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION "RJ_CLI_CHILD_PATH_LOOKUP=ok"
+        FAIL_REGULAR_EXPRESSION "RJ_CLI_PARENT_PATH_LOOKUP=bad"
+)
+add_test(
+    NAME RocjitsuLaunchClearEnv
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchClearEnv
+        RJ_SHOULD_NOT_LEAK=bad $<TARGET_FILE:rocjitsu_bin> --profile mi350x
+        --clear-env-vars --env RJ_CLI_ENV_TEST=ok -- /bin/sh -c
+        "test \"$RJ_CLI_ENV_TEST\" = ok && test -z \"$RJ_SHOULD_NOT_LEAK\""
+)
+
+set(_rj_attach_runtime
+    "${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchAttachClearEnv"
+)
+file(MAKE_DIRECTORY "${_rj_attach_runtime}")
+file(WRITE "${_rj_attach_runtime}/daemon.sock" "")
+add_test(
+    NAME RocjitsuLaunchAttachClearEnv
+    COMMAND
+        ${CMAKE_COMMAND} -E env "ROCJITSU_RUNTIME_DIR=${_rj_attach_runtime}"
+        RJ_SHOULD_NOT_LEAK=bad $<TARGET_FILE:rocjitsu_bin> --profile mi350x
+        --attach --clear-env-vars -- /bin/sh -c
+        [=[test -n "$ROCJITSU_INVOCATION_DIR" &&
+test "${ROCJITSU_INVOCATION_DIR#/}" != "$ROCJITSU_INVOCATION_DIR" &&
+test -e "$ROCJITSU_INVOCATION_DIR/daemon.sock" &&
+test -z "$RJ_SHOULD_NOT_LEAK"]=]
+)
+set(_rj_cli_workdir "${CMAKE_CURRENT_BINARY_DIR}/cli-workdir")
+file(MAKE_DIRECTORY "${_rj_cli_workdir}")
+
+set(_rj_attach_parent_xdg_runtime
+    "${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchAttachEnvOverrideParentXdg"
+)
+set(_rj_attach_child_xdg_runtime
+    "${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchAttachEnvOverrideChildXdg"
+)
+file(
+    MAKE_DIRECTORY
+        "${_rj_attach_parent_xdg_runtime}/rocjitsu"
+        "${_rj_attach_child_xdg_runtime}/rocjitsu"
+)
+file(WRITE "${_rj_attach_parent_xdg_runtime}/rocjitsu/daemon.sock" "")
+file(WRITE "${_rj_attach_child_xdg_runtime}/rocjitsu/daemon.sock" "")
+add_test(
+    NAME RocjitsuLaunchAttachEnvOverrideRuntime
+    COMMAND
+        ${CMAKE_COMMAND} -E env "ROCJITSU_RUNTIME_DIR="
+        "XDG_RUNTIME_DIR=${_rj_attach_parent_xdg_runtime}"
+        "RJ_EXPECTED_INVOCATION_DIR=${_rj_attach_child_xdg_runtime}/rocjitsu"
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --attach --env
+        "XDG_RUNTIME_DIR=${_rj_attach_child_xdg_runtime}" -- /bin/sh -c
+        [=[test "$ROCJITSU_INVOCATION_DIR" = "$RJ_EXPECTED_INVOCATION_DIR"]=]
+)
+
+add_test(
+    NAME RocjitsuLaunchWorkdir
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchWorkdir
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x
+        --workdir=${_rj_cli_workdir} -- /bin/pwd
+)
+set_tests_properties(
+    RocjitsuLaunchWorkdir
+    PROPERTIES PASS_REGULAR_EXPRESSION "${_rj_cli_workdir}"
+)
+
+add_test(
+    NAME RocjitsuLaunchRelativeRuntimeWorkdir
+    COMMAND
+        ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_BINARY_DIR}" ${CMAKE_COMMAND}
+        -E env ROCJITSU_RUNTIME_DIR=relative-runtime
+        RJ_EXPECTED_WORKDIR=${_rj_cli_workdir} $<TARGET_FILE:rocjitsu_bin>
+        --profile mi350x --workdir=${_rj_cli_workdir} -- /bin/sh -c
+        [=[test -n "$ROCJITSU_INVOCATION_DIR" &&
+test "${ROCJITSU_INVOCATION_DIR#/}" != "$ROCJITSU_INVOCATION_DIR" &&
+test -f "$ROCJITSU_INVOCATION_DIR/config_path" &&
+test "$(pwd)" = "$RJ_EXPECTED_WORKDIR"]=]
+)
+
+set(_rj_runtime_symlink_target
+    "${CMAKE_CURRENT_BINARY_DIR}/runtime-symlink-target"
+)
+set(_rj_runtime_symlink_link "${CMAKE_CURRENT_BINARY_DIR}/runtime-link")
+file(MAKE_DIRECTORY "${_rj_runtime_symlink_target}")
+file(REMOVE "${_rj_runtime_symlink_link}")
+execute_process(
+    COMMAND
+        ${CMAKE_COMMAND} -E create_symlink "${_rj_runtime_symlink_target}"
+        "${_rj_runtime_symlink_link}"
+)
+add_test(
+    NAME RocjitsuLaunchRuntimePathPreservesSymlinkTraversal
+    COMMAND
+        ${CMAKE_COMMAND} -E chdir "${CMAKE_CURRENT_BINARY_DIR}" ${CMAKE_COMMAND}
+        -E env ROCJITSU_RUNTIME_DIR=runtime-link/../runtime-symlink-preserved
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x -- /bin/sh -c
+        [=[test -n "$ROCJITSU_INVOCATION_DIR" &&
+test "${ROCJITSU_INVOCATION_DIR#*runtime-link/../runtime-symlink-preserved/}" != "$ROCJITSU_INVOCATION_DIR" &&
+test -f "$ROCJITSU_INVOCATION_DIR/config_path"]=]
+)
+set(_rj_fake_rocgdb_dir "${CMAKE_CURRENT_BINARY_DIR}/fake-rocgdb")
+file(MAKE_DIRECTORY "${_rj_fake_rocgdb_dir}")
+file(
+    WRITE "${_rj_fake_rocgdb_dir}/rocgdb"
+    [=[#!/bin/sh
+if [ -n "$ROCJITSU_DAEMON_PID" ]; then
+    printf 'RJ_CLI_DAEMON_PID=%s\n' "$ROCJITSU_DAEMON_PID"
+else
+    printf 'RJ_CLI_DAEMON_PID=missing\n'
+fi
+if [ "${RJ_CHECK_DAEMON_PROCESS_GROUP:-}" = 1 ]; then
+    if [ -z "$ROCJITSU_DAEMON_PID" ]; then
+        printf 'RJ_CLI_DAEMON_PROCESS_GROUP=missing-daemon\n'
+        exit 11
+    fi
+    daemon_pgid="$(ps -o pgid= -p "$ROCJITSU_DAEMON_PID" | tr -d ' ')"
+    rocgdb_pgid="$(ps -o pgid= -p "$$" | tr -d ' ')"
+    printf 'RJ_CLI_DAEMON_PGID=%s\n' "$daemon_pgid"
+    printf 'RJ_CLI_ROCGDB_PGID=%s\n' "$rocgdb_pgid"
+    if [ -z "$daemon_pgid" ] || [ -z "$rocgdb_pgid" ]; then
+        printf 'RJ_CLI_DAEMON_PROCESS_GROUP=missing-pgid\n'
+        exit 12
+    fi
+    if [ "$daemon_pgid" = "$rocgdb_pgid" ]; then
+        printf 'RJ_CLI_DAEMON_PROCESS_GROUP=foreground\n'
+        exit 13
+    fi
+    printf 'RJ_CLI_DAEMON_PROCESS_GROUP=detached\n'
+fi
+first=1
+for arg in "$@"; do
+    if [ "$first" = 0 ]; then
+        printf '|'
+    fi
+    first=0
+    printf '%s' "$arg"
+done
+printf '\n'
+]=]
+)
+file(
+    CHMOD
+    "${_rj_fake_rocgdb_dir}/rocgdb"
+    PERMISSIONS
+        OWNER_READ
+        OWNER_WRITE
+        OWNER_EXECUTE
+        GROUP_READ
+        GROUP_EXECUTE
+        WORLD_READ
+        WORLD_EXECUTE
+)
+add_test(
+    NAME RocjitsuLaunchGdbWrapsCommand
+    COMMAND
+        ${CMAKE_COMMAND} -E env "PATH=${_rj_fake_rocgdb_dir}:$ENV{PATH}"
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchGdbWrapsCommand
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --gdb -- /bin/true
+)
+set_tests_properties(
+    RocjitsuLaunchGdbWrapsCommand
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION "set breakpoint pending on.*--args.*/bin/true"
+)
+add_test(
+    NAME RocjitsuLaunchGdbExImpliesGdb
+    COMMAND
+        ${CMAKE_COMMAND} -E env "PATH=${_rj_fake_rocgdb_dir}:$ENV{PATH}"
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchGdbExImpliesGdb
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --gdb-ex "break kernel" --
+        /bin/echo hi
+)
+set_tests_properties(
+    RocjitsuLaunchGdbExImpliesGdb
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION
+            "set breakpoint pending on.*break kernel.*--args.*/bin/echo.*hi"
+)
+add_test(
+    NAME RocjitsuLaunchGdbStartsDaemon
+    COMMAND
+        ${CMAKE_COMMAND} -E env "PATH=${_rj_fake_rocgdb_dir}:$ENV{PATH}"
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchGdbStartsDaemon
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --gdb -- /bin/true
+)
+set_tests_properties(
+    RocjitsuLaunchGdbStartsDaemon
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION "RJ_CLI_DAEMON_PID=[1-9][0-9]*"
+        FAIL_REGULAR_EXPRESSION "RJ_CLI_DAEMON_PID=missing"
+)
+add_test(
+    NAME RocjitsuLaunchGdbDetachesDaemonProcessGroup
+    COMMAND
+        ${CMAKE_COMMAND} -E env "PATH=${_rj_fake_rocgdb_dir}:$ENV{PATH}"
+        RJ_CHECK_DAEMON_PROCESS_GROUP=1
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/gdb-detach-pgid
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --gdb -- /bin/true
+)
+set_tests_properties(
+    RocjitsuLaunchGdbDetachesDaemonProcessGroup
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION "RJ_CLI_DAEMON_PROCESS_GROUP=detached"
+        FAIL_REGULAR_EXPRESSION
+            "RJ_CLI_DAEMON_PROCESS_GROUP=(missing-daemon|missing-pgid|foreground)"
+)
+
+set(_rj_bad_rocgdb_dir "${CMAKE_CURRENT_BINARY_DIR}/bad-rocgdb")
+file(MAKE_DIRECTORY "${_rj_bad_rocgdb_dir}")
+file(
+    WRITE "${_rj_bad_rocgdb_dir}/rocgdb"
+    [=[#!/bin/sh
+echo RJ_PARENT_ROCGDB_PATH_LOOKUP=bad
+]=]
+)
+file(
+    CHMOD
+    "${_rj_bad_rocgdb_dir}/rocgdb"
+    PERMISSIONS
+        OWNER_READ
+        OWNER_WRITE
+        OWNER_EXECUTE
+        GROUP_READ
+        GROUP_EXECUTE
+        WORLD_READ
+        WORLD_EXECUTE
+)
+add_test(
+    NAME RocjitsuLaunchGdbUsesChildPath
+    COMMAND
+        ${CMAKE_COMMAND} -E env "PATH=${_rj_bad_rocgdb_dir}:$ENV{PATH}"
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchGdbUsesChildPath
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --env
+        "PATH=${_rj_fake_rocgdb_dir}:$ENV{PATH}" --gdb -- /bin/true
+)
+set_tests_properties(
+    RocjitsuLaunchGdbUsesChildPath
+    PROPERTIES
+        PASS_REGULAR_EXPRESSION "set breakpoint pending on.*--args.*/bin/true"
+        FAIL_REGULAR_EXPRESSION "RJ_PARENT_ROCGDB_PATH_LOOKUP=bad"
+)
+
+set(_rj_dbt_visibility_config
+    "${CMAKE_CURRENT_BINARY_DIR}/dbt-visibility-guest.json"
+)
+file(
+    WRITE "${_rj_dbt_visibility_config}"
+    "{\n"
+    "  \"dbt_guest\": {\n"
+    "    \"enabled\": true,\n"
+    "    \"guest_isa\": \"gfx950\",\n"
+    "    \"host_isa\": \"gfx950\",\n"
+    "    \"host_gpu_id\": 0,\n"
+    "    \"execution_backend\": \"simulator\",\n"
+    "    \"simulator_config\": \"${CMAKE_SOURCE_DIR}/configs/gfx950_mi355x_kmd_2gpu.json\",\n"
+    "    \"guest_device\": {\n"
+    "      \"gpu_id\": 38144,\n"
+    "      \"gfx_target_version\": 90500,\n"
+    "      \"ip_versions\": [\n"
+    "        {\"hardware_id\": 11, \"major\": 9, \"minor\": 5, \"revision\": 0},\n"
+    "        {\"hardware_id\": 42, \"major\": 4, \"minor\": 4, \"revision\": 5},\n"
+    "        {\"hardware_id\": 108, \"major\": 7, \"minor\": 9, \"revision\": 0}\n"
+    "      ],\n"
+    "      \"vendor_id\": 4098,\n"
+    "      \"device_id\": 30112,\n"
+    "      \"family_id\": 160,\n"
+    "      \"unique_id\": 5929628898254127105,\n"
+    "      \"marketing_name\": \"AMD Instinct MI350X\",\n"
+    "      \"drm_render_minor\": 128,\n"
+    "      \"simd_count\": 64,\n"
+    "      \"max_waves_per_simd\": 8,\n"
+    "      \"num_shader_engines\": 2,\n"
+    "      \"num_shader_arrays_per_engine\": 2,\n"
+    "      \"num_cu_per_sh\": 4,\n"
+    "      \"simd_per_cu\": 4,\n"
+    "      \"wave_front_size\": 64,\n"
+    "      \"max_slots_scratch_cu\": 32,\n"
+    "      \"local_mem_size\": 309237645312,\n"
+    "      \"lds_size_kb\": 64,\n"
+    "      \"mem_width\": 8192,\n"
+    "      \"mem_clk_max\": 1900,\n"
+    "      \"l1_size_kb\": 32,\n"
+    "      \"l1_line_size\": 128,\n"
+    "      \"l1_assoc\": 4,\n"
+    "      \"l2_size_kb\": 4096,\n"
+    "      \"l2_line_size\": 128,\n"
+    "      \"l2_assoc\": 16,\n"
+    "      \"num_sdma_engines\": 5,\n"
+    "      \"num_sdma_xgmi_engines\": 12,\n"
+    "      \"num_sdma_queues_per_engine\": 8,\n"
+    "      \"num_cp_queues\": 128,\n"
+    "      \"max_engine_clk_fcompute\": 2400\n"
+    "    }\n"
+    "  }\n"
+    "}\n"
+)
+add_test(
+    NAME RocjitsuLaunchDbtVisibilityOverride
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchDbtVisibilityOverride
+        $<TARGET_FILE:rocjitsu_bin> --config ${_rj_dbt_visibility_config} --env
+        HIP_VISIBLE_DEVICES=1 -- /bin/sh -c
+        [=[test "$(sed -n '2p' "$ROCJITSU_INVOCATION_DIR/config_path")" = 38145 &&
+test "$HIP_VISIBLE_DEVICES" = 1]=]
+)
+add_test(
+    NAME RocjitsuLaunchEnvRejectsInvalid
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--env;NO_EQUALS;--;/usr/bin/true"
+        "-DTEST_REGEX=--env expects KEY=VALUE" -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuLaunchWorkdirRejectsMissing
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--workdir;${CMAKE_CURRENT_BINARY_DIR}/missing-workdir;--;/usr/bin/true"
+        "-DTEST_REGEX=--workdir .*directory does not exist" -P
+        ${_rj_cli_failure_script}
+)
+
+add_test(
     NAME RocjitsuCpuThreadBudgetRejectsNonNumeric
     COMMAND
         $<TARGET_FILE:rocjitsu_bin> --config ${_rj_cdna3_config}
