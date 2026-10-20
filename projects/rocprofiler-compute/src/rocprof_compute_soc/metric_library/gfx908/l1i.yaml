@@ -61,7 +61,7 @@ l1i.l2_bw_util:
   formula: 100000 * SUM(SQC_TC_INST_REQ) / (2 * SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp)))
   unit: Percent
   description: >-
-    The percent of the peak theoretical L1I \u2192 L2 cache request bandwidth achieved.
+    The percent of the peak theoretical L1I -> L2 cache request bandwidth achieved.
     Calculated as the ratio of the total number of requests from the L1I to the L2
     cache over the total L1I-L2 interface cycles.
 l1i.misses_duplicated:

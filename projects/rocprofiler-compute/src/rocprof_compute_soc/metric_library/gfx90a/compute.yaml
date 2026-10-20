@@ -49,7 +49,7 @@ compute.inst_mix_conversion:
   unit: (Instructions + $normUnit)
   description: >-
     The total number of type conversion instructions (such as converting data to or
-    from F32\u2194F64) issued to the VALU per normalization unit.
+    from F32<->F64) issued to the VALU per normalization unit.
 compute.inst_mix_f16_add:
   name: F16-ADD
   formula: SUM(SQ_INSTS_VALU_ADD_F16) / SUM($denom)
@@ -279,17 +279,17 @@ compute.vmem_lat:
     The average number of round-trip cycles (that is, from issue to data return /
     acknowledgment) required for a VMEM instruction to complete.
 compute.vmem_ta_addr_stall:
-  name: "Sequencer \u2192 TA Address Stall"
+  name: Sequencer -> TA Address Stall
   formula: SUM(SQ_VMEM_TA_ADDR_FIFO_FULL) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: ''
 compute.vmem_ta_cmd_stall:
-  name: "Sequencer \u2192 TA Command Stall"
+  name: Sequencer -> TA Command Stall
   formula: SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: ''
 compute.vmem_ta_data_stall:
-  name: "Sequencer \u2192 TA Data Stall"
+  name: Sequencer -> TA Data Stall
   formula: SUM(SQ_VMEM_WR_TA_DATA_FIFO_FULL) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: ''

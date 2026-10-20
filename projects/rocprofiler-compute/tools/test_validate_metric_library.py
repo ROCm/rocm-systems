@@ -143,6 +143,8 @@ def test_main_reports_errors(tree, monkeypatch, capsys):
         ("unit: Percent", "unit: Percent\n  id: x", "'id' is not a known field"),
         ("unit: Percent", "unit: Percent\n  unit: Pct", "duplicate keys ['unit']"),
         ("unit: Percent", "unit: [Percent]", "'unit' must be a string"),
+        ("name: VALU Utilization", 'name: "VALU \\u2192 Utilization"', "plain ASCII"),
+        ('description: ""', "description: VALU \\u2122 busy", "plain ASCII"),
         ('description: ""', "description: 5", "'description' must be a string"),
     ],
 )
