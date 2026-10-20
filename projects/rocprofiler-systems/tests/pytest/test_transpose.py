@@ -470,7 +470,7 @@ class TestSampleTransposeTracePeriods(RocprofsysTest):
         assert_resolved_settings(
             result,
             {"ROCPROFSYS_TRACE_PERIODS": "0:60"},
-            flag_args=self.PERIOD_FLAGS,
+            cli_args=self.PERIOD_FLAGS,
         )
         self.assert_perfetto(
             result,
