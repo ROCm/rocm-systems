@@ -13,7 +13,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <iterator>
 #include <optional>
 #include <span>
 #include <utility>
@@ -390,19 +389,7 @@ AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch,
 }
 
 std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch) const {
-  const std::span<const uint8_t> image{reinterpret_cast<const uint8_t *>(image_data()),
-                                       image_size()};
-  // Discover descriptors through the shared scanner rather than re-walking sections
-  // here. scan_kernel_descriptors() filters to a single .text extent, so visit each
-  // text section to cover every kernel, then reduce via the span overload.
-  std::vector<KernelDescriptorInfo> kernels;
-  for (const Section *text : text_sections()) {
-    std::vector<KernelDescriptorInfo> found =
-        scan_kernel_descriptors(image, text->sectionOffset(), text->size());
-    kernels.insert(kernels.end(), std::make_move_iterator(found.begin()),
-                   std::make_move_iterator(found.end()));
-  }
-  return min_kernel_sgpr_count(arch, kernels);
+  return min_kernel_sgpr_count(arch, scan_object_kernel_descriptors(*this));
 }
 
 } // namespace rocjitsu

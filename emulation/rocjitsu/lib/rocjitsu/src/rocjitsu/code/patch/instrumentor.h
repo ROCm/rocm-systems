@@ -398,10 +398,10 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// is a much more difficult task.
 ///
 /// Block decoding is lazy so the CFG is built on the first call that needs
-/// it (validate_points, kernel_blocks or patch). An Instrumentor
-/// that is never asked for either also never decodes. When the object has
-/// kernel descriptors, only code reachable from a kernel entry is decoded;
-/// otherwise the whole .text is.
+/// it (validate_points, kernel_blocks or patch). An Instrumentor that is never
+/// asked for any of these calls also never decodes. When the object has kernel
+/// descriptors, only code reachable from a kernel entry is decoded; otherwise
+/// the whole .text is.
 class Instrumentor {
 public:
   /// @param obj  The code object to instrument. Borrowed; must outlive the
@@ -440,11 +440,15 @@ public:
 
   /// @brief The blocks of the kernel entered at @p entry, in .text order.
   ///
-  /// The blocks reachable_kernel_blocks() finds from the block starting at
-  /// @p entry, out of the ones validation and patching use. Returns nullopt and
-  /// sets *error_out when decoding fails, the object does not have exactly one
-  /// .text section, or no decoded block starts at @p entry. Queues nothing and
-  /// does not spend the single patch attempt.
+  /// Returns the blocks reachable_kernel_blocks() walks from the decoded block
+  /// that starts at @p entry, taken from the same blocks validation and
+  /// patching use.
+  ///
+  /// Returns nullopt and sets *error_out when decoding fails, the object does
+  /// not have exactly one .text section, or no decoded block starts at
+  /// @p entry.
+  ///
+  /// Queues nothing and does not spend the single patch attempt.
   [[nodiscard]] std::optional<std::vector<const BasicBlock *>>
   kernel_blocks(uint64_t entry, std::string *error_out = nullptr);
 
@@ -528,6 +532,10 @@ private:
   // the object does not have exactly one .text section.
   [[nodiscard]] std::optional<std::span<const uint8_t>> anchor_text(std::string *error_out);
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
+  // Diagnostic for an anchor_offset at which no decoded instruction starts,
+  // naming why: past .text, inside an instruction, or outside decoded code.
+  [[nodiscard]] std::string undecoded_anchor_error(uint64_t anchor_offset,
+                                                   uint64_t text_size) const;
 
   // The DBI entry prologue as a dispatch-only stub in the cave: the descriptor
   // is redirected to it, and it branches to the untouched original entry. Not
