@@ -11,9 +11,12 @@ use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
 use std::sync::Mutex;
 
+/// One occupied host range within a virtual-address reservation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct HostInterval {
+    /// First byte in the reserved process address space.
     address: u64,
+    /// Number of occupied bytes.
     size: u64,
 }
 
@@ -27,6 +30,7 @@ impl HostInterval {
 /// Serializes host page-table replacement in one VA reservation. A failed
 /// unmap keeps its interval occupied until retry succeeds.
 pub(crate) struct HostIntervals {
+    /// Host ranges kept occupied until native unmap succeeds.
     ranges: Mutex<Vec<HostInterval>>,
 }
 
@@ -60,14 +64,18 @@ impl HostIntervals {
     }
 }
 
+/// An occupied range together with the address space in which it is mapped.
 struct DeviceInterval<S: AddressSpaceInfo> {
+    /// Activated device state used to identify the native address space.
     device: S,
+    /// Bytes occupied within that address space.
     range: HostInterval,
 }
 
 /// Serializes mappings within each native device address space. Different
 /// device VMs may map the same process reservation at the same address.
 pub(crate) struct DeviceIntervals<S: AddressSpaceInfo> {
+    /// Device ranges grouped by their native address-space identity.
     ranges: Mutex<Vec<DeviceInterval<S>>>,
 }
 
@@ -109,11 +117,15 @@ pub(crate) struct DriverVirtualAddress<D: VirtualMemoryOperations>
 where
     D::DeviceState: AddressSpaceInfo,
 {
-    // The reservation owner is dropped before the shared driver instance.
+    /// Reservation owner dropped before the shared driver instance.
     pub(crate) inner: Shared<Owned<D::VirtualAddress>>,
+    /// Prevents overlapping host mappings within this reservation.
     host_intervals: Shared<HostIntervals>,
+    /// Prevents overlapping mappings within each device address space.
     device_intervals: Shared<DeviceIntervals<D::DeviceState>>,
+    /// Keeps the creating driver alive through reservation cleanup.
     driver: Shared<D>,
+    /// Cached address, extent, and mapping granularity.
     info: VirtualAddressInfo,
 }
 
@@ -175,6 +187,7 @@ where
 
 /// Owns a process virtual-address reservation used by detached memory mappings.
 pub struct VirtualAddress {
+    /// Concrete driver reservation and interval bookkeeping.
     pub(crate) inner: driver::VirtualAddressState,
 }
 
@@ -240,9 +253,11 @@ impl VirtualAddress {
 
 /// Shared detached-backing ownership for any virtual-memory driver.
 pub(crate) struct DriverVirtualMemory<D: VirtualMemoryOperations> {
-    // Keep the driver instance alive until backing cleanup completes.
+    /// Physical backing shared by mappings until native cleanup completes.
     pub(crate) inner: Shared<Owned<D::VirtualMemory>>,
+    /// Keeps the creating driver alive until backing cleanup completes.
     driver: Shared<D>,
+    /// Cached physical extent and backing identity.
     info: VirtualMemoryInfo,
 }
 
@@ -391,6 +406,7 @@ where
 
 /// Owns detached physical backing used by virtual-memory mappings.
 pub struct VirtualMemory {
+    /// Concrete driver owner of the detached physical backing.
     pub(crate) inner: driver::VirtualMemoryState,
 }
 
@@ -440,13 +456,21 @@ pub(crate) struct DriverVirtualDeviceMapping<D: VirtualMemoryOperations>
 where
     D::DeviceState: AddressSpaceInfo,
 {
+    /// Native mapping owner whose cleanup can be retried.
     inner: Owned<D::VirtualDeviceMapping>,
+    /// Creating driver retained until native unmap succeeds.
     driver: Option<Shared<D>>,
+    /// Reservation retained while the device mapping exists.
     reservation: Option<Shared<Owned<D::VirtualAddress>>>,
+    /// Physical backing retained while the device mapping exists.
     backing: Option<Shared<Owned<D::VirtualMemory>>>,
+    /// Interval occupancy released only after successful unmap.
     device_intervals: Option<Shared<DeviceIntervals<D::DeviceState>>>,
+    /// Native address-space identity used for interval release.
     device_state: Option<D::DeviceState>,
+    /// First mapped device byte.
     address: u64,
+    /// Mapped byte extent.
     size: u64,
 }
 
@@ -498,6 +522,7 @@ where
 
 /// Owns one virtual-memory mapping in an activated device VM.
 pub struct VirtualDeviceMapping {
+    /// Concrete driver mapping and retryable cleanup state.
     pub(crate) inner: driver::VirtualDeviceMappingState,
 }
 
@@ -514,12 +539,19 @@ impl VirtualDeviceMapping {
 
 /// Shared host-mapping ownership, including retryable native cleanup.
 pub(crate) struct DriverVirtualHostMapping<D: VirtualMemoryOperations> {
+    /// Native mapping owner whose cleanup can be retried.
     inner: Owned<D::VirtualHostMapping>,
+    /// Creating driver retained until native unmap succeeds.
     driver: Option<Shared<D>>,
+    /// Reservation retained while the host mapping exists.
     reservation: Option<Shared<Owned<D::VirtualAddress>>>,
+    /// Physical backing retained while the host mapping exists.
     backing: Option<Shared<Owned<D::VirtualMemory>>>,
+    /// Interval occupancy released only after successful unmap.
     host_intervals: Option<Shared<HostIntervals>>,
+    /// First mapped host byte.
     address: u64,
+    /// Mapped byte extent.
     size: u64,
 }
 
@@ -564,6 +596,7 @@ impl<D: VirtualMemoryOperations> Drop for DriverVirtualHostMapping<D> {
 
 /// Owns one virtual-memory mapping in the process host page tables.
 pub struct VirtualHostMapping {
+    /// Concrete driver mapping and retryable cleanup state.
     pub(crate) inner: driver::VirtualHostMappingState,
 }
 
@@ -737,6 +770,83 @@ mod tests {
     }
 
     #[test]
+    fn virtual_mapping_ranges_must_fit_both_owners() {
+        let memory = VirtualMemoryInfo {
+            size: 0x4000,
+            mapping_granularity: 0x1000,
+            physical_backing_id: [1, 2],
+            placement: None,
+        };
+        let reservation = VirtualAddressInfo {
+            address: 0x1_0000,
+            size: 0x8000,
+            mapping_granularity: 0x1000,
+        };
+
+        assert!(validate_virtual_mapping(memory, reservation, 0x1_1000, 0x2000, 0x2000).is_ok());
+        for (address, offset, size) in [
+            (0x1_1001, 0x2000, 0x1000),
+            (0x1_1000, 0x2001, 0x1000),
+            (0x1_1000, 0x2000, 0),
+            (0x0_f000, 0, 0x1000),
+            (0x1_7000, 0, 0x2000),
+            (0x1_1000, 0x3000, 0x2000),
+        ] {
+            assert_eq!(
+                validate_virtual_mapping(memory, reservation, address, offset, size)
+                    .unwrap_err()
+                    .kind(),
+                ErrorKind::InvalidArgument
+            );
+        }
+    }
+
+    #[test]
+    fn virtual_mapping_uses_the_stricter_owner_granularity() {
+        let memory = VirtualMemoryInfo {
+            size: 0x2_0000,
+            mapping_granularity: 0x1_0000,
+            physical_backing_id: [1, 2],
+            placement: None,
+        };
+        let reservation = VirtualAddressInfo {
+            address: 0x10_0000,
+            size: 0x4_0000,
+            mapping_granularity: 0x1000,
+        };
+
+        assert!(validate_virtual_mapping(memory, reservation, 0x10_0000, 0, 0x1_0000).is_ok());
+        assert_eq!(
+            validate_virtual_mapping(memory, reservation, 0x10_1000, 0, 0x1_0000)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::InvalidArgument
+        );
+
+        let invalid = VirtualMemoryInfo {
+            mapping_granularity: 0,
+            ..memory
+        };
+        assert_eq!(
+            validate_virtual_mapping(invalid, reservation, 0x10_0000, 0, 0x1_0000)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::DriverContract
+        );
+
+        let invalid = VirtualAddressInfo {
+            address: reservation.address + 1,
+            ..reservation
+        };
+        assert_eq!(
+            validate_virtual_mapping(memory, invalid, 0x10_0000, 0, 0x1_0000)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::DriverContract
+        );
+    }
+
+    #[test]
     #[ignore = "requires a qualified GPU and live DRM virtual-memory mapping"]
     fn live_device_mapping_rejects_overlap_and_reuses_freed_interval() {
         use crate::session::{DriverContextLifetime, Session};
@@ -876,80 +986,5 @@ mod tests {
         drop(reservation);
         drop(device);
         session.destroy().unwrap();
-    }
-
-    #[test]
-    fn virtual_mapping_ranges_must_fit_both_owners() {
-        let memory = VirtualMemoryInfo {
-            size: 0x4000,
-            mapping_granularity: 0x1000,
-            physical_backing_id: [1, 2],
-        };
-        let reservation = VirtualAddressInfo {
-            address: 0x1_0000,
-            size: 0x8000,
-            mapping_granularity: 0x1000,
-        };
-
-        assert!(validate_virtual_mapping(memory, reservation, 0x1_1000, 0x2000, 0x2000).is_ok());
-        for (address, offset, size) in [
-            (0x1_1001, 0x2000, 0x1000),
-            (0x1_1000, 0x2001, 0x1000),
-            (0x1_1000, 0x2000, 0),
-            (0x0_f000, 0, 0x1000),
-            (0x1_7000, 0, 0x2000),
-            (0x1_1000, 0x3000, 0x2000),
-        ] {
-            assert_eq!(
-                validate_virtual_mapping(memory, reservation, address, offset, size)
-                    .unwrap_err()
-                    .kind(),
-                ErrorKind::InvalidArgument
-            );
-        }
-    }
-
-    #[test]
-    fn virtual_mapping_uses_the_stricter_owner_granularity() {
-        let memory = VirtualMemoryInfo {
-            size: 0x2_0000,
-            mapping_granularity: 0x1_0000,
-            physical_backing_id: [1, 2],
-        };
-        let reservation = VirtualAddressInfo {
-            address: 0x10_0000,
-            size: 0x4_0000,
-            mapping_granularity: 0x1000,
-        };
-
-        assert!(validate_virtual_mapping(memory, reservation, 0x10_0000, 0, 0x1_0000).is_ok());
-        assert_eq!(
-            validate_virtual_mapping(memory, reservation, 0x10_1000, 0, 0x1_0000)
-                .unwrap_err()
-                .kind(),
-            ErrorKind::InvalidArgument
-        );
-
-        let invalid = VirtualMemoryInfo {
-            mapping_granularity: 0,
-            ..memory
-        };
-        assert_eq!(
-            validate_virtual_mapping(invalid, reservation, 0x10_0000, 0, 0x1_0000)
-                .unwrap_err()
-                .kind(),
-            ErrorKind::DriverContract
-        );
-
-        let invalid = VirtualAddressInfo {
-            address: reservation.address + 1,
-            ..reservation
-        };
-        assert_eq!(
-            validate_virtual_mapping(memory, invalid, 0x10_0000, 0, 0x1_0000)
-                .unwrap_err()
-                .kind(),
-            ErrorKind::DriverContract
-        );
     }
 }
