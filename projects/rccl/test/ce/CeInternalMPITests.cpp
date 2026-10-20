@@ -285,7 +285,7 @@ TEST_F(CeInternalMPITest, FiniAfterZeroCollectives)
 // external --timeout (same pattern as the CE dispatch tests above).
 TEST_F(CeInternalMPITest, GraphThenEagerAllReduceDoesNotHang)
 {
-    // CE AllReduce range is [NCCL_CE_AR_MIN_MSG_BYTES, NCCL_CE_AR_MAX_MSG_BYTES];
+    // CE AllReduce range is [NCCL_CE_AR_MIN_MSG_BYTES, RCCL_CE_AR_2SHOT_MAX_BYTES];
     // 8MiB of float32 sits comfortably inside it.
     constexpr size_t kElem = (8ull * 1024 * 1024) / sizeof(float);
     const int nRanks = ceComm->nRanks;
