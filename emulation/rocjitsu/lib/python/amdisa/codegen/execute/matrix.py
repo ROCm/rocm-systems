@@ -163,9 +163,8 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     dst_regs = max(1, dst_bits // 32)
 
     # SMFMAC: sparse matrix FMA with 4:2 structured sparsity.
-    # F32-result variants use cross-lane exec_smfmac_* helpers from
-    # mma_exec.h; I32-result variants fall through to the per-lane stub.
-    if 'SMFMAC' in name and result_type == 'F32':
+    # Sparse inputs and metadata are distributed across the whole wave.
+    if 'SMFMAC' in name:
         _SMFMAC_READ = {
             'F16': 'amdgpu::smfmac_read_f16',
             'BF16': 'amdgpu::smfmac_read_bf16',
@@ -215,26 +214,28 @@ def gen_mfma(ctx: ExecuteContext) -> str:
                 f'  uint32_t idx = {_matrix_base(supports_gpr_idx, f"amdgpu::src_base(vb, {s2}.encoding_value_)", "Src2")};'
             )
 
-        if input_type in ('F16', 'BF16'):
+        if result_type == 'I32' and input_type == 'I8':
+            L.append(
+                f'  amdgpu::exec_smfmac_i32_i8<{M}, {N}, {K}>'
+                f'(cu, dst, s0b, s1b, idx, inst_.cbsz, inst_.abid);'
+            )
+        elif result_type == 'F32' and input_type in ('F16', 'BF16'):
             read_fn = _SMFMAC_READ[input_type]
             L.append(
                 f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_f16(cu, dst, s0b, s1b, idx, {read_fn});'
             )
-        else:
+        elif result_type == 'F32' and input_type in _F8_FIXED:
             parts = input_type.split('_')
-            read_a = _SMFMAC_FP8_READ.get(parts[0], 'amdgpu::smfmac_read_fp8')
-            read_b = _SMFMAC_FP8_READ.get(parts[1], 'amdgpu::smfmac_read_fp8')
+            read_a = _SMFMAC_FP8_READ[parts[0]]
+            read_b = _SMFMAC_FP8_READ[parts[1]]
             L.append(
                 f'  amdgpu::exec_smfmac_f32_{M}x{N}x{K}_fp8(cu, dst, s0b, s1b, idx, {read_a},\n'
                 f'                                       {read_b});'
             )
-        return '\n'.join(L)
-
-    if 'SMFMAC' in name:
-        L = []
-        L.append(f'  // SMFMAC stub: {name} (I32 result, no cross-lane helper)')
-        L.append(f'  (void)wf;')
-        L.append(f'  throw util::UnimplementedInst(mnemonic());')
+        else:
+            raise ValueError(
+                f'{name}: unsupported SMFMAC types: {result_type}, {input_type}'
+            )
         return '\n'.join(L)
 
     # Compute number of blocks from output register count and matrix dims.
