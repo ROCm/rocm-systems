@@ -260,7 +260,8 @@ print_events(const ph_event_list_t* events, uint32_t limit)
 {
     for(uint32_t i = 0; i < events->list_size && i < limit; ++i)
     {
-        printf("id: %lu, type: %s, nesting_depth: %u, track_id: %u, start: %lu, end: %lu, name: %s\n",
+        printf("id: %lu, type: %s, nesting_depth: %u, track_id: %u, start: %lu, end: "
+               "%lu, name: %s\n",
                (unsigned long) events->events[i].id,
                event_type_name(events->events[i].type),
                (unsigned) events->events[i].nesting_depth,
@@ -485,27 +486,18 @@ on_load_finished(ph_future_t future, ph_future_status_t status, ph_result_t resu
 }
 
 static const char*
-probe_status_name(ph_probe_status_t status)
+probe_result_name(ph_result_t result)
 {
-    switch(status)
+    switch(result)
     {
-        case PH_PROBE_STATUS_UNKNOWN: return "unknown";
-        case PH_PROBE_STATUS_SUPPORTED: return "supported";
-        case PH_PROBE_STATUS_FILE_NOT_FOUND: return "file_not_found";
-        case PH_PROBE_STATUS_UNREADABLE: return "unreadable";
-        case PH_PROBE_STATUS_UNKNOWN_FORMAT: return "unknown_format";
-        case PH_PROBE_STATUS_METADATA_MISSING: return "metadata_missing";
-        case PH_PROBE_STATUS_METADATA_MALFORMED: return "metadata_malformed";
-        case PH_PROBE_STATUS_AMBIGUOUS_TRACE: return "ambiguous_trace";
-        case PH_PROBE_STATUS_UNSUPPORTED_VERSION: return "unsupported_version";
+        case PH_RESULT_SUCCESS: return "success";
+        case PH_RESULT_UNSUPPORTED_FILE: return "unsupported_file";
+        case PH_RESULT_INVALID_FILE: return "invalid_file";
+        case PH_RESULT_UNSUPPORTED_SCHEMA_VERSION: return "unsupported_schema_version";
+        case PH_RESULT_INVALID_ARGUMENT: return "invalid_argument";
+        case PH_RESULT_INTERNAL_ERROR: return "internal_error";
+        default: return "error";
     }
-    return "unknown";
-}
-
-static const char*
-database_kind_name(ph_database_kind_t kind)
-{
-    return kind == PH_DATABASE_KIND_SQLITE ? "sqlite" : "unknown";
 }
 
 static const char*
@@ -515,35 +507,21 @@ trace_schema_name(ph_trace_schema_t schema)
 }
 
 static int
-probe_databases(int count, char** paths)
+probe_files(int count, char** paths)
 {
     int failed = 0;
     for(int i = 0; i < count; ++i)
     {
-        ph_database_probe_t probe = { 0 };
-        char                uuid[128];
-        char                message[1024];
-        const ph_result_t   result = ph_probe_database_details(
-            paths[i], &probe, uuid, sizeof(uuid), message, sizeof(message));
-        if(result != PH_RESULT_SUCCESS)
-        {
-            fprintf(stderr, "%s: probe call failed (%d)\n", paths[i], (int) result);
-            failed = 1;
-            continue;
-        }
-
-        printf("%s: status=%s database=%s schema=%s version=%u.%u.%u uuid=%s "
-               "message=%s\n",
+        ph_file_probe_t   probe  = { 0 };
+        const ph_result_t result = ph_probe_file(paths[i], &probe);
+        printf("%s: result=%s schema=%s version=%u.%u.%u\n",
                paths[i],
-               probe_status_name(probe.status),
-               database_kind_name(probe.database_kind),
+               probe_result_name(result),
                trace_schema_name(probe.trace_schema),
                probe.schema_version.major,
                probe.schema_version.minor,
-               probe.schema_version.patch,
-               uuid,
-               message);
-        if(probe.status != PH_PROBE_STATUS_SUPPORTED) failed = 1;
+               probe.schema_version.patch);
+        if(result != PH_RESULT_SUCCESS) failed = 1;
     }
     return failed;
 }
@@ -558,7 +536,7 @@ main(int argc, char** argv)
             fprintf(stderr, "usage: %s --probe DATABASE [DATABASE ...]\n", argv[0]);
             return 2;
         }
-        return probe_databases(argc - 2, argv + 2);
+        return probe_files(argc - 2, argv + 2);
     }
 
     const char* trace_path = argc > 1 ? argv[1] : "/home/amd/test_dbs/rocpd-3930708-0.db";

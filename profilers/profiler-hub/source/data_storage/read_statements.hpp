@@ -371,7 +371,7 @@ struct pmc_sample_result
     double value{};
 };
 
-struct interval_row_t
+struct interval_result
 {
     size_t event_id{};
     size_t start_ts{};
@@ -465,14 +465,14 @@ struct read_statements
 
     [[nodiscard]] const std::string& trace_uuid() const { return m_uuid; }
 
-    [[nodiscard]] std::vector<interval_row_t> query_intervals(
+    [[nodiscard]] std::vector<interval_result> query_intervals(
         const std::string& sql) const
     {
         return m_backend
-            ->create_read_statement_executor<interval_row_t>(sql,
-                                                             &interval_row_t::event_id,
-                                                             &interval_row_t::start_ts,
-                                                             &interval_row_t::end_ts)()
+            ->create_read_statement_executor<interval_result>(sql,
+                                                             &interval_result::event_id,
+                                                             &interval_result::start_ts,
+                                                             &interval_result::end_ts)()
             .to_vector();
     }
 

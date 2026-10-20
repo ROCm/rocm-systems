@@ -23,6 +23,15 @@ class connection_pool;
 class thread_pool;
 }  // namespace common
 
+/**
+ * @brief Detects whether a reader can open @p path.
+ *        Opens a recognized file read-only and does not create or modify it.
+ *        Another format is added by registering a detector; another schema by
+ *        registering the versions its reader accepts.
+ */
+[[nodiscard]] reader_types::file_probe_result_t
+probe_file(const std::string& path);
+
 // ============================================================================
 // Reader Interface
 // ============================================================================
@@ -310,13 +319,13 @@ struct reader_t
      */
     /**
      * @brief Histogram for every track on one shared time grid.
-     * @param desired_bins Approximate number of buckets. Must be non-zero.
+     * @param max_buckets Upper bound on the number of buckets. Must be non-zero.
+     *        The grid never has more buckets than this. A short trace has fewer.
      *        Duration tracks count overlapping events and sum the overlap.
      *        PMC tracks average sample values and hold the last value across
      *        empty buckets between samples.
      */
-    [[nodiscard]] reader_types::histogram_t get_histogram(
-        size_t desired_bins = 500) const;
+    [[nodiscard]] reader_types::histogram_t get_histogram(size_t max_buckets = 500) const;
 
     [[nodiscard]] reader_types::time_window_t get_data_time_range() const;
 

@@ -19,49 +19,26 @@ extern "C"
 #endif
 
     /**
-     * @brief Detects whether @p file_path is a database and trace schema that
+     * @brief Detects whether @p file_path is a trace file and schema that
      *        profiler-hub supports, without loading the trace.
-     * @param file_path Existing database file to inspect.
-     * @param probe Out parameter receiving the detection result.
-     * @return PH_RESULT_SUCCESS when probing completed, including an unsupported
-     *         result reported through @p probe; PH_RESULT_INVALID_ARGUMENT if an
-     *         argument is null; PH_RESULT_INTERNAL_ERROR on an unexpected failure.
-     * @note The database is opened read-only and is not created or modified.
+     * @param file_path Existing file to inspect.
+     * @param probe Out parameter receiving the trace schema and schema version.
+     *        Zeroed before probing.
+     * @return PH_RESULT_SUCCESS when the file is a supported trace,
+     *         PH_RESULT_UNSUPPORTED_FILE when it is not a supported format,
+     *         PH_RESULT_INVALID_FILE when it is missing, unreadable, or not a
+     *         usable trace, PH_RESULT_UNSUPPORTED_SCHEMA_VERSION when the schema
+     *         version is recognized but not supported, PH_RESULT_INVALID_ARGUMENT
+     *         if an argument is null, PH_RESULT_INTERNAL_ERROR on an unexpected
+     *         failure.
+     * @note The file is opened read-only and is not created or modified.
      */
-    ph_result_t ph_probe_database(const char* file_path, ph_database_probe_t* probe);
-
-    /**
-     * @brief Detects database and schema support and returns the probe's
-     *        diagnostic text and trace UUID.
-     * @param file_path Existing database file to inspect.
-     * @param probe Out parameter receiving the detection result.
-     * @param uuid Caller-provided buffer receiving the trace UUID. May be null
-     *        when @p uuid_capacity is zero.
-     * @param uuid_capacity Capacity of @p uuid in bytes, including the null
-     *        terminator.
-     * @param message Caller-provided buffer receiving the diagnostic message.
-     *        May be null when @p message_capacity is zero.
-     * @param message_capacity Capacity of @p message in bytes, including the
-     *        null terminator.
-     * @return PH_RESULT_SUCCESS when probing completed, including an unsupported
-     *         result reported through @p probe; PH_RESULT_INVALID_ARGUMENT if an
-     *         argument or buffer/capacity pair is invalid;
-     *         PH_RESULT_INTERNAL_ERROR on an unexpected failure.
-     * @note Non-empty buffers are always null-terminated. Text that does not fit
-     *       is truncated.
-     * @note The database is opened read-only and is not created or modified.
-     */
-    ph_result_t ph_probe_database_details(const char*          file_path,
-                                          ph_database_probe_t* probe,
-                                          char*                uuid,
-                                          uint64_t             uuid_capacity,
-                                          char*                message,
-                                          uint64_t             message_capacity);
+    ph_result_t ph_probe_file(const char* file_path, ph_file_probe_t* probe);
 
     /**
      * @brief Opens a trace file and creates a context for it.
      * @param ctx Out parameter receiving the new context. Must not be null.
-     * @param file_path Path to the trace database to open. Must not be null.
+     * @param file_path Path to the trace file to open. Must not be null.
      * @param future Null to read the trace before returning. Otherwise a future
      *        from ph_future_create() that was not passed to an operation yet: the
      *        call returns at once with the context and the trace is read in the
@@ -71,8 +48,8 @@ extern "C"
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p file_path is null
      *         or @p future already serves an operation,
-     *         PH_RESULT_UNSUPPORTED_DATABASE, PH_RESULT_INVALID_DATABASE,
-     *         PH_RESULT_METADATA_MISSING or PH_RESULT_UNSUPPORTED_SCHEMA_VERSION
+     *         PH_RESULT_UNSUPPORTED_FILE, PH_RESULT_INVALID_FILE, or
+     *         PH_RESULT_UNSUPPORTED_SCHEMA_VERSION
      *         when the file is not a supported trace,
      *         PH_RESULT_CONTEXT_ALLOCATION_FAILED if the context could not be
      *         created or, without a future, the trace could not be read.
@@ -364,18 +341,19 @@ extern "C"
     /**
      * @brief Builds one histogram per track on a shared time grid.
      * @param ctx Context to query.
-     * @param desired_bins Approximate number of buckets. Must be non-zero.
+     * @param max_buckets Upper bound on the number of buckets. Must be non-zero.
+     *        The grid never has more buckets than this. A short trace has fewer.
      * @param histogram Out parameter. It is cleared before any other work.
      * @param future Null to run the call before returning. Otherwise a future
      *        from ph_future_create() that was not passed to an operation yet.
      * @return PH_RESULT_SUCCESS on success, PH_RESULT_INVALID_CONTEXT if
      *         @p ctx is null, PH_RESULT_INVALID_ARGUMENT if @p histogram is
-     *         null or @p desired_bins is 0, PH_RESULT_INTERNAL_ERROR on failure.
+     *         null or @p max_buckets is 0, PH_RESULT_INTERNAL_ERROR on failure.
      * @note Returned arrays are owned by @p ctx, remain valid until @p ctx is
      *       freed, and are not invalidated by a later call.
      */
     ph_result_t ph_get_histogram(ph_ctx_t        ctx,
-                                 uint32_t        desired_bins,
+                                 uint32_t        max_buckets,
                                  ph_histogram_t* histogram,
                                  ph_future_t     future);
 

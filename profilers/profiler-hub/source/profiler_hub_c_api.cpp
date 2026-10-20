@@ -1,11 +1,9 @@
-#include "database_probe_failure.hpp"
+#include "file_probe_failure.hpp"
 #include "ph_ctx.hpp"
 #include "ph_future.hpp"
 #include "profiler-hub/c/profiler_hub.h"
-#include "profiler-hub/cpp/database_probe.hpp"
+#include "profiler-hub/cpp/reader.hpp"
 
-#include <algorithm>
-#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
@@ -52,54 +50,13 @@ run_operation(ph_ctx_t ctx, ph_future_t future, std::function<ph_result_t()> ope
 }
 
 void
-copy_probe_text(const std::string& text, char* buffer, uint64_t capacity)
+copy_probe_result(const profiler_hub::reader_types::file_probe_result_t& result,
+                  ph_file_probe_t*                                       probe)
 {
-    if(buffer == nullptr || capacity == 0) return;
-
-    const uint64_t text_size = static_cast<uint64_t>(text.size());
-    const uint64_t copy_size = std::min(text_size, capacity - 1);
-    std::memcpy(buffer, text.data(), static_cast<size_t>(copy_size));
-    buffer[copy_size] = '\0';
-}
-
-void
-copy_probe_result(const profiler_hub::database_probe_result_t& result,
-                  ph_database_probe_t*                         probe)
-{
-    switch(result.status)
-    {
-        case profiler_hub::probe_status_t::supported:
-            probe->status = PH_PROBE_STATUS_SUPPORTED;
-            break;
-        case profiler_hub::probe_status_t::file_not_found:
-            probe->status = PH_PROBE_STATUS_FILE_NOT_FOUND;
-            break;
-        case profiler_hub::probe_status_t::unreadable:
-            probe->status = PH_PROBE_STATUS_UNREADABLE;
-            break;
-        case profiler_hub::probe_status_t::unknown_format:
-            probe->status = PH_PROBE_STATUS_UNKNOWN_FORMAT;
-            break;
-        case profiler_hub::probe_status_t::metadata_missing:
-            probe->status = PH_PROBE_STATUS_METADATA_MISSING;
-            break;
-        case profiler_hub::probe_status_t::metadata_malformed:
-            probe->status = PH_PROBE_STATUS_METADATA_MALFORMED;
-            break;
-        case profiler_hub::probe_status_t::ambiguous_trace:
-            probe->status = PH_PROBE_STATUS_AMBIGUOUS_TRACE;
-            break;
-        case profiler_hub::probe_status_t::unsupported_version:
-            probe->status = PH_PROBE_STATUS_UNSUPPORTED_VERSION;
-            break;
-    }
-
-    probe->database_kind  = result.database_kind == profiler_hub::database_kind_t::sqlite
-                                ? PH_DATABASE_KIND_SQLITE
-                                : PH_DATABASE_KIND_UNKNOWN;
-    probe->trace_schema   = result.trace_schema == profiler_hub::trace_schema_t::rocpd
-                                ? PH_TRACE_SCHEMA_ROCPD
-                                : PH_TRACE_SCHEMA_UNKNOWN;
+    probe->trace_schema =
+        result.trace_schema == profiler_hub::reader_types::trace_schema_t::rocpd
+            ? PH_TRACE_SCHEMA_ROCPD
+            : PH_TRACE_SCHEMA_UNKNOWN;
     probe->schema_version = { result.schema_version.major,
                               result.schema_version.minor,
                               result.schema_version.patch };
@@ -153,41 +110,20 @@ get_event_details(ph_ctx_t          ctx,
 }  // namespace
 
 ph_result_t
-ph_probe_database(const char* file_path, ph_database_probe_t* probe)
-{
-    return ph_probe_database_details(file_path, probe, nullptr, 0, nullptr, 0);
-}
-
-ph_result_t
-ph_probe_database_details(const char*          file_path,
-                          ph_database_probe_t* probe,
-                          char*                uuid,
-                          uint64_t             uuid_capacity,
-                          char*                message,
-                          uint64_t             message_capacity)
+ph_probe_file(const char* file_path, ph_file_probe_t* probe)
 {
     if(file_path == nullptr || probe == nullptr)
     {
         return PH_RESULT_INVALID_ARGUMENT;
     }
-    if((uuid == nullptr && uuid_capacity != 0) ||
-       (message == nullptr && message_capacity != 0))
-    {
-        return PH_RESULT_INVALID_ARGUMENT;
-    }
 
-    *probe        = {};
-    probe->status = PH_PROBE_STATUS_UNKNOWN;
-    copy_probe_text({}, uuid, uuid_capacity);
-    copy_probe_text({}, message, message_capacity);
-    return guard_call(
-        [file_path, probe, uuid, uuid_capacity, message, message_capacity]() {
-            const auto result = profiler_hub::probe_database(file_path);
-            copy_probe_result(result, probe);
-            copy_probe_text(result.uuid, uuid, uuid_capacity);
-            copy_probe_text(result.message, message, message_capacity);
-            return PH_RESULT_SUCCESS;
-        });
+    *probe = {};
+    return guard_call([file_path, probe]() {
+        const profiler_hub::reader_types::file_probe_result_t result =
+            profiler_hub::probe_file(file_path);
+        copy_probe_result(result, probe);
+        return result.status;
+    });
 }
 
 ph_result_t
@@ -220,9 +156,9 @@ ph_ctx_create(ph_ctx_t* ctx, const char* file_path, ph_future_t future)
         {
             return PH_RESULT_INVALID_ARGUMENT;
         }
-    } catch(const profiler_hub::database_probe_failure& failure)
+    } catch(const profiler_hub::file_probe_failure& failure)
     {
-        return profiler_hub::to_ph_result(failure.result().status);
+        return failure.result().status;
     } catch(...)
     {
         return PH_RESULT_CONTEXT_ALLOCATION_FAILED;
@@ -516,31 +452,26 @@ ph_get_track_samples(ph_ctx_t          ctx,
 
 ph_result_t
 ph_get_histogram(ph_ctx_t        ctx,
-                 uint32_t        desired_bins,
+                 uint32_t        max_buckets,
                  ph_histogram_t* histogram,
                  ph_future_t     future)
 {
-    if(histogram != nullptr)
-    {
-        *histogram = {};
-    }
-
     if(ctx == nullptr)
     {
         return PH_RESULT_INVALID_CONTEXT;
     }
-
-    if(histogram == nullptr || desired_bins == 0)
+    if(histogram == nullptr || max_buckets == 0)
     {
         return PH_RESULT_INVALID_ARGUMENT;
     }
+    *histogram = {};
 
-    return run_operation(ctx, future, [ctx, desired_bins, histogram]() -> ph_result_t {
+    return run_operation(ctx, future, [ctx, max_buckets, histogram]() -> ph_result_t {
         if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
         {
             return ready;
         }
-        ctx->build_histogram(desired_bins, *histogram);
+        ctx->build_histogram(max_buckets, *histogram);
         return PH_RESULT_SUCCESS;
     });
 }

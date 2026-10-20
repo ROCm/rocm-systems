@@ -79,7 +79,7 @@ struct ph_ctx
     [[nodiscard]] ph_sample_list_t          get_track_samples(uint32_t track_id,
                                                               uint64_t start_ts,
                                                               uint64_t end_ts);
-    void build_histogram(uint32_t desired_bins, ph_histogram_t& histogram);
+    void build_histogram(uint32_t max_buckets, ph_histogram_t& histogram);
 
     profiler_hub::common::thread_pool& get_thread_pool() { return m_thread_pool; }
 

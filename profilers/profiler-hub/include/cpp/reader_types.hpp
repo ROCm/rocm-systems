@@ -12,7 +12,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include <profiler-hub/c/profiler_hub_types.h>
 #include <profiler-hub/cpp/shared_types.hpp>
+#include <profiler-hub/cpp/version.hpp>
 
 namespace profiler_hub::reader_types
 {
@@ -612,6 +614,23 @@ struct histogram_t
     timestamp_ns_t         bucket_size{};
     size_t                 bucket_count{};
     track_histogram_list_t tracks;
+};
+
+/** @brief Trace schema family stored inside a recognized file. */
+enum class trace_schema_t
+{
+    unknown,
+    rocpd,
+};
+
+/** @brief What a path contains, and whether a reader can open it. */
+struct file_probe_result_t
+{
+    ph_result_t             status{ PH_RESULT_UNSUPPORTED_FILE };
+    trace_schema_t          trace_schema{ trace_schema_t::unknown };
+    profiler_hub::version_t schema_version{ 0, 0, 0 };
+    std::string             uuid;
+    std::string             message;
 };
 
 }  // namespace profiler_hub::reader_types

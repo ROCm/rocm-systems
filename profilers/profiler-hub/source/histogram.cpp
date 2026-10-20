@@ -173,7 +173,7 @@ struct bucket_accumulator_t
 };
 
 reader_types::histogram_bucket_list_t
-accumulate_overlaps(const std::vector<data_storage::schema_v3::interval_row_t>& rows,
+accumulate_overlaps(const std::vector<data_storage::schema_v3::interval_result>& rows,
                     reader_types::timestamp_ns_t                                origin,
                     reader_types::timestamp_ns_t bucket_size,
                     size_t                       bucket_count)
@@ -270,12 +270,14 @@ struct histogram_grid_t
     size_t                       bucket_count{};
 };
 
+// max_buckets is an upper bound. The grid never has more buckets than
+// requested, and a short trace has fewer.
 histogram_grid_t
-make_grid(const reader_catalog_t& catalog, size_t desired_bins)
+make_grid(const reader_catalog_t& catalog, size_t max_buckets)
 {
-    if(desired_bins == 0)
+    if(max_buckets == 0)
     {
-        throw std::invalid_argument{ "desired_bins must be non-zero" };
+        throw std::invalid_argument{ "max_buckets must be non-zero" };
     }
 
     bool                         any    = false;
@@ -294,7 +296,7 @@ make_grid(const reader_catalog_t& catalog, size_t desired_bins)
     }
 
     const reader_types::timestamp_ns_t duration = end - origin;
-    reader_types::timestamp_ns_t bucket_size = (duration + desired_bins) / desired_bins;
+    reader_types::timestamp_ns_t bucket_size = (duration + max_buckets) / max_buckets;
     if(bucket_size == 0) bucket_size = 1;
     const size_t bucket_count =
         duration == 0 ? 1 : (duration + bucket_size) / bucket_size;
@@ -303,9 +305,9 @@ make_grid(const reader_catalog_t& catalog, size_t desired_bins)
 }  // namespace
 
 reader_types::histogram_t
-reader_t::impl::get_histogram(size_t desired_bins)
+reader_t::impl::get_histogram(size_t max_buckets)
 {
-    const histogram_grid_t    grid = make_grid(*m_catalog, desired_bins);
+    const histogram_grid_t    grid = make_grid(*m_catalog, max_buckets);
     reader_types::histogram_t histogram;
     histogram.origin_ts    = grid.origin;
     histogram.bucket_size  = grid.bucket_size;

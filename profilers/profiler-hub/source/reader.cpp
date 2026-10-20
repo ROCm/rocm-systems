@@ -221,9 +221,9 @@ reader_t::get_region_summary(const reader_types::time_window_t& window) const
 }
 
 reader_types::histogram_t
-reader_t::get_histogram(size_t desired_bins) const
+reader_t::get_histogram(size_t max_buckets) const
 {
-    return m_impl->get_histogram(desired_bins);
+    return m_impl->get_histogram(max_buckets);
 }
 
 reader_types::time_window_t

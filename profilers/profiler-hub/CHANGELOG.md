@@ -35,7 +35,9 @@ downstream consumer of the library.
 - `ph_stream_t` and `ph_queue_t` carry `nid` (`rocpd_info_node.id`) and `pid`
   (`rocpd_info_process.id`, not the OS process id).
 - `reader_t::get_histogram()` and `ph_get_histogram()` return one histogram per
-  track on a shared time grid. Duration tracks count events that overlap each
+  track on a shared time grid. `max_buckets` is an upper bound: the grid never
+  has more buckets than requested, and a short trace has fewer. Duration tracks
+  count events that overlap each
   bucket and sum that overlap. PMC tracks average the samples in each bucket
   and hold the previous value across empty buckets between samples. Bucket 0
   starts at the earliest track timestamp.
@@ -55,24 +57,19 @@ downstream consumer of the library.
   pointer is null. A kernel, memory copy, or memory allocation uses its
   agent+queue track when that track exists, then its stream track, instead of
   the host thread track.
-- `probe_database()` and the C equivalent `ph_probe_database()` detect a SQLite
+- `probe_file()` and the C equivalent `ph_probe_file()` detect a SQLite
   database, its `rocpd_metadata_<uuid>` table, and the schema version before a
   reader is opened. A trace that only has the `schema_version` tag is accepted
   when its value is a major number such as `3`, `major.minor` such as `3.0`, or
   `major.minor.patch` such as `3.0.1`. They do not create or modify the file.
-  `ph-c-client --probe`
-  runs the C probe against one or more existing trace files. Schema 3 is
-  accepted. `ph_ctx_create()` returns
-  `PH_RESULT_UNSUPPORTED_DATABASE`, `PH_RESULT_INVALID_DATABASE`,
-  `PH_RESULT_METADATA_MISSING`, or `PH_RESULT_UNSUPPORTED_SCHEMA_VERSION`
-  instead of opening an unsupported trace. Another database format is added by
+  `ph_probe_file()` reports that outcome with `ph_result_t`. `ph_file_probe_t`
+  carries the trace schema and schema version. `ph-c-client
+  --probe` runs the C probe against one or more existing trace files. Schema 3
+  is accepted. `ph_ctx_create()` returns `PH_RESULT_UNSUPPORTED_FILE`,
+  `PH_RESULT_INVALID_FILE`, or `PH_RESULT_UNSUPPORTED_SCHEMA_VERSION` instead
+  of opening an unsupported trace. Another file format is added by
   registering a detector, and another schema by registering the versions its
   reader accepts.
-- `ph_probe_database_details()` preserves the existing C probe ABI while also
-  copying the probe diagnostic message and trace UUID into caller-owned
-  buffers. Probe output is initialized to `PH_PROBE_STATUS_UNKNOWN`, so a probe
-  result is never reported as supported unless probing completes successfully,
-  while the numeric values of existing statuses remain unchanged.
 - `ph_get_node()` returns `stream_hardware_links`: one entry per distinct
   stream-to-hardware relationship in kernel-dispatch, memory-allocate, and
   memory-copy rows. `reader_t::get_stream_hardware_links()` returns the same
@@ -146,7 +143,7 @@ downstream consumer of the library.
 ### Changed
 
 - `storage_t::get_storage_version()` uses the same schema-version rules as
-  `probe_database()`. All three split tags are required, otherwise
+  `probe_file()`. All three split tags are required, otherwise
   `schema_version` must be `major`, `major.minor`, or `major.minor.patch`.
   A partial set of split tags is not a version.
 - **Breaking:** `ph_process_t` now carries `ppid`, `init`, `fini`, `start`, `end`,

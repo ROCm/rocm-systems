@@ -1,9 +1,9 @@
 #include "ph_ctx.hpp"
-#include "database_probe_failure.hpp"
 #include "debug.hpp"
+#include "file_probe_failure.hpp"
 #include "ph_future.hpp"
 #include "populate_reader_catalog.hpp"
-#include "profiler-hub/cpp/database_probe.hpp"
+#include "profiler-hub/cpp/reader.hpp"
 #include "reader_catalog.hpp"
 #include "track_read_options.hpp"
 
@@ -319,10 +319,10 @@ ph_ctx::default_connection_count()
 ph_ctx::accepted_trace_t
 ph_ctx::accept_trace(std::string_view trace_path)
 {
-    const auto probe = profiler_hub::probe_database(std::string{ trace_path });
-    if(probe.status != profiler_hub::probe_status_t::supported)
+    const auto probe = profiler_hub::probe_file(std::string{ trace_path });
+    if(probe.status != PH_RESULT_SUCCESS)
     {
-        throw profiler_hub::database_probe_failure{ probe };
+        throw profiler_hub::file_probe_failure{ probe };
     }
     return accepted_trace_t{ std::string{ trace_path },
                              ph_schema_version_t{ .major = probe.schema_version.major,
@@ -819,11 +819,11 @@ narrow_histogram_count(std::size_t value)
 }  // namespace
 
 void
-ph_ctx::build_histogram(uint32_t desired_bins, ph_histogram_t& output)
+ph_ctx::build_histogram(uint32_t max_buckets, ph_histogram_t& output)
 {
     const auto source = m_connection_pool.with_connection(
-        [desired_bins](profiler_hub::common::connection& connection) {
-            return connection.reader().get_histogram(desired_bins);
+        [max_buckets](profiler_hub::common::connection& connection) {
+            return connection.reader().get_histogram(max_buckets);
         });
 
     auto storage = std::make_unique<c_histogram_storage_t>();

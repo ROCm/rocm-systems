@@ -69,7 +69,7 @@ struct reader_t::impl
 
     [[nodiscard]] size_t get_event_count(const reader_types::event_filter_t& filter);
 
-    [[nodiscard]] reader_types::histogram_t get_histogram(size_t desired_bins);
+    [[nodiscard]] reader_types::histogram_t get_histogram(size_t max_buckets);
 
     // Event detail queries
     [[nodiscard]] std::optional<reader_types::region_data_t> get_region_details(
