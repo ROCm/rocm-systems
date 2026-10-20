@@ -1610,6 +1610,7 @@
 <li>CMake 3.22+ (3.28+ when <code>ROCJITSU_ENABLE_VFIO=ON</code>)</li>
 <li>C++20 compiler (GCC 13+, Clang 16+)</li>
 <li>Python 3.10+ (for ISA code generation and the VFIO guest launcher)</li>
+<li><code>runtimes/api-headers</code> from the same source checkout (HSA and Linux UAPI headers)</li>
 <li>ROCm toolchain (optional, for HIP test kernels and daemon tests)</li>
 </ul>
 <p>When VFIO is enabled, configuration fails immediately on CMake older than 3.28;
@@ -1620,6 +1621,9 @@ automatically via CMake <code>FetchContent</code>.</p>
 <div class="highlight"><pre><span></span><code>cmake<span class="w"> </span>-B<span class="w"> </span>build<span class="w"> </span>-G<span class="w"> </span>Ninja<span class="w"> </span>-DCMAKE_BUILD_TYPE<span class="o">=</span>Release
 cmake<span class="w"> </span>--build<span class="w"> </span>build
 </code></pre></div>
+<p>When building rocjitsu outside the super-repository, pass
+<code>-DRJ_RUNTIME_API_HEADERS_SOURCE_DIR=/path/to/runtimes/api-headers</code> at
+configuration. Keep that header tree at a matching revision.</p>
 <h2 id="cmake-options">CMake options<a class="headerlink" href="#cmake-options" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -1664,6 +1668,11 @@ cmake<span class="w"> </span>--build<span class="w"> </span>build
 <td><code>RJ_CLANG_TIDY</code></td>
 <td><code>OFF</code></td>
 <td>Enable clang-tidy static analysis</td>
+</tr>
+<tr>
+<td><code>RJ_RUNTIME_API_HEADERS_SOURCE_DIR</code></td>
+<td><code>../../runtimes/api-headers</code></td>
+<td>Source directory of the shared runtime API headers</td>
 </tr>
 <tr>
 <td><code>LTO</code></td>
