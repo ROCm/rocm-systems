@@ -1383,7 +1383,12 @@ fn pm4_control(native: &sysfs::KfdNode) -> Option<Pm4Control> {
     {
         return None;
     }
-    let cache_line = usize::try_from(crate::cpu_cache::cache_line_size().ok()?).ok()?;
+    let cache_line = usize::try_from(
+        crate::host::cache::CacheMaintenance::qualify(crate::host::cache::CachePolicy::WriteBack)
+            .ok()?
+            .line_size_bytes()?,
+    )
+    .ok()?;
     if cache_line < size_of::<u64>() || !cache_line.is_power_of_two() || cache_line > 4096 / 3 {
         return None;
     }
