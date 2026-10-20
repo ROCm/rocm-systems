@@ -191,7 +191,7 @@ void* MemoryPool::AllocateMemory(size_t size, Stream* stream, void* dptr) {
     // Managed pools allocate fine-grain, host-backed SVM on the host context
     // (same as ihipMallocManaged); other pools use the per-device context.
     amd::Context* context = state_.managed_ ? hip::host_context : device_->asContext();
-    const auto& dev_info = context->devices()[0]->info();
+    const auto& dev_info = device_->asContext()->devices()[0]->info();
     if (dev_info.maxMemAllocSize_ < size) {
       return nullptr;
     }
