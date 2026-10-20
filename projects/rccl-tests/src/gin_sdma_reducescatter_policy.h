@@ -223,6 +223,22 @@ GIN_SDMA_RS_HD inline void bandwidthGBps(size_t perRankCount, int typeSize, doub
   }
 }
 
+// Whether ReduceScatterRunTest skips one (type, op) pair of its sweep.
+//   * fp8 never runs prod or mulsum, on either path.
+//   * The host path (deviceImpl == 0) skips floating avg: ring ReduceScatter
+//     reaches it through PreMulSum on non-direct primitives, which is only
+//     validated on AllReduce's direct path. Integer avg (SumPostDiv) runs. The
+//     -D 3 kernel implements avg itself, so the device path runs it.
+//   * The device path has no PreMulSum kernel, so it skips mulsum for every
+//     type; the host path keeps it.
+inline bool reduceScatterSkipsOp(int deviceImpl, bool floatingType, bool fp8Type,
+                                 bool isProd, bool isAvg, bool isMulsum) {
+  if (fp8Type && (isProd || isMulsum)) return true;
+  if (deviceImpl == 0 && isAvg && floatingType) return true;
+  if (deviceImpl != 0 && isMulsum) return true;
+  return false;
+}
+
 // Host-side env resolution (unit-testable without pulling in reduce_scatter.cu).
 //
 // Deliberately NOT wrapped in `#if !defined(__HIP_DEVICE_COMPILE__)`. HIP parses

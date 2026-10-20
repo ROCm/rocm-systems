@@ -298,6 +298,33 @@ TEST(ReduceScatterPolicyBandwidth, NullPointersAreSafe) {
   EXPECT_GT(alg, 0.0);
 }
 
+// ---- reduceScatterSkipsOp: which (type, op) pairs the sweep leaves out -------
+// Arguments: deviceImpl, floatingType, fp8Type, isProd, isAvg, isMulsum.
+
+TEST(ReduceScatterPolicySkip, FloatingAvgIsSkippedOnlyOnTheHostPath) {
+  EXPECT_TRUE(reduceScatterSkipsOp(0, true, false, false, true, false));
+  EXPECT_FALSE(reduceScatterSkipsOp(3, true, false, false, true, false));
+  EXPECT_TRUE(reduceScatterSkipsOp(0, true, true, false, true, false));    // fp8 avg, host
+  EXPECT_FALSE(reduceScatterSkipsOp(3, true, true, false, true, false));   // fp8 avg, -D 3
+  EXPECT_FALSE(reduceScatterSkipsOp(0, false, false, false, true, false)); // integer avg
+}
+
+TEST(ReduceScatterPolicySkip, MulsumIsSkippedOnlyOnTheDevicePath) {
+  EXPECT_FALSE(reduceScatterSkipsOp(0, true, false, false, false, true));
+  EXPECT_FALSE(reduceScatterSkipsOp(0, false, false, false, false, true));
+  EXPECT_TRUE(reduceScatterSkipsOp(3, true, false, false, false, true));
+  EXPECT_TRUE(reduceScatterSkipsOp(3, false, false, false, false, true));
+}
+
+TEST(ReduceScatterPolicySkip, Fp8NeverRunsProdOrMulsum) {
+  for (int impl : {0, 3}) {
+    EXPECT_TRUE(reduceScatterSkipsOp(impl, true, true, true, false, false)) << "impl " << impl;
+    EXPECT_TRUE(reduceScatterSkipsOp(impl, true, true, false, false, true)) << "impl " << impl;
+    EXPECT_FALSE(reduceScatterSkipsOp(impl, true, true, false, false, false)) << "impl " << impl;
+  }
+  EXPECT_FALSE(reduceScatterSkipsOp(3, true, false, true, false, false));  // non-fp8 prod
+}
+
 TEST(ReduceScatterPolicyEnv, ParseCtasEnvRejectsGarbage) {
   EXPECT_EQ(parseReduceScatterCtasEnvString(nullptr), kThresholdUnset);
   EXPECT_EQ(parseReduceScatterCtasEnvString(""), kThresholdUnset);
