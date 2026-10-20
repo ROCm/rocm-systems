@@ -51,6 +51,7 @@
 #   RCCL_TESTS_RS_CONN_RETRIES   connectivity-gate re-launches (default: 5)
 
 import os
+import re
 import shlex
 
 import pytest
@@ -171,6 +172,57 @@ def _run_rs_gin_sdma(request, per_rank_bytes, dtype, op, *, np=None, xenv=None):
     )
 
 
+# reduce_scatter_perf prints "# SKIP" and exits 0 when the device API is off
+# (for example cuMem disabled on Linux < 6.8), so rc == 0 alone proves nothing.
+_NUM = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
+_WRONG = r"(?:{}|N/A)".format(_NUM)
+# size count type redop root(-1) | time algbw busbw #wrong | time algbw busbw #wrong
+_RS_ROW_RE = re.compile(
+    r"^\s*(\d+)\s+\d+\s+\S+\s+\S+\s+-?\d+"
+    r"\s+{n}\s+{n}\s+{n}\s+({w})"
+    r"\s+{n}\s+{n}\s+{n}\s+({w})".format(n=_NUM, w=_WRONG)
+)
+_RS_SKIP_RE = re.compile(r"^# SKIP\b.*$", re.M)
+_RS_OOB_RE = re.compile(r"Out of bounds values\s*:\s*(\d+)")
+
+
+def _rs_rows(out):
+    """Measured rows as (size, wrong_out_of_place, wrong_in_place)."""
+    rows = []
+    for line in (out or "").splitlines():
+        m = _RS_ROW_RE.match(line)
+        if m:
+            rows.append((int(m.group(1)), m.group(2), m.group(3)))
+    return rows
+
+
+def _assert_rs_ok(rc, out, ctx):
+    """Assert the run measured something and its data check ran clean."""
+    tail = (out or "")[-2000:]
+    assert rc == 0, "ReduceScatter {} failed (exit {}). Output tail:\n{}".format(
+        ctx, rc, tail
+    )
+    skip = _RS_SKIP_RE.search(out or "")
+    assert not skip, "ReduceScatter {} did not run: {}".format(ctx, skip.group(0))
+    rows = _rs_rows(out)
+    assert rows, "ReduceScatter {} produced no measured rows. Output tail:\n{}".format(
+        ctx, tail
+    )
+    unchecked = [s for s, oop, ip in rows if "N/A" in (oop, ip)]
+    assert not unchecked, (
+        "ReduceScatter {} reported #wrong as N/A at sizes {}, so the data check "
+        "never ran.".format(ctx, unchecked)
+    )
+    bad = [(s, oop, ip) for s, oop, ip in rows if float(oop) != 0 or float(ip) != 0]
+    assert not bad, "ReduceScatter {} reported nonzero #wrong (size, oop, ip): {}".format(
+        ctx, bad
+    )
+    m = _RS_OOB_RE.search(out or "")
+    assert m and m.group(1) == "0", "ReduceScatter {} out-of-bounds count is {}".format(
+        ctx, m.group(1) if m else "absent"
+    )
+
+
 # CTA ladder probes (int32, 8 ranks -> total = per_rank * 8):
 #   1 MiB/rank ->  8 MiB total -> 48 CTAs (mid-band lo)
 #   4 MiB/rank -> 32 MiB total -> 48 CTAs (mid-band)
@@ -179,10 +231,8 @@ def _run_rs_gin_sdma(request, per_rank_bytes, dtype, op, *, np=None, xenv=None):
 @pytest.mark.parametrize("per_rank_mib,op", _CTA_LADDER)
 @pytest.mark.parametrize("dtype", _CTA_DTYPES)
 def test_ReduceScatterGinSdmaCtaLadder(request, per_rank_mib, op, dtype):
-    rc, _ = _run_rs_gin_sdma(request, per_rank_mib * MiB, dtype, op)
-    assert rc == 0, "ReduceScatter datacheck failed at {} MiB/rank op={} dtype={}".format(
-        per_rank_mib, op, dtype
-    )
+    rc, out = _run_rs_gin_sdma(request, per_rank_mib * MiB, dtype, op)
+    _assert_rs_ok(rc, out, "{} MiB/rank op={} dtype={}".format(per_rank_mib, op, dtype))
 
 
 # The narrowing types. gin_sdma_reduce.h carries a separate overload per op for
@@ -196,10 +246,8 @@ def test_ReduceScatterGinSdmaCtaLadder(request, per_rank_mib, op, dtype):
 @pytest.mark.parametrize("op", _NARROW_OPS)
 @pytest.mark.parametrize("dtype", _NARROW_DTYPES)
 def test_ReduceScatterGinSdmaNarrowingDtypes(request, dtype, op):
-    rc, _ = _run_rs_gin_sdma(request, 4 * MiB, dtype, op)
-    assert rc == 0, "ReduceScatter datacheck failed at 4 MiB/rank op={} dtype={}".format(
-        op, dtype
-    )
+    rc, out = _run_rs_gin_sdma(request, 4 * MiB, dtype, op)
+    _assert_rs_ok(rc, out, "4 MiB/rank op={} dtype={}".format(op, dtype))
 
 
 @_rs_skip
@@ -209,13 +257,11 @@ def test_ReduceScatterGinSdmaLowCtaSdma(request, dtype):
     # dtype: 1 MiB/rank and 8 MiB/rank.
     xenv = RS_XENV + ["NCCL_GIN_ANVIL_RS_CTAS=4"]
     for per_rank_mib in _LOW_CTA_SIZES_MIB:
-        rc, _ = _run_rs_gin_sdma(
+        rc, out = _run_rs_gin_sdma(
             request, per_rank_mib * MiB, dtype, "sum", xenv=xenv
         )
-        assert rc == 0, (
-            "ReduceScatter low-CTA SDMA {} MiB/rank datacheck failed dtype={}".format(
-                per_rank_mib, dtype
-            )
+        _assert_rs_ok(
+            rc, out, "low-CTA SDMA {} MiB/rank dtype={}".format(per_rank_mib, dtype)
         )
 
 
@@ -227,8 +273,8 @@ def test_ReduceScatterGinSdmaLowCtaSdma(request, dtype):
 def test_ReduceScatterGinSdmaPeerLoopArms(request, np):
     if RS_NP < np:
         pytest.skip("peer-loop arm needs RS_NP >= {} (got {})".format(np, RS_NP))
-    rc, _ = _run_rs_gin_sdma(request, 4 * MiB, "int32", "sum", np=np)
-    assert rc == 0, "ReduceScatter peer-loop datacheck failed at NP={}".format(np)
+    rc, out = _run_rs_gin_sdma(request, 4 * MiB, "int32", "sum", np=np)
+    _assert_rs_ok(rc, out, "peer-loop NP={}".format(np))
 
 
 @_rs_skip
@@ -238,8 +284,8 @@ def test_ReduceScatterGinSdma2GiBTotalHangGuard(request, dtype):
     # argument is measured against, and it takes the 8-way grid-stride path.
     if RS_NP < 8:
         pytest.skip("2 GiB total / 8-way path needs RS_NP >= 8 (got {})".format(RS_NP))
-    rc, _ = _run_rs_gin_sdma(request, 256 * MiB, dtype, "sum")
-    assert rc == 0, "ReduceScatter 2 GiB-total datacheck failed (dtype={})".format(dtype)
+    rc, out = _run_rs_gin_sdma(request, 256 * MiB, dtype, "sum")
+    _assert_rs_ok(rc, out, "2 GiB total dtype={}".format(dtype))
 
 
 def test_ReduceScatterGinSdmaHwLaunchCountMatchesParamLists():
@@ -252,3 +298,34 @@ def test_ReduceScatterGinSdmaHwLaunchCountMatchesParamLists():
         + len(_HANG_GUARD_DTYPES)
     )
     assert RS_HW_LAUNCH_COUNT == 27
+
+
+def test_ReduceScatterGinSdmaVerdictRejectsRunsThatCheckedNothing():
+    """Offline: rc == 0 must not pass a run that skipped or never checked data."""
+    header = (
+        "#       size         count      type   redop    root     time   algbw   busbw"
+        "  #wrong     time   algbw   busbw  #wrong\n"
+    )
+    row = (
+        "     8388608        262144     float     sum      -1    231.31   36.27   31.73"
+        "       0    231.50   36.24   31.71       0     SYM    SIMPLE          60\n"
+    )
+    oob = "# Out of bounds values : 0 OK\n"
+    _assert_rs_ok(0, header + row + oob, "clean")
+
+    skip = "# SKIP: symmetric memory / device API not supported (cuMem runtime disabled)\n"
+    unchecked = row.replace("       0    231.50", "     N/A    231.50")
+    wrong = row.replace("       0    231.50", "       3    231.50")
+    for out in (
+        skip,
+        skip + header + oob,
+        header + oob,
+        header + unchecked + oob,
+        header + wrong + oob,
+        header + row + "# Out of bounds values : 2 FAILED\n",
+        header + row,
+    ):
+        with pytest.raises(AssertionError):
+            _assert_rs_ok(0, out, "offline")
+    with pytest.raises(AssertionError):
+        _assert_rs_ok(1, header + row + oob, "offline")
