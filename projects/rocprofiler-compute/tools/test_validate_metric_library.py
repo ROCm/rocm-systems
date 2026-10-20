@@ -76,6 +76,13 @@ def gfx950_copy(tmp_path, monkeypatch):
     )
 
 
+@pytest.fixture
+def gfx115x_copy(tmp_path, monkeypatch):
+    """Copies of the gfx115x metric library and analysis configs."""
+    monkeypatch.setattr(MetricLibrary, "_cache", {})
+    return copy_shipped_trees(tmp_path, ["gfx115x"])
+
+
 def copy_shipped_trees(root, archs):
     library = root / "metric_library"
     configs = root / "analysis_configs"
@@ -452,6 +459,37 @@ def test_variant_position_must_exist(gfx908_copy, monkeypatch):
     )
     errors = validate(*gfx908_copy)
     assert "[gfx908] UNIT_VARIANTS lists 99.9.9, but no row has that position" in errors
+
+
+def test_bytes_per_second_row_shows_its_peak_scaled(gfx115x_copy):
+    """Roofline 4.1.3 shows its peak in Bytes/s: "$L1Bw_empirical_peak * 1e9"."""
+    library, configs = gfx115x_copy
+    replace_in(
+        configs / "gfx115x" / "0400_roofline.yaml",
+        "$L1Bw_empirical_peak * 1e9",
+        "$L1Bw_empirical_peak * 1e6",
+    )
+    errors = validate(library, configs)
+    assert any(
+        "GL1 Cache BW: peak $L1Bw_empirical_peak*1e6 is neither" in e for e in errors
+    )
+
+
+@pytest.mark.parametrize(
+    "known, message",
+    [
+        (("SPI_BUSY",), "counters missing: ['GL2C_EA_RDREQ_96B'"),
+        (
+            validate_metric_library.KNOWN_COUNTER_DIFFERENCES["gfx115x"] + ("SQ_X",),
+            "KNOWN_COUNTER_DIFFERENCES lists ['SQ_X']",
+        ),
+    ],
+)
+def test_known_counter_differences_are_exact(gfx115x_copy, monkeypatch, known, message):
+    monkeypatch.setattr(
+        validate_metric_library, "KNOWN_COUNTER_DIFFERENCES", {"gfx115x": known}
+    )
+    assert any(message in error for error in validate(*gfx115x_copy))
 
 
 def test_changed_rewritten_display_variant(gfx908_copy):

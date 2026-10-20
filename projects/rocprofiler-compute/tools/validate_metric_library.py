@@ -88,17 +88,16 @@ METRIC_REQUIRED_FIELDS = ("name", "formula", "unit", "description")
 METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical", "coll_level")
 # A roofline benchmark ceiling, the measured peak in "peak_empirical".
 EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
-# Ceilings the roofline benchmark measures that no row shows as a peak: the VALU
-# integer rates, MALL bandwidth (analyze skips MALL, roofline_calc.py), and the gfx950
-# F4 and F6 MFMA rates (the roofline shows only the combined F6F4 rate).
-CEILINGS_WITHOUT_METRIC = (
-    "I8Ops",
-    "I32Ops",
-    "I64Ops",
-    "MALLBw",
-    "MFMAF4Flops",
-    "MFMAF6Flops",
-)
+# Ceilings the roofline benchmark measures that no row shows as a peak: on every arch,
+# the VALU integer rates and MALL bandwidth (analyze skips MALL, roofline_calc.py); per
+# arch, the rates the roofline combines or does not show.
+CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
+ARCH_CEILINGS_WITHOUT_METRIC = {
+    # The roofline shows the combined F6F4 MFMA rate.
+    "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
+    # The roofline shows the F32 and F64 VALU rates only.
+    "gfx115x": ("FP16Flops", "BF16Flops"),
+}
 VARIABLE_FIELDS = ("formula",)
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
 # by a different measured ceiling. gfx950 counts MXF8 MFMA work in the F8 counter.
@@ -251,11 +250,41 @@ DISPLAY_VARIANTS["gfx942"] = {
         "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
     ),
 }
+DISPLAY_VARIANTS["gfx115x"] = {
+    "4.1.0": (
+        "VALU FLOPs",
+        "compute.valu_flops",
+        "SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(End_Timestamp - Start_Timestamp)",
+    ),
+    "4.1.1": (
+        "VALU FLOPs (F64)",
+        "compute.valu_flops_f64",
+        "SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)",
+    ),
+}
+# Counter names detect_counters() takes from YAML comments and descriptions rather than
+# formulas (D1); the library does not collect them.
+KNOWN_COUNTER_DIFFERENCES = {
+    "gfx115x": (
+        "GL2C_EA_RDREQ_96B",
+        "SPI_BUSY",
+        "SQ_INSTS_INTERNAL",
+        "SQ_INSTS_VALU",
+        "SQ_INSTS_VALU_TRANS",
+        "TCP_GATE_EN2_sum",
+    ),
+}
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
 UNIT_VARIANTS = {
     arch: _CDNA_UNIT_VARIANTS
     for arch in ("gfx908", "gfx90a", "gfx940", "gfx941", "gfx942")
+}
+UNIT_VARIANTS["gfx115x"] = {
+    "3.3.0": ("TCP Read Requests", "(Requests + $normUnit)"),
+    "3.3.1": ("TCP Write Requests", "(Requests + $normUnit)"),
+    "3.4.0": ("LDS Req", "(Requests + $normUnit)"),
+    "7.2.4": ("LDS Allocation", "Bytes"),
 }
 UNIT_VARIANTS["gfx950"] = {
     **_CDNA_UNIT_VARIANTS,
@@ -482,6 +511,10 @@ def _metric_errors(entry: object, source: str, item: str) -> list[str]:
 
 def _ceiling_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
     measured = _arch_ceilings(arch)
+    without_metric = {
+        *CEILINGS_WITHOUT_METRIC,
+        *ARCH_CEILINGS_WITHOUT_METRIC.get(arch, ()),
+    }
     users = defaultdict(list)
     for metric_id, metric in metrics.items():
         match = EMPIRICAL_PEAK_RE.fullmatch(str(metric.get("peak_empirical")))
@@ -496,7 +529,7 @@ def _ceiling_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
             )
         elif len(metric_ids) > 1:
             errors.append(f"[{arch}] {metric_ids}: share the ceiling {ceiling}")
-        elif ceiling in CEILINGS_WITHOUT_METRIC:
+        elif ceiling in without_metric:
             errors.append(
                 f"[{arch}] {metric_ids}: {ceiling} is in CEILINGS_WITHOUT_METRIC"
             )
@@ -504,7 +537,7 @@ def _ceiling_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
         f"[{arch}] the roofline benchmark measures {ceiling}, but no metric has it as "
         "'peak_empirical'; add it to the metric it bounds, or to "
         "CEILINGS_WITHOUT_METRIC"
-        for ceiling in sorted(measured - set(users) - set(CEILINGS_WITHOUT_METRIC))
+        for ceiling in sorted(measured - set(users) - without_metric)
     )
     return errors
 
@@ -679,8 +712,8 @@ def _peak_errors(
     """Check that row peaks and library peaks match, both ways.
 
     Each row's peak is its metric's "peak" or "peak_empirical", and each library peak
-    is the peak of a row that shows the metric. A measured peak on an arch the roofline
-    benchmark does not run on is skipped.
+    is the peak of a row that shows the metric. A Bytes/s row shows its peak in Bytes/s.
+    A measured peak on an arch the roofline benchmark does not run on is skipped.
     """
     benchmarked = bool(_arch_ceilings(arch))
     errors = []
@@ -694,7 +727,7 @@ def _peak_errors(
         fields = [
             field
             for field in ("peak", "peak_empirical")
-            if field in metric and row.peak == _canonical(metric[field])
+            if field in metric and row.peak == _row_peak(row, _canonical(metric[field]))
         ]
         shown_fields[metric_id].update(fields)
         if not fields:
@@ -718,6 +751,19 @@ def _gb_per_second(row: "_Row") -> Optional[str]:
     return row.equation
 
 
+def _row_peak(row: "_Row", peak: str) -> str:
+    """Return a library peak (GB/s) as row shows it.
+
+    A Bytes/s row shows a theoretical "<MHz term> / 1000" as "<MHz term> * 1e6", and a
+    measured "$<ceiling>_empirical_peak" as "... * 1e9".
+    """
+    if row.unit != "Bytes/s":
+        return peak
+    if peak.endswith("/1000"):
+        return peak[: -len("/1000")] + "*1e6"
+    return f"{peak}*1e9"
+
+
 def _counter_errors(
     arch: str, rows: list["_Row"], library: MetricLibrary, analysis_dir: Path
 ) -> list[str]:
@@ -726,7 +772,8 @@ def _counter_errors(
     detect_counters() scans the panel text, so it also takes the counter name a
     raw-counter row is labeled with ("TA_TA_BUSY", "TCP_GATE_EN1 (free running
     cycles)"), whose formula reads "<name>_sum". The library takes counters from
-    formulas only (D1), so those names are not missing.
+    formulas only (D1), so those names are not missing, nor are the names listed in
+    KNOWN_COUNTER_DIFFERENCES.
     """
     has_membw_panel = any(
         (analysis_dir / arch).glob(f"{MEMBW_ANALYSIS_PANEL_ID}_*.yaml")
@@ -738,10 +785,14 @@ def _counter_errors(
     )
     label_names = {row.label.split()[0] for row in rows}
     row_labels = {name for name in label_names if f"{name}_sum" in actual}
+    known = set(KNOWN_COUNTER_DIFFERENCES.get(arch, ()))
     errors = []
-    if expected - actual - row_labels:
-        missing = sorted(expected - actual - row_labels)
+    if expected - actual - row_labels - known:
+        missing = sorted(expected - actual - row_labels - known)
         errors.append(f"[{arch}] counters missing: {missing}")
+    if known - (expected - actual):
+        stale = sorted(known - (expected - actual))
+        errors.append(f"[{arch}] KNOWN_COUNTER_DIFFERENCES lists {stale}; remove them")
     if actual - expected:
         errors.append(f"[{arch}] extra counters: {sorted(actual - expected)}")
     return errors
@@ -806,19 +857,28 @@ def _make_soc(arch: str, analysis_dir: Path, membw_analysis: bool) -> OmniSoC_Ba
         set_selected=None,
     )
     machine_specs = SimpleNamespace(
-        gpu_arch=arch,
+        gpu_arch=_member_arch(arch),
         gpu_series=_gpu_series(arch),
         l2_banks=16,
         num_xcd=1,
         rocminfo_lines=None,
     )
     soc = OmniSoC_Base(args, machine_specs)
-    soc.set_arch(arch)
+    soc.set_arch(_member_arch(arch))
     return soc
 
 
 def _gpu_series(arch: str) -> Optional[str]:
-    return mi_gpu_specs.get_gpu_series(arch)
+    return mi_gpu_specs.get_gpu_series(_member_arch(arch))
+
+
+def _member_arch(arch: str) -> str:
+    """Return a GPU arch that uses arch's analysis configs (gfx1151 for gfx115x)."""
+    return next(
+        gpu_arch
+        for gpu_arch in sorted(mi_gpu_specs.get_gpu_series_dict())
+        if canonical_config_arch(gpu_arch) == arch
+    )
 
 
 # ---------------------------------------------------------------------------
