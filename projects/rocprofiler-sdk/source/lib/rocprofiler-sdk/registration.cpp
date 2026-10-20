@@ -1311,7 +1311,7 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
         }
 
         // provide code object information to any HSA executables previously loaded.
-        rocprofiler::code_object::iterate_hsa_executables();
+        rocprofiler::code_object::report_code_object_data();
 
         return status;
     }
@@ -1353,7 +1353,7 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     }
 
     // provide code object information to any HSA executables previously loaded.
-    rocprofiler::code_object::iterate_hsa_executables();
+    rocprofiler::code_object::report_code_object_data();
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
