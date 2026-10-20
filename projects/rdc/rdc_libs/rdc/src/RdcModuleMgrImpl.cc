@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include <cassert>
 #include <memory>
+#include <mutex>  // NOLINT(build/c++11)
 #include <type_traits>
 
 #include "rdc/rdc.h"
@@ -93,6 +94,7 @@ RdcModuleMgrImpl::RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher) : fetcher
 }
 
 RdcTelemetryPtr RdcModuleMgrImpl::get_telemetry_module() {
+  std::lock_guard<std::mutex> lock(module_mutex_);
   if (rdc_telemetry_module_ == nullptr) {
     rdc_telemetry_module_.reset(new RdcTelemetryModule(telemetry_modules_));
   }
@@ -100,6 +102,7 @@ RdcTelemetryPtr RdcModuleMgrImpl::get_telemetry_module() {
 }
 
 RdcDiagnosticPtr RdcModuleMgrImpl::get_diagnostic_module() {
+  std::lock_guard<std::mutex> lock(module_mutex_);
   if (rdc_diagnostic_module_ == nullptr) {
     rdc_diagnostic_module_.reset(new RdcDiagnosticModule(diagnostic_modules_));
   }

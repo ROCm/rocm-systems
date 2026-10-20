@@ -57,6 +57,16 @@ amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
 // AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS for any other handle.
 amdsmi_status_t get_gpu_id_from_processor_handle(amdsmi_processor_handle processor_handle,
                                                  uint32_t* gpu_index);
+// The slot an entity id holds in the flat GPU table, which is also its rocm_smi device index and
+// so the number AMD SMI reports a process's GPUs by. A physical GPU (device type GPU, role
+// physical, instance 0) is its own slot; any other GPU entity, such as a partition, is the slot
+// of the entry with its socket index and processor index (the dual index above). A placeholder
+// slot counts, so a GPU that AMD SMI cannot identify right now keeps its slot.
+// AMDSMI_STATUS_NOT_FOUND for every other entity: another device type, a physical index beyond
+// the table, or a socket and processor with no entry. AMDSMI_STATUS_INVAL for a null slot. It
+// takes one snapshot of the table, which lists AMD SMI's processors only when the table is
+// built or retried, and makes no other AMD SMI call.
+amdsmi_status_t get_gpu_slot_from_entity(uint32_t entity_id, uint32_t* slot);
 amdsmi_status_t get_processor_count(uint32_t& all_processor_count);
 amdsmi_status_t get_socket_handles(std::vector<amdsmi_socket_handle>& sockets);
 amdsmi_status_t get_processor_handles(amdsmi_socket_handle socket,

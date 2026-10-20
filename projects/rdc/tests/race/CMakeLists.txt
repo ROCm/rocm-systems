@@ -41,3 +41,15 @@ add_test(NAME rdc_race_tests COMMAND rdc_race_tests)
 
 # Each race test adds its test file and the RDC sources it drives below, in a
 # target_sources() block of its own.
+
+# test_module_mgr_race: RdcModuleMgrImpl's two lazy module getters, called from
+# two threads at once. The test file defines link-time fakes of every class the
+# manager builds and of the logger, so neither an RDC library nor the amd_smi
+# library is linked; the amd-smi headers come in through RdcSmiLib.h.
+target_sources(
+    rdc_race_tests
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_module_mgr_race.cc
+        ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcModuleMgrImpl.cc
+)
+target_include_directories(rdc_race_tests PRIVATE ${AMD_SMI_INCLUDE_DIR})

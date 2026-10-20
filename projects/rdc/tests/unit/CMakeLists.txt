@@ -187,8 +187,9 @@ install(
 # rdc_smi_diag_tests: the AMD SMI checks of rdci diag (compute processes, node
 # topology, GPU parameters) and the diagnostic module that runs them. Compiles
 # RdcSmiDiagnosticImpl.cc and RdcDiagnosticModule.cc into the test, which defines
-# the amdsmi calls they make and the two SmiUtils functions they call
-# (get_processor_handle_from_id, Smi2RdcError), so it links neither librdc nor
+# the amdsmi calls they make and the SmiUtils functions they call
+# (get_processor_handle_from_id and get_gpu_slot_from_entity; Smi2RdcError too,
+# which earlier versions of those two files call), so it links neither librdc nor
 # amd_smi and runs on GPU-less CI. librdc_bootstrap provides the logger.
 add_executable(
     rdc_smi_diag_tests
