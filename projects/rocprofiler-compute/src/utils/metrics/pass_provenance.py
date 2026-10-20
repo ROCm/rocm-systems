@@ -26,7 +26,7 @@ from typing import (
 
 import pandas as pd
 
-from utils.logger import console_warning
+from utils.logger import console_debug, console_warning
 from utils.metrics.expression import build_eval_string
 from utils.metrics.pass_layout import (
     PASS_COLUMN_SEP,
