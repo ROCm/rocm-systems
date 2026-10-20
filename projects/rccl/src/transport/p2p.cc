@@ -50,6 +50,9 @@ static_assert(sizeof(struct p2pConnectInfo) <= CONNECT_SIZE, "p2pConnectInfo is 
 struct p2pIpcExpInfo {
   ncclIpcDesc ipcDesc;
   bool legacyIpcCap;
+  // impFd carries a POSIX fd even though ncclCuMemHandleType is FABRIC: the allocation
+  // refused a fabric export and the (same-host) peer imports the fd instead.
+  bool fdFallback;
   ncclIpcFd impFd;
   size_t size;
   uintptr_t offset;
@@ -1114,6 +1117,13 @@ fail:
   goto exit;
 }
 
+// RCCL: a POSIX fd (host-local UDS) or a legacy hipIpc handle (host-local ROCr IPC server) can only
+// reach a peer on this host. Without peer info (host-only test comms) the peer is taken as local,
+// which is the pre-MNNVL behaviour.
+static bool p2pPeerOnSameHost(const ncclComm* comm, int peer) {
+  return comm->peerInfo == nullptr || comm->peerInfo[peer].hostHash == comm->peerInfo[comm->rank].hostHash;
+}
+
 static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize, int* peerRanks, int nPeers,
                                       ncclIpcRegType type, struct ncclReg* regRecord, int* regBufFlag,
                                       uintptr_t* offsetOut, uintptr_t** peerRmtAddrsOut, bool* isLegacyIpc) {
@@ -1222,7 +1232,10 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
             CUmemGenericAllocationHandle handle;
             if (CUPFN(cuMemRetainAllocationHandle(&handle, baseAddr)) != CUDA_SUCCESS) {
               // if cuMem* export fails, retry legacy export
-              if (comm->directMode || !ncclParamLegacyCudaRegister()) goto fail;
+              // (RCCL: same host only -- a legacy handle names a host-local ROCr IPC server)
+              if (comm->directMode || !ncclParamLegacyCudaRegister() ||
+                  !p2pPeerOnSameHost(comm, peerRank))
+                goto fail;
               CUDACHECKGOTO(cudaIpcGetMemHandle(&ipcInfo->ipcDesc.devIpc, baseAddr), ret, fail);
               ipcInfo->legacyIpcCap = true;
               if (isLegacyIpc) *isLegacyIpc = true;
@@ -1238,13 +1251,25 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
                   CUCHECKGOTO(cuMemExportToShareableHandle(&expFd, handle, ncclCuMemHandleType, 0), ret, fail);
                   NCCLCHECKGOTO(ncclProxyClientQueryFdBlocking(comm, proxyConn, expFd, &ipcInfo->impFd), ret, fail);
                   SYSCHECKGOTO(ncclIpcFdClose(expFd), "close", ret, fail);
-                } else {
-                  // Allow this to silently fail for cases where the user buff cannot be registered
-                  if (CUPFN(cuMemExportToShareableHandle(&ipcInfo->ipcDesc.cuDesc.handle, handle, ncclCuMemHandleType,
+                } else if (CUPFN(cuMemExportToShareableHandle(&ipcInfo->ipcDesc.cuDesc.handle, handle,
+                                                              ncclCuMemHandleType, 0)) != CUDA_SUCCESS) {
+                  // A fabric export is refused for allocations made without fabric handle support
+                  // (hipMalloc reports POSIX_FD only). A peer on this host can import a POSIX fd,
+                  // passed through its proxy's UDS service, which runs in every handle mode.
+                  // Otherwise allow this to silently fail for cases where the user buff cannot be registered.
+                  // The refused export leaves a sticky HIP error that would abort the next kernel launch
+                  // that checks cudaGetLastError() (e.g. DDA A2A LL after a registered p2p op): drop it.
+                  (void)cudaGetLastError();
+                  ncclIpcFd expFd = NCCL_INVALID_IPC_FD;
+                  if (!p2pPeerOnSameHost(comm, peerRank) ||
+                      CUPFN(cuMemExportToShareableHandle(&expFd, handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
                                                          0)) != CUDA_SUCCESS) {
                     CUCHECKGOTO(cuMemRelease(handle), ret, fail);
                     goto fail;
                   }
+                  NCCLCHECKGOTO(ncclProxyClientQueryFdBlocking(comm, proxyConn, expFd, &ipcInfo->impFd), ret, fail);
+                  SYSCHECKGOTO(ncclIpcFdClose(expFd), "close", ret, fail);
+                  ipcInfo->fdFallback = true;
                 }
               }
               CUCHECKGOTO(cuMemRelease(handle), ret, fail);
@@ -1252,8 +1277,10 @@ static ncclResult_t ipcRegisterBuffer(ncclComm* comm, const void* userbuff, size
           }
 #endif
         } else if (legacyIpcCap) {
-          // legacy export
-          if (comm->directMode || !ncclParamLegacyCudaRegister()) goto fail;
+          // legacy export (RCCL: same host only)
+          if (comm->directMode || !ncclParamLegacyCudaRegister() ||
+              !p2pPeerOnSameHost(comm, peerRank))
+            goto fail;
           CUDACHECKGOTO(cudaIpcGetMemHandle(&ipcInfo->ipcDesc.devIpc, baseAddr), ret, fail);
           ipcInfo->legacyIpcCap = true;
           if (isLegacyIpc) *isLegacyIpc = true;
@@ -1508,9 +1535,10 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
         // if proxy is same process as request peer, we just need to map the handle.
         memcpy(&segmentHandles[segment], &ipcExpInfo[segment].ipcDesc.memHandle, sizeof(CUmemGenericAllocationHandle));
       } else {
-        if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+        if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR || ipcExpInfo[segment].fdFallback) {
           CUCHECKGOTO(cuMemImportFromShareableHandle(&segmentHandles[segment],
-                                                     (void*)(uintptr_t)ipcExpInfo[segment].impFd, ncclCuMemHandleType),
+                                                     (void*)(uintptr_t)ipcExpInfo[segment].impFd,
+                                                     CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR),
                       ret, fail);
           SYSCHECKGOTO(ncclIpcFdClose(ipcExpInfo[segment].impFd), "close", ret, fail);
         } else {

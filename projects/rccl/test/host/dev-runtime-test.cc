@@ -839,15 +839,41 @@ TEST_F(SymMemoryExportSegmentHandleTest, NonPosixHandle_ExportsShareableHandle) 
   EXPECT_EQ(msg.segmentSize, 4096u);
 }
 
-// Branch: the export fails, so the second CUCHECKGOTO propagates the error.
-TEST_F(SymMemoryExportSegmentHandleTest, ExportFails_ReturnsError) {
+// Branch: the shareable (FABRIC) export is refused -- an allocation made without fabric handle
+// support. With every LSA peer on this host the segment falls back to a POSIX fd that the peers
+// fetch through this rank's proxy (fdFallback), and the export succeeds.
+TEST_F(SymMemoryExportSegmentHandleTest, ExportFails_SameHostFallsBackToPosixFd) {
   ncclCuMemHandleType = kMemHandleTypeNonPosix;
   ScopedHook exportHandle(g_hipMemExportToShareableHandle,
                           [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
                              unsigned long long) { return hipErrorInvalidValue; });
 
-  EXPECT_NE(symMemoryExportSegmentHandle(comm, &msg, {}, 4096), ncclSuccess);
+  EXPECT_EQ(symMemoryExportSegmentHandle(comm, &msg, {}, 4096), ncclSuccess);
   EXPECT_EQ(exportHandle.calls, 1);
+  EXPECT_EQ(msg.fdFallback, 1);
+  EXPECT_EQ(msg.segmentSize, 4096u);
+}
+
+// Same refusal with an LSA peer on another host: a POSIX fd cannot reach it, so the export fails
+// with ncclInvalidUsage (not a CUCHECK failure).
+TEST_F(SymMemoryExportSegmentHandleTest, ExportFails_CrossHostLsaPeerIsInvalidUsage) {
+  ncclCuMemHandleType = kMemHandleTypeNonPosix;
+  ScopedHook exportHandle(g_hipMemExportToShareableHandle,
+                          [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType,
+                             unsigned long long) { return hipErrorInvalidValue; });
+  ncclPeerInfo peers[2] = {};
+  peers[0].hostHash = 1;
+  peers[1].hostHash = 2;
+  int lsaRanks[2] = {0, 1};
+  comm->rank = 0;
+  comm->peerInfo = peers;
+  comm->devrState.lsaSize = 2;
+  comm->devrState.lsaRankList = lsaRanks;
+
+  EXPECT_EQ(symMemoryExportSegmentHandle(comm, &msg, {}, 4096), ncclInvalidUsage);
+  comm->peerInfo = nullptr;
+  comm->devrState.lsaSize = 0;
+  comm->devrState.lsaRankList = nullptr;
 }
 
 // Branch: the properties fetch fails, so the first CUCHECKGOTO returns before

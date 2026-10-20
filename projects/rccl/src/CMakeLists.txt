@@ -415,6 +415,7 @@ set(SRC_FILES
   include/rccl_common.h
   include/rccl_decision.h
   include/rccl_float8.h
+  include/rccl_memalloc_fabric.h
   include/rccl_vars.h
   include/recorder.h
   include/register.h

@@ -2460,12 +2460,15 @@ TEST_F(FreshRegistrationMicrotest, CuMemFabricExportFailureReleasesHandle)
             return hipSuccess;
         });
     ScopedHook retain(g_hipMemRetainAllocationHandle, RetainSentinelHandle());
-    // Export fails on the fabric arm.
+    // Export fails on the fabric arm, and so does the same-host POSIX-fd fallback that follows it
+    // (an allocation without fabric handle support is shared with a same-host peer by fd).
+    int xportCall = 0;
     ScopedHook xport(g_hipMemExportToShareableHandle,
-        [](void*, hipMemGenericAllocationHandle_t,
-           hipMemAllocationHandleType handleType,
-           unsigned long long) -> hipError_t {
-            EXPECT_NE(handleType, hipMemHandleTypePosixFileDescriptor);
+        [&xportCall](void*, hipMemGenericAllocationHandle_t,
+                     hipMemAllocationHandleType handleType,
+                     unsigned long long) -> hipError_t {
+            if (xportCall++ == 0) EXPECT_NE(handleType, hipMemHandleTypePosixFileDescriptor);
+            else EXPECT_EQ(handleType, hipMemHandleTypePosixFileDescriptor);
             return hipErrorInvalidValue;  // drives the error-arm goto fail
         });
     // The contract under test: Release fires on the sentinel handle
@@ -2490,7 +2493,7 @@ TEST_F(FreshRegistrationMicrotest, CuMemFabricExportFailureReleasesHandle)
                                    &regRecord, out, &isLegacyIpc);
 
     EXPECT_EQ(retain.calls,  1);
-    EXPECT_EQ(xport.calls,   1);
+    EXPECT_EQ(xport.calls,   2);  // fabric, then the POSIX-fd fallback
     EXPECT_EQ(release.calls, 1);  // the handle-leak guard contract
     EXPECT_EQ(proxy.calls,   0);
 
@@ -2503,6 +2506,53 @@ TEST_F(FreshRegistrationMicrotest, CuMemFabricExportFailureReleasesHandle)
     EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
     EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
 
+}
+
+// Non-MNNVL comms (ncclCuMemHandleType == POSIX_FD, the stock handle type) never reach the
+// FABRIC-export POSIX-fd fallback: a refused POSIX export is one export call and the registration
+// fails exactly as before the fallback existed (no second export, no proxy traffic).
+TEST_F(FreshRegistrationMicrotest, CuMemPosixFdExportFailureHasNoFallback)
+{
+    ScopedCuMemHandleType handleType(hipMemHandleTypePosixFileDescriptor);
+
+    cb.comm().gproxyConn[kPeerRank].initialized = true;
+    cb.comm().gproxyConn[kPeerRank].sameProcess = 0;
+
+    ScopedHook cuMemEnable(g_cuMemEnable, [] { return 1; });
+    const void* const kUserbuff =
+        reinterpret_cast<const void*>(kBegAddr + kBuffOffset);
+    ScopedHook memGet(g_hipMemGetAddressRange,
+        [&](hipDeviceptr_t* pbase, std::size_t* psize, hipDeviceptr_t) -> hipError_t {
+            if (pbase) *pbase = reinterpret_cast<hipDeviceptr_t>(kBaseAddr);
+            if (psize) *psize = kBaseSize;
+            return hipSuccess;
+        });
+    ScopedHook retain(g_hipMemRetainAllocationHandle, RetainSentinelHandle());
+    ScopedHook xport(g_hipMemExportToShareableHandle,
+        [](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType handleType,
+           unsigned long long) -> hipError_t {
+            EXPECT_EQ(handleType, hipMemHandleTypePosixFileDescriptor);
+            return hipErrorInvalidValue;
+        });
+    ScopedHook proxy(g_proxyCallBlocking,
+        [](struct ncclComm*, struct ncclProxyConnector*, int,
+           void*, int, void*, int) -> ncclResult_t {
+            ADD_FAILURE() << "proxy register must not fire after export failure";
+            return ncclInternalError;
+        });
+
+    int peerRanks[] = {kPeerRank};
+    IpcRegOutputs out;
+    bool isLegacyIpc = true;
+    (void)CallIpcRegisterBuffer(cb, kUserbuff, /*buffSize=*/ 256, peerRanks, 1, NCCL_IPC_COLLECTIVE,
+                                &regRecord, out, &isLegacyIpc);
+
+    EXPECT_EQ(retain.calls, 1);
+    EXPECT_EQ(xport.calls,  1);  // POSIX export only: no fallback attempt
+    EXPECT_EQ(proxy.calls,  0);
+    out.ExpectZeroed();
+    EXPECT_EQ(regRecord.ipcInfos[kPeerLocalRank], nullptr);
+    EXPECT_FALSE(regRecord.state & IPC_REG_COMPLETE);
 }
 
 // cuMem* arm, Retain failure -> retry-as-legacy fallback. Plan item A8.

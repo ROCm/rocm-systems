@@ -10,8 +10,36 @@
 #include "group.h"
 #include "nvtx.h"
 #include "utils.h"
+#include "archinfo.h"
+#include "rccl_memalloc_fabric.h"
 
 NCCL_PARAM(ShadowMempoolMaxSize, "SHADOW_MEMPOOL_MAX_SIZE", 1LL << 30);
+// RCCL: ncclMemAlloc before the first comm init would allocate POSIX_FD-only memory (the handle type
+// becomes FABRIC only when an MNNVL comm is initialized), which a peer on another host of the UALoE
+// clique can never import (no zero-copy / registration / symmetric window across trays). -1 (auto):
+// request FABRIC up front on gfx1250 when the device supports FABRIC handles and
+// NCCL_MNNVL_ENABLE != 0 (rcclMemAllocWantFabric); 1 force, 0 off. HIP accepts exactly one
+// requested handle type (hipMemCreate rejects FABRIC|POSIX, export must match it), so a FABRIC
+// buffer has no POSIX fd export: a non-MNNVL comm cannot register it, hence auto is limited to the
+// architecture whose MNNVL cliques need it. cuMemCreate failing with FABRIC (fabric not
+// provisioned) retries with POSIX_FD.
+RCCL_PARAM(MemAllocFabric, "MEMALLOC_FABRIC", -1);
+int64_t ncclParamMNNVLEnable();
+
+// gfx1250 test per device, cached (ncclMemAlloc can be called per allocator segment).
+static bool rcclMemAllocDeviceIsGfx1250(int dev) {
+  static int cache[MAX_ALLOC_TRACK_NGPU];  // 0 unknown, 1 no, 2 yes
+  if (dev < 0 || dev >= MAX_ALLOC_TRACK_NGPU) return false;
+  int v = __atomic_load_n(&cache[dev], __ATOMIC_ACQUIRE);
+  if (v == 0) {
+    char arch[256] = {0};
+    GetGcnArchName(dev, arch);
+    (void)cudaGetLastError();
+    v = IsArchMatch(arch, "gfx1250") ? 2 : 1;
+    __atomic_store_n(&cache[dev], v, __ATOMIC_RELEASE);
+  }
+  return v == 2;
+}
 
 NCCL_API(ncclResult_t, ncclMemAlloc, void** ptr, size_t size);
 ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
@@ -42,6 +70,7 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
   if (ncclCuMemEnable()) {
     size_t handleSize = size;
     int requestedHandleTypes = ncclCuMemHandleType;
+    bool fabricUpgrade = false;
     if (requestedHandleTypes == CU_MEM_HANDLE_TYPE_FABRIC) {
       flag = 0;
       // Check if the device supports FABRIC handles
@@ -50,7 +79,23 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
         WARN("ncclMemAlloc: device %d has no FABRIC handles support, falling back to POSIX", cudaDev);
         requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
       }
+    } else if (requestedHandleTypes == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+      const int64_t mode = rcclParamMemAllocFabric();
+      const int64_t mnnvl = mode < 0 ? ncclParamMNNVLEnable() : 0;
+      const bool gfx1250 = mode < 0 && mnnvl != 0 && rcclMemAllocDeviceIsGfx1250(cudaDev);
+      if (mode > 0 || gfx1250) {
+        flag = 0;
+        const bool fabricSupported =
+          CUPFN(cuDeviceGetAttribute(&flag, CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED, currentDev)) ==
+            CUDA_SUCCESS &&
+          flag;
+        if (rcclMemAllocWantFabric(mode, mnnvl, fabricSupported, gfx1250)) {
+          requestedHandleTypes = CU_MEM_HANDLE_TYPE_FABRIC;
+          fabricUpgrade = true;
+        }
+      }
     }
+    (void)cudaGetLastError();  // unsupported-attribute probes leave a sticky HIP error
 #if defined(HIP_VMM_UNCACHED_MEMORY)
     memprop.type = hipMemAllocationTypeUncached;
 #else
@@ -75,7 +120,13 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
     ALIGN_SIZE(handleSize, memGran);
 
     /* Allocate the physical memory on the device */
-    CUCHECKGOTO(cuMemCreate(&handle, handleSize, &memprop, 0), ret, vmm_fail);
+    if (fabricUpgrade && CUPFN(cuMemCreate(&handle, handleSize, &memprop, 0)) != CUDA_SUCCESS) {
+      (void)cudaGetLastError();
+      INFO(NCCL_ALLOC, "ncclMemAlloc: FABRIC allocation refused on device %d, using POSIX_FD", cudaDev);
+      memprop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+      fabricUpgrade = false;
+    }
+    if (!fabricUpgrade) CUCHECKGOTO(cuMemCreate(&handle, handleSize, &memprop, 0), ret, vmm_fail);
     handleCreated = true;
     /* Reserve a virtual address range */
     CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)ptr, handleSize, memGran, 0, 0), ret, vmm_fail);
