@@ -53,6 +53,7 @@ struct FieldSettings {
 struct JobWatchTableEntry {
   uint32_t group_id;
   std::vector<RdcFieldKey> fields;  //< store fields for faster query
+  uint64_t start_order;             //< the order of the job's start
 };
 
 struct HealthWatchTableEntry {
@@ -100,6 +101,27 @@ class RdcWatchTableImpl : public RdcWatchTable {
                     const RdcNotificationPtr& notif);
 
  private:
+  //!< Stops a running job: ends its watch, then its stats. The caller holds
+  //!< job_mutex_.
+  rdc_status_t stop_job(const char job_id[64], const rdc_gpu_gauges_t& gpu_gauge);
+
+  //!< Stops the stats of a running job, not its watch. The caller holds
+  //!< job_mutex_.
+  rdc_status_t stop_job_stats(const char job_id[64], const rdc_gpu_gauges_t& gpu_gauge);
+
+  //!< Removes a job from the job watch table and the cache. The caller holds
+  //!< job_mutex_.
+  rdc_status_t drop_job(const char job_id[64]);
+
+  //!< Makes room for a job start when every kept job runs: stops the stats of
+  //!< the running job, started first, whose GPU group was destroyed or runs a
+  //!< later job. A later job keeps its watch; a destroyed group's watch is
+  //!< unwatched, which turns it off even when rdc_field_unwatch() fails. A
+  //!< start that succeeds then removes the job as the job that stopped first.
+  //!< Returns false if there is no such job or its stop fails. The caller
+  //!< holds job_mutex_.
+  bool stop_orphaned_job(const rdc_gpu_gauges_t& gpu_gauge);
+
   //!< Helper function to Update the fields_in_table when unwatch tables
   rdc_status_t update_field_in_table_when_unwatch(const RdcFieldGroupKey& entry);
 
@@ -184,6 +206,14 @@ class RdcWatchTableImpl : public RdcWatchTable {
   //!< The last clean up time
   std::atomic<uint64_t> last_cleanup_time_;
   std::mutex watch_mutex_;
+
+  //!< Job starts, stops and removals run one at a time, so a start's check,
+  //!< its entries and their rollback do not interleave with another job call.
+  //!< Taken before watch_mutex_.
+  std::mutex job_mutex_;
+
+  //!< The start_order of the next job start. Guarded by job_mutex_.
+  uint64_t next_start_order_ = 0;
 };
 
 }  // namespace rdc

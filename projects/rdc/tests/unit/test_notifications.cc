@@ -22,34 +22,25 @@ THE SOFTWARE.
 
 // RdcNotificationImpl against fake AMD SMI event calls: which events listen() reports, and the
 // event mask that each GPU gets from its listeners; and RdcWatchTableImpl's listeners: a watch of
-// event fields, and a job start that records its listeners while a stop of the job runs. The
-// test compiles RdcNotificationImpl.cc, RdcWatchTableImpl.cc and RdcGroupSettingsImpl.cc and
-// defines the AMD SMI calls, the SmiUtils.cc lookups and ModifyCapability() they make, so it
-// needs neither librdc nor amd_smi nor a GPU; librdc_bootstrap provides the logger,
-// strncpy_with_null() and the entity codec.
+// event fields. The test compiles RdcNotificationImpl.cc, RdcWatchTableImpl.cc and
+// RdcGroupSettingsImpl.cc and defines the AMD SMI calls, the SmiUtils.cc lookups and
+// ModifyCapability() they make, so it needs neither librdc nor amd_smi nor a GPU;
+// librdc_bootstrap provides the logger, strncpy_with_null() and the entity codec.
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <functional>
-#include <map>
 #include <memory>
-#include <mutex>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
 #include "common/rdc_capabilities.h"
 #include "rdc/rdc.h"
-#include "rdc_lib/RdcCacheManager.h"
 #include "rdc_lib/RdcModuleMgr.h"
 #include "rdc_lib/RdcNotification.h"
 #include "rdc_lib/RdcPartition.h"
@@ -769,217 +760,6 @@ TEST(WatchTable, AWatchOfEventFieldsOnlyListensWithoutTelemetryCalls) {
   // (&v[0]) was undefined behavior.
   EXPECT_EQ(modules->telemetry->watches, std::vector<uint32_t>{});
   EXPECT_EQ(modules->telemetry->unwatches, std::vector<uint32_t>{});
-}
-
-// Where a thread under test waits until the test lets it go. Waits end after 10 s on the steady
-// clock, so that a broken test fails instead of hanging. (Each wait for the condition variable
-// is on the system clock: ThreadSanitizer, as of GCC 11, does not see it unlock its mutex in a
-// wait on the steady clock.)
-class Gate {
- public:
-  // The thread under test: says that it arrived, and waits.
-  void pass() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    arrived_ = true;
-    cv_.notify_all();
-    wait(&lock, [this] { return open_; });
-  }
-  // The test: waits until a thread arrived.
-  bool arrived() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    return wait(&lock, [this] { return arrived_; });
-  }
-  void open() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    open_ = true;
-    cv_.notify_all();
-  }
-
- private:
-  bool wait(std::unique_lock<std::mutex>* lock, const std::function<bool()>& done) {
-    const auto end = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (!done() && std::chrono::steady_clock::now() < end) {
-      cv_.wait_until(*lock, std::chrono::system_clock::now() + std::chrono::milliseconds(100));
-    }
-    return done();
-  }
-
-  std::mutex mutex_;
-  std::condition_variable cv_;
-  bool arrived_ = false;
-  bool open_ = false;
-};
-
-// Group settings whose first look-up of one group's GPUs waits at a gate.
-class HoldingGroups : public amd::rdc::RdcGroupSettingsImpl {
- public:
-  HoldingGroups() : RdcGroupSettingsImpl(std::make_shared<OnePartition>()) {}
-  rdc_status_t rdc_group_gpu_get_info(rdc_gpu_group_t group_id, rdc_group_info_t* info) override {
-    if (group_id == held_group && !held.exchange(true)) {
-      gate.pass();
-    }
-    return RdcGroupSettingsImpl::rdc_group_gpu_get_info(group_id, info);
-  }
-
-  rdc_gpu_group_t held_group = 0;
-  std::atomic<bool> held{false};
-  Gate gate;
-};
-
-// Counts the listeners of each (GPU, event field) pair. The add of one GPU's listeners, and the
-// removal of another GPU's, wait at gates.
-class HoldingNotification : public amd::rdc::RdcNotification {
- public:
-  bool is_notification_event(rdc_field_t field) const override {
-    return RDC_EVNT_IS_NOTIF_FIELD(field);
-  }
-  rdc_status_t add_event_listeners(const std::vector<RdcFieldKey>& fields) override {
-    if (!fields.empty() && fields[0].first == held_add_gpu) {
-      add_gate.pass();
-    }
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (const auto& field : fields) {
-      listeners_[field]++;
-    }
-    return RDC_ST_OK;
-  }
-  rdc_status_t remove_event_listeners(const std::vector<RdcFieldKey>& fields) override {
-    if (!fields.empty() && fields[0].first == held_remove_gpu) {
-      remove_gate.pass();
-    }
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (const auto& field : fields) {
-      if (listeners_[field] > 0) {
-        listeners_[field]--;
-      }
-    }
-    return RDC_ST_OK;
-  }
-  rdc_status_t listen(rdc_evnt_notification_t*, uint32_t* num_events, uint32_t) override {
-    *num_events = 0;
-    return RDC_ST_OK;
-  }
-  uint32_t listeners(uint32_t gpu, rdc_field_t field) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return listeners_[{gpu, field}];
-  }
-
-  uint32_t held_add_gpu = 0;
-  uint32_t held_remove_gpu = 0;
-  Gate add_gate;
-  Gate remove_gate;
-
- private:
-  std::mutex mutex_;
-  std::map<RdcFieldKey, uint32_t> listeners_;
-};
-
-// A cache with nothing in it, in which jobs start and stop.
-class EmptyCache : public amd::rdc::RdcCacheManager {
- public:
-  rdc_status_t rdc_field_get_latest_value(uint32_t, rdc_field_t, rdc_field_value*) override {
-    return RDC_ST_NOT_FOUND;
-  }
-  rdc_status_t rdc_field_get_value_since(uint32_t, rdc_field_t, uint64_t, uint64_t*,
-                                         rdc_field_value*) override {
-    return RDC_ST_NOT_FOUND;
-  }
-  rdc_status_t rdc_update_cache(uint32_t, const rdc_field_value&) override { return RDC_ST_OK; }
-  rdc_status_t evict_cache(uint32_t, rdc_field_t, uint64_t, double) override { return RDC_ST_OK; }
-  std::string get_cache_stats() override { return ""; }
-  rdc_status_t rdc_job_get_stats(const char[64], const rdc_gpu_gauges_t&,
-                                 rdc_job_info_t*) override {
-    return RDC_ST_NOT_FOUND;
-  }
-  rdc_status_t rdc_job_start_stats(const char[64], const rdc_group_info_t&,
-                                   const rdc_field_group_info_t&,
-                                   const rdc_gpu_gauges_t&) override {
-    return RDC_ST_OK;
-  }
-  rdc_status_t rdc_job_stop_stats(const char[64], const rdc_gpu_gauges_t&) override {
-    return RDC_ST_OK;
-  }
-  rdc_status_t rdc_update_job_stats(uint32_t, const std::string&, const rdc_field_value&) override {
-    return RDC_ST_OK;
-  }
-  rdc_status_t rdc_job_remove(const char[64]) override { return RDC_ST_OK; }
-  rdc_status_t rdc_job_remove_all() override { return RDC_ST_OK; }
-  rdc_status_t rdc_health_set(rdc_gpu_group_t, uint32_t, const rdc_field_value&) override {
-    return RDC_ST_OK;
-  }
-  rdc_status_t rdc_health_get_values(rdc_gpu_group_t, uint32_t, rdc_field_t, uint64_t, uint64_t,
-                                     rdc_field_value*, rdc_field_value*) override {
-    return RDC_ST_NOT_FOUND;
-  }
-  rdc_status_t rdc_health_clear(rdc_gpu_group_t) override { return RDC_ST_OK; }
-  rdc_status_t rdc_update_health_stats(rdc_gpu_group_t, uint32_t, const rdc_field_value&) override {
-    return RDC_ST_OK;
-  }
-};
-
-TEST(JobListeners, AStartThatRecordsWhileAStopRunsLeavesNoListeners) {
-  // Two starts of job j, on GPU 0 and on GPU 1 (nothing keeps two starts of one job apart), and
-  // a stop of j, ordered with gates: the start on GPU 1 records its listeners after the stop
-  // released those of the start on GPU 0, before the stop erased the job.
-  auto groups = std::make_shared<HoldingGroups>();
-  auto notifications = std::make_shared<HoldingNotification>();
-  // Job starts and stops use no metric fetcher.
-  amd::rdc::RdcWatchTableImpl watch_table{groups, std::make_shared<EmptyCache>(), nullptr,
-                                          std::make_shared<TelemetryOnly>(), notifications};
-  rdc_gpu_group_t gpu0 = 0;
-  rdc_gpu_group_t gpu1 = 0;
-  ASSERT_EQ(groups->rdc_group_gpu_create("gpu0", &gpu0), RDC_ST_OK);
-  ASSERT_EQ(groups->rdc_group_gpu_add(gpu0, 0), RDC_ST_OK);
-  ASSERT_EQ(groups->rdc_group_gpu_create("gpu1", &gpu1), RDC_ST_OK);
-  ASSERT_EQ(groups->rdc_group_gpu_add(gpu1, 1), RDC_ST_OK);
-  groups->held_group = gpu1;
-  notifications->held_add_gpu = 1;
-  notifications->held_remove_gpu = 0;
-  const rdc_gpu_gauges_t gauges;
-  rdc_status_t second_start = RDC_ST_UNKNOWN_ERROR;
-  rdc_status_t stop = RDC_ST_UNKNOWN_ERROR;
-  std::thread starter;
-  std::thread stopper;
-  // On any failure below, let both threads go and wait for them.
-  struct Finally {
-    std::function<void()> run;
-    ~Finally() { run(); }
-  } finally{[&] {
-    groups->gate.open();
-    notifications->add_gate.open();
-    notifications->remove_gate.open();
-    if (starter.joinable()) {
-      starter.join();
-    }
-    if (stopper.joinable()) {
-      stopper.join();
-    }
-  }};
-
-  // The start on GPU 1 finds no job j and waits.
-  starter = std::thread(
-      [&] { second_start = watch_table.rdc_job_start_stats(gpu1, "j", 1000000, gauges); });
-  ASSERT_TRUE(groups->gate.arrived());
-  // The start on GPU 0 runs, and records its listeners.
-  ASSERT_EQ(watch_table.rdc_job_start_stats(gpu0, "j", 1000000, gauges), RDC_ST_OK);
-  // The start on GPU 1 adds its listeners, and waits before it records them.
-  groups->gate.open();
-  ASSERT_TRUE(notifications->add_gate.arrived());
-  // The stop releases GPU 0's listeners, and waits before its unwatch.
-  stopper = std::thread([&] { stop = watch_table.rdc_job_stop_stats("j", gauges); });
-  ASSERT_TRUE(notifications->remove_gate.arrived());
-  // The start on GPU 1 records its listeners: job j is still in the table.
-  notifications->add_gate.open();
-  starter.join();
-  notifications->remove_gate.open();
-  stopper.join();
-
-  EXPECT_EQ(second_start, RDC_ST_OK);
-  EXPECT_EQ(stop, RDC_ST_OK);
-  for (rdc_field_t field : {RDC_EVNT_NOTIF_PROCESS_START, RDC_EVNT_NOTIF_PROCESS_END}) {
-    EXPECT_EQ(notifications->listeners(0, field), 0u) << field;
-    EXPECT_EQ(notifications->listeners(1, field), 0u) << field << ": the stop left them";
-  }
 }
 
 }  // namespace

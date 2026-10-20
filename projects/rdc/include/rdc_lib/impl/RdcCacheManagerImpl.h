@@ -80,7 +80,8 @@ struct GpuSummaryStats {
 // Per job entry
 struct RdcJobStatsCacheEntry {
   uint64_t start_time;
-  uint64_t end_time;
+  uint64_t end_time;     // 0 while the job runs
+  uint64_t start_order;  // counts job starts; orders jobs that stopped in the same second
   std::map<uint32_t, GpuSummaryStats> gpu_stats;
 
   uint32_t num_processes = 0;
@@ -96,6 +97,11 @@ typedef std::map<rdc_gpu_group_t, RdcCacheSamples> RdcHealthStatsCache;
 
 class RdcCacheManagerImpl : public RdcCacheManager {
  public:
+  // The most jobs, running or stopped, the cache keeps. rdc_job_start_stats()
+  // of a new job fails with RDC_ST_MAX_LIMIT when that many jobs run; else it
+  // may hold one job more until evict_jobs() removes the job that stopped first.
+  static constexpr size_t kMaxJobs = 256;
+
   rdc_status_t rdc_field_get_latest_value(uint32_t gpu_index, rdc_field_t field,
                                           rdc_field_value* value) override;
   rdc_status_t rdc_field_get_value_since(uint32_t gpu_index, rdc_field_t field,
@@ -117,6 +123,7 @@ class RdcCacheManagerImpl : public RdcCacheManager {
                                     const rdc_field_value& value) override;
   rdc_status_t rdc_job_remove(const char job_id[64]) override;
   rdc_status_t rdc_job_remove_all() override;
+  void evict_jobs() override;
 
   rdc_status_t rdc_health_set(rdc_gpu_group_t group_id, uint32_t gpu_index,
                               const rdc_field_value& value) override;
@@ -134,8 +141,12 @@ class RdcCacheManagerImpl : public RdcCacheManager {
                    unsigned int adjuster);
   void set_average_summary(rdc_stats_summary_t& summary,
                            uint32_t num_gpus);  // NOLINT
+  // The stopped job that stopped first (ties: the one started first), or
+  // cache_jobs_.end(). The caller holds cache_mutex_.
+  RdcJobStatsCache::iterator oldest_stopped_job();
   RdcCacheSamples cache_samples_;
   RdcJobStatsCache cache_jobs_;
+  uint64_t job_starts_ = 0;
   RdcHealthStatsCache cache_health_;
   std::mutex cache_mutex_;
 };
