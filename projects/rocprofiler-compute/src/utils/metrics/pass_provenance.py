@@ -14,7 +14,7 @@ from typing import Dict, FrozenSet, List, Mapping, Match, Optional, Set, Tuple, 
 
 import pandas as pd
 
-from utils.logger import console_warning
+from utils.logger import console_debug, console_warning
 from utils.metrics.expression import build_eval_string
 from utils.utils_counter_defs import (
     SUPPORTED_DENOM,
