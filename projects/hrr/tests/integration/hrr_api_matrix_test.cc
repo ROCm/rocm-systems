@@ -806,9 +806,9 @@ TEST_CASE("Unit_HRR_ApiMatrix_InfoBreakdownParse", "[.][hrr][api-matrix][cpu]") 
       "Owner PID:    7\n"
       "Processes:    1\n"
       "\n"
-      "  PID          Parent PID   Complete   Events       Blobs      Path\n"
-      "  ---          ----------   --------   ------       -----      ----\n"
-      "  7            1            NO         1326         1279       /tmp/cap/pid-7\n";
+      "  PID          Parent PID   Complete   Contents   Events       Blobs      Path\n"
+      "  ---          ----------   --------   --------   ------       -----      ----\n"
+      "  7            1            NO         recorded   1326         1279       /tmp/cap/pid-7\n";
   std::map<std::string, long long> root_counts;
   hrr_parse_info_breakdown(root_report, root_counts);
   CHECK(root_counts.empty());

@@ -370,7 +370,8 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlyCapture) {
  *   - Without the opt-in both pushes are marked HRR_PRESENT_WITHHELD; with it
  *     they are present and the zero is recorded as zero.
  *   - Only the metadata-only archive carries HRR_FILE_FLAG_METADATA_ONLY in its
- *     header, and --info says whether contents were recorded. Replay of the content
+ *     header, and --info on the process and on the capture root says whether
+ *     contents were recorded. Replay of the content
  *     archive, the genuine zero included, succeeds; replay of the metadata-only
  *     archive fails.
  */
@@ -435,6 +436,16 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlySetupArgument) {
       CHECK(info_rc == 0);
       CHECK(info.find(content ? "Contents:     recorded" : "Contents:     withheld") !=
             std::string::npos);
+    }
+    {
+      // The capture root, HIP_HRR_CAPTURE_OUTPUT itself, gets the process table,
+      // whose Contents column reads the same header flag.
+      const auto [info_rc, info] = hrr_playback_merged(cap.path, "--info");
+      INFO("--info output on the root:\n" << info);
+      CHECK(info_rc == 0);
+      CHECK(info.find("HRR Archive Root: ") != std::string::npos);
+      CHECK(info.find(content ? " recorded   " : " withheld   ") != std::string::npos);
+      CHECK(info.find(content ? " withheld   " : " recorded   ") == std::string::npos);
     }
 
     // The workload's fat binary refuses a metadata-only replay before the

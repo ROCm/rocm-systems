@@ -273,6 +273,19 @@ static std::vector<std::pair<fs::path, ProcessInfo>> collect_process_dirs(
   return processes;
 }
 
+// The root summary's Contents column: the HRR_FILE_FLAG_METADATA_ONLY bit of the
+// process's events.bin header, or "?" for a header this reader does not load.
+static const char* process_contents(const fs::path& dir) {
+  FILE* f = fopen((dir / "events.bin").string().c_str(), "rb");
+  if (!f) return "?";
+  hrr_file_header fh{};
+  const bool ok = fread(&fh, sizeof(fh), 1, f) == 1 && fh.magic == HRR_MAGIC &&
+                  fh.version == HRR_VERSION;
+  fclose(f);
+  if (!ok) return "?";
+  return (fh.reserved & HRR_FILE_FLAG_METADATA_ONLY) ? "withheld" : "recorded";
+}
+
 static bool print_root_info(const std::string& archive_path) {
   fs::path root(archive_path);
   if (fs::exists(root / "events.bin")) return false;
@@ -289,18 +302,19 @@ static bool print_root_info(const std::string& archive_path) {
   printf("Capture Mode: in-tree\n");
   printf("Owner PID:    %llu\n", static_cast<unsigned long long>(owner_pid));
   printf("Processes:    %zu\n\n", processes.size());
-  printf("  %-12s %-12s %-10s %-12s %-10s %s\n",
-         "PID", "Parent PID", "Complete", "Events", "Blobs", "Path");
-  printf("  %-12s %-12s %-10s %-12s %-10s %s\n",
-         "---", "----------", "--------", "------", "-----", "----");
+  printf("  %-12s %-12s %-10s %-10s %-12s %-10s %s\n",
+         "PID", "Parent PID", "Complete", "Contents", "Events", "Blobs", "Path");
+  printf("  %-12s %-12s %-10s %-10s %-12s %-10s %s\n",
+         "---", "----------", "--------", "--------", "------", "-----", "----");
   for (const auto& [path, info] : processes) {
     // The manifest says the process finalized; the trailer must also count the
     // records before it, as load_archive requires.
     const bool complete = info.complete && hrr::has_clean_trailer(path.string());
-    printf("  %-12llu %-12llu %-10s %-12llu %-10llu %s\n",
+    printf("  %-12llu %-12llu %-10s %-10s %-12llu %-10llu %s\n",
            static_cast<unsigned long long>(info.pid),
            static_cast<unsigned long long>(info.parent_pid),
            complete ? "yes" : "NO",
+           process_contents(path),
            static_cast<unsigned long long>(info.event_count),
            static_cast<unsigned long long>(info.blob_count),
            path.string().c_str());

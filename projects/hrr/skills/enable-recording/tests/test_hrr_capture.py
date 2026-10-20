@@ -693,6 +693,25 @@ def test_run_without_content_says_replay_refuses_and_offers_no_replay(world):
     assert "triage_archive.sh" not in result.stderr
 
 
+def test_run_with_content_ignores_a_metadata_only_backup(world):
+    """A pid-<pid>.prev-<n> left by an earlier metadata-only run is not this run's
+    capture, so the content capture beside it still gets the replay line."""
+    out = world.root / "capture"
+    backup = out / "pid-1.prev-1"
+    backup.mkdir(parents=True)
+    (backup / "events.bin").write_bytes(_archive_events(inspect_archive.FLAG_METADATA_ONLY))
+    app = _capturing_workload(world)
+
+    result = world.script(
+        "run", "--skip-preflight", "--no-playback", "--force", "--content",
+        "--output", str(out), "--", str(app),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "again with --content" not in result.stderr
+    assert f"triage_archive.sh --archive {out}/pid-<pid>" in result.stderr
+
+
 def test_run_with_nothing_captured_reports_it_and_offers_no_replay(world):
     """`run` returns the workload's status by design; the verdict is what
     says nothing was recorded."""

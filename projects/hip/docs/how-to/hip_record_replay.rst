@@ -128,12 +128,13 @@ Pointed at the archive directory, ``--info`` lists the recorded processes:
   Owner PID:    1180
   Processes:    2
 
-    PID          Parent PID   Complete   Events       Blobs      Path
-    ---          ----------   --------   ------       -----      ----
-    1180         0            yes        412          6          ./my_capture.hrr/pid-1180
-    1204         1180         NO         918274       1503       ./my_capture.hrr/pid-1204
+    PID          Parent PID   Complete   Contents   Events       Blobs      Path
+    ---          ----------   --------   --------   ------       -----      ----
+    1180         0            yes        recorded   412          6          ./my_capture.hrr/pid-1180
+    1204         1180         NO         recorded   918274       1503       ./my_capture.hrr/pid-1204
 
-``Complete`` reports whether that process shut down cleanly. An archive from a run
+``Complete`` reports whether that process shut down cleanly, and ``Contents``
+whether it ran in content mode (``recorded``) or metadata-only (``withheld``). An archive from a run
 that crashed is still usable: the reader recovers every complete record. To leave
 it in a tidy state, ``hrr-playback ./my_capture.hrr --repair`` rewrites every
 process capture under the archive with a clean trailer and rebuilds the index.
