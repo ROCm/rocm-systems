@@ -1,0 +1,10 @@
+inherit: ../gfx940/fabric.yaml
+fabric.rd_128b:
+  name: Read (128B)
+  formula: SUM(TCC_BUBBLE_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The total number of L2 requests to Infinity Fabric to read 128B of data from any
+    memory location, per normalization unit.
+fabric.rd_64b:
+  formula: AVG(NOISE_CLAMP((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) / $denom, TCC_EA0_RDREQ_sum))

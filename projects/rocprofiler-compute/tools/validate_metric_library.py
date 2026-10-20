@@ -117,12 +117,21 @@ _CDNA_MEMORY_CHART_VARIANTS = {
     "3.1.26": ("L2-Fabric Read BW", "fabric.rd_bw", None),
     "3.1.27": ("L2-Fabric Write and Atomic BW", "fabric.wr_atomic_bw", None),
 }
+# The roofline's L2 bandwidth at its bytes per request (64 up to gfx941, then 128).
+_ROOFLINE_L2_BW_EQUATION = (
+    "{} * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+    "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) "
+    "/ SUM(End_Timestamp - Start_Timestamp)"
+)
 _ROOFLINE_L2_BW = (
     "L2 Cache Bandwidth",
     "vl1d.l2_bw",
-    "64 * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
-    "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) "
-    "/ SUM(End_Timestamp - Start_Timestamp)",
+    _ROOFLINE_L2_BW_EQUATION.format(64),
+)
+_ROOFLINE_L2_BW_128B = (
+    "L2 Cache Bandwidth",
+    "vl1d.l2_bw",
+    _ROOFLINE_L2_BW_EQUATION.format(128),
 )
 _ROOFLINE_LDS_BW = (
     "LDS Bandwidth",
@@ -162,10 +171,25 @@ DISPLAY_VARIANTS = {
     },
 }
 DISPLAY_VARIANTS["gfx941"] = DISPLAY_VARIANTS["gfx940"]
+DISPLAY_VARIANTS["gfx942"] = {
+    **DISPLAY_VARIANTS["gfx940"],
+    "4.1.10": _ROOFLINE_L2_BW_128B,
+    # TODO(AIPROFCOMP-820): the clamp is deferred (FOLLOWUPS); the other vL1D hit rate
+    # rows have no NOISE_CLAMP.
+    "16.3.5": (
+        "Cache Hit Rate",
+        "vl1d.hit_rate",
+        "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum "
+        "+ TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+        "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), TCP_TOTAL_CACHE_ACCESSES_sum)) "
+        "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
+    ),
+}
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
 UNIT_VARIANTS = {
-    arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx940", "gfx941")
+    arch: _CDNA_UNIT_VARIANTS
+    for arch in ("gfx908", "gfx90a", "gfx940", "gfx941", "gfx942")
 }
 
 
