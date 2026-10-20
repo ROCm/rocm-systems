@@ -53,9 +53,10 @@ from amdisa.fieldless_policy import (
 )
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
-    F32_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
+    F64_TO_INTEGER_DTYPES,
     INTEGER_RESULT_OPERATIONS,
+    TO_FLOAT_CONVERSIONS,
     InstructionSemantics,
     SemanticsSpec,
 )
@@ -6671,6 +6672,8 @@ class CodeGenerator:
                 # Integer sources take no ABS/NEG, but the float result takes
                 # CLAMP and OMOD like any other VOP3 float result.
                 is_integer_to_float = cls == 'vector_unary' and dtype in (
+                    'f16_i16',
+                    'f16_u16',
                     'f32_i32',
                     'f32_u32',
                     'f32_ubyte0',
@@ -6680,8 +6683,12 @@ class CodeGenerator:
                     'f64_i32',
                     'f64_u32',
                 )
-                is_f32_input_conversion = (
-                    cls == 'vector_unary' and dtype in F32_INPUT_CONVERSION_DTYPES
+                is_float_to_integer = cls == 'vector_unary' and dtype in (
+                    F32_TO_INTEGER_DTYPES | F64_TO_INTEGER_DTYPES
+                )
+                # Floating sources take ABS/NEG; floating results take OMOD/CLAMP.
+                is_float_to_float = (
+                    cls == 'vector_unary' and dtype in TO_FLOAT_CONVERSIONS
                 )
                 is_f16_input_conversion = (
                     cls == 'vector_unary' and dtype in F16_INPUT_CONVERSION_DTYPES
@@ -6691,7 +6698,8 @@ class CodeGenerator:
                     and (
                         is_float_op
                         or is_integer_to_float
-                        or is_f32_input_conversion
+                        or is_float_to_integer
+                        or is_float_to_float
                         or is_f16_input_conversion
                     )
                     and not is_true16_mov
@@ -6704,8 +6712,7 @@ class CodeGenerator:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
                     integer_result = (
-                        dtype in F32_TO_INTEGER_DTYPES
-                        or op in INTEGER_RESULT_OPERATIONS
+                        is_float_to_integer or op in INTEGER_RESULT_OPERATIONS
                     )
                     if 'clamp' in inst_fields and not integer_result:
                         ef.add('clamp')
@@ -15179,6 +15186,11 @@ class CodeGenerator:
             prefixed_body = prefixed_body.replace(
                 'amdgpu::vop3_fp8_decode_e5m3(*this)',
                 'amdgpu::vop3_fp8_decode_e5m3(inst)',
+            )
+            prefixed_body = _re.sub(
+                r'(amdgpu::sdwa_conversion_to_f16<[\w:]+>)\(\*this, wf\)',
+                r'\1(inst, wf)',
+                prefixed_body,
             )
             prefixed_body = _re.sub(
                 r'\s*\(void\)wf;\s*(?://[^\n]*)?\n?', '\n', prefixed_body

@@ -3145,34 +3145,40 @@ def test_cdna4_fp8_cvt_keeps_ocp_helper_variant():
         encoding_map=None,
     )
 
-    widen = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_f32_fp8'))
-    assert 'util::fp8_e4m3_to_f32' in widen
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in widen
+    # OCP targets decode and encode through shared/conversion.h.
+    widen = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_f32_fp8', has_abs=True))
+    assert 'amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>' in widen
+    assert 'fnuz' not in widen
 
-    narrow = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_fp8_f32'))
-    assert 'util::f32_to_fp8_e4m3_rne_mode' in narrow
-    assert 'util::f32_to_fp8_e4m3_fnuz_rne_mode' not in narrow
-    assert 'wf.fp16_ovfl()' in narrow
+    narrow = gen_cvt_fp8(SimpleNamespace(**ctx.__dict__, op='pk_fp8_f32', has_abs=True))
+    assert (
+        'amdgpu::conversion_to_fp8<amdgpu::conversion::Fp8>(wf, inst_.abs, inst_.neg)'
+        in narrow
+    )
+    assert 'fnuz' not in narrow
 
     unary = _lower_unary('V_CVT_F32_FP8', 'cdna4')
-    assert 'util::fp8_e4m3_to_f32' in unary
-    assert 'util::fp8_e4m3_fnuz_to_f32' not in unary
+    assert 'amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>' in unary
+    assert 'fnuz' not in unary
 
 
-def test_f32_to_f16_vector_conversion_threads_fp16_ovfl():
+def test_f32_to_f16_vector_conversion_resolves_mode_once():
+    # conversion_to_float reads FP16_OVFL and the rounding fields from MODE.
     unary = _lower_unary('V_CVT_F16_F32')
 
-    assert 'util::f32_to_f16_mode(' in unary
-    assert ', wf.fp16_ovfl())' in unary
+    declaration = 'const auto conversion = amdgpu::sdwa_conversion_to_f16<amdgpu::fp_format::F32>('
+    assert declaration in unary
+    assert unary.index(declaration) < unary.index('for (uint32_t lane')
+    assert 'util::f32_to_f16' not in unary
 
 
 def test_fp16_ovfl_sensitive_f16_simd_probes_stay_vectorized():
+    # The conversion stage object reads FP16_OVFL when it is resolved.
     cvt_probe = simd_probe_line('v_cvt_f16_f32_vop1')
-    assert cvt_probe is not None
-    assert 'if (wf.fp16_ovfl())' in cvt_probe
-    assert 'util::f32_to_f16_ovfl_simd' in cvt_probe
-    assert 'util::f32_to_f16_simd' in cvt_probe
-    assert 'ROCJITSU_TRY_SIMD_VOP1_UNARY' in cvt_probe
+    assert cvt_probe == (
+        '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, '
+        'amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F16>(wf));'
+    )
 
     add_probe = simd_probe_line('v_add_f16_vop3', true16_vop3=True)
     assert add_probe is not None
@@ -3720,12 +3726,20 @@ def test_generated_f32_to_f64_conversion_applies_vop3_modifiers(
         execute_shared, 'v_cvt_f64_f32_vop3', 'v_cvt_f64_i32_vop1'
     )
 
+    # The raw SIMD glue carries no modifiers, so a modified encoding falls to
+    # the scalar body, whose stage object takes all four fields.
     assert (
         '!inst.inst_.abs && !inst.inst_.neg && !inst.inst_.omod && '
         '!inst.inst_.clamp' in body
     )
-    assert 'amdgpu::source_modifier::apply_to_float' in body
-    assert 'amdgpu::output_modifier::apply<amdgpu::fp_format::F64>' in body
+    stages = (
+        'amdgpu::conversion_to_float<amdgpu::fp_format::F32, amdgpu::fp_format::F64>'
+    )
+    assert f'{stages}(wf)' in body
+    assert (
+        f'{stages}(\n          wf, inst.inst_.abs, inst.inst_.neg, inst.inst_.omod, '
+        'inst.inst_.clamp)' in body
+    )
 
 
 def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
@@ -6671,8 +6685,9 @@ def test_shared_execute_preflight_detects_cdna3_fp8_cvt_divergence():
     assert fp8_cvt_keys <= unshared
 
     vop1_fp8_variants = variants[('v_cvt_f32_fp8', 'ENC_VOP1')]
+    ocp_decode = 'amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>'
     assert 'util::fp8_e4m3_fnuz_to_f32' in vop1_fp8_variants['cdna3'][2]
-    assert 'util::fp8_e4m3_to_f32' in vop1_fp8_variants['cdna4'][2]
+    assert ocp_decode in vop1_fp8_variants['cdna4'][2]
     assert 'util::fp8_e4m3_fnuz_to_f32' not in vop1_fp8_variants['cdna4'][2]
 
 
@@ -6706,7 +6721,7 @@ def test_multi_isa_regen_keeps_divergent_fp8_cvt_bodies_isa_local(tmp_path):
     )
 
     assert 'util::fp8_e4m3_fnuz_to_f32' in cdna3_fp8_body
-    assert 'util::fp8_e4m3_to_f32' in cdna4_fp8_body
+    assert 'amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>' in cdna4_fp8_body
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_fp8_body
     assert 'amdgpu::execute_v_cvt_f32_fp8_vop1' not in cdna3_fp8_body
     assert 'amdgpu::execute_v_cvt_f32_fp8_vop1' not in cdna4_fp8_body
@@ -6743,14 +6758,13 @@ def test_cdna4_generated_cvt_keeps_ocp_format(
     assert 'inline void execute_v_cvt_f32_bf8_vop1' not in shared
     assert 'inline void execute_v_cvt_f32_fp8_vop3' not in shared
     assert 'inline void execute_v_cvt_f32_bf8_vop3' not in shared
-    assert 'util::fp8_e4m3_to_f32' in cdna4_vop1
-    assert 'util::bf8_e5m2_to_f32' in cdna4_vop1
-    assert 'util::fp8_e4m3_to_f32' in cdna4_vop3
-    assert 'util::bf8_e5m2_to_f32' in cdna4_vop3
-    assert 'util::f32_to_fp8_e4m3_rne_mode' in cdna4_vop3
-    assert 'util::f32_to_bf8_e5m2_rne_mode' in cdna4_vop3
-    assert 'util::f32_to_fp8_e4m3_sr_mode' in cdna4_vop3
-    assert 'util::f32_to_bf8_e5m2_sr_mode' in cdna4_vop3
+    for layout in ('Fp8', 'Bf8'):
+        decode = f'amdgpu::conversion::decode_fp8<amdgpu::conversion::{layout}>'
+        encode = f'amdgpu::conversion_to_fp8<amdgpu::conversion::{layout}>'
+        assert decode in cdna4_vop1
+        assert decode in cdna4_vop3
+        assert encode in cdna4_vop3
+    assert 'conversion.stochastic(s0, seed)' in cdna4_vop3
     assert 'util::fp8_e4m3_fnuz_to_f32' not in shared
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop1
     assert 'util::fp8_e4m3_fnuz_to_f32' not in cdna4_vop3
@@ -6904,7 +6918,7 @@ def test_gfx1250_generated_fp8_vop3_byte_select_uses_local_inst_member(
     assert 'amdgpu::vop3_opsel(inst_)' in body
     assert 'amdgpu::vop3_fp8_decode_e5m3(*this)' in body
     assert 'util::fp8_e5m3_to_f32' in body
-    assert 'util::fp8_e4m3_to_f32' in body
+    assert 'amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>' in body
     # The local SIMD probe binds an instruction alias; scalar execution still
     # reads the encoding member directly.
     assert 'auto &inst = *this;' in body

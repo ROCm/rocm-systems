@@ -933,12 +933,18 @@ class TestDeriveVectorUnary:
             fields.add('abs')
         block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
         cpp = lower_sema_block(block)
-        assert cpp.index('util::f16_to_f32') < cpp.index(
-            'source_modifier::apply_to_float(sv'
+        # MODE flushes the raw half before it is widened; ABS/NEG apply to the
+        # widened value, before the scaled rounding.
+        flush = 'input_denormal::flush_input<amdgpu::fp_format::F16>('
+        assert (
+            'input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())'
+            in cpp
         )
-        assert cpp.index('source_modifier::apply_to_float(sv') < cpp.index(
-            'util::rndne_scalar'
+        assert cpp.index('source_modifier::apply_to_float(') < cpp.index(
+            'util::f16_to_f32'
         )
+        assert cpp.index('util::f16_to_f32') < cpp.index(flush)
+        assert cpp.index(flush) < cpp.index('util::rndne_scalar')
         assert ('inst_.abs' in cpp) == has_abs
         assert 'inst_.neg' in cpp
 
@@ -976,7 +982,7 @@ class TestDeriveVectorUnary:
             assert 'inst_.clamp' not in cpp
             assert cpp.index(modifier) < cpp.index('std::isnan(s)')
 
-    def test_cvt_f64_f32_modifiers_wrap_the_typed_conversion(self):
+    def test_cvt_f64_f32_modifiers_reach_the_shared_conversion(self):
         sem = derive_semantics('V_CVT_F64_F32', 'ENC_VOP3')
         block = enrich_block(
             derive_sema_block(sem),
@@ -984,14 +990,48 @@ class TestDeriveVectorUnary:
         )
         cpp = lower_sema_block(block)
 
-        source_modifier = 'source_modifier::apply_to_float'
-        conversion = 'static_cast<double>'
-        # The modifier call is nested inside the widening conversion.
-        assert cpp.index(conversion) < cpp.index(source_modifier)
-        assert 'inst_.abs' in cpp
+        # The stage object carries all four fields; see shared/conversion.h.
+        assert (
+            'amdgpu::conversion_to_float<amdgpu::fp_format::F32, '
+            'amdgpu::fp_format::F64>(wf, inst_.abs, inst_.neg, inst_.omod, '
+            'inst_.clamp)' in cpp
+        )
+        assert 'static_cast<double>' not in cpp
+
+    @pytest.mark.parametrize('suffix', ['I32', 'U32'])
+    @pytest.mark.parametrize('has_abs', [False, True])
+    def test_cvt_i32_u32_f64_modifiers_precede_conversion(self, suffix, has_abs):
+        sem = derive_semantics(f'V_CVT_{suffix}_F64', 'ENC_VOP3')
+        fields = {'neg'}
+        if has_abs:
+            fields.add('abs')
+        block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
+        cpp = lower_sema_block(block)
+        modifier = 'source_modifier::apply_to_float(sv, 0'
+        assert 'double sv = std::bit_cast<double>' in cpp
+        assert cpp.index(modifier) < cpp.index('std::isnan(s)')
+        assert ('inst_.abs' in cpp) == has_abs
         assert 'inst_.neg' in cpp
-        assert 'output_modifier_policy<amdgpu::fp_format::F64>' in cpp
-        assert 'output_modifier::apply<amdgpu::fp_format::F64>' in cpp
+
+    @pytest.mark.parametrize(
+        ('name', 'operation'),
+        [
+            ('V_CVT_FLOOR_I32_F32', 'FloorI32'),
+            ('V_CVT_NEAREST_I32_F32', 'NearestI32'),
+        ],
+    )
+    def test_cvt_floor_nearest_lower_to_shared_conversion(self, name, operation):
+        sem = derive_semantics(name, 'ENC_VOP3')
+        fields = frozenset({'neg', 'abs'})
+        block = enrich_block(derive_sema_block(sem), enc_field_names=fields)
+        cpp = lower_sema_block(block)
+        call = (
+            f'amdgpu::conversion::{operation}{{'
+            'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32())}('
+        )
+        assert call in cpp
+        assert cpp.index(call) < cpp.index('source_modifier::apply_to_float(sv, 0')
+        assert 'std::floor' not in cpp
 
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):
@@ -1120,7 +1160,7 @@ class TestDeriveVectorUnary:
 
         assert 'inst_.clamp' in cpp
         assert 'util::fp8_e5m3_to_f32' in cpp
-        assert 'util::fp8_e4m3_to_f32' in cpp
+        assert 'amdgpu::conversion::decode_fp8<amdgpu::conversion::Fp8>' in cpp
         assert 'util::f32_to_f16_mode' not in cpp
 
     def test_cvt_f16_fp8_gfx1250_clamp_selects_e5m3_decode_and_fp16_ovfl(self):
@@ -1184,11 +1224,19 @@ class TestDeriveVectorUnary:
         assert sem.operation == op
 
         cpp = gen_vector_cvt_pk(['vdst'], ['src0'], sem.semantic_class, sem.operation)
-        assert helper in cpp
-        assert 'src_hi' in cpp
-        assert 'packed & 0xFFFFu' in cpp
-        assert 'half & 0xFFu' in cpp
-        assert '(half >> 8) & 0xFFu' in cpp
+        if not needs_f16:
+            # F32 results decode the OCP bytes through shared/conversion.h.
+            layout = 'Fp8' if op.endswith('fp8') else 'Bf8'
+            decode = f'amdgpu::conversion::decode_fp8<amdgpu::conversion::{layout}>'
+            assert f'{decode}(half)' in cpp
+            assert f'{decode}(half >> 8)' in cpp
+            assert helper not in cpp
+        else:
+            assert helper in cpp
+            assert 'src_hi' in cpp
+            assert 'packed & 0xFFFFu' in cpp
+            assert 'half & 0xFFu' in cpp
+            assert '(half >> 8) & 0xFFu' in cpp
         assert write_fn in cpp
         assert ('util::f32_to_f16_mode(lo, wf.fp16_ovfl())' in cpp) == needs_f16
         assert ('util::f32_to_f16_mode(hi, wf.fp16_ovfl())' in cpp) == needs_f16
@@ -1242,15 +1290,18 @@ class TestDeriveVectorUnary:
         src = ['src0', 'src1'] if needs_src1 else ['src0']
         cpp = gen_vector_cvt_pk(['vdst'], src, sem.semantic_class, sem.operation)
         if uses_fp16_ovfl:
-            assert f'{helper}(s0, wf.fp16_ovfl())' in cpp
-            assert f'{helper}(s1, wf.fp16_ovfl())' in cpp
-            assert 'wf.fp16_ovfl()' in cpp
+            # F32 sources use the shared OCP stages, which read FP16_OVFL.
+            layout = 'Fp8' if op.startswith('fp8') else 'Bf8'
+            stages = f'amdgpu::conversion_to_fp8<amdgpu::conversion::{layout}>(wf)'
+            assert f'const auto conversion = {stages};' in cpp
+            assert 'uint32_t packed = conversion(s0, s1);' in cpp
+            assert helper not in cpp
         else:
             assert f'{helper}(s0)' in cpp
             assert f'{helper}(s1)' in cpp
             assert 'wf.fp16_ovfl()' not in cpp
-        assert 'static_cast<uint32_t>(lo)' in cpp
-        assert 'static_cast<uint32_t>(hi) << 8' in cpp
+            assert 'static_cast<uint32_t>(lo)' in cpp
+            assert 'static_cast<uint32_t>(hi) << 8' in cpp
         assert 'write_vop3_true16_dst' in cpp
         assert ('src1' in cpp) == needs_src1
         assert ('util::f16_to_f32' in cpp) == needs_f16
@@ -1266,8 +1317,13 @@ class TestDeriveVectorUnary:
         )
 
         assert 'inst_.clamp' in cpp
-        assert 'util::f32_to_fp8_e5m3_rne_mode(s0, wf.fp16_ovfl())' in cpp
-        assert 'util::f32_to_fp8_e4m3_rne_mode(s0, wf.fp16_ovfl())' in cpp
+        # E5M3 encodes the same ABS/NEG-modified, input-flushed sources.
+        for i in range(2):
+            assert (
+                f'util::f32_to_fp8_e5m3_rne_mode(std::bit_cast<float>('
+                f'conversion.source(s{i}, {i})), wf.fp16_ovfl())'
+            ) in cpp
+        assert 'conversion(s0, s1)' in cpp
         assert 'inst_.opsel' in cpp
 
     def test_gfx1250_cvt_pk_fp8_f16_clamp_selects_e5m3_without_fp16_ovfl(self):
@@ -1292,6 +1348,7 @@ class TestDeriveVectorUnary:
             dst_ops=['vdst'],
             src_ops=['src0', 'src1'],
             is_vop3=True,
+            has_abs=True,
             enc_field_names={'opsel'},
             encoding_map=None,
             enc_name='',
@@ -1301,8 +1358,11 @@ class TestDeriveVectorUnary:
         cpp = gen_cvt_fp8(ctx)
 
         assert 'inst_.clamp' in cpp
-        assert 'util::f32_to_fp8_e5m3_sr_mode(s0, seed, wf.fp16_ovfl())' in cpp
-        assert 'util::f32_to_fp8_e4m3_sr_mode(s0, seed, wf.fp16_ovfl())' in cpp
+        assert (
+            'util::f32_to_fp8_e5m3_sr_mode(std::bit_cast<float>('
+            'conversion.source(s0, 0)), seed, wf.fp16_ovfl())'
+        ) in cpp
+        assert 'conversion.stochastic(s0, seed)' in cpp
         assert 'inst_.opsel' in cpp
 
     def test_gfx1250_cvt_sr_fp8_f16_clamp_selects_e5m3_encoder(self):
@@ -1357,17 +1417,20 @@ class TestDeriveVectorUnary:
         assert 'util::f32_to_f16_mode(s0, wf.fp16_ovfl())' in cpp
         assert 'util::f32_to_f16_mode(s1, wf.fp16_ovfl())' in cpp
 
-    def test_cvt_f16_f32_lowering_threads_fp16_ovfl(self):
+    def test_cvt_f16_f32_lowers_to_shared_conversion(self):
         sem = derive_semantics('V_CVT_F16_F32', 'ENC_VOP3')
         assert sem is not None
         assert sem.operation == 'cvt'
         assert sem.data_type == 'f16_f32'
 
+        # The stage object reads MODE, including FP16_OVFL, when it is resolved.
         block = derive_sema_block(sem)
         cpp = lower_sema_block(block)
-        assert 'util::f32_to_f16_mode' in cpp
-        assert 'wf.fp16_ovfl()' in cpp
-        assert 'util::f32_to_f16(std::bit_cast<float>' not in cpp
+        assert (
+            'const auto conversion = '
+            'amdgpu::sdwa_conversion_to_f16<amdgpu::fp_format::F32>(*this, wf);'
+        ) in cpp
+        assert 'util::f32_to_f16' not in cpp
 
     def test_cvt_sr_pk_f16_bf16_f32_threads_fp16_ovfl(self):
         for name, helper in (

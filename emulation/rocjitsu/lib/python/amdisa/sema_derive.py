@@ -35,8 +35,9 @@ from amdisa.sema_effects import inline_binary_op_effects
 from amdisa.sema_properties import InstructionProperty, derive_properties
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
-    F32_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
+    F64_TO_INTEGER_DTYPES,
+    TO_FLOAT_CONVERSIONS,
     is_float_relation,
 )
 
@@ -48,6 +49,40 @@ FLOAT_COMPARE_CALL = 'float_compare_'
 
 # Semantic call prefix for IEEE 754-2019 min/max forms, e.g. float_minmax_min_num.
 FLOAT_MINMAX_CALL = 'float_minmax_'
+
+# Semantic call prefix for conversions lowered through shared/conversion.h,
+# followed by the conversion data type, e.g. conversion_f32_i32.
+CONVERSION_CALL = 'conversion_'
+
+_SEMA_FORMATS = {
+    'f16': SemaType.F16,
+    'f32': SemaType.F32,
+    'f64': SemaType.F64,
+    'i16': SemaType('I', 16),
+    'u16': SemaType('U', 16),
+    'i32': SemaType.I32,
+    'u32': SemaType.U32,
+}
+
+
+def _conversion(dtype: str) -> SemaBlock:
+    """Write a conversion's destination bits from its typed source.
+
+    The typed source and destination let enrichment attach VOP3 ABS/NEG and
+    OMOD/CLAMP; lowering passes those fields to the shared conversion.
+    """
+    result_name, source_name = dtype.split('_')
+    source_ty = _SEMA_FORMATS[source_name]
+    result_ty = _SEMA_FORMATS[result_name]
+    name = f'{CONVERSION_CALL}{dtype}'
+    call = SemaNode(
+        SemaNodeKind.CALL,
+        ty=result_ty,
+        call_name=name,
+        children=(_id(name), _cast(_src(0, source_ty), source_ty)),
+    )
+    return _assign(_cast(_dst(0, result_ty), result_ty), call)
+
 
 # Three-source min/max forms recognized directly by their operation name.
 _IEEE_MINMAX3 = (
@@ -1145,6 +1180,9 @@ class _VectorUnary(_ScalarDeriver):
             body = _assign(_cast(_dst(0, ty), ty), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
+        if op == 'cvt' and dtype in TO_FLOAT_CONVERSIONS:
+            return SemaBlock(sem.name, ExecModel.VECTOR, _conversion(dtype))
+
         if op == 'cvt' and dtype:
             call_name = f'cvt_{dtype}'
             src0 = _src(0)
@@ -1153,7 +1191,7 @@ class _VectorUnary(_ScalarDeriver):
                 src0 = _cast(_src(0, SemaType.F16), SemaType.F16)
                 if dtype == 'f32_f16':
                     call_name = 'cvt_f32_f16_valu'
-            elif dtype in F32_INPUT_CONVERSION_DTYPES:
+            elif dtype in F32_TO_INTEGER_DTYPES:
                 # Expose the floating source to VOP3 modifier enrichment, then
                 # pass register bits to the conversion helper.
                 src0 = SemaNode(
@@ -1165,17 +1203,18 @@ class _VectorUnary(_ScalarDeriver):
                         _cast(_src(0, SemaType.F32), SemaType.F32),
                     ),
                 )
+            elif dtype in F64_TO_INTEGER_DTYPES:
+                # Expose the floating source to VOP3 modifier enrichment; the
+                # conversion helper takes the decoded double.
+                src0 = _cast(_src(0, SemaType.F64), SemaType.F64)
             float_result = {
                 'f32_f16': SemaType.F32,
-                'f32_i32': SemaType.F32,
-                'f32_u32': SemaType.F32,
                 'f32_ubyte0': SemaType.F32,
                 'f32_ubyte1': SemaType.F32,
                 'f32_ubyte2': SemaType.F32,
                 'f32_ubyte3': SemaType.F32,
                 'f64_i32': SemaType.F64,
                 'f64_u32': SemaType.F64,
-                'f64_f32': SemaType.F64,
             }.get(dtype)
             if float_result is not None:
                 # The conversion helper returns register bits. Expose the
