@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 rocDecode is AMD's high-performance video decode SDK. It provides a C/C++ API to access hardware-accelerated video decoding (VCN engines) on AMD GPUs via VA-API, with HIP for GPU interoperability. Supported codecs: H.265/HEVC (8/10 bit), H.264/AVC (8 bit), AV1 (8/10 bit), VP9 (8/10 bit). Requires AMD GPU gfx908+.
 
 - rocDecode is located at `projects/rocdecode` within the `rocm-systems` repo
+- CI is at `.github/workflows/media-libs-ci.yml` (builds via TheRock super-project)
 - Python test scripts are in `test/testScripts/`; samples are in `samples/`
 
 ## Build Commands
