@@ -193,10 +193,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `ctx` to the callee) and its explicit-`bool` truthiness, and
     `makeOption(s)` /
     `ncclOptionSetAssertUnique`'s duplicate-name `WARN` (captured via
-    `../common/LogCapture.hpp`). First PR in the AICOMRCCL-2820 stacked
-    chain; the rest of `src/param/*` and `src/include/param/*.h` (the typed
-    registry, the remaining parsers, the C API, and env loading) are covered
-    by its follow-ups.
+    `../common/LogCapture.hpp`). The rest of `src/param/*` and
+    `src/include/param/*.h` is covered by the two entries below and
+    `rccl-UnitTestsMicroParam`.
+  - `include/param/parser_{default,enum,bitset,list}.h` (header-only, from
+    `param-parsers-test.cc`); suite `ParamParsersMicrotest.*`.
+  - `param/param_registry.cc` (`PARAM_REGISTRY_CC_PATH`, from
+    `param-registry-test.cc`); suite `ParamRegistryMicrotest.*`.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result
@@ -352,6 +355,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   The WarpSpeed helpers are referenced only when gfx950 CI copies
   `ENABLE_WARP_SPEED` onto this binary; the scenes leave `warpSpeedEnabled`
   false, so the stubs exist to link. See `test_categories_micro_connect.yaml`.
+- **`rccl-UnitTestsMicroParam`** — `param/param.cc`, `param/c_api.cc`,
+  `misc/param.cc` and `include/param/param.h` (via `PARAM_CC_PATH` / `C_API_CC_PATH`
+  / `MISC_PARAM_CC_PATH`, from `param-test.cc`); suites `Param*`. Its own binary
+  because `misc/param.cc` defines `ncclGetEnv`, `initEnv` and `ncclLoadParam`, which
+  the shared fakes in `rccl-UnitTestsMicro` also define.
 - **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
   `gin-host-test.cc`); suite `GinHostTest.*`. NVIDIA/nccl#2279
   `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
@@ -363,6 +371,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   selection, observed through the `g_hipExtLaunchKernel` seam. Its own binary:
   `rccl-UnitTestsMicro` links `fakes/dda_fakes.cc`, which defines the same symbols.
   See `test_categories_micro_dda_ipc.yaml`.
+- **`rccl-UnitTestsMicroProfiler`** — `plugin/profiler.cc` (via `PROFILER_CC_PATH`, from
+  `profiler-test.cc`) and the `plugin/profiler/profiler_v1..v7.cc` adapters (via
+  `PROFILER_V<N>_CC_PATH`, from `profiler-v<N>-test.cc`); suites `Profiler*`. Its own binary
+  because the tests define the logging, env, plugin-open and dlsym seams the shared fakes also
+  define. See `test_categories_micro_profiler.yaml`.
 
 - **`rccl-UnitTestsMicroRmaProxy`** — `src/rma/rma_proxy.cc` (via
   `RMA_PROXY_CC_PATH`, from `rma-proxy-test.cc`); suite
@@ -983,8 +996,10 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
 ./build/rccl-UnitTestsMicroDdaIpc             # src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
+./build/rccl-UnitTestsMicroParam              # src/param/*.cc, src/misc/param.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
+./build/rccl-UnitTestsMicroProfiler           # src/plugin/profiler.cc + profiler_v1..v7.cc
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
 ./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
 ./build/rccl-HostUnitTests
