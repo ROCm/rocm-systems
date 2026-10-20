@@ -124,7 +124,6 @@ RCCL_FILES = hipify_rccl/graph/topo.cc \
 			hipify_rccl/graph/rccl_graph_gen.cc \
 			../../src/misc/param.cc \
 			../../src/misc/nvmlwrap_stub.cc \
-			../../src/rccl_arch_thresholds.cc \
 			hipify_rccl/rccl_wrap.cc \
 			hipify_rccl/rccl_arch_thresholds.cc \
 			hipify_rccl/collectives.cc \
