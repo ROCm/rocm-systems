@@ -172,6 +172,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroSymKernels:$SCRIPT_DIR/host_tests_micro_symkernels.xml"
     "rccl-UnitTestsMicroTaskPrep:$SCRIPT_DIR/host_tests_micro_taskprep.xml"
     "rccl-UnitTestsMicroConnect:$SCRIPT_DIR/host_tests_micro_connect.xml"
+    "rccl-UnitTestsMicroParam:$SCRIPT_DIR/host_tests_micro_param.xml"
     "rccl-UnitTestsMicroCe:$SCRIPT_DIR/host_tests_micro_ce.xml"
     "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
     "rccl-UnitTestsMicroProfiler:$SCRIPT_DIR/host_tests_micro_profiler.xml"
