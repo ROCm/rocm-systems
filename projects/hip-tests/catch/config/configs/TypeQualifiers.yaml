@@ -3,7 +3,8 @@ TypeQualifiers:
   Unit_hipManagedKeyword_SingleGpu: *level_default
   Unit_hipManagedKeyword_MultiGpu:
     <<: *level_default
-    # SWDEV-396615 mGPUs not considered correctly
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2744 - SWDEV-396615: multi-GPU case not considered correctly. gfx1201 (amd_windows) self-skips: GPU does not support managed memory. gfx1201 (amd_wsl) self-skips: GPU does not support managed memory. Needs re-triage."
   Unit_hipManagedKeyword_hipPointerGetAttributes_BeforeKernel: *level_default
   Unit_hipManagedKeyword_hipPointerGetAttributes_AfterKernel: *level_default

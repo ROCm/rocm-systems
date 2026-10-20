@@ -22,7 +22,6 @@ errorHandling:
   Unit_hipGetLastError_with_hipMemcpyDtoHAsync: *level_default
   Unit_hipGetLastError_with_hipMemcpyParam2DAsync:
     <<: *level_default
-    disabled: [amd_wsl]
   Unit_hipGetLastError_with_hipDrvMemcpy3DAsync: *level_default
   Unit_hipGetLastError_with_hipMemcpy3DAsync:
     <<: *level_default
@@ -34,7 +33,6 @@ errorHandling:
   Unit_hipGetLastError_with_hipMemPrefetchAsync: *level_default
   Unit_hipGetLastError_with_hipMemcpy2DAsync:
     <<: *level_default
-    disabled: [amd_wsl]
   Unit_hipGetLastError_with_hipMemsetAsync: *level_default
   Unit_hipGetLastError_with_MemCpyAsync: *level_default
   Unit_hipGetLastError_with_MemCpyAsync_thread: *level_default
@@ -67,8 +65,9 @@ errorHandling:
     tags: [multigpu]
   Unit_hipGetLastError_KernelFailure_TwoStreams:
     <<: *level_default
-    # Test causes error state in the runtime and prevents resource cleanup.
-    disabled: [asan]
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2744 - test puts the runtime in an error state, which prevents resource cleanup under asan. Needs re-triage."
   Unit_hipExtGetLastError_Positive_Basic:
     <<: *level_default
     tags: [P0]
@@ -79,7 +78,6 @@ errorHandling:
   Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync: *level_default
   Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync:
     <<: *level_default
-    disabled: [amd_wsl]
   Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync: *level_default
   Unit_hipExtGetLastError_with_hipMemcpy3DAsync:
     <<: *level_default
@@ -91,7 +89,6 @@ errorHandling:
   Unit_hipExtGetLastError_with_hipMemPrefetchAsync: *level_default
   Unit_hipExtGetLastError_with_hipMemcpy2DAsync:
     <<: *level_default
-    disabled: [amd_wsl]
   Unit_hipExtGetLastError_with_hipMemsetAsync: *level_default
   Unit_hipExtGetLastError_with_MemCpyAsync: *level_default
   Unit_hipExtGetLastError_with_MemCpyAsync_thread: *level_default
@@ -101,9 +98,11 @@ errorHandling:
   Unit_hipExtGetLastError_with_Kernel_divide_by_zero: *level_default
   Unit_hipDynamicLogging_Positive_Basic:
     <<: *level_default
-    # Following tests disabled as it should be a local perf test
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - needs to be further investigated; this is really a local perf test. gfx1201 (amd_windows) FAIL: hipDynamicLoggingTest() == true -> false == true."
   Unit_hipDynamicLogging_Positive_MultipleEnableDisable:
     <<: *level_default
-    # Following tests disabled as it should be a local perf test
-    disabled: [amd_windows, amd_wsl]
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - needs to be further investigated; this is really a local perf test. gfx1201 (amd_windows) FAIL: output.size() > 0 -> 0 > 0."
