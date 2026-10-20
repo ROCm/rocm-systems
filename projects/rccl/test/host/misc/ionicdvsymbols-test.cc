@@ -70,7 +70,7 @@ TEST_F(IonicdvsymbolsBuildMicrotest, OnlySo1Present_LoadsFromSo1WithNodelete) {
   AddLibraryExporting(dl_, "libionic.so.1", {kUdmaMask});
 
   EXPECT_EQ(buildIonicdvSymbols(&syms_), ncclSuccess);
-  EXPECT_EQ(OpenedFiles(dl_), (std::vector<std::string>{"libionic.so", "libionic.so.1"}));
+  ASSERT_EQ(OpenedFiles(dl_), (std::vector<std::string>{"libionic.so", "libionic.so.1"}));
   EXPECT_TRUE(dl_.opens[1].mode & RTLD_NODELETE);
 }
 

@@ -75,7 +75,7 @@ TEST_F(Mlx5dvsymbolsBuildMicrotest, OnlySo1Present_LoadsFromSo1WithNodelete) {
   AddLibraryExporting(dl_, "libmlx5.so.1", {kIsSupported});
 
   EXPECT_EQ(buildMlx5dvSymbols(&syms_), ncclSuccess);
-  EXPECT_EQ(OpenedFiles(dl_), (std::vector<std::string>{"libmlx5.so", "libmlx5.so.1"}));
+  ASSERT_EQ(OpenedFiles(dl_), (std::vector<std::string>{"libmlx5.so", "libmlx5.so.1"}));
   EXPECT_TRUE(dl_.opens[1].mode & RTLD_NODELETE);
 }
 
