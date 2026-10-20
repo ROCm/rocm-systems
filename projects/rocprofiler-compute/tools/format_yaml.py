@@ -421,13 +421,18 @@ def extract_metric_equations(
 def sort_top_level_keys(content: str) -> str:
     """Return content with its top-level blocks sorted by key, "inherit" first.
 
-    A block is a top-level key line and the indented lines under it. Comment and blank
-    lines stay with the key that follows them.
+    A block is a top-level key line and the lines under it: indented lines and sequence
+    items written at column 0. Comment and blank lines stay with the key that follows
+    them, and a leading "---" stays first.
     """
+    header = ""
     blocks: list[tuple[str, str]] = []
     pending = ""
     for line in content.splitlines(keepends=True):
-        if line.startswith((" ", "\t")) and blocks:
+        if line.startswith("---") and not blocks:
+            header += pending + line
+            pending = ""
+        elif line.startswith((" ", "\t", "-")) and blocks:
             key, text = blocks[-1]
             blocks[-1] = (key, text + pending + line)
             pending = ""
@@ -437,7 +442,7 @@ def sort_top_level_keys(content: str) -> str:
             blocks.append((line.split(":", 1)[0], pending + line))
             pending = ""
     blocks.sort(key=lambda block: (block[0] != "inherit", block[0]))
-    return "".join(text for _, text in blocks) + pending
+    return header + "".join(text for _, text in blocks) + pending
 
 
 def _should_check_equations(path: Path) -> bool:
@@ -468,7 +473,11 @@ def _should_skip_file(path: Path) -> bool:
 
 
 class _EquationLoader(yaml.SafeLoader):
-    """SafeLoader that accepts the metric library's "!remove" tag."""
+    """SafeLoader that accepts the metric library's "!remove" tag.
+
+    The tag is REMOVE_TAG in src/utils/yaml_inherit_loader.py. It is repeated here
+    because this hook runs with pip PyYAML only, without src/ on the path.
+    """
 
 
 _EquationLoader.add_constructor("!remove", lambda loader, node: None)

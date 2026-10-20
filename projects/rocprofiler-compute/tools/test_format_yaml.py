@@ -202,6 +202,15 @@ class TestMetricLibraryFiles:
             "# B\nl2.b:\n  description: >-\n    One.\n\n    Two.\n"
         )
 
+    def test_column_zero_list_and_document_start_stay_in_place(self, tmp_path):
+        path = self.write_library_file(
+            tmp_path, "---\nl2.b:\n- two\n- three\nl2.a: !remove\n"
+        )
+        check_file(path, fix=True)
+        assert path.read_text(encoding="utf-8") == (
+            "---\nl2.a: !remove\nl2.b:\n- two\n- three\n"
+        )
+
     def test_analysis_config_keys_are_not_sorted(self, tmp_path):
         path = tmp_path / "analysis_configs" / "gfx908" / "0100_x.yaml"
         path.parent.mkdir(parents=True)
