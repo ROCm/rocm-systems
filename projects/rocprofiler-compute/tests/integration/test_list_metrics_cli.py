@@ -43,7 +43,7 @@ def arch_panels_from_disk(arch: str) -> dict[str, str]:
         if not data or "Panel Config" not in data:
             continue
         panel_config = data["Panel Config"]
-        panels[str(panel_config["id"] // 100)] = panel_config["title"]
+        panels[utils_common.panel_index(panel_config["id"])] = panel_config["title"]
     return panels
 
 

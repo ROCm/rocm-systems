@@ -38,6 +38,7 @@ from utils.utils_analysis import (
 )
 from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
+    panel_index,
     strip_ansi,
     table_index,
 )
@@ -1051,7 +1052,7 @@ def show_all(
                 print(panel_content, file=output)
             else:
                 print(f"\n{'-' * 80}", file=output)
-                print(f"{panel_id // 100}. {panel['title']}", file=output)
+                print(f"{panel_index(panel_id)}. {panel['title']}", file=output)
                 print(panel_content, file=output)
 
 

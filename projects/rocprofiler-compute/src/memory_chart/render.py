@@ -27,6 +27,7 @@ from memory_chart.units import (
     format_value,
     numeric,
 )
+from utils.utils_common import panel_index
 
 COLORS = {
     "cu": "green",
@@ -91,7 +92,7 @@ def plot_mem_chart(
 
 def format_mem_chart_heading(normal_unit: str, *, panel_id: int) -> str:
     """Heading like '3. Memory Chart (Normalization: per_kernel)'."""
-    return f"{panel_id // 100}. Memory Chart (Normalization: {normal_unit})"
+    return f"{panel_index(panel_id)}. Memory Chart (Normalization: {normal_unit})"
 
 
 def progress_bar(percent: Union[int, float, str, None]) -> str:

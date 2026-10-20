@@ -66,9 +66,14 @@ def is_gfx1250(gpu_arch: Optional[str]) -> bool:
     return gpu_arch == "gfx1250"
 
 
+def panel_index(config_id: int) -> str:
+    """The panel number of a panel or table id, e.g. 300 or 301 -> "3"."""
+    return str(config_id // 100)
+
+
 def table_index(table_id: int) -> str:
     """The dotted id of a metric table, e.g. 301 -> "3.1"."""
-    return f"{table_id // 100}.{table_id % 100}"
+    return f"{panel_index(table_id)}.{table_id % 100}"
 
 
 def format_metric_id(table_id: int, position: int) -> str:
@@ -782,7 +787,7 @@ def build_metric_list(
         for data_source in panel["data source"]:
             for type_key, data_config in data_source.items():
                 if type_key == "metric_table":
-                    data_source_idx = str(data_config["id"] // 100)
+                    data_source_idx = panel_index(data_config["id"])
                     if data_source_idx != "0":
                         metric_list[data_source_idx] = panel["title"]
 
@@ -794,7 +799,7 @@ def build_metric_list(
                             metric_list[metric_idx] = key
 
                 elif type_key in ("raw_csv_table", "pc_sampling_table"):
-                    data_source_idx = str(data_config["id"] // 100)
+                    data_source_idx = panel_index(data_config["id"])
                     metric_list[data_source_idx] = panel["title"]
 
     return metric_list

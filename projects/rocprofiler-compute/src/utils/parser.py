@@ -31,6 +31,7 @@ from utils.utils_common import (
     expand_placeholder_ranges,
     format_metric_id,
     normalize_filter_to_str_list,
+    panel_index,
     table_index,
 )
 
@@ -103,7 +104,7 @@ def build_dfs(
         for data_source in panel["data source"]:
             for table_type, data_config in data_source.items():
                 table_id = data_config["id"]
-                file_data_source_idx = str(table_id // 100)
+                file_data_source_idx = panel_index(table_id)
 
                 if table_type == "metric_table":
                     df, expressions = _build_metric_table_df(
@@ -178,7 +179,7 @@ def _metric_passes_filter(
     if user_metric_filter and (
         metric_id in user_metric_filter
         or data_source_idx in user_metric_filter
-        or str(panel_id // 100) in user_metric_filter
+        or panel_index(panel_id) in user_metric_filter
     ):
         return True
     if profile_panel_filter:
