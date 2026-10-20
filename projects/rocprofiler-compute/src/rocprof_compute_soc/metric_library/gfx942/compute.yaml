@@ -1,0 +1,17 @@
+inherit: ../gfx940/compute.yaml
+compute.int8_ops:
+  unit: (IOPS + $normUnit)
+compute.iops_per_norm:
+  unit: (IOPS + $normUnit)
+compute.vmem_ta_addr_stall:
+  description: >-
+    The number of cycles the sequencer was stalled waiting to send address requests
+    to the address processor due to a full address FIFO, per normalization unit.
+compute.vmem_ta_cmd_stall:
+  description: >-
+    The number of cycles the sequencer was stalled waiting to send commands to the
+    address processor due to a full command FIFO, per normalization unit.
+compute.vmem_ta_data_stall:
+  description: >-
+    The number of cycles the sequencer was stalled waiting to send write data to the
+    address processor due to a full data FIFO, per normalization unit.
