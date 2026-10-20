@@ -675,6 +675,23 @@ function(rccl_define_micro_source_lists)
     fakes/utils_fakes.cc                 # getBusId (alloc.h side stream)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroTransport -- src/transport/. Tests mirror that tree
+  # under test/host/transport; one binary owns the subsystem's shared socket,
+  # network and GDRCopy seams.
+  set(TEST_MICRO_TRANSPORT_SOURCE_FILES
+    transport/rma-socket-test.cc
+    transport/rma-socket-mem-test.cc
+    transport/rma-socket-progress-recver-test.cc
+    transport/rma-socket-setup-test.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/os_fakes.cc
+    fakes/socket_fakes.cc
+    fakes/transport_net_socket_common_fakes.cc
+    fakes/transport_net_socket_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1701,6 +1718,19 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDda
     # hipify renames .cu to .cu.cpp
     FABRIC_GPU_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_gpu_barrier.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroTransport
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroTransport
+  SOURCES ${TEST_MICRO_TRANSPORT_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    RMA_SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket.cc"
+    RMA_SOCKET_MEM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_mem.cc"
+    RMA_SOCKET_PROGRESS_RECVER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_progress_recver.cc"
+    RMA_SOCKET_SETUP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/rma_socket_setup.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_transport.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.
