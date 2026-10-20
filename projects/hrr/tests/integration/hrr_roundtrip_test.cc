@@ -673,7 +673,10 @@ HRR_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
  */
 HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_divergence"};
-  hrr_capture_direct("Unit_HRR_UncapturedHostWrite_Direct", cap.path);
+  // Pinned host snapshots would record the flag, so the write stays unseen only
+  // without them.
+  hrr_capture_direct("Unit_HRR_UncapturedHostWrite_Direct", cap.path, 5,
+                     {{"HIP_HRR_HOST_SNAPSHOTS", "0"}});
 
   SECTION("guard ON -> clean exit 2") {
     auto [ret, out] = hrr_playback_env(
@@ -723,7 +726,8 @@ HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
  */
 TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_nulloptional"};
-  hrr_capture_direct("Unit_HRR_NullOptionalPtr_Direct", cap.path);
+  hrr_capture_direct("Unit_HRR_NullOptionalPtr_Direct", cap.path, 5,
+                     {{"HIP_HRR_HOST_SNAPSHOTS", "0"}});
 
   auto [ret, out] = hrr_playback_env(
       cap.path,
