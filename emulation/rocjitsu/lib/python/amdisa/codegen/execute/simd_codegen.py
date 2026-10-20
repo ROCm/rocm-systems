@@ -1190,9 +1190,10 @@ SIMD_VOP3P_MOV_B32: set[str] = {
 # VOP3P integer dot products. dst is a single 32-bit lane (not packed) and
 # src2 is the accumulator; the dot reduction happens within each lane so the
 # fast path vectorizes across lanes. Parameterised by (ElemBits, Signed):
-# the 8/4-bit forms ignore op_sel in the scalar body, the 16-bit forms gate
-# on default packing inside the glue. Signed forms lower-clamp to 0 when
-# inst.clamp is set; the unsigned scalar bodies have no clamp branch.
+# the 8/4-bit forms apply op_sel half selection in both the scalar body and
+# the SIMD path, the 16-bit forms fall back to scalar for non-default packing
+# inside the glue. Signed forms lower-clamp to 0 when inst.clamp is set; the
+# unsigned scalar bodies have no clamp branch.
 SIMD_VOP3P_DOT_INT: dict[str, str] = {
     'v_dot4_i32_i8_vop3p': '8, true',
     'v_dot4_u32_u8_vop3p': '8, false',
