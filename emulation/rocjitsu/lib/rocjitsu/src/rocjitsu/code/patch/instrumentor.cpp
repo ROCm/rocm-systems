@@ -920,6 +920,19 @@ std::optional<std::vector<const BasicBlock *>> Instrumentor::kernel_blocks(uint6
   return std::vector<const BasicBlock *>(blocks.begin(), blocks.end());
 }
 
+std::vector<const Instruction *> Instrumentor::block_instructions(const BasicBlock &block) const {
+  std::vector<const Instruction *> instructions;
+  // Walked through offset_to_inst_ for the same reason as first_anchor().
+  for (uint64_t cur = block.start_offset(); cur < block.end_offset();) {
+    const Instruction *inst = find_instruction_at_offset(cur);
+    if (inst == nullptr || inst->size() <= 0)
+      break;
+    instructions.push_back(inst);
+    cur += static_cast<uint64_t>(inst->size());
+  }
+  return instructions;
+}
+
 std::optional<uint64_t> Instrumentor::first_anchor(const BasicBlock &block) const {
   const Section *text = obj_.text_sections().front();
   const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),

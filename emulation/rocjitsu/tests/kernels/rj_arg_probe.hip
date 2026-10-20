@@ -14,10 +14,10 @@
 // for -- both are needed here for the same reasons.
 //
 // The argument is consumed by inline asm rather than stored somewhere, because a
-// store to a __device__ global lowers to an s_getpc_b64 plus a relocated address
-// add, and build_probe_callable() rejects a body carrying any relocation. The
-// asm keeps the body self-contained without constraining where the compiler
-// chooses to put the argument, which is the thing under test.
+// store to a __device__ global would reference data, and the Instrumentor copies
+// only a probe's instructions (see build_probe_callable()). The asm keeps the
+// body self-contained without constraining where the compiler chooses to put the
+// argument, which is the thing under test.
 //
 // Compiled for gfx90a this lowers to `s_waitcnt 0 ; v_mov_b32 v3, v0 ;
 // s_setpc_b64 s[30:31]`.

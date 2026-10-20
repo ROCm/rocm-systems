@@ -459,6 +459,11 @@ public:
   /// points. @p block must come from kernel_blocks().
   [[nodiscard]] std::optional<uint64_t> first_anchor(const BasicBlock &block) const;
 
+  /// @brief The decoded instructions of @p block, in address order.
+  ///
+  /// @p block must come from kernel_blocks().
+  [[nodiscard]] std::vector<const Instruction *> block_instructions(const BasicBlock &block) const;
+
   /// @brief Validate, plan, build, and apply the queued points; emit a
   ///        patched ELF.
   ///
@@ -477,6 +482,11 @@ public:
   /// call returns, or past such an edge counts as dead, so a trampoline in such
   /// a kernel may clobber it. patch() does not detect this; the DBI runtime's
   /// site selector (instrument_each_block()) refuses such kernels.
+  ///
+  /// Growing .text moves the sections after it, and no PC-relative reference
+  /// into them is rebased: an address the kernel builds from s_getpc_b64 and a
+  /// literal keeps pointing at the old location. patch() does not detect this
+  /// either; the site selector refuses kernels that read the PC.
   ///
   /// Refuses any point whose probe reads a `LogBufferPtr*` argument: the entry
   /// prologue those need loads through a kernarg wrapper that no runtime builds

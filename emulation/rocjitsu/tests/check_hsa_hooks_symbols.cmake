@@ -16,8 +16,9 @@ if(
     )
 endif()
 
-# Check the actual dynamic ABI, including accidental RTTI or template exports
-# from the VM objects. Those objects may also be linked into the caller.
+# Compare the library's dynamic exports with the caller's list: an unexpected
+# export (accidental RTTI or template instantiations included) or a missing one
+# fails.
 function(check_exports library)
     set(_expected ${ARGN})
     execute_process(
