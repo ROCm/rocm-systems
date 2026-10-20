@@ -916,6 +916,23 @@ class TestDeriveVectorUnary:
             assert 'inst_.clamp' not in cpp
             assert cpp.index(modifier) < cpp.index('std::isnan(s)')
 
+    def test_cvt_f64_f32_modifiers_wrap_the_typed_conversion(self):
+        sem = derive_semantics('V_CVT_F64_F32', 'ENC_VOP3')
+        block = enrich_block(
+            derive_sema_block(sem),
+            enc_field_names=frozenset({'abs', 'neg', 'omod', 'clamp'}),
+        )
+        cpp = lower_sema_block(block)
+
+        source_modifier = 'source_modifier::apply_to_float'
+        conversion = 'static_cast<double>'
+        # The modifier call is nested inside the widening conversion.
+        assert cpp.index(conversion) < cpp.index(source_modifier)
+        assert 'inst_.abs' in cpp
+        assert 'inst_.neg' in cpp
+        assert 'output_modifier_policy<amdgpu::fp_format::F64>' in cpp
+        assert 'output_modifier::apply<amdgpu::fp_format::F64>' in cpp
+
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):
         sem = derive_semantics('V_COS_BF16', enc)

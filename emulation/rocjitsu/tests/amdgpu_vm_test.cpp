@@ -10,6 +10,7 @@
 #include "gws_test_encoding.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
@@ -45,9 +46,8 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/amd_hsa_queue.h"
-#include "linux/uapi/kfd_ioctl.h"
+#include "uapi/linux/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
@@ -256,25 +256,25 @@ struct VmFixture {
                         uint32_t group_segment_fixed_size = 0, bool wgp_mode = false,
                         uint32_t enable_vgpr_workitem_id = 0, uint32_t extra_compute_pgm_rsrc1 = 0,
                         bool wave32 = true) {
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-    AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
-                    static_cast<uint32_t>(wave32));
+    RJ_AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                       static_cast<uint32_t>(wave32));
     kd.compute_pgm_rsrc1 |= extra_compute_pgm_rsrc1;
     const uint32_t wave_size = kernel_wavefront_size(cu()->arch(), kd);
     const uint32_t vgpr_granule =
         descriptor_vgpr_granularity_for_wavefront(cu()->arch(), wave_size);
     assert(vgpr_granule != 0 && vgprs % vgpr_granule == 0);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    ((vgprs / vgpr_granule) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    ((sgprs / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, (wgp_mode ? 1u : 0u));
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                       ((vgprs / vgpr_granule) - 1));
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                       ((sgprs / 8) - 1));
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgprs);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, (wgp_mode ? 1u : 0u));
     kd.group_segment_fixed_size = group_segment_fixed_size;
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
-                    enable_vgpr_workitem_id);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_ENABLE_VGPR_WORKITEM_ID,
+                       enable_vgpr_workitem_id);
     mem()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem()->load_image(static_cast<const uint8_t *>(code), code_size,
                       addr + sizeof(kernel_descriptor_t));
@@ -471,14 +471,14 @@ hsa_kernel_dispatch_packet_t make_dispatch_packet(uint64_t kernel_object, uint64
 
 uint64_t write_test_kernel(amdgpu::GpuMemory *memory, uint64_t addr,
                            std::span<const uint32_t> code) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t descriptor{};
   descriptor.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  31);
-  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  12);
-  AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     31);
+  RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc1,
+                     COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT, 12);
+  RJ_AMDHSA_BITS_SET(descriptor.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
   memory->load_image(reinterpret_cast<const uint8_t *>(&descriptor), sizeof(descriptor), addr);
   memory->load_image(reinterpret_cast<const uint8_t *>(code.data()), code.size_bytes(),
                      addr + sizeof(descriptor));
@@ -581,7 +581,7 @@ TEST(RdnaDispatchTest, DescriptorSelectsCoherentWaveWidthAndVgprGranule) {
         0x1000, &kRdnaEndpgm, sizeof(kRdnaEndpgm), /*sgprs=*/104, expected_vgprs,
         /*user_sgprs=*/2, /*group_segment_fixed_size=*/0, /*wgp_mode=*/false,
         /*enable_vgpr_workitem_id=*/0, /*extra_compute_pgm_rsrc1=*/0, wave32);
-    rocr::llvm::amdhsa::kernel_descriptor_t stored_descriptor{};
+    rocjitsu::amdhsa::kernel_descriptor_t stored_descriptor{};
     fixture.mem()->read_block(kernel_object, {reinterpret_cast<uint8_t *>(&stored_descriptor),
                                               sizeof(stored_descriptor)});
     ASSERT_EQ(kernel_wavefront_size(fixture.cu()->arch(), stored_descriptor), expected_wave_size);
@@ -933,17 +933,19 @@ TEST(RdnaDispatchTest, WgpLdsContentsSurviveWorkgroupAllocationReuse) {
 }
 
 TEST(AqlDispatchTest, InitializesModeFromComputePgmRsrc1) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   uint32_t rsrc1 = 0;
-  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_32, FLOAT_ROUND_MODE_ZERO);
-  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_16_64, FLOAT_ROUND_MODE_PLUS_INFINITY);
-  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_32, FLOAT_DENORM_MODE_FLUSH_SRC);
-  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64, FLOAT_DENORM_MODE_FLUSH_NONE);
-  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 1);
-  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 1);
-  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_DEBUG_MODE, 1);
-  AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL, 1);
+  RJ_AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_32, FLOAT_ROUND_MODE_ZERO);
+  RJ_AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_ROUND_MODE_16_64,
+                     FLOAT_ROUND_MODE_PLUS_INFINITY);
+  RJ_AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_32, FLOAT_DENORM_MODE_FLUSH_SRC);
+  RJ_AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FLOAT_DENORM_MODE_16_64,
+                     FLOAT_DENORM_MODE_FLUSH_NONE);
+  RJ_AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_DX10_CLAMP, 1);
+  RJ_AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_ENABLE_IEEE_MODE, 1);
+  RJ_AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_DEBUG_MODE, 1);
+  RJ_AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL, 1);
 
   const uint32_t common_mode =
       (FLOAT_ROUND_MODE_ZERO << 0) | (FLOAT_ROUND_MODE_PLUS_INFINITY << 2) |
@@ -1125,7 +1127,7 @@ TEST(AqlDispatchTest, InvalidationRefetchesInstructionsAlreadyInCache) {
   std::vector<uint32_t> code(kNopCount, SOPP_S_NOP);
   code.push_back(kCdna5Endpgm);
   const uint64_t kernel = fixture.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
-  const uint64_t entry_pc = kernel + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t);
+  const uint64_t entry_pc = kernel + sizeof(rocjitsu::amdhsa::kernel_descriptor_t);
 
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<InvalidateAfterFirstInstruction>(
@@ -1155,7 +1157,7 @@ TEST(AqlDispatchTest, InvalidationRefetchesInstructionsAlreadyInCache) {
 }
 
 TEST(AqlDispatchTest, RevokedWaveSetupRecoversBeforeExecution) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   constexpr uint32_t kProcessId = 77;
   constexpr uint32_t kQueueId = 1;
   constexpr uint32_t kExceptionEvent = 19;
@@ -1227,7 +1229,7 @@ TEST(AqlDispatchTest, RevokedWaveSetupRecoversBeforeExecution) {
                                4);
       } else {
         uint16_t preload = 0;
-        AMDHSA_BITS_SET(preload, KERNARG_PRELOAD_SPEC_LENGTH, 1);
+        RJ_AMDHSA_BITS_SET(preload, KERNARG_PRELOAD_SPEC_LENGTH, 1);
         fixture.mem()->load_image(reinterpret_cast<const uint8_t *>(&preload), sizeof(preload),
                                   kernel + offsetof(kernel_descriptor_t, kernarg_preload));
       }
@@ -1493,7 +1495,7 @@ TEST(AqlDispatchTest, ConcurrentRootReplacementPreservesAdmittedDispatchSnapshot
   }
 
   const uint64_t second_instruction =
-      kernel + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t) + sizeof(uint32_t);
+      kernel + sizeof(rocjitsu::amdhsa::kernel_descriptor_t) + sizeof(uint32_t);
   auto replacement_a = std::make_shared<amdgpu::GpuMemory>("replacement_a");
   auto replacement_b = std::make_shared<amdgpu::GpuMemory>("replacement_b");
   replacement_a->write32(second_instruction, kCdna5Endpgm);
@@ -4660,7 +4662,7 @@ TEST(DispatchEntryTest, InitialExecMaskHandles3DTailWithWorkgroupOffset) {
 }
 
 TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBeforeConsumingPacket) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 19;
@@ -4817,7 +4819,7 @@ TEST(CommandProcessorTest, KfdQueueRequestsResizesAndReclaimsDynamicScratchBefor
 }
 
 TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 20;
@@ -4912,7 +4914,7 @@ TEST(CommandProcessorTest, DynamicScratchRequestBlocksRemovalOnlyUntilDelivery) 
 }
 
 TEST(CommandProcessorTest, KfdQueueHonorsAsyncScratchCutoffsAndTracksPerXccUse) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint32_t kProcessId = 7;
   constexpr uint32_t kQueueId = 23;
@@ -5653,12 +5655,12 @@ TEST_P(IsaTest, VendorSpecificBarrierValueConditionsWaitAndResume) {
     f.mem()->write64(kCompletionSignal + kSignalValueOffset, 1);
 
     amdgpu::AmdBarrierValuePacket barrier{};
-    barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
-    barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+    barrier.header.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+    barrier.header.AmdFormat = amdgpu::kHsaAmdPacketTypeBarrierValue;
     barrier.signal.handle = kDepSignal;
     barrier.value = test_case.value;
     barrier.mask = test_case.mask;
-    barrier.condition = test_case.condition;
+    barrier.cond = test_case.condition;
     barrier.completion_signal.handle = kCompletionSignal;
 
     test::AqlQueue queue(f.mem(), f.cp());
@@ -5684,9 +5686,9 @@ TEST_P(IsaTest, VendorSpecificBarrierValueAllowsNullSignals) {
   f.mem()->write64(kCompletionSignal + kSignalValueOffset, 1);
 
   amdgpu::AmdBarrierValuePacket barrier{};
-  barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
-  barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
-  barrier.condition = HSA_SIGNAL_CONDITION_EQ;
+  barrier.header.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.header.AmdFormat = amdgpu::kHsaAmdPacketTypeBarrierValue;
+  barrier.cond = HSA_SIGNAL_CONDITION_EQ;
   barrier.completion_signal.handle = kCompletionSignal;
 
   test::AqlQueue queue(f.mem(), f.cp());
@@ -5707,11 +5709,11 @@ TEST_P(IsaTest, VendorSpecificBarrierValueRejectsInvalidCondition) {
   f.mem()->write64(kDepSignal + kSignalValueOffset, 1);
 
   amdgpu::AmdBarrierValuePacket barrier{};
-  barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
-  barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+  barrier.header.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.header.AmdFormat = amdgpu::kHsaAmdPacketTypeBarrierValue;
   barrier.signal.handle = kDepSignal;
   barrier.mask = std::numeric_limits<int64_t>::max();
-  barrier.condition = 99;
+  barrier.cond = 99;
 
   test::AqlQueue invalid_queue(f.mem(), f.cp());
   test::AqlQueue independent_queue(f.mem(), f.cp(), 0xF0100000, 4096, 0xF0110000, 0xF0110008,
@@ -5749,8 +5751,8 @@ TEST_P(IsaTest, VendorSpecificBarrierValueOrdersQueueEntries) {
   dispatch.kernel_object = ko;
 
   amdgpu::AmdBarrierValuePacket barrier{};
-  barrier.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
-  barrier.amd_format = amdgpu::kHsaAmdPacketTypeBarrierValue;
+  barrier.header.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC | (1 << HSA_PACKET_HEADER_BARRIER);
+  barrier.header.AmdFormat = amdgpu::kHsaAmdPacketTypeBarrierValue;
   barrier.completion_signal.handle = kBarrierCompletionSignal;
 
   test::AqlQueue queue(f.mem(), f.cp());
@@ -6072,7 +6074,7 @@ TEST(CommandProcessorAqlTest, CuIdleDoesNotExecutePm4AfterPeerGridFault) {
 }
 
 TEST(CommandProcessorGwsPlacementTest, RetirementAdmitsPendingProducer) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (const uint32_t threads : {1u, 2u}) {
     SCOPED_TRACE(threads);
     VmFixture f("cdna3", 1, 3, 64, 104, 256, 1, 100000);
@@ -6097,7 +6099,7 @@ TEST(CommandProcessorGwsPlacementTest, RetirementAdmitsPendingProducer) {
         cdna3::build_sopp(cdna3::kSEndpgmSopp)[0]};
     const auto ko = f.write_kernel(0x1000, code, sizeof(code), 104, 256, 2, 0, false, 0, 0, false);
     auto rs2 = f.mem()->read32(ko + offsetof(kernel_descriptor_t, compute_pgm_rsrc2));
-    AMDHSA_BITS_SET(rs2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+    RJ_AMDHSA_BITS_SET(rs2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
     f.mem()->write32(ko + offsetof(kernel_descriptor_t, compute_pgm_rsrc2), rs2);
     init_completion_signal(f.mem(), 0x7000);
     test::AqlQueue queue(f.mem(), f.cp());
@@ -6763,13 +6765,13 @@ constexpr uint32_t S_ENDPGM = sopp(1, 0);
 } // namespace enc
 
 TEST(AqlDispatchTest, Fp16OvflDescriptorControlsFp8ConversionResult) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   using namespace enc;
 
   auto run_case = [](bool fp16_ovfl, uint32_t expected_v2) {
     uint32_t rsrc1 = 0;
     const uint32_t fp16_ovfl_bit = fp16_ovfl ? 1u : 0u;
-    AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL, fp16_ovfl_bit);
+    RJ_AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_FP16_OVFL, fp16_ovfl_bit);
 
     const auto cvt_pk_fp8 = vop3_cdna(cdna4::kVCvtPkFp8F32Vop3, 2, VGPR_SRC(5), VGPR_SRC(6));
     const uint32_t code[] = {
@@ -9716,12 +9718,13 @@ TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
             cu->set_functional_quantum(1);
             cu->set_gws_wait_limit(32);
           }
-        using namespace rocr::llvm::amdhsa;
+        using namespace rocjitsu::amdhsa;
         kernel_descriptor_t kd{};
         kd.kernel_code_entry_byte_offset = sizeof(kd);
-        AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
-        AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                        12);
+        RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                           31);
+        RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                           12);
         mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), 0x1000);
         auto p = cdna3::build_ds(
             test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3,

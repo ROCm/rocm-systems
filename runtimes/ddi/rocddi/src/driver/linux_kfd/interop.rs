@@ -38,7 +38,8 @@ impl LinuxKfdDriver {
         descriptor: BorrowedFd<'_>,
     ) -> Result<Owned<KfdVirtualMemory>, Error> {
         self.ensure_open()?;
-        KfdVirtualMemory::import(descriptor.as_raw_fd())
+        let kfd = self.kfd()?;
+        KfdVirtualMemory::import_with_kfd(descriptor.as_raw_fd(), &kfd)
     }
 
     pub(crate) fn export_virtual_memory(memory: &KfdVirtualMemory) -> Result<DmaBuf, Error> {
