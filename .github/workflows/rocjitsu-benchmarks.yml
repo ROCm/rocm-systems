@@ -333,6 +333,23 @@ jobs:
           name: ${{ env.RESULTS_ARTIFACT }}-dashboard
           path: ${{ env.RESULTS_DOWNLOAD_DIR }}/dashboard
 
+      - name: Checkout publication validator
+        if: ${{ needs.benchmark.outputs.dashboard_ready == 'true' }}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: workflow-source
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            emulation/rocjitsu/website/dashboard/scripts
+            emulation/rocjitsu/website/dashboard/src/data
+
+      - name: Set up Node.js
+        if: ${{ needs.benchmark.outputs.dashboard_ready == 'true' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+
       - name: Checkout publication branch
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -343,6 +360,7 @@ jobs:
         working-directory: publication
         env:
           DASHBOARD_READY: ${{ needs.benchmark.outputs.dashboard_ready }}
+          DASHBOARD_VALIDATOR: ${{ github.workspace }}/workflow-source/emulation/rocjitsu/website/dashboard/scripts/validate-dashboard-data.mjs
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -394,8 +412,16 @@ jobs:
               fi
             fi
 
+            if [[ "${DASHBOARD_READY}" == true && "${CATALOG_FAILED}" -eq 0 ]] &&
+              ! node "${DASHBOARD_VALIDATOR}" "${DATA}"; then
+              echo "Dashboard dataset failed validation; publishing raw only." >&2
+              # Discard only this attempt's dashboard edits, keeping the raw archive staged.
+              git restore --source=HEAD --staged --worktree -- "${DATA}"
+              CATALOG_FAILED=1
+            fi
+
             # Even after a successful raw-only push (or an unchanged archive),
-            # report catalog failure so the skipped dashboard update stays visible.
+            # report catalog or dataset failure so the skipped dashboard update stays visible.
             if git diff --cached --quiet; then exit "${CATALOG_FAILED}"; fi
             git commit -m "Publish benchmark ${GITHUB_RUN_ID}.${BENCHMARK_RUN_ATTEMPT}"
             if git push origin "HEAD:${RESULTS_BRANCH}"; then exit "${CATALOG_FAILED}"; fi

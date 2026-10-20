@@ -73,8 +73,9 @@ after updating Playwright if its required browser version changes.
 
 ## Dashboard-data Python tests
 
-Use a Python 3.12 environment with Bash, Git, jq, and coreutils (including
-`realpath`) on `PATH`. From `emulation/rocjitsu/website/dashboard`:
+Use a Python 3.12 environment with Node.js (as above), Bash, Git, jq, and coreutils
+(including `realpath`) on `PATH`. Publication tests use the real dashboard
+validator; no npm dependencies are required. From `emulation/rocjitsu/website/dashboard`:
 
 ```bash
 python -m pip install -r scripts/dashboard-data/requirements-test.txt

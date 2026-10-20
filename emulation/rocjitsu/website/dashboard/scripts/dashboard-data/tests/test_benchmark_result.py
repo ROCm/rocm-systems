@@ -19,6 +19,7 @@ SOURCE_SHA = 'b' * 40
 WORKFLOW_SHA = 'c' * 40
 TENSILE_SHA = 'd' * 40
 CORPUS_SHA = '6186d5c8bcd5e9bc93f7406e7cb50ed2a7698621'
+VALIDATOR = HELPER.parents[1] / 'validate-dashboard-data.mjs'
 SOURCE_SUBJECT = 'Source "subject" with spaces = literal $(touch SHOULD_NOT_EXIST)'
 
 
@@ -342,7 +343,7 @@ def test_copy_and_index_preserve_history(tmp_path, existing, publication_catalog
         setup_body
         + body[
             body.index('  mkdir -p "${DESTINATION}"') : body.index(
-                '  if git diff --cached'
+                '  if [[ "${DASHBOARD_READY}" == true && "${CATALOG_FAILED}" -eq 0 ]] &&'
             )
         ]
     )
@@ -425,7 +426,11 @@ def test_publication_catalog_path(tmp_path, publication_catalog, catalog_case):
     ]
     dashboard_body = (
         dashboard_setup
-        + body[body.index('  CATALOG_FAILED=') : body.index('  if git diff --cached')]
+        + body[
+            body.index('  CATALOG_FAILED=') : body.index(
+                '  if [[ "${DASHBOARD_READY}" == true && "${CATALOG_FAILED}" -eq 0 ]] &&'
+            )
+        ]
     )
     result = subprocess.run(
         [
@@ -533,6 +538,22 @@ def test_benchmark_artifact_contract():
     }
     metadata = benchmark['Record benchmark metadata']['run']
     assert "printf 'run_attempt=%s\\n' \"${GITHUB_RUN_ATTEMPT}\"" in metadata
+    publication = {step['name']: step for step in steps()}
+    validator_checkout = publication['Checkout publication validator']
+    assert validator_checkout['with']['ref'] == '${{ github.sha }}'
+    assert validator_checkout['with']['path'] == 'workflow-source'
+    assert validator_checkout['with']['persist-credentials'] is False
+    assert validator_checkout['with']['sparse-checkout'].splitlines() == [
+        'emulation/rocjitsu/website/dashboard/scripts',
+        'emulation/rocjitsu/website/dashboard/src/data',
+    ]
+    assert validator_checkout['if'] == downloads['Download dashboard JSON']['if']
+    assert publication['Set up Node.js']['if'] == validator_checkout['if']
+    assert publication['Set up Node.js']['with']['node-version'] == '22.13.0'
+    assert publication['Publish benchmark files']['env']['DASHBOARD_VALIDATOR'] == (
+        '${{ github.workspace }}/workflow-source/emulation/rocjitsu/website/dashboard/'
+        'scripts/validate-dashboard-data.mjs'
+    )
 
 
 @pytest.mark.parametrize(
@@ -618,6 +639,9 @@ def test_workflow_shell_and_source_contracts():
         (False, True, 'archived-missing'),
         (False, True, 'archived-existing-run'),
         (False, True, 'invalid'),
+        (False, True, 'incompatible'),
+        (False, True, 'incompatible-on-race'),
+        (False, True, 'archived-incompatible'),
     ],
 )
 def test_publication_retry(
@@ -654,12 +678,41 @@ def test_publication_retry(
     git(seed, 'config', '--local', 'commit.gpgsign', 'false')
     data = seed / 'rocjitsu-dashboard/data'
     data.mkdir(parents=True)
+    (data / 'metadata.json').write_text(
+        json.dumps(
+            {
+                'schemaVersion': 1,
+                'repository': 'https://github.com/ROCm/rocm-systems',
+                'isBeta': True,
+            }
+        )
+    )
+    (data / 'runs').mkdir()
+    for name in ('older', 'concurrent'):
+        run = json.loads(output.read_text())
+        run['id'] = name
+        run['comparisonId'] = name
+        if catalog_state in ('incompatible', 'archived-incompatible'):
+            run['execution']['machine'] = 'another machine'
+        (data / 'runs' / f'{name}.json').write_text(json.dumps(run))
     catalog = data / 'test-catalogs' / (publication_catalog['id'] + '.json')
-    if catalog_state in ('present', 'removed-on-race'):
+    if catalog_state in (
+        'present',
+        'removed-on-race',
+        'incompatible',
+        'incompatible-on-race',
+        'archived-incompatible',
+    ):
         catalog.parent.mkdir()
         catalog.write_text(json.dumps(publication_catalog))
     (data / 'index.json').write_text(
-        json.dumps({'runFiles': ['runs/older.json'], 'custom': 'keep'})
+        json.dumps(
+            {
+                'runFiles': ['runs/older.json'],
+                'custom': 'keep',
+                'generatedAt': '2026-10-01T00:01:00Z',
+            }
+        )
     )
     if catalog_state.startswith('archived-'):
         archive = seed / 'raw-benchmarks/github-123-attempt-1/raw.json'
@@ -667,7 +720,7 @@ def test_publication_retry(
         archive.write_bytes(original)
     if catalog_state == 'archived-existing-run':
         previous_run = data / 'runs' / output.name
-        previous_run.parent.mkdir()
+        previous_run.parent.mkdir(exist_ok=True)
         previous_run.write_text('preserve existing dashboard bytes\n')
         (data / 'index.json').write_text(
             json.dumps(
@@ -681,15 +734,45 @@ def test_publication_retry(
     git(seed, 'commit', '-qm', 'Initial fixture')
     initial = git(seed, 'rev-parse', 'HEAD')
     initial_index = (data / 'index.json').read_bytes()
+    if catalog_state in ('incompatible', 'archived-incompatible'):
+        # Each input validates alone; only the combined dataset violates machine policy.
+        subprocess.run(
+            ['node', str(VALIDATOR), str(data)], check=True, capture_output=True
+        )
+        isolated = tmp_path / 'isolated'
+        (isolated / 'runs').mkdir(parents=True)
+        (isolated / 'test-catalogs').mkdir()
+        shutil.copy2(data / 'metadata.json', isolated / 'metadata.json')
+        shutil.copy2(catalog, isolated / 'test-catalogs' / catalog.name)
+        shutil.copy2(output, isolated / 'runs' / output.name)
+        (isolated / 'index.json').write_text(
+            json.dumps(
+                {
+                    'generatedAt': '2026-10-01T00:01:00Z',
+                    'runFiles': ['runs/' + output.name],
+                }
+            )
+        )
+        subprocess.run(
+            ['node', str(VALIDATOR), str(isolated)], check=True, capture_output=True
+        )
     subprocess.run([real_git, 'clone', '-q', str(seed), str(publication)], check=True)
     git(publication, 'config', '--local', 'commit.gpgsign', 'false')
     git(seed, 'checkout', '-qb', 'race')
     (data / 'index.json').write_text(
         json.dumps(
-            {'runFiles': ['runs/older.json', 'runs/concurrent.json'], 'custom': 'keep'}
+            {
+                'runFiles': ['runs/older.json', 'runs/concurrent.json'],
+                'custom': 'keep',
+                'generatedAt': '2026-10-01T00:01:00Z',
+            }
         )
     )
     (seed / 'concurrent.txt').write_text('preserve concurrent writer')
+    if catalog_state == 'incompatible-on-race':
+        run = json.loads((data / 'runs/concurrent.json').read_text())
+        run['execution']['machine'] = 'another machine'
+        (data / 'runs/concurrent.json').write_text(json.dumps(run))
     if catalog_state == 'removed-on-race':
         catalog.unlink()
     elif catalog_state == 'added-on-race':
@@ -749,6 +832,7 @@ git('update-ref', ref, new, old)
         'GITHUB_RUN_ID': '123',
         'GITHUB_RUN_ATTEMPT': publish_attempt,
         'BENCHMARK_RUN_ATTEMPT': '1',
+        'DASHBOARD_VALIDATOR': str(VALIDATOR),
     }
     body = next(
         step['run'] for step in steps() if step['name'] == 'Publish benchmark files'
@@ -765,7 +849,9 @@ git('update-ref', ref, new, old)
     counter = tmp_path / 'push-count'
     if catalog_state.startswith('archived-'):
         assert result.returncode == 1, result.stdout + result.stderr
-        assert 'catalog' in result.stderr.lower()
+        assert (
+            'machine' if catalog_state == 'archived-incompatible' else 'catalog'
+        ) in result.stderr.lower()
         assert not counter.exists()
         assert git(publication, 'rev-parse', 'HEAD') == initial
         assert git(seed, 'rev-parse', 'gh-pages-rocjitsu') == initial
@@ -807,13 +893,34 @@ git('update-ref', ref, new, old)
         )
         git(seed, 'merge-base', '--is-ancestor', race, 'gh-pages-rocjitsu')
         if catalog_failed:
-            assert 'catalog' in result.stderr.lower()
+            assert (
+                'machine' if catalog_state.startswith('incompatible') else 'catalog'
+            ) in result.stderr.lower()
             assert not (
                 publication / 'rocjitsu-dashboard/data/runs' / output.name
             ).exists()
             assert (
                 publication / 'rocjitsu-dashboard/data/index.json'
             ).read_bytes() == race_index
+            assert (
+                git(
+                    seed,
+                    'diff',
+                    'refs/heads/race',
+                    'gh-pages-rocjitsu',
+                    '--',
+                    'rocjitsu-dashboard/data',
+                )
+                == ''
+            )
+        elif dashboard_ready:
+            subprocess.run(
+                ['node', str(VALIDATOR), str(publication / 'rocjitsu-dashboard/data')],
+                check=True,
+                capture_output=True,
+            )
+    if catalog_state == 'incompatible-on-race':
+        assert 'Dashboard data is valid' in result.stdout
     if not always_fail:
         published = subprocess.check_output(
             [
