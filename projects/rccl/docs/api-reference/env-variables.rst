@@ -433,13 +433,17 @@ in the following table.
         | See InfiniBand ``show_gids`` command for valid values
 
     * - | ``NCCL_IB_QUERY_PORT_SPEED``
-        | Controls whether RCCL queries the extended port speed
-          (``ibv_query_port`` active speed extension) for bandwidth reporting.
-          Disabling it falls back to the legacy ``active_speed``/
-          ``active_width`` computation and disables runtime speed-change
-          detection.
-      - | ``1``: Query the extended speed (default).
-        | ``0``: Use the legacy speed field only.
+        | Controls whether RCCL queries the port speed with
+          ``ibv_query_port_speed`` (``IBVERBS_1.16``) when it initializes
+          devices. Applies to both the ``IB`` and ``IB-CAST`` transports. If
+          the installed ``libibverbs`` does not export this function, or the
+          query fails, RCCL falls back to the port's ``active_speed_ex``
+          (for ``XDR`` or newer rates) or ``active_speed``, combined with
+          ``active_width``. Disabling it also turns off runtime speed-change
+          detection, which only the ``IB`` transport supports.
+      - | ``1``: Query the port speed (default).
+        | ``0``: Use ``active_speed_ex``/``active_speed`` and
+          ``active_width`` only.
 
     * - | ``NCCL_IB_SUBNET_AWARE_ROUTING``
         | Enables subnet-aware device selection.
@@ -1066,7 +1070,7 @@ threshold table introduced for gfx1250.
     * - | ``RCCL_FORCE_CE_ALLREDUCE``
         | Bypasses the ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``) requirement for
           CE AllReduce, allowing CE to run without symmetric window registration.
-          Does not override the staging buffer size cap (``RCCL_CE_AR_MAX_MSG_BYTES``
+          Does not override the staging buffer size cap (``RCCL_CE_AR_2SHOT_MAX_BYTES``
           or the arch table ``ceNonRegMax[AR]``); that cap is enforced regardless.
           When ``-1`` (auto), follows the same gfx1250-default logic as
           ``RCCL_CE_ALLREDUCE``.
@@ -1074,7 +1078,7 @@ threshold table introduced for gfx1250.
         | ``0``: Disabled.
         | ``1``: Force-enabled (CTA_POLICY check bypassed).
 
-    * - | ``RCCL_CE_AR_MAX_MSG_BYTES``
+    * - | ``RCCL_CE_AR_2SHOT_MAX_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
           the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table. A
           null or unknown-arch table restores the pre-table 256 MiB default. This
@@ -1094,10 +1098,60 @@ threshold table introduced for gfx1250.
     * - | ``RCCL_CE_AR_STAGING_BYTES``
         | Overrides the total allocation size of the CE AllReduce staging buffer
           (``ceARTmpBuf``). When ``-1`` (default), the buffer is allocated at the
-          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (16 MiB). Increasing
+          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (256 MiB). Increasing
           this reduces pipelining overhead for large messages but raises per-rank
           GPU memory usage. This variable sizes the buffer only; the selector cap
-          is controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
-      - | ``-1``: Use the compile-time default of 16 MiB (default).
+          is controlled separately by ``RCCL_CE_AR_2SHOT_MAX_BYTES``.
+      - | ``-1``: Use the compile-time default of 256 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
+
+    * - | ``RCCL_CE_AR_2SHOT_MIN_BYTES``
+        | Overrides the minimum message size for the CE 2-shot AllReduce path.
+          When ``-1`` (default), the value is resolved from ``ceNonRegMin[AllReduce]``
+          in the per-arch table. Messages smaller than this minimum skip the
+          2-shot CE path even when it is otherwise eligible.
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``N`` (bytes): Use ``N`` as the 2-shot AllReduce minimum size.
+
+    * - | ``RCCL_CE_COLL_MAX_BYTES``
+        | Overrides the CE size cap for all non-AllReduce collectives
+          (AllGather, AlltoAll, ReduceScatter, etc.) on both the registered-window
+          and non-registered (scratch) paths. When ``-1`` (default), the cap is
+          read from ``ceRegMax[func]`` or ``ceNonRegMax[func]`` in the per-arch
+          table. AllReduce uses ``RCCL_CE_AR_2SHOT_MAX_BYTES`` and
+          ``RCCL_CE_AR_REG_MAX_MSG_BYTES`` instead.
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``N`` (bytes): Use ``N`` as the CE size cap for all non-AllReduce
+          collectives, overriding the table.
+
+    * - | ``RCCL_CE_COLL_MIN_BYTES``
+        | Overrides the minimum message size for non-AllReduce CE paths,
+          on both the registered-window and non-registered (scratch) paths.
+          When ``-1`` (default), the value is resolved from ``ceNonRegMin[func]``
+          in the per-arch table. Messages below this size skip CE even when
+          CTAPolicy_ZERO is active and the size is within ``ceRegMax`` or
+          ``ceNonRegMax``.
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``N`` (bytes): Use ``N`` as the CE minimum size for all non-AllReduce paths.
+
+    * - | ``RCCL_SYM_K_MAX_BYTES``
+        | Overrides the symmetric-kernel upper bound for all collectives.
+          When ``-1`` (default), the bound is resolved from ``symMaxR2[func]``
+          (eager mode) or ``symMaxR2Graph[func]`` (graph-capture mode) in the
+          per-arch table. A table entry of ``kThreshUnlimited`` (``SIZE_MAX``)
+          means no suppression. Setting this variable to ``0`` disables the
+          symmetric kernel for all collectives.
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``0``: Disable the symmetric kernel for all collectives.
+        | ``N`` (bytes): Cap the symmetric kernel at ``N`` bytes for all collectives.
+
+    * - | ``RCCL_SYM_K_MIN_BYTES``
+        | Overrides the symmetric-kernel lower bound for all collectives. Below
+          this threshold, DDA is preferred over the symmetric kernel for registered
+          buffers. When ``-1`` (default), the bound is resolved from
+          ``symMinR2[func]`` in the per-arch table. ``0`` in the table means no
+          lower-bound suppression.
+      - | ``-1``: Resolved from the per-arch table (default).
+        | ``0``: No lower-bound suppression (symk eligible at all sizes).
+        | ``N`` (bytes): Below ``N``, prefer DDA over the symmetric kernel.
 

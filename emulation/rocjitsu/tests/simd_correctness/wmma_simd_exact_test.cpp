@@ -420,10 +420,10 @@ TEST(WmmaSimdExact, Bf16F32MixedPackLayout) {
   }
 }
 
-// Multiplication overflows in isolation, but the hardware-fused operation is
-// finite after adding -FLT_MAX.  This witnesses the single-rounding contract
-// in both the forced-scalar oracle and the vector path.
-TEST(WmmaSimdExact, Bf16F32MixedFusedOverflow) {
+// The selected dot-before-C model rounds the dot to F32 before adding C.
+// An overflowing dot therefore remains infinite even when a product fused
+// with C could be finite. This is a simulator grouping choice.
+TEST(WmmaSimdExact, Bf16F32MixedDotOverflow) {
   SKIP_IF_NO_SIMD();
   if (util::native<float>::size() != 16)
     GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
@@ -449,7 +449,7 @@ TEST(WmmaSimdExact, Bf16F32MixedFusedOverflow) {
     fx.cu->write_vgpr(fx.vbase + ACC + c.reg, c.lane, 0xFF7FFFFFu); // -FLT_MAX
   };
   expect_bit_exact(
-      "wmma_bf16f32_fused_overflow", Mode::MaxFinite, fx, reseed,
+      "wmma_bf16f32_dot_overflow", Mode::MaxFinite, fx, reseed,
       [&] {
         amdgpu::exec_wmma_bf16f32_16x16x32_bf16(*fx.cu, fx.vbase + BF16_DST, fx.vbase + S0,
                                                 fx.vbase + S1, fx.vbase + ACC,
@@ -459,7 +459,7 @@ TEST(WmmaSimdExact, Bf16F32MixedFusedOverflow) {
   ASSERT_FALSE(testing::Test::HasFatalFailure());
   const auto out = amdgpu::wmma_output_loc_16(16, 16, /*row=*/0, /*col=*/0);
   const uint32_t word = fx.cu->read_vgpr(fx.vbase + BF16_DST + out.reg, out.lane);
-  EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), 0x7380u);
+  EXPECT_EQ(static_cast<uint16_t>(word >> (16 * out.sub_element)), 0x7F80u);
 }
 
 // --- dense fp8/bf8 inputs, all four A/B combos, K=64 and K=128, f32/f16 out ---

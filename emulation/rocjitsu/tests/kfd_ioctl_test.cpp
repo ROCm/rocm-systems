@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -19,6 +20,7 @@
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/virtual_machine.h"
 #include "scoped_temp.h"
+#include "util/diagnostic.h"
 
 #include "embedded_schema.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
@@ -266,7 +268,14 @@ int daemon_debug_enable(rocjitsu::SimulatedKfd &daemon, uint32_t debugger,
 }
 
 uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
-  auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema,
+                                                     loaded_diagnostic.emitter());
+  if (loaded_result.failed()) {
+    ADD_FAILURE() << loaded_diagnostic.message();
+    return 0;
+  }
+  auto loaded = std::move(loaded_result).value();
   auto root = loaded.take_root();
   auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
   if (!soc)
@@ -304,7 +313,14 @@ uint32_t query_gb_addr_config(const std::string &config_path, uint32_t gpu_id) {
 }
 
 std::unique_ptr<rocjitsu::SoC> load_standalone_soc(const std::string &config_path) {
-  auto loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+  util::StringDiagnostic loaded_diagnostic;
+  auto loaded_result = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema,
+                                                     loaded_diagnostic.emitter());
+  if (loaded_result.failed()) {
+    ADD_FAILURE() << loaded_diagnostic.message();
+    return nullptr;
+  }
+  auto loaded = std::move(loaded_result).value();
   auto root = loaded.take_root();
   auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
   if (!soc)
@@ -321,7 +337,7 @@ protected:
   // has to stay void-returning and be called directly from SetUp().
   void SetUpWithConfig(const std::string &config_path) {
     setenv("RJ_CONFIG", config_path.c_str(), 1);
-    loaded_ = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
+    ASSERT_TRUE(rocjitsu::test::load_valid_config(config_path.c_str(), loaded_));
     auto root = loaded_.take_root();
     auto *soc = dynamic_cast<rocjitsu::SoC *>(root.get());
     ASSERT_NE(soc, nullptr);
@@ -4541,7 +4557,26 @@ TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
   ASSERT_EQ(::poll(&pfd, 1, 1000), 1);
   ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
             static_cast<ssize_t>(sizeof(notifications)));
-  EXPECT_EQ(notifications, 1u);
+  // A retry can write successfully but miss its reap deadline under load,
+  // leaving another wakeup for the same retained event. Check delivery rather
+  // than the eventfd's accumulated retry count.
+  EXPECT_GE(notifications, 1u);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  int query_result = -EAGAIN;
+  for (int attempt = 0; attempt < 200 && query_result == -EAGAIN; ++attempt) {
+    query.query_debug_event.exception_mask = kException;
+    query_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query);
+    if (query_result == -EAGAIN)
+      static_cast<void>(::poll(nullptr, 0, 10));
+  }
+  ASSERT_EQ(query_result, 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask & kException, kException);
+  query.query_debug_event.exception_mask = kException;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
 
   // Stop fixture threads before fork so their temporary allocations are not
   // orphaned in the child. The process-lifetime notification reaper stays alive.
