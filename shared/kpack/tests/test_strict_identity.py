@@ -197,6 +197,28 @@ def test_verifier_maps_stepping_directory_to_base_arch(
     assert verifier.results[-1].passed == passed
 
 
+@pytest.mark.parametrize(
+    "directory",
+    [
+        # Wrong revision: only v0 is a known, verified stepping.
+        "gfx1250v1",
+        # Wrong base arch: only gfx1250 is known to have a v0 stepping.
+        "gfx90av0",
+    ],
+)
+def test_verifier_flags_unknown_stepping_directory(tmp_path, directory):
+    """Only gfx1250v0 is a known, verified exception. A hypothetical, unverified
+    stepping suffix must still be flagged as contamination rather than silently
+    passed through, since we have no evidence it belongs with its base arch."""
+    artifact = tmp_path / "blas_lib_gfx1250"
+    stepping_dir = artifact / "stage/lib/hipblaslt/library" / directory
+    stepping_dir.mkdir(parents=True)
+    (stepping_dir / "TensileManifest.txt").write_text("data")
+    verifier = ArtifactVerifier(tmp_path, Toolchain())
+    verifier._check_architecture_separation([artifact])
+    assert not verifier.results[-1].passed
+
+
 @pytest.mark.parametrize("valid", [True, False])
 def test_verifier_checks_archives_under_component_stage(tmp_path, valid):
     target = "gfx1250-strict"

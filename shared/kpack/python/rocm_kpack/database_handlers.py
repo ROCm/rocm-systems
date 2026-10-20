@@ -117,11 +117,21 @@ class DatabaseHandler(ABC):
 
 
 # Regex matching a library/<arch>/ path component (for per-arch subdirectory layout).
-# A stepping suffix (library/gfx1250v0/ holds gfx1250 A0 kernels) is not a separate
-# target: the directory belongs to its base arch, matching the arch in the filenames.
 _LIBRARY_ARCH_DIR_PATTERN = re.compile(
-    r"/library/(" + _GFX_ARCH_PATTERN.pattern + r")(?:v\d+)?/"
+    r"/library/(" + _GFX_ARCH_PATTERN.pattern + r")/"
 )
+
+# Known, explicit stepping-directory aliases. hipBLASLt ships gfx1250 A0 kernels
+# under library/gfx1250v0/, not a separate target -- it belongs to its base arch,
+# matching the arch in the filenames. This mirrors TensileLite's own explicit
+# build-alias table (tensilelite/Common/Architectures.py: ARCH_BUILD_ALIASES),
+# which defines this exact one entry and no others. Deliberately a literal
+# lookup, not a general "any arch + vN" pattern: only this one case is verified,
+# and a future stepping directory is not guaranteed to want the same treatment
+# (it may need its own bundle).
+LIBRARY_ARCH_DIR_STEPPING_ALIASES = {
+    "gfx1250v0": "gfx1250",
+}
 
 
 class _TensileHandler(DatabaseHandler):
@@ -164,6 +174,10 @@ class _TensileHandler(DatabaseHandler):
         dir_match = _LIBRARY_ARCH_DIR_PATTERN.search(path_str)
         if dir_match:
             return dir_match.group(1)
+
+        for alias, base in LIBRARY_ARCH_DIR_STEPPING_ALIASES.items():
+            if f"/library/{alias}/" in path_str:
+                return base
 
         return None
 

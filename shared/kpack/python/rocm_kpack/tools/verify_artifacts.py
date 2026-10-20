@@ -26,6 +26,7 @@ from rocm_kpack.database_handlers import (
     AotritonHandler,
     ComposableKernelHandler,
     MIOpenHandler,
+    LIBRARY_ARCH_DIR_STEPPING_ALIASES,
 )
 from rocm_kpack.coff.kpack_transform import (
     HIPF_MAGIC as COFF_HIPF_MAGIC,
@@ -282,8 +283,6 @@ class ArtifactVerifier:
 
         # Find arch-specific artifacts (not generic, not gfx906 which is minimal)
         arch_pattern = re.compile(r"gfx\d+[a-z]*(?:-strict)?")
-        # Stepping directories (gfx1250v0) hold kernels for their base arch.
-        stepping_dir_pattern = re.compile(r"(gfx\d+[a-z]*?)v\d+")
         # Bundle keys may include a sub-family suffix, such as gfx12_0.
         bundle_pattern = re.compile(r"gfx\d+[a-z]*(?:_\d+)?(?:-strict)?")
         arch_artifacts = []
@@ -337,8 +336,8 @@ class ArtifactVerifier:
                         directory_arch = aotriton.detect(file, artifact)
                         if directory_arch is not None:
                             directory_arches.append(directory_arch)
-                    elif stepping := stepping_dir_pattern.fullmatch(part):
-                        directory_arches.append(stepping.group(1))
+                    elif part in LIBRARY_ARCH_DIR_STEPPING_ALIASES:
+                        directory_arches.append(LIBRARY_ARCH_DIR_STEPPING_ALIASES[part])
                     else:
                         directory_arches.extend(arch_pattern.findall(part))
                 # Handlers may preserve xnack features while filename/directory

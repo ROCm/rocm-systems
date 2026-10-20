@@ -353,6 +353,32 @@ class TestHipBLASLtHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx1250"
 
+    @pytest.mark.parametrize(
+        "directory",
+        [
+            # Wrong revision: only v0 is a known, verified stepping.
+            "gfx1250v1",
+            # Wrong base arch: only gfx1250 is known to have a v0 stepping.
+            "gfx90av0",
+            "gfx942v0",
+        ],
+    )
+    def test_detect_arch_subdir_unknown_stepping_not_merged(
+        self, handler, prefix_root, directory
+    ):
+        """Only gfx1250v0 is a known, verified stepping alias. Neither a
+        different revision nor a different base arch should be silently folded
+        into a base arch -- a directory-only file (no arch in its own filename)
+        under such a directory should stay unclassified rather than guessed."""
+        file_path = (
+            prefix_root / "lib/hipblaslt/library" / directory / "TensileManifest.txt"
+        )
+        file_path.parent.mkdir(parents=True)
+        file_path.touch()
+
+        result = handler.detect(file_path, prefix_root)
+        assert result is None
+
     def test_reject_wrong_directory(self, handler, prefix_root):
         """Test that files not in hipblaslt/library are rejected."""
         file_path = prefix_root / "lib/rocblas/library/TensileLibrary_gfx1100.dat"
