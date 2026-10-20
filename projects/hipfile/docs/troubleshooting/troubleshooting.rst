@@ -76,7 +76,7 @@ Confirm the kernel configuration directly:
   # CONFIG_PCI_P2PDMA is not set
 
 For instructions on booting a kernel that enables the option, see
-:ref:`hipfile-kernel-p2pdma`. For the list of verified distributions, see
+:ref:`hipfile-kernel-p2pdma`. For the list of tested distribution kernels, see
 :doc:`/reference/hipFile-kernel-p2pdma-support`.
 
 .. note::

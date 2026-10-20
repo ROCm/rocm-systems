@@ -15,7 +15,7 @@ using PCIe peer-to-peer DMA. This requires a Linux kernel built with
 .. warning::
 
    Not all ROCm-supported distributions have a default kernel that
-   enables ``CONFIG_PCI_P2PDMA``. See :ref:`hipfile-verified-distributions` for a list of tested distribution kernels and their P2PDMA support.
+   enables ``CONFIG_PCI_P2PDMA``. See :ref:`hipfile-os-vm-testing` for a list of tested distribution kernels and their P2PDMA support.
 
 .. _hipfile-check-p2pdma:
 
@@ -44,53 +44,6 @@ configuration files in these directories instead:
 
    ``CONFIG_PCI_P2PDMA`` is a boolean kernel option. It's either compiled into
    the kernel image or it isn't. It can't be changed.
-
-.. _hipfile-verified-distributions:
-
-Verified distributions
-======================
-
-The following table lists kernels that AMD has tested for P2PDMA support.
-Distributions update their kernels between point releases. 
-
-.. note::
-  
-  This table is a snapshot and doesn't guarantee support.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 34 38 28
-
-   * - Distribution
-     - Kernel tested
-     - ``CONFIG_PCI_P2PDMA``
-   * - Ubuntu 24.10
-     - ``6.11.0-19-generic``
-     - Yes
-   * - Ubuntu 24.04.2 LTS
-     - ``6.8.0-52-generic``
-     - Yes
-   * - Ubuntu 22.04.5 LTS (default kernel)
-     - ``5.15.0-134-generic``
-     - No
-   * - Ubuntu 22.04.5 LTS (HWE kernel)
-     - ``6.8.0-generic``
-     - Yes
-   * - Ubuntu 20.04 LTS
-     - ``5.4.0-150-generic``
-     - No
-   * - RHEL 9.4
-     - ``5.14.0-503.29.1.el9_5``
-     - Yes
-   * - RHEL 9.2
-     - ``5.14.0-284.30.1.el9_2`` or ``5.14.0-503.29.1.el9_5``
-     - Yes
-   * - RHEL 9.0
-     - ``5.14.0-70.30.1.el9_0`` or ``5.14.0-503.29.1.el9_5``
-     - Yes
-   * - openSUSE Tumbleweed (March 2025)
-     - ``6.13.0-1-default``
-     - Yes
 
 .. _hipfile-os-vm-testing:
 
