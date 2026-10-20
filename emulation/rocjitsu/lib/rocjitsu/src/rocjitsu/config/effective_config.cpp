@@ -388,6 +388,29 @@ FailureOr<std::string> json_with_launch_overrides(std::string_view json,
       return emit_error.emit() << error.what();
     }
   }
+  if (overrides.race_checking_checks) {
+    const std::string value =
+        "\"" + format_race_checking_checks(*overrides.race_checking_checks) + "\"";
+    auto result =
+        set_top_level_field(rewritten, "race_checking_checks", value, emit_error);
+    if (result.failed())
+      return Result::failure();
+    rewritten = std::move(result.value());
+    try {
+      const auto applied = with_parsed_simulation_config_json(
+          rewritten, rocjitsu::kEmbeddedSchema, [](const fb::SimulationConfig *config) {
+            return config->race_checking_checks()
+                       ? parse_race_checking_checks(
+                             config->race_checking_checks()->string_view())
+                       : std::nullopt;
+          });
+      if (applied != overrides.race_checking_checks)
+        return emit_error.emit()
+               << "cannot apply race_checking_checks to the simulation config";
+    } catch (const std::runtime_error &error) {
+      return emit_error.emit() << error.what();
+    }
+  }
   return rewritten;
 }
 

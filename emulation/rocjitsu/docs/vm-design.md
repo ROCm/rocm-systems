@@ -21,7 +21,7 @@ execution.
 | `amdgpu/compute_unit.h/cpp` | CU: wavefront slots, register files, execution |
 | `amdgpu/memory_wait_scoreboard.h/cpp` | Per-wave completion positions and register/replay-source diagnostics |
 | `amdgpu/memory_race_checker.h/cpp` | SoC-wide address race state for all CPs and CUs of one GPU |
-| `amdgpu/memory_diagnostic_report.h/cpp` | Bounded per-GPU JSON report combining wait and address findings |
+| `amdgpu/memory_diagnostic_report.h/cpp` | Bounded per-GPU JSON report combining wait/address findings and address-race work counters |
 | `amdgpu/shader_engine.h/cpp` | SE: container of compute units |
 | `amdgpu/xcd.h/cpp` | XCD: CP + shader engines |
 | `amdgpu/wavefront.h/cpp` | Wavefront: ISA-specific thread state |

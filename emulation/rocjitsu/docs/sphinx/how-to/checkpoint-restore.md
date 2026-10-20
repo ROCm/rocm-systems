@@ -104,10 +104,14 @@ deserialization fails.
 ## Diagnostic state after restore
 
 The checkpoint preserves each CU's effective memory-wait, XCNT and address-race
-policy, together with `race_checking_global_shadow_mb`. It does not serialize
+policy, including its selected `race_checking_checks` families, together with
+`race_checking_global_shadow_mb`. It does not serialize
 pending register dependencies or retained LDS/global address history. Those
 diagnostic histories restart empty, so a missing wait or race whose producer
-precedes the checkpoint can be missed after restore.
+precedes the checkpoint can be missed after restore. Resident LDS allocation
+metadata is not serialized either; restored waves default to zero LDS size, so
+post-restore LDS accesses are outside address-race coverage. Global accesses
+remain checked conservatively.
 
 `memory_diagnostic_report` is not checkpointed either. A VM restored through
 `rj_vm_restore_checkpoint` continues to print enabled diagnostics but does not

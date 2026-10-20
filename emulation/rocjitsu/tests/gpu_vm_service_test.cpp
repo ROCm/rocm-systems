@@ -10,8 +10,10 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/gpu_queue_registry.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/memory_diagnostic_report.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
+#include "scoped_temp.h"
 
 #include <gtest/gtest.h>
 
@@ -24,8 +26,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <functional>
 #include <future>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -102,6 +106,10 @@ public:
       return false;
     command_processor.compute_queues_.front().publication_faulted = true;
     return true;
+  }
+
+  static void queue_diagnostic_flush(CommandProcessor &command_processor) {
+    command_processor.end_dispatch_diagnostics(0);
   }
 };
 
@@ -1007,6 +1015,45 @@ TEST(CommandProcessorVmFault, FaultsEveryFanoutReplicaAndDropsPresentAndFutureWo
 
   owner.unregister_queue(kQueueId, kProcessId);
   peer.unregister_queue(kQueueId, kProcessId);
+  EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
+}
+
+TEST(CommandProcessorVmFault, DirectNotificationFlushesDiagnosticsAfterReleasingQueueLock) {
+  test::ScopedTempFile output("rocjitsu-vm-fault-diagnostics-");
+  auto report = std::make_shared<MemoryDiagnosticReport>(output.path());
+  GpuVm gpu_vm;
+  CommandProcessor command_processor("cp");
+  constexpr uint32_t kProcessId = 7;
+  constexpr uint32_t kQueueId = 43;
+  constexpr uint32_t kDispatchId = 29;
+  const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, kProcessId, 0x11);
+  command_processor.set_gpu_vm(&gpu_vm);
+  command_processor.set_memory_diagnostic_report(report);
+  (void)command_processor.register_queue({.address_space = address_space,
+                                          .process_id = kProcessId,
+                                          .queue_id = kQueueId,
+                                          .ring_base_va = 0x100,
+                                          .ring_size = 4096,
+                                          .read_ptr_va = 0x80,
+                                          .write_ptr_va = 0x88});
+
+  DispatchEntry entry{};
+  entry.dispatch_id = kDispatchId;
+  entry.queue_id = kQueueId;
+  entry.process_id = kProcessId;
+  entry.kind = DispatchPacketKind::Kernel;
+  entry.total_wgs = 1;
+  command_processor.accept_fanout_shard(std::move(entry));
+  command_processor.drain_fanout_inbox_for_test();
+  report->add_suppressed_race();
+
+  command_processor.notify_dispatch_vm_fault(kQueueId, kProcessId, kDispatchId,
+                                             VmAccessOutcome::Faulted);
+
+  std::ifstream input(output.path());
+  const std::string json(std::istreambuf_iterator<char>(input), {});
+  EXPECT_NE(json.find("\"suppressed\": 1"), std::string::npos);
+  command_processor.unregister_queue(kQueueId, kProcessId);
   EXPECT_TRUE(gpu_vm.unregister_address_space(address_space));
 }
 
@@ -2025,21 +2072,29 @@ TEST(GpuVmService, GracefulAqlCloseWaitsForCompletionPublicationRetry) {
 }
 
 TEST(GpuVmService, TerminalAqlPublicationFailureRequiresForceCancel) {
+  test::ScopedTempFile output("rocjitsu-faulted-close-diagnostics-");
+  auto report = std::make_shared<MemoryDiagnosticReport>(output.path());
   GpuVm gpu_vm;
   GpuQueueRegistry queues(gpu_vm);
   CommandProcessor command_processor("cp");
   const AddressSpaceHandle address_space = register_byte_address_space(gpu_vm, 7, 0x11);
   command_processor.set_gpu_vm(&gpu_vm);
+  command_processor.set_memory_diagnostic_report(report);
   const QueueHandle queue =
       queues.register_queue(queue_request(address_space, command_processor, 1));
   ASSERT_TRUE(queue);
   ASSERT_TRUE(CommandProcessorCloseTestAccess::mark_publication_faulted(command_processor));
+  report->add_suppressed_race();
+  CommandProcessorCloseTestAccess::queue_diagnostic_flush(command_processor);
 
   const QueueCloseResult faulted = queues.unregister_queue(queue);
   EXPECT_TRUE(faulted.found);
   EXPECT_EQ(faulted.status, QueueCloseStatus::Faulted);
   EXPECT_TRUE(queues.contains(queue));
   EXPECT_EQ(command_processor.registered_queue_count_for_test(), 1u);
+  std::ifstream input(output.path());
+  const std::string json(std::istreambuf_iterator<char>(input), {});
+  EXPECT_NE(json.find("\"suppressed\": 1"), std::string::npos);
 
   const QueueCloseResult canceled = queues.unregister_queue(queue, QueueCloseMode::ForceCancel);
   EXPECT_EQ(canceled.status, QueueCloseStatus::Closed);

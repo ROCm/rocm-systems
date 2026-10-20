@@ -544,6 +544,7 @@ private:
   [[nodiscard]] QueuePrepareCloseStatus close_queue_registration(uint64_t registration_id,
                                                                  bool force) noexcept;
   void end_dispatch_diagnostics(uint32_t dispatch_id);
+  void flush_pending_memory_diagnostics();
 
   struct DispatchLaunchMetadata {
     std::array<uint32_t, 4> scratch_resource_descriptor{};
@@ -755,6 +756,8 @@ private:
   [[nodiscard]] bool drain_completions();
   bool fault_dispatch_local(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
                             VmAccessOutcome outcome);
+  void notify_dispatch_vm_fault_impl(uint32_t queue_id, uint32_t process_id, uint64_t dispatch_id,
+                                     VmAccessOutcome outcome);
   /// @brief Drop cluster LDS pins collected under cluster_placements_mutex_.
   /// @warning Must run with that lock released; it reaches the CUs' wave-state lock.
   void release_cluster_lds_pins(const std::vector<std::pair<ComputeUnitCore *, uint64_t>> &unpin);
@@ -782,7 +785,10 @@ private:
   /// @brief Queue scheduling: select next queue with undispatched entries.
   ComputeQueueRecord *schedule_next_queue();
 
+  QueueSubmissionStatus notify_pm4_queue_doorbell_impl(uint64_t registration_id,
+                                                       uint64_t producer_cursor);
   void handle_doorbell_sync(simdojo::Tick timestamp);
+  void handle_doorbell_sync_impl(simdojo::Tick timestamp);
 
   /// @brief Check if barrier is satisfied for an entry.
   bool barrier_satisfied(const ComputeQueueRecord &qs, size_t idx) const;
@@ -943,6 +949,9 @@ private:
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
   std::shared_ptr<MemoryRaceChecker> memory_race_checker_;
   std::shared_ptr<MemoryDiagnosticReport> memory_diagnostic_report_;
+  // Dispatch retirement can run under hw_queue_mutex_. Defer report formatting
+  // and filesystem I/O until that lifecycle lock has been released.
+  std::atomic<bool> memory_diagnostic_flush_pending_{false};
 
   friend class ComputeUnitCore;
 

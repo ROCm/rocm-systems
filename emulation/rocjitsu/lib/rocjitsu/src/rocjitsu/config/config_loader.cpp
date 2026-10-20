@@ -590,6 +590,8 @@ std::unordered_map<std::string, FactoryFn> &factories() {
         else
           throw std::invalid_argument("memory_race_diagnostics must be warn or off");
       }
+      cc.memory_race_check_mask =
+          config_u32(cfg, "memory_race_check_mask", kAllRaceChecks);
       return amdgpu::ComputeUnitCore::create(n, cc, mem, nullptr, mode);
     };
   }
@@ -970,6 +972,17 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
       throw std::invalid_argument("race_checking must be on or off");
     cu_overrides["memory_race_diagnostics"] = *enabled ? "warn" : "off";
   }
+  RaceCheckMask race_check_mask = kAllRaceChecks;
+  if (const auto *setting = fb_config->race_checking_checks()) {
+    const auto parsed = parse_race_checking_checks(setting->string_view());
+    if (!parsed)
+      throw std::invalid_argument(
+          "race_checking_checks must be all or a unique comma-separated list of global, "
+          "lds-same-wave, lds-cross-wave, direct-to-lds, and tensor-dma; source checks require "
+          "an address domain");
+    race_check_mask = *parsed;
+  }
+  cu_overrides["memory_race_check_mask"] = std::to_string(race_check_mask);
   std::optional<uint64_t> race_shadow_bytes;
   if (flatbuffers::IsFieldPresent(fb_config,
                                   fb::SimulationConfig::VT_RACE_CHECKING_GLOBAL_SHADOW_MB)) {

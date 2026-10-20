@@ -327,6 +327,10 @@ table SimulationConfig {
   // Optional memory budget in MiB for race checking's global-access shadow.
   // Accesses past it are still checked but not retained. Omission keeps 512.
   race_checking_global_shadow_mb: uint32;
+  // Address domains and optional sources selected when race_checking is on.
+  // "all" or a comma-separated subset of global, lds-same-wave,
+  // lds-cross-wave, direct-to-lds, and tensor-dma. Omission keeps all.
+  race_checking_checks: string;
 }
 
 root_type SimulationConfig;

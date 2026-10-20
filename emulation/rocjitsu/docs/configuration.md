@@ -94,8 +94,9 @@ The example above is intentionally minimal.
 | `async_helper_threads` | int | Shared MMA helpers per VM. Omitted/-1 selects the table; 0 disables; explicit values are 0–128. |
 | `wait_checking` | string | Override wait diagnostics on every CU: `on`, `off`, or `all`. Omission preserves per-CU settings and defaults. |
 | `race_checking` | string | Set core address-aware LDS/global race diagnostics on every CU: `on` or `off` (default). Enabled CUs use one shared checker per SoC/GPU. |
-| `memory_diagnostic_report` | string | Optional path for a combined per-GPU JSON report of core `memory-wait` and `memory-race` findings. GPU 0 uses this path; additional GPU `N` appends `.gpuN`. |
-| `race_checking_global_shadow_mb` | int | Memory budget in MiB for race checking's record of global accesses (default 512, must be positive). It bounds allocated storage; past it, accesses are still checked but no longer retained. |
+| `race_checking_checks` | string | Select enabled race-check families: `all` (default), or a comma-separated subset of `global`, `lds-same-wave`, `lds-cross-wave`, `direct-to-lds`, and `tensor-dma`. Source families require at least one address domain. |
+| `memory_diagnostic_report` | string | Optional path for a combined per-GPU JSON report of core `memory-wait` and `memory-race` findings plus address-race work counters. Configuring it enables the counter and lock-timing instrumentation. GPU 0 uses this path; additional GPU `N` appends `.gpuN`. |
+| `race_checking_global_shadow_mb` | int | Checker-wide modeled global-shadow budget in MiB (default 512, must be positive). All 256 shards share this cap. It charges slab and flat-directory payloads, not allocator metadata or process RSS; accesses that cannot be retained are still checked against retained history. |
 | `thread_allocations` | array | Preferred `num_threads` / `cpu_dispatch_threads` / `async_helper_threads` triples, selected by total execution-thread cost. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | ISA architecture family: `cdna3`, `cdna4`, `cdna5`, etc. |
@@ -358,17 +359,37 @@ Address race checking is opt-in. Use `--race-checking=on`, top-level
 `{"key":"memory_race_diagnostics","value":"warn"}`. The accepted per-CU values are
 `warn` and `off`. `--race-checking=off` disables the core address checker for
 one launch; the flag uses the same config-copy mechanism and attach/DBT
-restrictions as `--wait-checking`. Pending address history is intentionally
+restrictions as `--wait-checking`.
+
+By default, enabling race checking selects every family. For one launch, use
+`--race-checking-checks=global,lds-same-wave` (or set top-level
+`"race_checking_checks"` to the same string) to select a subset without changing
+the source configuration. `global`, `lds-same-wave`, and `lds-cross-wave` are
+address domains. `direct-to-lds` and `tensor-dma` add those operation sources to
+the selected domains; they cannot be selected without a domain. Omitting the
+selector preserves the all-family behavior. The master `race_checking` setting
+still decides whether the selected families run. Checkpoints preserve both the
+effective master policy and family mask.
+
+Pending address history is intentionally
 reset at checkpoint restore, so races whose producer predates a restore are
-outside coverage. When the global shadow cannot retain another access within
+outside coverage. Resident LDS allocation metadata is also not checkpointed;
+restored waves default to zero LDS size, so their post-restore LDS accesses are
+outside address-race coverage. Global accesses remain checked. When the global
+shadow cannot retain another access within
 `race_checking_global_shadow_mb`, the checker warns once per GPU checker that
 coverage is degraded and reports
 `coverage_degraded` in that GPU's JSON report; raise the budget to retain more
-accesses. Checkpoints preserve the global shadow budget, but not
+accesses. Retiring a dispatch immediately returns its modeled directory and
+slab charge for reuse by any shard. Checkpoints preserve the global shadow
+budget, but not
 `memory_diagnostic_report`; a VM restored through `rj_vm_restore_checkpoint`
 does not write a JSON diagnostic report. The report is owned once per GPU,
 combines findings from all of its CPs and CUs, and is flushed whenever a
-dispatch retires or is dropped. GPU 0 writes the configured path; in a
+dispatch retires or is dropped. Its race statistics expose budget
+reservations/releases, slab and directory growth, site reuse, saturation-cache
+behavior, compact affine versus explicit access counts, per-dispatch released
+charge, and checker-wide peak charge. GPU 0 writes the configured path; in a
 multi-GPU config, additional GPU `N` writes `<path>.gpuN`. A config-validation
 machine that executes no dispatch does not overwrite a workload's report at the
 same path. Enabled memory-wait findings are written to this combined report even

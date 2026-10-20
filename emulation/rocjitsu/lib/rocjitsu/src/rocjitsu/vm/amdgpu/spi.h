@@ -102,8 +102,6 @@ public:
 
       ComputeUnitCore *cu = placement->cu;
       uint32_t lds_base = placement->lds_base;
-      cu->begin_workgroup(wg.entry->dispatch_id, wg.global_wg_id, wg.entry->wfs_per_workgroup,
-                          wg.entry->num_named_barriers);
       std::vector<Wavefront *> wg_wfs;
       wg_wfs.reserve(wg.entry->wfs_per_workgroup);
       for (uint32_t w = 0; w < wg.entry->wfs_per_workgroup; ++w) {
@@ -114,6 +112,7 @@ public:
         assert(wf && "dispatch_wf failed after select_cu returned a CU");
         wf->set_lds_base(lds_base);
         wf->set_lds_size(util::align_up(wg.entry->group_segment_fixed_size, 256u));
+        wf->set_global_race_check_enabled(wg.entry->grid_total_wgs() > 1);
         wf->set_lds(placement->lds);
         wf->set_dispatch_id(wg.entry->dispatch_id);
         wf->set_address_space(wg.entry->address_space);
@@ -123,6 +122,8 @@ public:
         init_wf(cu, wf, *wg.entry, wg.global_wg_id, w);
         wg_wfs.push_back(wf);
       }
+      cu->begin_workgroup(wg.entry->dispatch_id, wg.global_wg_id, wg.entry->wfs_per_workgroup,
+                          wg.entry->num_named_barriers);
       if (on_wg_dispatch)
         on_wg_dispatch(wg.global_wg_id, *wg.entry, std::span<Wavefront *>(wg_wfs));
       q.pop_front();

@@ -7,6 +7,7 @@
 #ifndef ROCJITSU_CONFIG_CONFIG_COMMON_H_
 #define ROCJITSU_CONFIG_CONFIG_COMMON_H_
 
+#include "rocjitsu/race_checking.h"
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/config/pci_device_config.h"
 

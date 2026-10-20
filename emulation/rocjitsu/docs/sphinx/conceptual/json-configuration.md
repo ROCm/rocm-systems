@@ -48,8 +48,9 @@ objects for the virtual machine and the topology.
 | `async_helper_threads` | int | Shared MMA helpers: -1 selects the table, 0 disables, 1–128 overrides. |
 | `wait_checking` | string | Override diagnostics on every CU and GPU: `on`, `off`, or `all`. Omission preserves per-CU settings and defaults. |
 | `race_checking` | string | Enable (`on`) or disable (`off`, the default) core address-aware LDS/global race diagnostics on every CU. Enabled CUs use one shared checker per SoC/GPU. |
-| `memory_diagnostic_report` | string | Optional destination for a combined per-GPU JSON report of core memory-wait and memory-race findings. GPU 0 uses this path; additional GPU `N` appends `.gpuN`. |
-| `race_checking_global_shadow_mb` | int | Positive global-access shadow budget in MiB (default 512). Accesses beyond it are checked but not retained. |
+| `race_checking_checks` | string | Select race-check families: `all` (default), or a comma-separated subset of `global`, `lds-same-wave`, `lds-cross-wave`, `direct-to-lds`, and `tensor-dma`. Source families require an address domain. |
+| `memory_diagnostic_report` | string | Optional destination for a combined per-GPU JSON report of core memory-wait and memory-race findings plus address-race work counters. Configuring it enables counter and lock-timing instrumentation. GPU 0 uses this path; additional GPU `N` appends `.gpuN`. |
+| `race_checking_global_shadow_mb` | int | Positive checker-wide modeled global-shadow budget in MiB (default 512), shared by all 256 shards. It charges slab and flat-directory payloads rather than process RSS. Accesses that cannot be retained are still checked against retained history. |
 | `thread_allocations` | array | Preferred engine, dispatch and helper allocations for this target. Largest fitting effective allocation wins. |
 | `exec_mode` | string | Execution mode: `"functional"` or `"clocked"`. |
 | `vm.arch` | string | Target architecture, such as `cdna3`, `cdna4`, or `rdna4`. |
@@ -84,14 +85,32 @@ Address race checking is opt-in. Use top-level `"race_checking": "on"` or
 unchanged and has the same attach and DBT-host-config restrictions as
 `--wait-checking`. Without a global override, each CU accepts
 `{"key":"memory_race_diagnostics","value":"warn"}`; `off` is the default.
-`race_checking_global_shadow_mb` bounds allocated global shadow storage, not an
-access count. Accesses that cannot be retained are still checked against
-retained history and set `coverage_degraded`.
+Enabling it selects all families unless `race_checking_checks` or
+`--race-checking-checks` supplies a subset. `global`, `lds-same-wave`, and
+`lds-cross-wave` select address domains. `direct-to-lds` and `tensor-dma` add
+those transfer sources to whichever domains are selected and are invalid
+without a domain. The family selector does not enable the master switch by
+itself. Checkpoints preserve the effective master policy and family selection.
+`race_checking_global_shadow_mb` is an atomic per-GPU/checker cap, not an access
+count or RSS limit. It covers modeled page/site-directory and
+page/record/site-slab payloads; allocator metadata and fixed checker objects are
+excluded. Accesses that cannot be retained are still checked against retained
+history and set `coverage_degraded`. Dispatch retirement releases its charge
+for immediate reuse by any shard.
 
 The optional report is shared across every CP and CU of one GPU, accumulates
 findings across dispatches, and is flushed whenever a dispatch retires or is
 dropped. It includes enabled memory-wait findings even when race checking is
-off. GPU 0 uses the configured path; additional GPU `N` writes `<path>.gpuN`. See
+off. Its `race_statistics` object keeps cumulative counters and detail for the
+eight most recent dispatches with address-race work; report memory does not grow
+with the number of completed dispatches. Global-shadow counters include
+reservation failures/releases, slab and directory growth, site reuse, and
+saturation-cache behavior. Representation counters distinguish compact affine
+accesses, dword runs and pending LDS operations from explicit range accesses.
+Dispatch entries also record
+`global_shadow_bytes_released` and checker-wide `global_shadow_peak_bytes`.
+GPU 0 uses the configured path;
+additional GPU `N` writes `<path>.gpuN`. See
 [address race diagnostics](https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/docs/memory-wait-diagnostics.md#address-race-diagnostics)
 for coverage and synchronization semantics.
 

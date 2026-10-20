@@ -1571,6 +1571,7 @@ TEST(ConfigLoaderTest, RaceCheckingOverridesEveryCu) {
       ++count;
       EXPECT_EQ(cu->config().memory_race_diagnostics,
                 enabled ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off);
+      EXPECT_EQ(cu->config().memory_race_check_mask, kAllRaceChecks);
       EXPECT_EQ(cu->memory_race_checks_enabled(), enabled);
     }
     EXPECT_GT(count, 0u);
@@ -1581,6 +1582,46 @@ TEST(ConfigLoaderTest, RejectsInvalidRaceChecking) {
   std::string json = config::read_config_file(test::config_path("gfx942_cdna3.json"));
   json.insert(json.find('{') + 1, R"("race_checking": "invalid",)");
   EXPECT_THROW(config::load_config_from_string(json, kEmbeddedSchema), std::invalid_argument);
+}
+
+TEST(ConfigLoaderTest, RaceCheckingCheckFamiliesOverrideEveryCu) {
+  using amdgpu::MemoryWaitDiagnostics;
+  const std::string source = config::read_config_file(test::config_path("gfx942_cdna3.json"));
+  constexpr RaceCheckMask selected =
+      race_check_bit(RaceCheckFamily::Global) |
+      race_check_bit(RaceCheckFamily::DirectToLds);
+  auto json = config::json_with_launch_overrides(
+      source, {.race_checking = true, .race_checking_checks = selected});
+  ASSERT_TRUE(json.succeeded());
+  auto loaded = config::load_config_from_string(json.value(), kEmbeddedSchema);
+  std::vector<simdojo::Component *> components;
+  loaded.build_result.root->collect_components(components);
+  unsigned count = 0;
+  for (auto *component : components) {
+    auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
+    if (!cu)
+      continue;
+    ++count;
+    EXPECT_EQ(cu->config().memory_race_diagnostics, MemoryWaitDiagnostics::Warn);
+    EXPECT_EQ(cu->config().memory_race_check_mask, selected);
+    EXPECT_TRUE(cu->memory_race_global_checks_enabled());
+    EXPECT_TRUE(cu->memory_race_direct_to_lds_checks_enabled());
+    EXPECT_FALSE(cu->memory_race_lds_checks_enabled());
+    EXPECT_FALSE(cu->memory_race_tensor_dma_checks_enabled());
+  }
+  EXPECT_GT(count, 0u);
+}
+
+TEST(ConfigLoaderTest, RejectsInvalidRaceCheckingCheckFamilies) {
+  for (const std::string_view setting :
+       {"", "none", "global,", "global,global", "direct-to-lds", "tensor-dma",
+        "global,unknown"}) {
+    SCOPED_TRACE(setting);
+    std::string json = config::read_config_file(test::config_path("gfx942_cdna3.json"));
+    json.insert(json.find('{') + 1,
+                std::format(R"("race_checking_checks": "{}",)", setting));
+    EXPECT_THROW(config::load_config_from_string(json, kEmbeddedSchema), std::invalid_argument);
+  }
 }
 
 TEST(ConfigLoaderTest, RaceCheckingGlobalShadowBudgetReachesEveryCommandProcessor) {
@@ -2485,10 +2526,16 @@ TEST(CheckpointTest, RoundTripsRaceShadowBudget) {
   std::string json = config::read_config_file(test::config_path("gfx1250_mi455x.json"));
   const size_t root = json.find('{');
   ASSERT_NE(root, std::string::npos);
-  json.insert(root + 1, "\"race_checking\":\"on\",\"race_checking_global_shadow_mb\":37,");
+  json.insert(root + 1,
+              "\"race_checking\":\"on\",\"race_checking_checks\":\"global,direct-to-lds\","
+              "\"race_checking_global_shadow_mb\":37,");
   auto source = config::load_config_from_string(json, kEmbeddedSchema);
   ASSERT_EQ(source.soc()->memory_race_checker()->global_shadow_budget(), uint64_t{37} << 20);
   auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  constexpr RaceCheckMask selected =
+      race_check_bit(RaceCheckFamily::Global) |
+      race_check_bit(RaceCheckFamily::DirectToLds);
+  ASSERT_EQ(source_cu->config().memory_race_check_mask, selected);
   ASSERT_NE(source_cu->dispatch_wf(9, 0, 32, 32), nullptr);
 
   test::ScopedTempFile checkpoint("rocjitsu-race-budget-checkpoint-");
@@ -2496,7 +2543,13 @@ TEST(CheckpointTest, RoundTripsRaceShadowBudget) {
                           source.cpu_dispatch_threads);
   auto restored = config::restore_checkpoint(checkpoint.path());
   EXPECT_EQ(restored.soc()->memory_race_checker()->global_shadow_budget(), uint64_t{37} << 20);
-  ASSERT_EQ(restored.soc()->memory_race_checker()->tracked_workgroups(), 1u);
+  EXPECT_EQ(restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)
+                ->config()
+                .memory_race_check_mask,
+            selected);
+  // A directly dispatched wave has no LDS allocation. Restoring it must keep
+  // the P1 zero-LDS path free of otherwise unused workgroup race state.
+  ASSERT_EQ(restored.soc()->memory_race_checker()->tracked_workgroups(), 0u);
   auto *restored_wf = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
   ASSERT_NE(restored_wf, nullptr);
   restored_wf->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);

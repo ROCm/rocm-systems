@@ -152,6 +152,14 @@ CommandProcessor::update_pm4_queue_registration(uint64_t id,
 }
 
 QueueSubmissionStatus CommandProcessor::notify_pm4_queue_doorbell(uint64_t id, uint64_t producer) {
+  flush_pending_memory_diagnostics();
+  const QueueSubmissionStatus status = notify_pm4_queue_doorbell_impl(id, producer);
+  flush_pending_memory_diagnostics();
+  return status;
+}
+
+QueueSubmissionStatus CommandProcessor::notify_pm4_queue_doorbell_impl(uint64_t id,
+                                                                       uint64_t producer) {
   std::lock_guard lock(hw_queue_mutex_);
   const auto queue = std::ranges::find(compute_queues_, id, &ComputeQueueRecord::registration_id);
   if (queue == compute_queues_.end() || queue->faulted || queue->command_fault_pending ||
@@ -882,13 +890,25 @@ void CommandProcessor::shutdown() {
     engine()->primary_release();
     is_primary_ = false;
   }
+  flush_pending_memory_diagnostics();
   completion_.reset();
 }
 
 void CommandProcessor::end_dispatch_diagnostics(uint32_t dispatch_id) {
-  if (memory_race_checker_)
-    memory_race_checker_->end_dispatch(dispatch_id);
-  if (memory_diagnostic_report_)
+  const bool cleanup_lds = std::ranges::any_of(
+      cus_, [](const ComputeUnitCore *cu) { return cu->memory_race_lds_checks_enabled(); });
+  const bool cleanup_global = std::ranges::any_of(
+      cus_, [](const ComputeUnitCore *cu) { return cu->memory_race_global_checks_enabled(); });
+  if (memory_race_checker_ && (cleanup_lds || cleanup_global))
+    memory_race_checker_->end_dispatch(dispatch_id, cleanup_lds, cleanup_global);
+  if (!memory_diagnostic_report_)
+    return;
+  memory_diagnostic_flush_pending_.store(true, std::memory_order_release);
+}
+
+void CommandProcessor::flush_pending_memory_diagnostics() {
+  if (memory_diagnostic_report_ &&
+      memory_diagnostic_flush_pending_.exchange(false, std::memory_order_acq_rel))
     memory_diagnostic_report_->flush();
 }
 
@@ -1432,11 +1452,14 @@ bool CommandProcessor::unregister_queue_registration(uint64_t registration_id) {
 
 QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t registration_id,
                                                                    bool force) noexcept {
-  if (registration_id == 0)
+  if (registration_id == 0) {
+    flush_pending_memory_diagnostics();
     return QueuePrepareCloseStatus::Faulted;
+  }
 
   bool drop_replicas = false;
   bool retry_close = false;
+  bool faulted_close = false;
   uint32_t queue_id = 0;
   uint32_t process_id = 0;
   {
@@ -1451,55 +1474,61 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     const std::vector<ComputeQueueRecord>::iterator queue =
         std::ranges::find(compute_queues_, registration_id, &ComputeQueueRecord::registration_id);
-    if (queue == compute_queues_.end())
-      return QueuePrepareCloseStatus::Faulted;
-    if (!force) {
-      if (queue->publication_faulted || queue->command_fault_pending ||
-          (queue->faulted && (!queue->entries.empty() || !queue->dispatches.entries.empty())))
-        return QueuePrepareCloseStatus::Faulted;
-      retry_close = queue->read_pointer_journal.publication_pending() ||
-                    queue->publication_retry_pending || queue->idle_publication.active() ||
-                    // After delivery, ROCr owns the scratch request and may suspend the queue
-                    // while allocating backing. Only an unfinished notification publication
-                    // must delay that removal.
-                    queue->scratch_request.publication_pending() ||
-                    queue->scratch_reclaim.active() || queue->has_pending_commands();
-    }
-    if (!retry_close) {
-      queue_id = queue->queue_id;
-      process_id = queue->process_id;
-      for (auto *cu : cus_) {
-        cu->with_wave_state_locked([&] {
-          for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-            auto *wave = cu->wf(slot);
-            if (wave && !wave->is_halted() && wave->process_id() == process_id &&
-                wave->queue_id() == queue_id)
-              wave->halt();
-          }
-        });
+    if (queue == compute_queues_.end()) {
+      faulted_close = true;
+    } else if (!force && (queue->publication_faulted || queue->command_fault_pending ||
+                          (queue->faulted &&
+                           (!queue->entries.empty() || !queue->dispatches.entries.empty())))) {
+      faulted_close = true;
+    } else {
+      if (!force) {
+        retry_close = queue->read_pointer_journal.publication_pending() ||
+                      queue->publication_retry_pending || queue->idle_publication.active() ||
+                      // After delivery, ROCr owns the scratch request and may suspend the queue
+                      // while allocating backing. Only an unfinished notification publication
+                      // must delay that removal.
+                      queue->scratch_request.publication_pending() ||
+                      queue->scratch_reclaim.active() || queue->has_pending_commands();
       }
-      drop_replicas = queue->xcd_fanout;
-      for (const DispatchEntry &entry : queue->entries) {
-        end_dispatch_diagnostics(entry.dispatch_id);
-        dispatch_launch_metadata_.erase(entry.dispatch_id);
+      if (!retry_close) {
+        queue_id = queue->queue_id;
+        process_id = queue->process_id;
+        for (auto *cu : cus_) {
+          cu->with_wave_state_locked([&] {
+            for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+              auto *wave = cu->wf(slot);
+              if (wave && !wave->is_halted() && wave->process_id() == process_id &&
+                  wave->queue_id() == queue_id)
+                wave->halt();
+            }
+          });
+        }
+        drop_replicas = queue->xcd_fanout;
+        for (const DispatchEntry &entry : queue->entries) {
+          end_dispatch_diagnostics(entry.dispatch_id);
+          dispatch_launch_metadata_.erase(entry.dispatch_id);
+        }
+        // Cancel every child stream before releasing the queue's VM lease.
+        if (!queue->commands.submissions.empty() || !queue->dispatches.entries.empty())
+          fail_pm4_queue(*queue, queue->dispatches);
+        // Any shares still unpublished here are simply dropped. They cannot be
+        // credited to the grid from this thread: publish_share is the release edge
+        // that must follow this XCD's cache write-back, and flushing walks cus_,
+        // which belong to the engine partition rather than to the caller. Crediting
+        // without the flush would let the owner fire the completion signal with this
+        // XCD's results still cached.
+        //
+        // Dropping them is safe because a fan-out queue is only ever destroyed on
+        // every XCD at once: the KFD paths sweep all command processors, and an
+        // owner cascades to its replicas below. No XCD is left holding a grid that
+        // can no longer retire. Unregistering a lone replica is not supported.
+        compute_queues_.erase(queue);
       }
-      // Cancel every child stream before releasing the queue's VM lease.
-      if (!queue->commands.submissions.empty() || !queue->dispatches.entries.empty())
-        fail_pm4_queue(*queue, queue->dispatches);
-      // Any shares still unpublished here are simply dropped. They cannot be
-      // credited to the grid from this thread: publish_share is the release edge
-      // that must follow this XCD's cache write-back, and flushing walks cus_,
-      // which belong to the engine partition rather than to the caller. Crediting
-      // without the flush would let the owner fire the completion signal with this
-      // XCD's results still cached.
-      //
-      // Dropping them is safe because a fan-out queue is only ever destroyed on
-      // every XCD at once: the KFD paths sweep all command processors, and an
-      // owner cascades to its replicas below. No XCD is left holding a grid that
-      // can no longer retire. Unregistering a lone replica is not supported.
-      compute_queues_.erase(queue);
     }
   }
+  flush_pending_memory_diagnostics();
+  if (faulted_close)
+    return QueuePrepareCloseStatus::Faulted;
   if (retry_close) {
     if (engine())
       engine()->schedule_event_now(&doorbell_event_);
@@ -2023,20 +2052,19 @@ void CommandProcessor::drain_pending_cluster_barrier_completions() {
 
   for (auto &completion : completions) {
     std::vector<Wavefront *> members;
+    std::vector<Wavefront *> race_members;
     for (auto [cu, peer_wg_id] : completion.peers) {
       auto peer_members =
           cu->complete_barrier(completion.dispatch_id, peer_wg_id, completion.completion_bit);
+      if (cu->memory_race_cross_wave_lds_checks_enabled())
+        race_members.insert(race_members.end(), peer_members.begin(), peer_members.end());
       members.insert(members.end(), peer_members.begin(), peer_members.end());
     }
     if (!members.empty()) {
-      const bool track_races =
-          memory_race_checker_ && std::ranges::any_of(completion.peers, [](const auto &peer) {
-            return peer.first->memory_race_checks_enabled();
-          });
-      if (track_races) {
+      if (memory_race_checker_ && !race_members.empty()) {
         std::vector<MemoryRaceChecker::WaveKey> keys;
-        keys.reserve(members.size());
-        for (const auto *member : members)
+        keys.reserve(race_members.size());
+        for (const auto *member : race_members)
           keys.push_back(memory_race_wave_key(*member));
         memory_race_checker_->barrier(keys);
       }
@@ -2418,6 +2446,7 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
       Wavefront *wf = wg_wavefronts[w];
       wf->set_lds_base(lds_base);
       wf->set_lds_size(aligned_lds_bytes_per_workgroup(entry));
+      wf->set_global_race_check_enabled(entry.grid_total_wgs() > 1);
       wf->set_lds(placement.lds);
       wf->set_dispatch_id(entry.dispatch_id);
       wf->set_aql_packet_id(entry.aql_packet_id);
@@ -2592,15 +2621,21 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
 void CommandProcessor::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id) {
   util::Logger::cp(
       [&](auto &os) { os << std::format("WG_COMPLETE d={} wg={}", dispatch_id, wg_id); });
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  pending_wg_completions_.push_back({dispatch_id, wg_id});
-  if (dispatch_threads_ <= 1) {
-    drain_pending_wg_completions();
-    // Without worker fan-out, completion arrives on the CP's engine thread, so
-    // retire promptly while another resident dispatch may wait on this signal.
-    // Parallel workers defer all stateful retirement until their batch rejoins.
-    (void)drain_completions();
+  {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    pending_wg_completions_.push_back({dispatch_id, wg_id});
+    if (dispatch_threads_ <= 1) {
+      drain_pending_wg_completions();
+      // Without worker fan-out, completion arrives on the CP's engine thread, so
+      // retire promptly while another resident dispatch may wait on this signal.
+      // Parallel workers defer all stateful retirement until their batch rejoins.
+      (void)drain_completions();
+    }
   }
+  // Parallel workers retire completed grids through on_cu_idle(). Avoid a
+  // contended atomic exchange on every workgroup notification in that mode.
+  if (dispatch_threads_ <= 1)
+    flush_pending_memory_diagnostics();
 }
 
 bool CommandProcessor::drain_completions() {
@@ -2624,7 +2659,8 @@ bool CommandProcessor::drain_completions() {
           });
       if (queue != compute_queues_.end())
         queue->publication_faulted = true;
-      notify_dispatch_vm_fault(fault.queue_id, fault.process_id, fault.dispatch_id, fault.outcome);
+      notify_dispatch_vm_fault_impl(fault.queue_id, fault.process_id, fault.dispatch_id,
+                                    fault.outcome);
       continue;
     }
 
@@ -2713,6 +2749,13 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
 
 void CommandProcessor::notify_dispatch_vm_fault(uint32_t queue_id, uint32_t process_id,
                                                 uint64_t dispatch_id, VmAccessOutcome outcome) {
+  notify_dispatch_vm_fault_impl(queue_id, process_id, dispatch_id, outcome);
+  flush_pending_memory_diagnostics();
+}
+
+void CommandProcessor::notify_dispatch_vm_fault_impl(uint32_t queue_id, uint32_t process_id,
+                                                     uint64_t dispatch_id,
+                                                     VmAccessOutcome outcome) {
   if (outcome == VmAccessOutcome::Complete || outcome == VmAccessOutcome::Unavailable ||
       dispatch_id > std::numeric_limits<uint32_t>::max())
     return;
@@ -2741,12 +2784,15 @@ void CommandProcessor::on_cu_idle() {
   if (cus_.empty())
     return;
 
-  std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+  std::unique_lock<std::recursive_mutex> lock(hw_queue_mutex_);
 
   drain_pending_cluster_barrier_completions();
   drain_pending_wg_completions();
-  if (!drain_completions())
+  if (!drain_completions()) {
+    lock.unlock();
+    flush_pending_memory_diagnostics();
     return;
+  }
 
   // Execute and retire eligible non-kernel entries at the head, then drain
   // again so a dependent kernel behind them can proceed.
@@ -2774,14 +2820,17 @@ void CommandProcessor::on_cu_idle() {
         break;
       }
       if (outcome != VmAccessOutcome::Complete) {
-        notify_dispatch_vm_fault(queue_id, process_id, dispatch_id, outcome);
+        notify_dispatch_vm_fault_impl(queue_id, process_id, dispatch_id, outcome);
         break;
       }
       ++qs.next_dispatch_idx;
     }
   }
-  if (!drain_completions())
+  if (!drain_completions()) {
+    lock.unlock();
+    flush_pending_memory_diagnostics();
     return;
+  }
 
   // Continue dispatching pending workgroups onto the just-freed CU in this same
   // tick rather than deferring to a now+1 doorbell event. Deferring routed every
@@ -2807,7 +2856,7 @@ void CommandProcessor::on_cu_idle() {
         const uint32_t dispatch_id = entry.dispatch_id;
         const DispatchWorkgroupResult result = dispatch_workgroups(entry);
         if (result.outcome != VmAccessOutcome::Complete) {
-          notify_dispatch_vm_fault(queue_id, process_id, dispatch_id, result.outcome);
+          notify_dispatch_vm_fault_impl(queue_id, process_id, dispatch_id, result.outcome);
           continue;
         }
         if (result.dispatched > 0 && entry.fully_dispatched())
@@ -2823,6 +2872,8 @@ void CommandProcessor::on_cu_idle() {
   // The last workgroup of this XCD's share retires here, not in handle_doorbell,
   // so this is where a fanned-out shard parks to wait for its peers.
   arm_grid_wait_recheck();
+  lock.unlock();
+  flush_pending_memory_diagnostics();
 }
 
 void CommandProcessor::on_cu_pool_ready(ComputeUnitCore *cu) {
@@ -2841,6 +2892,7 @@ void CommandProcessor::on_cu_pool_ready(ComputeUnitCore *cu) {
 bool CommandProcessor::step() {
   // Process dispatches across all queues.
   process_queues();
+  flush_pending_memory_diagnostics();
   return pending_entries() > 0;
 }
 
@@ -2872,7 +2924,7 @@ void CommandProcessor::process_queues() {
           break;
         }
         if (outcome != VmAccessOutcome::Complete) {
-          notify_dispatch_vm_fault(queue_id, process_id, dispatch_id, outcome);
+          notify_dispatch_vm_fault_impl(queue_id, process_id, dispatch_id, outcome);
           break;
         }
         ++qs.next_dispatch_idx;
@@ -2884,7 +2936,7 @@ void CommandProcessor::process_queues() {
       const uint32_t dispatch_id = entry.dispatch_id;
       const DispatchWorkgroupResult result = dispatch_workgroups(entry);
       if (result.outcome != VmAccessOutcome::Complete) {
-        notify_dispatch_vm_fault(queue_id, process_id, dispatch_id, result.outcome);
+        notify_dispatch_vm_fault_impl(queue_id, process_id, dispatch_id, result.outcome);
         break;
       }
       if (entry.fully_dispatched())
@@ -4199,8 +4251,8 @@ bool CommandProcessor::execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry 
   }
   fetch_pm4(queue, queue.dispatches, now);
   if (queue.faulted) {
-    notify_dispatch_vm_fault(entry.queue_id, entry.process_id, entry.dispatch_id,
-                             VmAccessOutcome::Faulted);
+    notify_dispatch_vm_fault_impl(entry.queue_id, entry.process_id, entry.dispatch_id,
+                                  VmAccessOutcome::Faulted);
     return false;
   }
   return queue.commands.submissions.empty();
@@ -4623,6 +4675,12 @@ void CommandProcessor::handle_doorbell(simdojo::Tick timestamp) {
 }
 
 void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
+  flush_pending_memory_diagnostics();
+  handle_doorbell_sync_impl(now);
+  flush_pending_memory_diagnostics();
+}
+
+void CommandProcessor::handle_doorbell_sync_impl(simdojo::Tick now) {
   // Release so the doorbell poll thread's acquire-load cannot observe a stale
   // "pending" after this handler has re-fetched; pairs with the release-stores at
   // the INVALID-packet and barrier/dependency stall sites. A site that is still
@@ -4687,7 +4745,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
       return false;
     }
     if (outcome != VmAccessOutcome::Complete) {
-      notify_dispatch_vm_fault(queue_id, process_id, dispatch_id, outcome);
+      notify_dispatch_vm_fault_impl(queue_id, process_id, dispatch_id, outcome);
       return false;
     }
     ++queue.next_dispatch_idx;
@@ -4756,7 +4814,7 @@ void CommandProcessor::handle_doorbell_sync(simdojo::Tick now) {
             const uint32_t process_id = current.process_id;
             const DispatchWorkgroupResult result = dispatch_workgroups(current);
             if (result.outcome != VmAccessOutcome::Complete) {
-              notify_dispatch_vm_fault(queue_id, process_id, dispatch_id, result.outcome);
+              notify_dispatch_vm_fault_impl(queue_id, process_id, dispatch_id, result.outcome);
               backpressure = true;
               break;
             }

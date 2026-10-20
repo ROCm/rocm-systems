@@ -40,6 +40,7 @@
 #include <cassert>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 
@@ -196,6 +197,7 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
   // Do not install this decoder's pool on the constructing thread.
 
   wfs_.resize(config.num_wf_slots);
+  memory_race_bindings_.resize(config.num_wf_slots);
   sgpr_file_.init(config.num_wf_slots * config.sgprs_per_wf, config.sgprs_per_wf);
   sgpr_block_owners_.resize(config.num_wf_slots);
   if (std::has_single_bit(config.sgprs_per_wf))
@@ -330,6 +332,7 @@ Wavefront *ComputeUnitCore::dispatch_wf_at(uint32_t wf_id, uint32_t wg_id, uint6
   if (!wfs_[wf_id])
     wfs_[wf_id] = create_wavefront(wf_id);
   auto *wf = wfs_[wf_id].get();
+  memory_race_bindings_[wf_id] = {};
   wf->activity_tracked_ = true;
   const uint32_t dispatched_wave_size = wave_size == 0 ? wf->default_wf_size_ : wave_size;
   if ((dispatched_wave_size != 32 && dispatched_wave_size != 64) ||
@@ -398,8 +401,12 @@ size_t ComputeUnitCore::num_wfs() const {
 
 void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
-  if (memory_race_checks_enabled() && !wf.is_halted())
-    memory_race_checker_->end_wave(memory_race_wave_key(wf));
+  auto &race_binding = memory_race_bindings_[wf.wf_id()];
+  if (memory_race_lds_checks_enabled() && !wf.is_halted() && race_binding) {
+    const auto key = memory_race_wave_key(wf);
+    memory_race_checker_->end_wave(key, &race_binding);
+  }
+  race_binding = {};
   scalar_mem_pipeline_.cancel(wf);
   global_mem_pipeline_.cancel(wf);
   local_mem_pipeline_.cancel(wf);
@@ -504,12 +511,33 @@ void ComputeUnitCore::begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint
   }
 
   const uint64_t key = wg_key(dispatch_id, wg_id);
-  active_wgs_[key] = wf_count;
-  if (memory_race_checks_enabled()) {
+  auto &active_workgroup = active_wgs_[key];
+  active_workgroup = {.waves = wf_count};
+  if (memory_race_lds_checks_enabled()) {
+    std::vector<Wavefront *> race_waves;
     for (const auto &wave : wfs_) {
       if (wave && !wave->is_halted() && wave->dispatch_id() == dispatch_id &&
-          wave->wg_id() == wg_id)
-        memory_race_checker_->begin_wave(memory_race_wave_key(*wave));
+          wave->wg_id() == wg_id) {
+        if (race_waves.empty()) {
+          if (wave->lds_size() == 0)
+            break;
+          race_waves.reserve(wf_count);
+        }
+        race_waves.push_back(wave.get());
+      }
+    }
+    if (!race_waves.empty()) {
+      assert(race_waves.size() == wf_count &&
+             "begin_workgroup requires every workgroup wave to be resident");
+      std::vector<MemoryRaceChecker::WaveKey> keys;
+      keys.reserve(race_waves.size());
+      for (const auto *wave : race_waves)
+        keys.push_back(memory_race_wave_key(*wave));
+      auto bindings = memory_race_checker_->begin_workgroup(keys);
+      assert(bindings.size() == race_waves.size());
+      for (size_t i = 0; i < race_waves.size(); ++i)
+        memory_race_bindings_[race_waves[i]->wf_id()] = std::move(bindings[i]);
+      active_workgroup.race_lds = true;
     }
   }
   if (wf_count <= 1) {
@@ -623,12 +651,14 @@ std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id,
 
 void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members) {
   if (!members.empty()) {
-    if (memory_race_checks_enabled()) {
+    if (memory_race_cross_wave_lds_checks_enabled()) {
       std::vector<MemoryRaceChecker::WaveKey> keys;
       keys.reserve(members.size());
       for (const auto *member : members)
-        keys.push_back(memory_race_wave_key(*member));
-      memory_race_checker_->barrier(keys);
+        if (member->lds_size() != 0)
+          keys.push_back(memory_race_wave_key(*member));
+      if (!keys.empty())
+        memory_race_checker_->barrier(keys);
     }
     plugin_group_->onAmdgpuBarrierResolved(members);
   }
@@ -738,10 +768,11 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
   }
 
   auto it = active_wgs_.find(key);
-  if (it != active_wgs_.end() && --it->second == 0) {
+  if (it != active_wgs_.end() && --it->second.waves == 0) {
+    const bool race_lds = it->second.race_lds;
     active_wgs_.erase(it);
     barrier_wgs_.erase(key);
-    if (memory_race_checks_enabled())
+    if (memory_race_lds_checks_enabled() && race_lds)
       memory_race_checker_->end_workgroup(dispatch_id, wg_id);
     // Queued rather than sent: notify_wg_complete() takes the CP's
     // hw_queue_mutex_, and this runs under the wave-state lock, which the CP
@@ -766,9 +797,12 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
     if (w && !w->is_halted() && w->dispatch_id() == dispatch_id && w->wg_id() == wg_id)
       free_wavefront_resources(*w);
   }
-  active_wgs_.erase(wg_key(dispatch_id, wg_id));
+  const auto key = wg_key(dispatch_id, wg_id);
+  const auto active = active_wgs_.find(key);
+  const bool race_lds = active != active_wgs_.end() && active->second.race_lds;
+  active_wgs_.erase(key);
   barrier_wgs_.erase(wg_key(dispatch_id, wg_id));
-  if (memory_race_checks_enabled())
+  if (memory_race_lds_checks_enabled() && race_lds)
     memory_race_checker_->end_workgroup(dispatch_id, wg_id);
   maybe_reset_lds_alloc();
 }
@@ -780,9 +814,9 @@ void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
       free_wavefront_resources(*wavefront);
   }
 
-  if (memory_race_checks_enabled())
+  if (memory_race_lds_checks_enabled())
     for (const auto &entry : active_wgs_)
-      if (static_cast<uint32_t>(entry.first >> 32) == dispatch_id)
+      if (static_cast<uint32_t>(entry.first >> 32) == dispatch_id && entry.second.race_lds)
         memory_race_checker_->end_workgroup(dispatch_id, static_cast<uint32_t>(entry.first));
   std::erase_if(active_wgs_, [dispatch_id](const auto &entry) {
     return static_cast<uint32_t>(entry.first >> 32) == dispatch_id;
@@ -897,7 +931,8 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
         request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
     const uint64_t flat_shared_lane_mask = flat_local_lane_mask | flat_dds_lane_mask;
     if (first_lane < wf_size && (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0) {
-      if (observe_routed_access || memory_race_checks_enabled()) {
+      if (observe_routed_access || memory_race_global_checks_enabled() ||
+          memory_race_lds_checks_enabled()) {
         std::ranges::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
         pre_routing_addresses = {pre_routing_address_storage.data(), wf_size};
       }
@@ -939,7 +974,25 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
   if (observe_routed_access)
     report_routed_access(*inst, wf, route_tag, decoded_route_tag, normalized_to_local,
                          pre_routing_addresses, flat_local_lane_mask, flat_dds_lane_mask);
-  if (memory_race_checks_enabled())
+  const bool track_routed_races = [&] {
+    if (route_tag == SCALAR_MEM)
+      return memory_race_global_checks_enabled();
+    if (route_tag != LOCAL_MEM && route_tag != GLOBAL_MEM)
+      return false;
+    const auto &d = *inst->data_as<VectorMemState>();
+    if (decoded_route_tag == GLOBAL_MEM && inst->mnemonic().starts_with("flat_")) {
+      const uint64_t shared_lanes = flat_local_lane_mask | flat_dds_lane_mask;
+      return (memory_race_lds_checks_enabled() && shared_lanes != 0) ||
+             (memory_race_global_checks_enabled() &&
+              (d.lane_mask & ~shared_lanes & ~d.scratch_lane_mask) != 0);
+    }
+    if (d.lds_dst)
+      return memory_race_direct_to_lds_checks_enabled() &&
+             (memory_race_global_checks_enabled() || memory_race_lds_checks_enabled());
+    return route_tag == LOCAL_MEM ? memory_race_lds_checks_enabled()
+                                  : memory_race_global_checks_enabled();
+  }();
+  if (track_routed_races)
     track_address_races(*inst, wf, route_tag, decoded_route_tag, pre_routing_addresses,
                         flat_local_lane_mask, flat_dds_lane_mask);
 
@@ -1403,21 +1456,57 @@ void ComputeUnitCore::track_address_races(const Instruction &inst, Wavefront &wf
                                           uint64_t flat_local_lane_mask,
                                           uint64_t flat_dds_lane_mask) {
   using LaneRange = MemoryRaceChecker::LaneRange;
+  using AffineLaneRange = MemoryRaceChecker::AffineLaneRange;
   if (route_tag != SCALAR_MEM && route_tag != LOCAL_MEM && route_tag != GLOBAL_MEM)
     return;
   auto make_access = [&](bool read, bool write, bool atomic) {
-    MemoryRaceChecker::Access access{.wave = memory_race_wave_key(wf),
+    return MemoryRaceChecker::Access{.wave = memory_race_wave_key(wf),
                                      .pc = wf.pc,
                                      .read = read,
                                      .write = write,
                                      .atomic = atomic};
-    attach_completion_tokens(access, inst, wf);
-    return access;
   };
   thread_local std::vector<LaneRange> ranges;
   ranges.clear();
+  std::optional<AffineLaneRange> affine;
+  const auto make_affine =
+      []<typename AddressOf>(uint64_t lanes, uint32_t size,
+                             AddressOf &&address_of) -> std::optional<AffineLaneRange> {
+    if (!lanes || !size)
+      return std::nullopt;
+    const uint32_t first = std::countr_zero(lanes);
+    const uint32_t last = 63 - std::countl_zero(lanes);
+    const uint32_t count = std::popcount(lanes);
+    if (count != last - first + 1)
+      return std::nullopt;
+    const uint64_t address = address_of(first);
+    uint64_t stride = 0;
+    if (count > 1) {
+      const uint64_t second = address_of(first + 1);
+      if (second < address)
+        return std::nullopt;
+      stride = second - address;
+      for (uint32_t i = 2; i < count; ++i) {
+        if (stride > (std::numeric_limits<uint64_t>::max() - address) / i ||
+            address_of(first + i) != address + uint64_t{i} * stride)
+          return std::nullopt;
+      }
+    }
+    return AffineLaneRange{address, stride, size, static_cast<int32_t>(first), count};
+  };
+  const auto materialize_affine = [&] {
+    if (!affine)
+      return;
+    ranges.reserve(ranges.size() + affine->count);
+    for (uint32_t i = 0; i < affine->count; ++i)
+      ranges.push_back({affine->address + uint64_t{i} * affine->stride, affine->size,
+                        affine->first_lane + static_cast<int32_t>(i)});
+    affine.reset();
+  };
 
   if (route_tag == SCALAR_MEM) {
+    if (!memory_race_global_checks_enabled() || !wf.global_race_check_enabled())
+      return;
     const auto &d = *inst.data_as<ScalarMemState>();
     for (uint32_t element = 0; element < d.num_dwords; ++element) {
       if (d.is_load && (d.load_dword_mask & (uint16_t{1} << element)) == 0)
@@ -1434,11 +1523,20 @@ void ComputeUnitCore::track_address_races(const Instruction &inst, Wavefront &wf
   }
 
   const auto &d = *inst.data_as<VectorMemState>();
+  const bool direct_to_lds = d.lds_dst;
+  if (direct_to_lds && !memory_race_direct_to_lds_checks_enabled())
+    return;
+  const bool track_global = memory_race_global_checks_enabled();
+  const MemoryRaceChecker::LdsCheckMode lds_mode{
+      memory_race_check_enabled(RaceCheckFamily::LdsSameWave),
+      memory_race_check_enabled(RaceCheckFamily::LdsCrossWave)};
+  const bool track_lds = lds_mode.same_wave || lds_mode.cross_wave;
+  if (!track_global && !track_lds)
+    return;
   const bool atomic = d.atomic_op != AtomicOp::NONE;
   const uint64_t shared_lanes = flat_local_lane_mask | flat_dds_lane_mask;
   const bool flat = decoded_route_tag == GLOBAL_MEM && inst.mnemonic().starts_with("flat_");
   const uint32_t elements = atomic ? 1 : d.num_elems;
-  const auto &scoreboard = wf.ensure_memory_wait_scoreboard();
   const MemoryRaceChecker::Access access =
       make_access(d.is_load || atomic, !d.is_load || atomic, atomic);
   const auto collect = [&](bool lds, uint64_t lanes, std::span<const uint64_t> addresses) {
@@ -1447,13 +1545,22 @@ void ComputeUnitCore::track_address_races(const Instruction &inst, Wavefront &wf
     };
     if (d.element_lane_masks.empty()) {
       // Every element of a lane is present, so the lane covers one range.
-      for (uint64_t pending = d.lane_mask & lanes; pending != 0; pending &= pending - 1) {
+      const uint64_t active = d.lane_mask & lanes;
+      if (ranges.empty() && !affine) {
+        affine = make_affine(active, elements * d.elem_size,
+                             [&](uint32_t lane) { return translate(addresses[lane]); });
+        if (affine)
+          return;
+      }
+      materialize_affine();
+      for (uint64_t pending = active; pending != 0; pending &= pending - 1) {
         const uint32_t lane = static_cast<uint32_t>(std::countr_zero(pending));
         ranges.push_back(
             {translate(addresses[lane]), elements * d.elem_size, static_cast<int32_t>(lane)});
       }
       return;
     }
+    materialize_affine();
     for (uint32_t element = 0; element < elements; ++element) {
       for (uint64_t pending = d.element_lane_masks[element] & lanes; pending != 0;
            pending &= pending - 1) {
@@ -1463,31 +1570,71 @@ void ComputeUnitCore::track_address_races(const Instruction &inst, Wavefront &wf
       }
     }
   };
-  const auto flush = [&](bool lds, const MemoryRaceChecker::Access &instruction) {
-    if (lds)
-      clip_to_lds_allocation(ranges, wf);
-    if (ranges.empty())
+  const auto flush = [&](bool lds, const MemoryRaceChecker::Access &instruction,
+                         bool unordered_completion = false) {
+    if ((lds && !track_lds) ||
+        (!lds && (!track_global || !wf.global_race_check_enabled()))) {
+      ranges.clear();
+      affine.reset();
       return;
-    if (lds)
-      memory_race_checker_->lds_access(instruction, ranges, scoreboard);
-    else
+    }
+    if (lds && affine) {
+      const uint64_t allocation_end =
+          wf.lds_size() > std::numeric_limits<uint64_t>::max() - wf.lds_base()
+              ? std::numeric_limits<uint64_t>::max()
+              : wf.lds_base() + wf.lds_size();
+      const uint64_t last_address = affine->address + uint64_t{affine->count - 1} * affine->stride;
+      if (affine->address < wf.lds_base() || last_address > allocation_end ||
+          affine->size > allocation_end - last_address)
+        materialize_affine();
+    }
+    if (lds && !ranges.empty())
+      clip_to_lds_allocation(ranges, wf);
+    if (ranges.empty() && !affine)
+      return;
+    if (lds) {
+      auto checked = instruction;
+      const auto &scoreboard = wf.ensure_memory_wait_scoreboard();
+      attach_completion_tokens(checked, inst, wf);
+      if (unordered_completion)
+        checked.ordered_class = 0;
+      const auto &binding = memory_race_bindings_[wf.wf_id()];
+      if (affine)
+        memory_race_checker_->lds_access(checked, *affine, scoreboard,
+                                         binding.valid_for(checked.wave) ? &binding : nullptr,
+                                         lds_mode);
+      else
+        memory_race_checker_->lds_access(checked, ranges, scoreboard,
+                                         binding.valid_for(checked.wave) ? &binding : nullptr,
+                                         lds_mode);
+    } else if (affine) {
+      memory_race_checker_->global_access(instruction, *affine);
+    } else {
       memory_race_checker_->global_access(instruction, ranges);
+    }
     ranges.clear();
+    affine.reset();
   };
 
   const std::span<const uint64_t> routed_addresses(d.per_lane_addr.data(), wf.wf_size());
   if (flat && !pre_routing_addresses.empty()) {
-    collect(true, shared_lanes, pre_routing_addresses);
-    flush(true, access);
-    collect(false, d.lane_mask & ~shared_lanes & ~d.scratch_lane_mask, pre_routing_addresses);
-    flush(false, access);
+    if (track_lds) {
+      collect(true, shared_lanes, pre_routing_addresses);
+      flush(true, access);
+    }
+    if (track_global && wf.global_race_check_enabled()) {
+      collect(false, d.lane_mask & ~shared_lanes & ~d.scratch_lane_mask, pre_routing_addresses);
+      flush(false, access);
+    }
   } else if (route_tag == LOCAL_MEM) {
-    collect(true, d.lane_mask, routed_addresses);
-    if (d.ds2_active)
-      collect(true, d.lane_mask,
-              std::span<const uint64_t>(d.ds2_per_lane_addr.data(), wf.wf_size()));
-    flush(true, access);
-  } else {
+    if (track_lds) {
+      collect(true, d.lane_mask, routed_addresses);
+      if (d.ds2_active)
+        collect(true, d.lane_mask,
+                std::span<const uint64_t>(d.ds2_per_lane_addr.data(), wf.wf_size()));
+      flush(true, access);
+    }
+  } else if (track_global && wf.global_race_check_enabled()) {
     collect(false, d.lane_mask & ~d.scratch_lane_mask, routed_addresses);
     flush(false, access);
   }
@@ -1497,20 +1644,24 @@ void ComputeUnitCore::track_address_races(const Instruction &inst, Wavefront &wf
   const bool cluster_destination_selected =
       !d.cluster_multicast || d.cluster_mcast_mask == 0 ||
       (d.cluster_mcast_mask & cluster_multicast_rank_mask(wf.cluster_rank())) != 0;
-  if (d.lds_dst && cluster_destination_selected) {
+  if (d.lds_dst && track_lds && cluster_destination_selected) {
     const uint32_t per_lane_bytes = elements * d.elem_size;
-    for (uint64_t lanes = d.lane_mask; lanes != 0; lanes &= lanes - 1) {
-      const uint32_t lane = static_cast<uint32_t>(std::countr_zero(lanes));
-      const uint64_t base =
-          d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
-      ranges.push_back({base, per_lane_bytes, static_cast<int32_t>(lane)});
-    }
+    affine = make_affine(d.lane_mask, per_lane_bytes, [&](uint32_t lane) {
+      return d.lds_per_lane_addr ? d.per_lane_lds_addr[lane]
+                                 : d.lds_base + uint64_t{lane} * per_lane_bytes;
+    });
+    if (!affine)
+      for (uint64_t lanes = d.lane_mask; lanes != 0; lanes &= lanes - 1) {
+        const uint32_t lane = static_cast<uint32_t>(std::countr_zero(lanes));
+        const uint64_t base = d.lds_per_lane_addr ? d.per_lane_lds_addr[lane]
+                                                  : d.lds_base + uint64_t{lane} * per_lane_bytes;
+        ranges.push_back({base, per_lane_bytes, static_cast<int32_t>(lane)});
+      }
     MemoryRaceChecker::Access lds_write = access;
     lds_write.read = false;
     lds_write.write = true;
     lds_write.atomic = false;
-    lds_write.ordered_class = 0;
-    flush(true, lds_write);
+    flush(true, lds_write, true);
   }
 }
 
@@ -1518,17 +1669,17 @@ void ComputeUnitCore::track_tensor_dma_accesses(Wavefront &wf, uint64_t pc,
                                                 std::span<const uint64_t> global_addresses,
                                                 std::span<const uint32_t> lds_addresses,
                                                 uint32_t size, bool store_from_lds) {
-  if (!memory_race_checks_enabled() || global_addresses.empty())
+  if (!memory_race_tensor_dma_checks_enabled() || global_addresses.empty())
     return;
-  auto &scoreboard = wf.ensure_memory_wait_scoreboard();
+  const bool track_global = memory_race_global_checks_enabled();
+  const MemoryRaceChecker::LdsCheckMode lds_mode{
+      memory_race_check_enabled(RaceCheckFamily::LdsSameWave),
+      memory_race_check_enabled(RaceCheckFamily::LdsCrossWave)};
+  const bool track_lds = lds_mode.same_wave || lds_mode.cross_wave;
+  if (!track_global && !track_lds)
+    return;
   MemoryRaceChecker::Access access{
       .wave = memory_race_wave_key(wf), .pc = pc, .read = !store_from_lds, .write = store_from_lds};
-  if (const auto token = scoreboard.latest_token(WaitCounterKind::Tensor)) {
-    access.completions[0] = token;
-    access.completion_count = 1;
-    if (token.order != MemoryWaitScoreboard::kUnordered)
-      access.ordered_class = 1u + (static_cast<uint32_t>(token.counter) << 16) + token.order;
-  }
   thread_local std::vector<MemoryRaceChecker::LaneRange> ranges;
   const auto collect = [&](auto addresses) {
     ranges.clear();
@@ -1541,16 +1692,27 @@ void ComputeUnitCore::track_tensor_dma_accesses(Wavefront &wf, uint64_t pc,
         ranges.push_back({address, size, -1});
     }
   };
-  collect(global_addresses);
-  memory_race_checker_->global_access(access, ranges);
+  if (track_global && wf.global_race_check_enabled()) {
+    collect(global_addresses);
+    memory_race_checker_->global_access(access, ranges);
+  }
+  if (!track_lds)
+    return;
   collect(lds_addresses);
   clip_to_lds_allocation(ranges, wf);
   if (ranges.empty())
     return;
+  auto &scoreboard = wf.ensure_memory_wait_scoreboard();
+  if (const auto token = scoreboard.latest_token(WaitCounterKind::Tensor)) {
+    access.completions[0] = token;
+    access.completion_count = 1;
+  }
   access.read = store_from_lds;
   access.write = !store_from_lds;
   access.ordered_class = 0;
-  memory_race_checker_->lds_access(access, ranges, scoreboard);
+  const auto &binding = memory_race_bindings_[wf.wf_id()];
+  memory_race_checker_->lds_access(access, ranges, scoreboard,
+                                   binding.valid_for(access.wave) ? &binding : nullptr, lds_mode);
 }
 
 void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &wf,
@@ -1909,8 +2071,14 @@ template <bool EnableAsync>
         (config_.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
          waitcheck_detail::WaitcheckTarget::is_xcnt_drain(*inst)))
       wait_state->before(*inst, config_.arch);
-    if (memory_race_checks_enabled() && (inst->is_waitcnt() || inst->has_embedded_memory_wait()))
-      memory_race_checker_->retire_completed(memory_race_wave_key(*active), *wait_state);
+    if (memory_race_lds_checks_enabled() &&
+        (inst->is_waitcnt() || inst->has_embedded_memory_wait())) {
+      const auto key = memory_race_wave_key(*active);
+      const auto &binding = memory_race_bindings_[active->wf_id()];
+      if (active->lds_size() != 0)
+        memory_race_checker_->retire_completed(key, *wait_state,
+                                               binding.valid_for(key) ? &binding : nullptr);
+    }
     wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
   }
   bool wait_checked = false;

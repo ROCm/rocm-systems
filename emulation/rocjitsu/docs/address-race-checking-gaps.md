@@ -29,6 +29,7 @@ kernel is race-free.
 | [Split barriers](#split-barriers) | Missed races |
 | [Global accesses within a workgroup](#global-accesses-within-a-workgroup) | Missed races |
 | [Accesses outside one dispatch](#accesses-outside-one-dispatch) | Missed races |
+| [Checkpoint-restored LDS accesses](#modes-and-lifecycle) | Missed races |
 | [Cluster multicast into peer LDS](#cluster-multicast-into-peer-lds) | Missed races |
 | [Limits inherited from the functional model](#limits-inherited-from-the-functional-model) | Missed races and false reports |
 | [Dynamic coverage](#dynamic-coverage) | Missed races |
@@ -36,7 +37,7 @@ kernel is race-free.
 | [LDS history size](#lds-history-size) | Unbounded memory |
 | [Finding limits](#finding-limits) | Hidden findings |
 | [Finding content](#finding-content) | Harder triage |
-| [Modes and lifecycle](#modes-and-lifecycle) | Unavailable modes, reset history |
+| [Modes and lifecycle](#modes-and-lifecycle) | Selectable coverage, reset history |
 | [Performance](#performance) | Run time and memory |
 | [Validation](#validation) | Untested or stale coverage |
 
@@ -299,23 +300,32 @@ only with an unretained one is missed. The checker then prints a warning and
 sets `coverage_degraded` in the JSON report.
 
 - The default is too small for realistic shapes. All 20 gfx950 Gluon tutorial
-  kernels reached it at the shapes in [Performance](#performance), while a 4 GiB
-  budget retained every access for all of them.
-- The budget is split evenly across 256 shards, chosen by page hash. A shard
-  that fills its share degrades coverage even if other shards have room.
-- For densely accessed data, the shadow costs about 4.25 bytes of page index per
-  dword (1,088 bytes per 1 KiB page) plus 24 bytes per retained record. Data
-  that one workgroup writes keeps one record per dword, and data that many
-  workgroups read keeps two. The shadow is therefore about 7 times the size of
-  the global data a dispatch writes, and 13 times the size of the shared data it
-  reads.
+  kernels reached it in the historical, final P2, and final P3 campaigns at the
+  shapes in [Performance](#performance), while a 4 GiB budget retained every
+  access for all of them.
+- One atomic checker-wide cap is shared by all 256 page-hash shards, so a busy
+  shard can use capacity that idle shards do not need. Reservations cannot
+  overshoot the cap, and retiring a dispatch releases its exact modeled charge
+  for immediate reuse.
+- The cap charges 1 KiB page slabs, 16-byte records, 16-byte interned
+  provenance sites, and open-addressed page/site directories. Site reuse can
+  make the 16-byte record smaller than the old 24-byte inline-provenance
+  record, while sparse pages and low site reuse still incur slab and directory
+  slack. The exact amplification is therefore workload- and shard-distribution
+  dependent; the cap is not a process-RSS limit.
+- Allocator metadata, small per-dispatch owner objects, slab-descriptor vectors,
+  mutexes, and fixed checker caches are not charged. The JSON report exposes
+  successful and failed reservations, releases, slab/directory growth, and
+  dispatch release/peak values so this boundary is explicit.
 - The warning prints once per checker (one checker per GPU/SoC), and
-  `coverage_degraded` is a single flag for that GPU's whole report, so neither
-  says which dispatch lost coverage.
+  `coverage_degraded` remains a single flag for that GPU's whole report. P0
+  statistics identify retained and rejected bytes by shard for the eight most
+  recent completed dispatches with address-race work, but the cumulative
+  report does not retain per-dispatch detail for every earlier dispatch.
 
-Sizing the default from the dispatch's footprint or from host memory, sharing
-one budget across the shards, and reporting degradation per dispatch would
-address these.
+Sizing the default from the dispatch's footprint or from host memory, bounding
+the excluded owner/allocator overhead, and retaining explicit coverage status
+for each dispatch would address the remaining gaps.
 
 ### LDS history size
 
@@ -374,14 +384,26 @@ covers, would let one racy pair use one slot.
 - Top-level `race_checking` and `--race-checking=on|off` override every CU.
   Without either, each CU's `memory_race_diagnostics` policy applies. Enabled
   CUs still share one checker and one address history for the whole GPU/SoC.
-- The `--race-checking` override is refused with `--attach`. In DBT guest mode
-  it is also refused when the guest config names a host `simulator_config`; set
-  `race_checking` in that config instead. `--wait-checking` has the same rules.
+- Top-level `race_checking_checks` and `--race-checking-checks` select `global`,
+  `lds-same-wave`, `lds-cross-wave`, `direct-to-lds`, and `tensor-dma`
+  families. The last two add transfer sources to selected address domains and
+  cannot be used alone. Omission selects all families. The selector is intended
+  for overhead attribution and for deployments that deliberately accept the
+  documented loss of unselected coverage.
+- The two `--race-checking` overrides are refused with `--attach`. In DBT guest
+  mode they are also refused when the guest config names a host
+  `simulator_config`; set `race_checking` and `race_checking_checks` in that
+  config instead. `--wait-checking` has the same rules.
 - Address history is not saved in checkpoints and is reset on restore, so a race
-  whose first access predates the restore is missed.
-- Checkpoints preserve the global shadow budget, but not the diagnostic report
-  path; a VM restored through `rj_vm_restore_checkpoint` does not write a JSON
-  diagnostic report.
+  whose first access predates the restore is missed. In addition, the checkpoint
+  format does not preserve a resident wave's LDS allocation base and size.
+  Restored waves default to a zero-sized allocation, and the core checker clips
+  their later LDS ranges to empty. Post-restore LDS races are therefore outside
+  coverage even when both conflicting accesses occur after the restore. Global
+  checking remains enabled conservatively when selected.
+- Checkpoints preserve the effective family selection and global shadow budget,
+  but not the diagnostic report path; a VM restored through
+  `rj_vm_restore_checkpoint` does not write a JSON diagnostic report.
 - One report is written per GPU. GPU 0 uses the configured
   `memory_diagnostic_report` path; additional GPU `N` uses `<path>.gpuN`.
 - Enabling the legacy race-detector plugin together with core checking
@@ -396,11 +418,11 @@ optimization roadmap and sign-off protocol.
 
 The campaigns below answer different questions. The 20-kernel campaign measures
 a heterogeneous realistic workload mix on the checker before the final
-SoC-shared ownership and lifecycle refactor. The current synthetic campaign
-isolates memory-bookkeeping cost. A targeted current rerun supplies a limited
+SoC-shared ownership and lifecycle refactor. The synthetic campaigns isolate
+memory-bookkeeping cost. A targeted representative rerun supplies a limited
 same-kernel comparison. Percentages are relative to the same binary with race
 checking off unless stated otherwise. These results are current through
-2026-10-15.
+2026-10-20.
 
 ### Pre-final-refactor realistic campaign
 
@@ -428,17 +450,19 @@ GEMMs about +6%).
 All 20 kernels' default-budget configurations warned that retention degraded;
 none of the 4 GiB configurations did. The campaigns produced no race findings.
 
-These measurements remain the broadest realistic baseline, but they are not a
+These measurements are the historical realistic baseline, but they are not a
 clean before/after measurement of the final refactor. In particular, the older
 checker was owned per command processor while the current checker is shared by
-all command processors and CUs of a GPU/SoC.
+all command processors and CUs of a GPU/SoC. The final P3 rerun below supersedes
+them for current overhead.
 
-### Current synthetic microbenchmarks
+### Pre-P0/P1 synthetic baseline
 
 Four memory-intensive gfx950 workloads (stream, LDS reduction, GEMM and
-histogram) were run against the current Release binary with checking on and off.
-The small set used 262,144 elements (GEMM 128); the large set used 1,048,576
-elements (GEMM 256). The geomeans deliberately exclude a compute-only control:
+histogram) were run against the post-redesign, pre-P0/P1 Release binary with
+checking on and off. The small set used 262,144 elements (GEMM 128); the large
+set used 1,048,576 elements (GEMM 256). The geomeans deliberately exclude a
+compute-only control:
 
 | Execution | Small memory workloads | Large memory workloads |
 |---|---:|---:|
@@ -454,7 +478,7 @@ not a general disabled-path regression, causes the slowdown.
 Combining those serial baselines, race-on was +40.7% on the small memory set and
 +51.2% on the large set versus `develop`. Those are the source of the earlier
 "about 41% / 51%" headline; the +41.1% / +48.4% on/off values above isolate the
-current checker's incremental cost.
+pre-P0/P1 checker's incremental cost.
 
 These numbers are intentionally not comparable to the 20-kernel geomean: the
 synthetics maximize accesses per unit of unrelated simulation work. The earlier
@@ -466,6 +490,24 @@ workloads and +30% when the compute control was included; the latest all-five
 geomean was +31%. The memory-only spread is another reason to treat the
 loaded-host synthetic figures as ranges rather than a refactor regression.
 
+### P1 synthetic rerun
+
+The final P1 binary, the same binary with checking off, and original `develop`
+were compared in one pinned, rotating nine-repetition matrix. All 216 cases
+passed and no checked run degraded coverage:
+
+| Comparison | Small memory workloads | Large memory workloads |
+|---|---:|---:|
+| P1 race-off / `develop` | +10.4% (-4.1% to +17.1%) | -0.4% (-5.9% to +3.1%) |
+| P1 race-on / race-off | +26.3% (+17.0% to +43.3%) | +41.0% (+34.7% to +43.0%) |
+| P1 race-on / `develop` | +39.4% (+26.1% to +48.2%) | +40.4% (+32.3% to +42.2%) |
+
+The small set remained bimodal; its +10.4% race-off point estimate is not a
+resolved disabled-path regression because the interval includes zero. The
+longer large set is stable. The latest +39.4% / +40.4% race-on-versus-`develop`
+result is directionally lower than the older +40.7% / +51.2% headline, but
+shared-host variation prevents attributing that whole difference to P1.
+
 ### Current mutation-harness sweep
 
 A separate serial gfx1250 sweep used 21 small mutation shaders, five processes
@@ -475,9 +517,9 @@ about +1.9% to +5.4%) and did not exhaust the global shadow. These CI-sized
 kernels show the low-cost end of the workload range; their whole-process timing
 is not comparable to the Gluon per-dispatch measurements.
 
-### Current representative rerun
+### Earlier two-kernel representative rerun
 
-FMHA v4 and A16W16 v9 were rerun on the current checker with one process per
+FMHA v4 and A16W16 v9 were rerun on an earlier checker build with one process per
 variant and three timed dispatches; the table uses their medians. The 512 MiB
 runs emitted the coverage warning; the 4 GiB runs did not. This status comes
 from raw stderr: the benchmark helper's `degraded` field still matched the old
@@ -490,15 +532,189 @@ warning text and incorrectly remained false.
 | Two-kernel geomean | — | +35.9% | +42.6% | — |
 
 For the same two kernels, medians from the pre-final-refactor campaign give
-+49.2% at the default budget and +53.4% at 4 GiB. The current rerun is therefore
++49.2% at the default budget and +53.4% at 4 GiB. The earlier rerun is therefore
 directionally faster, not evidence that the refactor increased overhead. It is
 still not a controlled redesign A/B: the runs were collected at different
-times, and the current rerun has only one process per variant.
+times, and the earlier rerun has only one process per variant. The final P3
+campaign below supersedes it for current overhead.
+
+### P0/P1 fixed-work instrumentation
+
+The optional JSON report now includes bounded per-dispatch counters for ranges,
+dwords, shadow work, allocations, lock acquisition, barriers, cleanup, and
+retained or rejected bytes.
+
+The original P0 harness accidentally enabled reporting for names ending in
+`-no-report`; its no-report and report-overhead conclusions are invalid. A
+corrected, explicit four-variant P0/P1 matrix found P1 was 2.0% faster on the
+small set and 0.7% faster on the large set without a report, with both
+intervals including zero. With a report, P1 was 4.2% and 4.9% faster; only the
+large interval excluded zero. Report collection added 7.4% for P0 and 2.9% for
+P1 on the large set. All 288 runs passed with no rejected shadow bytes.
+
+The counters give stronger optimization priorities than the software profile
+alone. Global-only stream and histogram dispatches created thousands of LDS
+workgroup states. GEMM generated 37.82 million dword candidates and rejected
+28.31 million (74.9%) as duplicates. Large dispatches inserted 1.05 to 7.67
+million records, GEMM visited 10.11 million records, and LDS reduction incurred
+205,675 vector growths. Serial map, state, and global-shard lock acquisition
+averaged 26 to 28 ns including timing overhead, with no sign of contention.
+
+P1 now creates no LDS state for zero-LDS stream and histogram workgroups.
+Batched setup cuts clock-matrix growth by 75%; cached state/wave bindings cut
+large LDS/GEMM workgroup lookups by 90% to 98%; and the aligned GEMM fast path
+skips its 74.9% overlapping prefix before dword expansion. A one-workgroup
+global dispatch records no race work at all. `dword_candidates` now excludes
+prefixes skipped before expansion, while `dword_duplicates_skipped` includes
+them. The generic path and exact `dword_visits` semantics are unchanged.
+
+### P2 global-shadow result
+
+P2 replaces global page hash nodes and relocatable record vectors with
+per-dispatch flat page/site directories and bounded slabs. It also replaces 256
+isolated budget shares with one exact checker-wide modeled cap. Dispatch
+cleanup returns its charge immediately, and a bounded saturation cache avoids
+repeating known-failed growth attempts without skipping retained-record checks.
+
+In the controlled P2/P1 matrix, P2 without JSON collection was 16.5% slower on
+the noisy small set and 11.1% slower on the stable large set. With collection,
+it was 1.3% and 10.6% slower. Exact site interning is the main new hot path:
+large stream was 29.1% slower, while site-reusing GEMM changed by 1.0%.
+Compact 8-byte site-directory entries and removal of duplicate site probes and
+per-record tracking atomics recovered seven percentage points from the first
+large-set P2 result.
+
+The layout improves storage for the site-heavy large stream: report-run peak
+RSS fell from 330.6 MB on P1 to 315.6 MB on P2, and its modeled peak was 105.7
+MB. A separate 512-MiB/4-GiB control had zero rejected bytes in all 80 cases;
+the large-set timing differed by 1.1%. Thus the P2/P1 timing comparison is at
+equal full coverage, not an artifact of earlier budget exhaustion.
+
+The final realistic rerun used the same 20 Gluon kernels and shapes as the
+historical campaign, with five rotating processes and two timed dispatches per
+variant. P2 race-off was +1.4% versus `develop` (-0.8% to +2.5%), which does not
+resolve a disabled-path regression. Race-on was +19.5% versus race-off at the
+default budget (+18.2% to +21.5%) and +20.0% with full 4 GiB coverage (+18.6%
+to +22.1%). Against `develop`, the corresponding geomeans were +21.1% and
++21.6%.
+
+All 400 processes passed with matching output and no finding. Every
+default-budget race-on process degraded retention; no 4 GiB process did.
+Full/default timing differed by +0.4% (-0.4% to +1.3%). Added dispatch-window
+peak RSS was 0.58--1.12 GiB at the default and 0.83--1.21 GiB at 4 GiB,
+compared with 0.7--1.3 GiB and 1.4--2.1 GiB in the historical campaign.
+
+### P3 compact-access result
+
+P3 represents a regular access from consecutive active lanes as one affine
+`(base, stride, size, first lane, count)` descriptor. Aligned descriptors use
+compact dword runs and in-flight LDS operations keep the descriptor through
+barrier carry. Sparse, descending, irregular, element-masked, DS2,
+per-lane-clipped, and tensor-DMA accesses retain explicit ranges. Unaligned
+affine accesses keep exact generic byte-mask iteration.
+
+A pinned rotating P3/P2/`develop` matrix ran all eight serial synthetics nine
+times. All 288 processes passed with full retained coverage. P3 race-on versus
+P2 race-on was +0.2% on both the small and large sets; the bootstrap intervals
+(-7.3% to +5.5% and -2.3% to +2.9%) include zero. No elapsed-time change
+resolves.
+
+The representation itself is active: on the largest stream and LDS reduction,
+97.0% and 99.1% of logical lane ranges were affine. LDS reduction kept 131,072
+pending operations compact and removed 122,880 range-vector growths. GEMM was
+entirely explicit, however. More importantly, P2 and P3 performed exactly the
+same dword visits and record insertions/scans on every synthetic. P3 therefore
+establishes a correctness-tested compact boundary but does not yet batch the
+per-dword shadow work or exact site interning that dominates runtime.
+
+The final P3 realistic campaign repeated all 20 Gluon kernels with five
+rotating processes and two timed dispatches per variant. Race-off was +0.2%
+versus `develop` (-1.0% to +2.3%). Race-on was +21.2% versus race-off at the
+default budget (+19.4% to +22.9%) and +21.8% with full 4 GiB coverage (+19.8%
+to +23.1%); the corresponding comparisons with `develop` were +21.4% and
++22.0%. Full/default timing differed by +0.5% (-0.9% to +1.4%).
+
+All 400 processes passed with matching output and no finding. Every
+default-budget process degraded retention and no 4 GiB process did. Added
+dispatch-window peak RSS was 0.58--1.08 GiB at the default and 0.84--1.20 GiB
+at 4 GiB. Normalized to each campaign's `develop`, P3 differs from P2 race-on
+by only +0.2% at the default and +0.3% at 4 GiB. The direct synthetic P3/P2
+comparison is also flat, so no P3 runtime gain or regression resolves.
+
+### Post-P3 lock-scope audit
+
+The synchronization audit keeps only shared-state and simulator-ordering work
+inside race-check locks. JSON formatting and file I/O use a revisioned snapshot
+outside the report-state mutex. Warning logs, report updates, and user reporter
+callbacks run after checker locks are released. Dispatch cleanup detaches
+workgroup/global state under its map or shard lock, then destroys slabs,
+aggregates statistics, and returns budget charge outside it. Command-processor
+report flushes are deferred until after the queue lifecycle mutex, including
+direct VM faults and failed queue-close paths.
+
+The CU wave-state lock still covers each instruction's simulated issue,
+scoreboard, barrier, and wave lifetime. The workgroup-state mutex still protects
+LDS clocks and records, and one global-shard mutex still protects the records
+being traversed and updated. Those are shared resources, not local preparation.
+Parallel workgroup completion also skips a report-pending atomic exchange; the
+worker join performs retirement and flushing.
+
+Four direct lock-scope/P3 matrices found no resolved timing change:
+
+| Geomean audited/P3 | Small set | Large set | All eight |
+|---|---:|---:|---:|
+| Serial, no JSON | -1.0% (-8.7% to +5.6%) | +0.2% (-1.9% to +2.4%) | -0.4% (-4.5% to +3.0%) |
+| Threaded, no JSON | +0.4% (-4.4% to +4.7%) | +0.3% (-5.0% to +4.4%) | +0.4% (-3.4% to +3.2%) |
+| Serial, JSON statistics | -1.5% (-10.7% to +16.5%) | +1.7% (-0.4% to +4.1%) | +0.1% (-4.8% to +8.9%) |
+| Threaded, JSON statistics | -1.4% (-4.4% to +4.1%) | -0.8% (-7.8% to +6.0%) | -1.1% (-4.7% to +3.3%) |
+
+All 864 processes passed with expected output and full retained coverage.
+Serial measured acquisitions averaged about 26--35 ns. Under threaded JSON
+instrumentation, workgroup-state locks remained about 30--37 ns and map locks
+about 97--171 ns, but global-shard acquisitions ranged from 0.30 to 5.81
+microseconds. The audit therefore removes avoidable blocking and deadlock
+exposure without resolving elapsed time. Global contention is real for some
+threaded workloads, but its remaining critical section is the required
+per-dword shadow traversal rather than reporting, cleanup, or local work.
+
+### Selectable-family overhead
+
+The current checker can time and deploy its address domains and transfer
+sources separately through `race_checking_checks`. A full-coverage matrix ran
+all eight relevant selector combinations over the 20 Gluon kernels, with five
+rotating processes and four timed dispatches per process:
+
+| Selection | Geomean overhead versus race-off |
+|---|---:|
+| `global` | +2.22% (+1.14% to +3.02%) |
+| `lds-same-wave` | +2.55% (+1.43% to +3.47%) |
+| `lds-cross-wave` | +6.13% (+5.01% to +7.15%) |
+| Both regular LDS families | +6.19% (+5.18% to +7.21%) |
+| All address domains without direct-to-LDS | +8.99% (+7.66% to +9.96%) |
+| Direct-to-LDS source increment | +12.67% (+11.55% to +13.72%) |
+| `all` | +22.81% (+21.44% to +23.62%) |
+
+All 800 processes passed with matching per-kernel digests, no finding and no
+coverage degradation. Adding same-wave LDS after cross-wave LDS was only
++0.05% (-0.86% to +1.07%), but the prerequisite cross-wave family was already
++6.13%; the combined option is not below 2%.
+
+The gfx950 tensor-DMA source increment was +0.80% (+0.13% to +1.46%), but
+gfx950 executes no tensor-DMA instruction, so that is a dormant-source noise
+control. A dedicated gfx1250 workload measured +7.46% (+1.76% to +9.66%) for
+the active source with cross-wave LDS and +20.89% (+15.08% to +29.39%) with
+all address domains. Its same-wave-only upper bound was +3.97%.
+
+The acceptance criterion requires both the estimate and 95% upper bound to be
+at most 2% on a workload that actively executes the check. No independently
+useful active family qualifies. The
+[performance analysis](address-race-checking-performance-analysis.md#selectable-family-overhead-and-2-decision)
+contains the synthetic, focused-source, and per-kernel evidence.
 
 ### Software profile
 
 Hardware `perf` sampling was unavailable (`perf_event_paranoid=4`), so a
-userspace SIGPROF sampler was used on the exact current Release binary. After
+userspace SIGPROF sampler was used on the exact pre-P1 Release binary. After
 normalizing to samples that resolved inside `librocjitsu.so`, direct
 race-checker functions accounted for:
 
@@ -511,21 +727,45 @@ race-checker functions accounted for:
 These are lower bounds for checker cost because allocator and mutex time that
 resolves to libc is not attributed to the caller. The samples identify
 per-dword shadow traversal, LDS history updates and lane/range preparation as
-hot paths. They do not measure lock wait directly and do not establish that
-contention is the dominant cost.
+hot paths. They do not measure lock wait directly; the post-P3 counter matrices
+above provide that measurement and show workload-dependent global-shard
+contention without a resolved aggregate timing change.
 
 ### Measurement limits
 
 The shared measurement host was heavily loaded (load averages roughly 400–560
-during parts of the synthetic/profile campaign and about 101 during the final
-rerun, on 384 logical CPUs), so the exact percentages are directional. A
+during parts of the synthetic/profile campaign, about 101 during the
+representative rerun, 44–47 during the final P1 matrices, 43–70 during the
+final P2 Gluon matrix, and 42–49 when the final P3 matrix started on 384
+logical CPUs). The selector campaign started and ended near 46. A
 sign-off run needs reserved cores, fixed CPU policy, interleaved on/off variants
 from one binary and at least five processes per variant. It must record coverage
 warnings and peak RSS with time: a faster capped run can simply have retained
-less history. gfx1250, wave32, multi-GPU and measured lock-contention scaling
-remain unprofiled.
+less history. gfx1250, wave32, and multi-GPU remain unprofiled. The post-P3
+matrix now measures gfx950 threaded lock contention, but its unpinned intervals
+remain wide.
 
 ## Validation
+
+The final selector build passes the 174-test complete core race/wait/config and
+checkpoint selection, the 250-test combined legacy/core race selection, the
+CLI selector CTest, and all 41 mutation-tool unit tests. The gfx950 matrix
+tested 52 mutants and the gfx1250 matrix tested 83; both had clean baselines,
+no inconclusive run, no false positive, and only the two known
+`lds_war_pattern` equivalent misses.
+
+Configuration and execution tests cover every family spelling, canonical
+formatting, source-without-domain rejection, omitted-selector compatibility,
+checkpoint round-trip, CLI restrictions, family-specific findings, disabled
+direct/tensor sources, and LDS-only dispatch finalization. All 2,126 selector
+performance cases passed: 576 general synthetics, 540 focused active paths,
+210 direct/tensor source cases, and 800 Gluon processes. None emitted a finding
+or coverage warning, and every Gluon kernel had one digest across all selectors.
+
+The earlier focused threaded probe still passes AddressSanitizer and
+UndefinedBehaviorSanitizer with leak detection. ThreadSanitizer binaries build,
+but its runtime cannot initialize on this host. The selector change did not
+alter the shadow layouts exercised by those probes.
 
 - The mutation harness has two mutation kinds: removing one wait instruction,
   and rewriting a load as a store. It never removes a barrier, which is the usual
@@ -541,12 +781,19 @@ remain unprofiled.
   those kernels produce no false reports, and measure the cost, but they do not
   show that a race in a kernel of that size is found, in particular after the
   global shadow degrades.
-- The budget unit test covers degradation at zero and checkpoint round-tripping
-  at a nonzero value. The per-shard split and nonzero capacity boundary are
-  exercised only by the Gluon measurements.
-- Report tests cover a combined single-GPU file, non-clobbering when unused and
-  flush at ordinary grid retirement. There is no end-to-end multi-GPU test of
-  the `.gpuN` report paths.
+- Budget tests cover degradation at zero, the exact 21,888-byte first-retention
+  boundary, checker-wide shard skew, concurrent admission without overshoot,
+  transactional record/site failures, partial-dispatch cleanup and immediate
+  reuse. Separate tests cover packed provenance, directory/slab growth, and
+  saturation-cache hits and invalidation.
+- Compact-representation tests compare affine and explicit global findings
+  across pages, verify unaligned byte masks, overlap and broadcast first-lane
+  provenance, compact pending LDS carry across repeated barriers, fallback
+  execution, accounting, and JSON serialization.
+- Report tests cover a combined single-GPU file, non-clobbering when unused,
+  flush at ordinary grid retirement, and LDS-only statistics finalization when
+  global checking is unselected. There is no end-to-end multi-GPU test of the
+  `.gpuN` report paths.
 - There are no tests for split barriers with work between the signal and the
   wait, for LDS barrier cells, or for cluster multicast into peer workgroups.
 
@@ -558,31 +805,43 @@ Correctness and coverage:
    dispatch.
 2. Key findings by instruction pair, and add kernel names and code-object
    offsets to findings.
-3. Add barrier-removal mutants to the mutation harness.
-4. Model gfx1250 LDS barrier cells, including the tensor-DMA arrive.
-5. Apply split-barrier ordering at each member's own signal and wait.
-6. Record cluster multicast writes in the peer workgroups' LDS history.
-7. Add happens-before for global memory. This removes the largest class of false
+3. Serialize or reconstruct resident LDS allocation metadata at checkpoint
+   restore so post-restore LDS checking resumes with empty history.
+4. Add barrier-removal mutants to the mutation harness.
+5. Model gfx1250 LDS barrier cells, including the tensor-DMA arrive.
+6. Apply split-barrier ordering at each member's own signal and wait.
+7. Record cluster multicast writes in the peer workgroups' LDS history.
+8. Add happens-before for global memory. This removes the largest class of false
    reports, and is a prerequisite for checking global accesses within a
    workgroup.
 
 Performance, preserving the same findings and retained coverage:
 
-1. Instrument lane ranges, distinct dwords, records walked, allocations, budget
-   loss and lock-wait time so later changes have fixed-work explanations.
-2. Add exact no-work paths for zero-LDS workgroups and one-workgroup global
-   dispatches, and attach completion tokens only to effects whose LDS history
-   consumes them.
-3. Stable-bucket and coalesce compatible lane ranges by page/dword, with
-   aligned, disjoint and aggregate-in-bounds fast paths; keep the generic path
-   for gathers, overlap, unaligned accesses and per-lane diagnostics.
-4. Batch workgroup registration, size vector clocks once, and cache a
-   lifetime-safe workgroup state and wave index instead of repeating map lookup
-   and linear wave search.
-5. Reuse barrier scratch and index pending LDS operations by range so accesses
+P1 added zero-LDS and one-workgroup no-work paths, LDS-only completion tokens,
+aligned overlapping-prefix skipping, batched workgroup setup, and cached
+lifetime-safe state/wave bindings. P2 added per-dispatch global slabs, flat
+directories, packed records and sites, checker-wide exact accounting, immediate
+budget reuse, and the saturation cache. P3 added affine global/LDS descriptors,
+aligned dword runs, compact pending LDS operations, explicit fallback, and
+representation counters.
+
+1. Batch the global-read and deferred-LDS-write effects of direct-to-LDS, which
+   adds 12.7% to the realistic geomean, and reuse one prepared provenance/site
+   context across both effects.
+2. Consume affine descriptors in page/shard and dense-LDS batches so compact
+   runs reduce shadow lookups, callbacks, and record-insertion overhead rather
+   than only range materialization. Add fallback-reason counters before
+   extending classification to GEMM's currently explicit patterns.
+3. Stable-bucket and coalesce compatible explicit ranges by page/dword while
+   retaining the generic path for gathers, overlap, unaligned accesses and
+   per-lane diagnostics.
+4. Reuse barrier scratch and index pending LDS operations by range so accesses
    visit only potentially overlapping incomplete operations.
-6. Improve global locality and memory amplification with dispatch arenas,
-   flatter page storage, balanced budget use and compact records.
-7. Consider affine page-run descriptors and epoch-based LDS history only after
-   the lower-risk paths are measured. Change lock topology only if lock-wait
-   instrumentation shows contention is material.
+5. Reduce optional report-collection work only if its remaining cost matters
+   for profiling runs; report snapshots and file I/O are already outside the
+   state lock, and collection is absent when no report is configured.
+6. Evaluate compact owner/conflict summaries and epoch-based LDS history with
+   differential tests. Threaded lock-wait instrumentation shows material,
+   workload-dependent global-shard contention, but the lock-scope audit is
+   timing-neutral. Batch more shadow work per acquisition before changing lock
+   topology.

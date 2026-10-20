@@ -59,6 +59,7 @@ Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
 | `--cpu-thread-budget <n>` | Replace top-level `cpu_thread_budget` for this launch without changing the source config. Zero selects automatic sizing. Not available with `--attach`. |
 | `--wait-checking <mode>` | Override wait diagnostics on every CU and GPU for this launch: `on`, `off`, or `all` (ordinary checks plus gfx1250 XCNT). Omission preserves JSON settings and defaults. Not available with `--attach`. |
 | `--race-checking <mode>` | Enable or disable core LDS/global address-race checking for this launch: `on` or `off`. Omission preserves JSON settings and the default is off. Not available with `--attach`. |
+| `--race-checking-checks <list>` | Select `global`, `lds-same-wave`, `lds-cross-wave`, `direct-to-lds`, and/or `tensor-dma`, or `all`. Source families require an address domain. Omission selects all families. |
 | `--vfio-socket <path>` | Serve the configured GPU as a PCI function over VFIO-user. The VMM must share guest RAM through mmap-able file descriptors. |
 | `--thread-budget-table` | Print the resolved engine, dispatch-worker, and helper-thread allocations without running a VM. |
 | `--check-vfio-user` | Exit successfully only when this binary was built with VFIO-user support. |
@@ -66,7 +67,7 @@ Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
 | `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit |
 | `--` | Separator between rocjitsu options and the target application command line |
 
-The three launch overrides also accept `--name=value`. They are refused when an
+The four launch overrides also accept `--name=value`. They are refused when an
 enabled DBT guest names an external `dbt_guest.simulator_config`, because that
 host simulator must read the setting from its own config.
 
@@ -87,7 +88,7 @@ rocjitsu --attach --config configs/gfx950_mi355x_kmd.json -- ./app
 
 # Run with core address-race diagnostics enabled for this launch
 rocjitsu --config configs/gfx950_mi355x_kmd.json \
-  --race-checking=on -- ./app
+  --race-checking=on --race-checking-checks=global,lds-cross-wave -- ./app
 
 # Serve the gfx1250 PCI function to a VMM
 rocjitsu --config configs/gfx1250_mi455x.json \

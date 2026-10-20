@@ -400,6 +400,9 @@ void print_usage() {
          "  --race-checking <mode>, --race-checking=<mode>\n"
          "                    Enable or disable core LDS/global address race checks\n"
          "                    for this launch (on or off; default off).\n"
+         "  --race-checking-checks <list>, --race-checking-checks=<list>\n"
+         "                    Select race-check families: global, lds-same-wave,\n"
+         "                    lds-cross-wave, direct-to-lds, tensor-dma, or all.\n"
          "  --vfio-socket <path>\n"
          "                    Serve the configured GPU as a PCI function to a VMM over\n"
          "                    the vfio-user protocol on this AF_UNIX socket, instead of\n"
@@ -481,6 +484,22 @@ int main(int argc, char *argv[]) {
         std::cerr << "rocjitsu: --race-checking requires on or off\n";
         return 1;
       }
+    } else if (arg == "--race-checking-checks" ||
+               arg.starts_with("--race-checking-checks=")) {
+      const size_t equals = arg.find('=');
+      std::string_view value;
+      if (equals != std::string_view::npos)
+        value = arg.substr(equals + 1);
+      else if (i + 1 < argc)
+        value = argv[++i];
+      overrides.race_checking_checks = parse_race_checking_checks(value);
+      if (!overrides.race_checking_checks) {
+        std::cerr
+            << "rocjitsu: --race-checking-checks requires all or a unique comma-separated "
+               "list of global, lds-same-wave, lds-cross-wave, direct-to-lds, and tensor-dma; "
+               "source checks require an address domain\n";
+        return 1;
+      }
     } else if (arg == "--vfio-socket" && i + 1 < argc) {
       vfio_socket = argv[++i];
     } else if (arg == "--thread-budget-table") {
@@ -542,6 +561,10 @@ int main(int argc, char *argv[]) {
   }
   if (overrides.race_checking && attach_mode) {
     std::cerr << "rocjitsu: --race-checking cannot be combined with --attach\n";
+    return 1;
+  }
+  if (overrides.race_checking_checks && attach_mode) {
+    std::cerr << "rocjitsu: --race-checking-checks cannot be combined with --attach\n";
     return 1;
   }
 
@@ -684,6 +707,14 @@ int main(int argc, char *argv[]) {
     std::cerr << std::format("rocjitsu: --race-checking cannot be combined with a dbt_guest "
                              "simulator_config; set race_checking in {} instead\n",
                              dbt_guest_config.host.simulator_config_path);
+    return 1;
+  }
+  if (dbt_guest_mode && overrides.race_checking_checks &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << std::format(
+        "rocjitsu: --race-checking-checks cannot be combined with a dbt_guest "
+        "simulator_config; set race_checking_checks in {} instead\n",
+        dbt_guest_config.host.simulator_config_path);
     return 1;
   }
 

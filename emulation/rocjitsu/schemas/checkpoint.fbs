@@ -62,6 +62,9 @@ table ComputeUnitState {
   memory_wait_checks: bool = null;
   xcnt_checks: bool = null;
   memory_race_checks: bool = null;
+  // Preserve selected race-check families; absent legacy checkpoints keep the
+  // mask supplied by their restore configuration.
+  memory_race_check_mask: uint32 = null;
 }
 
 /// Serialized state of a command processor.

@@ -288,7 +288,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
             builder, name, wfs_vec, 0, cu->config().functional_quantum, true,
             cu->config().memory_wait_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
             cu->config().xcnt_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
-            cu->config().memory_race_diagnostics != amdgpu::MemoryWaitDiagnostics::Off);
+            cu->config().memory_race_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
+            cu->config().memory_race_check_mask);
         cu_offsets.push_back(cus);
       }
     }
@@ -450,6 +451,7 @@ LoadedConfig restore_checkpoint(const std::string &path) {
       const auto memory_checks = cu_state->memory_wait_checks();
       const auto xcnt_checks = cu_state->xcnt_checks();
       const auto race_checks = cu_state->memory_race_checks();
+      const auto race_check_mask = cu_state->memory_race_check_mask();
       cu->restore_wait_diagnostics(
           memory_checks
               ? (*memory_checks ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off)
@@ -457,7 +459,8 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           xcnt_checks ? (*xcnt_checks ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off)
                       : cu->config().xcnt_diagnostics,
           race_checks ? (*race_checks ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off)
-                      : cu->config().memory_race_diagnostics);
+                      : cu->config().memory_race_diagnostics,
+          race_check_mask ? *race_check_mask : cu->config().memory_race_check_mask);
       if (auto *wf_states = cu_state->wavefronts()) {
         std::unordered_map<uint64_t, uint32_t> restored_workgroups;
         for (auto *wf_state : *wf_states) {

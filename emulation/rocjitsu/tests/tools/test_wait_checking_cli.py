@@ -45,7 +45,12 @@ class WaitCheckingCliTest(unittest.TestCase):
 
     def write_source(self, mode):
         config = json.loads(self.template.read_text())
-        config.update(wait_checking=mode, race_checking="off", cpu_thread_budget=6)
+        config.update(
+            wait_checking=mode,
+            race_checking="off",
+            race_checking_checks="all",
+            cpu_thread_budget=6,
+        )
         self.source.write_text(json.dumps(config, indent=2) + "\n")
 
     def run_cli(self, *args, config=None):
@@ -139,16 +144,68 @@ class WaitCheckingCliTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("--race-checking requires on or off", result.stderr)
 
-    def test_race_checking_rejects_attach_and_external_dbt_config(self):
-        for flags, config, message in (
-            (["--attach"], self.source, "cannot be combined with --attach"),
-            ([], self.dbt_config, "cannot be combined with a dbt_guest simulator_config"),
-        ):
-            result = self.run_cli(
-                "--race-checking=on", *flags, "--", "true", config=config
+    def test_race_checking_check_families(self):
+        expected = (
+            "global,lds-same-wave,lds-cross-wave,direct-to-lds,tensor-dma"
+        )
+        for assigned in (False, True):
+            flag = (
+                [f"--race-checking-checks={expected}"]
+                if assigned
+                else ["--race-checking-checks", expected]
             )
+            result = self.run_cli(
+                *flag, "--", sys.executable, "-c", PROBE, "local"
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(
+                json.loads(result.stdout)["config"]["race_checking_checks"], "all"
+            )
+
+        result = self.run_cli(
+            "--race-checking-checks",
+            "global, lds-same-wave",
+            "--",
+            sys.executable,
+            "-c",
+            PROBE,
+            "local",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout)["config"]["race_checking_checks"],
+            "global,lds-same-wave",
+        )
+
+        for flags in (
+            ["--race-checking-checks"],
+            ["--race-checking-checks="],
+            ["--race-checking-checks=none"],
+            ["--race-checking-checks=global,"],
+            ["--race-checking-checks=global,global"],
+            ["--race-checking-checks=direct-to-lds"],
+            ["--race-checking-checks", "--", "true"],
+        ):
+            result = self.run_cli(*flags)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn("--race-checking " + message, result.stderr)
+            self.assertIn("--race-checking-checks requires", result.stderr)
+
+    def test_race_checking_rejects_attach_and_external_dbt_config(self):
+        for option in ("--race-checking=on", "--race-checking-checks=global"):
+            for flags, config, message in (
+                (["--attach"], self.source, "cannot be combined with --attach"),
+                (
+                    [],
+                    self.dbt_config,
+                    "cannot be combined with a dbt_guest simulator_config",
+                ),
+            ):
+                result = self.run_cli(
+                    option, *flags, "--", "true", config=config
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(option.split("=")[0] + " " + message, result.stderr)
+
 
     def test_rejects_missing_or_invalid_values(self):
         for flags in (

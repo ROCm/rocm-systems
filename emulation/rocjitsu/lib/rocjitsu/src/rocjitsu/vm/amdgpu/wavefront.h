@@ -321,6 +321,11 @@ public:
   /// @brief Set the aligned LDS allocation size for this workgroup.
   void set_lds_size(uint32_t size) { lds_size_ = size; }
 
+  /// @brief Whether global address-race history can compare another workgroup.
+  bool global_race_check_enabled() const { return global_race_check_enabled_; }
+  /// @brief Disable global checks for a grid containing exactly one workgroup.
+  void set_global_race_check_enabled(bool enabled) { global_race_check_enabled_ = enabled; }
+
   /// @brief Return the LDS backing selected for this workgroup placement.
   ///
   /// CU-mode workgroups use their owning CU's LDS. WGP-mode workgroups can
@@ -990,6 +995,7 @@ public:
     pm4_failure_.reset();
     lds_base_ = 0;
     lds_size_ = 0;
+    global_race_check_enabled_ = true;
     lds_ = nullptr;
     cluster_rank_ = 0;
     cluster_size_ = 1;
@@ -1082,8 +1088,9 @@ protected:
   std::shared_ptr<uint32_t> scratch_lease_;      ///< Resident PM4 scratch slot.
   uint32_t queue_id_ = 0; ///< KFD queue ID that launched this wave (debugger correlation).
   InstructionExecutionError instruction_execution_error_ = InstructionExecutionError::None;
-  uint32_t lds_base_ = 0;     ///< Per-WG LDS base offset (set per dispatch).
-  uint32_t lds_size_ = 0;     ///< Aligned per-WG LDS allocation size.
+  uint32_t lds_base_ = 0; ///< Per-WG LDS base offset (set per dispatch).
+  uint32_t lds_size_ = 0; ///< Aligned per-WG LDS allocation size.
+  bool global_race_check_enabled_ = true;
   Lds *lds_ = nullptr;        ///< Placement-selected LDS backing; nullptr means CU-local LDS.
   uint32_t cluster_rank_ = 0; ///< Workgroup rank inside the dispatch cluster.
   uint32_t cluster_size_ = 1; ///< Number of workgroups in the dispatch cluster.

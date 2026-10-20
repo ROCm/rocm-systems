@@ -9277,12 +9277,13 @@ TEST(RoutedMemoryObservationTest, PerElementBoundsAndCachePolicyAreCarried) {
 TEST(CoreRaceCheckingTest, DirectToLdsWritesOutsideTheAllocationAreNotShared) {
   // Compilers disable a wave's direct-to-LDS load by pointing M0 past the
   // workgroup's LDS allocation, where hardware discards the write.
-  auto findings_for_m0 = [](uint32_t m0) {
+  auto findings_for_m0 = [](uint32_t m0, RaceCheckMask race_checks = kAllRaceChecks) {
     std::vector<MemoryRaceChecker::Finding> findings;
     PluginFixture fixture(/*num_wf_slots=*/2);
     auto *cu = fixture.cu();
     cu->restore_wait_diagnostics(cu->config().memory_wait_diagnostics,
-                                 cu->config().xcnt_diagnostics, MemoryWaitDiagnostics::Warn);
+                                 cu->config().xcnt_diagnostics, MemoryWaitDiagnostics::Warn,
+                                 race_checks);
     cu->set_memory_race_checker(std::make_shared<MemoryRaceChecker>(
         [&](const MemoryRaceChecker::Finding &finding) { findings.push_back(finding); }));
     for (int i = 0; i < 2; ++i) {
@@ -9311,6 +9312,37 @@ TEST(CoreRaceCheckingTest, DirectToLdsWritesOutsideTheAllocationAreNotShared) {
   };
   EXPECT_GT(findings_for_m0(0), 0u);
   EXPECT_EQ(findings_for_m0(0x7fffffff), 0u);
+  EXPECT_EQ(findings_for_m0(0, kRaceCheckAddressDomains), 0u);
+}
+
+TEST(CoreRaceCheckingTest, TensorDmaSourceCanBeDisabledIndependently) {
+  const auto finding_count = [](RaceCheckMask race_checks) {
+    std::vector<MemoryRaceChecker::Finding> findings;
+    PluginFixture fixture;
+    auto *cu = fixture.cu();
+    cu->restore_wait_diagnostics(cu->config().memory_wait_diagnostics,
+                                 cu->config().xcnt_diagnostics, MemoryWaitDiagnostics::Warn,
+                                 race_checks);
+    cu->set_memory_race_checker(std::make_shared<MemoryRaceChecker>(
+        [&](const MemoryRaceChecker::Finding &finding) { findings.push_back(finding); }));
+    auto *wave = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x800, /*sgprs=*/104, /*vgprs=*/256);
+    EXPECT_NE(wave, nullptr);
+    if (!wave)
+      return size_t{0};
+    wave->set_lds_size(1024);
+    auto &scoreboard = wave->ensure_memory_wait_scoreboard();
+    scoreboard.issue(WaitCounterKind::Tensor, true);
+    const std::array<uint64_t, 1> global{0xC000};
+    const std::array<uint32_t, 1> lds{0x20};
+    cu->track_tensor_dma_accesses(*wave, 0x800, global, lds, 4, false);
+    cu->track_tensor_dma_accesses(*wave, 0x804, global, lds, 4, true);
+    return findings.size();
+  };
+
+  constexpr RaceCheckMask same_wave =
+      race_check_bit(RaceCheckFamily::LdsSameWave);
+  EXPECT_GT(finding_count(same_wave | race_check_bit(RaceCheckFamily::TensorDma)), 0u);
+  EXPECT_EQ(finding_count(same_wave), 0u);
 }
 
 TEST(RoutedMemoryObservationTest, ASingleAccessCarriesNoSecondAddressSet) {

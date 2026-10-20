@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/accvgpr_layout.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/race_checking.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
 #include "rocjitsu/vm/amdgpu/decoded_instruction_cache.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -156,15 +157,27 @@ public:
     MemoryWaitDiagnostics xcnt_diagnostics = MemoryWaitDiagnostics::Off;
     /// Opt in to address-aware LDS and global race diagnostics.
     MemoryWaitDiagnostics memory_race_diagnostics = MemoryWaitDiagnostics::Off;
+    /// Address domains and optional sources included in core race diagnostics.
+    RaceCheckMask memory_race_check_mask = kAllRaceChecks;
 
     /// @brief Whether gfx1250 replay-source diagnostics are enabled.
     bool xcnt_checks_enabled() const {
       return arch == ROCJITSU_CODE_ARCH_CDNA5 && xcnt_diagnostics != MemoryWaitDiagnostics::Off;
     }
+    /// @brief Whether an address-race family is configured and the master switch is on.
+    bool race_check_enabled(RaceCheckFamily family) const {
+      return memory_race_diagnostics != MemoryWaitDiagnostics::Off &&
+             rocjitsu::race_check_enabled(memory_race_check_mask, family);
+    }
+    /// @brief Whether an LDS race domain needs memory-completion state.
+    bool lds_race_checks_enabled() const {
+      return memory_race_diagnostics != MemoryWaitDiagnostics::Off &&
+             (memory_race_check_mask & kRaceCheckLdsDomains) != 0;
+    }
     /// @brief Whether any core memory-result, replay-source, or address check is enabled.
     bool memory_wait_checks_enabled() const {
       return memory_wait_diagnostics != MemoryWaitDiagnostics::Off || xcnt_checks_enabled() ||
-             memory_race_diagnostics != MemoryWaitDiagnostics::Off;
+             lds_race_checks_enabled();
     }
   };
 
@@ -287,11 +300,12 @@ public:
 
   /// @brief Restore wait policies before populating checkpoint wavefront slots.
   void restore_wait_diagnostics(MemoryWaitDiagnostics memory, MemoryWaitDiagnostics xcnt,
-                                MemoryWaitDiagnostics race) {
+                                MemoryWaitDiagnostics race, RaceCheckMask race_mask) {
     assert(!has_active_wfs());
     config_.memory_wait_diagnostics = memory;
     config_.xcnt_diagnostics = xcnt;
     config_.memory_race_diagnostics = race;
+    config_.memory_race_check_mask = race_mask;
   }
 
   /// @brief Select whether the CP continuation event owns functional execution.
@@ -433,7 +447,27 @@ public:
   }
   bool memory_race_checks_enabled() const {
     return config_.memory_race_diagnostics != MemoryWaitDiagnostics::Off &&
-           memory_race_checker_ != nullptr;
+           config_.memory_race_check_mask != 0 && memory_race_checker_ != nullptr;
+  }
+  bool memory_race_check_enabled(RaceCheckFamily family) const {
+    return memory_race_checks_enabled() &&
+           rocjitsu::race_check_enabled(config_.memory_race_check_mask, family);
+  }
+  bool memory_race_lds_checks_enabled() const {
+    return memory_race_checks_enabled() &&
+           (config_.memory_race_check_mask & kRaceCheckLdsDomains) != 0;
+  }
+  bool memory_race_global_checks_enabled() const {
+    return memory_race_check_enabled(RaceCheckFamily::Global);
+  }
+  bool memory_race_cross_wave_lds_checks_enabled() const {
+    return memory_race_check_enabled(RaceCheckFamily::LdsCrossWave);
+  }
+  bool memory_race_direct_to_lds_checks_enabled() const {
+    return memory_race_check_enabled(RaceCheckFamily::DirectToLds);
+  }
+  bool memory_race_tensor_dma_checks_enabled() const {
+    return memory_race_check_enabled(RaceCheckFamily::TensorDma);
   }
 
   /// @brief Set the device VM service shared by legacy and PCI/VFIO queues.
@@ -1429,7 +1463,11 @@ protected:
     InstructionVmSnapshot *previous_;
   };
 
-  std::unordered_map<uint64_t, uint32_t> active_wgs_;
+  struct ActiveWorkgroup {
+    uint32_t waves = 0;
+    bool race_lds = false;
+  };
+  std::unordered_map<uint64_t, ActiveWorkgroup> active_wgs_;
 
   struct BarrierCounter {
     uint32_t member_count = 0;
@@ -1466,6 +1504,7 @@ protected:
   std::vector<waitcheck_detail::ClassifiedEvent> memory_wait_classification_;
   uint64_t xcnt_diagnostic_count_ = 0;
   std::shared_ptr<MemoryRaceChecker> memory_race_checker_;
+  std::vector<MemoryRaceChecker::WaveBinding> memory_race_bindings_;
   std::shared_ptr<MemoryDiagnosticReport> memory_diagnostic_report_;
   // Reports come only from the CU issuing thread; helpers must not report.
   std::atomic<uint64_t> isa_diagnostic_count_{0};

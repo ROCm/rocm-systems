@@ -29,8 +29,11 @@ struct LaunchOverrides {
   std::optional<uint32_t> cpu_thread_budget = std::nullopt;
   std::optional<WaitChecking> wait_checking = std::nullopt;
   std::optional<bool> race_checking = std::nullopt;
+  std::optional<RaceCheckMask> race_checking_checks = std::nullopt;
 
-  bool empty() const { return !cpu_thread_budget && !wait_checking && !race_checking; }
+  bool empty() const {
+    return !cpu_thread_budget && !wait_checking && !race_checking && !race_checking_checks;
+  }
 };
 
 /// @brief Return @p json with its top-level `cpu_thread_budget` set to @p budget.
