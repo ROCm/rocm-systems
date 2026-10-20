@@ -110,7 +110,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
   int qpIndexes[NCCL_IB_MAX_QPS];
   int qpsPerDev[NCCL_IB_MAX_DEVS_PER_NIC] = {};
   for (int i = 0; i < nqps; i++) {
-    NCCLCHECK(ncclIbCommBaseGetQpForFlagRequest(&comm->base, reqs[0]->id, i, flagFlush, &qps[i], &qpIndexes[i]));
+    NCCLCHECK(ncclIbCommBaseGetQpForRequest(&comm->base, reqs[0]->id, i, &qps[i], &qpIndexes[i]));
     qpsPerDev[comm->base.qps[qpIndexes[i]].devIndex]++;
   }
   uint64_t wr_id = 0ULL;
@@ -243,7 +243,7 @@ ncclResult_t ncclIbMultiSend(struct ncclIbSendComm* comm, int slot) {
       // Populate the correct RKey based on the device used
       sizesWr->wr.rdma.rkey = comm->remCmplsRecords.rkeys[devIndex];
     }
-    if (flagWr) flagWr->wr.rdma.remote_addr = comm->flagFlushRemAddr + qpIndex * sizeof(uint64_t);
+    if (flagWr) flagWr->wr.rdma.remote_addr = comm->flagFlushRemAddr + qpIndex * NCCL_GDR_FLUSH_FLAG_STRIDE;
 
     // Selective retransmission: skip posting if already delivered
     if (!(comm->base.resiliency && reqs[0]->send.sentData[qpIndex] == true)) {
@@ -576,9 +576,8 @@ ncclResult_t ncclIbIrecv(void* recvComm, int n, void** data, size_t* sizes, int*
 
   // Validate QPs before allocating/publishing the request.
   for (int i = 0; i < nqps; i++) {
-    NCCLCHECKGOTO(ncclIbCommBaseGetQpForFlagRequest(&comm->base, comm->base.fifoHead, i,
-                                                    comm->flagFlush && comm->flagFlushHint, &qps[i], &qpIndexes[i]),
-                  ret, irecvFail);
+    NCCLCHECKGOTO(ncclIbCommBaseGetQpForRequest(&comm->base, comm->base.fifoHead, i, &qps[i], &qpIndexes[i]), ret,
+                  irecvFail);
   }
 
   NCCLCHECKGOTO(ncclIbGetRequest(&comm->base, &req), ret, irecvFail);
@@ -855,12 +854,15 @@ static inline ncclResult_t ncclIbRequestComplete(struct ncclIbRequest* r, int* d
   if (r->type == NCCL_NET_IB_REQ_RECV && r->recv.flagFlush) {
     // net.cc reads this right after ncclIbTest() completes the request, so it
     // describes this request even if a later one already completed.
-    // Same QPs as ncclIbCommBaseGetQpForFlagRequest: 0..nQps-1.
+    // Same QPs as ncclIbCommBaseGetQpForRequest: nQps consecutive QPs from
+    // (id * nQps) % nqps; nQps is 1 or nqps, so they never wrap.
     struct ncclIbRecvComm* recvComm = (struct ncclIbRecvComm*)r->base;
     int nQpsPerRequest = 0;
     NCCLCHECK(ncclIbCommBaseGetNqpsPerRequest(&recvComm->base, &nQpsPerRequest));
     uint64_t nQps = nQpsPerRequest;
-    recvComm->flagFlushLastDesc = (nQps << NCCL_GDR_FLUSH_COUNT_SHIFT) | ((r->id + 1) & NCCL_GDR_FLUSH_SEQ_MASK);
+    uint64_t first = (r->id * nQps) % recvComm->base.nqps;
+    recvComm->flagFlushLastDesc = (nQps << NCCL_GDR_FLUSH_COUNT_SHIFT) | (first << NCCL_GDR_FLUSH_FIRST_SHIFT) |
+                                  ((r->id + 1) & NCCL_GDR_FLUSH_SEQ_MASK);
   }
   if (sizes && r->type == NCCL_NET_IB_REQ_RECV) {
     TRACE(NCCL_NET, "NET/IB: %s: Recv request completed (req=%p, comm=%p, id=%ld, type=%s, nreqs=%d)", __func__, r,

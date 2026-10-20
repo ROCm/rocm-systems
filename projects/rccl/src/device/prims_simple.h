@@ -132,14 +132,16 @@ class Primitives<T, RedOp, Fan, Direct,
   // The net proxy skips the GDR flush and publishes, per step, the flag value
   // the remote NIC writes (RO=0) after the payload on each QP that carried the
   // step, and which per-QP flags those are; seeing the value in local VRAM
-  // means the payload writes ahead of it on that QP have landed.
+  // means the payload writes ahead of it on that QP have landed. Earlier steps
+  // were confirmed by their own waits, so only this step's QPs matter.
   __device__ __forceinline__ void waitGdrFlushFlag(uint64_t* flag, uint64_t* seqs, uint64_t seqStep) {
     uint64_t desc = ld_volatile_global(seqs + seqStep % NCCL_STEPS);
     uint64_t seq = desc & NCCL_GDR_FLUSH_SEQ_MASK;
+    int first = (int)((desc >> NCCL_GDR_FLUSH_FIRST_SHIFT) & 0xff);
     int count = (int)(desc >> NCCL_GDR_FLUSH_COUNT_SHIFT);
     int spins = 0;
-    for (int q = 0; q < count; q++) {
-      while (ld_volatile_global(flag + q) < seq) {
+    for (int q = first; q < first + count; q++) {
+      while (ld_volatile_global(flag + q * (NCCL_GDR_FLUSH_FLAG_STRIDE / sizeof(uint64_t))) < seq) {
         if (checkAbort(flags, Aborted, spins)) return;
       }
     }

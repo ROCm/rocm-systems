@@ -495,20 +495,6 @@ static inline ncclResult_t ncclIbCommBaseGetQpForRequest(struct ncclIbNetCommBas
   return ncclSuccess;
 }
 
-// Requests carrying the GDR flush flag go on QPs 0..n-1 (QP 0 alone unless the request is
-// split over all QPs): each QP's flag is a single increasing counter, so every flag write
-// must stay queued behind the earlier flagged payloads on that QP. Other requests keep the
-// rotation above.
-static inline ncclResult_t ncclIbCommBaseGetQpForFlagRequest(struct ncclIbNetCommBase* baseComm, const uint64_t id,
-                                                             const uint8_t qpIndex, bool flagFlush, ncclIbQp** outQp,
-                                                             int* outQpIndex) {
-  if (!flagFlush) return ncclIbCommBaseGetQpForRequest(baseComm, id, qpIndex, outQp, outQpIndex);
-  *outQpIndex = qpIndex;
-  *outQp = baseComm->activeQps[qpIndex];
-  assert(*outQp != NULL);
-  return ncclSuccess;
-}
-
 // Get a QP object from a QP number. If not NULL, qpIndex will also return the
 // index of the QP in the ncclIbNetCommBase::qps[] array.
 static inline ncclResult_t ncclIbCommBaseGetQpByQpNum(struct ncclIbNetCommBase* commBase, int devIndex, uint32_t qpNum,
@@ -579,7 +565,7 @@ struct ncclIbSendComm {
   uint64_t remoteSpeedCounter;
   // GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG): after the payload of a slot, every
   // QP that carried it writes the slot sequence number from flagFlushSrc[slot]
-  // into its own RO=0 GPU flag, at flagFlushRemAddr + qpIndex * 8.
+  // into its own RO=0 GPU flag, at flagFlushRemAddr + qpIndex * NCCL_GDR_FLUSH_FLAG_STRIDE.
   int flagFlush;
   uint64_t flagFlushRemAddr;
   uint32_t flagFlushRkey;
