@@ -49,6 +49,8 @@
 #include <utility>
 using namespace rocjitsu;
 namespace {
+constexpr uint32_t kGfx9DataFormat32 = 4u << 15;
+
 class InstructionPolicyMachine {
 public:
   explicit InstructionPolicyMachine(rj_code_arch_t arch)
@@ -98,8 +100,8 @@ public:
     cu->write_sgpr(scalar + 4, 0x1000);
     cu->write_sgpr(scalar + 5, 0);
     cu->write_sgpr(scalar + 6, 4096);
-    // Raw buffers use complete byte-range bounds rather than zero-stride record bounds.
-    cu->write_sgpr(scalar + 7, 3u << 28);
+    // CDNA requires a valid DATA_FORMAT; RDNA selects COMPLETE byte-range bounds.
+    cu->write_sgpr(scalar + 7, arch_is_cdna_4_or_lower(cu->arch()) ? kGfx9DataFormat32 : 3u << 28);
     cu->write_vgpr(base + 4, 0, 0);
     cu->write_vgpr(base + 5, 0, 0);
     const uint32_t returned = run(words, src, 0, 0, 0xf0, true, buffer);
@@ -594,9 +596,14 @@ protected:
     compute_unit_->write_sgpr(scalar_base + 4, kAddress);
     compute_unit_->write_sgpr(scalar_base + 5, 0);
     compute_unit_->write_sgpr(scalar_base + 6, 4096);
-    compute_unit_->write_sgpr(scalar_base + 7,
-                              amdgpu::addr_calc::uses_rdna_buffer_range_check(GetParam()) ? 2u << 28
-                                                                                          : 0);
+    // RDNA selects this fixture's range rule; CDNA1-4 needs a valid DATA_FORMAT.
+    // CDNA5 uses the default descriptor encoding.
+    uint32_t word3 = 0;
+    if (amdgpu::addr_calc::uses_rdna_buffer_range_check(GetParam()))
+      word3 = 2u << 28;
+    else if (arch_is_cdna_4_or_lower(GetParam()))
+      word3 = kGfx9DataFormat32;
+    compute_unit_->write_sgpr(scalar_base + 7, word3);
     compute_unit_->write_vgpr(base_, 0, source_bits);
     compute_unit_->write_vgpr(base_ + 1, 0, compare_bits);
     compute_unit_->write_vgpr(base_ + 4, 0, 0);

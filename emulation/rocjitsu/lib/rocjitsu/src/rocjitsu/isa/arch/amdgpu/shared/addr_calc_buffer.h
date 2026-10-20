@@ -103,7 +103,8 @@ constexpr bool gfx9_mubuf_is_format_op(uint32_t op) { return op <= 15 || op == 3
 struct Gfx9BufferResource {
   uint32_t stride;       ///< STRIDE, word1[29:16].
   bool swizzle_enable;   ///< SWIZZLE_ENABLE, word1[31].
-  uint32_t data_format;  ///< DATA_FORMAT, word3[18:15]; STRIDE[17:14] for non-format ADD_TID ops.
+  uint32_t data_format;  ///< DATA_FORMAT, word3[18:15]; 0 unbound except as STRIDE[17:14]
+                         ///< for non-format ADD_TID operations.
   uint32_t index_stride; ///< INDEX_STRIDE, word3[22:21], in indices (8, 16, 32 or 64).
   bool add_tid_enable;   ///< ADD_TID_ENABLE, word3[23].
 };
@@ -338,6 +339,14 @@ void mubuf_calculate_addresses(const MubufInst &inst, amdgpu::Wavefront &wf, Vec
   const bool gfx9 = arch_is_cdna_4_or_lower(wf.cu().arch());
   const Gfx9BufferResource gfx9_srd = gfx9_buffer_resource(srd1, srd3);
   const bool format_op = gfx9_mubuf_is_format_op(inst.op);
+  // Format preparation rejects INVALID for typed accesses. Raw GFX9 buffers
+  // need the same no-access behavior here, before opcode-derived formats hide it.
+  // The ISA keys the stride-field exemption on ADD_TID itself, independently
+  // of the IDXEN qualification used below for adding lanes to linear buffers.
+  if (gfx9 && !format_op && gfx9_srd.data_format == 0 && !gfx9_srd.add_tid_enable) {
+    reject_vector_memory_access(d);
+    return;
+  }
   const bool rdna = uses_rdna_buffer_range_check(wf.cu().arch());
   const bool per_element = d.num_elems > 1 && d.atomic_op == AtomicOp::NONE &&
                            (gfx9 ? !format_op : rdna && !d.buffer_components);
