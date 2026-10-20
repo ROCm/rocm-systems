@@ -101,9 +101,13 @@ jobs:
       - name: Install PyTorch and test dependencies
         timeout-minutes: 15
         run: |
+          # The device-gfx942 extra resolves rocm-sdk-device-gfx942, which is
+          # published to the core index rather than the pytorch one; without
+          # the extra-index-url the resolve fails outright.
           uv pip install --prerelease=allow \
             "torch[device-gfx942]" \
-            --index-url https://rocm.nightlies.amd.com/whl-multi-arch/
+            --index-url https://nightly.repo.amd.com/rocm/pytorch/whl-next/ \
+            --extra-index-url https://nightly.repo.amd.com/rocm/core/whl-next/
           uv pip install \
             pytest \
             pytest-timeout \
