@@ -431,32 +431,11 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
                             chunk_size, wg_id, wg_size);
     }
 
-    // Loop 2 in the example above (allgather): every PE already holds its
-    // own fully-reduced chunk after loop 1 and just needs to broadcast it
-    // around the ring. This used to go straight into the peer's `dst` via
-    // putmem_nbi_wg(), which resolves the remote address through
-    // ipcPeerPtr()/the general symmetric-heap mapping. That path is where
-    // the real bug lives: on gfx1250, writes placed there this way are not
-    // reliably visible to the peer by the time its wait_until() on the
-    // paired pSync flag (itself delivered through the *wrk_sync_pool_*
-    // mapping, not the heap mapping) returns -- a genuine missing
-    // completion guarantee between the two different IPC-mapped regions,
-    // not a logic bug (it only reproduces at the larger per-iteration chunk
-    // sizes the reduce_wg element-size fix enables, and disappears under
-    // any added instruction latency, which is the signature of a race, not
-    // a deterministic indexing error). Switching the destination buffer
-    // alone to the blocking putmem_wg() (same ipcPeerPtr() mapping, just
-    // with the trailing s_barrier put_nbi omits) was verified NOT to fix
-    // it, which rules out "missing local barrier" and confirms the mapping
-    // itself is the problem.
-    //
-    // The fix: relay through pWrk/wrk_sync_pool_ instead, exactly like loop
-    // 1 above (whose correctness is already established -- it is the same
-    // mechanism internal_direct_allreduce_wg uses for every message size up
-    // to the direct/ring threshold, with no reported failures). Each PE
-    // pushes its chunk into the peer's pWrk at its own off_send, then once
-    // the paired flag confirms arrival, copies out of its *own* pWrk at
-    // off_recv (the index the peer used as off_send) into dst.
+    // Loop 2 in the example above (allgather). Relayed through pWrk (like
+    // loop 1) instead of writing directly into the peer's dst: the direct
+    // write and its pSync completion flag go through different IPC
+    // mappings (heap vs. wrk_sync_pool), so the flag can be visible before
+    // the write is.
     for (int iter = PE_size - 1; iter < 2 * PE_size - 2; iter++) {
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
       off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
@@ -481,10 +460,8 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
     }
   }
 
-  // Only clear the slots this call actually used (team-relative, not the
-  // global PE count): the other half of the double-buffered region may
-  // belong to a concurrently in-flight call (see pSync_offset below) and
-  // must not be touched here.
+  // Team-relative bound: clear only this call's half of the double-buffered
+  // pSync region, not the global PE count.
   for (int i = wg_id; i < 2 * PE_size - 2; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
@@ -585,15 +562,8 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
   if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
     internal_direct_allreduce_wg<T, Op>(dest, source, nreduce, team_obj);
   } else {
-    // The ring protocol's pSync flags are reused verbatim (same iter index,
-    // same wait value) by every call on this team. Back-to-back calls (e.g.
-    // a tight loop calling reduce on the same team/ctx) can let one PE start
-    // its next call's flag writes before a slower peer has consumed the
-    // previous call's flags on the exact same slots -- an ABA hazard that
-    // corrupts results or hangs. Double-buffer the slots a single call can
-    // use (ring_pSync of them) and alternate between the two halves each
-    // call, so a PE at most one call ahead can never alias a slower peer's
-    // in-flight slots.
+    // Double-buffer the ring pSync slots across calls to avoid an ABA race
+    // when back-to-back reduces reuse the same team/ctx.
     if (2 * ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
       size_t pSync_offset = (team_obj->reduce_sequence_number % 2) * ring_pSync;
       size_t ring_pWrk =

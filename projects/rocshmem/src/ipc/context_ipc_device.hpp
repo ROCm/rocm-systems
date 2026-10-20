@@ -541,12 +541,6 @@ class IPCContext : public Context {
   __device__ void internal_getmem_wg(void *dest, const void *source,
                                      size_t nelems, int pe);
 
-  __device__ void internal_putmem_wg_tdm(void *dest, const void *source,
-                                         size_t nelems, int pe);
-
-  __device__ void internal_getmem_wg_tdm(void *dest, const void *source,
-                                         size_t nelems, int pe);
-
   __device__ void internal_putmem_wave(void *dest, const void *source,
                                        size_t nelems, int pe);
 
