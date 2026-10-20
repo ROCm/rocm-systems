@@ -2225,7 +2225,8 @@ typedef struct {
  * **Version Support:**
  * - v2.x: format_revision == 2 && content_revision in [1, 4]. Revisions v2.1-v2.3
  *   are byte-prefix subsets of the v2.4 layout, so they populate the fields their
- *   own revision defines and leave the later ones at the sentinel described below.
+ *   own revision defines and leave the later ones at the N/A value described below.
+ *   A `v2_N` field annotation names the v2.x revision that added the field.
  *   v2.0 orders its fields differently and is not supported.
  * - v3.0: format_revision == 3 && content_revision == 0
  * Use ::amdsmi_gpu_metrics_t.common_header to identify which version populated
@@ -2234,14 +2235,15 @@ typedef struct {
  * **Sentinel Values:**
  * Fields not applicable to the current version are initialized to the maximum value
  * of their respective type: 0xFFFF for uint16_t fields, 0xFFFFFFFF for uint32_t fields,
- * and UINT64_MAX for uint64_t fields. For example, on v3.0 hardware, v2.4-only fields
+ * and UINT64_MAX for uint64_t fields. For example, on v3.0 hardware, v2.x-only fields
  * like `average_mm_activity` and `temperature_l3` will contain 0xFFFF. Similarly,
  * array elements beyond the version-specific count (e.g., elements 8-15 of
  * `temperature_core` on v2.4) will contain 0xFFFF. However, uint32_t elements such as
  * 'throttle_status' will contain 0xFFFFFFFF and UINT64_MAX for uint64_t elements such
  * as 'indep_throttle_status'. Callers should check the version and treat maximum values
  * as invalid/not applicable. On v3.0, a `temperature_core` or `temperature_skin`
- * reading of 0 (not measured) is also returned as 0xFFFF.
+ * reading of 0 (not measured) is also returned as 0xFFFF. A core or L3 slot whose
+ * clock reads 0 (the part has no such core or L3) has all of its fields returned as 0xFFFF.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
@@ -2249,18 +2251,18 @@ typedef struct {
   /**
    * @brief Temperature (instant)
    */
-  uint16_t temperature_gfx;                         //!< v2_4, v3_0
-  uint16_t temperature_soc;                         //!< v2_4, v3_0
-  uint16_t temperature_core[AMDSMI_APU_MAX_CORES];  //!< v2_4[8], v3_0[16]
-  uint16_t temperature_l3[AMDSMI_APU_MAX_L3];       //!< v2_4
+  uint16_t temperature_gfx;                         //!< v2_1, v3_0
+  uint16_t temperature_soc;                         //!< v2_1, v3_0
+  uint16_t temperature_core[AMDSMI_APU_MAX_CORES];  //!< v2_1[8], v3_0[16]
+  uint16_t temperature_l3[AMDSMI_APU_MAX_L3];       //!< v2_1
   uint16_t temperature_skin;                        //!< v3_0
 
   /**
    * @brief Utilization
    */
-  uint16_t average_gfx_activity;                            //!< v2_4, v3_0
-  uint16_t average_mm_activity;                             //!< v2_4
-  uint16_t average_vcn_activity;                            //!< v3_0
+  uint16_t average_gfx_activity;                            //!< v2_1, v3_0 [%]
+  uint16_t average_mm_activity;                             //!< v2_1 [%]
+  uint16_t average_vcn_activity;                            //!< v3_0 [%]
   uint16_t average_ipu_activity[AMDSMI_APU_MAX_IPU];        //!< v3_0
   uint16_t average_core_c0_activity[AMDSMI_APU_MAX_CORES];  //!< v3_0
   uint16_t average_dram_reads;                              //!< v3_0 [MB/s]
@@ -2275,11 +2277,11 @@ typedef struct {
    * the APU firmware. Note: the top-level gpu_metrics_t.average_socket_power
    * is converted to Watts; these APU sub-struct fields are NOT converted.
    */
-  uint32_t average_socket_power;                      //!< v2_4[uint16_t], v3_0[uint32_t]
-  uint16_t average_cpu_power;                         //!< v2_4
-  uint16_t average_soc_power;                         //!< v2_4
-  uint32_t average_gfx_power;                         //!< v2_4[uint16_t], v3_0[uint32_t]
-  uint16_t average_core_power[AMDSMI_APU_MAX_CORES];  //!< v2_4[8], v3_0[16]
+  uint32_t average_socket_power;                      //!< v2_1[uint16_t], v3_0[uint32_t]
+  uint16_t average_cpu_power;                         //!< v2_1
+  uint16_t average_soc_power;                         //!< v2_1
+  uint32_t average_gfx_power;                         //!< v2_1[uint16_t], v3_0[uint32_t]
+  uint16_t average_core_power[AMDSMI_APU_MAX_CORES];  //!< v2_1[8], v3_0[16]
   uint16_t average_ipu_power;                         //!< v3_0
   uint32_t average_apu_power;                         //!< v3_0
   uint32_t average_dgpu_power;                        //!< v3_0
@@ -2291,12 +2293,12 @@ typedef struct {
   /**
    * @brief Average clocks [MHz]
    */
-  uint16_t average_gfxclk_frequency;  //!< v2_4, v3_0
-  uint16_t average_socclk_frequency;  //!< v2_4, v3_0
-  uint16_t average_uclk_frequency;    //!< v2_4, v3_0
-  uint16_t average_fclk_frequency;    //!< v2_4, v3_0
-  uint16_t average_vclk_frequency;    //!< v2_4, v3_0
-  uint16_t average_dclk_frequency;    //!< v2_4
+  uint16_t average_gfxclk_frequency;  //!< v2_1, v3_0
+  uint16_t average_socclk_frequency;  //!< v2_1, v3_0
+  uint16_t average_uclk_frequency;    //!< v2_1, v3_0
+  uint16_t average_fclk_frequency;    //!< v2_1, v3_0
+  uint16_t average_vclk_frequency;    //!< v2_1, v3_0
+  uint16_t average_dclk_frequency;    //!< v2_1
   uint16_t average_vpeclk_frequency;  //!< v3_0
   uint16_t average_ipuclk_frequency;  //!< v3_0
   uint16_t average_mpipu_frequency;   //!< v3_0
@@ -2304,22 +2306,22 @@ typedef struct {
   /**
    * @brief Current clocks [MHz]
    */
-  uint16_t current_gfxclk;                         //!< v2_4
-  uint16_t current_socclk;                         //!< v2_4
-  uint16_t current_uclk;                           //!< v2_4
-  uint16_t current_fclk;                           //!< v2_4
-  uint16_t current_vclk;                           //!< v2_4
-  uint16_t current_dclk;                           //!< v2_4
-  uint16_t current_coreclk[AMDSMI_APU_MAX_CORES];  //!< v2_4[8], v3_0[16]
-  uint16_t current_l3clk[AMDSMI_APU_MAX_L3];       //!< v2_4
+  uint16_t current_gfxclk;                         //!< v2_1
+  uint16_t current_socclk;                         //!< v2_1
+  uint16_t current_uclk;                           //!< v2_1
+  uint16_t current_fclk;                           //!< v2_1
+  uint16_t current_vclk;                           //!< v2_1
+  uint16_t current_dclk;                           //!< v2_1
+  uint16_t current_coreclk[AMDSMI_APU_MAX_CORES];  //!< v2_1[8], v3_0[16]
+  uint16_t current_l3clk[AMDSMI_APU_MAX_L3];       //!< v2_1
   uint16_t current_core_maxfreq;                   //!< v3_0
   uint16_t current_gfx_maxfreq;                    //!< v3_0
 
   /**
    * @brief Throttle
    */
-  uint32_t throttle_status;              //!< v2_4
-  uint64_t indep_throttle_status;        //!< v2_4
+  uint32_t throttle_status;              //!< v2_1
+  uint64_t indep_throttle_status;        //!< v2_2
   uint32_t throttle_residency_prochot;   //!< v3_0
   uint32_t throttle_residency_spl;       //!< v3_0
   uint32_t throttle_residency_fppt;      //!< v3_0
@@ -2331,15 +2333,15 @@ typedef struct {
   /**
    * @brief Fan
    */
-  uint16_t fan_pwm;  //!< v2_4
+  uint16_t fan_pwm;  //!< v2_1
 
   /**
    * @brief Average temperature
    */
-  uint16_t average_temperature_gfx;                         //!< v2_4
-  uint16_t average_temperature_soc;                         //!< v2_4
-  uint16_t average_temperature_core[AMDSMI_APU_MAX_CORES];  //!< v2_4
-  uint16_t average_temperature_l3[AMDSMI_APU_MAX_L3];       //!< v2_4
+  uint16_t average_temperature_gfx;                         //!< v2_3
+  uint16_t average_temperature_soc;                         //!< v2_3
+  uint16_t average_temperature_core[AMDSMI_APU_MAX_CORES];  //!< v2_3
+  uint16_t average_temperature_l3[AMDSMI_APU_MAX_L3];       //!< v2_3
 
   /**
    * @brief Voltage [mV] / Current [mA]
@@ -2597,9 +2599,8 @@ typedef struct {
    * Not all fields are valid for all versions. A field the current version does
    * not populate reads back as the maximum value of its own type: 0xFFFF for
    * uint16_t, 0xFFFFFFFF for uint32_t and UINT64_MAX for uint64_t. Refer to
-   * inline comments in ::amdsmi_apu_metrics_t for per-field availability; the
-   * `v2_4` annotation names the v2.x layout, and a device reporting an earlier
-   * v2.1-v2.3 revision leaves the fields that revision omits at the sentinel.
+   * inline comments in ::amdsmi_apu_metrics_t for per-field availability; a
+   * `v2_N` annotation names the v2.x revision that added the field.
    */
   amdsmi_apu_metrics_t* apu_metrics;
 
@@ -5333,11 +5334,26 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
  *  including a GPU metrics table (v1.x) reported by an APU: the pointer
  *  tracks the table the device publishes, not whether the device is an APU.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on
- *  fail. Returns ::AMDSMI_STATUS_NOT_SUPPORTED when the device reports a
- *  metrics revision this library does not model, and
- *  ::AMDSMI_STATUS_UNEXPECTED_SIZE when the table it hands back does not match
- *  the size its header declares.
+ *  GFX, MM and VCN activity are whole percent for every revision, in @p pgpu_metrics
+ *  and in its APU sub-struct alike. The APU sub-struct keeps its power fields in
+ *  milliwatts.
+ *
+ *  A field the reported revision does not carry reads back as N/A, the maximum
+ *  value of its type. That value is never scaled, so N/A stays recognizable at
+ *  both levels.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED the device reports a metrics revision
+ *  this library does not model, or publishes an empty metrics node. The driver's
+ *  EPERM also maps here and is temporary: the device is runtime-suspended, or on
+ *  older kernels resetting or suspended.
+ *  @retval ::AMDSMI_STATUS_BUSY the device is resetting or suspended, so the
+ *  driver declined the read.
+ *  @retval ::AMDSMI_STATUS_INTERRUPT a signal interrupted the read; retry it.
+ *  @retval ::AMDSMI_STATUS_NO_PERM the metrics node cannot be read with the
+ *  caller's privileges.
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE the read came up short of the size the
+ *  header declares, or the driver failed it without naming a device state.
  */
 amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_handle,
                                             amdsmi_gpu_metrics_t* pgpu_metrics);
@@ -5362,22 +5378,25 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
  *  provided arguments.
  *
  *  **APU Metrics:**
- *  When APU-specific metrics are available (APU metrics table v2.1-v2.4 or
- *  v3.0; v2.0 is not supported),
- *  @p pgpu_metrics->apu_metrics will point to thread-local library-owned storage.
- *  This pointer is invalidated by ANY subsequent call to
- *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
- *  the same thread, even for different devices. Callers must copy the entire
- *  ::amdsmi_apu_metrics_t structure immediately after the call to preserve the data.
- *  Every other table leaves @p pgpu_metrics->apu_metrics as nullptr,
- *  including a GPU metrics table (v1.x) reported by an APU: the pointer
- *  tracks the table the device publishes, not whether the device is an APU.
+ *  A partition metrics table never carries them. This call resolves only the XCP
+ *  partition revisions, so @p pgpu_metrics->apu_metrics is always nullptr here;
+ *  use ::amdsmi_get_gpu_metrics_info for a device that publishes an APU table.
+ *  This call does still invalidate an ::amdsmi_apu_metrics_t pointer obtained
+ *  earlier from that function on the same thread, so copy what it returned before
+ *  calling this one.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on
- *  fail. Returns ::AMDSMI_STATUS_NOT_SUPPORTED when the device reports a
- *  metrics revision this library does not model, and
- *  ::AMDSMI_STATUS_UNEXPECTED_SIZE when the table it hands back does not match
- *  the size its header declares.
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED the device reports a metrics revision
+ *  this library does not model, or publishes an empty metrics node. The driver's
+ *  EPERM also maps here and is temporary: the device is runtime-suspended, or on
+ *  older kernels resetting or suspended.
+ *  @retval ::AMDSMI_STATUS_BUSY the device is resetting or suspended, so the
+ *  driver declined the read.
+ *  @retval ::AMDSMI_STATUS_INTERRUPT a signal interrupted the read; retry it.
+ *  @retval ::AMDSMI_STATUS_NO_PERM the metrics node cannot be read with the
+ *  caller's privileges.
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE the read came up short of the size the
+ *  header declares, or the driver failed it without naming a device state.
  */
 amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle processor_handle,
                                                       amdsmi_gpu_metrics_t* pgpu_metrics);

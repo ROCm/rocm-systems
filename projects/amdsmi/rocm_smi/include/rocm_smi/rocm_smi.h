@@ -1358,14 +1358,15 @@ struct amdgpu_xcp_metrics_t {
  * **Sentinel Values:**
  * Fields not applicable to the current version are initialized to the maximum value
  * of their respective type: 0xFFFF for uint16_t fields, 0xFFFFFFFF for uint32_t fields,
- * and UINT64_MAX for uint64_t fields. For example, on v3.0 hardware, v2.4-only fields
+ * and UINT64_MAX for uint64_t fields. For example, on v3.0 hardware, v2.x-only fields
  * like `average_mm_activity` and `temperature_l3` will contain 0xFFFF. Similarly,
  * array elements beyond the version-specific count (e.g., elements 8-15 of
  * `temperature_core` on v2.4) will contain 0xFFFF. However, uint32_t elements such as
  * 'throttle_status' will contain 0xFFFFFFFF and UINT64_MAX for uint64_t elements such
  * as 'indep_throttle_status'. Callers should check the version and treat maximum values
  * as invalid/not applicable. On v3.0, a `temperature_core` or `temperature_skin`
- * reading of 0 (not measured) is also returned as 0xFFFF.
+ * reading of 0 (not measured) is also returned as 0xFFFF. A core or L3 slot whose
+ * clock reads 0 (the part has no such core or L3) has all of its fields returned as 0xFFFF.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */

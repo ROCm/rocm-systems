@@ -45,7 +45,7 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
                                               char* version);
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed);
 // PLX temperature is carried in gpu_metrics rather than hwmon. Reports
-// NOT_SUPPORTED when the reading holds the not-applicable sentinel (an APU has
+// NOT_SUPPORTED when the reading holds the max-value N/A (an APU has
 // no such sensor), otherwise writes *temperature.
 amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& metrics,
                                                  int64_t* temperature);
