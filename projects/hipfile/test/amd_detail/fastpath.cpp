@@ -44,11 +44,11 @@ static int       SCORE_ACCEPT{100};
 static const int SCORE_REJECT{-1};
 
 #if defined(STATX_DIOALIGN)
-static const uint32_t DEFAULT_MEM_ALIGN{4};
-static const uint32_t DEFAULT_OFFSET_ALIGN{512};
+static const std::uint32_t DEFAULT_MEM_ALIGN{4};
+static const std::uint32_t DEFAULT_OFFSET_ALIGN{512};
 #else
-static const uint32_t DEFAULT_MEM_ALIGN{4096};
-static const uint32_t DEFAULT_OFFSET_ALIGN{4096};
+static const std::uint32_t DEFAULT_MEM_ALIGN{4096};
+static const std::uint32_t DEFAULT_OFFSET_ALIGN{4096};
 #endif
 
 namespace hipFile {
@@ -810,8 +810,9 @@ TEST_P(FastpathIoParam, IoWithFallbackThrowsAFallbackIneligibleException)
         std::system_error);
 }
 
-// To cover the branch of non-std::system_error exceptions
-TEST_P(FastpathIoParam, IoWithFallbackThrowsHipRuntimeException)
+// hipAmdFileRead/Write reports a failed AIS transfer, including P2PDMA unavailable,
+// as hipErrorUnknown with a zero kernel status. That must take the POSIX fallback.
+TEST_P(FastpathIoParam, IoFallsBackOnHipErrorUnknown)
 {
     auto backend    = std::make_shared<Fastpath>();
     auto m_fallback = std::make_shared<StrictMock<MBackend>>();
@@ -831,9 +832,12 @@ TEST_P(FastpathIoParam, IoWithFallbackThrowsHipRuntimeException)
             FAIL() << "Invalid IoType";
     }
 
-    ASSERT_THROW(
-        backend->io(GetParam(), mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET),
-        Hip::RuntimeError);
+    EXPECT_CALL(*m_fallback, io).WillOnce(Return(DEFAULT_IO_SIZE));
+    EXPECT_CALL(*m_fallback, score).WillOnce(Return(SCORE_ACCEPT));
+
+    ssize_t nbytes =
+        backend->io(GetParam(), mfile, mbuffer, DEFAULT_IO_SIZE, DEFAULT_FILE_OFFSET, DEFAULT_BUFFER_OFFSET);
+    ASSERT_EQ(nbytes, DEFAULT_IO_SIZE);
 }
 
 TEST_P(FastpathIoParam, IoThrowsAFallbackEligibleENODEV)

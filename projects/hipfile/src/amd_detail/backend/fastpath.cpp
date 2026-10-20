@@ -156,12 +156,12 @@ Fastpath::score(const shared_ptr<IFile> &file, const shared_ptr<IBuffer> &buffer
     accept_io &=
         is_block_device || (is_regular_file && (unsupported_file_systems || on_ext4_ordered || on_xfs));
 
-    const uint32_t dio_offset_align{file->dioOffsetAlign()};
+    const std::uint32_t dio_offset_align{file->dioOffsetAlign()};
     accept_io &= dio_offset_align && !(file_offset & (dio_offset_align - 1));
     accept_io &= dio_offset_align && !(size & (dio_offset_align - 1));
 
-    const uint32_t dio_mem_align{file->dioMemAlign()};
-    const auto     mem_addr{reinterpret_cast<intptr_t>(buffer->getBuffer()) + buffer_offset};
+    const std::uint32_t dio_mem_align{file->dioMemAlign()};
+    const auto          mem_addr{reinterpret_cast<intptr_t>(buffer->getBuffer()) + buffer_offset};
     accept_io &= dio_mem_align && !(mem_addr & (dio_mem_align - 1));
 
     if (!accept_io) {
@@ -276,6 +276,13 @@ Fastpath::is_fallback_eligible(std::exception_ptr e_ptr, ssize_t nbytes) const
     catch (const std::system_error &sys_err) {
         return fastpathFallbackEligibleErrno(sys_err.code().value());
     }
+    catch (const Hip::RuntimeError &hip_err) {
+        // hipAmdFileRead/Write reports an HSA/KFD failure as hipErrorUnknown and
+        // leaves the kernel status at 0. That includes P2PDMA being unavailable,
+        // which the kernel would have returned as ENODEV. Treat it as the same
+        // fallback case, or hipFileWrite returns -hipErrorUnknown.
+        return hip_err.error == hipErrorUnknown;
+    }
     catch (...) {
         // Thrown exception not eligible for fallback.
         return false;
@@ -331,6 +338,12 @@ async_fastpath_copy(void *userArgs)
     catch (const std::system_error &sys_err) {
         op->bytes_transferred_internal = -hipFileInternalError;
         if (op->failover && fastpathFallbackEligibleErrno(sys_err.code().value())) {
+            op->failover->fallback_needed = true;
+        }
+    }
+    catch (const Hip::RuntimeError &hip_err) {
+        op->bytes_transferred_internal = -hipFileInternalError;
+        if (op->failover && hip_err.error == hipErrorUnknown) {
             op->failover->fallback_needed = true;
         }
     }
