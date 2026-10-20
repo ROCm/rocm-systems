@@ -249,23 +249,25 @@ inline uint32_t gfx12_dot_bits(const std::array<uint16_t, N> &src0,
 }
 
 template <bool Bf16, std::size_t N>
-inline uint32_t gfx12_dot_f32(const std::array<uint16_t, N> &a, const std::array<uint16_t, N> &b,
-                              uint32_t acc) {
-  return gfx12_dot_bits<Bf16, false>(a, b, acc);
+inline uint32_t gfx12_dot_f32(const std::array<uint16_t, N> &src0,
+                              const std::array<uint16_t, N> &src1, uint32_t acc) {
+  return gfx12_dot_bits<Bf16, false>(src0, src1, acc);
 }
 
 /// @brief Widen packed C, execute one GFX12 DOT4 step and return packed result bits.
 template <bool Bf16>
-inline uint16_t gfx12_dot4_packed16(const std::array<uint16_t, 4> &a,
-                                    const std::array<uint16_t, 4> &b, uint16_t acc,
+inline uint16_t gfx12_dot4_packed16(const std::array<uint16_t, 4> &src0,
+                                    const std::array<uint16_t, 4> &src1, uint16_t acc,
                                     bool fp16_ovfl = false) {
-  return uint16_t(gfx12_dot_bits<Bf16, true>(a, b, dot_packed16::widen<Bf16>(acc), fp16_ovfl));
+  return uint16_t(
+      gfx12_dot_bits<Bf16, true>(src0, src1, dot_packed16::widen<Bf16>(acc), fp16_ovfl));
 }
 
 /// @brief Two-product wrapper for GFX12 DOT2 and VOPD DOT2ACC.
 template <bool Bf16>
-inline uint32_t gfx12_dot2_f32(uint16_t a0, uint16_t b0, uint16_t a1, uint16_t b1, uint32_t acc) {
-  return gfx12_dot_f32<Bf16>(std::array{a0, a1}, std::array{b0, b1}, acc);
+inline uint32_t gfx12_dot2_f32(uint16_t src0_lo, uint16_t src1_lo, uint16_t src0_hi,
+                               uint16_t src1_hi, uint32_t acc) {
+  return gfx12_dot_f32<Bf16>(std::array{src0_lo, src0_hi}, std::array{src1_lo, src1_hi}, acc);
 }
 
 /// @brief Widen packed C, execute one GFX12 DOT2 step and return packed result bits.

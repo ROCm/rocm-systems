@@ -102,20 +102,21 @@ inline uint32_t pack(int64_t units, int grid, bool frame_negative) {
 /// Packed F16 uses a -14 floor for C alignment even when C is subnormal.
 /// BF16 narrows the ordinary FP32-rounded result after every DOT2 step.
 template <bool Bf16, bool Packed = false>
-inline uint32_t gfx11_dot2_bits(uint16_t a0_bits, uint16_t b0_bits, uint16_t a1_bits,
-                                uint16_t b1_bits, uint32_t acc, bool fp16_ovfl = false) {
+inline uint32_t gfx11_dot2_bits(uint16_t src0_lo_bits, uint16_t src1_lo_bits, uint16_t src0_hi_bits,
+                                uint16_t src1_hi_bits, uint32_t acc, bool fp16_ovfl = false) {
   using namespace gfx11_dot2_detail;
   const auto special = [](uint32_t bits) -> uint32_t {
     if constexpr (Packed)
       return dot_packed16::special<Bf16>(bits);
     return bits;
   };
-  const Factor<Bf16> a0{a0_bits}, b0{b0_bits}, a1{a1_bits}, b1{b1_bits};
+  const Factor<Bf16> src0_lo{src0_lo_bits}, src1_lo{src1_lo_bits}, src0_hi{src0_hi_bits},
+      src1_hi{src1_hi_bits};
   // Lane NaNs and invalid products take precedence over an accumulator NaN.
-  if (a0.nan() || b0.nan() || a1.nan() || b1.nan())
+  if (src0_lo.nan() || src1_lo.nan() || src0_hi.nan() || src1_hi.nan())
     return special(kFactorNan);
-  if ((a0.inf() && !b0.significand()) || (b0.inf() && !a0.significand()) ||
-      (a1.inf() && !b1.significand()) || (b1.inf() && !a1.significand()))
+  if ((src0_lo.inf() && !src1_lo.significand()) || (src1_lo.inf() && !src0_lo.significand()) ||
+      (src0_hi.inf() && !src1_hi.significand()) || (src1_hi.inf() && !src0_hi.significand()))
     return special(kInvalidProductNan);
   bool positive_inf = false;
   bool negative_inf = false;
@@ -127,8 +128,8 @@ inline uint32_t gfx11_dot2_bits(uint16_t a0_bits, uint16_t b0_bits, uint16_t a1_
         positive_inf = true;
     }
   };
-  add_inf(a0, b0);
-  add_inf(a1, b1);
+  add_inf(src0_lo, src1_lo);
+  add_inf(src0_hi, src1_hi);
   if (positive_inf && negative_inf)
     return special(kInvalidProductNan);
   if ((acc & 0x7fffffff) > 0x7f800000)
@@ -140,15 +141,16 @@ inline uint32_t gfx11_dot2_bits(uint16_t a0_bits, uint16_t b0_bits, uint16_t a1_
                    : negative_inf               ? 0xff800000
                                                 : 0x7f800000);
 
-  const Term p0 = a0.product(b0), p1 = a1.product(b1);
+  const Term p0 = src0_lo.product(src1_lo), p1 = src0_hi.product(src1_hi);
   const unsigned acc_exp = (acc >> 23) & 255;
   const Term c{acc_exp ? (acc & 0x7fffff) | 0x800000u : 0, int(acc_exp) - 127 - 23,
                bool(acc >> 31)};
   if (!(c.significand | p0.significand | p1.significand))
     return 0;
   const int product_grid =
-      std::max(p0.significand ? a0.alignment_exponent() + b0.alignment_exponent() : kEmptyExponent,
-               p1.significand ? a1.alignment_exponent() + b1.alignment_exponent()
+      std::max(p0.significand ? src0_lo.alignment_exponent() + src1_lo.alignment_exponent()
+                              : kEmptyExponent,
+               p1.significand ? src0_hi.alignment_exponent() + src1_hi.alignment_exponent()
                               : kEmptyExponent) -
       24;
   const int grid = std::max(
@@ -174,16 +176,17 @@ inline uint32_t gfx11_dot2_bits(uint16_t a0_bits, uint16_t b0_bits, uint16_t a1_
 }
 
 template <bool Bf16>
-inline uint32_t gfx11_dot2_f32(uint16_t a0, uint16_t b0, uint16_t a1, uint16_t b1, uint32_t acc) {
-  return gfx11_dot2_bits<Bf16>(a0, b0, a1, b1, acc);
+inline uint32_t gfx11_dot2_f32(uint16_t src0_lo, uint16_t src1_lo, uint16_t src0_hi,
+                               uint16_t src1_hi, uint32_t acc) {
+  return gfx11_dot2_bits<Bf16>(src0_lo, src1_lo, src0_hi, src1_hi, acc);
 }
 
 /// @brief Widen packed C, execute one GFX11 DOT2 step and return packed result bits.
 /// @details This is also the arithmetic of VOP3 V_DOT2_F16_F16 and V_DOT2_BF16_BF16.
 template <bool Bf16>
-inline uint16_t gfx11_dot2_packed16(uint16_t a0, uint16_t b0, uint16_t a1, uint16_t b1,
-                                    uint16_t acc, bool fp16_ovfl = false) {
-  return uint16_t(
-      gfx11_dot2_bits<Bf16, true>(a0, b0, a1, b1, dot_packed16::widen<Bf16>(acc), fp16_ovfl));
+inline uint16_t gfx11_dot2_packed16(uint16_t src0_lo, uint16_t src1_lo, uint16_t src0_hi,
+                                    uint16_t src1_hi, uint16_t acc, bool fp16_ovfl = false) {
+  return uint16_t(gfx11_dot2_bits<Bf16, true>(src0_lo, src1_lo, src0_hi, src1_hi,
+                                              dot_packed16::widen<Bf16>(acc), fp16_ovfl));
 }
 } // namespace rocjitsu::amdgpu
