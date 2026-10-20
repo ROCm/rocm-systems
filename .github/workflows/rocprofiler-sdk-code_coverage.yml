@@ -278,6 +278,7 @@ jobs:
           -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
     - name: Configure, Build, and Test (Tests Code Coverage)
+      if: ${{ !cancelled() }}
       timeout-minutes: 45
       shell: bash
       working-directory: projects/rocprofiler-sdk
@@ -302,6 +303,7 @@ jobs:
           -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
     - name: Configure, Build, and Test (Samples Code Coverage)
+      if: ${{ !cancelled() }}
       timeout-minutes: 30
       working-directory: projects/rocprofiler-sdk
       shell: bash
@@ -335,7 +337,7 @@ jobs:
 
     - id: generatereport
       name: Generate Code Coverage Comment
-      if: github.event_name == 'pull_request'
+      if: ${{ !cancelled() && github.event_name == 'pull_request' }}
       timeout-minutes: 10
       working-directory: projects/rocprofiler-sdk
       shell: bash
@@ -345,6 +347,10 @@ jobs:
         ls -la
 
         for i in "all" "tests" "samples"; do
+            if [ ! -f .codecov/${i}.html ]; then
+                echo "::error::No ${i} coverage report; keeping the existing comment"
+                exit 1
+            fi
             wkhtmltoimage --enable-local-file-access --quality 70 .codecov/${i}.html .codecov/${i}.png
         done
         ls -la .codecov
@@ -381,7 +387,7 @@ jobs:
         echo 'EOF' >> $GITHUB_OUTPUT
 
     - name: Write Code Coverage Comment
-      if: github.event_name == 'pull_request'
+      if: ${{ !cancelled() && steps.generatereport.outcome == 'success' }}
       timeout-minutes: 10
       uses: actions/github-script@v6
       env:
@@ -429,7 +435,7 @@ jobs:
             }
 
     - name: Archive Code Coverage Data
-      if: ${{ github.event_name == 'workflow_dispatch' }}
+      if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
       uses: actions/upload-artifact@v7
       with:
         name: code-coverage-details
