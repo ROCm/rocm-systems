@@ -176,6 +176,17 @@ def rocjitsu_source_root() -> Path:
 
 
 @pytest.fixture
+def runtime_api_headers_include_root(rocjitsu_source_root: Path) -> Path:
+    source = Path(
+        os.environ.get(
+            'RJ_RUNTIME_API_HEADERS_SOURCE_DIR',
+            rocjitsu_source_root / '..' / '..' / 'runtimes' / 'api-headers',
+        )
+    )
+    return source.resolve() / 'include'
+
+
+@pytest.fixture
 def amdgpu_root(rocjitsu_source_root: Path) -> Path:
     return (
         rocjitsu_source_root
@@ -2351,6 +2362,10 @@ def _generated_matrix_call(body: str, callee: str) -> str:
             'exec_smfmac_f32_16x16x64_fp8',
             True,
         ),
+        ('V_SMFMAC_I32_16X16X64_I8', 'cdna3', 'exec_smfmac_i32_i8', True),
+        ('V_SMFMAC_I32_32X32X32_I8', 'cdna3', 'exec_smfmac_i32_i8', True),
+        ('V_SMFMAC_I32_16X16X128_I8', 'cdna4', 'exec_smfmac_i32_i8', True),
+        ('V_SMFMAC_I32_32X32X64_I8', 'cdna4', 'exec_smfmac_i32_i8', True),
         # Fixed-wave sparse float result variants.
         ('V_SWMMAC_F32_16X16X32_F16', 'cdna5', 'exec_swmmac_f32', True),
         ('V_SWMMAC_F16_16X16X32_F16', 'cdna5', 'exec_swmmac_f16', True),
@@ -2590,14 +2605,15 @@ def test_unimplemented_execute_stub_requires_unconditional_failure(body, expecte
         ('cdna4', 'VSmfmacI3232x32x32I8Vop3pMfma'),
     ],
 )
-def test_generated_sparse_integer_mma_stubs_report_failure(
+def test_generated_sparse_integer_mma_dispatches_cross_lane_helper(
     amdgpu_generated_root: Path, arch: str, class_name: str
 ):
     source = (amdgpu_generated_root / arch / 'vop3p_exec.cpp').read_text()
     body = _generated_function_body(source, f'void {class_name}::execute_impl')
-    assert 'wf.report_instruction_execution_error(' in body
-    assert 'InstructionExecutionError::UnimplementedInstruction' in body
-    assert 'throw ' not in body
+    assert 'amdgpu::exec_smfmac_i32_i8<' in body
+    assert 'idx, inst_.cbsz, inst_.abid);' in body
+    assert 'inst_.acc_cd' in body
+    assert 'InstructionExecutionError::UnimplementedInstruction' not in body
 
 
 def test_cdna3_real_spec_mfma_destination_uses_acc_cd(tmp_path):
@@ -3525,6 +3541,22 @@ def test_generated_classified_alu_latches_trapsts_before_simd_return(
     assert body.count('wf.set_trapsts(wf.trapsts() | alu_causes);') == 1
 
 
+def test_generated_f32_to_f64_conversion_applies_vop3_modifiers(
+    execute_shared_path: Path,
+):
+    execute_shared = execute_shared_path.read_text()
+    body = _shared_execute_body(
+        execute_shared, 'v_cvt_f64_f32_vop3', 'v_cvt_f64_i32_vop1'
+    )
+
+    assert (
+        '!inst.inst_.abs && !inst.inst_.neg && !inst.inst_.omod && '
+        '!inst.inst_.clamp' in body
+    )
+    assert 'amdgpu::source_modifier::apply_to_float' in body
+    assert 'amdgpu::output_modifier::apply<amdgpu::fp_format::F64>' in body
+
+
 def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     execute_shared_path: Path,
     gfx1250_generated_root: Path,
@@ -3804,7 +3836,10 @@ def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
 
 
 def test_single_isa_cdna1_sources_preprocess_with_source_includes(
-    tmp_path, monkeypatch, rocjitsu_source_root: Path
+    tmp_path,
+    monkeypatch,
+    rocjitsu_source_root: Path,
+    runtime_api_headers_include_root: Path,
 ):
     compiler = shutil.which('c++')
     if compiler is None:
@@ -3836,7 +3871,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
     include_roots = (
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
-        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'external_headers' / 'hsa_headers',
+        runtime_api_headers_include_root,
         rocjitsu_source_root / 'lib' / 'util' / 'include',
         rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
     )
@@ -3856,7 +3891,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
 
 
 def test_custom_identity_preprocesses_with_profile_handwritten_includes(
-    tmp_path, rocjitsu_source_root: Path
+    tmp_path, rocjitsu_source_root: Path, runtime_api_headers_include_root: Path
 ):
     compiler = shutil.which('c++')
     if compiler is None:
@@ -3883,7 +3918,7 @@ def test_custom_identity_preprocesses_with_profile_handwritten_includes(
     include_roots = (
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
-        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'external_headers' / 'hsa_headers',
+        runtime_api_headers_include_root,
         rocjitsu_source_root / 'lib' / 'util' / 'include',
         rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
     )

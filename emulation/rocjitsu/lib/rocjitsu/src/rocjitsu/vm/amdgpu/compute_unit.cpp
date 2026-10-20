@@ -219,9 +219,37 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
   return std::make_unique<Base>(std::move(name), config, memory, l2);
 }
 
-std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
-                                                         GpuMemory *memory, L2Cache *l2,
-                                                         simdojo::ExecMode exec_mode) {
+namespace {
+template <typename F> decltype(auto) with_compute_unit_isa(rj_code_arch_t arch, F &&fn) {
+  switch (arch) {
+    // \NPI new ISA family: add its architecture-to-ISA mapping here.
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return fn.template operator()<cdna1::Isa>();
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return fn.template operator()<cdna2::Isa>();
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return fn.template operator()<cdna3::Isa>();
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return fn.template operator()<cdna4::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return fn.template operator()<rdna1::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return fn.template operator()<rdna2::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return fn.template operator()<rdna3::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return fn.template operator()<rdna3_5::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return fn.template operator()<rdna4::Isa>();
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return fn.template operator()<cdna5::Isa>();
+  default:
+    throw std::runtime_error("Unsupported architecture for ComputeUnit");
+  }
+}
+} // namespace
+
+void ComputeUnitCore::validate(const Config &config) {
   if (config.target != ROCJITSU_CODE_TARGET_INVALID) {
     const IsaTargetRegistry &registry = default_isa_target_registry();
     const IsaTargetDescriptor *target_descriptor = registry.find(config.target);
@@ -235,36 +263,25 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
       throw util::ConfigError("execution is not implemented for the concrete GPU target");
   }
 
-  // Helper: instantiate the ISA-specific CU for the given execution mode.
-#define ROCJITSU_CU_CASE(ARCH_ENUM, ISA_TYPE)                                                      \
-  case ARCH_ENUM:                                                                                  \
-    validate_compute_unit_config<ISA_TYPE>(config);                                                \
-    switch (exec_mode) {                                                                           \
-    case simdojo::ExecMode::FUNCTIONAL:                                                            \
-      return create_functional_cu<ISA_TYPE>(std::move(name), config, memory, l2);                  \
-    case simdojo::ExecMode::CLOCKED:                                                               \
-      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, ISA_TYPE>>(           \
-          std::move(name), config, memory, l2);                                                    \
-    }                                                                                              \
-    break
+  with_compute_unit_isa(config.arch,
+                        [&]<GpuIsa Isa>() { validate_compute_unit_config<Isa>(config); });
+}
 
-  switch (config.arch) {
-    // \NPI new ISA family: add ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_<NAME>, <isa>::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA1, cdna1::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA2, cdna2::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA3, cdna3::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA4, cdna4::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA1, rdna1::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA2, rdna2::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3, rdna3::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA4, rdna4::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA5, cdna5::Isa);
-  default:
-    break;
-  }
-#undef ROCJITSU_CU_CASE
-  throw std::runtime_error("Unsupported architecture for ComputeUnit");
+std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
+                                                         GpuMemory *memory, L2Cache *l2,
+                                                         simdojo::ExecMode exec_mode) {
+  validate(config);
+
+  return with_compute_unit_isa(config.arch, [&]<GpuIsa Isa>() -> std::unique_ptr<ComputeUnitCore> {
+    switch (exec_mode) {
+    case simdojo::ExecMode::FUNCTIONAL:
+      return create_functional_cu<Isa>(std::move(name), config, memory, l2);
+    case simdojo::ExecMode::CLOCKED:
+      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, Isa>>(
+          std::move(name), config, memory, l2);
+    }
+    throw std::runtime_error("Unsupported architecture for ComputeUnit");
+  });
 }
 
 Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
@@ -925,30 +942,31 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
       if ((d.lane_mask & ~scratch_lanes & lane_bit) != 0) {
         const uint64_t address = d.per_lane_addr[lane];
         if (address >= shared_aperture_base_ && address <= shared_aperture_limit_) {
-          if (((address - shared_aperture_base_) & (uint64_t{1} << 31)) != 0)
+          if (arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
+              ((address - shared_aperture_base_) & (uint64_t{1} << 31)) != 0)
             flat_dds_lane_mask |= lane_bit;
           else
             flat_local_lane_mask |= lane_bit;
         }
       }
     }
-    // Under the current uniform-address-space assumption, FLAT operations
-    // targeting the shared aperture use the LDS pipeline. Scratch-targeting
-    // FLATs stay on the global path. Counter participation is selected from all
-    // requesting lanes below, independently of the first-lane functional route.
+    // Normalize shared addresses once for both routes. The global operation
+    // excludes those lanes, and retries reuse this state without rerouting.
     const uint64_t request_lanes = transpose_request_lane_mask(d, wf_size);
-    const uint32_t first_lane =
-        request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
     const uint64_t flat_shared_lane_mask = flat_local_lane_mask | flat_dds_lane_mask;
-    if (first_lane < wf_size && (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0) {
+    d.flat_local_lane_mask = flat_local_lane_mask & request_lanes;
+    d.flat_dds_lane_mask = flat_dds_lane_mask & request_lanes;
+    if (flat_shared_lane_mask != 0) {
       if (observe_routed_access) {
         std::ranges::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
         pre_routing_addresses = {pre_routing_address_storage.data(), wf_size};
       }
       for (uint32_t lane = 0; lane < wf_size; ++lane) {
-        if (d.lane_mask & (1ULL << lane))
-          d.per_lane_addr[lane] = (d.per_lane_addr[lane] - shared_aperture_base_) + wf.lds_base();
+        if (flat_shared_lane_mask & (uint64_t{1} << lane))
+          d.per_lane_addr[lane] = d.per_lane_addr[lane] - shared_aperture_base_ + wf.lds_base();
       }
+    }
+    if (request_lanes != 0 && (request_lanes & ~flat_shared_lane_mask) == 0) {
       inst->data()->set_tag(LOCAL_MEM);
       d.wait_counter_type = WaitCounterType::LGKMCNT;
       const auto *issue = inst->amdgpu_memory_issue_info();
@@ -1308,8 +1326,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   // map X to a position issued below for this instruction: zero-EXEC operations
   // may be skipped by an empty completion queue while older X entries remain.
   const bool flat_local_route =
-      flat && flat_requests &&
-      (flat_shared_lanes & (uint64_t{1} << std::countr_zero(flat_requests)));
+      flat && flat_requests != 0 && (flat_requests & ~flat_shared_lanes) == 0;
   const auto xcnt_completion_counter =
       flat_local_route ? WaitCounterKind::Ds : classified.front().counter;
   std::optional<WaitCounterKind> xcnt_completion;
