@@ -7889,8 +7889,11 @@ class CodeGenerator:
             gds_guard = ''
             if self._enc_has_field('gds'):
                 gds_guard = (
-                    '  if (inst_.gds)\n'
-                    '    throw util::UnimplementedInst(mnemonic());\n'
+                    '  if (inst_.gds) {\n'
+                    '    wf.report_instruction_execution_error(\n'
+                    '        amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                    '    return;\n'
+                    '  }\n'
                 )
             if cls == 'ds_read':
                 return gds_guard + self._gen_ds_read(dst_ops, src_ops, sem)
@@ -7963,7 +7966,15 @@ class CodeGenerator:
             )
             flags = '(1u | ((inst_.offset1 & 3u) << 1))' if modern else '0u'
             if not modern:
-                L.append('  if (inst_.gds) throw util::UnimplementedInst(mnemonic());')
+                L.extend(
+                    [
+                        '  if (inst_.gds) {',
+                        '    wf.report_instruction_execution_error(',
+                        '        amdgpu::InstructionExecutionError::UnimplementedInstruction);',
+                        '    return;',
+                        '  }',
+                    ]
+                )
             L.append(
                 '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
             )
@@ -7979,8 +7990,11 @@ class CodeGenerator:
             gds_guard = ''
             if self._enc_has_field('gds'):
                 gds_guard = (
-                    '  if (inst_.gds)\n'
-                    '    throw util::UnimplementedInst(mnemonic());\n'
+                    '  if (inst_.gds) {\n'
+                    '    wf.report_instruction_execution_error(\n'
+                    '        amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                    '    return;\n'
+                    '  }\n'
                 )
             if cls == 'ds_atomic2':
                 return gds_guard + self._gen_ds_atomic2(dst_ops, src_ops, sem)
@@ -7990,8 +8004,11 @@ class CodeGenerator:
             gds_guard = ''
             if self._enc_has_field('gds'):
                 gds_guard = (
-                    '  if (inst_.gds)\n'
-                    '    throw util::UnimplementedInst(mnemonic());\n'
+                    '  if (inst_.gds) {\n'
+                    '    wf.report_instruction_execution_error(\n'
+                    '        amdgpu::InstructionExecutionError::UnimplementedInstruction);\n'
+                    '    return;\n'
+                    '  }\n'
                 )
             if cls == 'ds_mskor':
                 return gds_guard + self._gen_ds_mskor(dst_ops, src_ops, sem)
