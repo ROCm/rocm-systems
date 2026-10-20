@@ -82,7 +82,9 @@ source, and the Phase 2 views place metrics by id.
 A metric concept has one `id` on every architecture. Each family base (gfx908 for CDNA,
 gfx115x for RDNA, and gfx1250) defines the id with that family's formula, as the HLD's
 end-to-end example does for `l2.hit_rate`. Within one architecture, every appearance
-of an id uses the same formula.
+of an id uses the same formula. An id has one `name` and one `unit` on every
+architecture, the specific ones (`LDS Utilization`, not a panel's `Utilization`); the
+validator checks this, and a row that shows another unit is a listed unit variant.
 
 A file maps each metric `id` to its fields, so the `id` is the key rather than a field:
 
@@ -569,7 +571,7 @@ AIPROFCOMP-820 (marked by TODOs in `tools/validate_metric_library.py`):
 | Row equations, units and peaks match the library, with `DISPLAY_VARIANTS` and `UNIT_VARIANTS` | When the old panel files are deleted, after the one-release fallback | The fallback still reads the old files, so they must stay equal to the library |
 
 The schema checks (file loading, inheritance, fields, id rules, shared formulas, measured
-peaks, unit spelling and key order) stay.
+peaks, unit spelling, one name and unit per id, and key order) stay.
 
 ### Dependencies
 

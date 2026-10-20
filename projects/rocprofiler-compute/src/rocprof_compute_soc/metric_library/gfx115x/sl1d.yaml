@@ -1,5 +1,5 @@
 sl1d.bw:
-  name: Scalar Data Cache BW
+  name: sL1D Cache BW
   formula: 128 * SUM(SQC_TC_DATA_READ_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-

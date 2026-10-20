@@ -303,6 +303,20 @@ def test_ceiling_without_metric_cannot_be_used(tree, measured):
     assert any("I8Ops is in CEILINGS_WITHOUT_METRIC" in error for error in errors)
 
 
+def test_an_id_has_one_name_and_unit_on_every_arch(tree):
+    replace_in(
+        tree / "gfx_c1" / "compute.yaml",
+        "compute.salu_util:\n",
+        "compute.salu_util:\n  name: SALU Busy\n",
+    )
+    errors = validate(tree)
+    assert any(
+        error.startswith("compute.salu_util: one name and unit on every arch")
+        and "'SALU Busy' [Percent]" in error
+        for error in errors
+    )
+
+
 def test_unknown_arch_directory(tree):
     (tree / "gfx_other").mkdir()
     assert "[gfx_other] is not a known metric library arch" in validate(tree)
@@ -364,6 +378,17 @@ def test_changed_unit(gfx908_copy):
     replace_in(library / "gfx908" / "cp.yaml", "unit: Percent", "unit: Cycles")
     errors = validate(library, configs)
     assert any("unit 'Percent' is not 'Cycles' (cp.cpc_l2_util)" in e for e in errors)
+
+
+def test_unit_variant_must_differ(gfx908_copy, monkeypatch):
+    monkeypatch.setitem(
+        validate_metric_library.UNIT_VARIANTS,
+        "gfx908",
+        {"7.1.8": ("LDS Allocation", "Bytes per Workgroup")},
+    )
+    assert any(
+        "remove it from UNIT_VARIANTS" in error for error in validate(*gfx908_copy)
+    )
 
 
 def test_changed_variable(gfx908_copy):

@@ -17,10 +17,6 @@ compute.inst_mix_mfma_f8:
     unit. This is supported in AMD Instinct MI300 series and later only.
 compute.inst_mix_vmem:
   formula: SUM(SQ_INSTS_VMEM) / SUM($denom)
-compute.int8_ops:
-  unit: (FLOPs + $normUnit)
-compute.iops_per_norm:
-  unit: (FLOPs + $normUnit)
 compute.mfma_flops_bf16:
   peak: $max_sclk * $cu_per_gpu * 2048 / 1000
 compute.mfma_flops_f16:

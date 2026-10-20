@@ -7,7 +7,7 @@ l2.ai:
     relative to L2 cache traffic. Higher values indicate better data reuse upstream
     of L2, while lower values suggest heavy traffic into L2.
 l2.bw:
-  name: GL2 Cache Read BW
+  name: L2 Cache BW
   formula: SUM(GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_COMPRESSED_READ_96_REQ_sum * 96) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-

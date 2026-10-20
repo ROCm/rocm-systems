@@ -1,5 +1,5 @@
 l1i.bw:
-  name: Instruction Cache BW
+  name: L1I BW
   formula: 128 * SUM(SQC_TC_INST_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
@@ -16,7 +16,7 @@ l1i.hit_rate_excl_dup:
     indicate large kernel code size or divergent control flow.
   peak: 100
 l1i.req:
-  name: ICache Requests
+  name: L1I Requests
   formula: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: ''

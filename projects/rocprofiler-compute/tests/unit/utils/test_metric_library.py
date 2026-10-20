@@ -81,7 +81,10 @@ def test_load_metric_library_merges_the_chain(tree):
         "compute.valu_util",
         "compute.mfma_flops_f8",
     ]
-    assert library.metrics["compute.salu_util"]["unit"] == "Pct"
+    assert (
+        library.metrics["compute.salu_util"]["description"]
+        == "How often the SALU was busy."
+    )
 
 
 def test_load_metric_library_is_cached(tree):
