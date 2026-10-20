@@ -3722,8 +3722,11 @@ protected:
   // VGPR the planner picked.
   std::optional<WaitGap> sgpr_restore_gap(const std::vector<uint32_t> &cave,
                                           std::span<const uint32_t> anchor, uint16_t sgpr) {
+    // The bridge is an ordinary VGPR, so the scan covers the ordinary VGPR file
+    // (256 on both CDNA and RDNA).
+    constexpr uint16_t kVgprFileSize = 256;
     return wait_gap_before_anchor(cave, anchor, [&](std::span<const uint32_t> words) {
-      for (uint16_t bridge = 0; bridge < 256; ++bridge)
+      for (uint16_t bridge = 0; bridge < kVgprFileSize; ++bridge)
         if (std::ranges::equal(words, build_v_readlane_b32(sgpr, bridge, /*lane=*/0, a_.arch)))
           return true;
       return false;
@@ -4028,8 +4031,11 @@ TEST_F(Cdna4ProbeSpill, SgprAndM0RestoresShareOneNop) {
   EXPECT_EQ(m0_gap->nops, 1u) << m0_gap->trace;
 }
 
-// RDNA4 interlocks both of these hazards, so the same SGPR restore gets no s_nop. Its global
-// loads are 12 bytes and cannot be anchors, so the anchor reads s8 through a VALU.
+// GFX9-style s_nop padding is omitted on RDNA4, and that is all this pins. The anchor
+// reads s8 through a VALU, which falls under RDNA4's separate SGPR hazard (deferred,
+// see docs/dbi-design.md), so the missing s_nop says nothing about whether this
+// sequence is hazard-free there. RDNA4 global loads are 12 bytes and cannot be
+// anchors, hence the VALU read.
 TEST_F(Rdna4ProbeSpill, SgprRestoreAddsNoNop) {
   const Caved caved = patch_spill(
       {kMovV3S8, endpgm()}, {build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch()), setpc()}, 64);
