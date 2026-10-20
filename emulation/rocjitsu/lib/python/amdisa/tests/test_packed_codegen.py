@@ -792,27 +792,17 @@ def test_renamed_packed_float_routes_use_exact_helpers():
 
 
 def test_dot_dispatch_covers_every_semantic_class():
-    """Every DOT semantic class must have a DISPATCH handler.
+    """The DOT semantic classes and their DISPATCH handlers must agree exactly.
 
-    The generator keeps no dot2_/dot4_/dot8_ prefix fallback, so a new class
-    without an entry would otherwise generate an empty body.
+    The generator keeps no dot2_/dot4_/dot8_ prefix fallback, so a class with
+    no entry would generate a body that throws ``UnimplementedInst``. Checking
+    the other direction too rejects handlers for classes no ISA defines.
     """
     import os
     from pathlib import Path
 
+    from amdisa.__main__ import _PROFILES
     from amdisa.codegen.execute import DISPATCH
-    from amdisa.isa_profile import (
-        Cdna1Profile,
-        Cdna2Profile,
-        Cdna4Profile,
-        Cdna5Profile,
-        CdnaProfile,
-        Rdna1Profile,
-        Rdna2Profile,
-        Rdna3_5Profile,
-        Rdna3Profile,
-        Rdna4Profile,
-    )
     from amdisa.parser import Parser
     from amdisa.semantics import derive_all_semantics
 
@@ -825,24 +815,20 @@ def test_dot_dispatch_covers_every_semantic_class():
             / 'isa',
         )
     )
-    profiles = {
-        'cdna1': Cdna1Profile,
-        'cdna2': Cdna2Profile,
-        'cdna3': CdnaProfile,
-        'cdna4': Cdna4Profile,
-        'cdna5': Cdna5Profile,
-        'rdna1': Rdna1Profile,
-        'rdna2': Rdna2Profile,
-        'rdna3': Rdna3Profile,
-        'rdna3_5': Rdna3_5Profile,
-        'rdna4': Rdna4Profile,
-    }
+    prefixes = ('dot2_', 'dot4_', 'dot8_')
     found = set()
-    for name, profile in profiles.items():
-        spec = Parser(str(mrisa / f'amdgpu_isa_{name}.xml'), profile()).parse()
+    # Taken from the generator's own profile table, minus the bare 'cdna' alias
+    # that has no ISA XML of its own, so a newly supported ISA is covered here
+    # the moment it is registered.
+    for name, profile in _PROFILES.items():
+        if name == 'cdna':
+            continue
+        spec = Parser(
+            str(mrisa / f'amdgpu_isa_{name.replace(".", "_")}.xml'), profile()
+        ).parse()
         for sem in derive_all_semantics(spec).instructions.values():
-            if sem.semantic_class.startswith(('dot2_', 'dot4_', 'dot8_')):
+            if sem.semantic_class.startswith(prefixes):
                 found.add(sem.semantic_class)
 
     assert found, 'no DOT semantic classes found; the ISA specs did not load'
-    assert sorted(c for c in found if c not in DISPATCH) == []
+    assert found == {cls for cls in DISPATCH if cls.startswith(prefixes)}
