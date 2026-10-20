@@ -37,7 +37,11 @@ ncclResult_t amd_smi_getFabricDeviceInfo(uint32_t deviceIndex, struct amdsmiFabr
 }
 
 ncclResult_t g_amdSmiInitResult = ncclSuccess;
-ncclResult_t amd_smi_init() { return g_amdSmiInitResult; }
+int g_amdSmiInitCalls = 0;
+ncclResult_t amd_smi_init() {
+  g_amdSmiInitCalls++;
+  return g_amdSmiInitResult;
+}
 
 static ncclResult_t DefaultAmdSmiGetNumDevice(uint32_t* numDevs) {
   *numDevs = 0;
@@ -79,6 +83,7 @@ void ResetAmdSmiFakes() {
   g_amdSmiGetDeviceIndexByPciBusId = DefaultAmdSmiGetDeviceIndexByPciBusId;
   g_amdSmiGetFabricDeviceInfo = DefaultAmdSmiGetFabricDeviceInfo;
   g_amdSmiInitResult = ncclSuccess;
+  g_amdSmiInitCalls = 0;
   g_amdSmiGetNumDevice = DefaultAmdSmiGetNumDevice;
   g_amdSmiGetDevicePciBusIdString = DefaultAmdSmiGetDevicePciBusIdString;
   g_amdSmiGetLinkInfo = DefaultAmdSmiGetLinkInfo;
