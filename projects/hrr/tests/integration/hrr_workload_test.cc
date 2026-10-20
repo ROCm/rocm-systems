@@ -4191,14 +4191,21 @@ TEST_CASE("Unit_HRR_ForkAfterCaptureShutdown_Direct", "[.][hrr-direct]") {
 
 // ---------------------------------------------------------------------------
 // mkdir() for this test binary, for the same reason as fsync() above: CLR
-// resolves it here first. The capture writer creates an archive's directories
-// with it while it opens the archive. With no hook set it is a plain mkdir.
+// resolves it here first. The capture writer creates the path to an archive
+// with it, and the directories inside it with mkdirat, while it opens the
+// archive. The hook gets the path or the name as given. With no hook set they
+// are a plain mkdir and mkdirat.
 // ---------------------------------------------------------------------------
 static std::atomic<void (*)(const char*)> g_hrr_mkdir_hook{nullptr};
 
 extern "C" int mkdir(const char* path, mode_t mode) noexcept {
   if (auto hook = g_hrr_mkdir_hook.load(std::memory_order_acquire)) hook(path);
   return static_cast<int>(syscall(SYS_mkdirat, AT_FDCWD, path, mode));
+}
+
+extern "C" int mkdirat(int dirfd, const char* path, mode_t mode) noexcept {
+  if (auto hook = g_hrr_mkdir_hook.load(std::memory_order_acquire)) hook(path);
+  return static_cast<int>(syscall(SYS_mkdirat, dirfd, path, mode));
 }
 
 // ---------------------------------------------------------------------------
@@ -4218,7 +4225,7 @@ namespace {
 std::atomic<bool> g_child_open_held{false};
 
 void child_open_mkdir_hook(const char* path) {
-  static constexpr char kSuffix[] = "/code_objects";
+  static constexpr char kSuffix[] = "code_objects";
   constexpr size_t kSuffixLen = sizeof(kSuffix) - 1;
   const size_t len = strlen(path);
   if (len < kSuffixLen || memcmp(path + len - kSuffixLen, kSuffix, kSuffixLen) != 0) return;
@@ -4251,16 +4258,23 @@ TEST_CASE("Unit_HRR_ShutdownWhileChildOpensArchive_Direct", "[.][hrr-direct]") {
 }
 
 // ---------------------------------------------------------------------------
-// rename() for this test binary, for the same reason as fsync() above: CLR
-// resolves it here first. The capture shutdown calls it to publish the root
-// manifest, after it has written the trailer and before it closes events.bin.
-// With no hook set it is a plain rename.
+// rename() and renameat() for this test binary, for the same reason as fsync()
+// above: CLR resolves them here first. The capture shutdown calls renameat to
+// publish the root manifest, by its path, after it has written the trailer and
+// before it closes events.bin. With no hook set they are a plain rename and
+// renameat.
 // ---------------------------------------------------------------------------
 static std::atomic<void (*)(const char*)> g_hrr_rename_hook{nullptr};
 
 extern "C" int rename(const char* oldpath, const char* newpath) noexcept {
   if (auto hook = g_hrr_rename_hook.load(std::memory_order_acquire)) hook(newpath);
   return static_cast<int>(syscall(SYS_renameat2, AT_FDCWD, oldpath, AT_FDCWD, newpath, 0));
+}
+
+extern "C" int renameat(int olddirfd, const char* oldpath, int newdirfd,
+                        const char* newpath) noexcept {
+  if (auto hook = g_hrr_rename_hook.load(std::memory_order_acquire)) hook(newpath);
+  return static_cast<int>(syscall(SYS_renameat2, olddirfd, oldpath, newdirfd, newpath, 0));
 }
 
 // ---------------------------------------------------------------------------
@@ -4410,6 +4424,151 @@ TEST_CASE("Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct", "[.][hrr-direct]") 
     g_flush_fork_status = pid > 0 ? hrr_wait_child(pid, 30) : -1;
     g_forked_after_flush = true;
   }).detach();
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_CloseDuringCrashManifest_Direct
+//
+// The crash callback opens manifest.json through the archive's directory
+// descriptor, and the capture shutdown's close() closes that descriptor. close()
+// must wait for a callback that holds it, or another thread could reuse the
+// number in between and the callback write its manifest into that directory.
+// Here a second thread raises SIGSEGV, the fsync hook holds CLR's crash
+// callback in the fsync() of its manifest.json, and the main thread returns,
+// which runs the capture shutdown. The hold ends a second after the shutdown
+// starts, and prints a line if it started. The process exits 3 if the shutdown
+// got past close() during the hold; otherwise it dies of its SIGSEGV once the
+// callback returns. Unit_HRR_CloseDuringCrashManifest checks both.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_crash_close_hold{false};
+std::atomic<bool> g_crash_close_held{false};
+std::atomic<bool> g_crash_close_exiting{false};
+
+void crash_close_fsync_hook(int fd) {
+  if (!hrr_fd_is_manifest(fd) || !g_crash_close_hold.exchange(false)) return;
+  g_crash_close_held = true;
+  for (int ms = 0; ms < 10000 && !g_crash_close_exiting.load(); ++ms) hrr_sleep_1ms();
+  for (int ms = 0; ms < 1000; ++ms) hrr_sleep_1ms();
+  if (g_crash_close_exiting.load()) {
+    static constexpr char kLine[] = "capture shutdown started while the crash callback was held\n";
+    (void)!write(2, kLine, sizeof(kLine) - 1);
+  }
+  g_crash_close_held = false;
+}
+
+void crash_close_exiting() { g_crash_close_exiting = true; }
+
+void crash_close_after_shutdown() {
+  if (g_crash_close_held.load()) _exit(3);
+  for (;;) pause();  // for the SIGSEGV the callback raises again
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_CloseDuringCrashManifest_Direct", "[.][hrr-direct]") {
+  // The crash is the point; a core file is not.
+  struct rlimit no_core{0, 0};
+  (void)setrlimit(RLIMIT_CORE, &no_core);
+  // Before the first HIP call, which registers the capture shutdown.
+  REQUIRE(std::atexit(hrr_after_capture_shutdown) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  (void)hipGetLastError();
+  // After it, so it runs first.
+  REQUIRE(std::atexit(crash_close_exiting) == 0);
+
+  g_hrr_after_capture_shutdown = crash_close_after_shutdown;
+  g_hrr_fsync_hook = crash_close_fsync_hook;
+  g_crash_close_hold = true;
+  std::thread([] { raise(SIGSEGV); }).detach();
+  for (int ms = 0; ms < 10000 && !g_crash_close_held.load(); ++ms) hrr_sleep_1ms();
+}
+
+// ---------------------------------------------------------------------------
+// Unit_HRR_ForkDuringBlobWrite_Direct
+//
+// A blob write opens its blobs/<xx> for that write only and closes it on the
+// writing thread, which a forked child does not have. Here the rename hook
+// holds a second thread inside a blob write, with that directory open, for two
+// seconds, and the main thread forks meanwhile. The child exits 3 if it holds a
+// descriptor of a directory in the parent's blobs/.
+// Unit_HRR_ForkDuringBlobWrite checks the exit code.
+// ---------------------------------------------------------------------------
+namespace {
+std::atomic<bool> g_blob_write_hold{false};
+std::atomic<bool> g_blob_write_held{false};
+
+void blob_write_rename_hook(const char* path) {
+  static constexpr char kSuffix[] = ".blob";
+  constexpr size_t kSuffixLen = sizeof(kSuffix) - 1;
+  const size_t len = strlen(path);
+  if (len < kSuffixLen || memcmp(path + len - kSuffixLen, kSuffix, kSuffixLen) != 0) return;
+  if (!g_blob_write_hold.exchange(false)) return;
+  g_blob_write_held = true;
+  for (int ms = 0; ms < 2000; ++ms) hrr_sleep_1ms();
+  g_blob_write_held = false;
+}
+
+// Descriptors open on something inside `dir`. Async-signal-safe, for a child.
+int hrr_fds_inside(const char* dir) {
+  const size_t dir_len = strlen(dir);
+  int found = 0;
+  for (int fd = 0; fd < 1024; ++fd) {
+    char link[32] = "/proc/self/fd/";
+    size_t n = strlen(link);
+    char digits[12];
+    size_t k = 0;
+    int v = fd;
+    do {
+      digits[k++] = static_cast<char>('0' + v % 10);
+      v /= 10;
+    } while (v > 0);
+    while (k > 0) link[n++] = digits[--k];
+    link[n] = '\0';
+    char target[4096];
+    const ssize_t len = readlink(link, target, sizeof(target));
+    if (len > static_cast<ssize_t>(dir_len) && memcmp(target, dir, dir_len) == 0 &&
+        target[dir_len] == '/')
+      ++found;
+  }
+  return found;
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_ForkDuringBlobWrite_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  const char* base = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
+  REQUIRE(base != nullptr);
+  const std::string blobs_path =
+      std::string(base) + "/pid-" + std::to_string(::getpid()) + "/blobs";
+  char blobs[4096];
+  REQUIRE(::realpath(blobs_path.c_str(), blobs) != nullptr);
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, SZ));
+
+  g_hrr_rename_hook = blob_write_rename_hook;
+  g_blob_write_hold = true;
+  // Nothing below may REQUIRE before the join.
+  std::thread writer([d] {
+    const std::vector<int> h(N, 0x5eed);
+    (void)hipMemcpy(d, h.data(), SZ, hipMemcpyHostToDevice);
+  });
+  for (int ms = 0; ms < 10000 && !g_blob_write_held.load(); ++ms) hrr_sleep_1ms();
+  const bool held = g_blob_write_held.load();
+  int status = -1;
+  if (held) {
+    const pid_t pid = fork();
+    if (pid == 0) _exit(hrr_fds_inside(blobs) == 0 ? 0 : 3);
+    if (pid > 0) status = hrr_wait_child(pid, 10);
+  }
+  writer.join();
+  g_hrr_rename_hook = nullptr;
+  HRR_HIP_CHECK(hipFree(d));
+
+  INFO("child wait status " << status);
+  REQUIRE(held);
+  REQUIRE(status != -1);
+  REQUIRE(WIFEXITED(status));
+  REQUIRE(WEXITSTATUS(status) == 0);
 }
 #endif  // !_WIN32
 

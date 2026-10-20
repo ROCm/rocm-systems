@@ -8806,26 +8806,36 @@ inline void execute_v_cvt_f64_f32_vop1([[maybe_unused]] Inst &inst,
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint64_t>(static_cast<double>(std::bit_cast<float>(
-            static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))))));
+        std::bit_cast<uint64_t>(std::bit_cast<double>(std::bit_cast<uint64_t>(
+            static_cast<double>(std::bit_cast<float>(static_cast<uint32_t>(std::bit_cast<uint32_t>(
+                std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))))))))));
   }
 }
 
 template <typename Inst>
 inline void execute_v_cvt_f64_f32_vop3([[maybe_unused]] Inst &inst,
                                        [[maybe_unused]] Wavefront &wf) {
-  if (!inst.inst_.omod && !inst.inst_.clamp) {
+  if (!inst.inst_.abs && !inst.inst_.neg && !inst.inst_.omod && !inst.inst_.clamp) {
     ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(
         float32_t, [](auto in) { return util::stdx::static_simd_cast<util::native<double>>(in); });
   }
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
+  const auto output_policy =
+      amdgpu::output_modifier_policy<amdgpu::fp_format::F64>(wf, inst.inst_.omod, inst.inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     sdwa::write_lane64<amdgpu::sdwa::ResultFormat::NONE>(
         inst, wf, inst.vdst, lane,
-        std::bit_cast<uint64_t>(static_cast<double>(std::bit_cast<float>(
-            static_cast<uint32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane))))));
+        amdgpu::output_modifier::apply<amdgpu::fp_format::F64>(
+            std::bit_cast<uint64_t>(static_cast<double>(
+                std::bit_cast<float>(static_cast<uint32_t>(std::bit_cast<uint32_t>([&]() {
+                  float sv =
+                      std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane));
+                  return amdgpu::source_modifier::apply_to_float(sv, 0, inst.inst_.abs,
+                                                                 inst.inst_.neg);
+                }()))))),
+            output_policy));
   }
 }
 

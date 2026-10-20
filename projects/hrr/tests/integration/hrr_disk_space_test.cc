@@ -15,7 +15,9 @@
  * refuses to open below that, and stops, leaving an archive marked incomplete,
  * when a write would eat into it. CI runners have far more free space than any
  * workload can fill, so this file fakes the file system instead: the test
- * binary defines statvfs, statvfs64 and fsync itself. The dynamic linker binds
+ * binary defines statvfs, fstatvfs, their 64-bit names and fsync itself. The
+ * writer reads free space through its pid-<pid> descriptor, which fstatvfs
+ * resolves to a path through /proc/self/fd. The dynamic linker binds
  * the HIP runtime's calls to these definitions before libc's, and they forward
  * to libc for every path outside HIP_HRR_CAPTURE_OUTPUT.
  *
@@ -57,10 +59,11 @@
 // 32-bit targets.
 static_assert(sizeof(void*) == 8, "the statvfs fake assumes an LP64 target");
 
-// Set by a workload in another file of this binary. Each statvfs and statvfs64
-// call runs it first, faked or not. The capture writer reads free space on its
-// pid-<pid> directory while it opens the archive, after it has removed a stale
-// active marker and before it creates its own.
+// Set by a workload in another file of this binary. Each statvfs call, and
+// each fstatvfs call on a descriptor /proc can name, runs it, faked or not.
+// The capture writer reads free space on its pid-<pid> directory while it
+// opens the archive, after it has removed a stale active marker and before it
+// creates its own.
 std::atomic<void (*)(const char*)> g_hrr_statvfs_hook{nullptr};
 
 namespace {
@@ -152,19 +155,10 @@ bool wait_for(const std::atomic<bool>& flag, int timeout_ms) {
   return true;
 }
 
-int fake_statvfs(const char* name, const char* path, struct statvfs* buf) {
+// Fills *buf for a path under the capture directory; false for any other.
+bool fill_fake(const char* path, struct statvfs* buf) {
   if (auto hook = g_hrr_statvfs_hook.load(std::memory_order_acquire)) hook(path);
-  if (!is_faked(path)) {
-    using Fn = int (*)(const char*, struct statvfs*);
-    static Fn real[2] = {reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "statvfs")),
-                         reinterpret_cast<Fn>(dlsym(RTLD_NEXT, "statvfs64"))};
-    Fn fn = real[strcmp(name, "statvfs") == 0 ? 0 : 1];
-    if (fn == nullptr) {
-      errno = ENOSYS;
-      return -1;
-    }
-    return fn(path, buf);
-  }
+  if (!is_faked(path)) return false;
   g_fake_calls.fetch_add(1);
   if (g_statvfs_hold.exchange(false)) {
     g_statvfs_entered.store(true);
@@ -180,7 +174,48 @@ int fake_statvfs(const char* name, const char* path, struct statvfs* buf) {
   buf->f_ffree   = 1u << 20;
   buf->f_favail  = 1u << 20;
   buf->f_namemax = 255;
-  return 0;
+  return true;
+}
+
+template <typename Arg>
+int call_real(const char* name, Arg arg, struct statvfs* buf) {
+  using Fn = int (*)(Arg, struct statvfs*);
+  Fn fn = reinterpret_cast<Fn>(dlsym(RTLD_NEXT, name));
+  if (fn == nullptr) {
+    errno = ENOSYS;
+    return -1;
+  }
+  return fn(arg, buf);
+}
+
+// The real call goes first, so a path that does not exist fails as it would
+// without the fake.
+int fake_statvfs(const char* name, const char* path, struct statvfs* buf) {
+  const int rc = call_real(name, path, buf);
+  const int err = errno;
+  if (fill_fake(path, buf) && rc == 0) return 0;
+  errno = err;
+  return rc;
+}
+
+// The path /proc/self/fd gives for fd, spelled from HIP_HRR_CAPTURE_OUTPUT
+// when it lies under it, since /proc gives the resolved path.
+int fake_fstatvfs(const char* name, int fd, struct statvfs* buf) {
+  char link[64], target[4096], root_real[4096];
+  snprintf(link, sizeof(link), "/proc/self/fd/%d", fd);
+  const ssize_t len = readlink(link, target, sizeof(target) - 1);
+  if (len > 0) {
+    target[len] = '\0';
+    std::string path = target;
+    const char* root = fake_root();
+    if (root != nullptr && realpath(root, root_real) != nullptr) {
+      const size_t n = strlen(root_real);
+      if (path.compare(0, n, root_real) == 0 && (path.size() == n || path[n] == '/'))
+        path = root + path.substr(n);
+    }
+    if (fill_fake(path.c_str(), buf)) return 0;
+  }
+  return call_real(name, fd, buf);
 }
 
 }  // namespace
@@ -191,6 +226,8 @@ extern "C" int hrr_disk_space_statvfs(const char* path, struct statvfs* buf)
     __asm__("statvfs");
 extern "C" int hrr_disk_space_statvfs64(const char* path, struct statvfs* buf)
     __asm__("statvfs64");
+extern "C" int hrr_disk_space_fstatvfs(int fd, struct statvfs* buf) __asm__("fstatvfs");
+extern "C" int hrr_disk_space_fstatvfs64(int fd, struct statvfs* buf) __asm__("fstatvfs64");
 extern "C" int hrr_disk_space_fsync(int fd) __asm__("fsync");
 
 extern "C" int hrr_disk_space_statvfs(const char* path, struct statvfs* buf) {
@@ -199,6 +236,14 @@ extern "C" int hrr_disk_space_statvfs(const char* path, struct statvfs* buf) {
 
 extern "C" int hrr_disk_space_statvfs64(const char* path, struct statvfs* buf) {
   return fake_statvfs("statvfs64", path, buf);
+}
+
+extern "C" int hrr_disk_space_fstatvfs(int fd, struct statvfs* buf) {
+  return fake_fstatvfs("fstatvfs", fd, buf);
+}
+
+extern "C" int hrr_disk_space_fstatvfs64(int fd, struct statvfs* buf) {
+  return fake_fstatvfs("fstatvfs64", fd, buf);
 }
 
 // Defined in hrr_workload_test.cc: the fork cases there hold a thread in fsync.
@@ -635,6 +680,20 @@ TEST_CASE("Unit_HRR_DiskSpace_BufferedEventsCounted_Direct", "[.][hrr-direct]") 
   HRR_HIP_CHECK(hipFree(dev));
 }
 
+// pid-<pid> renamed once the capture is open, then free space one block short
+// of the reserve: the next checked copy still stops the capture.
+TEST_CASE("Unit_HRR_DiskSpace_StopsAfterRename_Direct", "[.][hrr-direct]") {
+  begin_workload();
+  const fs::path base(fake_root());
+  fs::rename(base / ("pid-" + std::to_string(getpid())), base / "moved");
+  void* dev = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&dev, kBigCopy));
+  arm_fixed(kBelowReserve);
+  copy_to_device(dev, 970, kBigCopy);
+  disarm();
+  HRR_HIP_CHECK(hipFree(dev));
+}
+
 // ===========================================================================
 // Drivers.
 // ===========================================================================
@@ -918,6 +977,19 @@ HRR_TEST_CASE(Unit_HRR_DiskSpace_BufferedEventsCounted) {
     if (ev.header().event_type == HRR_API_HIPMEMSETASYNC) ++memsets;
   CHECK(memsets > 0);
   CHECK(memsets < static_cast<size_t>(kMemsetCount));
+}
+
+// The writer reads free space through the pid-<pid> it opened, so renaming that
+// directory does not turn the reserve off.
+HRR_TEST_CASE(Unit_HRR_DiskSpace_StopsAfterRename) {
+  ScopedDir cap(cap_dir("renamed"));
+  const WorkloadRun run =
+      run_workload("Unit_HRR_DiskSpace_StopsAfterRename_Direct", cap.path, kTotal64M);
+  INFO("Capture output:\n" << run.out);
+  REQUIRE(run.rc == 0);
+  CHECK(count_of(run.out, kStopped) == 1);
+  CHECK(read_text_file(cap.path / "moved" / "manifest.json").find(kIncomplete) !=
+        std::string::npos);
 }
 
 #endif  // !_WIN32 && HRR_TEST_EXE

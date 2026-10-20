@@ -30,6 +30,10 @@
  *     A shim reached after the trailer, whose event is dropped, must not list
  *     its API under manifest.unreplayable_apis; one reached before must.
  *
+ *   Unit_HRR_DispatchSwap_ChildKeepsInheritedPreload:
+ *     Preloading the tool must not drop what the test process itself preloads,
+ *     such as an emulator's interposer; the child needs both.
+ *
  *   Unit_HRR_Fork_ChildArchiveCompleteAfterParentFailure:
  *     The failure above marks the parent's archive only. A child forked
  *     afterwards writes its own archive and must still get its trailer, and
@@ -82,6 +86,7 @@ namespace {
 #define HRR_LATE_MARKER "HRR_LATE_UNREPLAYABLE"
 #define HRR_CLOSE_MARKER "HRR_BLOB_CLOSE"
 #define HRR_NO_TABLE_MARKER "HRR_NO_HIP_TABLE"
+#define HRR_PRELOAD_MARKER "HRR_CHILD_PRELOAD"
 
 // Big enough that the failing write is cut off by the file size limit, which
 // is set well below it and well above anything else the capture writes then.
@@ -340,6 +345,15 @@ TEST_CASE("Unit_HRR_DispatchSwap_Unreplayable_Direct", "[.][hrr-direct]") {
   REQUIRE(tool_set_fopen_hook(before_own_manifest));
 }
 
+// Reports what the child was started with: whether the tool is loaded, and the
+// whole LD_PRELOAD.
+TEST_CASE("Unit_HRR_DispatchSwap_Preload_Direct", "[.][hrr-direct]") {
+  const char* preload = std::getenv("LD_PRELOAD");
+  const bool tool = dlsym(RTLD_DEFAULT, "hrr_dispatch_tool_set_fopen_hook") != nullptr;
+  printf(HRR_PRELOAD_MARKER " tool=%d preload=%s\n", tool ? 1 : 0, preload ? preload : "");
+  fflush(stdout);
+}
+
 // ---------------------------------------------------------------------------
 // fork() after a failure
 // ---------------------------------------------------------------------------
@@ -431,13 +445,21 @@ std::string dispatch_tool_path() {
   return (self.parent_path() / fs::path(HRR_DISPATCH_TOOL).filename()).string();
 }
 
+// LD_PRELOAD for a child that must also preload `lib`: `lib` first, then what
+// this process was started with. An emulator such as rocJitsu is preloaded
+// too, and a child without it sees no device.
+std::string preload_with(const std::string& lib) {
+  const char* inherited = std::getenv("LD_PRELOAD");
+  return inherited && *inherited ? lib + ":" + inherited : lib;
+}
+
 std::string capture_workload(const fs::path& cap, const char* direct_case, bool with_tool,
                              bool preload_tool = false) {
   hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true);
   proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.string());
   proc.setEnv("HIP_HRR_CAPTURE_CONTENT", "1");
   if (with_tool) proc.setEnv("ROCPROFILER_REGISTER_LIBRARY", dispatch_tool_path());
-  if (preload_tool) proc.setEnv("LD_PRELOAD", dispatch_tool_path());
+  if (preload_tool) proc.setEnv("LD_PRELOAD", preload_with(dispatch_tool_path()));
   set_proc_search_path(proc);
   const int ret = proc.runWithTimeout(std::string("\"") + direct_case + "\"", 600);
   std::string out = proc.getOutput();
@@ -630,6 +652,41 @@ HRR_TEST_CASE(Unit_HRR_DispatchSwap_NoUnreplayableAfterTrailer) {
   INFO("manifest.json:\n" << manifest);
   CHECK(manifest.find("\"hipLaunchHostFunc\"") != std::string::npos);
   CHECK(manifest.find("\"hipUserObjectCreate\"") == std::string::npos);
+}
+
+// Before, the child got the tool alone and lost whatever this process preloads,
+// which under rocJitsu is the emulator itself.
+HRR_TEST_CASE(Unit_HRR_DispatchSwap_ChildKeepsInheritedPreload) {
+  // A library every process here has loaded already, so preloading it changes
+  // nothing but the variable. Restored on the way out, failed or not.
+  struct ScopedPreload {
+    std::string old;
+    bool had = false;
+    ScopedPreload() {
+      const char* cur = std::getenv("LD_PRELOAD");
+      had = cur != nullptr;
+      if (had) old = cur;
+      const std::string marker = "libm.so.6";
+      setenv("LD_PRELOAD", (old.empty() ? marker : marker + ":" + old).c_str(), 1);
+    }
+    ~ScopedPreload() {
+      if (had)
+        setenv("LD_PRELOAD", old.c_str(), 1);
+      else
+        unsetenv("LD_PRELOAD");
+    }
+  } scoped;
+  const std::string inherited = std::getenv("LD_PRELOAD");
+
+  ScopedDir cap(fs::temp_directory_path() / "hrr_child_preload.hrr");
+  const std::string out =
+      capture_workload(cap.path, "Unit_HRR_DispatchSwap_Preload_Direct", false, true);
+  INFO("Workload output:\n" << out);
+
+  // The tool is loaded, and in front of what this process preloads.
+  const std::string expected =
+      HRR_PRELOAD_MARKER " tool=1 preload=" + dispatch_tool_path() + ":" + inherited + "\n";
+  CHECK(out.find(expected) != std::string::npos);
 }
 
 // Before, the child inherited the parent's incomplete flag and lost its trailer.
