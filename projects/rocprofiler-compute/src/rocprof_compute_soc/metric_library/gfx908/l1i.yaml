@@ -80,7 +80,7 @@ l1i.misses_non_duplicated:
     The total number of L1I requests that missed on a cache line that were not already
     pending due to another request, per normalization-unit.
 l1i.req:
-  name: Req
+  name: L1I Requests
   formula: SUM(SQC_ICACHE_REQ) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-

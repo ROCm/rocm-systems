@@ -38,7 +38,7 @@ lds.bank_conflict:
     The total number of cycles spent in the LDS scheduler due to bank conflicts (as
     determined by the conflict resolution hardware) per normalization unit.
 lds.bank_conflict_rate:
-  name: Bank Conflict Rate
+  name: LDS Bank Conflict Rate
   formula: 3.125 * SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
   unit: Percent
   description: >-
@@ -47,7 +47,7 @@ lds.bank_conflict_rate:
     number of LDS cycles that would have been required to move the same amount of
     data in an uncontended access.
 lds.bank_conflicts_access:
-  name: Bank Conflicts/Access
+  name: LDS Bank Conflicts/Access
   formula: SUM(SQ_LDS_BANK_CONFLICT) / SUM(SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT)
   unit: Conflicts per Access
   description: >-
@@ -113,7 +113,7 @@ lds.unaligned_stall:
     The total number of cycles spent in the LDS scheduler due to stalls from non-dword
     aligned addresses per normalization unit.
 lds.util:
-  name: Utilization
+  name: LDS Utilization
   formula: 100 * SUM(SQ_LDS_IDX_ACTIVE) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
