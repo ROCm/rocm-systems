@@ -6,9 +6,12 @@
 
 // State owned by src/transport/net_ib_cast/qp_sharing.cc, for binaries that do not compile it.
 // IbCastQpSharingGlobalEnable itself is declared by qp_sharing.h and starts false, as in production.
+// IbCastValidateSharedQpPool only counts its calls.
 
 #ifndef RCCL_TEST_HOST_NET_IB_CAST_QP_SHARING_FAKES_H_
 #define RCCL_TEST_HOST_NET_IB_CAST_QP_SHARING_FAKES_H_
+
+extern int g_ibCastValidateSharedQpPoolCalls;
 
 void ResetNetIbCastQpSharingFakes();
 
