@@ -5,7 +5,8 @@
 #   .github/workflows/rccl_perf_regression.yml
 # It runs on the self-hosted org runner "tw-gfx950-ainic-ROCm-scale-runner"
 # (org: ROCm). Adjust `runs-on` labels to match how that runner was registered.
-# The `paths` filter keeps the gate scoped to RCCL-only changes in the monorepo;
+# The `paths` filter keeps the gate scoped to RCCL-only changes in the monorepo,
+# and the `changes` job skips PRs to develop that only touch projects/rccl/test/host;
 # build_rccl.sh auto-detects the projects/rccl cmake subdir in the checkout.
 #
 # The Slurm submit/poll/report scripts these steps call
@@ -59,13 +60,41 @@ permissions:
   pull-requests: write
 
 jobs:
+  # Host-only test changes on develop are covered by rccl-host-unit-tests.yml
+  # and cannot change librccl, so they skip the cluster A/B run. Never skipped
+  # itself: a skipped ancestor would also skip `detect`.
+  changes:
+    name: Detect host-only test changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      # The filter step only runs on PRs; default to running the gate.
+      host_tests_only: ${{ steps.filter.outputs.host_tests_only || 'false' }}
+    steps:
+      - name: Checkout scripts
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          sparse-checkout: .github/scripts
+          # HEAD^ on a PR merge commit is the base branch tip.
+          fetch-depth: 2
+
+      - name: Check for host-only test changes
+        id: filter
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+        run: python3 .github/scripts/rccl_detect_coco_changes.py --base-ref HEAD^ --base-branch "$BASE_BRANCH"
+
   build:
+    needs: changes
     # Forked PRs cannot run this workflow: it builds and MPI-executes the PR's
     # own source on a self-hosted runner, so arbitrary fork code would get
     # arbitrary code execution on our infrastructure. Scope to same-repo PRs
     # only; workflow_dispatch is unaffected (it already requires repo write
     # access to trigger).
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Runs even if `changes` failed; only an explicit host_tests_only skips it.
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && needs.changes.outputs.host_tests_only != 'true')) }}
     # Separate lock from the detect job below: build never touches the pinned
     # nodes, so it shouldn't queue behind another PR's in-flight A/B run.
     # (Real cross-PR parallelism from this also needs a 2nd self-hosted runner
@@ -139,7 +168,8 @@ jobs:
 
   detect:
     needs: build
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Explicit status check: the implicit success() also requires `changes`.
+    if: ${{ !cancelled() && needs.build.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
     # Serialise: the pinned calibration nodes can host only one A/B job at a
     # time, and thresholds are only valid there. Do NOT cancel in-progress (a
     # running allocation must finish cleanly to release the nodes).
