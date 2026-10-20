@@ -1,0 +1,335 @@
+vl1d.access_lat:
+  name: L1 Access Latency
+  formula: SUM(TCP_TCP_LATENCY_sum) / SUM(TCP_TA_TCP_STATE_READ_sum)
+  unit: Cycles
+  description: >-
+    Calculated as the average number of cycles that a vL1D cache line request spent
+    in the vL1D cache pipeline.
+vl1d.ai:
+  name: AI L1
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum))
+  unit: FLOPs/Byte
+  description: >-
+    The Arithmetic Intensity (AI) relative to the L1 Cache. It is the ratio of total
+    floating-point operations (FLOPs) to total bytes transferred between the L1 cache
+    and the processing units.
+vl1d.atomic_req:
+  name: Atomic Req
+  formula: SUM(TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The total number of incoming atomic requests from the address processing unit
+    after coalescing per normalization unit.
+vl1d.bw_util:
+  name: Bandwidth Utilization
+  formula: 100 * 64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk / 1000 * 64 * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    The number of bytes looked up in the vL1D cache as a result of VMEM instructions,
+    as a percent of the peak theoretical bandwidth achievable on the specific accelerator.
+    The number of bytes is calculated as the number of cache lines requested multiplied
+    by the cache line size. This value does not consider partial requests, so for
+    instance, if only a single value is requested in a cache line, the data movement
+    will still be counted as a full cache line.
+vl1d.cache_accesses:
+  name: Cache Accesses
+  formula: SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: The total number of cache line lookups in the vL1D.
+vl1d.cache_bw:
+  name: Cache BW
+  formula: 64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    The number of bytes looked up in the vL1D cache as a result of VMEM instructions
+    per unit time. The number of bytes is calculated as the number of cache lines
+    requested multiplied by the cache line size. This value does not consider partial
+    requests, so e.g., if only a single value is requested in a cache line, the data
+    movement will still be counted as a full cache line.
+  peak: $max_sclk / 1000 * 64 * $cu_per_gpu
+vl1d.cache_hits:
+  name: Cache Hits
+  formula: SUM(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The number of cache accesses minus the number of outgoing requests to the L2 cache,
+    that is, the number of cache line requests serviced by the vL1D Cache RAM per
+    normalization unit.
+vl1d.cc_atomic:
+  name: CC - Atomic
+  formula: SUM(TCP_TCC_CC_ATOMIC_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total atomic requests with CC mtype from this TCP to all TCCs Sum over TCP instances
+    per normalization unit.
+vl1d.cc_rd:
+  name: CC - Read
+  formula: SUM(TCP_TCC_CC_READ_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total read requests with CC mtype from this TCP to all TCCs Sum over TCP instances
+    per normalization unit.
+vl1d.cc_wr:
+  name: CC - Write
+  formula: SUM(TCP_TCC_CC_WRITE_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total write requests with CC mtype from this TCP to all TCCs Sum over TCP instances
+    per normalization unit.
+vl1d.coalescing:
+  name: vL1D Coalescing
+  formula: 100 * 64 * SUM(TA_TOTAL_WAVEFRONTS_sum) / (4 * SUM(TCP_TOTAL_ACCESSES_sum))
+  unit: Percent
+  description: >-
+    Indicates how well memory instructions were coalesced by the address processing
+    unit, ranging from uncoalesced (25%) to fully coalesced (100%). Calculated as
+    the average number of thread-requests generated per instruction divided by the
+    ideal number of thread-requests per instruction.
+vl1d.hit_rate:
+  name: vL1D Cache Hit Rate
+  formula: 100 - 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+  unit: Percent
+  description: >-
+    The percent of vL1D cache line requests that hit in the vL1D cache, over the total
+    number of cache line requests to the vL1D Cache RAM.
+  peak: 100
+vl1d.hit_ratio:
+  name: Hit Ratio
+  formula: 100 * SUM(TCP_UTCL1_TRANSLATION_HIT_sum) / SUM(TCP_UTCL1_REQUEST_sum)
+  unit: Percent
+  description: >-
+    The ratio of the number of translation requests that hit in the UTCL1 divided
+    by the total number of translation requests made to the UTCL1.
+vl1d.hits:
+  name: Hits
+  formula: SUM(TCP_UTCL1_TRANSLATION_HIT_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The number of translation requests that hit in the UTCL1, and could be reused,
+    per normalization unit.
+vl1d.invalidations:
+  name: Invalidations
+  formula: SUM(TCP_TOTAL_WRITEBACK_INVALIDATES_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The number of times the vL1D was issued a write-back invalidate command during
+    the kernel's execution per normalization unit. This may be triggered by, for instance,
+    the buffer_wbinvl1 instruction.
+vl1d.l2_atomic_bw:
+  name: VL1_L2 Atomic BW
+  formula: 64 * SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Bandwidth of atomic requests from the vL1D cache to the L2 cache per unit time.
+vl1d.l2_atomic_req:
+  name: L1-L2 Atomic
+  formula: SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The number of atomic requests that are sent through the vL1D to the L2 cache,
+    per normalization unit. This includes requests for atomics with, and without return.
+vl1d.l2_bw:
+  name: vL1D-L2 Bandwidth
+  formula: 64 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    The number of bytes transferred across the vL1D-L2 interface as a result of VMEM
+    instructions, divided by total duration. The number of bytes is calculated as
+    the number of cache lines requested multiplied by the cache line size. This value
+    does not consider partial requests, so for instance, if only a single value is
+    requested in a cache line, the data movement will still be counted as a full cache
+    line.
+vl1d.l2_rd_bw:
+  name: VL1_L2 Read BW
+  formula: 128 * SUM(TCP_TCC_READ_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Bandwidth of read requests from the vL1D cache to the L2 cache per unit time.
+vl1d.l2_rd_lat:
+  name: L1-L2 Read Latency
+  formula: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
+  unit: Cycles
+  description: >-
+    Calculated as the average number of cycles that the vL1D cache took to issue and
+    receive read requests from the L2 Cache. This number also includes requests for
+    atomics with return values.
+vl1d.l2_rd_req:
+  name: L1-L2 Read
+  formula: SUM(TCP_TCC_READ_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The number of read requests for a vL1D cache line that were not satisfied by the
+    vL1D and must be retrieved from the to the L2 Cache per normalization unit.
+vl1d.l2_wr_bw:
+  name: VL1_L2 Write BW
+  formula: 64 * SUM(TCP_TCC_WRITE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Bandwidth of write requests from the vL1D cache to the L2 cache per unit time.
+vl1d.l2_wr_lat:
+  name: L1-L2 Write Latency
+  formula: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
+  unit: Cycles
+  description: >-
+    Calculated as the average number of cycles that the vL1D cache took to issue and
+    receive acknowledgement of a write request to the L2 Cache. This number also includes
+    requests for atomics without return values.
+vl1d.l2_wr_req:
+  name: L1-L2 Write
+  formula: SUM(TCP_TCC_WRITE_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The number of write requests to a vL1D cache line that were sent through the vL1D
+    to the L2 cache, per normalization unit.
+vl1d.nc_atomic:
+  name: NC - Atomic
+  formula: SUM(TCP_TCC_NC_ATOMIC_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total atomic requests with NC mtype from this TCP to all TCCs Sum over TCP instances
+    per normalization unit.
+vl1d.nc_rd:
+  name: NC - Read
+  formula: SUM(TCP_TCC_NC_READ_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total read requests with NC mtype from this TCP to all TCCs Sum over TCP instances
+    per normalization unit.
+vl1d.nc_wr:
+  name: NC - Write
+  formula: SUM(TCP_TCC_NC_WRITE_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total write requests with NC mtype from this TCP to all TCCs Sum over TCP instances
+    per normalization unit.
+vl1d.permission_misses:
+  name: Permission Misses
+  formula: SUM(TCP_UTCL1_PERMISSION_MISS_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The total number of translation requests that missed in the UTCL1 due to a permission
+    error, per normalization unit. This is unused and expected to be zero in most
+    configurations for modern CDNA\u2122 accelerators.
+vl1d.rd_req:
+  name: Read Req
+  formula: SUM(TCP_TOTAL_READ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The total number of incoming read requests from the address processing unit after
+    coalescing per normalization unit.
+vl1d.req:
+  name: Req
+  formula: SUM(TCP_UTCL1_REQUEST_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The number of translation requests made to the UTCL1 per normalization unit.
+vl1d.rw_atomic:
+  name: RW - Atomic
+  formula: SUM(TCP_TCC_RW_ATOMIC_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total atomic requests with RW mtype from this TCP to all TCCs Sum over TCP instances
+    per normalization unit.
+vl1d.rw_rd:
+  name: RW - Read
+  formula: SUM(TCP_TCC_RW_READ_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total read requests with RW mtype from this TCP to all TCCs Sum over TCP instances
+    per normalization unit.
+vl1d.rw_wr:
+  name: RW - Write
+  formula: SUM(TCP_TCC_RW_WRITE_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total write requests with RW mtype from this TCP to all TCCs Sum over TCP instances
+    per normalization unit.
+vl1d.stalled_on_l2_data:
+  name: Stalled on L2 Data
+  formula: 100 * TCP_PENDING_STALL_CYCLES_sum / TCP_GATE_EN1_sum
+  unit: ''
+  description: >-
+    The ratio of the number of cycles where the vL1D is stalled waiting for requested
+    data to return from the L2 cache divided by the number of cycles where the vL1D
+    is active.
+vl1d.stalled_on_l2_req:
+  name: Stalled on L2 Req
+  formula: 100 * TCP_TCR_TCP_STALL_CYCLES_sum / TCP_GATE_EN1_sum
+  unit: ''
+  description: >-
+    The ratio of the number of cycles where the vL1D is stalled waiting to issue a
+    request for data to the L2 cache divided by the number of cycles where the vL1D
+    is active.
+vl1d.tag_ram_stall_atomic:
+  name: Tag RAM Stall (Atomic)
+  formula: 100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
+  unit: ''
+  description: >-
+    The ratio of the number of cycles where the vL1D is stalled due to Atomic requests
+    with conflicting tags being looked up concurrently, divided by the number of cycles
+    where the vL1D is active.
+vl1d.tag_ram_stall_rd:
+  name: Tag RAM Stall (Read)
+  formula: 100 * TCP_READ_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
+  unit: ''
+  description: >-
+    The ratio of the number of cycles where the vL1D is stalled due to Read requests
+    with conflicting tags being looked up concurrently, divided by the number of cycles
+    where the vL1D is active.
+vl1d.tag_ram_stall_wr:
+  name: Tag RAM Stall (Write)
+  formula: 100 * TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum / TCP_GATE_EN1_sum
+  unit: ''
+  description: >-
+    The ratio of the number of cycles where the vL1D is stalled due to Write requests
+    with conflicting tags being looked up concurrently, divided by the number of cycles
+    where the vL1D is active.
+vl1d.total_req:
+  name: Total Req
+  formula: SUM(TCP_TOTAL_ACCESSES_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The total number of incoming requests from the address processing unit after coalescing.
+vl1d.translation_misses:
+  name: Translation Misses
+  formula: SUM(TCP_UTCL1_TRANSLATION_MISS_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The total number of translation requests that missed in the UTCL1 due to translation
+    not being present in the cache, per normalization unit.
+vl1d.uc_atomic:
+  name: UC - Atomic
+  formula: SUM(TCP_TCC_UC_ATOMIC_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total atomic requests with UC mtype from this TCP to all TCCs Sum over TCP instances
+    per normalization unit.
+vl1d.uc_rd:
+  name: UC - Read
+  formula: SUM(TCP_TCC_UC_READ_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total read requests with UC mtype from this TCP to all TCCs Sum over TCP instances
+    per normalization unit.
+vl1d.uc_wr:
+  name: UC - Write
+  formula: SUM(TCP_TCC_UC_WRITE_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total write requests with UC mtype from this TCP to all TCCs Sum over TCP instances
+    per normalization unit.
+vl1d.util:
+  name: Utilization
+  formula: 100 * SUM(TCP_GATE_EN2_sum) / SUM(TCP_GATE_EN1_sum)
+  unit: Percent
+  description: >-
+    Indicates how busy the vL1D Cache RAM was during the kernel execution. The number
+    of cycles where the vL1D Cache RAM is actively processing any request divided
+    by the number of cycles where the vL1D is active.
+vl1d.wr_req:
+  name: Write Req
+  formula: SUM(TCP_TOTAL_WRITE_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    The total number of incoming write requests from the address processing unit after
+    coalescing per normalization unit.

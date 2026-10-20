@@ -6,6 +6,12 @@ repos:
     hooks:
       - id: check-yaml
         files: ^projects/rocprofiler-compute/
+        exclude: ^projects/rocprofiler-compute/src/rocprof_compute_soc/metric_library/
+      # Metric library files use the custom !remove tag, which only --unsafe accepts.
+      - id: check-yaml
+        name: check yaml (metric library)
+        args: [--unsafe]
+        files: ^projects/rocprofiler-compute/src/rocprof_compute_soc/metric_library/
       - id: end-of-file-fixer
         files: ^projects/rocprofiler-compute/
       - id: trailing-whitespace
@@ -112,6 +118,6 @@ repos:
         entry: python projects/rocprofiler-compute/tools/format_yaml.py --fix
         language: python
         additional_dependencies: [pyyaml==6.0.3]
-        files: ^projects/rocprofiler-compute/src/rocprof_compute_soc/analysis_configs/gfx.*\.yaml$
+        files: ^projects/rocprofiler-compute/src/rocprof_compute_soc/(analysis_configs|metric_library)/gfx.*\.yaml$
         pass_filenames: true
         stages: [pre-commit]
