@@ -43,3 +43,20 @@ set_target_properties(
     rocprofiler-systems-binary-library
     PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}-binary
 )
+
+# Detect system libunwind >= 1.6 which has a regression in _ULx86_64_get_proc_name
+# (null-deref via __sigaction). The bundled libunwind (ROCPROFSYS_BUILD_LIBUNWIND=ON)
+# is pre-1.6 and unaffected. When the bug is present, analysis.cpp uses dladdr()
+# as a crash-safe fallback for name resolution.
+if(NOT ROCPROFSYS_BUILD_LIBUNWIND)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(SYSTEM_LIBUNWIND QUIET libunwind)
+        if(SYSTEM_LIBUNWIND_FOUND AND SYSTEM_LIBUNWIND_VERSION VERSION_GREATER_EQUAL 1.6)
+            target_compile_definitions(
+                rocprofiler-systems-binary-library
+                PRIVATE ROCPROFSYS_LIBUNWIND_BROKEN_GET_PROC_NAME=1
+            )
+        endif()
+    endif()
+endif()

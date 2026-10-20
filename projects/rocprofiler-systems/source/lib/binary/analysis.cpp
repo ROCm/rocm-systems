@@ -292,7 +292,34 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
 
     auto _v    = tim::unwind::processed_entry{};
     _v.address = _entry.address();
-    _v.name    = _entry.template get_name<4096, true>(*_context_p, &_v.offset, &_v.error);
+    static constexpr std::size_t k_proc_name_buf_size = 4096;
+    // Workaround for a regression introduced in libunwind 1.6.x: a null-pointer
+    // dereference inside _ULx86_64_get_proc_name (via __sigaction at offset 0x38)
+    // fires for valid mapped addresses on certain kernels. Confirmed on libunwind
+    // 1.6.2 (Ubuntu 22.04); libunwind < 1.6 (e.g. 1.3.2 on Ubuntu 20.04) is
+    // unaffected. dladdr() is a crash-safe alternative: it returns the nearest
+    // exported symbol name and the byte offset from its start without invoking
+    // the unwinder. This fix is necessitated by a libunwind regression, not by
+    // a defect in rocprofiler-systems.
+    // TODO: remove this version guard once the upstream regression is fixed.
+#if defined(ROCPROFSYS_LIBUNWIND_BROKEN_GET_PROC_NAME)
+    {
+        Dl_info dli{};
+        if(::dladdr(reinterpret_cast<const void*>(_addr), &dli) != 0 &&
+           dli.dli_sname != nullptr)
+        {
+            _v.name   = dli.dli_sname;
+            _v.offset = _addr - reinterpret_cast<uintptr_t>(dli.dli_saddr);
+            _v.error  = 0;
+        }
+        else
+        {
+            _v.error = 1;  // non-zero: address not resolvable via dladdr
+        }
+    }
+#else
+    _v.name = _entry.template get_name<k_proc_name_buf_size, true>(*_context_p, &_v.offset, &_v.error);
+#endif
 
     tim::unwind::processed_entry::construct(_v, &_cache_p->files);
 
