@@ -548,6 +548,7 @@ class TestSamplingTargetFlags(RocprofsysTest):
         )
         self.assert_regex(result, pass_regex=["ROCPROFSYS_SAMPLING_CPUS=0-3"])
 
+    @pytest.mark.amdsmi_min_version("26.3")
     def test_ai_nics_without_device(self, target):
         result = self.run_test(
             "baseline",

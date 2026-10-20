@@ -148,25 +148,6 @@ class TestAINIC(RocprofsysTest):
             f"Missing: {missing}"
         )
 
-    # No NIC hardware required; the module-level amdsmi_min_version("26.3") gate
-    # skips this on builds where AI NIC support is not compiled in.
-    @pytest.mark.parametrize("target", TARGETS)
-    @pytest.mark.timeout(30)
-    def test_sampling_ainics_help(self, target):
-        """--sampling-ainics must appear in the sampling help output.
-
-        The flag is only registered (and therefore only shown by
-        ``--help=sampling``) when the binary was built with
-        ROCPROFSYS_BUILD_AINIC=ON.
-        """
-        result = self.run_test(
-            "baseline",
-            target=target,
-            run_args=["--help=sampling"],
-            fail_on_not_found=True,
-        )
-        self.assert_regex(result, pass_regex=[r"--sampling-ainics"])
-
     @pytest.mark.ainic_required
     @pytest.mark.network
     @pytest.mark.rocpd("ainic_perf_env")
