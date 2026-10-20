@@ -75,8 +75,10 @@ Confirm the kernel configuration directly:
   $ grep CONFIG_PCI_P2PDMA /boot/config-$(uname -r)
   # CONFIG_PCI_P2PDMA is not set
 
-For instructions on booting a kernel that enables the option, see
-:ref:`hipfile-kernel-p2pdma`. For the list of tested distribution kernels, see
+For a worked example of booting a kernel that has the option, see
+:ref:`hipfile-ubuntu-2204-fastpath`. For the other locations to check when
+``/boot/config-$(uname -r)`` is missing, see :ref:`hipfile-check-p2pdma`. For
+the list of tested distribution kernels, see
 :doc:`/reference/hipFile-kernel-p2pdma-support`.
 
 .. note::

@@ -51,6 +51,15 @@ hipFile's fastpath is only supported on GPU physical functions (PFs).
 ``ais-check`` also detects virtual functions via ``amd-smi`` and prints a warning
 when one is present. This warning won't change the exit code.
 
+Memory corruption on RHEL 9.8 and RHEL 10.2 kernels
+===================================================
+
+All OS kernels that support P2PDMA pass the fastpath I/O tests except for RHEL 9.8 and RHEL 10.2. A change was backported to RHEL 9.8 and 10.2 that broke DMA mapping for P2PDMA pages that are transferred through the host bridge. These two kernels report ``CONFIG_PCI_P2PDMA=y``, but using P2PDMA on them can cause memory corruption, so don't use the fastpath on these kernels.
+
+RHEL 9.9 and RHEL 10.3, which are in development, contain a fix. See `dma-mapping: direct: fix missing mapping for THRU_HOST_BRIDGE segments <https://github.com/torvalds/linux/commit/560000d619ef162568746ce287f0c725e24ea967>`_.
+
+.. _hipfile-ubuntu-2204-fastpath:
+
 The Ubuntu 22.04 default kernel does not support the fastpath
 =============================================================
 
@@ -61,14 +70,8 @@ Ubuntu 22.04 LTS is a supported ROCm distribution, but its default 5.15 kernel i
 built without ``CONFIG_PCI_P2PDMA``. hipFile's fastpath requires that option in
 order to perform peer-to-peer DMA between the GPU and the storage device.
 
-Check the running kernel's configuration:
-
-.. code-block:: none
-
-  $ grep CONFIG_PCI_P2PDMA /boot/config-$(uname -r)
-  # CONFIG_PCI_P2PDMA is not set
-
-``ais-check`` reports the same condition as ``Kernel P2PDMA support : False``.
+``ais-check`` reports this condition as ``Kernel P2PDMA support : False``. To
+confirm it from the kernel configuration, see :ref:`hipfile-check-p2pdma`.
 
 To work around this issue, install the Ubuntu 22.04 hardware enablement (HWE)
 kernel, which is based on 6.8 and enables the option:
@@ -78,8 +81,9 @@ kernel, which is based on 6.8 and enables the option:
   $ sudo apt install linux-generic-hwe-22.04
   $ sudo systemctl reboot
 
-See :ref:`hipfile-kernel-p2pdma` for other distributions, and
-:doc:`/reference/hipFile-kernel-p2pdma-support` for the kernels AMD has tested.
+See :ref:`hipfile-check-p2pdma` for how to check the running kernel on other
+distributions, and :doc:`/reference/hipFile-kernel-p2pdma-support` for the
+kernels AMD has tested.
 
 High memory utilization with hipFile
 ====================================
@@ -151,10 +155,3 @@ lock and results in IOPS that are in line with expectations.
 Lock contention can impact IOPS with I/O sizes < 64KiB and process/thread counts
 >= 16. To work around this issue, use I/O sizes >= 64KiB or use fewer
 threads/processes.
-
-P2PDMA kernel support
-======================
-
-All OS kernels that support P2PDMA pass the fastpath I/O tests except for RHEL 9.8 and RHEL 10.2. A change was backported to RHEL 9.8 and 10.2 that broke DMA mapping for P2PDMA pages that are transferred through the host bridge. These two kernels report ``CONFIG_PCI_P2PDMA=y``, but using P2PDMA on them can cause memory corruption, so don't use the fastpath on these kernels.
-
-RHEL 9.9 and RHEL 10.3, which are in development, contain a fix. See `dma-mapping: direct: fix missing mapping for THRU_HOST_BRIDGE segments <https://github.com/torvalds/linux/commit/560000d619ef162568746ce287f0c725e24ea967>`_.

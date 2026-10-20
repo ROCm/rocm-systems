@@ -25,7 +25,7 @@ see :ref:`ROCm Core SDK components <rocm:release-components>`.
 - ``libmount`` from ``util-linux`` for mount metadata parsing
 - A Linux kernel built with ``CONFIG_PCI_P2PDMA=y`` for the peer-to-peer DMA
   fastpath. hipFile builds and runs without
-  it, but all I/O uses the fallback path. See :ref:`hipfile-kernel-p2pdma` for how
+  it, but all I/O uses the fallback path. See :ref:`hipfile-check-p2pdma` for how
   to check the running kernel, and
   :doc:`/reference/hipFile-kernel-p2pdma-support` for which distribution kernels
   enable the option.

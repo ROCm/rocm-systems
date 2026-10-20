@@ -83,14 +83,13 @@ present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, 
 | ``amdgpu``: The loaded amdgpu kernel driver exposes ``kfd_ais_rw_file`` in ``/proc/kallsyms``.
 | ``hipFile-capable volume``: At least one row in the mounted volumes table has ``HIPFILE`` set to ``yes``.
 
-.. note::
-
-   ``Kernel P2PDMA support : False`` most often means the distribution's kernel
-   was built without ``CONFIG_PCI_P2PDMA``. For example, the Ubuntu 22.04 LTS
-   default 5.15 kernel is not built with ``CONFIG_PCI_P2PDMA``. For
-   how to boot a kernel that enables the option, see
-   :ref:`hipfile-kernel-p2pdma`. For the list of tested distribution kernels,
-   see :doc:`/reference/hipFile-kernel-p2pdma-support`.
+``Kernel P2PDMA support : False`` most often means the distribution's kernel was
+built without ``CONFIG_PCI_P2PDMA``. For example, the Ubuntu 22.04 LTS default
+5.15 kernel is not built with ``CONFIG_PCI_P2PDMA``. For that case, including how
+to boot a kernel that has the option, see :ref:`hipfile-ubuntu-2204-fastpath`. To
+check the running kernel on another distribution, see
+:ref:`hipfile-check-p2pdma`. For the list of tested distribution kernels, see
+:doc:`/reference/hipFile-kernel-p2pdma-support`.
 
 .. note::
 

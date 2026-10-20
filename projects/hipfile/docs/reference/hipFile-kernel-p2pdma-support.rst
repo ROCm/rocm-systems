@@ -8,8 +8,8 @@
 hipFile kernel P2PDMA support
 **********************************
 
-hipFile's fastpath requires a Linux kernel PCIe peer-to-peer DMA (P2PDMA) support. hipFile's fastpath moves data directly between the GPU and the storage device
-using PCIe peer-to-peer DMA. This requires a Linux kernel built with
+hipFile's fastpath moves data directly between the GPU and the storage device
+using PCIe peer-to-peer DMA (P2PDMA). This requires a Linux kernel built with
 ``CONFIG_PCI_P2PDMA=y``. Without it, the fastpath backend cannot run at all.
 
 .. warning::
@@ -42,8 +42,11 @@ configuration files in these directories instead:
 
 .. note::
 
-   ``CONFIG_PCI_P2PDMA`` is a boolean kernel option. It's either compiled into
-   the kernel image or it isn't. It can't be changed.
+   ``CONFIG_PCI_P2PDMA`` is a boolean kernel option that is compiled into the
+   kernel image. It can't be toggled at runtime or with a boot parameter, so a
+   kernel built without it can't be made to support P2PDMA. To get P2PDMA
+   support, boot a kernel that was built with the option, as described in
+   :ref:`hipfile-ubuntu-2204-fastpath` for Ubuntu 22.04.
 
 .. _hipfile-os-vm-testing:
 

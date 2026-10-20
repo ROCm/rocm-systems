@@ -6,8 +6,8 @@
 Limitations
 **********************************
 
-hipFile requires a Linux kernel built with ``CONFIG_PCI_P2PDMA=y``. A kernel
-without peer-to-peer DMA support always goes to fallback mode,
+hipFile requires a Linux kernel built with ``CONFIG_PCI_P2PDMA=y``. On a kernel
+without peer-to-peer DMA support, hipFile always goes to fallback mode,
 regardless of the storage configuration. See :ref:`hipfile-kernel-p2pdma`.
 
 hipFile also requires a direct path from the GPU to the storage device. The

@@ -22,17 +22,9 @@ Linux kernel requirements
 
 hipFile's fastpath requires a Linux kernel built with PCIe peer-to-peer DMA (P2PDMA) support. When no fastpath is available, hipFile uses the fallback path by default, resulting in lower than expected throughput.
 
-Use the following command to read the configuration of the running kernel and determine whether it supports P2PDMA:
-
-.. code:: shell
-
-   grep CONFIG_PCI_P2PDMA /boot/config-$(uname -r)
-
-If ``CONFIG_PCI_P2PDMA=y`` is returned, the kernel supports peer-to-peer DMA.
-If no string is returned or if ``# CONFIG_PCI_P2PDMA is not set`` is returned,
-peer-to-peer DMA isn't supported.
-
-See :doc:`/reference/hipFile-kernel-p2pdma-support` for more information, including a list of tested distribution kernels.
+To check whether the running kernel supports P2PDMA, see
+:ref:`hipfile-check-p2pdma`. For the list of tested distribution kernels, see
+:doc:`/reference/hipFile-kernel-p2pdma-support`.
 
 Install the ROCm Core SDK
 =========================
