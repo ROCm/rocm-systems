@@ -159,6 +159,8 @@ protected:
                                          MemoryAccessDeferredCompletion complete) override;
 
 private:
+  VmAccessOutcome initiate_global_access(VectorMemState &state, Wavefront &wf,
+                                         uint64_t request_lanes);
   L1VectorCache *l1_;
   L2Cache *l2_;
 };
