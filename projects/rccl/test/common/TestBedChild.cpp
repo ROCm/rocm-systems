@@ -12,6 +12,10 @@
 #include <algorithm>
 #include <thread>
 #include <execinfo.h>
+#if defined(RCCL_TEST_CODE_COVERAGE)
+#include <dlfcn.h>
+extern "C" int __llvm_profile_write_file(void);
+#endif
 #ifdef ENABLE_OPENMP
 #include <omp.h>
 #endif
@@ -201,7 +205,14 @@ namespace RcclUnitTesting
     close(this->childReadFd);
     close(this->childWriteFd);
 
-    exit(0);
+#if defined(RCCL_TEST_CODE_COVERAGE)
+    __llvm_profile_write_file();
+    using WriteFn = int (*)(void);
+    auto libWrite = reinterpret_cast<WriteFn>(
+        dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile"));
+    if (libWrite) libWrite();
+#endif
+    _exit(0);
   }
 
   ErrCode TestBedChild::GetUniqueId(std::vector<char>& retValBuf)
