@@ -121,17 +121,9 @@ _LIBRARY_ARCH_DIR_PATTERN = re.compile(
     r"/library/(" + _GFX_ARCH_PATTERN.pattern + r")/"
 )
 
-# Known, explicit stepping-directory aliases, scoped to the library subtree
-# they're documented for (keyed by _library_dir). hipBLASLt and hipSPARSELt ship
-# gfx1250 A0 kernels under library/gfx1250v0/, not a separate target -- it
-# belongs to its base arch, matching the arch in the filenames. This mirrors
-# TensileLite's own explicit build-alias table (tensilelite/Common/
-# Architectures.py: ARCH_BUILD_ALIASES), which defines this exact one entry and
-# no others. Deliberately scoped per library and a literal lookup, not a
-# general "any arch + vN" pattern or a cross-library default: only this one
-# case, for these two libraries, is verified. Neither a different stepping,
-# nor a different library (e.g. rocBLAS, which does not produce this
-# directory today), is guaranteed to want the same treatment.
+# hipBLASLt and hipSPARSELt store gfx1250 A0 kernels under gfx1250v0/,
+# but name the kernels for gfx1250. Keep this alias explicit: other
+# stepping directories may need separate bundles.
 LIBRARY_ARCH_DIR_STEPPING_ALIASES = {
     "hipblaslt/library": {"gfx1250v0": "gfx1250"},
     "hipsparselt/library": {"gfx1250v0": "gfx1250"},
