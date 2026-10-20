@@ -52,10 +52,12 @@ for the alltoall\_wg offload path.  Does not enable GIN plugins.
 | `NCCL_GIN_TYPE` | (auto) | Force a specific backend: `2`=IB proxy, `6`=rocSHMEM GDA, `7`=Anvil SDMA. **Not value-compatible with 2.30.7** (see below). |
 | `NCCL_GIN_ANVIL_SDMA_THRESHOLD` | `128` | Minimum message size (bytes) to use SDMA; smaller messages fall back to the IB proxy |
 | `NCCL_GIN_ANVIL_SDMA_FUSED_SIGNAL` | `0` | Enable fused signal mode for SDMA (experimental) |
+| `NCCL_GIN_ANVIL_SDMA_CONN_CHECK` | `1` | Validate LSA signal connectivity on first bind (LSA team only; skipped under `NCCL_GIN_CONNECTION_RAIL`); set exactly `0` to bypass |
 | `RCCL_GIN_ALLREDUCE_FORCE_ENABLE` | `0` | GIN AllReduce is used only for messages >= 256 MiB by default (smaller sizes use DDA). Set to `1` to also use GIN AllReduce for smaller messages (LSA one-shot / LSA two-shot). |
 | `NCCL_CUMEM_ENABLE` | `0` | Required: GIN needs `hipMemCreate`-based allocations |
 | `NCCL_DMABUF_ENABLE` | `0` | Recommended: enables dmabuf-based MR registration |
 | `NCCL_P2P_DISABLE` | `0` | Set to `1` to force inter-GPU traffic over the network (useful for single-node GIN testing) |
+| `NCCL_IB_MERGE_NICS` | `1` | No effect on GIN: every backend keeps using physical devices and never receives a fused vNIC. Fusion applies to the regular transport only, so it does not need to be disabled |
 
 ### Example: AlltoAll with SDMA backend (8 GPUs, single node)
 
@@ -75,7 +77,6 @@ docker run -it --rm --shm-size 64G \
         -x NCCL_DMABUF_ENABLE=1 \
         -x NCCL_P2P_DISABLE=1 \
         -x NCCL_CROSS_NIC=1 \
-        -x NCCL_IB_MERGE_NICS=0 \
         -x NCCL_MSCCL_ENABLE=0 \
         -x HSA_NO_SCRATCH_RECLAIM=1 \
         -x NCCL_DEBUG=INFO \
@@ -139,4 +140,4 @@ GIN plugin functions from the executable at runtime.
 | `gin_rocshmem_gda_factory.cc` | QueuePair creation, MR registration, topology discovery |
 | `gin_rocshmem_constmem.hip` | Stub `__constant__` definitions for device bitcode linking |
 | `gin_anvil_ipc_table_host.cc` | IPC table management for SDMA |
-| `gin_anvil_sdma_oss7_device.cc` | SDMA OSS7 device helpers |
+| `gin_anvil_conn_check_device.cc` | LSA signal connectivity self-test kernels (device-linked) |

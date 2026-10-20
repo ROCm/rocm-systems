@@ -20,19 +20,14 @@
 #include <utility>
 #include <vector>
 
-#include "hsa/hsa_api_trace_minimal.h"
+#include "hsa/hsa_api_trace.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/dbt/virtual_lds.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/sidecar_metadata.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 #include "scoped_temp.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 extern "C" bool OnLoad(HsaApiTable *table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char *const *failed_tool_names);
@@ -116,7 +111,7 @@ struct FakeSignalValue {
 };
 std::vector<FakeSignalValue> g_fake_signal_values;
 hsa_queue_t *g_last_intercept_registered_queue = nullptr;
-hsa_amd_queue_intercept_handler_t g_fake_intercept_handler = nullptr;
+hsa_amd_queue_intercept_handler g_fake_intercept_handler = nullptr;
 void *g_fake_intercept_user_data = nullptr;
 std::vector<hsa_kernel_dispatch_packet_t> g_last_intercept_written_packets;
 uint64_t g_fake_symbol_kernel_object = 0;
@@ -315,7 +310,7 @@ hsa_status_t HSA_API fake_amd_queue_intercept_create(
 }
 
 hsa_status_t HSA_API fake_amd_queue_intercept_register(hsa_queue_t *queue,
-                                                       hsa_amd_queue_intercept_handler_t callback,
+                                                       hsa_amd_queue_intercept_handler callback,
                                                        void *user_data) {
   g_last_intercept_registered_queue = queue;
   g_fake_intercept_handler = callback;
@@ -979,8 +974,8 @@ make_translated_metadata_elf(uint32_t mach, const std::vector<VirtualLdsMetadata
 struct VirtualLdsRegistrationForTest {};
 
 VirtualLdsRegistrationForTest register_virtual_lds_kernel_for_test(
-    FakeApiTable &api, const rocr::llvm::amdhsa::kernel_descriptor_t &normal_descriptor,
-    const rocr::llvm::amdhsa::kernel_descriptor_t &virtual_descriptor, uint32_t static_lds_bytes,
+    FakeApiTable &api, const rocjitsu::amdhsa::kernel_descriptor_t &normal_descriptor,
+    const rocjitsu::amdhsa::kernel_descriptor_t &virtual_descriptor, uint32_t static_lds_bytes,
     uint32_t kernarg_size = 0,
     uint32_t backing_pointer_kernarg_offset = kVirtualLdsWrapperStateOffsetForTest,
     uint16_t flags = kVirtualLdsWrapperFlagsForTest, bool resolve_symbol_by_name = true,
@@ -1789,7 +1784,7 @@ TEST(HsaHooksUnitTest, GuestShutdownKeepsHookInstalledForProcessLifetime) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsSymbolInfoReportsNormalDescriptorUntilPacketFallback) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -1850,7 +1845,7 @@ TEST(HsaHooksUnitTest, VirtualLdsSymbolInfoReportsNormalDescriptorUntilPacketFal
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRegistryKeepsFittingDispatchOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -1944,7 +1939,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRegistryKeepsFittingDispatchOnNormalDescriptor)
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRegistryResolvesKernelObjectFromIteratedSymbol) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2015,7 +2010,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRegistryResolvesKernelObjectFromIteratedSymbol)
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRegistryRejectsSidecarDescriptorAsPacketInput) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2137,7 +2132,7 @@ TEST(HsaHooksUnitTest, QueueDoorbellSignalStoreIsForwardedAfterTrackedQueueScan)
 }
 
 TEST(HsaHooksUnitTest, QueueDoorbellRaisesPacketPrivateSizeFromDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2203,7 +2198,7 @@ TEST(HsaHooksUnitTest, QueueDoorbellRaisesPacketPrivateSizeFromDescriptor) {
 }
 
 TEST(HsaHooksUnitTest, MultiProducerDoorbellRewritesEarlierPublishedPacket) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   // Fallback (non-intercept) multi-producer path: a producer publishes two ready
   // packets and rings once with the FINAL packet id. Packet 0 needs virtual-LDS
@@ -2264,7 +2259,7 @@ TEST(HsaHooksUnitTest, MultiProducerDoorbellRewritesEarlierPublishedPacket) {
 }
 
 TEST(HsaHooksUnitTest, MultiProducerHoleCloseAdvancesFrontierAcrossReadySuffix) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   // Regression for the stranded-frontier bug: on a size-4 multi-producer queue an
   // out-of-order ring publishes a ready suffix ABOVE an unready hole, the hole
@@ -2364,7 +2359,7 @@ TEST(HsaHooksUnitTest, MultiProducerHoleCloseAdvancesFrontierAcrossReadySuffix) 
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteWorksWithoutLoadedCodeObjectOutput) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2444,7 +2439,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteWorksWithoutLoadedCodeObjectOutput) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsScannerKeepsDestroyedSignalSlotUntilReuse) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2522,7 +2517,7 @@ TEST(HsaHooksUnitTest, VirtualLdsScannerKeepsDestroyedSignalSlotUntilReuse) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteCopiesOriginalKernargIntoWrapperPrefix) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2602,7 +2597,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteCopiesOriginalKernargIntoWrapperPrefix) 
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsBelowThresholdDispatchOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2652,7 +2647,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsBelowThresholdDispatchOnNormalDescr
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsExactHardwareLimitOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2700,7 +2695,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsExactHardwareLimitOnNormalDescripto
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsStaticPlusDynamicLimitOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2749,7 +2744,7 @@ TEST(HsaHooksUnitTest, VirtualLdsRewriteKeepsStaticPlusDynamicLimitOnNormalDescr
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptRewritePublishesWrapperKernarg) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2838,7 +2833,7 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptRewritePublishesWrapperKernarg) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptReleasesCompletedRetiredBuffers) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2914,7 +2909,7 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptReleasesCompletedRetiredBuffers) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptReleasesBorrowedSignalBeforeDestroy) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -2981,7 +2976,7 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptReleasesBorrowedSignalBeforeDestroy) {
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsBelowThresholdPacketOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -3037,7 +3032,7 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsBelowThresholdPacketOnNormalDescr
 }
 
 TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsStaticPlusDynamicLimitOnNormalDescriptor) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -3095,7 +3090,7 @@ TEST(HsaHooksUnitTest, VirtualLdsInterceptKeepsStaticPlusDynamicLimitOnNormalDes
 }
 
 TEST(HsaHooksUnitTest, DoorbellForwardsOversizedPacketOnUnrelatedAgentQueueUnchanged) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -3140,7 +3135,7 @@ TEST(HsaHooksUnitTest, DoorbellForwardsOversizedPacketOnUnrelatedAgentQueueUncha
 }
 
 TEST(HsaHooksUnitTest, InterceptForwardsOversizedPacketOnUnrelatedAgentQueueUnchanged) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   reset_pool_blocker(false);
   reset_queue_fakes();
@@ -3254,7 +3249,7 @@ TEST(HsaHooksUnitTest, LoadOnUnrelatedAgentForwardsMalformedMetadataImageUnchang
 }
 
 TEST(HsaHooksUnitDeathTest, InterceptGuestUnregisteredOversizedDispatchAborts) {
-  using rocr::llvm::amdhsa::kernel_descriptor_t;
+  using rocjitsu::amdhsa::kernel_descriptor_t;
 
   // fork-based death test: the guest queue's intercept handler runs synchronously
   // (no scanner jthread on the intercept path), so aborting inside it is safe to

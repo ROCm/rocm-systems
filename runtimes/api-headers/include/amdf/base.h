@@ -64,14 +64,44 @@ static inline void amdf_abort(void) { abort(); }
 extern "C" {
 #endif
 
-/// Version number identifying a compatible public API table layout.
+/// Version number identifying a compatible public API layout and contract.
 typedef uint32_t amdf_abi_version_t;
 
-/// The first supported libamdf ABI version.
+/// The original libamdf ABI version.
 #define AMDF_ABI_VERSION_1 ((amdf_abi_version_t)1)
 
+/// Memory visibility qualification and explicit registered-page cacheability.
+#define AMDF_ABI_VERSION_2 ((amdf_abi_version_t)2)
+
+/// Exact prospective CREATE payload geometry in construction capabilities.
+#define AMDF_ABI_VERSION_3 ((amdf_abi_version_t)3)
+
+/// Final queue destruction consumes handles on native cleanup failure.
+#define AMDF_ABI_VERSION_4 ((amdf_abi_version_t)4)
+
+/// Activated kernel queue information includes native notification types.
+#define AMDF_ABI_VERSION_5 ((amdf_abi_version_t)5)
+
+/// Stable reservations, ordinary backing sources and queue-ordered mappings.
+#define AMDF_ABI_VERSION_6 ((amdf_abi_version_t)6)
+
+/// Checked mapping removal independent of reservation destruction.
+#define AMDF_ABI_VERSION_7 ((amdf_abi_version_t)7)
+
+/// Stable host reservations and explicitly remappable CPU backing.
+#define AMDF_ABI_VERSION_8 ((amdf_abi_version_t)8)
+
+/// Live reservation capabilities include whole-backing source requirements.
+#define AMDF_ABI_VERSION_9 ((amdf_abi_version_t)9)
+
+/// Explicit placement of host-owned backing with qualified device accesses.
+#define AMDF_ABI_VERSION_10 ((amdf_abi_version_t)10)
+
+/// Native file-buffer views, optional memory routes, and I/O visibility sites.
+#define AMDF_ABI_VERSION_11 ((amdf_abi_version_t)11)
+
 /// The most recent ABI version described by this header.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_1
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_11
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"
@@ -95,6 +125,8 @@ enum amdf_status_domain_e {
   AMDF_STATUS_DOMAIN_ERRNO = 3,
   /// Windows Win32 error values returned by `GetLastError`.
   AMDF_STATUS_DOMAIN_WIN32 = 4,
+  /// Failed Windows COM/DXGI/D3D HRESULT values.
+  AMDF_STATUS_DOMAIN_HRESULT = 5,
 };
 
 /// Portable status code used with `AMDF_STATUS_DOMAIN_API`.
@@ -202,6 +234,16 @@ enum amdf_structure_type_e {
   AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO = 19,
   /// An `amdf_memory_access_capabilities_t` output structure.
   AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES = 20,
+  /// An `amdf_memory_profile_pair_query_t` input structure.
+  AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY = 21,
+  /// Live address-domain reservation and mapping limits.
+  AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CAPABILITIES = 22,
+  /// Explicit live consumers and geometry for a stable reservation.
+  AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_CREATE_INFO = 23,
+  /// Cached stable address and alias-domain facts for one consumer.
+  AMDF_STRUCTURE_TYPE_MEMORY_RESERVATION_ACCESS_INFO = 24,
+  /// Host CPU locality captured while opening an endpoint.
+  AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY = 25,
 };
 
 /// Identifier of an optional API table compiled into the providing library.
@@ -211,6 +253,8 @@ enum amdf_extension_id_e {
   AMDF_EXTENSION_XDNA = 1,
   /// GPU endpoint qualification and execution services.
   AMDF_EXTENSION_GPU = 2,
+  /// Portable timing and observation services, independent of device families.
+  AMDF_EXTENSION_OBSERVATION = 3,
 };
 
 /// Common prefix of every extensible input structure.
@@ -260,52 +304,6 @@ typedef struct amdf_user_queue_mapping_t amdf_user_queue_mapping_t;
 /// Kernel-mediated publication and retirement of native commands.
 typedef struct amdf_kernel_queue_t amdf_kernel_queue_t;
 
-/// Allocates one uninitialized host-memory range.
-///
-/// `byte_length` is nonzero. `minimum_alignment` is a power of two and at
-/// least the platform's natural maximum alignment. Returns a suitably aligned
-/// allocation or `NULL` when storage is unavailable. The callback must be
-/// thread-safe and must not throw or unwind across the C ABI.
-typedef void*(AMDF_CALL* amdf_allocator_allocate_fn_t)(
-    void* user_data, uint64_t byte_length, uint64_t minimum_alignment);
-
-/// Resizes one host-memory allocation without changing it on failure.
-///
-/// `allocation` was returned by the same allocator. Success preserves the
-/// lesser of `old_byte_length` and `new_byte_length` bytes and returns a
-/// suitably aligned allocation. Returning `NULL` leaves `allocation` live and
-/// unchanged. The callback must be thread-safe and must not throw or unwind
-/// across the C ABI.
-typedef void*(AMDF_CALL* amdf_allocator_resize_fn_t)(
-    void* user_data, void* allocation, uint64_t old_byte_length,
-    uint64_t new_byte_length, uint64_t minimum_alignment);
-
-/// Frees one host-memory allocation returned by the same allocator.
-///
-/// `allocation` may be `NULL`. The callback is infallible, must be thread-safe,
-/// and must not throw or unwind across the C ABI.
-typedef void(AMDF_CALL* amdf_allocator_free_fn_t)(void* user_data,
-                                                  void* allocation);
-
-/// Instance-scoped host-memory allocator used by libamdf-owned metadata.
-///
-/// An all-zero value selects the built-in system allocator. Otherwise
-/// `allocate` and `free` are required. `resize` may be `NULL`, in which case
-/// libamdf implements resize with allocate-copy-free. The value is copied when
-/// the instance is created; `user_data` and callback code must remain valid
-/// until instance destruction succeeds. Native device backing and operating
-/// system allocations do not use this allocator.
-typedef struct amdf_allocator_t {
-  /// Opaque value passed to every callback.
-  void* user_data;
-  /// Required uninitialized allocation callback.
-  amdf_allocator_allocate_fn_t allocate;
-  /// Optional allocation-resize callback.
-  amdf_allocator_resize_fn_t resize;
-  /// Required infallible release callback.
-  amdf_allocator_free_fn_t free;
-} amdf_allocator_t;
-
 /// Maximum lifetime permitted for native state acquired by an instance.
 ///
 /// Resources may be released earlier. This policy neither changes public
@@ -338,8 +336,6 @@ typedef struct amdf_instance_create_info_t {
   amdf_native_lifetime_t native_lifetime;
   /// Reserved for compatible growth and must be zero.
   uint32_t reserved;
-  /// Host allocator copied and used by this instance and all of its children.
-  amdf_allocator_t host_allocator;
 } amdf_instance_create_info_t;
 
 /// Opaque provider identity used to reopen one enumerated endpoint.
@@ -459,6 +455,46 @@ typedef struct amdf_pci_info_t {
   uint32_t revision_id;
 } amdf_pci_info_t;
 
+/// Native namespace used to correlate an endpoint with another API provider.
+typedef uint32_t amdf_endpoint_native_identity_type_t;
+enum amdf_endpoint_native_identity_type_e {
+  /// No native correlation identity is available.
+  AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_NONE = 0,
+  /// Linux character-device major/minor numbers.
+  AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE = 1,
+  /// Windows adapter LUID and physical-adapter index.
+  AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER = 2,
+};
+
+/// Passive identity for matching contemporaneous native API providers.
+///
+/// This value conveys neither a native handle nor ownership. It is not stable
+/// across device removal or reboot. Matching identifies the native device;
+/// foreign-driver, memory-transport and access compatibility still require
+/// their own qualification. The opaque endpoint id remains the value used to
+/// open libamdf endpoints.
+typedef struct amdf_endpoint_native_identity_t {
+  /// Native namespace selecting the active member of `value`.
+  amdf_endpoint_native_identity_type_t type;
+  /// Native identity in the namespace selected by `type`.
+  union {
+    /// Linux DRM render node for GPU endpoints, accelerator node for XDNA.
+    struct {
+      /// Character-device major number, as returned by `major(st_rdev)`.
+      uint32_t major;
+      /// Character-device minor number, as returned by `minor(st_rdev)`.
+      uint32_t minor;
+    } linux_device;
+    /// Windows logical adapter and the endpoint's physical adapter within it.
+    struct {
+      /// LUID bits: `(uint64_t)(uint32_t)HighPart << 32 | LowPart`.
+      uint64_t luid;
+      /// KMT physical-adapter index within the logical adapter.
+      uint32_t physical_adapter_index;
+    } windows_adapter;
+  } value;
+} amdf_endpoint_native_identity_t;
+
 /// Fixed-stride endpoint identity returned by `endpoint_enumerate`.
 ///
 /// This structure is immutable for ABI v1. It contains no pointers, extension
@@ -480,7 +516,7 @@ typedef struct amdf_endpoint_info_t {
   amdf_structure_type_t type;
   /// Must be at least `sizeof(amdf_endpoint_info_t)`.
   uint32_t structure_size;
-  /// Optional output extension chain. No extensions are defined in ABI v1.
+  /// Optional `amdf_endpoint_host_locality_t` output extension.
   void* next;
   /// Opaque identity used to open this endpoint.
   amdf_endpoint_id_t id;
@@ -494,7 +530,29 @@ typedef struct amdf_endpoint_info_t {
   char name[AMDF_ENDPOINT_NAME_CAPACITY];
   /// Number of immutable endpoint-local native queue families.
   uint32_t queue_family_count;
+  /// Cached native identity for matching other API providers before activation.
+  amdf_endpoint_native_identity_t native_identity;
 } amdf_endpoint_info_t;
+
+/// Host CPU locality captured by `endpoint_open` without device activation.
+///
+/// Append to `amdf_endpoint_info_t::next`. This is a native topology hint,
+/// independent of GPU memory placement and queue topology. The caller owns
+/// affinity policy, including application overrides and allowed CPU sets.
+/// The snapshot does not follow later CPU hotplug or topology changes.
+typedef struct amdf_endpoint_host_locality_t {
+  /// Must be `AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY`.
+  amdf_structure_type_t type;
+  /// Must be at least `sizeof(amdf_endpoint_host_locality_t)`.
+  uint32_t structure_size;
+  /// Must be NULL; no further endpoint output extensions are defined.
+  void* next;
+  /// OS NUMA node with online host CPUs at the endpoint's attachment, or
+  /// UINT32_MAX when unavailable or when that node has no online CPUs.
+  /// Zero is a valid node. This is neither a GPU memory node nor a Windows
+  /// processor group, and does not imply permission to run on those CPUs.
+  uint32_t numa_node;
+} amdf_endpoint_host_locality_t;
 
 #ifdef __cplusplus
 }  // extern "C"

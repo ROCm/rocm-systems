@@ -37,7 +37,7 @@ ncclGin
       *peer* is a rank within *team* (see :ref:`devapi_teams`); it may refer to the local rank (a loopback).  The destination
       and source buffers are each specified using the window (*dstWnd*, *srcWnd*) and a byte-based offset (*dstOffset*,
       *srcOffset*).  *bytes* specifies the data transfer count in bytes. If GIN is initialized with connection
-      type :c:macro:`NCCL_GIN_CONNECTION_RAIL`, *peer* must be within the same rail team as the local rank.
+      type :c:enumerator:`NCCL_GIN_CONNECTION_RAIL <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_RAIL>`, *peer* must be within the same rail team as the local rank.
 
       Arguments beyond the first seven are optional.  *remoteAction* and *localAction* specify actions
       to undertake on the destination peer and on the local rank when the payload has been settled and the input has been
@@ -66,7 +66,7 @@ ncclGin
       *peer* is a rank within *team* (see :ref:`devapi_teams`); it may refer to the local rank (a loopback).  The remote
       and local buffers are each specified using the window (*remoteWnd*, *localWnd*) and a byte-based offset (*remoteOffset*,
       *localOffset*).  *bytes* specifies the data transfer count in bytes. If GIN is initialized with connection
-      type :c:macro:`NCCL_GIN_CONNECTION_RAIL`, *peer* must be within the same rail team as the local rank.
+      type :c:enumerator:`NCCL_GIN_CONNECTION_RAIL <ncclGinConnectionType_t.NCCL_GIN_CONNECTION_RAIL>`, *peer* must be within the same rail team as the local rank.
       *bufType* specifies the physical memory composition of the source and destination buffers (see
       :ref:`devapi_segment_types`); it defaults to ``ncclGin_SegmentDevice``.
 
@@ -250,9 +250,10 @@ ncclGinBarrierSession
    .. cpp:function:: ncclGinBarrierSession(Coop coop, ncclGin gin, ncclTeamTagRail tag, uint32_t index)
 
       Initializes a new network barrier session.  *coop* represents a cooperative group (see :ref:`devapi_coops`).  *gin* is
-      a previously initialized :cpp:class:`ncclGin` object.  *ncclTeamTagRail* indicates that the barrier will apply to all
-      peers on the same rail as the local rank (see :ref:`devapi_teams`).  *index* identifies the underlying barrier to use
-      (it should be different for each *coop*; typically set to ``blockIdx.x`` to ensure uniqueness between CTAs).
+      a previously initialized :cpp:class:`ncclGin` object (or pass ``ncclGinAllContexts`` instead; see below).
+      *ncclTeamTagRail* indicates that the barrier will apply to all peers on the same rail as the local rank (see
+      :ref:`devapi_teams`).  *index* identifies the underlying barrier to use (it should be different for each *coop*;
+      typically set to ``blockIdx.x`` to ensure uniqueness between CTAs).
 
    .. cpp:function:: ncclGinBarrierSession(Coop coop, ncclGin gin, ncclTeam team, ncclGinBarrierHandle handle, uint32_t index)
 
@@ -261,6 +262,17 @@ ncclGinBarrierSession
       This variant expects *team* to be passed as an argument, and also takes an extra *handle* argument indicating the
       location of the underlying barriers (typically set to the ``railGinBarrier`` field of the device communicator).
 
+   .. cpp:function:: ncclGinBarrierSession(Coop coop, ncclGinAllContexts allCtx, ncclTeam team, ncclGinBarrierHandle handle, uint32_t index)
+   .. cpp:function:: ncclGinBarrierSession(Coop coop, ncclGinAllContexts allCtx, ncclTeamTagRail tag, uint32_t index)
+   .. cpp:function:: ncclGinBarrierSession(Coop coop, ncclGinAllContexts allCtx, ncclTeamTagWorld tag, uint32_t index)
+
+      Same as the single-context constructors, but arrival signaling and fencing iterate every GIN context on the comm.
+      Signaling on each context preserves ordering when puts and signals use different network queue pairs. Use this when
+      puts or gets were sharded across ``ginContextCount`` contexts and a ``Put`` or ``Get`` fence must drain all of them.
+      On the Anvil SDMA backend those contexts currently share one signal array, so a second AllContexts barrier in the
+      same kernel can observe the first barrier's counts (AICOMRCCL-2339). That is a plugin follow-up; the constructors
+      here still iterate every context.
+
    .. cpp:function:: void sync(Coop coop, cuda::memory_order order, ncclGinFenceLevel fence = ncclGinFenceLevel::Put | ncclGinFenceLevel::Get)
 
       Synchronizes all threads of all team members that participate in the barrier session. The *fence* argument is a
@@ -268,12 +280,72 @@ ncclGinBarrierSession
       defaults to ``ncclGinFenceLevel::Put | ncclGinFenceLevel::Get`` so callers who do not opt in explicitly get the
       strongest guarantee:
 
-      * ``ncclGinFenceLevel::None`` — pure synchronization, no drain.
+      * ``ncclGinFenceLevel::None`` — no put or get drain. Choose this when the kernel already waits on
+        signals and calls ``gin.flush`` (for example AlltoAll that uses ``waitSignal``).
       * ``ncclGinFenceLevel::Put`` — after the barrier returns, puts issued by other team members targeting the
-        calling rank prior to the barrier are visible in the calling rank's memory.
+        calling rank prior to the barrier are visible in the calling rank's memory. Self-puts (loopback to this rank)
+        issued before the barrier are included.
       * ``ncclGinFenceLevel::Get`` — after the barrier returns, gets issued by the calling rank prior to the barrier have
-        landed in the calling rank's local memory.
+        landed in the calling rank's local memory. Requires a backend that implements ``gin.get``.
 
       The fence values are bit flags and compose via bitwise OR. To request both ``Put`` and ``Get`` semantics, pass
-      ``ncclGinFenceLevel::Put | ncclGinFenceLevel::Get``. ``ncclGinFenceLevel::Relaxed`` is preserved as a deprecated alias
-      for ``None`` for source-level backward compatibility; new code should use ``None``.
+      ``ncclGinFenceLevel::Put | ncclGinFenceLevel::Get``. That combination is the default if *fence* is omitted.
+      ``ncclGinFenceLevel::Relaxed`` is preserved as a deprecated alias for ``None`` for source-level backward
+      compatibility; new code should use ``None``.
+
+   .. cpp:function:: ncclResult_t sync(Coop coop, cuda::memory_order order, ncclGinFenceLevel fence, uint64_t timeoutCycles)
+
+      Same fence contract as the overload without a timeout. Returns ``ncclTimeout`` if not every team member arrives
+      within *timeoutCycles*. The fence still applies when the call returns success.
+
+ncclBarrierSession
+------------------
+
+.. cpp:class:: template<typename Coop> ncclBarrierSession
+
+   A class representing a hybrid barrier session.  It combines a memory barrier over the :ref:`LSA <device_api_lsa>`
+   team (:cpp:class:`ncclLsaBarrierSession`) with a network barrier (:cpp:class:`ncclGinBarrierSession`).
+
+   .. cpp:function:: ncclBarrierSession(Coop coop, ncclTeamTagWorld tag, ncclGin gin, uint32_t index, bool multimem = false)
+
+      Initializes a new hybrid barrier session covering the world team (see :ref:`devapi_teams`).  *coop* represents a
+      cooperative group (see :ref:`devapi_coops`).  *gin* is a previously initialized :cpp:class:`ncclGin` object,
+      used for the network part of the barrier.  *index* identifies the underlying barrier to use (it should be
+      unique for each *coop*; typically set to ``blockIdx.x`` to ensure uniqueness between CTAs).  *multimem*
+      requests memory multicast for the LSA part of the barrier.
+
+   .. cpp:function:: ncclBarrierSession(Coop coop, ncclTeamTagRail tag, ncclGin gin, uint32_t index)
+
+      Initializes a new hybrid barrier session covering the rail team, i.e., all peers on the same rail as the local
+      rank (see :ref:`devapi_teams`).
+
+   .. cpp:function:: ncclBarrierSession(Coop coop, ncclTeamTagLsa tag, ncclDevComm const& comm, uint32_t index, bool multimem = false)
+
+      Initializes a new hybrid barrier session covering the LSA team.  Since no network traffic is involved, this
+      variant takes the device communicator *comm* (created using :c:func:`ncclDevCommCreate`) instead of an
+      :cpp:class:`ncclGin` object, and only the LSA barrier takes part in the session.
+
+   .. cpp:function:: ncclBarrierSession(Coop coop, ncclTeam innerTeam, ncclTeam outerTeam, ncclGin gin, \
+        ncclLsaBarrierHandle innerBarHandle, ncclGinBarrierHandle outerBarHandle, uint32_t index, \
+        bool multimem = false, ncclMultimemHandle innerMmHandle = {})
+
+      Initializes a new hybrid barrier session.  This is the general-purpose variant, to be used when the teams and
+      the barrier locations are not the ones baked into the constructors above.  *innerTeam* and *innerBarHandle*
+      describe the memory barrier, while *outerTeam* and *outerBarHandle* describe the network barrier. *innerMmHandle* provides
+      the multicast handle backing the *multimem* implementation of the memory barrier.
+
+   .. cpp:function:: void sync(Coop coop, cuda::memory_order order, \
+        ncclGinFenceLevel fence = ncclGinFenceLevel::Put | ncclGinFenceLevel::Get)
+
+      Synchronizes all threads of all team members that participate in the barrier session.  *fence* selects which
+      prior network operations must be complete after the barrier returns; it has the same meaning and the same
+      default as in :cpp:func:`ncclGinBarrierSession::sync`.
+
+      The selected barrier implementation is decided at run-time from the session's team, the GIN connectivity of the device communicator
+      (see :c:member:`ginConnectionType`), and *fence*.
+
+   .. cpp:function:: ncclLsaBarrierSession<Coop>& lsaBarrier()
+   .. cpp:function:: ncclGinBarrierSession<Coop>& ginBarrier()
+
+      Returns the reference to the memory barrier or the rail network barrier underlying this hybrid session, so that it can be
+      driven individually.

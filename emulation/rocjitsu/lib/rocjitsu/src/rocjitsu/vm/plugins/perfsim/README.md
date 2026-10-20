@@ -2,17 +2,18 @@
 
 ## What is it
 
-This optional Linux plugin forwards supported RocJITsu execution events
-to a separately supplied performance-simulation backend.
+This optional Linux plugin forwards supported gfx1250 RocJITsu execution events
+to a separately supplied Perfsim backend implementing FFM observer API versions
+8 through 13.
 
 ## How to install
 
 The build below installs the RocJITsu adapter as
 `librocjitsu_plugin_perfsim.so`. Its Perfsim backend is not included with
 RocJITsu; obtain or build the backend's `libgpucsim_ffm_plugin.so` shared
-library separately. The backend must support observer ABI version 8; other ABI
-versions are rejected during initialization. Its Linux runtime dependencies
-must also be compatible with the launch environment.
+library separately. The backend must support an observer ABI version from 8
+through 13; versions outside that range are rejected during initialization. Its
+Linux runtime dependencies must also be compatible with the launch environment.
 
 From the repository root, build and install RocJITsu with the adapter enabled:
 
@@ -60,12 +61,91 @@ For a larger trace, the budget can be raised explicitly:
 The 1 GiB value is only an example, not a recommended default. A larger budget
 trades host memory for trace coverage, and some known traces exceed even 1 GiB.
 
+To profile one kernel in a multi-dispatch application, set `dispatch_name` to
+the exact normalized display name shown in quotes in RocJITsu's VM dispatch
+log:
+
+```json
+"perfsim": {
+  "library_path": "/absolute/path/to/libgpucsim_ffm_plugin.so",
+  "dispatch_name": "_topk_topp_kernel"
+}
+```
+
+For example, the mangled ELF symbol `_Z11racy_kernelPKfPf` has the normalized
+display name `racy_kernel`: demangling removes its argument list, a leading
+`void `, and whitespace. A VM dispatch log line contains both forms:
+
+```text
+dispatch #1 d=0 "racy_kernel" symbol="_Z11racy_kernelPKfPf" ...
+```
+
+Copy the quoted display name, not the `symbol="..."` field. Copying a mangled
+symbol can therefore miss, and overloads that normalize to the same display
+name are selected together.
+
+Nonmatching dispatches still execute normally in RocJITsu, including their
+functional memory effects. The adapter only suppresses their observer event
+staging and replay into Perfsim. Matching is exact; it is neither a prefix nor
+a regular-expression match. If `dispatch_name` is absent, every supported
+dispatch is forwarded exactly as before. If no dispatch matches the configured
+name, the adapter reports that name once when the plugin shuts down.
+
+For diagnostic runs, `max_observed_workgroups` can additionally cap the number
+of distinct workgroups whose events are staged for each selected dispatch:
+
+```json
+"perfsim": {
+  "library_path": "/absolute/path/to/libgpucsim_ffm_plugin.so",
+  "dispatch_name": "_topk_topp_kernel",
+  "max_observed_workgroups": 1
+}
+```
+
+The cap admits the first distinct RocJITsu workgroup IDs encountered in
+wave-dispatch order; after an ID is admitted, all of that workgroup's observed
+waves remain eligible. The cap does not skip functional execution. It only
+limits observer events, and is disabled when omitted. A capped trace is
+incomplete and must not be treated as an exact full-grid result unless the
+backend explicitly reconstructs the full population from dispatch geometry and
+the workload satisfies that backend's scaling assumptions.
+
 Configure Perfsim through its own environment, then launch the workload:
 
 ```bash
 /absolute/path/to/install/bin/rocjitsu \
   --config /absolute/path/to/gfx1250-config.json -- ./application
 ```
+
+`GPUCSIM_INTERNAL_DETAILED_REPORT=1` is a diagnostic option implemented by
+recent `libgpucsim_ffm_plugin.so` builds, not by the RocJITsu adapter. It asks
+the backend to emit its internal detailed JSON schema, including fields such as
+`dispatch_id`. Leave it unset (or set it to `0`) for the stable public summary
+schema. The detailed schema is intended for backend qualification and tests,
+may change with the backend, and should not be treated as a customer-facing
+report contract. The real-backend parity test enables it itself because that
+test compares dispatches individually.
+
+## Backend ABI
+
+The adapter contains a private, non-installed declaration of only the latest
+FFM observer binary prefix that it consumes. The declaration is limited to the
+validated little-endian Linux LP64 GCC/Clang ABI. The separately built Perfsim
+library must export `ffm_observer_plugin_get_api`, negotiate an API version from
+8 through 13, and provide the required lifecycle, instruction, regular-memory,
+and tensor-DMA callbacks. The adapter requests versions from newest to oldest
+and passes the negotiated version back through `FfmHostApi::api_version`.
+
+The ABI additions consumed here are append-only: v8 backends read the legacy
+payload prefixes, while newer backends additionally receive the v9 dispatch
+name from dispatch-owned storage, the v12 host logger through the configured
+RocJITsu sink, and the v13 tensor-DMA descriptor geometry. Tensor-DMA descriptor
+strides are converted from element units to the byte units required by the v13
+callback.
+
+These FFM versions do not expose a table size or ABI fingerprint, and `on_init`
+returns no status. Qualify the exact Perfsim build with a known dispatch and
+require a nonempty report containing that dispatch.
 
 ## Real-world example: GPT-OSS kernels
 
@@ -78,7 +158,10 @@ a helper module on first use.
 ### Use Rocjitsu
 
 Use a Python environment containing ROCm Torch, Triton, and NumPy to run the
-GPT-OSS `_rms_norm_kernel/D1` corpus case. Run it directly with RocJITsu:
+GPT-OSS `_rms_norm_kernel/D1` corpus case. A tested stack used Python 3.12.14,
+ROCm PyTorch `2.10.0+rocm7.13.0a20260511` (HIP 7.13.0), Triton `3.6.0`, and
+NumPy `2.5.2`. These are example versions, not minimum plugin requirements.
+Run it directly with RocJITsu:
 
 ```bash
 export GPT_OSS=/absolute/path/to/gpt-oss-kernel-harness

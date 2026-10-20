@@ -76,6 +76,24 @@ architecture_t::cwsr_record_t::architecture () const
   return queue ().architecture ();
 }
 
+std::optional<std::array<uint32_t, 3>>
+architecture_t::cwsr_record_t::cluster_ids () const
+{
+  /* By default, even when the dispatch is not in cluster mode, we
+     think of a workgroup being in a single-workgroup cluster.  In
+     that case, the cluster is positioned at the same location with
+     the workgroup it contains.  */
+  return group_ids ();
+}
+
+std::array<uint32_t, 3>
+architecture_t::cwsr_record_t::nwg_in_cluster () const
+{
+  /* By default, there is a single workgroup.  See the comment in
+     cluster_ids above.  */
+  return {1, 1, 1};
+}
+
 /* Base class for all AMDGCN architectures.  */
 
 class amdgcn_architecture_t : public architecture_t
@@ -2455,11 +2473,6 @@ protected:
       return utils::bit_extract (relaunch_wave, 11, 12);
     }
     static constexpr uint32_t
-    compute_relaunch_wave_payload_scratch_en (uint32_t relaunch_wave)
-    {
-      return utils::bit_extract (relaunch_wave, 15, 15);
-    }
-    static constexpr uint32_t
     compute_relaunch_wave_payload_last_wave (uint32_t relaunch_wave)
     {
       return utils::bit_extract (relaunch_wave, 16, 16);
@@ -2491,9 +2504,6 @@ protected:
     /* Number of scalar registers.  */
     size_t sgpr_count () const override;
 
-    /* Return true is a scratch slot is allocated for this record.  */
-    bool is_scratch_enabled () const override;
-
     /* The shader engine ID this wave was created on.  */
     uint32_t shader_engine_id () const override;
     /* Scratch region slot ID.  */
@@ -2523,9 +2533,12 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const
   {
     dbgapi_assert (compute_relaunch_state.size () == 1);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
@@ -2594,7 +2607,15 @@ public:
   std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
   scratch_memory_region (
     const agent_t &agent, uint32_t compute_tmpring_size_register,
+    amd_dbgapi_global_address_t scratch_backing_memory_address,
     const architecture_t::cwsr_record_t &cwsr_record) const override;
+
+  amd_dbgapi_size_t
+  scratch_memory_allocation (
+    uint32_t compute_tmpring_size_register) const override;
+
+  amd_dbgapi_size_t
+  scratch_memory_size (uint32_t compute_tmpring_size_register) const override;
 
   std::vector<agent_t::aperture_t>
   get_apertures (const os_agent_info_t &info) const override;
@@ -2828,12 +2849,6 @@ size_t
 gfx9_architecture_t::cwsr_record_t::hwreg_count () const
 {
   return 32;
-}
-
-bool
-gfx9_architecture_t::cwsr_record_t::is_scratch_enabled () const
-{
-  return compute_relaunch_wave_payload_scratch_en (m_compute_relaunch_wave);
 }
 
 uint32_t
@@ -3353,6 +3368,7 @@ gfx9_architecture_t::control_stack_iterate (
 {
   size_t wave_count = 0;
   std::vector<uint32_t> state (num_compute_relaunch_states (), 0);
+  bool in_cluster_so_far = false;
 
   agent_address_t last_wave_area = wave_area_address;
 
@@ -3374,10 +3390,17 @@ gfx9_architecture_t::control_stack_iterate (
         }
       else
         {
+          /* cwsr_record_t ctor marks the CWSR record to be in cluster mode
+             if the record is the first wave of a cluster, even if
+             in_cluster_so_far is false.  */
           auto cwsr_record
             = make_cwsr_record (queue, xcc_id, relaunch, state,
                                 last_wave_area
-                                - context_save_area_adjustment ());
+                                - context_save_area_adjustment (),
+                                in_cluster_so_far);
+          in_cluster_so_far
+            = ((in_cluster_so_far || cwsr_record->is_first_of_cluster ())
+               && !cwsr_record->is_last_of_cluster ());
 
           last_wave_area = cwsr_record->begin ();
           wave_callback (std::move (cwsr_record));
@@ -3414,14 +3437,15 @@ gfx9_architecture_t::dispatch_packet_id (
 std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
 gfx9_architecture_t::scratch_memory_region (
   const agent_t &agent, uint32_t compute_tmpring_size_register,
+  amd_dbgapi_global_address_t scratch_backing_memory_address,
   const architecture_t::cwsr_record_t &cwsr_record) const
 {
   /* Total size of allocated scratch memory in number of waves.  */
   amd_dbgapi_size_t waves
-    = utils::bit_extract (compute_tmpring_size_register, 0, 11);
+    = scratch_memory_allocation (compute_tmpring_size_register);
   /* Amount of space in bytes used by each wave.  */
   amd_dbgapi_size_t wavesize
-    = utils::bit_extract (compute_tmpring_size_register, 12, 24) * 1024;
+    = scratch_memory_size (compute_tmpring_size_register);
 
   auto shader_engine_count = utils::narrow<uint32_t> (
     agent.os_info ().shader_engine_count / agent.os_info ().xcc_count);
@@ -3449,7 +3473,22 @@ gfx9_architecture_t::scratch_memory_region (
   amd_dbgapi_size_t xcc_scratch_base
     = waves * wavesize * cwsr_record.xcc_id ();
 
-  return { xcc_scratch_base + offset, wavesize };
+  return { scratch_backing_memory_address + xcc_scratch_base + offset,
+           wavesize };
+}
+
+amd_dbgapi_size_t
+gfx9_architecture_t::scratch_memory_allocation (
+  uint32_t compute_tmpring_size_register) const
+{
+  return utils::bit_extract (compute_tmpring_size_register, 0, 11);
+}
+
+amd_dbgapi_size_t
+gfx9_architecture_t::scratch_memory_size (
+  uint32_t compute_tmpring_size_register) const
+{
+  return utils::bit_extract (compute_tmpring_size_register, 12, 24) * 1024;
 }
 
 std::vector<agent_t::aperture_t>
@@ -3551,7 +3590,8 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    bool in_cluster) const override
     = 0;
 
   mi_architecture_t (elf_amdgpu_machine_t e_machine,
@@ -3700,9 +3740,12 @@ class gfx908_t final : public mi_architecture_t
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 1);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
@@ -3764,9 +3807,12 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 1);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
@@ -3884,9 +3930,12 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 1);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
@@ -3923,6 +3972,12 @@ protected:
 
   bool can_halt_at_endpgm () const override { return true; }
   bool has_architected_flat_scratch () const override { return true; };
+
+  std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
+  scratch_memory_region (
+    const agent_t &agent, uint32_t compute_tmpring_size_register,
+    amd_dbgapi_global_address_t scratch_backing_memory_address,
+    const architecture_t::cwsr_record_t &cwsr_record) const override;
 };
 
 amdgcn_architecture_t::exception_mask_t
@@ -4263,6 +4318,24 @@ gfx9_4_architecture_t::dispatch_packet_id (
          >> ttmp11_queue_packet_id_shift;
 }
 
+std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
+gfx9_4_architecture_t::scratch_memory_region (
+  const agent_t &agent, uint32_t compute_tmpring_size_register,
+  amd_dbgapi_global_address_t /* scratch_backing_memory_address */,
+  const architecture_t::cwsr_record_t &cwsr_record) const
+{
+  dbgapi_assert (has_architected_flat_scratch ());
+
+  agent_address_t flat_scratch;
+  auto flat_scratch_address
+    = cwsr_record.register_address (amdgpu_regnum_t::flat_scratch);
+  dbgapi_assert (flat_scratch_address.has_value ());
+  agent.read_agent_memory (flat_scratch_address.value (),
+                           &flat_scratch);
+  return { flat_scratch,
+           scratch_memory_size (compute_tmpring_size_register) };
+}
+
 /* Generic gfx9.4 architecture.  */
 
 class gfx9_4_generic_t final : public gfx9_4_architecture_t
@@ -4308,9 +4381,12 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 1);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       context_save_address);
@@ -4362,11 +4438,6 @@ protected:
       return utils::bit_extract (relaunch_wave, 0, 9);
     }
     static constexpr uint32_t
-    compute_relaunch_wave_payload_scratch_en (uint32_t relaunch_wave)
-    {
-      return utils::bit_extract (relaunch_wave, 11, 11);
-    }
-    static constexpr uint32_t
     compute_relaunch_wave_payload_first_wave (uint32_t relaunch_wave)
     {
       return utils::bit_extract (relaunch_wave, 12, 12);
@@ -4399,8 +4470,6 @@ protected:
     size_t vgpr_count () const override;
     virtual size_t shared_vgpr_count () const;
 
-    bool is_scratch_enabled () const override;
-
     uint32_t shader_engine_id () const override;
     uint32_t scratch_scoreboard_id () const override;
 
@@ -4418,9 +4487,12 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 2);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       compute_relaunch_state[1], context_save_address);
@@ -4909,12 +4981,6 @@ gfx10_architecture_t::branch_target (wave_t &wave, agent_address_t pc,
     }
 
   return gfx9_architecture_t::branch_target (wave, pc, instruction);
-}
-
-bool
-gfx10_architecture_t::cwsr_record_t::is_scratch_enabled () const
-{
-  return compute_relaunch_wave_payload_scratch_en (m_compute_relaunch_wave);
 }
 
 uint32_t
@@ -5466,9 +5532,12 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 2);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       compute_relaunch_state[1], context_save_address);
@@ -5536,7 +5605,11 @@ public:
   std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
   scratch_memory_region (
     const agent_t &agent, uint32_t compute_tmpring_size_register,
+    amd_dbgapi_global_address_t scratch_backing_memory_address,
     const architecture_t::cwsr_record_t &cwsr_record) const override;
+
+  amd_dbgapi_size_t
+  scratch_memory_size (uint32_t compute_tmpring_size_register) const override;
 
   bool can_halt_at_endpgm () const override { return true; }
   virtual bool can_halt_at_sendmsg_dealloc_vgprs () const
@@ -6086,29 +6159,27 @@ gfx11_architecture_t::can_simulate (wave_t &wave,
 std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
 gfx11_architecture_t::scratch_memory_region (
   const agent_t &agent, uint32_t compute_tmpring_size_register,
+  amd_dbgapi_global_address_t /* scratch_backing_memory_address */,
   const architecture_t::cwsr_record_t &cwsr_record) const
 {
-  /* Total size of allocated scratch memory in number of waves.  */
-  amd_dbgapi_size_t waves
-    = utils::bit_extract (compute_tmpring_size_register, 0, 11);
-  /* Amount of space in bytes used by each wave.  */
-  amd_dbgapi_size_t wavesize
-    = utils::bit_extract (compute_tmpring_size_register, 12, 26) * 256;
+  dbgapi_assert (has_architected_flat_scratch ());
 
-  /* For gfx11, the number of waves is per shader engine instead of total.  */
-  amd_dbgapi_size_t offset = (waves * cwsr_record.shader_engine_id ()
-                              + cwsr_record.scratch_scoreboard_id ())
-                             * wavesize;
+  agent_address_t flat_scratch;
+  auto flat_scratch_address
+    = cwsr_record.register_address (amdgpu_regnum_t::flat_scratch);
+  dbgapi_assert (flat_scratch_address.has_value ());
+  agent.read_agent_memory (flat_scratch_address.value (),
+                           &flat_scratch);
+  return { flat_scratch,
+           scratch_memory_size (compute_tmpring_size_register) };
+}
 
-  auto shader_engine_count = utils::narrow<uint32_t> (
-    agent.os_info ().shader_engine_count / agent.os_info ().xcc_count);
-
-  /* The scratch memory is evenly divided between all XCCs, so each XCC has its
-     own scratch base.  */
-  amd_dbgapi_size_t xcc_scratch_base
-    = waves * shader_engine_count * wavesize * cwsr_record.xcc_id ();
-
-  return { xcc_scratch_base + offset, wavesize };
+amd_dbgapi_size_t
+gfx11_architecture_t::scratch_memory_size (
+  uint32_t compute_tmpring_size_register) const
+{
+  /* The unit is 64 dwords.  */
+  return utils::bit_extract (compute_tmpring_size_register, 12, 26) * 256;
 }
 
 /* Generic gfx11 architecture.  */
@@ -6203,6 +6274,46 @@ public:
   }
 };
 
+class gfx11_7_generic_t final : public gfx11_architecture_t
+{
+public:
+  gfx11_7_generic_t ()
+    : gfx11_architecture_t (EF_AMDGPU_MACH_AMDGCN_GFX11_7_GENERIC,
+                            "amdgcn-amd-amdhsa--gfx11-7-generic")
+  {
+  }
+};
+
+class gfx1170_t final : public gfx11_architecture_t
+{
+public:
+  gfx1170_t ()
+    : gfx11_architecture_t (EF_AMDGPU_MACH_AMDGCN_GFX1170,
+                            "amdgcn-amd-amdhsa--gfx1170")
+  {
+  }
+};
+
+class gfx1171_t final : public gfx11_architecture_t
+{
+public:
+  gfx1171_t ()
+    : gfx11_architecture_t (EF_AMDGPU_MACH_AMDGCN_GFX1171,
+                            "amdgcn-amd-amdhsa--gfx1171")
+  {
+  }
+};
+
+class gfx1172_t final : public gfx11_architecture_t
+{
+public:
+  gfx1172_t ()
+    : gfx11_architecture_t (EF_AMDGPU_MACH_AMDGCN_GFX1172,
+                            "amdgcn-amd-amdhsa--gfx1172")
+  {
+  }
+};
+
 class gfx12_architecture_t : public gfx11_architecture_t
 {
 private:
@@ -6226,7 +6337,6 @@ protected:
   static constexpr uint32_t sq_wave_state_priv_poison_err_mask = 1 << 15;
   static constexpr uint32_t sq_wave_state_priv_cond_dbg_user_mask = 1 << 16;
   static constexpr uint32_t sq_wave_state_priv_cond_dbg_sys_mask = 1 << 17;
-  static constexpr uint32_t sq_wave_state_priv_scratch_en_mask = 1 << 18;
   static constexpr uint32_t sq_wave_state_priv_perf_en_mask = 1 << 19;
   static constexpr uint32_t sq_wave_state_priv_ttrace_en_mask = 1 << 20;
 
@@ -6317,9 +6427,12 @@ protected:
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    [[maybe_unused]] bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 2);
+    dbgapi_assert (!in_cluster);
+
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
       compute_relaunch_state[1], context_save_address);
@@ -6404,10 +6517,8 @@ protected:
   wave_disable_traps (wave_t &wave,
                       os_wave_launch_trap_mask_t mask) const override final;
 
-  std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
-  scratch_memory_region (
-    const agent_t &agent, uint32_t compute_tmpring_size_register,
-    const architecture_t::cwsr_record_t &cwsr_record) const override;
+  amd_dbgapi_size_t
+  scratch_memory_size (uint32_t compute_tmpring_size_register) const override;
 };
 
 gfx12_architecture_t::gfx12_architecture_t (elf_amdgpu_machine_t e_machine,
@@ -7530,33 +7641,12 @@ gfx12_architecture_t::is_sequential (const instruction_t &instruction) const
     && !is_sopk_encoding<20> (instruction);
 }
 
-std::pair<amd_dbgapi_size_t /* offset  */, amd_dbgapi_size_t /* size  */>
-gfx12_architecture_t::scratch_memory_region (
-  const agent_t &agent, uint32_t compute_tmpring_size_register,
-  const architecture_t::cwsr_record_t &cwsr_record) const
+amd_dbgapi_size_t
+gfx12_architecture_t::scratch_memory_size (
+  uint32_t compute_tmpring_size_register) const
 {
-  /* Total size of allocated scratch memory in number of waves.  */
-  amd_dbgapi_size_t waves
-    = utils::bit_extract (compute_tmpring_size_register, 0, 11);
-  /* Amount of space in bytes used by each wave.
-     This is unit of 64 dwords.  */
-  amd_dbgapi_size_t wavesize
-    = utils::bit_extract (compute_tmpring_size_register, 12, 29) * 256;
-
-  /* The number of waves is per shader engine instead of total.  */
-  amd_dbgapi_size_t offset = (waves * cwsr_record.shader_engine_id ()
-                              + cwsr_record.scratch_scoreboard_id ())
-                             * wavesize;
-
-  auto shader_engine_count = utils::narrow<uint32_t> (
-    agent.os_info ().shader_engine_count / agent.os_info ().xcc_count);
-
-  /* The scratch memory is evenly divided between all XCCs, so each XCC has its
-     own scratch base.  */
-  amd_dbgapi_size_t xcc_scratch_base
-    = waves * shader_engine_count * wavesize * cwsr_record.xcc_id ();
-
-  return { xcc_scratch_base + offset, wavesize };
+  /* The unit is 64 dwords.  */
+  return utils::bit_extract (compute_tmpring_size_register, 12, 29) * 256;
 }
 
 /* Generic gfx12 architecture.  */
@@ -7612,16 +7702,30 @@ protected:
       return utils::bit_extract (relaunch_wave, 13, 13);
     }
 
+    static constexpr uint32_t
+    compute_relaunch_wave_payload_first_of_cluster (uint32_t relaunch_wave)
+    {
+      return utils::bit_extract (relaunch_wave, 27, 27);
+    }
+
+    static constexpr uint32_t
+    compute_relaunch_wave_payload_last_of_cluster (uint32_t relaunch_wave)
+    {
+      return utils::bit_extract (relaunch_wave, 28, 28);
+    }
+
   public:
     cwsr_record_t (compute_queue_t &queue, uint32_t xcc_id,
                    uint32_t compute_relaunch_wave,
                    uint32_t compute_relaunch_state,
                    uint32_t compute_relaunch2_state,
-                   agent_address_t context_save_address)
+                   agent_address_t context_save_address,
+                   bool in_cluster)
       : gfx12_architecture_t::cwsr_record_t (
           queue, xcc_id, compute_relaunch_wave, compute_relaunch_state,
           compute_relaunch2_state, context_save_address)
     {
+      m_in_cluster = in_cluster || is_first_of_cluster ();
     }
 
     /* There's no "shared_vgpr" in gfx 125x anymore.  */
@@ -7630,21 +7734,30 @@ protected:
     size_t hwreg_count () const override;
     size_t lds_size () const override;
     bool is_last_wave () const override;
+    bool is_first_of_cluster () const override;
+    bool is_last_of_cluster () const override;
+    std::optional<std::array<uint32_t, 3>> cluster_ids () const override;
+    std::array<uint32_t, 3> nwg_in_cluster () const override;
+    std::optional<std::array<uint32_t, 3>> group_ids () const override;
 
     std::optional<agent_address_t>
     register_address (amdgpu_regnum_t regnum) const override;
+
+  protected:
+    bool m_in_cluster;
   };
 
   std::unique_ptr<architecture_t::cwsr_record_t>
   make_cwsr_record (compute_queue_t &queue, uint32_t xcc_id,
                     uint32_t compute_relaunch_wave,
                     const std::vector<uint32_t> &compute_relaunch_state,
-                    agent_address_t context_save_address) const override
+                    agent_address_t context_save_address,
+                    bool in_cluster) const override
   {
     dbgapi_assert (compute_relaunch_state.size () == 2);
     return std::make_unique<cwsr_record_t> (
       queue, xcc_id, compute_relaunch_wave, compute_relaunch_state[0],
-      compute_relaunch_state[1], context_save_address);
+      compute_relaunch_state[1], context_save_address, in_cluster);
   }
 
   /* A note regarding all the register methods in this class:
@@ -7738,6 +7851,8 @@ public:
   std::vector<agent_t::aperture_t>
   get_apertures (const os_agent_info_t &info) const override;
   const void *register_read_only_mask (amdgpu_regnum_t regnum) const override;
+
+  bool supports_clusters () const override { return true; }
 
 private:
   register_class_t &get_register_class (const char *class_name);
@@ -8009,6 +8124,81 @@ gfx12_5_architecture_t::cwsr_record_t::is_last_wave () const
   return compute_relaunch_wave_payload_last_wave (m_compute_relaunch_wave);
 }
 
+bool
+gfx12_5_architecture_t::cwsr_record_t::is_first_of_cluster () const
+{
+  return compute_relaunch_wave_payload_first_of_cluster (m_compute_relaunch_wave);
+}
+
+bool
+gfx12_5_architecture_t::cwsr_record_t::is_last_of_cluster () const
+{
+  return compute_relaunch_wave_payload_last_of_cluster (m_compute_relaunch_wave);
+}
+
+std::optional<std::array<uint32_t, 3>>
+gfx12_5_architecture_t::cwsr_record_t::cluster_ids () const
+{
+  /* If we are not in cluster mode, pretend there is a
+     single-workgroup cluster.  That imaginary cluster would be
+     positioned in the same place as the workgroup.  */
+  if (!m_in_cluster)
+    return group_ids ();
+
+  /* If we are in cluster mode, the coordinates are fetched from the
+     registers the same way group ids are fetched in gfx12.  */
+  return gfx12_architecture_t::cwsr_record_t::group_ids ();
+}
+
+std::array<uint32_t, 3>
+gfx12_5_architecture_t::cwsr_record_t::nwg_in_cluster () const
+{
+  if (!m_in_cluster)
+    return {1, 1, 1};
+
+  uint32_t ttmp6;
+  const agent_address_t ttmp6_address
+    = register_address (amdgpu_regnum_t::ttmp6).value ();
+  agent ().read_agent_memory (ttmp6_address, &ttmp6);
+
+  std::array<uint32_t, 3> nwg;
+  nwg[0] = utils::bit_extract (ttmp6, 12, 15) + 1;
+  nwg[1] = utils::bit_extract (ttmp6, 16, 19) + 1;
+  nwg[2] = utils::bit_extract (ttmp6, 20, 23) + 1;
+
+  return nwg;
+}
+
+std::optional<std::array<uint32_t, 3>>
+gfx12_5_architecture_t::cwsr_record_t::group_ids () const
+{
+  if (!m_in_cluster)
+    return gfx12_architecture_t::cwsr_record_t::group_ids ();
+
+  auto cids = cluster_ids ();
+  dbgapi_assert (cids.has_value ());
+  std::array<uint32_t, 3> cluster_in_grid = cids.value ();
+
+  std::array<uint32_t, 3> nwg = nwg_in_cluster ();
+
+  uint32_t ttmp6;
+  const agent_address_t ttmp6_address
+    = register_address (amdgpu_regnum_t::ttmp6).value ();
+  agent ().read_agent_memory (ttmp6_address, &ttmp6);
+
+  std::array<uint32_t, 3> wg_in_cluster;
+  wg_in_cluster[0] = utils::bit_extract (ttmp6, 0, 3);
+  wg_in_cluster[1] = utils::bit_extract (ttmp6, 4, 7);
+  wg_in_cluster[2] = utils::bit_extract (ttmp6, 8, 11);
+
+  std::array<uint32_t, 3> wg_in_grid;
+  wg_in_grid[0] = cluster_in_grid[0] * nwg[0] + wg_in_cluster[0];
+  wg_in_grid[1] = cluster_in_grid[1] * nwg[1] + wg_in_cluster[1];
+  wg_in_grid[2] = cluster_in_grid[2] * nwg[2] + wg_in_cluster[2];
+
+  return wg_in_grid;
+}
+
 std::optional<agent_address_t>
 gfx12_5_architecture_t::cwsr_record_t::register_address (
   amdgpu_regnum_t regnum) const
@@ -8017,27 +8207,20 @@ gfx12_5_architecture_t::cwsr_record_t::register_address (
      0x04: PC_LO
      0x08: PC_HI
      0x0C: EXEC_LO
-     0x10: EXEC_HI
+     0x10: <zero>
      0x14: STATE_PRIV
-     0x18: TRAPSTS
+     0x18: EXCP_FLAG_PRIV
      0x1C: XNACK_MASK
      0x20: MODE
-     0x24: FLAT_SCRATCH_LO
-     0x28: FLAT_SCRATCH_HI
+     0x24: SCRATCH_BASE_LO
+     0x28: SCRATCH_BASE_HI
      0x2C: EXCP_FLAG_USER
      0x30: TRAP_CTRL
      0x34: STATUS
      0x38: barrier
-     0x3C: <blank>
-     0x40: TTMP4
-     0x44: TTMP5
-     0x48: TTMP6
-     0x4C: TTMP7
-     0x50: TTMP8
-     0x54: TTMP9
-     0x58: TTMP10
-     0x5C: TTMP11: XNACK_STATE_PRIV
-     0x60: TTMP13  */
+     0x3C: cluster barrier state
+     0x38: SCHED_MODE
+  */
   switch (regnum)
     {
     case amdgpu_regnum_t::xnack_mask_32:
@@ -8491,6 +8674,13 @@ architecture_t::get_info (amd_dbgapi_architecture_info_t query,
       utils::get_info (value_size, value,
                        regnum_to_register_id (amdgpu_regnum_t::pc));
       return;
+
+    case AMD_DBGAPI_ARCHITECTURE_INFO_CLUSTERS_SUPPORTED:
+      utils::get_info (value_size, value,
+                       (supports_clusters ()
+                        ? AMD_DBGAPI_CLUSTERS_SUPPORTED
+                        : AMD_DBGAPI_CLUSTERS_UNSUPPORTED));
+      return;
     }
 
   throw api_error_t (AMD_DBGAPI_STATUS_ERROR_INVALID_ARGUMENT);
@@ -8526,6 +8716,7 @@ decltype (architecture_t::s_architecture_map)
       map.emplace (make_architecture<gfx1031_t> ());
       map.emplace (make_architecture<gfx1032_t> ());
       map.emplace (make_architecture<gfx11_generic_t> ());
+      map.emplace (make_architecture<gfx11_7_generic_t> ());
       map.emplace (make_architecture<gfx1100_t> ());
       map.emplace (make_architecture<gfx1101_t> ());
       map.emplace (make_architecture<gfx1102_t> ());
@@ -8534,6 +8725,9 @@ decltype (architecture_t::s_architecture_map)
       map.emplace (make_architecture<gfx1151_t> ());
       map.emplace (make_architecture<gfx1152_t> ());
       map.emplace (make_architecture<gfx1153_t> ());
+      map.emplace (make_architecture<gfx1170_t> ());
+      map.emplace (make_architecture<gfx1171_t> ());
+      map.emplace (make_architecture<gfx1172_t> ());
       map.emplace (make_architecture<gfx12_generic_t> ());
       map.emplace (make_architecture<gfx1200_t> ());
       map.emplace (make_architecture<gfx1201_t> ());

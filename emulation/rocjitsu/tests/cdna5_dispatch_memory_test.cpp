@@ -53,8 +53,9 @@ TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
   EXPECT_EQ(sim.cu()->num_wfs(), 0u);
 }
 
-TEST(Gfx1250SimulationTest, DispatchedModeSetterControlsPseudoScalarRounding) {
-  constexpr uint32_t kExpectedRoundTowardPositive = 0x3FB504F4u;
+TEST(Gfx1250SimulationTest, DispatchedPseudoScalarExpIgnoresRoundingMode) {
+  // The gfx1201-qualified mapping is shared here; physical gfx1250 is not yet qualified.
+  constexpr uint32_t kExpectedHardwareApproximation = 0x3FB504F3u;
   const uint32_t code[] = {
       0xB9800801u, // s_setreg_imm32_b32 hwreg(HW_REG_MODE, 0, 2), 1
       0x00000001u,
@@ -66,7 +67,7 @@ TEST(Gfx1250SimulationTest, DispatchedModeSetterControlsPseudoScalarRounding) {
   const auto *snapshot = dispatch_one_wave(sim, code, std::size(code));
 
   ASSERT_NE(snapshot, nullptr);
-  EXPECT_EQ(snapshot->sgpr(4), kExpectedRoundTowardPositive);
+  EXPECT_EQ(snapshot->sgpr(4), kExpectedHardwareApproximation);
 }
 
 TEST(Gfx1250SimulationTest, MultiWaveDispatchHonorsPackedTidComponentCount) {
@@ -99,8 +100,8 @@ TEST(Gfx1250SimulationTest, MultiWaveDispatchHonorsPackedTidComponentCount) {
       lane31_values.push_back(wf.vgpr(0, 31));
     }
 
-    std::sort(lane0_values.begin(), lane0_values.end());
-    std::sort(lane31_values.begin(), lane31_values.end());
+    std::ranges::sort(lane0_values);
+    std::ranges::sort(lane31_values);
     const uint32_t y_scale = component_count >= 1 ? 1u << 10 : 0;
     const std::vector<uint32_t> expected_lane0{0u, y_scale, 2 * y_scale, 3 * y_scale};
     const std::vector<uint32_t> expected_lane31{31u, 31u | y_scale, 31u | (2 * y_scale),
@@ -115,7 +116,7 @@ std::vector<uint64_t> collect_active_exec_masks(Gfx1250Sim &sim) {
   std::vector<uint64_t> exec_masks;
   for (const auto &wf : sim.snapshot->snapshots())
     exec_masks.push_back(wf.exec);
-  std::sort(exec_masks.begin(), exec_masks.end());
+  std::ranges::sort(exec_masks);
   return exec_masks;
 }
 
@@ -221,7 +222,7 @@ TEST(Gfx1250SimulationTest, Partial2DGridTailMasksNonContiguousExecLanes) {
 }
 
 TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -233,7 +234,8 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
   } args{0x11111111u, 0x22222222u, 0x33333333u};
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   sim.memory->load_image(reinterpret_cast<const uint8_t *>(&args), sizeof(args), kKernargAddr);
@@ -253,7 +255,7 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
 }
 
 TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -261,7 +263,8 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
   const std::array<uint32_t, 3> args{0x11111111u, 0x22222222u, 0x33333333u};
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   sim.memory->load_image(reinterpret_cast<const uint8_t *>(args.data()),
@@ -281,7 +284,7 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
 }
 
 TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -291,7 +294,8 @@ TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload)
     args[i] = 0x1000u + i;
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   sim.memory->load_image(reinterpret_cast<const uint8_t *>(args.data()),
@@ -312,7 +316,7 @@ TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload)
 }
 
 TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -325,7 +329,8 @@ TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   write_global_u32(*sim.memory, kKernargAddr + 4, kExpected);
@@ -341,7 +346,7 @@ TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
 }
 
 TEST(Gfx1250SimulationTest, SLoadB32WritesVccHalves) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -365,7 +370,8 @@ TEST(Gfx1250SimulationTest, SLoadB32WritesVccHalves) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   write_global_u32(*sim.memory, kKernargAddr, kVccLo);
@@ -382,7 +388,7 @@ TEST(Gfx1250SimulationTest, SLoadB32WritesVccHalves) {
 }
 
 TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -398,7 +404,8 @@ TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   sim.memory->load_image(reinterpret_cast<const uint8_t *>(&kExpected), sizeof(kExpected),
@@ -415,7 +422,7 @@ TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
 }
 
 TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -447,7 +454,8 @@ TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   write_global_u32(*sim.memory, kKernargAddr, kSgprValue);
@@ -508,7 +516,7 @@ TEST(Gfx1250SimulationTest, Ttmp8EncodesWaveIdWithinWorkgroup) {
   std::vector<uint32_t> ttmp8_values;
   for (const auto &wf : sim.snapshot->snapshots())
     ttmp8_values.push_back(wf.ttmp(8));
-  std::sort(ttmp8_values.begin(), ttmp8_values.end());
+  std::ranges::sort(ttmp8_values);
   EXPECT_EQ(ttmp8_values, (std::vector<uint32_t>{0, 1u << 25}));
 }
 
@@ -532,7 +540,7 @@ TEST(Gfx1250SimulationTest, Ttmp8EncodesQueuePacketId) {
     ASSERT_GE(wf.dispatch_id, 1u);
     by_dispatch[i++] = {wf.dispatch_id, wf.ttmp(8) & 0x1FFFFFFu};
   }
-  std::sort(by_dispatch.begin(), by_dispatch.end());
+  std::ranges::sort(by_dispatch);
   ASSERT_LT(by_dispatch[0].first, by_dispatch[1].first);
   EXPECT_EQ(by_dispatch[0].second, 0u);
   EXPECT_EQ(by_dispatch[1].second, 1u);

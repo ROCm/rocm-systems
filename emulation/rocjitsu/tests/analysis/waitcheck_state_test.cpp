@@ -265,7 +265,7 @@ TEST(WaitcheckState, CompletedPathCoverageIsPerRegisterAndIndependentOfJoinOrder
     Ops::apply_wait(joined, WaitCounterKind::Load, 0);
     EXPECT_TRUE(joined.ready_regs.contains({RegClass::VGPR, 0, 1}));
     EXPECT_FALSE(joined.ready_regs.contains({RegClass::VGPR, 1, 1}));
-  } while (std::next_permutation(order.begin(), order.end()));
+  } while (std::ranges::next_permutation(order).found);
 }
 
 TEST(WaitcheckState, ProducerAbsentOnOnePathStaysUnprovenAcrossFurtherJoins) {
@@ -284,7 +284,7 @@ TEST(WaitcheckState, ProducerAbsentOnOnePathStaysUnprovenAcrossFurtherJoins) {
     Ops::apply_wait(joined, WaitCounterKind::Load, 0);
     EXPECT_TRUE(joined.pending[kLoad].empty());
     EXPECT_FALSE(joined.ready_regs.contains({RegClass::VGPR, 0, 1}));
-  } while (std::next_permutation(predecessors.begin(), predecessors.end()));
+  } while (std::ranges::next_permutation(predecessors).found);
 
   // An unvisited predecessor is not an initialized path lacking the event.
   const std::array<uint8_t, 3> middle_unvisited{1, 0, 1};
@@ -498,8 +498,8 @@ TEST(WaitcheckState, InstructionWaitsRespectSentinelsAndArchitecture) {
 }
 
 TEST(WaitcheckState, UnsupportedArchitectureFailsWithoutChangingState) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                              ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (rj_code_arch_t arch :
+       {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID}) {
     PendingState state;
     state.pending[kLoad] = {load(0, 3)};
     state.va_vdst_hazards.hazards[0] = {2, false, {}};

@@ -14,6 +14,11 @@ without needing the extra setup of a full graphical interface. This analysis opt
 a terminal-based interface that offers real-time visual feedback, keyboard shortcuts for common
 actions, and improved readability with formatted output.
 
+.. warning::
+
+   The TUI (``--tui``) is deprecated and will be removed in a future release.
+   Use the :doc:`cli` instead.
+
 .. note::
 
    TUI is currently an experimental feature. You must include the ``--experimental`` flag to enable it.

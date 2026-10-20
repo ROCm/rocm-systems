@@ -86,6 +86,12 @@ struct TensorDmaMemoryAccessObservation {
   uint32_t element_size_bytes = 0;
   bool is_load = true; ///< True for global-to-LDS, false for LDS-to-global.
   TensorDmaAddressView addresses;
+  uint32_t tile_dim0 = 0; ///< Descriptor tile-dimension-zero extent.
+  /// Dimension-one tile extent; gather uses the valid-index count.
+  uint32_t tile_dim1 = 0;
+  uint32_t data_size = 0;         ///< Raw element-size code; bytes = 1 << data_size.
+  int64_t tensor_dim0_stride = 0; ///< Descriptor dimension-zero stride in bytes.
+  int64_t tensor_dim1_stride = 0; ///< Descriptor dimension-one stride in bytes.
 };
 
 } // namespace rocjitsu::amdgpu

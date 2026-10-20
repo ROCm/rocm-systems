@@ -93,8 +93,13 @@ static float ncclCeAgLatencyUs(struct ncclComm* comm, bool multicast, int nRanks
   // Graph-captured unicast also pays the intra-batch sync latency; add it.
   if (!multicast && captured) {
     int numOps = inPlace ? (nRanks - 1) : nRanks;
+    // intraBatchSyncFreq is written only by ncclCeInit, so it is still 0 on a
+    // comm that never initialized CE (gfx942 declines on the driver version).
+    // numOps > 0 and a 0 threshold would both pass, so without this term the
+    // guard guarantees the divide below rather than preventing it.
     int freq = (int)comm->ceColl.intraBatchSyncFreq;
-    if (numOps > freq && (uint64_t)perRankBytes * (uint64_t)numOps >= comm->ceColl.intraBatchSyncMsgThreshold) {
+    if (freq > 0 && numOps > freq &&
+        (uint64_t)perRankBytes * (uint64_t)numOps >= comm->ceColl.intraBatchSyncMsgThreshold) {
       int blocks = (numOps + freq - 1) / freq;
       int numSyncs = (blocks - 1) + ((blocks % 2 == 0) ? 1 : 0); // per-freq syncs + even-count workaround
       total += (float)numSyncs * floorUs;

@@ -61,7 +61,7 @@
 
 cmake_minimum_required(VERSION 3.21)
 
-project(amd-dbgapi VERSION 0.80.0 LANGUAGES CXX DESCRIPTION "ROCm Debugger API")
+project(amd-dbgapi VERSION 0.82.1 LANGUAGES CXX DESCRIPTION "ROCm Debugger API")
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -365,6 +365,7 @@ add_library(
     src/agent.cpp
     src/architecture.cpp
     src/callbacks.cpp
+    src/cluster.cpp
     src/code_object.cpp
     src/debug.cpp
     src/dispatch.cpp
@@ -594,11 +595,17 @@ configure_file(
     @ONLY
 )
 
+# A Windows DLL is a RUNTIME artifact and installs to bin, next to the
+# executable that loads it, which is where Windows searches.  A Unix
+# shared object is a LIBRARY artifact, not RUNTIME, so it installs to
+# lib.  Options after an artifact-kind keyword apply to that kind
+# alone, so COMPONENT has to be repeated for each one.
 install(
     TARGETS amd-dbgapi
     EXPORT amd-dbgapi-export
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    COMPONENT dev
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT dev
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
 )
 
 install(

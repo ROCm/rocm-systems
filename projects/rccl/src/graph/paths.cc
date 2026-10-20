@@ -401,9 +401,6 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   // In general, use P2P whenever we can.
   int p2pLevel = PATH_SYS;
 
-  // User override
-  NCCLCHECK(ncclGetUserP2pLevel(&p2pLevel));
-
   // Don't use P2P through ARM CPUs
   int arch, vendor, model;
   NCCLCHECK(ncclTopoCpuType(system, &arch, &vendor, &model));
@@ -414,6 +411,9 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   if (arch == NCCL_TOPO_CPU_ARCH_X86 && vendor == NCCL_TOPO_CPU_VENDOR_ZHAOXIN) {
     p2pLevel = PATH_PXB;
   }
+
+  // User override, last so NCCL_P2P_DISABLE / NCCL_P2P_LEVEL win over the CPU defaults
+  NCCLCHECK(ncclGetUserP2pLevel(&p2pLevel));
 
   // Compute the PCI distance and compare with the p2pLevel.
   // For MNNVL clique peers (IFoE cross-node), no topology edge exists between the merged GPUs,
@@ -527,7 +527,10 @@ NCCL_PARAM(NetGdrMloPart, "NET_GDR_MLOPART", 1);
 // the no-GDR diversion below (addInterStep, which only rewrites GPU<->NET) never degrades. Reading
 // the partition's own entry instead would feed the decision back its own diverted path and let
 // partitions of one device disagree about GDR.
+// A PXN relay is the exception: addInterStep marks it on the partition's own GPU<->NET entry only, never
+// on the DEV, so report PATH_PXN from there or ncclTopoCheckGdr cannot switch to the relay GPU's distance.
 static int ncclTopoGdrDistance(struct ncclTopoNode* gpu, int n) {
+  if (gpu->paths[NET] != NULL && gpu->paths[NET][n].type == PATH_PXN) return PATH_PXN;
   if (gpu->gpu.mloPart != NCCL_TOPO_UNDEF && gpu->gpu.parent != NULL && gpu->gpu.parent->paths[NET] != NULL)
     return gpu->gpu.parent->paths[NET][n].type;
   return gpu->paths[NET][n].type;
@@ -589,7 +592,19 @@ ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t n
   }
 
   // Check if we are close enough that it makes sense to enable GDR
-  int netGdrLevel = system->netGdrLevel == -2 ? (ncclParamNetGdrC2c() ? PATH_P2C : PATH_PXB) : system->netGdrLevel;
+  int netGdrLevel = PATH_PXB;
+  if (ncclParamNetGdrC2c()) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+    // The MLOPart C2C restriction below keys on the CUDA driver version; RCCL's MLOPart GDR policy is
+    // NCCL_NET_GDR_MLOPART above, so partitions follow the whole-GPU level here.
+    netGdrLevel = PATH_P2C;
+#else
+    // MloPart over C2C requires cuMem GDR support with CUDA 13.4+ (must be available communicator wide)
+    bool gdrSupport = system->cuMemGdrSupport && system->minDriverVersion >= 13040;
+    if (gpu->gpu.mloPart == NCCL_TOPO_UNDEF || gdrSupport) netGdrLevel = PATH_P2C;
+#endif
+  }
+  if (system->netGdrLevel != -2) netGdrLevel = system->netGdrLevel;
   NCCLCHECK(ncclGetLevel(&ncclTopoUserGdrLevel, NULL, "NCCL_NET_GDR_LEVEL"));
   if (ncclTopoUserGdrLevel != -2) netGdrLevel = ncclTopoUserGdrLevel;
   else {
@@ -864,24 +879,36 @@ static bool rcclPathOverride(struct ncclTopoSystem* system, uint64_t distance) {
   }
 }
 
-// Rewrite GPU<->NIC paths of type `fromType` to `toType` when the two devices share a PCI domain.
+// Rewrite DEV/GPU <-> NET paths of type `fromType` to `toType` when the two devices share a PCI domain.
+// Keyed on the physical device (DEV node), not on the GPU partitions layered on top of it: reaching a
+// NIC is a property of the PCI function, and ncclTopoGdrDistance reads the DEV path for partitioned
+// GPUs. Rewriting only the partitions leaves that decision on the original distance, and the no-GDR
+// diversion in ncclTopoComputePaths then undoes the rewrite. Partitions mirror their parent so the
+// graph search and the GDR decision see the same distance.
 static void rcclRewriteSameDomainNetPaths(struct ncclTopoSystem* system, int fromType, int toType) {
-  for (int g = 0; g < system->nodes[GPU].count; g++) {
-    struct ncclTopoNode* gpu = system->nodes[GPU].nodes + g;
-    int64_t gpuBusId = NCCL_TOPO_ID_LOCAL_ID(gpu->id);
-    int64_t gpuDomain = NCCL_BUSID_DOMAIN(gpuBusId);
+  for (int d = 0; d < system->nodes[DEV].count; d++) {
+    struct ncclTopoNode* dev = system->nodes[DEV].nodes + d;
+    // MLOPart splitting overlays the partition index on the DEV id; strip it to recover the busId.
+    int64_t devBusId = NCCL_TOPO_ID_LOCAL_ID(dev->id) & ~NCCL_TOPO_MLOPART_MASK;
+    int64_t devDomain = NCCL_BUSID_DOMAIN(devBusId);
     for (int n = 0; n < system->nodes[NET].count; n++) {
       struct ncclTopoNode* net = system->nodes[NET].nodes + n;
       // Skip uninitialized/invalid busIds (raw id 0), but allow domain 0000:
       // it is a valid PCI domain and must still match.
-      if (gpuBusId == 0 || net->net.busId == 0) continue;
-      if (gpuDomain != NCCL_BUSID_DOMAIN(net->net.busId)) continue;
-      if (gpu->paths[NET] && gpu->paths[NET][n].type == fromType) {
-        gpu->paths[NET][n].type = toType;
-        INFO(NCCL_GRAPH, "Rewrote same-domain GPU %d -> NET %d path %d->%d (domain 0x%04lx)", g, n, fromType, toType,
-             (unsigned long)gpuDomain);
+      if (devBusId == 0 || net->net.busId == 0) continue;
+      if (devDomain != NCCL_BUSID_DOMAIN(net->net.busId)) continue;
+      if (dev->paths[NET] && dev->paths[NET][n].type == fromType) {
+        dev->paths[NET][n].type = toType;
+        INFO(NCCL_GRAPH, "Rewrote same-domain DEV %d -> NET %d path %d->%d (domain 0x%04lx)", d, n, fromType, toType,
+             (unsigned long)devDomain);
       }
-      if (net->paths[GPU] && net->paths[GPU][g].type == fromType) net->paths[GPU][g].type = toType;
+      if (net->paths[DEV] && net->paths[DEV][d].type == fromType) net->paths[DEV][d].type = toType;
+      for (int g = 0; g < system->nodes[GPU].count; g++) {
+        struct ncclTopoNode* gpu = system->nodes[GPU].nodes + g;
+        if (gpu->gpu.parent != dev) continue;
+        if (gpu->paths[NET] && gpu->paths[NET][n].type == fromType) gpu->paths[NET][n].type = toType;
+        if (net->paths[GPU] && net->paths[GPU][g].type == fromType) net->paths[GPU][g].type = toType;
+      }
     }
   }
 }
@@ -1167,12 +1194,12 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
 
   // detect if all GPUs are connected by XGMI
   for (int i = 0; i < system->nodes[GPU].count && allXgmi; i++) {
-    int cudaDev1 = system->nodes[GPU].nodes[i].gpu.dev;
+    int dev1 = system->nodes[GPU].nodes[i].gpu.dev;
     for (int j = 0; j < system->nodes[GPU].count && allXgmi; j++) {
       if (i == j) continue;
-      int cudaDev2 = system->nodes[GPU].nodes[j].gpu.dev;
+      int dev2 = system->nodes[GPU].nodes[j].gpu.dev;
       bool isXGMI;
-      NCCLCHECKGOTO(ncclTopoGetLinkType(comm->topo, cudaDev1, cudaDev2, &isXGMI), ret, fail);
+      NCCLCHECKGOTO(ncclTopoGetLinkType(comm->topo, dev1, dev2, &isXGMI), ret, fail);
       allXgmi &= isXGMI;
     }
   }
@@ -1232,7 +1259,13 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclComm* comm, int g /*local gp
     }
     // Local rank
     path = system->nodes[GPU].nodes[peer].paths[GPU] + g;
-    if (path->type == PATH_NVL) {
+    if (path->type == PATH_NVL &&
+        ncclTopoIsMloPartSibling(system->nodes[GPU].nodes + g, system->nodes[GPU].nodes + peer)) {
+      // On-package hop between compute partitions of one device: path->bw is MLOPART_LOC_BW,
+      // which is not a multiple of the XGMI width, so the division below cannot read a link
+      // count out of it. See MLOPART_P2P_NCHANNELS.
+      *nChannels = MLOPART_P2P_NCHANNELS;
+    } else if (path->type == PATH_NVL) {
       float nvlBw = ncclTopoXGMISpeed(system->nodes[GPU].nodes[g].gpu.gcn);
       *nChannels = ((IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
                      IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
@@ -1317,9 +1350,10 @@ int ncclP2pChannelsUpperBound(struct ncclComm* comm, bool* userOptedHigherOut) {
 // (nNodes >= 16) to reduce P2P CU usage. Disabled by default.
 NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
 // When set, pick p2pnChannelsPerPeer so that a P2P plan touches every channel
-// in the pool: ppp = pow2Down(p2pnChannels / nRanks). The pow2 step matters --
-// ncclP2pChannelForPart mods channel ids by the pool, so ppp*nRanks > pool
-// causes round bases to wrap and channels to collide.
+// in the pool: ppp = pow2Down(p2pnChannels / maxP2pPeers), where maxP2pPeers is
+// the configured peer limit and defaults to nRanks. The pow2 step keeps the
+// per-peer tile a divisor of the pool. Declaring fewer peers than a job actually
+// uses deliberately oversubscribes channels across rounds.
 // Unset defaults to on for gfx1250, off elsewhere.
 RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET);
 extern int64_t ncclParamWorkArgsBytes();
@@ -1434,28 +1468,84 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   if (saturateP2p == RCCL_VALUE_UNSET) {
     saturateP2p = isGfx1250 ? 1 : 0;
   }
-  if (saturateP2p && comm->nRanks > 0) {
-    int target = std::max(1, comm->p2pnChannels / comm->nRanks);
+  // Divisor for both per-peer heuristics below, resolved from config.maxP2pPeers (or
+  // nRanks when unset) by ncclTopoComputeP2pChannelsPerPeer, which init.cc runs first.
+  const int maxP2pPeers = comm->p2pMaxPeers;
+  if (saturateP2p && maxP2pPeers > 0) {
+    int target = std::max(1, comm->p2pnChannels / maxP2pPeers);
     int newPpp = std::min(pow2Down(target), (int)MAXCHANNELS);
     INFO(NCCL_INIT | NCCL_TUNING,
-         "RCCL_SATURATE_P2P_NCHANNELS: p2pnChannelsPerPeer %d -> %d (p2pnChannels=%d, nRanks=%d)",
-         comm->p2pnChannelsPerPeer, newPpp, comm->p2pnChannels, comm->nRanks);
+         "RCCL_SATURATE_P2P_NCHANNELS: p2pnChannelsPerPeer %d -> %d (p2pnChannels=%d, maxP2pPeers=%d)",
+         comm->p2pnChannelsPerPeer, newPpp, comm->p2pnChannels, maxP2pPeers);
     comm->p2pnChannelsPerPeer = newPpp;
   }
   if (comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT) {
     // In the case of >1 NVLD (and the user didn't set nChannelsPerNetPeer), the network is the bottleneck.
     // Reduce the number of channels per host to avoid going above p2pnChannels to fit all the peers within a single round.
-    while (comm->p2pnChannelsPerPeer * divUp(comm->nRanks, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >= comm->p2pnChannels &&
+    INFO(NCCL_INIT, "Tuning P2P operations with maxP2pPeers = %d", maxP2pPeers);
+    while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >= comm->p2pnChannels &&
            comm->p2pnChannelsPerPeer > 1)
       comm->p2pnChannelsPerPeer /= 2;
+    if (rcclUseAinic()) {
+      // A single AINIC NIC is only saturated by two net-p2p channels per peer.
+      // Restore the pre-2.29 count of max(netCountByBw, nChannelsMax) wherever the channel pool can hold it (was available up to 8 nodes).
+      bool atScale = comm->nNodes > 8 && 2 * comm->nRanks > comm->p2pnChannels;
+      int nChannelsMax = atScale ? 1 : 2;
+      comm->p2pnChannelsPerPeer = std::max(
+        comm->p2pnChannelsPerPeer, std::min(std::max(comm->minNetCount, nChannelsMax), comm->p2pnChannels));
+    }
   } else {
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
+    // Across compute partitions the on-package fabric is the bottleneck the network is above
+    // multi-node, and every peer of a plan puts its channels on it at once. Past the point where
+    // the peers fill the channel pool, more channels per peer only adds traffic that conflicts
+    // with the other peers', so fit the peers into a single round the way the branch above does
+    // for the NICs. On an 8x MI355X node in CPX, 1 GiB alltoall over 64 partitions runs 12.5 GB/s
+    // at 8 channels per peer, 15.0 at 4 and 29.6 at 1; over the 8 partitions of one device it
+    // runs 74.3 at 64 and 144.8 at 16.
+    //
+    // Strictly greater, where the branch above is >=, so a plan that exactly fills the pool is
+    // left alone instead of halved once more. Exactly full is one round, which is all either loop
+    // is after; the >= above goes a step past its own comment, and that step is not free here
+    // because it is the case that keeps coming up -- 8 partitions land on 16 channels per peer
+    // over 4 rounds and 16 partitions on 8 over 8, both exactly 64. Halving either would cost
+    // about a quarter of the bandwidth: 8 partitions run 1 GiB sendrecv at 120.9 GB/s with 16
+    // channels per peer and 88.5 with 8. The >= is left as it is because the net-bound branch has
+    // its own history and is not what this change is about.
+    //
+    // Gated on MLOPart because that is the configuration the contention was measured in: a
+    // whole-device (SPX) comm has its own per-peer counts and channel pool and is left as it was.
+    // Within MLOPart it is not narrowed to CPX, though CPX is where the numbers above come from.
+    // The bottleneck is that partitions of one device share one on-package fabric, which is true
+    // of DPX and the other XCP modes too; what changes is how many of them there are, and that is
+    // already the loop's input. A coarser partitioning has fewer peers per device and so needs
+    // fewer rounds to cover them, which is why the loop mostly does not fire there -- it reduces
+    // what the peer count says needs reducing rather than assuming a partition size.
+    // Decided per communicator rather than per operation because the device recovers a work's
+    // part index with comm->p2pnChannelsPerPeer (see sendrecv.h), so the channel stride cannot
+    // vary between plans; a workload whose real peers are few declares them through
+    // config.maxP2pPeers and keeps its full per-peer count.
+    //
+    // nNodes is tested here and not left to the else, which is also reached by a multi-node comm
+    // whose user pinned nChannelsPerNetPeer -- that pin is the whole reason the branch above
+    // declines to run, and ncclTopoGetNchannels() hands it straight back as the count for every
+    // remote peer, so halving it here would undo it. Multi-node is the network's bottleneck to
+    // size against, not the on-package fabric's.
+    if (comm->nNodes == 1 && comm->hasMloPart) {
+      while (comm->p2pnChannelsPerPeer * divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) >
+               comm->p2pnChannels &&
+             comm->p2pnChannelsPerPeer > 1)
+        comm->p2pnChannelsPerPeer /= 2;
+    }
   }
   // Final safety: arch-specific caps above and the halving loop may still
   // leave p2pnChannelsPerPeer > p2pnChannels (e.g. when the loop bottoms out
-  // at 1 but divUp(nRanks, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is large, or when
-  // a later arch cap shrinks p2pnChannels). Clamp to preserve the device-side
-  // invariant required by ncclP2pChannelToPart.
+  // at 1 but divUp(maxP2pPeers, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is large, or when
+  // a later arch cap shrinks p2pnChannels). Covers the plain ncclP2pChannelToPart
+  // bound only. The shift branch (device.h) needs p2pnChannels >> p2pChannelShiftSize,
+  // which this does not enforce. That gap predates this change, but a small maxP2pPeers
+  // widens what can reach it: divUp(2, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) is 1, so the loop
+  // above can now stop at p2pnChannels/2 where dividing by nRanks stopped at /4 or lower.
   comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
 
   // Same grow reconciliation as ncclTopoPostset, for p2p channels (the grow path
@@ -1464,6 +1554,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     NCCLCHECK(ncclTopoReconcileGrowChannels(comm, &comm->p2pnChannels));
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }
+
+  INFO(NCCL_INIT | NCCL_TUNING, "P2P channels: p2pnChannels=%d p2pnChannelsPerPeer=%d maxP2pPeers=%d",
+       comm->p2pnChannels, comm->p2pnChannelsPerPeer, maxP2pPeers);
 
   // Init channels that weren't used so far
   for (int c = comm->nChannels; c < std::max(comm->nChannels, comm->p2pnChannels); c++) NCCLCHECK(initChannel(comm, c));

@@ -18,13 +18,22 @@
 #define NCCL_CE_SYNC_OPS_PER_RANK_UC 3
 #define RCCL_CE_NUM_COPY_STREAMS 8
 
-// Largest message eligible for the unregistered forced CE AllReduce path.
-#define NCCL_CE_AR_MAX_MSG_BYTES (256ull * 1024 * 1024)
+// Selection marker for the hierarchical CE path. Defined once because the
+// scale-out MPI tests assert on this exact text.
+#define RCCL_CE_HIER_SELECTED_TAG "[Hierarchical CE]"
 
 // Total payload capacity of one reusable CE AllReduce staging slot. Messages
-// larger than this are pipelined; sizing each slot to NCCL_CE_AR_MAX_MSG_BYTES
-// wastes VMM (512 MiB with two slots) and fails late VA reservations on ROCm.
-#define NCCL_CE_AR_STAGING_BYTES (16ull * 1024 * 1024)
+// larger than this are pipelined. ceArStagingBytes is the total across all ranks
+// for one slot; with NUM_SLOTS=2 the VMM reservation is 2 * 256 MiB = 512 MiB.
+// On gfx1250, CE-registered AllReduce is default-on, so this is allocated
+// unconditionally at init. Larger values risk late VA reservations on ROCm.
+#define NCCL_CE_AR_STAGING_BYTES (256ull * 1024 * 1024)
+
+// Fallback 2-shot max cap for rcclCeNonRegMaxTab(table, ncclFuncAllReduce) when no arch table is present.
+// Independent of NCCL_CE_AR_STAGING_BYTES (which governs buffer allocation).
+#ifndef NCCL_CE_AR_TMPBUF_DEFAULT_BYTES
+#define NCCL_CE_AR_TMPBUF_DEFAULT_BYTES (256ULL * 1024 * 1024)
+#endif
 
 #ifndef NCCL_CE_REDUCE_MAX_BLOCKS
 #define NCCL_CE_REDUCE_MAX_BLOCKS 46
@@ -34,7 +43,7 @@
 #define NCCL_CE_NUM_SLOTS 2
 #endif
 
-// Per-rank staging capacity in ceARTmpBuf.
+// Per-rank staging capacity in ceARTmpBuf (fixed default; use ceArStagingBytes for runtime value).
 inline size_t ncclCeAllReduceMaxChunkBytes(int nRanks) {
   return (size_t)NCCL_CE_AR_STAGING_BYTES / (size_t)nRanks;
 }
@@ -60,6 +69,11 @@ inline size_t ncclCeAllReduceChooseChunkBytes(size_t shardBytes, size_t slotChun
   if (targetChunkBytes < MIN_CHUNK_BYTES) targetChunkBytes = MIN_CHUNK_BYTES;
   if (targetChunkBytes > slotChunkBytes) targetChunkBytes = slotChunkBytes;
   return alignDown(targetChunkBytes, (size_t)16);
+}
+
+// CE collectives that stage through ceARTmpBuf. Its setup is collective, so it runs in the group job, never at launch.
+inline bool ncclCeCollNeedsStaging(ncclFunc_t func) {
+  return func == ncclFuncAllReduce;
 }
 
 enum ncclCeMethodId {
@@ -97,6 +111,9 @@ struct ncclCeColl {
   // The reduced result is written straight into the user recvbuff (no scratch).
   uint8_t* ceARTmpBuf;
   struct ncclDevrWindow* ceARTmpWin;
+  bool stagingPending;     // set at task append, consumed by the group's SymRegister job
+  size_t ceArMaxBytes;     // 2-shot staging cap, resolved at init: env RCCL_CE_AR_MAX_MSG_BYTES > arch ceArMax
+  size_t ceArStagingBytes; // resolved at init: env var RCCL_CE_AR_STAGING_BYTES > NCCL_CE_AR_STAGING_BYTES
   uint32_t* signalBuffer;
   struct ncclDevrWindow* signalWin;
   // Global counter barrier for regular launch: [0]=arrival, [1]=completed generation.
@@ -146,6 +163,8 @@ struct ncclCeBatchOpsParams {
   void** srcs;
   size_t* sizes;
   size_t numOps;
+  // Split operations into stream-ordered round-robin waves.
+  bool chunking;
   bool intraBatchSync;
 #ifdef CE_BATCH_ASYNC_SUPPORTED
   hipMemcpyAttributes* attrs;
@@ -165,7 +184,15 @@ bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType
 bool ncclHierCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                          ncclSymRegType_t winRegType, struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin);
 
+// True when an admitted CE task must run on the hierarchical path. The launch
+// site and the selection marker share this so they cannot disagree about which
+// algorithm a task got.
+bool ncclHierCeDispatch(struct ncclComm* comm);
+
 ncclResult_t ncclCeInit(struct ncclComm* comm);
+
+// Collective (window registration): call from every rank's group job, never from a single-thread launch loop.
+ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm);
 
 ncclResult_t ncclCeFinalize(struct ncclComm* comm);
 
@@ -201,6 +228,11 @@ ncclResult_t ncclAlltoAllvValidatePeerSendSize(size_t sendBytes, size_t peerRecv
 bool ncclCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
                              bool hasSysmemSegment, bool capturing);
 
+// Multi-node hierarchical CE AlltoAllv (RMA rail + intra-node CE).
+bool ncclHierCeAlltoAllvEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
+                                 struct ncclDevrWindow* sendWin, struct ncclDevrWindow* recvWin,
+                                 bool hasSysmemSegment, bool capturing);
+
 // Same gates as AlltoAllv, then ncclCeAvailable (single-node CE; not hier).
 bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, ncclSymRegType_t winRegType,
                             bool hasSysmemSegment, bool capturing);
@@ -208,6 +240,8 @@ bool ncclCeAlltoAllEligible(struct ncclComm* comm, ncclDataType_t datatype, nccl
 ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 
 ncclResult_t ncclHierCeAlltoAll(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
+
+ncclResult_t ncclHierCeAlltoAllv(struct ncclComm* comm, struct ncclKernelPlan* plan, cudaStream_t stream);
 
 // CE AllReduce: scatter → local-reduce → allgather (→ optional copy-to-user-recvbuff).
 // Requires comm->ceColl.ceARTmpBuf != NULL (i.e. ncclCeInit has run).

@@ -262,13 +262,13 @@ void run_execution_dispatch_benchmark(size_t failure_period) {
   auto decoder = Decoder::create(cfg.arch);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 2> add_words{0x80000000u, 0}; // s_add_co_u32 s0, s0, s0
-  const std::array<uint32_t, 3> rejected_words{0xC4024000u, 0, 0};
+  const std::array<uint32_t, 2> rejected_words{0xD0068000u, 0};
   std::unique_ptr<Instruction> add(decode_valid(*decoder, add_words.data()));
   std::unique_ptr<Instruction> rejected(decode_valid(*decoder, rejected_words.data()));
   ASSERT_NE(add, nullptr);
   ASSERT_NE(rejected, nullptr);
   ASSERT_EQ(add->mnemonic(), "s_add_co_u32");
-  ASSERT_EQ(rejected->mnemonic(), "buffer_load_d16_format_xy");
+  ASSERT_EQ(rejected->mnemonic(), "image_bvh64_intersect_ray");
 
   constexpr size_t iterations = 1000000;
   size_t failures = 0;

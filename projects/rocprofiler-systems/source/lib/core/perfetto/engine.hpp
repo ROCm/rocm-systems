@@ -37,7 +37,7 @@ struct engine_config
     std::uint32_t            flush_period_ms    = 0;
     fill_policy_t            fill_policy        = fill_policy_t::discard;
     backend_t                backend            = backend_t::inprocess;
-    std::vector<std::string> disabled_categories{};
+    std::vector<std::string> disabled_categories;
     bool                     suppress_sdk_log_output = false;
 };
 
@@ -57,7 +57,7 @@ class basic_cached_perfetto_engine
 {
 public:
     using backend_t   = Backend;
-    using session_ptr = typename Backend::session_ptr;
+    using session_ptr = Backend::session_ptr;
 
     explicit basic_cached_perfetto_engine(engine_config cfg);
     ~basic_cached_perfetto_engine() noexcept;
@@ -92,10 +92,10 @@ private:
     Backend                             m_backend{};
     bool                                m_running{ false };
     std::weak_ptr<trace_sink_interface> m_active_sink;
-    session_ptr                         m_session{};
+    session_ptr                         m_session;
 
-    std::mutex                                 m_collector_mutex{};
-    std::unordered_map<int, std::vector<char>> m_collected_bytes{};
+    std::mutex                                 m_collector_mutex;
+    std::unordered_map<int, std::vector<char>> m_collected_bytes;
     std::atomic<bool>                          m_collected_bytes_frozen{ false };
     std::atomic<std::size_t>                   m_dropped_packet_count{ 0 };
 };

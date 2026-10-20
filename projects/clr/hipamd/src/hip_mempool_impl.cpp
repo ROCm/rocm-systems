@@ -89,7 +89,9 @@ Heap::SortedMap::iterator Heap::EraseAllocation(Heap::SortedMap::iterator& it) {
     dev_mem_vaddr = memory->getSvmPtr();
   }
 
-  if (use_vm_heap_) {
+  if (memory->ipcShared()) {
+    memory->release();
+  } else if (use_vm_heap_) {
     vm_heap_.Free(memory);
   } else {
     amd::SvmBuffer::free(memory->getContext(), dev_mem_vaddr);

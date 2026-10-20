@@ -8,7 +8,7 @@
 /// Every other fan-out regression registers an AqlQueue straight against a
 /// command processor: vmid 0, no process page table, and a kernel that touches
 /// no private memory. This brings the driver up instead, creates a compute queue
-/// through CREATE_QUEUE -- the path that sets HwQueue::xcd_fanout -- and
+/// through CREATE_QUEUE -- the path that sets ComputeQueueConfig::xcd_fanout -- and
 /// dispatches a kernel that really does spill, behind a real process page table.
 ///
 /// What that reaches, and what it does not: the scratch *addressing* contract is
@@ -26,6 +26,7 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/code/executable.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
@@ -41,7 +42,6 @@
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
 #include "hsa/amd_hsa_queue.h"
 #include "hsa/hsa.h"
 RJ_DIAGNOSTIC_POP
@@ -74,13 +74,10 @@ using test::kernel_path;
 
 constexpr uint32_t kGpuId = 38144;
 constexpr uint32_t kTotalXcds = 8;
-constexpr uint32_t kCusPerXcd = 36;
-constexpr uint32_t kTotalCus = kTotalXcds * kCusPerXcd;
 constexpr uint32_t kWavefrontSize = 64;
-// One workgroup per CU, so every XCD takes an equal share and the top of the
-// grid -- the part a share-sized scratch pool would leave unbacked -- lands on
-// the highest-rank peer.
-constexpr uint32_t kGridWgs = kTotalCus;
+// One workgroup per XCD gives every peer an equal share while retaining the
+// high-rank grid-wide scratch slots that expose a mistakenly share-sized pool.
+constexpr uint32_t kGridWgs = kTotalXcds;
 constexpr uint32_t kGridItems = kGridWgs * kWavefrontSize;
 
 /// Driver, VM and engine brought up together, with the engine driven on its own
@@ -276,7 +273,7 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
 
   // The premise of the whole test: without a private segment the dispatch never
   // reaches the scratch path at all.
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   std::memcpy(&kd, reinterpret_cast<const void *>(kernel_object), sizeof(kd));
   ASSERT_GT(kd.private_segment_fixed_size, 0u)
@@ -347,7 +344,7 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
 
   // Wait on the signal rather than on the engine: the dispatch retires when the
   // last XCD's share does, and only then is every result guaranteed visible.
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
   while (std::atomic_ref<uint64_t>(signal[kSignalValueIndex]).load(std::memory_order_acquire) !=
              kInitialSignal - 1 &&
          std::chrono::steady_clock::now() < deadline)

@@ -740,10 +740,13 @@ that contains both ``roofline.csv`` and application performance counters
 
 .. note::
    Matrix multiplication benchmarking and counter collection will vary depending on which architecture is profiled:
+
    * gfx9 (CDNA1/2/3/4) supports Matrix Fused MultiplyAdd (MFMA).
    * gfx10+ (RDNA3+) supports Wave Matrix Multiply Accumulate (WMMA).
 
-   Additionally, the cache levels that are benchmarked are dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.
+   CDNA4+ also supports Microscaling formats, which can be identified by the "MX" prefix in datatypes. More details and other resources about MX per CDNA architecture can be found at `AMD CDNA Architecture <https://www.amd.com/en/technologies/cdna.html>`_.
+
+   The cache levels that are benchmarked are dependent on the memory hierarchy levels of the architecture. See the :ref:`CDNA Performance Model <cdna-performance-model>` or :ref:`RDNA Performance Model <rdna-performance-model>` pages to view more information about the hardware blocks and cache levels supported in each architecture.
 
 Roofline options (profile)
 --------------------------
@@ -902,15 +905,28 @@ which operators contribute to specific performance counter values.
 Requirements
 ------------
 
-* PyTorch 2.13 or 2.14 in the profiling environment.
+* PyTorch in the profiling environment. PyTorch 2.13 or 2.14 gets the full
+  operator trace; other versions get the reduced trace described below.
 * PyTorch application must be run as a Python script or a Python command.
+
+``--torch-trace`` records PyTorch operators in one of two ways:
+
+* The **collector** is a small shared library that registers a callback inside
+  PyTorch itself. The callback runs on every thread, so the trace includes the
+  operators that autograd runs on its own worker threads during the backward
+  pass. This is used for PyTorch 2.13 and 2.14.
+* ``TorchDispatchMode`` is a PyTorch hook that calls back into Python around
+  each operator. It works on any PyTorch version, but it only sees the thread
+  it was entered on, so backward-pass operators are missed. This is used for
+  every other PyTorch version, and whenever the collector cannot be loaded.
+
+Profiling never stops because of this. When the collector is unavailable,
+``--torch-trace`` prints a warning and continues with ``TorchDispatchMode``.
 
 .. important::
 
    PyTorch must be installed together with ROCm from the TheRock package index.
-   Torch trace is built against the PyTorch that ships alongside ROCm, so a
-   PyTorch installed separately, for example from the default PyPI index, is not
-   supported.
+   Loading two different ROCm installations in one process aborts at startup.
 
    Install ``rocm[profiler]`` and ``torch`` from the same index, each with the
    ``device-*`` extra for your GPU. See `Installing multi-arch PyTorch Python
@@ -971,11 +987,14 @@ these wraps. ``ROCPROFCOMPUTE_ROCTX_DEEP_TENSOR_WRAPS`` is enabled by default.
 Torch trace collector
 ---------------------
 
-``--torch-trace`` loads ``torch_trace_collector-<major>.<minor>.<abi>.so`` for
-the workload PyTorch version. If this installation has no collector at all,
-profiling stops and says so. If a collector exists but none matches the workload
-PyTorch version, profiling stops with an error listing the supported versions and
-the workload version.
+One ``torch_trace_collector.so`` ships with rocprofiler-compute and is loaded
+through a plain-C interface. It is built as C++17 without PyTorch headers or
+libraries, and it does not depend on the Python version the workload runs, so
+a single file covers every supported setup.
+
+The collector reads a few PyTorch types by byte offset, so it is enabled only
+for the PyTorch versions whose layouts rocprofiler-compute records. Any other
+version falls back to ``TorchDispatchMode``.
 
 Output
 ------

@@ -15,9 +15,7 @@
 #include <string>
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace common_utils
+namespace rocprofsys::common_utils
 {
 
 using argument_parser = tim::argparse::argument_parser;
@@ -45,7 +43,7 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
     namespace env = rocprofsys::env_vars;
 
     // Capture callable once to avoid multiple std::forward (use-after-move).
-    auto env_updater = std::forward<EnvUpdater>(update_env);
+    auto const env_updater = std::forward<EnvUpdater>(update_env);
 
     parser.start_group("PRESET OPTIONS",
                        "Load a profiling preset by name or from a JSON file");
@@ -60,14 +58,19 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
         .max_count(1)
         .dtype("string")
         .action([&state, env_updater](argument_parser& parser_ref) mutable {
-            auto preset = parser_ref.get<std::string>("preset");
-            if(preset.empty()) return;
+            auto const preset = parser_ref.get<std::string>("preset");
+            if(preset.empty())
+            {
+                return;
+            }
             state.active_preset_name = preset;
             auto settings            = state.registry.get_settings(preset);
             if(settings)
             {
                 for(const auto& [key, val] : *settings)
+                {
                     env_updater(key, val);
+                }
             }
             else
             {
@@ -91,7 +94,7 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
         .max_count(1)
         .dtype("string")
         .action([&state, tool_name](argument_parser& parser_ref) {
-            auto preset_name = parser_ref.get<std::string>("explain");
+            auto const preset_name = parser_ref.get<std::string>("explain");
             if(preset_name.empty())
             {
                 std::cerr << "[rocprof-sys] --explain requires a preset name\n";
@@ -120,10 +123,10 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
 
             if(parser_ref.exists("gpu"))
             {
-                auto metrics_str = parser_ref.get<std::string>("gpu");
+                auto const metrics_str = parser_ref.get<std::string>("gpu");
                 if(!metrics_str.empty())
                 {
-                    auto expanded =
+                    auto const expanded =
                         rocprofsys::json_config::expand_gpu_metrics(metrics_str);
                     if(!expanded.empty())
                     {
@@ -151,7 +154,7 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
 
             if(parser_ref.exists("rocm"))
             {
-                auto input = parser_ref.get<std::string>("rocm");
+                auto const input = parser_ref.get<std::string>("rocm");
                 if(!input.empty())
                 {
                     domains_str = rocprofsys::json_config::expand_rocm_domains(input);
@@ -175,7 +178,7 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
             std::string freq = "100";  // default
             if(parser_ref.exists("cpu"))
             {
-                auto input = parser_ref.get<std::string>("cpu");
+                auto const input = parser_ref.get<std::string>("cpu");
                 if(!input.empty())
                 {
                     try
@@ -210,7 +213,7 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
                 runtimes_str = parser_ref.get<std::string>("parallel");
             }
 
-            auto env_vars =
+            auto const env_vars =
                 rocprofsys::json_config::expand_parallel_runtimes(runtimes_str);
             for(const auto& [key, val] : env_vars)
             {
@@ -237,5 +240,4 @@ register_preset_and_domain_arguments(argument_parser& parser, std::string_view t
         });
 }
 
-}  // namespace common_utils
-}  // namespace rocprofsys
+}  // namespace rocprofsys::common_utils

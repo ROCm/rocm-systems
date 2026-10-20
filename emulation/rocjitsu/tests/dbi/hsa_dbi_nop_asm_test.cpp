@@ -42,6 +42,14 @@ RJ_DIAGNOSTIC_POP
 using namespace rocjitsu;
 using namespace rocjitsu::dbi_test;
 
+// ROCR's async-event pool is protected by an uninstrumented HybridMutex, so
+// TSan can report its allocator reuse as a race during HSA initialization.
+// Suppress only accesses originating in that external runtime.
+extern "C" RJ_API_EXPORT const char *__tsan_default_suppressions() {
+  return "called_from_lib:libhsa-runtime64.so\n"
+         "thread:rocr::os::os_thread\n";
+}
+
 namespace {
 
 using test::kernel_path;

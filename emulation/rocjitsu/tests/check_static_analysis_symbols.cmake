@@ -35,6 +35,9 @@ endif()
 # state as new consumers are added to the shared object groups.
 list(
     APPEND _forbidden_symbols
+    "rocjitsu::WaitcheckTarget::"
+    "WaitcheckTarget::"
+    "rocjitsu::analyze_waitcheck_stream("
     "rocjitsu::BinaryTranslator::"
     "rocjitsu::Instrumentor::"
     "rocjitsu::Executable::"
@@ -54,7 +57,12 @@ foreach(_forbidden IN LISTS _forbidden_symbols)
 endforeach()
 
 # Require actual code-object and CFG consumers so the boundary is not vacuous.
-foreach(_required "rocjitsu::AmdGpuCodeObject::" "rocjitsu::BasicBlock::build(")
+foreach(
+    _required
+    "rocjitsu::AmdGpuCodeObject::"
+    "rocjitsu::BasicBlock::build("
+    "rocjitsu::BasicBlock::build_reachable("
+)
     string(FIND "${_symbols}" "${_required}" _match)
     if(_match EQUAL -1)
         message(FATAL_ERROR "static analysis is missing symbol: ${_required}")

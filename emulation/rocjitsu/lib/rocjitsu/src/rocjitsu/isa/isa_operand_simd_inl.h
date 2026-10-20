@@ -65,7 +65,7 @@ void AmdgpuIsaOperand<Isa>::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_
   }
   // Inert (non-value-reading) operand: fill benign zero.
   if (!this->reads_value()) {
-    std::fill_n(out, count, 0u);
+    std::ranges::fill_n(out, count, 0u);
     return;
   }
   if (auto off = detail::resolved_vgpr_offset_for_operand<Isa>(wf, *this)) {
@@ -76,10 +76,11 @@ void AmdgpuIsaOperand<Isa>::read_lane_chunk(const amdgpu::Wavefront &wf, uint32_
         count == 0 ? 0 : util::mask<uint64_t>(static_cast<int>(count)) << lane_base;
     auto region =
         amdgpu::RegisterAccess(wf).read_vgpr_region(wf.vgpr_alloc().base + voff, 1, lane_mask);
-    std::copy_n(region.lanes().begin() + lane_base, count, out);
+    std::ranges::copy_n(region.lanes().begin() + lane_base, count, out);
     return;
   }
-  std::fill_n(out, count, Isa::simd_broadcast_value(wf, this->opr_type_, this->encoding_value_));
+  std::ranges::fill_n(out, count,
+                      Isa::simd_broadcast_value(wf, this->opr_type_, this->encoding_value_));
 }
 
 template <typename Isa>

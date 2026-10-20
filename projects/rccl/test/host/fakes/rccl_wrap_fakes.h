@@ -40,6 +40,9 @@ extern int64_t g_rcclParamDirectReduceScatterThreshold;  // UNDRIVEN
 // Call counters for the no-op tuning hooks: a no-op that was never called and one
 // that was look identical without these, so a dropped call site would be silent.
 extern int g_rcclUpdateCollectiveProtocolCalls;
+extern int g_rcclUpdateCollectiveAlgorithmCalls;
+extern bool g_rcclUpdateCollectiveAlgorithmBeforeProtocol;
+extern int g_rcclUpdateCollectiveChannelsCalls;
 extern int g_rcclSetPipeliningCalls;
 extern int g_rcclUpdateThreadThresholdCalls;
 extern int g_rcclOptThreadBlockSizeCalls;
@@ -49,9 +52,9 @@ extern int g_rcclOverrideAlgorithmCalls;
 extern int g_rcclOverrideProtocolCalls;
 
 // CE (copy-engine) allreduce gates (rccl_wrap.cc:834-855).
-extern bool g_rcclCeAllReduceAllowed;
-extern int g_rcclCeAllReduceGraphLatchTickCalls;
-extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;
+extern bool g_rcclCeArGraphSafe;  // UNDRIVEN
+extern int g_rcclCeAllReduceGraphLatchTickCalls;  // UNDRIVEN
+extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;  // UNDRIVEN
 
 // -------------------------------------------------------------------------
 // WARP_SPEED seams (rccl_wrap.cc:1448+). enqueue.cc calls these from five sites
@@ -88,6 +91,17 @@ extern int g_rcclParamWarpSpeedForceEnableCalls;
 // auto-mode arm can never fire.
 extern bool g_rcclCanUseWarpSpeedAutoResult;
 extern int g_rcclCanUseWarpSpeedAutoCalls;
+
+// Hierarchical collectives (rcclEnsureHierarchicalComms). The temp-buffer size
+// is a hook so a test can check the arguments it was sized from, not only that
+// the returned size reached the allocator.
+extern std::function<size_t(int, bool, bool)> g_rcclHierarchicalTempBufferSize;
+extern int64_t g_rcclParamHierarchicalAllGather;
+extern int64_t g_rcclParamHierarchicalReduceScatter;
+
+// CE AllReduce staging (ncclCeEnsureAllReduceStaging, ncclCeInit in ce_coll.cc).
+extern int64_t g_rcclParamCeAllReduce;
+extern int64_t g_rcclParamCeArStagingBytes;
 
 // checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
 // hsaScratchEnv argument, which is the only proof the check read the environment at all.

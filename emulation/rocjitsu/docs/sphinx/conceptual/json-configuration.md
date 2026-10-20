@@ -44,8 +44,9 @@ objects for the virtual machine and the topology.
 | `max_ticks` | int | Maximum simulation ticks. A value of `0` means unlimited. |
 | `num_threads` | int | Simdojo engine partitions, clamped to the aggregate XCD count. |
 | `cpu_dispatch_threads` | int | Inclusive dispatch width per SoC; omitted/0 selects from preferred allocations, 1 forces serial. |
-| `cpu_thread_budget` | int | Selection ceiling; omitted/0 uses affinity capped at 32, positive values override it. |
+| `cpu_thread_budget` | int | Selection ceiling; omitted/0 uses affinity and target allocations. Positive values override the budget. |
 | `async_helper_threads` | int | Shared MMA helpers: -1 selects the table, 0 disables, 1–128 overrides. |
+| `wait_checking` | string | Override diagnostics on every CU and GPU: `on`, `off`, or `all`. Omission preserves per-CU settings and defaults. |
 | `thread_allocations` | array | Preferred engine, dispatch and helper allocations for this target. Largest fitting effective allocation wins. |
 | `exec_mode` | string | Execution mode: `"functional"` or `"clocked"`. |
 | `vm.arch` | string | Target architecture, such as `cdna3`, `cdna4`, or `rdna4`. |
@@ -55,12 +56,25 @@ objects for the virtual machine and the topology.
 single XCD is never split between engine partitions. In functional mode,
 `cpu_dispatch_threads` controls the host parallelism used to execute accepted
 CU work. Its pool is shared by all command processors in a SoC, and each width
-is clamped to per-CP CU capacity. The selection counts engines, all retained
+is bounded by one plus the sum of CUs-1 across nonempty XCDs. Each submission
+still uses at most its active CU count. The selection counts engines, all retained
 dispatch workers and shared helpers: E + sum(D - 1) + H. Explicit knobs
 override the selected allocation; configs without a table use serial defaults.
 Clocked mode always uses serial dispatch. See the source
 [configuration guide](../../configuration.md)
 for table examples and `rocjitsu --thread-budget-table`.
+`rocjitsu --cpu-thread-budget N` replaces JSON `cpu_thread_budget` for that launch.
+
+Ordinary memory wait warnings are enabled by default; gfx1250 XCNT replay-source
+checks are off. If warnings appear incorrect or checking slows a workload, use
+`rocjitsu --config <file> --wait-checking=off -- <command>` to disable both.
+`--wait-checking=on` enables ordinary checks only; `--wait-checking=all` also
+enables XCNT. The flag overrides JSON settings on every CU and GPU for the launch,
+leaving the source file unchanged. Omitting it preserves JSON settings and defaults.
+`mirage run` accepts the same flag with profiles or `--config`, including alongside
+`--cpu-thread-budget` in daemon and in-process modes.
+See the source [memory wait diagnostics guide](../../memory-wait-diagnostics.md)
+for coverage, per-CU controls and launch-mode restrictions.
 
 `exec_mode` is matched literally. Only `"clocked"` selects cycle-accurate
 mode. If the field is omitted or set to `"functional"`, `"cycle"`, or any
@@ -165,7 +179,7 @@ The `configs/` directory ships several ready-to-use topology files:
 | `gfx950_mi355x.json` | Single CDNA4 GPU, standalone simulation. |
 | `gfx950_mi355x_kmd.json` | Single CDNA4 GPU, daemon or KFD mode. |
 | `gfx950_mi355x_kmd_2gpu.json` | Two CDNA4 GPUs, multi-GPU daemon mode. |
-| `gfx1250_mi455x.json` | Single CDNA5 GPU, standalone simulation. |
+| `gfx1250_mi455x.json` | Single CDNA5 GPU, standalone or PCI/VFIO simulation. |
 | `gfx1250_mi455x_kmd_4gpu.json` | Four CDNA5 GPUs, multi-GPU daemon mode. |
 | `gfx1100_w7900.json` | Single RDNA3 GPU, standalone simulation. |
 | `gfx1151.json` | Single RDNA3.5 GPU, standalone simulation. |
@@ -177,6 +191,12 @@ Standalone configs (without `_kmd` in the name) are used with
 `rj_vm_step` or `rj_vm_run`. KMD configs initialize the topology and
 simulated driver so that an unmodified ROCm runtime stack can issue
 ioctls through the interposer.
+
+The gfx1250 standalone profile can also back the Linux VFIO-user server. That
+compute-only PCI profile requires an AMDGPU guest containing commit
+`4e07da515d1c` or an equivalent backport so discovery accepts the intentional
+absence of VCN, UVD, and JPEG hardware. See
+[Run a QEMU VFIO-user compute guest](/how-to/qemu-vfio.md).
 
 ## Multi-GPU configurations
 

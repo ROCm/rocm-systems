@@ -16,11 +16,15 @@ on:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-build.yml'
   push:
     branches: [develop]
     paths:
       - 'projects/amdsmi/**'
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-build.yml'
   workflow_dispatch:
 
@@ -45,91 +49,6 @@ defaults:
     shell: bash
 
 jobs:
-  manylinux-build:
-    name: Build (Manylinux Gate)
-    runs-on: ubuntu-24.04
-    container:
-      image: quay.io/pypa/manylinux_2_28_x86_64
-    env:
-      BUILD_DIR: /tmp/amdsmi-build
-
-    steps:
-      # rocm-systems is a large monorepo; the wheel gate only needs the amdsmi
-      # project and this workflow, so sparse-checkout keeps the fetch cheap.
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: |
-            projects/amdsmi
-            .github/workflows
-
-      - name: Mark workspace safe for git
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Select build interpreter
-        run: |
-          set -euo pipefail
-          # The manylinux image periodically drops EOL interpreters
-          # (e.g. cp38 was removed once Python 3.8 reached end-of-life),
-          # so pick the newest available stable CPython rather than
-          # hardcoding a version that may vanish on the next image bump.
-          PY_BUILD=""
-          for _py in cp313 cp312 cp311 cp310 cp39; do
-            _cand="/opt/python/${_py}-${_py}/bin/python3"
-            if [ -x "$_cand" ]; then PY_BUILD="$_cand"; break; fi
-          done
-          if [ -z "$PY_BUILD" ]; then
-            echo "ERROR: no suitable CPython interpreter found under /opt/python" >&2
-            exit 1
-          fi
-          echo "Using build interpreter: $PY_BUILD ($("$PY_BUILD" --version 2>&1))"
-          echo "PY_BUILD=$PY_BUILD" >> "$GITHUB_ENV"
-
-      - name: Install build prerequisites
-        run: |
-          set -euo pipefail
-          dnf -y install git make gcc gcc-c++ cmake ninja-build openssl-devel libnl3-devel libmnl-devel
-          "$PY_BUILD" -m pip install --upgrade pip
-
-      - name: Configure
-        run: |
-          set -euo pipefail
-          rm -rf "$BUILD_DIR"
-          cmake -S "$GITHUB_WORKSPACE/projects/amdsmi" -B "$BUILD_DIR" \
-            -DENABLE_ESMI_LIB=ON \
-            -DBUILD_PYTHON_WHEEL=ON \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DPython3_EXECUTABLE="$PY_BUILD"
-
-      - name: Build library and wheel
-        # The CMake `python_wheel` target is part of ALL (gated on
-        # BUILD_PYTHON_WHEEL), so this single build produces both the
-        # SONAME-isolated libamd_smi_python.so and the .whl that bundles it --
-        # no separate `pip wheel` invocation, which would bypass the target's
-        # disable_system_fallback.py loader-flag step.
-        run: make -C "$BUILD_DIR" -j"$(nproc)"
-
-      - name: Verify wheel artifact
-        run: |
-          set -euo pipefail
-          wheel_dir="$BUILD_DIR/py-interface/python_package"
-          shopt -s nullglob
-          wheels=("$wheel_dir"/*.whl)
-          if [ "${#wheels[@]}" -eq 0 ]; then
-            echo "ERROR: no wheel produced under $wheel_dir" >&2
-            exit 1
-          fi
-          printf 'Python wheel built: %s\n' "${wheels[@]}"
-          echo "WHEEL=${wheels[0]}" >> "$GITHUB_ENV"
-
-      - name: Install and import the wheel
-        run: |
-          set -euo pipefail
-          # Prove the wheel is installable and loads its bundled library, not
-          # just that the file exists. No GPU needed for import.
-          "$PY_BUILD" -m pip install "$WHEEL"
-          "$PY_BUILD" -c "import amdsmi; print('import amdsmi OK from', amdsmi.__file__)"
-          echo "Build gate passed"
-
   # Single job covering every distro + package format. The build-time logic
   # (package manager, distro quirks) is autodetected by run_amdsmi_build.py
   # from /etc/os-release, so the matrix only needs the OS label plus the
@@ -149,7 +68,13 @@ jobs:
         include:
           - { os: Ubuntu20,    package_format: deb, arch_suffix: _amd64.deb }
           - { os: Ubuntu22,    package_format: deb, arch_suffix: _amd64.deb }
-          - { os: Debian10,    package_format: deb, arch_suffix: _amd64.deb }
+          # The internal registry has no debian-12/13, so these two use the
+          # official images, pinned by digest. They ship no build tooling;
+          # run_amdsmi_build.py installs it.
+          - { os: Debian12,    package_format: deb, arch_suffix: _amd64.deb,
+              image: "debian:12@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443" } # bookworm, 2026-08-24
+          - { os: Debian13,    package_format: deb, arch_suffix: _amd64.deb,
+              image: "debian:13@sha256:f324c7ff54321e8d9c588493a20244965938ce0aa50bbd1022d38010e9ffc4b1" } # trixie, 2026-08-24
           - { os: SLES,        package_format: rpm, arch_suffix: .rpm }
           - { os: RHEL8,       package_format: rpm, arch_suffix: .rpm }
           - { os: RHEL9,       package_format: rpm, arch_suffix: .rpm }
@@ -157,16 +82,36 @@ jobs:
           - { os: AlmaLinux8,  package_format: rpm, arch_suffix: .rpm }
           - { os: AzureLinux3, package_format: rpm, arch_suffix: .rpm }
     container:
-      image: ${{ vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
+      image: ${{ matrix.image || vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}
       options: --rm --privileged --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --shm-size=64G --cap-add=SYS_MODULE -v /lib/modules:/lib/modules -u root
 
     steps:
+      # An empty container image does not fail the job: it runs on the bare
+      # self-hosted runner instead, unsandboxed.
+      - name: Verify container image is configured
+        run: |
+          if [ -z "${{ matrix.image || vars[format('{0}_DOCKER_IMAGE', matrix.os)] }}" ]; then
+            echo "::error::No image for ${{ matrix.os }}: set the ${{ matrix.os }}_DOCKER_IMAGE repository variable"
+            exit 1
+          fi
+
+      # The official Debian images carry neither git, which actions/checkout
+      # needs to clone rather than fall back to a tarball, nor python3, which
+      # launches the build script.
+      - name: Bootstrap git and python3
+        run: |
+          command -v git >/dev/null && command -v python3 >/dev/null && exit 0
+          apt-get update
+          apt-get install -y --no-install-recommends git python3 ca-certificates
+
       # rocm-systems is a large monorepo; only the amdsmi project and this
       # workflow are needed, so sparse-checkout keeps the fetch cheap.
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             projects/amdsmi
+            shared/cuid
+            shared/sha256
             .github/workflows
 
       - name: Mark workspace safe for git
@@ -188,11 +133,12 @@ jobs:
           echo "BUILD_DATE=$(date -u +%m%d%y-%H%M)" >> $GITHUB_ENV
 
       - name: Run AMDSMI Build and Install
+        id: build
         run: |
           set -euo pipefail
           # The script autodetects package manager, format, and distro
-          # quirks (Debian10 archived repos, RHEL10/AlmaLinux8 QA_RPATHS,
-          # AzureLinux3 more_itertools, etc.) from /etc/os-release.
+          # quirks (RHEL10/AlmaLinux8 QA_RPATHS, AzureLinux3
+          # more_itertools, etc.) from /etc/os-release.
           python3 "${{ env.PROJECT_DIR }}/tests/amdsmi_build/run_amdsmi_build.py" \
             --project-dir "${{ env.PROJECT_DIR }}" \
             --os-label "${{ matrix.os }}" \
@@ -229,7 +175,10 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      # The command and test steps run whenever the install succeeded, so a failure
+      # in one does not hide the results of the other.
       - name: AMDSMI Command Tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           set -euo pipefail
           mkdir -p /tmp/test-results-${{ matrix.os }}
@@ -248,9 +197,10 @@ jobs:
             "amd-smi xgmi"
             "amd-smi partition"
           )
-          # Command failures are not hard fails here; the AMDSMI CI
-          # Summary step scans amd-smi_*.log for 'Error code:' / 'Traceback'
-          # / 'AmdSmiException' and surfaces any failures in the summary.
+          # Every command runs before the step fails, so one run reports them all.
+          # The AMDSMI CI Summary step also flags 'Error code:' / 'Traceback' /
+          # 'AmdSmiException' in amd-smi_*.log.
+          failed=()
           for cmd in "${commands[@]}"; do
             debug_cmd="$cmd --loglevel debug"
             echo "Running: $debug_cmd"
@@ -261,8 +211,13 @@ jobs:
               echo "Command '$debug_cmd' failed (exit $rc)."
               cat "$log"
               echo "Error code: $rc" >> "$log"
+              failed+=("$cmd")
             fi
           done
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::Failed: ${failed[*]}"
+            exit 1
+          fi
 
       - name: Upload AMDSMI Command Test Results
         if: always()
@@ -272,33 +227,56 @@ jobs:
           path: /tmp/test-results-${{ matrix.os }}
 
       - name: Run AMDSMI, Python, and Example Tests
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         run: |
           set -euo pipefail
           RESULTS_DIR=/tmp/test-results-${{ matrix.os }}
+
+          # Every suite runs even after one fails, so one run reports them all. A
+          # failed run gets an 'Exit code:' line that the summary step reports.
+          failed=()
+          run() {
+            local log=$1 rc=0
+            shift
+            "$@" > "$log" 2>&1 || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              # On its own line even when the output lacks a final newline.
+              printf '\nExit code: %s\n' "$rc" >> "$log"
+              failed+=("$(basename "$log") (exit $rc)")
+            fi
+          }
+
+          # A command outside run() (cd, source, cmake, make) still ends the step
+          # under set -e. Record where, so the summary does not read the logs that
+          # were never written as a pass.
+          finished=0
+          trap '[ "$finished" = 1 ] || echo "FAILED: stopped at: $BASH_COMMAND" > "$RESULTS_DIR/test_step_result.txt"' EXIT
 
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
           source detect_asic_filter.sh
           echo "GTEST_EXCLUDE=${GTEST_EXCLUDE}"
-          ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}" > "$RESULTS_DIR/amdsmi_tests.log" 2>&1
+          run "$RESULTS_DIR/amdsmi_tests.log" ./amdsmitst --gtest_filter="-${GTEST_EXCLUDE}"
 
           cd /opt/rocm/share/amd_smi/tests/python_unittest
-          ./integration_test.py -v > "$RESULTS_DIR/integration_test_output.txt" 2>&1
-          ./unit_tests.py -v > "$RESULTS_DIR/unit_test_output.txt" 2>&1
-          python3 test_abi_compat.py -v > "$RESULTS_DIR/abi_compat_output.txt" 2>&1
-          if [ -f ./perf_tests.py ]; then
-            ./perf_tests.py -v > "$RESULTS_DIR/perf_test_output.txt" 2>&1 || echo 'perf_tests.py failed'
-          else
-            echo "perf_tests.py not present; skipping" > "$RESULTS_DIR/perf_test_output.txt"
-          fi
+          run "$RESULTS_DIR/integration_test_output.txt" ./integration_test.py -v
+          run "$RESULTS_DIR/unit_test_output.txt" ./unit_tests.py -v
+          run "$RESULTS_DIR/cli_test_output.txt" ./cli_unit_test.py -v
+          run "$RESULTS_DIR/abi_compat_output.txt" python3 test_abi_compat.py -v
 
           cd ${{ env.PROJECT_DIR }}/example
           rm -rf build
           cmake -B build -DENABLE_ESMI_LIB=OFF
           make -C build -j $(nproc)
           cd build
-          ./amd_smi_drm_ex > "$RESULTS_DIR/amd_smi_drm_ex.log" 2>&1 || echo 'amd_smi_drm_ex failed'
-          ./amd_smi_nodrm_ex > "$RESULTS_DIR/amd_smi_nodrm_ex.log" 2>&1 || echo 'amd_smi_nodrm_ex failed'
+          run "$RESULTS_DIR/amd_smi_drm_ex.log" ./amd_smi_drm_ex
+          run "$RESULTS_DIR/amd_smi_nodrm_ex.log" ./amd_smi_nodrm_ex
+          finished=1
+
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo "::error::Failed: ${failed[*]}"
+            exit 1
+          fi
 
       - name: AMDSMI Test Results
         if: always()
@@ -312,9 +290,9 @@ jobs:
         if: always()
         run: cat /tmp/test-results-${{ matrix.os }}/unit_test_output.txt || echo "No unit test results"
 
-      - name: Perf Test Results
+      - name: CLI Test Results
         if: always()
-        run: cat /tmp/test-results-${{ matrix.os }}/perf_test_output.txt || echo "No perf test results"
+        run: cat /tmp/test-results-${{ matrix.os }}/cli_test_output.txt || echo "No CLI test results"
 
       - name: ABI Compat Test Results
         if: always()

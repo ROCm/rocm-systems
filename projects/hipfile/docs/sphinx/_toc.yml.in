@@ -8,6 +8,10 @@ subtrees:
         title: Build from source
       - file: install/python-bindings
         title: Install Python bindings
+  - caption: Conceptual
+    entries:
+      - file: conceptual/amd-infinity-storage
+        title: AMD Infinity Storage
   - caption: How to
     entries:
       - file: how-to/checking-system-compatibility
@@ -30,6 +34,8 @@ subtrees:
         title: Copying a file
       - file: tutorials/async-multistream-io
         title: Asynchronous multistream I/O
+      - file: tutorials/batch-io
+        title: Batch I/O
       - file: tutorials/get-version
         title: Query the hipFile version
       - file: tutorials/python-gpu-io
@@ -59,6 +65,7 @@ subtrees:
           - file: reference/api-file-and-buffer
           - file: reference/api-async
           - file: reference/api-batch
+          - file: reference/api-stats
           - file: reference/api-errors
           - file: reference/api-python
   - caption: Troubleshooting
