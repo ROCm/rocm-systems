@@ -1438,8 +1438,6 @@ TEST_F(SymMemoryMapLsaTeamTest, Publish_IndexesOwnerFdsBySegmentVa) {
 }
 
 #if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
-// ROCM-29810: HIP reports an imported host VMM handle as device, so one host owner
-// beside device peers is the owner's segment imported everywhere else; it maps.
 // Off the host-VMM compile gate ncclSymIsHostSegment(kLocHost) is false.
 TEST_F(SymMemoryMapLsaTeamTest, SingleHostOwnerBesideImportedDevice_Succeeds) {
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {

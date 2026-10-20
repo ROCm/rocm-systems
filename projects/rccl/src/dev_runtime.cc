@@ -579,8 +579,6 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
   }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // TODO(ROCM-29810): Remove when the runtime preserves imported VMM location metadata.
-  // RCCL: imported host VMM reads as device, so propagate the one host owner's type; scan maxSegments so all ranks agree.
   if (ncclParamSymReuseSysmemHandles()) {
     for (int segment = 0; segment < maxSegments; segment++) {
       int nHost = 0, nDevice = 0;
@@ -924,7 +922,6 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     int ptrType;
     bool needDmabuf;
-    // RCCL: TODO(ROCM-29810): imported host VMM reads as device; the owner fd marks it as host.
     if (hostOwnerFd >= 0) cuMemLocType = static_cast<CUmemLocationType>(CU_MEM_LOCATION_TYPE_HOST_NUMA);
     NCCLCHECKGOTO(rcclDevrGinSegmentRegType(ncclSymIsHostSegment(cuMemLocType), mem->maxGlobalNumSegments, &ptrType,
                                             &needDmabuf),
