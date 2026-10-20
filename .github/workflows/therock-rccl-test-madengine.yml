@@ -231,3 +231,18 @@ jobs:
           rm -rf "${WORK_DIR}/madengine" "${WORK_DIR}/MAD" "${WORK_DIR}/conda" \
                  "${WORK_DIR}/env" "${WORK_DIR}/overlay_ctx" \
                  "${WORK_DIR}/docker_builds"
+
+          # Nothing on this host builds or pulls an image any more; the nodes
+          # build them. Earlier versions did both, under per-run tags nothing
+          # removed, and every runner on this host shares its Docker disk: a
+          # pull of the sglang base ran it out of space. Remove those tags and
+          # the bases they were built from, but not -f, so an image a container
+          # still uses stays. Layers of a failed pull have no name and stay too.
+          docker system df || true
+          {
+            docker images --format '{{.Repository}}:{{.Tag}}' \
+              | grep -E -- '-(rccl-gfx[0-9a-z]+|primus-v[0-9.]+|mad-[0-9a-f]{8})-' || true
+            python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import test_madengine as t; print(*sorted({c["base_image"] for c in t.WORKLOAD_CONFIGS.values()}), sep="\n")' \
+              rocm-systems/projects/rccl/ci/scripts
+          } | sort -u | xargs -r docker image rm 2>&1 | grep -v 'No such image' || true
+          docker system df || true
