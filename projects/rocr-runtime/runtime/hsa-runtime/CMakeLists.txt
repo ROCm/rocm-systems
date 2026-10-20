@@ -198,6 +198,23 @@ if ( CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   endif()
 endif()
 
+## ThreadSanitizer flags
+## IMPORTANT: TSAN requires the entire process image to be built with -fsanitize=thread.
+## Linking only hsa-runtime64 with TSAN (via HSA_SHARED_LINK_FLAGS) leaves __tsan_init
+## undefined in the shared object. Consumers not built with TSAN will fail to load it.
+## Build the application and all dependencies with TSAN enabled.
+if ( THREAD_SANITIZER OR THEROCK_SANITIZER STREQUAL "TSAN" OR DEFINED ENV{THREAD_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "TSAN" )
+  # Use -O1 per ThreadSanitizer documentation: aggressive optimization can mask race conditions
+  # -Wno-tsan is only needed for GCC, as clang has no -Wtsan warning
+  if ( CMAKE_COMPILER_IS_GNUCXX )
+    set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=thread -g -O1 -Wno-tsan )
+  else()
+    set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=thread -g -O1 )
+  endif()
+  set ( HSA_SHARED_LINK_FLAGS "${HSA_SHARED_LINK_FLAGS} -fsanitize=thread" )
+  message(STATUS "hsa-runtime64: ThreadSanitizer (TSAN) enabled")
+endif()
+
 ## UndefinedBehaviorSanitizer flags
 if ( UNDEFINED_SANITIZER OR THEROCK_SANITIZER STREQUAL "UBSAN" OR DEFINED ENV{UNDEFINED_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "UBSAN" )
   set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=undefined -fsanitize-recover=undefined -g )
