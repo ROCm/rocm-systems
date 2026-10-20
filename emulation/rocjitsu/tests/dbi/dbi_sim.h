@@ -40,6 +40,7 @@
 #include "../config_test_util.h"
 #include "../halt_snapshot_plugin.h"
 
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -47,12 +48,6 @@
 #include "rocjitsu/vm/soc.h"
 
 #include "simdojo/sim/simulation.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
@@ -124,10 +119,10 @@ public:
   /// CP's fallback for internal test dispatches, the else branch of the enable-bit
   /// walk in CommandProcessor::init_wavefront_regs.
   /// That path writes nothing when the dispatch carries no kernarg address.
-  void set_kernarg(std::vector<uint8_t> bytes,
-                   uint32_t properties =
-                       rocr::llvm::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
-                   uint32_t user_sgpr_count = 2) {
+  void set_kernarg(
+      std::vector<uint8_t> bytes,
+      uint32_t properties = rocjitsu::amdhsa::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+      uint32_t user_sgpr_count = 2) {
     kernarg_bytes_ = std::move(bytes);
     kernarg_properties_ = properties;
     user_sgpr_count_ = user_sgpr_count;
@@ -155,16 +150,16 @@ public:
   /// @note The descriptor is synthesized, not the patched object's -- see the
   ///   file-level warning.
   uint64_t write_kernel(uint64_t addr, const std::vector<uint32_t> &code, uint32_t private_bytes) {
-    using namespace rocr::llvm::amdhsa;
+    using namespace rocjitsu::amdhsa;
     kernel_descriptor_t kd{};
     kd.kernel_code_entry_byte_offset =
         static_cast<int64_t>(sizeof(kernel_descriptor_t) + entry_offset_);
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                    ((256 / 8) - 1));
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                       ((256 / 8) - 1));
     // 104 SGPRs is ample for the probe link pair s[30:31] and envelope temps.
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                    ((104 / 8) - 1));
-    AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgpr_count_);
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                       ((104 / 8) - 1));
+    RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, user_sgpr_count_);
     kd.kernel_code_properties = kernarg_properties_;
     kd.kernarg_size = static_cast<uint32_t>(kernarg_bytes_.size());
     kd.private_segment_fixed_size = private_bytes;

@@ -231,7 +231,7 @@ TEST(Gfx1250SimulationTest, Partial2DGridTailMasksNonContiguousExecLanes) {
 }
 
 TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -243,7 +243,8 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
   } args{0x11111111u, 0x22222222u, 0x33333333u};
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
@@ -264,7 +265,7 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
 }
 
 TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -272,7 +273,8 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
   const std::array<uint32_t, 3> args{0x11111111u, 0x22222222u, 0x33333333u};
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
@@ -293,7 +295,7 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
 }
 
 TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -303,7 +305,8 @@ TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload)
     args[i] = 0x1000u + i;
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
@@ -325,7 +328,7 @@ TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload)
 }
 
 TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -338,7 +341,8 @@ TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
@@ -355,7 +359,7 @@ TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
 }
 
 TEST(Gfx1250SimulationTest, SLoadB32WritesVccHalves) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -379,7 +383,8 @@ TEST(Gfx1250SimulationTest, SLoadB32WritesVccHalves) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
@@ -397,7 +402,7 @@ TEST(Gfx1250SimulationTest, SLoadB32WritesVccHalves) {
 }
 
 TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -413,7 +418,8 @@ TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
@@ -431,7 +437,7 @@ TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
 }
 
 TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint64_t kKernargAddr = 0x400000;
@@ -463,7 +469,8 @@ TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
   append_instruction(code, S_ENDPGM_GFX12);
 
   uint32_t kernel_code_properties = 0;
-  AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
+                     1);
 
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());

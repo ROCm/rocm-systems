@@ -11,6 +11,7 @@
 
 #include "checkpoint_generated.h"
 #include "embedded_schema.h"
+#include "rocjitsu/code/kernel_descriptor_abi.h"
 #include "rocjitsu/config/checkpoint.h"
 #include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
@@ -33,12 +34,6 @@
 #include "util/diagnostic.h"
 
 #include "simdojo/sim/simulation.h"
-
-#include "rocjitsu/base/rj_compiler.h"
-RJ_DIAGNOSTIC_PUSH
-RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "hsa/AMDHSAKernelDescriptor.h"
-RJ_DIAGNOSTIC_POP
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -93,6 +88,22 @@ test::ScopedTempFile write_temp_config(std::string_view json) {
   return file;
 }
 
+std::string config_load_error(const std::string &path, bool validate_only) {
+  try {
+    util::StringDiagnostic diagnostic;
+    if (validate_only) {
+      if (config::validate_config(path, kEmbeddedSchema, diagnostic.emitter()).failed())
+        return diagnostic.message();
+    } else {
+      if (config::load_config(path, kEmbeddedSchema, diagnostic.emitter()).failed())
+        return diagnostic.message();
+    }
+    return {};
+  } catch (const std::exception &error) {
+    return error.what();
+  }
+}
+
 std::vector<uint8_t> read_binary_file(const std::string &path) {
   std::ifstream stream(path, std::ios::binary);
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
@@ -123,6 +134,53 @@ TEST(SoCTest, SelectsSdmaPacketDialect) {
     SCOPED_TRACE(static_cast<int>(arch));
     SoC soc("soc", nullptr, arch);
     EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), expected);
+  }
+}
+
+TEST(ConfigLoaderTest, MatchesFullConstructionForRepositoryConfigurations) {
+  for (const auto &entry : std::filesystem::directory_iterator(CONFIG_DIR_PATH)) {
+    if (entry.path().extension() != ".json")
+      continue;
+    SCOPED_TRACE(entry.path().string());
+    EXPECT_EQ(config_load_error(entry.path().string(), /*validate_only=*/true),
+              config_load_error(entry.path().string(), /*validate_only=*/false));
+  }
+}
+
+TEST(ConfigLoaderTest, MatchesConstructorResourceAndTypeErrors) {
+  const std::string prefix = R"({ "vm": { "arch": "cdna3" }, "topology": {
+    "root": { "name": "soc", "type": "soc", "children": [
+      { "name": "mem", "type": "gpu_memory" },
+      { "name": "cu", "type": "compute_unit", "config": [)";
+  for (const auto &setting : {R"({"key":"num_wf_slots","value":"1000000"})",
+                              R"({"key":"vgprs_per_wf","value":"1000000"})",
+                              R"({"key":"memory_wait_diagnostics","value":"invalid"})",
+                              R"({"key":"xcnt_diagnostics","value":"invalid"})",
+                              R"({"key":"functional_quantum","value":"nonnumeric"})",
+                              R"({"key":"num_wf_slots","value":"0"})"}) {
+    SCOPED_TRACE(setting);
+    const auto file = write_temp_config(prefix + setting + "]} ]} }}");
+    EXPECT_EQ(config_load_error(file.path(), /*validate_only=*/true),
+              config_load_error(file.path(), /*validate_only=*/false));
+  }
+}
+
+TEST(ConfigLoaderTest, ValidationReportsParseAndDeviceFailures) {
+  struct Case {
+    const char *json;
+    const char *message;
+  };
+  for (const auto &test_case :
+       {Case{"{", "Failed to parse JSON config:"},
+        Case{R"({"vm":{"arch":"cdna3","gpu":{"device":{"num_sdma_engines":1}}}})",
+             "vm.gpu.device.num_sdma_queues_per_engine"}}) {
+    SCOPED_TRACE(test_case.message);
+    const auto file = write_temp_config(test_case.json);
+    util::StringDiagnostic diagnostic;
+    const util::Result result =
+        config::validate_config(file.path(), kEmbeddedSchema, diagnostic.emitter());
+    EXPECT_TRUE(result.failed());
+    EXPECT_THAT(diagnostic.message(), testing::HasSubstr(test_case.message));
   }
 }
 
@@ -212,14 +270,14 @@ run_two_spi_dispatch(util::DiagnosticEmitter emit_error) {
   rocjitsu::test::DispatchCountPlugin *dispatch_count = nullptr;
   soc->set_plugin_group(rocjitsu::test::make_dispatch_count_group(&dispatch_count));
 
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  ((104 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     ((256 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     ((104 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
 
   constexpr uint64_t KD_ADDR = 0x1000;
   soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
@@ -2255,15 +2313,15 @@ TEST(ConfigLoaderTest, DispatchDistributesAcrossCUs) {
   soc->set_plugin_group(plugin_group);
 
   // Write a kernel descriptor + invalid instruction so wavefronts halt immediately.
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
   // CDNA3 (GFX940+) uses VGPR granularity 8 (not 4).
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  ((104 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     ((256 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     ((104 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
 
   constexpr uint64_t KD_ADDR = 0x1000;
   soc->memory()->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), KD_ADDR);
@@ -3527,14 +3585,14 @@ TEST(CApiTest, ClockedDispatchStaysEventDriven) {
   EXPECT_EQ(handle->soc->dispatch_threads(), 1u);
   EXPECT_EQ(cp->dispatch_threads(), 1u);
 
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   kernel_descriptor_t kd{};
   kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
-                  ((256 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
-                  ((104 / 8) - 1));
-  AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                     ((256 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                     ((104 / 8) - 1));
+  RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
 
   constexpr uint64_t kKernelAddress = 0x1000;
   constexpr uint32_t kCode[] = {0xBF800000u, 0xBF810000u}; // s_nop; s_endpgm

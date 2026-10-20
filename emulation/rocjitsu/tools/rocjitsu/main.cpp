@@ -652,9 +652,9 @@ int main(int argc, char *argv[]) {
     }
     dbt_guest_config = std::move(maybe_dbt_guest.value());
     if (!dbt_guest_config.enabled) {
-      auto loaded = rocjitsu::config::load_config(abs_config, rocjitsu::kEmbeddedSchema,
-                                                  launch_config_diagnostic.emitter());
-      if (loaded.failed()) {
+      auto validated = rocjitsu::config::validate_config(abs_config, rocjitsu::kEmbeddedSchema,
+                                                         launch_config_diagnostic.emitter());
+      if (validated.failed()) {
         std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
                                  launch_config_diagnostic.message());
         return 1;

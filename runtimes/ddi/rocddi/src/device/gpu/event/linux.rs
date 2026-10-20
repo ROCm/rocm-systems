@@ -3,12 +3,149 @@
 
 //! Linux KFD signal-event interoperability.
 
+use crate::device::Device;
 use crate::device::gpu::GpuDevice;
 use crate::device::gpu::queue::QueueErrorEvent;
 use crate::driver;
 use crate::memory::Allocation;
 use crate::memory::storage::Owned;
 use crate::{Error, ErrorKind};
+use std::sync::atomic::{AtomicPtr, Ordering};
+use std::sync::{Mutex, MutexGuard};
+
+/// Process-wide KFD page identity shared by the AMDF and HSA adapters.
+/// The page allocation itself stays with the adapter that offered it and is
+/// transferred to process lifetime during that adapter's shutdown.
+struct ProcessPage {
+    host_address: Option<usize>,
+    mappings: Vec<([u8; 16], u64)>,
+    confirmed: bool,
+}
+
+struct ProcessPageSlot {
+    process: u32,
+    page: Mutex<ProcessPage>,
+}
+
+// Fork children must not lock an inherited mutex or use a parent KFD page.
+// Published slots intentionally live until their process exits.
+static PROCESS_PAGE_SLOT: AtomicPtr<ProcessPageSlot> = AtomicPtr::new(std::ptr::null_mut());
+
+#[allow(unsafe_code)]
+fn process_page_slot() -> &'static ProcessPageSlot {
+    let process = std::process::id();
+    loop {
+        let current = PROCESS_PAGE_SLOT.load(Ordering::Acquire);
+        if !current.is_null() {
+            // SAFETY: A published slot is never freed or moved.
+            if unsafe { (*current).process == process } {
+                return unsafe { &*current };
+            }
+        }
+        let candidate = Box::into_raw(Box::new(ProcessPageSlot {
+            process,
+            page: Mutex::new(ProcessPage {
+                host_address: None,
+                mappings: Vec::new(),
+                confirmed: false,
+            }),
+        }));
+        match PROCESS_PAGE_SLOT.compare_exchange(
+            current,
+            candidate,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => return unsafe { &*candidate },
+            Err(_) => unsafe { drop(Box::from_raw(candidate)) },
+        }
+    }
+}
+
+/// Serializes KFD page installation and records the GPU mappings that existed
+/// when the page was offered. Hold this through native event creation.
+#[doc(hidden)]
+pub struct ProcessSignalEventPageGuard(MutexGuard<'static, ProcessPage>);
+
+impl ProcessSignalEventPageGuard {
+    /// Address of the page KFD may have installed, including uncertain offers.
+    #[must_use]
+    pub fn host_address(&self) -> Option<usize> {
+        self.0.host_address
+    }
+
+    /// GPU mailbox base recorded for this endpoint when the page was offered.
+    #[must_use]
+    pub fn device_address(&self, endpoint_id: [u8; 16]) -> Option<u64> {
+        self.0
+            .mappings
+            .iter()
+            .find_map(|(id, address)| (*id == endpoint_id).then_some(*address))
+    }
+
+    /// Whether a process-lifetime device could currently install or use a page.
+    #[must_use]
+    pub fn can_create_for(&self, endpoint_id: [u8; 16]) -> bool {
+        self.0.host_address.is_none()
+            || (self.0.confirmed && self.device_address(endpoint_id).is_some())
+    }
+
+    /// Records a dispatched page offer, even if KFD returned an error after
+    /// installing it. The caller retains that page until process teardown.
+    ///
+    /// # Errors
+    /// Rejects a conflicting page identity or empty mapping set.
+    pub fn record_offer(
+        &mut self,
+        host_address: usize,
+        mappings: Vec<([u8; 16], u64)>,
+    ) -> Result<(), Error> {
+        if host_address == 0 || mappings.is_empty() {
+            return Err(Error::Operation {
+                kind: ErrorKind::InvalidArgument,
+                detail: "KFD signal event page has no valid mapping",
+            });
+        }
+        if let Some(existing) = self.0.host_address {
+            if existing != host_address || self.0.mappings != mappings {
+                return Err(Error::Operation {
+                    kind: ErrorKind::DriverContract,
+                    detail: "KFD signal event page identity changed",
+                });
+            }
+        } else {
+            self.0.host_address = Some(host_address);
+            self.0.mappings = mappings;
+        }
+        Ok(())
+    }
+
+    /// Marks the process page as installed after a valid event was created.
+    pub fn confirm(&mut self) {
+        self.0.confirmed = true;
+    }
+
+    /// Whether KFD has returned a valid event for the process page.
+    #[must_use]
+    pub fn is_confirmed(&self) -> bool {
+        self.0.confirmed
+    }
+}
+
+/// Locks the process KFD page identity across an event creation transaction.
+///
+/// # Errors
+/// Reports poisoned process state.
+pub fn lock_process_signal_event_page() -> Result<ProcessSignalEventPageGuard, Error> {
+    process_page_slot()
+        .page
+        .lock()
+        .map(ProcessSignalEventPageGuard)
+        .map_err(|_| Error::Operation {
+            kind: ErrorKind::Internal,
+            detail: "KFD process signal page lock poisoned",
+        })
+}
 
 /// KFD identity and mailbox slot assigned to one interrupt-capable signal.
 #[doc(hidden)]
@@ -23,7 +160,9 @@ pub struct SignalEventInfo {
 /// Owns one process-local KFD signal event.
 #[doc(hidden)]
 pub struct SignalEvent {
+    /// Native KFD event retained until destruction succeeds.
     pub(crate) inner: Owned<driver::KfdSignalEvent>,
+    /// Stable event ID and mailbox slot returned to the caller.
     pub(crate) info: SignalEventInfo,
 }
 
@@ -32,6 +171,23 @@ impl SignalEvent {
     #[must_use]
     pub fn info(&self) -> SignalEventInfo {
         self.info
+    }
+
+    /// Signals this native event for a host observer.
+    ///
+    /// # Errors
+    /// Reports a native event or context failure.
+    pub fn signal(&self) -> Result<(), Error> {
+        self.inner.signal()
+    }
+
+    /// Waits for a native notification. A successful wake is a hint to
+    /// recheck the caller's authoritative completion or stop predicate.
+    ///
+    /// # Errors
+    /// Reports a native event or context failure.
+    pub fn wait(&self, timeout_nanoseconds: u64) -> Result<bool, Error> {
+        self.inner.wait(timeout_nanoseconds)
     }
 
     /// Creates the opaque notification descriptor used by a KFD-backed AQL
@@ -61,7 +217,9 @@ impl SignalEvent {
 /// retains the complete allocation if explicit transfer has not succeeded.
 #[doc(hidden)]
 pub struct SignalEventPage {
+    /// Allocated page retained until explicit transfer or conclusive cleanup.
     allocation: Option<Allocation>,
+    /// KFD may have installed the page even if event creation failed.
     attempted: bool,
 }
 
@@ -79,6 +237,20 @@ impl SignalEventPage {
     #[must_use]
     pub fn host_address(&self) -> Option<usize> {
         self.allocation.as_ref()?.info().host_address
+    }
+
+    /// Returns this page's established GPU address on a mapped device.
+    ///
+    /// # Errors
+    /// Rejects a device outside the allocation's live access set.
+    pub fn device_address(&self, device: &Device) -> Result<u64, Error> {
+        self.allocation
+            .as_ref()
+            .ok_or(Error::Operation {
+                kind: ErrorKind::Internal,
+                detail: "signal event page lost its allocation",
+            })?
+            .device_address(device)
     }
 
     /// Whether this page was offered to KFD, even if event creation failed.
@@ -150,4 +322,32 @@ pub fn create_signal_event(
     let inner = result?;
     let info = inner.info();
     Ok(SignalEvent { inner, info })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    static TEST_PAGE: Mutex<ProcessPage> = Mutex::new(ProcessPage {
+        host_address: None,
+        mappings: Vec::new(),
+        confirmed: false,
+    });
+
+    #[test]
+    fn offered_process_page_limits_capability_to_its_mapped_endpoints() {
+        let first = [1; 16];
+        let second = [2; 16];
+        let mut page = ProcessSignalEventPageGuard(TEST_PAGE.lock().unwrap());
+        assert!(page.can_create_for(first));
+        assert!(page.can_create_for(second));
+        page.record_offer(0x1000, vec![(first, 0x2000)]).unwrap();
+        assert!(!page.can_create_for(first));
+        page.confirm();
+        assert!(page.can_create_for(first));
+        assert!(!page.can_create_for(second));
+        assert_eq!(page.device_address(first), Some(0x2000));
+        assert!(page.record_offer(0x3000, vec![(second, 0x3000)]).is_err());
+    }
 }
