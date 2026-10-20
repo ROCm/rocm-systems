@@ -93,6 +93,25 @@ def export_per_kernel_isa_files(
     return per_kernel_directory
 
 
+def resolve_isa_relative_path(
+    kernel_uuid: int,
+    short_name: Optional[str],
+    code_object_id: int,
+    pid: int,
+) -> Path:
+    """Return one kernel's ISA file relative to its workload's folder.
+
+    The folder leads with the kernel's short name so it reads as the kernel it
+    holds. Two kernels can share a short name, so the kernel uuid follows it to
+    keep the folder unique and to map it back to its kernel.csv row.
+    """
+    folder_prefix = _sanitize_short_name(short_name) or UNNAMED_KERNEL_FOLDER_PREFIX
+    return (
+        Path(f"{folder_prefix}_uuid_{kernel_uuid}")
+        / f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
+    )
+
+
 def _build_isa_header(stall_reasons: Iterable[str]) -> List[str]:
     """Return the column names of one workload's ISA files.
 
@@ -108,27 +127,13 @@ def _build_isa_header(stall_reasons: Iterable[str]) -> List[str]:
 
 
 def _resolve_isa_export_path(per_kernel_directory: Path, file_key: FileKey) -> Path:
-    """Return the file one kernel's ISA is written to.
-
-    The folder leads with the kernel's short name so it reads as the kernel it
-    holds. Two kernels can share a short name, so the kernel uuid follows it to
-    keep the folder unique and to map it back to its kernel.csv row.
-    """
-    (
-        workload_name,
-        workload_sub_name,
-        kernel_uuid,
-        short_name,
-        code_object_id,
-        pid,
-    ) = file_key
-    folder_prefix = _sanitize_short_name(short_name) or UNNAMED_KERNEL_FOLDER_PREFIX
+    """Return the file one kernel's ISA is written to."""
+    workload_name, workload_sub_name, *kernel_key = file_key
     return (
         per_kernel_directory
         / workload_name
         / workload_sub_name
-        / f"{folder_prefix}_uuid_{kernel_uuid}"
-        / f"isa_code_object_id_{code_object_id}_pid_{pid}.csv"
+        / resolve_isa_relative_path(*kernel_key)
     )
 
 
