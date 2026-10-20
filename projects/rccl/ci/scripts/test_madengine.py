@@ -158,7 +158,7 @@ WORKLOAD_CONFIGS = {
     },
     # The first JAX workload here, and the first one whose base image is not
     # rocm/primus. That drives the "family" dispatch in install_madengine(),
-    # build_rccl_overlay_image() and generate_manifest(): a different MAD
+    # stage_rccl_overlay() and generate_manifest(): a different MAD
     # script directory, a Primus checkout baked into both A/B images, and a
     # launcher that takes a Primus config rather than a model repo name.
     #
@@ -982,21 +982,20 @@ def build_maxtext_baseline_image(
     return tag
 
 
-def build_rccl_overlay_image(
+def stage_rccl_overlay(
     rccl_lib: Path,
     base_image: str,
     gpu_target: str,
     work_dir: Path,
-    registry: str = "",
     family: str = "megatron",
     primus_dir: Path | None = None,
     from_ref: str = "",
 ) -> str:
-    """Build a Docker overlay image with the CI-built RCCL and push to registry.
+    """Stage the candidate image: the base with the CI-built RCCL swapped in.
 
-    When a registry is provided, the image is tagged and pushed so that
-    SLURM compute nodes can pull it automatically.  Returns the final
-    image tag (registry-qualified if pushed).
+    Writes the Dockerfile and its build context under ``overlay_ctx`` and
+    returns the tag. Nothing is built here: node 0 of the allocation builds it
+    from the manifest's Dockerfile and the other nodes load it.
 
     *family* selects the recipe. ``megatron`` keeps the two layout-specific
     branches that target the Primus image; ``maxtext`` layers the same Primus
@@ -1012,16 +1011,6 @@ def build_rccl_overlay_image(
         # rebuilt on a base that had moved.
         tag = f"{tag}-{base_identity(from_ref)}"
 
-    image_exists = subprocess.run(
-        ["docker", "image", "inspect", tag],
-        capture_output=True,
-    ).returncode == 0
-    if image_exists:
-        log.info("Overlay image already exists on head node: %s", tag)
-
-    # Staged even on a cache hit: the manifest points the compute nodes at this
-    # Dockerfile, and WORK_DIR is new on every attempt while the tag is not, so
-    # a hit would otherwise advertise a build context that was never written.
     ctx_dir = work_dir / OVERLAY_CTX
     ctx_dir.mkdir(exist_ok=True)
     dockerfile = ctx_dir / OVERLAY_DOCKERFILE
@@ -1132,25 +1121,7 @@ RUN set -e; \\
 ENV NCCL_DEBUG=WARN
 """)
 
-    if not image_exists:
-        log.info("Building overlay image: %s", tag)
-        subprocess.run(
-            ["docker", "build", "-t", tag,
-             "-f", str(dockerfile), str(ctx_dir)],
-            check=True,
-        )
-        log.info("Overlay image built: %s", tag)
-
-    if registry:
-        safe_base = base_image.replace("/", "-").replace(":", "-")
-        push_tag = f"{registry}/rccl-ci:{safe_base}-{rccl_commit}"
-        log.info("Tagging overlay for registry: %s -> %s", tag, push_tag)
-        subprocess.run(["docker", "tag", tag, push_tag], check=True)
-        log.info("Pushing overlay image to registry: %s", push_tag)
-        subprocess.run(["docker", "push", push_tag], check=True)
-        log.info("Overlay image pushed: %s", push_tag)
-        return push_tag
-
+    log.info("Candidate (CI RCCL), built on the nodes: %s", tag)
     return tag
 
 
@@ -1167,12 +1138,10 @@ def generate_manifest(
     overlay_image: str,
     nodes: int,
     work_dir: Path,
-    registry: str = "",
     rccl_lib: Path | None = None,
     run_dir: Path | None = None,
     pull_only: bool = False,
     dockerfile_name: str = OVERLAY_DOCKERFILE,
-    local_only: bool = False,
 ) -> Path:
     """Generate a madengine manifest.json for the workload.
 
@@ -1323,18 +1292,11 @@ def generate_manifest(
             "gpu_vendor": "AMD",
         }
     else:
-        # local_only images are built here and never pushed, so they must stay
-        # on the local-image path even when a registry is configured -- the
-        # maxtext baseline is built by build_maxtext_baseline_image(), which
-        # has nothing to push to. Marking it registry-backed would send every
-        # node to pull a tag that was never uploaded, instead of rebuilding
-        # from the Dockerfile advertised below.
-        via_registry = bool(registry) and not local_only
         image_entry = {
             "docker_image": overlay_image,
-            "local_image": not via_registry,
-            "registry_image": overlay_image if via_registry else None,
-            "registry": registry if via_registry else None,
+            "local_image": True,
+            "registry_image": None,
+            "registry": None,
             "base_docker": workload_config["base_image"],
             "build_status": "SKIPPED",
             "build_duration": 0,
@@ -1509,7 +1471,7 @@ def repro_manifest(manifest: dict, work_dir: Path) -> dict:
 def copy_overlay_ctx(src: Path, dst: Path) -> None:
     """Copy the build context without the duplicate librccl names.
 
-    build_rccl_overlay_image() stages every ``librccl*`` the artifact carries,
+    stage_rccl_overlay() stages every ``librccl*`` the artifact carries,
     but each recipe reads only ``rccl_libs/librccl.so`` and ``rccl_libs/.kpack``,
     and the other names are byte-identical copies of the same library.
     """
@@ -1668,6 +1630,20 @@ def write_repro_bundle(
     return bundle
 
 
+# Run on every node once the phases are done. The images are per-run tags that
+# no later run can reuse, and each is tens of GB on a node's local disk.
+CLEANUP_IMAGES = """\
+#!/bin/bash
+for image in "$@"; do
+    if docker image rm -f "$image" >/dev/null 2>&1 \\
+        || sudo -n docker image rm -f "$image" >/dev/null 2>&1; then
+        echo "  removed $(hostname -s) $image"
+    fi
+done
+exit 0
+"""
+
+
 def run_ab_in_one_allocation(
     phases: list[tuple[str, Path]],
     work_dir: Path,
@@ -1676,7 +1652,7 @@ def run_ab_in_one_allocation(
     workload_config: dict,
     cluster_config: dict,
     timeout_minutes: int,
-    nodelist: str = "",
+    built_images: list[str] | None = None,
 ) -> dict:
     """Run every phase back to back inside a single SLURM allocation.
 
@@ -1694,6 +1670,10 @@ def run_ab_in_one_allocation(
 
     madengine picks up SLURM_JOB_ID from salloc and runs the workload in place
     through srun instead of submitting its own sbatch (ROCm/madengine#213).
+
+    *built_images* are the tags the nodes build for this run; they are removed
+    from every node once both phases are done. A run killed by the timeout
+    leaves them behind.
 
     Returns ``{"exit_codes": {phase: int}, "job_id": str, "nodelist": str}``.
     """
@@ -1746,6 +1726,18 @@ def run_ab_in_one_allocation(
             "madengine run -m manifest.json -o perf.csv --live-output --verbose",
             "echo $? > " + shlex.quote(str(run_dir / "exit_code")),
         ]
+    if built_images:
+        cleanup = work_dir / "ab" / "cleanup_images.sh"
+        cleanup.parent.mkdir(parents=True, exist_ok=True)
+        cleanup.write_text(CLEANUP_IMAGES)
+        script_lines += [
+            "",
+            'echo "===== cleanup: this run\'s images on every allocated node ====="',
+            'srun --ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1 '
+            f"--overlap bash {shlex.quote(str(cleanup))} "
+            + " ".join(shlex.quote(i) for i in built_images)
+            + " || true",
+        ]
 
     script_path = work_dir / "ab" / "run_phases.sh"
     script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1764,8 +1756,6 @@ def run_ab_in_one_allocation(
     qos = cluster_config.get("slurm_qos", "")
     if qos:
         cmd += ["--qos", qos]
-    if nodelist:
-        cmd += ["--nodelist", nodelist]
     cmd += ["bash", str(script_path)]
 
     log.info("Running: %s", " ".join(cmd))
@@ -2271,12 +2261,6 @@ def main() -> None:
         help="Send summary report to this Teams webhook URL",
     )
     parser.add_argument(
-        "--registry",
-        type=str,
-        default="",
-        help="Container registry to push overlay image to (e.g. ghcr.io/rocm/rocm-systems)",
-    )
-    parser.add_argument(
         "--skip-overlay-build",
         action="store_true",
         help="Skip Docker overlay build (use pre-built image specified via --overlay-image)",
@@ -2337,19 +2321,20 @@ def main() -> None:
     if family == "maxtext" and not args.skip_overlay_build:
         base_ref = resolve_base_digest(workload_config["base_image"])
 
-    # Step 3: Build overlay image (or use pre-built)
+    # Step 3: Stage the candidate image (or use pre-built). Images are built
+    # on the allocation's nodes, never here: this host is shared by every
+    # runner and has neither the disk for them nor any use for them.
     if args.skip_overlay_build:
         if not args.overlay_image:
             log.error("--skip-overlay-build requires --overlay-image")
             sys.exit(1)
         overlay_image = args.overlay_image
     else:
-        overlay_image = build_rccl_overlay_image(
+        overlay_image = stage_rccl_overlay(
             rccl_lib,
             workload_config["base_image"],
             cluster_config["gpu_target"],
             work_dir,
-            registry=args.registry,
             family=family,
             primus_dir=primus_dir,
             from_ref=base_ref,
@@ -2373,25 +2358,6 @@ def main() -> None:
         baseline_pull_only = True
 
     # Step 4: Generate one manifest per A/B phase
-    #
-    # The baseline is the untouched base image: with no --registry an overlay
-    # never leaves the node that built it, so no earlier overlay is reachable.
-    #
-    # When no registry is configured, the overlay image only exists on the
-    # node that built it. Pin the allocation to that node so madengine can
-    # find the image locally.
-    nodelist = ""
-    if args.nodes == 1 and not args.registry:
-        nodelist = os.environ.get("SLURM_NODELIST", "")
-        if not nodelist:
-            hostname = subprocess.run(
-                ["hostname", "-s"], capture_output=True, text=True,
-            ).stdout.strip()
-            if hostname:
-                nodelist = hostname
-        if nodelist:
-            log.info("No registry — pinning allocation to build node: %s", nodelist)
-
     phases: list[tuple[str, Path]] = []
     for phase, image, pull_only in (
         (BASELINE, baseline_image, baseline_pull_only),
@@ -2405,7 +2371,6 @@ def main() -> None:
             image,
             args.nodes,
             work_dir,
-            registry=args.registry,
             # The bind-mount of the CI library is what makes a --skip-overlay-build
             # run the candidate; the baseline must keep the image's own copy.
             rccl_lib=(
@@ -2423,9 +2388,6 @@ def main() -> None:
                 if family == "maxtext" and phase == BASELINE
                 else OVERLAY_DOCKERFILE
             ),
-            # Built locally by build_maxtext_baseline_image() and never
-            # pushed, so it stays on the local-image path under --registry.
-            local_only=(family == "maxtext" and phase == BASELINE),
         )
         phases.append((phase, run_dir))
 
@@ -2453,7 +2415,11 @@ def main() -> None:
         workload_config,
         cluster_config,
         args.timeout_minutes,
-        nodelist=nodelist,
+        # A --skip-overlay-build image and a stock baseline are not ours to remove.
+        built_images=(
+            ([] if args.skip_overlay_build else [overlay_image])
+            + ([] if baseline_pull_only else [baseline_image])
+        ),
     )
     exit_code = max(allocation["exit_codes"].values(), default=1)
 

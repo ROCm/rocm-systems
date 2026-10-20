@@ -78,7 +78,6 @@ class WorkDir:
                 pull_only=family != "maxtext" and phase == tm.BASELINE,
                 dockerfile_name=(tm.MAXTEXT_BASELINE_DOCKERFILE if maxtext_baseline
                                  else tm.OVERLAY_DOCKERFILE),
-                local_only=maxtext_baseline,
             )
             self.phase_dirs[phase] = run_dir
 

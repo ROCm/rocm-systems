@@ -122,12 +122,14 @@ jobs:
       XDG_CACHE_HOME: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache"
       PIP_CACHE_DIR: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache/pip"
       CONDA_PKGS_DIRS: "/apps/rccl-ci/madengine/workdir/${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.workload }}/cache/conda-pkgs"
+      # ~/.cache/pip is on a small NFS home quota.
+      PIP_NO_CACHE_DIR: '1'
     steps:
       - name: Checkout TheRock repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: "ROCm/TheRock"
-          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+          ref: 47434387de730d51788b705e5600602dd6064997 # 2026-10-16
 
       - name: Checkout rocm-systems scripts
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -331,3 +333,18 @@ jobs:
                  "${WORK_DIR}/cache"
           echo "Remaining in ${WORK_DIR}:"
           du -sh "${WORK_DIR}" 2>/dev/null || true
+
+          # Nothing on this host builds or pulls an image any more; the nodes
+          # build them. Earlier versions did both, under per-run tags nothing
+          # removed, and every runner on this host shares its Docker disk: a
+          # pull of the sglang base ran it out of space. Remove those tags and
+          # the bases they were built from, but not -f, so an image a container
+          # still uses stays. Layers of a failed pull have no name and stay too.
+          docker system df || true
+          {
+            docker images --format '{{.Repository}}:{{.Tag}}' \
+              | grep -E -- '-(rccl-gfx[0-9a-z]+|primus-v[0-9.]+|mad-[0-9a-f]{8})-' || true
+            python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import test_madengine as t; print(*sorted({c["base_image"] for c in t.WORKLOAD_CONFIGS.values()}), sep="\n")' \
+              rocm-systems/projects/rccl/ci/scripts
+          } | sort -u | xargs -r docker image rm 2>&1 | grep -v 'No such image' || true
+          docker system df || true

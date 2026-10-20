@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 # Floating-source conversions that accept VOP3 ABS/NEG before integer conversion.
 F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32_f32'})
 
+# Mixed-type conversions that accept VOP3 ABS/NEG on an F32 source.
+F32_INPUT_CONVERSION_DTYPES = F32_TO_INTEGER_DTYPES | {'f64_f32'}
+
 # Mixed-type conversions that accept VOP3 ABS/NEG on a floating half source.
 F16_INPUT_CONVERSION_DTYPES = frozenset({'i16_f16', 'u16_f16', 'f32_f16'})
 
