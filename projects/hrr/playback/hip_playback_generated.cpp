@@ -2483,7 +2483,7 @@ extern hipError_t playback_hipMemAddressReserve(PlaybackContext& ctx, const uint
 
 static hipError_t playback_hipMemAdvise(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipMemAdvise*>(payload);
-#if HIP_FORCE_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)
+#if HIP_TARGET_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)
   hipMemLocation _loc_device{};
   _loc_device.type = hipMemLocationTypeDevice;
   _loc_device.id   = (int)a->device;
