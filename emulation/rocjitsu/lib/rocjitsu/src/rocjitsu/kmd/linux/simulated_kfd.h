@@ -18,7 +18,7 @@
 
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_ioctl.h"
+#include "uapi/linux/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
 #include <atomic>
@@ -567,6 +567,9 @@ private:
   int unmap_memory_ioctl(KfdProcess &proc, void *arg);
   int create_queue_ioctl(KfdProcess &proc, void *arg);
   int update_queue_ioctl(KfdProcess &proc, void *arg);
+  /// @brief Whether KFD allows GWS with debugging, assuming capable firmware.
+  bool debugger_supports_gws(uint32_t gpu_id) const;
+  int alloc_queue_gws_ioctl(KfdProcess &proc, void *arg);
   int set_cu_mask_ioctl(KfdProcess &proc, void *arg);
   int destroy_queue_ioctl(KfdProcess &proc, void *arg);
   int create_event_ioctl(KfdProcess &proc, void *arg);
@@ -628,7 +631,8 @@ private:
       bool clear_debug_stop_on_success = false, bool runtime_already_reserved = false,
       bool runtime_failure_debuggable = true,
       amdgpu::QueueExceptionDeliveryPolicy delivery_policy =
-          amdgpu::QueueExceptionDeliveryPolicy::WaitForAcknowledgment);
+          amdgpu::QueueExceptionDeliveryPolicy::WaitForAcknowledgment,
+      bool retain_wave = true);
   /// @brief Publish a wave stop: serialize the queue, then wake the debugger.
   /// @param retain_on_rejection Whether a serialized stop whose notification
   ///        loses its subscription or notifier should remain in the queue's
@@ -671,8 +675,8 @@ private:
                           bool is_atomic);
   /// @brief Decode failures go to a publishable debugger stop first, then the runtime.
   bool on_wave_illegal_instruction(amdgpu::Wavefront &wf);
-  /// @brief Report emulator support failures as queue aborts without fabricating a trap.
-  bool on_wave_instruction_failure(amdgpu::Wavefront &wf);
+  /// @brief Report non-architectural execution failures as queue aborts without a trap.
+  bool on_wave_execution_failure(amdgpu::Wavefront &wf, bool retain_wave);
   bool on_wave_alu_exception(amdgpu::Wavefront &wf);
 
   /// @brief Memory-violation handler installed on every compute unit.

@@ -332,6 +332,60 @@ TEST(InstructionCacheTest, TranslatedHitRejectsARevokedSnapshot) {
   EXPECT_TRUE(std::ranges::all_of(revoked, [](uint8_t byte) { return byte == 0xcc; }));
 }
 
+TEST(InstructionCacheTest, TranslatedFetchMatchesEveryAlignedOffsetColdAndWarm) {
+  constexpr size_t kBytes = InstructionCache::kLineSize * 2;
+  std::array<uint32_t, kBytes / sizeof(uint32_t)> program;
+  for (size_t word = 0; word < program.size(); ++word)
+    program[word] = static_cast<uint32_t>(0x10203040u + word * 0x01030507u);
+  const auto expected = std::as_bytes(std::span(program));
+  GpuVm gpu_vm;
+  InstructionCache cache;
+  auto address_space = std::make_shared<ExecutableAddressSpace>(0, kBytes);
+  address_space->write_program(program);
+  const auto handle = gpu_vm.register_translated(7, address_space, address_space);
+  ASSERT_TRUE(handle);
+  const auto access = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(access);
+
+  for (size_t offset = 0; offset + InstructionCache::kFetchBytes <= kBytes;
+       offset += sizeof(uint32_t)) {
+    SCOPED_TRACE(offset);
+    for (unsigned resident_lines = 0; resident_lines <= 2; ++resident_lines) {
+      SCOPED_TRACE(resident_lines);
+      cache.invalidate_all();
+      for (unsigned line = 0; line < resident_lines; ++line)
+        fetch_at(cache, *access, kCodeBase + line * InstructionCache::kLineSize);
+      std::array<uint8_t, InstructionCache::kFetchBytes + 2> destination;
+      std::ranges::fill(destination, uint8_t{0xcc});
+      ASSERT_EQ(cache.fetch(*access, kCodeBase + offset, destination.data() + 1),
+                amdgpu::VmAccessOutcome::Complete);
+      EXPECT_TRUE(std::ranges::equal(
+          std::as_bytes(std::span(destination).subspan(1, InstructionCache::kFetchBytes)),
+          std::span(expected).subspan(offset, InstructionCache::kFetchBytes)));
+      EXPECT_EQ(destination.front(), 0xcc);
+      EXPECT_EQ(destination.back(), 0xcc);
+    }
+  }
+}
+
+TEST(InstructionCacheTest, TranslatedStraddleRejectsRevocationWithACachedFirstLine) {
+  GpuVm gpu_vm;
+  InstructionCache cache;
+  auto address_space = std::make_shared<ExecutableAddressSpace>(0x11);
+  const auto handle = gpu_vm.register_translated(7, address_space, address_space);
+  ASSERT_TRUE(handle);
+  const auto access = gpu_vm.snapshot_pinned(handle);
+  ASSERT_TRUE(access);
+  fetch_at(cache, *access);
+  ASSERT_TRUE(gpu_vm.invalidate(handle));
+  std::array<uint8_t, InstructionCache::kFetchBytes> destination;
+  std::ranges::fill(destination, uint8_t{0xcc});
+  EXPECT_EQ(cache.fetch(*access, kCodeBase + InstructionCache::kLineSize - sizeof(uint32_t),
+                        destination.data()),
+            amdgpu::VmAccessOutcome::Revoked);
+  EXPECT_TRUE(std::ranges::all_of(destination, [](uint8_t byte) { return byte == 0xcc; }));
+}
+
 TEST(InstructionCacheTest, FetchBypassesAnIncompleteCacheLine) {
   GpuVm gpu_vm;
   InstructionCache icache;
@@ -503,6 +557,115 @@ TEST(DecodedInstructionCacheCuTest, LoopDecodesOnceAndReadsCurrentRegisters) {
     ASSERT_EQ(wf->pc, kCodeBase);
   }
   EXPECT_EQ(counter->calls, 2u);
+}
+
+TEST(DecodedInstructionCacheCuTest, IdenticalEncodingsAtDifferentPcsUseCurrentBranchPc) {
+  CuFixture fixture("decoded_relocated_loop");
+  auto decoder = std::make_unique<CountingDecoder>();
+  auto *counter = decoder.get();
+  fixture.cu()->replace_decoder_for_test(std::move(decoder));
+  const std::array<uint32_t, 2> program{0xBE800001u, 0xBF82FFFEu};
+  constexpr uint64_t other_base = kCodeBase + 0x10010;
+  fixture.write_program(program);
+  fixture.write_program(program, other_base);
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  for (uint32_t value = 1; value <= 4; ++value) {
+    const uint64_t base = value % 2 ? kCodeBase : other_base;
+    wf->pc = base;
+    fixture.cu()->write_sgpr(wf->sgpr_alloc().base + 1, value * 19);
+    fixture.cu()->step();
+    EXPECT_EQ(fixture.read_s0(*wf), value * 19);
+    fixture.cu()->step();
+    EXPECT_EQ(wf->pc, base);
+  }
+  EXPECT_EQ(counter->calls, 2u);
+}
+
+TEST(DecodedInstructionCacheCuTest, ContiguousScalarAndVectorLoopsReuseAfterWarmup) {
+  for (bool vector : {false, true}) {
+    SCOPED_TRACE(vector);
+    for (unsigned count : {64, 128}) {
+      SCOPED_TRACE(count);
+      CuFixture fixture("decoded_contiguous_loop");
+      auto decoder = std::make_unique<CountingDecoder>();
+      auto *counter = decoder.get();
+      fixture.cu()->replace_decoder_for_test(std::move(decoder));
+      std::vector<uint32_t> program(count + 1);
+      for (unsigned i = 0; i < count; ++i) {
+        // Distinct four-byte moves of inline constants 0..63 into s0/s1 or v0/v1.
+        program[i] = vector ? (0x7e000200u | ((i / 64) << 17) | (128 + i % 64))
+                            : (0xbe800000u | ((i / 64) << 16) | (128 + i % 64));
+      }
+      program[count] = 0xbf820000u | static_cast<uint16_t>(-static_cast<int>(count) - 1);
+      fixture.write_program(program);
+      auto *wf = fixture.launch(1, 0);
+      ASSERT_NE(wf, nullptr);
+      for (unsigned pass = 0; pass < 4; ++pass) {
+        for (unsigned i = 0; i <= count; ++i)
+          fixture.cu()->step();
+        ASSERT_EQ(wf->pc, kCodeBase);
+        EXPECT_EQ(counter->calls, count + 1);
+        if (vector) {
+          for (unsigned reg = 0; reg < count / 64; ++reg)
+            for (unsigned lane = 0; lane < 64; ++lane)
+              EXPECT_EQ(fixture.cu()->read_vgpr(wf->vgpr_alloc().base + reg, lane), 63u);
+        } else {
+          for (unsigned reg = 0; reg < count / 64; ++reg)
+            EXPECT_EQ(fixture.cu()->read_sgpr(wf->sgpr_alloc().base + reg), 63u);
+        }
+      }
+    }
+  }
+}
+
+TEST(DecodedInstructionCacheTest, EveryFetchedWordParticipatesInReuse) {
+  CountingDecoder decoder;
+  amdgpu::DecodedInstructionCache cache;
+  std::array<uint32_t, 4> words{kSNop};
+  {
+    auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+    ASSERT_FALSE(decoded.failed());
+    amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                           words);
+  }
+  unsigned calls = 1;
+  ASSERT_EQ(decoder.calls, calls);
+  for (unsigned word = 0; word < words.size(); ++word) {
+    ++words[word];
+    for (unsigned repeat = 0; repeat < 2; ++repeat) {
+      auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+      ASSERT_FALSE(decoded.failed());
+      amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                             words);
+    }
+    EXPECT_EQ(decoder.calls, ++calls);
+  }
+}
+
+TEST(DecodedInstructionCacheTest, DistinctLiteralsRemainCorrectAfterEviction) {
+  CountingDecoder decoder;
+  amdgpu::DecodedInstructionCache cache;
+  constexpr unsigned working_set = 2 * amdgpu::DecodedInstructionCache::kNumEntries;
+  for (unsigned pass = 0; pass < 2; ++pass) {
+    for (unsigned literal = 0; literal < working_set; ++literal) {
+      const std::array<uint32_t, 4> words{0xBE8000FFu, literal}; // s_mov_b32 s0, literal.
+      unsigned calls = 0;
+      for (unsigned repeat = 0; repeat < 2; ++repeat) {
+        auto decoded = cache.decode(decoder, kCodeBase, 7, words, {});
+        ASSERT_FALSE(decoded.failed());
+        if (repeat == 0)
+          calls = decoder.calls;
+        else
+          EXPECT_EQ(decoder.calls, calls);
+        const auto *source = decoded.value()->src_operand(0);
+        ASSERT_NE(source, nullptr);
+        EXPECT_EQ(source->const_value(), literal);
+        amdgpu::DecodedInstructionCache::ScopedReturn returned(cache, decoded.value(), kCodeBase, 7,
+                                                               words);
+      }
+    }
+  }
 }
 
 TEST(DecodedInstructionCacheCuTest, RewrittenLiteralAndDebuggerBypassUseFreshDecodes) {
@@ -686,7 +849,7 @@ TEST(DecodedInstructionCacheTest, BorrowedVopdEncodingIsNotRetainedAcrossIssues)
   }
 }
 
-TEST(DecodedInstructionCacheTest, AddressSpacesCollisionsAndClearCauseMisses) {
+TEST(DecodedInstructionCacheTest, AddressSpacesAndClearCauseMisses) {
   CountingDecoder decoder;
   amdgpu::DecodedInstructionCache cache;
   std::array<uint32_t, 4> words{kSNop};
@@ -703,10 +866,10 @@ TEST(DecodedInstructionCacheTest, AddressSpacesCollisionsAndClearCauseMisses) {
   EXPECT_EQ(decoder.calls, 3u);
   issue(kCodeBase + 4 * amdgpu::DecodedInstructionCache::kNumEntries, 7);
   issue(kCodeBase, 7);
-  EXPECT_EQ(decoder.calls, 5u);
+  EXPECT_EQ(decoder.calls, 3u);
   cache.clear();
   issue(kCodeBase, 7);
-  EXPECT_EQ(decoder.calls, 6u);
+  EXPECT_EQ(decoder.calls, 4u);
 }
 
 TEST(DecodedInstructionCacheTest, DynamicStateIsNotReusedAndPoolLifetimeIsIndependent) {

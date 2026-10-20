@@ -22,6 +22,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:output-format-tests>
     $<TARGET_OBJECTS:output-summary-tests>
     $<TARGET_OBJECTS:parse-numeric-range-tests>
+    $<TARGET_OBJECTS:process-environment-tests>
     $<TARGET_OBJECTS:rank-passes-filter-tests>
     $<TARGET_OBJECTS:state-tests>
     $<TARGET_OBJECTS:progress-tests>

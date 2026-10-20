@@ -1155,6 +1155,7 @@ void VAddF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
       return;
   }
   uint64_t exec = wf.exec();
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1163,11 +1164,13 @@ void VAddF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::sdwa::finish_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(src0, lane), input_policy))),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane), input_policy))),
+                0.0f, wf.fp_round_mode_f16_f64()),
             wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
 }
@@ -1210,6 +1213,7 @@ RJ_NOINLINE void VAddF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
       return;
   }
   uint64_t exec = wf.exec();
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1218,11 +1222,13 @@ RJ_NOINLINE void VAddF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
         amdgpu::sdwa::finish_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::ADD>(
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(src0, lane), input_policy))),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane), input_policy))),
+                0.0f, wf.fp_round_mode_f16_f64()),
             wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();
@@ -1251,6 +1257,7 @@ void VSubF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
       return;
   }
   uint64_t exec = wf.exec();
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1259,11 +1266,13 @@ void VSubF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::sdwa::finish_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(src0, lane), input_policy))),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane), input_policy))),
+                0.0f, wf.fp_round_mode_f16_f64()),
             wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
 }
@@ -1306,6 +1315,7 @@ RJ_NOINLINE void VSubF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
       return;
   }
   uint64_t exec = wf.exec();
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1314,11 +1324,13 @@ RJ_NOINLINE void VSubF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
         amdgpu::sdwa::finish_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(src0, lane), input_policy))),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane), input_policy))),
+                0.0f, wf.fp_round_mode_f16_f64()),
             wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();
@@ -1347,6 +1359,7 @@ void VSubrevF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
       return;
   }
   uint64_t exec = wf.exec();
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1355,11 +1368,13 @@ void VSubrevF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::sdwa::finish_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane), input_policy))),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(src0, lane), input_policy))),
+                0.0f, wf.fp_round_mode_f16_f64()),
             wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
 }
@@ -1402,6 +1417,7 @@ RJ_NOINLINE void VSubrevF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
       return;
   }
   uint64_t exec = wf.exec();
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1410,11 +1426,13 @@ RJ_NOINLINE void VSubrevF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
         amdgpu::sdwa::finish_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::SUB>(
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane), input_policy))),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(src0, lane), input_policy))),
+                0.0f, wf.fp_round_mode_f16_f64()),
             wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();
@@ -1443,6 +1461,7 @@ void VMulF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
       return;
   }
   uint64_t exec = wf.exec();
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1451,11 +1470,13 @@ void VMulF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::sdwa::finish_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::MUL>(
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(src0, lane), input_policy))),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane), input_policy))),
+                0.0f, wf.fp_round_mode_f16_f64()),
             wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
 }
@@ -1498,6 +1519,7 @@ RJ_NOINLINE void VMulF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
       return;
   }
   uint64_t exec = wf.exec();
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1506,11 +1528,13 @@ RJ_NOINLINE void VMulF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
         amdgpu::sdwa::finish_arithmetic_f16(
             *this, wf,
             amdgpu::fp_mode::arithmetic_f16<amdgpu::fp_mode::Arithmetic::MUL>(
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                util::f16_to_f32(
-                    static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                0.0f, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(src0, lane), input_policy))),
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane), input_policy))),
+                0.0f, wf.fp_round_mode_f16_f64()),
             wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();
@@ -1641,6 +1665,7 @@ void VLdexpF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
       return;
   }
   uint64_t exec = wf.exec();
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1648,11 +1673,12 @@ void VLdexpF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
         *this, wf, vdst, lane,
         amdgpu::sdwa::finish_arithmetic_f16(
             *this, wf,
-            amdgpu::fp_mode::ldexp_f16(util::f16_to_f32(static_cast<uint16_t>(
-                                           amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                                       static_cast<int32_t>(static_cast<int16_t>(
-                                           amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                                       wf.fp_denorm_mode_f16_f64()),
+            amdgpu::fp_mode::ldexp_f16(
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(src0, lane), input_policy))),
+                static_cast<int32_t>(
+                    static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)))),
             wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
 }
@@ -1699,6 +1725,7 @@ RJ_NOINLINE void VLdexpF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
       return;
   }
   uint64_t exec = wf.exec();
+  const auto input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64());
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -1706,11 +1733,12 @@ RJ_NOINLINE void VLdexpF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
         *this, wf, vdst, lane,
         amdgpu::sdwa::finish_arithmetic_f16(
             *this, wf,
-            amdgpu::fp_mode::ldexp_f16(util::f16_to_f32(static_cast<uint16_t>(
-                                           amdgpu::RegisterAccess(wf).read_lane(src0, lane))),
-                                       static_cast<int32_t>(static_cast<int16_t>(
-                                           amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane))),
-                                       wf.fp_denorm_mode_f16_f64()),
+            amdgpu::fp_mode::ldexp_f16(
+                util::f16_to_f32(static_cast<uint16_t>(
+                    amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>(
+                        amdgpu::RegisterAccess(wf).read_lane(src0, lane), input_policy))),
+                static_cast<int32_t>(
+                    static_cast<int16_t>(amdgpu::RegisterAccess(wf).read_lane(vsrc1, lane)))),
             wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl()));
   }
   dpp_write_mask_scope_.restore();

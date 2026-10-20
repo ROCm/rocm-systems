@@ -20,6 +20,7 @@ pub mod device;
 mod driver;
 mod error;
 pub mod memory;
+pub mod observation;
 mod os;
 pub mod session;
 pub mod topology;
