@@ -1184,6 +1184,70 @@ TEST(ParseApiTest, Mi400PacketLossKeepsItsTokenTimestampWithMarkersEnabled)
     }
 }
 
+TEST(MarkerApiTest, EveryPacketLossStopsAPayloadEvenWhileALossIsPending)
+{
+    // gfx12 keeps its loss flag set until an unhandled token, so a second loss
+    // can arrive while the first is still pending. A wave started in between
+    // must not join payload words across the second gap.
+    BitStreamBuilder builder;
+    append_gfx12_header(builder);
+    append_rdna_codeobj_load(builder);
+    append_dispatch_registers(builder);
+    auto loss = [&]()
+    {
+        gfx12::timestamp_type stamp{};
+        stamp.header = 0b0000001;
+        stamp.pl = 1;
+        builder.writeBits(stamp.raw, 64);
+    };
+    auto shaderdata = [&](uint32_t value)
+    {
+        gfx12::shader_data_type shader{};
+        shader.header = 0b0000110;
+        shader.data = value;
+        builder.writeBits(shader.raw, 56);
+    };
+    loss();
+    gfx12::wstart_type start{};
+    start.header = 0b1100;
+    start.pipe = kPipe;
+    start.me = kMe;
+    start.count = 8;
+    builder.writeBits(start.raw, 32);
+    shaderdata(2u << 2);
+    shaderdata(0);
+    loss();
+    for (uint32_t word = 1; word < 130; ++word) shaderdata(word);
+    const auto trace = builder.finish(16);
+
+    HandleGuard handle;
+    ASSERT_EQ(rocprof_trace_decoder_create_handle(&handle.value), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS);
+    auto elf = make_marker_code_object("payload", "P:2:payload\nR:2:extra_payload_count=130\n");
+    ASSERT_EQ(
+        rocprof_trace_decoder_codeobj_load(
+            handle.value, kCodeObjectId, kCodeObjectBase, kCodeObjectSize, elf.data(), elf.size()
+        ),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+    rocprofiler_thread_trace_decoder_record_request_t request{
+        sizeof(request), ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER, 0
+    };
+    rocprofiler_thread_trace_decoder_record_filter_t filter{.size = sizeof(filter), .records = &request, .record_count = 1};
+    ASSERT_EQ(
+        rocprof_trace_decoder_set_record_filter(handle.value, &filter), ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+    MarkerApiSink sink;
+    ASSERT_EQ(
+        rocprof_trace_decoder_parse(handle.value, trace.data(), trace.size(), collect_api_markers, &sink),
+        ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS
+    );
+
+    ASSERT_EQ(sink.markers.size(), 1u);
+    EXPECT_EQ(sink.markers[0].id, 2u);
+    EXPECT_NE(sink.markers[0].flags & ROCPROFILER_THREAD_TRACE_DECODER_MARKER_FLAGS_INCOMPLETE, 0u);
+    EXPECT_EQ(sink.markers[0].payload, std::vector<uint32_t>{0});
+}
+
 TEST(MarkerApiTest, RawShaderdataDoesNotDependOnMarkerDecoding)
 {
     struct Case

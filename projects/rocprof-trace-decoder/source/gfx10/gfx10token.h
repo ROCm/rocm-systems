@@ -487,8 +487,23 @@ public:
     std::vector<att_decoder_realtime_t> realtime{};
 
     bool packetlost = false;
+    // Counts every loss. packetlost stays set until the parser reports it, so a
+    // later loss in that window is visible only here.
+    uint64_t packetloss_count = 0;
 
 protected:
+    template <typename Table, typename Info> int64_t advanceTime(Table& table, const Info& info, int64_t& real)
+    {
+        bool lost = false;
+        const int64_t time = table.getTime(info, current, globaltime, lost, real);
+        if (lost)
+        {
+            packetlost = true;
+            ++packetloss_count;
+        }
+        return time;
+    }
+
     inline uint64_t getBuffer() { return buffer[bit_ptr / 8]; };
 
     inline void advance4Bit(uint64_t value)

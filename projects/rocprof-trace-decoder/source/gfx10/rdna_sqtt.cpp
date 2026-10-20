@@ -83,18 +83,19 @@ void RDNASQTParser::sqtt_simd_analysis(CppReturnInfo& info, TokenGenerator& _gen
     };
 
     // The generator's sticky loss flag also controls which tokens it returns, so
-    // leave it alone. Markers stop decoding as soon as it is raised.
-    bool marker_loss = false;
+    // leave it alone. Markers stop decoding at every loss, including one that
+    // arrives while an earlier loss is still pending.
+    uint64_t marker_losses = generator.packetloss_count;
     stitch.markerSetRegisters(csregister);
 
     while (generator.nextValid())
     {
         if (records.status() != ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS) return;
         Token token = generator.next();
-        if (generator.packetlost != marker_loss)
+        if (generator.packetloss_count != marker_losses)
         {
-            marker_loss = generator.packetlost;
-            if (marker_loss) stitch.markerPacketLoss();
+            marker_losses = generator.packetloss_count;
+            stitch.markerPacketLoss();
         }
 
         switch (token.type)
