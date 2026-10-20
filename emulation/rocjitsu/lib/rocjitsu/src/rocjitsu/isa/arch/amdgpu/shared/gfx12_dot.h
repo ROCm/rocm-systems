@@ -159,8 +159,9 @@ inline int64_t align(Term term, int grid, bool accumulator = false) {
 /// https://github.com/ROCm/rocm-systems/issues/12056 on RDNA4.
 template <typename Src0Format, typename Src1Format, gfx12_dot_detail::ProductPolicy Policy,
           bool Packed, std::size_t N>
-inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &a, const std::array<uint16_t, N> &b,
-                                uint32_t acc, bool fp16_ovfl = false) {
+inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &src0,
+                                const std::array<uint16_t, N> &src1, uint32_t acc,
+                                bool fp16_ovfl = false) {
   static_assert(N == 2 || N == 4 || N == 8);
   static_assert(Policy.group > 0 && N % Policy.group == 0);
   using namespace gfx12_dot_detail;
@@ -179,8 +180,8 @@ inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &a, const std::arr
   bool negative_inf = false;
   bool invalid = false;
   for (std::size_t i = 0; i < N; ++i) {
-    const Factor<Src0Format> left{a[i]};
-    const Factor<Src1Format> right{b[i]};
+    const Factor<Src0Format> left{src0[i]};
+    const Factor<Src1Format> right{src1[i]};
     if (left.nan() || right.nan())
       return special(kFactorNan);
     invalid |= (left.inf() && !right.significand()) || (right.inf() && !left.significand());
@@ -239,10 +240,11 @@ inline uint32_t gfx12_dot_terms(const std::array<uint16_t, N> &a, const std::arr
 }
 
 template <bool Bf16, bool Packed, std::size_t N>
-inline uint32_t gfx12_dot_bits(const std::array<uint16_t, N> &a, const std::array<uint16_t, N> &b,
-                               uint32_t acc, bool fp16_ovfl = false) {
+inline uint32_t gfx12_dot_bits(const std::array<uint16_t, N> &src0,
+                               const std::array<uint16_t, N> &src1, uint32_t acc,
+                               bool fp16_ovfl = false) {
   using Half = gfx12_dot_detail::HalfFactor<Bf16>;
-  return gfx12_dot_terms<Half, Half, gfx12_dot_detail::kPairedProducts, Packed>(a, b, acc,
+  return gfx12_dot_terms<Half, Half, gfx12_dot_detail::kPairedProducts, Packed>(src0, src1, acc,
                                                                                 fp16_ovfl);
 }
 
@@ -269,16 +271,17 @@ inline uint32_t gfx12_dot2_f32(uint16_t a0, uint16_t b0, uint16_t a1, uint16_t b
 /// @brief Widen packed C, execute one GFX12 DOT2 step and return packed result bits.
 /// @details This is also the arithmetic of VOP3 V_DOT2_F16_F16 and V_DOT2_BF16_BF16.
 template <bool Bf16>
-inline uint16_t gfx12_dot2_packed16(uint16_t a0, uint16_t b0, uint16_t a1, uint16_t b1,
-                                    uint16_t acc, bool fp16_ovfl = false) {
-  return uint16_t(gfx12_dot_bits<Bf16, true>(std::array{a0, a1}, std::array{b0, b1},
+inline uint16_t gfx12_dot2_packed16(uint16_t src0_lo, uint16_t src1_lo, uint16_t src0_hi,
+                                    uint16_t src1_hi, uint16_t acc, bool fp16_ovfl = false) {
+  return uint16_t(gfx12_dot_bits<Bf16, true>(std::array{src0_lo, src0_hi},
+                                             std::array{src1_lo, src1_hi},
                                              dot_packed16::widen<Bf16>(acc), fp16_ovfl));
 }
 
 /// @brief GFX12 V_DOT4_F32_{FP8,BF8}_{FP8,BF8}: four OCP FP8 (E4M3) or BF8 (E5M2)
 /// products from packed bytes plus an F32 accumulator.
 template <bool Src0Bf8, bool Src1Bf8>
-inline uint32_t gfx12_dot4_f32_fp8(uint32_t a, uint32_t b, uint32_t acc) {
+inline uint32_t gfx12_dot4_f32_fp8(uint32_t src0, uint32_t src1, uint32_t acc) {
   using namespace gfx12_dot_detail;
   const auto bytes = [](uint32_t v) {
     return std::array<uint16_t, 4>{uint16_t(v & 0xff), uint16_t((v >> 8) & 0xff),
@@ -286,7 +289,8 @@ inline uint32_t gfx12_dot4_f32_fp8(uint32_t a, uint32_t b, uint32_t acc) {
   };
   using Src0Format = std::conditional_t<Src0Bf8, Bf8Factor, Fp8Factor>;
   using Src1Format = std::conditional_t<Src1Bf8, Bf8Factor, Fp8Factor>;
-  return gfx12_dot_terms<Src0Format, Src1Format, kFp8Dot4Products, false>(bytes(a), bytes(b), acc);
+  return gfx12_dot_terms<Src0Format, Src1Format, kFp8Dot4Products, false>(bytes(src0), bytes(src1),
+                                                                          acc);
 }
 
 /// @brief One GFX12 FP8/BF8 WMMA step: eight native FP8 (E4M3) or BF8 (E5M2)
