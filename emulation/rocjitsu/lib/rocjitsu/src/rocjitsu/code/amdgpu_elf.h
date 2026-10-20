@@ -36,6 +36,7 @@ inline constexpr int EI_MAGIC_SIZE = sizeof(EI_MAGIC);
 inline constexpr uint8_t ELFCLASSNONE = 0;
 inline constexpr uint8_t ELFCLASS32 = 1;
 inline constexpr uint8_t ELFCLASS64 = 2;
+inline constexpr uint8_t ELFDATA2LSB = 1;
 
 inline constexpr uint8_t ELFOSABI_NONE = 0;
 inline constexpr uint8_t ELFOSABI_AMDGPU_HSA = 64;
@@ -254,6 +255,7 @@ inline constexpr uint32_t NT_AMDGPU_METADATA = 32;
 
 // Program header types.
 inline constexpr uint32_t PT_LOAD = 1;
+inline constexpr uint32_t PF_X = 1;
 inline constexpr uint32_t PT_DYNAMIC = 2;
 inline constexpr uint32_t PT_NOTE = 4;
 
