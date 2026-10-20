@@ -84,6 +84,11 @@ FAMILY_CEILINGS: dict[str, dict[str, str]] = {
     },
 }
 
+# Every roofline.csv column any benchmark writes.
+ALL_CEILINGS = {
+    column for family in FAMILY_CEILINGS.values() for column in family.values()
+}
+
 _GFX11_UNSUPPORTED = [
     "HBM",
     "WMMA-F4",
