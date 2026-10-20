@@ -113,7 +113,7 @@ class TestUnifiedMemoryCli(RocprofsysTest):
                 "ROCPROFSYS_USE_UNIFIED_MEMORY_PROFILING": True,
                 "ROCPROFSYS_UNIFIED_MEMORY_OUTPUT_PATH": str(reports_dir),
             },
-            flag_args=flag_args,
+            cli_args=flag_args,
         )
 
         requested = sorted(reports_dir.glob("unified_memory*.txt")) + sorted(
