@@ -329,7 +329,10 @@ def equivalence_errors(metric_dir: Path, analysis_dir: Path, arch: str) -> list[
         metric["name"].casefold(): metric_id
         for metric_id, metric in library.metrics.items()
     }
-    metric_ids = [_row_metric_id(row, variants, formulas, names) for row in rows]
+    metric_ids = [
+        _row_metric_id(row, variants, formulas, names, set(library.metrics))
+        for row in rows
+    ]
     return [
         *_row_errors(arch, rows, metric_ids, library),
         *_unshown_errors(arch, rows, metric_ids, library),
@@ -337,6 +340,7 @@ def equivalence_errors(metric_dir: Path, analysis_dir: Path, arch: str) -> list[
         *_peak_errors(arch, rows, metric_ids, library),
         *_counter_errors(arch, rows, library, analysis_dir),
         *_builtin_var_errors(arch, library),
+        *_unused_variant_errors(arch, rows),
     ]
 
 
@@ -496,13 +500,25 @@ def _ceiling_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
 def _shared_formula_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
     ids_by_formula = defaultdict(list)
     for metric_id, metric in metrics.items():
-        if metric_id not in SHARED_FORMULA_IDS:
-            ids_by_formula[_canonical(metric.get("formula"))].append(metric_id)
-    return [
+        ids_by_formula[_canonical(metric.get("formula"))].append(metric_id)
+    listed_pairs = [{shared, partner} for shared, partner in SHARED_FORMULA_IDS.items()]
+    errors = [
         f"[{arch}] {metric_ids}: share a formula; merge them into one id"
         for formula, metric_ids in ids_by_formula.items()
-        if formula is not None and len(metric_ids) > 1
+        if formula is not None
+        and len(metric_ids) > 1
+        and set(metric_ids) not in listed_pairs
     ]
+    errors.extend(
+        f"[{arch}] {shared}: SHARED_FORMULA_IDS lists it with {partner}, but their "
+        "formulas differ"
+        for shared, partner in SHARED_FORMULA_IDS.items()
+        if shared in metrics
+        and partner in metrics
+        and _canonical(metrics[shared].get("formula"))
+        != _canonical(metrics[partner].get("formula"))
+    )
+    return errors
 
 
 def _arch_ceilings(arch: str) -> set[str]:
@@ -534,6 +550,7 @@ def _row_metric_id(
     variants: dict[str, tuple],
     formulas: dict[str, str],
     names: dict[str, str],
+    library_ids: set[str],
 ) -> Optional[str]:
     """Return the id of the metric a row shows, or None if it shows none.
 
@@ -542,7 +559,7 @@ def _row_metric_id(
     """
     if row.legacy_id in variants:
         metric_id = variants[row.legacy_id][1]
-        return metric_id if metric_id in names.values() else None
+        return metric_id if metric_id in library_ids else None
     named_id = names.get(row.label.casefold())
     if row.equation is None:
         return named_id
@@ -586,6 +603,20 @@ def _variant_errors(
     if row.equation == expected:
         return []
     return [f"[{arch}] {row.legacy_id} {label}: not the listed form of {metric_id}"]
+
+
+def _unused_variant_errors(arch: str, rows: list["_Row"]) -> list[str]:
+    """Report DISPLAY_VARIANTS and UNIT_VARIANTS entries at a position no row has."""
+    positions = {row.legacy_id for row in rows}
+    return [
+        f"[{arch}] {name} lists {legacy_id}, but no row has that position"
+        for name, listed in (
+            ("DISPLAY_VARIANTS", DISPLAY_VARIANTS.get(arch, {})),
+            ("UNIT_VARIANTS", UNIT_VARIANTS.get(arch, {})),
+        )
+        for legacy_id in listed
+        if legacy_id not in positions
+    ]
 
 
 def _unshown_errors(

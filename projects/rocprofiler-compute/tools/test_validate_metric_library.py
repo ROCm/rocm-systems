@@ -213,6 +213,17 @@ def test_listed_ids_may_share_a_formula(tree, monkeypatch):
     assert not any("share a formula" in error for error in validate(tree))
 
 
+def test_listed_id_may_share_only_with_its_partner(tree, monkeypatch):
+    monkeypatch.setattr(
+        validate_metric_library,
+        "SHARED_FORMULA_IDS",
+        {"compute.valu_util_copy": "compute.other_util"},
+    )
+    second = BASE_METRIC.replace("valu_util", "valu_util_copy")
+    write_base_metrics(tree, BASE_METRIC + second)
+    assert any("share a formula" in error for error in validate(tree))
+
+
 def test_child_file_must_inherit_from_its_parent(tree):
     path = tree / "gfx_c4" / "compute.yaml"
     path.write_text(
@@ -405,6 +416,42 @@ def test_shared_formula_rows_show_the_id_their_label_names(gfx950_copy):
         and error.endswith("compute.mfma_flops_mxf8")
         for error in errors
     )
+
+
+def test_shared_formula_id_must_keep_its_partners_formula(gfx950_copy):
+    library, configs = gfx950_copy
+    replace_in(
+        library / "gfx950" / "compute.yaml",
+        "name: MFMA FLOPs (MXF8)\n  formula: 512 *",
+        "name: MFMA FLOPs (MXF8)\n  formula: 999 *",
+    )
+    errors = validate(library, configs)
+    assert any(
+        "compute.mfma_flops_mxf8: SHARED_FORMULA_IDS lists it" in error
+        for error in errors
+    )
+
+
+def test_display_variant_row_is_checked_for_its_unit(gfx950_copy):
+    """30.7.1 names a metric whose generic name another id shares."""
+    library, configs = gfx950_copy
+    replace_in(
+        configs / "gfx950" / "3000_mem_bw.yaml",
+        "* TO_INT($total_l2_chan))\n          unit: Percent",
+        "* TO_INT($total_l2_chan))\n          unit: Cycles",
+    )
+    errors = validate(library, configs)
+    assert any("30.7.1 L2 utilization: unit 'Cycles'" in error for error in errors)
+
+
+def test_variant_position_must_exist(gfx908_copy, monkeypatch):
+    monkeypatch.setitem(
+        validate_metric_library.UNIT_VARIANTS,
+        "gfx908",
+        {**validate_metric_library.UNIT_VARIANTS["gfx908"], "99.9.9": ("X", "Y")},
+    )
+    errors = validate(*gfx908_copy)
+    assert "[gfx908] UNIT_VARIANTS lists 99.9.9, but no row has that position" in errors
 
 
 def test_changed_rewritten_display_variant(gfx908_copy):
