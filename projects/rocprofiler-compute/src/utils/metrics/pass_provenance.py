@@ -34,6 +34,16 @@ _COUNTER_COL_RE = re.compile(r"raw_pmc_df\[['\"]([^'\"]+)['\"]\]")
 _AMMOLITE_VAR_RE = re.compile(r"ammolite__([A-Za-z0-9_]+)")
 _DIGIT_SPLIT_RE = re.compile(r"(\d+)")
 
+# Wide-frame columns that are not hardware counters. $denom (per_kernel) and
+# per-second formulas name these, and they are never a Counter_Name in a pass.
+_NON_PMC_FRAME_COLUMNS = frozenset({
+    UNIT_COUNTER,
+    "Start_Timestamp",
+    "End_Timestamp",
+})
+
+_PASS_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
 # System / unit variables that never take a pass suffix.
 _SYSTEM_LIKE_VARS = frozenset({
     "num_xcd",
@@ -63,6 +73,29 @@ def natural_pass_sort_key(key: str) -> Tuple[Union[int, str], ...]:
     return tuple(int(part) if part.isdigit() else part for part in parts)
 
 
+def raw_pmc_column_names(expr: str) -> List[str]:
+    """Return raw_pmc_df column names referenced by one expression string."""
+    if not isinstance(expr, str) or not expr:
+        return []
+    return _COUNTER_COL_RE.findall(expr)
+
+
+def _require_safe_pass_key(pass_key: str) -> str:
+    """Reject a pass key that cannot be spliced into a quoted expression."""
+    if _PASS_KEY_RE.fullmatch(pass_key) is None:
+        raise ValueError(
+            f"pass key {pass_key!r} is not safe to splice into an expression"
+        )
+    return pass_key
+
+
+def _pmc_column_base(column: str) -> str:
+    """Strip a pass qualifier so a second bind sees the hardware counter."""
+    if PASS_COLUMN_SEP in column:
+        return column.split(PASS_COLUMN_SEP, 1)[0]
+    return column
+
+
 @dataclass(frozen=True)
 class PassLayout:
     """Counters observed per profiling pass (from results, not perfmon YAML)."""
@@ -83,6 +116,7 @@ class PassLayout:
         return self.pass_keys.index(pass_key)
 
     def qualified_column(self, counter: str, pass_key: str) -> str:
+        _require_safe_pass_key(pass_key)
         return f"{counter}{PASS_COLUMN_SEP}{pass_key}"
 
     def passes_containing(self, counters: FrozenSet[str]) -> List[str]:
@@ -110,7 +144,8 @@ def build_pass_layout(long_df: pd.DataFrame) -> PassLayout:
 
     counters_by_pass: Dict[str, FrozenSet[str]] = {}
     for pass_key, group in long_df.groupby(PASS_KEY_COLUMN, sort=False):
-        counters_by_pass[str(pass_key)] = frozenset(
+        key = _require_safe_pass_key(str(pass_key))
+        counters_by_pass[key] = frozenset(
             str(name) for name in group["Counter_Name"].dropna().unique()
         )
 
@@ -135,7 +170,11 @@ def extract_row_refs(built_exprs: List[str]) -> MetricRowRefs:
     for expr in built_exprs:
         if not isinstance(expr, str) or not expr:
             continue
-        counters.update(_COUNTER_COL_RE.findall(expr))
+        for column in raw_pmc_column_names(expr):
+            base = _pmc_column_base(column)
+            if base in _NON_PMC_FRAME_COLUMNS:
+                continue
+            counters.add(base)
         for var_name in _AMMOLITE_VAR_RE.findall(expr):
             # Strip accidental pass suffixes if re-extracting.
             if PASS_VAR_SEP in var_name:
@@ -240,6 +279,17 @@ def select_pass_with_normalization_fallback(
     # SQ_WAVES or GRBM_GUI_ACTIVE onto a different pass.
     del gpu_series
     return select_pass(required, layout), False
+
+
+def _expression_should_unset(value: object) -> bool:
+    return isinstance(value, str) and bool(value) and value != _UNSET_EXPRESSION
+
+
+# Dividing by these counters across passes is not a same-pass result.
+# Relaxing them would read another pass's copy.
+_SAME_PASS_COUNTERS = frozenset({"SQ_WAVES", "GRBM_GUI_ACTIVE"})
+
+_UNSET_EXPRESSION = "None"
 
 
 def choose_metric_pass(
@@ -387,6 +437,8 @@ def bind_metric_tables_to_passes(
             ]
             refs = extract_row_refs(exprs)
             required = expand_required_counters(refs, gpu_series)
+            if not hardware_counters_for_pass_select(required, gpu_series):
+                continue
             chosen = choose_metric_pass(
                 required,
                 pass_layout,
@@ -466,6 +518,8 @@ def bind_expression_dataframe(
             continue
         refs = extract_row_refs(exprs)
         required = expand_required_counters(refs, gpu_series)
+        if not hardware_counters_for_pass_select(required, gpu_series):
+            continue
         chosen = choose_metric_pass(
             required,
             pass_layout,

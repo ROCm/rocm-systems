@@ -139,6 +139,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     before validation. Its raw-byte fixture reproduces the enum UBSan failure;
     enable it after the production fix. The defined `RAS_DIAG_CHECK_COUNT`
     sentinel remains covered by enabled dispatch and peer-payload tests.
+  - `ras/rasnet.cc` (`RASNET_CC_PATH`, from `rasnet-test.cc`); suite
+    `RasNetMicrotest.*`. Covers connection and socket lifecycles, event-loop
+    I/O, timeout recovery, keep-alives, and fallback-link maintenance.
   - `ras/diagnostics_gpu.cc` (`RAS_DIAGNOSTICS_GPU_CC_PATH`, from
     `ras-diagnostics-gpu-test.cc`); suite `RasDiagnosticsGpuMicrotest.*`. Covers
     GPU inventory, CUDA and NVIDIA graphics driver versions, ECC, and NVLink
@@ -179,6 +182,20 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     overrides, NVLS efficiency policy, and symmetric-kernel fallback. Its
     `ncclParamSingleProcMemRegEnable` resolves from `group.cc` via
     `group-test.cc`; do not add `fakes/group_fakes.cc` to this binary.
+  - `include/param/utils.h` and `include/param/parser_common.h`, from
+    `param-utils-test.cc`; suite `ParamUtilsMicrotest.*`. Header-only, no
+    `_CC_PATH` macro needed. Covers `ncclParamTypeIdOf<T>`'s per-type mapping
+    and RAW fallback, `flagsStr`'s private-prefix/flag-ordering/comma-joining,
+    the `srcDefault`/`srcEnvPlugin` labels, `stringFormat` (including a long
+    argument), `iequals`/`trim`/`split`, the `ncclParamParser<T>`
+    function-pointer-trio wrapper (including that `resolve()` forwards its
+    `ctx` to the callee) and its explicit-`bool` truthiness, and
+    `makeOption(s)` /
+    `ncclOptionSetAssertUnique`'s duplicate-name `WARN` (captured via
+    `../common/LogCapture.hpp`). First PR in the AICOMRCCL-2820 stacked
+    chain; the rest of `src/param/*` and `src/include/param/*.h` (the typed
+    registry, the remaining parsers, the C API, and env loading) are covered
+    by its follow-ups.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result
@@ -190,6 +207,20 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `transport/net_ib*/reg.cc` copies by configure-time `rccl_assert_source_line`
     checks in `CMakeLists.txt`, so a flag change in `reg.cc` fails the configure
     until the probe and the test are updated to match.
+  - `misc/ionicdvsymbols.cc`, `misc/mlx5dvsymbols.cc` (`IONICDV_SYMBOLS_CC_PATH`,
+    `MLX5DV_SYMBOLS_CC_PATH`, from `dv_symbols_test.cc`); suite `DvSymbolsTestIsolated.*`.
+    Checks that a provider dv library stays mapped after a missing-symbol failure,
+    and that a libionic without `ionic_dv_qp_set_gda` still builds, using
+    `fakes/dv_provider_fake.cc` built as shared objects with SONAME `libionic.so` /
+    `libmlx5.so`. Each test runs in its own process because the builders open the
+    fakes with `RTLD_NODELETE`. The fakes are built and installed beside the test
+    binary; the tests skip if they are missing.
+  - `graph/rccl_graph_gen.cc` (`RCCL_GRAPH_GEN_CC_PATH`, from
+    `rccl-graph-gen-test.cc`); suites `GraphGen*Test.*`. Covers ring
+    construction for every `generateRings` dispatch arm (degenerate, the 4/6/8
+    tables, prime strides, Walecki, Walecki+greedy) and the load-balanced cut
+    selection in `findRingCutIndices`. `greedyRingGen`'s out-of-memory arm is
+    driven through the heap half of `fakes/libc_seam.h`.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
@@ -201,8 +232,28 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   because `enqueue.cc` defines them itself. See
   `test_categories_micro_enqueue.yaml`.
 - **`rccl-UnitTestsMicroCe`**: `ce_coll.cc` (via `CE_COLL_CC_PATH`); suite
-  `CeCollMicrotest.*`. Its own binary because every other target links
-  `fakes/ce_fakes.cc`, which fakes the symbols this file defines.
+  `CeCollMicrotest.*` and `LaunchPaths/CeAlltoAllvSyncMicrotest.*`, both in
+  `ce-coll-test.cc`. Its own binary because every other target links
+  `fakes/ce_fakes.cc`, which fakes the symbols this file defines, and the
+  `rccl-UnitTestsMicroInit` cleanup-order oracle needs the fake `ncclCeFinalize`
+  in `fakes/nccl_stubs.cc`, which this target drops via
+  `RCCL_STUBS_OMIT_ncclCeFinalize`.
+- **`rccl-UnitTestsMicroClientSupport`**: `ras/client_support.cc` (via
+  `CLIENT_SUPPORT_CC_PATH`, from `client-support-test.cc`); suites
+  `RasClientSupportMicrotest.*` and
+  `Commands/RasClientSupportEnqueueFailureMicrotest.*`. Raw socket I/O is
+  redirected through `fakes/libc_fakes.{h,cc}`, the HIP driver query through
+  `fakes/hip_fakes.{h,cc}`, and reusable RAS collaborators through
+  `fakes/ras_fakes.{h,cc}` plus `fakes/ras_param_fakes.{h,cc}` for timeout
+  scaling. Its own binary: this file's inline stand-ins for
+  `ncclSocketsSameNode`/`rasPeerInfoToString`/`rasPeerToString` (its callees
+  into `ras/peers.cc`) collide with the REAL `peers.cc` that
+  `rccl-UnitTestsMicro` links for `ras-peers-test.cc`, which conversely needs
+  those three real and this file's own `ncclSocketToHost`/`rasGpuDevsToString`
+  faked -- the opposite split, so the two cannot share a binary. The
+  guard-less positional pair `libc_seam.h` / `libc_seam_undef.h` must bracket
+  the production source include, after system headers and before test
+  helpers. CMake pins the copied `ncclFuncStr` table to `src/init.cc`.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
@@ -260,16 +311,53 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   scene, vocabulary and fake-reset fixture live in `TaskPrepScene.h`.
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_taskprep.yaml`.
+- **`rccl-UnitTestsMicroConnect`** — `src/graph/connect.cc` (via `CONNECT_CC_PATH`,
+  suites `EveryRank/ConnectMicrotest.*` and `ConnectMicrotestReject.*`):
+  `ncclTopoPreset` and `ncclTopoPostset` run unstubbed on a hand-built
+  single-node comm, with the real `rings.cc`, `trees.cc`, `rccl_graph_gen.cc` and
+  `archinfo.cc` linked in. Its own binary because every other micro target links
+  `topo_stubs.cc`, whose Preset/Postset stubs would be duplicate symbols; the few
+  remaining dependencies (logging, params, `bootstrapAllGather`, and the
+  WarpSpeed channel helpers `rcclGetMaxWarpsPerBlock` /
+  `rcclWarpSpeedComputeNChannels`) are faked in `connect-test.cc` itself.
+  The WarpSpeed helpers are referenced only when gfx950 CI copies
+  `ENABLE_WARP_SPEED` onto this binary; the scenes leave `warpSpeedEnabled`
+  false, so the stubs exist to link. See `test_categories_micro_connect.yaml`.
 - **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
   `gin-host-test.cc`); suite `GinHostTest.*`. NVIDIA/nccl#2279
   `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
+- **`rccl-UnitTestsMicroDdaIpc`**: `algorithms/dda/all_reduce/dda_all_reduce_ipc.cu`
+  (`DDA_ALL_REDUCE_IPC_CC_PATH`, from `dda-allreduce-ipc-test.cc`); suites
+  `DdaAllReduceIpc*`. Eligibility gates, datatype dispatch and flat/tree kernel
+  selection, observed through the `g_hipExtLaunchKernel` seam. Its own binary:
+  `rccl-UnitTestsMicro` links `fakes/dda_fakes.cc`, which defines the same symbols.
+  See `test_categories_micro_dda_ipc.yaml`.
+
+- **`rccl-UnitTestsMicroRmaProxy`** — `src/rma/rma_proxy.cc` (via
+  `RMA_PROXY_CC_PATH`, from `rma-proxy-test.cc`); suite
+  `RmaProxyAllocGraphTest.*`. Its own binary, not sharing `rccl-UnitTestsMicro`:
+  that target resolves `ncclRmaProxyConnectOnce` / `ncclRmaProxyRegister` /
+  `ncclRmaProxyDeregister` from `fakes/dev_runtime_micro_fakes.cc`, and
+  `rma_proxy.cc` defines all three, so linking the unit under test there is a
+  duplicate symbol. `ncclGdrCopy` (owned by `init.cc`) is defined in the test TU
+  rather than a fakes file: `allocMemCPUAccessible()` is a header-static
+  template, so this global is the only seam that steers it, and the suite owns
+  it outright. Compiles the real `utils.cc` oracle TU for `getBusId` and the
+  memory stack. The suite drives the public lifecycle --
+  `ncclRmaProxyCreateContext` / `ncclRmaProxyDestroyContext` -- so production
+  owns the context and its cleanup. See `test_categories_micro_rma_proxy.yaml`.
+
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
   compiles for real. See `test_categories_micro_diagnostics.yaml`.
+- **`rccl-UnitTestsMicroGraph`**: the real `src/graph/{xml,topo,paths,search,rome_models}.cc`,
+  compiled as sources; suite `TopoGpuDevMicrotest.*` in `graph-dev-test.cc`. Its own binary:
+  every other target links fakes for the graph symbols these files define. See
+  `test_categories_micro_graph.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
@@ -394,7 +482,7 @@ symbol.
 |---|---|
 | `src/algorithms/dda/*.cc` | `fakes/dda_fakes.cc` |
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
-| `src/ce_coll.cc` | `fakes/ce_fakes.cc` |
+| `src/ce_coll.cc` (targets that do not compile the real file) | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
 | `src/diagnostics.cc` (`ncclDiagChildRun*` external-tool runners) | `fakes/diagnostics_fakes.cc` |
@@ -411,6 +499,7 @@ symbol.
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
 | `src/misc/api_trace.cc` (`NCCL_API` dispatch) | `fakes/api_trace_fakes.cc` |
 | `src/misc/ibvwrap.cc` (PD / MR registration wrappers) | `fakes/ibvwrap_fakes.cc` |
+| ibverbs provider dv libraries (`libionic.so`, `libmlx5.so`) | `fakes/dv_provider_fake.cc` |
 | `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
 | `src/misc/param.cc` + `getenv` interposition | `fakes/env_fakes.cc` |
 | `src/misc/rocmwrap.cc` | `fakes/rocmwrap_fakes.cc` |
@@ -420,7 +509,8 @@ symbol.
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real file) | `fakes/gin_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
-| `src/ras/ras_param.cc` | `fakes/ras_param_fakes.cc` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
+| `src/ras/ras_param.cc` (seconds and nanoseconds timeout scaling) | `fakes/ras_param_fakes.{h,cc}` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
+| `src/rccl_arch_thresholds.cc` | `fakes/rccl_arch_thresholds_fakes.cc` |
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
@@ -432,7 +522,8 @@ symbol.
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
-| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`) | `fakes/libc_fakes.cc` |
+| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`) | `fakes/libc_fakes.cc` |
+| reusable RAS poll-entry, message, and diagnostics-context seams | `fakes/ras_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
 | HIP runtime | `fakes/hip_fakes.cc` |
@@ -781,8 +872,10 @@ above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
-`rccl-UnitTestsMicroGinHost, `rccl-UnitTestsMicroDiagnostics`,
-`rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
+`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDiagnostics`, 
+`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
+`rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
@@ -820,9 +913,14 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
+./build/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroDdaIpc             # src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
+./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
+./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
 ./build/rccl-HostUnitTests
 ```
 

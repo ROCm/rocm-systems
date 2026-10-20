@@ -114,9 +114,9 @@ There are three high-level GPU analysis views:
 
 .. _cli-memory-chart-viewing:
 
-The memory chart is a wide diagram drawn at a fixed width. It does not shrink to
-fit the terminal, so in a narrow window every chart line wraps and the boxes,
-arrows, and bandwidth labels no longer line up. Widening the window until one
+The memory chart is a wide diagram whose width follows its content. It does not
+shrink to fit the terminal, so in a narrow window every chart line wraps and the
+boxes, arrows, and bandwidth labels no longer line up. Widening the window until one
 chart line fits on a single row fixes this. If you cannot resize, use one of the
 following instead.
 
@@ -493,7 +493,7 @@ First, list the top kernels in your application using `--list-stats`.
 
 Second, select the index of the kernel you would like to filter; for example,
 ``vecCopy(double*, double*, double*, int, int) [clone .kd]`` at index ``0``.
-Then, use this index to apply the filter via ``-k`` or ``--kernels``.
+Then, use this index to apply the filter via ``-k`` or ``--kernel``.
 
 .. code-block:: shell-session
 
@@ -629,7 +629,8 @@ Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
 Interactive Roofline HTML:
 
-* Use the *AI axis* selector to choose one memory level per kernel, or *All peaks* to plot every level at once. Isolating one kernel shows it across all available memory levels.
+* Use the *AI axis* selector to choose one memory level per kernel, *All peaks* to plot every level at once, or *Limited by* to show each kernel's limiting memory-level point (falling back to its leftmost point when no memory-level limiter is available).
+  Isolating one kernel shows it across all available memory levels.
 * Use the *Precision* selector to choose one or more arithmetic precision's peak roofline to display on the plot.
 * Use the *Kernels* and *Bandwidth rooflines* panels to isolate, multi-select, or reset plotted items. The *Runtime shown* slider filters to the heaviest kernels that reach the selected GPU resident-time cutoff.
 * Hover over kernel dots and rooflines to see arithmetic intensity, throughput, roofline percentage, limiter, runtime, bandwidth, and compute-peak details.

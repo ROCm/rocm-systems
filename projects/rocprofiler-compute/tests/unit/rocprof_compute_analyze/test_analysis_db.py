@@ -19,6 +19,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import text
 
+from memory_chart.loader import Layouts
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
 from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
@@ -224,6 +225,14 @@ def make_counter_backed_database_analyzer(
     analyzer._kernel_values_data_per_workload = {}
     analyzer._workload_values_data_per_workload = {}
     return analyzer
+
+
+def run_memory_chart_workload(tmp_path, gpu_arch):
+    """Run analysis of one counter-backed workload; return its workload row."""
+    analyzer = make_counter_backed_database_analyzer(str(tmp_path), ["3"], [])
+    analyzer._runs[str(tmp_path)].sys_info = pd.DataFrame([{"gpu_arch": gpu_arch}])
+    run_analysis_with_existing_database(analyzer)
+    return orm.Database.get_session().query(orm.Workload).one()
 
 
 def run_analysis_with_existing_database(analyzer):
@@ -872,6 +881,87 @@ def test_calc_dataframe_expressions_computes_pass_scoped_builtins():
     assert per_xcd_value == 200.0
 
 
+def test_pass_scoped_builtins_follow_transitive_formulas():
+    """numActiveCUs depends on GRBM_GUI_ACTIVE_PER_XCD even when unnamed."""
+    from utils.metrics.pass_provenance import PassLayout
+
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE", "SQ_BUSY_CU_CYCLES"}),
+            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE"}),
+        },
+        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
+    )
+    pmc_df = pd.DataFrame({
+        "SQ_BUSY_CU_CYCLES": [100.0],
+        "GRBM_GUI_ACTIVE": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [80.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
+    })
+    sys_info = {
+        "gpu_arch": "gfx942",
+        "num_xcd": 1,
+        "max_waves_per_cu": 32,
+        "cu_per_gpu": 304,
+    }
+    results = db_analysis.calc_pass_scoped_builtin_sys_info(
+        pmc_df,
+        sys_info,
+        layout,
+        {"pmc_perf_0"},
+        ["ammolite__numActiveCUs__pass0"],
+    )
+    assert "GRBM_GUI_ACTIVE_PER_XCD__pass0" in results
+    assert "numActiveCUs__pass0" in results
+
+
+def test_calc_expressions_uses_same_pass_counters():
+    """The workload value comes from the pass that holds the whole PMC set."""
+    from utils.metrics.pass_provenance import PassLayout
+
+    workload_path = "/fake/workload"
+    pmc_df = pd.DataFrame({
+        "Kernel_Name": ["kernel_a"],
+        "TA_BUSY": [50.0],
+        "GRBM_GUI_ACTIVE": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_0": [100.0],
+        "GRBM_GUI_ACTIVE@pass:pmc_perf_1": [200.0],
+    })
+    expression_template = pd.DataFrame({
+        "metric_id": ["9.9.9"],
+        "value_name": ["Avg"],
+        "value": [
+            "to_avg(100 * raw_pmc_df['TA_BUSY'] / raw_pmc_df['GRBM_GUI_ACTIVE'])"
+        ],
+    })
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0", "pmc_perf_1"),
+        counters_by_pass={
+            "pmc_perf_0": frozenset({"GRBM_GUI_ACTIVE"}),
+            "pmc_perf_1": frozenset({"GRBM_GUI_ACTIVE", "TA_BUSY"}),
+        },
+        duplicated=frozenset({"GRBM_GUI_ACTIVE"}),
+    )
+    analyzer = db_analysis(MagicMock(), {})
+    analyzer._pmc_df_per_workload = {workload_path: pmc_df}
+    analyzer._metric_expression_data_per_workload = {workload_path: expression_template}
+    analyzer._metrics_info_data_per_workload = {}
+    analyzer._roofline_ceilings_per_workload = {workload_path: {}}
+    analyzer._pass_layout_per_workload = {workload_path: layout}
+    analyzer._runs = {
+        workload_path: MagicMock(
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx942", "num_xcd": 1}])
+        )
+    }
+    analyzer._arch_configs = {"gfx942": MagicMock()}
+
+    with patch.object(db_analysis, "validate_dual_issue_metrics"):
+        _kernel_values, workload_values = analyzer.calc_expressions()
+
+    assert float(workload_values[workload_path].at[0, "value"]) == 25.0
+
+
 # =============================================================================
 # calc_metrics_data tests
 # =============================================================================
@@ -933,6 +1023,49 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
     assert list(exprs["value_name"]) == ["Avg", "Min", "Max"]
     assert list(exprs["value"]) == ["10", "5", "20"]
     assert set(exprs["metric_id"]) == {"7.1.0"}
+
+
+def test_calc_metrics_data_ingests_null_min_max():
+    """YAML null min/max is an empty expression cell, not an AttributeError."""
+    workload_path = "/fake/workload"
+    metric_df = pd.DataFrame(
+        {
+            "Metric": ["VALU FLOPs"],
+            "Avg": [" 1 "],
+            "Min": ["x"],
+            "Max": ["y"],
+            "Unit": ["Gflop"],
+        },
+        index=pd.Index(["2.1.0"], name="Metric_ID"),
+    )
+    metric_df.at["2.1.0", "Min"] = None
+    metric_df.at["2.1.0", "Max"] = None
+    assert metric_df.loc["2.1.0", "Min"] is None
+    assert metric_df.loc["2.1.0", "Max"] is None
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {201: metric_df}
+    arch_config.panel_configs = {
+        200: {
+            "id": 200,
+            "title": "Workgroup",
+            "data source": [{"metric_table": {"id": 201, "title": "VALU"}}],
+        }
+    }
+
+    analyzer = db_analysis(MagicMock(verbose=0), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    _metrics_info, expressions = analyzer.calc_metrics_data()
+
+    exprs = expressions[workload_path]
+    by_name = dict(zip(exprs["value_name"], exprs["value"]))
+    assert by_name["Avg"] == "1"
+    assert by_name["Min"] == ""
+    assert by_name["Max"] == ""
 
 
 LONG_FORM_PMC_PERF = (
@@ -3663,6 +3796,27 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
         assert (df[col] == 42.0).all()
 
     assert evaluated_row_counts == [2] * (NUM_KERNELS * len(roofline_metrics))
+
+
+# =============================================================================
+# Memory chart layout (Workload.memory_chart_layout_extdata)
+# =============================================================================
+
+
+def test_run_analysis_stores_the_memory_chart_layout_file_unchanged(
+    db_session, tmp_path
+):
+    workload = run_memory_chart_workload(tmp_path, "gfx942")
+    layout_file = Layouts.for_arch("gfx942").path
+    assert workload.memory_chart_layout_extdata == json.loads(
+        layout_file.read_text(encoding="utf-8")
+    )
+
+
+def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_path):
+    # Also covers a layout file skipped as broken
+    workload = run_memory_chart_workload(tmp_path, "gfx1030")
+    assert workload.memory_chart_layout_extdata is None
 
 
 def test_visible_metric_rows_drop_collectable_names():

@@ -1,10 +1,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -21,6 +22,12 @@ from utils.logger import (
     demarcate,
 )
 from utils.metrics.pass_provenance import natural_pass_sort_key
+from utils.utils_common import (
+    NATIVE_AGENTS_PREFIX,
+    NATIVE_COUNTERS_PREFIX,
+    NATIVE_DISPATCH_PREFIX,
+    NATIVE_KERNEL_SYMBOLS_PREFIX,
+)
 from utils.utils_counter_defs import UNIT_COUNTER
 
 NS_TO_MS = 1.0 / 1_000_000.0
@@ -28,6 +35,64 @@ NS_TO_MS = 1.0 / 1_000_000.0
 # Canonical column-name preference order for Percent of Peak lookups
 VALUE_COL_PREFERENCE: tuple[str, ...] = ("Avg", "Value")
 PEAK_COL_PREFERENCE: tuple[str, ...] = ("Peak", "Peak (Empirical)")
+
+# The long counter frame both lanes hand to process_rocpd_csv, in the column
+# order of results_*.csv.
+COUNTER_RESULTS_COLUMNS: List[str] = [
+    "GPU_ID",
+    "GUID",
+    "Correlation_Id",
+    "Dispatch_ID",
+    "Grid_Size",
+    "Workgroup_Size",
+    "LDS_Per_Workgroup",
+    "Scratch_Per_Workitem",
+    "Arch_VGPR",
+    "Accum_VGPR",
+    "SGPR",
+    "Kernel_Name",
+    "Start_Timestamp",
+    "End_Timestamp",
+    "Kernel_ID",
+    "Counter_Name",
+    "Counter_Value",
+]
+
+_NATIVE_ARTIFACT_RE = re.compile(
+    rf"^(?P<kind>{NATIVE_COUNTERS_PREFIX}|{NATIVE_DISPATCH_PREFIX}"
+    rf"|{NATIVE_KERNEL_SYMBOLS_PREFIX}|{NATIVE_AGENTS_PREFIX})"
+    rf"_(?P<fbase>.+)_(?P<pid>\d+)\.csv\.gz$"
+)
+
+# Native CSV column names mapped to their results_*.csv names.
+_NATIVE_TO_RESULTS_COLUMNS = {
+    "gpu_id": "GPU_ID",
+    "correlation_id": "Correlation_Id",
+    "grid_size": "Grid_Size",
+    "workgroup_size": "Workgroup_Size",
+    "lds_per_workgroup": "LDS_Per_Workgroup",
+    "scratch_per_workitem": "Scratch_Per_Workitem",
+    "arch_vgpr": "Arch_VGPR",
+    "accum_vgpr": "Accum_VGPR",
+    "sgpr": "SGPR",
+    "kernel_name": "Kernel_Name",
+    "start_timestamp": "Start_Timestamp",
+    "end_timestamp": "End_Timestamp",
+    "counter_name": "Counter_Name",
+    "counter_value": "Counter_Value",
+}
+
+# The keys profile mode numbers results_*.csv dispatches and kernels by.
+_DISPATCH_ID_KEYS = [
+    "PID",
+    "Kernel_Name",
+    "Grid_Size",
+    "Workgroup_Size",
+    "LDS_Per_Workgroup",
+    "Start_Timestamp",
+    "End_Timestamp",
+]
+_KERNEL_ID_KEYS = ["Kernel_Name", "Grid_Size", "Workgroup_Size", "LDS_Per_Workgroup"]
 
 
 def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
@@ -96,6 +161,18 @@ class NodeRollup:
     total_duration_ns: float
     min_dispatch_ns: Optional[float]
     max_dispatch_ns: Optional[float]
+
+
+@dataclass(frozen=True)
+class NativeArtifacts:
+    """The four CSVs one process wrote for one counter set."""
+
+    fbase: str
+    pid: int
+    counters: Path
+    dispatch: Path
+    kernel_symbols: Path
+    agents: Path
 
 
 def simplify_kernel_name(full_kernel_name: str) -> str:
@@ -766,6 +843,7 @@ def process_rocpd_csv(
     )
 
     data: list[dict[str, Any]] = []
+    missing_dispatches: List[int] = []
 
     # Group by unique kernel and merge into a single row
     for _, group_df in df.groupby([
@@ -791,14 +869,23 @@ def process_rocpd_csv(
         }
         if use_provenance:
             row.update(_timestamps_by_pass(group_df, pass_layout))
-            row.update(_merge_counters_with_pass_provenance(group_df, pass_layout))
+            row.update(
+                _merge_counters_with_pass_provenance(
+                    group_df, pass_layout, missing_dispatches
+                )
+            )
         else:
             # Each counter will become its own column (last write wins).
             row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
         data.append(row)
+    if missing_dispatches:
+        console_warning(
+            "pass_provenance",
+            f"{len(missing_dispatches)} dispatch(es) are missing a duplicated "
+            "counter from a profiling pass; those cells are NaN and drop out "
+            "of sums.",
+        )
     df = pd.DataFrame(data)
-    # Rank GPU IDs, map lowest number to 0, next to 1, etc.
-    df["GPU_ID"] = df["GPU_ID"].rank(method="dense").astype(int) - 1
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(1, len(df) + 1)
     return df
@@ -817,12 +904,95 @@ def _timestamps_by_pass(
     return columns
 
 
+def find_native_artifacts(workload_dir: Path) -> List[NativeArtifacts]:
+    """Return the complete per-pid native artifact sets in workload_dir.
+
+    Sorted by counter set then pid, since ids are numbered in read order. An
+    incomplete set cannot be joined, so it is skipped.
+    """
+    found: Dict[Tuple[str, int], Dict[str, Path]] = {}
+    for path in workload_dir.glob(f"*.csv{csv_compression.GZIP_SUFFIX}"):
+        match = _NATIVE_ARTIFACT_RE.match(path.name)
+        if match is None:
+            continue
+        key = (match["fbase"], int(match["pid"]))
+        found.setdefault(key, {})[match["kind"]] = path
+
+    kinds = {
+        NATIVE_COUNTERS_PREFIX,
+        NATIVE_DISPATCH_PREFIX,
+        NATIVE_KERNEL_SYMBOLS_PREFIX,
+        NATIVE_AGENTS_PREFIX,
+    }
+    artifacts = []
+    for (fbase, pid), paths in sorted(found.items()):
+        if not kinds <= set(paths):
+            continue
+        artifacts.append(
+            NativeArtifacts(
+                fbase=fbase,
+                pid=pid,
+                counters=paths[NATIVE_COUNTERS_PREFIX],
+                dispatch=paths[NATIVE_DISPATCH_PREFIX],
+                kernel_symbols=paths[NATIVE_KERNEL_SYMBOLS_PREFIX],
+                agents=paths[NATIVE_AGENTS_PREFIX],
+            )
+        )
+    return artifacts
+
+
+def number_gpus_by_node(agents: pd.DataFrame) -> Dict[int, int]:
+    """Map every GPU's node id to a GPU id from 0, in node order."""
+    node_ids = sorted({int(node_id) for node_id in agents["node_id"]})
+    return {node_id: gpu_id for gpu_id, node_id in enumerate(node_ids)}
+
+
+def join_native_counters(
+    counters: pd.DataFrame,
+    dispatches: pd.DataFrame,
+    symbols: pd.DataFrame,
+    pid: int,
+) -> pd.DataFrame:
+    """Join one process's native counters to its dispatches and kernel symbols.
+
+    counters holds one total per dispatch and counter. A row whose dispatch or
+    kernel symbol is missing is dropped. The pid fills GUID, since the native
+    tool has no session uuid and GUID only tells processes apart.
+    """
+    joined = counters.merge(dispatches, on="dispatch_id", how="inner").merge(
+        symbols, on="kernel_id", how="inner"
+    )
+    return joined.rename(columns=_NATIVE_TO_RESULTS_COLUMNS).assign(GUID=pid, PID=pid)
+
+
+def assign_native_ids(counter_set: pd.DataFrame) -> pd.DataFrame:
+    """Number one counter set's dispatches from 1 and its kernels from 0.
+
+    Rows are sorted by pid, then dispatch_id, so ids follow the order kernels
+    were launched, not the order they finished.
+    """
+    launch_order = counter_set.sort_values(["PID", "dispatch_id"], kind="stable")
+    dispatch_groups = launch_order.groupby(_DISPATCH_ID_KEYS, sort=False, dropna=False)
+    kernel_groups = launch_order.groupby(_KERNEL_ID_KEYS, sort=False, dropna=False)
+    numbered = launch_order.assign(
+        Dispatch_ID=dispatch_groups.ngroup() + 1,
+        Kernel_ID=kernel_groups.ngroup(),
+    )
+    return numbered.loc[:, COUNTER_RESULTS_COLUMNS]
+
+
 def _merge_counters_with_pass_provenance(
     group_df: pd.DataFrame,
     pass_layout: "PassLayout",
+    missing_dispatches: List[int],
 ) -> dict[str, Any]:
-    """Build base + shadow counter columns for one dispatch group."""
+    """Build base + shadow counter columns for one dispatch group.
+
+    A duplicated counter gets a column for every layout pass that collects it.
+    A dispatch missing that pass stores NaN so later dispatches still align.
+    """
     merged: dict[str, Any] = {}
+    missing = 0
     for counter_name, counter_rows in group_df.groupby("Counter_Name", sort=False):
         values_by_pass: dict[str, Any] = {}
         for pass_key, value in zip(
@@ -831,12 +1001,21 @@ def _merge_counters_with_pass_provenance(
             values_by_pass[str(pass_key)] = value
         ordered_passes = sorted(values_by_pass, key=natural_pass_sort_key)
         first_pass = ordered_passes[0]
-        merged[str(counter_name)] = values_by_pass[first_pass]
-        if str(counter_name) in pass_layout.duplicated:
-            for pass_key in ordered_passes:
-                merged[pass_layout.qualified_column(str(counter_name), pass_key)] = (
-                    values_by_pass[pass_key]
-                )
+        name = str(counter_name)
+        merged[name] = values_by_pass[first_pass]
+        if name not in pass_layout.duplicated:
+            continue
+        for pass_key in pass_layout.pass_keys:
+            if name not in pass_layout.counters_by_pass.get(pass_key, frozenset()):
+                continue
+            column = pass_layout.qualified_column(name, pass_key)
+            if pass_key in values_by_pass:
+                merged[column] = values_by_pass[pass_key]
+            else:
+                merged[column] = np.nan
+                missing += 1
+    if missing:
+        missing_dispatches.append(missing)
     return merged
 
 

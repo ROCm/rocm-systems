@@ -80,8 +80,11 @@
  * v8: hipDeviceFlushGPUDirectRDMAWrites and hipLibraryGetModule were
  * appended to HipDispatchTable. Each took a compiler ID, so the compiler
  * API IDs moved up by two. develop still records both under v7. A v7
- * reader decodes those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)8u)
+ * reader decodes those events as the wrong API.
+ * v9: hipKernelSetAttributeForDevice was appended to HipDispatchTable,
+ * taking the first compiler ID and shifting the compiler API IDs up by one.
+ * A v8 reader would decode those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)9u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
@@ -2230,7 +2233,7 @@ typedef struct {
     int32_t ret;
     uint64_t handle;
     uint64_t devPtr;
-    uint8_t handle_bytes[64];  /* hipIpcMemHandle_t inline copy */
+    uint8_t handle_bytes[64];  /* hipIpcMemHandle_t not recorded, zeros */
     uint8_t handle_present;  /* 1 when handle was non-null */
 } hrr_args_hipIpcGetMemHandle;
 #ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
@@ -2242,7 +2245,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t event;
-    uint8_t handle_bytes[64];  /* hipIpcEventHandle_t passed by value, inline copy */
+    uint8_t handle_bytes[64];  /* hipIpcEventHandle_t passed by value, not recorded, zeros */
 } hrr_args_hipIpcOpenEventHandle;
 #ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
 static_assert(sizeof(hipIpcEventHandle_t) <= 64, "hrr_args_hipIpcOpenEventHandle::handle_bytes too small for hipIpcEventHandle_t");
@@ -2253,7 +2256,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t devPtr;
-    uint8_t handle_bytes[64];  /* hipIpcMemHandle_t passed by value, inline copy */
+    uint8_t handle_bytes[64];  /* hipIpcMemHandle_t passed by value, not recorded, zeros */
     uint32_t flags;
 } hrr_args_hipIpcOpenMemHandle;
 #ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
@@ -5853,6 +5856,16 @@ typedef struct {
     uint64_t library;
 } hrr_args_hipLibraryGetModule;
 
+/* hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value, int device) */
+typedef struct {
+    hrr_event_header hdr;
+    int32_t ret;
+    uint64_t kernel;
+    int32_t attr;
+    int32_t value;
+    int32_t device;
+} hrr_args_hipKernelSetAttributeForDevice;
+
 /* ---- API id enumeration ---- */
 typedef enum hrr_api_id {
     HRR_API_HIPAPINAME = 0,
@@ -6402,16 +6415,17 @@ typedef enum hrr_api_id {
     HRR_API_HIPMODULEENUMERATEFUNCTIONS = 544,
     HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES = 545,
     HRR_API_HIPLIBRARYGETMODULE = 546,
-    HRR_API_HIPPOPCALLCONFIGURATION = 547,
-    HRR_API_HIPPUSHCALLCONFIGURATION = 548,
-    HRR_API_HIPREGISTERFATBINARY = 549,
-    HRR_API_HIPREGISTERFUNCTION = 550,
-    HRR_API_HIPREGISTERMANAGEDVAR = 551,
-    HRR_API_HIPREGISTERSURFACE = 552,
-    HRR_API_HIPREGISTERTEXTURE = 553,
-    HRR_API_HIPREGISTERVAR = 554,
-    HRR_API_HIPUNREGISTERFATBINARY = 555,
-    HRR_API_COUNT = 556
+    HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE = 547,
+    HRR_API_HIPPOPCALLCONFIGURATION = 548,
+    HRR_API_HIPPUSHCALLCONFIGURATION = 549,
+    HRR_API_HIPREGISTERFATBINARY = 550,
+    HRR_API_HIPREGISTERFUNCTION = 551,
+    HRR_API_HIPREGISTERMANAGEDVAR = 552,
+    HRR_API_HIPREGISTERSURFACE = 553,
+    HRR_API_HIPREGISTERTEXTURE = 554,
+    HRR_API_HIPREGISTERVAR = 555,
+    HRR_API_HIPUNREGISTERFATBINARY = 556,
+    HRR_API_COUNT = 557
 } hrr_api_id_t;
 
 /* Array of API names indexed by hrr_api_id_t */
@@ -6964,6 +6978,7 @@ const char* const hrr_api_names[HRR_API_COUNT] = {
     "hipModuleEnumerateFunctions",
     "hipDeviceFlushGPUDirectRDMAWrites",
     "hipLibraryGetModule",
+    "hipKernelSetAttributeForDevice",
     "__hipPopCallConfiguration",
     "__hipPushCallConfiguration",
     "__hipRegisterFatBinary",

@@ -66,9 +66,12 @@ def try_allocate_single_pass_metrics(
     if not work_set:
         return None
 
-    single_pass_metric_sets, single_pass_metric_count = (
-        collect_unique_single_pass_metric_sets(soc, work_set, perfmon_config)
-    )
+    (
+        single_pass_metric_sets,
+        single_pass_metric_count,
+        multi_pass_metric_sets,
+        multi_pass_metric_count,
+    ) = _partition_unique_metric_sets(soc, work_set, perfmon_config)
     files: List[CounterFile] = []
     file_count = file_count_start
     for group in single_pass_metric_sets:
@@ -94,9 +97,6 @@ def try_allocate_single_pass_metrics(
         )
         return None
 
-    multi_pass_metric_sets, multi_pass_metric_count = (
-        collect_unique_multi_pass_metric_sets(soc, work_set, perfmon_config)
-    )
     files, file_count, multi_pass_fill_stats = (
         fill_multi_pass_metrics_into_existing_passes(
             files,
@@ -161,22 +161,10 @@ def collect_unique_single_pass_metric_sets(
     Returns:
         Groups sorted largest-first, and the single-pass metric count.
     """
-    seen: Set[FrozenSet[str]] = set()
-    metric_sets: List[FrozenSet[str]] = []
-    single_pass_metric_count = 0
-    for _sort_key, group, _label in iter_metric_groups(soc, profile_counters):
-        if not counters_fit_one_bucket(group, perfmon_config):
-            continue
-        single_pass_metric_count += 1
-        for candidate in adjust_candidate_groups(group, profile_counters):
-            if not counters_fit_one_bucket(candidate, perfmon_config):
-                candidate = group
-            if candidate in seen:
-                continue
-            seen.add(candidate)
-            metric_sets.append(candidate)
-    metric_sets.sort(key=lambda group: (-len(group), sorted(group)))
-    return metric_sets, single_pass_metric_count
+    single_sets, single_count, _multi_sets, _multi_count = (
+        _partition_unique_metric_sets(soc, profile_counters, perfmon_config)
+    )
+    return single_sets, single_count
 
 
 def collect_unique_multi_pass_metric_sets(
@@ -189,19 +177,10 @@ def collect_unique_multi_pass_metric_sets(
     Returns:
         Metric sets sorted largest-first, and the multi-pass metric count.
     """
-    seen: Set[FrozenSet[str]] = set()
-    metric_sets: List[FrozenSet[str]] = []
-    multi_pass_metric_count = 0
-    for _sort_key, group, _label in iter_metric_groups(soc, profile_counters):
-        if counters_fit_one_bucket(group, perfmon_config):
-            continue
-        multi_pass_metric_count += 1
-        if group in seen:
-            continue
-        seen.add(group)
-        metric_sets.append(group)
-    metric_sets.sort(key=lambda group: (-len(group), sorted(group)))
-    return metric_sets, multi_pass_metric_count
+    _single_sets, _single_count, multi_sets, multi_count = (
+        _partition_unique_metric_sets(soc, profile_counters, perfmon_config)
+    )
+    return multi_sets, multi_count
 
 
 def fill_multi_pass_metrics_into_existing_passes(
@@ -269,6 +248,42 @@ def fill_multi_pass_metrics_into_existing_passes(
         pmc_placed_into_new=pmc_into_new,
     )
     return files, file_count, stats
+
+
+def _partition_unique_metric_sets(
+    soc: "OmniSoC_Base",
+    profile_counters: Set[str],
+    perfmon_config: Dict[str, int],
+) -> Tuple[List[FrozenSet[str]], int, List[FrozenSet[str]], int]:
+    """Split metric PMC sets in one YAML walk.
+
+    Returns single-pass sets, that count, multi-pass sets, and that count.
+    """
+    seen_single: Set[FrozenSet[str]] = set()
+    seen_multi: Set[FrozenSet[str]] = set()
+    single_sets: List[FrozenSet[str]] = []
+    multi_sets: List[FrozenSet[str]] = []
+    single_count = 0
+    multi_count = 0
+    for _sort_key, group, _label in iter_metric_groups(soc, profile_counters):
+        if counters_fit_one_bucket(group, perfmon_config):
+            single_count += 1
+            for candidate in adjust_candidate_groups(group, profile_counters):
+                if not counters_fit_one_bucket(candidate, perfmon_config):
+                    candidate = group
+                if candidate in seen_single:
+                    continue
+                seen_single.add(candidate)
+                single_sets.append(candidate)
+            continue
+        multi_count += 1
+        if group in seen_multi:
+            continue
+        seen_multi.add(group)
+        multi_sets.append(group)
+    single_sets.sort(key=lambda metric_set: (-len(metric_set), sorted(metric_set)))
+    multi_sets.sort(key=lambda metric_set: (-len(metric_set), sorted(metric_set)))
+    return single_sets, single_count, multi_sets, multi_count
 
 
 def _channel_instance_base(counter: str) -> str:
@@ -436,7 +451,11 @@ def _first_fit_unplaced(
     perfmon_config: Dict[str, int],
     file_count: int,
 ) -> Tuple[List[CounterFile], int]:
-    """First-fit counters that are not present in any bucket yet."""
+    """First-fit counters that are not present in any bucket yet.
+
+    A counter that fits no bucket, including a fresh empty one, raises
+    ValueError. The same situation in multi-pass fill is an error too.
+    """
     placed = _counters_in_any_bucket(files)
     leftovers = sorted(work_set - placed)
     files = list(files)
@@ -458,11 +477,10 @@ def _first_fit_unplaced(
         bucket = CounterFile(str(file_count), perfmon_config)
         file_count += 1
         if not bucket.add(ctr):
-            console_warning(
-                "profiling",
-                f"single-pass metric allocation: leftover {ctr!r} was rejected.",
+            raise ValueError(
+                "single-pass metric counter(s) exceed a block budget "
+                f"even in an empty bucket: {ctr}"
             )
-            continue
         files.append(bucket)
         if is_tcc_channel_counter(ctr):
             tcc_map[_channel_instance_base(ctr)] = bucket

@@ -22,8 +22,8 @@ pub(crate) mod test_driver;
 mod tests;
 
 pub(crate) use instance::{
-    DeviceDriverState, DriverInstance, EndpointSelector, EventSubscription, KfdAllocation,
-    KfdDeviceState, new_driver_instance,
+    DeviceDriverState, DriverInstance, EndpointSelector, EventSubscription, GpuDriverRef,
+    KfdAllocation, KfdDeviceState, new_driver_instance,
 };
 pub(crate) use linux_kfd::KfdEventSubscription;
 #[cfg(all(
@@ -41,14 +41,36 @@ use crate::device::gpu::kernel_queue::{
 };
 use crate::device::gpu::profiling::ClockCounters;
 use crate::device::gpu::queue::{QueueRequest, QueueScratch, QueueTransport};
-use crate::host_storage::{Allocator, Owned};
+use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
-    AllocationInfo, DeviceAccess, HostRegistration, OwnedMemoryKind, VirtualAddressInfo,
+    AllocationInfo, DeviceAccess, HostRegistration, MemoryKind, VirtualAddressInfo,
     VirtualMemoryInfo,
 };
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, GpuPresentation};
+use crate::topology::{Endpoint, EndpointDetails};
 use crate::{Error, ErrorKind};
+
+/// Inert constructors for the driver backends compiled into this target.
+/// Each session constructs fresh instances from this immutable catalog.
+pub(crate) type DriverFactory = fn(DriverContextLifetime) -> Result<DriverInstance, Error>;
+
+pub(crate) const BUILTIN_DRIVER_FACTORIES: &[DriverFactory] = &[
+    #[cfg(all(
+        target_os = "linux",
+        any(target_arch = "x86_64", target_arch = "aarch64")
+    ))]
+    new_linux_kfd,
+];
+
+#[cfg(all(
+    target_os = "linux",
+    any(target_arch = "x86_64", target_arch = "aarch64")
+))]
+fn new_linux_kfd(lifetime: DriverContextLifetime) -> Result<DriverInstance, Error> {
+    Ok(DriverInstance::LinuxKfd(Shared::new(
+        KfdDriver::with_context_lifetime(lifetime),
+    )?))
+}
 
 /// Address-space identity and bounds for devices that can map memory.
 ///
@@ -89,14 +111,18 @@ pub(crate) trait Driver: Send + Sync {
     type DeviceState: Clone + Send + Sync;
     fn driver_instance(&self) -> u64;
     fn context_lifetime(&self) -> DriverContextLifetime;
-    /// Allocator used for metadata retained by this driver and its resources.
-    fn allocator(&self) -> Allocator;
     fn shutdown(&mut self) -> Result<(), Error>;
     fn enumerate(
         &self,
         visitor: &mut dyn FnMut(Endpoint) -> Result<(), Error>,
     ) -> Result<(), Error>;
     fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error>;
+    /// Queries optional information about a passive endpoint without
+    /// activating it. Kind-specific details must match the endpoint kind.
+    /// Drivers with no additional source return empty details.
+    fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
+        Ok(EndpointDetails::empty_for(endpoint))
+    }
     fn activate(&self, endpoint: &Endpoint) -> Result<Self::DeviceState, Error>;
 }
 
@@ -110,6 +136,7 @@ pub(crate) trait AllocationOperations: Driver {
     fn supports_host_registration(&self, endpoint: &Endpoint) -> bool;
     fn check_allocation(allocation: &Self::Allocation) -> Result<(), Error>;
     fn allocation_is_device_local(allocation: &Self::Allocation) -> bool;
+    /// Replaces access using temporary metadata.
     fn set_allocation_access(
         _allocation: &mut Self::Allocation,
         _devices: &[&Self::DeviceState],
@@ -124,19 +151,24 @@ pub(crate) trait AllocationOperations: Driver {
         device: &Self::DeviceState,
     ) -> Result<u64, Error>;
     fn allocation_is_owned_by(allocation: &Self::Allocation, device: &Self::DeviceState) -> bool;
+    /// A successful release is idempotent. After failure, a later call must
+    /// safely resume cleanup or report terminal uncertainty without replaying
+    /// an ambiguous native operation. The generic owner also calls this on Drop.
     fn free_allocation(allocation: &mut Self::Allocation) -> Result<(), Error>;
     fn allocate_owned(
         &self,
         device: &Self::DeviceState,
         peers: &[&Self::DeviceState],
-        kind: OwnedMemoryKind,
+        kind: MemoryKind,
         size: u64,
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Owned<Self::Allocation>, Error>;
     /// # Safety
-    /// The caller keeps the complete host page cover mapped and synchronized
-    /// through successful free or, after ambiguous driver failure, process exit.
+    /// The caller keeps borrowed pages mapped through successful free or,
+    /// after ambiguous driver failure, process exit. When `request.backing` is
+    /// present, the driver instead takes that lease into its native owner and
+    /// retains it through uncertain cleanup.
     #[allow(unsafe_code)]
     unsafe fn register_host(
         &self,
@@ -173,7 +205,7 @@ pub(crate) trait VirtualMemoryOperations: Driver {
     fn create_virtual_memory(
         &self,
         device: &Self::DeviceState,
-        kind: OwnedMemoryKind,
+        kind: MemoryKind,
         size: u64,
         pinned: bool,
         uncached: bool,
@@ -200,7 +232,6 @@ pub(crate) trait VirtualMemoryOperations: Driver {
         offset: u64,
         size: u64,
         permissions: DeviceAccess,
-        allocator: crate::host_storage::Allocator,
     ) -> Result<Owned<Self::VirtualHostMapping>, Error>;
     fn free_virtual_host_mapping(mapping: &mut Self::VirtualHostMapping) -> Result<(), Error>;
 }
@@ -262,7 +293,7 @@ pub(crate) trait KernelQueueResource {
 /// queue models. Hardware-dependent operations can report `Unsupported` after
 /// checking the activated device's capabilities. NPU drivers do not implement
 /// this trait merely because they support a shared memory contract.
-pub(crate) trait GpuDriver: Driver + AllocationOperations + VirtualMemoryOperations {
+pub(crate) trait GpuDriver: AllocationOperations + VirtualMemoryOperations {
     /// Direct GPU queue retained by this driver's activated device state.
     type UserQueue: UserQueueResource<DeviceState = Self::DeviceState>;
     /// Kernel-mediated submission queue created by this same driver.
@@ -283,7 +314,6 @@ pub(crate) trait GpuDriver: Driver + AllocationOperations + VirtualMemoryOperati
         device: &Self::DeviceState,
         format: KernelQueueFormat,
     ) -> Result<Owned<Self::KernelQueue>, Error>;
-    fn gpu_presentation(&self, endpoint: &Endpoint) -> GpuPresentation;
     fn set_persisting_l2_cache_size(
         &self,
         device: &Self::DeviceState,

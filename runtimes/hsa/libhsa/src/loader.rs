@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::{Ordering, fence};
 
 use crate::platform::memory as linux_interop;
-use rocddi::memory::{Allocation, DeviceAccess, MemoryKind};
+use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 
 use crate::ffi::*;
 use crate::runtime::{Runtime, boundary, initialized_mut, lock, map_error};

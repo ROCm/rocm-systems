@@ -41,6 +41,8 @@ test_categories:
       - "RasCollectivesMicrotest.*"
       # ras/diagnostics.cc
       - "RasDiagnosticsMicrotest.*"
+      # ras/rasnet.cc
+      - "RasNetMicrotest.*"
       # ras/diagnostics_gpu.cc
       - "RasDiagnosticsGpuMicrotest.*"
       # ras/peers.cc
@@ -49,6 +51,9 @@ test_categories:
       - "RasDiagnosticsEnvMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
+      # ras/client_support.cc
+      - "RasClientSupportMicrotest.*"
+      - "Commands/RasClientSupportEnqueueFailureMicrotest.*"
       # ras/ras_param.cc
       - "RasParamMicrotest.*"
       # rma/rma_proxy_launch.cc
@@ -80,6 +85,10 @@ test_categories:
       - "TuningGeneralMicrotest.*"
       # tuning/tuning.cc
       - "TuningMicrotest.*"
+      # plugin/tuner/csv_tuner.cc
+      - "CsvTunerMicrotest.*"
+      # include/param/utils.h, include/param/parser_common.h
+      - "ParamUtilsMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
       - "GroupCommHeadChainTest.*"
@@ -100,8 +109,24 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
+      # misc/ionicdvsymbols.cc, misc/mlx5dvsymbols.cc
+      - "DvSymbolsTestIsolated.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
+      - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
+      # graph/rccl_graph_gen.cc
+      - "GraphGenPermuteTest.*"
+      - "GraphGenIsPrimeTest.*"
+      - "NodeCounts/GraphGenWaleckiTest.*"
+      - "EvenNodeCounts/GraphGenWaleckiEvenTest.*"
+      - "GraphGenWaleckiGuardTest.*"
+      - "Tables/GraphGenFixedRingTableTest.*"
+      - "PrimeNodeCounts/GraphGenPrimeRingTest.*"
+      - "GraphGenPrimeRingGuardTest.*"
+      - "GraphGenGreedyTest.*"
+      - "GraphGenGenerateRingsTest.*"
+      - "Constructions/GraphGenDispatchTest.*"
+      - "GraphGenCutIndicesTest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"

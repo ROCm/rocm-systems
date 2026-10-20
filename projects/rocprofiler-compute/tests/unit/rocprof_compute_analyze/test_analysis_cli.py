@@ -158,7 +158,11 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
         "rocprof_compute_analyze.analysis_cli.cli_analysis.load_pc_sampling_tool_data",
         lambda self, _path: None,
     )
-    monkeypatch.setattr("utils.file_io.create_df_pmc", lambda *a, **kw: pd.DataFrame())
+    layout = object()
+    monkeypatch.setattr(
+        "utils.file_io.load_df_pmc",
+        lambda *a, **kw: (pd.DataFrame(), layout),
+    )
     monkeypatch.setattr(
         "utils.file_io.create_df_kernel_top_stats",
         lambda *a, **kw: (pd.DataFrame(), pd.DataFrame()),
@@ -168,3 +172,32 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
     inst.pre_processing()
 
     assert len(membw_calls) == (1 if expect_called else 0)
+    assert workload.pmc_pass_layout is layout
+
+
+def test_load_table_data_forwards_pmc_pass_layout(monkeypatch):
+    """eval_metric receives the layout stored on the workload."""
+    from utils.metrics.pass_provenance import PassLayout
+    from utils.parser import load_table_data
+
+    captured = {}
+
+    def fake_eval(*_args, **kwargs):
+        captured["pass_layout"] = kwargs.get("pass_layout")
+
+    monkeypatch.setattr("utils.parser.eval_metric", fake_eval)
+    monkeypatch.setattr("utils.parser.load_non_mertrics_table", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "utils.parser.apply_filters",
+        lambda *_a, **_k: pd.DataFrame(),
+    )
+    layout = PassLayout.empty()
+    workload = SimpleNamespace(
+        dfs={},
+        dfs_type={},
+        pmc_pass_layout=layout,
+        sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
+        roofline_peaks=pd.DataFrame(),
+    )
+    load_table_data(workload, "/tmp/test", SimpleNamespace(debug=False), {})
+    assert captured["pass_layout"] is layout

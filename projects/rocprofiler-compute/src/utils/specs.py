@@ -892,7 +892,7 @@ class MachineSpecs:
             self.l2_banks,
             getattr(self, "compute_partition", None),
         )
-        self.num_dies = mi_gpu_specs.get_num_dies(self.gpu_arch, self.gpu_model)
+        self.num_dies = mi_gpu_specs.get_num_dies(self.gpu_model)
         self.cache_sizes = set_cache_sizes(
             self.gpu_model,
             gpu_info["num_compute_units"],

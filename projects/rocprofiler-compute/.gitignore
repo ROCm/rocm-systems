@@ -6,8 +6,6 @@ __pycache__
 *~
 
 # generated files/folders
-/dist
-/omniperf.spec
 /build*
 /.vscode
 /.cache

@@ -200,6 +200,25 @@ in the following table.
           ``DEBUG_GLOBAL`` wins; any other ``NCCL_CHECK_MODE`` value keeps the
           mode selected by ``NCCL_CHECK_POINTERS=1``.
 
+    * - | ``RCCL_FABRIC_TELEMETRY_ENABLE``
+        | Periodically logs UALoE fabric counters for the GPUs this process
+          uses. Also requires ``RCCL_USE_AMD_SMI_LIB=1``, since the counters are
+          only reachable through the amd-smi library, and ``NCCL_DEBUG=INFO``,
+          since the reports are logged at ``INFO`` level under the ``INIT``
+          subsystem. See :ref:`fabric-telemetry` for what they contain.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
+    * - | ``RCCL_FABRIC_TELEMETRY_INTERVAL_MS``
+        | Sampling period for ``RCCL_FABRIC_TELEMETRY_ENABLE``, in
+          milliseconds. The firmware republishes its datasets roughly once a
+          second, so periods much shorter than that cost work without yielding
+          more information.
+      - | Default ``1000``.
+        | Values below ``100`` are raised to ``100``.
+        | Values above ``3600000`` (one hour) are lowered to ``3600000``.
+        | ``0`` or less disables telemetry.
+
 .. _check-mode:
 
 Validating collective arguments
@@ -242,6 +261,74 @@ reach the expected symmetric performance.
    ``DEBUG_GLOBAL`` adds a bootstrap all-gather to every group launch, which is
    far more expensive than the collective itself for small messages. Use it to
    diagnose a configuration, not in production.
+
+.. _fabric-telemetry:
+
+Fabric telemetry
+----------------
+
+``RCCL_FABRIC_TELEMETRY_ENABLE=1`` starts a sampler that reads every amd-smi
+fabric telemetry category for the GPUs this process opens communicators on and
+logs the counters that moved. It is diagnostic only and off by default.
+
+Three settings are needed for any output to appear. The first two are easy to
+omit, and leaving either out makes the feature silent rather than noisy::
+
+    RCCL_USE_AMD_SMI_LIB=1 RCCL_FABRIC_TELEMETRY_ENABLE=1 \
+      NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT \
+      mpirun -np 4 ./all_reduce_perf -b 8 -e 1G -f 2 -g 1
+
+``RCCL_USE_AMD_SMI_LIB=1`` is required because the counters are only reachable
+through the amd-smi library; the sysfs fabric discovery path RCCL uses otherwise
+exposes no telemetry. Without it, RCCL warns that telemetry is disabled and
+initialization continues.
+
+.. note::
+
+   ``VERSION`` is below ``WARN`` in the ``NCCL_DEBUG`` ordering, so running with
+   ``NCCL_DEBUG=VERSION`` suppresses both the reports and the warning explaining
+   why there are none. Enabling telemetry then looks exactly like not enabling
+   it. Use ``NCCL_DEBUG=INFO`` to see the reports, or at least ``WARN`` to see
+   why they are missing.
+
+Each report names the GPU, the communicator that opened telemetry on it, that
+communicator's rank, and the category, followed by the firmware generation
+count, how many counters moved out of how many exist, and the largest movers::
+
+    fabric telemetry GPU 1 comm 0xa01ec474f15d9f01 rank 1 NetPort: gen=28091
+      changed=888/4104 top: NETPORT_RX_TOTAL_BYTES[netport6] +3887018566, ...
+
+The rank is included because the amd-smi device index alone does not say which
+rank owns the GPU. The counters are per device, so when several communicators
+share a GPU the reports cover all of them but keep the identity of whichever
+opened it, and a line is logged when a later communicator joins.
+
+Values are cumulative since firmware boot, so each report is a delta. A category
+whose generation count has not advanced is skipped rather than reported as
+unchanged traffic. When a device's last communicator is destroyed it is reported
+once more, measured over the whole time it was sampled, so a run too short for
+the firmware to publish more than once still produces output.
+
+Telemetry also needs access to the IFoE config character device, which ships
+root-only. It is a request/response channel rather than a readable file, so
+amd-smi opens it ``O_RDWR`` and read-only permission is not sufficient. Granting
+the ``render`` group read and write is enough::
+
+    # /etc/udev/rules.d/70-amdgpu-ualoe-telemetry.rules
+    SUBSYSTEM=="misc", KERNEL=="cbl-cfg-*", GROUP="render", MODE="0660"
+
+.. note::
+
+   On a ROCm host ``render`` is every GPU user and container, and a file in
+   ``/etc/udev/rules.d`` persists across reboots, so the rule outlives the run
+   that motivated it. Install it to diagnose a fabric and remove it afterwards,
+   rather than carrying it in a deployment.
+
+Without that access ``amdsmi_get_fabric_telemetry_data`` returns
+``NOT_SUPPORTED``. RCCL logs which device it skipped and why, and
+initialization continues normally. That line is logged at ``INFO``, so unlike
+the missing-``RCCL_USE_AMD_SMI_LIB`` case above, ``WARN`` alone will not explain
+this one.
 
 Algorithm and protocol control
 ==============================
@@ -292,6 +379,31 @@ collected in the following table.
         | Default: ``16``
         | ``0``: No lower bound.
 
+    * - | ``NCCL_TREE_COMPACT``
+        | Builds the inter-node trees with a half-interleave node remapping.
+          Intended for jobs whose nodes are ordered by network domain. Both
+          trees keep cross-domain hops at the leaves only when the nodes split
+          evenly into two domains; with an uneven split, the first tree does
+          so when the first domain holds at least half of the nodes, and the
+          second tree still crosses domains. All ranks in a communicator must
+          use the same value; initialization fails otherwise.
+      - | ``0``: Standard double binary tree (default)
+        | ``1``: Compact tree
+    * - | ``RCCL_TUNER_EMBEDDED_CONFIG``
+        | Controls whether the built-in CSV tuner uses the tuning configurations
+          compiled into ``librccl.so`` from the source tree's ``tuner/*.csv``.
+          These are the stock defaults, so no file has to be staged on each node.
+          ``NCCL_TUNER_CONFIG_FILE`` and a CSV in ``<librccl.so dir>/tuner/`` or
+          ``${ROCM_PATH}/share/rccl/tuner/`` take precedence over them. When the
+          GPU architecture is known, only an architecture-specific
+          (``rccl_tuner_<arch>.csv``) or generic (``rccl_tuner.csv``)
+          configuration is used; another architecture's configuration is never
+          applied. When the architecture cannot be determined, any embedded
+          configuration may be used. To disable the tuner entirely, embedded
+          or not, use ``NCCL_TUNER_PLUGIN=none``.
+      - | ``1``: Use the embedded configurations when no file is found (default).
+        | ``0``: Ignore the embedded configurations. File-based tuning is unaffected.
+
 Network and topology
 ====================
 
@@ -340,12 +452,58 @@ in the following table.
           ``NCCL_IB_SUBNET_AWARE_ROUTING``.
       - | Integer value, bits (default: ``24``)
 
+    * - | ``NCCL_IB_WQE_LATENCY_THRESHOLD_NS``
+        | Enables per-queue-pair (QP) CPU-side WQE post-to-poll latency
+          monitoring in the ``IB`` network transport (``net_ib``). When set
+          above ``0``, each send-side QP measures the time from posting a
+          signaled work request (``ibv_post_send``) to the CPU polling its
+          completion, which includes any delay before RCCL polls the
+          completion queue (CQ). It is not the hardware completion time.
+        | Each QP samples one signaled WQE at a time. The next one is sampled
+          only after the previous sample completes, so under pipelined
+          traffic the statistics cover a subset of WQEs.
+        | Samples longer than the threshold are counted as slow and logged
+          as ``NET/IB: WQE slow`` lines. A sampled WQE that has been
+          outstanding longer than the threshold without a completion is
+          logged as ``NET/IB: WQE stall (no CQE)``. Both messages are logged
+          at most once per second per QP, at ``INFO`` level with the ``NET``
+          subsystem (``NCCL_DEBUG=INFO``, ``NCCL_DEBUG_SUBSYS=NET``). Each
+          line identifies the local and remote QP number, device, port and
+          LID. The GIDs are only filled in on RoCE (Ethernet link layer)
+          devices and print empty on InfiniBand.
+        | Read once per process. Not applied by the ``IB-CAST`` transport.
+      - | Integer value, nanoseconds (default: ``0``, disabled)
+
+    * - | ``NCCL_IB_WQE_LATENCY_REPORT``
+        | Controls the per-QP latency summary logged when a send connection
+          is closed while ``NCCL_IB_WQE_LATENCY_THRESHOLD_NS`` is enabled.
+          The summary (``NET/IB: WQE latency summary``) reports the sample
+          count, slow count, threshold and the post-to-poll mean, standard
+          deviation, P50/P90/P99/P99.9 estimates and maximum. QPs with no
+          samples are not reported.
+      - | ``1``: Log a summary per QP on close (default).
+        | ``0``: Disabled. Slow and stall messages are still logged.
+
     * - | ``NCCL_PXN_C2C``
         | Allows PXN routing through a C2C link to reach a NIC attached to a
           peer GPU. The C2C path is NVIDIA-specific and is not currently
           applicable on AMD hardware.
       - | ``0``: Disabled (default).
         | ``1``: Enabled.
+
+    * - | ``NCCL_GIN_MLOPART``
+        | Allows GPU-initiated networking (GIN) on a communicator that includes
+          a rank on a GPU partition. Without this variable, one partitioned
+          rank turns GIN off for the whole communicator. The default allows
+          partitions on a single-node communicator only; set ``1`` to allow
+          them across nodes. See :ref:`device-api-gin` and
+          :ref:`nps4_cpx_mi300_rccl`.
+      - | Unset: Allow GIN on partitions on a single-node communicator; disable
+          GIN on a partitioned communicator spanning several nodes (default).
+          The latter is reported through ``NCCL_DEBUG=INFO``.
+        | ``1``: Allow GIN on partitions on any number of nodes.
+        | ``0``: Disable GIN whenever any rank runs on a partition.
+        | A communicator with no partitioned rank is unaffected by any value.
 
     * - | ``NCCL_SOCKET_IFNAME``
         | Specifies which IP interfaces to use for communication.
@@ -824,6 +982,19 @@ threshold table introduced for gfx1250.
       - | ``0``: Use the per-architecture table for threshold defaults (default).
         | ``1``: Ignore the table; fall back to pre-table compile-time constants.
           This matches the behavior before the arch table was introduced.
+
+    * - | ``RCCL_TUNING_PARTITION_MODE``
+        | Selects which gfx1250 per-architecture table (SPX or DPX) is used for
+          tuning thresholds. It only changes tuning, not results. A communicator
+          uses the DPX table only when every rank selects DPX; otherwise every rank
+          uses the SPX table. Other architectures have one table for every mode.
+          Has no effect when ``RCCL_IGNORE_ARCH_TABLE=1``.
+      - | ``auto`` (default): Follow the compute-partition mode the GPU reports.
+          ``DPX`` selects the DPX table; ``SPX``, ``CPX``, or no reported mode
+          selects the SPX table. Any other value is reported once and treated
+          as ``auto``.
+        | ``SPX``: Use the SPX table.
+        | ``DPX``: Use the DPX table.
 
     * - | ``RCCL_DDA_THRESHOLD``
         | Upper bound in bytes for the DDA VMM/Simple tier per collective.

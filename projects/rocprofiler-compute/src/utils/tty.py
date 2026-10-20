@@ -23,9 +23,11 @@ from membw_analysis.summary import (
     has_active_nodes,
     status_text,
 )
-from utils import mem_chart_gfx9, mem_chart_gfx11, mem_chart_gfx1250, parser, schema
+from memory_chart.loader import Layouts, is_memory_chart_panel
+from memory_chart.render import format_mem_chart_heading, plot_mem_chart
+from memory_chart.units import panel_units
+from utils import parser, schema
 from utils.logger import console_error, console_log, console_warning
-from utils.mem_chart_common import format_mem_chart_heading, strip_ansi
 from utils.metrics.aggregation import calc_pct_of_peak
 from utils.utils_analysis import (
     NS_TO_MS,
@@ -34,12 +36,7 @@ from utils.utils_analysis import (
     get_bw_scale_and_unit,
     simplify_kernel_name,
 )
-from utils.utils_common import (
-    convert_filter_blocks_to_panel_ids,
-    is_gfx9,
-    is_gfx115x,
-    is_gfx1250,
-)
+from utils.utils_common import convert_filter_blocks_to_panel_ids, strip_ansi
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
 
@@ -366,8 +363,9 @@ def format_node_stats(node: CallTreeNode) -> str:
     )
 
 
-def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
+def get_tree_wrap_width() -> int:
     """Pick wrap width based on terminal size to avoid terminal hard-wrap artifacts."""
+    min_width, max_width = 72, 120
     terminal_cols = shutil.get_terminal_size((max_width, 20)).columns
     safe_width = max(terminal_cols - 2, min_width)
     return min(safe_width, max_width)
@@ -376,18 +374,15 @@ def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
 def print_wrapped_tree_line(
     prefix: str,
     body: str,
-    width: Optional[int] = None,
-    break_long_words: bool = False,
 ) -> None:
     """Print a tree line and wrap continuation lines to preserve indentation."""
-    effective_width = get_tree_wrap_width() if width is None else width
     print(
         textwrap.fill(
             body,
-            width=effective_width,
+            width=get_tree_wrap_width(),
             initial_indent=prefix,
             subsequent_indent=" " * len(prefix),
-            break_long_words=break_long_words,
+            break_long_words=False,
             break_on_hyphens=False,
         )
     )
@@ -397,12 +392,10 @@ def print_wrapped_kernel_line(
     prefix: str,
     kernel_name: str,
     suffix: str,
-    width: Optional[int] = None,
     continuation_prefix: str = "",
 ) -> None:
     """Wrap long kernel names while keeping suffix attached to final name chunk."""
-    effective_width = get_tree_wrap_width() if width is None else width
-    content_width = max(effective_width - len(prefix), 20)
+    content_width = max(get_tree_wrap_width() - len(prefix), 20)
 
     inline = f"{kernel_name} {suffix}"
     if len(inline) <= content_width:
@@ -612,6 +605,24 @@ def _safe_round_value(
         return "N/A"
 
 
+def _is_hidden_collectable_metric(name: object) -> bool:
+    """True for internal ``_collect.*`` rows.
+
+    Same visibility rule as the analysis-db export.
+    """
+    return isinstance(name, str) and name.startswith("_collect.")
+
+
+def _visible_cli_table_rows(frame: pd.DataFrame, table_type: str) -> pd.DataFrame:
+    """Drop ``_collect.*`` rows from a CLI metric table."""
+    if table_type != "metric_table" or "Metric" not in frame.columns:
+        return frame
+    visible = [
+        not _is_hidden_collectable_metric(name) for name in frame["Metric"].tolist()
+    ]
+    return frame.loc[visible]
+
+
 def process_table_data(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -622,7 +633,7 @@ def process_table_data(
 ) -> pd.DataFrame:
     # take the 1st run as baseline
     base_run, base_data = next(iter(runs.items()))
-    base_df = base_data.dfs[table_config["id"]]
+    base_df = _visible_cli_table_rows(base_data.dfs[table_config["id"]], table_type)
 
     if args.time_unit and has_time_data(base_df):
         base_df = convert_time_columns(base_df, args.time_unit)
@@ -659,7 +670,9 @@ def process_table_data(
         else:
             # Process columns that can be compared across runs.
             for run_name, run_data in runs.items():
-                cur_df = run_data.dfs[table_config["id"]]
+                cur_df = _visible_cli_table_rows(
+                    run_data.dfs[table_config["id"]], table_type
+                )
 
                 if args.time_unit and has_time_data(base_df):
                     cur_df = convert_time_columns(cur_df, args.time_unit)
@@ -698,26 +711,6 @@ def process_table_data(
                         )
 
                         result_df = pd.concat([result_df, formatted_diff], axis=1)
-
-                        # DEBUG: When in a CI setting and flag is set,
-                        #       then verify metrics meet threshold
-                        #       requirement
-                        if (
-                            header in ["Value", "Count", "Avg"]
-                            and percent_diff.abs().gt(args.report_diff).any()
-                        ):
-                            result_df["Abs Diff"] = absolute_diff
-
-                            if args.report_diff:
-                                violation_idx = percent_diff.index[
-                                    percent_diff.abs() > args.report_diff
-                                ]
-                                console_warning(
-                                    f"Dataframe diff exceeds {args.report_diff}% "
-                                    "threshold requirement\n"
-                                    f"See metric {violation_idx.to_numpy()}"
-                                )
-                                console_warning(result_df)
                     else:
                         # Base run - just add the rounded values
                         cur_df_copy = copy.deepcopy(cur_df)
@@ -729,22 +722,12 @@ def process_table_data(
     return result_df
 
 
-def _panel_is_mem_chart_only(panel: dict[str, Any]) -> bool:
-    """True when every table uses ``cli_style: mem_chart`` (one merged chart)."""
-    sources = panel.get("data source") or []
-    return bool(sources) and all(
-        tcfg.get("cli_style") == "mem_chart" for ds in sources for tcfg in ds.values()
-    )
-
-
 def format_table_output(
     args: argparse.Namespace,
     table_config: dict[str, Any],
     df: pd.DataFrame,
     table_type: str,
     runs: dict[str, Any],
-    gpu_arch: Optional[str] = None,
-    mem_data_override: Optional[dict[str, Any]] = None,
 ) -> str:
     """Format table for output, handling special cases and saving to files if needed."""
 
@@ -764,12 +747,7 @@ def format_table_output(
         console_log(f"Not showing table with empty column(s): {table_id_str} {title}")
         return content
 
-    # mem_chart diagram mode: one merged chart, no per-table titles (3.1, 3.2, …).
-    # With --view table, keep titles so tabular output stays navigable.
-    skip_mem_chart_title = table_config.get(
-        "cli_style"
-    ) == "mem_chart" and not _tty_view_is_table(args)
-    if "title" in table_config and table_config["title"] and not skip_mem_chart_title:
+    if table_config.get("title"):
         content += f"{table_id_str} {table_config['title']}\n"
 
     if table_id_str == PC_SAMPLING_TABLE_ID:
@@ -795,71 +773,12 @@ def format_table_output(
     # For multiple runs (baseline comparison), keep Bytes for accurate comparison
     is_single_run = len(runs) == 1
 
-    # Capture raw metric values before human-readable BW scaling so the chart
-    # renderer still receives Bytes/s floats.
-    raw_chart_values: Optional[dict[str, Any]] = None
-    if "Metric" in df.columns and "Value" in df.columns:
-        raw_chart_values = dict(zip(df["Metric"], df["Value"]))
-
     if is_single_run and "Unit" in df.columns:
         # Identify value columns to format
         value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
         df = scale_bw_columns(df, value_cols, args.decimal)
 
-    # When --view table is set, force table output and ignore cli_style from config
-    use_mem_chart = (
-        not _tty_view_is_table(args)
-        and table_config.get("cli_style") == "mem_chart"
-        and len(runs) == 1
-        and "Metric" in df.columns
-        and "Value" in df.columns
-        and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch) or is_gfx1250(gpu_arch))
-    )
-
-    if use_mem_chart:
-        if mem_data_override is not None:
-            mem_data = mem_data_override
-        else:
-            mem_data = raw_chart_values or {}
-
-        if is_gfx115x(gpu_arch):
-            content += (
-                mem_chart_gfx11.plot_mem_chart(
-                    mem_data,
-                    chart_title=format_mem_chart_heading(
-                        args.normal_unit,
-                        panel_id=int(table_config["id"]),
-                    ),
-                )
-                + "\n"
-            )
-        elif is_gfx1250(gpu_arch):
-            content += (
-                mem_chart_gfx1250.plot_mem_chart(
-                    mem_data,
-                    chart_title=format_mem_chart_heading(
-                        args.normal_unit,
-                        panel_id=int(table_config["id"]),
-                    ),
-                )
-                + "\n"
-            )
-        else:
-            content += (
-                mem_chart_gfx9.plot_mem_chart(
-                    mem_data,
-                    chart_title=format_mem_chart_heading(
-                        args.normal_unit,
-                        panel_id=int(table_config["id"]),
-                    ),
-                    gpu_arch=gpu_arch,
-                )
-                + "\n"
-            )
-    else:
-        content += (
-            get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
-        )
+    content += get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
 
     return content
 
@@ -999,17 +918,14 @@ def show_all(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
-        # Skip panels that don't support baseline comparison
-        if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
-            continue
-
         # Handle roofline panel (400) with custom display logic
         # Skip if --view table is set; tables 401/402 will be rendered as normal tables
         if panel_id == 400 and not _tty_view_is_table(args):
             _ = is_roofline_shown(args, runs, output, panel, roof_plot, hidden_cols)
 
         panel_content = ""  # store content of all data_source from one panel
-        mem_chart_data: dict[str, Any] = {}  # merged mem_chart metrics (gfx115x)
+        # Metric -> value from every table in this panel, drawn as one chart
+        mem_chart_data: dict[str, Any] = {}
 
         for data_source in panel["data source"]:
             for table_type, table_config in data_source.items():
@@ -1094,16 +1010,12 @@ def show_all(
 
                 # For mem_chart panels, collect all tables and merge
                 # into a single chart; skip individual table output.
-                # Gate to architectures with a renderer; unsupported arches fall back to
+                # Gate to architectures with a chart layout; others fall back to
                 # normal table output.
                 is_mem_chart = (
                     table_config.get("cli_style") == "mem_chart"
                     and not _tty_view_is_table(args)
-                    and (
-                        is_gfx9(gpu_arch)
-                        or is_gfx115x(gpu_arch)
-                        or is_gfx1250(gpu_arch)
-                    )
+                    and Layouts.for_arch(gpu_arch) is not None
                 )
 
                 if is_mem_chart and len(runs) == 1:
@@ -1125,45 +1037,25 @@ def show_all(
                     processed_df,
                     table_type,
                     runs,
-                    gpu_arch,
                 )
 
         # Emit the merged memory chart for the panel.
-        if mem_chart_data and not _tty_view_is_table(args):
-            heading = format_mem_chart_heading(
-                args.normal_unit,
-                panel_id=int((panel or {}).get("id", 300)),
+        if mem_chart_data:
+            heading = format_mem_chart_heading(args.normal_unit, panel_id=panel_id)
+            membw_result = getattr(first_run, "membw_result", None)
+            chart_output = plot_mem_chart(
+                mem_chart_data,
+                chart_title=heading,
+                gpu_arch=gpu_arch,
+                units=panel_units(panel),
+                membw=membw_result,
             )
-            if is_gfx115x(gpu_arch):
-                panel_content += (
-                    mem_chart_gfx11.plot_mem_chart(
-                        mem_chart_data,
-                        chart_title=heading,
-                    )
-                    + "\n"
+            panel_content += chart_output + "\n"
+            if membw_result is not None:
+                panel_content += _render_membw_guidance(
+                    membw_result,
+                    chart_width=_max_line_width(chart_output),
                 )
-            elif is_gfx1250(gpu_arch):
-                panel_content += (
-                    mem_chart_gfx1250.plot_mem_chart(
-                        mem_chart_data,
-                        chart_title=heading,
-                    )
-                    + "\n"
-                )
-            else:
-                membw_result = getattr(first_run, "membw_result", None)
-                chart_output = mem_chart_gfx9.plot_mem_chart(
-                    mem_chart_data,
-                    chart_title=heading,
-                    gpu_arch=gpu_arch,
-                    membw=membw_result,
-                )
-                panel_content += chart_output + "\n"
-                if membw_result is not None:
-                    panel_content += _render_membw_guidance(
-                        membw_result,
-                        chart_width=_max_line_width(chart_output),
-                    )
 
         # Roofline printing is handled separately above in is_roofline_shown.
         # With --view table, roofline tables (401/402) render as normal tables.
@@ -1172,7 +1064,8 @@ def show_all(
         ):
             if not hasattr(output, "isatty") or not output.isatty():
                 panel_content = strip_ansi(panel_content)
-            if _panel_is_mem_chart_only(panel) and not _tty_view_is_table(args):
+            # A panel drawn entirely as the memory chart carries its own heading
+            if mem_chart_data and is_memory_chart_panel(panel):
                 print(panel_content, file=output)
             else:
                 print(f"\n{'-' * 80}", file=output)

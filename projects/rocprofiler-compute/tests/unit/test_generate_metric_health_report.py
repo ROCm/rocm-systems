@@ -161,3 +161,21 @@ def test_report_rejects_more_than_two_paths(
         report.main()
 
     assert "accepts at most two paths" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("arch", ["gfx940", "gfx941", "gfx942"])
+def test_cdna3_total_note_keeps_single_xcd_l2_correction(arch: str) -> None:
+    """The backup branch still explains the single-XCD L2 channel correction."""
+    note = report.build_total_note(
+        arch,
+        arch,
+        {"vcopy": {"total": 12}},
+        12,
+        "Median",
+    )
+
+    assert "<code>$total_l2_chan</code>" in note
+    assert "l2_banks × num_xcd" in note
+    lowered = note.lower()
+    assert "reconcil" in lowered
+    assert "single-xcd" in lowered

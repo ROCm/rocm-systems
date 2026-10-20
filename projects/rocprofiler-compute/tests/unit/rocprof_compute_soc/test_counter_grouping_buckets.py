@@ -1,10 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+from types import SimpleNamespace
+
 import pytest
 
 from rocprof_compute_soc.counter_file import flat_counters_in_perfmon_file
 from rocprof_compute_soc.counter_grouping_buckets import (
+    count_multi_bucket_metrics,
+    count_single_pass_metrics_split_across_buckets,
     counters_fit_one_bucket,
     rebuild_counter_file,
 )
@@ -66,3 +70,44 @@ def test_rebuild_counter_file_round_trip():
     rebuilt = rebuild_counter_file("0", PERFMON_CONFIG, counters)
     assert rebuilt is not None
     assert set(flat_counters_in_perfmon_file(rebuilt)) == counters
+
+
+class _FormulaSoc:
+    """Serves a fixed metric list without reading analysis YAML."""
+
+    def __init__(self, rows):
+        self._mspec = SimpleNamespace(gpu_series="MI300")
+        self._rows = rows
+
+    def _same_bucket_priority_metric_ids(self):
+        return ()
+
+    def _expand_tcc_template_counters(self, counters):
+        return set(counters)
+
+    def _iter_arch_analysis_yaml_metrics(self):
+        return iter(self._rows)
+
+
+@pytest.mark.misc
+def test_copied_counter_is_not_counted_as_split():
+    """A group held by one bucket stays together when a member is copied."""
+    files = [
+        rebuild_counter_file("0", PERFMON_CONFIG, {"SQ_WAVES", "GRBM_GUI_ACTIVE"}),
+        rebuild_counter_file("1", PERFMON_CONFIG, {"SQ_WAVES", "TA_BUSY"}),
+    ]
+    assert all(counter_file is not None for counter_file in files)
+    soc = _FormulaSoc([
+        ("1", 1, 0, "waves and grbm", "SQ_WAVES / GRBM_GUI_ACTIVE"),
+        ("1", 1, 1, "waves and ta", "SQ_WAVES / TA_BUSY"),
+        ("1", 1, 2, "grbm and ta", "GRBM_GUI_ACTIVE / TA_BUSY"),
+    ])
+    profile = {"SQ_WAVES", "GRBM_GUI_ACTIVE", "TA_BUSY"}
+
+    assert (
+        count_single_pass_metrics_split_across_buckets(
+            files, soc, profile, PERFMON_CONFIG
+        )
+        == 1
+    )
+    assert count_multi_bucket_metrics(files, soc, profile) == 1

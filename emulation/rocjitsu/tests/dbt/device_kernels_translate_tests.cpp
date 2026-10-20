@@ -463,6 +463,43 @@ TEST(KernelDescriptorTranslator, CdnaToCdnaAllowsFullVgprAndAccVgprDescriptorAll
   EXPECT_EQ(translated->target_vgpr_granulated, 63u);
 }
 
+TEST(KernelDescriptorTranslator, Cdna1KeepsVgprAndAccumulatorAllocationsSeparate) {
+  using namespace rocr::llvm::amdhsa;
+  for (bool full : {false, true}) {
+    auto fixture =
+        mutable_vector_add_descriptor(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA1);
+    ASSERT_TRUE(fixture.valid);
+    auto *kd = mutable_kernel_descriptor(fixture);
+    kd->compute_pgm_rsrc1 = 0;
+    kd->compute_pgm_rsrc3 = 1u << 16; // Guest TG_SPLIT must not leak into reserved host bits.
+    AMDHSA_BITS_SET(kd->compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
+                    full ? 63 : 13);
+    AMDHSA_BITS_SET(kd->compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, full ? 63 : 23);
+    rocjitsu::KernelDescriptorTranslationOptions options;
+    options.minimum_vgprs = full ? 256 : 128;
+    const auto translations = translate_mutable_descriptor(fixture, ROCJITSU_CODE_ARCH_CDNA4,
+                                                           ROCJITSU_CODE_ARCH_CDNA1, options);
+    const auto translated = std::ranges::find_if(translations, [&fixture](const auto &translation) {
+      return translation.descriptor_file_offset == fixture.kd_file_off;
+    });
+    ASSERT_NE(translated, translations.end());
+    EXPECT_TRUE(translated->supported);
+    EXPECT_EQ(translated->target_accvgpr_base, 0u);
+    EXPECT_EQ(translated->target_vgpr_count, full ? 256u : 128u);
+    EXPECT_EQ(translated->target_agpr_count, full ? 256u : 16u);
+    EXPECT_EQ(translated->target_vgpr_allocation_count, full ? 256u : 128u);
+    EXPECT_EQ(translated->target_vgpr_granulated, full ? 63u : 31u);
+    rocjitsu::AmdGpuCodeObject mutated(fixture.image.data(), fixture.image.size());
+    ASSERT_TRUE(mutated.is_valid());
+    rocjitsu::CodeObjectPatcher patcher(mutated);
+    ASSERT_TRUE(patcher.apply_kernel_descriptor_translation(*translated, ROCJITSU_CODE_ARCH_CDNA1));
+    const auto patched_image = patcher.emit();
+    const auto *patched_kd =
+        reinterpret_cast<const kernel_descriptor_t *>(patched_image.data() + fixture.kd_file_off);
+    EXPECT_EQ(patched_kd->compute_pgm_rsrc3, 0u);
+  }
+}
+
 TEST(KernelDescriptorTranslator, CdnaDescriptorAllowsReservedSgprAllocationRounding) {
   using namespace rocr::llvm::amdhsa;
 

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import ast
+import json
 import re
 import warnings
 from pathlib import Path
@@ -12,6 +13,7 @@ import pandas as pd
 
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
+from memory_chart.loader import Layouts
 from pc_sampling.code_object_analysis import (
     CodeObjectSymbol,
     InstructionPipelines,
@@ -81,7 +83,6 @@ from utils.metrics.pass_provenance import (
     PASS_VAR_SEP,
     PassLayout,
     bind_expression_dataframe,
-    extract_row_refs,
     ordered_scoped_builtin_bindings,
     pass_scoped_builtins,
 )
@@ -183,6 +184,24 @@ def filter_dispatch_frame(
 
 def _is_collectable_metric_name(name: object) -> bool:
     return isinstance(name, str) and name.startswith("_collect.")
+
+
+def _metric_cell_text(value: object) -> str:
+    """Expression text for a metric cell.
+
+    The CLI shows a missing cell as empty. Strings are stripped.
+    """
+    if isinstance(value, str):
+        return value.strip()
+    if value is None:
+        return ""
+    try:
+        missing = pd.isna(value)
+    except (TypeError, ValueError):
+        return str(value).strip()
+    if bool(missing):
+        return ""
+    return str(value).strip()
 
 
 def _visible_metric_rows(
@@ -370,6 +389,17 @@ class SourceFrameCollector:
         })
 
 
+def memory_chart_layout_extdata(gpu_arch: str) -> Optional[dict[str, Any]]:
+    """The memory chart layout file of *gpu_arch*, unchanged; None if it has none.
+
+    src/memory_chart/README.md documents the format.
+    """
+    layout = Layouts.for_arch(gpu_arch)
+    if layout is None:
+        return None
+    return json.loads(layout.path.read_text(encoding="utf-8"))
+
+
 class db_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -430,6 +460,9 @@ class db_analysis(OmniAnalyze_Base):
                     workload_path
                 ),
                 profiling_config_extdata=self._profiling_config,
+                memory_chart_layout_extdata=memory_chart_layout_extdata(
+                    sys_info["gpu_arch"]
+                ),
             )
             Database.get_session().add(workload_obj)
             workload_objs.append(workload_obj)
@@ -1128,9 +1161,11 @@ class db_analysis(OmniAnalyze_Base):
         Keys are ``{var}__pass{ordinal}`` so that bound ``ammolite__var__passN``
         expressions resolve via ``sys_info["var__passN"]``.
 
-        ``expressions`` may already be pass-bound; builtin names are recovered via
-        ``extract_row_refs`` (strips ``__passN``). PER_XCD built-ins are evaluated
-        before dependents that reference them (same order as ``calc_builtin_vars``).
+        expressions may already be pass-bound. Builtin names are recovered by
+        stripping __passN and then resolving formulas transitively, so a
+        dependent such as GRBM_GUI_ACTIVE_PER_XCD is computed when only
+        numActiveCUs is named. PER_XCD built-ins are evaluated before
+        dependents that reference them (same order as calc_builtin_vars).
         """
         if not used_passes or not pass_layout.is_multi_pass:
             return {}
@@ -1140,8 +1175,13 @@ class db_analysis(OmniAnalyze_Base):
         if not scoped:
             return {}
 
-        # extract_row_refs strips __passN; extract_counters_and_variables does not.
-        expression_builtin_vars = extract_row_refs(expressions).builtin_vars
+        # extract_counters_and_variables resolves built-ins transitively.
+        # Strip __passN first; that walker does not.
+        plain_expressions = db_analysis._expressions_without_pass_suffixes(expressions)
+        _, expression_builtin_vars = extract_counters_and_variables(
+            "\n".join(plain_expressions),
+            gpu_series,
+        )
         build_in_vars = {
             key: value
             for key, value in get_build_in_vars(gpu_series).items()
@@ -1157,12 +1197,14 @@ class db_analysis(OmniAnalyze_Base):
             for variable_key, bound in ordered_scoped_builtin_bindings(
                 build_in_vars, pass_key, pass_layout, scoped
             ):
-                pass_locals[f"{variable_key}__pass{ordinal}"] = db_analysis.evaluate(
-                    variable_key,
-                    bound,
-                    pmc_df,
-                    {**sys_info, **pass_locals},
-                    parse=False,
+                pass_locals[f"{variable_key}{PASS_VAR_SEP}{ordinal}"] = (
+                    db_analysis.evaluate(
+                        variable_key,
+                        bound,
+                        pmc_df,
+                        {**sys_info, **pass_locals},
+                        parse=False,
+                    )
                 )
             results.update(pass_locals)
         return results
@@ -1495,7 +1537,7 @@ class db_analysis(OmniAnalyze_Base):
                 ExpressionRow(
                     metric_id=metric_id,
                     value_name=value_name,
-                    value=row[value_name].strip(),
+                    value=_metric_cell_text(row[value_name]),
                 )
                 for _table_name, _sub_table_name, value_columns, rows in metric_tables
                 for metric_id, row in rows
