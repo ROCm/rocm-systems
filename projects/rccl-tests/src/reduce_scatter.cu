@@ -35,6 +35,8 @@
 thread_local ncclDevResourceHandle g_rsScratchHandle = 0;
 thread_local size_t g_rsScratchBytes = 0;
 thread_local ncclDevResourceRequirements g_rsScratchReq = {};
+// Grid-sync words registered past the g_rsScratchBytes of SDMA slots.
+static constexpr size_t kRsGridSyncBytes = 128;
 
 // Caching wrapper. The parser lives in gin_sdma_reducescatter_policy.h so the
 // host unit test can lock "8foo" / leading '-' without compiling this TU.
@@ -178,7 +180,7 @@ testResult_t ReduceScatterGetDevCommRequirements(int deviceImpl, ncclDevCommRequ
               commProperties.nRanks, gin_sdma_reducescatter::kReduceScatterSdmaSlotMaxDefault);
           g_rsScratchHandle = 0;
           g_rsScratchReq = {};
-          g_rsScratchReq.bufferSize = g_rsScratchBytes;
+          g_rsScratchReq.bufferSize = g_rsScratchBytes + kRsGridSyncBytes;
           g_rsScratchReq.bufferAlign = 128;
           g_rsScratchReq.outBufferHandle = &g_rsScratchHandle;
           g_rsScratchReq.next = reqs->resourceRequirementsList;
@@ -242,45 +244,69 @@ bool ReduceScatterGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements
 // verifier, so acc[] stays in T rather than a wider float -- the reduction ALU is
 // not the bottleneck; the load schedule is.
 //
-// Low-occupancy SDMA-scatter + local reduce. Each rank GIN-puts send slice r to
-// rank r's resource-window slot [myRank]. Every CTA waits for nRanks inbound
-// completions on signal (rank % gridDim), then SM-reduces the N local slots
-// into recvbuff (same ascending-source fold as the LSA path).
+// Low-occupancy SDMA-scatter + local reduce. CTA 0 GIN-puts send slice r to
+// rank r's resource-window slot [myRank] with SignalInc on signal 0. Every CTA
+// waits for nRanks inbound completions on signal 0, then SM-reduces its own
+// pack range of the N local slots into recvbuff (same ascending-source fold as
+// the LSA path).
 //
-// Put index and wait index are different. Block b issues the puts whose peer
-// r == b (mod gridDim), so those puts increment signal b on the destination.
-// All nRanks senders targeting this rank therefore bump signal (rank % gridDim).
-// The fold reads every scratch slot, so every CTA must wait that signal.
-// ncclLsaBarrierSession orders one blockIdx across ranks; it does not join
-// sibling CTAs on this rank. waitSignal is a non-destructive wait-until->=.
+// ncclBarrierSession orders one blockIdx across ranks and does not join
+// sibling CTAs on this rank. A sibling that sampled signal 0 after the world
+// barrier could see a put that already landed and wait for a value nobody
+// posts, so every CTA samples and then meets at rsGridSync before CTA 0 enters
+// the barrier that releases the puts. That grid sync also keeps the next
+// launch's puts out of a slot until every CTA here has folded it.
+//
+// Only CTA 0 puts because the Anvil backend drives one SDMA queue per peer.
+// With several CTAs posting to the same queue, 8x MI355X hung about one run in
+// three at 8 MiB; one producer per queue did not hang.
+
+// Sense-reversing barrier across this launch's CTAs on one rank. sync[0] counts
+// arrivals and sync[1] is the generation; both live past the scratch slots and
+// start zeroed with the resource window. The SDMA tier launches fewer than
+// kReduceScatterSdmaCtaCeil CTAs, so all of them are co-resident.
+__device__ __forceinline__ void rsGridSync(unsigned int* sync) {
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    const unsigned int gen = __hip_atomic_load(&sync[1], __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT);
+    if (__hip_atomic_fetch_add(&sync[0], 1u, __ATOMIC_ACQ_REL, __HIP_MEMORY_SCOPE_AGENT) == gridDim.x - 1) {
+      __hip_atomic_store(&sync[0], 0u, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      __hip_atomic_store(&sync[1], gen + 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+    } else {
+      while (__hip_atomic_load(&sync[1], __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) == gen)
+        __builtin_amdgcn_s_sleep(1);
+    }
+  }
+  __syncthreads();
+}
+
 template <typename T>
-__device__ __forceinline__ void ginReduceScatterSdmaBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, struct ncclDevComm devComm, int redOp, ncclDevResourceHandle scratchHandle) {
+__device__ __forceinline__ void ginReduceScatterSdmaBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, struct ncclDevComm devComm, int redOp, size_t scratchCap, ncclDevResourceHandle scratchHandle) {
   const int nRanks = devComm.nRanks;
   const size_t sliceBytes = count * sizeof(T);
   const int ginContext = 0;
-  const int peerStride = (int)gridDim.x;
-  const unsigned int putSignalIndex = (unsigned int)blockIdx.x;
-  const unsigned int waitSignalIndex = (unsigned int)(devComm.rank % peerStride);
+  const unsigned int signalIndex = 0;
+  char* scratchBase = (char*)ncclGetResourceBufferLocalPointer(devComm, scratchHandle);
+
   ncclGin gin { devComm, ginContext };
-  // Sample the baseline before the world barrier. A peer put can land as soon
-  // as that barrier releases, and a late sample would wait for nRanks past an
-  // already-incremented base.
-  const uint64_t signalValue = gin.readSignal(waitSignalIndex);
+  const uint64_t signalValue = gin.readSignal(signalIndex);
+  rsGridSync((unsigned int*)(scratchBase + scratchCap));
 
   ncclBarrierSession<ncclCoopCta> bar { ncclCoopCta(), ncclTeamTagWorld(), gin, blockIdx.x };
   bar.sync(ncclCoopCta(), cuda::memory_order_acquire, ncclGinFenceLevel::Relaxed);
 
-  const size_t dstBase = ncclGetResourceBufferOffset(scratchHandle);
-  for (int r = blockIdx.x + (int)threadIdx.x * peerStride; r < nRanks;
-       r += peerStride * (int)blockDim.x) {
-    gin.put(ncclTeamWorld(devComm), r,
-        devComm.resourceWindow, dstBase + (size_t)devComm.rank * sliceBytes,
-        sendwin, sendoffset + (size_t)r * sliceBytes,
-        sliceBytes, ncclGin_SignalInc{putSignalIndex});
+  if (blockIdx.x == 0) {
+    const size_t dstBase = ncclGetResourceBufferOffset(scratchHandle);
+    for (int r = threadIdx.x; r < nRanks; r += blockDim.x) {
+      gin.put(ncclTeamWorld(devComm), r,
+          devComm.resourceWindow, dstBase + (size_t)devComm.rank * sliceBytes,
+          sendwin, sendoffset + (size_t)r * sliceBytes,
+          sliceBytes, ncclGin_SignalInc{signalIndex});
+    }
   }
   __syncthreads();
 
-  gin.waitSignal(ncclCoopCta(), waitSignalIndex, signalValue + (uint64_t)nRanks);
+  gin.waitSignal(ncclCoopCta(), signalIndex, signalValue + (uint64_t)nRanks);
   gin.flush(ncclCoopCta());
 
   ncclTeam lsa = ncclTeamLsa(devComm);
@@ -289,12 +315,11 @@ __device__ __forceinline__ void ginReduceScatterSdmaBody(ncclWindow_t sendwin, s
 
   constexpr int VEC = (sizeof(T) <= 16) ? (int)(16 / sizeof(T)) : 1;
   struct alignas(16) Pack { T e[VEC]; };
-  Pack* dstP = (Pack*)ncclGetLocalPointer(recvwin, recvoffset);
   const size_t nPacks = count / (size_t)VEC;
-  char* scratchBase = (char*)ncclGetResourceBufferLocalPointer(devComm, scratchHandle);
-  const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-  const int nthreads = blockDim.x * gridDim.x;
-  for (size_t pk = (size_t)tid; pk < nPacks; pk += (size_t)nthreads) {
+  const size_t packBegin = nPacks * (size_t)blockIdx.x / (size_t)gridDim.x;
+  const size_t packEnd = nPacks * ((size_t)blockIdx.x + 1) / (size_t)gridDim.x;
+  Pack* dstP = (Pack*)ncclGetLocalPointer(recvwin, recvoffset);
+  for (size_t pk = packBegin + threadIdx.x; pk < packEnd; pk += blockDim.x) {
     T acc[VEC];
     Pack v0 = ((const Pack*)(scratchBase + 0 * sliceBytes))[pk];
     #pragma unroll
@@ -319,7 +344,7 @@ __device__ __forceinline__ void ginReduceScatterBody(ncclWindow_t sendwin, size_
   const size_t sliceBytes = count * sizeof(T);
   if (gin_sdma_reducescatter::usesSdmaTier((int)gridDim.x) && scratchHandle != 0 &&
       gin_sdma_reducescatter::sdmaScratchFits(sliceBytes, devComm.nRanks, scratchCap)) {
-    ginReduceScatterSdmaBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, devComm, redOp, scratchHandle);
+    ginReduceScatterSdmaBody<T>(sendwin, sendoffset, recvwin, recvoffset, count, devComm, redOp, scratchCap, scratchHandle);
     return;
   }
   const int nRanks = devComm.nRanks;
