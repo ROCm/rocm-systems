@@ -8,6 +8,8 @@
 
 #include "recorder_fakes.h"
 
+#include <mutex>
+
 #include "recorder.h"
 
 ncclResult_t g_recorderResult = ncclSuccess;
@@ -39,7 +41,12 @@ Recorder& Recorder::instance() {
   return inst;
 }
 
+// Production records from whatever thread entered the API, so tests that drive one entry point
+// from two threads at once land here concurrently. Unsynchronised emplace_back corrupts the heap.
+// Readers run single-threaded after the fact, so only the writer side needs the lock.
 void Recorder::record(const char* label) {                             // non-replayable
+  static std::mutex labelsMutex;
+  std::lock_guard<std::mutex> lock(labelsMutex);
   g_recorderLabels.emplace_back(label ? label : "");
 }
 void Recorder::record(ncclComm_t*, int, const int*) {}                 // CommInitAll
