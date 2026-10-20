@@ -8,7 +8,7 @@ use crate::generated::amdf::{
     amdf_endpoint_native_identity_t__value, amdf_endpoint_native_identity_t__value__linux_device,
 };
 use rocddi::topology::Endpoint;
-use rocddi::topology::platform::linux::kfd_drm_info;
+use rocddi::topology::platform::linux::{host_numa_node as native_host_numa_node, kfd_drm_info};
 
 pub(crate) use rocddi::memory::interop::linux as memory;
 pub(crate) use std::os::fd::IntoRawFd;
@@ -20,29 +20,7 @@ pub(crate) fn render_supported(endpoint: &Endpoint) -> bool {
 }
 
 pub(crate) fn host_numa_node(endpoint: &Endpoint) -> u32 {
-    let Some(minor) = kfd_drm_info(endpoint).and_then(|info| info.render_minor) else {
-        return u32::MAX;
-    };
-    let Some(node) =
-        std::fs::read_to_string(format!("/sys/class/drm/renderD{minor}/device/numa_node"))
-            .ok()
-            .and_then(|value| value.trim().parse::<i64>().ok())
-            .and_then(|value| u32::try_from(value).ok())
-    else {
-        return u32::MAX;
-    };
-    let cpus = std::fs::read_to_string(format!("/sys/devices/system/node/node{node}/cpulist"));
-    if cpus.is_ok_and(|value| {
-        value
-            .trim_start()
-            .as_bytes()
-            .first()
-            .is_some_and(u8::is_ascii_digit)
-    }) {
-        node
-    } else {
-        u32::MAX
-    }
+    native_host_numa_node(endpoint).unwrap_or(u32::MAX)
 }
 
 pub(crate) fn native_identity(endpoint: &Endpoint) -> amdf_endpoint_native_identity_t {

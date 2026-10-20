@@ -52,11 +52,11 @@ pub(crate) unsafe extern "C" fn clock_sample(
             .native
             .gpu()
             .map_err(|error| device.native_error_status(&error))?;
-        let before = rocddi::observation::host_clock().map_err(|error| native(&error))?;
+        let before = rocddi::host::clock::read().map_err(|error| native(&error))?;
         let counters = gpu
             .clock_counters()
             .map_err(|error| device.native_error_status(&error))?;
-        let after = rocddi::observation::host_clock().map_err(|error| native(&error))?;
+        let after = rocddi::host::clock::read().map_err(|error| native(&error))?;
         let clock = clock_info(counters.gpu_frequency)?;
         out.write(amdf_observation_clock_sample_t {
             clock,

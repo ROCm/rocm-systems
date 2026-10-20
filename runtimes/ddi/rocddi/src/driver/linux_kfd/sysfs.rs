@@ -14,8 +14,8 @@ use crate::memory::storage::Shared;
 use crate::memory::storage::TryPush;
 use crate::memory::{DeviceAccess, HostCacheability};
 use crate::topology::{
-    CacheInfo, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities, MemoryLink, MemoryLinkInfo,
-    MemoryLinkType, PciInfo, TopologyKey,
+    CacheInfo, CacheKind, Endpoint, EndpointKind, GpuInfo, GpuQueueCapabilities, MemoryLink,
+    MemoryLinkInfo, MemoryLinkType, PciInfo, TopologyKey,
 };
 use crate::{Error, ErrorKind};
 use std::fmt::{self, Write as _};
@@ -248,13 +248,21 @@ fn cache_properties(text: &str) -> Result<(CacheInfo, u32), Error> {
     let _ = properties.u32("cache_lines_per_tag")?;
     let _ = properties.u32("association")?;
     let _ = properties.u32("latency")?;
+    let native_kind = properties.u32("type")?;
+    let kind = match (native_kind & 1 != 0, native_kind & 2 != 0) {
+        (true, true) => CacheKind::Unified,
+        (true, false) => CacheKind::Data,
+        (false, true) => CacheKind::Instruction,
+        (false, false) => CacheKind::Other,
+    };
     // KFD reports cache capacity in KiB; driver facts use bytes.
     Ok((
         CacheInfo {
             level: properties.u32("level")?,
             size_bytes: u64::from(properties.u32("size")?) * 1024,
-            line_size_bytes,
-            kind: properties.u32("type")?,
+            line_size_bytes: (line_size_bytes != 0).then_some(line_size_bytes),
+            kind,
+            compute_unit_cache: native_kind & (1 << 3) != 0,
         },
         properties
             .optional_u32("persisting_cache_size_max")?

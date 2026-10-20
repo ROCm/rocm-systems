@@ -586,8 +586,14 @@ impl Fixture {
                             }
                             assert_eq!(header, expected);
                         } else if args.queue_type == 0 {
-                            let cache_line =
-                                u64::from(crate::cpu_cache::cache_line_size().unwrap());
+                            let cache_line = u64::from(
+                                crate::host::cache::CacheMaintenance::qualify(
+                                    crate::host::cache::CachePolicy::WriteBack,
+                                )
+                                .unwrap()
+                                .line_size_bytes()
+                                .unwrap(),
+                            );
                             assert_eq!(args.read_pointer, pointers.va + PM4_READ_OFFSET as u64);
                             assert_eq!(args.write_pointer, pointers.va + cache_line);
                             let mut read = [1; 8];

@@ -12,7 +12,8 @@ use crate::memory::Scope;
 use crate::platform;
 use crate::support::*;
 use rocddi::device::event::{DeviceEvent, DeviceEventSubscription, subscribe};
-use rocddi::device::gpu::event::linux::{SignalEventPage, lock_process_signal_event_page};
+use rocddi::device::gpu::event::linux::{SignalEventService, process_signal_event_available};
+use rocddi::host::cache::{CacheMaintenance, CachePolicy};
 use rocddi::memory::storage::TryPush;
 use rocddi::memory::storage::{Owned, Shared};
 use rocddi::{device as native_device, memory as native_memory, session, topology};
@@ -40,16 +41,16 @@ pub(crate) struct Instance {
     pub ids: AtomicU64,
     /// Head of the linked list of provider-owned host backings.
     pub host_backing_head: Mutex<usize>,
-    /// Native signal page for the process KFD connection, prepared on demand.
-    pub event_page: Mutex<Option<EventPageState>>,
+    /// Native signal page service for the process KFD connection.
+    pub event_service: Mutex<SignalEventService>,
     /// Whether this instance uses process-wide native resource lifetime.
     pub process_lifetime: bool,
     /// One observer per activated endpoint, shared by its device handles.
     event_observers: Mutex<Vec<ObserverRecord>>,
     /// Host page size cached for memory profile queries.
     pub host_page_size: u64,
-    /// Host cache line size when the platform reports one.
-    pub host_cache_line: Option<u32>,
+    /// Qualified write-back recipe retained for mapping capability queries.
+    pub host_write_back_cache: Option<CacheMaintenance>,
     /// Embedded host memory profile namespace.
     pub scope: Scope,
 }
@@ -88,13 +89,6 @@ pub(crate) struct Device {
     pub reset_epoch: Shared<AtomicU64>,
     /// Keeps exception polling alive while this handle is public.
     event_observer: Shared<EventObserver>,
-}
-
-pub(crate) struct EventPageState {
-    pub page: SignalEventPage,
-    pub endpoint_id: [u8; 16],
-    pub address: u64,
-    pub host_address: usize,
 }
 
 /// Instance registry entry for one endpoint's shared exception observer.
@@ -627,17 +621,17 @@ pub(crate) unsafe extern "C" fn create(
         let native = session::Session::new(lifetime).map_err(|e| crate::support::native(&e))?;
         let host_page_size =
             native_memory::host::host_page_size().map_err(|e| crate::support::native(&e))?;
-        let host_cache_line = native_memory::host::host_cache_line_size().ok();
+        let host_write_back_cache = CacheMaintenance::qualify(CachePolicy::WriteBack).ok();
         let owner = slot.write(Instance {
             native,
             process_id: std::process::id(),
             host_page_size,
-            host_cache_line,
+            host_write_back_cache,
             children: AtomicU64::new(0),
             closing: false,
             ids: AtomicU64::new(1),
             host_backing_head: Mutex::new(0),
-            event_page: Mutex::new(None),
+            event_service: Mutex::new(SignalEventService::new(lifetime)),
             process_lifetime: info.native_lifetime == AMDF_NATIVE_LIFETIME_PROCESS,
             event_observers: Mutex::new(Vec::new()),
             scope: Scope {
@@ -667,12 +661,12 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_instance_t) -> u64 {
             // Native cleanup can make partial progress. Retain this handle on
             // failure for destruction only; no new child may borrow it then.
             instance.closing = true;
-            if let Some(state) = instance.event_page.lock().map_err(|_| INTERNAL)?.as_mut() {
-                state
-                    .page
-                    .retain_for_process()
-                    .map_err(|error| native(&error))?;
-            }
+            instance
+                .event_service
+                .lock()
+                .map_err(|_| INTERNAL)?
+                .release()
+                .map_err(|error| native(&error))?;
             instance.native.destroy().map_err(|e| native(&e))?;
             drop(Owned::from_raw(pointer.cast::<Instance>()));
             Ok(())
@@ -948,8 +942,7 @@ pub(crate) unsafe extern "C" fn device_info(
                     .native
                     .supports_host_registration(device.native.endpoint()),
             ) | if device_instance(device).process_lifetime {
-                let page = lock_process_signal_event_page().map_err(|_| INTERNAL)?;
-                if page.can_create_for(device.native.endpoint().id) {
+                if process_signal_event_available(&device.native).map_err(|_| INTERNAL)? {
                     AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS
                 } else {
                     0

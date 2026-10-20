@@ -14,6 +14,7 @@ use crate::platform::IntoRawFd;
 use crate::platform::memory as linux_interop;
 use crate::reservation::Reservation;
 use crate::support::*;
+use rocddi::host::cache::{CacheMaintenance, CachePolicy};
 use rocddi::memory;
 use rocddi::memory::storage::Owned;
 use rocddi::memory::storage::TryPush;
@@ -214,6 +215,8 @@ struct Mapping {
     owner: MappingOwner,
     /// Host address, extent, and cache facts returned to callers.
     info: amdf_host_mapping_info_t,
+    /// Recipe selected from this mapping's cache policy and retained with it.
+    maintenance: Option<CacheMaintenance>,
 }
 
 fn rounded(value: u64, granularity: u64) -> Result<u64, u64> {
@@ -407,7 +410,7 @@ unsafe fn profile(
     // mode; AMDF represents unavailable maintenance separately from mapping.
     if host_visible
         && (!registered || endpoint.is_some())
-        && (instance.host_cache_line.is_none()
+        && (instance.host_write_back_cache.is_none()
             || (local && unsafe { (*scope.endpoint).native.host_local_cacheability }.is_none()))
     {
         return Err(UNSUPPORTED);
@@ -1346,16 +1349,18 @@ pub(crate) unsafe extern "C" fn map(
         range(map.byte_offset, map.byte_length, memory.info.byte_length).map_err(|_| INVALID)?;
         let host = memory.host.ok_or(UNSUPPORTED)?;
         let slot = Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED)?;
-        let (line, flush, invalidate) =
+        let (maintenance, line, flush, invalidate) =
             host_transitions(&*(*memory.scope).instance, memory.cacheability)?;
+        let address = host
+            .checked_add(usize::try_from(map.byte_offset).map_err(|_| RANGE)?)
+            .ok_or(RANGE)?;
         register(&memory.children)?;
         let owner = slot.write(Mapping {
             owner: MappingOwner::Memory(pointer.cast()),
             info: amdf_host_mapping_info_t {
                 flags: 3,
                 cacheability: memory.cacheability,
-                pointer: (host + usize::try_from(map.byte_offset).map_err(|_| RANGE)?)
-                    as *mut c_void,
+                pointer: address as *mut c_void,
                 memory_byte_offset: map.byte_offset,
                 byte_length: map.byte_length,
                 byte_offset_granularity: 1,
@@ -1370,6 +1375,7 @@ pub(crate) unsafe extern "C" fn map(
                 invalidate,
                 ..Default::default()
             },
+            maintenance,
         });
         out.write(owner.into_raw().cast());
         Ok(())
@@ -1407,7 +1413,8 @@ pub(crate) unsafe fn map_reservation(
         return Err(UNSUPPORTED);
     }
     let instance = unsafe { object(reservation.instance)? };
-    let (line, flush, invalidate) = host_transitions(instance, AMDF_HOST_CACHEABILITY_WRITE_BACK)?;
+    let (maintenance, line, flush, invalidate) =
+        host_transitions(instance, AMDF_HOST_CACHEABILITY_WRITE_BACK)?;
     let slot = Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED)?;
     let address = reservation
         .info
@@ -1432,6 +1439,7 @@ pub(crate) unsafe fn map_reservation(
             invalidate,
             ..Default::default()
         },
+        maintenance,
     });
     // SAFETY: The ABI output slot was validated by reservation::map.
     unsafe { out.write(owner.into_raw().cast()) };
@@ -1490,12 +1498,11 @@ pub(crate) unsafe extern "C" fn cache_control(
             AMDF_CACHE_TRANSITION_KIND_NONE => return Ok(()),
             _ => {}
         }
-        memory::host::host_cache_control(
-            mapping.info.pointer as usize + usize::try_from(offset).map_err(|_| RANGE)?,
-            length,
-            mapping.info.cache_line_size,
-        )
-        .map_err(|e| native(&e))?;
+        let maintenance = mapping.maintenance.ok_or(UNSUPPORTED)?;
+        let address = (mapping.info.pointer as usize)
+            .checked_add(usize::try_from(offset).map_err(|_| RANGE)?)
+            .ok_or(RANGE)?;
+        maintenance.apply(address, length).map_err(|e| native(&e))?;
         Ok(())
     })
 }
@@ -1970,11 +1977,21 @@ struct Site {
 fn host_transitions(
     instance: &Instance,
     cacheability: amdf_host_cacheability_t,
-) -> Result<(u32, amdf_cache_transition_t, amdf_cache_transition_t), u64> {
-    let (line, flush) = match cacheability {
+) -> Result<
+    (
+        Option<CacheMaintenance>,
+        u32,
+        amdf_cache_transition_t,
+        amdf_cache_transition_t,
+    ),
+    u64,
+> {
+    let (maintenance, line, flush) = match cacheability {
         AMDF_HOST_CACHEABILITY_WRITE_BACK => {
-            let line = instance.host_cache_line.ok_or(UNSUPPORTED)?;
+            let maintenance = instance.host_write_back_cache.ok_or(UNSUPPORTED)?;
+            let line = maintenance.line_size_bytes().ok_or(INTERNAL)?;
             (
+                Some(maintenance),
                 line,
                 amdf_cache_transition_t {
                     kind: AMDF_CACHE_TRANSITION_KIND_RANGE,
@@ -1988,24 +2005,29 @@ fn host_transitions(
                 },
             )
         }
-        AMDF_HOST_CACHEABILITY_WRITE_COMBINED => (
-            0,
-            amdf_cache_transition_t {
-                kind: AMDF_CACHE_TRANSITION_KIND_GLOBAL,
-                executor: AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT,
-                host_operation: AMDF_HOST_CACHE_OPERATION_FLUSH,
-                host_fence_after: AMDF_HOST_CACHE_FENCE_X86_MFENCE,
-                ..Default::default()
-            },
-        ),
-        AMDF_HOST_CACHEABILITY_UNCACHED => (0, no_transition()),
-        _ => (0, amdf_cache_transition_t::default()),
+        AMDF_HOST_CACHEABILITY_WRITE_COMBINED => {
+            let maintenance = CacheMaintenance::qualify(CachePolicy::WriteCombined)
+                .map_err(|error| native(&error))?;
+            (
+                Some(maintenance),
+                0,
+                amdf_cache_transition_t {
+                    kind: AMDF_CACHE_TRANSITION_KIND_GLOBAL,
+                    executor: AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT,
+                    host_operation: AMDF_HOST_CACHE_OPERATION_FLUSH,
+                    host_fence_after: AMDF_HOST_CACHE_FENCE_X86_MFENCE,
+                    ..Default::default()
+                },
+            )
+        }
+        AMDF_HOST_CACHEABILITY_UNCACHED => (None, 0, no_transition()),
+        _ => (None, 0, amdf_cache_transition_t::default()),
     };
     let mut invalidate = flush;
     if invalidate.executor == AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT {
         invalidate.host_operation = AMDF_HOST_CACHE_OPERATION_INVALIDATE;
     }
-    Ok((line, flush, invalidate))
+    Ok((maintenance, line, flush, invalidate))
 }
 
 fn describe_pair(producer: &Site, consumer: &Site) -> Result<amdf_memory_pair_info_t, u64> {
@@ -2173,7 +2195,7 @@ unsafe fn profile_site(
             } else {
                 AMDF_HOST_CACHEABILITY_WRITE_BACK
             };
-            let (_, release, acquire) =
+            let (_, _, release, acquire) =
                 host_transitions(unsafe { &*scope.instance }, cacheability)?;
             Ok(Site {
                 memory: std::ptr::null_mut(),
