@@ -10,6 +10,11 @@ l1i.hit_rate_excl_dup:
   unit: Percent
   description: Instruction Cache hit rate.
   peak: 100
+l1i.hits_per_req:
+  name: L1I Hits per Request
+  formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
+  unit: Percent
+  description: Instruction Cache hit rate.
 l1i.icache_gl1_rd_bw:
   name: ICache-GL1 Read Bandwidth
   formula: 128 * SUM(SQC_TC_INST_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)

@@ -41,6 +41,11 @@ sl1d.hit_rate_excl_dup:
   unit: Percent
   description: Scalar Data Cache hit rate.
   peak: 100
+sl1d.hits_per_req:
+  name: sL1D Hits per Request
+  formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
+  unit: Percent
+  description: Scalar Data Cache hit rate.
 sl1d.interface_stall_rate:
   name: Interface Stall Rate
   formula: 100 * SUM(SQC_TC_STALL_sum) / SUM(SQ_BUSY_CYCLES_sum)
