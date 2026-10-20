@@ -613,6 +613,22 @@ class TestWaitDuration(RocprofsysTest):
             cli_args=["-d", "2.5"],
         )
 
+    def test_failing_resolved_settings(self, target, cpu_workload):
+        result = self.run_test(
+            "baseline",
+            target=target,
+            run_args=["-d", "2.5", *parallel_overhead_args(cpu_workload)],
+            fail_on_not_found=True,
+        )
+
+        assert_resolved_settings(
+            result,
+            {"ROCPROFSYS_TRACE_DURATION": 1.5,
+            "ROCPROFSYS_SAMPLING_DURATION": 1.5,
+            "ROCPROFSYS_TRACE_PERIODS": "0:2"},
+            cli_args=["-d", "2.5"],
+        )
+
 # =============================================================================
 # --periods
 # =============================================================================
