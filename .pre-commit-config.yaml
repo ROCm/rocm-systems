@@ -50,6 +50,8 @@ repos:
         name: clang-format (C/C++/ObjC)
         entry: clang-format -i -style=file
         files: '\.(c|cpp|cc|h|hpp|m|mm)$'
+        # Preserve the pinned, verbatim Linux KFD sysfs mirror.
+        exclude: ^runtimes/api-headers/include/uapi/linux/kfd_sysfs\.h$
 
   # gersemi: CMake formatter (replaces cmake-format and cmake-lint)
   - repo: https://github.com/BlankSpruce/gersemi

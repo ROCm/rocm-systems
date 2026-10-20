@@ -24,7 +24,7 @@
 namespace rocjitsu {
 namespace {
 
-namespace kd = rocr::llvm::amdhsa;
+namespace kd = rocjitsu::amdhsa;
 using KD = kd::kernel_descriptor_t;
 
 constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
@@ -89,8 +89,8 @@ private:
 [[nodiscard]] KD kernarg_descriptor(uint32_t kernarg_size = 0) {
   KD desc{};
   set_kernel_descriptor_user_sgpr_count(kArch, desc, 2);
-  AMDHSA_BITS_SET(desc.kernel_code_properties,
-                  kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(desc.kernel_code_properties,
+                     kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
   desc.kernarg_size = kernarg_size;
   return desc;
 }
@@ -99,8 +99,8 @@ private:
 /// the pair lands above s[0:1].
 [[nodiscard]] KD kernarg_descriptor_at_slot(uint16_t expected_slot) {
   KD desc = kernarg_descriptor();
-  AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
-                  1);
+  RJ_AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR,
+                     1);
   set_kernel_descriptor_user_sgpr_count(kArch, desc, 4);
   EXPECT_EQ(kernarg_segment_ptr_sgpr(desc).value_or(0xFFFF), expected_slot);
   return desc;
@@ -110,18 +110,15 @@ private:
                             bool workgroup_id_y = false, bool workgroup_id_z = false) {
   KD desc{};
   set_kernel_descriptor_user_sgpr_count(kArch, desc, user_sgpr_count);
-  // Braces are load-bearing: AMDHSA_BITS_SET expands to two statements with no
-  // do-while wrapper, so an unbraced `if` would set the bit unconditionally. The
-  // field also has to be named literally at each call, since the macro pastes
-  // _SHIFT onto its argument.
+  // Name each field literally because RJ_AMDHSA_BITS_SET pastes _SHIFT onto it.
   if (workgroup_id_x) {
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
   }
   if (workgroup_id_y) {
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Y, 1);
   }
   if (workgroup_id_z) {
-    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1);
+    RJ_AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_Z, 1);
   }
   return desc;
 }
@@ -514,7 +511,7 @@ TEST(PlanDbiEntryPrologue, ReturnsTheStorageAndTheWordsItEncoded) {
 TEST(PlanDbiEntryPrologue, FailsClosedOnAKernargPreloadingKernel) {
   const Kernel kernel(kernel_naming_sgpr(4));
   KD desc = kernarg_descriptor(/*kernarg_size=*/16);
-  AMDHSA_BITS_SET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1);
+  RJ_AMDHSA_BITS_SET(desc.kernarg_preload, kd::KERNARG_PRELOAD_SPEC_LENGTH, 1);
 
   std::string error;
   const auto plan = plan_dbi_entry_prologue(kernel.scope(), desc, kArch,

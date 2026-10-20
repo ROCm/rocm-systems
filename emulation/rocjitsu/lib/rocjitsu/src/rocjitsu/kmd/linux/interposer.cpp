@@ -34,14 +34,14 @@
 
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_ioctl.h"
+#include "uapi/linux/kfd_ioctl.h"
 // Vendored kernel DRM/amdgpu UAPI (MIT). Provides the real drm_version,
 // drm_amdgpu_info, drm_amdgpu_info_device, drm_amdgpu_info_vram_gtt, and
 // drm_amdgpu_memory_info structs so the interposer services the amdgpu DRM
 // ioctl ABI directly. These are kernel ABI, not libdrm library types, so this
 // keeps the interposer independent of libdrm.
-#include <libdrm/amdgpu_drm.h>
-#include <libdrm/drm.h>
+#include <uapi/linux/drm/amdgpu_drm.h>
+#include <uapi/linux/drm/drm.h>
 RJ_DIAGNOSTIC_POP
 
 #include "util/dynamic_loader.h"
@@ -5019,7 +5019,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     // The AMDGPU command range starts at DRM_COMMAND_BASE, while generic DRM
     // requests occupy ranges on both sides of it (timeline syncobj requests, for
     // example, start at 0xbf). Only label requests in the range defined by this
-    // vendored AMDGPU UAPI as driver-relative commands.
+    // shared AMDGPU UAPI as driver-relative commands.
     if (nr >= DRM_COMMAND_BASE && nr < DRM_COMMAND_END) {
       util::Logger::warn("DRM ioctl rejected: nr=0x", std::hex, nr, " (AMDGPU cmd 0x",
                          nr - DRM_COMMAND_BASE, std::dec, ") fd=", fd);

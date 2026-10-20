@@ -176,6 +176,17 @@ def rocjitsu_source_root() -> Path:
 
 
 @pytest.fixture
+def runtime_api_headers_include_root(rocjitsu_source_root: Path) -> Path:
+    source = Path(
+        os.environ.get(
+            'RJ_RUNTIME_API_HEADERS_SOURCE_DIR',
+            rocjitsu_source_root / '..' / '..' / 'runtimes' / 'api-headers',
+        )
+    )
+    return source.resolve() / 'include'
+
+
+@pytest.fixture
 def amdgpu_root(rocjitsu_source_root: Path) -> Path:
     return (
         rocjitsu_source_root
@@ -3804,7 +3815,10 @@ def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
 
 
 def test_single_isa_cdna1_sources_preprocess_with_source_includes(
-    tmp_path, monkeypatch, rocjitsu_source_root: Path
+    tmp_path,
+    monkeypatch,
+    rocjitsu_source_root: Path,
+    runtime_api_headers_include_root: Path,
 ):
     compiler = shutil.which('c++')
     if compiler is None:
@@ -3836,7 +3850,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
     include_roots = (
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
-        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'external_headers' / 'hsa_headers',
+        runtime_api_headers_include_root,
         rocjitsu_source_root / 'lib' / 'util' / 'include',
         rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
     )
@@ -3856,7 +3870,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
 
 
 def test_custom_identity_preprocesses_with_profile_handwritten_includes(
-    tmp_path, rocjitsu_source_root: Path
+    tmp_path, rocjitsu_source_root: Path, runtime_api_headers_include_root: Path
 ):
     compiler = shutil.which('c++')
     if compiler is None:
@@ -3883,7 +3897,7 @@ def test_custom_identity_preprocesses_with_profile_handwritten_includes(
     include_roots = (
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
-        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'external_headers' / 'hsa_headers',
+        runtime_api_headers_include_root,
         rocjitsu_source_root / 'lib' / 'util' / 'include',
         rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
     )

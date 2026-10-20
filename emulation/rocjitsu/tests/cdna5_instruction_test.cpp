@@ -195,7 +195,7 @@ TEST(Gfx1250SimulationTest, SGetPcI64ReturnsNextInstructionAddress) {
 
   ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
   const auto &wf = sim.snapshot->snapshots().front();
-  uint64_t entry_pc = kKernelAddr + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t);
+  uint64_t entry_pc = kKernelAddr + sizeof(rocjitsu::amdhsa::kernel_descriptor_t);
   EXPECT_EQ(wf.sgpr64(4), entry_pc + sizeof(uint32_t));
 }
 
@@ -262,7 +262,7 @@ TEST(Gfx1250SimulationTest, SAddPcI64WrapsAtUnsignedBoundaries) {
 TEST(Gfx1250SimulationTest, SSetPcI64JumpsToScalarAddress) {
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint32_t kTargetWord = 5;
-  uint64_t entry_pc = kKernelAddr + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t);
+  uint64_t entry_pc = kKernelAddr + sizeof(rocjitsu::amdhsa::kernel_descriptor_t);
   uint64_t target_pc = entry_pc + kTargetWord * sizeof(uint32_t);
   std::vector<uint32_t> code = {
       0xBE8400FFu,    static_cast<uint32_t>(target_pc), // s_mov_b32 s4, target_pc[31:0]
@@ -287,7 +287,7 @@ TEST(Gfx1250SimulationTest, SSwapPcI64StoresReturnAddressAndJumps) {
   constexpr uint64_t kKernelAddr = 0x10000;
   constexpr uint32_t kReturnWord = 4;
   constexpr uint32_t kTargetWord = 5;
-  uint64_t entry_pc = kKernelAddr + sizeof(rocr::llvm::amdhsa::kernel_descriptor_t);
+  uint64_t entry_pc = kKernelAddr + sizeof(rocjitsu::amdhsa::kernel_descriptor_t);
   uint64_t return_pc = entry_pc + kReturnWord * sizeof(uint32_t);
   uint64_t target_pc = entry_pc + kTargetWord * sizeof(uint32_t);
   std::vector<uint32_t> code = {
