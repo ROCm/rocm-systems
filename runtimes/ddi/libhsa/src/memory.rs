@@ -52,7 +52,10 @@ use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::{MemoryLinkInfo, MemoryLinkType};
 
 use crate::ffi::*;
-use crate::runtime::{HsaState, InFlightGeneration, boundary, initialized_mut, lock, map_error};
+use crate::runtime::{
+    HsaState, InFlightGeneration, boundary, cache_handles_in_level_order, initialized_mut, lock,
+    map_error,
+};
 use crate::signal::{AsyncCopyClock, AsyncCopyProfile};
 
 const GPU_POOL_COARSE: u64 = 1;
@@ -1083,15 +1086,7 @@ pub unsafe extern "C" fn hsa_agent_iterate_caches(
             let Some(_) = callback else {
                 return INVALID_ARGUMENT;
             };
-            runtime
-                .caches
-                .iter()
-                .enumerate()
-                .filter(|(_, cache)| cache.agent == agent)
-                .map(|(index, _)| HsaCache {
-                    handle: CACHE_BASE + index as u64,
-                })
-                .collect::<Vec<_>>()
+            cache_handles_in_level_order(&runtime.caches, agent)
         };
         let Some(callback) = callback else {
             return INVALID_ARGUMENT;

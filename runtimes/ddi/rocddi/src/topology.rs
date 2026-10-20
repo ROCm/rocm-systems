@@ -17,6 +17,7 @@ use crate::driver;
 use crate::memory::storage::Shared;
 use crate::memory::{DeviceAccess, HostCacheability};
 
+pub mod host;
 pub mod platform;
 
 /// Exact PCI function and configuration identity reported by the OS.
@@ -42,21 +43,53 @@ pub struct PciInfo {
     pub revision_id: u32,
 }
 
-/// Immutable native cache metadata associated with one endpoint.
+/// Data and instruction classification reported by a topology source.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CacheKind {
+    /// Data cache.
+    Data,
+    /// Instruction cache.
+    Instruction,
+    /// Cache holding both data and instructions.
+    Unified,
+    /// Another or unknown cache type.
+    Other,
+}
+
+/// Passive cache information shared by host and endpoint topology.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CacheInfo {
-    /// Hierarchy level reported by the native topology.
-    pub(crate) level: u32,
+    /// Hierarchy level reported by the topology source.
+    pub level: u32,
     /// Cache capacity in bytes.
-    pub(crate) size_bytes: u64,
-    /// Native cache-line size in bytes.
-    pub(crate) line_size_bytes: u32,
-    /// Native cache type encoding.
-    pub(crate) kind: u32,
+    pub size_bytes: u64,
+    /// Cache-line size in bytes, when the topology source reports one.
+    pub line_size_bytes: Option<u32>,
+    /// Data and instruction classification of this cache.
+    pub kind: CacheKind,
+    /// Whether the source marks this cache as associated with compute units.
+    pub(crate) compute_unit_cache: bool,
 }
 
 impl CacheInfo {
-    /// Returns the native cache level.
+    /// Creates cache information without a compute-unit association.
+    #[must_use]
+    pub const fn new(
+        level: u32,
+        size_bytes: u64,
+        line_size_bytes: Option<u32>,
+        kind: CacheKind,
+    ) -> Self {
+        Self {
+            level,
+            size_bytes,
+            line_size_bytes,
+            kind,
+            compute_unit_cache: false,
+        }
+    }
+
+    /// Returns the cache level.
     #[must_use]
     pub const fn level(&self) -> u32 {
         self.level
@@ -71,7 +104,10 @@ impl CacheInfo {
     /// Returns the native cache-line size in bytes.
     #[must_use]
     pub const fn line_size_bytes(&self) -> u32 {
-        self.line_size_bytes
+        match self.line_size_bytes {
+            Some(bytes) => bytes,
+            None => 0,
+        }
     }
 }
 
