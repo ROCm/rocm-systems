@@ -789,3 +789,60 @@ def test_renamed_packed_float_routes_use_exact_helpers():
             probe
             == f'  ROCJITSU_TRY_SIMD_PACKED_FLOAT({operation}, {str(bf16).lower()});'
         )
+
+
+def test_dot_dispatch_covers_every_semantic_class():
+    """Every DOT semantic class must have a DISPATCH handler.
+
+    The generator keeps no dot2_/dot4_/dot8_ prefix fallback, so a new class
+    without an entry would otherwise generate an empty body.
+    """
+    import os
+    from pathlib import Path
+
+    from amdisa.codegen.execute import DISPATCH
+    from amdisa.isa_profile import (
+        Cdna1Profile,
+        Cdna2Profile,
+        Cdna4Profile,
+        Cdna5Profile,
+        CdnaProfile,
+        Rdna1Profile,
+        Rdna2Profile,
+        Rdna3_5Profile,
+        Rdna3Profile,
+        Rdna4Profile,
+    )
+    from amdisa.parser import Parser
+    from amdisa.semantics import derive_all_semantics
+
+    mrisa = Path(
+        os.environ.get(
+            'MRISA_PATH',
+            Path(__file__).resolve().parents[6]
+            / 'shared'
+            / 'machine-readable-isa'
+            / 'isa',
+        )
+    )
+    profiles = {
+        'cdna1': Cdna1Profile,
+        'cdna2': Cdna2Profile,
+        'cdna3': CdnaProfile,
+        'cdna4': Cdna4Profile,
+        'cdna5': Cdna5Profile,
+        'rdna1': Rdna1Profile,
+        'rdna2': Rdna2Profile,
+        'rdna3': Rdna3Profile,
+        'rdna3_5': Rdna3_5Profile,
+        'rdna4': Rdna4Profile,
+    }
+    found = set()
+    for name, profile in profiles.items():
+        spec = Parser(str(mrisa / f'amdgpu_isa_{name}.xml'), profile()).parse()
+        for sem in derive_all_semantics(spec).instructions.values():
+            if sem.semantic_class.startswith(('dot2_', 'dot4_', 'dot8_')):
+                found.add(sem.semantic_class)
+
+    assert found, 'no DOT semantic classes found; the ISA specs did not load'
+    assert sorted(c for c in found if c not in DISPATCH) == []
