@@ -49,6 +49,58 @@ rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
   "int64_t ncclParamIbQpsPerConn() { return g_loadParam(\"IB_QPS_PER_CONNECTION\", 1); }"
   "the IbQpsPerConn fake default")
+# The net_ib_cast connect / qp_sharing fakes repeat these params; both copies must agree.
+foreach(_param
+    "NCCL_PARAM(IbCastTimeout, \"IB_TIMEOUT\", 20)"
+    "NCCL_PARAM(IbCastRetryCnt, \"IB_RETRY_CNT\", 7)"
+    "NCCL_PARAM(IbCastPkey, \"IB_PKEY\", 0)"
+    "NCCL_PARAM(IbCastQpsPerConn, \"IB_QPS_PER_CONNECTION\", 2)"
+    "NCCL_PARAM(IbCastUseInline, \"IB_USE_INLINE\", 0)"
+    "NCCL_PARAM(IbCastGdrFlushDisable, \"GDR_FLUSH_DISABLE\", 1)"
+    "NCCL_PARAM(IbCastSl, \"IB_SL\", -1)"
+    "NCCL_PARAM(IbCastTc, \"IB_TC\", -1)"
+    "RCCL_PARAM(IbCastUDMAPolicy, \"IB_UDMA_POLICY\", 0)")
+  rccl_assert_source_line("${_rccl_src_root}/transport/net_ib_cast/connect.cc"
+    "${_param}" "fakes/net_ib_cast_connect_fakes.cc")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_connect_fakes.cc"
+    "${_param}" "the connect.cc default")
+endforeach()
+foreach(_param
+    "RCCL_PARAM(IbCastQpSharingEnable, \"IB_QP_SHARING_ENABLE\", 0)"
+    "RCCL_PARAM(IbCastCommNGroups, \"IB_COMM_NGROUPS\", 4)"
+    "RCCL_PARAM(IbCastQpSharingValidatePool, \"IB_QP_SHARING_VALIDATE_POOL\", 0)")
+  rccl_assert_source_line("${_rccl_src_root}/transport/net_ib_cast/qp_sharing.cc"
+    "${_param}" "fakes/net_ib_cast_qp_sharing_fakes.cc")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/net_ib_cast_qp_sharing_fakes.cc"
+    "${_param}" "the qp_sharing.cc default")
+endforeach()
+# The net_ib_cast and socket fakes copy these lines from production; pin both ends ("<SEMI>" stands for a semicolon).
+set(_rccl_cast_pins
+  "transport/net_ib_cast/p2p.cc" "NCCL_PARAM(IbCastArThreshold, \"IB_AR_THRESHOLD\", -2)<SEMI>"
+    "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"IB_AR_THRESHOLD\", -2)<SEMI> }"
+  "transport/net_ib_cast/p2p.cc" "int64_t IbCastArThreshold = 8192<SEMI>"
+    "net_ib_cast_p2p_fakes.cc" "int64_t IbCastArThreshold = 8192<SEMI>"
+  "transport/net_ib_cast/p2p.cc" "NCCL_PARAM(IbCastReceiverSideMatchingScheme, \"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI>"
+    "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)<SEMI> }"
+  "transport/net_ib_cast/p2p.cc" "RCCL_PARAM(IbCastGdrFlushGpuMemNoRelaxedOrdering, \"GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING\", 1)<SEMI>"
+    "net_ib_cast_p2p_fakes.cc" "return g_loadParam(\"RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING\", 1)<SEMI>"
+  "transport/net_ib_cast/p2p.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\"}<SEMI>"
+    "net_ib_cast_p2p_fakes.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\"}<SEMI>"
+  "transport/net_ib_cast/p2p_resiliency.cc" "NCCL_PARAM(IbCastResiliencyPortFailover, \"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI>"
+    "net_ib_cast_p2p_resiliency_fakes.cc" "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0)<SEMI> }"
+  "transport/net_ib_cast/p2p_resiliency.cc" "NCCL_PARAM(IbCastResiliencyPortFailoverMaxAttempts, \"IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS\", 1)<SEMI>"
+    "net_ib_cast_p2p_resiliency_fakes.cc" "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS\", 1)<SEMI>"
+  "transport/net_ib_cast/p2p_resiliency.cc" "NCCL_PARAM(IbCastResiliencyPortFailoverProbeDelay, \"IB_RESILIENCY_PORT_FAILOVER_PROBE_DELAY\", 10)<SEMI>"
+    "net_ib_cast_p2p_resiliency_fakes.cc" "return g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER_PROBE_DELAY\", 10)<SEMI>"
+  "misc/socket.cc" "static uint64_t cached = NCCL_SOCKET_MAGIC<SEMI>"
+    "socket_fakes.cc" "uint64_t ncclSocketDefaultMagic(void) { return NCCL_SOCKET_MAGIC<SEMI> }")
+while(_rccl_cast_pins)
+  list(POP_FRONT _rccl_cast_pins _src _prod _fake _copy)
+  string(REPLACE "<SEMI>" ";" _prod "${_prod}")
+  string(REPLACE "<SEMI>" ";" _copy "${_copy}")
+  rccl_assert_source_line("${_rccl_src_root}/${_src}" "${_prod}" "fakes/${_fake}")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/${_fake}" "${_copy}" "the ${_src} copy")
+endwhile()
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"

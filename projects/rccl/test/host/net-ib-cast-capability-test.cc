@@ -226,9 +226,10 @@ class NetIbCastCapabilityReadMicrotest : public NetIbCastCapabilityMicrotest {
                                                posted_ = *wr;
                                                postedSge_ = *wr->sg_list;
                                                if (Stops(Fail::PostSend)) return EIO;
-                                               if (copy_)
+                                               if (copy_) {
                                                  memcpy((void*)wr->sg_list->addr, (void*)wr->wr.rdma.remote_addr,
                                                         wr->sg_list->length);
+                                               }
                                                return 0;
                                              }};
   HookOf<decltype(g_fakePollCq)> pollCq_{g_fakePollCq, [this](struct ibv_cq* cq, int n, struct ibv_wc* wc) {

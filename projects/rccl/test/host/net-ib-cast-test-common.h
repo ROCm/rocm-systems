@@ -152,8 +152,9 @@ class FakeIbWorld {
     return port;
   }
   FakeHca* Find(struct ibv_context* ctx) {
-    for (FakeHca& hca : hcas)
+    for (FakeHca& hca : hcas) {
       if (&hca.context == ctx) return &hca;
+    }
     return nullptr;
   }
 
@@ -202,8 +203,9 @@ class FakeIbWorld {
                                                    return ncclSuccess;
                                                  }};
   HookOf<decltype(g_mlx5dvIsSupported)> mlx5IsSupported{g_mlx5dvIsSupported, [this](struct ibv_device* d) {
-                                                          for (FakeHca& hca : hcas)
+                                                          for (FakeHca& hca : hcas) {
                                                             if (&hca.device == d) return hca.mlx5;
+                                                          }
                                                           return false;
                                                         }};
   HookOf<decltype(g_ibvQueryDevice)> queryDevice{g_ibvQueryDevice, [this](struct ibv_context* ctx,
@@ -217,8 +219,9 @@ class FakeIbWorld {
   HookOf<decltype(g_ibvQueryPort)> queryPort{g_ibvQueryPort, [this](struct ibv_context* ctx, uint8_t portNum,
                                                                     struct ibv_port_attr* attr) {
                                                FakeHca* hca = Find(ctx);
-                                               if (hca == nullptr || portNum < 1 || portNum > hca->ports.size())
+                                               if (hca == nullptr || portNum < 1 || portNum > hca->ports.size()) {
                                                  return ncclSystemError;
+                                               }
                                                *attr = hca->ports[portNum - 1];
                                                return ncclSuccess;
                                              }};

@@ -189,6 +189,8 @@ TEST_F(NetIbCastMultiplaneMicrotest, Load_PipWithoutInterface_LeavesTheInterface
   ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
   std::string log = CaptureLog([&] { ASSERT_EQ(IbCastMultiplaneLoad(), ncclSuccess); });
   EXPECT_TRUE(LogHas(log, "ip=10.0.0.1 interface=\n")) << log;
+  ASSERT_EQ(gidToPipMap.size(), 1u);
+  EXPECT_STREQ(gidToPipMap.begin()->second.at(0).interface, "");
 }
 
 TEST_F(NetIbCastMultiplaneMicrotest, Load_DuplicateVip_LastEntryWins) {

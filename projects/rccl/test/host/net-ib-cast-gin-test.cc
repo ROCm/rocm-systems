@@ -10,6 +10,8 @@
 
 #include <gtest/gtest.h>
 
+#include <sys/wait.h>
+
 #include <csignal>
 #include <cstring>
 #include <memory>
@@ -1128,7 +1130,8 @@ TEST_F(NetIbCastGinTestMicrotest, Test_KnownBug_ErrorInTheSecondCompletionSlotCr
         IbCastRmaIbProxyTest(&cComm_, a, &done);
         exit(0);
       },
-      ::testing::KilledBySignal(SIGSEGV), "");
+      // A plain build dies on the signal; under ASan the runtime reports the SEGV and exits non-zero.
+      [](int status) { return WIFSIGNALED(status) ? WTERMSIG(status) == SIGSEGV : WEXITSTATUS(status) != 0; }, "");
   ::testing::GTEST_FLAG(death_test_style) = style;
 }
 

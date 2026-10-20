@@ -286,8 +286,9 @@ class NetIbCastCommonEventMicrotest : public NetIbCastCommonMicrotest {
       event->event_type = events_.front();
       events_.pop_front();
       event->element.cq = &cq_;
-      if (event->event_type >= IBV_EVENT_QP_FATAL && event->event_type <= IBV_EVENT_QP_ACCESS_ERR)
+      if (event->event_type >= IBV_EVENT_QP_FATAL && event->event_type <= IBV_EVENT_QP_ACCESS_ERR) {
         event->element.qp = &qp_;
+      }
       return ncclSuccess;
     });
   }

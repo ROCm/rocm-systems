@@ -133,8 +133,9 @@ class NetIbCastInitMicrotest : public ::testing::Test {
   // realpath() answers for /sys/class/infiniband/<hca>/device.
   void PciPaths(std::map<std::string, std::string> paths) {
     realpath_.emplace(g_initRealpath, [paths](const char* path, char*) -> char* {
-      for (auto& [hca, pci] : paths)
+      for (auto& [hca, pci] : paths) {
         if (std::string(path) == "/sys/class/infiniband/" + hca + "/device") return strdup(pci.c_str());
+      }
       return nullptr;
     });
   }
@@ -218,10 +219,9 @@ TEST_F(NetIbCastInitMicrotest, GetPciPath_NoSysfsEntry_LeavesAnEmptyFullPath) {
 
 TEST_F(NetIbCastInitMicrotest, GetRealPort_CountsEarlierDevicesOnTheSamePhysicalNic) {
   char p0[] = "/sys/devices/pci0000:00/0000:01:00.0";
-  char p1[] = "/sys/devices/pci0000:00/0000:02:00.0";
-  Dev(0, "a").pciPath = p0;
-  Dev(1, "b").pciPath = p1;
-  Dev(2, "c").pciPath = p0;
+  Dev(0, "a").pciPath = strdup(p0);
+  Dev(1, "b").pciPath = strdup("/sys/devices/pci0000:00/0000:02:00.0");
+  Dev(2, "c").pciPath = strdup(p0);
   int realPort = -1;
   ASSERT_EQ(IbCastGetRealPort(p0, &realPort, 3), ncclSuccess);
   EXPECT_EQ(realPort, 2);
@@ -229,7 +229,6 @@ TEST_F(NetIbCastInitMicrotest, GetRealPort_CountsEarlierDevicesOnTheSamePhysical
   EXPECT_EQ(realPort, 0);
   ASSERT_EQ(IbCastGetRealPort(nullptr, &realPort, 3), ncclSuccess);
   EXPECT_EQ(realPort, 0);
-  for (int d = 0; d < 3; d++) IbCastDevs[d].pciPath = nullptr;
 }
 
 TEST_F(NetIbCastInitMicrotest, PciRootFromPath_TakesTheFirstDomainAndBus) {
