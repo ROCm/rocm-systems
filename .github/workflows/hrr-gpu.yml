@@ -75,35 +75,12 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 projects/hrr/tests/scripts/hrr_capture_build.py fetch-base
 
-      - name: Capture cache key
-        id: cache_key
-        run: >-
-          python3 projects/hrr/tests/scripts/hrr_capture_build.py cache-key
-          --therock-pin "${THEROCK_PIN}" --image "${BUILD_IMAGE}"
-
-      # Exact key. A prefix restore could pair this tree with another base
-      # or another targets.arch.
-      - name: Restore capture build
-        id: capture_cache
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
-        with:
-          path: |
-            build/capture-lib
-            build/hrr
-            dist/lib/librocm_kpack*
-          # v2 added the HRR build tree and librocm_kpack. v3 caches every
-          # librocm_kpack file. A restore of v2 left librocm_kpack.so.0 missing.
-          key: hrr-capture-v3-${{ steps.cache_key.outputs.digest }}
-
+      # No cache restore: a cache hit left librocm_kpack.so.0 out of the tree and
+      # Verify failed. Off until that failure is understood, so the build always
+      # runs. The `cache-key` and `stage` commands of hrr_capture_build.py are
+      # the pieces to reuse.
       - name: Build
-        if: steps.capture_cache.outputs.cache-hit != 'true'
         run: python3 projects/hrr/tests/scripts/hrr_capture_build.py build
-
-      # The build stages copies of libLLVM and the sysdeps into dist/lib, and
-      # the cache does not keep them.
-      - name: Stage runtime libraries
-        if: steps.capture_cache.outputs.cache-hit == 'true'
-        run: python3 projects/hrr/tests/scripts/hrr_capture_build.py stage
 
       - name: Verify
         run: python3 projects/hrr/tests/scripts/hrr_capture_build.py verify
