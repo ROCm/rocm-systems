@@ -186,6 +186,9 @@ stream:
     tags: [synchronization, P0]
   Unit_hipStreamWaitValue_Default:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - fails on amd_windows (gfx110X): REQUIRE(false) 'illegal memory access' in hipStreamValue.cc; corrupts the GPU queue so subsequent stream/event tests cascade with 0xc0000409 and the shard hits the 120min timeout. Disabled pending re-triage."
     tags: [synchronization, P0]
   Unit_hipStreamSynchronize_EmptyStream:
     <<: *level_default
