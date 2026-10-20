@@ -25,6 +25,7 @@
 // default and a reset, never as a hardcoded always-succeed. poll remains
 // deliberately absent until a caller needs a shared recording surface.
 
+#include <dirent.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -106,12 +107,20 @@ extern std::function<void(const char*)> g_perror;
 extern std::function<void(int)> g_exit;
 extern std::function<int(char*, size_t)> g_gethostname;
 extern std::function<int(const char*, int)> g_access;
+extern std::function<int(const char*, int, mode_t)> g_open;
 
 // Fail an allocation for one case with a hook returning nullptr; g_freedPointers
 // then shows whether the unit released what it had already taken on the way out.
 extern std::function<void*(size_t)> g_malloc;
 extern std::function<void*(size_t, size_t)> g_calloc;
 extern std::function<void(void*)> g_free;
+extern std::function<FILE*(const char*, const char*)> g_fopen;
+extern std::function<DIR*(const char*)> g_opendir;
+extern std::function<struct dirent*(DIR*)> g_readdir;
+extern std::function<int(DIR*)> g_closedir;
+extern std::function<ssize_t(const char*, char*, size_t)> g_readlink;
+extern std::function<int(int, unsigned long, void*)> g_ioctl;
+extern std::function<int(void (*)(void))> g_atexit;
 
 // ---------------------------------------------------------------------------
 // Observation points fed by the default seams. A test that installs its own
@@ -124,6 +133,7 @@ extern std::vector<MicroPerrorCall> g_perrorCalls;  // every perror(), in order;
 extern std::vector<int> g_closedFds;    // fds passed to close(), in order
 // Pointers passed to free(), in order, nullptrs included.
 extern std::vector<void*> g_freedPointers;
+extern std::vector<void (*)(void)> g_atexitFns;  // handlers the default atexit recorded instead of registering
 // FILE* argument of every fprintf() the unit made, in order. Never the formatted text: fprintf always forwards to
 // the real vfprintf, so this only proves whether and where a diagnostic was printed, not what it said.
 extern std::vector<FILE*> g_fprintfCalls;
