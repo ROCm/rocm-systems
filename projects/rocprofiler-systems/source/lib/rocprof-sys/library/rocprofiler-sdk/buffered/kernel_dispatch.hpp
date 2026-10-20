@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include "core/demangler.hpp"
-
 #include "library/rocprofiler-sdk/stream_stack_service.hpp"
 #include "library/rocprofiler-sdk/types.hpp"
 
@@ -16,7 +14,6 @@
 #include <fmt/format.h>
 
 #include <cstdint>
-#include <optional>
 #include <stdexcept>
 
 namespace rocprofsys::domains::buffered
@@ -57,11 +54,7 @@ on_kernel_dispatch(typename SdkBackend::kernel_dispatch_record_t* record,
         return;
     }
 
-    auto name = rocprofsys::utility::demangle(
-        Externals::get_kernel_symbol_name(record->dispatch_info.kernel_id));
-    auto beg_timestamp_ns = record->start_timestamp;
-    auto end_timestamp_ns = record->end_timestamp;
-    auto queue_id         = record->dispatch_info.queue_id;
+    auto queue_id = record->dispatch_info.queue_id;
 
     std::uint64_t stream_id =
         rocprofiler_sdk::stream_stack_service<SdkBackend>::get_stream_id(record).handle;
@@ -100,16 +93,6 @@ on_kernel_dispatch(typename SdkBackend::kernel_dispatch_record_t* record,
                 record->dispatch_info.workgroup_size.z, record->dispatch_info.grid_size.x,
                 record->dispatch_info.grid_size.y, record->dispatch_info.grid_size.z,
                 stream_id });
-    }
-
-    if(Externals::get_use_timemory())
-    {
-        if(const auto sequent_tid =
-               Externals::get_thread_info_sequent_tid(record->thread_id))
-        {
-            Externals::write_timemory_bundle(name, *sequent_tid,
-                                             end_timestamp_ns - beg_timestamp_ns);
-        }
     }
 }
 

@@ -379,42 +379,6 @@ struct external_dependencies
         return trace_cache::get_buffer_storage();
     }
 
-    static std::string_view get_kernel_symbol_name(std::uint64_t kernel_id)
-    {
-        auto symbol = get_metadata_registry().get_kernel_symbol(kernel_id);
-        return symbol.has_value() ? std::string_view{ symbol->kernel_name }
-                                  : std::string_view{};
-    }
-
-    static std::optional<std::uint64_t> get_thread_info_sequent_tid(std::uint64_t tid)
-    {
-        const auto& thread_info_data =
-            thread_info::get(static_cast<std::int64_t>(tid), SystemTID);
-        if(!thread_info_data.has_value() || !thread_info_data->index_data.has_value())
-        {
-            return std::nullopt;
-        }
-
-        return thread_info_data->index_data->sequent_value;
-    }
-
-    static void write_timemory_bundle(std::string_view name, std::uint64_t tid,
-                                      std::uint64_t elapsed_ns)
-    {
-        using kernel_dispatch_bundle_t =
-            tim::lightweight_tuple<tim::component::wall_clock>;
-
-        auto kernel_dispatch_bundle_data = kernel_dispatch_bundle_t{ name };
-        kernel_dispatch_bundle_data.push(static_cast<std::int64_t>(tid)).start().stop();
-        kernel_dispatch_bundle_data.get(
-            [elapsed_ns](tim::component::wall_clock* wall_clock_data) {
-                wall_clock_data->set_value(static_cast<std::int64_t>(elapsed_ns));
-                wall_clock_data->set_accum(static_cast<std::int64_t>(elapsed_ns));
-            });
-
-        kernel_dispatch_bundle_data.pop();
-    }
-
     // ─── Members required by domains::callback::roctx::k_{core,control}_api ────────
     using rocm_marker_api_category = category::rocm_marker_api;
     using string_id_t              = tim::hash_value_t;
