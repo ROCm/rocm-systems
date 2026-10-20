@@ -286,7 +286,7 @@ TEST(Gfx12Dot, WmmaTinyNegativeAccumulatorSubtractsFloorUnit) {
         for (uint32_t reg = 0; reg < 4; ++reg) {
           // A[row][k] sits in lane row (+16 for k >= 8), register k / 2, half k % 2.
           machine.set(reg, lane, lane < 16 && reg == 0 ? test.a : 0u);
-          machine.set(8 + reg, lane, test.b * 0x10001u);
+          machine.set(8 + reg, lane, uint32_t(test.b) | (uint32_t(test.b) << 16));
         }
         for (uint32_t reg = 0; reg < c_regs; ++reg)
           machine.set(16 + reg, lane, test.c);

@@ -4280,6 +4280,19 @@ std::vector<ArithmeticCase> dot2_packed16_cases() {
        0xa5a57243u, 0xa5a57243u, kSplitModes},
       {"Bf16NegAbsPositiveAccumulator", true, kAbsC, kNegC, 0, 0x647ca85du, 0x137ce99cu,
        0x705459c5u, 0xa5a5d9c4u, 0xa5a5d9c4u, kSplitModes},
+      // The only true16 lane that isolates the negative-C floor unit: gfx1201
+      // subtracts one unit, gfx1100 does not. Captured at these six MODEs.
+      {"Bf16TinyNegativeAccumulator",
+       true,
+       0,
+       0,
+       0,
+       0x0cca8580u,
+       0x2f01c580u,
+       0x00008005u,
+       0xa5a50b7fu,
+       0xa5a50b80u,
+       {0xf0u, 0x30u, 0xc0u, 0x00u, 0xf3u, 0xfcu}},
       {"Bf16OverflowSign",
        true,
        0,
@@ -4419,8 +4432,14 @@ std::vector<DotLane> dot_family_lanes() {
   const std::vector<uint32_t> fp8_modes{0xf0u, 0x30u, 0xc0u, 0xf3u, 0xfcu};
   add("Fp8Fp8FactorNan", dot4_fp8_fp8, {}, 0xffb88100u, 0xffb88100u, 0u, 0xffc00a3du, {},
       fp8_modes);
-  add("Fp8Fp8OneGrid", dot4_fp8_fp8, {}, 0x259ade4cu, 0xcf5a6651u, 0xce741245u, 0xce74125du, {},
+  add("Fp8Fp8Finite", dot4_fp8_fp8, {}, 0x259ade4cu, 0xcf5a6651u, 0xce741245u, 0xce74125du, {},
       fp8_modes);
+  // All four products align on one grid before C. Aligning them in pairs, as
+  // the 16-bit forms do, gives 0xccb0092c and 0xcc743e9c here.
+  add("Fp8Fp8OneGridAlignment", dot4_fp8_fp8, {}, 0xd1539ce7u, 0x622dbba1u, 0xccb00900u,
+      0xccb0092bu, {}, fp8_modes);
+  add("Bf8Bf8OneGridAlignment", dot4_bf8_bf8, {}, 0x526563b0u, 0x2bb0cb26u, 0xcc743234u,
+      0xcc743e9bu, {}, fp8_modes);
   add("Fp8Bf8InvalidProduct", dot4_fp8_bf8, {}, 0x003040feu, 0xfcbc8100u, 0u, 0xffc00a3du, {},
       fp8_modes);
   add("Fp8Bf8InfiniteProduct", dot4_fp8_bf8, {}, 0x407e0780u, 0xfcbc8100u, 0u, 0xff800000u, {},
@@ -4445,9 +4464,12 @@ std::vector<DotLane> dot_family_lanes() {
       split_modes);
   add("Bf8Bf8SubnormalFactor", dot4_bf8_bf8, {}, 0x9fb8dca8u, 0xcb2d0379u, 0xb80f58b5u, 0xc49ffe90u,
       {}, split_modes);
-  // A negative subnormal C is read as is; flushing it would change the result.
-  add("Bf8Bf8NegativeSubnormalAccumulator", dot4_bf8_bf8, {}, 0xb3510221u, 0xc48c2309u, 0x8030a352u,
-      0x3f5d8020u, {}, split_modes);
+  // Zero products leave C alone, so flushing a subnormal C changes the result.
+  add("Bf8Bf8ZeroProductAccumulator", dot4_bf8_bf8, {}, 0x00000000u, 0x7b5c3a11u, 0x8030a352u,
+      0x8030a352u, {}, fp8_modes);
+  // An ordinary captured lane: subnormal factors with a negative accumulator.
+  add("Bf8Bf8SubnormalFactorsNegativeAccumulator", dot4_bf8_bf8, {}, 0xb3510221u, 0xc48c2309u,
+      0x8030a352u, 0x3f5d8020u, {}, split_modes);
   // Integer DOT4/DOT8 read each source as two 16-bit halves: OP_SEL picks the
   // half for bits 15:0 and OP_SEL_HI the half for bits 31:16. Both cards agree.
   // These lanes must also take the integer DOT SIMD path.
