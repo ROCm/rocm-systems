@@ -5254,39 +5254,35 @@ TEST(WrapMicrotest, AllReducePreferredBackends_CTAPolicyZeroReturnsCeAndGinSdma)
 }
 
 TEST(WrapMicrotest, AllReducePreferredBackends_ForceSymmetricReturnsSymmetric) {
-  g_loadParam = ForceParam("RCCL_FORCE_SYMMETRIC", int64_t(1));
+  ScopedHook loadParam(g_loadParam, ForceParam("RCCL_FORCE_SYMMETRIC", int64_t(1)));
   ncclComm* comm = MakeSelectComm();
   EXPECT_EQ(RCCL_BACKEND_SYMMETRIC, rcclAllReducePreferredBackends(comm));
   DeleteCommWithArch(comm);
-  g_loadParam = nullptr;
 }
 
 TEST(WrapMicrotest, AllReducePreferredBackends_ForceDdaReturnsDda) {
-  g_loadParam = ForceParam("RCCL_FORCE_DDA", int64_t(1));
+  ScopedHook loadParam(g_loadParam, ForceParam("RCCL_FORCE_DDA", int64_t(1)));
   ncclComm* comm = MakeSelectComm();
   EXPECT_EQ(RCCL_BACKEND_DDA, rcclAllReducePreferredBackends(comm));
   DeleteCommWithArch(comm);
-  g_loadParam = nullptr;
 }
 
 TEST(WrapMicrotest, AllReducePreferredBackends_ForceSymmetricTakesPriorityOverCTAZero) {
-  g_loadParam = ForceParam("RCCL_FORCE_SYMMETRIC", int64_t(1));
+  ScopedHook loadParam(g_loadParam, ForceParam("RCCL_FORCE_SYMMETRIC", int64_t(1)));
   ncclComm* comm = MakeSelectComm();
   comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
   EXPECT_EQ(RCCL_BACKEND_SYMMETRIC, rcclAllReducePreferredBackends(comm))
       << "FORCE_SYMMETRIC check precedes CTAPolicy_ZERO check";
   DeleteCommWithArch(comm);
-  g_loadParam = nullptr;
 }
 
 TEST(WrapMicrotest, AllReducePreferredBackends_ForceDdaTakesPriorityOverCTAZero) {
-  g_loadParam = ForceParam("RCCL_FORCE_DDA", int64_t(1));
+  ScopedHook loadParam(g_loadParam, ForceParam("RCCL_FORCE_DDA", int64_t(1)));
   ncclComm* comm = MakeSelectComm();
   comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
   EXPECT_EQ(RCCL_BACKEND_DDA, rcclAllReducePreferredBackends(comm))
       << "FORCE_DDA check precedes CTAPolicy_ZERO check";
   DeleteCommWithArch(comm);
-  g_loadParam = nullptr;
 }
 
 // ===========================================================================
