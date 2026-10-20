@@ -14,8 +14,8 @@ New developer tool `tools/validate_metric_library.py`, following the existing
 `tools/validate_*.py` checks: it loads each arch's metric library through the
 inheritance loader, collects every schema error, and exits 1 if there are any. It runs
 as a pre-commit hook on `metric_library/` files and from
-`master_config_workflow_script.py --validate-only`. It lands with the first metric
-library files (Stage 4), not with the loader. As with today's panel files, the runtime
+`master_config_workflow_script.py --validate-only`. It lands in the same PR as the
+first metric library files (Stage 4), not with the loader. As with today's panel files, the runtime
 does not re-validate the files it loads.
 
 `MetricDefinition` fields:
@@ -27,7 +27,7 @@ does not re-validate the files it loads.
 | `formula` | str | yes | The expression of the row's main column (`avg`, `value` or `expr`), aggregation included; never empty, in the canonical form of `tools/format_yaml.py`. A metric an arch cannot compute does not exist on that arch; a later arch adds it. |
 | `unit` | str | yes | One canonical spelling per unit (e.g. `"GB/s"`, `"GFLOP/s"`; aliases such as `Gbps` are rejected); a display scale such as Bytes/s is a view concern (D8 Kind 2); may be empty |
 | `description` | str | yes | Human-readable metric description: what the metric is, never how a view shows it (a view adds that as `description_note`, [Phase 2](lld-phase2-display-view.md)); may be empty |
-| `peak` | str (formula) | no | Theoretical ceiling expression, from the hardware specs, e.g. `$max_sclk * $cu_per_gpu * 512 / 1000`. Required for speed-of-light metrics. Never a measured peak. |
+| `peak` | str (formula) or number | no | Theoretical ceiling expression, from the hardware specs, e.g. `$max_sclk * $cu_per_gpu * 512 / 1000`. Required for speed-of-light metrics. Never a measured peak. |
 | `peak_empirical` | str | no | Measured ceiling: `$<ceiling>_empirical_peak`, where `<ceiling>` is a roofline benchmark column (`roofline/benchmark/ceilings.py`), e.g. `$MFMAF16Flops_empirical_peak`. See [Measured peaks](#measured-peaks). |
 | `coll_level` | str | no | Accumulation level, e.g. `SQ_LEVEL_WAVES` |
 | `avg_mode` | str | no | Phase 2, with runtime wrapper generation; not in Phase A. Default `weighted` (`SUM(X)/SUM(Y)`). Set to `simple` for metrics that use `AVG()` instead. |
@@ -80,20 +80,16 @@ of an id uses the same formula.
 A file maps each metric `id` to its fields, so the `id` is the key rather than a field:
 
 ```yaml
+# gfx908/compute.yaml
 compute.salu_util:
-  name: "SALU Utilization"
-  formula: "100 * SQ_ACTIVE_INST_SCA / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)"
+  name: SALU Utilization
+  formula: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    The percentage of time the SALU was busy executing instructions.
-
-compute.valu_flops:
-  name: "VALU FLOPs"
-  formula: "64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + ...) / (End_Timestamp - Start_Timestamp)"
-  unit: GFLOPs
-  peak: "$max_sclk * $cu_per_gpu * 64 * 2 / 1000"
-  description: >-
-    The total number of vector ALU floating-point operations per second.
+    Indicates what percent of the kernel's duration the SALU was busy executing instructions.
+    Computed as the ratio of the total number of cycles spent by the scheduler issuing
+    SALU or SMEM instructions over the total CU cycles.
+  peak: 100
 ```
 
 **Typed row fields** of fabric stall and per-channel tables (`xfer`, `coherency`,
@@ -114,22 +110,17 @@ first.
 ```yaml
 # gfx908/variables.yaml
 GRBM_COUNT_PER_XCD:
-  formula: "(GRBM_COUNT / $num_xcd)"
+  formula: GRBM_COUNT / $num_xcd
 GRBM_GUI_ACTIVE_PER_XCD:
-  formula: "(GRBM_GUI_ACTIVE / $num_xcd)"
+  formula: GRBM_GUI_ACTIVE / $num_xcd
 GRBM_SPI_BUSY_PER_XCD:
-  formula: "(GRBM_SPI_BUSY / $num_xcd)"
+  formula: GRBM_SPI_BUSY / $num_xcd
 hbmBandwidth:
-  formula: "($max_mclk / 1000 * 32 * $num_memory_channels)"
+  formula: $max_mclk / 1000 * 32 * $num_memory_channels
 kernelBusyCycles:
-  formula: "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk)), 0)"
+  formula: ROUND(AVG((End_Timestamp - Start_Timestamp) / 1000 * $max_sclk), 0)
 numActiveCUs:
-  formula: >-
-    TO_INT(MIN(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) /
-    SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 +
-    MIN(MOD(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) /
-    SUM($GRBM_GUI_ACTIVE_PER_XCD), 0),
-    $max_waves_per_cu), 8), $cu_per_gpu))
+  formula: TO_INT(MIN(ROUND(4 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + MIN(MOD(ROUND(4 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), $max_waves_per_cu), 8), $cu_per_gpu))
 ```
 
 ### Layer 1.5 -- Collectables
@@ -344,30 +335,34 @@ To load a file:
 | Deep merge | Map + map | Recursive deep merge. Override keys win; base-only keys preserved, in file order. A metric in a child file lists only the fields that change. |
 | Replace | List in override | A list replaces the base list as a whole. |
 
-Example of all three operations:
+Example, from the gfx90a files:
 
 ```yaml
 # gfx90a/compute.yaml
 inherit: ../gfx908/compute.yaml
 
-# Add: new metric not present in gfx908
+# Modify: gfx90a doubles the BF16 MFMA rate and adds the measured peak
 compute.mfma_flops_bf16:
-  name: "MFMA FLOPs (BF16)"
-  formula: "512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 / (End_Timestamp - Start_Timestamp)"
-  unit: GFLOPs
-  description: >-
-    BF16 matrix fused multiply-add operations per second.
+  peak: $max_sclk * $cu_per_gpu * 1024 / 1000
+  peak_empirical: $MFMABF16Flops_empirical_peak
 
-# Remove a field: drop the parent's peak
-compute.salu_util:
-  peak: !remove
-
-# Remove: metric that existed in gfx908 but is not valid for gfx90a
-compute.some_deprecated_metric: !remove
-
-# Modify: change the formula for an existing metric
+# Add: a metric gfx908 cannot compute
 compute.valu_flops:
-  formula: "64 * (SQ_INSTS_VALU_ADD_F16 + ...) / (End_Timestamp - Start_Timestamp)"
+  name: VALU FLOPs
+  formula: 64 * SUM(SQ_INSTS_VALU_ADD_F16 + ... + 2 * SQ_INSTS_VALU_FMA_F64) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total floating-point operations executed per second on the VALU. Note: this
+    does not include any floating-point operations from MFMA instructions.
+  peak: $max_sclk * $cu_per_gpu * 64 * 2 / 1000
+```
+
+```yaml
+# gfx90a/fabric.yaml
+inherit: ../gfx908/fabric.yaml
+
+# Remove: a metric gfx90a no longer shows
+fabric.rd_bw_norm: !remove
 ```
 
 **Cycle detection:** Follow the `inherit` chain from the file to its base, keeping the
@@ -486,11 +481,12 @@ class MetricLibrary:
 
 ### Tests
 
-- Integration test: load a synthetic family chain (`gfx908/` -> `gfx940/` ->
-  `gfx942/`) from test fixtures. Verify: correct number of metrics, inheritance
+- Integration test: load a synthetic family (a base and a four-deep chain of children)
+  from test fixtures. Verify: correct number of metrics, inheritance
   overrides applied, variable definitions present, duplicate id raises error.
-- Counter extraction equivalence: `get_counters_for_metrics()` returns the same
-  counter set as `extract_counters_and_variables()` when given the same formula text.
+- Counter extraction: `get_counters_for_metrics()` takes counters from `formula`,
+  `peak` and `coll_level`, and resolves built-in variables. Equivalence with
+  `detect_counters()` over the whole library is the Stage 3 counter check.
 - String metric IDs follow the hierarchical convention
   (`{category}.{subcategory}_{name}`).
 
@@ -529,19 +525,23 @@ At the cutover, counters come from the metrics that the selected views place
 ### Validation
 
 `tools/validate_metric_library.py`, for every arch that has a metric library tree, also
-compares sets with today's analysis configs:
+compares the library with today's analysis configs:
 
 - **Formulas:** every equation a row shows (its `avg`, `value` or `expr` form, or each
-  column of a multi-column row, without display-only `ROUND()`) is a library formula,
-  except rows listed as display variants by positional id and label (another unit, or
-  the same equation written differently); every library formula is shown by some row.
+  column of a multi-column row, without display-only `ROUND()`) is a library formula;
+  every library formula is shown by some row. Display variants, listed by positional id
+  and label, show a formula in Bytes/s or write it differently; the validator checks
+  each one's equation against its metric.
+- **Units:** every row's unit is its metric's unit, after unit aliases, except the rows
+  listed as unit variants.
 - **Counters:** the counters the whole library selects equal the counters
   `detect_counters()` selects with no filter (with `--membw-analysis` where the arch has
   panel 3000).
 - **Built-in variables:** the library variables equal `get_build_in_vars()`.
-- **Peaks:** every row's `peak` is its metric's `peak` or `peak_empirical` (a measured
-  peak on an arch without a roofline benchmark is skipped). A display variant names its
-  metric id for this check.
+- **Peaks:** every row's `peak` is its metric's `peak` or `peak_empirical`, and every
+  library peak is the peak of some row that shows the metric (a measured peak on an arch
+  without a roofline benchmark is skipped). A display variant names its metric id for
+  this check, and a hidden row (`value: None`) names it by its label.
 
 The reference side is today's tree, read through the production loaders in the same run,
 so there are no snapshot files. Both trees are source data that cannot change after
@@ -558,7 +558,7 @@ AIPROFCOMP-820 (marked by TODOs in `tools/validate_metric_library.py`):
 |---|---|---|
 | Counters equal `detect_counters()` | At the cutover (Stage 8) | `detect_counters()` stops scanning the panels and selects from the library |
 | Variables equal `get_build_in_vars()` | At the cutover (Stage 8) | `get_build_in_vars()` loads from the library, so the check would compare the library with itself |
-| Row equations are library formulas, row peaks are library peaks, with `DISPLAY_VARIANTS` | When the old panel files are deleted, after the one-release fallback | The fallback still reads the old files, so they must stay equal to the library |
+| Row equations, units and peaks match the library, with `DISPLAY_VARIANTS` and `UNIT_VARIANTS` | When the old panel files are deleted, after the one-release fallback | The fallback still reads the old files, so they must stay equal to the library |
 
 The schema checks (file loading, inheritance, fields, id rules, shared formulas, measured
 peaks, unit spelling and key order) stay.
@@ -793,15 +793,16 @@ unchanged -- it receives the same `dict[str, str]` regardless of source.
 | Tool | What changes |
 |---|---|
 | `validate_sets_metric_ids.py` | Validate `metric_library/{arch}/sets.yaml`: references resolve through `MetricLibrary`, and each set fits one pass. The numeric files keep their positional check until the cutover. |
-| `format_yaml.py` | Also checks `metric_library/gfx*` files (its pre-commit hook covers them): the `formula` and `peak` keys, with the `!remove` tag accepted. Core equation formatting logic (factoring constants out of aggregation) is unchanged. Done in Stage 1 (task 03). |
+| `format_yaml.py` | Also checks `metric_library/gfx*` files (its pre-commit hook covers them): the `formula`, `peak` and `peak_empirical` keys, with the `!remove` tag accepted, and sorts their top-level keys. Core equation formatting logic (factoring constants out of aggregation) is unchanged. Done with the gfx908 library. |
 | `hash_manager.py` | Include base arch directories in hash database. Path discovery expands to cover `gfx908/*.yaml` and `gfx115x/*.yaml` as base arch files. |
 | `verify_against_config_template.py` | No change: `tools/validate_metric_library.py` checks the metric library files, and this script keeps checking the old panel files until the cutover. |
 | `metric_description_manager.py` | No change in Phase A: the old panel YAMLs stay the documentation source until the cutover (Stage 8), when it reads descriptions from Layer 2. Output format for docs YAMLs is unchanged. |
 
 ### Migration tooling
 
-A one-time local script converts each arch. It is not committed; each PR commits its
-output unedited and says how the files were generated.
+A one-time local script converts each arch. It is not committed; each PR says how the
+files were generated and lists the hand edits made afterwards (for example, the
+approved description changes).
 
 1. Read each current panel config YAML for a given architecture.
 2. For each metric: generate the Layer 2 format with string `id`, canonical `name`,

@@ -298,16 +298,16 @@ The first architecture in each family serves as the base -- its files are the co
 
 Files identical to the parent arch do not exist in the child directory; they are inherited implicitly. Files that exist contain only the `inherit` key plus additions, modifications, or removals.
 
-**Example:** gfx941 differs from gfx940 in a few metrics. With inheritance, its `compute.yaml` becomes:
+**Example:** gfx90a doubles the BF16 MFMA rate of gfx908. With inheritance, its `compute.yaml` says only that:
 
 ```yaml
-inherit: ../gfx940/compute.yaml
+inherit: ../gfx908/compute.yaml
 
-compute.mfma_flops_f8:
-  unit: GFLOPs
+compute.mfma_flops_bf16:
+  peak: $max_sclk * $cu_per_gpu * 1024 / 1000
 ```
 
-This 4-line file replaces a 300+ line duplicate. The deep merge replaces only the `unit` field of `compute.mfma_flops_f8`, preserving all other content from gfx940.
+The deep merge replaces only the `peak` field of `compute.mfma_flops_bf16`, preserving the rest of the metric from gfx908. The library spells each unit one way, so a drift such as the gfx940/gfx941 `GFLOPs` above is rejected rather than inherited.
 
 ### How the layers connect
 
@@ -389,8 +389,8 @@ l2.hit_rate:
 
 # gfx908/fabric.yaml
 fabric.hbm_rd:
-  name: HBM Rd
-  unit: Requests/normUnit
+  name: HBM Read
+  unit: (Requests + $normUnit)
   formula: TCC_EA0_RDREQ_DRAM_sum / $denom
   description: >-
     The total number of L2 requests to read data from the accelerator's local HBM.
@@ -423,7 +423,7 @@ fabric.dram_rd:
     The total number of L2 requests to read data from DRAM.
 ```
 
-The metric defines a single base formula without aggregation wrappers (`SUM`, `AVG`, `MIN`, `MAX`). Aggregation is applied by code based on the view's column headers (Layer 3). `l2.hit_rate` has the same id and description in both bases -- it is the same metric concept with different formulas per family. `fabric.hbm_rd` (CDNA) and `fabric.dram_rd` (RDNA) are different metrics describing different memory subsystems.
+In the target state, the metric defines a single base formula without aggregation wrappers (`SUM`, `AVG`, `MIN`, `MAX`), and code applies aggregation based on the view's column headers (Layer 3). In Phase A, `formula` keeps the aggregation of the row's main column, so the library matches today's analysis configs (see [LLD Phase 1](lld-phase1-metric-library.md)). `l2.hit_rate` has the same id and description in both bases -- it is the same metric concept with different formulas per family. `fabric.hbm_rd` (CDNA) and `fabric.dram_rd` (RDNA) are different metrics describing different memory subsystems.
 
 #### Layer 3 — Display / View
 
