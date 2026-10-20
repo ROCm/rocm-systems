@@ -15,8 +15,7 @@ using PCIe peer-to-peer DMA. This requires a Linux kernel built with
 .. warning::
 
    Not all ROCm-supported distributions have a default kernel that
-   enables ``CONFIG_PCI_P2PDMA``. See :ref:`hipfile-verified-distributions` for a list of verified distributions that support P2PDMA.
-
+   enables ``CONFIG_PCI_P2PDMA``. See :ref:`hipfile-verified-distributions` for a list of tested distribution kernels and their P2PDMA support.
 
 .. _hipfile-check-p2pdma:
 
@@ -54,7 +53,7 @@ Verified distributions
 The following table lists kernels that AMD has tested for P2PDMA support.
 Distributions update their kernels between point releases. 
 
-..note ::
+.. note::
   
   This table is a snapshot and doesn't guarantee support.
 
