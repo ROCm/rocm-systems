@@ -950,6 +950,82 @@ bool rcclForceCeScratchEnabled(const ncclComm* comm) {
   return table == nullptr || table->forceCeScratch;
 }
 
+bool rcclAlltoAllCeScratchInPlace(const ncclComm* comm, const void* sendbuff, const void* recvbuff) {
+  return IsArchMatch(comm->archName, "gfx1250") && sendbuff != nullptr && sendbuff == recvbuff &&
+         rcclParamForceCe() != 0;
+}
+
+bool rcclAlltoAllRegisteredCeRefused(const ncclComm* comm, const void* sendbuff, const void* recvbuff) {
+  return IsArchMatch(comm->archName, "gfx1250") && sendbuff != nullptr && sendbuff == recvbuff && comm->nRanks > 1;
+}
+
+ncclResult_t rcclAlltoAllInPlaceGuard(const ncclComm* comm, const void* sendbuff, const void* recvbuff,
+                                      size_t totalBytes, rcclA2aInPlaceSite site, bool capturing, bool registeredCe) {
+  if (sendbuff != recvbuff || totalBytes == 0 || comm->nRanks <= 1 || !IsArchMatch(comm->archName, "gfx1250")) {
+    return ncclSuccess;
+  }
+  // Split / shrink / grow children, MNNVL-off, multi-clique and DDA-off comms never get the fabric
+  // handler (ncclDdaFabricCommInit), hence no fabric paths and no ddaScratch: say so instead of
+  // pointing at the arguments.
+  static const char kNoFabric[] =
+    "this communicator has no DDA fabric scratch (child comm from split/shrink/grow, MNNVL off, multi-clique, "
+    "or DDA disabled)";
+  const bool noFabric = comm->ddaFabricMemHandler == nullptr;
+  bool fabricNamedNoScratch = false;
+  const char* entry = "ncclAlltoAll";
+  const char* fabric = nullptr;
+  bool ceConsidered = true;
+  switch (site) {
+  case rcclA2aSiteAlltoAll:
+    if (rcclCollectiveMustUseEnqueuePath(const_cast<ncclComm*>(comm))) {
+      fabric = "NCCL_CHECK_MODE turns the DDA fabric paths off";
+    } else if (noFabric) {
+      fabric = kNoFabric;
+      fabricNamedNoScratch = true;
+    } else {
+      fabric = "no DDA fabric path takes these arguments (they need 16-byte aligned buffers and per-peer size, "
+               "RCCL_DDA_ENABLE and a call outside a group)";
+    }
+    break;
+  case rcclA2aSiteAlltoAllEnqueue:
+    fabric = "the call was diverted to the enqueue path (NCCL_CHECK_MODE or a suspended comm), which has no DDA "
+             "fabric AllToAll and decomposes it into per-peer Send/Recv";
+    ceConsidered = false;
+    break;
+  case rcclA2aSiteAlltoAllConfig:
+    entry = "ncclAlltoAllConfig";
+    fabric = "ncclAlltoAllConfig has no DDA fabric path";
+    break;
+  case rcclA2aSiteRearch:
+    entry = "ncclAlltoAll / ncclAlltoAllConfig";
+    fabric = "NCCL_ENQUEUE_REARCH_ENABLE lowers every AllToAll to per-peer Send/Recv, which is wrong in place";
+    ceConsidered = false;
+    break;
+  }
+  char ce[256] = "";
+  if (ceConsidered) {
+    if (registeredCe) {
+      snprintf(ce, sizeof(ce), ", the registered-window CE AllToAll is not correct in place, and CE-Scratch does "
+               "not take registered buffers");
+    } else if (rcclParamForceCe() == 0) {
+      snprintf(ce, sizeof(ce), ", and CE-Scratch is off (RCCL_FORCE_CE=0)");
+    } else if (capturing) {
+      snprintf(ce, sizeof(ce), ", and CE-Scratch cannot run under graph capture");
+    } else if (comm->ddaScratch != nullptr && totalBytes > comm->ddaScratchBytes) {
+      snprintf(ce, sizeof(ce), ", and the call is above the CE scratch (%zu bytes)", comm->ddaScratchBytes);
+    } else if (noFabric && fabricNamedNoScratch) {
+      snprintf(ce, sizeof(ce), ", so CE-Scratch has nothing to stage through either");
+    } else if (noFabric) {
+      snprintf(ce, sizeof(ce), ", and CE-Scratch is unavailable: %s", kNoFabric);
+    } else {
+      snprintf(ce, sizeof(ce), ", and CE-Scratch is unavailable on this comm");
+    }
+  }
+  WARN("%s: in-place AllToAll of %zu bytes on %d ranks has no correct implementation on gfx1250: %s%s; use "
+       "separate send and receive buffers", entry, totalBytes, comm->nRanks, fabric, ce);
+  return ncclInvalidUsage;
+}
+
 inline size_t rcclCeNonRegMinTab(const rcclArchThresholds* table, ncclFunc_t func) {
   if (table == nullptr) return 0;
   return (size_t)func < RCCL_DDA_FUNC_COUNT ? table->ceNonRegMin[(size_t)func] : 0;
@@ -2228,14 +2304,22 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   // ncclCeAvailable does not check sysmem segments itself (ce_coll.cc:301).
   const bool a2aHasSysmem = ncclDevrWindowHasSysmemSegment(a2aSendWin) ||
                              ncclDevrWindowHasSysmemSegment(a2aRecvWin);
+  // gfx1250 in place: the registered-window CE AllToAll (4) and hierarchical CE (5) race on the
+  // user buffer (rcclAlltoAllRegisteredCeRefused). Skip both; CE-Scratch (6) refuses registered recv
+  // windows, so such a call reaches the guard below.
+  const bool a2aRegCeRefused = rcclAlltoAllRegisteredCeRefused(comm, sendbuff, recvbuff);
+  bool a2aRegCeSkipped = false;
   if (!ceCapturing) {
     // Probe real window registration on both paths so the reported decision and
     // the dispatched one cannot disagree. The lookups are null-safe, so the
     // buffer-less ABI (rcclSymKGetInfo) simply sees unregistered buffers.
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
         ncclCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
-      decision->algo = RCCL_CE_REGISTERED;
-      return ncclSuccess;
+      if (!a2aRegCeRefused) {
+        decision->algo = RCCL_CE_REGISTERED;
+        return ncclSuccess;
+      }
+      a2aRegCeSkipped = true;
     }
     if (!query) INFO(NCCL_TUNING, "A2A CE-registered disqualified: CTAPolicy=%d hasSysmem=%d ceAvailable=%d",
          (int)comm->config.CTAPolicy, (int)a2aHasSysmem,
@@ -2246,20 +2330,41 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
     // CE branches, matching the AllGather twin.
     if ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) && !a2aHasSysmem &&
         ncclHierCeAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType, a2aSendWin, a2aRecvWin)) {
-      decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
-      return ncclSuccess;
+      if (!a2aRegCeRefused) {
+        decision->algo = RCCL_CE_REGISTERED;  // reports as CE; hier dispatch in taskAppend
+        return ncclSuccess;
+      }
+      a2aRegCeSkipped = true;
     }
 
     // (6) CE scratch: unregistered buffers, RCCL_FORCE_CE, recv fits in DDA scratch.
     // Guard a2aWinRegType to reject registered recv windows (they must not be routed through
     // ddaScratch; that would clobber the user recv buffer).  Mirrors AllGather Branch #2 at
     // line ~1643 and the taskAppend funnel guard at enqueue.cc:3978.
-    if (rcclForceCeScratchEnabled(comm) && !a2aHasSysmem &&
-        comm->ddaScratch != nullptr && totalBytes <= comm->ddaScratchBytes &&
+    // gfx1250: CE-Scratch is not forced out of place (arch table forceCeScratch = false; stock R0
+    // CE-Scratch vs p2p busBW agrees above 2 MiB: 16r 4M-512M CE 54-178 vs p2p 101-291, 8r 2M-512M
+    // CE 42-222 vs p2p 62-332).
+    // In place it is kept wherever it fits: it copies through ddaScratch and is correct, while the p2p
+    // fallback below is wrong in place (P02: every size >= 1 MiB; P05: misaligned / P%16 != 0).
+    // RCCL_FORCE_CE=0 still turns it off. Buffer-less queries (nullptr) are not treated as in place.
+    if ((rcclForceCeScratchEnabled(comm) || rcclAlltoAllCeScratchInPlace(comm, sendbuff, recvbuff)) &&
+        !a2aHasSysmem && comm->ddaScratch != nullptr && totalBytes <= comm->ddaScratchBytes &&
         ncclCeScratchAvailable(comm, ncclFuncAlltoAll, ncclDevSum, datatype, a2aWinRegType)) {
       decision->algo = RCCL_CE_SCRATCH;
       return ncclSuccess;
     }
+  }
+
+  // gfx1250: the p2p fallback below is not correct in place (measured wrong at every size >= 1 MiB on
+  // 8 and 16 ranks, eager and graph). In place, every correct path (DDA LL / LL128, CE-Scratch)
+  // was refused above (e.g. misaligned or P % 16 != 0 above the CE scratch, a check-mode comm, a comm
+  // without the fabric paths, registered windows): fail the call rather than return wrong data.
+  // Reporting (query) keeps naming the fallback. ncclAlltoAll returns before ncclEnqueueCheck here, so
+  // record the error for an enclosing group: ncclGroupEnd then fails the whole group, as it does for
+  // the taskAppend-site refusal.
+  if (!query) {
+    NCCLCHECK(ncclGroupErrCheck(rcclAlltoAllInPlaceGuard(comm, sendbuff, recvbuff, totalBytes, rcclA2aSiteAlltoAll,
+                                                         ceCapturing, a2aRegCeSkipped)));
   }
 
   // (7) Direct (p2p) fallback. AllToAll has no collective kernel: taskAppend()
