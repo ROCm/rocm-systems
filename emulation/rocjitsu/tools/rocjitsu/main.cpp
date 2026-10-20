@@ -349,6 +349,115 @@ void print_json_string(std::string_view key, std::string_view value, bool comma 
   std::cout << "\n";
 }
 
+std::string name_list(const std::vector<std::string> &names) {
+  if (names.empty())
+    return "(none)";
+  std::string out;
+  for (const std::string &name : names) {
+    if (!out.empty())
+      out += ", ";
+    out += name;
+  }
+  return out;
+}
+
+void print_json_string_array(std::string_view key, const std::vector<std::string> &values,
+                             bool comma = true) {
+  std::cout << "    \"" << key << "\": [";
+  for (size_t i = 0; i < values.size(); ++i) {
+    if (i != 0)
+      std::cout << ", ";
+    std::cout << "\"" << json_escape(values[i]) << "\"";
+  }
+  std::cout << "]";
+  if (comma)
+    std::cout << ",";
+  std::cout << "\n";
+}
+
+std::vector<std::string> discover_runtime_plugins(const std::string &runtime_lib_path) {
+  if (runtime_lib_path.empty())
+    return {};
+
+  constexpr std::string_view prefix = "librocjitsu_plugin_";
+  constexpr std::string_view suffix = ".so";
+  std::vector<std::string> names;
+  const std::filesystem::path plugin_dir = std::filesystem::path(runtime_lib_path).parent_path();
+  std::error_code error;
+  std::filesystem::directory_iterator it(plugin_dir, error);
+  const std::filesystem::directory_iterator end;
+  for (; !error && it != end; it.increment(error)) {
+    const std::string filename = it->path().filename().string();
+    if (!filename.starts_with(prefix) || !filename.ends_with(suffix))
+      continue;
+    std::string name =
+        filename.substr(prefix.size(), filename.size() - prefix.size() - suffix.size());
+    if (!name.empty())
+      names.emplace_back(std::move(name));
+  }
+  std::ranges::sort(names);
+  names.erase(std::unique(names.begin(), names.end()), names.end());
+  return names;
+}
+
+void print_emulators(bool json, bool long_output) {
+  constexpr std::string_view name = "rocjitsu";
+  constexpr std::string_view description =
+      "ROCm just-in-time GPU emulator (cycle-accurate or functional)";
+  constexpr std::string_view support_reason = "software emulator; no special hardware required";
+  const std::string runtime = find_interposer_lib();
+  const bool installed = !runtime.empty();
+  const std::vector<std::string> options = {
+      "async_helper_threads", "cpu_dispatch_threads", "cpu_thread_budget", "exec_mode",
+      "gpus_per_node",        "num_threads",          "wait_checking",
+  };
+  const std::vector<std::string> plugins = discover_runtime_plugins(runtime);
+
+  if (json) {
+    std::cout << "[\n";
+    std::cout << "  {\n";
+    std::cout << "    \"name\": \"" << name << "\",\n";
+    std::cout << "    \"default\": true,\n";
+    std::cout << "    \"version\": \"" << json_escape(rj_get_version_string()) << "\",\n";
+    std::cout << "    \"description\": \"" << description << "\",\n";
+    std::cout << "    \"installed\": " << (installed ? "true" : "false") << ",\n";
+    std::cout << "    \"runtime\": {\n";
+    if (installed) {
+      std::cout << "      \"state\": \"found\",\n";
+      std::cout << "      \"path\": \"" << json_escape(runtime) << "\"\n";
+    } else {
+      std::cout << "      \"state\": \"missing\",\n";
+      std::cout << "      \"lib_name\": \"librocjitsu.so\"\n";
+    }
+    std::cout << "    },\n";
+    std::cout << "    \"support\": {\n";
+    std::cout << "      \"supported\": true,\n";
+    std::cout << "      \"reason\": \"" << support_reason << "\"\n";
+    std::cout << "    },\n";
+    print_json_string_array("options", options);
+    print_json_string_array("plugins", plugins, false);
+    std::cout << "  }\n";
+    std::cout << "]\n";
+    return;
+  }
+
+  if (long_output) {
+    std::cout << name << " (default)\n";
+    std::cout << "  " << description << "\n";
+    std::cout << "  installed: " << (installed ? "yes" : "no") << "\n";
+    std::cout << "  runtime:   " << (installed ? runtime : "not found") << "\n";
+    std::cout << "  supported: yes  (" << support_reason << ")\n";
+    std::cout << "  options:   " << name_list(options) << "\n";
+    std::cout << "  plugins:   " << name_list(plugins) << "\n";
+    return;
+  }
+
+  std::cout << std::format("{:<13} {:<10} {:<10} DESCRIPTION\n", "NAME", "INSTALLED", "SUPPORTED");
+  std::cout << std::format("{:<13} {:<10} {:<10} {}\n", "rocjitsu*", installed ? "yes" : "no",
+                           "yes", description);
+  std::cout << "\n* = default emulator for new profiles\n";
+}
+
 void print_paths(bool json) {
   const std::vector<std::filesystem::path> config_dirs = profile_config_search_dirs();
   const std::string runtime_dir = rpc_default_runtime_dir();
@@ -394,6 +503,12 @@ void print_paths_usage() {
   std::cerr << "Usage: rocjitsu paths [--json]\n"
                "\n"
                "Print the config search roots and runtime paths the rocjitsu CLI uses.\n";
+}
+
+void print_emulators_usage() {
+  std::cerr << "Usage: rocjitsu emulators [-l|--long] [--json]\n"
+               "\n"
+               "List the emulator backends this rocjitsu CLI can run.\n";
 }
 
 void cleanup_runtime_files(const std::filesystem::path &invocation_runtime_dir) {
@@ -538,6 +653,25 @@ bool append_env_override(std::string_view assignment,
   return true;
 }
 
+std::optional<int32_t> parse_int32(std::string_view text) {
+  int32_t value = 0;
+  const std::from_chars_result result =
+      std::from_chars(text.data(), text.data() + text.size(), value);
+  if (result.ec != std::errc{} || result.ptr != text.data() + text.size())
+    return std::nullopt;
+  return value;
+}
+
+bool apply_unsigned_config_option(std::string_view key, std::string_view value,
+                                  std::optional<uint32_t> &target) {
+  target = config::parse_uint32(value);
+  if (!target) {
+    std::cerr << std::format("rocjitsu: --option {} requires an unsigned integer\n", key);
+    return false;
+  }
+  return true;
+}
+
 bool apply_config_option(std::string_view assignment, config::LaunchOverrides &overrides) {
   const size_t equals = assignment.find('=');
   if (equals == std::string_view::npos) {
@@ -551,13 +685,39 @@ bool apply_config_option(std::string_view assignment, config::LaunchOverrides &o
 
   const std::string_view key = assignment.substr(0, equals);
   const std::string_view value = assignment.substr(equals + 1);
-  if (key == "cpu_thread_budget") {
-    overrides.cpu_thread_budget = config::parse_uint32(value);
-    if (!overrides.cpu_thread_budget) {
-      std::cerr << "rocjitsu: --option cpu_thread_budget requires an unsigned integer\n";
+  if (key == "exec_mode") {
+    if (value != "functional" && value != "clocked") {
+      std::cerr << "rocjitsu: --option exec_mode requires functional or clocked\n";
+      return false;
+    }
+    overrides.exec_mode = std::string(value);
+    return true;
+  }
+  if (key == "gpus_per_node") {
+    std::optional<uint32_t> count = config::parse_uint32(value);
+    if (!count || *count == 0) {
+      std::cerr << "rocjitsu: --option gpus_per_node requires a positive integer\n";
+      return false;
+    }
+    overrides.gpus_per_node = *count;
+    return true;
+  }
+  if (key == "num_threads")
+    return apply_unsigned_config_option(key, value, overrides.num_threads);
+  if (key == "cpu_dispatch_threads")
+    return apply_unsigned_config_option(key, value, overrides.cpu_dispatch_threads);
+  if (key == "async_helper_threads") {
+    overrides.async_helper_threads = parse_int32(value);
+    if (!overrides.async_helper_threads || *overrides.async_helper_threads < -1 ||
+        *overrides.async_helper_threads > 128) {
+      std::cerr << "rocjitsu: --option async_helper_threads requires -1 or a nonnegative integer "
+                   "up to 128\n";
       return false;
     }
     return true;
+  }
+  if (key == "cpu_thread_budget") {
+    return apply_unsigned_config_option(key, value, overrides.cpu_thread_budget);
   }
   if (key == "wait_checking") {
     overrides.wait_checking = config::parse_wait_checking(value);
@@ -569,7 +729,9 @@ bool apply_config_option(std::string_view assignment, config::LaunchOverrides &o
   }
 
   std::cerr << std::format(
-      "rocjitsu: unknown --option key '{}'; known options: cpu_thread_budget, wait_checking\n",
+      "rocjitsu: unknown --option key '{}'; known options: async_helper_threads, "
+      "cpu_dispatch_threads, cpu_thread_budget, exec_mode, gpus_per_node, num_threads, "
+      "wait_checking\n",
       key);
   return false;
 }
@@ -622,6 +784,17 @@ bool validate_workdir(const std::filesystem::path &workdir) {
     std::cerr << std::format("rocjitsu: --workdir {}: not a directory\n", workdir.string());
     return false;
   }
+  return true;
+}
+
+bool reject_dbt_guest_simulator_config_override(bool override_enabled, std::string_view option_name,
+                                                std::string_view config_field,
+                                                const config::DbtGuestConfig &dbt_guest) {
+  if (!override_enabled || !dbt_guest.enabled || dbt_guest.host.simulator_config_path.empty())
+    return false;
+  std::cerr << std::format("rocjitsu: {} cannot be combined with a dbt_guest simulator_config; "
+                           "set {} in {} instead\n",
+                           option_name, config_field, dbt_guest.host.simulator_config_path);
   return true;
 }
 
@@ -792,6 +965,7 @@ void print_usage() {
          "  rocjitsu --config foo.json --vfio-socket <path>\n"
          "                                               Serve a PCI device to a VMM\n"
          "  rocjitsu [--json] paths                      Print config/runtime paths\n"
+         "  rocjitsu [--json] emulators [-l|--long]      List emulator backend support\n"
          "\n"
          "Options:\n"
          "  --config <path>   Simulation config JSON. Cannot be combined with --profile.\n"
@@ -868,6 +1042,28 @@ int main(int argc, char *argv[]) {
       }
     }
     print_paths(json);
+    return 0;
+  }
+
+  if (command_arg < argc && std::string_view(argv[command_arg]) == "emulators") {
+    bool json = json_output;
+    bool long_output = false;
+    for (int i = command_arg + 1; i < argc; ++i) {
+      std::string_view arg(argv[i]);
+      if (arg == "--json") {
+        json = true;
+      } else if (arg == "-l" || arg == "--long") {
+        long_output = true;
+      } else if (arg == "--help" || arg == "-h") {
+        print_emulators_usage();
+        return 0;
+      } else {
+        std::cerr << std::format("rocjitsu: unknown emulators option: {}\n", arg);
+        print_emulators_usage();
+        return 1;
+      }
+    }
+    print_emulators(json, long_output);
     return 0;
   }
 
@@ -1154,6 +1350,18 @@ int main(int argc, char *argv[]) {
     std::cerr << "rocjitsu: --wait-checking cannot be combined with --attach\n";
     return 1;
   }
+  if (overrides.num_threads && attach_mode) {
+    std::cerr << "rocjitsu: --option num_threads cannot be combined with --attach\n";
+    return 1;
+  }
+  if (overrides.cpu_dispatch_threads && attach_mode) {
+    std::cerr << "rocjitsu: --option cpu_dispatch_threads cannot be combined with --attach\n";
+    return 1;
+  }
+  if (overrides.async_helper_threads && attach_mode) {
+    std::cerr << "rocjitsu: --option async_helper_threads cannot be combined with --attach\n";
+    return 1;
+  }
 
   // Applying overrides to a copy keeps them inside this launch: the
   // config the user named is never rewritten, and simulations built from other
@@ -1287,38 +1495,36 @@ int main(int argc, char *argv[]) {
   // A dbt_guest simulator_config is resolved relative to the config naming it, and
   // it, not this config, is what the host VM is built from. Moving overrides onto
   // a copy would therefore both break that path and miss the config they must reach.
-  const bool dbt_guest_delegates_to_simulator =
-      dbt_guest_mode && !dbt_guest_config.host.simulator_config_path.empty();
-  if (dbt_guest_delegates_to_simulator && overrides.exec_mode) {
-    std::cerr << std::format("rocjitsu: --exec-mode cannot be combined with a dbt_guest "
-                             "simulator_config; set exec_mode in {} instead\n",
-                             dbt_guest_config.host.simulator_config_path);
+  if (reject_dbt_guest_simulator_config_override(overrides.exec_mode.has_value(), "--exec-mode",
+                                                 "exec_mode", dbt_guest_config))
     return 1;
-  }
-  if (dbt_guest_delegates_to_simulator && overrides.gpus_per_node) {
-    std::cerr << std::format("rocjitsu: --gpus-per-node cannot be combined with a dbt_guest "
-                             "simulator_config; set vm.gpu.num_gpus in {} instead\n",
-                             dbt_guest_config.host.simulator_config_path);
+  if (reject_dbt_guest_simulator_config_override(overrides.gpus_per_node.has_value(),
+                                                 "--gpus-per-node", "vm.gpu.num_gpus",
+                                                 dbt_guest_config))
     return 1;
-  }
-  if (dbt_guest_delegates_to_simulator && !overrides.plugins.empty()) {
-    std::cerr << std::format("rocjitsu: --plugin cannot be combined with a dbt_guest "
-                             "simulator_config; set plugins in {} instead\n",
-                             dbt_guest_config.host.simulator_config_path);
+  if (reject_dbt_guest_simulator_config_override(!overrides.plugins.empty(), "--plugin", "plugins",
+                                                 dbt_guest_config))
     return 1;
-  }
-  if (dbt_guest_delegates_to_simulator && overrides.cpu_thread_budget) {
-    std::cerr << std::format("rocjitsu: --cpu-thread-budget cannot be combined with a dbt_guest "
-                             "simulator_config; set cpu_thread_budget in {} instead\n",
-                             dbt_guest_config.host.simulator_config_path);
+  if (reject_dbt_guest_simulator_config_override(overrides.cpu_thread_budget.has_value(),
+                                                 "--cpu-thread-budget", "cpu_thread_budget",
+                                                 dbt_guest_config))
     return 1;
-  }
-  if (dbt_guest_delegates_to_simulator && overrides.wait_checking) {
-    std::cerr << std::format("rocjitsu: --wait-checking cannot be combined with a dbt_guest "
-                             "simulator_config; set wait_checking in {} instead\n",
-                             dbt_guest_config.host.simulator_config_path);
+  if (reject_dbt_guest_simulator_config_override(overrides.wait_checking.has_value(),
+                                                 "--wait-checking", "wait_checking",
+                                                 dbt_guest_config))
     return 1;
-  }
+  if (reject_dbt_guest_simulator_config_override(overrides.num_threads.has_value(),
+                                                 "--option num_threads", "num_threads",
+                                                 dbt_guest_config))
+    return 1;
+  if (reject_dbt_guest_simulator_config_override(overrides.cpu_dispatch_threads.has_value(),
+                                                 "--option cpu_dispatch_threads",
+                                                 "cpu_dispatch_threads", dbt_guest_config))
+    return 1;
+  if (reject_dbt_guest_simulator_config_override(overrides.async_helper_threads.has_value(),
+                                                 "--option async_helper_threads",
+                                                 "async_helper_threads", dbt_guest_config))
+    return 1;
 
   if (!write_config_for_this_launch())
     return 1;
