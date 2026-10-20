@@ -279,8 +279,9 @@ Per-source-line counts in CSV output
 ====================================
 
 Beside each exported source file, ``--output-format csv`` writes
-``<source file name>_pc_sampling.csv``. It holds one row per line of that file,
-with the samples of every kernel and process that ran code compiled from it:
+``<source file name>_pc_sampling.csv``. It has one row for each line of that
+file, with the samples of every kernel and process that ran code compiled from
+that line:
 
 .. list-table::
    :header-rows: 1
@@ -294,17 +295,16 @@ with the samples of every kernel and process that ran code compiled from it:
    * - ``Total count``, ``Active count``, ``Stall count``, ``Stall <REASON>``
      - Sums over the instructions compiled from this line.
    * - ``Wave occupancy percent``, ``Active thread percent``
-     - Averages over the samples behind those instructions.
+     - Averages over the samples of those instructions.
    * - ``ISA references``
      - Rows of those instructions in the per-kernel ISA files, as
-       ``<kernel folder>/<ISA file>:<instruction line numbers>``, one ISA file
-       per line of the cell.
+       ``<kernel folder>/<ISA file>:<instruction line numbers>``, with one ISA
+       file per line of the cell.
 
 An instruction from inlined code counts in full toward every line of its inline
 stack. For example, an instruction that reads ``blockDim.x`` counts toward both
 the HIP header lines that implement it and the application line that reads it.
-An instruction whose source line is ``?`` adds to no line, but keeps its row in
-the per-kernel ISA file. A line no instruction came from has empty counts.
+An instruction whose source line is ``?`` adds to no source line.
 
 .. _pc-sampling-note:
 

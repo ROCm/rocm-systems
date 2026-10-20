@@ -977,7 +977,7 @@ def test_analyze_per_kernel_export_output_format(
 
     # Every exported file sits under the absolute path the CSV records for
     # it, so the paths below are the fixture's own capture-host paths. Each
-    # copy has its line counts beside it.
+    # copy has its per-source-line file beside it.
     exported_sources = {
         Path("app/projects/rocprofiler-compute/sample/vcopy.cpp"),
         Path(
