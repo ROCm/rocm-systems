@@ -85,6 +85,7 @@ TEST_F(IbvsymbolsBuildMicrotest, OptionalSymbolsMissing_LeavesThemNullAndSucceed
 TEST_F(IbvsymbolsBuildMicrotest, NoLibraryOpens_TriesBothSonamesAndFailsWithNullSlots) {
   EXPECT_EQ(buildIbvSymbols(&syms_), ncclSystemError);
   EXPECT_EQ(OpenedFiles(dl_), (std::vector<std::string>{"libibverbs.so", "libibverbs.so.1"}));
+  for (const auto& open : dl_.opens) EXPECT_TRUE(open.mode & RTLD_NOW) << open.file;
   ExpectAllSlotsNull(syms_, AllSyms());
   EXPECT_TRUE(dl_.closes.empty());
 }
