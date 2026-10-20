@@ -176,6 +176,17 @@ def rocjitsu_source_root() -> Path:
 
 
 @pytest.fixture
+def runtime_api_headers_include_root(rocjitsu_source_root: Path) -> Path:
+    source = Path(
+        os.environ.get(
+            'RJ_RUNTIME_API_HEADERS_SOURCE_DIR',
+            rocjitsu_source_root / '..' / '..' / 'runtimes' / 'api-headers',
+        )
+    )
+    return source.resolve() / 'include'
+
+
+@pytest.fixture
 def amdgpu_root(rocjitsu_source_root: Path) -> Path:
     return (
         rocjitsu_source_root
@@ -3525,6 +3536,22 @@ def test_generated_classified_alu_latches_trapsts_before_simd_return(
     assert body.count('wf.set_trapsts(wf.trapsts() | alu_causes);') == 1
 
 
+def test_generated_f32_to_f64_conversion_applies_vop3_modifiers(
+    execute_shared_path: Path,
+):
+    execute_shared = execute_shared_path.read_text()
+    body = _shared_execute_body(
+        execute_shared, 'v_cvt_f64_f32_vop3', 'v_cvt_f64_i32_vop1'
+    )
+
+    assert (
+        '!inst.inst_.abs && !inst.inst_.neg && !inst.inst_.omod && '
+        '!inst.inst_.clamp' in body
+    )
+    assert 'amdgpu::source_modifier::apply_to_float' in body
+    assert 'amdgpu::output_modifier::apply<amdgpu::fp_format::F64>' in body
+
+
 def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     execute_shared_path: Path,
     gfx1250_generated_root: Path,
@@ -3804,7 +3831,10 @@ def test_local_true16_vop3_probe_uses_scoped_dpp_binding(tmp_path):
 
 
 def test_single_isa_cdna1_sources_preprocess_with_source_includes(
-    tmp_path, monkeypatch, rocjitsu_source_root: Path
+    tmp_path,
+    monkeypatch,
+    rocjitsu_source_root: Path,
+    runtime_api_headers_include_root: Path,
 ):
     compiler = shutil.which('c++')
     if compiler is None:
@@ -3836,7 +3866,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
     include_roots = (
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
-        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'external_headers' / 'hsa_headers',
+        runtime_api_headers_include_root,
         rocjitsu_source_root / 'lib' / 'util' / 'include',
         rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
     )
@@ -3856,7 +3886,7 @@ def test_single_isa_cdna1_sources_preprocess_with_source_includes(
 
 
 def test_custom_identity_preprocesses_with_profile_handwritten_includes(
-    tmp_path, rocjitsu_source_root: Path
+    tmp_path, rocjitsu_source_root: Path, runtime_api_headers_include_root: Path
 ):
     compiler = shutil.which('c++')
     if compiler is None:
@@ -3883,7 +3913,7 @@ def test_custom_identity_preprocesses_with_profile_handwritten_includes(
     include_roots = (
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'src',
         rocjitsu_source_root / 'lib' / 'rocjitsu' / 'include',
-        rocjitsu_source_root / 'lib' / 'rocjitsu' / 'external_headers' / 'hsa_headers',
+        runtime_api_headers_include_root,
         rocjitsu_source_root / 'lib' / 'util' / 'include',
         rocjitsu_source_root / 'lib' / 'simdojo' / 'include',
     )
@@ -4826,13 +4856,35 @@ def test_generated_encoding_rendering_overrides_are_inline(
 
     if 'amdgpu::sdwa::append_' in encodings_h:
         assert (
-            '#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"' in encodings_h
+            '#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"'
+            in encodings_h
         )
     if 'amdgpu::append_gfx12_cache_policy' in encodings_h:
         assert (
             '#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_cache_flags.h"'
             in encodings_h
         )
+
+
+@pytest.mark.parametrize('split_execution_sources', [False, True])
+def test_generated_sdwa_formatting_has_direct_header_dependency(
+    tmp_path: Path,
+    split_execution_sources: bool,
+) -> None:
+    class Profile(Cdna4Profile):
+        @property
+        def split_execution_sources(self) -> bool:
+            return split_execution_sources
+
+    spec = Parser(str(_mrisa_dir() / 'amdgpu_isa_cdna4.xml'), Profile()).parse()
+    CodeGenerator(spec, str(tmp_path), derive_all_semantics(spec)).gen_encodings()
+    header = (tmp_path / 'cdna4' / 'encodings.h').read_text()
+    source = (tmp_path / 'cdna4' / 'encodings.cpp').read_text()
+    include = '#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"'
+
+    assert 'amdgpu::sdwa::append_' in header
+    assert include in header
+    assert include not in source
 
 
 @pytest.mark.parametrize('arch', ['cdna4', 'rdna4', 'gfx1250'])
@@ -4978,8 +5030,10 @@ def test_generated_sdwa_uses_shared_source_staging(
             assert 'amdgpu::sdwa::stage_source(' in generated
             assert 'sdwa_src_select(' not in generated
             assert 'std::make_unique<DppOperand>' not in generated
-        encodings = (amdgpu_generated_root / arch / 'encodings.cpp').read_text()
-        assert '#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"' in encodings
+        encodings = (amdgpu_generated_root / arch / 'encodings.h').read_text()
+        assert (
+            '#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"' in encodings
+        )
     assert checked_sdwa_files > 0
 
 

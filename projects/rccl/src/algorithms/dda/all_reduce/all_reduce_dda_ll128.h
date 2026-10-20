@@ -31,8 +31,7 @@ namespace dda::common {
 // slices, so a slot always begins on a slice boundary and the 16B wire accesses
 // stay aligned however nRanks divides the bank
 constexpr size_t ddaLL128ArSlotWords(size_t bankSize, int nRanks) {
-  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks,
-                       (size_t)kDdaLL128WireWordsPerSlice);
+  return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
 // LL128 flat all-reduce kernel. One warp owns one slice at a time; the grid is
@@ -40,14 +39,13 @@ constexpr size_t ddaLL128ArSlotWords(size_t bankSize, int nRanks) {
 //
 // Phase 1 (publish): pack this rank's slice into registers once, then push it
 // onto the wire in every peer's scratch at slot selfRank, flag word embedded.
-// Phase 2 (reduce): for each rank in order 0..nRanks-1, poll that rank's slot in
-// our own scratch and fold the arriving words into an accumulator, then unpack
-// the accumulator into recvbuff. The fixed order makes every rank round
-// identically. Flag polling supplies the cross-rank ordering, so no GPU barrier
-// is used.
+// Phase 2 (reduce): for each rank in rank order, poll that rank's slot in our own
+// scratch and fold the arriving words into an accumulator, then unpack the
+// accumulator into recvbuff. Flag polling supplies the cross-rank ordering, so
+// no GPU barrier is used.
 //
-// Self does not round-trip through scratch; its contribution is folded in at its
-// rank position straight from sendbuff. Scratch is double buffered: bank = flag & 1.
+// Self does not round-trip through scratch; its contribution is packed straight
+// from sendbuff. Scratch is double buffered: bank = flag & 1.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
