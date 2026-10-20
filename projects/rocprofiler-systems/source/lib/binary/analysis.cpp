@@ -290,8 +290,8 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
         return std::optional<tim::unwind::processed_entry>{};
     }
 
-    auto _v                                           = tim::unwind::processed_entry{};
-    _v.address                                        = _entry.address();
+    auto new_entry                                           = tim::unwind::processed_entry{};
+    new_entry.address                                        = _entry.address();
     static constexpr std::size_t k_proc_name_buf_size = 4096;
     // Workaround for a regression introduced in libunwind 1.6.x: a null-pointer
     // dereference inside _ULx86_64_get_proc_name (via __sigaction at offset 0x38)
@@ -308,40 +308,40 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
         if(::dladdr(reinterpret_cast<const void*>(_addr), &dli) != 0 &&
            dli.dli_sname != nullptr)
         {
-            _v.name   = dli.dli_sname;
-            _v.offset = _addr - reinterpret_cast<uintptr_t>(dli.dli_saddr);
-            _v.error  = 0;
+            new_entry.name   = dli.dli_sname;
+            new_entry.offset = _addr - reinterpret_cast<uintptr_t>(dli.dli_saddr);
+            new_entry.error  = 0;
         }
         else
         {
-            _v.error = 1;  // non-zero: address not resolvable via dladdr
+            new_entry.error = 1;  // non-zero: address not resolvable via dladdr
         }
     }
 #else
-    _v.name = _entry.template get_name<k_proc_name_buf_size, true>(*_context_p,
-                                                                   &_v.offset, &_v.error);
+    new_entry.name = _entry.template get_name<k_proc_name_buf_size, true>(*_context_p,
+                                                                   &new_entry.offset, &new_entry.error);
 #endif
 
-    tim::unwind::processed_entry::construct(_v, &_cache_p->files);
+    tim::unwind::processed_entry::construct(new_entry, &_cache_p->files);
 
-    if(_v.error != 0 && _v.lineinfo)
+    if(new_entry.error != 0 && new_entry.lineinfo)
     {
-        auto const _lineinfo = _v.lineinfo.get();
+        auto const _lineinfo = new_entry.lineinfo.get();
         if(_lineinfo)
         {
-            _v.name  = _lineinfo.name;
-            _v.error = 0;
+            new_entry.name  = _lineinfo.name;
+            new_entry.error = 0;
         }
     }
-    else if(_v.info && _v.info.symbol)
+    else if(new_entry.info && new_entry.info.symbol)
     {
-        _v.name  = _v.info.symbol.name;
-        _v.error = 0;
+        new_entry.name  = new_entry.info.symbol.name;
+        new_entry.error = 0;
     }
 
-    _cache_p->entries.emplace(_entry, _v);
+    _cache_p->entries.emplace(_entry, new_entry);
 
-    return (_v.error == 0) ? std::optional<tim::unwind::processed_entry>{ _v }
+    return (new_entry.error == 0) ? std::optional<tim::unwind::processed_entry>{ new_entry }
                            : std::optional<tim::unwind::processed_entry>{};
 }
 
