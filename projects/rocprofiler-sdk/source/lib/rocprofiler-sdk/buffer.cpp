@@ -305,10 +305,10 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
     auto& buff = CHECK_NOTNULL(rocprofiler::buffer::get_buffers())
                      ->at(opt_buff_id->handle - rocprofiler::buffer::get_buffer_offset());
 
-    // allocate the buffers. if it is lossless, we allocate a second buffer to store data while
-    // other buffer is being flushed
-    buff->buffers.front().allocate(size);
-    if(action == ROCPROFILER_BUFFER_POLICY_LOSSLESS) buff->buffers.back().allocate(size);
+    // Flushing rotates between both buffers regardless of policy, including explicit
+    // and watermark-triggered flushes in discard mode.
+    for(auto& itr : buff->buffers)
+        itr.allocate(size);
 
     buff->watermark     = watermark;
     buff->policy        = action;
