@@ -33,6 +33,8 @@ uint64_t HipProfilerDisableExt();
 
 // Called from each *Layer wrapper.
 hipApiRecordExt* HipGetActiveRecordExt(uint32_t api_id);
+// True while hipProfilerEnableExt() is in effect or GPU_CLR_PROFILE_OUTPUT is set.
+bool HipProfilerActiveExt();
 
 // Declared in hip_clr_dispatch_wrappers.cpp; called by Enable/Disable/Init
 struct HipDispatchTable;
