@@ -39,6 +39,9 @@ import signal
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -80,7 +83,7 @@ OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 # The maxtext family needs a second image: its A/B baseline cannot be the stock
 # registry tag, which carries no Primus. See stage_maxtext_baseline().
 MAXTEXT_BASELINE_DOCKERFILE = "Dockerfile.maxtext-baseline"
-# Likewise for sglang-disagg, whose baseline is MAD's Dockerfile built here.
+# Likewise for sglang-disagg, whose baseline is MAD's Dockerfile.
 SGLANG_BASELINE_DOCKERFILE = "Dockerfile.sglang-baseline"
 SGLANG_MAD_DOCKERFILE = "docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile"
 # Families whose baseline is built here rather than pulled as the stock tag.
@@ -286,8 +289,8 @@ WORKLOAD_CONFIGS = {
     # left to RCCL (MOE_A2A_BACKEND=none) rather than MoRI, so expert traffic
     # is what the candidate library carries.
     #
-    # Both A/B images are MAD's sglang Dockerfile built here; see
-    # build_sglang_baseline_image().
+    # Both A/B images are MAD's sglang Dockerfile; see
+    # stage_sglang_baseline().
     "deepseek-r1-sglang-disagg": {
         "type": "inference",
         "family": "sglang-disagg",
@@ -1102,53 +1105,83 @@ def _stage_primus_context(ctx_dir: Path, primus_dir: Path) -> None:
         raise RuntimeError(f"failed to stage Primus from {primus_dir}")
 
 
+# What `docker pull` accepts, so the digest is the one a pull by tag would
+# record in RepoDigests: the index for a multi-arch tag, else the manifest.
+_MANIFEST_MEDIA_TYPES = ", ".join((
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+))
+
+
+def registry_digest(image: str, timeout: int = 60) -> str:
+    """*image* pinned by digest as its registry serves it now, or "" on failure.
+
+    Asks the registry for the manifest digest and downloads no layer: the
+    runner host's disk is shared by every runner on it and has no room for a
+    base image (the sgl-dev one is 27 GB compressed), and nothing there would
+    use it.
+    """
+    if "@sha256:" in image:
+        return image
+    name, _, tag = image.rpartition(":")
+    if not name or "/" in tag:
+        name, tag = image, "latest"
+    first, _, rest = name.partition("/")
+    if rest and ("." in first or ":" in first or first == "localhost"):
+        host, path = first, rest
+    else:
+        host, path = "registry-1.docker.io", name if rest else f"library/{name}"
+    url = f"https://{host}/v2/{path}/manifests/{tag}"
+    headers = {"Accept": _MANIFEST_MEDIA_TYPES}
+    try:
+        try:
+            req = urllib.request.Request(url, headers=headers, method="HEAD")
+            resp = urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            challenge = exc.headers.get("WWW-Authenticate", "")
+            if exc.code != 401 or not challenge.startswith("Bearer "):
+                raise
+            params = dict(re.findall(r'(\w+)="([^"]*)"', challenge))
+            realm = params.pop("realm")
+            params.setdefault("scope", f"repository:{path}:pull")
+            token_url = f"{realm}?{urllib.parse.urlencode(params)}"
+            with urllib.request.urlopen(token_url, timeout=timeout) as tok:
+                body = json.load(tok)
+            headers["Authorization"] = (
+                f"Bearer {body.get('token') or body.get('access_token')}"
+            )
+            req = urllib.request.Request(url, headers=headers, method="HEAD")
+            resp = urllib.request.urlopen(req, timeout=timeout)
+        with resp:
+            digest = resp.headers.get("Docker-Content-Digest", "")
+    except (OSError, ValueError, KeyError) as exc:
+        log.warning("Could not get the registry digest of %s: %s", image, exc)
+        return ""
+    return f"{name}@{digest}" if digest.startswith("sha256:") else ""
+
+
 def resolve_base_digest(base_image: str) -> str:
-    """Return *base_image* pinned by digest, without pulling it.
+    """*base_image* pinned by digest, for both A/B Dockerfiles.
 
     Both A/B images must come from the same base, and a tag cannot promise
-    that: the baseline and the candidate are separate `docker build`
-    invocations, and `rocm/jax-training:maxtext-v26.6` is mutable. Adding
-    `--pull` to both would only narrow the window, not close it -- a push
-    between the two builds still splits the pair. A digest is immutable, so
+    that: each phase builds its own image on the compute nodes, and
+    `rocm/jax-training:maxtext-v26.6` is mutable. A digest is immutable, so
     resolving it once and writing it into both Dockerfiles closes it.
 
-    The query goes to the registry, not to a local copy: this host builds no
-    images and has no use for a multi-GB base, and every runner on it shares
-    one Docker disk. The nodes do the pulling, once each, as part of their
-    own build.
-
-    Falls back to the tag when the digest cannot be resolved -- a locally
-    built base has nothing remote to pin to, and an unreachable registry is
-    not worth failing the run over this far ahead of the allocation.
+    Falls back to the tag when the registry cannot tell.
     """
-    repo = base_image.split("@", 1)[0].rsplit(":", 1)[0]
-    probes = (
-        ["docker", "buildx", "imagetools", "inspect",
-         "--format", "{{.Manifest.Digest}}", base_image],
-        # Already-pulled bases still resolve, so a host that happens to carry
-        # one does not depend on the registry being reachable.
-        ["docker", "image", "inspect",
-         "--format", "{{index .RepoDigests 0}}", base_image],
-    )
-    for probe in probes:
-        try:
-            result = subprocess.run(probe, capture_output=True, text=True, timeout=120)
-        except (OSError, subprocess.SubprocessError) as exc:
-            log.debug("%s failed: %s", probe[1], exc)
-            continue
-        out = result.stdout.strip()
-        if result.returncode != 0 or "sha256:" not in out:
-            continue
-        digest = out if "@sha256:" in out else f"{repo}@{out}"
-        log.info("Base pinned for both A/B images: %s", digest)
-        return digest
-
-    log.warning(
-        "Could not resolve a digest for %s; both A/B images will use the tag. "
-        "They are built minutes apart, so a push in between would split the pair.",
-        base_image,
-    )
-    return base_image
+    digest = registry_digest(base_image)
+    if not digest:
+        log.warning(
+            "No digest for %s; both A/B images will use the tag, so a push "
+            "between the two phases' builds would split the pair.",
+            base_image,
+        )
+        return base_image
+    log.info("Base pinned for both A/B images: %s", digest)
+    return digest
 
 
 def base_identity(from_ref: str) -> str:
@@ -1175,11 +1208,6 @@ def stage_maxtext_baseline(
 ) -> str:
     """Stage the A/B baseline for the MaxText family: Primus, stock RCCL.
 
-    Writes the Dockerfile and its build context under ``overlay_ctx`` and
-    returns the tag, exactly as stage_rccl_overlay() does for the candidate.
-    Nothing is built here: the baseline manifest advertises this Dockerfile,
-    so node 0 of the allocation builds it and the others load it.
-
     The Megatron workloads use the stock registry image as their baseline, but
     that cannot work here: ``rocm/jax-training:maxtext-*`` ships MaxText and no
     Primus, so ``scripts/jax-maxtext/run.sh`` would not find ``primus-cli`` and
@@ -1189,6 +1217,9 @@ def stage_maxtext_baseline(
     That makes the pair *tighter* than the Megatron A/B rather than looser: the
     two images differ by the librccl swap alone, which is exactly the variable
     the ratio is supposed to isolate.
+
+    Only the Dockerfile and its context are written here; node 0 of the
+    allocation builds the image and the other nodes load it.
     """
     ctx_dir = work_dir / OVERLAY_CTX
     ctx_dir.mkdir(exist_ok=True)
@@ -1197,13 +1228,12 @@ def stage_maxtext_baseline(
     dockerfile = ctx_dir / MAXTEXT_BASELINE_DOCKERFILE
     dockerfile.write_text(f"FROM {from_ref}\n\n{MAXTEXT_PRIMUS_PAYLOAD}")
 
-    # Tagged per A/B run, with the same token the candidate carries: the nodes
-    # rebuild on a tag they cannot find, and a tag shared with an earlier run
-    # would let one of them skip that build and pair a fresh candidate with a
-    # stale baseline -- breaking the one invariant this pair exists to hold,
-    # that the two differ by the RCCL swap alone.
+    # A per-run tag, with the same token the candidate uses: a node holding an
+    # image under a reused tag would skip the build and could pair a fresh
+    # candidate with a stale baseline, breaking the one invariant this pair
+    # exists to hold -- that the two differ by the RCCL swap alone.
     tag = f"{base_image}-primus-{PRIMUS_REF}-{run_token}-{base_identity(from_ref)}"
-    log.info("MaxText baseline staged for the nodes to build: %s", tag)
+    log.info("MaxText baseline (Primus, stock RCCL), built on the nodes: %s", tag)
     return tag
 
 
@@ -1232,16 +1262,16 @@ def sglang_recipe(mad_dir: Path, from_ref: str) -> str:
     return f"{pinned}\n{SGLANG_SWAP_TOOLS}"
 
 
-def build_sglang_baseline_image(
+def stage_sglang_baseline(
     base_image: str,
     work_dir: Path,
     run_token: str,
     from_ref: str,
 ) -> str:
-    """Build the A/B baseline for sglang-disagg: MAD's image, stock RCCL.
+    """Stage the A/B baseline for sglang-disagg: MAD's image, stock RCCL.
 
     The base alone is not what MAD runs: its Dockerfile adds rdma-core 63,
-    without which queue-pair creation fails on Thor2. Built every run and
+    without which queue-pair creation fails on Thor2. Built on the nodes and
     tagged like the MaxText baseline, for the same reasons.
     """
     ctx_dir = work_dir / OVERLAY_CTX
@@ -1250,12 +1280,7 @@ def build_sglang_baseline_image(
     dockerfile.write_text(sglang_recipe(work_dir / "MAD", from_ref))
 
     tag = f"{base_image}-mad-{MAD_REF[:8]}-{run_token}-{base_identity(from_ref)}"
-    log.info("Building sglang baseline image (MAD recipe, stock RCCL): %s", tag)
-    subprocess.run(
-        ["docker", "build", "-t", tag, "-f", str(dockerfile), str(ctx_dir)],
-        check=True,
-    )
-    log.info("sglang baseline image built: %s", tag)
+    log.info("sglang baseline (MAD recipe, stock RCCL), built on the nodes: %s", tag)
     return tag
 
 
@@ -1741,21 +1766,6 @@ REPRO_MANIFESTS = {
 THEROCK_ARTIFACT_BUCKET = "therock-ci-artifacts-external"
 
 
-def local_repo_digest(image: str) -> str:
-    """*image* pinned by digest as the local daemon knows it, or "" if it cannot tell.
-
-    Never pulls: this only records what the head node built from.
-    """
-    if "@sha256:" in image:
-        return image
-    result = subprocess.run(
-        ["docker", "image", "inspect", "--format", "{{index .RepoDigests 0}}", image],
-        capture_output=True, text=True,
-    )
-    digest = result.stdout.strip()
-    return digest if result.returncode == 0 and "@sha256:" in digest else ""
-
-
 def repro_manifest(manifest: dict, work_dir: Path) -> dict:
     """*manifest* with its build paths made relative to the bundle root.
 
@@ -1902,8 +1912,9 @@ the refs, image digests and cluster settings. The run's own numbers are in the
   mounts them.
 - To shorten a Megatron run, add `"PRIMUS_TRAIN_ITERS": "15"` to both
   `context.docker_env_vars` and `deployment_config.env_vars`.
-- `BASE_DIGEST` is the base the CI head node built from. The nodes build from
-  `BASE_IMAGE` by tag; if the base has moved since, the image differs.
+- `BASE_DIGEST` is what `BASE_IMAGE` pointed to when CI ran. MaxText and
+  sglang-disagg images build from that digest; Megatron ones from `BASE_IMAGE`
+  by tag, so if the base has moved since, the image differs.
 """
 
 
@@ -2886,7 +2897,7 @@ def main() -> None:
         )
         baseline_pull_only = False
     elif family == "sglang-disagg":
-        baseline_image = build_sglang_baseline_image(
+        baseline_image = stage_sglang_baseline(
             workload_config["base_image"], work_dir,
             run_token=rccl_commit,
             from_ref=base_ref or workload_config["base_image"],
@@ -2917,11 +2928,11 @@ def main() -> None:
             ),
             run_dir=run_dir,
             pull_only=pull_only,
-            # A maxtext baseline is a locally built image, so its manifest is
-            # on the build-capable path and must advertise ITS OWN dockerfile.
-            # Left at the default it would hand a node the candidate recipe
-            # and have it rebuild the swapped image under the baseline tag --
-            # an A/B comparing the CI RCCL against itself.
+            # A maxtext baseline is built on the nodes, so its manifest must
+            # advertise ITS OWN dockerfile. Left at the default it would hand
+            # a node the candidate recipe and have it build the swapped image
+            # under the baseline tag -- an A/B comparing the CI RCCL against
+            # itself.
             dockerfile_name=(
                 LOCAL_BASELINE_DOCKERFILES.get(family, OVERLAY_DOCKERFILE)
                 if phase == BASELINE
@@ -2940,7 +2951,7 @@ def main() -> None:
             work_dir, phase_dirs, args.workload, workload_config, cluster_config,
             args.nodes, rccl_fingerprint,
             images={BASELINE: baseline_image, CANDIDATE: overlay_image},
-            base_digest=base_ref or local_repo_digest(workload_config["base_image"]),
+            base_digest=base_ref or registry_digest(workload_config["base_image"]),
         )
     except Exception:
         log.exception("Could not write the repro bundle; continuing without it")
