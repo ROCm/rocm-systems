@@ -52,7 +52,7 @@ def arch_chain(arch: str) -> list[str]:
     Returns:
         The chain of canonical archs, ending with arch itself.
     """
-    config_arch = canonical_config_arch(arch) or arch
+    config_arch = canonical_config_arch(arch)
     if config_arch not in METRIC_LIBRARY_PARENT_ARCH:
         raise FileNotFoundError(f"No metric library is defined for arch {arch}")
     chain = [config_arch]
@@ -96,7 +96,7 @@ def load_metric_library(metric_dir: Path, arch: str) -> "MetricLibrary":
     Returns:
         The arch's metrics and built-in variables.
     """
-    key = (str(Path(metric_dir).resolve()), canonical_config_arch(arch) or arch)
+    key = (str(Path(metric_dir).resolve()), canonical_config_arch(arch))
     if key not in MetricLibrary._cache:
         MetricLibrary._cache[key] = _read_metric_library(metric_dir, arch)
     return MetricLibrary._cache[key]

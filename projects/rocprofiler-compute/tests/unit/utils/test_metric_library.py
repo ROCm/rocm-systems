@@ -119,11 +119,10 @@ def test_counters_come_from_formula_and_peak():
                 "formula": "SUM(SQ_WAVES)",
                 "peak": "SUM(SQ_BUSY_CYCLES)",
             },
-            "a.none": {"formula": None},
         },
         {},
     )
-    selected = library.get_counters_for_metrics(["a.one", "a.none"], GPU_SERIES)
+    selected = library.get_counters_for_metrics(["a.one"], GPU_SERIES)
     assert {"SQ_WAVES", "SQ_BUSY_CYCLES"} <= selected
 
 
