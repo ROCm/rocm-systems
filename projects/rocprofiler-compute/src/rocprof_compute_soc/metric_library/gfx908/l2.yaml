@@ -14,7 +14,7 @@ l2.atomic_req:
     The total number of atomic requests (with and without return) to the L2 from all
     clients.
 l2.bw:
-  name: Bandwidth
+  name: L2 Cache BW
   formula: 64 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
