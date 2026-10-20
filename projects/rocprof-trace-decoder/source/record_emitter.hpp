@@ -90,13 +90,6 @@ public:
         return status_;
     }
 
-    static rocprofiler_thread_trace_decoder_status_t callback(
-        rocprofiler_thread_trace_decoder_record_type_t type, void* data, uint64_t count, void* userdata
-    )
-    {
-        return static_cast<RecordEmitter*>(userdata)->emit(type, data, count);
-    }
-
 private:
     rocprof_trace_decoder_trace_callback_t callback_ = nullptr;
     void* userdata_ = nullptr;

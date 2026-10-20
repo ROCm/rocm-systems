@@ -55,7 +55,7 @@ typedef enum
  * @brief Callback for rocprofiler to return traces back to rocprofiler.
  *
  * Return SUCCESS to continue delivery. The first non-success status stops
- * further callbacks and is returned by the parse or quick-scan call.
+ * further callbacks and is returned by the parse call.
  * Record pointers and referenced storage are valid during the callback. Copy
  * data that must outlive it unless the record type documents a longer lifetime.
  *
@@ -301,7 +301,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
  * delivery. Semantic MARKER decoding is opt-in. A non-NULL filter replaces the
  * enabled set; an empty set disables all callbacks. The decoder copies the
  * requests, so the caller may release them after this call returns. The filter
- * applies to subsequent parse and quick-scan calls on this handle.
+ * applies to subsequent parse calls on this handle; quick scan ignores it.
  *
  * Initialize the filter and each request's size to sizeof its structure. Larger
  * structures are accepted and unknown trailing fields are ignored. Array entries
