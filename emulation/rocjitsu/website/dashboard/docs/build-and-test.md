@@ -77,7 +77,7 @@ Use a Python 3.12 environment with Bash, Git, jq, and coreutils (including
 `realpath`) on `PATH`. From `emulation/rocjitsu/website/dashboard`:
 
 ```bash
-python -m pip install -r scripts/dashboard-data/tests/requirements.txt
+python -m pip install -r scripts/dashboard-data/requirements-test.txt
 python -m pytest scripts/dashboard-data/tests
 ```
 

@@ -105,6 +105,8 @@ def convert(
 @pytest.fixture
 def publication_catalog():
     return {
+        # Independently provisioned for raw_run: default- plus SHA256 of the
+        # catalog body without id, using the converter's JSON encoding.
         'id': 'default-67daf36efa1cd84a9f2beb1f0fa30860edbecf572f2b733c86642cdbbabea8cd',
         'tests': [
             {
@@ -506,8 +508,11 @@ def test_benchmark_artifact_contract():
     )
 
 
-@pytest.mark.parametrize('symlinked', [False, True])
-def test_completion_marker_output_path(tmp_path, symlinked):
+@pytest.mark.parametrize(
+    'symlinked,artifact,expected_exit',
+    [(False, 'run.json', 0), (True, 'run.json', 0), (False, 'wrong.json', 1)],
+)
+def test_completion_marker_output_path(tmp_path, symlinked, artifact, expected_exit):
     workspace = tmp_path / 'real workspace'
     results = workspace / 'results'
     results.mkdir(parents=True)
@@ -520,7 +525,7 @@ def test_completion_marker_output_path(tmp_path, symlinked):
         selected_results = results
     # Match the pinned runner's resolved artifact path without running a runner.
     (tmp_path / 'runner-output.txt').write_text(
-        f'run failed: {selected_results.resolve()}/run.json\n'
+        f'run failed: {selected_results.resolve()}/{artifact}\n'
     )
     body = next(
         step['run']
@@ -539,7 +544,7 @@ def test_completion_marker_output_path(tmp_path, symlinked):
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == expected_exit, result.stderr
 
 
 def test_workflow_shell_and_source_contracts():
