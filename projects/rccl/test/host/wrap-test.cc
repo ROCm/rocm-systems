@@ -4335,6 +4335,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotStaysWhenLocalSymReg) {
           if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
           return deft;
         };
+        g_ceImplemented = true;
         ScopedHook ceAvailable(
             g_ceAvailable,
             [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
@@ -4480,8 +4481,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_ForceUnregisteredNeedsCeDriver) {
 // twoShotWindow tests: verify rcclSelectAllReduce enforces the [min, max] size window.
 // gfx950 has ceNonRegMax[AllReduce]=256MiB and ceNonRegMin[AllReduce]=0 in its arch table.
 // Env params RCCL_CE_AR_2SHOT_MAX_BYTES / RCCL_CE_AR_2SHOT_MIN_BYTES override the table.
-// RCCL_CE_ALLREDUCE=1 and RCCL_FORCE_CE_ALLREDUCE=1 are set so eligibility gates pass;
-// only the size window check should determine whether RCCL_CE_2SHOT is selected.
+// RCCL_CE_ALLREDUCE=1, FORCE, and g_ceImplemented pass the driver gate. bigSize caches a spanning LSA team.
+// Only the size window should determine whether RCCL_CE_2SHOT is selected.
 
 // (a) Table-driven max: message exceeds gfx950 table max (256 MiB). No env override.
 //     count = 256*1024*1024/4 + 8 floats => totalBytes = 256 MiB + 32 bytes > 256 MiB.
@@ -4494,6 +4495,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveTableMax)
           if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
           return deft;  // no size env override -- local table value is used
         };
+        g_ceImplemented = true;
         ScopedHook symRequested(g_isSymmetricKernelRequested,
                                [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                   size_t, const void*, void*, bool) { return false; });
@@ -4501,6 +4503,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveTableMax)
         comm->nRanks           = 8;
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -4535,6 +4539,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveEnvMax) {
           if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MAX_BYTES") == 0) return kCap;
           return deft;
         };
+        g_ceImplemented = true;
         ScopedHook symRequested(g_isSymmetricKernelRequested,
                                [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                   size_t, const void*, void*, bool) { return false; });
@@ -4542,6 +4547,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveEnvMax) {
         comm->nRanks           = 8;
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -4567,6 +4574,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMin) {
           if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MIN_BYTES") == 0) return kMin;
           return deft;
         };
+        g_ceImplemented = true;
         ScopedHook symRequested(g_isSymmetricKernelRequested,
                                [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                   size_t, const void*, void*, bool) { return false; });
@@ -4574,6 +4582,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMin) {
         comm->nRanks           = 8;
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -4601,6 +4611,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenWithinEnvWindow) 
           if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MAX_BYTES") == 0) return kMax;
           return deft;
         };
+        g_ceImplemented = true;
         ScopedHook symRequested(g_isSymmetricKernelRequested,
                                [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                   size_t, const void*, void*, bool) { return false; });
@@ -4608,6 +4619,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenWithinEnvWindow) 
         comm->nRanks           = 8;
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
         // RCCL_FORCE_CE_ALLREDUCE=1 (above) stands in for symReg=true since null
         // send/recv pointers mean ncclCeAvailable returns false in unit test context.
         // CTAPolicy=ZERO satisfies rcclUseCeAr2Shot; force satisfies ceAllReduceAllowed.
@@ -4727,6 +4740,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMinBou
           if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MIN_BYTES") == 0) return kMin;
           return deft;
         };
+        g_ceImplemented = true;
         ScopedHook symRequested(g_isSymmetricKernelRequested,
                                [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                   size_t, const void*, void*, bool) { return false; });
@@ -4734,6 +4748,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenBelowEnvMinBou
         comm->nRanks           = 4;
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
@@ -4760,6 +4776,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenAtEnvMinBound) {
           if (std::strcmp(env, "RCCL_CE_AR_2SHOT_MIN_BYTES") == 0) return kMin;
           return deft;
         };
+        g_ceImplemented = true;
         ScopedHook symRequested(g_isSymmetricKernelRequested,
                                [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                   size_t, const void*, void*, bool) { return false; });
@@ -4767,6 +4784,8 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenAtEnvMinBound) {
         comm->nRanks           = 4;
         comm->nNodes           = 1;
         comm->symmetricSupport = 1;
+        comm->devrState.bigSize = 1;
+        comm->devrState.lsaSize = comm->nRanks;
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
