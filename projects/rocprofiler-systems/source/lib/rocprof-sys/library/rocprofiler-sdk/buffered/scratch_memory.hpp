@@ -14,7 +14,6 @@
 #include <fmt/format.h>
 
 #include <cstdint>
-#include <optional>
 #include <stdexcept>
 
 namespace rocprofsys::domains::buffered
@@ -89,16 +88,6 @@ on_scratch_memory(typename SdkBackend::scratch_memory_record_t* record,
         SdkBackend::get_scratch_memory_allocation_size(*record),
         record->correlation_id.internal,
         SdkBackend::get_parent_stack_id(record->correlation_id), stream_id });
-
-    if(Externals::get_use_timemory())
-    {
-        if(const auto sequent_tid =
-               Externals::get_thread_info_sequent_tid(record->thread_id))
-        {
-            Externals::write_timemory_bundle(
-                name, *sequent_tid, record->end_timestamp - record->start_timestamp);
-        }
-    }
 }
 
 template <policies::domain_service::backend   SdkBackend,

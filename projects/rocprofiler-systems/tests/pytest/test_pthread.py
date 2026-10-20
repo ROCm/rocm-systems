@@ -60,9 +60,9 @@ class TestPthreads(RocprofsysTest):
         r"\|_pthread_mutex_unlock .* 1000"
     ]
     OVERHEAD_LOCKS_TIMEMORY_PASS_REGEX = [
-        r"start_thread (.*) 4 (.*) "
-        r"pthread_mutex_lock (.*) 4000 (.*) "
-        r"pthread_mutex_unlock (.*) 4000"
+        r"start_thread (.*) 1 (.*) "
+        r"pthread_mutex_lock (.*) 1000 (.*) "
+        r"pthread_mutex_unlock (.*) 1000"
     ]
 
     TIMEMORY_BINARY_REWRITE_ARGS = [

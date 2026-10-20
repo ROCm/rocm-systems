@@ -29,8 +29,7 @@ namespace rocprofsys
 {
 // bundle of components used in instrumentation
 using instrumentation_bundle_t =
-    tim::component_bundle<project::rocprofsys, comp::wall_clock*,
-                          comp::user_global_bundle*>;
+    tim::component_bundle<project::rocprofsys, comp::user_global_bundle*>;
 
 // allocator for instrumentation_bundle_t
 using bundle_allocator_t = tim::data::ring_buffer_allocator<instrumentation_bundle_t>;
