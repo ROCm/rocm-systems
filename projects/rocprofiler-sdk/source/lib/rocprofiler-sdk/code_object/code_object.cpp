@@ -1564,7 +1564,6 @@ iterate_hsa_executables()
                 auto _func =
                     reinterpret_cast<decltype(rocprofiler_register_iterate_hsa_executables)*>(_sym);
 
-                ROCP_WARNING << "Invoking rocprofiler_register_iterate_hsa_executables...";
                 _func(_executables_cb, &_executables);
             }
         }
