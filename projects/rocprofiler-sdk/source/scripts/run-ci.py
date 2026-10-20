@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -294,6 +294,9 @@ def generate_dashboard_script(args):
     SOURCE_DIR = os.path.realpath(args.source_dir)
     BINARY_DIR = os.path.realpath(args.binary_dir)
     MEMCHECK = 1 if args.memcheck is not None else 0
+    PYTHON_CMD = sys.executable
+    GCOV_CMD = which("gcov", require=CODECOV > 0)
+    GCDA_TOOL = os.path.join(os.path.dirname(os.path.realpath(__file__)), "gcda-tool.py")
     SUBMIT = 0 if args.disable_cdash else 1
     STRICT_SUBMIT = 1 if args.require_cdash_submission else 0
     ARGN = "${ARGN}"
@@ -374,6 +377,9 @@ def generate_dashboard_script(args):
         endif()
 
         if("{CODECOV}" GREATER 0 AND "COVERAGE" IN_LIST STAGES)
+            execute_process(
+                COMMAND {PYTHON_CMD} {GCDA_TOOL} check {BINARY_DIR} --gcov {GCOV_CMD}
+                COMMAND_ERROR_IS_FATAL ANY)
             ctest_coverage(
                 BUILD "{BINARY_DIR}"
                 RETURN_VALUE _coverage_ret
