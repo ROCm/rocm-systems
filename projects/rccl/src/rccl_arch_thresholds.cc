@@ -250,7 +250,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     512ULL*1024,         // [2] AllGather       -- LL beats LL128 1.4-1.6x to 512K at 8 ranks; the
                          //                        crossover falls with rank count (512K at 16, ~128K
                          //                        at 32), so this is a total, not rank-scaled (DPX)
-    16ULL*1024*1024,     // [3] ReduceScatter
+    1ULL*1024*1024,      // [3] ReduceScatter   -- below 8 ranks: LL through 256 KiB/rank at 4 GPUs.
+                         //                        LL128 is 1.5-1.9x from 512 KiB/rank (DPX)
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -263,7 +264,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     64ULL*1024*1024,     // [2] AllGather       -- Ring beats it 1.1-1.4x at 128M-256M on 8/16/32 (DPX)
-    2ULL*1024*1024,      // [3] ReduceScatter
+    4ULL*1024*1024,      // [3] ReduceScatter   -- below 8 ranks: LL128 through 1 MiB/rank at 4 GPUs.
+                         //                        VMM still covers 8-16 MiB total (DPX)
     256ULL*1024*1024,    // [4] AllReduce       -- two-shot beats Ring to 256M (AICOMRCCL-2875); its scratch
                          //                        slot reaches 256M from 32 ranks, ~128M at 2-8, 240M at 16
     0,                   // [5] SendRecv        -- not used
