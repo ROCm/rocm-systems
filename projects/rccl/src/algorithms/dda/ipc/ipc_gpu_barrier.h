@@ -122,7 +122,7 @@ public:
     if constexpr (hasPreviousMemAccess) {
       __syncthreads();
     }
-    if (threadIdx.x < NRANKS) {
+    if (threadIdx.x < NRANKS && !aborted_) {
       auto peerRank = threadIdx.x;
       bool signaled = false;
       if constexpr (fenceType == MemFenceType::ACQUIRE_ONLY) {
@@ -131,13 +131,15 @@ public:
         signaled = allMailboxes_[peerRank].setFlagWithMemFence(selfRank_, blockIdx.x, abortSignal_);
       }
 
+      bool arrived = false;
       if (signaled) {
         if constexpr (fenceType == MemFenceType::RELEASE_ONLY) {
-          (void)allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x, abortSignal_);
+          arrived = allMailboxes_[selfRank_].waitFlagNoMemFence(peerRank, blockIdx.x, abortSignal_);
         } else {
-          (void)allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, abortSignal_);
+          arrived = allMailboxes_[selfRank_].waitFlagWithMemFence(peerRank, blockIdx.x, abortSignal_);
         }
       }
+      aborted_ = __any(!arrived);
     }
     if constexpr (hasSubsequentMemAccess) {
       __syncthreads();
@@ -149,6 +151,11 @@ private:
   int selfRank_{-1};
   std::array<DeviceMailbox, NRANKS> allMailboxes_;
   DdaAbortSignal abortSignal_{};
+  // Sticky for the rest of the kernel and uniform across the signaling lanes,
+  // which all sit in wave 0: once any of them gives up a barrier on abort, the
+  // block signals no later barrier, so a late peer cannot pair its earlier flag
+  // with this block's next one and read data this rank never finished producing.
+  bool aborted_{false};
 
   __host__ IpcGpuBarrier(int nRanks, int nBlocks, int selfRank, const std::array<DeviceMailbox, NRANKS>& allMailboxes,
                          DdaAbortSignal abortSignal);

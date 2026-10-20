@@ -50,6 +50,7 @@ struct BarrierState {
   int nRanks;
   FlagType** peerFlags;
   dda::common::DdaAbortSignal abortSignal;
+  bool aborted;
 };
 static_assert(sizeof(BarrierState) == sizeof(FabricGpuBarrier), "FabricGpuBarrier layout changed");
 static_assert(std::is_standard_layout<FabricGpuBarrier>::value, "FabricGpuBarrier layout is no longer fixed");

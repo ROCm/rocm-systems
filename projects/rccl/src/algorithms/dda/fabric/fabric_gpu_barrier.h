@@ -71,7 +71,8 @@ public:
     // signaled or waited on, hanging the barrier. Every rank walks peers in the
     // same increasing order, so the interleaved signal/wait cannot deadlock.
     FlagType* selfBuf = peerFlags_[selfRank_];
-    for (int peerRank = threadIdx.x; peerRank < nRanks_; peerRank += blockDim.x) {
+    bool gaveUp = false;
+    for (int peerRank = threadIdx.x; !aborted_ && peerRank < nRanks_; peerRank += blockDim.x) {
       FlagType* peerBuf = peerFlags_[peerRank];
       bool signaled = false;
 
@@ -81,7 +82,10 @@ public:
       } else {
         signaled = putFlag<std::memory_order_release>(peerBuf + getFlagIdx(selfRank_, blockIdx.x), abortSignal_);
       }
-      if (!signaled) break;
+      if (!signaled) {
+        gaveUp = true;
+        break;
+      }
 
       // Wait for the peer's signal in this rank's own buffer.
       bool arrived = false;
@@ -90,10 +94,23 @@ public:
       } else {
         arrived = waitFlag<std::memory_order_acquire>(selfBuf + getFlagIdx(peerRank, blockIdx.x), abortSignal_);
       }
-      if (!arrived) break;
+      if (!arrived) {
+        gaveUp = true;
+        break;
+      }
+    }
+    // With nRanks_ <= warpSize every signaling lane is in wave 0, so a wave vote
+    // suffices; larger cliques span waves and need the block-wide vote.
+    const bool singleWave = nRanks_ <= warpSize;
+    if (singleWave) {
+      aborted_ = __any(aborted_ || gaveUp);
     }
     if constexpr (hasSubsequentMemAccess) {
-      __syncthreads();
+      if (singleWave) {
+        __syncthreads();
+      } else {
+        aborted_ = __syncthreads_or(aborted_ || gaveUp);
+      }
     }
   }
 
@@ -103,6 +120,8 @@ private:
   int nRanks_{-1};
   FlagType** peerFlags_{nullptr};
   DdaAbortSignal abortSignal_{};
+  // Sticky for the rest of the kernel and uniform across the signaling lanes; see IpcGpuBarrier::aborted_.
+  bool aborted_{false};
 
   __host__ FabricGpuBarrier(int nBlocks, int selfRank, int nRanks, FlagType** peerFlags, DdaAbortSignal abortSignal)
     : nBlocks_(nBlocks), selfRank_(selfRank), nRanks_(nRanks), peerFlags_(peerFlags), abortSignal_(abortSignal) {}

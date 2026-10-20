@@ -49,6 +49,7 @@ struct BarrierImage {
   int selfRank;
   std::array<DeviceMailbox, kRanks> mailboxes;
   DdaAbortSignal abortSignal;
+  bool aborted;
 };
 static_assert(sizeof(MailboxImage) == sizeof(DeviceMailbox), "DeviceMailbox layout changed");
 static_assert(sizeof(BarrierImage) == sizeof(IpcGpuBarrier), "IpcGpuBarrier layout changed");
@@ -63,7 +64,7 @@ DeviceMailbox makeMailbox(uint32_t* flags) {
 }
 
 IpcGpuBarrier makeBarrier(int selfRank, const std::vector<DeviceMailbox>& mailboxes) {
-  BarrierImage img{kBlocks, selfRank, {}, {}};
+  BarrierImage img{kBlocks, selfRank, {}, {}, false};
   for (int r = 0; r < kRanks; ++r) {
     img.mailboxes[r] = mailboxes[r];
   }
