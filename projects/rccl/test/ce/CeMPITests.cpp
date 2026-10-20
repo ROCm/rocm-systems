@@ -43,6 +43,13 @@ constexpr size_t kMediumCount     = 65536;  // elements per rank for larger test
 // partial tail chunk whenever nRanks is not a power of two. Costs a transient
 // host buffer of the same size per rank in fill/verify.
 constexpr size_t kPipelinedTotalBytes = 512ull * 1024 * 1024;
+// Non-Sum AllReduce size inside the gfx942/gfx950 CE 2-shot cap (256 MiB), so the registered to 2-shot handoff can run.
+constexpr size_t kCeOnlyTotalBytes = 128ull * 1024 * 1024;
+constexpr size_t kCeOnlyRankStride = 517;   // per-rank offset so every rank wins some elements of Max/Min
+constexpr size_t kCeOnlyValueRange = 4096;  // keeps fill values exact in float32
+constexpr int    kCeOnlyIters      = 3;     // first call is CE registered, later ones CE 2-shot once ceARTmpBuf exists
+// A shard spans 8 default staging slots (128 MiB / nRanks vs 16 MiB / nRanks), so the CE pipeline must run.
+constexpr size_t kCeOnlyMinChunksPerShard = 2;
 constexpr int    kMinRanks2       = 2;
 constexpr int    kMinRanks4       = 4;
 constexpr int    kMinRanks8       = 8;
@@ -105,12 +112,12 @@ protected:
         debugGuard_.reset();
     }
 
-    // Returns true when all CE prerequisites are met (driver + env vars).
+    // Returns true when all CE prerequisites are met (driver + env vars + the comm's symmetric memory).
     // Delegates to isCeDispatchConfigured() in CeTestHelpers.hpp — the single
     // source of truth shared with CeInternalMPITests.cpp.
     // Hierarchical CE (multi-node) only implements AllGather, AlltoAll and AlltoAllv; Scatter,
     // Gather, and AllReduce fall back to SM kernels when nNodes > 1.
-    virtual bool isCeExpected() const { return isCeDispatchConfigured(); }
+    virtual bool isCeExpected() const { return isCeDispatchConfigured(test_comm_); }
 
     // CE log markers: "Init CE" = CE initialised; "CE: rank" = CE path taken for a collective.
     enum class CeLogStatus { Taken, InitOnlyNoOp, NotInitialized };
@@ -257,10 +264,15 @@ protected:
         }
     }
 
+    static bool isCeAllReduceAlgo(int algo)
+    {
+        return algo == static_cast<int>(RCCL_CE_REGISTERED) || algo == static_cast<int>(RCCL_CE_2SHOT);
+    }
+
     bool isCeAllReduceExpected() const
     {
         // CE AllReduce is single-node only (ceAllReduceFits / nNodes>1 gate).
-        return isCeAllReduceDispatchConfigured() && !isMultiNodeTest();
+        return isCeAllReduceDispatchConfigured(test_comm_) && !isMultiNodeTest();
     }
 
     void assertCEAllReducePathTaken(const char* context)
@@ -282,8 +294,9 @@ protected:
                 << context
                 << ": CE AllReduce log marker found but CE AR was not expected";
             if(!ceLogShowsAllReducePath(log))
-                TEST_INFO("%s: assertion passed — non-CE-AR path (CE AR prerequisites not met)",
-                          context);
+            {
+                TEST_INFO("%s: assertion passed: non-CE-AR path (CE AR prerequisites not met)", context);
+            }
         }
     }
 
@@ -513,7 +526,7 @@ protected:
 
         // DDA IPC claims AlltoAll on gfx942/950 only once nRanks >= 8. Smaller
         // communicators still take the CE path even when RCCL_DDA_ENABLE is left on.
-        if(isCeDispatchConfigured() && nRanks >= 8 && !isCeAlltoAllDispatchConfigured())
+        if(isCeDispatchConfigured(getActiveCommunicator()) && nRanks >= 8 && !isCeAlltoAllDispatchConfigured())
             GTEST_SKIP() << "CE AlltoAll needs RCCL_DDA_ENABLE=0; DDA IPC claims AlltoAll first";
 
         const size_t totalElem = count * static_cast<size_t>(nRanks);
@@ -764,7 +777,7 @@ class CeMPI_Scatter : public CeMPITest
 {
 protected:
     // Hierarchical CE does not implement Scatter; multi-node runs take the SM path.
-    bool isCeExpected() const override { return isCeDispatchConfigured() && !isMultiNodeTest(); }
+    bool isCeExpected() const override { return isCeDispatchConfigured(test_comm_) && !isMultiNodeTest(); }
     // Root sends block r to rank r; non-root send bufs are registered but ignored.
     void runScatter(int minRanks, size_t count, int root, const char* testId)
     {
@@ -815,7 +828,7 @@ class CeMPI_Gather : public CeMPITest
 {
 protected:
     // Hierarchical CE does not implement Gather; multi-node runs take the SM path.
-    bool isCeExpected() const override { return isCeDispatchConfigured() && !isMultiNodeTest(); }
+    bool isCeExpected() const override { return isCeDispatchConfigured(test_comm_) && !isMultiNodeTest(); }
     // All ranks send; root gathers into block-pattern recvbuf; non-root recv bufs registered.
     void runGather(int minRanks, size_t count, int root, const char* testId)
     {
@@ -888,7 +901,9 @@ protected:
     void assertCEAllReduceChunking(size_t minChunksPerShard, const char* context)
     {
         if(!isCeAllReduceExpected() || minChunksPerShard == 0)
+        {
             return;
+        }
 
         const size_t chunksPerShard = ceLogChunksPerShard(readAllLogs());
         EXPECT_GE(chunksPerShard, minChunksPerShard)
@@ -918,6 +933,17 @@ protected:
         ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, recvSym));
 
         fillRankScalar(sendSym.ptr, alignedCount, rank);
+        int predictedAlgo = -1, proto = 0, nChannels = 0;
+        ASSERT_EQ(ncclSuccess,
+                  rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, alignedCount, ncclFloat32, op,
+                                      sendSym.ptr, recvSym.ptr, /*graphCapturing=*/0, &predictedAlgo, &proto,
+                                      &nChannels));
+        if(isCeAllReduceExpected())
+        {
+            // Under CTAPolicy=ZERO an available CE registered path beats symk, so the reporter must name a CE variant.
+            ASSERT_TRUE(isCeAllReduceAlgo(predictedAlgo)) << testId << ": predicted algo " << predictedAlgo
+                                                          << " is not a CE AllReduce variant";
+        }
 
         ASSERT_EQ(ncclSuccess,
                   ncclAllReduce(sendSym.ptr, recvSym.ptr, alignedCount, ncclFloat32, op,
@@ -934,6 +960,86 @@ protected:
 
         assertCEAllReducePathTaken(testId);
         assertCEAllReduceChunking(minChunksPerShard, testId);
+    }
+
+    // Max/Min on symmetric windows: symk does not request non-Sum, so after the first call CE 2-shot can take over from registered.
+    void runCeOnlyAllReduce(ncclRedOp_t op, const char* testId)
+    {
+        if(!validateTestPrerequisites(kMinRanks2))
+        {
+            GTEST_SKIP() << "Need >= " << kMinRanks2 << " MPI ranks";
+        }
+        int             device = 0;
+        hipDeviceProp_t prop{};
+        ASSERT_EQ(hipSuccess, hipGetDevice(&device));
+        ASSERT_EQ(hipSuccess, hipGetDeviceProperties(&prop, device));
+        const std::string arch(prop.gcnArchName);
+        const bool archOk = arch.find("gfx942") != std::string::npos || arch.find("gfx950") != std::string::npos;
+        const bool ceOk   = isCeAllReduceDispatchConfigured() && !isMultiNodeTest();
+        const std::string skipReason = mpiCoordinatedSkipReason(
+            !archOk || !ceOk, !ceOk ? "Needs single-node CE AllReduce dispatch (NCCL_CTA_POLICY=2 NCCL_CUMEM_ENABLE=1 "
+                                      "NCCL_LOCAL_REGISTER=0 RCCL_CE_ALLREDUCE=1)"
+                                    : "CE AllReduce caps for this case are tuned for gfx942/gfx950 only");
+        if(!skipReason.empty())
+        {
+            GTEST_SKIP() << skipReason;
+        }
+
+        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+        ncclComm_t comm = getActiveCommunicator();
+        if(!isCeAllReduceDispatchConfigured(comm))
+        {
+            GTEST_SKIP() << "No symmetric memory on this communicator (cuMem unavailable), so CE AllReduce never runs";
+        }
+        int        rank{}, nRanks{};
+        ncclCommUserRank(comm, &rank);
+        ncclCommCount(comm, &nRanks);
+
+        const size_t count = ceAllReduceAlignedCount(kCeOnlyTotalBytes / sizeof(float), nRanks);
+        const size_t bytes = count * sizeof(float);
+        SymBuf       sendSym, recvSym;
+        ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, sendSym));
+        ASSERT_EQ(ncclSuccess, allocSymBuf(bytes, recvSym));
+
+        const auto value = [](int r, size_t i) {
+            return static_cast<float>((i + static_cast<size_t>(r) * kCeOnlyRankStride) % kCeOnlyValueRange);
+        };
+        ASSERT_EQ(hipSuccess, initializeBufferWithPattern<float>(sendSym.ptr, count,
+                                                                [rank, value](size_t i) { return value(rank, i); }));
+        const auto expected = [nRanks, op, value](size_t i) {
+            float acc = value(0, i);
+            for(int r = 1; r < nRanks; ++r)
+            {
+                acc = (op == ncclMax) ? std::max(acc, value(r, i)) : std::min(acc, value(r, i));
+            }
+            return acc;
+        };
+
+        for(int iter = 0; iter < kCeOnlyIters; ++iter)
+        {
+            // Fresh comm: no CE staging before the first call, so registered CE runs first and allocates it for 2-shot.
+            const int wantAlgo = (iter == 0) ? static_cast<int>(RCCL_CE_REGISTERED) : static_cast<int>(RCCL_CE_2SHOT);
+            int       algo = -1, proto = 0, nChannels = 0;
+            ASSERT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllReduce, count, ncclFloat32, op, sendSym.ptr,
+                                                       recvSym.ptr, /*graphCapturing=*/0, &algo, &proto, &nChannels));
+            ASSERT_EQ(wantAlgo, algo) << testId << ": iteration " << iter << " predicted the wrong AllReduce backend";
+
+            // NaN-fill the output so a skipped or partial reduction cannot match the expected values.
+            ASSERT_EQ(hipSuccess, hipMemset(recvSym.ptr, 0xFF, bytes));
+            ASSERT_EQ(ncclSuccess, ncclAllReduce(sendSym.ptr, recvSym.ptr, count, ncclFloat32, op, comm,
+                                                 getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            size_t badIndex = 0;
+            float  want = 0.0f, got = 0.0f;
+            ASSERT_TRUE(verifyBufferData<float>(recvSym.ptr, count, expected, /*num_samples=*/0, /*tolerance=*/0.0,
+                                                &badIndex, &want, &got))
+                << testId << ": rank " << rank << " iteration " << iter << " mismatch at element " << badIndex
+                << ": expected " << want << ", got " << got;
+        }
+
+        assertCEAllReducePathTaken(testId);
+        assertCEAllReduceChunking(kCeOnlyMinChunksPerShard, testId);
     }
 };
 
@@ -966,23 +1072,24 @@ TEST_F(CeMPI_AllReduce, LargeMessage)
     runAllReduce(kMinRanks4, largeCount, ncclSum, "CeMPI_AllReduce/LargeMessage");
 }
 
-// CE-MPI-AR-06: Multi-chunk pipeline (chunksPerShard >= 2).
-//
-// ncclCeAllReduce() pipelines only when a shard does not fit one staging slot,
-// i.e. once the message passes NCCL_CE_AR_MAX_MSG_BYTES. That cap does not gate
-// this path: it only sets ceAllReduceFits in taskAppend(), which gates the
-// unregistered "force" branch. With symmetric windows registered — as allocSymBuf
-// does here — ceAvailable alone selects CE, at any size.
-//
-// This exercises the persistent reduce kernel's double-buffered slot recycling,
-// the cross-rank signal doorbells and the Phase 3 drain loop, none of which run
-// on the single-shot path. At a non-power-of-two rank count it additionally hits
-// the partial tail chunk and the slotChunkBytes rounding from ce75b9a1.
+// CE-MPI-AR-06: Multi-chunk pipeline (chunksPerShard >= 2); under CTAPolicy=ZERO registered CE takes a 512 MiB Sum at any size.
 TEST_F(CeMPI_AllReduce, PipelinedMultiChunk)
 {
     const size_t pipelinedCount = kPipelinedTotalBytes / sizeof(float);
     runAllReduce(kMinRanks2, pipelinedCount, ncclSum, "CeMPI_AllReduce/PipelinedMultiChunk",
                  /*minChunksPerShard=*/2);
+}
+
+// CE-MPI-AR-07: Max on symmetric windows covers CE registered then CE 2-shot on one comm.
+TEST_F(CeMPI_AllReduce, MaxOp128MiB)
+{
+    runCeOnlyAllReduce(ncclMax, "CeMPI_AllReduce/MaxOp128MiB");
+}
+
+// CE-MPI-AR-08: Min on symmetric windows, same selection as CE-MPI-AR-07.
+TEST_F(CeMPI_AllReduce, MinOp128MiB)
+{
+    runCeOnlyAllReduce(ncclMin, "CeMPI_AllReduce/MinOp128MiB");
 }
 
 // ===========================================================================

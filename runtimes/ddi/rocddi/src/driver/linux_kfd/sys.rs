@@ -17,6 +17,7 @@
 
 #![allow(unsafe_code)]
 
+use crate::memory::storage::TryPush;
 use std::ffi::{c_int, c_long, c_ulong, c_void};
 use std::fs::File;
 use std::io;
@@ -37,8 +38,10 @@ use crate::session::DriverContextLifetime;
 
 /// DMA-BUF extent and metadata copied out of one synchronous KFD query.
 pub(super) struct DmaBufDetails {
+    /// Native size, flags, and owner GPU returned by KFD.
     pub(super) info: uapi::DmaBufInfo,
-    pub(super) metadata: crate::host_storage::Buffer<u8>,
+    /// Driver-owned metadata copied out of the query buffer.
+    pub(super) metadata: Vec<u8>,
 }
 
 unsafe extern "C" {
@@ -53,6 +56,7 @@ pub(super) enum Call<'a> {
     Version(&'a mut uapi::Version),
     ClockCounters(&'a mut uapi::ClockCounters),
     AvailableMemory(&'a mut uapi::AvailableMemory),
+    TileConfig(&'a mut uapi::TileConfig, &'a mut [u32], &'a mut [u32]),
     Apertures(&'a mut uapi::Apertures, &'a mut [uapi::Aperture]),
     AcquireVm(&'a mut uapi::AcquireVm),
     CreateProcess(&'a mut uapi::CreateProcess),
@@ -68,11 +72,14 @@ pub(super) enum Call<'a> {
     IpcExportHandle(&'a mut uapi::IpcExportHandle),
     Svm(&'a mut uapi::SvmArgs, &'a mut [uapi::SvmAttribute]),
     Spm(&'a mut uapi::Spm),
+    PcSample(&'a mut uapi::PcSampleArgs, &'a mut [uapi::PcSampleInfo]),
     Ais(&'a mut uapi::AisArgs),
     CreateEvent(&'a mut uapi::CreateEvent),
     DestroyEvent(&'a mut uapi::DestroyEvent),
+    SetEvent(&'a mut uapi::ResetEvent),
     ResetEvent(&'a mut uapi::ResetEvent),
     Wait(&'a mut uapi::WaitEvents, &'a mut uapi::EventData),
+    WaitSignal(&'a mut uapi::WaitEvents, &'a mut [uapi::EventData; 3]),
     SetScratchBackingVa(&'a mut uapi::SetScratchBackingVa),
     SetTrapHandler(&'a mut uapi::SetTrapHandler),
     CreateQueue(&'a mut uapi::CreateQueue),
@@ -80,6 +87,16 @@ pub(super) enum Call<'a> {
     UpdateQueue(&'a mut uapi::UpdateQueue),
     SetCuMask(&'a mut uapi::SetCuMask, &'a [u32]),
     AllocQueueGws(&'a mut uapi::AllocQueueGws),
+}
+
+fn prepare_tile_config(call: &mut Call<'_>) -> io::Result<()> {
+    if let Call::TileConfig(args, tiles, macro_tiles) = call {
+        args.tiles_ptr = tiles.as_mut_ptr() as u64;
+        args.macro_tiles_ptr = macro_tiles.as_mut_ptr() as u64;
+        args.num_tile_configs = u32::try_from(tiles.len()).map_err(invalid_data)?;
+        args.num_macro_tile_configs = u32::try_from(macro_tiles.len()).map_err(invalid_data)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -90,10 +107,13 @@ pub(super) type IoctlHook = std::sync::Arc<dyn Fn(&mut Call<'_>) -> io::Result<(
 /// Runtime enable and disable are separately serialized here so no session can
 /// publish a partially enabled process state.
 pub(super) struct Kfd {
-    allocator: crate::host_storage::Allocator,
+    /// Exact native descriptor used for this context.
     file: Option<File>,
+    /// Creating process identity checked before native calls.
     process: u32,
+    /// Serialized context selection and runtime enablement.
     runtime: Mutex<RuntimeControl>,
+    /// Optional unit-test replacement for native ioctls.
     #[cfg(test)]
     hook: Option<IoctlHook>,
 }
@@ -116,20 +136,23 @@ enum ContextState {
     SelectionUncertain,
 }
 
+/// Context selection and enablement guarded as one KFD transaction.
 struct RuntimeControl {
+    /// Primary or secondary context selected for this file description.
     context: ContextState,
+    /// Last known native runtime enablement state.
     enable: RuntimeState,
 }
 
 /// Guard retaining exclusive access to one runtime-enable transaction.
 pub(super) struct RuntimeGuard<'a> {
+    /// Holds exclusive access through the native enable transaction.
     state: MutexGuard<'a, RuntimeControl>,
 }
 
 impl Kfd {
-    pub(super) fn new(file: File, allocator: crate::host_storage::Allocator) -> Self {
+    pub(super) fn new(file: File) -> Self {
         Self {
-            allocator,
             file: Some(file),
             process: std::process::id(),
             runtime: Mutex::new(RuntimeControl {
@@ -143,17 +166,7 @@ impl Kfd {
 
     #[cfg(test)]
     pub(super) fn with_hook(file: File, hook: IoctlHook) -> Self {
-        Self::with_hook_allocator(file, hook, crate::host_storage::Allocator::default())
-    }
-
-    #[cfg(test)]
-    pub(super) fn with_hook_allocator(
-        file: File,
-        hook: IoctlHook,
-        allocator: crate::host_storage::Allocator,
-    ) -> Self {
         Self {
-            allocator,
             file: Some(file),
             process: std::process::id(),
             runtime: Mutex::new(RuntimeControl {
@@ -178,6 +191,10 @@ impl Kfd {
         self.call_with_page_offer(call, None)
     }
 
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one typed match audits every native KFD ioctl body and borrowed buffer"
+    )]
     fn call_with_page_offer(
         &self,
         mut call: Call<'_>,
@@ -189,6 +206,15 @@ impl Kfd {
             .as_ref()
             .ok_or_else(|| io::Error::from(io::ErrorKind::NotConnected))?
             .as_raw_fd();
+        if let Call::PcSample(args, info) = &mut call {
+            args.num_sample_info = u32::try_from(info.len()).map_err(invalid_data)?;
+            args.sample_info_ptr = if info.is_empty() {
+                0
+            } else {
+                info.as_mut_ptr() as u64
+            };
+        }
+        prepare_tile_config(&mut call)?;
         if let Some(page_offered) = page_offered {
             // Validation has finished. KFD may retain this page even when the
             // ioctl fails, so record the offer before dispatch or its test hook.
@@ -199,7 +225,7 @@ impl Kfd {
             return hook(&mut call);
         }
         if let Call::Svm(args, attributes) = &mut call {
-            return self.call_svm(descriptor, args, attributes);
+            return Self::call_svm(descriptor, args, attributes);
         }
         let (request, body) = match &mut call {
             Call::Version(args) => (uapi::GET_VERSION, ptr::from_mut(*args).cast::<c_void>()),
@@ -207,6 +233,7 @@ impl Kfd {
             Call::AvailableMemory(args) => {
                 (uapi::GET_AVAILABLE_MEMORY, ptr::from_mut(*args).cast())
             }
+            Call::TileConfig(args, _, _) => (uapi::GET_TILE_CONFIG, ptr::from_mut(*args).cast()),
             Call::Apertures(args, entries) => {
                 args.pointer = if entries.is_empty() {
                     0
@@ -243,10 +270,16 @@ impl Kfd {
             Call::IpcExportHandle(args) => (uapi::IPC_EXPORT_HANDLE, ptr::from_mut(*args).cast()),
             Call::Svm(_, _) => return Err(invalid_data("SVM dispatch path was not selected")),
             Call::Spm(args) => (uapi::SPM, ptr::from_mut(*args).cast()),
+            Call::PcSample(args, _) => (uapi::PC_SAMPLE, ptr::from_mut(*args).cast()),
             Call::Ais(args) => (uapi::AIS, ptr::from_mut(*args).cast()),
             Call::CreateEvent(args) => (uapi::CREATE_EVENT, ptr::from_mut(*args).cast()),
             Call::DestroyEvent(args) => (uapi::DESTROY_EVENT, ptr::from_mut(*args).cast()),
+            Call::SetEvent(args) => (uapi::SET_EVENT, ptr::from_mut(*args).cast()),
             Call::ResetEvent(args) => (uapi::RESET_EVENT, ptr::from_mut(*args).cast()),
+            Call::WaitSignal(args, events) => {
+                args.events = events.as_mut_ptr() as u64;
+                (uapi::WAIT_EVENTS, ptr::from_mut(*args).cast())
+            }
             Call::SetScratchBackingVa(args) => {
                 (uapi::SET_SCRATCH_BACKING_VA, ptr::from_mut(*args).cast())
             }
@@ -278,7 +311,6 @@ impl Kfd {
     }
 
     fn call_svm(
-        &self,
         descriptor: c_int,
         args: &mut uapi::SvmArgs,
         attributes: &mut [uapi::SvmAttribute],
@@ -288,9 +320,8 @@ impl Kfd {
         let words = 3_usize
             .checked_add(attributes.len())
             .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-        let mut buffer =
-            crate::host_storage::Buffer::<u64>::try_with_capacity(words, self.allocator)
-                .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
+        let mut buffer = crate::memory::storage::try_vec_with_capacity::<u64>(words)
+            .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
         for _ in 0..words {
             buffer
                 .try_push(0)
@@ -344,6 +375,29 @@ impl Kfd {
         Ok(counters)
     }
 
+    pub(super) fn tile_config(&self, gpu_id: u32) -> io::Result<uapi::TileConfig> {
+        if gpu_id == 0 {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
+        // KFD's legacy array outputs are required by the ioctl even though
+        // GFX12 AddrLib consumes only GB_ADDR_CONFIG. ROCr offers 40 entries.
+        let mut tiles = [0u32; 40];
+        let mut macro_tiles = [0u32; 40];
+        let mut config = uapi::TileConfig {
+            gpu_id,
+            ..uapi::TileConfig::default()
+        };
+        self.call(Call::TileConfig(&mut config, &mut tiles, &mut macro_tiles))?;
+        if config.num_tile_configs as usize > tiles.len()
+            || config.num_macro_tile_configs as usize > macro_tiles.len()
+        {
+            return Err(invalid_data(
+                "KFD tile configuration exceeds supplied arrays",
+            ));
+        }
+        Ok(config)
+    }
+
     pub(super) fn available_memory(&self, gpu_id: u32) -> io::Result<u64> {
         let mut memory = uapi::AvailableMemory {
             gpu_id,
@@ -353,11 +407,11 @@ impl Kfd {
         Ok(memory.available)
     }
 
-    pub(super) fn apertures(&self) -> io::Result<crate::host_storage::Buffer<uapi::Aperture>> {
+    pub(super) fn apertures(&self) -> io::Result<Vec<uapi::Aperture>> {
         let mut args = uapi::Apertures::default();
         self.call(Call::Apertures(&mut args, &mut []))?;
         let count = usize::try_from(args.count).map_err(invalid_data)?;
-        let mut entries = crate::host_storage::Buffer::try_with_capacity(count, self.allocator)
+        let mut entries = crate::memory::storage::try_vec_with_capacity(count)
             .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
         for _ in 0..count {
             entries
@@ -392,6 +446,11 @@ impl Kfd {
             .lock()
             .map(|state| RuntimeGuard { state })
             .map_err(|_| invalid_data("KFD runtime lock poisoned"))
+    }
+
+    /// SDK-created PC sampling IDs belong to KFD's primary process context.
+    pub(super) fn uses_primary_context(&self) -> io::Result<bool> {
+        Ok(self.runtime_guard()?.state.context == ContextState::Primary)
     }
 
     /// Selects the instance-owned context before its first VM or runtime call.
@@ -598,11 +657,11 @@ impl Kfd {
             first?;
             return Ok(DmaBufDetails {
                 info: args,
-                metadata: crate::host_storage::Buffer::new(self.allocator),
+                metadata: Vec::new(),
             });
         }
         let count = usize::try_from(args.metadata_size).map_err(invalid_data)?;
-        let mut metadata = crate::host_storage::Buffer::try_with_capacity(count, self.allocator)
+        let mut metadata = crate::memory::storage::try_vec_with_capacity(count)
             .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
         for _ in 0..count {
             metadata
@@ -720,6 +779,36 @@ impl Kfd {
             return Err(io::Error::from(io::ErrorKind::InvalidInput));
         }
         self.call(Call::Spm(args))
+    }
+
+    /// The kernel may update both the records and `num_sample_info`, including
+    /// when a query returns ENOSPC. The slice stays borrowed through the ioctl.
+    pub(super) fn pc_sample(
+        &self,
+        args: &mut uapi::PcSampleArgs,
+        info: &mut [uapi::PcSampleInfo],
+    ) -> io::Result<()> {
+        let valid = match args.operation {
+            uapi::PC_SAMPLE_QUERY_CAPABILITIES => args.trace_id == 0,
+            uapi::PC_SAMPLE_CREATE => {
+                args.trace_id == 0
+                    && info.len() == 1
+                    && info[0].interval != 0
+                    && matches!(
+                        info[0].method,
+                        uapi::PC_SAMPLE_METHOD_HOST_TRAP | uapi::PC_SAMPLE_METHOD_STOCHASTIC
+                    )
+                    && info[0].unit <= uapi::PC_SAMPLE_UNIT_INSTRUCTIONS
+            }
+            uapi::PC_SAMPLE_DESTROY | uapi::PC_SAMPLE_START | uapi::PC_SAMPLE_STOP => {
+                args.trace_id != 0 && info.is_empty() && args.flags == 0
+            }
+            _ => false,
+        };
+        if args.gpu_id == 0 || !valid {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        }
+        self.call(Call::PcSample(args, info))
     }
 
     /// A successful ioctl replaces the first 16 input bytes with its output.
@@ -904,6 +993,53 @@ impl Kfd {
         self.call(Call::ResetEvent(&mut uapi::ResetEvent { event_id, pad: 0 }))
     }
 
+    pub(super) fn set_event(&self, event_id: u32) -> io::Result<()> {
+        self.call(Call::SetEvent(&mut uapi::ResetEvent { event_id, pad: 0 }))
+    }
+
+    pub(super) fn wait_signal_event(
+        &self,
+        event_id: u32,
+        last_age: u64,
+        memory_exception_id: u32,
+        hardware_exception_id: u32,
+        timeout_ms: u32,
+    ) -> io::Result<Option<(u64, bool)>> {
+        let mut events = [
+            uapi::EventData {
+                payload: [last_age, 0, 0, 0],
+                event_id,
+                ..uapi::EventData::default()
+            },
+            uapi::EventData {
+                payload: [u64::from(u32::MAX), 0, 0, 0],
+                event_id: memory_exception_id,
+                ..uapi::EventData::default()
+            },
+            uapi::EventData {
+                payload: [u64::from(u32::MAX), 0, 0, 0],
+                event_id: hardware_exception_id,
+                ..uapi::EventData::default()
+            },
+        ];
+        let mut args = uapi::WaitEvents {
+            count: 3,
+            timeout: timeout_ms,
+            ..uapi::WaitEvents::default()
+        };
+        self.call(Call::WaitSignal(&mut args, &mut events))?;
+        match args.result {
+            uapi::WAIT_COMPLETE => Ok(Some((
+                events[0].payload[0],
+                events[1..]
+                    .iter()
+                    .any(|event| event.payload[0] & u64::from(u32::MAX) != u64::from(u32::MAX)),
+            ))),
+            uapi::WAIT_TIMEOUT => Ok(None),
+            _ => Err(invalid_data("KFD signal wait returned an unknown result")),
+        }
+    }
+
     /// Exception events are created without auto-reset. The connection owner
     /// snapshots each payload, then explicitly resets the native event while
     /// serializing all observers of that connection.
@@ -956,21 +1092,32 @@ impl Kfd {
 /// Decoded hardware exception reported by KFD.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct HardwareException {
+    /// Native GPU that reported the exception.
     pub(super) gpu_id: u32,
+    /// Native reset scope encoding.
     pub(super) reset_type: u32,
+    /// Whether device memory was reported lost.
     pub(super) memory_lost: bool,
+    /// Native reset cause encoding.
     pub(super) reset_cause: u32,
 }
 
 /// Decoded memory-exception information returned by KFD event polling.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct MemoryException {
+    /// Accessed page was absent or privileged.
     pub(super) not_present: u32,
+    /// Access attempted to write read-only memory.
     pub(super) read_only: u32,
+    /// Access attempted to execute non-executable memory.
     pub(super) no_execute: u32,
+    /// Fault address may be imprecise.
     pub(super) imprecise: u32,
+    /// Reported GPU virtual address.
     pub(super) address: u64,
+    /// Native GPU that reported the fault.
     pub(super) gpu_id: u32,
+    /// Native exception category.
     pub(super) error_type: u32,
 }
 

@@ -7,6 +7,13 @@
 #   unit/        CPU-focused format, recovery, and playback-invariant tests.
 #   integration/ GPU capture/replay round-trip tests (require an AMD GPU and a
 #                capture-enabled HIP runtime).
+#   config/      One YAML file per suite: every case, and where it runs.
+#   include/     The Catch2 harness headers both suites include.
+#   scripts/     CI helpers that run a suite and report on it, and the unittest
+#                suites for those helpers and for ../tools (not built).
+#
+# tests/config/<suite>.yaml lists every case the binary must contain and where
+# it runs; scripts/hrr_test_config.py enforces the list.
 #
 # The HRR tests use a small local harness (hrr_test_common.hh / hrr_test_process.hh)
 # instead of the hip-tests Catch2 infrastructure.
@@ -32,6 +39,19 @@ endif()
 find_package(hip CONFIG REQUIRED)
 
 add_subdirectory(unit)
+
+# Generator rules: regenerate the playback handlers and fail if
+# one still casts an archive field to a pointer or an opaque handle.
+# Also fails if a checked-in generated source or the API matrix header is
+# stale against the generator (test_generated_files_current.py), and if
+# PRIVACY.md no longer lists the manifest fields capture writes
+# (test_privacy_doc.py).
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME hrr-generator-rules
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..)
+endif()
 
 if(HRR_BUILD_INTEGRATION_TESTS)
   if(NOT HRR_BUILD_PLAYBACK)

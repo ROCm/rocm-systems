@@ -42,6 +42,9 @@ test_categories:
       - "GraphCapture_AllReduce.MultiNode"
       - "PatLazyInitMPITest.*"
       - "PatSharedConnectionMPITest.*"
+      # Short tier only: quick carries the smoke/precheck labels, and the three large rows each
+      # validate a 2 MiB shard per rank over 64 steps. They stay covered by standard below.
+      - "DtypeSizeCases/PersistentCommunicatorMPITest.*_short"
     exclude_windows: &mpi_exclude_windows
       - "*"
     labels:
@@ -222,6 +225,7 @@ test_categories:
       - "NetTransportMPITest.*"
       - "ShmMPITest.*"
       - "NetIbMPITest.*"
+      - "GdrFlushTest.*"
       - "ImplicitLaunchOrderMPITest.*"
       - "UBR_AllReduce.*"
       - "UBR_AllGather.*"
@@ -235,17 +239,69 @@ test_categories:
       - "GraphCapture_AllReduce.*"
       - "PatLazyInitMPITest.*"
       - "PatSharedConnectionMPITest.*"
+      - "DtypeSizeCases/PersistentCommunicatorMPITest.*"
       - "DdaFabricSimple.*"
       - "DdaFabricBlockCap.*"
       - "DdaFabricBarrierStress.*"
+      # Skips under comprehensive: NCCL_LAUNCH_ORDER_IMPLICIT=1 disables DDA, so standard is where it runs.
+      - "DdaIpcMPI_IndexData.*"
+      - "DdaMPI_CollOpCount.*"
     exclude_windows: *mpi_exclude_windows
-    labels:
+    labels: &mpi_standard_labels
       - "rccl"
       - "standard"
       - "regression"
       - "mpi"
     env_variables:
       - "NCCL_DEBUG=INFO"
+  # DDA fp8, one category per fabric tier. RCCL_PARAM caches the DDA thresholds for the process lifetime,
+  # so each tier's settings are set before launch and each fixture runs in its own process.
+  standard_env_dda_fp8_ll:
+    description: "DDA fp8 on the fabric LL tier (default thresholds)."
+    test_patterns:
+      - "DdaFp8MPI_LL.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+  standard_env_dda_fp8_ll_twoshot:
+    description: "DDA fp8 AllReduce on the fabric LL two-shot tier."
+    test_patterns:
+      - "DdaFp8MPI_LLTwoShot.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_DDA_LL_ONESHOT_THRESHOLD=0"
+  standard_env_dda_fp8_ll128:
+    description: "DDA fp8 on the fabric LL128 tier."
+    test_patterns:
+      - "DdaFp8MPI_LL128.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_DDA_LL_THRESHOLD=0"
+  standard_env_dda_fp8_ll128_twoshot:
+    description: "DDA fp8 AllReduce on the fabric LL128 two-shot tier."
+    test_patterns:
+      - "DdaFp8MPI_LL128TwoShot.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_DDA_LL_THRESHOLD=0"
+      - "RCCL_DDA_LL128_ONESHOT_THRESHOLD=0"
+  standard_env_dda_fp8_vmm:
+    description: "DDA fp8 on the fabric VMM (SIMPLE) tier."
+    test_patterns:
+      - "DdaFp8MPI_Vmm.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_standard_labels
+    env_variables:
+      - "NCCL_DEBUG=INFO"
+      - "RCCL_DDA_LL=0"
+      - "RCCL_DDA_THRESHOLD=67108864"
   comprehensive:
     description: "MPI exhaustive — same suites as standard; env enables implicit launch, CE memcpy paths, and verbose rank logs."
     test_patterns: *mpi_all_patterns
@@ -426,6 +482,11 @@ execution_settings:
     quick_env_netib_xfer_log_ranks: 1200
     quick_env_pat_shared_qps_off: 1200
     standard: 1200
+    standard_env_dda_fp8_ll: 1200
+    standard_env_dda_fp8_ll_twoshot: 1200
+    standard_env_dda_fp8_ll128: 1200
+    standard_env_dda_fp8_ll128_twoshot: 1200
+    standard_env_dda_fp8_vmm: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200
     full_base: 1200

@@ -80,13 +80,14 @@ include(cmake/NcclCompat.cmake)
 rccl_define_nccl_compat_options()
 
 option(BUILD_ADDRESS_SANITIZER                 "Enable address sanitizer"                      ${RCCL_DEFAULT_BUILD_ADDRESS_SANITIZER})
-option(BUILD_ALL_UNROLLS                       "Generate every unroll factor (1,2,4,8,16,32) for the targeted GPU arch(es)" OFF)
+option(BUILD_ALL_UNROLLS                       "Also generate unroll factors 8 and 16 on top of the per-arch default set" OFF)
 option(BUILD_BFD                               "Enable custom backtrace (if bfd.h exists)"     OFF)
 option(BUILD_LOCAL_GPU_TARGET_ONLY             "Build only for GPUs detected on this machine"  OFF)
 option(BUILD_SHARED_LIBS                       "Build as shared library"                       ON)
 option(BUILD_TESTS                             "Build unit test programs"                      OFF)
+option(BUILD_PROFILER_ACCL                     "Build the ACCL timing-decomposition profiler"  ${NCCL_OS_LINUX})
 option(BUILD_PROFILER_INSPECTOR                "Build the NCCL Inspector profiler plugin"      ${BUILD_TESTS})
-option(BUILD_PLUGIN_EXAMPLES                      "Build plugin example libraries (net, tuner, profiler, env, gin, mixed, proxytrace, accl)" OFF)
+option(BUILD_PLUGIN_EXAMPLES                   "Build plugin example libraries (net, tuner, profiler, env, gin, mixed, proxytrace)" OFF)
 option(DUMP_ASM                                "Disassemble and dump"                          OFF)
 option(ENABLE_CODE_COVERAGE                    "Enable code coverage"                          OFF)
 set(ENABLE_FULL_COVERAGE "OFF" CACHE STRING
@@ -793,6 +794,23 @@ file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/include/rccl")
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/rccl/rccl.h) # For external linking
 configure_file(src/nccl.h.in ${PROJECT_BINARY_DIR}/include/nccl.h)      # Used by some internal files
 
+## Compile tuner/*.csv into librccl.so so the built-in CSV tuner works without
+## the files being staged on every node. Disk locations remain as overrides.
+set(RCCL_EMBEDDED_TUNER_SCRIPT ${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateEmbeddedTunerConfigs.cmake)
+set(RCCL_EMBEDDED_TUNER_HEADER ${PROJECT_BINARY_DIR}/include/rccl_tuner_embedded_configs.h)
+# Always run, like update_git_version: an OUTPUT/DEPENDS command re-runs only
+# when an input is newer than the output, so deleting a CSV would leave it
+# embedded. The script rewrites the header only when the content changes, so
+# running every build does not churn rebuilds.
+add_custom_target(rccl_embedded_tuner_configs
+  ALL
+  COMMAND ${CMAKE_COMMAND} -DTUNER_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tuner
+                           -DOUT_FILE=${RCCL_EMBEDDED_TUNER_HEADER}
+                           -P ${RCCL_EMBEDDED_TUNER_SCRIPT}
+  BYPRODUCTS ${RCCL_EMBEDDED_TUNER_HEADER}
+  COMMENT "Generating embedded RCCL tuner configs"
+  VERBATIM)
+
 # Example plugins are C sources
 if(BUILD_TESTS AND BUILD_PLUGIN_EXAMPLES)
   enable_language(C)
@@ -805,6 +823,14 @@ endif()
 # librccl internals, so Release builds must export those symbols.
 option(ENABLE_MPI_TESTS "Enable MPI-based tests" OFF)
 add_subdirectory(src)
+
+# ACCL timing-decomposition profiler plugin. This is a separately loaded,
+# host-only shared library, so building it for every RCCL package does not add
+# instrumentation or runtime overhead to librccl.so. Set BUILD_PROFILER_ACCL=OFF
+# for installations that do not want to ship the optional plugin.
+if(BUILD_PROFILER_ACCL)
+  add_subdirectory(plugins/profiler/accl)
+endif()
 
 # NCCL Inspector profiler plugin. Built as its own .so and loaded at runtime via
 # NCCL_PROFILER_PLUGIN; the MPI tests pick up the in-tree build automatically.
@@ -881,9 +907,15 @@ if(EMIT_LLVM_IR)
   rocm_install(DIRECTORY   ${PROJECT_BINARY_DIR}/include/nccl_device
                DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rccl)
 endif()
-## Install tuner config directory for CSV-based tuner
-file(COPY tuner DESTINATION ${PROJECT_BINARY_DIR})
-rocm_install(DIRECTORY ${PROJECT_BINARY_DIR}/tuner DESTINATION ${CMAKE_INSTALL_DATADIR}/rccl)
+## tuner/*.csv is compiled into librccl.so (see rccl_embedded_tuner_configs above),
+## so nothing is copied to the build tree or installed. A CSV placed in
+## <libdir>/tuner/ or share/rccl/tuner/ still overrides the embedded defaults.
+##
+## Migration: dropping these rules does not delete copies an earlier build or
+## install already wrote, and those still win over the embedded map. Package
+## upgrades remove the installed copy, but `cmake --install` over an existing
+## prefix does not, and an incremental build tree keeps <builddir>/tuner/ next
+## to librccl.so. Delete those by hand to pick up the embedded defaults.
 rocm_export_targets(
   NAMESPACE roc::
   TARGETS   rccl
@@ -946,7 +978,6 @@ if(BUILD_TESTS)
     add_subdirectory(plugins/tuner/example)
     add_subdirectory(plugins/profiler/example)
     add_subdirectory(plugins/profiler/proxytrace)
-    add_subdirectory(plugins/profiler/accl)
     add_subdirectory(plugins/env/example)
     add_subdirectory(plugins/env/json)
     add_subdirectory(plugins/gin/example)

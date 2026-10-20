@@ -9,8 +9,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/cdna2/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/machine_insts.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/sdwa_disassembly.h"
 #include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/instruction.h"
 #include <array>
@@ -835,6 +835,11 @@ public:
 class Mimg : public IsaInstruction<Isa> {
 public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
+  bool should_print_dst_operand(uint8_t operand_index) const override {
+    // Image atomics have one encoded VDATA tuple, printed as a source.
+    return !mnemonic_.starts_with("image_atomic_") &&
+           Instruction::should_print_dst_operand(operand_index);
+  }
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;
 };

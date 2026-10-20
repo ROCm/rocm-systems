@@ -186,6 +186,11 @@ struct manageable_aperture {
 	vm_area_t *vm_ranges;
 	rbtree_t tree;
 	rbtree_t user_tree;
+	/* Largest page-rounded userptr extent. Bounds the leftward scan in
+	 * fmm_retire_stale_userptrs. Grows on insert and resets when user_tree
+	 * is empty.
+	 */
+	uint64_t userptr_max_extent;
 	pthread_mutex_t fmm_mutex;
 	bool is_cpu_accessible;
 	const manageable_aperture_ops_t *ops;
@@ -480,6 +485,11 @@ static inline HsaSharedMemoryHandle *to_hsa_shared_memory_handle(
 }
 
 static int __fmm_release(HsaKFDContext *ctx, vm_object_t *object, manageable_aperture_t *aperture);
+static int __fmm_release_locked(HsaKFDContext *ctx, vm_object_t *object,
+				manageable_aperture_t *aperture);
+static int _fmm_unmap_from_gpu(HsaKFDContext *ctx, manageable_aperture_t *aperture,
+			       void *address, uint32_t *device_ids_array,
+			       uint32_t device_ids_array_size, vm_object_t *obj);
 static int _fmm_unmap_from_gpu_scratch(HsaKFDContext *ctx, uint32_t gpu_id,
 				       manageable_aperture_t *aperture, void *address);
 static void print_device_id_array(uint32_t *device_id_array, uint32_t device_id_array_size);
@@ -562,6 +572,15 @@ static void vm_remove_area(manageable_aperture_t *app, vm_area_t *area)
 	free(area);
 }
 
+/* Page-rounded span of a userptr registration. */
+static uint64_t userptr_page_extent(const vm_object_t *obj)
+{
+	uint64_t ustart = (uint64_t)obj->userptr & ~(uint64_t)(PAGE_SIZE - 1);
+	uint64_t uend = PAGE_ALIGN_UP((uint64_t)obj->userptr + obj->userptr_size);
+
+	return uend - ustart;
+}
+
 static void vm_remove_object(manageable_aperture_t *app, vm_object_t *object)
 {
 	/* Free allocations inside the object */
@@ -580,8 +599,15 @@ static void vm_remove_object(manageable_aperture_t *app, vm_object_t *object)
 		free(object->mapped_node_id_array);
 
 	hsakmt_rbtree_delete(&app->tree, &object->node);
-	if (object->userptr)
+	if (object->userptr) {
 		hsakmt_rbtree_delete(&app->user_tree, &object->user_node);
+		/* A stale bound only widens later scans. Drop it once nothing
+		 * is tracked so one large registration does not keep widening
+		 * them for the life of the process.
+		 */
+		if (app->user_tree.root == &app->user_tree.sentinel)
+			app->userptr_max_extent = 0;
+	}
 
 	free(object);
 }
@@ -1051,6 +1077,76 @@ static void aperture_release_area(manageable_aperture_t *app, void *address,
 				  uint64_t MemorySizeInBytes)
 {
 	app->ops->release_area(app, address, MemorySizeInBytes);
+}
+
+/*
+ * mmap apertures reserve with MAP_FIXED_NOREPLACE or a kernel-chosen address,
+ * so a successful reservation proves no CPU mapping existed in [mem, mem+size).
+ * A userptr registration with a page in that range pins host pages that are
+ * gone, and since userptrs are looked up first in mmap apertures it would
+ * shadow the new object. Unmap and release such registrations, all
+ * references at once, before the caller publishes its object.
+ * Any registration that can reach the range has its key at or after
+ * start - userptr_max_extent, so the walk starts there instead of at the
+ * leftmost node. Caller holds app->fmm_mutex.
+ */
+static int fmm_retire_stale_userptrs(HsaKFDContext *ctx,
+				     manageable_aperture_t *app,
+				     void *mem, uint64_t size)
+{
+	uint64_t start = (uint64_t)mem;
+	uint64_t end = PAGE_ALIGN_UP(start + size);
+	/* Size 0 selects the first in-order node at that address. LKP_ADDR
+	 * would stop on a larger duplicate and skip the smaller one to its left.
+	 */
+	uint64_t scan = start > app->userptr_max_extent ?
+			start - app->userptr_max_extent : 0;
+	rbtree_key_t key = rbtree_key(scan, 0);
+	rbtree_node_t *n = rbtree_lookup_nearest(&app->user_tree, &key,
+						 LKP_ALL, RIGHT);
+	int ret;
+
+	while (n) {
+		vm_object_t *obj = vm_object_entry(n, 1);
+		uint64_t ustart = (uint64_t)obj->userptr & ~(uint64_t)(PAGE_SIZE - 1);
+		uint64_t uend = PAGE_ALIGN_UP((uint64_t)obj->userptr + obj->userptr_size);
+
+		/* user_tree is ordered by userptr; fetch next before removal */
+		n = hsakmt_rbtree_next(&app->user_tree, n);
+		if (ustart >= end)
+			break;
+		if (uend <= start)
+			continue;
+
+		if (obj->mapped_device_id_array_size > 0) {
+			obj->mapping_count = 1;
+			ret = _fmm_unmap_from_gpu(ctx, app, obj->start, NULL, 0, obj);
+			if (ret)
+				return ret;
+		}
+		obj->registration_count = 1;
+		ret = __fmm_release_locked(ctx, obj, app);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+/* Reserve VA for a new object. Caller holds app->fmm_mutex. */
+static void *aperture_reserve_area(HsaKFDContext *ctx, manageable_aperture_t *app,
+				   void *address, uint64_t size, uint64_t align)
+{
+	void *mem = aperture_allocate_area_aligned(app, address, size, align);
+
+	if (mem && app->ops == &mmap_aperture_ops &&
+	    fmm_retire_stale_userptrs(ctx, app, mem, size)) {
+		pr_err("Failed to retire stale userptr overlapping %p\n", mem);
+		aperture_release_area(app, mem, size);
+		return NULL;
+	}
+
+	return mem;
 }
 
 /* returns 0 on success. Assumes, that fmm_mutex is locked on entry */
@@ -2343,7 +2439,7 @@ void *hsakmt_fmm_allocate_scratch(HsaKFDContext *ctx,
 	/* Allocate address space for scratch backing, 64KB aligned */
 	if (hsakmt_is_dgpu) {
 		pthread_mutex_lock(&fmm_ctx->svm.dgpu_aperture->fmm_mutex);
-		mem = aperture_allocate_area_aligned(
+		mem = aperture_reserve_area(ctx,
 			fmm_ctx->svm.dgpu_aperture, address,
 			aligned_size, SCRATCH_ALIGN);
 		pthread_mutex_unlock(&fmm_ctx->svm.dgpu_aperture->fmm_mutex);
@@ -2395,7 +2491,7 @@ static void *__fmm_allocate_device(HsaKFDContext *ctx,
 
 	/* Allocate address space */
 	pthread_mutex_lock(&aperture->fmm_mutex);
-	mem = aperture_allocate_area_aligned(aperture, address, MemorySizeInBytes, alignment);
+	mem = aperture_reserve_area(ctx, aperture, address, MemorySizeInBytes, alignment);
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
 	if (!mem)
@@ -2441,7 +2537,7 @@ static void *fmm_map_to_cpu(void *mem, uint64_t size, bool host_access,
 	return ret;
 }
 
-static void *fmm_allocate_va(uint32_t gpu_id, void *address, uint64_t size,
+static void *fmm_allocate_va(HsaKFDContext *ctx, uint32_t gpu_id, void *address, uint64_t size,
 			manageable_aperture_t *aperture, uint64_t alignment, HsaMemFlags mflags)
 {
 	void *mem = NULL;
@@ -2453,7 +2549,7 @@ static void *fmm_allocate_va(uint32_t gpu_id, void *address, uint64_t size,
 
 	/* Allocate address space */
 	pthread_mutex_lock(&aperture->fmm_mutex);
-	mem = aperture_allocate_area_aligned(aperture, address, size, alignment);
+	mem = aperture_reserve_area(ctx, aperture, address, size, alignment);
 
 	if (mem) {
 		/* Assign handle 0 to vm_obj since no memory allocated yet */
@@ -2627,7 +2723,7 @@ void *hsakmt_fmm_allocate_device(HsaKFDContext *ctx,
 
 	/* special case for va allocation without vram alloc */
 	if (mflags.ui32.OnlyAddress)
-		return fmm_allocate_va(gpu_id, address, size, aperture, alignment, mflags);
+		return fmm_allocate_va(ctx, gpu_id, address, size, aperture, alignment, mflags);
 
 	/* special case for vram allocation without addr */
 	if(mflags.ui32.NoAddress)
@@ -2912,7 +3008,7 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 
 	/* special case for va allocation without real memory alloc */
 	if (mflags.ui32.OnlyAddress)
-		return fmm_allocate_va(gpu_id, address, size, aperture, alignment, mflags);
+		return fmm_allocate_va(ctx, gpu_id, address, size, aperture, alignment, mflags);
 
 	/* KFD refuses userptr on a node in recoverable-fault mode: evicting a
 	 * userptr BO invalidates its PTEs instead of preempting the queues,
@@ -2935,7 +3031,7 @@ static void *fmm_allocate_host_gpu(HsaKFDContext *ctx,
 
 		/* Allocate address space */
 		pthread_mutex_lock(&aperture->fmm_mutex);
-		mem = aperture_allocate_area_aligned(aperture, address, size, alignment);
+		mem = aperture_reserve_area(ctx, aperture, address, size, alignment);
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 		if (!mem)
 			return NULL;
@@ -3050,7 +3146,8 @@ void *hsakmt_fmm_allocate_host(HsaKFDContext *ctx,
 	return fmm_allocate_host_cpu(ctx, address, MemorySizeInBytes, mflags);
 }
 
-static int __fmm_release(HsaKFDContext *ctx,
+/* Caller holds aperture->fmm_mutex. */
+static int __fmm_release_locked(HsaKFDContext *ctx,
 			vm_object_t *object, manageable_aperture_t *aperture)
 {
 	struct kfd_ioctl_free_memory_of_gpu_args args = {0};
@@ -3060,14 +3157,10 @@ static int __fmm_release(HsaKFDContext *ctx,
 	if (!object)
 		return -EINVAL;
 
-	pthread_mutex_lock(&aperture->fmm_mutex);
-
 	if (object->userptr) {
 		object->registration_count--;
-		if (object->registration_count > 0) {
-			pthread_mutex_unlock(&aperture->fmm_mutex);
+		if (object->registration_count > 0)
 			return 0;
-		}
 	}
 
 	/* If memory is user memory and it's still GPU mapped, munmap
@@ -3084,7 +3177,7 @@ static int __fmm_release(HsaKFDContext *ctx,
 	}
 
 	if (ret)
-		goto err_free_mem_failed;
+		return ret;
 
 	if (object->is_svm_paged) {
 		/* Paged host memory backed by SVM is registered through
@@ -3117,7 +3210,16 @@ static int __fmm_release(HsaKFDContext *ctx,
 	aperture_release_area(aperture, object->start, object->size);
 	vm_remove_object(aperture, object);
 
-err_free_mem_failed:
+	return 0;
+}
+
+static int __fmm_release(HsaKFDContext *ctx,
+			vm_object_t *object, manageable_aperture_t *aperture)
+{
+	int ret;
+
+	pthread_mutex_lock(&aperture->fmm_mutex);
+	ret = __fmm_release_locked(ctx, object, aperture);
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 	return ret;
 }
@@ -4592,6 +4694,9 @@ static void print_device_id_array(uint32_t *device_id_array, uint32_t device_id_
 #endif
 }
 
+/* A supplied obj requires the caller to hold aperture->fmm_mutex.
+ * With obj == NULL, this helper acquires and releases the mutex.
+ */
 static int _fmm_unmap_from_gpu(HsaKFDContext *ctx,
 		manageable_aperture_t *aperture, void *address,
 		uint32_t *device_ids_array, uint32_t device_ids_array_size,
@@ -4894,12 +4999,17 @@ static HSAKMT_STATUS fmm_register_user_memory(HsaKFDContext *ctx,
 	if (exist_obj) {
 		++exist_obj->registration_count;
 	} else {
+		uint64_t extent;
+
 		obj->userptr = addr;
 		hsakmt_gpuid_to_nodeid(ctx, gpu_id, &obj->node_id);
 		obj->userptr_size = size;
 		obj->registration_count = 1;
 		obj->user_node.key = rbtree_key((unsigned long)addr, size);
 		hsakmt_rbtree_insert(&aperture->user_tree, &obj->user_node);
+		extent = userptr_page_extent(obj);
+		if (extent > aperture->userptr_max_extent)
+			aperture->userptr_max_extent = extent;
 	}
 	pthread_mutex_unlock(&aperture->fmm_mutex);
 
@@ -5057,7 +5167,7 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 	if (!aperture_is_valid(aperture->base, aperture->limit))
 		goto error_free_metadata;
 	pthread_mutex_lock(&aperture->fmm_mutex);
-	mem = aperture_allocate_area_aligned(aperture, NULL, infoArgs.size,
+	mem = aperture_reserve_area(ctx, aperture, NULL, infoArgs.size,
 					     IMAGE_ALIGN);
 	if (!mem) {
 		pthread_mutex_unlock(&aperture->fmm_mutex);
@@ -5264,8 +5374,8 @@ HSAKMT_STATUS hsakmt_fmm_register_shared_memory(HsaKFDContext *ctx,
 	}
 
 	pthread_mutex_lock(&aperture->fmm_mutex);
-	reservedMem = aperture_allocate_area(aperture, NULL,
-			(SizeInPages << PAGE_SHIFT));
+	reservedMem = aperture_reserve_area(ctx, aperture, NULL,
+			(SizeInPages << PAGE_SHIFT), 0);
 	if (!reservedMem) {
 		err = HSAKMT_STATUS_NO_MEMORY;
 		goto err_free_buffer;

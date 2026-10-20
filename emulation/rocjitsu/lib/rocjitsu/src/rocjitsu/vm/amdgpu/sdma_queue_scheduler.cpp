@@ -281,6 +281,9 @@ QueuePrepareCloseStatus SdmaQueueScheduler::detach(Handle handle, bool force) no
     if (slot.generation == 0)
       ++slot.generation;
     free_slots_.push_back(handle.slot_);
+    // Service is quiescent and the queue cannot be selected again. Worker or
+    // management references may outlive detach, but must not keep the VM bound.
+    queue->address_space_lease_ = {};
     condition_.notify_all();
   }
   return QueuePrepareCloseStatus::Ready;

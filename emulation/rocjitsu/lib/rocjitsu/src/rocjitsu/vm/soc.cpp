@@ -20,10 +20,10 @@ namespace {
 amdgpu::SdmaPacketDialect sdma_dialect(rj_code_arch_t arch) {
   if (arch == ROCJITSU_CODE_ARCH_CDNA5)
     return amdgpu::SdmaPacketDialect::Gfx1250;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+    return amdgpu::SdmaPacketDialect::Rdna4;
+  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
     return amdgpu::SdmaPacketDialect::Gfx11Plus;
-  }
   if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
       arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
     return amdgpu::SdmaPacketDialect::LegacyExtendedCount;
@@ -69,7 +69,16 @@ void SoC::add_xcd(amdgpu::Xcd *xcd) {
   }
   if (amdgpu::CommandProcessor *cp = xcd->command_processor())
     cp->set_gpu_vm(&gpu_vm_, internal_address_space_);
+  // GWS is device-global: share one store across every XCD so a dispatch that
+  // fans out across XCDs still rendezvouses (see GwsDevice). Supersedes the XCD's
+  // standalone default store. The XCD's CUs are already attached by this point.
+  xcd->adopt_gws_store(gws_device_);
   xcds_.push_back(xcd);
+}
+
+void SoC::wire_gws_to_xcds() {
+  for (amdgpu::Xcd *xcd : xcds_)
+    xcd->adopt_gws_store(gws_device_);
 }
 
 void SoC::add_iod(amdgpu::Iod *iod) {
@@ -214,6 +223,9 @@ SoC::SoC(std::string name, const Config &config)
       add_child(std::move(xcd_ptr));
     }
   }
+  // GWS is device-global: share one store across every XCD (see GwsDevice). The
+  // XCDs above were pushed directly rather than through add_xcd, so wire here.
+  wire_gws_to_xcds();
   if (config.scratch_slots_per_cu != 0)
     for_each_cp([&](amdgpu::CommandProcessor *cp) {
       cp->set_scratch_slots_per_cu(config.scratch_slots_per_cu);
