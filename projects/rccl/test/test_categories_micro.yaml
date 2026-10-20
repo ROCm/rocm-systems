@@ -56,6 +56,23 @@ test_categories:
       - "Commands/RasClientSupportEnqueueFailureMicrotest.*"
       # ras/ras_param.cc
       - "RasParamMicrotest.*"
+      # transport/net_telemetry.cc, include/net_telemetry.h
+      - "NetTelemetryInitMicrotest.*"
+      - "NetTelemetryRegisterMicrotest.*"
+      - "NetTelemetryChannelMicrotest.*"
+      - "NetTelemetryHooksMicrotest.*"
+      - "NetTelemetryQpHooksMicrotest.*"
+      - "NetTelemetryDeviceHooksMicrotest.*"
+      - "NetTelemetryCaptureMicrotest.*"
+      - "NetTelemetryCountersMicrotest.*"
+      - "NetTelemetryEthtoolMicrotest.*"
+      - "NetTelemetryDebugfsMicrotest.*"
+      - "NetTelemetryReadCountersMicrotest.*"
+      - "NetTelemetrySnapshotMicrotest.*"
+      - "NetTelemetryCollectMicrotest.*"
+      - "NetTelemetrySamplerMicrotest.*"
+      - "NetTelemetryJsonMicrotest.*"
+      - "NetTelemetryFlushMicrotest.*"
       # rma/rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"
       - "RmaProxyDescriptorTest.*"

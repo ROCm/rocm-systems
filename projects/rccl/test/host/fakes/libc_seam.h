@@ -36,8 +36,10 @@
 
 // The headers that declare the names renamed below, so this file satisfies its own ordering rule and a unit following
 // the recipe above cannot get it wrong by forgetting one. Include guards make the includer's own copies free.
+#include <dirent.h>
 #include <netdb.h>
 #include <fcntl.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -72,6 +74,14 @@ void micro_free(void*);
 int micro_fprintf(FILE*, const char*, ...) __attribute__((format(printf, 2, 3)));
 int micro_gethostname(char*, size_t);
 int micro_access(const char*, int);
+int micro_open(const char*, int, ...);
+FILE* micro_fopen(const char*, const char*);
+DIR* micro_opendir(const char*);
+struct dirent* micro_readdir(DIR*);
+int micro_closedir(DIR*);
+ssize_t micro_readlink(const char*, char*, size_t);
+int micro_ioctl(int, unsigned long, ...);
+int micro_atexit(void (*)(void));
 }  // extern "C"
 
 #define write micro_write
@@ -100,3 +110,11 @@ int micro_access(const char*, int);
 #define fprintf micro_fprintf
 #define gethostname micro_gethostname
 #define access micro_access
+#define open micro_open
+#define fopen micro_fopen
+#define opendir micro_opendir
+#define readdir micro_readdir
+#define closedir micro_closedir
+#define readlink micro_readlink
+#define ioctl micro_ioctl
+#define atexit micro_atexit
