@@ -186,10 +186,10 @@ struct pair_state
     uint64_t starts_evicted     = 0;  // retained STARTs aged out by the watermark
     uint64_t starts_cap_evicted = 0;  // retained STARTs dropped by the hard size cap
 
-    // Hard bound on pending_starts, mirroring D9's per-GPU hub cap (this map is
+    // Hard bound on pending_starts, mirroring the per-GPU hub cap (this map is
     // per-GPU too, and a START is of the same order in size). evict_stale is only
     // an AGE backstop -- at the 30-min default a sustained EOP loss exhausts memory
-    // long before it fires -- and D9's cap does not cover this map, because
+    // long before it fires -- and the hub cap does not cover this map, because
     // firmware emits records for signal-fallback dispatches the hub never saw.
     // Overridden from ROCPROFILER_KFD_DISPATCH_LOG_MAX_PENDING_STARTS by the
     // reader; the default stands for a unit test that never sets it.
@@ -201,7 +201,7 @@ struct pair_state
     // map sits AT the cap. Reaching the cap already means EOPs are being lost at a
     // rate no sane workload produces, and the alternative there is memory
     // exhaustion; a cheap victim lookup would need a second index ordered by
-    // seen_at_ns, the same secondary-index work D9 deferred.
+    // seen_at_ns, the same secondary-index work deferred from the hub cap.
     void evict_oldest_start()
     {
         auto _oldest = pending_starts.end();

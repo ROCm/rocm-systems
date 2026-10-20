@@ -1066,14 +1066,13 @@ TEST(stream_geometry, rejection_reason_is_reported)
 }
 
 // ---------------------------------------------------------------------------
-// D1 (F9) tick-ordered pairing. The pairer orders each batch by (tick, kind,
+// Tick-ordered pairing. The pairer orders each batch by (tick, kind,
 // arrival_seq) with EOP-before-START at equal ticks, so temporal order -- not
-// region/copy position -- decides every pairing. These are the spec's
-// fails-without-fix cases (D1 180-199); they fail under the old all-STARTs-first
-// two-pass pairer.
+// region/copy position -- decides every pairing. These fail under the old
+// all-STARTs-first two-pass pairer.
 // ---------------------------------------------------------------------------
 
-// D1(a): {S_A, E_A, S_B, E_B} on one raw key in true temporal order -> BOTH pair.
+// In-order reuse of one raw key: {S_A, E_A, S_B, E_B} -> BOTH pair.
 // The old two-pass installed S_A and S_B before any EOP, so S_B overwrote S_A;
 // tick order runs S_A -> E_A(pair) -> S_B -> E_B(pair).
 TEST(dlog_drain, d1_same_key_in_order_reuse_both_pair)
@@ -1092,7 +1091,7 @@ TEST(dlog_drain, d1_same_key_in_order_reuse_both_pair)
     EXPECT_TRUE(e.st.pairing.pending_starts.empty());
 }
 
-// D1(i): reuse tie -- S_A(1) retained, then {E_A(5), S_B(5), E_B(9)} in one batch.
+// Reuse tie: S_A(1) retained, then {E_A(5), S_B(5), E_B(9)} in one batch.
 // EOP-before-START at the equal tick 5 pairs E_A with the outstanding S_A first,
 // then installs S_B cleanly; both pair, no overwrite.
 TEST(dlog_drain, d1_reuse_equal_tick_both_pair_no_overwrite)
@@ -1114,7 +1113,7 @@ TEST(dlog_drain, d1_reuse_equal_tick_both_pair_no_overwrite)
     EXPECT_TRUE(e.st.pairing.pending_starts.empty());
 }
 
-// D1(d): a START retained from batch N pairs its EOP in batch N+1, and the
+// A START retained from batch N pairs its EOP in batch N+1, and the
 // retained START is NOT counted as overwritten (it is not re-fed into N+1's sort).
 TEST(dlog_drain, d1_cross_batch_pair_no_overwrite)
 {
@@ -1134,7 +1133,7 @@ TEST(dlog_drain, d1_cross_batch_pair_no_overwrite)
     EXPECT_EQ(e.rec.pairs[std::make_pair(db, 7u)].second, 200u);
 }
 
-// D1(e): after a replayed key pairs, the NEXT START on the same raw key inserts a
+// After a replayed key pairs, the NEXT START on the same raw key inserts a
 // fresh entry and pairs normally.
 TEST(dlog_drain, d1_replayed_key_then_fresh_start_pairs)
 {
@@ -1158,7 +1157,7 @@ TEST(dlog_drain, d1_replayed_key_then_fresh_start_pairs)
     EXPECT_EQ(e.rec.pairs[std::make_pair(db, 7u)].first, 500u);
 }
 
-// D1(g): cross-batch equal tick -- START(t) in batch N, EOP(t) in batch N+1.
+// Cross-batch equal tick -- START(t) in batch N, EOP(t) in batch N+1.
 // No firmware guarantee that start<end for a real pair, so an equal-tick EOP is
 // dropped fail-closed (equal_tick_drops), the key drained and re-pairable.
 TEST(dlog_drain, d1_cross_batch_equal_tick_dropped)
@@ -1178,7 +1177,7 @@ TEST(dlog_drain, d1_cross_batch_equal_tick_dropped)
     EXPECT_TRUE(e.st.pairing.pending_starts.empty()) << "key drained to 0, re-pairable";
 }
 
-// D1(h): cross-batch stale EOP -- START(100) retained from batch N, EOP(50) in
+// Cross-batch stale EOP -- START(100) retained from batch N, EOP(50) in
 // batch N+1 predates it (belongs to an earlier lost dispatch). The stale EOP is
 // dropped and the retained START is left UNTOUCHED, so its own EOP(120) in batch
 // N+2 still pairs.
@@ -1208,7 +1207,7 @@ TEST(dlog_drain, d1_cross_batch_stale_eop_leaves_start_and_later_eop_pairs)
     EXPECT_EQ(e.rec.pairs[std::make_pair(db, 7u)].second, 120u);
 }
 
-// D1(f): same-batch {S(t), E(t)} on one key fed in BOTH arrival orders must give
+// Same-batch {S(t), E(t)} on one key fed in BOTH arrival orders must give
 // a byte-identical outcome -- the EOP-before-START tie rule is a property of the
 // record multiset, not arrival order. Both orders: one startless EOP forwarded,
 // equal_tick_drops == 0, one retained START.
