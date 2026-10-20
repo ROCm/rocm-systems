@@ -6795,7 +6795,7 @@ def test_generated_vop3_dot2_true16_uses_true16_helpers(
     assert 'uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(src1, lane);' in body
     assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in body
     assert (
-        'amdgpu::gfx12_dot2_packed16<false>(a0, b0, a1, b1, acc, wf.fp16_ovfl())'
+        'amdgpu::gfx12_dot2_packed16<false>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl())'
         in body
     )
     assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true)' in body

@@ -311,7 +311,7 @@ def test_rdna4_dot2_uses_exact_policy_and_encoding_specific_inline_halves():
         )
         assert 'amdgpu::gfx12_dot2_f32<' in cpp
         assert 'gfx11_dot2_f32' not in cpp
-        assert 'float result = a0 * b0' not in cpp
+        assert 'float result = src0_lo * src1_lo' not in cpp
         for index in range(2):
             if cls == 'dot2_f32_f16':
                 assert f'dot2_src_needs_half_replication(inst_.src{index})' not in cpp
@@ -360,19 +360,19 @@ def test_dot2_true16_uses_the_architecture_packed_dot_step():
         ):
             cpp = gen_dot2_true16(['vdst'], ['src0', 'src1', 'src2'], cls, accumulation)
             assert (
-                f'amdgpu::{arch}_dot2_packed16<{bf16}>(a0, b0, a1, b1, acc, wf.fp16_ovfl())'
+                f'amdgpu::{arch}_dot2_packed16<{bf16}>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl())'
                 in cpp
             )
             assert (
                 f'source_modifier::apply<amdgpu::fp_format::{fmt}>(bits & 0xffffu, source, '
                 'inst_.abs, inst_.neg)' in cpp
             )
-            assert 'a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);' in cpp
-            assert 'b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);' in cpp
+            assert 'src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);' in cpp
+            assert 'src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);' in cpp
             assert 'acc = half(acc_bits, 2);' in cpp
             # Only an inline constant is converted through a host float.
             assert '_to_f32' not in cpp
-            assert 'float a' not in cpp
+            assert 'float src0_lo' not in cpp
             assert 'fp_mode::' not in cpp
 
 

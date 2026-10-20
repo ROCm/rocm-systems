@@ -7984,11 +7984,11 @@ void VDot2F16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(bits & 0xffffu, source,
                                                                              inst_.abs, inst_.neg));
     };
-    const uint16_t a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);
-    const uint16_t b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);
+    const uint16_t src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);
+    const uint16_t src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);
     const uint16_t acc = half(acc_bits, 2);
     const uint16_t result_bits =
-        amdgpu::gfx12_dot2_packed16<false>(a0, b0, a1, b1, acc, wf.fp16_ovfl());
+        amdgpu::gfx12_dot2_packed16<false>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
 }
@@ -8029,11 +8029,11 @@ RJ_NOINLINE void VDot2F16F16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
       return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(bits & 0xffffu, source,
                                                                              inst_.abs, inst_.neg));
     };
-    const uint16_t a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);
-    const uint16_t b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);
+    const uint16_t src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);
+    const uint16_t src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);
     const uint16_t acc = half(acc_bits, 2);
     const uint16_t result_bits =
-        amdgpu::gfx12_dot2_packed16<false>(a0, b0, a1, b1, acc, wf.fp16_ovfl());
+        amdgpu::gfx12_dot2_packed16<false>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
   dpp_write_mask_scope_.restore();
@@ -8064,11 +8064,11 @@ void VDot2Bf16Bf16Vop3::execute_impl(amdgpu::Wavefront &wf) {
       return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::BF16>(
           bits & 0xffffu, source, inst_.abs, inst_.neg));
     };
-    const uint16_t a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);
-    const uint16_t b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);
+    const uint16_t src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);
+    const uint16_t src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);
     const uint16_t acc = half(acc_bits, 2);
     const uint16_t result_bits =
-        amdgpu::gfx12_dot2_packed16<true>(a0, b0, a1, b1, acc, wf.fp16_ovfl());
+        amdgpu::gfx12_dot2_packed16<true>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
 }
@@ -8109,11 +8109,11 @@ RJ_NOINLINE void VDot2Bf16Bf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf)
       return uint16_t(amdgpu::source_modifier::apply<amdgpu::fp_format::BF16>(
           bits & 0xffffu, source, inst_.abs, inst_.neg));
     };
-    const uint16_t a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);
-    const uint16_t b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);
+    const uint16_t src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);
+    const uint16_t src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);
     const uint16_t acc = half(acc_bits, 2);
     const uint16_t result_bits =
-        amdgpu::gfx12_dot2_packed16<true>(a0, b0, a1, b1, acc, wf.fp16_ovfl());
+        amdgpu::gfx12_dot2_packed16<true>(src0_lo, src1_lo, src0_hi, src1_hi, acc, wf.fp16_ovfl());
     ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits, true);
   }
   dpp_write_mask_scope_.restore();
