@@ -14,8 +14,6 @@ from sqlalchemy.orm import Session
 
 from pc_sampling.source_snapshot_analysis import parse_source_frames
 from utils.analysis_orm import (
-    PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT,
-    PER_SOURCE_LINE_FILE_KEY_COLUMN_COUNT,
     CodeObjectStore,
     Database,
     Dispatch,
@@ -30,6 +28,7 @@ from utils.analysis_orm import (
     SourceFile,
     SourceLine,
     Workload,
+    per_kernel_isa_file_key_columns,
 )
 
 PC_SAMPLING_SUMMARY_VIEW_COLUMNS = [
@@ -241,35 +240,6 @@ def add_captured_source_file(
         for line_number in range(1, line_count + 1)
     ])
     return source_file
-
-
-def fetch_per_source_line_rows(
-    session: Session,
-    workload: Workload,
-    stall_reasons: list[str] | None = None,
-) -> list[dict[str, object]]:
-    """Stream one workload's per-source-line rows, keyed by column name."""
-    session.commit()
-    stall_reasons = stall_reasons or []
-    column_names = [
-        column.name
-        for column in Database._per_source_line_statement(
-            workload.workload_id, stall_reasons
-        ).selected_columns
-    ]
-    rows = []
-    for row in Database.stream_per_source_line_rows(
-        workload.workload_id, stall_reasons
-    ):
-        named_row = dict(zip(column_names, row))
-        named_row["isa_references"] = json.loads(named_row["isa_references"])
-        rows.append(named_row)
-    return rows
-
-
-def per_source_line_counts(rows: list[dict[str, object]]) -> dict[tuple, object]:
-    """Map each (file, line) to its total count."""
-    return {(row["file_path"], row["line_number"]): row["count"] for row in rows}
 
 
 # =============================================================================
@@ -1109,7 +1079,7 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
     """The exporter slices the key off by count, so order and count must hold."""
     statement = Database._per_kernel_isa_statement(workload_id=1, stall_reasons=[])
     leading_columns = list(statement.selected_columns)[
-        :PER_KERNEL_ISA_FILE_KEY_COLUMN_COUNT
+        : len(per_kernel_isa_file_key_columns())
     ]
 
     assert [column.name for column in leading_columns] == [
@@ -1122,185 +1092,60 @@ def test_per_kernel_isa_select_leads_with_the_file_key_columns():
     ]
 
 
-def test_per_source_line_select_leads_with_the_file_key_columns():
-    """The exporter slices off the key by count, so the order and count must hold."""
-    statement = Database._per_source_line_statement(workload_id=1, stall_reasons=[])
-    leading_columns = list(statement.selected_columns)[
-        :PER_SOURCE_LINE_FILE_KEY_COLUMN_COUNT
-    ]
-
-    assert [column.name for column in leading_columns] == [
-        "workload_name",
-        "workload_sub_name",
-        "file_path",
-    ]
-
-
-def test_per_source_line_rows_sum_the_instructions_of_a_line(db_session):
-    """Counts and stall reasons are summed, and percentages are sample-weighted."""
+def test_per_source_line_rows_add_up_the_instructions_of_each_line(db_session):
+    """Each line of a captured file adds up the instructions that came from it."""
     workload = Workload(name="w", sub_name="s")
     kernel = Kernel(kernel_name="vecCopy", workload=workload)
-    add_captured_source_file(db_session, workload, "/s/a.cpp", line_count=1)
-    add_pc_sampling_state(
-        db_session,
-        workload=workload,
-        kernel=kernel,
-        pid=42,
-        code_object_id=5,
-        total_count=3,
-        issue_count=1,
-        stall_count=2,
-        wave_occupancy_percent=50.0,
-        active_thread_percent=None,
-        stall_reasons={"WAITCNT": 2},
-    )
-    add_pc_sampling_state(
-        db_session,
-        workload=workload,
-        kernel=kernel,
-        pid=42,
-        code_object_id=6,
-        total_count=5,
-        issue_count=4,
-        stall_count=1,
-        wave_occupancy_percent=10.0,
-        active_thread_percent=80.0,
-        stall_reasons={"NONE": 1},
-    )
-
-    (row,) = fetch_per_source_line_rows(db_session, workload, ["NONE", "WAITCNT"])
-
-    assert (row["count"], row["issue_count"], row["stall_count"]) == (8, 5, 3)
-    assert (row["NONE"], row["WAITCNT"]) == (1, 2)
-    assert row["wave_occupancy_percent"] == pytest.approx((50 * 3 + 10 * 5) / 8)
-    # The instruction without a percentage adds no weight.
-    assert row["active_thread_percent"] == pytest.approx(80.0)
-
-
-def test_per_source_line_rows_credit_every_frame_of_an_inline_stack(db_session):
-    """An inlined instruction counts in full toward each line of its stack."""
-    workload = Workload(name="w", sub_name="s")
-    kernel = Kernel(kernel_name="vecCopy", workload=workload)
+    add_captured_source_file(db_session, workload, "/s/a.cpp", line_count=3)
     add_captured_source_file(db_session, workload, "/s/hip.h", line_count=2)
-    add_captured_source_file(db_session, workload, "/s/a.cpp", line_count=3)
-    add_pc_sampling_state(
-        db_session,
-        workload=workload,
-        kernel=kernel,
-        pid=42,
-        source="/s/hip.h:2 -> /s/a.cpp:3",
-        total_count=4,
-    )
-
-    counts = per_source_line_counts(fetch_per_source_line_rows(db_session, workload))
-
-    assert counts[("/s/hip.h", 2)] == 4
-    assert counts[("/s/a.cpp", 3)] == 4
-
-
-def test_per_source_line_rows_count_an_instruction_once_per_line(db_session):
-    """An instruction whose stack names one line twice counts once on that line."""
-    workload = Workload(name="w", sub_name="s")
-    kernel = Kernel(kernel_name="vecCopy", workload=workload)
-    add_captured_source_file(db_session, workload, "/s/a.cpp", line_count=2)
-    add_pc_sampling_state(
-        db_session,
-        workload=workload,
-        kernel=kernel,
-        pid=42,
-        source="/s/a.cpp:2 -> /s/a.cpp:2",
-        total_count=4,
-    )
-
-    counts = per_source_line_counts(fetch_per_source_line_rows(db_session, workload))
-
-    assert counts[("/s/a.cpp", 2)] == 4
-
-
-def test_per_source_line_rows_list_every_line_of_captured_files_only(db_session):
-    """Every numbered line of a captured file appears once.
-
-    A ":?" frame adds to no source line, and a file missing from the snapshot
-    is left out because it has no exported copy.
-    """
-    workload = Workload(name="w", sub_name="s")
-    kernel = Kernel(kernel_name="vecCopy", workload=workload)
-    add_captured_source_file(db_session, workload, "/s/a.cpp", line_count=3)
-    add_pc_sampling_state(
-        db_session,
-        workload=workload,
-        kernel=kernel,
-        pid=42,
-        code_object_id=5,
-        source="/s/a.cpp:2",
-    )
-    add_pc_sampling_state(
-        db_session,
-        workload=workload,
-        kernel=kernel,
-        pid=42,
-        code_object_id=6,
-        source="/s/a.cpp:?",
-    )
-    add_pc_sampling_state(
-        db_session,
-        workload=workload,
-        kernel=kernel,
-        pid=42,
-        code_object_id=7,
-        source="/s/absent.cpp:1",
-    )
-
-    rows = fetch_per_source_line_rows(db_session, workload)
-
-    assert per_source_line_counts(rows) == {
-        ("/s/a.cpp", 1): None,
-        ("/s/a.cpp", 2): 3,
-        ("/s/a.cpp", 3): None,
-    }
-    # A line that no instruction came from has one all-null reference.
-    assert rows[0]["isa_references"] == [
+    for instruction in (
         {
-            "kernel_uuid": None,
-            "short_name": None,
-            "code_object_id": None,
-            "pid": None,
-            "instruction_line_number": None,
-        }
+            "code_object_id": 5,
+            "source": "/s/hip.h:2 -> /s/a.cpp:2",
+            "total_count": 3,
+            "issue_count": 1,
+            "stall_count": 2,
+            "wave_occupancy_percent": 50.0,
+            "stall_reasons": {"WAITCNT": 2},
+        },
+        # A line that appears twice in one stack counts once.
+        {
+            "code_object_id": 6,
+            "source": "/s/a.cpp:2 -> /s/a.cpp:2",
+            "total_count": 5,
+            "issue_count": 4,
+            "stall_count": 1,
+            "wave_occupancy_percent": 10.0,
+            "active_thread_percent": 80.0,
+            "stall_reasons": {"NONE": 1},
+        },
+        {"code_object_id": 7, "source": "/s/a.cpp:?"},
+        {"code_object_id": 8, "source": "/s/absent.cpp:1"},
+    ):
+        add_pc_sampling_state(
+            db_session, workload=workload, kernel=kernel, pid=42, **instruction
+        )
+    db_session.commit()
+
+    rows = [
+        (
+            *row[:-1],
+            [
+                isa_reference["code_object_id"]
+                for isa_reference in json.loads(row[-1])
+                if isa_reference["kernel_uuid"] is not None
+            ],
+        )
+        for row in Database.stream_per_source_line_rows(
+            workload.workload_id, ["NONE", "WAITCNT"]
+        )
     ]
 
-
-def test_per_source_line_rows_number_isa_rows_as_the_isa_file_does(db_session):
-    """A reference names an instruction by its row in its kernel's ISA file.
-
-    Rows are numbered by offset within one kernel, code object and process, and
-    an unsampled instruction is numbered too.
-    """
-    workload = Workload(name="w", sub_name="s")
-    kernel = Kernel(kernel_name="vecCopy", short_name="vecCopy", workload=workload)
-    add_captured_source_file(db_session, workload, "/s/a.cpp", line_count=2)
-    kernel_symbol = KernelSymbol(
-        code_object_store=CodeObjectStore(
-            code_object_id=5, pid=42, load_base=0x1000, workload=workload
-        ),
-        kernel=kernel,
-    )
-    for offset, source in ((0x20, "/s/a.cpp:1"), (0x10, "/s/a.cpp:2")):
-        instruction_line = InstructionLine(
-            code_object_offset=offset,
-            instruction="v_mov",
-            kernel_symbol=kernel_symbol,
-        )
-        add_source_frames(db_session, workload, instruction_line, source)
-
-    rows = fetch_per_source_line_rows(db_session, workload)
-
-    assert [
-        [
-            (isa_reference["code_object_id"], isa_reference["instruction_line_number"])
-            for isa_reference in row["isa_references"]
-        ]
-        for row in rows
-    ] == [[(5, 2)], [(5, 1)]]
-    assert rows[0]["isa_references"][0]["kernel_uuid"] == kernel.kernel_uuid
-    assert rows[0]["isa_references"][0]["short_name"] == "vecCopy"
+    empty_counts = (None,) * 7
+    assert rows == [
+        ("w", "s", "/s/a.cpp", 1, "line 1", *empty_counts, []),
+        ("w", "s", "/s/a.cpp", 2, "line 2", 8, 5, 3, 25.0, 80.0, 1, 2, [5, 6]),
+        ("w", "s", "/s/a.cpp", 3, "line 3", *empty_counts, []),
+        ("w", "s", "/s/hip.h", 1, "line 1", *empty_counts, []),
+        ("w", "s", "/s/hip.h", 2, "line 2", 3, 1, 2, 50.0, None, None, 2, [5]),
+    ]

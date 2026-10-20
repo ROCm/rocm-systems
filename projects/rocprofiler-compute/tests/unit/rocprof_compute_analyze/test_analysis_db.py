@@ -3310,15 +3310,19 @@ def test_run_analysis_isa_carries_no_stall_columns_for_host_trap(tmp_path):
 def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path):
     """A source file's per-source-line file sits beside its copy and cites ISA rows."""
     workload_path = tmp_path / "workloads" / ISA_WORKLOAD_NAME / ISA_WORKLOAD_SUB_NAME
+    tool_data_records = make_source_workload_tool_data_records(
+        workload_path,
+        {"/s/a.cpp": "int first;\nint second;\nint third;\n"},
+        ["/s/a.cpp:1", "/s/a.cpp:2"],
+    )
+    # Both offsets belong to one kernel, so the references number its ISA rows.
+    tool_data = tool_data_records[0]
+    tool_data["kernel_symbols"][1]["kernel_id"] = 100
+    tool_data["buffer_records"]["kernel_dispatch"][1]["dispatch_info"]["kernel_id"] = (
+        100
+    )
     analyzer, result_path = make_csv_run_analyzer(
-        tmp_path,
-        {
-            str(workload_path): make_source_workload_tool_data_records(
-                workload_path,
-                {"/s/a.cpp": "int first;\nint second;\nint third;\n"},
-                ["/s/a.cpp:1", "/s/a.cpp:2"],
-            )
-        },
+        tmp_path, {str(workload_path): tool_data_records}
     )
     run_source_export_analysis(analyzer)
 
@@ -3334,11 +3338,11 @@ def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path)
         "a.cpp",
         "a.cpp_pc_sampling.csv",
     ]
-    kernel_frame = pd.read_csv(result_path / "kernel.csv").set_index("kernel_name")
-    isa_folders = {
-        kernel_name: f"{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
-        for kernel_name, kernel_row in kernel_frame.iterrows()
-    }
+    kernel_row = pd.read_csv(result_path / "kernel.csv").iloc[0]
+    isa_file = (
+        f"{kernel_row.short_name}_uuid_{kernel_row.kernel_uuid}"
+        "/isa_code_object_id_5_pid_42.csv"
+    )
     with (source_directory / "a.cpp_pc_sampling.csv").open(
         newline="", encoding="utf-8"
     ) as source_line_file:
@@ -3365,7 +3369,7 @@ def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path)
             "",
             "",
             "1",
-            f"{isa_folders['vecCopy']}/isa_code_object_id_5_pid_42.csv:1",
+            f"{isa_file}:1",
         ],
         [
             "2",
@@ -3376,7 +3380,7 @@ def test_run_analysis_writes_source_line_counts_beside_the_source_copy(tmp_path)
             "",
             "",
             "",
-            f"{isa_folders['vecAdd']}/isa_code_object_id_5_pid_42.csv:1",
+            f"{isa_file}:2",
         ],
         ["3", "int third;", "", "", "", "", "", "", ""],
     ]
