@@ -3438,12 +3438,13 @@
       "timeout": 300,
       "env_variables": {
         "RCCL_CE_ALLREDUCE": "1",
-        "RCCL_FORCE_CE_ALLREDUCE": "1"
+        "RCCL_FORCE_CE_ALLREDUCE": "1",
+        "RCCL_CE_AR_MAX_MSG_BYTES": "8388608"
       },
       "tests": [
         {
           "name": "CE_AllReduce_SpanningLsa_ForcedUnregistered",
-          "description": "One node, 4 ranks, one LSA team: forced CE AllReduce on unregistered buffers selects CE before staging exists, allocates staging, and returns the correct sum",
+          "description": "One node, 4 ranks, one LSA team: forced CE AllReduce on unregistered buffers selects CE before staging exists, allocates staging, and returns the correct sum. gfx1250 leaves the unregistered cap at 0, so the 8 MiB call sets RCCL_CE_AR_MAX_MSG_BYTES.",
           "test_filter": "CeAllReduceSpanningLsaTest.*"
         }
       ]
