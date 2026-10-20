@@ -274,7 +274,10 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
 
   size_t direct_pWrk = PE_size * nreduce;
   size_t direct_pSync = PE_size;
-  size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
+  // See reduce_wg for why this is rescaled from double-sized units to
+  // T-sized units.
+  size_t provided_pWrk = max(nreduce / 2 + 1,
+      (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T));
   size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
 
   size_t ring_pSync = 2 * PE_size;
@@ -283,7 +286,8 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
     internal_direct_allreduce_wave<T, Op>(dest, source, nreduce, team_obj);
   } else {
     if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
-      size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+      size_t ring_pWrk =
+          (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
       int chunk_size = ring_pWrk / PE_size;
       int seg_size = chunk_size * PE_size;
 
@@ -382,10 +386,10 @@ __device__ int IPCContext::reduce_wave(rocshmem_team_t team, T *dest,
 template <typename T, ROCSHMEM_OP Op>
 __device__ void IPCContext::internal_ring_allreduce_wg(
     T *dst, const T *src, int nelems, IPCTeam *team_obj,  // NOLINT(runtime/int)
-    int n_seg, int seg_size, int chunk_size) {
+    int n_seg, int seg_size, int chunk_size, size_t pSync_offset) {
 
   int PE_size = team_obj->tinfo_wrt_world->size;
-  long *pSync = team_obj->reduce_pSync;
+  long *pSync = team_obj->reduce_pSync + pSync_offset;
   T *pWrk = reinterpret_cast<T *>(team_obj->pWrk);
   int my_pe_in_team = team_obj->my_pe;
 
@@ -427,13 +431,39 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
                             chunk_size, wg_id, wg_size);
     }
 
-    // Loop 2 in the example above
+    // Loop 2 in the example above (allgather): every PE already holds its
+    // own fully-reduced chunk after loop 1 and just needs to broadcast it
+    // around the ring. This used to go straight into the peer's `dst` via
+    // putmem_nbi_wg(), which resolves the remote address through
+    // ipcPeerPtr()/the general symmetric-heap mapping. That path is where
+    // the real bug lives: on gfx1250, writes placed there this way are not
+    // reliably visible to the peer by the time its wait_until() on the
+    // paired pSync flag (itself delivered through the *wrk_sync_pool_*
+    // mapping, not the heap mapping) returns -- a genuine missing
+    // completion guarantee between the two different IPC-mapped regions,
+    // not a logic bug (it only reproduces at the larger per-iteration chunk
+    // sizes the reduce_wg element-size fix enables, and disappears under
+    // any added instruction latency, which is the signature of a race, not
+    // a deterministic indexing error). Switching the destination buffer
+    // alone to the blocking putmem_wg() (same ipcPeerPtr() mapping, just
+    // with the trailing s_barrier put_nbi omits) was verified NOT to fix
+    // it, which rules out "missing local barrier" and confirms the mapping
+    // itself is the problem.
+    //
+    // The fix: relay through pWrk/wrk_sync_pool_ instead, exactly like loop
+    // 1 above (whose correctness is already established -- it is the same
+    // mechanism internal_direct_allreduce_wg uses for every message size up
+    // to the direct/ring threshold, with no reported failures). Each PE
+    // pushes its chunk into the peer's pWrk at its own off_send, then once
+    // the paired flag confirms arrival, copies out of its *own* pWrk at
+    // off_recv (the index the peer used as off_send) into dst.
     for (int iter = PE_size - 1; iter < 2 * PE_size - 2; iter++) {
       off_send = (((my_pe_in_team + 1 - iter + 2 * PE_size) % PE_size) * chunk_size);
-      putmem_nbi_wg(reinterpret_cast<void *>(&dst[off_send + off_seg]),
+      off_recv = (((my_pe_in_team - iter + 2 * PE_size) % PE_size) * chunk_size);
+
+      internal_putmem_wg(reinterpret_cast<void *>(&pWrk[off_send]),
                     reinterpret_cast<void *>(&dst[off_send + off_seg]),
                     chunk_size * sizeof(T), send_pe);
-      __syncthreads();
       fence(send_pe);
       if (is_thread_zero_in_block()) {
         wait_val = seg + 10;
@@ -442,12 +472,20 @@ __device__ void IPCContext::internal_ring_allreduce_wg(
       }
       atomic::threadfence<atomic::memory_scope::system,
                           atomic::memory_order::acquire>();
+      __syncthreads();
 
+      for (int i = wg_id; i < chunk_size; i += wg_size) {
+        dst[off_seg + off_recv + i] = pWrk[off_recv + i];
+      }
       __syncthreads();
     }
   }
 
-  for (int i = wg_id; i < 2 * constmem.num_pes - 2; i += wg_size) {
+  // Only clear the slots this call actually used (team-relative, not the
+  // global PE count): the other half of the double-buffered region may
+  // belong to a concurrently in-flight call (see pSync_offset below) and
+  // must not be touched here.
+  for (int i = wg_id; i < 2 * PE_size - 2; i += wg_size) {
     pSync[i] = ROCSHMEM_SYNC_VALUE;
   }
   __syncthreads();
@@ -540,14 +578,26 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
   size_t direct_pWrk = PE_size * nreduce;
   size_t direct_pSync = PE_size;
   size_t ring_pSync = 2 * PE_size;
-  size_t provided_pWrk = max(nreduce / 2 + 1, ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE);
+  size_t provided_pWrk = max(nreduce / 2 + 1,
+      (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T));
   size_t provided_pSync = ROCSHMEM_REDUCE_SYNC_SIZE;
 
   if (provided_pWrk >= direct_pWrk && provided_pSync >= direct_pSync) {
     internal_direct_allreduce_wg<T, Op>(dest, source, nreduce, team_obj);
   } else {
-    if (ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
-      size_t ring_pWrk = ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+    // The ring protocol's pSync flags are reused verbatim (same iter index,
+    // same wait value) by every call on this team. Back-to-back calls (e.g.
+    // a tight loop calling reduce on the same team/ctx) can let one PE start
+    // its next call's flag writes before a slower peer has consumed the
+    // previous call's flags on the exact same slots -- an ABA hazard that
+    // corrupts results or hangs. Double-buffer the slots a single call can
+    // use (ring_pSync of them) and alternate between the two halves each
+    // call, so a PE at most one call ahead can never alias a slower peer's
+    // in-flight slots.
+    if (2 * ring_pSync <= ROCSHMEM_REDUCE_SYNC_SIZE) {
+      size_t pSync_offset = (team_obj->reduce_sequence_number % 2) * ring_pSync;
+      size_t ring_pWrk =
+          (ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * sizeof(double)) / sizeof(T);
       // integer division truncating value
       int chunk_size = ring_pWrk / PE_size;
       int seg_size = chunk_size * PE_size;
@@ -559,7 +609,7 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
 
       if (n_seg > 0) {
         internal_ring_allreduce_wg<T, Op>(dest, source, nreduce, team_obj, n_seg,
-                                       seg_size, chunk_size);
+                                       seg_size, chunk_size, pSync_offset);
       }
       if (n_seg_up > n_seg) {
         T *p_dst = (dest + (n_seg * seg_size));
@@ -570,7 +620,7 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
           barrier_wg(team);
           internal_ring_allreduce_wg<T, Op>(p_dst, p_src,
                                          (p_chunk * PE_size), team_obj, 1,
-                                         (p_chunk * PE_size), p_chunk);
+                                         (p_chunk * PE_size), p_chunk, pSync_offset);
         }
 
         if ((p_chunk * PE_size) < p_count) {
@@ -581,6 +631,9 @@ __device__ int IPCContext::reduce_wg(rocshmem_team_t team, T *dest,
           barrier_wg(team);
           internal_direct_allreduce_wg<T, Op>(p_dst, p_src2, p_count, team_obj);
         }
+      }
+      if (is_thread_zero_in_block()) {
+        team_obj->reduce_sequence_number++;
       }
     } else {
       LOGD_WARN("Unsupported reduction size for IPC conduit.");
