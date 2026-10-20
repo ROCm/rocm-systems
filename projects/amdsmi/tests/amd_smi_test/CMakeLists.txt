@@ -147,6 +147,14 @@ install(
     COMPONENT ${TESTS_COMPONENT}
 )
 
+# Headers the KFD event tests compare with the kernel's, installed next to the test binary so the
+# packaged tests need no source tree (they look in kfd_headers/ first).
+install(
+    FILES unit/gpu/kfd_event_formats.h ${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/kfd_ioctl.h
+    DESTINATION ${SHARE_INSTALL_PREFIX}/tests/kfd_headers
+    COMPONENT ${TESTS_COMPONENT}
+)
+
 # CPER mock fixtures, installed next to the test binary so the packaged tests
 # locate them at runtime instead of relying on the build-machine source path.
 # Exclude __pycache__ so a locally-run sanitize_cper.py never leaks a stray .pyc
