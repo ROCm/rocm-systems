@@ -177,6 +177,12 @@ using context_array_t                = context::context_array_t;
 using context_user_data_map_t        = std::unordered_map<const context_t*, user_data_t>;
 using amd_compute_pgm_rsrc_three32_t = uint32_t;
 
+struct code_object_load_callback_data_t
+{
+    code_object_array_t* code_objects          = nullptr;
+    bool                 needs_host_symbol_map = false;
+};
+
 RocAttachDispatchTable**
 get_attach_table()
 {
@@ -703,7 +709,9 @@ code_object_load_callback(hsa_executable_t         executable,
     code_obj_v.hsa_executable  = executable;
     code_obj_v.hsa_code_object = loaded_code_object;
 
-    auto* code_obj_vec = static_cast<code_object_array_t*>(cb_data);
+    auto* callback_data = static_cast<code_object_load_callback_data_t*>(cb_data);
+    CHECK_NOTNULL(callback_data);
+    auto* code_obj_vec = CHECK_NOTNULL(callback_data->code_objects);
     auto exists = std::any_of(code_obj_vec->begin(), code_obj_vec->end(), [&code_obj_v](auto& itr) {
         return (itr && code_obj_v == *itr);
     });
@@ -716,9 +724,12 @@ code_object_load_callback(hsa_executable_t         executable,
         {
             if(itr && *itr == code_obj_v)
             {
+                if(callback_data->needs_host_symbol_map)
+                    populate_hip_symbol_map_from_loaded_code_object(itr->rocp_data);
+
                 ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
                     executable,
-                    data.hsa_agent,
+                    itr->rocp_data.hsa_agent,
                     executable_iterate_agent_symbols_load_callback,
                     itr.get());
             }
@@ -819,7 +830,11 @@ code_object_load_callback(hsa_executable_t         executable,
     // generate a unique code object id
     data.code_object_id = ++get_code_object_id();
 
-    populate_hip_symbol_map_from_loaded_code_object(data);
+    // The device-to-host symbol map is only consumed while synthesizing host
+    // kernel-symbol callbacks. Device-symbol subscribers already receive the
+    // HSA symbol name directly, so avoid parsing ELF metadata for them.
+    if(callback_data->needs_host_symbol_map)
+        populate_hip_symbol_map_from_loaded_code_object(data);
 
     auto _status = ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
         executable, data.hsa_agent, executable_iterate_agent_symbols_load_callback, &code_obj_v);
@@ -976,17 +991,6 @@ hsa_status_t
 executable_freeze_internal(hsa_executable_t executable)
 {
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
-    (void) initialize_hip_binary_data();
-
-    CHECK_NOTNULL(get_executables())->wlock([executable](executable_array_t& data) {
-        data.emplace_back(executable);
-    });
-
-    auto* code_obj_vec = get_code_objects();
-    CHECK_NOTNULL(code_obj_vec)->wlock([executable](code_object_array_t& _vec) {
-        get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
-            executable, code_object_load_callback, &_vec);
-    });
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
     constexpr auto CODE_OBJECT_LOAD = ROCPROFILER_CODE_OBJECT_LOAD;
@@ -997,11 +1001,33 @@ executable_freeze_internal(hsa_executable_t executable)
     auto&& context_filter = [](const context_t* ctx) {
         return (ctx->callback_tracer && ctx->callback_tracer->domains(CODE_OBJECT_KIND) &&
                 (ctx->callback_tracer->domains(CODE_OBJECT_KIND, CODE_OBJECT_LOAD) ||
-                 ctx->callback_tracer->domains(CODE_OBJECT_KIND, CODE_OBJECT_KERNEL_SYMBOL)));
+                 ctx->callback_tracer->domains(CODE_OBJECT_KIND, CODE_OBJECT_KERNEL_SYMBOL) ||
+                 ctx->callback_tracer->domains(CODE_OBJECT_KIND, CODE_OBJECT_HOST_SYMBOL)));
     };
 
     static thread_local auto ctxs = context_array_t{};
     context::get_active_contexts(ctxs, std::move(context_filter));
+
+    const auto needs_host_symbol_map =
+        std::any_of(ctxs.begin(), ctxs.end(), [](const context_t* ctx) {
+            return ctx->callback_tracer &&
+                   ctx->callback_tracer->domains(CODE_OBJECT_KIND, CODE_OBJECT_HOST_SYMBOL);
+        });
+
+    if(needs_host_symbol_map) (void) initialize_hip_binary_data();
+
+    CHECK_NOTNULL(get_executables())->wlock([executable](executable_array_t& data) {
+        data.emplace_back(executable);
+    });
+
+    auto* code_obj_vec = get_code_objects();
+    CHECK_NOTNULL(code_obj_vec)->wlock([executable, needs_host_symbol_map](
+                                           code_object_array_t& _vec) {
+        auto callback_data =
+            code_object_load_callback_data_t{&_vec, needs_host_symbol_map};
+        get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
+            executable, code_object_load_callback, &callback_data);
+    });
 
     if(!ctxs.empty())
     {
@@ -1041,80 +1067,88 @@ executable_freeze_internal(hsa_executable_t executable)
 
                     for(const auto& sitr : ditr->symbols)
                     {
-                        if(sitr && citr->callback_tracer->domains(CODE_OBJECT_KIND,
-                                                                  CODE_OBJECT_KERNEL_SYMBOL))
+                        if(!sitr || sitr->beg_notified) continue;
+
+                        if(citr->callback_tracer->domains(CODE_OBJECT_KIND,
+                                                          CODE_OBJECT_KERNEL_SYMBOL))
                         {
-                            if(!sitr->beg_notified)
-                            {
-                                auto sym_data = sitr->rocp_data;
-                                auto record   = rocprofiler_callback_tracing_record_t{
+                            auto sym_data = sitr->rocp_data;
+                            auto record   = rocprofiler_callback_tracing_record_t{
+                                .context_id     = rocprofiler_context_id_t{citr->context_idx},
+                                .thread_id      = tidx,
+                                .correlation_id = rocprofiler_correlation_id_t{},
+                                .kind           = CODE_OBJECT_KIND,
+                                .operation      = CODE_OBJECT_KERNEL_SYMBOL,
+                                .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
+                                .payload        = static_cast<void*>(&sym_data)};
+
+                            // invoke callback
+                            auto& cb_data =
+                                citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
+                            sitr->user_data.wlock([&](auto& user_data_map) {
+                                auto& user_data = user_data_map[citr];
+                                cb_data.callback(record, &user_data, cb_data.data);
+                            });
+                        }
+
+                        // Host-symbol notifications are a separate operation and
+                        // must be delivered even when the context does not
+                        // subscribe to device-symbol notifications.
+                        if(citr->callback_tracer->domains(CODE_OBJECT_KIND,
+                                                          CODE_OBJECT_HOST_SYMBOL))
+                        {
+                            auto sym_data = sitr->rocp_data;
+                            auto& cb_data =
+                                citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
+                            sitr->user_data.wlock([&](auto& user_data_map) {
+                                auto& user_data = user_data_map[citr];
+
+                                std::string device_name =
+                                    CHECK_NOTNULL(get_hip_register_data())
+                                        ->rlock([sym_data](
+                                                    const hip::hip_register_data& register_data) {
+                                                const auto& sym_map =
+                                                    register_data.kernel_symbol_device_map;
+                                                const auto it = sym_map.find(
+                                                    *CHECK_NOTNULL(common::get_string_entry(
+                                                        sym_data.kernel_name)));
+                                                if(it != sym_map.end()) return it->second;
+                                                return std::string();
+                                            });
+                                // Does not have a host function, skip
+                                if(device_name.empty()) return;
+                                auto host_data =
+                                    CHECK_NOTNULL(get_hip_register_data())
+                                        ->rlock([device_name](const hip::hip_register_data&
+                                                                  register_data) {
+                                            const auto it =
+                                                register_data.host_function_map.find(device_name);
+                                            if(it == register_data.host_function_map.end())
+                                                return rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t{};
+                                            return it->second;
+                                        });
+                                // when kernel_symbol_device_map kernels are not present in
+                                // host_function_map, skip.
+                                if(host_data.device_function == nullptr) return;
+                                host_data.code_object_id = sym_data.code_object_id;
+                                host_data.kernel_id      = sym_data.kernel_id;
+                                // the id identifies the symbol, not this notification, so
+                                // allocate it on the first context and reuse it for the rest
+                                if(sitr->host_function_id == 0)
+                                    sitr->host_function_id = ++get_host_function_id();
+                                host_data.host_function_id = sitr->host_function_id;
+                                auto hip_record = rocprofiler_callback_tracing_record_t{
                                     .context_id     = rocprofiler_context_id_t{citr->context_idx},
                                     .thread_id      = tidx,
                                     .correlation_id = rocprofiler_correlation_id_t{},
                                     .kind           = CODE_OBJECT_KIND,
-                                    .operation      = CODE_OBJECT_KERNEL_SYMBOL,
+                                    .operation      = CODE_OBJECT_HOST_SYMBOL,
                                     .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
-                                    .payload        = static_cast<void*>(&sym_data)};
+                                    .payload        = static_cast<void*>(&host_data)};
 
                                 // invoke callback
-                                auto& cb_data =
-                                    citr->callback_tracer->callback_data.at(CODE_OBJECT_KIND);
-                                sitr->user_data.wlock([&](auto& user_data_map) {
-                                    auto& user_data = user_data_map[citr];
-                                    cb_data.callback(record, &user_data, cb_data.data);
-
-                                    std::string device_name =
-                                        CHECK_NOTNULL(get_hip_register_data())
-                                            ->rlock(
-                                                [sym_data](
-                                                    const hip::hip_register_data& register_data) {
-                                                    const auto& sym_map =
-                                                        register_data.kernel_symbol_device_map;
-                                                    const auto it = sym_map.find(
-                                                        *CHECK_NOTNULL(common::get_string_entry(
-                                                            sym_data.kernel_name)));
-                                                    if(it != sym_map.end()) return it->second;
-                                                    return std::string();
-                                                });
-                                    // Does not have a host function, skip
-                                    if(device_name.empty()) return;
-                                    auto host_data =
-                                        CHECK_NOTNULL(get_hip_register_data())
-                                            ->rlock([device_name](const hip::hip_register_data&
-                                                                      register_data) {
-                                                // Add check for out of range here
-                                                const auto it =
-                                                    register_data.host_function_map.find(
-                                                        device_name);
-                                                if(it == register_data.host_function_map.end())
-                                                {
-                                                    return rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t{};
-                                                }
-                                                return it->second;
-                                            });
-                                    // when kernel_symbol_device_map kernels are not present in
-                                    // host_function_map, skip.
-                                    if(host_data.device_function == nullptr) return;
-                                    host_data.code_object_id = sym_data.code_object_id;
-                                    host_data.kernel_id      = sym_data.kernel_id;
-                                    // the id identifies the symbol, not this notification, so
-                                    // allocate it on the first context and reuse it for the rest
-                                    if(sitr->host_function_id == 0)
-                                        sitr->host_function_id = ++get_host_function_id();
-                                    host_data.host_function_id = sitr->host_function_id;
-                                    auto hip_record = rocprofiler_callback_tracing_record_t{
-                                        .context_id = rocprofiler_context_id_t{citr->context_idx},
-                                        .thread_id  = tidx,
-                                        .correlation_id = rocprofiler_correlation_id_t{},
-                                        .kind           = CODE_OBJECT_KIND,
-                                        .operation      = CODE_OBJECT_HOST_SYMBOL,
-                                        .phase          = ROCPROFILER_CALLBACK_PHASE_LOAD,
-                                        .payload        = static_cast<void*>(&host_data)};
-
-                                    // invoke callback
-                                    cb_data.callback(hip_record, &user_data, cb_data.data);
-                                });
-                            }
+                                cb_data.callback(hip_record, &user_data, cb_data.data);
+                            });
                         }
                     }
                 }
