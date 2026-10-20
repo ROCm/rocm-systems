@@ -11,10 +11,6 @@
 
 #include <gtest/gtest.h>
 
-#include <sys/prctl.h>
-#include <sys/resource.h>
-
-#include <csignal>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -27,6 +23,7 @@
 
 #include "../common/LogCapture.hpp"
 #include "../common/ProcessIsolatedTestRunner.hpp"
+#include "ExpectedCrash.h"
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"
 #include "fakes/nccl_fakes.h"
@@ -44,20 +41,6 @@ using RcclUnitTesting::LogHas;
 namespace {
 int g_telemetryInitResult = 0;
 }  // namespace
-
-// Shared with plugin-open-test.cc: an expected crash would otherwise dump a core.
-void DisableCoreDumpsForExpectedCrash() {
-  prctl(PR_SET_DUMPABLE, 0);
-  const struct rlimit noCore = {0, 0};
-  setrlimit(RLIMIT_CORE, &noCore);
-}
-
-// ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it.
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-#define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
-#else
-#define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
-#endif
 
 // No shared owner for these two.
 int rcclTelemetryInit(void) { return g_telemetryInitResult; }
@@ -350,7 +333,7 @@ TEST_F(PluginNetMicrotest, ListNoneOrEmptyLeavesOnlyInternals) {
   }
 }
 
-// NCCL_NET_MAX_PLUGINS (16) less the two internals leaves room for 14, but the log claims 13.
+// NCCL_NET_MAX_PLUGINS less the two internals leaves room for 14, but the log claims 13.
 // Pins AICOMRCCL-2986; a fix flips this pin.
 TEST_F(PluginNetMicrotest, List_KnownBug_KeepsFourteenExternalsButLogsThirteen) {
   constexpr int kExternals = NCCL_NET_MAX_PLUGINS - 2;
@@ -809,7 +792,9 @@ TEST_F(PluginNetMicrotest, FinalizeSkipsACollNetThatIsNotEnabled) {
   EXPECT_EQ(g_coll[0].finalizeCalls, 0);
 }
 
-TEST_F(PluginNetMicrotest, FinalizePropagatesFailuresBeforeDroppingTheRef) {
+// A failing net or collnet finalize returns before the refcount drop, so the comm's reference is never released
+// and the library stays loaded for good. No ticket yet; a fix flips this pin.
+TEST_F(PluginNetMicrotest, Finalize_KnownBug_AFailedPluginFinalizeKeepsTheRef) {
   g_libs["ext"] = {12, 12};
   BuildList("ext");
   ASSERT_EQ(ncclNetInit(comm_.get()), ncclSuccess);
@@ -817,15 +802,24 @@ TEST_F(PluginNetMicrotest, FinalizePropagatesFailuresBeforeDroppingTheRef) {
   g_net[kExtA].finalizeResult = ncclSystemError;
   EXPECT_EQ(ncclNetFinalize(comm_.get()), ncclSystemError);
   EXPECT_EQ(g_coll[0].finalizeCalls, 0);
+  EXPECT_EQ(Lib(0).ncclNetPluginRefCount, 1);
+
   g_net[kExtA].finalizeResult = ncclSuccess;
   g_coll[0].finalizeResult = ncclRemoteError;
   EXPECT_EQ(ncclNetFinalize(comm_.get()), ncclRemoteError);
   EXPECT_EQ(Lib(0).ncclNetPluginRefCount, 1);
+  EXPECT_EQ(Lib(0).dlHandle, kLibHandles[0]);
+  EXPECT_TRUE(g_closed.empty());
+}
 
-  g_coll[0].finalizeResult = ncclSuccess;
+TEST_F(PluginNetMicrotest, FinalizePropagatesAnUnloadFailure) {
+  g_libs["ext"] = {12, 12};
+  BuildList("ext");
+  ASSERT_EQ(ncclNetInit(comm_.get()), ncclSuccess);
   g_closeResult = ncclSystemError;
   EXPECT_EQ(ncclNetFinalize(comm_.get()), ncclSystemError);
   EXPECT_EQ(Lib(0).ncclNetPluginRefCount, 0);
+  EXPECT_EQ(g_closed.size(), 1u);
 }
 
 // Comms split with shared resources
@@ -877,15 +871,13 @@ TEST_F(PluginNetMicrotest, InitFromParentRejectsADifferentNetNameButOnlyLogsTraf
 TEST_F(PluginNetMicrotest, InitFromParent_KnownBug_CrashesWhenOnlyTheChildHasANetName) {
   auto parent = std::make_unique<ncclComm>();
   comm_->config.netName = "IB";
-  const std::string style = ::testing::GTEST_FLAG(death_test_style);
-  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+  ScopedDeathTestStyle style("threadsafe");
   EXPECT_EXIT(
       {
         DisableCoreDumpsForExpectedCrash();
         (void)ncclNetInitFromParent(comm_.get(), parent.get());
       },
       DEATH_BY_SEGV, "");
-  ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
 // Device counts
@@ -915,6 +907,28 @@ TEST_F(PluginNetMicrotest, DevCountsRequireAnEnabledProbedPlugin) {
   ASSERT_EQ(ncclCollNetGetDevCount(0, &phys, &virt), ncclSuccess);
   EXPECT_EQ(phys, 2);
   EXPECT_EQ(virt, 3);
+}
+
+// netPluginIndex only comes from ncclNetInit's loop (or the parent comm), below pluginCount: the last slot is the bound.
+TEST_F(PluginNetMicrotest, DevCountsReachTheLastSlot) {
+  constexpr int kLast = NCCL_NET_MAX_PLUGINS - 1;
+  BuildList("none");
+  int phys = -7, virt = -7;
+  EXPECT_EQ(ncclNetGetDevCount(kLast, &phys, &virt), ncclInternalError);  // past pluginCount: never loaded
+  EXPECT_EQ(ncclNetSetVirtDevCount(kLast, 1), ncclInternalError);
+
+  std::string list;
+  for (int i = 0; i < NCCL_NET_MAX_PLUGINS; i++) list += (i ? ",p" : "p") + std::to_string(i);
+  BuildList(list.c_str());
+  ASSERT_EQ(pluginCount, NCCL_NET_MAX_PLUGINS);
+  ASSERT_EQ(ncclNetPluginInit(comm_.get(), &Lib(kLast)), ncclSuccess);
+  ASSERT_EQ(ncclNetSetVirtDevCount(kLast, 3), ncclSuccess);
+  ASSERT_EQ(ncclNetGetDevCount(kLast, &phys, &virt), ncclSuccess);
+  EXPECT_EQ(phys, 2);
+  EXPECT_EQ(virt, 3);
+  EXPECT_EQ(Lib(kLast - 1).netVirtDevs, NCCL_UNDEF_DEV_COUNT);
+  EXPECT_EQ(ncclCollNetGetDevCount(kLast, &phys, &virt), ncclInternalError);  // internals have no collnet
+  EXPECT_EQ(ncclCollNetSetVirtDevCount(kLast, 1), ncclInternalError);
 }
 
 TEST_F(PluginNetMicrotest, SetVirtDevCountRequiresEnabledAndNonNegative) {

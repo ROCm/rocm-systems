@@ -9,29 +9,21 @@
 
 #include <gtest/gtest.h>
 
-#include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <map>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "../common/LogCapture.hpp"
+#include "ExpectedCrash.h"
 #include "debug.h"
 #include "os.h"
 #include "plugin.h"
 
 using RcclUnitTesting::CaptureLog;
 using RcclUnitTesting::LogHas;
-
-void DisableCoreDumpsForExpectedCrash();  // plugin-net-test.cc
-
-// ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it.
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-#define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
-#else
-#define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
-#endif
 
 namespace {
 
@@ -78,6 +70,12 @@ int FakeDlinfo(void* handle, int request, void* info) {
 }
 
 }  // namespace
+
+// The seams below are renames, so pin each fake to the real declaration (ncclOsDlopen's one-argument overload).
+static_assert(std::is_same_v<decltype(&FakeDlopen),
+                             decltype(static_cast<ncclOsLibraryHandle (*)(const char*)>(&ncclOsDlopen))>);
+static_assert(std::is_same_v<decltype(&FakeDlerror), decltype(&ncclOsDlerror)>);
+static_assert(std::is_same_v<decltype(&FakeDlclose), decltype(&ncclOsDlclose)>);
 
 #define ncclOsDlopen FakeDlopen
 #define ncclOsDlerror FakeDlerror
@@ -291,15 +289,13 @@ TEST_F(PluginOpenMicrotest, GetNetPluginLib_KnownBug_CrashesWhenTheNetLibraryHas
   g_dl.installed["librccl-net.so"] = kNet;
   g_dl.dlinfoFails = true;
   ASSERT_EQ(ncclOpenNetPluginLib(nullptr), kNet);
-  const std::string style = ::testing::GTEST_FLAG(death_test_style);
-  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
+  ScopedDeathTestStyle style("threadsafe");
   EXPECT_EXIT(
       {
         DisableCoreDumpsForExpectedCrash();
         (void)ncclGetNetPluginLib(ncclPluginTypeTuner);
       },
       DEATH_BY_SEGV, "");
-  ::testing::GTEST_FLAG(death_test_style) = style;
 }
 
 }  // namespace

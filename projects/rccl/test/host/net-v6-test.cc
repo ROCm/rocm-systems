@@ -51,7 +51,7 @@ struct Rec {
   int size = 0;
   int tag = 0;
   int n = 0;
-  int sizes[4] = {};
+  int sizes[NCCL_PROXY_MAX_SUBS] = {};
   void* request = nullptr;
 };
 Rec g_net;
@@ -361,6 +361,26 @@ TEST_F(PluginNetV6Microtest, IrecvClearsTheOptionalCompletionMarkerAndNarrowsSiz
   g_net = Rec{};
   sizes[1] = MAX_NET_SIZE + 1;
   EXPECT_EQ(net->irecv(&comm, 2, nullptr, sizes, nullptr, nullptr, nullptr, &request), ncclInternalError);
+  EXPECT_EQ(g_net.n, 0);
+}
+
+// The proxy sizes its own arrays by NCCL_PROXY_MAX_SUBS, so that is the largest n the shim's int copy must hold.
+TEST_F(PluginNetV6Microtest, IrecvNarrowsAFullSetOfSubs) {
+  ncclNet_t* net = InitNet();
+  char comm;
+  void* request = &comm;
+  size_t sizes[NCCL_PROXY_MAX_SUBS];
+  for (int i = 0; i < NCCL_PROXY_MAX_SUBS; i++) sizes[i] = 100 + i;
+  sizes[NCCL_PROXY_MAX_SUBS - 1] = MAX_NET_SIZE;
+  ASSERT_EQ(net->irecv(&comm, NCCL_PROXY_MAX_SUBS, nullptr, sizes, nullptr, nullptr, nullptr, &request), ncclSuccess);
+  EXPECT_EQ(g_net.n, NCCL_PROXY_MAX_SUBS);
+  for (int i = 0; i < NCCL_PROXY_MAX_SUBS - 1; i++) EXPECT_EQ(g_net.sizes[i], 100 + i) << i;
+  EXPECT_EQ(g_net.sizes[NCCL_PROXY_MAX_SUBS - 1], MAX_NET_SIZE);
+
+  g_net = Rec{};
+  sizes[NCCL_PROXY_MAX_SUBS - 1] = MAX_NET_SIZE + 1;
+  EXPECT_EQ(net->irecv(&comm, NCCL_PROXY_MAX_SUBS, nullptr, sizes, nullptr, nullptr, nullptr, &request),
+            ncclInternalError);
   EXPECT_EQ(g_net.n, 0);
 }
 
