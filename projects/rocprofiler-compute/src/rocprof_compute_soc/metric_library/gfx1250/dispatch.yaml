@@ -1,0 +1,58 @@
+dispatch.agprs:
+  name: AGPRs
+  formula: AVG(Accum_VGPR)
+  unit: Registers
+  description: Number of accumulation VGPRs allocated per wave.
+dispatch.grid_size:
+  name: Grid Size
+  formula: AVG(Grid_Size)
+  unit: Work-items
+  description: Total number of work-items in the dispatch grid.
+dispatch.lds_allocation:
+  name: LDS Allocation
+  formula: AVG(LDS_Per_Workgroup)
+  unit: Bytes per Workgroup
+  description: >-
+    The number of bytes of LDS memory (or, shared memory) allocated per workgroup.
+    Note: This may also be larger than what was requested at compile time due to both
+    allocation granularity and dynamic per-dispatch LDS allocations.
+dispatch.scratch_allocation:
+  name: Scratch Allocation
+  formula: AVG(Scratch_Per_Workitem)
+  unit: Bytes per Work-item
+  description: Bytes of scratch (private) memory allocated per work-item.
+dispatch.scratch_allocation_per_wave:
+  name: Scratch Allocation
+  formula: AVG(Scratch_Per_Workitem) * $wave_size / 1024
+  unit: KB per Wave
+  description: >-
+    The amount of scratch memory requested per wavefront, in KB: the scratch bytes
+    requested per work-item multiplied by the wavefront size. Scratch memory is used
+    for stack memory on the accelerator, as well as for register spills and restores.
+dispatch.sgprs:
+  name: SGPRs
+  formula: AVG(SGPR)
+  unit: Registers
+  description: >-
+    The number of scalar general-purpose registers allocated for the kernel. Note:
+    this may not exactly match the number of SGPRs requested by the compiler due to
+    allocation granularity.
+dispatch.vgprs:
+  name: VGPRs
+  formula: AVG(Arch_VGPR)
+  unit: Registers
+  description: >-
+    The number of architected vector general-purpose registers allocated for the kernel.
+    Note: this may not exactly match the number of VGPRs requested by the compiler
+    due to allocation granularity.
+dispatch.workgroup_size:
+  name: Workgroup Size
+  formula: AVG(Workgroup_Size)
+  unit: Work-items
+  description: Number of work-items per workgroup.
+dispatch.workgroups_per_wgp:
+  name: Workgroups
+  formula: AVG(Grid_Size / Workgroup_Size) / $cu_per_gpu
+  unit: Workgroups per WGP
+  description: >-
+    The number of workgroups in the launch divided by the number of WGPs.

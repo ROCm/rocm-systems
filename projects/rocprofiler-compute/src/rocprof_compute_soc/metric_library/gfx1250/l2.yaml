@@ -1,0 +1,7 @@
+l2.bw:
+  name: L2 Cache BW
+  formula: 256 * SUM(GL2C_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Total GL2 cache data bandwidth combining load, store, and atomic traffic.
+  peak: $max_sclk / 1000 * 256 * TO_INT($total_l2_chan)
