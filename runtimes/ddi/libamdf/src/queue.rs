@@ -26,7 +26,7 @@ const DEFAULT_RING_BYTES: u64 = 64 * 1024;
 /// Native queue implementation or deterministic unit-test fixture.
 enum NativeQueue {
     /// rocddi direct queue and its native transport.
-    Provider(queue::Queue),
+    Provider(queue::RetainedQueue<Option<memory::QueueScratchBorrow>>),
     /// Scripted queue used by internal ownership tests.
     #[cfg(test)]
     Fixture(std::sync::Arc<tests::Fixture>),
@@ -80,8 +80,6 @@ struct Queue {
     /// Fixture reset generation kept live by its test environment.
     #[cfg(test)]
     device_reset_epoch: *const AtomicU64,
-    /// Keeps queue scratch backing live for the queue's lifetime.
-    _scratch_borrow: Option<memory::QueueScratchBorrow>,
     /// Immutable public queue identity and creation facts.
     info: amdf_user_queue_info_t,
     /// Cached host producer view of the native transport.
@@ -398,14 +396,13 @@ fn creation_transports(
 }
 
 fn rollback_creation(
-    queue: queue::Queue,
+    queue: queue::RetainedQueue<Option<memory::QueueScratchBorrow>>,
     device: &Device,
-    scratch_borrow: Option<memory::QueueScratchBorrow>,
     status: u64,
 ) -> u64 {
-    // SAFETY: No public queue was issued. The scratch child borrow retains
-    // any external address a GPU engine could still reach after failed cleanup.
-    let result = unsafe { queue.abandon_unpublished_with_dependencies(scratch_borrow) };
+    // SAFETY: No public queue was issued. The native owner retains its scratch
+    // child borrow even if the driver cannot prove cleanup.
+    let result = unsafe { queue.abandon_unpublished() };
     rollback_creation_result(&device.queues, status, result, |error| {
         device.native_error_status(error)
     })
@@ -497,14 +494,13 @@ pub(crate) unsafe extern "C" fn create(
         // SAFETY: The optional scratch address was resolved from an accessible
         // public memory owner, and scratch_borrow retains it through teardown.
         // The frontend enforces the selected producer protocol at its ABI.
-        let (native_queue, scratch_borrow) =
-            match gpu.create_queue_with_dependencies(desc, scratch_borrow) {
-                Ok(created) => created,
-                Err(error) => {
-                    unregister(&device.queues);
-                    return Err(device.native_error_status(&error));
-                }
-            };
+        let native_queue = match gpu.create_queue_with_dependencies(desc, scratch_borrow) {
+            Ok(created) => created,
+            Err(error) => {
+                unregister(&device.queues);
+                return Err(device.native_error_status(&error));
+            }
+        };
         let native_info = native_queue.info();
         let capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER
             | if native_info.doorbell_device_address.is_some() {
@@ -516,21 +512,11 @@ pub(crate) unsafe extern "C" fn create(
         {
             Ok(mappings) => mappings,
             Err(status) => {
-                return Err(rollback_creation(
-                    native_queue,
-                    device,
-                    scratch_borrow,
-                    status,
-                ));
+                return Err(rollback_creation(native_queue, device, status));
             }
         };
         if create_info.required_capabilities & !capabilities != 0 {
-            return Err(rollback_creation(
-                native_queue,
-                device,
-                scratch_borrow,
-                UNSUPPORTED,
-            ));
+            return Err(rollback_creation(native_queue, device, UNSUPPORTED));
         }
         let epoch = device.current_reset_epoch();
         let id = amdf_queue_id_t {
@@ -565,7 +551,6 @@ pub(crate) unsafe extern "C" fn create(
             device_queues: &raw const device.queues,
             #[cfg(test)]
             device_reset_epoch: &raw const *device.reset_epoch,
-            _scratch_borrow: scratch_borrow,
             info: queue_info,
             host_mapping,
             device_mapping,

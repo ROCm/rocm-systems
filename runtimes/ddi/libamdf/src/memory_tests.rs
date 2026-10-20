@@ -425,7 +425,7 @@ fn unavailable_host_recipe_does_not_publish_a_host_visible_profile() {
     unsafe {
         let (instance, memory) = host_resource();
         assert_eq!(destroy(memory), 0);
-        (*instance.cast::<Instance>()).host_cache_line = None;
+        (*instance.cast::<Instance>()).host_write_back_cache = None;
         let scope = (&raw mut (*instance.cast::<Instance>()).scope).cast();
         let mut profile = amdf_memory_profile_t {
             r#type: AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,

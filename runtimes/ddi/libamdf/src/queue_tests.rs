@@ -108,7 +108,6 @@ fn fixture_queue(environment: &Environment) -> (Owned<Queue>, Arc<Fixture>) {
         device: ptr::NonNull::<Device>::dangling().as_ptr(),
         device_queues: &raw const environment.queues,
         device_reset_epoch: &raw const environment.epoch,
-        _scratch_borrow: None,
         info: amdf_user_queue_info_t {
             queue_id: id,
             reset_epoch: 7,
