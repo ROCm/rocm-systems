@@ -1,0 +1,4 @@
+{
+  global: OnLoad; OnUnload; rj_consan_drain; rj_consan_finish; rj_consan_get_statistics;
+  local: *;
+};

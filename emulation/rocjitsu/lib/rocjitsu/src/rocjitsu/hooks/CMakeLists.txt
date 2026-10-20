@@ -1,6 +1,10 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+if(RJ_BUILD_CONSAN_RUNTIME)
+    add_subdirectory(consan)
+endif()
+
 # The hook sources are compiled once into an object library and linked into two
 # shared libraries: the production rocjitsu_hooks, which exports only the HSA
 # tool entry points, and the test-only rocjitsu_hooks_testing, which adds the

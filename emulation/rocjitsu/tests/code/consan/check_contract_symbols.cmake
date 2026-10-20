@@ -17,6 +17,8 @@ foreach(_input "${CONTRACT_ARCHIVE}" "${CONTRACT_BINARY}")
         "rocjitsu::consan::decode_manifest("
         "rocjitsu::consan::match_images("
         "rocjitsu::consan::plan_launch("
+        "rocjitsu::consan::decode_capture("
+        "rocjitsu::consan::CaptureEncoder::append("
     )
         string(FIND "${_symbols}" "${_required}" _match)
         if(_match EQUAL -1)
