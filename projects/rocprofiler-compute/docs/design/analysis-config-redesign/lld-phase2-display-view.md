@@ -34,6 +34,7 @@ New module `src/utils/layer3_schema.py`.
 | `archs` | list[str] | no | Metric-level arch filter |
 | `label` | str | no | Display name override for this view |
 | `unit` | str | no | Display unit for this view, e.g. `Bytes/s` for a metric defined in `GB/s` |
+| `description_note` | str | no | Sentence appended to the metric's description in this view, saying how the view shows it, e.g. "This is also presented as a percent of the peak theoretical bandwidth." |
 
 **Render type mapping to current table types:**
 
@@ -88,8 +89,8 @@ row's main column.
 `views_to_panel_configs(views: list[ViewDefinition], library: MetricLibrary) -> OrderedDict[int, dict]`:
 
 Translates view objects into the same `OrderedDict[int, dict]` consumed by
-`build_dfs()`. This replaces Stage 3's `layer2_to_panel_configs()` as the permanent
-translation from the new format to the existing pipeline.
+`build_dfs()`. It is the translation from the new format to the existing pipeline; Phase
+A ships no adapter (see [Stage 3](lld-phase1-metric-library.md#stage-3----equivalence-with-the-analysis-configs)).
 
 - Panel IDs: from `legacy_panel_id` during transition, or from view ordering when
   legacy IDs are removed.
@@ -228,6 +229,9 @@ One-time script `tools/generate_views_from_panels.py`:
 4. Preserve `label` overrides where the current display name differs from the
    canonical `name` -- the 234 cases of intentional name variation identified in the
    HLD's static analysis.
+5. Preserve, as `description_note`, each sentence a panel adds to a metric's description
+   about how the panel shows it (the library descriptions leave these out; Phase 1
+   lists them in the PR #13522 description review).
 
 ### Validation
 
@@ -296,16 +300,11 @@ WARNING: Numeric metric ID '11.2.3' is deprecated.
 `convert_metric_id_to_panel_info()` remains during the deprecation window for
 backward compatibility.
 
-**Legacy mapping** -- the transition-only mapping that carries `legacy_id` per table row
-is removed.
-
 **`legacy_panel_id`** -- removed from all Layer 3 view files.
 
 **Old panel config YAML files** -- removed from per-arch directories one release after
 the cutover (see the fallback above). The base arch and `views/` directories are the
 canonical source.
-
-**`compat_adapter.py`** -- removed.
 
 ### Tooling cleanup
 

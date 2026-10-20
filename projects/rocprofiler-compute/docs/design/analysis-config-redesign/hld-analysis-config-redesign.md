@@ -186,7 +186,7 @@ MFMA FLOPs (F8):
     - Aggregation (`avg/min/max`) is a display concern owned by Layer 3, not a metric specification field. The metric defines a single base formula; the view's column headers determine how it is aggregated for display.
     - **Typed variants** (not general metric fields): `xfer`, `coherency`, `expr`, `type`, `transaction` — these appear in specific table types only and require a separate schema treatment
 - **[FR2.2]** Metrics must be uniquely identifiable by a stable, explicitly declared id, not by position in a file or directory. A positional reference (e.g., the 3rd metric in file `1100_*.yaml`) breaks whenever metrics are reordered or files are renamed. An explicit `id` field survives both.
-    - **[FR2.2a]** Metric ids must be **hierarchical, human-readable strings** (e.g., `mem.l2_hit_rate`, `compute.valu_util`), not opaque integers. A reader of the id alone — without consulting any table or file — should be able to infer which hardware concept and metric it refers to. This is a deliberate design choice: metric ids serve as the **public API surface** for CLI filtering (`-b mem.l2_hit_rate`), baseline comparison keys, documentation cross-references, and programmatic queries. In all of these contexts a human reads the id, so it must carry meaning. Arbitrary numeric ids (e.g., `10.1.1`) satisfy stability but not discoverability — they reintroduce the opacity that positional indexing already suffers from.
+    - **[FR2.2a]** Metric ids must be **hierarchical, human-readable strings** (e.g., `l2.hit_rate`, `compute.valu_util`), not opaque integers. A reader of the id alone — without consulting any table or file — should be able to infer which hardware concept and metric it refers to. This is a deliberate design choice: metric ids serve as the **public API surface** for CLI filtering (`-b l2.hit_rate`), baseline comparison keys, documentation cross-references, and programmatic queries. In all of these contexts a human reads the id, so it must carry meaning. Arbitrary numeric ids (e.g., `10.1.1`) satisfy stability but not discoverability — they reintroduce the opacity that positional indexing already suffers from.
     - **[FR2.2.1]** Public names (user-facing) are not to be used as internal indexing. Internal indices and front-end names must be decoupled. A developer renaming the display name of a metric should not require updating any code or any file other than the metric's own definition. *(Note: 95 of 824 metric names contain special characters such as `()`, `/`, `%`, or `:` — ids cannot be mechanically derived from names and must be explicitly declared.)*
 - **[FR2.3]** A metric's architecture availability must be declared within its single definition to avoid redundancy.
 - **[FR2.4]** Metrics with table-type-specific fields (e.g., fabric stall breakdown metrics with `xfer`, `coherency`, `expr` fields) must be handled as typed variants. The general metric definition schema does not need to accommodate these fields.
@@ -276,9 +276,8 @@ A file with a top-level `inherit: <path>` key loads the referenced base file fir
 |---|---|---|
 | Modify | Scalar in override | Override replaces base value. |
 | Add | New key in override | Appended to the merged map. New metrics, new tables, new fields. |
-| Remove | Value set to `!remove` | Key is deleted from the merged result. Used when a child arch drops a metric or field that existed in the parent. |
-| Deep merge | Map + map | Recursive deep merge. Override keys win; base-only keys preserved. |
-| List merge | `data source` list | Matched by `metric_table.id` (not position), then deep-merged per entry. New entries appended. |
+| Remove | `key: !remove` | The key is deleted from the merged result. Used when a child arch drops a metric (keyed by its id) or a field of one. |
+| Deep merge | Map + map | Recursive deep merge. Override keys win; base-only keys preserved. Metrics are keyed by id, so a child lists only the fields that change. |
 
 **Inheritance hierarchy** -- each arch inherits from its immediate predecessor to minimize diffs:
 
@@ -299,25 +298,20 @@ The first architecture in each family serves as the base -- its files are the co
 
 Files identical to the parent arch do not exist in the child directory; they are inherited implicitly. Files that exist contain only the `inherit` key plus additions, modifications, or removals.
 
-**Example:** gfx941 differs from gfx940 in two files. With inheritance, the first of them becomes:
+**Example:** gfx941 differs from gfx940 in a few metrics. With inheritance, its `compute.yaml` becomes:
 
 ```yaml
-inherit: ../gfx940/0200_system_speed_of_light.yaml
+inherit: ../gfx940/compute.yaml
 
-Panel Config:
-  data source:
-  - metric_table:
-      id: 201
-      metric:
-        MFMA FLOPs (F8):
-          unit: GFLOPs
+compute.mfma_flops_f8:
+  unit: GFLOPs
 ```
 
-This 7-line file replaces a 300+ line duplicate. The deep merge replaces only the `unit` field within `MFMA FLOPs (F8)`, preserving all other content from gfx940.
+This 4-line file replaces a 300+ line duplicate. The deep merge replaces only the `unit` field of `compute.mfma_flops_f8`, preserving all other content from gfx940.
 
 ### How the layers connect
 
-The diagram below shows how `mem.l2_hit_rate` flows from counters through the metric library into two family-specific views, with the formula resolved at analysis time based on the profiled architecture.
+The diagram below shows how `l2.hit_rate` flows from counters through the metric library into two family-specific views, with the formula resolved at analysis time based on the profiled architecture.
 
 ```mermaid
 flowchart LR
@@ -327,7 +321,7 @@ flowchart LR
     end
 
     subgraph L2["Layer 2 — Metric Library"]
-        metric_def["mem.l2_hit_rate\n(L2 Cache Hit Rate)"]
+        metric_def["l2.hit_rate\n(L2 Cache Hit Rate)"]
         impl_cdna["CDNA impl\nTCC_HIT / (TCC_HIT + TCC_MISS)"]
         impl_rdna["RDNA impl\nGL2C_HIT / (GL2C_HIT + GL2C_MISS)"]
     end
@@ -378,13 +372,13 @@ Neither metric owns these counters. The counter registry owns them; both metrics
 Each metric is defined once in a family base file. Per-arch files inherit from the base and override only what differs (see [YAML inheritance](#yaml-inheritance)).
 
 Three fields govern metric identity and display:
-- **`id`** (`mem.l2_hit_rate`) — the stable key used by code, view files, and CLI filters (e.g., `-b mem.l2_hit_rate`) to reference a metric. Designed to be human-readable so it serves as both an internal key and a user-facing identifier. Never changes.
+- **`id`** (`l2.hit_rate`) — the stable key used by code, view files, and CLI filters (e.g., `-b l2.hit_rate`) to reference a metric. Designed to be human-readable so it serves as both an internal key and a user-facing identifier. Never changes.
 - **`name`** (`"L2 Cache Hit Rate"`) -- the canonical display name. What the user sees in the `analyze` output by default. Lives in Layer 2 alongside the formula. Free to change without updating any view file or code.
 - **`label`** -- an optional field declared in a Layer 3 view file that overrides `name` for that specific panel. The same metric may intentionally appear under different names in different panels -- e.g., `"L2 Cache Hit Rate"` in the speed-of-light panel vs. `"L2 Hit"` in a compact memory chart. `label` is a display decision made by the view, not the metric. If absent, `name` is used.
 
 ```yaml
-# gfx908/1700_l2_cache.yaml -- CDNA base (gfx908 is the first CDNA arch)
-- id: mem.l2_hit_rate
+# gfx908/l2.yaml -- CDNA base (gfx908 is the first CDNA arch)
+l2.hit_rate:
   name: L2 Cache Hit Rate
   unit: Percent
   formula: 100 * TCC_HIT_sum / (TCC_HIT_sum + TCC_MISS_sum)
@@ -393,7 +387,8 @@ Three fields govern metric identity and display:
     The ratio of cache line requests that hit in the last-level on-chip cache
     over the total number of incoming requests.
 
-- id: mem.hbm_read
+# gfx908/fabric.yaml
+fabric.hbm_rd:
   name: HBM Rd
   unit: Requests/normUnit
   formula: TCC_EA0_RDREQ_DRAM_sum / $denom
@@ -402,15 +397,15 @@ Three fields govern metric identity and display:
 ```
 
 ```yaml
-# gfx90a/1700_l2_cache.yaml -- inherits from gfx908, overrides only what differs
-inherit: ../gfx908/1700_l2_cache.yaml
+# gfx90a/l2.yaml -- inherits from gfx908, overrides only what differs
+inherit: ../gfx908/l2.yaml
 
 # only the fields that differ from gfx908 are present
 ```
 
 ```yaml
-# gfx115x/1300_l2_cache.yaml -- RDNA base (separate file, different counters)
-- id: mem.l2_hit_rate
+# gfx115x/l2.yaml -- RDNA base (separate file, different counters)
+l2.hit_rate:
   name: L2 Cache Hit Rate
   unit: Percent
   formula: 100 * GL2C_HIT_sum / (GL2C_HIT_sum + GL2C_MISS_sum)
@@ -419,7 +414,8 @@ inherit: ../gfx908/1700_l2_cache.yaml
     The ratio of cache line requests that hit in the last-level on-chip cache
     over the total number of incoming requests.
 
-- id: mem.dram_read
+# gfx115x/fabric.yaml
+fabric.dram_rd:
   name: DRAM Rd
   unit: Requests/normUnit
   formula: GL2C_MC_RDREQ_sum / $denom
@@ -427,7 +423,7 @@ inherit: ../gfx908/1700_l2_cache.yaml
     The total number of L2 requests to read data from DRAM.
 ```
 
-The metric defines a single base formula without aggregation wrappers (`SUM`, `AVG`, `MIN`, `MAX`). Aggregation is applied by code based on the view's column headers (Layer 3). `mem.l2_hit_rate` has the same id and description in both bases -- it is the same metric concept with different formulas per family. `mem.hbm_read` (CDNA) and `mem.dram_read` (RDNA) are different metrics describing different memory subsystems.
+The metric defines a single base formula without aggregation wrappers (`SUM`, `AVG`, `MIN`, `MAX`). Aggregation is applied by code based on the view's column headers (Layer 3). `l2.hit_rate` has the same id and description in both bases -- it is the same metric concept with different formulas per family. `fabric.hbm_rd` (CDNA) and `fabric.dram_rd` (RDNA) are different metrics describing different memory subsystems.
 
 #### Layer 3 — Display / View
 
@@ -438,8 +434,8 @@ Each view declares which metrics to show and how to render them. The metric defi
 view: Roofline
 render: roofline_chart
 metrics:
-  - mem.hbm_bandwidth                        # available on all archs in scope
-  - mem.l2_cache_bandwidth
+  - fabric.hbm_bw                        # available on all archs in scope
+  - l2.bw
   - compute.mfma_flops_f8    archs: [gfx940, gfx941, gfx942, gfx950]  # metric-level: not on gfx908/gfx90a
   - compute.mfma_flops_f6f4  archs: [gfx950]                           # metric-level: gfx950 only
   - ...
@@ -448,17 +444,17 @@ metrics:
 view: Memory Chart
 render: mem_chart
 metrics:
-  - id: mem.l2_hit_rate                  # Case A: same id, formula resolved at runtime per arch
+  - id: l2.hit_rate                  # Case A: same id, formula resolved at runtime per arch
     label: "L2 Hit"                      # label overrides canonical name for compact display
-  - id: mem.hbm_read                     # Case B: CDNA-specific metric
+  - id: fabric.hbm_rd                     # Case B: CDNA-specific metric
   - ...
 
 # views/rdna/memory_chart.yaml  — loads for RDNA only
 view: Memory Chart
 render: mem_chart
 metrics:
-  - mem.l2_hit_rate         # Case A: same id, different formula selected at runtime
-  - mem.dram_read           # Case B: RDNA-specific metric
+  - l2.hit_rate         # Case A: same id, different formula selected at runtime
+  - fabric.dram_rd           # Case B: RDNA-specific metric
   - ...
 
 # views/mem_bw.yaml  — view-level: entire view is gfx950-only
@@ -466,8 +462,8 @@ view: Memory Bandwidth Analysis
 archs: [gfx950]
 render: mem_bw_chart
 metrics:
-  - mem.hbm_rd_bw
-  - mem.hbm_wr_bw
+  - fabric.hbm_rd_bw
+  - fabric.hbm_wr_bw
   - ...
 ```
 
@@ -479,7 +475,7 @@ Each change touches only the layer that owns the concern — satisfying the [[FR
 |---|---|---|
 | Fix HBM Bandwidth formula | `metrics/memory/hbm_bandwidth.yaml` | `views/roofline.yaml`, `views/cdna/memory_chart.yaml`, `metrics/memory/l2_cache.yaml` |
 | Rename "HBM Bandwidth" to "HBM BW" | `metrics/memory/hbm_bandwidth.yaml` (`name` field only) | `views/roofline.yaml`, `views/cdna/memory_chart.yaml` (reference `id`, not `name`) |
-| Show "HBM BW" in roofline but "HBM Bandwidth" in memory chart | `views/roofline.yaml` (`label: "HBM BW"` on `mem.hbm_bandwidth`) | `metrics/memory/hbm_bandwidth.yaml`, `views/cdna/memory_chart.yaml` |
+| Show "HBM BW" in roofline but "HBM Bandwidth" in memory chart | `views/roofline.yaml` (`label: "HBM BW"` on `fabric.hbm_bw`) | `metrics/memory/hbm_bandwidth.yaml`, `views/cdna/memory_chart.yaml` |
 | Change how roofline is rendered | `views/roofline.yaml` | `metrics/memory/hbm_bandwidth.yaml`, `metrics/memory/l2_cache.yaml` |
 | Fix L2 Hit formula for CDNA (Case A) | `metrics/memory/l2_cache.yaml` (CDNA family base definition only) | `views/cdna/memory_chart.yaml`, `views/rdna/memory_chart.yaml` |
 | Add a new RDNA-only metric (Case B) | `metrics/memory/l2_cache.yaml` (new entry), `views/rdna/memory_chart.yaml` | `views/cdna/memory_chart.yaml`, `metrics/memory/hbm_bandwidth.yaml` |
@@ -496,7 +492,7 @@ flowchart LR
     subgraph P1["Phase 1 — Metric Library (Layer 2)"]
         s1["1. Layer 2 schema + inheritance loader\n───────────────────\nRequired: id, name, formula,\nunit, description\nOptional: peak, coll_level\nTyped variants: xfer, coherency,\nexpr (fabric stall tables)\nPyYAML loader for the inherit key\nwith vendored deepmerge\n───────────────────\nDepends on: nothing\nResolves: FR2.1, FR2.4\nDeveloper gains: agreed field contract\nfor all metric files"]
         s2["2. Layer 2 parser\n───────────────────\nRead Layer 2 metric files\nResolve inherit chains\n───────────────────\nDepends on: Stage 1\nResolves: FR2.2.1, FR2.3\nDeveloper gains: metric files\ncan be parsed and validated"]
-        s3["3. Compatibility adapter\n───────────────────\nTranslate Layer 2 output into\nexisting pipeline structure\nExisting consumers unchanged\n───────────────────\nDepends on: Stage 2\nResolves: NFR1\nDeveloper gains: safe to merge\nLayer 2 files without breaking\nexisting pipeline"]
+        s3["3. Equivalence checks\n───────────────────\nCheck Layer 2 files against\ntoday's analysis configs:\nformulas, counters, variables\nAdapter to the pipeline comes\nwith the Layer 3 views\n───────────────────\nDepends on: Stage 2\nResolves: NFR1\nDeveloper gains: safe to merge\nLayer 2 files without breaking\nexisting pipeline"]
         s4["4. Metric migration\n───────────────────\ngfx908 is CDNA base,\ngfx115x is RDNA base\nConvert one arch at a time\n(start with gfx90a — inherits gfx908)\nVerify output equivalence at each step\nParallelizable: compute,\nmemory, system, sets\n17 metric groups: one shared id,\nformula differences tracked\n30 metric groups: canonical\nname selected\n───────────────────\nDepends on: Stages 1, 2\nResolves: FR2, FR2.2, FR3 (Layer 2), PS2\nDeveloper gains: formula fixes\npropagate in one edit; new arch\nadds only override files;\nsets reference metric ids"]
     end
 
@@ -552,6 +548,6 @@ Recounted as 30 groups (originally 43). Examples: `['Cache Hit', 'Hit Rate', 'L2
 ### OQ5 — `--filter-blocks` numeric index deprecation timeline
 *(no implementation blocked)*
 
-**Design decision:** String-based metric ids are the target format for `--filter-blocks` (`-b`). Once Layer 2 metric ids are stable and validated, `-b` will accept hierarchical string ids as the primary filtering mechanism (e.g., `-b mem.l2_hit_rate`, `-b mem.*`, `-b compute.valu_util`). Numeric positional indices (e.g., `11.2.3`) remain supported during the transition period but are not the target format — they will be deprecated once string ids have been proven stable in production.
+**Design decision:** String-based metric ids are the target format for `--filter-blocks` (`-b`). Once Layer 2 metric ids are stable and validated, `-b` will accept hierarchical string ids as the primary filtering mechanism (e.g., `-b l2.hit_rate`, `-b l2.*`, `-b compute.valu_util`). Numeric positional indices (e.g., `11.2.3`) remain supported during the transition period but are not the target format — they will be deprecated once string ids have been proven stable in production.
 
 The remaining open question is the **deprecation timeline** for numeric indices and the user migration path (documentation, warning messages, eventual removal). This can be defined after the Layer 2 migration is complete and string ids are in use.

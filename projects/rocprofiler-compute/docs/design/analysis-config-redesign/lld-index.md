@@ -11,8 +11,8 @@ that carry all four.
 
 The parent HLD ([`hld-analysis-config-redesign.md`](hld-analysis-config-redesign.md))
 defines a three-layer architecture to separate them. This LLD specifies how each layer
-connects to the existing pipeline, how the compatibility adapter translates between old
-and new formats, and what each self-contained PR delivers.
+connects to the existing pipeline, how the Phase 2 compatibility adapter translates
+between old and new formats, and what each self-contained PR delivers.
 
 **Scope:** Layers 2 and 3 -- metric library, display/view, and the compatibility adapter.
 Layer 1.5 (collectables) moved to a separate epic. Layer 1 (`sdk_config.yaml`) is out of
@@ -90,7 +90,7 @@ flowchart LR
     L15["Layer 1.5 YAML<br/>(collectables)"]
     L2["Layer 2 YAML<br/>(base arch + {arch}/ overrides)"]
     L3["Layer 3 YAML<br/>(views/)"]
-    LML["load_metric_library()<br/>(layer2_parser.py)"]
+    LML["load_metric_library()<br/>(metric_library.py)"]
     LV["load_views()<br/>(layer3_reader.py)"]
     V2P["views_to_panel_configs()"]
     BD["build_dfs()<br/>(parser.py, unchanged)"]
@@ -119,7 +119,7 @@ contract is the `OrderedDict[int, dict]` shape that `build_dfs()` expects.
 flowchart LR
     L15["Layer 1.5 YAML<br/>(collectables)"]
     L2["Layer 2 YAML<br/>(base arch + {arch}/ overrides)"]
-    LML["load_metric_library()<br/>(layer2_parser.py)"]
+    LML["load_metric_library()<br/>(metric_library.py)"]
     GCM["get_counters_for_metrics()"]
     PC["perfmon_coalesce()<br/>(soc_base.py, unchanged)"]
     PMC["pmc_perf_*.yaml<br/>(one per hardware pass)"]
@@ -143,15 +143,16 @@ around numeric positional IDs (e.g., `11.2.3` = panel 1100, table 1102, metric i
 3). The new design replaces these with stable string IDs (`compute.salu_util`). During
 the transition, both systems must coexist.
 
-`legacy_id` carries the numeric positional ID from the current system. It lives in a
-transition-only legacy mapping next to the Layer 2 metric files, not on the metrics,
-because one metric appears in several tables at a different position in each. Each row
-of the mapping links a `legacy_id` to a metric id:
+`legacy_id` is the numeric positional ID from the current system. It is not a metric
+field, because one metric appears in several tables at a different position in each. In
+Phase A it stays what it is today, a position in the analysis configs, and the metric
+library does not link rows to metric ids: the analysis configs remain the display source
+until the Phase 2 views. A view row stores the `legacy_id` together with the metric id:
 
 ```yaml
-# legacy mapping, table 1102
-- legacy_id: "11.2.2"            # old positional ID, transition only
-  metric: compute.salu_util      # new stable string ID
+# view row, table 1102: the third row is 11.2.2
+- metric: compute.salu_util      # new stable string ID
+  legacy_id: "11.2.2"            # old positional ID, transition only
 ```
 
 Similarly, `legacy_panel_id` on Layer 3 views carries the old numeric panel ID:
@@ -161,12 +162,16 @@ view: "Compute Units - Compute Pipeline"
 legacy_panel_id: 1100            # old panel ID, transition only
 ```
 
-The compatibility adapter (Stage 3) uses these fields to reconstruct the numeric
-`OrderedDict[int, dict]` that `build_dfs()` expects. The `-b` filter resolves numeric
-IDs via `legacy_id` during the transition period.
+The views store `legacy_id` instead of using row positions because one view serves
+several archs and skips refs by `archs`, so a row's position is not the same on every
+arch.
 
-The legacy mapping and `legacy_panel_id` are removed in Stage 8 when the old path is retired and string IDs are
-the primary format. They are transition artifacts, not part of the target design.
+The Phase 2 adapter (`views_to_panel_configs()`) uses these fields to reconstruct the
+numeric `OrderedDict[int, dict]` that `build_dfs()` expects, and the `-b` filter resolves
+numeric IDs through them.
+
+`legacy_id` and `legacy_panel_id` are removed after Stage 8, when string IDs are the
+primary format. They are transition artifacts, not part of the target design.
 
 
 ## Stage dependencies and parallelism
@@ -175,7 +180,7 @@ the primary format. They are transition artifacts, not part of the target design
 flowchart LR
     S1["Stage 1<br/>Schema + loader"]
     S2["Stage 2<br/>Parser"]
-    S3["Stage 3<br/>Compat adapter"]
+    S3["Stage 3<br/>Equivalence"]
     S4["Stage 4<br/>Metric migration"]
     S5["Stage 5<br/>View schema"]
     S6["Stage 6<br/>View reader"]
@@ -198,7 +203,7 @@ flowchart LR
 |---|---|---|
 | 1 -- Schema + loader | (none) | 5 |
 | 2 -- Parser | 1 | 5 |
-| 3 -- Compat adapter | 2 | 4, 5 |
+| 3 -- Equivalence | 2 | 4, 5 |
 | 4 -- Metric migration | 1, 2 (3 for validation) | 3, 5, 6 |
 | 5 -- View schema | (none) | 1, 2, 3, 4 |
 | 6 -- View reader | 2, 5 | 3, 4 |
@@ -209,7 +214,7 @@ flowchart LR
 
 - **Stages 1 and 5** can start at the same time (no dependencies).
 - **Stages 3 and 4** can run in parallel once Stage 2 lands (Stage 4 uses Stage 3
-  only for golden-file validation, not as a build dependency).
+  only for its equivalence check, not as a build dependency).
 - **Stage 6** can start once Stages 2 and 5 are done, overlapping with Stage 4.
 - **Stage 7** is the convergence point -- it needs both metric migration (4) and
   view schema (5) before it can begin.
