@@ -805,11 +805,14 @@ per-user file `${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent`
 (`%APPDATA%\hrr\capture-consent` on Windows); see [README.md](README.md#capture). The
 variable decides the run when set: `yes` consents and any other value withholds consent.
 The file consents when its first line is `yes`, after any UTF-8 or UTF-16LE byte order
-mark and before trailing blanks. On POSIX it counts only as a regular file, checked on
-the descriptor opened with `O_NONBLOCK`, owned by the effective user. Consent is read
-once, by `hrr_consent_source()`, and is part of `hip_capture_enabled()`, so
-`hip_capture_output_dir()` is empty without it. Without consent `hip_capture_init()`
-prints one line on stderr and the process runs unrecorded; it never prompts. With
+mark and before trailing blanks. UTF-16LE is decoded before the line end is looked for,
+and a character outside ASCII makes the file no yes; so does a file over 4 KiB. On POSIX
+it counts only as a regular file, checked on the descriptor opened with `O_NONBLOCK`,
+owned by the effective user. Consent is read once, by `hrr_consent()`, and is part of
+`hip_capture_enabled()`, so `hip_capture_output_dir()` is empty without it. Without
+consent `hip_capture_init()` prints one line on stderr naming what withheld it (the
+variable, or the file missing, not a regular file, owned by another user or not saying
+yes) and the process runs unrecorded; it never prompts. With
 consent the manifest metadata records `capture_consent` as `"file"` or
 `"HIP_HRR_CAPTURE_CONSENT"`, not the file's path, which names the user.
 

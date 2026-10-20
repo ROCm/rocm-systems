@@ -299,9 +299,13 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
  *     metadata records capture_consent "HIP_HRR_CAPTURE_CONSENT".
  *   - Writes the yes as Windows PowerShell does, after a UTF-8 or a UTF-16LE
  *     byte order mark: each still records capture_consent "file".
- *   - With yes in the file and HIP_HRR_CAPTURE_CONSENT=no, nothing is written:
- *     a set variable decides the run. With "yes " and no file, the trailing
- *     blank is ignored as it is in the file.
+ *   - Writes UTF-16LE that is not a yes but would read as one with its NULs
+ *     dropped or a line end looked for byte by byte: U+6579 then s, and yes,
+ *     U+010A, no. Nothing is written and the notice says the file is no yes.
+ *   - With yes in the file and HIP_HRR_CAPTURE_CONSENT=no, nothing is written
+ *     and the notice names the variable: a set variable decides the run. With
+ *     an empty exported variable the file consents. With "yes " and no file,
+ *     the trailing blank is ignored as it is in the file.
  *   - On POSIX, puts a FIFO with no writer at the consent path: the workload
  *     must finish within a deadline, with nothing written, instead of blocking
  *     HIP's init in the open of the consent file.
@@ -351,6 +355,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
     const std::string out = capture(nullptr);
     CHECK(out.find("[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent.") !=
           std::string::npos);
+    CHECK(out.find(consent_file.string() + " does not exist.") != std::string::npos);
     CHECK(out.find("write the line yes to " + consent_file.string() + " once") !=
           std::string::npos);
     CHECK(out.find("set HIP_HRR_CAPTURE_CONSENT=yes") != std::string::npos);
@@ -381,12 +386,28 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
     CHECK(recorded_consent() == "file");
   }
 
+  // UTF-16LE that is no yes: U+6579 then s, and yes, U+010A, no.
+  for (const std::string& not_yes :
+       {std::string("\xFF\xFE\x79\x65s\0", 6),
+        std::string("\xFF\xFEy\0e\0s\0\x0A\x01n\0o\0", 14)}) {
+    fs::remove_all(cap.path);
+    std::ofstream(consent_file, std::ios::binary) << not_yes;
+    const std::string out = capture(nullptr);
+    CHECK(out.find(consent_file.string() + " does not say yes.") != std::string::npos);
+    CHECK(nothing_written());
+  }
+
   {
     fs::remove_all(cap.path);
     std::ofstream(consent_file) << "yes\n";
     const std::string out = capture("no");
-    CHECK(out.find("capture needs your consent.") != std::string::npos);
+    CHECK(out.find("capture needs your consent. HIP_HRR_CAPTURE_CONSENT is set to 'no', which "
+                   "withholds consent.") != std::string::npos);
     CHECK(nothing_written());
+    // An exported empty variable counts as unset, so the file decides.
+    capture("");
+    CHECK(recorded_consent() == "file");
+    fs::remove_all(cap.path);
     fs::remove(consent_file);
     capture("yes ");
     CHECK(recorded_consent() == "HIP_HRR_CAPTURE_CONSENT");
@@ -407,7 +428,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
     INFO("Capture subprocess output:\n" << out);
     REQUIRE(ret != hrr::test::SpawnProc::kKilledOnTimeout);
     REQUIRE(ret == 0);
-    CHECK(out.find("capture needs your consent.") != std::string::npos);
+    CHECK(out.find(consent_file.string() + " is not a regular file.") != std::string::npos);
     CHECK(nothing_written());
   }
 #endif
@@ -454,7 +475,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureIgnoresConsentOfOtherUser) {
     // 65534 is nobody on most systems; any uid other than root's will do.
     REQUIRE(::chown(consent_file.c_str(), 65534, 65534) == 0);
     const std::string out = capture();
-    CHECK(out.find("capture needs your consent.") != std::string::npos);
+    CHECK(out.find(consent_file.string() + " is not owned by this user.") != std::string::npos);
     std::error_code ec;
     CHECK((!fs::exists(cap.path, ec) || fs::is_empty(cap.path, ec)));
   }

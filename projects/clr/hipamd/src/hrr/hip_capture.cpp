@@ -55,6 +55,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <climits>
 #include <cstddef>
 #include <cstdio>
@@ -146,73 +147,111 @@ static std::string hrr_consent_file() {
 #endif
 }
 
-// The answer in the consent file or variable, without what shells and editors
-// add around it: trailing blanks and line ends, and the byte order mark that
-// Windows PowerShell writes, UTF-8 or, with its `>`, UTF-16LE.
-static std::string hrr_consent_answer(std::string s) {
-  if (s.rfind("\xEF\xBB\xBF", 0) == 0) {
-    s.erase(0, 3);
-  } else if (s.rfind("\xFF\xFE", 0) == 0) {
-    s.erase(0, 2);
-    s.erase(std::remove(s.begin(), s.end(), '\0'), s.end());
+// The consent file or variable as ASCII text, after the byte order mark that
+// Windows PowerShell writes, UTF-8 or, with its `>`, UTF-16LE. UTF-16LE is
+// decoded unit by unit before anyone looks for a line end, so that neither a
+// unit such as U+6579 nor U+010A can pass for letters or a newline; a unit
+// outside ASCII, or an odd byte, yields "\x7F", which is never an answer.
+static std::string hrr_consent_text(const std::string& s) {
+  if (s.rfind("\xEF\xBB\xBF", 0) == 0) return s.substr(3);
+  if (s.rfind("\xFF\xFE", 0) != 0) return s;
+  if (s.size() % 2 != 0) return "\x7F";
+  std::string text;
+  for (size_t i = 2; i < s.size(); i += 2) {
+    if (s[i + 1] != '\0' || static_cast<unsigned char>(s[i]) > 0x7F) return "\x7F";
+    text.push_back(s[i]);
   }
+  return text;
+}
+
+// Without trailing blanks and line ends.
+static std::string hrr_consent_trim(std::string s) {
   while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
   return s;
 }
 
+struct HrrConsent {
+  // Where the yes came from for the manifest, "HIP_HRR_CAPTURE_CONSENT" or
+  // "file" (not its path, which names the user), or "" when there is none.
+  std::string source;
+  // Without consent, why not, for the notice; "" when nothing says no.
+  std::string refusal;
+};
+
 // The archive holds the recorded process's memory, so HIP_HRR_CAPTURE_OUTPUT
 // alone does not start capture: the user also has to say yes, once in the
 // consent file or per run in HIP_HRR_CAPTURE_CONSENT for CI and containers.
-// Returns where the yes came from for the manifest, "HIP_HRR_CAPTURE_CONSENT" or
-// "file" (not its path, which names the user), or "" when there is none.
-static std::string hrr_capture_consent() {
+static HrrConsent hrr_capture_consent() {
   // A set variable decides this run either way: yes consents, and any other
   // value, such as no, withholds consent even when the file says yes. A blank
   // value, which is what the flag parser keeps of an exported empty variable,
   // counts as unset.
   if (!flagIsDefault(HIP_HRR_CAPTURE_CONSENT)) {
-    const std::string answer = hrr_consent_answer(HIP_HRR_CAPTURE_CONSENT);
-    if (!answer.empty()) return answer == "yes" ? "HIP_HRR_CAPTURE_CONSENT" : "";
+    const std::string answer = hrr_consent_trim(hrr_consent_text(HIP_HRR_CAPTURE_CONSENT));
+    if (answer == "yes") return {"HIP_HRR_CAPTURE_CONSENT", ""};
+    if (!answer.empty()) {
+      return {"", std::string("HIP_HRR_CAPTURE_CONSENT is set to '") + HIP_HRR_CAPTURE_CONSENT +
+                      "', which withholds consent."};
+    }
   }
   const std::string path = hrr_consent_file();
-  if (path.empty()) return "";
-  std::string line;
+  if (path.empty()) return {};
+  // A yes file is a few bytes; read at most this much of it at HIP's init.
+  constexpr size_t kMaxConsentFile = 4096;
+  std::string bytes(kMaxConsentFile + 1, '\0');
 #if defined(_WIN32)
   // No owner check here: the file lives under %APPDATA%, which is per user.
   std::error_code ec;
-  if (!std::filesystem::is_regular_file(path, ec)) return "";
-  std::ifstream in(path);
-  if (!std::getline(in, line)) return "";
+  if (!std::filesystem::exists(path, ec)) return {"", path + " does not exist."};
+  if (!std::filesystem::is_regular_file(path, ec)) {
+    return {"", path + " is not a regular file."};
+  }
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return {"", path + " cannot be read."};
+  in.read(&bytes[0], static_cast<std::streamsize>(bytes.size()));
+  bytes.resize(static_cast<size_t>(in.gcount()));
 #else
   // Only a regular file, checked on the descriptor that is read: a FIFO planted
   // there, even after a check by path, must not block HIP's init in open().
   // The file must also belong to the effective user: a yes owned by someone
   // else, say in an XDG_CONFIG_HOME shared by several users, is not theirs.
   const int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
-  if (fd < 0) return "";
-  struct stat st{};
-  if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != ::geteuid()) {
-    ::close(fd);
-    return "";
+  if (fd < 0) {
+    return {"", path + (errno == ENOENT ? " does not exist." : " cannot be read.")};
   }
-  FILE* f = ::fdopen(fd, "r");
+  struct stat st{};
+  const char* bad = nullptr;
+  if (::fstat(fd, &st) != 0) {
+    bad = " cannot be read.";
+  } else if (!S_ISREG(st.st_mode)) {
+    bad = " is not a regular file.";
+  } else if (st.st_uid != ::geteuid()) {
+    bad = " is not owned by this user.";
+  }
+  FILE* f = bad == nullptr ? ::fdopen(fd, "rb") : nullptr;
   if (f == nullptr) {
     ::close(fd);
-    return "";
+    return {"", path + (bad != nullptr ? bad : " cannot be read.")};
   }
-  int c;
-  while ((c = std::fgetc(f)) != EOF && c != '\n') line.push_back(static_cast<char>(c));
+  bytes.resize(std::fread(&bytes[0], 1, bytes.size(), f));
   std::fclose(f);
 #endif
-  return hrr_consent_answer(line) == "yes" ? "file" : "";
+  // The answer is the first line, so the line end is looked for in the decoded
+  // text. A file longer than the cap is not a yes.
+  std::string text = bytes.size() > kMaxConsentFile ? "\x7F" : hrr_consent_text(bytes);
+  text.erase(std::min(text.find('\n'), text.size()));
+  if (hrr_consent_trim(text) == "yes") return {"file", ""};
+  return {"", path + " does not say yes."};
 }
 
 // Read once: the answer must not change between hip_capture_init() and the
 // callers that ask later, and hip_capture_enabled() runs on the launch path.
-static const std::string& hrr_consent_source() {
-  static const std::string source = hrr_capture_consent();
-  return source;
+static const HrrConsent& hrr_consent() {
+  static const HrrConsent consent = hrr_capture_consent();
+  return consent;
 }
+
+static const std::string& hrr_consent_source() { return hrr_consent().source; }
 
 // Consent is part of the predicate, so no caller sees capture on after
 // hip_capture_init() refused it. Short-circuits so that the consent file is
@@ -3084,12 +3123,15 @@ void hip_capture_init() {
       // No consent. Deliberately not gated on AMD_LOG_LEVEL, like the start
       // notice below: the user asked for an archive and must learn why there is
       // none. Never prompts: the process may have no terminal, or many workers
-      // sharing one.
+      // sharing one. Names what withheld it, so that a yes in the wrong place
+      // is not taken for a refused one.
       const std::string file = hrr_consent_file();
+      const std::string& refusal = hrr_consent().refusal;
       fprintf(stderr,
-              "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent. The "
-              "archive would hold this process's host buffers, kernel arguments and code "
+              "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent. %s%s"
+              "The archive would hold this process's host buffers, kernel arguments and code "
               "objects. To consent, %s%s%sset HIP_HRR_CAPTURE_CONSENT=yes for one run.\n",
+              refusal.c_str(), refusal.empty() ? "" : " ",
               file.empty() ? "" : "write the line yes to ", file.c_str(),
               file.empty() ? "" : " once, or ");
       return;
