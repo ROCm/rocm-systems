@@ -53,13 +53,13 @@ This deliberately small corpus is regression coverage, not exhaustive validation
 ## Inline DOT captures
 
 `valu_fp_mode_test.cpp` and `gfx12_dot_test.cpp` also hold DOT lanes copied
-from four separate probe batches. The VALU and DOT probes compiled one HIP
+from five separate probe batches. The VALU and DOT probes compiled one HIP
 kernel per instruction and modifier form, set MODE with `s_setreg` around the
 instruction, and wrote the raw destination bits for 8,192 fixed-seed lanes
 (special-value cross products, random values and, for integer DOT, operands
 near the accumulator limits). The same binaries were replayed under rocjitsu.
-The WMMA probe is described in its row below. The probe sources are not part of
-this repository.
+The WMMA and witness probes are described in their rows below. The probe
+sources are not part of this repository.
 
 | Card | Host software |
 | --- | --- |
@@ -76,6 +76,7 @@ kept it set.
 | First DOT probe | VOP3P `V_DOT2_F32_F16/BF16`, `V_DOT4_F32_{FP8,BF8}_{FP8,BF8}` (`gfx1201` only), integer DOT4/DOT8, `V_DOT2ACC_F32_F16` (`gfx1100` only), each with one modifier per form | 12 for plain forms; modifier forms `0xf0`, `0x00`, `0x30`, `0xc0`, `0xff`, so their rounding cases change both fields at once; integer forms `0xf0`, `0x00` |
 | DOT follow-up probe | ABS+NEG on C for every floating DOT form, including true16 BF16; integer OP_SEL combined with NEG and CLAMP near the limits | Plain forms: 15, including one denormal input or output bit at a time (`0x70`, `0xb0`, `0xd0`, `0xe0`), one rounding field at a time (`0xf3`, `0xfc`) and FP16_OVFL; modifier forms: 9 |
 | WMMA C-floor probe (`gfx1201`, wave32) | `V_WMMA_F32_16X16X16_BF16` and `V_WMMA_BF16_16X16X16_BF16` with only k=0 of A nonzero, small BF16 products and subnormal C; 16,384 cases per opcode | kernel default |
+| Witness probe | Single lanes chosen so that one rule change alters the result: the negative-C floor unit at both floors, FP8/BF8 one-grid alignment, and a zero-product accumulator | `0xf0`, `0x30`, `0xc0`, `0x00`, `0xf3`, `0xfc` |
 
 ### Measured and extrapolated behaviour
 
@@ -85,12 +86,27 @@ ABS, and integer DOT4/DOT8 half selection with NEG and CLAMP. Measured on
 RDNA3 rules. RDNA2, CDNA1–4 and CDNA5 share the generated DOT bodies (NEG_HI on
 C as ABS, integer half selection) without a capture.
 
-The negative-C floor unit in `gfx12_dot.h` can only change a result when BF16
-products bring the alignment grid down to 2^-126 or below. Its callers:
+### The negative-C floor unit
 
-| Caller | Evidence |
-| --- | --- |
-| VOP3P `V_DOT2_F32_BF16` | First DOT probe lanes that only the floor rule matches |
-| `V_WMMA_F32_16X16X16_BF16`, `V_WMMA_BF16_16X16X16_BF16` | WMMA C-floor probe; `Gfx12Dot.WmmaTinyNegativeAccumulatorSubtractsFloorUnit` |
-| True16 `V_DOT2_BF16_BF16` | Captures match, but no captured lane isolates the floor unit |
-| VOPD `V_DUAL_DOT2ACC_F32_BF16` | Extrapolated; VOPD DOT was not captured |
+A negative C whose bits all fall below the alignment grid still subtracts one
+unit. `gfx12_dot_terms` floors C's alignment exponent at 2^-14 for packed F16
+and 2^-126 otherwise, and the unit applies at or below that floor, so the two
+output formats reach it from different directions:
+
+- **At 2^-126**, only BF16 products are small enough. This is the rule this
+  change extends from packed F16 to the F32 and packed-BF16 outputs.
+- **At 2^-14**, F16 products alone reach it. That rule is unchanged here, and
+  gfx11 does not apply it: `{0x6400 x 0x3c00, 0x3e00 x 0x3c00}` with
+  C=`0x8001` gives `0x6401` on gfx1201 and `0x6402` on gfx1100.
+
+| Caller | Floor | Evidence |
+| --- | --- | --- |
+| VOP3P `V_DOT2_F32_BF16` | 2^-126 | First DOT probe lanes that only this rule matches |
+| `V_WMMA_F32_16X16X16_BF16`, `V_WMMA_BF16_16X16X16_BF16` | 2^-126 | WMMA C-floor probe; `Gfx12Dot.WmmaTinyNegativeAccumulatorSubtractsFloorUnit` |
+| True16 `V_DOT2_BF16_BF16` | 2^-126 | Witness probe; `Bf16TinyNegativeAccumulator` |
+| VOPD `V_DUAL_DOT2ACC_F32_BF16` | 2^-126 | Witness probe, both cards; no decoded case, since this PR adds no VOPD test harness |
+| True16 `V_DOT2_F16_F16`, `V_WMMA_F16_16X16X16_F16` | 2^-14 | Witness probe; `F16TinyNegativeAccumulator`. The WMMA form shares the step but has no lane of its own |
+
+The broad corpora do not reach either boundary: disabling the unit at 2^-14
+leaves every captured variant matching, and the lanes above were constructed
+for it.

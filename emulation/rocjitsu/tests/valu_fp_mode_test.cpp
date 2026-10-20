@@ -4280,8 +4280,21 @@ std::vector<ArithmeticCase> dot2_packed16_cases() {
        0xa5a57243u, 0xa5a57243u, kSplitModes},
       {"Bf16NegAbsPositiveAccumulator", true, kAbsC, kNegC, 0, 0x647ca85du, 0x137ce99cu,
        0x705459c5u, 0xa5a5d9c4u, 0xa5a5d9c4u, kSplitModes},
-      // The only true16 lane that isolates the negative-C floor unit: gfx1201
-      // subtracts one unit, gfx1100 does not. Captured at these six MODEs.
+      // gfx12 applies the negative-C floor unit to packed F16 at its own 2^-14
+      // C-alignment floor, where gfx11 does not: 0x6401 against 0x6402.
+      {"F16TinyNegativeAccumulator",
+       false,
+       0,
+       0,
+       0,
+       0x3e006400u,
+       0x3c003c00u,
+       0x00008001u,
+       0xa5a56401u,
+       0xa5a56402u,
+       {0xf0u, 0x30u, 0xc0u, 0x00u, 0xf3u, 0xfcu}},
+      // The only true16 lane that isolates the unit at the 2^-126 floor:
+      // gfx1201 subtracts one unit, gfx1100 does not.
       {"Bf16TinyNegativeAccumulator",
        true,
        0,
