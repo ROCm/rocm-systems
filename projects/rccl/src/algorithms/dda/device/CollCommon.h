@@ -394,8 +394,8 @@ __device__ __forceinline__ bool ddaLLWaitLineFlags(const volatile LLPacket16* sr
   do {
     ddaLLLoadLineB128(line, d0, f0, d1, f1);
     if (f0 == flag && f1 == flag) return true;
-    if (abortSignal.spinTick(spins)) return false;
-  } while (true);
+  } while (!abortSignal.spinTick(spins));
+  return false;
 }
 
 __device__ __forceinline__ uint32_t ddaGetLLEpochInc(const uint32_t* __restrict__ epochDev, int flatBlockId, uint32_t inc) {
