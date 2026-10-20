@@ -58,6 +58,7 @@ The "Mode" column states which mode records each item.
 | Other structures passed into a HIP call, copied whole, such as copy, memset, graph node, allocation, pool and launch-attribute parameters. Padding, reserved and unused union bytes are copied as the caller left them | `events.bin` | both | — kept, replay needs it |
 | Host buffers copied to or from the device, byte for byte, unencrypted. For a serving stack this includes prompts and generated output as token ids, which the model's public tokeniser reverses, and the model weights | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Host memory registered with `hipHostRegister`: the whole range, byte for byte, as it was at registration, whether or not it is ever copied | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
+| Pinned host memory a kernel reads: at each launch whose arguments point into memory from `hipHostMalloc`, `hipMallocHost` or `hipHostRegister`, the whole allocation, byte for byte, as it was before the launch, whether or not the kernel reads all of it, again each time its contents changed. Allocations over `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64 MiB unless set) are skipped, and `HIP_HRR_HOST_SNAPSHOTS=0` turns this off | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | By-value kernel argument bytes, a struct whole with any device pointers inside it, and the values pushed with `hipSetupArgument`. Whole-argument pointers are addresses and are kept in both modes | `events.bin` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880): size and zeros in metadata-only mode |
 | Code objects the process loaded (the application's own GPU binary code) | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Linker input buffers passed to `hipLinkAddData`, every byte, with their names, including inputs the call rejected and inputs never linked or loaded | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
@@ -89,7 +90,7 @@ given to `hipLinkAddFile`, the name given to `hipLinkAddData`, the function name
 `hipGetProcAddress`); as the name of a device variable the program registers; as a character
 array in a structure passed to a HIP call (the device and architecture names given to
 `hipChooseDevice`); inside the padding or unused bytes of such a structure; inside a host
-buffer the workload copied or registered; inside a linker input buffer, even one the linker
+buffer the workload copied or registered, or pinned host memory a kernel launch pointed into; inside a linker input buffer, even one the linker
 rejected; or inside a code object. A path in such a buffer,
 for example a compiler cache path under the user's home directory, is recorded with it.
 Memory that never crossed a HIP call is not recorded, and neither is a failed call, apart
