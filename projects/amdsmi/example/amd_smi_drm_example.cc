@@ -1227,11 +1227,7 @@ int main() {
         CHK_AMDSMI_RET(ret)
         printf("    Output of amdsmi_get_gpu_driver_info:\n");
         printf("\tDriver name: %s\n", driver_info.driver_name);
-        printf("\tamdgpu kernel source version: %s\n", driver_info.driver_kernel_version);
-        printf("\tamdgpu driver version: %s\n", driver_info.amdgpu_driver_version);
         printf("\tDriver version: %s\n", driver_info.driver_version);
-        printf("\tBuild version: %s\n", driver_info.driver_build_version);
-        printf("\tFull version: %s\n", driver_info.driver_full_version);
         printf("\tDriver date: %s\n\n", driver_info.driver_date);
       } else {
         printf("\tamdsmi_get_gpu_driver_info(): not available on this device.\n");
