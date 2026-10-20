@@ -465,8 +465,9 @@ def test_changed_rewritten_display_variant(gfx908_copy):
     assert any("4.1.11 LDS Bandwidth: not the listed form" in e for e in errors)
 
 
-def test_changed_scaled_display_variant(gfx90a_copy):
-    """3.1.26 is checked even though row 17.2.0 also shows fabric.rd_bw."""
+def test_changed_bytes_per_second_row(gfx90a_copy):
+    """3.1.26 shows fabric.rd_bw in Bytes/s; it is checked even though row 17.2.0 also
+    shows fabric.rd_bw."""
     library, configs = gfx90a_copy
     replace_in(
         configs / "gfx90a" / "0300_memory_chart.yaml",
@@ -474,11 +475,11 @@ def test_changed_scaled_display_variant(gfx90a_copy):
         "TCC_EA_RDREQ_32B_sum) * 128) / (SUM(End",
     )
     errors = validate(library, configs)
-    assert any("3.1.26 L2-Fabric Read BW: not the listed form" in e for e in errors)
+    assert any("3.1.26 L2-Fabric Read BW: not a library formula" in e for e in errors)
 
 
 def test_renamed_display_variant(gfx908_copy):
     library, configs = gfx908_copy
-    path = configs / "gfx908" / "0300_memory_chart.yaml"
-    replace_in(path, "VL1_L2 Read BW", "VL1_L2 Rd BW")
-    assert any("3.1.16 is now" in error for error in validate(library, configs))
+    path = configs / "gfx908" / "0400_roofline.yaml"
+    replace_in(path, "LDS Bandwidth:", "LDS BW:")
+    assert any("4.1.11 is now" in error for error in validate(library, configs))
