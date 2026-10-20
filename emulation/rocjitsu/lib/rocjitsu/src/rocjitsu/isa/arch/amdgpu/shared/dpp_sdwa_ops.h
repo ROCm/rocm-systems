@@ -215,21 +215,17 @@ inline int dpp_permute(uint32_t dpp_ctrl, int lane, int wf_size, bool &out_of_bo
   }
 
   if (dpp_ctrl == ROW_BCAST15) {
-    // Broadcast lane 15 of each row to the following row. Row 0 has invalid
-    // shared data.
-    if (lane < ROW_SIZE) {
-      out_of_bounds = true;
+    // Broadcast lane 15 of each row to the following row. The first row
+    // retains each lane's source.
+    if (lane < ROW_SIZE)
       return lane;
-    }
     return row_num * ROW_SIZE - 1;
   }
 
   if (dpp_ctrl == ROW_BCAST31) {
-    // Broadcast lane 31 to lanes 32-63. Lanes 0-31 have invalid shared data.
-    if (lane < 32 || wf_size <= 32) {
-      out_of_bounds = true;
+    // Broadcast lane 31 to lanes 32-63. The first half retains its sources.
+    if (lane < 32 || wf_size <= 32)
       return lane;
-    }
     return 31;
   }
 

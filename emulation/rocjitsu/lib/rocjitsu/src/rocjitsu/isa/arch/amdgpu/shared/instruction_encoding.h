@@ -229,12 +229,12 @@ enum class DppCtrlDialect {
 /// @brief Return true when a DPP control can read past a row or wave edge.
 ///
 /// These controls leave some destination lanes unwritten when BOUND_CTRL is
-/// zero. Rotates, mirrors, quad permutations, row-select, and row-xmask always
-/// map to valid lanes.
+/// zero. Rotates, mirrors, broadcasts, quad permutations, row-select, and
+/// row-xmask always map to valid lanes.
 inline bool dpp_ctrl_produces_oob(uint32_t dpp_ctrl) {
   return (dpp_ctrl >= ROW_SHL1 && dpp_ctrl <= ROW_SHL_MAX) ||
          (dpp_ctrl >= ROW_SHR1 && dpp_ctrl <= ROW_SHR_MAX) || dpp_ctrl == WF_SHL1 ||
-         dpp_ctrl == WF_SRL1 || dpp_ctrl == ROW_BCAST15 || dpp_ctrl == ROW_BCAST31;
+         dpp_ctrl == WF_SRL1;
 }
 
 /// @brief Return true for a documented DPP16 control encoding.
