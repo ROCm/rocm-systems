@@ -56,14 +56,28 @@ std::vector<uint32_t> three_block_text(const SitesTarget &target) {
 }
 
 std::vector<uint8_t> kernel(const SitesTarget &target, const std::vector<uint32_t> &text,
-                            uint32_t granulated_sgpr_count = 3) {
-  return test::make_amdgpu_kernel_elf(text, /*private_bytes=*/0, granulated_sgpr_count,
-                                      target.e_flags);
+                            uint32_t granulated_sgpr_count = 3, uint64_t entry_text_offset = 0) {
+  return test::make_amdgpu_kernel_elf(
+      text, /*private_bytes=*/0, granulated_sgpr_count, target.e_flags,
+      /*granulated_vgpr_count=*/0, /*accum_offset=*/0, /*unterminated_kd_name=*/false,
+      /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
+      /*kd_crosses_section=*/false, /*wave32=*/false, /*kernarg_segment_ptr=*/false,
+      /*kernarg_size=*/0, entry_text_offset);
 }
 
-std::vector<uint8_t> probe(const SitesTarget &target) {
-  return test::make_amdgpu_probe_elf(
-      kProbeSymbol, {build_s_setpc_b64(/*s[30:31]=*/30, target.arch)}, target.e_flags);
+std::vector<uint8_t> probe(const SitesTarget &target,
+                           const std::vector<uint32_t> &leading_words = {}) {
+  return test::make_amdgpu_probe_elf(kProbeSymbol,
+                                     {build_s_setpc_b64(/*s[30:31]=*/30, target.arch)},
+                                     target.e_flags, leading_words);
+}
+
+// A function stub, then the zero words a linker pads the next function's
+// 256-byte alignment with, which do not decode on RDNA4.
+std::vector<uint32_t> stub_and_zero_padding(rj_code_arch_t arch) {
+  std::vector<uint32_t> words(0x100 / sizeof(uint32_t), 0u);
+  words.front() = build_s_setpc_b64(/*s[30:31]=*/30, arch);
+  return words;
 }
 
 DbiInstrumentation instrument(const std::vector<uint8_t> &guest,
@@ -173,6 +187,25 @@ TEST(DbiRuntimeSites, LeavesKernelThatMakesACallUnpatched) {
   EXPECT_TRUE(result.elf_bytes.empty());
 }
 
+TEST(DbiRuntimeSites, LeavesKernelWithAnUnresolvedJumpUnpatched) {
+  // s[4:5] rather than the link pair: a live s[30:31] is refused earlier, by
+  // the Instrumentor, as PatchFailed.
+  const rj_code_arch_t arch = kGfx950.arch;
+  const std::vector<uint32_t> text = {kMovV2Zero, build_s_setpc_b64(/*s[4:5]=*/4, arch)};
+  const DbiInstrumentation result = instrument(kernel(kGfx950, text), probe(kGfx950));
+  EXPECT_EQ(result.decision, DbiLoadDecision::UnsupportedControlFlow);
+  EXPECT_TRUE(result.elf_bytes.empty());
+}
+
+TEST(DbiRuntimeSites, LeavesKernelThatBranchesOutOfTextUnpatched) {
+  const rj_code_arch_t arch = kGfx950.arch;
+  const std::vector<uint32_t> text = {kMovV2Zero, build_s_branch(/*offset_dwords=*/0x7fff, arch),
+                                      build_s_endpgm(arch)};
+  const DbiInstrumentation result = instrument(kernel(kGfx950, text), probe(kGfx950));
+  EXPECT_EQ(result.decision, DbiLoadDecision::UnsupportedControlFlow);
+  EXPECT_TRUE(result.elf_bytes.empty());
+}
+
 TEST(DbiRuntimeSites, LeavesDeadCodeAlone) {
   // 0x00 v_mov, 0x04 s_endpgm: the kernel. 0x08 v_mov, 0x0c s_setpc_b64
   // s[30:31]: a function nothing calls. Its return is unresolved control flow,
@@ -191,6 +224,55 @@ TEST(DbiRuntimeSites, LeavesDeadCodeAlone) {
   ASSERT_GE(words.size(), text.size());
   EXPECT_EQ(words[2], text[2]);
   EXPECT_EQ(words[3], text[3]);
+}
+
+TEST(DbiRuntimeSites, PlacesTheSiteAtAnEntryPastPadding) {
+  // Two s_nop of padding fall into the entry at 8 with no terminator between.
+  const rj_code_arch_t arch = kGfx950.arch;
+  const std::vector<uint32_t> text = {build_s_nop(0, arch), build_s_nop(0, arch), kMovV2Zero,
+                                      build_s_endpgm(arch)};
+  const DbiInstrumentation result = instrument(
+      kernel(kGfx950, text, /*granulated_sgpr_count=*/3, /*entry_text_offset=*/8), probe(kGfx950));
+  ASSERT_EQ(result.decision, DbiLoadDecision::Instrumented)
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  EXPECT_EQ(result.sites, 1u);
+
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> words = text_words(patched);
+  ASSERT_GT(words.size(), text.size());
+  EXPECT_EQ(words[0], text[0]);
+  EXPECT_EQ(words[1], text[1]);
+  EXPECT_NE(words[2], text[2]);
+  EXPECT_EQ(words[3], text[3]);
+}
+
+TEST(DbiRuntimeSites, InstrumentsAnRdna4KernelBehindAStubAndZeroPadding) {
+  const rj_code_arch_t arch = kGfx1200.arch;
+  std::vector<uint32_t> text = stub_and_zero_padding(arch);
+  const uint64_t entry = text.size() * sizeof(uint32_t);
+  text.push_back(kMovV2Zero);
+  text.push_back(build_s_endpgm(arch));
+  const DbiInstrumentation result =
+      instrument(kernel(kGfx1200, text, /*granulated_sgpr_count=*/3, entry), probe(kGfx1200));
+  ASSERT_EQ(result.decision, DbiLoadDecision::Instrumented)
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  EXPECT_EQ(result.sites, 1u);
+
+  const AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> words = text_words(patched);
+  ASSERT_GT(words.size(), text.size());
+  EXPECT_TRUE(std::equal(text.begin(), text.begin() + entry / sizeof(uint32_t), words.begin()));
+}
+
+TEST(DbiRuntimeSites, CallsAnRdna4ProbeBehindAStubAndZeroPadding) {
+  const DbiInstrumentation result =
+      instrument(kernel(kGfx1200, three_block_text(kGfx1200)),
+                 probe(kGfx1200, stub_and_zero_padding(kGfx1200.arch)));
+  ASSERT_EQ(result.decision, DbiLoadDecision::Instrumented)
+      << (result.errors.empty() ? std::string{} : result.errors.front());
+  EXPECT_EQ(result.sites, 2u);
 }
 
 TEST(DbiRuntimeSites, LeavesObjectWithNothingToAnchorUnpatched) {
@@ -215,6 +297,7 @@ TEST(DbiRuntimeSites, ReportsInstrumentorRefusal) {
 TEST(DbiRuntimeSites, NamesEveryDecision) {
   for (size_t index = 0; index < kDbiLoadDecisionCount; ++index)
     EXPECT_STRNE(dbi_load_decision_name(static_cast<DbiLoadDecision>(index)), "unknown") << index;
+  EXPECT_STREQ(dbi_load_decision_name(DbiLoadDecision::Count), "unknown");
 }
 
 } // namespace

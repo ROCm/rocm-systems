@@ -11,8 +11,7 @@
 
 #include <cassert>
 #include <iterator>
-#include <memory>
-#include <unordered_set>
+#include <optional>
 #include <utility>
 
 namespace rocjitsu::hooks {
@@ -43,32 +42,6 @@ namespace {
   return found;
 }
 
-// Blocks reachable from the block starting at @p entry along successors(), in
-// .text order. Empty when no block starts there.
-[[nodiscard]] std::vector<const BasicBlock *>
-reachable_blocks(const std::vector<std::unique_ptr<BasicBlock>> &blocks, uint64_t entry) {
-  std::unordered_set<const BasicBlock *> reachable;
-  std::vector<const BasicBlock *> worklist;
-  for (const std::unique_ptr<BasicBlock> &block : blocks) {
-    if (block->start_offset() == entry) {
-      reachable.insert(block.get());
-      worklist.push_back(block.get());
-    }
-  }
-  while (!worklist.empty()) {
-    const BasicBlock *block = worklist.back();
-    worklist.pop_back();
-    for (const BasicBlock *successor : block->successors())
-      if (reachable.insert(successor).second)
-        worklist.push_back(successor);
-  }
-  std::vector<const BasicBlock *> ordered;
-  for (const std::unique_ptr<BasicBlock> &block : blocks)
-    if (reachable.contains(block.get()))
-      ordered.push_back(block.get());
-  return ordered;
-}
-
 } // namespace
 
 const char *dbi_load_decision_name(DbiLoadDecision decision) {
@@ -89,6 +62,8 @@ const char *dbi_load_decision_name(DbiLoadDecision decision) {
     return "no-sites";
   case DbiLoadDecision::PatchFailed:
     return "patch-failed";
+  case DbiLoadDecision::Count:
+    break;
   }
   return "unknown";
 }
@@ -120,31 +95,23 @@ DbiInstrumentation instrument_each_block(std::span<const uint8_t> elf, const Dbi
 
   Instrumentor instrumentor(object, arch);
   std::string error;
-  const std::vector<std::unique_ptr<BasicBlock>> *blocks = instrumentor.blocks(&error);
-  if (blocks == nullptr) {
+  const std::optional<std::vector<const BasicBlock *>> blocks =
+      instrumentor.kernel_blocks(kernel_list.front().entry_text_offset, &error);
+  if (!blocks) {
     out.decision = DbiLoadDecision::PatchFailed;
     out.errors.push_back(std::move(error));
     return out;
   }
-  // Dead code (padding, unreferenced device functions) is left alone, and does
-  // not get to veto the kernel.
-  const std::vector<const BasicBlock *> reachable =
-      reachable_blocks(*blocks, kernel_list.front().entry_text_offset);
-  if (reachable.empty()) {
-    out.decision = DbiLoadDecision::PatchFailed;
-    out.errors.emplace_back("the kernel entry does not start a decoded block");
-    return out;
-  }
   // The trampolines' liveness follows successors() only, so it would miss
   // registers read across a call or an unresolved edge.
-  for (const BasicBlock *block : reachable) {
+  for (const BasicBlock *block : *blocks) {
     if (!block->call_edges().empty() ||
         block->successor_issue() != BasicBlock::SuccessorIssue::None) {
       out.decision = DbiLoadDecision::UnsupportedControlFlow;
       return out;
     }
   }
-  for (const BasicBlock *block : reachable) {
+  for (const BasicBlock *block : *blocks) {
     const std::optional<uint64_t> anchor = instrumentor.first_anchor(*block);
     if (!anchor) {
       ++out.blocks_without_site;

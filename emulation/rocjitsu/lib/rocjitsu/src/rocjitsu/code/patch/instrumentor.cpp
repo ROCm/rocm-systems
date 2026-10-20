@@ -10,6 +10,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/patch/error_report.h"
@@ -824,9 +825,6 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   decoder_ = std::move(decoder);
-  // A kernel entry need not follow a terminator (alignment padding can fall
-  // into it), so split there explicitly. Split points add no external entry
-  // state, so liveness is unchanged.
   std::vector<uint64_t> kernel_entries;
   if (obj_.text_sections().size() == 1) {
     const Section *text = obj_.text_sections().front();
@@ -836,18 +834,25 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
          scan_kernel_descriptors(image, text->sectionOffset(), text->size()))
       kernel_entries.push_back(kernel.entry_text_offset);
   }
+  // Decoding from the kernel entries leaves padding and unreferenced functions
+  // alone, which need not decode on the target: RDNA4 has no encoding for the
+  // zero words a linker pads .text with. Without a kernel there is no root, so
+  // the whole section is decoded.
   util::StringDiagnostic decode_error;
-  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter(),
-                                  /*extra_leaders=*/{}, ExternalEntryPolicy::InferPredecessorless,
-                                  kernel_entries);
+  auto blocks = kernel_entries.empty()
+                    ? BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter())
+                    : BasicBlock::build_reachable(obj_, *decoder_, arch_, kernel_entries,
+                                                  decode_error.emitter());
   if (blocks.failed()) {
     report(error_out, decode_error.message().c_str());
     return false;
   }
   blocks_ = std::move(blocks).value();
-  // BasicBlock::build returns blocks in .text order. Keep clause state across
+  kernel_entries_ = std::move(kernel_entries);
+  // Both builders return blocks in .text order. Keep clause state across
   // block boundaries because a branch target may split the linear instruction
-  // stream in the middle of a clause.
+  // stream in the middle of a clause. Carrying it across undecoded bytes can
+  // only block more anchors.
   uint32_t clause_remaining = 0;
   for (const auto &block : blocks_) {
     uint64_t cur = block->start_offset();
@@ -888,8 +893,22 @@ const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offs
   return it == offset_to_inst_.end() ? nullptr : it->second;
 }
 
-const std::vector<std::unique_ptr<BasicBlock>> *Instrumentor::blocks(std::string *error_out) {
-  return anchor_text(error_out) ? &blocks_ : nullptr;
+std::optional<std::vector<const BasicBlock *>> Instrumentor::kernel_blocks(uint64_t entry,
+                                                                           std::string *error_out) {
+  if (!anchor_text(error_out))
+    return std::nullopt;
+  const BlockOffsetIndex block_index = build_block_offset_index(blocks_);
+  BasicBlock *entry_block = block_for_offset(block_index, entry);
+  if (entry_block == nullptr || entry_block->start_offset() != entry) {
+    report(error_out, ("no decoded block starts at kernel entry " + std::to_string(entry)).c_str());
+    return std::nullopt;
+  }
+  KernelScopeSpec spec;
+  spec.kernel_entries.insert(kernel_entries_.begin(), kernel_entries_.end());
+  spec.own_entries.insert(entry);
+  const std::vector<BasicBlock *> blocks = reachable_kernel_blocks(
+      blocks_, block_index, build_block_position_index(blocks_), *entry_block, spec);
+  return std::vector<const BasicBlock *>(blocks.begin(), blocks.end());
 }
 
 std::optional<uint64_t> Instrumentor::first_anchor(const BasicBlock &block) const {
