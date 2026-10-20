@@ -1287,16 +1287,16 @@ rcclArchThresholds MakeRankScaledTable() {
   rcclArchThresholds t{};
   t.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
   t.ddaLLMax[ncclFuncAllGather] = 128 * kKiB;
-  t.ddaLLMax[ncclFuncReduceScatter] = 16 * kMiB;
+  t.ddaLLMax[ncclFuncReduceScatter] = 1 * kMiB;
   t.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
   t.ddaLL128Max[ncclFuncAllGather] = 128 * kMiB;
-  t.ddaLL128Max[ncclFuncReduceScatter] = 2 * kMiB;
+  t.ddaLL128Max[ncclFuncReduceScatter] = 64 * kMiB;
   t.ddaVmmMax[ncclFuncAllReduce] = 16 * kMiB;
   t.ddaLLMaxPerRank[ncclFuncAllReduce] = 1 * kMiB;
   t.ddaLLMaxPerRank[ncclFuncAllGather] = 16 * kKiB;
   t.ddaLLMaxPerRank[ncclFuncReduceScatter] = 256 * kKiB;
   t.ddaLL128MaxPerRank[ncclFuncAllGather] = 16 * kMiB;
-  t.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 512 * kKiB;
+  t.ddaLL128MaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
   t.ddaVmmMaxPerRank[ncclFuncReduceScatter] = 2 * kMiB;
   t.rankScaledMinRanks = 8;
   t.rankScaledMaxBytes = 256 * kMiB;
@@ -3559,6 +3559,43 @@ TEST(WrapMicrotest, DdaEnabled_UnsupportedArchReturnsFalse) {
   DeleteCommWithArch(comm);
 }
 
+TEST(WrapMicrotest, DdaEnabled_UnsetLaunchOrderDoesNotDisable) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 8;
+  // Init leaves launchOrderImplicit at NCCL_CONFIG_UNDEF_INT unless the env or comm config sets it.
+  comm->config.launchOrderImplicit = NCCL_CONFIG_UNDEF_INT;
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx950AtRankFloorReturnsTrue) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nRanks = 8;
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx950BelowRankFloorReturnsFalse) {
+  ncclComm* comm = MakeCommWithArch("gfx950");
+  comm->nRanks = 7;
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_Gfx1250HasNoRankFloor) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->nRanks = 2;
+  EXPECT_TRUE(rcclDdaEnabled(comm, /*totalBytes=*/1024, /*threshold=*/2048));
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, DdaEnabled_ZeroThresholdReturnsFalseEvenForZeroBytes) {
+  ncclComm* comm = MakeCommWithArch("gfx942");
+  comm->nRanks = 8;
+  EXPECT_FALSE(rcclDdaEnabled(comm, /*totalBytes=*/0, /*threshold=*/0));
+  DeleteCommWithArch(comm);
+}
+
 // ===========================================================================
 // rcclSymkQuery -- rccl_wrap.cc:547-568 (static). Only the four early-return
 // guards, reachable through plain comm/arg setup: everything past
@@ -3756,37 +3793,161 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricEligibleChoosesSymmetric) {
       });
 }
 
-// CE registered wins over symmetric when both are eligible, per the
-// production comment's documented precedence -- distinct from the test
-// above, which only proves symmetric wins when CE ISN'T eligible.
-TEST(WrapMicrotestIsolated, SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothEligible) {
+namespace {
+// gfx950-shaped AllReduce row: symk never withdrawn, registered CE capped at 256 MiB.
+constexpr size_t kCeVsSymkRegCapBytes = 256ull * 1024 * 1024;
+constexpr size_t kCeVsSymkOverCapCount = 2 * kCeVsSymkRegCapBytes / sizeof(float);
+
+rcclArchThresholds MakeCeVsSymkTable() {
+  rcclArchThresholds table{};
+  for (size_t f = 0; f < RCCL_DDA_FUNC_COUNT; ++f) {
+    table.symMaxR2[f] = kThreshUnlimited;
+    table.symMaxR2Graph[f] = kThreshUnlimited;
+  }
+  table.ceRegMax[ncclFuncAllReduce] = kCeVsSymkRegCapBytes;
+  return table;
+}
+
+const rcclArchThresholds kCeVsSymkTable = MakeCeVsSymkTable();
+
+// Selects a sum AllReduce of `count` floats with registered CE available; symk is requested only when asked.
+int SelectCeVsSymk(int ctaPolicy, size_t count, bool symkRequested, const rcclArchThresholds* table = &kCeVsSymkTable,
+                   const char* arch = "gfx950") {
+  ScopedHook symRequested(g_isSymmetricKernelRequested,
+                          [symkRequested](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*,
+                                          void*, bool) { return symkRequested; });
+  ScopedHook ceAvailable(
+      g_ceAvailable,
+      [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+         struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+  ScopedHook tuningCompute(g_tuningCompute,
+                           SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
+  ncclComm* comm = MakeCommWithArch(arch);
+  comm->archThresholds = table;
+  comm->symmetricSupport = 1;
+  comm->config.CTAPolicy = ctaPolicy;
+  rcclCollDecision decision{};
+  EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, count, ncclFloat32, ncclSum,
+                                              /*stream=*/nullptr, /*query=*/true,
+                                              /*graphCapturingHint=*/false, &decision));
+  DeleteCommWithArch(comm);
+  return decision.algo;
+}
+}  // namespace
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyNullTableKeepsCeRegisteredDisabled) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_SymmetricBeatesCeRegisteredWhenBothEligible",
+      "Wrap_SelectAllReduce_ZeroPolicyNullTableKeepsCeRegisteredDisabled",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        EXPECT_EQ(NCCL_ALGO_RING, SelectCeVsSymk(NCCL_CTA_POLICY_ZERO, /*count=*/8, /*symkRequested=*/false,
+                                                 /*table=*/nullptr, "gfx90a"));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_NoForceNoZeroSkipsCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_NoForceNoZeroSkipsCeRegistered",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        EXPECT_EQ(NCCL_ALGO_RING, SelectCeVsSymk(NCCL_CTA_POLICY_DEFAULT, /*count=*/8, /*symkRequested=*/false));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceWithoutZeroAboveTableCapSkipsCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceWithoutZeroAboveTableCapSkipsCeRegistered",
       []() {
         g_loadParam = [](const char* env, int64_t def) -> int64_t {
           if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
-          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return INT64_MAX;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
           return def;
         };
-        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*, bool) { return true; });
-        ScopedHook ceAvailable(
-            g_ceAvailable,
-            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
-               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
-        ScopedHook symkAvailable(g_symkAvailable,
-                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
-        ScopedHook tuningCompute(g_tuningCompute,
-                                 SelectSymkTuning(ncclSymkKernelId_AllReduce_RSxLD_AGxST, /*maxChannels=*/6));
-        ncclComm* comm = MakeSelectComm();
-        comm->symmetricSupport = 1;
-        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
-        rcclCollDecision decision{};
-        EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/8, ncclFloat32, ncclSum,
-                                                    /*stream=*/nullptr, /*query=*/true,
-                                                    /*graphCapturingHint=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
-        DeleteCommWithArch(comm);
+        EXPECT_EQ(NCCL_ALGO_RING,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_DEFAULT, kCeVsSymkOverCapCount, /*symkRequested=*/false));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceWithoutZeroTakesCeRegisteredWhenSymkIneligible) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceWithoutZeroTakesCeRegisteredWhenSymkIneligible",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
+          return def;
+        };
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_DEFAULT, /*count=*/8, /*symkRequested=*/false));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyCeRegisteredBeatsEligibleSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroPolicyCeRegisteredBeatsEligibleSymmetric",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_ZERO, /*count=*/8, /*symkRequested=*/true));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyCeRegisteredIgnoresTableCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroPolicyCeRegisteredIgnoresTableCap",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_ZERO, kCeVsSymkOverCapCount, /*symkRequested=*/true));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyHonorsEnvRegisteredCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ZeroPolicyHonorsEnvRegisteredCap",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return int64_t(kCeVsSymkRegCapBytes);
+          return def;
+        };
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_ZERO, kCeVsSymkOverCapCount, /*symkRequested=*/true));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_DefaultPolicyKeepsSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_DefaultPolicyKeepsSymmetric",
+      []() {
+        g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_DEFAULT, /*count=*/8, /*symkRequested=*/true));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_ForceWithoutZeroYieldsToEligibleSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_ForceWithoutZeroYieldsToEligibleSymmetric",
+      []() {
+        g_loadParam = [](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0) return 1;
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
+          return def;
+        };
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_DEFAULT, /*count=*/8, /*symkRequested=*/true));
+      });
+}
+
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeAllReduceUnsetKeepsSymmetricOnArchWithoutCeDefault) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_CeAllReduceUnsetKeepsSymmetricOnArchWithoutCeDefault",
+      []() {
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_ZERO, /*count=*/8, /*symkRequested=*/true));
       });
 }
 
@@ -5194,14 +5355,15 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
         comm->nRanks = 7;
         EXPECT_EQ(32 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
         EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
-        EXPECT_EQ(2 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(64 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(0u, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 8;
         EXPECT_EQ(8 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
         EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
         EXPECT_EQ(2 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(128 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllGather));
-        EXPECT_EQ(4 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
+        EXPECT_EQ(16 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(256 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncAllReduce)) << "no per-rank entry";
         EXPECT_EQ(16 * kMiB, rcclDdaVmmThreshold(comm, ncclFuncAllReduce)) << "no per-rank entry";

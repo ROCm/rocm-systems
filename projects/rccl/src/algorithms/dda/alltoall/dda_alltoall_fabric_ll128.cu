@@ -165,7 +165,7 @@ bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, vo
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -190,7 +190,7 @@ uint32_t ncclAllToAllDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclData
 
 ncclResult_t ncclAllToAllDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                         ncclComm* comm, cudaStream_t stream) {
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return ncclInvalidArgument;
   }
   const int typeSize = ncclTypeSize(datatype);

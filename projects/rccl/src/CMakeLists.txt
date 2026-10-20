@@ -220,6 +220,7 @@ set(SRC_FILES
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
+  include/dv_dlopen.h
   include/gin/gin_host_anvil_sdma.h
   include/gin/gin_anvil_sdma_factory.h
   include/git_version.h
@@ -573,6 +574,7 @@ set(SRC_FILES
   transport/net_ib/gin.h
   transport/net_ib/init.cc
   transport/net_ib/net_ib_gid_inspect.cc
+  transport/net_ib/net_ib_wqe_lat_inspect.cc
   transport/net_ib/p2p.cc
   transport/net_ib/p2p.h
   transport/net_ib/p2p_resiliency.cc
@@ -586,6 +588,7 @@ set(SRC_FILES
   transport/net_ib_cast/net_ib_fault_inject.h
   transport/net_ib_gid_inspect.h
   transport/net_ib_limits.h
+  transport/net_ib_wqe_lat_inspect.h
   transport/net_socket.cc
   transport/net_socket/common.cc
   transport/net_socket/common.h
@@ -1196,7 +1199,7 @@ if (ENABLE_ROCSHMEM_GIN)
     # SDMA anvil host code: copied into build tree (no sed — host code needs
     # unqualified log.hpp to find the host shim via include path ordering).
     set(_GIN_SDMA_DIR "${PROJECT_BINARY_DIR}/gin/sdma")
-    foreach(_f anvil.cpp anvil.hpp)
+    foreach(_f anvil.cpp anvil.hpp anvil_engine_map.hpp)
       add_custom_command(
         OUTPUT "${_GIN_SDMA_DIR}/${_f}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_GIN_SDMA_DIR}"

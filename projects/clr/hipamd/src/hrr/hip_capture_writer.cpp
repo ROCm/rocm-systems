@@ -18,6 +18,9 @@
  * its absence marks the archive as crash-truncated for the reader, which
  * recovers all complete records.
  *
+ * Every process starts a fresh archive. One that an earlier process with the
+ * same pid left at pid-<pid> is moved aside to pid-<pid>.prev-<n>, never added to.
+ *
  * Disk space: capture stops, and the archive is marked incomplete, before the
  * file system holding it falls below a reserve; see "Disk space" below.
  *
@@ -64,24 +67,10 @@
 #  include <fcntl.h>
 #  include <process.h>
 #  include <sys/stat.h>
-// Truncate: new archive. Append: resume into existing events.bin (must NOT use _O_TRUNC).
 #  define HRR_OPEN(p)          _open((p), _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY, _S_IREAD | _S_IWRITE)
-#  define HRR_OPEN_APPEND(p)   _open((p), _O_RDWR | _O_CREAT | _O_BINARY, _S_IREAD | _S_IWRITE)
 #  define HRR_WRITE(fd,b,n)    _write((fd), (b), (unsigned)(n))
 #  define HRR_CLOSE(fd)        _close((fd))
 #  define HRR_FSYNC(fd)        _commit((fd))
-
-using hrr_stat_t = struct _stat64;
-static int hrr_stat_file(const char* path, hrr_stat_t* st) { return _stat64(path, st); }
-static std::int64_t hrr_stat_size(const hrr_stat_t& st) { return st.st_size; }
-
-static int hrr_ftruncate_fd(int fd, std::int64_t len) {
-  return _chsize_s(fd, len) == 0 ? 0 : -1;
-}
-
-static std::int64_t hrr_seek_end(int fd) {
-  return static_cast<std::int64_t>(_lseeki64(fd, 0, SEEK_END));
-}
 
 static inline uint64_t current_thread_id() {
   static thread_local uint64_t cached = static_cast<uint64_t>(GetCurrentThreadId());
@@ -106,14 +95,6 @@ static inline uint64_t current_parent_process_id() {
 #  define HRR_WRITE(fd,b,n)  ::write((fd), (b), (n))
 #  define HRR_CLOSE(fd)      ::close((fd))
 #  define HRR_FSYNC(fd)      ::fsync((fd))
-
-static int hrr_ftruncate_fd(int fd, std::int64_t len) {
-  return ftruncate(fd, static_cast<off_t>(len));
-}
-
-static std::int64_t hrr_seek_end(int fd) {
-  return static_cast<std::int64_t>(lseek(fd, 0, SEEK_END));
-}
 
 static inline uint64_t current_thread_id() {
   static thread_local uint64_t cached = static_cast<uint64_t>(syscall(SYS_gettid));
@@ -253,8 +234,8 @@ static std::condition_variable g_blob_writes_done;
 static std::atomic<bool> g_reopen_after_fork{false};
 static std::mutex        g_reopen_mu;
 
-// In-memory set of blob hex keys already written to disk.
-// Eliminates the fs::exists() stat syscall on repeated blobs (common for weight tensors).
+// Keys of the blobs and code objects written to this archive, so repeated bytes
+// (common for weight tensors) are written once.
 // Protected by g_blob_mu (separate from g_file_mu to avoid head-of-line blocking).
 // flush() takes g_blob_mu while it holds g_file_mu, so never take them the other way round.
 // "co:" prefix for code objects matches the playback-side load_code_object key convention.
@@ -415,43 +396,41 @@ static bool claim_private_dir(const std::string& path) {
 #endif
 }
 
-// Open this process's events.bin and report how many bytes it already holds.
-// On POSIX an existing file is reused only if it is a regular file with a single
-// link owned by the effective user, and a new one is created exclusively, so
-// nothing planted at that path is ever truncated or appended to. O_NONBLOCK keeps
-// a planted FIFO or device from blocking the open; it changes nothing for the
-// regular file that is kept.
-static int open_events_file(const std::string& path, std::int64_t* existing_size) {
-  *existing_size = 0;
+// True when the claimed pid-<pid> holds an earlier process's archive: an
+// events.bin of the kind this writer leaves, a regular file with a single link
+// owned by the effective user. Anything else at that name is not moved, and the
+// open of events.bin refuses it.
+static bool holds_earlier_archive(const std::string& out_dir) {
+  const std::string events = out_dir + "/events.bin";
 #ifdef _WIN32
-  hrr_stat_t st{};
-  if (hrr_stat_file(path.c_str(), &st) == 0 && hrr_stat_size(st) > 0) {
-    *existing_size = hrr_stat_size(st);
-    return HRR_OPEN_APPEND(path.c_str());
-  }
-  return HRR_OPEN(path.c_str());
+  std::error_code ec;
+  return fs::is_regular_file(fs::symlink_status(events, ec));
 #else
-  int fd = ::open(path.c_str(), O_RDWR | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
-  if (fd < 0 && errno == ENOENT)
-    fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
-  if (fd < 0) return -1;
   struct stat st{};
-  int err = 0;
-  if (::fstat(fd, &st) != 0) {
-    err = errno;
-  } else if (!S_ISREG(st.st_mode) || st.st_nlink != 1 || !owned_by_euid(st)) {
-    err = EPERM;
-  } else if ((st.st_mode & 07777) != 0600 && ::fchmod(fd, 0600) != 0) {
-    err = errno;
-  }
-  if (err != 0) {
-    ::close(fd);
-    errno = err;
-    return -1;
-  }
-  *existing_size = static_cast<std::int64_t>(st.st_size);
-  return fd;
+  return ::lstat(events.c_str(), &st) == 0 && S_ISREG(st.st_mode) && st.st_nlink == 1 &&
+         owned_by_euid(st);
 #endif
+}
+
+// A process never adds to an archive it did not open: an earlier process with
+// the same pid, common in containers, keeps its archive. Renames pid-<pid> to
+// the first free pid-<pid>.prev-<n>, which readers do not take for a process
+// archive. rename() moves the directory entry itself and never follows a link,
+// and the new name is checked free first. Sets errno and returns false when the
+// directory cannot be moved.
+static bool move_earlier_archive_aside(const std::string& out_dir, std::string* moved_to) {
+  for (unsigned n = 1; n <= 0xffff; ++n) {
+    const std::string to = out_dir + ".prev-" + std::to_string(n);
+    std::error_code ec;
+    if (fs::exists(fs::symlink_status(to, ec))) continue;
+    if (std::rename(out_dir.c_str(), to.c_str()) == 0) {
+      *moved_to = to;
+      return true;
+    }
+    if (errno != EEXIST && errno != ENOTEMPTY) return false;
+  }
+  errno = EEXIST;
+  return false;
 }
 
 #ifndef _WIN32
@@ -498,8 +477,8 @@ static FILE* fopen_private(const std::string& path) {
 // fopen(path, "r") for a file inside the archive. On POSIX only a regular file
 // is read, never through a symbolic link, and a planted FIFO is refused rather
 // than blocking the open. What is trusted on the way in passes the same checks
-// as what is written: ours and a single link, or another user's counters and
-// manifests would be taken for this archive's.
+// as what is written: ours and a single link, or another user's manifests
+// would be taken for this archive's.
 static FILE* fopen_read_regular(const std::string& path) {
 #ifdef _WIN32
   return fopen(path.c_str(), "r");
@@ -530,200 +509,6 @@ static bool is_json_object_fragment(const std::string& json) {
 // ---------------------------------------------------------------------------
 // manifest writers
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Subprocess / resume helpers
-//
-// vLLM server mode runs GPU work in a spawned EngineCore child. Each HIP-owning
-// process must append to the same events.bin instead of truncating it. On resume
-// we scan the existing log (or trust writer_state.json from the last checkpoint),
-// strip a clean-shutdown trailer if present, and continue sequence IDs.
-// ---------------------------------------------------------------------------
-
-struct ScanResult {
-  uint64_t max_seq   = 0;
-  uint64_t count     = 0;
-  std::int64_t append_at = 0;
-  bool     had_trailer = false;
-  bool     torn_tail   = false;
-};
-
-static ScanResult scan_events_for_resume(FILE* f, std::int64_t file_size) {
-  ScanResult r;
-  const uint16_t hdr_size = static_cast<uint16_t>(sizeof(hrr_event_header));
-  if (fseek(f, static_cast<long>(sizeof(hrr_file_header)), SEEK_SET) != 0)
-    return r;
-
-  r.append_at = sizeof(hrr_file_header);
-  while (true) {
-    long pos = ftell(f);
-    if (pos < 0 || static_cast<std::int64_t>(pos) >= file_size) break;
-
-    hrr_event_header h{};
-    if (fread(&h, hdr_size, 1, f) != 1) {
-      r.torn_tail = true;
-      r.append_at = pos;
-      break;
-    }
-
-    // Valid trailer only if full hrr_eof_record + magic (same rule as hrr_reader).
-    if (h.event_type == HRR_EOF_MARKER &&
-        h.payload_length == static_cast<uint32_t>(sizeof(hrr_eof_record))) {
-      uint64_t total_events = 0;
-      uint32_t eof_magic    = 0;
-      if (fread(&total_events, sizeof(total_events), 1, f) != 1 ||
-          fread(&eof_magic, sizeof(eof_magic), 1, f) != 1) {
-        r.torn_tail = true;
-        r.append_at = pos;
-        break;
-      }
-      if (eof_magic == HRR_EOF_MAGIC) {
-        r.had_trailer = true;
-        r.append_at = pos;
-        break;
-      }
-      // Bogus EOF-shaped record: count it and skip past the bytes we read.
-      r.max_seq = (h.sequence_id > r.max_seq) ? h.sequence_id : r.max_seq;
-      r.count++;
-      r.append_at = static_cast<std::int64_t>(ftell(f));
-      continue;
-    }
-
-    if (h.payload_length < hdr_size) {
-      r.torn_tail = true;
-      r.append_at = pos;
-      break;
-    }
-
-    long body = static_cast<long>(h.payload_length) - static_cast<long>(hdr_size);
-    // fseek past EOF "succeeds" on most platforms (it only fails to read on the
-    // next fread), so a record claiming e.g. 65535 bytes of body in a 100-byte
-    // file would otherwise be accepted and leave append_at pointing past EOF —
-    // corrupting the resuming capture's offset and sequence IDs. Validate that
-    // the full record body actually fits in the file before trusting it.
-    if (fseek(f, body, SEEK_CUR) != 0 ||
-        ftell(f) < 0 ||
-        static_cast<std::int64_t>(ftell(f)) > file_size) {
-      r.torn_tail = true;
-      r.append_at = pos;
-      break;
-    }
-    // Counted only once it fits: the torn record is cut off, so counting it
-    // would make the resumed trailer claim one record too many.
-    r.max_seq = (h.sequence_id > r.max_seq) ? h.sequence_id : r.max_seq;
-    r.count++;
-    r.append_at = static_cast<std::int64_t>(ftell(f));
-  }
-
-  if (!r.had_trailer && !r.torn_tail)
-    r.append_at = file_size;
-  return r;
-}
-
-static bool try_load_writer_state(const std::string& path, std::int64_t file_size,
-                                  uint64_t* next_seq, uint64_t* ev_count,
-                                  uint64_t* bl_count) {
-  FILE* f = fopen_read_regular(path);
-  if (!f) return false;
-
-  uint64_t ns = 0, ec = 0, bc = 0;
-  long long stored_size = -1;
-  char line[256];
-  while (fgets(line, sizeof(line), f)) {
-    unsigned long long u = 0;
-    long long s = 0;
-    if (sscanf(line, " \"next_seq\": %llu", &u) == 1) { ns = u; continue; }
-    if (sscanf(line, " \"event_count\": %llu", &u) == 1) { ec = u; continue; }
-    if (sscanf(line, " \"blob_count\": %llu", &u) == 1) { bc = u; continue; }
-    if (sscanf(line, " \"events_file_size\": %lld", &s) == 1) { stored_size = s; continue; }
-  }
-  fclose(f);
-
-  if (stored_size != file_size)
-    return false;
-  *next_seq = ns;
-  *ev_count = ec;
-  *bl_count = bc;
-  return true;
-}
-
-static void save_writer_state_locked() {
-  if (g_output_dir.empty() || g_events_fd < 0) return;
-  std::int64_t sz = hrr_seek_end(g_events_fd);
-  if (sz < 0) return;
-
-  FILE* f = fopen_private(g_output_dir + "/writer_state.json");
-  if (!f) return;
-  fprintf(f,
-          "{\n"
-          "  \"next_seq\": %llu,\n"
-          "  \"event_count\": %llu,\n"
-          "  \"blob_count\": %llu,\n"
-          "  \"events_file_size\": %lld\n"
-          "}\n",
-          static_cast<unsigned long long>(g_seq_id.load()),
-          static_cast<unsigned long long>(g_event_count.load()),
-          static_cast<unsigned long long>(g_blob_count.load()),
-          static_cast<long long>(sz));
-  fclose(f);
-}
-
-// A blob or code object found on resume counts as already written only if this
-// user wrote it: a regular file with a single link owned by the effective user.
-// The directories were claimed first, so nobody else can add one now, but a
-// file another user planted before the claim, or a hard link to a file
-// elsewhere, would otherwise be trusted and never rewritten. Left unindexed,
-// it is replaced by the next atomic write of that hash, which renames over it.
-static bool resumed_file_is_ours(const fs::path& p) {
-#ifdef _WIN32
-  std::error_code ec;
-  return fs::symlink_status(p, ec).type() == fs::file_type::regular;
-#else
-  struct stat st{};
-  return ::lstat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode) && st.st_nlink == 1 &&
-         owned_by_euid(st);
-#endif
-}
-
-static void index_existing_blobs_locked(const std::string& output_dir) {
-  std::lock_guard<std::mutex> lk(g_blob_mu);
-  g_written_blobs.clear();
-  g_blob_claims.clear();  // as in the fresh-archive path of open()
-
-  // error_code overloads throughout: a missing or unreadable directory only
-  // means fewer blobs are known to exist, and a blob written twice is harmless.
-  // Only a file resumed_file_is_ours() accepts counts; anything else is replaced.
-  // A blobs/<xx> prefix is claimed before its files are trusted: one that fails
-  // claim_private_dir contributes nothing, and write_blob refuses it later.
-  std::error_code ec;
-  const fs::path blobs_root = output_dir + "/blobs";
-  for (fs::directory_iterator dit(blobs_root, ec), dend; !ec && dit != dend; dit.increment(ec)) {
-    std::error_code entry_ec;
-    if (dit->symlink_status(entry_ec).type() != fs::file_type::directory) continue;
-#ifndef _WIN32
-    const std::string name = dit->path().filename().string();
-    const auto nibble = [](char c) -> int {
-      return (c >= '0' && c <= '9') ? c - '0' : (c >= 'a' && c <= 'f') ? c - 'a' + 10 : -1;
-    };
-    if (name.size() != 2 || nibble(name[0]) < 0 || nibble(name[1]) < 0) continue;
-    if (!claim_private_dir(dit->path().string())) continue;
-    g_blob_prefix_claimed[(nibble(name[0]) << 4) | nibble(name[1])].store(
-        true, std::memory_order_release);
-#endif
-    for (fs::directory_iterator it(dit->path(), entry_ec), end; !entry_ec && it != end;
-         it.increment(entry_ec)) {
-      if (it->path().extension() == ".blob" && resumed_file_is_ours(it->path()))
-        g_written_blobs.insert(it->path().stem().string());
-    }
-  }
-
-  ec.clear();
-  const fs::path co_root = output_dir + "/code_objects";
-  for (fs::directory_iterator it(co_root, ec), end; !ec && it != end; it.increment(ec)) {
-    if (it->path().extension() == ".hsaco" && resumed_file_is_ours(it->path()))
-      g_written_blobs.insert(std::string("co:") + it->path().stem().string());
-  }
-}
 
 static void reopen_after_fork() {
   if (!g_reopen_after_fork.load(std::memory_order_acquire)) return;
@@ -915,8 +700,12 @@ static void update_root_manifest() {
   for (fs::directory_iterator it(g_base_dir, ec), end; !ec && it != end; it.increment(ec)) {
     std::error_code entry_ec;
     if (it->symlink_status(entry_ec).type() != fs::file_type::directory) continue;
+    // pid-<digits> only: an archive moved aside to pid-<pid>.prev-<n> is not
+    // one of this capture's processes.
     const std::string name = it->path().filename().string();
-    if (name.rfind("pid-", 0) != 0) continue;
+    if (name.size() <= 4 || name.compare(0, 4, "pid-") != 0 ||
+        name.find_first_not_of("0123456789", 4) != std::string::npos)
+      continue;
     ProcessManifestEntry entry{};
     const std::string manifest_path = (it->path() / "manifest.json").string();
     if (read_process_manifest(manifest_path, &entry))
@@ -1014,11 +803,11 @@ static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total,
 // capture is on. open() removes a stale one before any step that can fail and
 // creates it as its last step. flush() removes it at shutdown, and
 // stop_for_space() when the capture stops early. events.bin cannot carry that
-// signal: a resume that fails after opening it leaves the earlier run's file in
-// place. The marker holds one line naming the process instance (see
-// process_instance()). A killed process cannot remove its marker, and a producer
-// in a later process with the same pid checks before HIP starts, so it must find
-// its own instance in the marker.
+// signal: a capture refused after creating it leaves the file in place. The
+// marker holds one line naming the process instance (see process_instance()). A
+// killed process cannot remove its marker, and a producer in a later process
+// with the same pid checks before HIP starts, so it must find its own instance
+// in the marker.
 static constexpr const char* kActiveMarker = "/active";
 
 // Flush what is buffered, close events.bin and mark the archive incomplete.
@@ -1137,7 +926,7 @@ static void clear_archive_paths() {
 }
 
 // ---------------------------------------------------------------------------
-// open / close / flush / checkpoint
+// open / close / flush
 // ---------------------------------------------------------------------------
 
 // A failed open() keeps no archive path, so reopen_after_fork() does not open one
@@ -1243,9 +1032,23 @@ bool open(const char* output_dir) {
   const std::string out_dir = g_base_dir + sub;
 
   std::error_code exists_ec;
-  const bool created_pid_dir =
-      !fs::exists(fs::symlink_status(out_dir, exists_ec));
+  bool created_pid_dir = !fs::exists(fs::symlink_status(out_dir, exists_ec));
   bool dirs_ok = ensure_dir(out_dir) && claim_private_dir(out_dir);
+  if (dirs_ok && !created_pid_dir && holds_earlier_archive(out_dir)) {
+    std::string moved_to;
+    if (!move_earlier_archive_aside(out_dir, &moved_to)) {
+      const int err = errno;
+      LogPrintfError("[HRR capture] Cannot move the earlier archive at %s aside: %s",
+                     out_dir.c_str(), strerror(err));
+      fprintf(stderr, "[HRR capture] Capture disabled: cannot move the earlier archive at %s "
+              "aside (%s).\n", out_dir.c_str(), strerror(err));
+      return open_failed(out_dir, false);
+    }
+    fprintf(stderr, "[HRR capture] %s held an archive from an earlier process with this pid; "
+            "moved it to %s.\n", out_dir.c_str(), moved_to.c_str());
+    created_pid_dir = true;
+    dirs_ok = ensure_dir(out_dir) && claim_private_dir(out_dir);
+  }
   // A marker left by an earlier process with this pid goes first, once the
   // directory it sits in is known to be ours.
   if (dirs_ok) (void)remove((out_dir + kActiveMarker).c_str());
@@ -1277,8 +1080,7 @@ bool open(const char* output_dir) {
   std::string events_path = out_dir + "/events.bin";
   std::string manifest_path = out_dir + "/manifest.json";
 
-  std::int64_t existing_size = 0;
-  const int fd = open_events_file(events_path, &existing_size);
+  const int fd = HRR_OPEN(events_path.c_str());
   if (fd < 0) {
     const int err = errno;
     LogPrintfError("[HRR capture] Failed to open %s: %s", events_path.c_str(), strerror(err));
@@ -1287,86 +1089,14 @@ bool open(const char* output_dir) {
     return open_failed(out_dir, created_pid_dir);
   }
 
-  const bool exists = existing_size > 0;
-  uint64_t next_seq = 0, ev_count = 0, bl_count = 0;
-  bool fast = false;
-  ScanResult scan{};
-  if (exists) {
-    const std::string state_path = out_dir + "/writer_state.json";
-    fast = try_load_writer_state(state_path, existing_size, &next_seq, &ev_count, &bl_count);
-
-    // Without the scan a trailer is not stripped and the counters can restart,
-    // so an archive that cannot be scanned is not resumed.
-    bool scanned = false;
-    int scan_err = 0;
-#ifdef _WIN32
-    if (FILE* rf = fopen(events_path.c_str(), "rb")) {
-      scan = scan_events_for_resume(rf, existing_size);
-      fclose(rf);
-      scanned = true;
-    } else {
-      scan_err = errno;
-    }
-#else
-    // Reuse the already-validated events descriptor so a pathname swap cannot
-    // make the scan follow a different file than open_events_file accepted.
-    const int scan_fd = ::fcntl(fd, F_DUPFD_CLOEXEC, 0);
-    if (scan_fd < 0) {
-      scan_err = errno;
-    } else if (FILE* rf = ::fdopen(scan_fd, "rb")) {
-      scan = scan_events_for_resume(rf, existing_size);
-      fclose(rf);
-      scanned = true;
-    } else {
-      scan_err = errno;
-      ::close(scan_fd);
-    }
-#endif
-    if (!scanned) {
-      LogPrintfError("[HRR capture] Cannot read %s to resume it: %s", events_path.c_str(),
-                     strerror(scan_err));
-      fprintf(stderr, "[HRR capture] Capture disabled: cannot read %s to resume it (%s).\n",
-              events_path.c_str(), strerror(scan_err));
-      HRR_CLOSE(fd);
-      return open_failed(out_dir, created_pid_dir);
-    }
-    if (!fast) {
-      next_seq = (scan.count > 0) ? (scan.max_seq + 1) : 0;
-      ev_count = scan.count;
-    }
-
-    // The reader stops at a trailer or a torn tail, so records appended after
-    // one that cannot be cut off would be lost: such an archive is not resumed.
-    if (scan.append_at > 0 && (scan.had_trailer || scan.torn_tail) &&
-        hrr_ftruncate_fd(fd, scan.append_at) != 0) {
-      const int err = errno;
-      LogPrintfError("[HRR capture] ftruncate resume of %s at %lld failed: %s", events_path.c_str(),
-                     (long long)scan.append_at, strerror(err));
-      fprintf(stderr, "[HRR capture] Capture disabled: cannot trim %s to resume it (%s).\n",
-              events_path.c_str(), strerror(err));
-      HRR_CLOSE(fd);
-      return open_failed(out_dir, created_pid_dir);
-    }
-    if (hrr_seek_end(fd) < 0) {
-      const int err = errno;
-      LogPrintfError("[HRR capture] seek end of %s failed", events_path.c_str());
-      fprintf(stderr, "[HRR capture] Capture disabled: cannot seek to the end of %s (%s).\n",
-              events_path.c_str(), strerror(err));
-      HRR_CLOSE(fd);
-      return open_failed(out_dir, created_pid_dir);
-    }
-
-    index_existing_blobs_locked(out_dir);
-  } else {
-    // Fresh per-process archive. Incomplete belongs to the archive, as in
-    // atfork_child: a failure recorded against one closed earlier in this
-    // process must not cost this one its trailer. A resumed archive keeps it.
-    // So does the unreplayable list, which a forked child also drops here.
-    g_capture_incomplete.store(false, std::memory_order_relaxed);
-    {
-      std::lock_guard<std::mutex> lk(g_unreplayable_mu);
-      g_unreplayable_apis.clear();
-    }
+  // open() runs once at init, or in a forked child whose atfork_child() has
+  // already cleared the incomplete flag: a flag set since then is for a record
+  // this archive lost. The child drops the parent's unreplayable list here.
+  {
+    std::lock_guard<std::mutex> lk(g_unreplayable_mu);
+    g_unreplayable_apis.clear();
+  }
+  {
     std::lock_guard<std::mutex> lk(g_blob_mu);
     g_written_blobs.clear();
     // A forked child drops the claims of the parent's writers here, not in
@@ -1374,7 +1104,7 @@ bool open(const char* output_dir) {
     g_blob_claims.clear();
   }
 
-  // The last step before the archive is published, on resume and on a fresh one.
+  // The last step before the archive is published.
   if (!publish_active_marker(out_dir)) {
     const int err = errno;
     LogPrintfError("[HRR capture] Cannot create %s%s: %s", out_dir.c_str(), kActiveMarker,
@@ -1396,39 +1126,16 @@ bool open(const char* output_dir) {
     g_buf_len           = 0;
     g_events_since_ckpt = 0;
     g_events_finalized  = false;
-    g_seq_id.store(next_seq, std::memory_order_relaxed);
-    g_event_count.store(ev_count, std::memory_order_relaxed);
-    if (!exists)
-      g_blob_count.store(0, std::memory_order_relaxed);
-    else if (fast)
-      g_blob_count.store(bl_count, std::memory_order_relaxed);
+    g_seq_id.store(0, std::memory_order_relaxed);
+    g_event_count.store(0, std::memory_order_relaxed);
+    g_blob_count.store(0, std::memory_order_relaxed);
     g_events_fd = fd;
-    if (!exists) {
-      // Pitched host copies record only their copied rows (hip_capture.cpp,
-      // write_host_rect_blob), which replay reads back by this flag.
-      hrr_file_header fh{HRR_MAGIC, HRR_VERSION, HRR_FILE_FLAG_PACKED_HOST_RECTS};
-      buffer_append_locked(&fh, sizeof(fh));
-    }
-  }
-
-  if (exists) {
-    LogPrintfInfo("[HRR capture] Resumed archive at %s (events=%llu next_seq=%llu%s%s)",
-                  events_path.c_str(),
-                  static_cast<unsigned long long>(ev_count),
-                  static_cast<unsigned long long>(next_seq),
-                  scan.had_trailer ? ", stripped trailer" : "",
-                  scan.torn_tail ? ", trimmed torn tail" : "");
+    // Pitched host copies record only their copied rows (hip_capture.cpp,
+    // write_host_rect_blob), which replay reads back by this flag.
+    hrr_file_header fh{HRR_MAGIC, HRR_VERSION, HRR_FILE_FLAG_PACKED_HOST_RECTS};
+    buffer_append_locked(&fh, sizeof(fh));
   }
   return true;
-}
-
-void checkpoint() {
-  BufWriteGuard lk;
-  if (g_events_fd < 0) return;
-  flush_buffer_locked();
-  HRR_FSYNC(g_events_fd);
-  save_writer_state_locked();
-  g_events_since_ckpt = 0;
 }
 
 // Caller holds g_blob_mu. A claimed write ends here even after flush() has cut
@@ -1546,7 +1253,6 @@ void flush(const char* /*output_dir*/) {
   if (out_dir.empty()) return;
   write_manifest_stdio(out_dir.c_str(), /*complete=*/!incomplete);
   update_root_manifest();
-  remove((out_dir + "/writer_state.json").c_str());
   remove((out_dir + kActiveMarker).c_str());
 }
 

@@ -180,7 +180,7 @@ NCCL_API(ncclResult_t, rcclGetCollImplInfo, struct ncclComm* comm, ncclFunc_t co
          int* protocol, int* maxChannels);
 // Single source of truth for AllReduce implementation selection. Runs the exact
 // priority chain (GIN-SDMA -> symmetric -> CE 2-shot -> DDA LL/LL128/VMM/IPC -> CE registered
-// -> kernel) and returns the decision.
+// -> kernel) and returns the decision. Under CTAPolicy=ZERO an available CE registered path beats symmetric.
 //   query=false : live dispatch path (ncclAllReduce_impl). ceCapturing is probed
 //                 from `stream`; the CE graph latch is ticked; graphCapturingHint
 //                 is ignored.
@@ -385,6 +385,11 @@ size_t rcclDdaScratchPayloadCap(const ncclComm* comm);
 // DDA for the call.
 bool rcclDdaEnabled(const ncclComm* comm, size_t totalBytes, size_t threshold,
                     bool query = false, const char* prefix = nullptr);
+
+// Element types the DDA fabric kernels accept on this comm's arch: ncclSum for
+// the reducing collectives, a raw byte copy for AllGather and AlltoAll. fp8 is
+// gfx1250-only.
+bool rcclDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype);
 
 int getFirmwareVersion();
 bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName);
