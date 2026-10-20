@@ -47,11 +47,6 @@ TEST(clocks_read_test, returns_zero_when_the_clock_fails)
     EXPECT_EQ(detail::read(k_invalid_clock_id), std::chrono::nanoseconds::zero());
 }
 
-TEST(timeline_clock_test, matches_rocprofiler_sdk_host_clock)
-{
-    EXPECT_EQ(timeline::k_sdk_host_clock_id, CLOCK_BOOTTIME);
-}
-
 TEST(timeline_clock_test, reads_the_timeline_clock)
 {
     const auto before_duration = read_boottime_ns();

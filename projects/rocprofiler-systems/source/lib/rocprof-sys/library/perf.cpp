@@ -233,7 +233,7 @@ perf_event::open(double freq, std::uint32_t batch_size, pid_t pid, int cpu)
     perf_event_a.exclude_hv               = 1;
     perf_event_a.exclude_callchain_kernel = 1;
     perf_event_a.use_clockid              = 1;
-    perf_event_a.clockid                  = clocks::timeline::k_sdk_host_clock_id;
+    perf_event_a.clockid                  = clocks::timeline::k_timeline_clock_id;
 
     return open(perf_event_a, pid, cpu);
 }

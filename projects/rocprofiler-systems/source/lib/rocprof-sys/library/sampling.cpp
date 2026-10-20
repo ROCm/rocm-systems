@@ -798,7 +798,7 @@ configure(bool _setup, std::int64_t _tid)
             // otherwise stay on perf's CLOCK_MONOTONIC, and parse_overflow_data()
             // freezes the monotonic-to-timeline offset from the first sample.
             _pe.use_clockid = 1;
-            _pe.clockid     = clocks::timeline::k_sdk_host_clock_id;
+            _pe.clockid     = clocks::timeline::k_timeline_clock_id;
 
             auto _perf_open_error =
                 _perf_sampler->open(_pe, _info->index_data->system_value);

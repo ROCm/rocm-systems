@@ -14,7 +14,7 @@ namespace rocprofsys::inline common::clocks::detail
 [[nodiscard]] inline std::chrono::nanoseconds
 read(clockid_t clock_id) noexcept
 {
-    struct timespec specs = {};
+    timespec specs = {};
     if(clock_gettime(clock_id, &specs) != 0)
     {
         return std::chrono::nanoseconds::zero();
@@ -26,15 +26,15 @@ read(clockid_t clock_id) noexcept
 
 namespace rocprofsys::inline common::clocks::timeline
 {
-/// Should match rocprofiler-sdk host events stamp clock, or CPU events won't line up with
-/// SDK events in the trace
-inline constexpr clockid_t k_sdk_host_clock_id = CLOCK_BOOTTIME;
+/// Must match the rocprofiler-sdk host clock so the CPU and SDK events won't line up in
+/// the trace; the SDK backend tests static_assert this.
+inline constexpr clockid_t k_timeline_clock_id = CLOCK_BOOTTIME;
 
 /// Absolute timeline clock for CPU and call-stack event stamps.
 [[nodiscard]] inline std::chrono::nanoseconds
 now() noexcept
 {
-    return detail::read(k_sdk_host_clock_id);
+    return detail::read(k_timeline_clock_id);
 }
 
 template <typename Tp = std::uint64_t>
