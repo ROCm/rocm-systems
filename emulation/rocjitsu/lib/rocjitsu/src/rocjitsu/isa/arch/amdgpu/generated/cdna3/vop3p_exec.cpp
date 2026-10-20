@@ -626,13 +626,31 @@ void VSmfmacF3232x32x16Bf16Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VSmfmacI3216x16x64I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::apply_gpr_idx_to_mma_base(
+      wf, vb, amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd), amdgpu::VgprMsbRole::Dst);
+  uint32_t s0b = amdgpu::apply_gpr_idx_to_mma_base(
+      wf, vb, amdgpu::src_base(vb, src0.encoding_value_), amdgpu::VgprMsbRole::Src0);
+  uint32_t s1b = amdgpu::apply_gpr_idx_to_mma_base(
+      wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
+  uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
+      wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
+  amdgpu::exec_smfmac_i32_i8<16, 16, 64>(cu, dst, s0b, s1b, idx, inst_.cbsz, inst_.abid);
 }
 
 void VSmfmacI3232x32x32I8Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto &cu = wf.cu();
+  uint32_t vb = wf.vgpr_alloc().base;
+  uint32_t dst = amdgpu::apply_gpr_idx_to_mma_base(
+      wf, vb, amdgpu::dst_base(vb, vdst.encoding_value_, inst_.acc_cd), amdgpu::VgprMsbRole::Dst);
+  uint32_t s0b = amdgpu::apply_gpr_idx_to_mma_base(
+      wf, vb, amdgpu::src_base(vb, src0.encoding_value_), amdgpu::VgprMsbRole::Src0);
+  uint32_t s1b = amdgpu::apply_gpr_idx_to_mma_base(
+      wf, vb, amdgpu::src_base(vb, src1.encoding_value_), amdgpu::VgprMsbRole::Src1);
+  uint32_t idx = amdgpu::apply_gpr_idx_to_mma_base(
+      wf, vb, amdgpu::src_base(vb, src2.encoding_value_), amdgpu::VgprMsbRole::Src2);
+  amdgpu::exec_smfmac_i32_i8<32, 32, 32>(cu, dst, s0b, s1b, idx, inst_.cbsz, inst_.abid);
 }
 
 void VMfmaF6416x16x4F64Vop3pMfma::execute_impl(amdgpu::Wavefront &wf) {
