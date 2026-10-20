@@ -73,18 +73,31 @@ fn validate_command(command: KernelCommand) -> Result<u32, Error> {
 
 /// One private DRM submission context, completion fence, and atomic slot.
 pub(crate) struct KfdKernelQueue {
+    /// Exact render VM that owns the command context and completion fence.
     vm: Shared<DeviceVm>,
+    /// Rejects use of inherited handles after fork.
     process: u32,
+    /// Private DRM submission context until destruction succeeds.
     context_id: Option<u32>,
+    /// Timeline object proving command retirement.
     completion_syncobj: Option<u32>,
+    /// Hardware IP and ring selected for this queue.
     engine: drm::CommandEngine,
+    /// Atomic submission slot guarding concurrent producers.
     slot: AtomicU64,
+    /// Highest native submission accepted by the driver.
     accepted: AtomicU64,
+    /// Highest submission whose retirement has been proved.
     retired: AtomicU64,
+    /// A failed submission may have reached native execution.
     ambiguous_submission: AtomicBool,
+    /// Native sequence did not match the expected submission identity.
     sequence_mismatch: AtomicBool,
+    /// Sticky terminal error classification.
     terminal: AtomicU8,
+    /// Context release may have completed despite an error.
     context_free_ambiguous: bool,
+    /// Timeline destruction may have completed despite an error.
     syncobj_destroy_ambiguous: bool,
 }
 
