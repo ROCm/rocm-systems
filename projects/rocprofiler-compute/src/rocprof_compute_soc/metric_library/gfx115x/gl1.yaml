@@ -22,6 +22,15 @@ gl1.gl2_rd_128b_req:
   description: >-
     Number of 128-byte read requests forwarded from GL1 to GL2 cache. This represents
     large cache line fetches for memory-intensive workloads.
+gl1.gl2_rd_bw:
+  name: GL1-GL2 Read Bandwidth
+  formula: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Read bandwidth between L1 (GL1C) and L2 (GL2C) caches. This represents cache miss
+    traffic from L1 that must be serviced by L2. Lower values indicate better L1 cache
+    efficiency.
+  peak: $num_gl1c * 128 * $max_sclk / 1000
 gl1.gl2_rd_req:
   name: GL1-GL2 Read Requests
   formula: SUM(GL1C_GL2_REQ_READ_sum) / SUM($denom)
@@ -73,15 +82,6 @@ gl1.miss_req:
     Number of GL1 cache requests that missed and required fetching from GL2. High
     miss counts increase memory latency and traffic to GL2. Consider improving data
     locality at the shader engine level.
-gl1.rd_bw:
-  name: GL1 Cache Read BW
-  formula: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
-  unit: GB/s
-  description: >-
-    Read bandwidth between L1 (GL1C) and L2 (GL2C) caches. This represents cache miss
-    traffic from L1 that must be serviced by L2. Lower values indicate better L1 cache
-    efficiency.
-  peak: $num_gl1c * 128 * $max_sclk / 1000
 gl1.rd_req:
   name: GL1 Read Requests
   formula: SUM(GL1C_REQ_READ_sum) / SUM($denom)
