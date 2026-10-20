@@ -1,24 +1,25 @@
-# Matrix definitions for rocprofiler-compute-continuous-integration
+# Matrix definition for rocprofiler-compute-continuous-integration
 # Runner labels are resolved from ROCm/therock-ci-config at workflow runtime.
 
 # 'arch' selects the runner label family. 'gfx-target' is the exact GPU target
 # and picks the ROCm and PyTorch wheel device extras.
+# 'modes' lists the scheduled/automatic modes an entry runs in: 'continuous'
+# (push/PR) and/or 'nightly' (schedule). A manual workflow_dispatch that names
+# an arch bypasses 'modes' and can run any entry.
+# 'test-label' (ctest -L label) and 'timeout-minutes' apply to the test step and
+# default to the nightly values. An optional 'continuous:' map overrides them
+# when the effective mode is continuous (e.g. a trimmed tier for PR runs).
 
-matrix-ubuntu-nightly:
+matrix-ubuntu:
   # MI355
-  - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', gfx-target: 'gfx950' }
-  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', gfx-target: 'gfx950' }
+  - { os-release: '22.04', gpu: 'mi355', arch: 'gfx950', gfx-target: 'gfx950', modes: [nightly], test-label: 'full', timeout-minutes: 120 }
+  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', gfx-target: 'gfx950', modes: [continuous, nightly], test-label: 'full', timeout-minutes: 120, continuous: { timeout-minutes: 90 } }
   # MI325
-  - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', gfx-target: 'gfx942' }
-  - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', gfx-target: 'gfx942' }
+  - { os-release: '22.04', gpu: 'mi325', arch: 'gfx94X', gfx-target: 'gfx942', modes: [nightly], test-label: 'full', timeout-minutes: 120 }
+  - { os-release: '24.04', gpu: 'mi325', arch: 'gfx94X', gfx-target: 'gfx942', modes: [nightly], test-label: 'full', timeout-minutes: 120 }
   # MI200
-  - { os-release: '22.04', gpu: 'mi200', arch: 'gfx90a', gfx-target: 'gfx90a' }
-  - { os-release: '24.04', gpu: 'mi200', arch: 'gfx90a', gfx-target: 'gfx90a' }
+  - { os-release: '22.04', gpu: 'mi200', arch: 'gfx90a', gfx-target: 'gfx90a', modes: [nightly], test-label: 'full', timeout-minutes: 120 }
+  - { os-release: '24.04', gpu: 'mi200', arch: 'gfx90a', gfx-target: 'gfx90a', modes: [nightly], test-label: 'full', timeout-minutes: 120 }
   # Strix Halo
-  - { os-release: '22.04', gpu: 'strix-halo', arch: 'gfx1151', gfx-target: 'gfx1151' }
-  - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', gfx-target: 'gfx1151' }
-matrix-ubuntu-ci:
-  # MI355
-  - { os-release: '24.04', gpu: 'mi355', arch: 'gfx950', gfx-target: 'gfx950' }
-  # Strix Halo
-  - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', gfx-target: 'gfx1151' }
+  - { os-release: '22.04', gpu: 'strix-halo', arch: 'gfx1151', gfx-target: 'gfx1151', modes: [nightly], test-label: 'full', timeout-minutes: 120 }
+  - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', gfx-target: 'gfx1151', modes: [continuous, nightly], test-label: 'full', timeout-minutes: 120, continuous: { test-label: 'standard', timeout-minutes: 30 } }

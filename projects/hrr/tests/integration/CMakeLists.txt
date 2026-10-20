@@ -45,8 +45,9 @@
 #
 # hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
 # argument no allocation explains: a sentinel keeps its value, an
-# address-shaped lost pointer becomes null. Contains its own hidden
-# [.][hrr-direct] workload.
+# address-shaped lost pointer becomes null. It also checks that capture logs
+# argument bytes for HIP_HRR_DEBUG_ARGS only in a Debug runtime. Contains its
+# own hidden [.][hrr-direct] workload.
 #
 # hrr_va_placement_test.cc covers capture-address placement: a device pointer
 # stored in device memory by an H2D copy (ROCM-31827). Contains its own hidden
@@ -163,9 +164,9 @@ if(NOT WIN32)
 
   # hrr_disk_space_test.cc defines these for the HIP runtime to bind to. An
   # executable exports only what its link-time libraries reference, and the
-  # runtime may name either statvfs or statvfs64, so export all three.
+  # runtime may name statvfs or fstatvfs by either name, so export all five.
   set(_hrr_disk_space_exports "${CMAKE_CURRENT_BINARY_DIR}/hrr_disk_space_exports.list")
-  file(WRITE "${_hrr_disk_space_exports}" "{ statvfs; statvfs64; fsync; };\n")
+  file(WRITE "${_hrr_disk_space_exports}" "{ statvfs; statvfs64; fstatvfs; fstatvfs64; fsync; };\n")
   target_link_options(hrr-integration-tests PRIVATE
                       "LINKER:--dynamic-list=${_hrr_disk_space_exports}")
   target_link_libraries(hrr-integration-tests PRIVATE ${CMAKE_DL_LIBS})
@@ -185,6 +186,13 @@ if(NOT DEFINED HRR_RAW_TRACE_EXE)
   else()
     set(HRR_RAW_TRACE_EXE "")
   endif()
+endif()
+
+# Capture honours HIP_HRR_DEBUG_ARGS only in a CLR built without NDEBUG
+# (CMAKE_BUILD_TYPE=Debug). Tell the tests which kind of runtime they run against.
+option(HRR_TEST_CLR_DEBUG_FLAGS "The HIP runtime under test is a Debug build" OFF)
+if(HRR_TEST_CLR_DEBUG_FLAGS)
+  target_compile_definitions(hrr-integration-tests PRIVATE HRR_TEST_CLR_DEBUG_FLAGS)
 endif()
 
 target_compile_definitions(hrr-integration-tests PRIVATE
