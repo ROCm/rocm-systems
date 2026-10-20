@@ -93,6 +93,17 @@ repos:
         pass_filenames: false
         stages: [pre-commit]
 
+  # Local hook: report any change to the counters profile mode collects
+  - repo: local
+    hooks:
+      - id: profiled-counters-check
+        name: Profiled counter snapshot check
+        entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/config_management/counter_snapshot.py'
+        language: system
+        files: (analysis_configs/gfx.*/\d{4}_.*\.yaml|utils/utils_counter_defs\.py|rocprof_compute_soc/soc_base\.py|mi_gpu_spec\.yaml|config_management/counter_snapshot\.py|\.profiled_counters\.json)$
+        pass_filenames: false
+        stages: [pre-commit]
+
   # Local hook: memory chart layout formatting (layout checks run as unit tests)
   - repo: local
     hooks:

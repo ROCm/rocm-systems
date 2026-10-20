@@ -8,6 +8,7 @@ Tests LimitedSet, CounterFile, and the bin-packing helpers used by
 perfmon_coalesce. No GPU hardware required.
 """
 
+import json
 from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
+from config_management.counter_snapshot import SNAPSHOT_PATH
 
 import config
 from rocprof_compute_soc.soc_base import (
@@ -26,6 +28,7 @@ from rocprof_compute_soc.soc_base import (
     _trial_counter_file_with_extra,
     flat_counters_in_perfmon_file,
 )
+from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import canonical_config_arch, convert_metric_id_to_panel_info
 from utils.utils_counter_defs import extract_counters_and_variables
 
@@ -93,6 +96,38 @@ Panel Config:
     SQ_METRIC_NAME_COUNTER: Uses SQ_DESCRIPTION_COUNTER.
 """
 
+# One arch per analysis config directory (gfx115x parts share one).
+CONFIG_ARCHS = sorted(
+    {
+        canonical_config_arch(arch): arch for arch in mi_gpu_specs.get_gpu_series_dict()
+    }.values()
+)
+
+
+def make_config_soc(
+    config_dir: Path, gpu_arch: str, membw_analysis: bool
+) -> OmniSoC_Base:
+    """OmniSoC_Base reading the analysis configs in config_dir, with one XCD and
+    one L2 bank so each TCC channel template expands to channel 0 only."""
+    args = SimpleNamespace(
+        config_dir=config_dir,
+        filter_blocks=[],
+        membw_analysis=membw_analysis,
+        roof_only=False,
+        set_selected=None,
+    )
+    machine_specs = SimpleNamespace(
+        gpu_arch=gpu_arch,
+        gpu_series=mi_gpu_specs.get_gpu_series(gpu_arch),
+        l2_banks=1,
+        num_xcd=1,
+        rocminfo_lines=None,
+    )
+    with patch("rocprof_compute_soc.soc_base.console_debug"):
+        soc = OmniSoC_Base(args, machine_specs)
+    soc.set_arch(gpu_arch)
+    return soc
+
 
 @pytest.fixture
 def perfmon_config():
@@ -151,24 +186,7 @@ Panel Config:
         encoding="utf-8",
     )
 
-    args = SimpleNamespace(
-        config_dir=tmp_path,
-        filter_blocks=[],
-        membw_analysis=False,
-        roof_only=False,
-        set_selected=None,
-    )
-    machine_specs = SimpleNamespace(
-        gpu_arch="gfx950",
-        gpu_series="MI350",
-        l2_banks=1,
-        num_xcd=1,
-        rocminfo_lines=None,
-    )
-    with patch("rocprof_compute_soc.soc_base.console_debug"):
-        soc = OmniSoC_Base(args, machine_specs)
-    soc.set_arch("gfx950")
-    return soc
+    return make_config_soc(tmp_path, "gfx950", membw_analysis=False)
 
 
 def _make_soc(perfmon_config, arch="gfx908", num_xcd=1, l2_banks=4):
@@ -790,6 +808,19 @@ def test_detect_counters_reads_only_metric_expressions(
     )
     formula_counters |= {"SQ_LEVEL_WAVES_ACCUM", "SQ_BUSY_CYCLES"}
     assert counters == formula_counters
+
+
+@pytest.mark.parametrize("gpu_arch", CONFIG_ARCHS)
+def test_profiled_counter_snapshot_matches_detect_counters(gpu_arch: str) -> None:
+    """The committed snapshot lists exactly what a full profile collects, so a
+    change to the profiled counters always shows up in it."""
+    snapshot = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+    recorded = set().union(*snapshot[canonical_config_arch(gpu_arch)].values())
+    soc = make_config_soc(config.analysis_configs_dir, gpu_arch, membw_analysis=True)
+
+    counters, _ = soc.detect_counters()
+
+    assert counters == soc._expand_tcc_template_counters(recorded)
 
 
 # =============================================================================
