@@ -187,7 +187,3 @@ class TestStaticNicJson(unittest.TestCase):
         args = argparse.Namespace(nic=commands.device_handles_ainics)
         self.assertTrue(commands._static_nics(args, False, None))
         self.assertEqual(commands.logger.combine_calls, 0)
-
-
-if __name__ == "__main__":
-    unittest.main()

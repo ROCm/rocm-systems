@@ -112,10 +112,11 @@ class TestInitNicOnlyGating(unittest.TestCase):
     def test_empty_host_exits_with_drivers_not_loaded(self):
         module = _load_amdsmi_init(_make_amdsmi_stub())
         self._patch_gates(module, gpu=False, hsmp=False, nic_present=False)
-        with self.assertRaises(SystemExit) as ctx:
+        with self.assertLogs(level="ERROR") as logs, self.assertRaises(SystemExit) as ctx:
             module.amdsmi_cli_init()
         # -1 would reach the shell as 255, the library's unknown-error code.
         self.assertEqual(ctx.exception.code, int(module.AmdSmiExitCode.DRIVERS_NOT_LOADED))
+        self.assertIn("Drivers not loaded", logs.output[0])
 
     def test_gpu_host_initializes_without_nic(self):
         flag = self._run_init(gpu=True, hsmp=False, nic_present=False)
@@ -140,15 +141,17 @@ class TestInitNicOnlyGating(unittest.TestCase):
 
     def test_library_not_init_exits_with_drivers_not_loaded(self):
         module = self._init_raising(1)  # AMDSMI_STATUS_NOT_INIT in the stub
-        with self.assertRaises(SystemExit) as ctx:
+        with self.assertLogs(level="ERROR") as logs, self.assertRaises(SystemExit) as ctx:
             module.amdsmi_cli_init()
         self.assertEqual(ctx.exception.code, int(module.AmdSmiExitCode.DRIVERS_NOT_LOADED))
+        self.assertIn("Drivers not loaded", logs.output[0])
 
     def test_library_driver_not_loaded_exits_with_drivers_not_loaded(self):
         module = self._init_raising(2)  # AMDSMI_STATUS_DRIVER_NOT_LOADED in the stub
-        with self.assertRaises(SystemExit) as ctx:
+        with self.assertLogs(level="ERROR") as logs, self.assertRaises(SystemExit) as ctx:
             module.amdsmi_cli_init()
         self.assertEqual(ctx.exception.code, int(module.AmdSmiExitCode.DRIVERS_NOT_LOADED))
+        self.assertIn("Drivers not loaded", logs.output[0])
 
     def test_other_library_failure_is_raised_not_translated(self):
         module = self._init_raising(99)
