@@ -239,6 +239,27 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `rccl-UnitTestsMicroInit` cleanup-order oracle needs the fake `ncclCeFinalize`
   in `fakes/nccl_stubs.cc`, which this target drops via
   `RCCL_STUBS_OMIT_ncclCeFinalize`.
+- **`rccl-UnitTestsMicroCrypt`** — `misc/crypt.cc` (via `CRYPT_CC_PATH`, from
+  `crypt-test.cc`); suite `Crypt*`. Its own binary keeps `crypt.cc`'s file-scope
+  state isolated. See `test_categories_micro_crypt.yaml`.
+- **`rccl-UnitTestsMicroStrongstream`** — `misc/strongstream.cc` (via
+  `STRONGSTREAM_CC_PATH`, from `strongstream-test.cc`); suite `Strongstream*`. Its own
+  binary because the test defines the HIP stream, event and graph calls it records, and
+  `strongstream_stubs.cc` / `nccl_fakes.cc` already define this unit's symbols. See
+  `test_categories_micro_strongstream.yaml`.
+- **`rccl-UnitTestsMicroUtils`** — `misc/utils.cc` (via `UTILS_CC_PATH`, from
+  `utils-test.cc`); suite `Utils*`. Its own binary because the test seams HIP, env and
+  libc (allocation, hostname, boot id, `readlink`, `sysconf`) around a unit other
+  binaries link whole. See `test_categories_micro_utils.yaml`.
+- **`rccl-UnitTestsMicroArgcheck`** — `misc/argcheck.cc` (via `ARGCHECK_CC_PATH`, from
+  `argcheck-test.cc`); suite `Argcheck*`. Its own binary because the test seams HIP,
+  `ncclDevrFindWindow` and `bootstrapAllGather` around a unit other binaries link whole.
+  See `test_categories_micro_argcheck.yaml`.
+- **`rccl-UnitTestsMicroCpuset`** — header-only `include/cpuset.h` (from `cpuset-test.cc`);
+  suite `Cpuset*`. Its own binary because the test defines `os/linux.cc`'s
+  `ncclOsCpuZero` / `ncclOsCpuSet` / `ncclOsCpuIsSet` one-liners, which would
+  otherwise sit in `rccl-UnitTestsMicro` as test-TU definitions. See
+  `test_categories_micro_cpuset.yaml`.
 - **`rccl-UnitTestsMicroClientSupport`**: `ras/client_support.cc` (via
   `CLIENT_SUPPORT_CC_PATH`, from `client-support-test.cc`); suites
   `RasClientSupportMicrotest.*` and
@@ -925,6 +946,11 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
 cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
 ./build/rccl-UnitTestsMicroWarpSpeed  # src/scheduler/*.cc tests
+./build/rccl-UnitTestsMicroCrypt              # misc/crypt.cc tests
+./build/rccl-UnitTestsMicroStrongstream       # misc/strongstream.cc tests
+./build/rccl-UnitTestsMicroUtils              # misc/utils.cc tests
+./build/rccl-UnitTestsMicroArgcheck           # misc/argcheck.cc tests
+./build/rccl-UnitTestsMicroCpuset             # include/cpuset.h tests
 ./build/rccl-UnitTestsMicroInit      # init.cc tests
 ./build/rccl-UnitTestsMicroInit-uncached
 ./build/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
