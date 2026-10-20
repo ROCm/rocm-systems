@@ -724,7 +724,7 @@
         {
           "name": "DdaFabricEligibilityTest",
           "description": "Dda Fabric eligibility and block-cap tests",
-          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricMaxBlocksTest.*:DdaFabricScratchSizingTest.*"
+          "test_filter": "DdaFabricEligibilityTest.*:DdaFabricLL128EligibilityTest.*:DdaFabricMaxBlocksTest.*:DdaFabricScratchSizingTest.*"
         },
         {
           "name": "TimeoutTests",
@@ -3780,6 +3780,16 @@
           "env_variables": {
             "NCCL_GRAPH_STREAM_ORDERING": "0"
           }
+        },
+        {
+          "name": "DDA_IpcAllReduceIndexData_8Ranks",
+          "description": "DDA IPC flat and tree AllReduce with rank- and index-dependent fp32/bf16 data, out-of-place and in-place, checked exactly on every rank",
+          "test_filter": "DdaIpcMPI_IndexData.AllReduce*"
+        },
+        {
+          "name": "DDA_IpcReduceScatterIndexData_8Ranks",
+          "description": "DDA IPC ReduceScatter with rank- and index-dependent fp32/bf16 data: every rank must receive its own reduced slice",
+          "test_filter": "DdaIpcMPI_IndexData.ReduceScatter*"
         }
       ]
     },
