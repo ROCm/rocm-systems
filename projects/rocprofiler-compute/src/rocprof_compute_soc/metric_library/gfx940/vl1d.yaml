@@ -1,0 +1,10 @@
+inherit: ../gfx90a/vl1d.yaml
+vl1d.access_lat: !remove
+vl1d.ai:
+  formula: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + ) / (64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum)) )
+vl1d.bw_util:
+  formula: 100 * 128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk / 1000 * 128 * $cu_per_gpu)
+vl1d.cache_bw:
+  peak: $max_sclk / 1000 * 128 * $cu_per_gpu
+vl1d.l2_rd_lat: !remove
+vl1d.l2_wr_lat: !remove

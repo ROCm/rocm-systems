@@ -88,8 +88,9 @@ METRIC_REQUIRED_FIELDS = ("name", "formula", "unit", "description")
 METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical", "coll_level")
 # A roofline benchmark ceiling, the measured peak in "peak_empirical".
 EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
-# Ceilings the roofline benchmark measures that no metric is bounded by.
-CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops")
+# Ceilings the roofline benchmark measures that no metric is bounded by: the VALU
+# integer rates, and MALL bandwidth, which analyze skips (roofline_calc.py).
+CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
 VARIABLE_FIELDS = ("formula",)
 
 ANALYSIS_CONFIGS = (
@@ -106,7 +107,7 @@ NANOSECONDS = "/SUM(End_Timestamp-Start_Timestamp)"
 # Rows showing a metric in another display form (positional id -> label, metric id,
 # row equation). Without a row equation, the row shows the formula in Bytes/s (the
 # library keeps GB/s); with one, the row writes the formula differently.
-_CDNA_DISPLAY_VARIANTS = {
+_CDNA_MEMORY_CHART_VARIANTS = {
     "3.1.16": ("VL1_L2 Read BW", "vl1d.l2_rd_bw", None),
     "3.1.17": ("VL1_L2 Write BW", "vl1d.l2_wr_bw", None),
     "3.1.18": ("VL1_L2 Atomic BW", "vl1d.l2_atomic_bw", None),
@@ -114,35 +115,54 @@ _CDNA_DISPLAY_VARIANTS = {
     "3.1.24": ("IL1_L2 Read BW", "l1i.l2_bw", None),
     "3.1.26": ("L2-Fabric Read BW", "fabric.rd_bw", None),
     "3.1.27": ("L2-Fabric Write and Atomic BW", "fabric.wr_atomic_bw", None),
-    "4.1.9": (
-        "L2 Cache Bandwidth",
-        "vl1d.l2_bw",
-        "64 * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
-        "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) "
-        "/ SUM(End_Timestamp - Start_Timestamp)",
-    ),
-    "4.1.11": (
-        "LDS Bandwidth",
-        "lds.theoretical_bw",
-        "SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu) "
-        "/ SUM(End_Timestamp - Start_Timestamp)",
-    ),
 }
+_ROOFLINE_L2_BW = (
+    "L2 Cache Bandwidth",
+    "vl1d.l2_bw",
+    "64 * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+    "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) "
+    "/ SUM(End_Timestamp - Start_Timestamp)",
+)
+_ROOFLINE_LDS_BW = (
+    "LDS Bandwidth",
+    "lds.theoretical_bw",
+    "SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu) "
+    "/ SUM(End_Timestamp - Start_Timestamp)",
+)
+_PIPELINE_MFMA_UTIL = (
+    "MFMA Utilization",
+    "compute.mfma_util",
+    "100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) "
+    "/ (4 * SUM($cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))",
+)
 DISPLAY_VARIANTS = {
-    "gfx908": _CDNA_DISPLAY_VARIANTS,
+    "gfx908": {
+        **_CDNA_MEMORY_CHART_VARIANTS,
+        "4.1.9": _ROOFLINE_L2_BW,
+        "4.1.11": _ROOFLINE_LDS_BW,
+    },
     "gfx90a": {
-        **_CDNA_DISPLAY_VARIANTS,
-        "11.2.7": (
-            "MFMA Utilization",
-            "compute.mfma_util",
-            "100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) "
-            "/ (4 * SUM($cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))",
+        **_CDNA_MEMORY_CHART_VARIANTS,
+        "4.1.9": _ROOFLINE_L2_BW,
+        "4.1.11": _ROOFLINE_LDS_BW,
+        "11.2.7": _PIPELINE_MFMA_UTIL,
+    },
+    "gfx940": {
+        **_CDNA_MEMORY_CHART_VARIANTS,
+        "3.1.28": ("Estimated HBM Read BW", "fabric.hbm_rd_bw_est", None),
+        "3.1.29": (
+            "Estimated HBM Write and Atomic BW",
+            "fabric.hbm_wr_atomic_bw_est",
+            None,
         ),
+        "4.1.10": _ROOFLINE_L2_BW,
+        "4.1.12": _ROOFLINE_LDS_BW,
+        "11.2.7": _PIPELINE_MFMA_UTIL,
     },
 }
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
-UNIT_VARIANTS = {"gfx908": _CDNA_UNIT_VARIANTS, "gfx90a": _CDNA_UNIT_VARIANTS}
+UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx940")}
 
 
 def validate(metric_dir: Path, analysis_dir: Optional[Path] = None) -> list[str]:
