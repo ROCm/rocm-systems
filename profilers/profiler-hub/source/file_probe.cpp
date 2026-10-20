@@ -4,7 +4,7 @@
 #include "profiler-hub/cpp/reader.hpp"
 
 #include "data_storage/backends/sqlite_api_policy.hpp"
-#include "data_storage/schema_version_text.hpp"
+#include "data_storage/schema_version.hpp"
 
 #include <array>
 #include <cstdint>

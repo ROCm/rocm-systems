@@ -7,7 +7,7 @@
 #include "profiler-hub/cpp/version.hpp"
 
 #include "data_storage/backends/sqlite_backend.hpp"
-#include "data_storage/schema_version_text.hpp"
+#include "data_storage/schema_version.hpp"
 
 #include <fmt/format.h>
 
