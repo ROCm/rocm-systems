@@ -19,22 +19,20 @@ definition file via dataclasses.
 |---|---|---|---|
 | `id` | str | yes | Stable hierarchical string, e.g. `mem.l2_hit_rate` |
 | `name` | str | yes | Canonical display name, e.g. `"L2 Cache Hit Rate"` |
-| `formula` | str | yes | Base expression without aggregation wrappers |
+| `formula` | str | yes | The expression of the row's main column (`avg`, `value` or `expr`), aggregation included |
 | `unit` | str | yes | e.g. `"Percent"`, `"GFLOPs"` |
 | `description` | str | yes | Human-readable metric description |
 | `peak` | str (formula) | no | Performance ceiling expression. Required for speed-of-light metrics. |
 | `coll_level` | str | no | Accumulation level, e.g. `SQ_LEVEL_WAVES` |
 | `avg_mode` | str | no | Default `weighted` (`SUM(X)/SUM(Y)`). Set to `simple` for metrics that use `AVG()` instead. |
 
-**Aggregation is not a metric field.** The metric defines a single base formula
-without aggregation wrappers (`SUM`, `AVG`, `MIN`, `MAX`). Aggregation is a display
-concern owned by Layer 3 -- the view's `header` dict declares which columns to show
-(e.g., `avg`, `min`, `max`, or `value`), and the code auto-generates the wrapped
-formulas at evaluation time.
-
-This eliminates the current duplication where ~98% of metrics repeat the same base
-formula three times with different wrappers. The `simple_box` tables already prove
-this pattern works -- they auto-generate `MIN/Q1/MEDIAN/Q3/MAX` from a single `expr`.
+**Aggregation columns belong to the views.** In Phase A, `formula` is the expression of
+the row's main column, aggregation included (e.g. `100 * SUM(TCC_HIT_sum) /
+SUM(TCC_HIT_sum + TCC_MISS_sum)`). A row's other columns (`min`, `max`, `std dev`, ...)
+stay in the analysis configs. The Phase 2 views own them: a view's `header` declares the
+columns, and the code generates their wrapped forms from a per-kernel expression, as the
+`simple_box` tables already do for `MIN/Q1/MEDIAN/Q3/MAX`. Stage 8 deletes no panel file
+until the views reproduce every column of it.
 
 Percent-of-peak is not a schema field. In the target state it is computed automatically
 when a metric has a `peak` formula and `unit: Percent`. During the transition, the legacy
@@ -793,8 +791,9 @@ sets:
 The built-in variables move into each base arch's `variables.yaml`. In Phase A,
 `get_build_in_vars()` in `utils_counter_defs.py` keeps its hardcoded dicts, and a test
 asserts that `layer2_vars_to_builtin_vars()` returns the same dict for every GPU series.
-At the cutover, `get_build_in_vars()` loads from `MetricLibrary.variables` and the
-hardcoded dicts are removed.
+At the cutover, `get_build_in_vars()` loads from `MetricLibrary.variables` by default;
+the hardcoded dicts stay behind the one-release fallback option and are removed in the
+next release.
 
 The evaluation pipeline (`calc_builtin_vars()` in `evaluation_pipeline.py`) is
 unchanged -- it receives the same `dict[str, str]` regardless of source.
