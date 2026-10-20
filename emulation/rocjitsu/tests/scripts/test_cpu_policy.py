@@ -127,7 +127,7 @@ class CpuPolicyTest(unittest.TestCase):
 
     def test_missing_all_policies(self):
         shutil.rmtree(self.root / "cpufreq")
-        self.assert_preflight_rejects("cpufreq policies missing CPUs")
+        self.assert_preflight_rejects("cpufreq policies missing CPUs 16-63,80-127")
 
     def test_missing_last_cpu_pair(self):
         shutil.rmtree(self.root / "cpufreq/policy63")
@@ -139,7 +139,7 @@ class CpuPolicyTest(unittest.TestCase):
 
     def test_offline_cpu(self):
         self.put("online", "0-126")
-        self.assert_preflight_rejects("online CPUs")
+        self.assert_preflight_rejects("online CPUs 0-127")
 
     def test_policy_overlaps_housekeeping(self):
         self.put("cpufreq/policy63/related_cpus", "0 63 127")
@@ -179,9 +179,6 @@ class CpuPolicyTest(unittest.TestCase):
                 patch.object(
                     benchmark_run, "check_scheduler", return_value=("bpfland_test", 1)
                 )
-            )
-            stack.enter_context(
-                patch.object(benchmark_run.os, "geteuid", return_value=0)
             )
             stack.enter_context(
                 patch.object(
@@ -384,9 +381,8 @@ class CgroupTest(unittest.TestCase):
 
 
 class ProcessGroupTest(unittest.TestCase):
-    def test_harness_timeout_kills_workload_and_descendants(self):
-        # Exercise real processes without requiring host policy or setarch permission.
-        launcher = """
+    # Exercise real processes without requiring host policy or setarch permission.
+    launcher = """
 import runpy
 import subprocess
 import sys
@@ -399,9 +395,9 @@ wrapper.os.sched_getaffinity = lambda pid: wrapper.BENCHMARK_CPUS
 wrapper.os.sched_setaffinity = lambda pid, cpus: None
 popen = subprocess.Popen
 wrapper.subprocess.Popen = lambda argv, **kwargs: popen(argv[3:], **kwargs)
-wrapper.run([sys.executable, '-c', sys.argv[2]])
+sys.exit(wrapper.run([sys.executable, '-c', sys.argv[2]]))
 """
-        payload = """
+    payload = """
 import os
 import subprocess
 import sys
@@ -411,8 +407,10 @@ child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
 print(os.getpid(), child.pid, flush=True)
 time.sleep(60)
 """
+
+    def check_group_cancellation(self, signum: int):
         process = subprocess.Popen(
-            [sys.executable, '-B', '-c', launcher, __file__, payload],
+            [sys.executable, '-B', '-c', self.launcher, __file__, self.payload],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -423,11 +421,13 @@ time.sleep(60)
             self.assertTrue(select.select([process.stdout], [], [], 10)[0])
             descendants = [int(pid) for pid in process.stdout.readline().split()]
             self.assertEqual(len(descendants), 2)
-            # Match the corpus harness's SIGKILL process-group timeout cleanup.
-            os.killpg(process.pid, signal.SIGKILL)
+            for pid in descendants:
+                self.assertEqual(os.getpgid(pid), process.pid)
+            # The harness owns cancellation of the wrapper and its descendants.
+            os.killpg(process.pid, signum)
             process.communicate(timeout=5)
-            self.assertEqual(process.returncode, -signal.SIGKILL)
-            # communicate returning proves both descendants closed inherited pipes.
+            self.assertEqual(process.returncode, -signum)
+            # Both descendants must close inherited pipes for communicate to return.
         finally:
             for pid in [process.pid, *descendants]:
                 try:
@@ -435,6 +435,11 @@ time.sleep(60)
                 except ProcessLookupError:
                     pass
             process.communicate(timeout=5)
+
+    def test_group_cancellation_kills_workload_and_descendants(self):
+        for signum in (signal.SIGKILL, signal.SIGTERM):
+            with self.subTest(signal=signum):
+                self.check_group_cancellation(signum)
 
 
 if __name__ == "__main__":

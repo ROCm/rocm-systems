@@ -44,6 +44,7 @@ jobs:
         --volume /sys/fs/cgroup:/sys/fs/cgroup:ro
         --volume /sys/kernel/sched_ext:/sys/kernel/sched_ext:ro
         --volume /sys/devices/system/cpu:/sys/devices/system/cpu:ro
+        --mount type=bind,source=/usr/local/libexec/rocjitsu-benchmark-runner,target=/usr/local/libexec/rocjitsu-benchmark-runner,readonly
       env:
         DEBIAN_FRONTEND: noninteractive
 
@@ -130,7 +131,7 @@ jobs:
             --build-dir "${ROCJITSU_BUILD_DIR}" \
             --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json" \
             --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json" \
-            --run-wrapper "/usr/bin/python3 -E -s \"${ROCJITSU_SOURCE_DIR}/scripts/benchmark-runner/benchmark_run.py\" -- \"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
+            --run-wrapper "/usr/bin/python3 -E -s /usr/local/libexec/rocjitsu-benchmark-runner/benchmark_run.py -- \"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
             --manifest benchmarks/suites/nightly.toml \
             --output "${ROCJITSU_RESULT_DIR}"
 

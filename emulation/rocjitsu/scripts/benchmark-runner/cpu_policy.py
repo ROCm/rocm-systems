@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 CPU_ROOT = Path('/sys/devices/system/cpu')
+ONLINE_CPUS = frozenset(range(128))
 BENCHMARK_CPUS = frozenset(range(16, 64))
 BENCHMARK_SIBLING_CPUS = frozenset(range(80, 128))
 POLICY_CPUS = BENCHMARK_CPUS | BENCHMARK_SIBLING_CPUS
@@ -52,9 +53,11 @@ def nominal_frequency_khz(cpu_root: Path, cpu: int) -> int:
 
 def policy_settings(cpu_root: Path) -> dict[Path, str]:
     """Validate the fixed layout and controls before returning settings to apply."""
-    if cpu_list(cpu_root / 'online') != set(range(128)):
-        raise ValueError('benchmark runner requires online CPUs 0-127')
-    for cpu in range(128):
+    if cpu_list(cpu_root / 'online') != ONLINE_CPUS:
+        raise ValueError(
+            f'benchmark runner requires online CPUs {format_cpus(ONLINE_CPUS)}'
+        )
+    for cpu in sorted(ONLINE_CPUS):
         path = cpu_root / f'cpu{cpu}/topology/thread_siblings_list'
         if cpu_list(path) != {cpu % 64, cpu % 64 + 64}:
             raise ValueError(f'{path}: expected SMT siblings N,N+64')
@@ -86,7 +89,7 @@ def policy_settings(cpu_root: Path) -> dict[Path, str]:
         settings[policy / 'scaling_min_freq'] = str(frequency)
     if covered != POLICY_CPUS:
         raise ValueError(
-            f'cpufreq policies missing CPUs {sorted(POLICY_CPUS - covered)}'
+            f'cpufreq policies missing CPUs {format_cpus(POLICY_CPUS - covered)}'
         )
 
     for cpu in sorted(POLICY_CPUS):

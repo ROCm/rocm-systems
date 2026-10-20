@@ -8,10 +8,8 @@
 import argparse
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
-from types import FrameType
 
 from cpu_policy import (
     BENCHMARK_CPUS,
@@ -76,22 +74,7 @@ def run(command: list[str]) -> int:
     check_policy(CPU_ROOT)
     scheduler = check_scheduler()
     previous_affinity = os.sched_getaffinity(0)
-    handlers = {}
-    child = None
-    pending = []
-
-    def forward(signum: int, frame: FrameType | None) -> None:
-        if child is None:
-            pending.append(signum)
-        else:
-            try:
-                child.send_signal(signum)
-            except ProcessLookupError:
-                pass
-
     try:
-        for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-            handlers[signum] = signal.signal(signum, forward)
         os.sched_setaffinity(0, BENCHMARK_CPUS)
         if os.sched_getaffinity(0) != BENCHMARK_CPUS:
             raise RuntimeError(
@@ -101,14 +84,10 @@ def run(command: list[str]) -> int:
         child = subprocess.Popen(
             ["/usr/bin/setarch", os.uname().machine, "-R", *command],
         )
-        for signum in pending:
-            forward(signum, None)
         # Blocking wait: no timed-wait polling in the harness.
         status = child.wait()
     finally:
         os.sched_setaffinity(0, previous_affinity)
-        for signum, handler in handlers.items():
-            signal.signal(signum, handler)
     check_cpus()
     check_policy(CPU_ROOT)
     if check_scheduler() != scheduler:

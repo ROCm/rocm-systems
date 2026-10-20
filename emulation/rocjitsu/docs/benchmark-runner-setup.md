@@ -12,6 +12,10 @@ and Bpfland. Configuration files are in
   `fead94e15184e957469b346b129f412641691bbe`. The service uses default arguments;
   use the same build across runners.
 - An existing GitHub Actions runner service using `runsvc.sh`.
+- For container jobs, Docker with the systemd cgroup driver and cgroup v2, and
+  runner account access to its daemon (commonly through the `docker` group).
+  Access to a rootful daemon grants administrative control beyond the runner
+  service restrictions.
 
 The supplied configuration uses **64 physical cores and 128 online logical CPUs**,
 with SMT sibling pairs `N,N+64`: benchmarks use `16-63`, runner control activity
@@ -98,9 +102,15 @@ runner starts.
 
 The [benchmark workflow](https://github.com/ROCm/rocm-systems/blob/develop/.github/workflows/rocjitsu-benchmarks.yml)
 sets the Docker CPU limits, host mounts for validation, and
-`seccomp=unconfined` for `setarch -R`. Docker must use the systemd cgroup driver
-with cgroup v2. The container runs under `benchmark.slice`, inheriting its swap
-limit; the harness uses CPUs `0-15` and wrapped workloads use `16-63`.
+`seccomp=unconfined` for `setarch -R`. It mounts the installed script directory
+read-only so setup and validation use the same policy version. The container
+runs under `benchmark.slice`, inheriting its swap limit; the harness uses CPUs
+`0-15` and wrapped workloads use `16-63`.
+
+To deploy script or policy updates, stop the runner, reinstall the scripts and
+any changed systemd files, run `systemctl daemon-reload`, restart
+`rocjitsu-bpfland.service`, then start the runner. Checkout changes take effect
+after installation. Reboot if CPU allocation drop-ins changed.
 
 ## Run benchmarks
 
@@ -116,3 +126,7 @@ The wrapper selects CPUs `16-63`, disables ASLR, and checks CPU allocation,
 CPU policy, and Bpfland before and after execution. It rejects results if the
 policy drifts or Bpfland restarts. Schedule one benchmark job at a time;
 the wrapper doesn't serialize runs.
+
+The caller must cancel the whole process group, not just the wrapper PID.
+The corpus benchmark harness handles this automatically; the wrapper doesn't
+forward signals.
