@@ -9,10 +9,11 @@
 #include "embedded_schema.h"
 #include "simulation_config_generated.h"
 
-#include <charconv>
+#include <cctype>
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -34,6 +35,15 @@ bool starts_comment(std::string_view json, size_t at) {
   return json[at] == '/' && at + 1 < json.size() && (json[at + 1] == '/' || json[at + 1] == '*');
 }
 
+bool is_valid_plugin_name(std::string_view name) {
+  if (name.empty())
+    return false;
+  for (unsigned char c : name)
+    if (!std::isalnum(c) && c != '_' && c != '-')
+      return false;
+  return true;
+}
+
 /// @brief Advance past whitespace and the comment forms the config parser accepts.
 void skip_filler(std::string_view json, size_t &at) {
   while (at < json.size()) {
@@ -52,149 +62,9 @@ void skip_filler(std::string_view json, size_t &at) {
   }
 }
 
-FailureOr<uint32_t> parse_hex_digits(std::string_view json, size_t &at, size_t count,
-                                     const util::DiagnosticEmitter &emit_error) {
-  if (json.size() - at < count)
-    return emit_error.emit() << "unterminated escape sequence";
-
-  const std::string_view digits = json.substr(at, count);
-  uint32_t value = 0;
-  const auto [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), value, 16);
-  if (ec != std::errc{} || ptr != digits.data() + digits.size())
-    return emit_error.emit() << "escape code must be followed by hexadecimal digits";
-
-  at += count;
-  return value;
-}
-
-Result append_utf8(uint32_t code_point, std::string &decoded,
-                   const util::DiagnosticEmitter &emit_error) {
-  if (code_point <= 0x7f) {
-    decoded += static_cast<char>(code_point);
-  } else if (code_point <= 0x7ff) {
-    decoded += static_cast<char>(0xc0 | (code_point >> 6));
-    decoded += static_cast<char>(0x80 | (code_point & 0x3f));
-  } else if (code_point <= 0xffff) {
-    decoded += static_cast<char>(0xe0 | (code_point >> 12));
-    decoded += static_cast<char>(0x80 | ((code_point >> 6) & 0x3f));
-    decoded += static_cast<char>(0x80 | (code_point & 0x3f));
-  } else if (code_point <= 0x10ffff) {
-    decoded += static_cast<char>(0xf0 | (code_point >> 18));
-    decoded += static_cast<char>(0x80 | ((code_point >> 12) & 0x3f));
-    decoded += static_cast<char>(0x80 | ((code_point >> 6) & 0x3f));
-    decoded += static_cast<char>(0x80 | (code_point & 0x3f));
-  } else {
-    return emit_error.emit() << "Unicode code point is out of range";
-  }
-  return Result::success();
-}
-
-/// @brief Decode a quoted string and advance past it.
-FailureOr<std::string> parse_quoted_string(std::string_view json, size_t &at,
-                                           const util::DiagnosticEmitter &emit_error) {
-  if (at >= json.size() || (json[at] != '"' && json[at] != '\''))
-    return emit_error.emit() << "expected a quoted string";
-
-  const char quote = json[at++];
-  std::string decoded;
-  int unicode_high_surrogate = -1;
-  while (at < json.size()) {
-    const char c = json[at++];
-    if (c == quote) {
-      if (unicode_high_surrogate != -1)
-        return emit_error.emit() << "illegal Unicode sequence";
-      return decoded;
-    }
-
-    if (static_cast<unsigned char>(c) < ' ')
-      return emit_error.emit() << "illegal character in string constant";
-    if (c != '\\') {
-      if (unicode_high_surrogate != -1)
-        return emit_error.emit() << "illegal Unicode sequence";
-      decoded += c;
-      continue;
-    }
-
-    if (at >= json.size())
-      return emit_error.emit() << "unterminated escape sequence";
-    const char escape = json[at++];
-    if (unicode_high_surrogate != -1 && escape != 'u')
-      return emit_error.emit() << "illegal Unicode sequence";
-
-    switch (escape) {
-    case 'n':
-      decoded += '\n';
-      break;
-    case 't':
-      decoded += '\t';
-      break;
-    case 'r':
-      decoded += '\r';
-      break;
-    case 'b':
-      decoded += '\b';
-      break;
-    case 'f':
-      decoded += '\f';
-      break;
-    case '"':
-      decoded += '"';
-      break;
-    case '\'':
-      decoded += '\'';
-      break;
-    case '\\':
-      decoded += '\\';
-      break;
-    case '/':
-      decoded += '/';
-      break;
-    case 'x': {
-      FailureOr<uint32_t> digits = parse_hex_digits(json, at, 2, emit_error);
-      if (digits.failed())
-        return Result::failure();
-      decoded += static_cast<char>(digits.value());
-      break;
-    }
-    case 'u': {
-      FailureOr<uint32_t> digits = parse_hex_digits(json, at, 4, emit_error);
-      if (digits.failed())
-        return Result::failure();
-      const uint32_t value = digits.value();
-      if (value >= 0xd800 && value <= 0xdbff) {
-        if (unicode_high_surrogate != -1)
-          return emit_error.emit() << "illegal Unicode sequence";
-        unicode_high_surrogate = static_cast<int>(value);
-      } else if (value >= 0xdc00 && value <= 0xdfff) {
-        if (unicode_high_surrogate == -1)
-          return emit_error.emit() << "illegal Unicode sequence";
-        const uint32_t code_point =
-            0x10000 + ((static_cast<uint32_t>(unicode_high_surrogate) & 0x3ff) << 10) +
-            (value & 0x3ff);
-        Result appended = append_utf8(code_point, decoded, emit_error);
-        if (appended.failed())
-          return Result::failure();
-        unicode_high_surrogate = -1;
-      } else {
-        if (unicode_high_surrogate != -1)
-          return emit_error.emit() << "illegal Unicode sequence";
-        Result appended = append_utf8(value, decoded, emit_error);
-        if (appended.failed())
-          return Result::failure();
-      }
-      break;
-    }
-    default:
-      return emit_error.emit() << "unknown escape code in string constant";
-    }
-  }
-
-  return emit_error.emit() << "unterminated string constant";
-}
-
 /// @brief Advance past a quoted string, honoring the loader's escapes.
 Result skip_string(std::string_view json, size_t &at, const util::DiagnosticEmitter &emit_error) {
-  FailureOr<std::string> parsed = parse_quoted_string(json, at, emit_error);
+  FailureOr<std::string> parsed = parse_json_quoted_string(json, at, emit_error);
   if (parsed.failed())
     return Result::failure();
   return Result::success();
@@ -245,22 +115,25 @@ Result skip_value(std::string_view json, size_t &at, const util::DiagnosticEmitt
   return Result::success();
 }
 
-/// @brief Return @p json with top-level @p field set to @p value, inserting it when absent.
-///
-/// @details Only the one field's text changes, so every other field keeps the
-/// spelling, ordering and formatting the author gave it and stays readable when a
-/// failing run is reproduced from the launch copy.
-FailureOr<std::string> set_top_level_field(std::string_view json, std::string_view field,
-                                           std::string_view value,
-                                           const util::DiagnosticEmitter &emit_error) {
-  size_t at = 0;
-  skip_filler(json, at);
+struct ObjectField {
+  bool found = false;
+  size_t fields_begin = 0;
+  bool has_fields = false;
+  size_t value_begin = 0;
+  size_t value_end = 0;
+};
+
+FailureOr<ObjectField> find_object_field(std::string_view json, size_t object_begin,
+                                         std::string_view field,
+                                         const util::DiagnosticEmitter &emit_error) {
+  size_t at = object_begin;
   if (at >= json.size() || json[at] != '{')
     return emit_error.emit() << "simulation config must be a JSON object";
-  const size_t fields_begin = ++at;
+  ObjectField result;
+  result.fields_begin = ++at;
 
   skip_filler(json, at);
-  const bool has_fields = at < json.size() && json[at] != '}';
+  result.has_fields = at < json.size() && json[at] != '}';
 
   while (at < json.size()) {
     skip_filler(json, at);
@@ -269,7 +142,7 @@ FailureOr<std::string> set_top_level_field(std::string_view json, std::string_vi
 
     std::string name;
     if (json[at] == '"' || json[at] == '\'') {
-      FailureOr<std::string> parsed_name = parse_quoted_string(json, at, emit_error);
+      FailureOr<std::string> parsed_name = parse_json_quoted_string(json, at, emit_error);
       if (parsed_name.failed())
         return Result::failure();
       name = std::move(parsed_name.value());
@@ -294,11 +167,12 @@ FailureOr<std::string> set_top_level_field(std::string_view json, std::string_vi
     Result skipped_value = skip_value(json, at, emit_error);
     if (skipped_value.failed())
       return Result::failure();
+    const size_t value_end = at;
     if (name == field) {
-      std::string rewritten(json.substr(0, value_begin));
-      rewritten.append(value);
-      rewritten.append(json.substr(at));
-      return rewritten;
+      result.found = true;
+      result.value_begin = value_begin;
+      result.value_end = value_end;
+      return result;
     }
 
     skip_filler(json, at);
@@ -306,12 +180,120 @@ FailureOr<std::string> set_top_level_field(std::string_view json, std::string_vi
       ++at;
   }
 
-  std::string rewritten(json.substr(0, fields_begin));
+  return result;
+}
+
+FailureOr<std::string> set_field_in_object(std::string_view json, size_t object_begin,
+                                           std::string_view field, std::string_view value,
+                                           const util::DiagnosticEmitter &emit_error) {
+  FailureOr<ObjectField> found = find_object_field(json, object_begin, field, emit_error);
+  if (found.failed())
+    return Result::failure();
+  if (found.value().found) {
+    std::string rewritten(json.substr(0, found.value().value_begin));
+    rewritten.append(value);
+    rewritten.append(json.substr(found.value().value_end));
+    return rewritten;
+  }
+
+  std::string rewritten(json.substr(0, found.value().fields_begin));
   rewritten.append("\"").append(field).append("\": ").append(value);
-  if (has_fields)
+  if (found.value().has_fields)
     rewritten.append(",");
-  rewritten.append(json.substr(fields_begin));
+  rewritten.append(json.substr(found.value().fields_begin));
   return rewritten;
+}
+
+/// @brief Return @p json with top-level @p field set to @p value, inserting it when absent.
+///
+/// @details Only the one field's text changes, so every other field keeps the
+/// spelling, ordering and formatting the author gave it and stays readable when a
+/// failing run is reproduced from the launch copy.
+FailureOr<std::string> set_top_level_field(std::string_view json, std::string_view field,
+                                           std::string_view value,
+                                           const util::DiagnosticEmitter &emit_error) {
+  size_t at = 0;
+  skip_filler(json, at);
+  return set_field_in_object(json, at, field, value, emit_error);
+}
+
+FailureOr<std::string> json_with_gpu_count(std::string_view json, uint32_t count,
+                                           const util::DiagnosticEmitter &emit_error) {
+  size_t at = 0;
+  skip_filler(json, at);
+  FailureOr<ObjectField> vm = find_object_field(json, at, "vm", emit_error);
+  if (vm.failed())
+    return Result::failure();
+  if (!vm.value().found)
+    return emit_error.emit() << "cannot apply gpus_per_node: simulation config has no vm";
+
+  size_t vm_begin = vm.value().value_begin;
+  skip_filler(json, vm_begin);
+  if (vm_begin >= json.size() || json[vm_begin] != '{')
+    return emit_error.emit()
+           << "cannot apply gpus_per_node: simulation config vm must be an object";
+
+  FailureOr<ObjectField> gpu = find_object_field(json, vm_begin, "gpu", emit_error);
+  if (gpu.failed())
+    return Result::failure();
+  if (!gpu.value().found)
+    return emit_error.emit() << "cannot apply gpus_per_node: simulation config has no vm.gpu";
+
+  size_t gpu_begin = gpu.value().value_begin;
+  skip_filler(json, gpu_begin);
+  if (gpu_begin >= json.size() || json[gpu_begin] != '{')
+    return emit_error.emit()
+           << "cannot apply gpus_per_node: simulation config vm.gpu must be an object";
+
+  FailureOr<std::string> rewritten =
+      set_field_in_object(json, gpu_begin, "num_gpus", std::to_string(count), emit_error);
+  if (rewritten.failed())
+    return Result::failure();
+
+  try {
+    const uint32_t applied = with_parsed_simulation_config_json(
+        rewritten.value(), rocjitsu::kEmbeddedSchema, [](const fb::SimulationConfig *config) {
+          return config->vm() && config->vm()->gpu() ? config->vm()->gpu()->num_gpus() : 0;
+        });
+    if (applied != count)
+      return emit_error.emit() << "cannot apply gpus_per_node to the simulation config";
+  } catch (const std::runtime_error &error) {
+    return emit_error.emit() << error.what();
+  }
+  return std::move(rewritten.value());
+}
+
+FailureOr<std::string> json_with_plugin_enabled(std::string_view json, std::string_view plugin,
+                                                const util::DiagnosticEmitter &emit_error) {
+  if (!is_valid_plugin_name(plugin))
+    return emit_error.emit() << "invalid plugin name '" << plugin
+                             << "'; allowed: letters, digits, '_', '-'";
+
+  size_t at = 0;
+  skip_filler(json, at);
+  FailureOr<ObjectField> plugins = find_object_field(json, at, "plugins", emit_error);
+  if (plugins.failed())
+    return Result::failure();
+
+  if (!plugins.value().found) {
+    std::string plugin_object = "{\"";
+    plugin_object.append(plugin).append("\": {}}");
+    return set_top_level_field(json, "plugins", plugin_object, emit_error);
+  }
+
+  size_t plugins_begin = plugins.value().value_begin;
+  skip_filler(json, plugins_begin);
+  if (plugins_begin >= json.size() || json[plugins_begin] != '{')
+    return emit_error.emit() << "cannot apply plugin: simulation config plugins must be an object";
+
+  FailureOr<ObjectField> existing_plugin =
+      find_object_field(json, plugins_begin, plugin, emit_error);
+  if (existing_plugin.failed())
+    return Result::failure();
+  if (existing_plugin.value().found)
+    return std::string(json);
+
+  return set_field_in_object(json, plugins_begin, plugin, "{}", emit_error);
 }
 
 } // namespace
@@ -342,6 +324,42 @@ FailureOr<std::string> json_with_launch_overrides(std::string_view json,
                                                   const LaunchOverrides &overrides,
                                                   const util::DiagnosticEmitter &emit_error) {
   std::string rewritten(json);
+  if (overrides.exec_mode) {
+    std::string value = "\"";
+    value.append(*overrides.exec_mode).append("\"");
+    auto result = set_top_level_field(rewritten, "exec_mode", value, emit_error);
+    if (result.failed())
+      return Result::failure();
+    rewritten = std::move(result.value());
+    try {
+      const std::string applied = with_parsed_simulation_config_json(
+          rewritten, rocjitsu::kEmbeddedSchema, [](const fb::SimulationConfig *config) {
+            return config->exec_mode() ? config->exec_mode()->str() : std::string{};
+          });
+      if (applied != *overrides.exec_mode)
+        return emit_error.emit() << "cannot apply exec_mode to the simulation config";
+    } catch (const std::runtime_error &error) {
+      return emit_error.emit() << error.what();
+    }
+  }
+  if (overrides.gpus_per_node) {
+    auto result = json_with_gpu_count(rewritten, *overrides.gpus_per_node, emit_error);
+    if (result.failed())
+      return Result::failure();
+    rewritten = std::move(result.value());
+  }
+  if (!overrides.plugins.empty()) {
+    for (const std::string &plugin : overrides.plugins) {
+      auto result = json_with_plugin_enabled(rewritten, plugin, emit_error);
+      if (result.failed())
+        return Result::failure();
+      rewritten = std::move(result.value());
+    }
+    auto result = set_top_level_field(rewritten, "require_all_plugins", "true", emit_error);
+    if (result.failed())
+      return Result::failure();
+    rewritten = std::move(result.value());
+  }
   if (overrides.cpu_thread_budget) {
     auto result = json_with_cpu_thread_budget(rewritten, *overrides.cpu_thread_budget, emit_error);
     if (result.failed())

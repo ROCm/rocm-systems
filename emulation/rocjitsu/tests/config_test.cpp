@@ -1538,6 +1538,34 @@ TEST(EffectiveConfigTest, CombinesWaitCheckingAndBudgetWithoutChangingOtherField
           .failed());
 }
 
+TEST(EffectiveConfigTest, AddsLaunchPluginsAndRequiresThem) {
+  const std::string json = R"({"max_ticks":1})";
+  auto rewritten =
+      config::json_with_launch_overrides(json, {.plugins = {"race", "instruction-mix"}});
+  ASSERT_TRUE(rewritten.succeeded());
+  EXPECT_NE(rewritten.value().find(R"("plugins": {"instruction-mix": {},"race": {}})"),
+            std::string::npos);
+  EXPECT_NE(rewritten.value().find(R"("require_all_plugins": true)"), std::string::npos);
+}
+
+TEST(EffectiveConfigTest, KeepsExistingPluginConfigWhenLaunchPluginRepeatsIt) {
+  const std::string json = R"({"plugins":{"logging":{"interval":7}}})";
+  auto rewritten = config::json_with_launch_overrides(json, {.plugins = {"race", "logging"}});
+  ASSERT_TRUE(rewritten.succeeded());
+  EXPECT_NE(rewritten.value().find(R"("race": {})"), std::string::npos);
+  EXPECT_NE(rewritten.value().find(R"("logging":{"interval":7})"), std::string::npos);
+  EXPECT_EQ(rewritten.value().find(R"("logging": {})"), std::string::npos);
+  EXPECT_NE(rewritten.value().find(R"("require_all_plugins": true)"), std::string::npos);
+}
+
+TEST(EffectiveConfigTest, RejectsInvalidLaunchPluginName) {
+  util::StringDiagnostic diagnostic;
+  auto rewritten = config::json_with_launch_overrides(R"({"plugins":{}})", {.plugins = {"../race"}},
+                                                      diagnostic.emitter());
+  EXPECT_TRUE(rewritten.failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("invalid plugin name '../race'"));
+}
+
 TEST(ConfigLoaderTest, WaitCheckingOverridesEveryCuAndGpu) {
   using amdgpu::MemoryWaitDiagnostics;
   using config::WaitChecking;
@@ -1833,6 +1861,45 @@ TEST(ConfigLoaderTest, RejectsMisspelledDbtExecutionBackend) {
         "dbt_guest": {
           "enabled": true,
           "execution_backed": "simulator"
+        }
+      })");
+
+  EXPECT_THROW(config::load_dbt_guest_config_from_file(file.path()), std::runtime_error);
+}
+
+TEST(ConfigLoaderTest, AllowsPluginFieldsDuringStrictDbtValidation) {
+  const auto file = write_temp_config(R"({
+        "plugins": {"race": {}},
+        "require_all_plugins": true,
+        "dbt_guest": {
+          "enabled": false,
+          "execution_backend": "hardware"
+        }
+      })");
+
+  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(file.path()));
+}
+
+TEST(ConfigLoaderTest, AllowsEscapedPluginFieldsDuringStrictDbtValidation) {
+  const auto file = write_temp_config(R"({
+        "plugin\u0073": {"race": {}},
+        "require_all_plugin\u0073": true,
+        "dbt_guest": {
+          "enabled": false,
+          "execution_backend": "hardware"
+        }
+      })");
+
+  EXPECT_NO_THROW(config::load_dbt_guest_config_from_file(file.path()));
+}
+
+TEST(ConfigLoaderTest, StillRejectsMisspelledDbtFieldsWithPluginFieldsPresent) {
+  const auto file = write_temp_config(R"({
+        "plugins": {"race": {}},
+        "require_all_plugins": true,
+        "dbt_guest": {
+          "enabled": false,
+          "execution_backed": "hardware"
         }
       })");
 
