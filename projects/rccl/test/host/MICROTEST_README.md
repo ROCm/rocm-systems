@@ -239,6 +239,27 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `rccl-UnitTestsMicroInit` cleanup-order oracle needs the fake `ncclCeFinalize`
   in `fakes/nccl_stubs.cc`, which this target drops via
   `RCCL_STUBS_OMIT_ncclCeFinalize`.
+- **`rccl-UnitTestsMicroCrypt`** — `misc/crypt.cc` (via `CRYPT_CC_PATH`, from
+  `crypt-test.cc`); suite `Crypt*`. Its own binary keeps `crypt.cc`'s file-scope
+  state isolated. See `test_categories_micro_crypt.yaml`.
+- **`rccl-UnitTestsMicroStrongstream`** — `misc/strongstream.cc` (via
+  `STRONGSTREAM_CC_PATH`, from `strongstream-test.cc`); suite `Strongstream*`. Its own
+  binary because the test defines the HIP stream, event and graph calls it records, and
+  `strongstream_stubs.cc` / `nccl_fakes.cc` already define this unit's symbols. See
+  `test_categories_micro_strongstream.yaml`.
+- **`rccl-UnitTestsMicroUtils`** — `misc/utils.cc` (via `UTILS_CC_PATH`, from
+  `utils-test.cc`); suite `Utils*`. Its own binary because the test seams HIP, env and
+  libc (allocation, hostname, boot id, `readlink`, `sysconf`) around a unit other
+  binaries link whole. See `test_categories_micro_utils.yaml`.
+- **`rccl-UnitTestsMicroArgcheck`** — `misc/argcheck.cc` (via `ARGCHECK_CC_PATH`, from
+  `argcheck-test.cc`); suite `Argcheck*`. Its own binary because the test seams HIP,
+  `ncclDevrFindWindow` and `bootstrapAllGather` around a unit other binaries link whole.
+  See `test_categories_micro_argcheck.yaml`.
+- **`rccl-UnitTestsMicroCpuset`** — header-only `include/cpuset.h` (from `cpuset-test.cc`);
+  suite `Cpuset*`. Its own binary because the test defines `os/linux.cc`'s
+  `ncclOsCpuZero` / `ncclOsCpuSet` / `ncclOsCpuIsSet` one-liners, which would
+  otherwise sit in `rccl-UnitTestsMicro` as test-TU definitions. See
+  `test_categories_micro_cpuset.yaml`.
 - **`rccl-UnitTestsMicroClientSupport`**: `ras/client_support.cc` (via
   `CLIENT_SUPPORT_CC_PATH`, from `client-support-test.cc`); suites
   `RasClientSupportMicrotest.*` and
@@ -356,17 +377,44 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   memory stack. The suite drives the public lifecycle --
   `ncclRmaProxyCreateContext` / `ncclRmaProxyDestroyContext` -- so production
   owns the context and its cleanup. See `test_categories_micro_rma_proxy.yaml`.
+- **`rccl-UnitTestsMicroRoctxNvml`** (+ **`-roctx`**) — `src/misc/roctx.cc` and
+  `src/misc/nvmlwrap_stub.cc` (via `ROCTX_CC_PATH` / `NVMLWRAP_STUB_CC_PATH`,
+  from `roctx-nvml-stub-test.cc`); suites `RoctxNvml*`. Its own binary because
+  `fakes/comm_fakes.cc` stubs the `roctx_scoped_range_in` this file defines. See
+  `test_categories_micro_roctx_nvml.yaml`.
+- **`rccl-UnitTestsMicroRocmwrap`** — `src/misc/rocmwrap.cc` (via
+  `ROCMWRAP_CC_PATH`, from `rocmwrap-test.cc`); suite `RocmwrapMicrotest.*`. Its
+  own binary because `fakes/rocmwrap_fakes.cc` and `fakes/nccl_fakes.cc` define
+  `rocmLibraryInit`, `ncclCuMemEnable` and `ncclCuMemHandleType`. See
+  `test_categories_micro_rocmwrap.yaml`.
+- **`rccl-UnitTestsMicroAmdsmiWrap`** — `src/misc/amdsmi_wrap.cc` (via
+  `AMDSMI_WRAP_CC_PATH`, from `amdsmi-wrap-test.cc`); suite
+  `AmdsmiWrapMicrotest.*`. Its own binary because `fakes/amdsmi_fakes.cc`
+  defines the `amd_smi_*` wrappers this file compiles. See
+  `test_categories_micro_amdsmi_wrap.yaml`.
 
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
-  compiles for real. See `test_categories_micro_diagnostics.yaml`.
+  compiles for real. Also `src/diagnostics.cc` (`DIAGNOSTICS_CC_PATH`, suite
+  `DiagnosticsMicrotest.*`) and `src/diagnostics/device/p2p.cu` (`DIAG_P2P_DEVICE_CU_PATH`,
+  suite `DiagP2pDeviceMicrotest.*`), each with its symbols renamed so the fakes of
+  both stay linked. See `test_categories_micro_diagnostics.yaml`.
 - **`rccl-UnitTestsMicroGraph`**: the real `src/graph/{xml,topo,paths,search,rome_models}.cc`,
   compiled as sources; suite `TopoGpuDevMicrotest.*` in `graph-dev-test.cc`. Its own binary:
   every other target links fakes for the graph symbols these files define. See
   `test_categories_micro_graph.yaml`.
 
+- **`rccl-UnitTestsMicroGinHostFinalize`**: `src/gin/gin_host.cc` (via
+  `GIN_HOST_CC_PATH`, suite `GinHostFinalizeTest.*`): host finalize, connect
+  failure / retry, and the register, deregister and DevCommSetup walks over
+  closed backends, against a fake `ncclGin_t` vtable. Separate from
+  `rccl-UnitTestsMicroGinHost`: both compile `gin_host.cc`, and
+  `gin-host-test.cc` defines the same ConnectOnce seams. Also separate from
+  `rccl-UnitTestsMicro`, which fakes those entry points in
+  `fakes/dev_runtime_micro_fakes.cc`. See
+  `test_categories_micro_gin_host_finalize.yaml`.
 - **`rccl-UnitTestsMicroDda`** — `src/algorithms/dda/`, one binary because the
   units share the cuMem VMM and bootstrap seams; tests mirror the source tree
   under `test/host/algorithms/`. See `test_categories_micro_dda.yaml`.
@@ -882,22 +930,22 @@ above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
-`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDdaIpc`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroGraph`, `rccl-UnitTestsMicroDiagnostics`, `rccl-UnitTestsMicroDda`,
 `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
 `rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
 
-Three of those names are preprocessor variants, not duplicates. `init.cc` gates
+Four of those names are preprocessor variants, not duplicates. `init.cc` gates
 part of its allocation path on `HIP_*_UNCACHED_MEMORY` and its fault-mask blocks
 on `ENABLE_FAULT_INJECTION`, and `enqueue.cc` gates `rcclShmemDynamicSize` on
-`RCCL_DEVICE_LINKER`, all at the **preprocessor**, so one compile can only ever
-reach one arm. The in-RCCL-build path inherits `RCCL_DEVICE_LINKER` from the
+`RCCL_DEVICE_LINKER`, and `roctx.cc` gates roctracer on `ROCTX_ENABLE`, all at
+the **preprocessor**, so one compile can only ever reach one arm. The in-RCCL-build path inherits `RCCL_DEVICE_LINKER` from the
 `rccl` target's compile definitions (`ENABLE_DEVICE_LINKER` defaults ON, so the
 device-linker arm is the one that ships); this standalone project has no `rccl`
 target to inherit from, which is why it builds the `-devlinker` variant
-explicitly. `ENABLE_FAULT_INJECTION` was the same inheritance in reverse -
+explicitly, and likewise `-roctx`. `ENABLE_FAULT_INJECTION` was the same inheritance in reverse -
 defined in-tree, absent standalone, so the two paths tested different code - and
 is now stripped from the inherited list and set per variant in both paths, so the
 `-faultinj` binary is the only one that has it either way.
@@ -917,6 +965,11 @@ cmake -B build -DCMAKE_BUILD_TYPE=Release \
 cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicro          # p2p tests, ldd shows no HIP/ROCm/HSA/RCCL
 ./build/rccl-UnitTestsMicroWarpSpeed  # src/scheduler/*.cc tests
+./build/rccl-UnitTestsMicroCrypt              # misc/crypt.cc tests
+./build/rccl-UnitTestsMicroStrongstream       # misc/strongstream.cc tests
+./build/rccl-UnitTestsMicroUtils              # misc/utils.cc tests
+./build/rccl-UnitTestsMicroArgcheck           # misc/argcheck.cc tests
+./build/rccl-UnitTestsMicroCpuset             # include/cpuset.h tests
 ./build/rccl-UnitTestsMicroInit      # init.cc tests
 ./build/rccl-UnitTestsMicroInit-uncached
 ./build/rccl-UnitTestsMicroInit-faultinj      # same, ENABLE_FAULT_INJECTION arm
@@ -925,9 +978,10 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
-./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
+./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics.cc + src/diagnostics/ tests
 ./build/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
 ./build/rccl-UnitTestsMicroDdaIpc             # src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
@@ -935,6 +989,10 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroProxy              # src/proxy.cc tests
 ./build/rccl-UnitTestsMicroDda                # src/algorithms/dda/ tests
 ./build/rccl-HostUnitTests
+./build/rccl-UnitTestsMicroRoctxNvml          # misc/roctx.cc + misc/nvmlwrap_stub.cc tests
+./build/rccl-UnitTestsMicroRoctxNvml-roctx    # same, ROCTX_ENABLE arm
+./build/rccl-UnitTestsMicroRocmwrap           # src/misc/rocmwrap.cc cuMem + DMA-BUF init
+./build/rccl-UnitTestsMicroAmdsmiWrap         # src/misc/amdsmi_wrap.cc
 ```
 
 Disable coverage instrumentation for the standalone host-only test binaries

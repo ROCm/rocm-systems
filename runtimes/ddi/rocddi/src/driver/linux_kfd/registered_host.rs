@@ -19,20 +19,32 @@ use crate::memory::storage::{Owned, Shared};
 use crate::memory::{AllocationDesc, AllocationInfo, DeviceAccess};
 use crate::{Error, ErrorKind};
 
+/// Native mapping phase retained across partial failure and retry.
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum MappingPhase {
+    /// No mapping request has been sent.
     NotMapped,
+    /// A map request may have changed some page-table entries.
     Mapping,
+    /// Mapping and synchronization completed.
     Mapped,
+    /// An unmap request may have changed some page-table entries.
     Unmapping,
+    /// Unmapping and synchronization completed.
     Unmapped,
 }
 
+/// Per-render-VM GEM registration and mapping progress for borrowed pages.
 struct VmMapping {
+    /// Render VM that owns the GEM handle and timeline.
     vm: Shared<DeviceVm>,
+    /// GEM USERPTR handle, or zero before registration.
     handle: u32,
+    /// Timeline used to prove VM update completion.
     timeline: u32,
+    /// Last known mapping phase.
     phase: MappingPhase,
+    /// Native operation may have completed despite reporting an error.
     uncertain: bool,
 }
 
@@ -142,13 +154,21 @@ impl VmMapping {
 
 /// One common GPU VA for a caller-owned page cover across requested render VMs.
 pub(crate) struct DrmRegisteredHost {
+    /// Creating VM retained through every peer registration.
     owner: Shared<DeviceVm>,
+    /// Native USERPTR handles and mapping progress in each render VM.
     mappings: Vec<VmMapping>,
+    /// Common GPU virtual address reserved for the page cover.
     reservation: Option<os_memory::Reservation>,
+    /// First caller-visible host byte.
     host_address: usize,
+    /// Owner of runtime-allocated pages, when present.
     backing: Option<HostBackingLease>,
+    /// Offset from the registered page cover to `host_address`.
     byte_offset: usize,
+    /// Exact public byte extent.
     size: u64,
+    /// Prevents new access changes after cleanup begins.
     freeing: bool,
 }
 

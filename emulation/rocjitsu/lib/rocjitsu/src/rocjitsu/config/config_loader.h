@@ -272,6 +272,15 @@ const char *arch_to_string(rj_code_arch_t arch);
 /// @brief Parse an execution mode name, defaulting to FUNCTIONAL.
 simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
 
+/// @brief Validate configuration through the loader's shared component traversal.
+/// @details Shares CU resource and ISA checks with construction, using placeholders
+/// for CUs. CU-dependent topology checks must use the declarative configuration;
+/// execution wiring and its geometry warnings only run during full construction.
+/// @param json_path Path to the JSON configuration file.
+/// @param schema_text FlatBuffers schema text.
+/// @throws std::exception if parsing or configuration validation fails.
+void validate_config(const std::string &json_path, const std::string &schema_text);
+
 /// @brief Load simulation config from a JSON file.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
