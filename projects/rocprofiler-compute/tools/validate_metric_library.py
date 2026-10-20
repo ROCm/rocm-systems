@@ -209,6 +209,22 @@ DISPLAY_VARIANTS["gfx950"] = {
     "4.1.12": _ROOFLINE_L2_BW_128B,
     "4.1.14": _ROOFLINE_LDS_BW,
     "11.2.9": _PIPELINE_MFMA_UTIL,
+    # Panel 3000 shows each latency as SUM/SUM and as AVG/AVG over the same rows.
+    "30.2.6": (
+        "L1 latency",
+        "vl1d.average_lat",
+        "AVG(TCP_TCP_LATENCY_sum) / AVG(TCP_TOTAL_ACCESSES_sum)",
+    ),
+    "30.2.10": (
+        "L2 read latency",
+        "vl1d.l2_rd_average_lat",
+        "AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)",
+    ),
+    "30.2.12": (
+        "L2 write latency",
+        "vl1d.l2_wr_average_lat",
+        "AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)",
+    ),
     "30.7.1": (
         "L2 utilization",
         "l2.util",

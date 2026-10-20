@@ -116,14 +116,6 @@ vl1d.l2_rd_average_lat:
     Average latency to get a read response from L2 (TCC), including reads and atomics
     with return. Weighted average across all CUs (SUM/SUM gives more weight to CUs
     with more accesses). Equation: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum)
-vl1d.l2_rd_lat_avg:
-  name: L2 read latency
-  formula: AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)
-  unit: Cycles per Request
-  description: >-
-    Latency to get a read response from L2 (TCC), including reads and atomics with
-    return. Ratio of averages across CUs (AVG/AVG gives equal weight to each CU).
-    Equation: AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)
 vl1d.l2_rd_lat_norm:
   name: L1-L2 Read Latency Cycles
   formula: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM($denom)
@@ -156,14 +148,6 @@ vl1d.l2_wr_average_lat:
     and atomics without return. Weighted average across all CUs (SUM/SUM gives more
     weight to CUs with more accesses). Equation: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum)
     / SUM(TCP_TCC_WRITE_REQ_sum)
-vl1d.l2_wr_lat_avg:
-  name: L2 write latency
-  formula: AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)
-  unit: Cycles per Request
-  description: >-
-    Latency to get a write acknowledgment from L2 (TCC), including writes and atomics
-    without return. Ratio of averages across CUs (AVG/AVG gives equal weight to each
-    CU). Equation: AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)
 vl1d.l2_wr_lat_norm:
   name: L1-L2 Write Latency Cycles
   formula: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM($denom)
@@ -172,14 +156,6 @@ vl1d.l2_wr_lat_norm:
     The total number of cycles the vL1D cache took to issue and receive acknowledgement
     of write requests to the L2 Cache, summed over all requests (including atomics
     without return values), per normalization unit.
-vl1d.lat:
-  name: L1 latency
-  formula: AVG(TCP_TCP_LATENCY_sum) / AVG(TCP_TOTAL_ACCESSES_sum)
-  unit: Cycles per Request
-  description: >-
-    Latency to complete memory access, from wave entering to wave leaving TCP. Ratio
-    of averages across CUs (AVG/AVG gives equal weight to each CU). Equation: AVG(TCP_TCP_LATENCY_sum)
-    / AVG(TCP_TOTAL_ACCESSES_sum)
 vl1d.lat_fifo_stall:
   name: Latency FIFO Stall
   formula: SUM(TCP_UTCL1_LFIFO_FULL_sum) / SUM($denom)
