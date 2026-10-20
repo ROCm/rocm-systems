@@ -1632,6 +1632,10 @@ protected:
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
 
+// Keep LDS selection available to self-contained execution plugin modules.
+inline Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
+inline const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
+
 inline InstructionCache &InstructionComputeUnitView::instruction_cache() {
   return raw_cu().instruction_cache();
 }

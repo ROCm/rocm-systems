@@ -184,6 +184,12 @@ public:
   /// FLAT counter participation selected from the resolved requesting lanes.
   /// Unset before routing; decoded metadata continues to describe all domains.
   std::optional<MemoryIssueInfo> routed_issue_info;
+  // Routing normalizes ordinary LDS lanes in per_lane_addr once, including
+  // mixed FLAT requests. CDNA5 DDS has no backing implementation and faults before
+  // either pipeline accesses memory. Original aperture addresses live only in
+  // the routed observation's callback snapshot.
+  uint64_t flat_local_lane_mask = 0;
+  uint64_t flat_dds_lane_mask = 0;
   bool non_temporal = false;
   // Keep this outside Mtype: cluster loads force only the request-side vector
   // L1 lookup to miss, while mtype must still preserve the instruction/PTE

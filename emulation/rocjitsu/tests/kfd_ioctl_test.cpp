@@ -4541,7 +4541,26 @@ TEST_F(KfdIoctlTest, DbgTrapCompetingNotifierWriterCannotBlockPublisher) {
   ASSERT_EQ(::poll(&pfd, 1, 1000), 1);
   ASSERT_EQ(::read(notifier, &notifications, sizeof(notifications)),
             static_cast<ssize_t>(sizeof(notifications)));
-  EXPECT_EQ(notifications, 1u);
+  // A retry can write successfully but miss its reap deadline under load,
+  // leaving another wakeup for the same retained event. Check delivery rather
+  // than the eventfd's accumulated retry count.
+  EXPECT_GE(notifications, 1u);
+
+  kfd_ioctl_dbg_trap_args query{};
+  query.pid = static_cast<uint32_t>(getpid());
+  query.op = KFD_IOC_DBG_TRAP_QUERY_DEBUG_EVENT;
+  int query_result = -EAGAIN;
+  for (int attempt = 0; attempt < 200 && query_result == -EAGAIN; ++attempt) {
+    query.query_debug_event.exception_mask = kException;
+    query_result = driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query);
+    if (query_result == -EAGAIN)
+      static_cast<void>(::poll(nullptr, 0, 10));
+  }
+  ASSERT_EQ(query_result, 0);
+  EXPECT_EQ(query.query_debug_event.queue_id, create.queue_id);
+  EXPECT_EQ(query.query_debug_event.exception_mask & kException, kException);
+  query.query_debug_event.exception_mask = kException;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DBG_TRAP, &query), -EAGAIN);
 
   // Stop fixture threads before fork so their temporary allocations are not
   // orphaned in the child. The process-lifetime notification reaper stays alive.
