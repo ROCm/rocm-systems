@@ -59,6 +59,16 @@
  *     process with the same pid moves it to pid-<pid>.prev-1, untouched, and
  *     records a fresh archive, which readers find on their own; when it cannot
  *     move it, capture is disabled and the earlier archive stays (POSIX).
+ *
+ *   Unit_HRR_CaptureWritesThroughCheckedDirs:
+ *     pid-<pid> renamed while the capture runs, with a symbolic link planted in
+ *     its place, is still where the blobs, the manifest and the active marker's
+ *     removal go, and nothing is written through the link (POSIX).
+ *
+ *   Unit_HRR_CaptureClosesArchiveDirs:
+ *     a capture whose blobs span most blobs/<xx> prefixes holds at most three
+ *     archive directory descriptors while it runs, and none after it has shut
+ *     down (Linux).
  */
 
 #include "hrr_test_common.hh"
@@ -373,6 +383,87 @@ TEST_CASE("Unit_HRR_CaptureMarkerRefused_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   g_hrr_statvfs_hook = nullptr;
 }
+
+// ---------------------------------------------------------------------------
+// Hidden ([.]) workload for Unit_HRR_CaptureWritesThroughCheckedDirs: once HIP
+// is up, and with it the capture, renames its own pid-<pid> to "moved" and
+// plants a symbolic link to HRR_TEST_VICTIM at pid-<pid>, as someone who can
+// write to the base directory could. It then copies 32 distinct host buffers
+// to the device, blobs spread over many blobs/<xx> prefixes, and exits
+// cleanly, which writes manifest.json and removes the marker.
+// Run without either variable, it does nothing.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_CaptureRenamedArchive_Direct", "[.][hrr-direct]") {
+  const char* base = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
+  const char* victim = std::getenv("HRR_TEST_VICTIM");
+  if (base == nullptr || victim == nullptr) return;
+  HRR_HIP_CHECK(hipSetDevice(0));
+  const std::string pid_dir = std::string(base) + "/pid-" + std::to_string(::getpid());
+  REQUIRE(::rename(pid_dir.c_str(), (std::string(base) + "/moved").c_str()) == 0);
+  REQUIRE(::symlink(victim, pid_dir.c_str()) == 0);
+  void* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, 256));
+  for (uint32_t i = 0; i < 32; ++i) {
+    const std::vector<uint32_t> host(64, i);
+    HRR_HIP_CHECK(hipMemcpy(d, host.data(), 256, hipMemcpyHostToDevice));
+  }
+  HRR_HIP_CHECK(hipFree(d));
+}
+
+#ifdef __linux__
+// ---------------------------------------------------------------------------
+// Hidden ([.]) workload for Unit_HRR_CaptureClosesArchiveDirs: copies 512
+// distinct host buffers to the device, blobs spread over most of the 256
+// blobs/<xx> prefixes, then prints how many of its descriptors are directories
+// in its pid-<pid>: once while the capture runs, and once from an exit handler
+// that runs after the capture has shut down. The handler is registered before
+// the first HIP call, which registers the capture's own, so it runs after it.
+// Run without HIP_HRR_CAPTURE_OUTPUT, it does nothing.
+// ---------------------------------------------------------------------------
+namespace {
+char g_fd_archive[4096];  // pid-<pid>, resolved
+
+int archive_dir_fds() {
+  DIR* fds = ::opendir("/proc/self/fd");
+  if (fds == nullptr) return -1;
+  const size_t len = strlen(g_fd_archive);
+  int n = 0;
+  while (const dirent* e = ::readdir(fds)) {
+    char target[4096];
+    const ssize_t got = ::readlinkat(::dirfd(fds), e->d_name, target, sizeof(target) - 1);
+    if (got <= 0) continue;
+    target[got] = '\0';
+    struct stat st{};
+    if (strncmp(target, g_fd_archive, len) == 0 && (target[len] == '\0' || target[len] == '/') &&
+        ::fstatat(::dirfd(fds), e->d_name, &st, 0) == 0 && S_ISDIR(st.st_mode))
+      ++n;
+  }
+  ::closedir(fds);
+  return n;
+}
+
+void report_archive_dir_fds_at_exit() {
+  fprintf(stderr, "archive directory descriptors after the capture: %d\n", archive_dir_fds());
+}
+}  // namespace
+
+TEST_CASE("Unit_HRR_CaptureClosesArchiveDirs_Direct", "[.][hrr-direct]") {
+  const char* base = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
+  if (base == nullptr) return;
+  REQUIRE(std::atexit(report_archive_dir_fds_at_exit) == 0);
+  HRR_HIP_CHECK(hipSetDevice(0));
+  const std::string pid_dir = std::string(base) + "/pid-" + std::to_string(::getpid());
+  REQUIRE(::realpath(pid_dir.c_str(), g_fd_archive) != nullptr);
+  void* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, 256));
+  for (uint32_t i = 0; i < 512; ++i) {
+    const std::vector<uint32_t> host(64, i);
+    HRR_HIP_CHECK(hipMemcpy(d, host.data(), 256, hipMemcpyHostToDevice));
+  }
+  HRR_HIP_CHECK(hipFree(d));
+  fprintf(stderr, "archive directory descriptors during the capture: %d\n", archive_dir_fds());
+}
+#endif
 
 #endif
 
@@ -923,6 +1014,90 @@ HRR_TEST_CASE(Unit_HRR_CaptureMovesEarlierArchiveAside) {
     CHECK(disabled_because(run.output, "cannot move the earlier archive at ", " aside ("));
     CHECK(same_tree(pid_dir, earlier));
   }
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_CaptureRenamedArchive_Direct, which renames its pid-<pid>
+ *     to "moved" after the capture has opened it and plants a symbolic link to
+ *     an empty directory at pid-<pid>, then records blobs and exits cleanly.
+ *   - The directory behind the link stays empty: the writer creates, opens and
+ *     renames everything relative to the directories it checked, so neither
+ *     the blobs nor the manifest follow the path to the link.
+ *   - "moved" holds the whole archive: its blobs, a manifest that says
+ *     complete: true, no active marker, and events.bin loads complete.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureWritesThroughCheckedDirs) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX symbolic links");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_renamed"};
+  const fs::path base = work.path / "capture";
+  const fs::path victim_dir = work.path / "victim-dir";
+  fs::create_directories(base);
+  fs::create_directories(victim_dir);
+
+  const PlantedRun run = capture_after_planting(
+      base, work.path / "plant.sh", "export HRR_TEST_VICTIM='" + victim_dir.string() + "'\n",
+      "Unit_HRR_CaptureRenamedArchive_Direct");
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  CHECK(fs::is_empty(victim_dir));
+  const fs::path moved = base / "moved";
+  REQUIRE(fs::is_directory(fs::symlink_status(moved)));
+  CHECK(archive_files(moved, "blobs", ".blob").size() >= 32);
+  CHECK(manifest_says_complete(moved, true));
+  CHECK_FALSE(fs::exists(fs::symlink_status(moved / "active")));
+  hrr::Archive archive;
+  REQUIRE(hrr::load_archive(moved.string(), archive));
+  CHECK(archive.complete);
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_CaptureClosesArchiveDirs_Direct, which records 512
+ *     distinct blobs and reports how many of its descriptors are directories
+ *     in its archive, during the capture and after it has shut down.
+ *   - The blobs land in at least 128 blobs/<xx> prefixes, so a descriptor
+ *     kept per prefix would show.
+ *   - During the capture the writer holds at most pid-<pid>, blobs/ and
+ *     code_objects/; after it, none.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureClosesArchiveDirs) {
+#ifndef __linux__
+  HRR_SKIP("/proc/self/fd");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_dir_fds"};
+  const fs::path base = work.path / "capture";
+  fs::create_directories(base);
+  const PlantedRun run = capture_workload(base, "Unit_HRR_CaptureClosesArchiveDirs_Direct");
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  const std::vector<fs::path> archives = hrr_process_archives(base);
+  REQUIRE(archives.size() == 1);
+  size_t prefixes = 0;
+  for (const auto& ent : fs::directory_iterator(archives.front() / "blobs"))
+    if (ent.is_directory()) ++prefixes;
+  CHECK(prefixes >= 128);
+  CHECK(manifest_says_complete(archives.front(), true));
+  // -1 when the workload did not report it.
+  const auto reported = [&run](const std::string& when) {
+    const std::string head = "archive directory descriptors " + when + ": ";
+    const size_t at = run.output.find(head);
+    return at == std::string::npos ? -1 : std::atoi(run.output.c_str() + at + head.size());
+  };
+  // Each blob is written inside its hipMemcpy, on the calling thread, so the
+  // blobs/<xx> it opened is closed again before the workload counts.
+  const int during = reported("during the capture");
+  CHECK(during >= 0);
+  CHECK(during <= 3);
+  CHECK(reported("after the capture") == 0);
 #endif
 }
 
