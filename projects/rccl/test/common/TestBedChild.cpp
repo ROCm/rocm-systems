@@ -6,16 +6,15 @@
 
 #include "TestBedChild.hpp"
 #include "PipeUtils.hpp"
+#if defined(RCCL_TEST_CODE_COVERAGE)
+#include "ProcessIsolatedTestRunner.hpp"
+#endif
 #include "ResourceGuards.hpp"
 #include "comm.h"
 
 #include <algorithm>
 #include <thread>
 #include <execinfo.h>
-#if defined(RCCL_TEST_CODE_COVERAGE)
-#include <dlfcn.h>
-extern "C" int __llvm_profile_write_file(void);
-#endif
 #ifdef ENABLE_OPENMP
 #include <omp.h>
 #endif
@@ -206,13 +205,10 @@ namespace RcclUnitTesting
     close(this->childWriteFd);
 
 #if defined(RCCL_TEST_CODE_COVERAGE)
-    __llvm_profile_write_file();
-    using WriteFn = int (*)(void);
-    auto libWrite = reinterpret_cast<WriteFn>(
-        dlsym(RTLD_DEFAULT, "rcclCoverageWriteFile"));
-    if (libWrite) libWrite();
+    ProcessIsolatedTestRunner::exitChild(0);
+#else
+    exit(0);
 #endif
-    _exit(0);
   }
 
   ErrCode TestBedChild::GetUniqueId(std::vector<char>& retValBuf)
