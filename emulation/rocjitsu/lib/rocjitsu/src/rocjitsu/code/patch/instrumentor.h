@@ -398,8 +398,10 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// is a much more difficult task.
 ///
 /// Block decoding is lazy so the CFG is built on the first call that needs
-/// it (validate_points, blocks or patch). An Instrumentor
-/// that is never asked for either also never decodes.
+/// it (validate_points, kernel_blocks or patch). An Instrumentor
+/// that is never asked for either also never decodes. When the object has
+/// kernel descriptors, only code reachable from a kernel entry is decoded;
+/// otherwise the whole .text is.
 class Instrumentor {
 public:
   /// @param obj  The code object to instrument. Borrowed; must outlive the
@@ -436,14 +438,15 @@ public:
   /// one record per queued point in insertion order and `errors` is empty.
   [[nodiscard]] ValidationResult validate_points();
 
-  /// @brief The decoded blocks of the object's .text, in .text order.
+  /// @brief The blocks of the kernel entered at @p entry, in .text order.
   ///
-  /// The same blocks validation and patching use; every kernel entry starts
-  /// one. Returns nullptr and sets *error_out when decoding fails or the object
-  /// does not have exactly one .text section. Queues nothing and does not spend
-  /// the single patch attempt.
-  [[nodiscard]] const std::vector<std::unique_ptr<BasicBlock>> *
-  blocks(std::string *error_out = nullptr);
+  /// The blocks reachable_kernel_blocks() finds from the block starting at
+  /// @p entry, out of the ones validation and patching use. Returns nullopt and
+  /// sets *error_out when decoding fails, the object does not have exactly one
+  /// .text section, or no decoded block starts at @p entry. Queues nothing and
+  /// does not spend the single patch attempt.
+  [[nodiscard]] std::optional<std::vector<const BasicBlock *>>
+  kernel_blocks(uint64_t entry, std::string *error_out = nullptr);
 
   /// @brief The first instruction in @p block a point can anchor at, if any.
   ///
@@ -451,7 +454,7 @@ public:
   /// is_relocatable_anchor(), and not being among the instructions an s_clause
   /// covers, which is counted across block boundaries. A point queued there can
   /// still be refused for reasons that depend on its probe or on the other
-  /// points. @p block must come from blocks().
+  /// points. @p block must come from kernel_blocks().
   [[nodiscard]] std::optional<uint64_t> first_anchor(const BasicBlock &block) const;
 
   /// @brief Validate, plan, build, and apply the queued points; emit a
@@ -465,6 +468,13 @@ public:
   /// Requires at least one queued InstrumentationPoint; queuing zero is a fatal
   /// error. Shares the single-attempt budget with patch_with_debug_summaries();
   /// see the class-level note.
+  ///
+  /// Liveness at each anchor currently follows successors() only: no call or
+  /// return edge, and nothing past an unresolved edge
+  /// (BasicBlock::successor_issue()). A register read only in a callee, after a
+  /// call returns, or past such an edge counts as dead, so a trampoline in such
+  /// a kernel may clobber it. patch() does not detect this; the DBI runtime's
+  /// site selector (instrument_each_block()) refuses such kernels.
   ///
   /// Refuses any point whose probe reads a `LogBufferPtr*` argument: the entry
   /// prologue those need loads through a kernarg wrapper that no runtime builds
@@ -505,6 +515,8 @@ private:
   // are among the following instructions covered by an s_clause. The s_clause
   // instruction itself is rejected by is_relocatable_anchor().
   std::unordered_set<uint64_t> clause_blocked_offsets_;
+  // .text-relative entries of the object's kernels; the roots of the decode.
+  std::vector<uint64_t> kernel_entries_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);

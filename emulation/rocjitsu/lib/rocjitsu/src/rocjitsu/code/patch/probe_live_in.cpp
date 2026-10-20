@@ -70,9 +70,9 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
     return std::nullopt;
   }
 
-  // BasicBlock::build() decodes only text_sections() and restarts its byte
-  // offsets per section, so a body outside ".text" is never decoded and with
-  // more than one ".text" a block offset names no unique body.
+  // BasicBlock::build_reachable() decodes from offsets in the object's only
+  // ".text", so a body outside it is never decoded and with more than one
+  // ".text" an offset names no unique body.
   if (probe_obj.text_sections().size() != 1) {
     report(error_out, "probe code object must have exactly one .text section for CFG analysis");
     return std::nullopt;
@@ -99,13 +99,13 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
     return std::nullopt;
   }
 
-  // Split point, not extra leader: extra_leaders only carries external-entry
-  // meaning under ExplicitOnly, which would oblige us to enumerate every
-  // externally reachable entry in the object.
-  const uint64_t split_points[] = {entry_text_offset};
+  // Decoding from the probe entry leaves the object's other functions and its
+  // padding alone, which need not decode on the target: RDNA4 has no encoding
+  // for the zero words a linker pads .text with.
+  const uint64_t entries[] = {entry_text_offset};
   util::StringDiagnostic decode_error;
-  auto built = BasicBlock::build(probe_obj, *decoder, arch, decode_error.emitter(), {},
-                                 ExternalEntryPolicy::InferPredecessorless, split_points);
+  auto built =
+      BasicBlock::build_reachable(probe_obj, *decoder, arch, entries, decode_error.emitter());
   if (built.failed()) {
     report(error_out, ("probe code object failed to decode: " + decode_error.message()).c_str());
     return std::nullopt;

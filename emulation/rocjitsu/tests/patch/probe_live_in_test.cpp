@@ -410,16 +410,37 @@ TEST(ProbeLiveInTest, RejectsEntryThatDoesNotStartABlock) {
   sym.body_size = 4;
 
   std::string err;
-  EXPECT_FALSE(
-      analyze_probe_live_ins(obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
-                             *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
-                             /*wave_size=*/64, &err)
-          .has_value());
-  EXPECT_NE(err.find("basic block"), std::string::npos) << err;
+  EXPECT_FALSE(analyze_probe_live_ins(
+                   obj, sym, ROCJITSU_CODE_ARCH_CDNA2,
+                   *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31),
+                    /*wave_size=*/64, &err)
+                   .has_value());
+  EXPECT_NE(err.find("invalid reachable CFG entry"), std::string::npos) << err;
 }
 
-// BasicBlock::build() restarts its byte offsets per section, so a block offset
-// would not name a unique body. Instrumentor's own multi-.text check covers only
+// A function stub, and the zero words a linker pads the probe's alignment with,
+// sit ahead of the body. RDNA4 has no encoding for a zero word, so decoding them
+// would fail the analysis.
+TEST(ProbeLiveInTest, DecodesNothingAheadOfAnRdna4Probe) {
+  constexpr size_t kEntryWord = 4;
+  const std::vector<uint32_t> text{kGfx12SSetpcS30S31, 0u, 0u, 0u, kVMovV0S4, kGfx12SSetpcS30S31};
+  const auto image = make_elf(text, EF_AMDGPU_MACH_AMDGCN_GFX1200);
+  const AmdGpuCodeObject obj(image.data(), image.size());
+  ResolvedProbeSymbol sym = whole_body_symbol(text);
+  sym.st_value += kEntryWord * sizeof(uint32_t);
+  sym.body_file_offset += kEntryWord * sizeof(uint32_t);
+  sym.body_size = (text.size() - kEntryWord) * sizeof(uint32_t);
+
+  std::string err;
+  const auto set = analyze_probe_live_ins(
+      obj, sym, ROCJITSU_CODE_ARCH_RDNA4,
+      *derive_probe_abi(ProbeCallingConvention::AmdGpuFuncReturnS30S31), /*wave_size=*/64, &err);
+  ASSERT_TRUE(set.has_value()) << err;
+  EXPECT_EQ(format_register_set(*set), "s4");
+}
+
+// Block offsets are relative to one section, so with two a block offset would
+// not name a unique body. Instrumentor's own multi-.text check covers only
 // the destination object, so a multi-.text probe object reaches this from a real
 // input rather than only from a fabricated one.
 TEST(ProbeLiveInTest, RejectsMultipleTextSections) {
