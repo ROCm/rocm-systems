@@ -3074,7 +3074,7 @@
         },
         {
           "name": "IncompleteCollective_DdaAllGatherLl128",
-          "description": "Rank np-1 skips DDA fabric LL128 AllGather (RCCL_DDA_LL=0); asserts LL128 via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "description": "Rank np-1 skips DDA fabric LL128 AllGather (RCCL_DDA_LL_THRESHOLD=0); asserts LL128 via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
           "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaAllGatherLl128"
         },
         {
@@ -3084,7 +3084,7 @@
         },
         {
           "name": "IncompleteCollective_DdaReduceScatterLl128",
-          "description": "Rank np-1 skips DDA fabric LL128 ReduceScatter (RCCL_DDA_LL=0); asserts LL128 via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "description": "Rank np-1 skips DDA fabric LL128 ReduceScatter (RCCL_DDA_LL_THRESHOLD=0); asserts LL128 via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
           "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaReduceScatterLl128"
         },
         {
@@ -3094,7 +3094,7 @@
         },
         {
           "name": "IncompleteCollective_DdaAlltoAllLl128",
-          "description": "Rank np-1 skips DDA fabric LL128 AlltoAll (RCCL_DDA_LL=0); asserts LL128 via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "description": "Rank np-1 skips DDA fabric LL128 AlltoAll (RCCL_DDA_LL_THRESHOLD=0); asserts LL128 via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
           "test_filter": "RevokeDdaMPITest.IncompleteCollective_DdaAlltoAllLl128"
         },
         {
