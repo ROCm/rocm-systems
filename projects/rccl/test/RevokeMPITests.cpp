@@ -699,6 +699,7 @@ void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
 
     MPI_Barrier(MPI_COMM_WORLD);
 
+    // DDA IPC needs exactly 8 ranks, so for the IPC cases the 7-rank child runs a generic kernel.
     ncclResult_t childLaunchRes = ncclSuccess;
     if(!isExcluded)
         childLaunchRes = ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, child, stream);
