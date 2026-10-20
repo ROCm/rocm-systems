@@ -24,6 +24,8 @@ extern std::function<ncclResult_t(struct ncclSocket*, void*, int)> g_ncclSocketS
 extern std::function<ncclResult_t(struct ncclSocket*, void*, int)> g_ncclSocketRecv;
 extern std::function<ncclResult_t(int, struct ncclSocket*, void*, int, int*, bool*)> g_ncclSocketProgress;
 extern std::function<void(struct ncclSocket*, struct ncclSocket*)> g_ncclSocketMove;
+extern std::function<ncclResult_t(char*, union ncclSocketAddress*, int, int, int*)> g_ncclFindInterfaces;
+extern std::function<const char*(const union ncclSocketAddress*, char*, size_t, int)> g_ncclSocketToString;
 
 void ResetSocketFakes();
 

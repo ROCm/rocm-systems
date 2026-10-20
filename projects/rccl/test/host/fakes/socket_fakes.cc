@@ -42,6 +42,14 @@ static void DefaultSocketMove(struct ncclSocket*, struct ncclSocket*) {
   FailLoudUnfaked("socket_fakes", "ncclSocketMove");
 }
 
+static ncclResult_t DefaultFindInterfaces(char*, union ncclSocketAddress*, int, int, int*) {
+  FailLoudUnfaked("socket_fakes", "ncclFindInterfaces");
+}
+
+static const char* DefaultSocketToString(const union ncclSocketAddress*, char*, size_t, int) {
+  FailLoudUnfaked("socket_fakes", "ncclSocketToString");
+}
+
 std::function<ncclResult_t(struct ncclSocket*, const union ncclSocketAddress*, uint64_t,
                            enum ncclSocketType, volatile uint32_t*, int, int)>
     g_ncclSocketInit = DefaultSocketInit;
@@ -54,6 +62,10 @@ std::function<ncclResult_t(struct ncclSocket*, void*, int)> g_ncclSocketRecv = D
 std::function<ncclResult_t(int, struct ncclSocket*, void*, int, int*, bool*)> g_ncclSocketProgress =
     DefaultSocketProgress;
 std::function<void(struct ncclSocket*, struct ncclSocket*)> g_ncclSocketMove = DefaultSocketMove;
+std::function<ncclResult_t(char*, union ncclSocketAddress*, int, int, int*)> g_ncclFindInterfaces =
+    DefaultFindInterfaces;
+std::function<const char*(const union ncclSocketAddress*, char*, size_t, int)> g_ncclSocketToString =
+    DefaultSocketToString;
 
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketInit, ncclSocketInit);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketConnect, ncclSocketConnect);
@@ -63,6 +75,8 @@ ASSERT_HOOK_MATCHES_PROD(g_ncclSocketSend, ncclSocketSend);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketRecv, ncclSocketRecv);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketProgress, ncclSocketProgress);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketMove, ncclSocketMove);
+ASSERT_HOOK_MATCHES_PROD(g_ncclFindInterfaces, ncclFindInterfaces);
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketToString, ncclSocketToString);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 uint64_t ncclSocketDefaultMagic() { return NCCL_SOCKET_MAGIC; }
@@ -95,6 +109,13 @@ ncclResult_t ncclSocketProgress(int op, struct ncclSocket* sock, void* ptr, int 
 }
 
 void ncclSocketMove(struct ncclSocket* dst, struct ncclSocket* src) { g_ncclSocketMove(dst, src); }
+ncclResult_t ncclFindInterfaces(char* names, union ncclSocketAddress* addresses, int nameSize, int maxIfs,
+                                int* count) {
+  return g_ncclFindInterfaces(names, addresses, nameSize, maxIfs, count);
+}
+const char* ncclSocketToString(const union ncclSocketAddress* address, char* buffer, size_t size, int numeric) {
+  return g_ncclSocketToString(address, buffer, size, numeric);
+}
 
 void ResetSocketFakes() {
   g_ncclSocketInit = DefaultSocketInit;
@@ -105,4 +126,6 @@ void ResetSocketFakes() {
   g_ncclSocketRecv = DefaultSocketRecv;
   g_ncclSocketProgress = DefaultSocketProgress;
   g_ncclSocketMove = DefaultSocketMove;
+  g_ncclFindInterfaces = DefaultFindInterfaces;
+  g_ncclSocketToString = DefaultSocketToString;
 }
