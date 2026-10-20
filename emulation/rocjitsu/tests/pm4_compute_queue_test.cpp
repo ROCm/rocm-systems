@@ -166,6 +166,55 @@ protected:
   uint32_t next_queue_id = 1;
 };
 
+TEST_F(Pm4ComputeQueueTest, RejectsSubmissionsForUnknownQueueOrProcess) {
+  ASSERT_TRUE(
+      cp->register_drm_queue({.address_space = address_space, .process_id = 7, .queue_id = 1}));
+  constexpr uint32_t kOutput = 0x300;
+  const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
+  for (size_t word_index = 0; word_index < words.size(); ++word_index)
+    memory->store<uint32_t>(kRing + word_index * 4, words[word_index]);
+
+  uint32_t completions = 0;
+  for (const auto &[queue_id, process_id] : {std::pair{2u, 7u}, std::pair{1u, 8u}}) {
+    Pm4Submission submission;
+    submission.buffers.push_back({.address = kRing, .dwords = words.size()});
+    submission.complete = [&](bool) { ++completions; };
+    EXPECT_FALSE(cp->submit_pm4(queue_id, process_id, std::move(submission)));
+  }
+
+  service();
+  service();
+  EXPECT_EQ(completions, 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+}
+
+TEST_F(Pm4ComputeQueueTest, RejectsSubmissionsForNativeRingQueue) {
+  const auto registration = cp->register_queue({.address_space = address_space,
+                                                .process_id = 7,
+                                                .queue_id = 1,
+                                                .ring_base_va = kRing,
+                                                .ring_size = kRingBytes,
+                                                .read_ptr_va = kReadPointer,
+                                                .packet_format = QueuePacketFormat::Pm4});
+  ASSERT_NE(registration, 0u);
+  constexpr uint32_t kOutput = 0x300;
+  const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
+  for (size_t word_index = 0; word_index < words.size(); ++word_index)
+    memory->store<uint32_t>(kRing + word_index * 4, words[word_index]);
+
+  uint32_t completions = 0;
+  Pm4Submission submission;
+  submission.buffers.push_back({.address = kRing, .dwords = words.size()});
+  submission.complete = [&](bool) { ++completions; };
+  EXPECT_FALSE(cp->submit_pm4(1, 7, std::move(submission)));
+
+  service();
+  service();
+  EXPECT_EQ(completions, 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+}
+
 TEST_F(Pm4ComputeQueueTest, SubmissionDefersEffectsUntilTheCpServicesTheQueue) {
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
