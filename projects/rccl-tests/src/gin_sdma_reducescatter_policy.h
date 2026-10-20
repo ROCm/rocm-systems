@@ -5,24 +5,24 @@
  ************************************************************************/
 
 // Pure, host-testable policy helpers for the GIN Anvil-SDMA ReduceScatter
-// (reduce_scatter_perf -D 3, GinReduceScatterKernel). These capture the per-rank
-// output-slice sizing, the size-adaptive CTA selection, the devComm barrier/signal
-// requirement shape and the bandwidth math that reduce_scatter.cu relies on, in one
-// place that can be unit-tested on the host with no GPU (see
+// (reduce_scatter_perf -D 3): per-rank output-slice sizing, the size-adaptive
+// CTA selection, the devComm barrier/signal requirement shape and the bandwidth
+// math, unit-tested on the host with no GPU (see
 // gin_sdma_reducescatter_policy_test.cpp). Companion to gin_sdma_allgather_policy.h.
 //
-// The device kernel calls the same helpers so the CTA schedule and requirement
-// shape tested on the host are byte-for-byte the ones used on the GPU. Under
+// Contract for the -D 3 kernel and its host launcher: they must take the CTA
+// schedule, pool size and scratch size from these helpers rather than restating
+// them, so the values tested here are the ones launched. Under
 // GIN_SDMA_HOST_ONLY the __host__/__device__ attributes drop to no-ops so the
 // header compiles as plain C++ for the host unit test.
 //
-// NOTE on the tiers: GinReduceScatterKernel is CTA-budget hybrid.
+// Tier selection the kernel must implement, keyed on its launched grid:
 //   * gridDim.x >= kReduceScatterSdmaCtaCeil (16): single-tier LSA read-reduce.
 //     That is the default. The size-adaptive ladder launches 32 or 48 CTAs.
-//   * gridDim.x < 16: GIN/SDMA scatter of each per-dest slice into the owner's
-//     resource-window slots, then a local SM reduce. Entered only when
-//     NCCL_GIN_ANVIL_RS_CTAS pins a grid below 16. The size-based RSTier helpers
-//     are not what selects this path.
+//   * gridDim.x < 16 (usesSdmaTier): GIN/SDMA scatter of each per-dest slice
+//     into the owner's resource-window slots, then a local SM reduce. Reached
+//     only when kReduceScatterCtasEnv pins a grid below 16. The size-based
+//     RSTier helpers do not select this path.
 
 #ifndef GIN_SDMA_REDUCESCATTER_POLICY_H_
 #define GIN_SDMA_REDUCESCATTER_POLICY_H_
@@ -116,30 +116,14 @@ GIN_SDMA_RS_HD inline bool sdmaScratchFits(size_t sliceBytes_, int nRanks, size_
 // per-collective env (NCCL_GIN_ANVIL_SDMA_THRESHOLD_REDUCESCATTER) > global env
 // (NCCL_GIN_ANVIL_SDMA_THRESHOLD) > compiled default. "Set" means the env var was
 // present and parsed (an explicit 0 is honored). Pure so the precedence is
-// unit-testable without the environment; the getenv/parse wrapper lives host-side
-// in reduce_scatter.cu. Mirrors gin_sdma_allgather::pickSdmaThreshold.
+// unit-testable without the environment. Kept for parity with
+// gin_sdma_allgather::pickSdmaThreshold; the CTA-keyed tier does not read it.
 GIN_SDMA_RS_HD inline size_t pickSdmaThreshold(bool perCollSet, unsigned long long perCollVal,
                                                bool globalSet, unsigned long long globalVal,
                                                size_t compiledDefault) {
   if (perCollSet) return (size_t)perCollVal;
   if (globalSet) return (size_t)globalVal;
   return compiledDefault;
-}
-
-// devComm resource requirements for the -D 3 ReduceScatter kernel: one barrier +
-// one lsaBarrier + one signal per CTA, GIN required. The single-tier LSA read-
-// reduce actually uses only the lsaBarrier (entry), but the pools are sized
-// uniformly per CTA. Mirrors the movement-collective shape.
-struct DevReqs {
-  int barrierCount;
-  int lsaBarrierCount;
-  int ginSignalCount;
-  bool needsGin;
-  bool supported;
-};
-GIN_SDMA_RS_HD inline DevReqs reduceScatterDevReqs(int deviceCtaCount) {
-  DevReqs r{deviceCtaCount, deviceCtaCount, deviceCtaCount, true, true};
-  return r;
 }
 
 // ReduceScatter -D 3 size-adaptive CTA count (decoupled from -V, mirrors the
@@ -171,12 +155,30 @@ GIN_SDMA_RS_HD inline int reduceScatterMaxCtas() {
 
 // Size of the barrier/lsaBarrier/signal pools the ReduceScatter kernel launches
 // with: max(-V/deviceCtaCount, the size-adaptive ladder's peak). This is BOTH the
-// pool allocated in ReduceScatterGetDevCommRequirements AND the ceiling that
-// reduceScatterGridCtas() clamps any launched grid to, so the "grid <= pool"
-// invariant lives in one place. Mirrors gin_sdma_allgather::allGatherPoolCtas.
+// pool reduceScatterDevReqs registers AND the ceiling that reduceScatterGridCtas()
+// clamps any launched grid to, so the "grid <= pool" invariant lives in one place.
+// Idempotent. Mirrors gin_sdma_allgather::allGatherPoolCtas.
 GIN_SDMA_RS_HD inline int reduceScatterPoolCtas(int deviceCtaCount) {
   const int maxTier = reduceScatterMaxCtas();
   return (deviceCtaCount > maxTier) ? deviceCtaCount : maxTier;
+}
+
+// devComm resource requirements for the -D 3 ReduceScatter kernel: one barrier +
+// one lsaBarrier + one signal per pool slot, GIN required. Takes the raw -V count
+// and sizes from reduceScatterPoolCtas, so the pool always covers the launched
+// grid. The single-tier LSA read-reduce actually uses only the lsaBarrier
+// (entry), but the pools are sized uniformly. Mirrors the movement-collective shape.
+struct DevReqs {
+  int barrierCount;
+  int lsaBarrierCount;
+  int ginSignalCount;
+  bool needsGin;
+  bool supported;
+};
+GIN_SDMA_RS_HD inline DevReqs reduceScatterDevReqs(int deviceCtaCount) {
+  const int pool = reduceScatterPoolCtas(deviceCtaCount);
+  DevReqs r{pool, pool, pool, true, true};
+  return r;
 }
 
 // Launched grid CTA count: the size-adaptive ladder (or an NCCL_GIN_ANVIL_RS_CTAS
@@ -190,14 +192,17 @@ GIN_SDMA_RS_HD inline int reduceScatterGridCtas(size_t totalBytes, size_t envCta
   return (c > poolCtas) ? poolCtas : c;
 }
 
-// Bytes of scratch-window the SDMA-scatter tier needs: N incoming per-source
-// slots, rounded up to the 128 B resource-buffer granularity. Zero if the
-// input is zero.
-GIN_SDMA_RS_HD inline size_t reduceScatterScratchBytes(size_t maxSendBytesPerRank) {
-  if (maxSendBytesPerRank == 0) return 0;
-  return (maxSendBytesPerRank + 127) & ~(size_t)127;
+// Round a byte count up to the 128 B resource-buffer granularity. Zero stays zero.
+GIN_SDMA_RS_HD inline size_t reduceScatterScratchBytes(size_t bytes) {
+  if (bytes == 0) return 0;
+  return (bytes + 127) & ~(size_t)127;
 }
 
+// Scratch window the SDMA-scatter tier registers: nRanks slots of up to slotMax
+// bytes. The 128 B rounding applies once to the whole window, not per slot:
+// slot s lives at s * sliceBytes, packed back to back, and sdmaScratchFits
+// checks the unrounded sliceBytes * nRanks against this. Zero on a zero input
+// or a multiply that would wrap.
 GIN_SDMA_RS_HD inline size_t reduceScatterSdmaScratchBytes(int nRanks, size_t slotMax) {
   if (nRanks <= 0 || slotMax == 0) return 0;
   if (slotMax > (size_t)-1 / (size_t)nRanks) return 0;
@@ -222,13 +227,17 @@ GIN_SDMA_RS_HD inline void bandwidthGBps(size_t perRankCount, int typeSize, doub
 //
 // Deliberately NOT wrapped in `#if !defined(__HIP_DEVICE_COMPILE__)`. HIP parses
 // the whole translation unit in the device pass, including the bodies of host
-// functions it will not codegen, so hiding these there breaks name lookup in
-// ReduceScatterParseCtasEnv and fails the reduce_scatter_perf build on every
-// arch. Plain `inline` is already host-only. Note gin_sdma_allgather_policy.h
-// does the opposite: it guards parseAllGatherCtasEnv, and all_gather.cu works
-// around that guard with a __HIP_DEVICE_COMPILE__ branch.
+// functions it will not codegen, so hiding these there breaks name lookup in any
+// host caller in a .cu file and fails that build on every arch. Plain `inline`
+// is already host-only. Note gin_sdma_allgather_policy.h does the opposite: it
+// guards parseAllGatherCtasEnv, and all_gather.cu works around that guard with a
+// __HIP_DEVICE_COMPILE__ branch.
 
-// Parse NCCL_GIN_ANVIL_RS_CTAS. Returns kThresholdUnset for null/empty/negative/
+// Diagnostic CTA pin for -D 3. A pin below kReduceScatterSdmaCtaCeil selects the
+// SDMA-scatter tier.
+static constexpr char kReduceScatterCtasEnv[] = "NCCL_GIN_ANVIL_RS_CTAS";
+
+// Parse kReduceScatterCtasEnv. Returns kThresholdUnset for null/empty/negative/
 // trailing-garbage so "8foo" and "-2" do not pin a CTA count. strtoull wraps a
 // leading '-' into a huge unsigned, which the CTA clamp would then honor.
 inline size_t parseReduceScatterCtasEnvString(const char* e) {
@@ -244,7 +253,7 @@ inline size_t parseReduceScatterCtasEnvString(const char* e) {
   return (size_t)v;
 }
 
-inline size_t parseReduceScatterCtasEnv(const char* name) {
+inline size_t parseReduceScatterCtasEnv(const char* name = kReduceScatterCtasEnv) {
   return parseReduceScatterCtasEnvString(getenv(name));
 }
 
