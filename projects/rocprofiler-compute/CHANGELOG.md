@@ -20,6 +20,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Scalar data cache utilization, latency, stall rate, and bandwidth.
   * GL1 request latency.
 
+* Added PC sampling counts per source line to `rocprof-compute analyze --output-format csv`. Beside each captured source file, `<file>_pc_sampling.csv` lists every line of the file with the samples of the instructions compiled from it, and where those instructions sit in the per-kernel ISA files.
+
 ### Changed
 
 * Improved the standalone roofline HTML kernel hover tooltip: it now shows the limiting roof, percent of roofline, achieved and peak bandwidth per memory level, dispatch count and share of total application dispatches, and kernel duration and share of total application time. Kernel names longer than 200 characters are truncated in the sidebar, with the full name shown on hover.

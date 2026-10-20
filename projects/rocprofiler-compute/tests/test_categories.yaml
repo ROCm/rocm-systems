@@ -33,6 +33,7 @@ test_categories:
       - test_code_object_analysis
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
+      - test_per_source_line_export
       - test_rocpd_data
       - test_L1_cache_counters
       - test_roofline_calc
@@ -128,6 +129,7 @@ test_categories:
       - test_code_object_analysis
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
+      - test_per_source_line_export
       - test_pc_sampling_analysis
       - test_pc_sampling_analyze_cli
       - test_file_io
@@ -227,6 +229,7 @@ test_categories:
       - test_code_object_analysis
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
+      - test_per_source_line_export
       - test_pc_sampling_analysis
       - test_pc_sampling_analyze_cli
       - test_file_io
@@ -326,6 +329,7 @@ test_categories:
       - test_code_object_analysis
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
+      - test_per_source_line_export
       - test_pc_sampling_analysis
       - test_pc_sampling_analyze_cli
       - test_file_io

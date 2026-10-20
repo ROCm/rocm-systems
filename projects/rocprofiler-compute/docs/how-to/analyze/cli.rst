@@ -705,7 +705,7 @@ format is ``stdout``.
 * ``csv`` format:
    * Generate a folder named ``rocprof_compute_<uuid>`` in the current working directory.
    * This folder contains one CSV file per view defined in the :ref:`analysis database schema <analysis-database>`.
-   * For a PC-sampled workload it also holds each kernel's disassembly and source; see :ref:`pc-sampling-per-kernel-csv`.
+   * For a PC-sampled workload it also holds each kernel's disassembly and source, and the samples per source line; see :ref:`pc-sampling-per-kernel-csv` and :ref:`pc-sampling-per-source-line-csv`.
    * This is useful for further programmatic analysis of analysis reports.
    * NOTE: This option will disable output of analysis report to terminal.
 

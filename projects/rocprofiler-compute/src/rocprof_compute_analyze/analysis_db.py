@@ -6,7 +6,7 @@ import json
 import re
 import warnings
 from pathlib import Path
-from typing import Any, NamedTuple, Optional
+from typing import Any, List, NamedTuple, Optional
 
 import numpy as np
 import pandas as pd
@@ -27,6 +27,10 @@ from pc_sampling.pc_sampling_analysis import (
 from pc_sampling.per_kernel_isa_export import (
     WorkloadIsaExport,
     export_per_kernel_isa_files,
+)
+from pc_sampling.per_source_line_export import (
+    WorkloadSourceLineExport,
+    export_per_source_line_files,
 )
 from pc_sampling.source_snapshot_analysis import (
     SourceFrame,
@@ -481,6 +485,12 @@ class db_analysis(OmniAnalyze_Base):
                 csv_result_directory=csv_result_folder,
                 workload_isa_exports=self._build_workload_isa_exports(workload_objs),
             )
+            export_per_source_line_files(
+                export_directory=per_kernel_folder,
+                workload_source_line_exports=(
+                    self._build_workload_source_line_exports(workload_objs)
+                ),
+            )
             Database.write_csv_dir(csv_result_folder)
             export_source_snapshot_files(
                 workload_source_snapshots=workload_source_snapshots,
@@ -510,6 +520,26 @@ class db_analysis(OmniAnalyze_Base):
                 )
             )
         return workload_isa_exports
+
+    @staticmethod
+    def _build_workload_source_line_exports(
+        workload_objs: List[orm.Workload],
+    ) -> List[WorkloadSourceLineExport]:
+        """Pair each workload's stall reasons with its source line rows."""
+        stall_reasons_by_workload = Database.get_stall_reasons_by_workload()
+        workload_source_line_exports = []
+        for workload_obj in workload_objs:
+            stall_reasons = stall_reasons_by_workload.get(workload_obj.workload_id, [])
+            workload_source_line_exports.append(
+                WorkloadSourceLineExport(
+                    workload_id=workload_obj.workload_id,
+                    stall_reasons=stall_reasons,
+                    source_line_rows=Database.stream_per_source_line_rows(
+                        workload_obj.workload_id, stall_reasons
+                    ),
+                )
+            )
+        return workload_source_line_exports
 
     def run_analysis_metrics(
         self,
