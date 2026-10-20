@@ -18,6 +18,8 @@ struct ncclGroupJob;
 
 extern std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobAbort;
 
+extern std::function<ncclResult_t(struct ncclGroupJob*)> g_ncclGroupJobComplete;
+
 extern std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclCollPreconnect;
 
 extern std::function<ncclResult_t(struct ncclComm*, int)> g_doLaunches;
