@@ -591,61 +591,21 @@ class OmniSoC_Base:
     def _iter_arch_analysis_yaml_metrics(
         self,
     ) -> Iterator[tuple[str, Any, int, str, str]]:
-        """Iterate analysis_configs/<arch> YAML metric_table rows.
+        """Iterate the metrics of this arch's analysis configs.
 
-        Yields:
-            stem_id     YAML filename prefix (e.g. "2" from "2_SQ.yaml")
-            panel_id    metric_table "id" field (may be None)
-            metric_idx  zero-based index of the metric within its table
-            metric_name metric key string
-            metric_yaml metric body serialised as YAML text
+        Block 30 is skipped unless --membw-analysis is set. See
+        iter_analysis_config_metrics for what each item holds.
         """
         args = self.get_args()
         arch = self.__arch
         if not arch:
             return
-        config_root = Path(args.config_dir) / (canonical_config_arch(arch) or arch)
-        if not config_root.is_dir():
-            return
         exclude: set[str] = set()
         if not args.membw_analysis:
             exclude.add(str(MEMBW_ANALYSIS_PANEL_ID))
-
-        for ypath in sorted(config_root.glob("*.yaml")):
-            stem_id = ypath.name.split("_")[0]
-            if stem_id in exclude:
-                continue
-            try:
-                with open(ypath, encoding="utf-8") as stream:
-                    doc = yaml.safe_load(stream)
-            except (OSError, UnicodeError, yaml.YAMLError):
-                continue
-            if not isinstance(doc, dict):
-                continue
-            panel_cfg = doc.get("Panel Config")
-            if not isinstance(panel_cfg, dict):
-                continue
-            sources = panel_cfg.get("data source")
-            if not isinstance(sources, list):
-                continue
-            for section in sources:
-                if not isinstance(section, dict) or "metric_table" not in section:
-                    continue
-                mt = section["metric_table"]
-                if not isinstance(mt, dict):
-                    continue
-                metrics = mt.get("metric")
-                if not isinstance(metrics, dict):
-                    continue
-                panel_id = mt.get("id")
-                for idx, (metric_name, metric_body) in enumerate(metrics.items()):
-                    try:
-                        metric_text = yaml.dump(
-                            metric_body, sort_keys=False, allow_unicode=True
-                        )
-                    except (TypeError, yaml.YAMLError):
-                        continue
-                    yield stem_id, panel_id, idx, metric_name, metric_text
+        yield from iter_analysis_config_metrics(
+            Path(args.config_dir) / (canonical_config_arch(arch) or arch), exclude
+        )
 
     def get_rocprof_supported_counters(self) -> set[str]:
         args = self.get_args()
@@ -913,3 +873,55 @@ def flat_counters_in_perfmon_file(counter_file: CounterFile) -> list[str]:
         for block_name in counter_file.blocks
         for ctr in counter_file.blocks[block_name].elements
     ]
+
+
+def iter_analysis_config_metrics(
+    config_root: Path, exclude_file_ids: set[str]
+) -> Iterator[tuple[str, Any, int, str, str]]:
+    """Iterate the metric_table rows of the analysis config YAML files in
+    config_root, skipping files whose id is in exclude_file_ids.
+
+    Yields:
+        stem_id     YAML filename prefix (e.g. "2" from "2_SQ.yaml")
+        panel_id    metric_table "id" field (may be None)
+        metric_idx  zero-based index of the metric within its table
+        metric_name metric key string
+        metric_yaml metric body serialised as YAML text
+    """
+    if not config_root.is_dir():
+        return
+    for ypath in sorted(config_root.glob("*.yaml")):
+        stem_id = ypath.name.split("_")[0]
+        if stem_id in exclude_file_ids:
+            continue
+        try:
+            with open(ypath, encoding="utf-8") as stream:
+                doc = yaml.safe_load(stream)
+        except (OSError, UnicodeError, yaml.YAMLError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        panel_cfg = doc.get("Panel Config")
+        if not isinstance(panel_cfg, dict):
+            continue
+        sources = panel_cfg.get("data source")
+        if not isinstance(sources, list):
+            continue
+        for section in sources:
+            if not isinstance(section, dict) or "metric_table" not in section:
+                continue
+            mt = section["metric_table"]
+            if not isinstance(mt, dict):
+                continue
+            metrics = mt.get("metric")
+            if not isinstance(metrics, dict):
+                continue
+            panel_id = mt.get("id")
+            for idx, (metric_name, metric_body) in enumerate(metrics.items()):
+                try:
+                    metric_text = yaml.dump(
+                        metric_body, sort_keys=False, allow_unicode=True
+                    )
+                except (TypeError, yaml.YAMLError):
+                    continue
+                yield stem_id, panel_id, idx, metric_name, metric_text
