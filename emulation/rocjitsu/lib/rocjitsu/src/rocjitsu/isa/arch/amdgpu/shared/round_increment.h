@@ -28,6 +28,8 @@ constexpr Mask rounds_up(uint32_t round_mode, const Mask &negative, V kept, V re
   case 2:
     return rest != zero && negative;
   default:
+    // Toward zero never rounds up; the self-comparison builds a false of the
+    // caller's scalar or SIMD mask type.
     return rest != rest;
   }
 }

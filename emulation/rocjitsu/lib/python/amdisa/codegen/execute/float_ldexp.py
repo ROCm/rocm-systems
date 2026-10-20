@@ -46,7 +46,8 @@ def _template_args(dtype: str) -> str:
 
 def operation_expr(dtype: str, policy: str = POLICY) -> str:
     """Capture the policy in an operation; it applies no instruction modifiers,
-    but the policy's OMOD flag decides whether a tiny result flushes."""
+    but the policy's flush_tiny, set by effective OMOD or disabled output
+    denormals, decides whether a tiny result flushes."""
     return f'amdgpu::ldexp::Operation<{_template_args(dtype)}>{{{policy}}}'
 
 

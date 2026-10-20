@@ -2508,11 +2508,6 @@ def _ldexp_result(
         omod = f'{output_policy}.omod != 0'
     elif destination and dtype == 'f16':
         omod = f'{_SDWA_F16_OMOD} != 0'
-        if ctx.instruction_name not in SDWA_ROUNDED_F16_OPS:
-            raise ValueError(
-                f'{ctx.instruction_name or "instruction"} sets effective OMOD for F16 SDWA '
-                'but is not in SDWA_ROUNDED_F16_OPS; the store will not scale the result'
-            )
     else:
         omod = 'false'
     declaration = float_ldexp.policy_decl(dtype, omod)

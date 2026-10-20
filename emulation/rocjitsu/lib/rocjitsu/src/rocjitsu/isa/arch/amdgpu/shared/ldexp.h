@@ -58,9 +58,10 @@ struct Policy {
   bool saturate = false;
 
   /// @brief Build the LDEXP policy from MODE, overflow saturation, and effective OMOD.
-  /// @details Reads the format's MODE.FP_DENORM and MODE.FP_ROUND fields. A tiny
-  /// result flushes when effective OMOD is enabled, ensuring OMOD sees only +0 for
-  /// values that are tiny at full precision but round up to the smallest normal.
+  /// @details Reads the format's MODE.FP_DENORM and MODE.FP_ROUND fields. Either
+  /// effective OMOD or disabled output denormals sets flush_tiny, which replaces a
+  /// result that is tiny at full precision with a zero of the source's sign; the
+  /// OMOD stage then scales that signed zero to +0.
   /// @param saturate Overflow gives the largest finite value (FP16_OVFL for F16).
   /// @param omod Effective OMOD is enabled (gfx1201 probe, all three formats).
   /// Callers must pass it: the OMOD stage sees only the rounded result, and a tiny
@@ -198,7 +199,8 @@ constexpr V evaluate(V bits, V exponent, const Policy &policy) {
 
 /// @brief LDEXP with its MODE and effective-OMOD policy.
 /// @details Independent of ABS/NEG and CLAMP, and applies no OMOD scaling; the
-/// policy's omod flag only decides whether a tiny result flushes.
+/// policy's flush_tiny, set by effective OMOD or disabled output denormals, only
+/// decides whether a tiny result flushes.
 template <typename Fmt, unsigned ExponentWidth = Fmt::kWidth> struct Operation {
   Policy policy;
 
