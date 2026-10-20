@@ -35,6 +35,9 @@ public:
     void reset()
     {
         enabled.fill(true);
+        // Semantic marker decoding is opt-in: legacy consumers already receive
+        // the raw shaderdata and should not pay to decode it a second time.
+        enabled[ROCPROFILER_THREAD_TRACE_DECODER_RECORD_MARKER] = false;
         flags.fill(ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REQUEST_FLAGS_NONE);
     }
 

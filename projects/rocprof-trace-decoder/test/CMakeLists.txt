@@ -10,7 +10,9 @@ project(
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_BUILD_TYPE RelWithDebInfo)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo)
+endif()
 
 option(UNIT_TESTS "Build unit tests" ON)
 option(BUILD_INTEGRATION_TESTS "Build integration tests" ON)

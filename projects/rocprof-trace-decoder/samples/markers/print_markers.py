@@ -10,7 +10,7 @@ from marker_common import (
     marker_selected,
     marker_time,
 )
-from rocprof_trace_decoder import MarkerFlags, MarkerRecordKind
+from rocprof_trace_decoder import MarkerFlags, MarkerKind
 
 
 def main() -> int:
@@ -28,14 +28,6 @@ def main() -> int:
                 f"cu={marker.shaderdata.cu} simd={marker.shaderdata.simd} "
                 f"wave={marker.shaderdata.wave_id}"
             )
-            if marker.record_kind == MarkerRecordKind.PAYLOAD:
-                print(
-                    f"{time:12d} {location} "
-                    f"payload[{marker.payload_index}/{marker.payload_count}]="
-                    f"0x{marker.shaderdata.value:08x} {marker_name(marker, args)}"
-                )
-                continue
-
             flags = []
             if marker.marker_flags & MarkerFlags.NEW_WAVE:
                 flags.append("new-wave")
@@ -43,11 +35,24 @@ def main() -> int:
                 flags.append("exit")
             if marker.marker_flags & MarkerFlags.ENTER:
                 flags.append("enter")
+            if marker.marker_flags & MarkerFlags.INCOMPLETE:
+                flags.append("incomplete")
+            kind = (
+                marker.marker_kind.name.lower()
+                if isinstance(marker.marker_kind, MarkerKind)
+                else f"unknown({marker.marker_kind})"
+            )
             print(
                 f"{time:12d} {location} "
-                f"id={marker.marker_id} kind={marker.marker_kind.name.lower()} "
+                f"id={marker.marker_id} kind={kind} "
                 f"flags={','.join(flags) or '-'} {marker_name(marker, args)}"
             )
+            for index, payload in enumerate(marker.payload):
+                print(
+                    "    "
+                    f"payload[{index}/{marker.metadata.payload_count}]="
+                    f"0x{payload:08x}"
+                )
     return 0
 
 

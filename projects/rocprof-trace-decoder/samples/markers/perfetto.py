@@ -12,16 +12,14 @@ from marker_common import (
     marker_time,
     prepare_output_dir,
 )
-from rocprof_trace_decoder import MarkerFlags, MarkerKind, MarkerRecordKind
+from rocprof_trace_decoder import MarkerFlags, MarkerKind
 
 
 def trace_events(markers, args=None, clock_rate_ghz: float | None = None) -> list[dict]:
     events = []
     depths: dict[tuple[int, int], int] = {}
     last_base = {}
-    for marker in sorted(markers, key=marker_time):
-        if marker.record_kind != MarkerRecordKind.HEADER:
-            continue
+    for marker in markers:
         if not marker_selected(marker, args):
             continue
         time = marker_time(marker)

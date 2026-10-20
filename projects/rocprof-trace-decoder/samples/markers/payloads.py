@@ -11,7 +11,7 @@ from marker_common import (
     marker_selected,
     marker_time,
 )
-from rocprof_trace_decoder import MarkerRecordKind
+from rocprof_trace_decoder import MarkerFlags
 
 
 def main() -> int:
@@ -22,26 +22,27 @@ def main() -> int:
     rows = []
     for trace in load_marker_traces(args):
         for marker in trace.records.markers:
-            if marker.record_kind != MarkerRecordKind.PAYLOAD:
-                continue
             if not marker_selected(marker, args):
                 continue
-            rows.append(
-                {
-                    "trace": str(trace.path),
-                    "time": marker_time(marker),
-                    "code_object_id": marker.code_object_id,
-                    "marker_id": marker.marker_id,
-                    "name": marker_name(marker, args),
-                    "source_location": marker.source_location,
-                    "cu": marker.shaderdata.cu,
-                    "simd": marker.shaderdata.simd,
-                    "wave_id": marker.shaderdata.wave_id,
-                    "payload_index": marker.payload_index,
-                    "payload_count": marker.payload_count,
-                    "value": marker.shaderdata.value,
-                }
-            )
+            for index, payload in enumerate(marker.payload):
+                rows.append(
+                    {
+                        "trace": str(trace.path),
+                        "marker_time": marker_time(marker),
+                        "code_object_id": marker.code_object_id,
+                        "marker_id": marker.marker_id,
+                        "name": marker_name(marker, args),
+                        "source_location": marker.source_location,
+                        "cu": marker.shaderdata.cu,
+                        "simd": marker.shaderdata.simd,
+                        "wave_id": marker.shaderdata.wave_id,
+                        "payload_index": index,
+                        "payload_count": marker.payload_count,
+                        "declared_payload_count": marker.metadata.payload_count,
+                        "incomplete": bool(marker.marker_flags & MarkerFlags.INCOMPLETE),
+                        "value": payload,
+                    }
+                )
     print(json.dumps(rows, indent=2))
     return 0
 

@@ -53,6 +53,12 @@ typedef enum
 
 /**
  * @brief Callback for rocprofiler to return traces back to rocprofiler.
+ *
+ * Return SUCCESS to continue delivery. The first non-success status stops
+ * further callbacks and is returned by the parse or quick-scan call.
+ * Record pointers and referenced storage are valid during the callback. Copy
+ * data that must outlive it unless the record type documents a longer lifetime.
+ *
  * @param[in] trace_type_id One of rocprofiler_thread_trace_decoder_record_type_t
  * @param[in] trace_events A pointer to sequence of events, of size trace_size.
  * @param[in] trace_size The number of events in the trace.
@@ -174,16 +180,23 @@ typedef struct
 } rocprof_trace_decoder_handle_t;
 
 /**
- * The decoder supports two mutually exclusive modes for ISA resolution during trace parsing.
- * Only one needs to be configured before calling rocprof_trace_decoder_parse():
+ * Wave instruction decoding uses a custom ISA callback when one is set, or the
+ * decoder's built-in disassembly otherwise:
  *
- * **Mode 1 — Built-in disassembly (requires COMGR):**
- *   Load code objects via rocprof_trace_decoder_codeobj_load(). The decoder uses COMGR
- *   internally to disassemble instructions. No ISA callback is needed.
+ * **Mode 1 — Built-in disassembly:**
+ *   Load code objects via rocprof_trace_decoder_codeobj_load(). No ISA callback is needed.
  *
  * **Mode 2 — Custom ISA callback:**
  *   Set a callback via rocprof_trace_decoder_set_isa_callback(). The decoder calls it
- *   for every instruction encountered during parsing. No code objects need to be loaded.
+ *   for instructions needed by wave decoding.
+ *
+ * MARKER records require the trace's code objects to be loaded in either mode:
+ * shaderdata is decoded only for waves whose code object has a .sqtt_funcmap
+ * section. Metadata loading works without built-in disassembly. When WAVE
+ * records are disabled, parsing does not require an ISA source.
+ *
+ * Configure the handle before parsing. Setters, code-object load/unload, and
+ * handle destruction must not be called on the same handle from its callbacks.
  */
 
 /**
@@ -205,18 +218,21 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t
 rocprof_trace_decoder_destroy_handle(rocprof_trace_decoder_handle_t handle);
 
 /**
- * @brief Loads a code object for the decoder's built-in disassembly (Mode 1).
+ * @brief Loads a code object's ELF data for marker metadata and optional disassembly.
  *
- * Not required when using a custom ISA callback (Mode 2).
+ * Available without built-in disassembly. The decoder copies the data and uses
+ * its marker metadata in subsequent parses, including those with a custom ISA
+ * callback.
  *
  * @param[in] handle The decoder handle.
  * @param[in] load_id Unique load identifier for the code object.
  * @param[in] load_addr Load address (base virtual address) of the code object.
- * @param[in] load_size Memory size of the loaded code object.
+ * @param[in] load_size Nonzero memory size of the loaded code object.
  * @param[in] data Pointer to the code object ELF data.
  * @param[in] data_size Size of the code object data in bytes.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
- * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED if COMGR is not available.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT for an invalid handle,
+ * null/empty data, or an invalid load-address range.
  * @retval
  * ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
  */
@@ -234,7 +250,7 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
  * @param[in] handle The decoder handle.
  * @param[in] load_id The load identifier of the code object to unload.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
- * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED if COMGR is not available.
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT for an invalid handle.
  * @retval
  * ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.
  */
@@ -245,8 +261,9 @@ rocprof_trace_decoder_codeobj_unload(rocprof_trace_decoder_handle_t handle, uint
  * @brief Sets a custom ISA callback for trace parsing (Mode 2).
  *
  * When set, the decoder uses this callback for all ISA resolution instead of
- * the built-in COMGR disassembly. Code objects do not need to be loaded.
- * Set callback to NULL to revert to built-in disassembly (Mode 1).
+ * the built-in disassembly. Load code objects separately when marker metadata is
+ * needed. Set callback to NULL to revert to built-in disassembly (Mode 1); no
+ * disassembly is required if WAVE records are disabled.
  *
  * @param[in] handle The decoder handle.
  * @param[in] callback The ISA callback, or NULL to use built-in disassembly.
@@ -280,11 +297,21 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 /**
  * @brief Replaces the enabled callback record set for subsequent parses.
  *
- * NULL restores all record types with
- * pooled delivery. A non-NULL filter
- * replaces the enabled set; the decoder copies its request array.
- * IMMEDIATE is
- * supported for shaderdata, occupancy, realtime, and marker records.
+ * NULL restores the default record set (all types except MARKER) and default
+ * delivery. Semantic MARKER decoding is opt-in. A non-NULL filter replaces the
+ * enabled set; an empty set disables all callbacks. The decoder copies the
+ * requests, so the caller may release them after this call returns. The filter
+ * applies to subsequent parse and quick-scan calls on this handle.
+ *
+ * Initialize the filter and each request's size to sizeof its structure. Larger
+ * structures are accepted and unknown trailing fields are ignored. Array entries
+ * must be spaced by each entry's size in bytes. Unknown record types, duplicate
+ * types, unsupported flags, and undersized structures are
+ * rejected with INVALID_ARGUMENT, leaving the previous filter unchanged.
+ *
+ * IMMEDIATE is supported for shaderdata, occupancy, realtime, and marker
+ * records. These records are otherwise pooled. Other record types retain
+ * their existing delivery behavior.
  *
  * Immediate occupancy records may precede delayed code-object attribution and
  * therefore retain code_object_id zero.
@@ -296,8 +323,10 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
 /**
  * @brief Parses a buffer of thread trace data (V2 API).
  *
- * Requires either loaded code objects (Mode 1) or a custom ISA callback (Mode 2)
- * to be configured on the handle before calling. See @ref decoder_handle for details.
+ * When WAVE records are enabled, configure either loaded code objects for
+ * built-in disassembly (Mode 1) or a custom ISA callback (Mode 2).
+ * Other records, including markers, can be parsed without ISA resolution. Load
+ * code objects to provide their marker metadata. See @ref decoder_handle for details.
  *
  * @param[in] handle The decoder handle.
  * @param[in] data Pointer to the shader engine trace data.
@@ -305,8 +334,8 @@ ROCPROF_TRACE_DECODER_API rocprofiler_thread_trace_decoder_status_t rocprof_trac
  * @param[in] trace_callback Callback invoked for each decoded record.
  * @param[in] userdata Userdata passed back to caller via trace_callback.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS on success.
- * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED if no ISA source is
- * configured (no COMGR and no ISA callback set).
+ * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_NOT_IMPLEMENTED if WAVE records are
+ * enabled without a disassembly backend or custom ISA callback.
  * @retval ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_SHADER_DATA on malformed input.
  * @retval
  * ::ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR on generic error.

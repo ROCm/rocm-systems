@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from marker_common import add_marker_args, load_marker_traces, marker_selected, marker_time
-from rocprof_trace_decoder import MarkerRecordKind
+from rocprof_trace_decoder import MarkerFlags
 
 
 @dataclass
@@ -67,16 +67,22 @@ def infer_wave_size(kind: str, is_64bit: bool | None, payload_count: int) -> int
     return wave_size if wave_size in (32, 64) else 0
 
 
-def decode_block(header, payloads) -> AddressTrace | None:
+def decode_block(header) -> AddressTrace | None:
     matched = match_kind(header.name)
     if matched is None:
         return None
     kind, is_64bit = matched
-    wave_size = infer_wave_size(kind, is_64bit, header.payload_count)
-    if not wave_size or len(payloads) != header.payload_count:
+    wave_size = infer_wave_size(kind, is_64bit, header.metadata.payload_count)
+    if (
+        not wave_size
+        or header.metadata.wave_size not in (0, wave_size)
+        or header.marker_flags & MarkerFlags.INCOMPLETE
+        or header.payload_count != header.metadata.payload_count
+        or len(header.payload) != header.payload_count
+    ):
         return None
 
-    values = [payload.shaderdata.value & 0xFFFFFFFF for payload in payloads]
+    values = header.payload
     exec_mask = values[0] | (values[1] << 32)
     values = values[2:]
     addresses: list[int] = []
@@ -116,31 +122,13 @@ def decode_block(header, payloads) -> AddressTrace | None:
 
 
 def decode_address_traces(markers, args) -> list[AddressTrace]:
-    active = {}
     traces = []
     for marker in markers:
         if not marker_selected(marker, args):
             continue
-        key = (
-            marker.code_object_id,
-            marker.shaderdata.cu,
-            marker.shaderdata.simd,
-            marker.shaderdata.wave_id,
-            marker.marker_id,
-        )
-        if marker.record_kind == MarkerRecordKind.HEADER:
-            if match_kind(marker.name) is not None and marker.payload_count:
-                active[key] = (marker, [None] * marker.payload_count)
-            continue
-        block = active.get(key)
-        if block is None or marker.payload_index >= len(block[1]):
-            continue
-        block[1][marker.payload_index] = marker
-        if all(payload is not None for payload in block[1]):
-            trace = decode_block(block[0], block[1])
-            if trace is not None:
-                traces.append(trace)
-            del active[key]
+        trace = decode_block(marker)
+        if trace is not None:
+            traces.append(trace)
     return traces
 
 
