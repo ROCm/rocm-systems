@@ -1553,26 +1553,46 @@ iterate_hsa_executables()
     // HSA has not been initialized yet
     if(!get_loader_table().hsa_ven_amd_loader_iterate_executables) return;
 
+    // block hsa_executable_destroy while this function is executing
+    auto _lk = std::unique_lock{get_destroy_mutex()};
+
+    auto _executables = executable_array_t{};
+    // Replaying a previously unseen kernel inside this callback deadlocks. ROCr's
+    // AmdHsaCodeLoader::IterateExecutables holds the loader's writer lock while invoking callbacks
+    // (projects/rocr-runtime/runtime/hsa-runtime/loader/executable.cpp:432–437).
+    // executable_freeze_internal then reaches get_kernel_descriptor →
+    // hsa_ven_amd_loader_query_host_address → FindHostAddress, which requests a reader lock on the
+    // same non-recursive lock. Late rocprofiler_force_configure() therefore never returns. Collect
+    // handles in the iterator callback and replay afterward, with synchronization that prevents
+    // executable destruction during replay.
+    //
+    // Thus, we acquire the destroy mutex before iterating and operating on the executables to
+    // prevent them from being destroyed while this function runs.
     auto ret = get_loader_table().hsa_ven_amd_loader_iterate_executables(
-        [](hsa_executable_t executable, void* /*data*/) -> hsa_status_t {
+        [](hsa_executable_t executable, void* data) -> hsa_status_t {
             constexpr auto null_hsa_executable = hsa_executable_t{0};
-            auto           _status             = HSA_STATUS_SUCCESS;
             if(executable != null_hsa_executable)
-            {
-                if(auto _ret = executable_freeze_internal(executable); _ret != HSA_STATUS_SUCCESS)
-                {
-                    ROCP_WARNING << fmt::format(
-                        "Failed to parse code object info for hsa_executable_t{{.handle={}}}: "
-                        "ec={} :: {}",
-                        executable.handle,
-                        static_cast<std::underlying_type_t<hsa_status_t>>(_ret),
-                        get_status_string(_ret));
-                    _status = _ret;
-                }
-            }
-            return _status;
+                static_cast<executable_array_t*>(data)->emplace_back(executable);
+            return HSA_STATUS_SUCCESS;
         },
-        nullptr);
+        &_executables);
+
+    for(auto exe : _executables)
+    {
+        auto _state  = HSA_EXECUTABLE_STATE_UNFROZEN;
+        auto _status = ::rocprofiler::hsa::get_core_table()->hsa_executable_get_info_fn(
+            exe, HSA_EXECUTABLE_INFO_STATE, &_state);
+        if(_status == HSA_STATUS_SUCCESS && _state == HSA_EXECUTABLE_STATE_FROZEN)
+        {
+            auto _ret = executable_freeze_internal(exe);
+            ROCP_WARNING_IF(_ret != HSA_STATUS_SUCCESS) << fmt::format(
+                "Failed to parse code object info for hsa_executable_t{{.handle={}}}: "
+                "ec={} :: {}",
+                exe.handle,
+                static_cast<std::underlying_type_t<hsa_status_t>>(_ret),
+                get_status_string(_ret));
+        }
+    }
 
     ROCP_WARNING_IF(ret != HSA_STATUS_SUCCESS)
         << fmt::format("Failed to iterate HSA executables for code object information: {}",
