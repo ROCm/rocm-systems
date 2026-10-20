@@ -157,7 +157,11 @@ TestEvtNotifReadWrite::TestEvtNotifReadWrite() : TestBase() {
   set_title("AMDSMI Event Notification Read/Write Test");
   set_description(
       "The Event Notification Read/Write tests verifies that "
-      "we can configure to collect various event types and then read them");
+      "we can configure to collect various event types and then read them, and checks the "
+      "fields of each event. "
+      "Set AMDSMI_TEST_TRIGGER_RESET=1 (as root) to also reset each GPU and require the "
+      "GPU_PRE_RESET and GPU_POST_RESET events. A reset is destructive, so it is off by "
+      "default.");
 }
 
 TestEvtNotifReadWrite::~TestEvtNotifReadWrite(void) {}

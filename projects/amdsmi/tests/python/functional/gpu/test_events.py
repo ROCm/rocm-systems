@@ -307,6 +307,11 @@ class TestGpuEvents(unittest.TestCase):
         return problems
 
     def test_gpu_event(self):
+        """Read every event type and check each event's fields.
+
+        Set AMDSMI_TEST_TRIGGER_RESET=1 as root to also reset each GPU and require the
+        GPU_PRE_RESET and GPU_POST_RESET events. A reset is destructive, so it is off by default.
+        """
         self.common.print_func_name("")
 
         # Opt-in: amdsmi_reset_gpu() is destructive and needs root, so only run it
