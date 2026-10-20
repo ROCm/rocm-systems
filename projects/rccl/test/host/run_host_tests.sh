@@ -170,6 +170,11 @@ do_host_tests() {
     "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
     "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
     "rccl-UnitTestsMicroDdaIpc:$SCRIPT_DIR/host_tests_micro_dda_ipc.xml"
+    "rccl-UnitTestsMicroRoctxNvml:$SCRIPT_DIR/host_tests_micro_roctx_nvml.xml"
+    # Standalone-only: roctx.cc's ROCTX_ENABLE arm.
+    "rccl-UnitTestsMicroRoctxNvml-roctx:$SCRIPT_DIR/host_tests_micro_roctx_nvml_roctx.xml"
+    "rccl-UnitTestsMicroRocmwrap:$SCRIPT_DIR/host_tests_micro_rocmwrap.xml"
+    "rccl-UnitTestsMicroAmdsmiWrap:$SCRIPT_DIR/host_tests_micro_amdsmi_wrap.xml"
     "rccl-UnitTestsMicroRomeModels:$SCRIPT_DIR/host_tests_micro_rome_models.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
     "rccl-UnitTestsMicroGraph:$SCRIPT_DIR/host_tests_micro_graph.xml"
