@@ -73,6 +73,6 @@ initialize(RocAttachDispatchTable* table);
 // this function is used to iterate over all loaded HSA executables and make sure the code object
 // and kernel symbol information is passed to the all active contexts if they haven't been already
 void
-iterate_hsa_executables();
+report_code_object_data();
 }  // namespace code_object
 }  // namespace rocprofiler

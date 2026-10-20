@@ -1201,7 +1201,7 @@ executable_destroy(hsa_executable_t executable)
 {
     // destroy mutex is recursive so it is safe for executable_destroy_internal to acquire it.
     // this higher level lock was introduced to prevent the internal HSA executable_destroy
-    // (get_destroy_function) from running concurrently with the iterate_hsa_executables function.
+    // (get_destroy_function) from running concurrently with the report_code_object_data function.
     auto _lk = std::unique_lock{get_destroy_mutex()};
 
     // Serialize all executable_destroy calls to prevent:
@@ -1553,7 +1553,7 @@ initialize(RocAttachDispatchTable* attach_table)
 }
 
 void
-iterate_hsa_executables()
+report_code_object_data()
 {
     // HSA has not been initialized yet
     if(!get_loader_table().hsa_ven_amd_loader_iterate_executables) return;
