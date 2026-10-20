@@ -49,6 +49,47 @@ rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
   "int64_t ncclParamIbQpsPerConn() { return g_loadParam(\"IB_QPS_PER_CONNECTION\", 1); }"
   "the IbQpsPerConn fake default")
+# The net_ib_cast fakes copy these names and defaults from production; pin both ends.
+set(_rccl_cast_pins
+  "net_ib_cast/common.cc" "NCCL_PARAM(IbCastSplitDataOnQps, \"IB_SPLIT_DATA_ON_QPS\", 0)"
+    "net_ib_cast_common_fakes.cc" "ncclParamIbCastSplitDataOnQps() { return g_loadParam(\"IB_SPLIT_DATA_ON_QPS\", 0)"
+  "net_ib_cast/common.cc" "NCCL_PARAM(IbCastPrepostReceiveWorkRequests, \"IB_PREPOST_RECEIVE_WORK_REQUESTS\", -2)"
+    "net_ib_cast_common_fakes.cc" "g_loadParam(\"IB_PREPOST_RECEIVE_WORK_REQUESTS\", -2)"
+  "net_ib_cast/common.cc" "NCCL_PARAM(IbCastAsyncEvents, \"IB_RETURN_ASYNC_EVENTS\", 1)"
+    "net_ib_cast_common_fakes.cc" "g_loadParam(\"IB_RETURN_ASYNC_EVENTS\", 1)"
+  "net_ib_cast/common.cc" "RCCL_PARAM(IbCastOptionalRecvCompletion, \"IB_OPTIONAL_RECV_COMPLETION\", 0)"
+    "net_ib_cast_common_fakes.cc" "g_loadParam(\"RCCL_IB_OPTIONAL_RECV_COMPLETION\", 0)"
+  "net_ib_cast/init.cc" "RCCL_PARAM(IbCastQpsPerP2p, \"IB_QPS_PER_P2P\", 0)"
+    "net_ib_cast_init_fakes.cc" "g_loadParam(\"RCCL_IB_QPS_PER_P2P\", 0)"
+  "net_ib_cast/init.cc" "RCCL_PARAM(IbCastP2pDisableCts, \"IB_P2P_DISABLE_CTS\", 1)"
+    "net_ib_cast_init_fakes.cc" "g_loadParam(\"RCCL_IB_P2P_DISABLE_CTS\", 1)"
+  "net_ib_cast/init.cc" "NCCL_PARAM(IbCastOooRq, \"IB_OOO_RQ\", 0)"
+    "net_ib_cast_init_fakes.cc" "g_loadParam(\"IB_OOO_RQ\", 0)"
+  "net_ib_cast/p2p.cc" "NCCL_PARAM(IbCastArThreshold, \"IB_AR_THRESHOLD\", -2)"
+    "net_ib_cast_p2p_fakes.cc" "g_loadParam(\"IB_AR_THRESHOLD\", -2)"
+  "net_ib_cast/p2p.cc" "int64_t IbCastArThreshold = 8192"
+    "net_ib_cast_p2p_fakes.cc" "int64_t IbCastArThreshold = 8192"
+  "net_ib_cast/p2p.cc" "NCCL_PARAM(IbCastReceiverSideMatchingScheme, \"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)"
+    "net_ib_cast_p2p_fakes.cc" "g_loadParam(\"IB_RECEIVER_SIDE_MATCHING_SCHEME\", -2)"
+  "net_ib_cast/p2p.cc" "RCCL_PARAM(IbCastGdrFlushGpuMemNoRelaxedOrdering, \"GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING\", 1)"
+    "net_ib_cast_p2p_fakes.cc" "g_loadParam(\"RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING\", 1)"
+  "net_ib_cast/p2p.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\"}"
+    "net_ib_cast_p2p_fakes.cc" "const char* IbCastReqTypeStr[] = {\"Unused\", \"Send\", \"Recv\", \"Flush\", \"IPut\"}"
+  "net_ib_cast/p2p_resiliency.cc" "NCCL_PARAM(IbCastResiliencyPortFailover, \"IB_RESILIENCY_PORT_FAILOVER\", 0)"
+    "net_ib_cast_p2p_resiliency_fakes.cc" "g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER\", 0)"
+  "net_ib_cast/p2p_resiliency.cc" "NCCL_PARAM(IbCastResiliencyPortFailoverMaxAttempts, \"IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS\", 1)"
+    "net_ib_cast_p2p_resiliency_fakes.cc" "g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER_MAX_ATTEMPTS\", 1)"
+  "net_ib_cast/p2p_resiliency.cc" "NCCL_PARAM(IbCastResiliencyPortFailoverProbeDelay, \"IB_RESILIENCY_PORT_FAILOVER_PROBE_DELAY\", 10)"
+    "net_ib_cast_p2p_resiliency_fakes.cc" "g_loadParam(\"IB_RESILIENCY_PORT_FAILOVER_PROBE_DELAY\", 10)")
+while(_rccl_cast_pins)
+  list(POP_FRONT _rccl_cast_pins _src _prod _fake _copy)
+  rccl_assert_source_line("${_rccl_src_root}/transport/${_src}" "${_prod}" "fakes/${_fake}")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/${_fake}" "${_copy}" "the ${_src} copy")
+endwhile()
+rccl_assert_source_line("${_rccl_src_root}/misc/rocmwrap.cc"
+  "NCCL_PARAM(DmaBufEnable, \"DMABUF_ENABLE\", 1)" "net-ib-cast-connect-test.cc: ncclParamDmaBufEnable()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/net-ib-cast-connect-test.cc"
+  "g_loadParam(\"DMABUF_ENABLE\", 1)" "the rocmwrap.cc DmaBufEnable param")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
@@ -673,6 +714,45 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     fakes/utils_fakes.cc                 # getBusId (alloc.h side stream)
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroNetIbCastQpSharing -- src/transport/net_ib_cast/qp_sharing.cc. Own binary: it
+  # needs the net_ib_cast fakes and include directories that no shared binary links.
+  set(TEST_MICRO_NET_IB_CAST_QP_SHARING_SOURCE_FILES
+    net-ib-cast-qp-sharing-test.cc
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc    # IbCastDevs
+    fakes/os_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real getHostHash/getPidHash
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroNetIbCastConnect -- src/transport/net_ib_cast/connect.cc with the real
+  # qp_sharing.cc. Own binary: no shared binary links the net_ib_cast or socket fakes it needs.
+  set(TEST_MICRO_NET_IB_CAST_CONNECT_SOURCE_FILES
+    net-ib-cast-connect-test.cc
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/ibvwrap_fakes.cc
+    fakes/ionicdvwrap_fakes.cc
+    fakes/libc_fakes.cc
+    fakes/mlx5dvwrap_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/net_ib_cast_common_fakes.cc
+    fakes/net_ib_cast_gdr_fakes.cc
+    fakes/net_ib_cast_init_fakes.cc
+    fakes/net_ib_cast_multiplane_fakes.cc
+    fakes/net_ib_cast_p2p_fakes.cc
+    fakes/net_ib_cast_p2p_resiliency_fakes.cc
+    fakes/os_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/socket_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real getHostHash/getPidHash
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_telemetry.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -1701,6 +1781,35 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDda
     # hipify renames .cu to .cu.cpp
     FABRIC_GPU_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_gpu_barrier.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNetIbCastQpSharing
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastQpSharing
+  SOURCES ${TEST_MICRO_NET_IB_CAST_QP_SHARING_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h, qp_sharing.h
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    NET_IB_CAST_QP_SHARING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_qp_sharing.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNetIbCastConnect
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastConnect
+  SOURCES ${TEST_MICRO_NET_IB_CAST_CONNECT_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast  # common_cast.h, connect_cast.h
+    ${RCCL_HOST_HIPIFY_DIR}/src/transport              # net_ib_limits.h
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # connect_tmp.cc, not connect.cc: graph/connect.cc is listed first in src/CMakeLists.txt, so
+    # add_file_unique() renames this one. Re-check after any source-list reorder.
+    NET_IB_CAST_CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/connect_tmp.cc"
+    NET_IB_CAST_QP_SHARING_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/qp_sharing.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_connect.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.
