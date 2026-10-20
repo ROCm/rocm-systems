@@ -226,7 +226,7 @@ __device__ __forceinline__ bool ddaLL128PollWire(const uint64_t* wire, uint64_t 
   int spins = 0;
   bool needReload;
   do {
-    if (__any(abortSignal.spinTick(spins))) return false;
+    if (abortSignal.spinTick(spins)) return false;
     needReload = false;
 #pragma unroll
     for (int u = 0; u < kDdaLL128WordsPerThread; u += 2) {
