@@ -60,8 +60,18 @@
 #include <utility>
 #include <vector>
 
+#include <dlfcn.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+extern "C" {
+typedef void (*rocprofiler_register_iterate_hsa_executables_cb_t)(hsa_executable_t, void*);
+
+int
+rocprofiler_register_iterate_hsa_executables(
+    rocprofiler_register_iterate_hsa_executables_cb_t callback,
+    void*                                             user_data);
+}
 
 namespace rocprofiler
 {
@@ -970,16 +980,16 @@ initialize_hip_binary_data()
 }
 
 // Contains all operations for tracing we do after a successful executable_freeze
-// Can be called directly for code objects which have already been frozen
+// Can be called repeatedly for already frozen code objects to notify newly active contexts.
 // Used for attachment to capture code objects created before attachment time
 hsa_status_t
 executable_freeze_internal(hsa_executable_t executable)
 {
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
     (void) initialize_hip_binary_data();
-
     CHECK_NOTNULL(get_executables())->wlock([executable](executable_array_t& data) {
-        data.emplace_back(executable);
+        if(std::find(data.begin(), data.end(), executable) == data.end())
+            data.emplace_back(executable);
     });
 
     auto* code_obj_vec = get_code_objects();
@@ -1007,17 +1017,19 @@ executable_freeze_internal(hsa_executable_t executable)
     {
         code_obj_vec->wlock([](code_object_array_t& data) {
             auto tidx = common::get_tid();
-            // set the contexts for each code object
-            for(const auto& ditr : data)
-                ditr->contexts = ctxs;
-
             for(const auto& ditr : data)
             {
-                for(const auto* citr : ditr->contexts)
+                for(const auto* citr : ctxs)
                 {
+                    // Retain earlier recipients even if they are no longer active.
+                    if(std::find(ditr->contexts.begin(), ditr->contexts.end(), citr) ==
+                       ditr->contexts.end())
+                        ditr->contexts.emplace_back(citr);
+
                     if(citr->callback_tracer->domains(CODE_OBJECT_KIND, CODE_OBJECT_LOAD))
                     {
-                        if(!ditr->beg_notified)
+                        if(ditr->beg_notified.wlock(
+                               [citr](auto& notified) { return notified.emplace(citr).second; }))
                         {
                             auto co_data = ditr->rocp_data;
                             auto record  = rocprofiler_callback_tracing_record_t{
@@ -1044,7 +1056,9 @@ executable_freeze_internal(hsa_executable_t executable)
                         if(sitr && citr->callback_tracer->domains(CODE_OBJECT_KIND,
                                                                   CODE_OBJECT_KERNEL_SYMBOL))
                         {
-                            if(!sitr->beg_notified)
+                            if(sitr->beg_notified.wlock([citr](auto& notified) {
+                                   return notified.emplace(citr).second;
+                               }))
                             {
                                 auto sym_data = sitr->rocp_data;
                                 auto record   = rocprofiler_callback_tracing_record_t{
@@ -1118,13 +1132,6 @@ executable_freeze_internal(hsa_executable_t executable)
                         }
                     }
                 }
-            }
-
-            for(const auto& ditr : data)
-            {
-                ditr->beg_notified = true;
-                for(auto& sitr : ditr->symbols)
-                    sitr->beg_notified = true;
             }
         });
     }
@@ -1204,7 +1211,7 @@ executable_destroy(hsa_executable_t executable)
     // Serialize all executable_destroy calls to prevent:
     // 1. Concurrent access to code objects in shutdown()
     // 2. Use-after-free when multiple threads destroy same executable
-    // 3. Race on end_notified flags (now atomic, but still need serialization for callbacks)
+    // 3. Interleaved unload callbacks for the same code object and context
     executable_destroy_internal(executable);
     return CHECK_NOTNULL(get_destroy_function())(executable);
 }
@@ -1332,7 +1339,10 @@ shutdown(hsa_executable_t executable)
         {
             if(citr->callback_tracer->domains(CODE_OBJECT_KIND, CODE_OBJECT_LOAD))
             {
-                if(!itr.object->end_notified)
+                if(itr.object->beg_notified.rlock(
+                       [citr](const auto& notified) { return notified.count(citr) > 0; }) &&
+                   itr.object->end_notified.wlock(
+                       [citr](auto& notified) { return notified.emplace(citr).second; }))
                 {
                     auto record = rocprofiler_callback_tracing_record_t{
                         .context_id     = rocprofiler_context_id_t{citr->context_idx},
@@ -1359,7 +1369,10 @@ shutdown(hsa_executable_t executable)
             {
                 for(auto& sitr : itr.symbols)
                 {
-                    if(!sitr->end_notified)
+                    if(sitr->beg_notified.rlock(
+                           [citr](const auto& notified) { return notified.count(citr) > 0; }) &&
+                       sitr->end_notified.wlock(
+                           [citr](auto& notified) { return notified.emplace(citr).second; }))
                     {
                         auto record = rocprofiler_callback_tracing_record_t{
                             .context_id     = rocprofiler_context_id_t{citr->context_idx},
@@ -1380,13 +1393,6 @@ shutdown(hsa_executable_t executable)
                 }
             }
         }
-    }
-
-    for(auto& itr : _unloaded)
-    {
-        itr.object->end_notified = true;
-        for(auto& sitr : itr.symbols)
-            sitr->end_notified = true;
     }
 
     return _unloaded;
@@ -1529,5 +1535,46 @@ initialize(RocAttachDispatchTable* attach_table)
     *(get_attach_table()) = attach_table;
 }
 
+void
+iterate_hsa_executables()
+{
+    if(auto* _hsa_executables = get_executables(); _hsa_executables)
+    {
+        // don't hold rlock since executable_freeze_internal acquires wlock
+        auto _executables = _hsa_executables->get();
+
+        // add executables from rocprofiler-register which may have been recorded before
+        // rocprofiler-sdk was initialized
+        {
+            if(void* _sym = ::dlsym(RTLD_DEFAULT, "rocprofiler_register_iterate_hsa_executables");
+               _sym)
+            {
+                auto _executables_cb = [](hsa_executable_t itr, void* user_data) {
+                    constexpr auto null_hsa_executable = hsa_executable_t{0};
+
+                    auto* _executables_v = static_cast<executable_array_t*>(user_data);
+                    if(_executables_v && itr != null_hsa_executable)
+                    {
+                        if(std::find(_executables_v->begin(), _executables_v->end(), itr) ==
+                           _executables_v->end())
+                            _executables_v->emplace_back(itr);
+                    }
+                };
+
+                auto _func =
+                    reinterpret_cast<decltype(rocprofiler_register_iterate_hsa_executables)*>(_sym);
+
+                ROCP_WARNING << "Invoking rocprofiler_register_iterate_hsa_executables...";
+                _func(_executables_cb, &_executables);
+            }
+        }
+
+        for(const auto& itr : _executables)
+        {
+            constexpr auto null_hsa_executable = hsa_executable_t{0};
+            if(itr != null_hsa_executable) executable_freeze_internal(itr);
+        }
+    }
+}
 }  // namespace code_object
 }  // namespace rocprofiler
