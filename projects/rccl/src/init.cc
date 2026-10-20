@@ -784,7 +784,11 @@ ncclResult_t ncclCommEnsureReady(ncclComm_t comm) {
   /* comm must be ready, or error will be reported */
   ncclResult_t ret = ncclSuccess;
   if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire)) {
-    ncclGroupJobAbort(comm->groupJob);
+    // Claim the link so only one thread ever reaps it, and so the comm is left
+    // without a pointer to a job that abort may destroy.
+    struct ncclGroupJob* groupJob =
+      COMPILER_ATOMIC_EXCHANGE(&comm->groupJob, static_cast<struct ncclGroupJob*>(nullptr), std::memory_order_acq_rel);
+    ncclGroupJobAbort(groupJob);
   } else {
     NCCLCHECK(ncclCommGetAsyncError(comm, &ret));
     if (ret == ncclInProgress) {
@@ -5232,10 +5236,16 @@ ncclResult_t ncclCommGetAsyncError_impl(ncclComm_t comm, ncclResult_t* asyncErro
     }
   }
 
-  /* if there is linked group job, we should complete it. */
-  if (*asyncError == ncclSuccess && comm->groupJob) {
-    NCCLCHECK(ncclGroupJobComplete(comm->groupJob));
-    comm->groupJob = NULL;
+  /* if there is linked group job, we should complete it. Claiming the link
+   * atomically makes exactly one caller the owner of that reference: two
+   * threads polling the same comm must not both reach ncclGroupJobComplete,
+   * or one can destroy the job while the other is inside std::thread::join. */
+  if (*asyncError == ncclSuccess) {
+    struct ncclGroupJob* groupJob =
+      COMPILER_ATOMIC_EXCHANGE(&comm->groupJob, static_cast<struct ncclGroupJob*>(nullptr), std::memory_order_acq_rel);
+    if (groupJob) {
+      NCCLCHECK(ncclGroupJobComplete(groupJob));
+    }
   }
   return ncclSuccess;
 }
