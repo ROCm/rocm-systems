@@ -45,6 +45,7 @@
 #include "hip_capture_writer.h"
 #include "hip_capture.h"
 #include "hip_capture_metadata.h"
+#include "hip_capture_scrub.h"
 
 #include "os/os.hpp"           // amd::Os::timeNanos()
 #include "utils/debug.hpp"     // LogPrintfError, LogPrintfWarning, LogPrintfInfo
@@ -1786,7 +1787,13 @@ Hash128 write_code_object(const void* image, size_t image_size) {
   }
   if (!g_record_content.load(std::memory_order_relaxed)) return kWithheld;  // as in write_blob()
 
-  Hash128 h = hash_buffer(image, image_size);
+  // The stored bytes, and so the hash, are the image with its .comment and
+  // debug sections zeroed (see hip_capture_scrub.h).
+  std::vector<uint8_t> scrubbed(static_cast<const uint8_t*>(image),
+                                static_cast<const uint8_t*>(image) + image_size);
+  scrub::scrub_code_object(scrubbed.data(), scrubbed.size());
+
+  Hash128 h = hash_buffer(scrubbed.data(), image_size);
   char hex[33];
   hash_hex(h, hex);
   std::string key = std::string("co:") + hex;  // namespace to match playback load_code_object key
@@ -1806,7 +1813,7 @@ Hash128 write_code_object(const void* image, size_t image_size) {
   ClaimedWrite claim(key);
 
   const bool ok = atomic_write_file(g_code_objects_fd.load(), g_output_dir + "/code_objects",
-                                    std::string(hex) + ".hsaco", image, image_size);
+                                    std::string(hex) + ".hsaco", scrubbed.data(), image_size);
   if (!ok) LogPrintfWarning("[HRR capture] Failed to write code object %s", hex);
   claim.done(ok);
   return h;

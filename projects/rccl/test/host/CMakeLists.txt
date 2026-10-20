@@ -68,6 +68,21 @@ endforeach()
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/gdr-probe-test.cc"
   "${_rccl_reg_access_flags}" "the production registration flags")
 unset(_rccl_reg_access_flags)
+# graph_fakes.cc hand-writes these params, whose NCCL_PARAMs are in files rccl-UnitTestsMicroTopo doesn't compile.
+# Each entry is <src file>|<production line>|<fake body, up to its ';'>.
+foreach(_pin
+    "init.cc|NCCL_PARAM(P2pDisable, \"P2P_DISABLE\", 0)|ncclParamP2pDisable() { return g_loadParam(\"P2P_DISABLE\", 0)"
+    "init.cc|NCCL_PARAM(MultiRankGpuEnable, \"MULTI_RANK_GPU_ENABLE\", 0)|ncclParamMultiRankGpuEnable() { return g_loadParam(\"MULTI_RANK_GPU_ENABLE\", 0)"
+    "init.cc|NCCL_PARAM(WorkArgsBytes, \"WORK_ARGS_BYTES\", INT64_MAX)|ncclParamWorkArgsBytes() { return g_loadParam(\"WORK_ARGS_BYTES\", INT64_MAX)"
+    "graph/rccl_graph_gen.cc|RCCL_PARAM(IntraGraphGen, \"INTRA_GRAPH_GEN\", 0)|rcclParamIntraGraphGen() { return g_loadParam(\"RCCL_INTRA_GRAPH_GEN\", 0)"
+    "graph/rccl_graph_gen.cc|RCCL_PARAM(InterGraphGen, \"INTER_GRAPH_GEN\", 0)|rcclParamInterGraphGen() { return g_loadParam(\"RCCL_INTER_GRAPH_GEN\", 0)")
+  string(REPLACE "|" ";" _pin "${_pin}")
+  list(GET _pin 0 _src)
+  list(GET _pin 1 _prod)
+  list(GET _pin 2 _fake)
+  rccl_assert_source_line("${_rccl_src_root}/${_src}" "${_prod}" "fakes/graph_fakes.cc")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/graph_fakes.cc" "${_fake}" "the graph_fakes.cc default")
+endforeach()
 # Pin the copied function-name table and its order to init.cc.
 foreach(_func_str_line
     "const char* ncclFuncStr[NCCL_NUM_FUNCTIONS + 4] = {\"Broadcast\", \"Reduce\", \"AllGather\", \"ReduceScatter\", \"AllReduce\","
@@ -137,6 +152,7 @@ function(rccl_define_micro_source_lists)
     devcomm-test.cc
     wrap-test.cc
     dev-runtime-test.cc
+    nccl-utility-test.cc                 # src/include/nccl_device/utility.h (header-only, no fakes)
     # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
     gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
     dv_symbols_test.cc                   # src/misc/ionicdvsymbols.cc, src/misc/mlx5dvsymbols.cc
@@ -425,6 +441,61 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroNcclDevice -- src/nccl_device/ requirement builders. Own binary:
+  # fakes/dev_runtime_micro_fakes.cc fakes three of them in rccl-UnitTestsMicro.
+  set(TEST_MICRO_NCCL_DEVICE_SOURCE_FILES
+    nccl-device-requirements-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroCore -- src/nccl_device/core.cc. Own binary:
+  # dev_runtime_micro_fakes.cc and devcomm_fakes.cc fake five of its seven functions.
+  set(TEST_MICRO_CORE_SOURCE_FILES
+    core-test.cc
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/collectives_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/dev_runtime_fakes.cc
+    fakes/env_fakes.cc
+    fakes/os_fakes.cc
+    fakes/recorder_fakes.cc
+    fakes/strongstream_stubs.cc
+    fakes/tuning_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroCftDevRuntime -- src/cft_dev_runtime.cc + src/nccl_device/core.cc. Own
+  # binary: rccl-UnitTestsMicro fakes most of core.cc, which the LE-info queries call.
+  set(TEST_MICRO_CFT_DEV_RUNTIME_SOURCE_FILES
+    cft-dev-runtime-test.cc
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/collectives_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/dev_runtime_fakes.cc
+    fakes/env_fakes.cc
+    fakes/os_fakes.cc
+    fakes/recorder_fakes.cc
+    fakes/strongstream_stubs.cc
+    fakes/tuning_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # rccl-UnitTestsMicroTaskPrep -- host-only microtests for src/enqueue/task_prep/
   # and src/enqueue/task_sched/.
   # Its own binary, not rccl-UnitTestsMicro: that target compiles group.cc, rccl_wrap.cc and
@@ -607,13 +678,36 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
+  # rccl-UnitTestsMicroTopo -- src/graph/{xml,topo,paths,search,rome_models,connect,rings,trees}.cc, one
+  # test TU each. Own binary: rccl-UnitTestsMicroGraph links tuning_fakes.cc, which defines connect.cc's params,
+  # and os_fakes.cc, whose CPU and sysfs seams these tests cannot drive.
+  set(TEST_MICRO_TOPO_SOURCE_FILES
+    xml-test.cc
+    topo-test.cc
+    paths-test.cc
+    search-test.cc
+    graph-rome-models-test.cc
+    graph-connect-test.cc
+    rings-test.cc
+    trees-test.cc
+    fakes/graph_fakes.cc
+    fakes/amdsmi_fakes.cc
+    fakes/hip_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # src/algorithms/dda/
   set(TEST_MICRO_DDA_SOURCE_FILES
+    algorithms/dda/fabric/fabric-gpu-barrier-test.cc
     algorithms/dda/fabric/fabric-mem-handler-test.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc  # real DeviceBuffer
     fakes/bootstrap_stubs.cc             # bootstrapAllGather
     fakes/env_fakes.cc                   # NCCL_CUMEM_SKIP_FREE
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
+    fakes/utils_fakes.cc                 # getBusId (alloc.h side stream)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -1372,6 +1466,41 @@ if(_ENQ_BUILD_DEVLINKER)
 endif()
 
 # ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNcclDevice
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNcclDevice
+  SOURCES ${TEST_MICRO_NCCL_DEVICE_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    CFT_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/cft_barrier.cc"
+    GIN_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/gin_barrier.cc"
+    GIN_SCRATCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/gin_scratch.cc"
+    LL_A2A_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/ll_a2a.cc"
+    LSA_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/lsa_barrier.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_nccl_device.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroCore
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroCore
+  SOURCES ${TEST_MICRO_CORE_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_core.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroCftDevRuntime
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroCftDevRuntime
+  SOURCES ${TEST_MICRO_CFT_DEV_RUNTIME_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc"
+    CFT_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/cft_dev_runtime.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_cft_dev_runtime.yaml")
+
+# ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCe
 # ---------------------------------------------------------------------------
 # In-build, CE_BATCH_ASYNC_SUPPORTED arrives with rccl's own compile definitions when CE_ENABLED.
@@ -1565,6 +1694,26 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGraph
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_graph.yaml")
 
 # ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroTopo
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroTopo
+  SOURCES ${TEST_MICRO_TOPO_SOURCE_FILES}
+  # The warp-speed arms of connect.cc call rcclGetMaxWarpsPerBlock/rcclWarpSpeedComputeNChannels (rccl_wrap.cc).
+  REMOVE_DEFS ENABLE_WARP_SPEED
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ${_MICRO_AMDSMI_DEF}
+    XML_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc"
+    TOPO_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc"
+    PATHS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc"
+    SEARCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc"
+    ROME_MODELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc"
+    CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc"
+    RINGS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc"
+    TREES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_topo.yaml")
+
+# ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDiagnostics
 # ---------------------------------------------------------------------------
 # p2p.cu's <<<>>> must not reach hip_fakes.cc's aborting hipLaunchKernel; see diag-p2p-device-test.cc.
@@ -1596,11 +1745,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGinHostFinalize
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDda
 # ---------------------------------------------------------------------------
+set_source_files_properties(
+  ${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/device/device_buffer.cc
+  PROPERTIES GENERATED TRUE)
 rccl_add_micro_binary(rccl-UnitTestsMicroDda
   SOURCES ${TEST_MICRO_DDA_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     FABRIC_MEM_HANDLER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_mem_handler.cc"
+    # hipify renames .cu to .cu.cpp
+    FABRIC_GPU_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/fabric/fabric_gpu_barrier.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_dda.yaml")
 
 # =====================================================================

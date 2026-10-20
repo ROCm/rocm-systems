@@ -53,7 +53,7 @@ The "Mode" column states which mode records each item.
 | Sequence of successful HIP calls, with sizes, flags, device addresses, handles, thread ids | `events.bin` | both | — kept, replay needs it |
 | Kernel names, mangled but read back with `c++filt`; they describe the model's architecture and precision | `events.bin` | both | — kept, triage names the failing kernel |
 | Event timestamps, from a monotonic clock (not the date or time of day) | `events.bin` | both | — kept |
-| Device properties passed to `hipChooseDevice`, the whole `hipDeviceProp_t`: device and architecture names, PCI ids and, in the current layout, the UUID and LUID | `events.bin` | both | — kept, the call's answer depends on them |
+| Device properties passed to `hipChooseDevice`, the whole `hipDeviceProp_t` with the device and architecture names; its UUID, LUID and PCI ids are written as zeros | `events.bin` | both | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): UUID, LUID and PCI ids blanked; the rest is kept, the call's answer depends on it |
 | Scalar values passed to a HIP call: memset fill values, memset graph nodes included; the values `hipStreamWriteValue32/64`, `hipStreamWaitValue32/64` and `hipStreamBatchMemOp` write or wait for; attribute and limit values such as those given to `hipMemPoolSetAttribute`. Each is at most 8 bytes, given to the call rather than read from a buffer | `events.bin` | both | — kept, as sizes and flags are; replay needs them |
 | Strings passed to a HIP call, up to 255 characters each: the `hipLinkAddFile` path, the `hipLinkAddData` input name, the `hipGetProcAddress` symbol and the names of `__device__` variables | `events.bin` | both | — kept, replay needs them |
 | Other structures passed into a HIP call, copied whole, such as copy, memset, graph node, allocation, pool and launch-attribute parameters. Padding, reserved and unused union bytes are copied as the caller left them | `events.bin` | both | — kept, replay needs it |
@@ -62,9 +62,10 @@ The "Mode" column states which mode records each item.
 | Pinned host memory a kernel reads: at each launch whose arguments point into memory from `hipHostMalloc`, `hipMallocHost` or `hipHostRegister`, the whole allocation, byte for byte, as it was before the launch, whether or not the kernel reads all of it, again each time its contents changed. Allocations over `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64 MiB unless set) are skipped, and `HIP_HRR_HOST_SNAPSHOTS=0` turns this off | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | By-value kernel argument bytes, a struct whole with any device pointers inside it, and the values pushed with `hipSetupArgument`. Whole-argument pointers are addresses and are kept in both modes | `events.bin` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880): size and zeros in metadata-only mode |
 | Code objects the process loaded (the application's own GPU binary code) | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
-| Linker input buffers passed to `hipLinkAddData`, every byte, including inputs the call rejected and inputs never linked or loaded | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
+| Linker input buffers passed to `hipLinkAddData`, every byte, with their names, including inputs the call rejected and inputs never linked or loaded. A SPIR-V or LLVM bitcode input keeps its compiler identification and, built with `-g`, its source and build directories; capture does not scrub them | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Whole fat binary bundles, including targets HIP never loads | `blobs/` | contents | [AIRUNTIME-2858](https://amd-hub.atlassian.net/browse/AIRUNTIME-2858): only the code objects HIP loads |
-| Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): stripped |
+| Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): zeroed in code objects and uncompressed fat binaries; kept in compressed (`CCOB`) fat binaries |
+| Strings in the code the GPU loads, such as the absolute source path a device `assert()` prints | `code_objects/`, `blobs/` | contents | — kept, the kernel uses them; `verify` counts code objects holding an absolute path |
 | Framework allocator layout, when a region producer ran beside capture | `regions/` | both | — kept, written only by an opt-in producer |
 | Marker that capture is running: on Linux the boot id and the process start time in clock ticks since boot; on Windows the process creation date and time. A normal exit removes it; a process that crashes or is killed leaves it | `active` | both | — kept, region producers read it |
 
@@ -77,10 +78,11 @@ The per-process `manifest.json` also holds `pid`, `parent_pid`, `complete`, `eve
 | `total_global_mem`, `multi_processor_count`, `warp_size`, `max_threads_per_block` | yes | — |
 | `clock_rate_khz`, `memory_clock_rate_khz`, `memory_bus_width`, `l2_cache_size` | yes | — |
 | `integrated`, `managed_memory`, `memory_pools_supported`, `compute_mode` | yes | — |
-| `uuid`, `pci`, `luid`, `luid_device_node_mask`: identify the individual GPU and its slot | no | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): blanked |
+| `luid_device_node_mask`, a node mask rather than an identifier | yes | — |
+| `uuid`, `pci`, `luid`: identify the individual GPU and its slot | written blank | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881) |
 
-This table covers `manifest.json` only. A `hipChooseDevice` call can carry the same
-identifiers in `events.bin`, as listed above.
+This table covers `manifest.json` only. The copy of the device properties a
+`hipChooseDevice` call keeps in `events.bin` has the same identifiers blanked, as listed above.
 
 ## Never recorded
 

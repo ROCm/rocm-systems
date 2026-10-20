@@ -298,6 +298,39 @@
         {"name": "InitMicrotestsUncached", "description": "Host-only init.cc microtests, HIP_*_UNCACHED_MEMORY arm; covers the preprocessor-gated paths the base binary cannot", "test_filter": "*"}
       ]
     },
+    "unit_tests_micro_nccl_device": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroNcclDevice",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "NcclDeviceMicrotests", "description": "Host-only nccl_device requirement builders microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_core": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroCore",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "CoreMicrotests", "description": "Host-only nccl_device/core.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_cft_dev_runtime": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroCftDevRuntime",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "CftDevRuntimeMicrotests", "description": "Host-only cft_dev_runtime.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
     "unit_tests_micro_init_faultinj": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroInit-faultinj",
@@ -430,6 +463,17 @@
         {"name": "RomeModelsMicrotests", "description": "Host-only graph/rome_models.cc microtests (no GPU, no HIP/RCCL runtime); covers parseGraphLight RCCL_TREES input validation", "test_filter": "*"}
       ]
     },
+    "unit_tests_micro_topo": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroTopo",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "TopoMicrotests", "description": "Host-only src/graph microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
     "unit_tests_micro_dda": {
       "is_gtest": true,
       "binary": "host/rccl-UnitTestsMicroDda",
@@ -522,6 +566,24 @@
       "enabled": true
     },
     {
+      "name": "RCCL Microtests - nccl_device requirement builders",
+      "description": "rccl-UnitTestsMicroNcclDevice (host-only nccl_device requirement builders microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_nccl_device",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - nccl_device/core.cc",
+      "description": "rccl-UnitTestsMicroCore (host-only nccl_device/core.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_core",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - cft_dev_runtime.cc",
+      "description": "rccl-UnitTestsMicroCftDevRuntime (host-only cft_dev_runtime.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_cft_dev_runtime",
+      "enabled": true
+    },
+    {
       "name": "RCCL Microtests - init.cc (fault injection)",
       "description": "rccl-UnitTestsMicroInit-faultinj (init.cc ENABLE_FAULT_INJECTION arm)",
       "config": "unit_tests_micro_init_faultinj",
@@ -591,6 +653,12 @@
       "name": "RCCL Microtests - rome_models.cc",
       "description": "rccl-UnitTestsMicroRomeModels (host-only rome_models.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_rome_models",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - src/graph",
+      "description": "rccl-UnitTestsMicroTopo (host-only src/graph microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_topo",
       "enabled": true
     },
     {
