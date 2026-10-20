@@ -1264,32 +1264,51 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaMap(HsaMemoryObjectHandle Handle,
               HsaMemoryMapFlags flags, HSAuint32 NodeId)
 {
 	CHECK_DXG_OPEN();
-  (void)NodeId;
+  (void)flags;
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
   assert(gpu_mem != nullptr);
 
-  if (gpu_mem->GpuAddress() == addr) {
+  wsl::thunk::WDDMDevice* target = get_wddmdev(NodeId);
+  if (!target)
+    return HSAKMT_STATUS_INVALID_NODE_UNIT;
+
+  // Page-table update is submitted to NodeId. That is the paging fence this
+  // call advances, so wait on the target device.
+  wsl::thunk::GpuMemory* view = gpu_mem;
+  if (gpu_mem->GetDevice() != target) {
+    std::lock_guard<std::mutex> guard(*allocation_map_lock_);
+    auto* owner = gpu_mem->Owner() ? gpu_mem->Owner() : gpu_mem;
+    view = owner->ViewOn(target, false, nullptr);
+    if (view == nullptr) {
+      if (owner->GpuAddress() != addr)
+        return HSAKMT_STATUS_ERROR;
+      view = owner->ViewOn(target, true, nullptr);
+      if (view == nullptr)
+        return HSAKMT_STATUS_ERROR;
+      // ViewOn already mapped this VA and waited on the target.
+      return HSAKMT_STATUS_SUCCESS;
+    }
+  }
+
+  if (view->GpuAddress() == addr) {
     pr_info("bo is mapped already\n");
     return HSAKMT_STATUS_SUCCESS;
-  } else if (gpu_mem->GpuAddress()) {
+  } else if (view->GpuAddress()) {
     pr_err("amdgpu_bo_va_op: GPU memory already mapped at %p, but requested to map at %p\n",
-           reinterpret_cast<void*>(gpu_mem->GpuAddress()), reinterpret_cast<void*>(addr));
+           reinterpret_cast<void*>(view->GpuAddress()), reinterpret_cast<void*>(addr));
     return HSAKMT_STATUS_ERROR;
   }
 
-  auto code = gpu_mem->MapGpuVirtualAddress(static_cast<gpusize>(addr), size, offset);
+  auto code = view->MapGpuVirtualAddress(static_cast<gpusize>(addr), size, offset);
   if (code != ErrorCode::Success)
     return HSAKMT_STATUS_ERROR;
 
-  code = gpu_mem->MakeResident();
+  code = view->MakeResident();
   if (code != ErrorCode::Success)
     return HSAKMT_STATUS_ERROR;
 
-  // Wait on paging fence to ensure map and residency are completed. MakeResident()
-  // updates the same paging fence as Map(), hence it's safe to wait for the last one.
-  if (!gpu_mem->GetDevice()->WaitOnPagingFenceFromCpu()) {
+  if (!target->WaitOnPagingFenceFromCpu())
     return HSAKMT_STATUS_ERROR;
-  }
 
 	return HSAKMT_STATUS_SUCCESS;
 }
@@ -1298,19 +1317,28 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMemoryVaUnmap(HsaMemoryObjectHandle Handle,
               HSAuint64 offset, HSAuint64 size, HSAuint64 addr, HSAuint32 NodeId)
 {
 	CHECK_DXG_OPEN();
-  (void)NodeId;
   wsl::thunk::GpuMemory* gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory*>(Handle);
   assert(gpu_mem != nullptr);
 
-  auto code = gpu_mem->UnmapGpuVirtualAddress(static_cast<gpusize>(addr), size, offset);
+  wsl::thunk::WDDMDevice* target = get_wddmdev(NodeId);
+  if (!target)
+    return HSAKMT_STATUS_INVALID_NODE_UNIT;
+
+  wsl::thunk::GpuMemory* view = gpu_mem;
+  if (gpu_mem->GetDevice() != target) {
+    std::lock_guard<std::mutex> guard(*allocation_map_lock_);
+    view = gpu_mem->ViewOn(target, false, nullptr);
+    if (view == nullptr)
+      return HSAKMT_STATUS_SUCCESS;
+  }
+
+  auto code = view->UnmapGpuVirtualAddress(static_cast<gpusize>(addr), size, offset);
   if (code != ErrorCode::Success)
     return HSAKMT_STATUS_ERROR;
-  // Wait on paging fence to ensure unmap is completed. Evict() doesn't
-  // update the fence.
-  if (!gpu_mem->GetDevice()->WaitOnPagingFenceFromCpu()) {
+  // Unmap updates the target device's paging fence. Evict() does not.
+  if (!target->WaitOnPagingFenceFromCpu())
     return HSAKMT_STATUS_ERROR;
-  }
-  gpu_mem->Evict();
+  view->Evict();
 	return HSAKMT_STATUS_SUCCESS;
 }
 
