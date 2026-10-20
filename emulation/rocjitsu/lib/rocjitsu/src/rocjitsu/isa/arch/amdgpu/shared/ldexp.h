@@ -60,8 +60,9 @@ struct Policy {
   /// @brief Build the LDEXP policy from MODE, overflow saturation, and effective OMOD.
   /// @details Reads the format's MODE.FP_DENORM and MODE.FP_ROUND fields. Either
   /// effective OMOD or disabled output denormals sets flush_tiny, which replaces a
-  /// result that is tiny at full precision with a zero of the source's sign; the
-  /// OMOD stage then scales that signed zero to +0.
+  /// result that is tiny at full precision with a zero of the source's sign.
+  /// Output flushing alone keeps that sign; only when OMOD is enabled does the
+  /// scaling stage turn the signed zero into +0.
   /// @param saturate Overflow gives the largest finite value (FP16_OVFL for F16).
   /// @param omod Effective OMOD is enabled (gfx1201 probe, all three formats).
   /// Callers must pass it: the OMOD stage sees only the rounded result, and a tiny
@@ -80,7 +81,8 @@ using lane::choose;
 /// @brief Offset added to biased exponents so values below the subnormal range stay unsigned.
 inline constexpr unsigned kExponentOrigin = 1024;
 
-/// @brief Round a finite nonzero magnitude, significand * 2^exponent, to `Fmt`.
+/// @brief Round a finite nonzero magnitude, held as a significand and an offset
+/// exponent, to `Fmt`.
 /// @details `significand` has its leading one at bit TopBit and at most
 /// kMantissaBits + 1 significant bits, as an LDEXP source does, so its bits
 /// below TopBit - kMantissaBits are zero. `exponent` is the biased exponent of

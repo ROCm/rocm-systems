@@ -3014,6 +3014,13 @@ std::vector<ArithmeticCase> fract_cases() {
         // truncates, as toward zero does for the positive result.
         {"RoundTowardPositive", Vop1, {}, round_input, modes.toward_positive, nearest},
         {"RoundTowardNegative", Vop1, {}, round_input, modes.toward_negative, toward_zero},
+        // VOP3 reads the same MODE fields as VOP1. These modes give the two
+        // format groups opposite settings, so reading the other group's
+        // FP_DENORM or FP_ROUND field would change each result.
+        {"NegativeSubnormalKept", Vop3, {}, sign | tiny, modes.kept, capped},
+        {"NegativeSubnormalInputFlushed", Vop3, {}, sign | tiny, modes.input_flush, 0},
+        {"RoundNearestEven", Vop3, {}, round_input, modes.nearest_even, nearest},
+        {"RoundTowardZero", Vop3, {}, round_input, modes.toward_zero, toward_zero},
         {"InfinityIsNegativeNan", Vop1, {}, infinity, 0xf0u, infinity_result},
         {"QuietsSignalingNan", Vop1, {}, infinity | 1, 0xf0u, quiet_nan},
         // Integers, including -0, give +0 even when rounding toward -inf.
