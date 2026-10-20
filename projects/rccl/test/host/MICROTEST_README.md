@@ -81,6 +81,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `DEV_RUNTIME_SEGMENTS_CC_PATH`, from `dev-runtime-test.cc`);
     suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
     `Sym*`, and `Win*`.
+  - `include/nccl_device/utility.h` (header-only, from `nccl-utility-test.cc`);
+    suite `NcclUtilityMicrotest.*`.
   - the generated `sym_kernels_host.cc` (`SYM_KERNELS_HOST_CC_PATH`, from
     `sym-kernels-index-test.cc`); suites `SymKernelIndex*`,
     `SymAllEmittedCombinations/*`, `SymUnhandledCombinations/*` (covered by the
@@ -343,6 +345,22 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   scene, vocabulary and fake-reset fixture live in `TaskPrepScene.h`.
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_taskprep.yaml`.
+- **`rccl-UnitTestsMicroNcclDevice`**: the requirement builders in
+  `src/nccl_device/{cft_barrier,gin_barrier,gin_scratch,ll_a2a,lsa_barrier}.cc`
+  (via `<STEM>_CC_PATH`, from `nccl-device-requirements-test.cc`); suite
+  `NcclDeviceRequirementsMicrotest.*`. Its own binary because
+  `fakes/dev_runtime_micro_fakes.cc` fakes three of these builders. See
+  `test_categories_micro_nccl_device.yaml`.
+- **`rccl-UnitTestsMicroCore`**: `src/nccl_device/core.cc` (via
+  `CORE_CC_PATH`, from `core-test.cc`); suite `CoreMicrotest.*`. Its
+  own binary because `fakes/dev_runtime_micro_fakes.cc` and
+  `fakes/devcomm_fakes.cc` fake five of its seven functions. See
+  `test_categories_micro_core.yaml`.
+- **`rccl-UnitTestsMicroCftDevRuntime`**: `src/cft_dev_runtime.cc` and
+  `src/nccl_device/core.cc` (via `CFT_DEV_RUNTIME_CC_PATH` / `CORE_CC_PATH`,
+  from `cft-dev-runtime-test.cc`); suites `CftDevRuntime*`. Its own binary because
+  `rccl-UnitTestsMicro` fakes most of `core.cc`, which the LE-info queries call. See
+  `test_categories_micro_cft_dev_runtime.yaml`.
 - **`rccl-UnitTestsMicroConnect`** — `src/graph/connect.cc` (via `CONNECT_CC_PATH`,
   suites `EveryRank/ConnectMicrotest.*` and `ConnectMicrotestReject.*`):
   `ncclTopoPreset` and `ncclTopoPostset` run unstubbed on a hand-built
@@ -995,6 +1013,9 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroGraph              # src/graph/{xml,topo,paths,search,rome_models}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
+./build/rccl-UnitTestsMicroNcclDevice         # nccl_device requirement builders tests
+./build/rccl-UnitTestsMicroCore               # nccl_device/core.cc tests
+./build/rccl-UnitTestsMicroCftDevRuntime      # cft_dev_runtime.cc tests
 ./build/rccl-UnitTestsMicroDdaIpc             # src/algorithms/dda/all_reduce/dda_all_reduce_ipc.cu
 ./build/rccl-UnitTestsMicroParam              # src/param/*.cc, src/misc/param.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests

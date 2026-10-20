@@ -137,6 +137,7 @@ function(rccl_define_micro_source_lists)
     devcomm-test.cc
     wrap-test.cc
     dev-runtime-test.cc
+    nccl-utility-test.cc                 # src/include/nccl_device/utility.h (header-only, no fakes)
     # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
     gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
     dv_symbols_test.cc                   # src/misc/ionicdvsymbols.cc, src/misc/mlx5dvsymbols.cc
@@ -419,6 +420,61 @@ function(rccl_define_micro_source_lists)
     fakes/os_fakes.cc
     fakes/strongstream_stubs.cc
     fakes/recorder_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroNcclDevice -- src/nccl_device/ requirement builders. Own binary:
+  # fakes/dev_runtime_micro_fakes.cc fakes three of them in rccl-UnitTestsMicro.
+  set(TEST_MICRO_NCCL_DEVICE_SOURCE_FILES
+    nccl-device-requirements-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroCore -- src/nccl_device/core.cc. Own binary:
+  # dev_runtime_micro_fakes.cc and devcomm_fakes.cc fake five of its seven functions.
+  set(TEST_MICRO_CORE_SOURCE_FILES
+    core-test.cc
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/collectives_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/dev_runtime_fakes.cc
+    fakes/env_fakes.cc
+    fakes/os_fakes.cc
+    fakes/recorder_fakes.cc
+    fakes/strongstream_stubs.cc
+    fakes/tuning_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroCftDevRuntime -- src/cft_dev_runtime.cc + src/nccl_device/core.cc. Own
+  # binary: rccl-UnitTestsMicro fakes most of core.cc, which the LE-info queries call.
+  set(TEST_MICRO_CFT_DEV_RUNTIME_SOURCE_FILES
+    cft-dev-runtime-test.cc
+    fakes/bootstrap_stubs.cc
+    fakes/topo_stubs.cc
+    fakes/transport_stubs.cc
+    fakes/nccl_stubs.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/collectives_fakes.cc
+    fakes/comm_fakes.cc
+    fakes/dev_runtime_fakes.cc
+    fakes/env_fakes.cc
+    fakes/os_fakes.cc
+    fakes/recorder_fakes.cc
+    fakes/strongstream_stubs.cc
+    fakes/tuning_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
@@ -1370,6 +1426,41 @@ if(_ENQ_BUILD_DEVLINKER)
   rccl_add_micro_binary(rccl-UnitTestsMicroEnqueue-devlinker ${_enq_common_args})
   target_compile_definitions(rccl-UnitTestsMicroEnqueue-devlinker PRIVATE RCCL_DEVICE_LINKER)
 endif()
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNcclDevice
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNcclDevice
+  SOURCES ${TEST_MICRO_NCCL_DEVICE_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    CFT_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/cft_barrier.cc"
+    GIN_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/gin_barrier.cc"
+    GIN_SCRATCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/gin_scratch.cc"
+    LL_A2A_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/ll_a2a.cc"
+    LSA_BARRIER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/lsa_barrier.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_nccl_device.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroCore
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroCore
+  SOURCES ${TEST_MICRO_CORE_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_core.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroCftDevRuntime
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroCftDevRuntime
+  SOURCES ${TEST_MICRO_CFT_DEV_RUNTIME_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc"
+    CFT_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/cft_dev_runtime.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_cft_dev_runtime.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroCe
