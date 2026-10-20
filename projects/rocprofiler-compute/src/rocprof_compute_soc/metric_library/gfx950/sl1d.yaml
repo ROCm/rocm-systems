@@ -1,0 +1,9 @@
+inherit: ../gfx908/sl1d.yaml
+sl1d.atomic_req:
+  description: >-
+    The total number of atomic requests from sL1D to the L2, per normalization unit.
+    Atomic requests to the sL1D are typically unused on current CDNA accelerators.
+sl1d.l2_atomic_req:
+  description: >-
+    The total number of atomic requests from sL1D to the L2, per normalization unit.
+    Atomic requests to the sL1D are typically unused on current CDNA accelerators.

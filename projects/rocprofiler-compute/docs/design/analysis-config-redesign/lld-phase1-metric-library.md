@@ -62,8 +62,9 @@ types each device skips. The validator checks, for every arch:
 
 - every ceiling the benchmark measures on a device of the arch is the `peak_empirical`
   of exactly one metric, or is listed in `CEILINGS_WITHOUT_METRIC` (the VALU integer
-  rates `I8Ops`, `I32Ops`, `I64Ops`, and `MALLBw`, which analyze skips: no metric shows
-  them);
+  rates `I8Ops`, `I32Ops`, `I64Ops`, `MALLBw`, which analyze skips, and the gfx950
+  `MFMAF4Flops` and `MFMAF6Flops`, where the roofline shows only the combined F6F4 rate:
+  no row shows them as a peak);
 - no metric names a ceiling the arch does not measure.
 
 So a new ceiling, or a new arch, fails validation until a metric claims each ceiling.
@@ -537,7 +538,9 @@ compares the library with today's analysis configs:
   listed as unit variants.
 - **Counters:** the counters the whole library selects equal the counters
   `detect_counters()` selects with no filter (with `--membw-analysis` where the arch has
-  panel 3000).
+  panel 3000). `detect_counters()` scans the panel text, so it also takes the counter
+  name a raw-counter row is labeled with (`TA_TA_BUSY`, whose formula reads
+  `TA_TA_BUSY_sum`); those names are not missing from the library.
 - **Built-in variables:** the library variables equal `get_build_in_vars()`.
 - **Peaks:** every row's `peak` is its metric's `peak` or `peak_empirical`, and every
   library peak is the peak of some row that shows the metric (a measured peak on an arch
@@ -663,7 +666,11 @@ families.
 metric it still shows; a changed equation is an override of that id, never a new id. Two
 placements of one id that disagree within an arch are a Kind 3 case for review, and two
 ids with the same formula on one arch are one metric: the validator rejects them, and
-they are merged into one id (each panel's label becomes a view label in Phase 2).
+they are merged into one id (each panel's label becomes a view label in Phase 2). The one
+exception is listed in `SHARED_FORMULA_IDS`: the same counters bounded by a different
+measured ceiling (gfx950 counts MXF8 MFMA work in the F8 counter, so
+`compute.mfma_flops_mxf8` shares the formula of `compute.mfma_flops_f8`); a row whose
+label names the listed id shows that id.
 
 | Category | Hardware | File | Example IDs |
 |---|---|---|---|
