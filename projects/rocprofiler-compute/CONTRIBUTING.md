@@ -241,7 +241,10 @@ Customers read `docs/how-to/`, `CHANGELOG.md`, and the CLI help.
 
 If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml` or metric descriptions in `tools/per_arch_metric_definitions/gfx<arch>_metrics_description.yaml` — follow the metric management workflow:
 
-1. Edit the relevant panel YAMLs.
+1. Edit the relevant panel YAMLs. If the arch has a metric library
+   (`src/rocprof_compute_soc/metric_library/<arch>/`), make the same change there:
+   `tools/validate_metric_library.py`, a pre-commit hook, fails while the two
+   disagree.
 2. Validate them with `python tools/config_management/master_config_workflow_script.py --validate-only`.
 3. Refresh the hash DB with `python tools/config_management/hash_manager.py --compute-all src/rocprof_compute_soc/analysis_configs` and confirm CI tests pass.
 
