@@ -27,7 +27,7 @@ For every arch in src/rocprof_compute_soc/metric_library/, check that:
 import re
 import sys
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, NamedTuple, Optional
@@ -330,7 +330,10 @@ def equivalence_errors(metric_dir: Path, analysis_dir: Path, arch: str) -> list[
         metric["name"].casefold(): metric_id
         for metric_id, metric in library.metrics.items()
     }
-    metric_ids = [_row_metric_id(row, variants, formulas, names) for row in rows]
+    metric_ids = [
+        _row_metric_id(row, variants, formulas, names, set(library.metrics))
+        for row in rows
+    ]
     return [
         *_row_errors(arch, rows, metric_ids, library),
         *_unshown_errors(arch, rows, metric_ids, library),
@@ -338,6 +341,7 @@ def equivalence_errors(metric_dir: Path, analysis_dir: Path, arch: str) -> list[
         *_peak_errors(arch, rows, metric_ids, library),
         *_counter_errors(arch, library, analysis_dir),
         *_builtin_var_errors(arch, library),
+        *_unused_variant_errors(arch, rows),
     ]
 
 
@@ -486,15 +490,25 @@ def _ceiling_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
 
 
 def _shared_formula_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
-    return _shared_value_errors(
+    formulas = {
+        metric_id: _canonical(metric.get("formula"))
+        for metric_id, metric in metrics.items()
+    }
+    errors = _shared_value_errors(
         arch,
-        {
-            metric_id: _canonical(m.get("formula"))
-            for metric_id, m in metrics.items()
-            if metric_id not in SHARED_FORMULA_IDS
-        },
+        formulas,
         "share a formula; merge them into one id",
+        [{shared, partner} for shared, partner in SHARED_FORMULA_IDS.items()],
     )
+    errors.extend(
+        f"[{arch}] {shared}: SHARED_FORMULA_IDS lists it with {partner}, but their "
+        "formulas differ"
+        for shared, partner in SHARED_FORMULA_IDS.items()
+        if shared in formulas
+        and partner in formulas
+        and formulas[shared] != formulas[partner]
+    )
+    return errors
 
 
 def _shared_name_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
@@ -510,7 +524,10 @@ def _shared_name_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
 
 
 def _shared_value_errors(
-    arch: str, values: dict[str, Optional[str]], problem: str
+    arch: str,
+    values: dict[str, Optional[str]],
+    problem: str,
+    allowed_groups: Sequence[set[str]] = (),
 ) -> list[str]:
     ids_by_value = defaultdict(list)
     for metric_id, value in values.items():
@@ -518,7 +535,9 @@ def _shared_value_errors(
     return [
         f"[{arch}] {metric_ids}: {problem}"
         for value, metric_ids in ids_by_value.items()
-        if value is not None and len(metric_ids) > 1
+        if value is not None
+        and len(metric_ids) > 1
+        and set(metric_ids) not in allowed_groups
     ]
 
 
@@ -551,6 +570,7 @@ def _row_metric_id(
     variants: dict[str, tuple],
     formulas: dict[str, str],
     names: dict[str, str],
+    library_ids: set[str],
 ) -> Optional[str]:
     """Return the id of the metric a row shows, or None if it shows none.
 
@@ -559,7 +579,7 @@ def _row_metric_id(
     """
     if row.legacy_id in variants:
         metric_id = variants[row.legacy_id][1]
-        return metric_id if metric_id in names.values() else None
+        return metric_id if metric_id in library_ids else None
     named_id = names.get(row.label.casefold())
     if row.equation is None:
         return named_id
@@ -603,6 +623,20 @@ def _variant_errors(
     if row.equation == expected:
         return []
     return [f"[{arch}] {row.legacy_id} {label}: not the listed form of {metric_id}"]
+
+
+def _unused_variant_errors(arch: str, rows: list["_Row"]) -> list[str]:
+    """Report DISPLAY_VARIANTS and UNIT_VARIANTS entries at a position no row has."""
+    positions = {row.legacy_id for row in rows}
+    return [
+        f"[{arch}] {name} lists {legacy_id}, but no row has that position"
+        for name, listed in (
+            ("DISPLAY_VARIANTS", DISPLAY_VARIANTS.get(arch, {})),
+            ("UNIT_VARIANTS", UNIT_VARIANTS.get(arch, {})),
+        )
+        for legacy_id in listed
+        if legacy_id not in positions
+    ]
 
 
 def _unshown_errors(
