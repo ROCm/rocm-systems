@@ -668,7 +668,7 @@ TEST(GpuVmPipeline, CompletionRetryOnOneQueueDoesNotStarveAnotherQueue) {
   constexpr uint32_t kEndpgm = S_ENDPGM_GFX12;
 
   ASSERT_EQ(sim.write_kernel(kKernelAddress, &kEndpgm, 1), kKernelAddress);
-  std::array<std::byte, sizeof(rocr::llvm::amdhsa::kernel_descriptor_t) + sizeof(kEndpgm)>
+  std::array<std::byte, sizeof(rocjitsu::amdhsa::kernel_descriptor_t) + sizeof(kEndpgm)>
       kernel_image{};
   sim.memory->read_block(
       kKernelAddress,
@@ -1283,11 +1283,15 @@ TEST(GpuVmPipeline, LegacyAtomicBatchPreservesLaneResultsOnRetry) {
       }
       const auto &coherence = context.cu->l2()->coherence_domain();
       const auto epoch = coherence->current_epoch();
+      const uint64_t reads = context.cu->l2()->backing_read_transactions();
+      const uint64_t writes = context.cu->l2()->backing_write_transactions();
       amdgpu::GlobalMemPipeline pipeline(&context.cu->l1_vector(), context.cu->l2());
       EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(state)), *context.wf),
                 amdgpu::VmAccessOutcome::Complete);
       if (mask && retry) {
         ASSERT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+        EXPECT_EQ(context.cu->l2()->backing_read_transactions() - reads, 2u);
+        EXPECT_EQ(context.cu->l2()->backing_write_transactions() - writes, 2u);
         EXPECT_EQ(context.external->load<uint32_t>(kAddress), kInitial + kSource[0]);
         // Retire the first attempt's snapshot after lane 0 has committed. The
         // retry must acquire a new generation without repeating that lane.
@@ -1305,7 +1309,10 @@ TEST(GpuVmPipeline, LegacyAtomicBatchPreservesLaneResultsOnRetry) {
           expected += kSource[lane];
       }
       EXPECT_EQ(context.external->load<uint32_t>(kAddress), expected);
-      EXPECT_EQ(context.external->atomic_modify_calls, mask ? (retry ? 4u : 3u) : 0u);
+      const uint32_t attempts = mask ? (retry ? 4u : 3u) : 0u;
+      EXPECT_EQ(context.external->atomic_modify_calls, attempts);
+      EXPECT_EQ(context.cu->l2()->backing_read_transactions() - reads, attempts);
+      EXPECT_EQ(context.cu->l2()->backing_write_transactions() - writes, attempts);
     }
   }
 }
