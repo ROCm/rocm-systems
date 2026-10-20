@@ -38,28 +38,22 @@ def run_roofline_benchmark(
     bench.dump_csv(benchmark_metrics, str(roofline_csv))
 
 
+def bench_class(gpu_arch: str) -> type:
+    """Return the benchmark class of gpu_arch, e.g. Bench_gfx942 for "gfx940"."""
+    device = ceilings.BENCH_DEVICE_ALIASES.get(gpu_arch, gpu_arch)
+    module = importlib.import_module(
+        f"roofline.benchmark.{device[:-2]}.benchmark_{device}"
+    )
+    return getattr(module, f"Bench_{device}")
+
+
 def load_bench(device_id: int, cache_sizes: dict) -> object:
     try:
         from utils.hip_interface import hipGetDeviceProperties
 
-        # Get exact LLVM target name of the device
-        gfx_device = ceilings.bench_device(
-            (hipGetDeviceProperties(device_id).gcnArchName).split(":", 1)[0]
-        )
-
-        # Get the gfx architecture of the device
-        gfx_arch = gfx_device[:-2]
-
-        # Dynamically import the bench class module
-        bench_module = importlib.import_module(
-            f"roofline.benchmark.{gfx_arch}.benchmark_{gfx_device}"
-        )
-
-        # Get the bench class from the module
-        bench_class = getattr(bench_module, f"Bench_{gfx_device}")
-        # Instantiate and return the bench class
-        bench_instance = bench_class(device_id, cache_sizes)
-        return bench_instance
+        # The device's exact LLVM target, e.g. "gfx942" from "gfx942:sramecc+:xnack-"
+        gpu_arch = hipGetDeviceProperties(device_id).gcnArchName.split(":", 1)[0]
+        return bench_class(gpu_arch)(device_id, cache_sizes)
     except Exception as e:
         # Propagate error so users do not attempt to use a non-existent bench instance
         raise RuntimeError(

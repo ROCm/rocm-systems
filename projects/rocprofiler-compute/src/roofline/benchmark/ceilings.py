@@ -3,10 +3,9 @@
 
 """Roofline benchmark ceilings, as plain data.
 
-Each benchmarked data type writes one roofline.csv column, and analyze reads that column
-as the variable "$<column>_empirical_peak": the measured peak of a metric. The benchmark
-classes and tools/validate_metric_library.py both read this module, which loads no ROCm
-library.
+Each benchmarked data type writes one roofline.csv column, which analyze reads as
+"$<column>_empirical_peak". The module imports nothing, so tools can read it on a host
+without ROCm.
 """
 
 # Data type -> roofline.csv column, per arch family.
@@ -99,8 +98,7 @@ _GFX11_UNSUPPORTED = [
     "WMMA-I8",
 ]
 
-# Data types each benchmarked device does not measure. Its keys are the devices with a
-# benchmark class.
+# Data types each device's benchmark skips, for every device with a benchmark class.
 UNSUPPORTED_DATA_TYPES: dict[str, list[str]] = {
     "gfx90a": ["MALL", "MFMA-F4", "MFMA-F6", "MFMA-F6F4", "MFMA-MXF8", "MFMA-F8"],
     "gfx942": ["MFMA-F4", "MFMA-F6", "MFMA-F6F4", "MFMA-MXF8"],
@@ -112,14 +110,8 @@ UNSUPPORTED_DATA_TYPES: dict[str, list[str]] = {
     "gfx1250": ["L1", "MALL", "WMMA-F64"],
 }
 
-# Devices that use another device's benchmark class: gfx940 (MI300A_A0) and gfx941
-# (MI300X_A0) use gfx942 (MI300_A1).
+# gfx940 (MI300A_A0) and gfx941 (MI300X_A0) use the gfx942 (MI300_A1) benchmark.
 BENCH_DEVICE_ALIASES = {"gfx940": "gfx942", "gfx941": "gfx942"}
-
-
-def bench_device(gpu_arch: str) -> str:
-    """Return the device whose benchmark class gpu_arch uses."""
-    return BENCH_DEVICE_ALIASES.get(gpu_arch, gpu_arch)
 
 
 def measured_ceilings(gpu_arch: str) -> set[str]:
@@ -127,7 +119,7 @@ def measured_ceilings(gpu_arch: str) -> set[str]:
 
     An arch without a benchmark class, such as gfx908, measures none.
     """
-    device = bench_device(gpu_arch)
+    device = BENCH_DEVICE_ALIASES.get(gpu_arch, gpu_arch)
     if device not in UNSUPPORTED_DATA_TYPES:
         return set()
     return {
