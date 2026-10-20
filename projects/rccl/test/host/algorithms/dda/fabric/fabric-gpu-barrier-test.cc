@@ -39,6 +39,7 @@ constexpr int kNRanks = 4;
 constexpr int kRank = 1;
 constexpr int kNBlocks = 3;
 void* const kBootstrap = reinterpret_cast<void*>(0xB007);
+const uint32_t* const kAbortFlag = reinterpret_cast<const uint32_t*>(0xAB047);
 
 size_t FlagBytes(int nRanks, int nBlocks) { return static_cast<size_t>(nRanks) * nBlocks * sizeof(FlagType); }
 
@@ -48,6 +49,7 @@ struct BarrierState {
   int selfRank;
   int nRanks;
   FlagType** peerFlags;
+  dda::common::DdaAbortSignal abortSignal;
 };
 static_assert(sizeof(BarrierState) == sizeof(FabricGpuBarrier), "FabricGpuBarrier layout changed");
 static_assert(std::is_standard_layout<FabricGpuBarrier>::value, "FabricGpuBarrier layout is no longer fixed");
@@ -98,7 +100,8 @@ class FabricGpuBarrierMicrotest : public ::testing::Test {
                    struct ncclMemManager* manager = nullptr) {
     nRanks_ = nRanks;
     selfRank_ = selfRank;
-    result_ = FabricGpuBarrier::mallocAndInit(nRanks, nBlocks, selfRank, kBootstrap, manager);
+    result_ = FabricGpuBarrier::mallocAndInit(nRanks, nBlocks, selfRank, kBootstrap, manager,
+                                              dda::common::DdaAbortSignal{kAbortFlag});
     return result_;
   }
 
@@ -288,6 +291,7 @@ TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_AllSucceed_BarrierCarriesGeometr
   EXPECT_EQ(state.selfRank, kRank);
   EXPECT_EQ(state.nRanks, kNRanks);
   EXPECT_EQ(state.peerFlags, r.first->peerFlagsDev->get());
+  EXPECT_EQ(state.abortSignal.flag, kAbortFlag);
 }
 
 TEST_F(FabricGpuBarrierMicrotest, MallocAndInit_WithManager_TracksFlagBufferAndUntracksPeerMappingsInIt) {
