@@ -357,7 +357,7 @@ TEST_F(RmaSocketMemMicrotest, DeregMrSym_ActiveReceiveKeepsMrRegisteredUntilRele
   });
   enteredFuture.wait();
 
-  EXPECT_EQ(deregister.wait_for(std::chrono::milliseconds(10)), std::future_status::timeout);
+  ASSERT_EQ(deregister.wait_for(std::chrono::milliseconds(10)), std::future_status::timeout);
   EXPECT_EQ(scene.comm.mrHead, handle);
 
   ncclAtomicRefCountDecrement(&handle->recvActiveOps);

@@ -33,6 +33,7 @@ class RmaSocketMicrotest : public ::testing::Test {
  protected:
   void TearDown() override {
     ncclRmaSocketProxyRefCount = 0;
+    ncclGdrCopy = nullptr;
     ResetTransportNetSocketCommonFakes();
     ResetTransportNetSocketFakes();
     ResetSocketFakes();
@@ -43,11 +44,14 @@ class RmaSocketMicrotest : public ::testing::Test {
 };
 
 TEST_F(RmaSocketMicrotest, Init_AmdPlatformReportsUnsupportedAndClearsContext) {
+  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
+  ScopedHook initDevices(g_ncclNetSocketInitDevices, [](const char*) { return ncclSuccess; });
   void* ctx = reinterpret_cast<void*>(0x1);
 
   EXPECT_EQ(ncclRmaSocketProxyInit(&ctx, 7, nullptr), ncclInternalError);
   EXPECT_EQ(ctx, nullptr);
   EXPECT_EQ(ncclRmaSocketProxyRefCount, 0);
+  EXPECT_EQ(initDevices.calls, 0);
 }
 
 TEST_F(RmaSocketMicrotest, Init_ExistingInitializationAddsReferenceWithoutReinitializingDevices) {
@@ -394,7 +398,7 @@ TEST_F(RmaSocketMicrotest, ProgressSendTask_InvalidOrClosedPutAckReturnsRemoteEr
   bool close = false;
   ScopedHook progress(g_ncclSocketProgress, [&close](int, ncclSocket*, void* ptr, int size, int* offset,
                                                      bool* closed) {
-    *static_cast<uint32_t*>(ptr) = 0;
+    *static_cast<uint32_t*>(ptr) = close ? NCCL_RMA_SOCKET_CONTROL_ACK_MAGIC : 0;
     *offset = size;
     *closed = close;
     return ncclSuccess;
@@ -547,10 +551,14 @@ TEST_F(RmaSocketMicrotest, ValidatePutArgs_InvalidHandlesContextRankSizeOrRangeA
   EXPECT_EQ(ncclRmaSocketProxyValidatePutArgs(scene.contexts.data(), 0, 0, &src, 1, 0, &dst,
                                               scene.comm.nranks, false, 0, nullptr, 0, &args),
             ncclInvalidArgument);
-  EXPECT_EQ(ncclRmaSocketProxyValidatePutArgs(scene.contexts.data(), 0, 0, &src,
-                                              static_cast<size_t>(INT_MAX) + 1, 0, &dst, 0, false, 0,
+  const size_t oversized = static_cast<size_t>(INT_MAX) + 1;
+  src.size = oversized;
+  dst.size = oversized;
+  EXPECT_EQ(ncclRmaSocketProxyValidatePutArgs(scene.contexts.data(), 0, 0, &src, oversized, 0, &dst, 0, false, 0,
                                               nullptr, 0, &args),
             ncclInvalidArgument);
+  src.size = data.size();
+  dst.size = data.size();
   src.type = NCCL_PTR_DMABUF;
   EXPECT_EQ(ncclRmaSocketProxyValidatePutArgs(scene.contexts.data(), 0, 0, &src, 1, 0, &dst, 0, false, 0,
                                               nullptr, 0, &args),
@@ -767,10 +775,14 @@ TEST_F(RmaSocketMicrotest, ValidateGet_LocalHandleContextAndMaximumSizeAreValida
   EXPECT_EQ(ncclRmaSocketProxyValidateGet(scene.contexts.data(), scene.contexts[0].nContexts, 0, &remote, 1, 0,
                                           &local, 0, &ctx, &remoteOut, &localOut),
             ncclInvalidArgument);
-  EXPECT_EQ(ncclRmaSocketProxyValidateGet(scene.contexts.data(), 0, 0, &remote,
-                                          static_cast<size_t>(INT_MAX) + 1, 0, &local, 0, &ctx, &remoteOut,
-                                          &localOut),
+  const size_t oversized = static_cast<size_t>(INT_MAX) + 1;
+  remote.size = oversized;
+  local.size = oversized;
+  EXPECT_EQ(ncclRmaSocketProxyValidateGet(scene.contexts.data(), 0, 0, &remote, oversized, 0, &local, 0, &ctx,
+                                          &remoteOut, &localOut),
             ncclInvalidArgument);
+  remote.size = data.size();
+  local.size = data.size();
   local.type = NCCL_PTR_DMABUF;
   EXPECT_EQ(ncclRmaSocketProxyValidateGet(scene.contexts.data(), 0, 0, &remote, 1, 0, &local, 0, &ctx, &remoteOut,
                                           &localOut),

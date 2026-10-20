@@ -146,7 +146,7 @@ TEST_F(RmaSocketProgressRecverMicrotest, ResolveSignalTarget_InvalidOperationTyp
   Scene scene;
   alignas(uint64_t) std::array<unsigned char, 16> data{};
   std::vector<ncclRmaSocketProxyMrHandle> handles{
-      scene.MakeMr(data.data(), data.size(), NCCL_PTR_HOST, 1)};
+      scene.MakeMr(data.data(), data.size(), NCCL_PTR_CUDA, 1)};
   scene.LinkMrs(handles);
   auto& receiver = scene.receivers[0];
   receiver.controlMsg.signalMrId = 1;
@@ -154,6 +154,7 @@ TEST_F(RmaSocketProgressRecverMicrotest, ResolveSignalTarget_InvalidOperationTyp
   EXPECT_EQ(ncclRmaSocketProxyResolveSignalTarget(&scene.comm, 0, &receiver), ncclInvalidUsage);
 
   receiver.controlMsg.signalOp = NCCL_NET_SIGNAL_OP_INC;
+  handles[0].type = NCCL_PTR_HOST;
   EXPECT_EQ(ncclRmaSocketProxyResolveSignalTarget(&scene.comm, 0, &receiver), ncclInvalidUsage);
 
   handles[0].type = NCCL_PTR_CUDA;
