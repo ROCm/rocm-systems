@@ -101,6 +101,113 @@ static int acclMkdirRecursive(const char* path) {
   return 0;
 }
 
+// ============================================================================
+// Growable slot pool (see struct acclPool)
+// ============================================================================
+
+// Adds one chunk and pushes its slots on the free list. Caller holds mutex.
+static int acclPoolGrow(struct acclPool* pool) {
+  if (pool->nChunks >= pool->maxChunks) return -1;
+  int c = pool->nChunks;
+  int n = pool->chunkSlots;
+  char* chunk = (char*)calloc((size_t)n, pool->elemSize);
+  int* used = (int*)calloc((size_t)n, sizeof(int));
+  int* next = (int*)malloc((size_t)n * sizeof(int));
+  if (!chunk || !used || !next) {
+    free(chunk);
+    free(used);
+    free(next);
+    return -1;
+  }
+  if (pool->slotMutexOff >= 0) {
+    for (int i = 0; i < n; i++) {
+      pthread_mutex_init((pthread_mutex_t*)(chunk + (size_t)i * pool->elemSize +
+                                            pool->slotMutexOff), NULL);
+    }
+  }
+  for (int i = 0; i < n; i++) next[i] = c * n + i + 1;
+  next[n - 1] = pool->freeHead;
+  pool->chunks[c] = chunk;
+  pool->used[c] = used;
+  pool->next[c] = next;
+  pool->freeHead = c * n;
+  pool->nChunks = c + 1;
+  return 0;
+}
+
+static int acclPoolInit(struct acclPool* pool, size_t elemSize, int chunkSlots,
+                        int capacity, long slotMutexOff) {
+  pthread_mutex_init(&pool->mutex, NULL);
+  pool->elemSize = elemSize;
+  pool->chunkSlots = chunkSlots;
+  pool->maxChunks = capacity / chunkSlots;
+  pool->slotMutexOff = slotMutexOff;
+  pool->freeHead = -1;
+  return acclPoolGrow(pool);
+}
+
+static void acclPoolDestroy(struct acclPool* pool) {
+  for (int c = 0; c < pool->nChunks; c++) {
+    if (pool->slotMutexOff >= 0) {
+      for (int i = 0; i < pool->chunkSlots; i++) {
+        pthread_mutex_destroy((pthread_mutex_t*)(pool->chunks[c] +
+                              (size_t)i * pool->elemSize + pool->slotMutexOff));
+      }
+    }
+    free(pool->chunks[c]);
+    free(pool->used[c]);
+    free(pool->next[c]);
+  }
+  pool->nChunks = 0;
+  pthread_mutex_destroy(&pool->mutex);
+}
+
+// Slots ever allocated, in use or not. Caller holds mutex.
+static inline int acclPoolSlots(const struct acclPool* pool) {
+  return pool->nChunks * pool->chunkSlots;
+}
+
+// No lock needed: idx came from an alloc, which published its chunk first.
+static inline void* acclPoolSlot(const struct acclPool* pool, int idx) {
+  return pool->chunks[idx / pool->chunkSlots] +
+         (size_t)(idx % pool->chunkSlots) * pool->elemSize;
+}
+
+static inline int acclPoolIsUsed(const struct acclPool* pool, int idx) {
+  return pool->used[idx / pool->chunkSlots][idx % pool->chunkSlots];
+}
+
+// Index of the slot at p, or -1 if p is not a slot of this pool. Caller holds mutex.
+static int acclPoolIndex(const struct acclPool* pool, const void* p) {
+  const char* cp = (const char*)p;
+  size_t chunkBytes = (size_t)pool->chunkSlots * pool->elemSize;
+  for (int c = 0; c < pool->nChunks; c++) {
+    if (cp >= pool->chunks[c] && cp < pool->chunks[c] + chunkBytes) {
+      return c * pool->chunkSlots + (int)((size_t)(cp - pool->chunks[c]) / pool->elemSize);
+    }
+  }
+  return -1;
+}
+
+// Takes a free slot, growing the pool if it has none. Returns -1 at capacity.
+// Caller holds mutex.
+static int acclPoolTake(struct acclPool* pool) {
+  if (pool->freeHead < 0 && acclPoolGrow(pool) != 0) return -1;
+  int idx = pool->freeHead;
+  pool->freeHead = pool->next[idx / pool->chunkSlots][idx % pool->chunkSlots];
+  pool->used[idx / pool->chunkSlots][idx % pool->chunkSlots] = 1;
+  return idx;
+}
+
+// Returns a slot to the free list. A slot already free is left alone, so a
+// second release cannot put it on the list twice. Caller holds mutex.
+static void acclPoolRelease(struct acclPool* pool, int idx) {
+  if (idx < 0 || idx >= acclPoolSlots(pool) || !acclPoolIsUsed(pool, idx)) return;
+  pool->used[idx / pool->chunkSlots][idx % pool->chunkSlots] = 0;
+  pool->next[idx / pool->chunkSlots][idx % pool->chunkSlots] = pool->freeHead;
+  pool->freeHead = idx;
+}
+
 // Forward declarations for cross-referenced pool functions
 static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo* op);
 
@@ -109,7 +216,7 @@ static void acclFreeCollProxyOps(struct acclCommContext* ctx,
   for (int i = 0; i < coll->nProxyOps; i++) {
     int idx = coll->proxyOpIndices[i];
     if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE) {
-      acclFreeProxyOp(ctx, &ctx->proxyOpPool[idx]);
+      acclFreeProxyOp(ctx, (struct acclProxyOpInfo*)acclPoolSlot(&ctx->proxyOpPool, idx));
     }
   }
 }
@@ -130,39 +237,31 @@ static void acclCtxUnref(struct acclCommContext* ctx) {
     ctx->outputFile = NULL;
   }
   pthread_mutex_unlock(&ctx->outputMutex);
-  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
-    pthread_mutex_destroy(&ctx->collPool[i].mutex);
-  }
-  for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
-    pthread_mutex_destroy(&ctx->proxyOpPool[i].mutex);
-  }
+  acclPoolDestroy(&ctx->collPool);
+  acclPoolDestroy(&ctx->proxyOpPool);
+  acclPoolDestroy(&ctx->proxyStepPool);
   pthread_mutex_destroy(&ctx->outputMutex);
-  pthread_mutex_destroy(&ctx->collPoolMutex);
-  pthread_mutex_destroy(&ctx->proxyOpPoolMutex);
-  pthread_mutex_destroy(&ctx->proxyStepPoolMutex);
   free(ctx);
 }
 
 static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
-  pthread_mutex_lock(&ctx->collPoolMutex);
-  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
-    if (!ctx->collPoolUsed[i]) {
-      ctx->collPoolUsed[i] = 1;
-      // Clear around the mutex, never through it, and hold it while clearing: a
-      // stale KernelCh stop writes nKernelChCompleted under this lock, and that
-      // path does not take collPoolMutex. POSIX does not define copying a
-      // pthread_mutex_t.
-      struct acclCollInfo* slot = &ctx->collPool[i];
-      const size_t muOff = offsetof(struct acclCollInfo, mutex);
-      const size_t muEnd = muOff + sizeof(slot->mutex);
-      pthread_mutex_lock(&slot->mutex);
-      memset(slot, 0, muOff);
-      memset((char*)slot + muEnd, 0, sizeof(*slot) - muEnd);
-      pthread_mutex_unlock(&slot->mutex);
-      __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
-      pthread_mutex_unlock(&ctx->collPoolMutex);
-      return &ctx->collPool[i];
-    }
+  pthread_mutex_lock(&ctx->collPool.mutex);
+  int i = acclPoolTake(&ctx->collPool);
+  if (i >= 0) {
+    // Clear around the mutex, never through it, and hold it while clearing: a
+    // stale KernelCh stop writes nKernelChCompleted under this lock, and that
+    // path does not take collPool.mutex. POSIX does not define copying a
+    // pthread_mutex_t.
+    struct acclCollInfo* slot = (struct acclCollInfo*)acclPoolSlot(&ctx->collPool, i);
+    const size_t muOff = offsetof(struct acclCollInfo, mutex);
+    const size_t muEnd = muOff + sizeof(slot->mutex);
+    pthread_mutex_lock(&slot->mutex);
+    memset(slot, 0, muOff);
+    memset((char*)slot + muEnd, 0, sizeof(*slot) - muEnd);
+    pthread_mutex_unlock(&slot->mutex);
+    __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
+    pthread_mutex_unlock(&ctx->collPool.mutex);
+    return slot;
   }
   // Pool is full. Warn once: a per-drop WARN emits one line per collective for
   // the rest of the run, which buries the very message it is trying to deliver.
@@ -170,7 +269,7 @@ static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
   ctx->droppedCollectives++;
   int firstExhaustion = !ctx->poolExhaustedWarned;
   ctx->poolExhaustedWarned = 1;
-  pthread_mutex_unlock(&ctx->collPoolMutex);
+  pthread_mutex_unlock(&ctx->collPool.mutex);
   if (firstExhaustion) {
     ACCL_WARN("ACCL Profiler: coll pool exhausted (%d slots). Profiling output for this "
               "communicator is now INCOMPLETE and must not be compared against a full "
@@ -182,12 +281,9 @@ static struct acclCollInfo* acclAllocColl(struct acclCommContext* ctx) {
 
 static void acclFreeColl(struct acclCommContext* ctx, struct acclCollInfo* coll) {
   if (!coll) return;
-  pthread_mutex_lock(&ctx->collPoolMutex);
-  int idx = (int)(coll - ctx->collPool);
-  if (idx >= 0 && idx < ACCL_COLL_POOL_SIZE) {
-    ctx->collPoolUsed[idx] = 0;
-  }
-  pthread_mutex_unlock(&ctx->collPoolMutex);
+  pthread_mutex_lock(&ctx->collPool.mutex);
+  acclPoolRelease(&ctx->collPool, acclPoolIndex(&ctx->collPool, coll));
+  pthread_mutex_unlock(&ctx->collPool.mutex);
   acclCtxUnref(ctx);
 }
 
@@ -203,30 +299,29 @@ static void acclProxyPoolExhausted(uint64_t* dropped, int* warned,
 }
 
 static struct acclProxyOpInfo* acclAllocProxyOp(struct acclCommContext* ctx) {
-  pthread_mutex_lock(&ctx->proxyOpPoolMutex);
-  for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
-    if (!ctx->proxyOpPoolUsed[i]) {
-      ctx->proxyOpPoolUsed[i] = 1;
-      __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
-      // Clear around the mutex, never through it, and hold it while clearing: a
-      // stale ProxyStep stop reads generation under this lock, so the clear
-      // must not run beside it. POSIX does not define copying a pthread_mutex_t.
-      struct acclProxyOpInfo* slot = &ctx->proxyOpPool[i];
-      const size_t muOff = offsetof(struct acclProxyOpInfo, mutex);
-      const size_t muEnd = muOff + sizeof(slot->mutex);
-      pthread_mutex_lock(&slot->mutex);
-      uint64_t gen = slot->generation;
-      memset(slot, 0, muOff);
-      memset((char*)slot + muEnd, 0, sizeof(*slot) - muEnd);
-      // One tenancy per alloc. A step that outlived the previous tenant is
-      // rejected at stop rather than charged to this one.
-      slot->generation = gen + 1;
-      pthread_mutex_unlock(&slot->mutex);
-      pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
-      return slot;
-    }
+  pthread_mutex_lock(&ctx->proxyOpPool.mutex);
+  int i = acclPoolTake(&ctx->proxyOpPool);
+  if (i >= 0) {
+    __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
+    // Clear around the mutex, never through it, and hold it while clearing: a
+    // stale ProxyStep stop reads generation under this lock, so the clear
+    // must not run beside it. POSIX does not define copying a pthread_mutex_t.
+    struct acclProxyOpInfo* slot = (struct acclProxyOpInfo*)acclPoolSlot(&ctx->proxyOpPool, i);
+    const size_t muOff = offsetof(struct acclProxyOpInfo, mutex);
+    const size_t muEnd = muOff + sizeof(slot->mutex);
+    pthread_mutex_lock(&slot->mutex);
+    uint64_t gen = slot->generation;
+    memset(slot, 0, muOff);
+    memset((char*)slot + muEnd, 0, sizeof(*slot) - muEnd);
+    // One tenancy per alloc. A step that outlived the previous tenant is
+    // rejected at stop rather than charged to this one.
+    slot->generation = gen + 1;
+    slot->poolIdx = i;
+    pthread_mutex_unlock(&slot->mutex);
+    pthread_mutex_unlock(&ctx->proxyOpPool.mutex);
+    return slot;
   }
-  pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
+  pthread_mutex_unlock(&ctx->proxyOpPool.mutex);
   acclProxyPoolExhausted(&ctx->droppedProxyOps, &ctx->proxyOpPoolWarned,
                          "op", ACCL_PROXY_OP_POOL_SIZE);
   return NULL;
@@ -236,27 +331,23 @@ static void acclFreeProxyOp(struct acclCommContext* ctx, struct acclProxyOpInfo*
   if (!op) return;
   // Not destroyed here: a ProxyStep stop still locks it after the slot is
   // released. Destroyed once in acclCtxUnref, with the last context reference.
-  pthread_mutex_lock(&ctx->proxyOpPoolMutex);
-  int idx = (int)(op - ctx->proxyOpPool);
-  if (idx >= 0 && idx < ACCL_PROXY_OP_POOL_SIZE) {
-    ctx->proxyOpPoolUsed[idx] = 0;
-  }
-  pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
+  pthread_mutex_lock(&ctx->proxyOpPool.mutex);
+  acclPoolRelease(&ctx->proxyOpPool, op->poolIdx);
+  pthread_mutex_unlock(&ctx->proxyOpPool.mutex);
   acclCtxUnref(ctx);
 }
 
 static struct acclProxyStepInfo* acclAllocProxyStep(struct acclCommContext* ctx) {
-  pthread_mutex_lock(&ctx->proxyStepPoolMutex);
-  for (int i = 0; i < ACCL_PROXY_STEP_POOL_SIZE; i++) {
-    if (!ctx->proxyStepPoolUsed[i]) {
-      ctx->proxyStepPoolUsed[i] = 1;
-      __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
-      memset(&ctx->proxyStepPool[i], 0, sizeof(ctx->proxyStepPool[i]));
-      pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
-      return &ctx->proxyStepPool[i];
-    }
+  pthread_mutex_lock(&ctx->proxyStepPool.mutex);
+  int i = acclPoolTake(&ctx->proxyStepPool);
+  if (i >= 0) {
+    struct acclProxyStepInfo* slot = (struct acclProxyStepInfo*)acclPoolSlot(&ctx->proxyStepPool, i);
+    __atomic_add_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
+    memset(slot, 0, sizeof(*slot));
+    pthread_mutex_unlock(&ctx->proxyStepPool.mutex);
+    return slot;
   }
-  pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
+  pthread_mutex_unlock(&ctx->proxyStepPool.mutex);
   acclProxyPoolExhausted(&ctx->droppedProxySteps, &ctx->proxyStepPoolWarned,
                          "step", ACCL_PROXY_STEP_POOL_SIZE);
   return NULL;
@@ -264,12 +355,9 @@ static struct acclProxyStepInfo* acclAllocProxyStep(struct acclCommContext* ctx)
 
 static void acclFreeProxyStep(struct acclCommContext* ctx, struct acclProxyStepInfo* step) {
   if (!step) return;
-  pthread_mutex_lock(&ctx->proxyStepPoolMutex);
-  int idx = (int)(step - ctx->proxyStepPool);
-  if (idx >= 0 && idx < ACCL_PROXY_STEP_POOL_SIZE) {
-    ctx->proxyStepPoolUsed[idx] = 0;
-  }
-  pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
+  pthread_mutex_lock(&ctx->proxyStepPool.mutex);
+  acclPoolRelease(&ctx->proxyStepPool, acclPoolIndex(&ctx->proxyStepPool, step));
+  pthread_mutex_unlock(&ctx->proxyStepPool.mutex);
   acclCtxUnref(ctx);
 }
 
@@ -498,7 +586,7 @@ static void acclFinalizeCollective(struct acclCollInfo* coll) {
   for (int i = 0; i < coll->nProxyOps; i++) {
     int opIdx = coll->proxyOpIndices[i];
     if (opIdx < 0 || opIdx >= ACCL_PROXY_OP_POOL_SIZE) continue;
-    struct acclProxyOpInfo* op = &ctx->proxyOpPool[opIdx];
+    struct acclProxyOpInfo* op = (struct acclProxyOpInfo*)acclPoolSlot(&ctx->proxyOpPool, opIdx);
     // Under op->mutex: a step of this op can still be stopping and adding to
     // these accumulators, and that path writes them under the same lock.
     pthread_mutex_lock(&op->mutex);
@@ -586,11 +674,21 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   }
 
   ctx->refCount = 1;
-  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
-    pthread_mutex_init(&ctx->collPool[i].mutex, NULL);
-  }
-  for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
-    pthread_mutex_init(&ctx->proxyOpPool[i].mutex, NULL);
+  // One chunk each up front, as the fixed pools had; the rest on demand.
+  int poolErr = acclPoolInit(&ctx->collPool, sizeof(struct acclCollInfo),
+                             ACCL_COLL_POOL_CHUNK, ACCL_COLL_POOL_SIZE,
+                             (long)offsetof(struct acclCollInfo, mutex));
+  poolErr |= acclPoolInit(&ctx->proxyOpPool, sizeof(struct acclProxyOpInfo),
+                          ACCL_PROXY_OP_POOL_CHUNK, ACCL_PROXY_OP_POOL_SIZE,
+                          (long)offsetof(struct acclProxyOpInfo, mutex));
+  poolErr |= acclPoolInit(&ctx->proxyStepPool, sizeof(struct acclProxyStepInfo),
+                          ACCL_PROXY_STEP_POOL_CHUNK, ACCL_PROXY_STEP_POOL_SIZE, -1);
+  if (poolErr) {
+    acclPoolDestroy(&ctx->collPool);
+    acclPoolDestroy(&ctx->proxyOpPool);
+    acclPoolDestroy(&ctx->proxyStepPool);
+    free(ctx);
+    return ncclSuccess;
   }
   ctx->commHash = commHash;
   ctx->rank = rank;
@@ -599,9 +697,6 @@ __hidden ncclResult_t acclPluginInit(void** context, uint64_t commHash,
   if (commName) strncpy(ctx->commName, commName, sizeof(ctx->commName) - 1);
 
   pthread_mutex_init(&ctx->outputMutex, NULL);
-  pthread_mutex_init(&ctx->collPoolMutex, NULL);
-  pthread_mutex_init(&ctx->proxyOpPoolMutex, NULL);
-  pthread_mutex_init(&ctx->proxyStepPoolMutex, NULL);
 
   // Open output file (write mode — fresh file per init to avoid stale data)
   const char* outDir = getenv("ACCL_PROFILER_OUTPUT_DIR");
@@ -658,11 +753,11 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
   ACCL_INFO("ACCL Profiler: finalize rank=%d output=%s", ctx->rank, ctx->outputPath);
 
   // Drain any coll slots still in use (orphaned by teardown).
-  pthread_mutex_lock(&ctx->collPoolMutex);
-  for (int i = 0; i < ACCL_COLL_POOL_SIZE; i++) {
-    if (ctx->collPoolUsed[i]) {
-      struct acclCollInfo* coll = &ctx->collPool[i];
-      // Take the claim under the lock every writer uses, not collPoolMutex. An
+  pthread_mutex_lock(&ctx->collPool.mutex);
+  for (int i = 0; i < acclPoolSlots(&ctx->collPool); i++) {
+    if (acclPoolIsUsed(&ctx->collPool, i)) {
+      struct acclCollInfo* coll = (struct acclCollInfo*)acclPoolSlot(&ctx->collPool, i);
+      // Take the claim under the lock every writer uses, not collPool.mutex. An
       // already-claimed slot belongs to a thread between acclShouldFinalize and
       // acclFreeColl, which releases the slot and its reference itself; touching
       // it here double-releases both. Read and set in one critical section so no
@@ -684,11 +779,11 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
       // emitted for it.
       ctx->leakedCollectives++;
       acclFreeCollProxyOps(ctx, coll);
-      ctx->collPoolUsed[i] = 0;
+      acclPoolRelease(&ctx->collPool, i);
       __atomic_sub_fetch(&ctx->refCount, 1, __ATOMIC_SEQ_CST);
     }
   }
-  pthread_mutex_unlock(&ctx->collPoolMutex);
+  pthread_mutex_unlock(&ctx->collPool.mutex);
 
   // Count, but deliberately do NOT release, proxy ops and steps still held at
   // finalize. Three classes never reach acclFreeProxyOp/acclFreeProxyStep on
@@ -710,17 +805,17 @@ __hidden ncclResult_t acclPluginFinalize(void* context) {
   // retained for the life of the process. The cost is bounded: one
   // acclCommContext per affected communicator, and the output file is closed
   // below regardless, so no descriptor is held.
-  pthread_mutex_lock(&ctx->proxyOpPoolMutex);
-  for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
-    if (ctx->proxyOpPoolUsed[i]) ctx->outstandingProxyOps++;
+  pthread_mutex_lock(&ctx->proxyOpPool.mutex);
+  for (int i = 0; i < acclPoolSlots(&ctx->proxyOpPool); i++) {
+    if (acclPoolIsUsed(&ctx->proxyOpPool, i)) ctx->outstandingProxyOps++;
   }
-  pthread_mutex_unlock(&ctx->proxyOpPoolMutex);
+  pthread_mutex_unlock(&ctx->proxyOpPool.mutex);
 
-  pthread_mutex_lock(&ctx->proxyStepPoolMutex);
-  for (int i = 0; i < ACCL_PROXY_STEP_POOL_SIZE; i++) {
-    if (ctx->proxyStepPoolUsed[i]) ctx->outstandingProxySteps++;
+  pthread_mutex_lock(&ctx->proxyStepPool.mutex);
+  for (int i = 0; i < acclPoolSlots(&ctx->proxyStepPool); i++) {
+    if (acclPoolIsUsed(&ctx->proxyStepPool, i)) ctx->outstandingProxySteps++;
   }
-  pthread_mutex_unlock(&ctx->proxyStepPoolMutex);
+  pthread_mutex_unlock(&ctx->proxyStepPool.mutex);
 
   // Write the drop summary while the output file is still open, under the lock
   // acclWriteRecord uses, so the summary cannot land inside a record. The file
@@ -1009,7 +1104,7 @@ __hidden ncclResult_t acclPluginStopEvent(void* eHandle) {
         acclFreeProxyOp(ctx, op);
         return ncclSuccess;
       }
-      int opIdx = (int)(op - ctx->proxyOpPool);
+      int opIdx = op->poolIdx;
       if (coll->nProxyOps < ACCL_MAX_PROXY_OPS) {
         coll->proxyOpIndices[coll->nProxyOps] = opIdx;
         coll->nProxyOps++;
