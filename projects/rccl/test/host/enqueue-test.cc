@@ -2254,6 +2254,48 @@ TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag)
   EXPECT_EQ(0u, ac.c()->lastStreamTag);
 }
 
+// ROCM-33092: an addon collective never reaches ncclEnqueueCheck, so the info overload is what keeps
+// comm->opCount in step with the native path.
+TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_AdvancesOpCountOnSuccess) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  int localRankToRank[1] = {0};
+  ac.c()->localRankToRank = localRankToRank;
+  ac.c()->opCount = 7;
+
+  struct ncclInfo info = {};
+  info.opName = "ReduceScatter";
+  info.comm = ac.c();
+  info.stream = kAddonStream;
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(info, [] { return ncclSuccess; }));
+  EXPECT_EQ(8u, ac.c()->opCount);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_WithInfo_LaunchFailedLeavesOpCount) {
+  AddonComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph,
+                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
+                            if (graph) *graph = ncclCudaGraphNone(mode);
+                            return ncclSuccess;
+                          });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+  int localRankToRank[1] = {0};
+  ac.c()->localRankToRank = localRankToRank;
+  ac.c()->opCount = 7;
+
+  struct ncclInfo info = {};
+  info.opName = "ReduceScatter";
+  info.comm = ac.c();
+  info.stream = kAddonStream;
+  EXPECT_EQ(ncclInternalError, rcclAddonLaunch(info, [] { return ncclInternalError; }));
+  EXPECT_EQ(7u, ac.c()->opCount);
+}
+
 // ===========================================================================
 // rcclAddonLaunch under graph capture (AICOMRCCL-2184). A captured addon collective joins the
 // per-communicator chain that ncclLaunchPrepare / ncclLaunchFinish capture native collectives into:

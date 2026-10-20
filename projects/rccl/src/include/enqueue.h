@@ -9,6 +9,7 @@
 #define NCCL_ENQUEUE_H_
 
 #include "comm.h"
+#include "info.h"
 #include "group.h"
 #include "collectives.h"
 #include "utils.h"
@@ -77,6 +78,20 @@ inline ncclResult_t rcclAddonLaunch(struct ncclComm* comm, cudaStream_t stream, 
   ncclResult_t result = rcclAddonLaunchBegin(comm, stream, &state);
   if (result != ncclSuccess) return rcclAddonLaunchEnd(comm, stream, state, result);
   return rcclAddonLaunchEnd(comm, stream, state, launch());
+}
+
+// An addon collective that returns before ncclEnqueueCheck must still print its per-collective COLL line and
+// advance comm->opCount on the user's comm. Hierarchical addons use this too: their sub-collectives run on the
+// separate intra/inter comms (and log there under their own names), so the parent comm is counted here exactly
+// once, matching the native path.
+void rcclLogCollInfo(const struct ncclInfo& info);
+
+template <typename LaunchFn>
+inline ncclResult_t rcclAddonLaunch(const struct ncclInfo& info, LaunchFn&& launch) {
+  rcclLogCollInfo(info);
+  ncclResult_t result = rcclAddonLaunch(info.comm, info.stream, std::forward<LaunchFn>(launch));
+  if (result == ncclSuccess) info.comm->opCount++;
+  return result;
 }
 
 ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t* simInfo);
