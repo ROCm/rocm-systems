@@ -106,7 +106,7 @@ TEMPLATE_TEST_CASE(Unit_atomicExch_system_Positive_Peer_GPUs, int, float, double
 
 ## Test Levels and Quick Mode (`level_0`)
 
-Tests are assigned a level in the YAML configuration (`level: 0` through `level: 4`). The level serves two purposes: it controls which tests are **selected** to run (via Catch2 tag filters), and it allows tests to **adjust their behavior** at runtime (e.g., reducing workload at lower levels).
+Tests are assigned a level in the YAML configuration (`level: 0` through `level: 4`). Levels serve two independent purposes, each controlled by its own knob: the `[level_N]` tags let you **select** which tests run (Catch2 tag filter or `ctest -L`), and the `HIP_TEST_LEVEL` environment variable picks the **parameters** tests run with (memory sizes, iteration counts, `isQuickLevel()`, ...).
 
 | Level | Use case | Typical runtime |
 |-------|----------|-----------------|
@@ -118,49 +118,43 @@ Tests are assigned a level in the YAML configuration (`level: 0` through `level:
 
 ### Running at a specific level
 
-The active level always supplies the workload parameters. It selects which
-tests run **only when it was requested explicitly**. The level is resolved once
-per process, in strict priority order:
+Each knob has exactly one meaning:
 
-1. A Catch2 tag filter on the command line: `./MemoryTest1 "[level_0]"`
-2. The `HIP_TEST_LEVEL` environment variable: `HIP_TEST_LEVEL=level_0 ./MemoryTest1`
-3. The default, `level_2`
+- **`HIP_TEST_LEVEL=level_N` only sets the parameters.** It never filters: every
+  requested test runs, with `level_N` parameters. Unset (or empty), the
+  parameters default to `level_2`.
+- **A `[level_N]` Catch2 filter or `ctest -L level_N` only selects tests.** It
+  never changes the parameters, so the selected tests run with whatever
+  `HIP_TEST_LEVEL` says — `level_2` by default.
+
+To run the `level_0` tests with `level_0` parameters, set both explicitly.
 
 | Invocation | Parameters | Tests that run |
 |---|---|---|
 | `./MemoryTest1` | `level_2` (default) | every test in the binary |
 | `./MemoryTest1 Unit_hipMemsetSync` | `level_2` (default) | `Unit_hipMemsetSync` |
-| `./MemoryTest1 "[level_0]"` | `level_0` | only `[level_0]`-tagged |
-| `HIP_TEST_LEVEL=level_0 ./MemoryTest1` | `level_0` | only `[level_0]`-tagged |
-| `HIP_TEST_LEVEL=level_0 ./MemoryTest1 Unit_hipMemsetSync` | `level_0` | `Unit_hipMemsetSync` if it is tagged `level_0`, otherwise nothing |
-| `HIP_TEST_LEVEL=level_0,level_2 ./MemoryTest1` | `level_2` (highest requested) | `[level_0]` **or** `[level_2]` |
-| `HIP_TEST_LEVEL=~level_4 ./MemoryTest1` | `level_3` (highest remaining) | `level_0` through `level_3` |
+| `./MemoryTest1 "[level_0]"` | `level_2` (default) | only `[level_0]`-tagged |
+| `HIP_TEST_LEVEL=level_0 ./MemoryTest1` | `level_0` | every test in the binary |
+| `HIP_TEST_LEVEL=level_0 ./MemoryTest1 "[level_0]"` | `level_0` | only `[level_0]`-tagged |
+| `HIP_TEST_LEVEL=level_0 ./MemoryTest1 "[level_2]"` | `level_0` | only `[level_2]`-tagged |
+| `HIP_TEST_LEVEL=level_4 ./MemoryTest1 "[level_0]"` | `level_4` | only `[level_0]`-tagged |
+| `HIP_TEST_LEVEL=level_0 ./MemoryTest1 Unit_hipMemsetSync` | `level_0` | `Unit_hipMemsetSync` |
 | `ctest` | `level_2` (default) | every test |
-| `HIP_TEST_LEVEL=level_0 ctest` | `level_0` | `level_0` tests run, the rest reported **Skipped** |
-| `ctest -L level_0` | `level_2` (default) | the `level_0`-labelled entries, on default parameters |
+| `ctest -L level_0` | `level_2` (default) | the `level_0`-labelled entries |
+| `HIP_TEST_LEVEL=level_0 ctest` | `level_0` | every test |
+| `HIP_TEST_LEVEL=level_0 ctest -L level_0` | `level_0` | the `level_0`-labelled entries |
+| `HIP_TEST_LEVEL=level_0 ctest -L level_2` | `level_0` | the `level_2`-labelled entries |
 | `ctest -N`, `--list-tests`, `--help` | — | no level is resolved at all |
 
-Two rules explain every row. First, naming a test is itself a statement about
-what to run, so a merely-default level never overrides it — which is also why
-plain `ctest` behaves exactly as it always has, since every ctest entry names a
-test. Second, when several levels are requested at once, **all** of them run
-while the **highest** supplies the parameters: there is one parameter store per
-process, so one level has to win, but nothing that was asked for is dropped
-from the run.
-
-An explicit request that matches nothing is not a failure: the process exits
-with code 4 ("all tests skipped"), and CTest reports such entries as **Skipped**
-rather than **Failed**. Given that levels partition rather than nest, this is
-how `HIP_TEST_LEVEL=level_0 ctest` leaves every non-`level_0` entry.
-
-> `ctest -L level_0` selects the level_0-labelled entries but still runs them
-> with the default `level_2` parameters — `-L` is consumed by ctest and never
-> reaches the test binary. Use `HIP_TEST_LEVEL=level_0 ctest`, which selects and
-> parameterises in one go and needs no `-L`.
+`HIP_TEST_LEVEL` must name exactly one supported level (`level_0` through
+`level_4`). Anything else — a list such as `level_0,level_2`, an exclusion such
+as `~level_4`, a bracketed tag such as `[level_0]`, or a typo — is rejected: the
+test binary prints an error and exits with a failure before running any test,
+rather than silently falling back to the default parameters.
 
 ### Writing level-aware tests with `isQuickLevel()`
 
-Tests that are slow in emulation environments can use `isQuickLevel()` to reduce their workload at `level_0` while preserving full coverage at higher levels. This function returns `true` when the active test level is `level_0` (set via `HIP_TEST_LEVEL` environment variable or `[level_0]` Catch2 tag filter).
+Tests that are slow in emulation environments can use `isQuickLevel()` to reduce their workload at `level_0` while preserving full coverage at higher levels. This function returns `true` when the active parameter level is `level_0`, i.e. when `HIP_TEST_LEVEL=level_0` is set. A `[level_0]` Catch2 tag filter alone does not make it return `true`.
 
 ```cpp
 #include <hip_test_common.hh>
@@ -174,7 +168,7 @@ HIP_TEST_CASE(Unit_hipMemsetSync) {
 #### Guidelines for `isQuickLevel()` trimming
 
 - **Prefer reducing iteration counts and buffer sizes** over skipping code paths, so the same API surface is exercised with less data.
-- **Call `isQuickLevel()` inside the test function**, not in global/static variable initializers. The test level is resolved in `main()` before any test runs, which is after static initialization.
+- **Call `isQuickLevel()` inside the test function**, not in global/static variable initializers. The test level is resolved when the test run starts, before any test runs, which is after static initialization.
 - **Use reproducible seeds** when tests involve randomization. Log the seed and allow overriding (e.g., via `HIP_TEST_SEED`) so failures can be replayed.
 
 #### Example: reducing a memset size

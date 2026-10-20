@@ -867,7 +867,8 @@ class TestDeriveVectorUnary:
     @pytest.mark.parametrize('has_abs', [False, True])
     def test_cvt_norm_i16_u16_f16_modifiers_precede_rounding(self, suffix, has_abs):
         sem = derive_semantics(f'V_CVT_NORM_{suffix}_F16', 'ENC_VOP3')
-        fields = {'neg', 'clamp', 'omod'}
+        # The generator withholds CLAMP/OMOD from integer results.
+        fields = {'neg'}
         if has_abs:
             fields.add('abs')
         block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
@@ -880,8 +881,6 @@ class TestDeriveVectorUnary:
         )
         assert ('inst_.abs' in cpp) == has_abs
         assert 'inst_.neg' in cpp
-        assert 'inst_.omod' not in cpp
-        assert 'inst_.clamp' not in cpp
 
     @pytest.mark.parametrize('suffix', ['I16', 'U16', 'F32'])
     @pytest.mark.parametrize('has_abs', [False, True])
@@ -892,9 +891,18 @@ class TestDeriveVectorUnary:
             fields.add('abs')
         block = enrich_block(derive_sema_block(sem), enc_field_names=frozenset(fields))
         cpp = lower_sema_block(block)
-        assert cpp.index('util::f16_to_f32') < cpp.index(
-            'source_modifier::apply_to_float(sv'
+        # F32_F16 flushes the raw half before widening it; the modifiers apply
+        # to the widened value. The integer forms keep their own source read.
+        modifier = (
+            'source_modifier::apply_to_float('
+            if suffix == 'F32'
+            else 'source_modifier::apply_to_float(sv'
         )
+        if suffix == 'F32':
+            assert cpp.index(modifier) < cpp.index('util::f16_to_f32')
+            assert 'input_denormal::flush_input<amdgpu::fp_format::F16>(' in cpp
+        else:
+            assert cpp.index('util::f16_to_f32') < cpp.index(modifier)
         assert ('inst_.abs' in cpp) == has_abs
         assert 'inst_.neg' in cpp
         if suffix == 'F32':
@@ -906,9 +914,24 @@ class TestDeriveVectorUnary:
         else:
             assert 'inst_.omod' not in cpp
             assert 'inst_.clamp' not in cpp
-            assert cpp.index('source_modifier::apply_to_float(sv') < cpp.index(
-                'std::isnan(s)'
-            )
+            assert cpp.index(modifier) < cpp.index('std::isnan(s)')
+
+    def test_cvt_f64_f32_modifiers_wrap_the_typed_conversion(self):
+        sem = derive_semantics('V_CVT_F64_F32', 'ENC_VOP3')
+        block = enrich_block(
+            derive_sema_block(sem),
+            enc_field_names=frozenset({'abs', 'neg', 'omod', 'clamp'}),
+        )
+        cpp = lower_sema_block(block)
+
+        source_modifier = 'source_modifier::apply_to_float'
+        conversion = 'static_cast<double>'
+        # The modifier call is nested inside the widening conversion.
+        assert cpp.index(conversion) < cpp.index(source_modifier)
+        assert 'inst_.abs' in cpp
+        assert 'inst_.neg' in cpp
+        assert 'output_modifier_policy<amdgpu::fp_format::F64>' in cpp
+        assert 'output_modifier::apply<amdgpu::fp_format::F64>' in cpp
 
     @pytest.mark.parametrize('enc', ['ENC_VOP1', 'ENC_VOP3'])
     def test_cos_bf16_lowers_through_shared_transcendental(self, enc):
@@ -2524,6 +2547,54 @@ class TestDeriveDsSwizzle:
         sem.sign_extend = False
         block = derive_sema_block(sem)
         assert block is not None
+
+
+class TestDeriveDsGws:
+    @pytest.mark.parametrize(
+        ('name', 'operation'),
+        [
+            ('DS_GWS_INIT', 'init'),
+            ('DS_GWS_SEMA_V', 'sema_v'),
+            ('DS_GWS_SEMA_P', 'sema_p'),
+            ('DS_GWS_SEMA_BR', 'sema_br'),
+            ('DS_GWS_SEMA_RELEASE_ALL', 'sema_release_all'),
+            ('DS_GWS_BARRIER', 'barrier'),
+        ],
+    )
+    def test_classifies_each_gws_opcode(self, name, operation):
+        sem = derive_semantics(name, 'ENC_DS')
+        assert sem is not None
+        assert sem.semantic_class == 'ds_gws'
+        assert sem.operation == operation
+        # GWS publishes a zero-payload 4-byte store for wait accounting.
+        assert sem.elem_size == 4
+        assert sem.num_elems == 0
+
+    @pytest.mark.parametrize(
+        'name',
+        [
+            'DS_GWS_FUTURE_VARIANT',
+            # Counterexample: the generic DS-atomic fallback keys off substrings
+            # like '_ADD'/'_SUB', so an unrecognized GWS name containing one must
+            # still be stopped as a GWS opcode (classified nop) and not mis-decoded
+            # as a read-modify-write atomic.
+            'DS_GWS_ADD_VARIANT',
+            'DS_GWS_SUB_FOO',
+            'DS_GWS_MIN_BAR',
+        ],
+    )
+    def test_unknown_gws_mnemonic_is_unsupported(self, name):
+        # An unrecognized DS_GWS_* name must not be assigned synchronization or
+        # memory-atomic behavior; it is classified as an unsimulated nop.
+        sem = derive_semantics(name, 'ENC_DS')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
+
+
+def test_ds_ordered_count_stays_unimplemented():
+    sem = derive_semantics('DS_ORDERED_COUNT', 'ENC_DS')
+    assert sem is not None
+    assert sem.semantic_class == 'nop'
 
 
 @pytest.mark.parametrize('dtype', ['f16', 'bf16'])

@@ -3010,6 +3010,10 @@ TEST_F(GpuDeviceSdma, TerminalFaultSurvivesUnavailableReadPointerPublication) {
 
   auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{48});
   ring_doorbell(0x800, doorbell);
+  // Wait for the terminal scheduler turn, including its retried publication.
+  // The doorbell drain's idle window can end before that asynchronous work.
+  EXPECT_FALSE(device_.synchronize_sdma_queue_for_test(/*engine=*/0));
+  device_.drain_doorbell_inbox_for_test();
   EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), 28u);
   EXPECT_EQ(transport_.dword_at(kSchedulerRingFencePhysical), 0u);
 

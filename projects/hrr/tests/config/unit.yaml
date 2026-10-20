@@ -21,6 +21,7 @@ cases:
   Unit_HRR_Format_BadMagic: {}
   Unit_HRR_Format_EventTypeName: {}
   Unit_HRR_Format_HashHex: {}
+  Unit_HRR_Format_HostSnapshotRecord: {}
   Unit_HRR_Format_Roundtrip: {}
   Unit_HRR_Format_SmallPayloadForType: {}
   Unit_HRR_Format_TruncatedEvent: {}

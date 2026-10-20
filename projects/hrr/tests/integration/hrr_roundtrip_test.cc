@@ -673,7 +673,10 @@ HRR_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
  */
 HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_divergence"};
-  hrr_capture_direct("Unit_HRR_UncapturedHostWrite_Direct", cap.path);
+  // Pinned host snapshots would record the flag, so the write stays unseen only
+  // without them.
+  hrr_capture_direct("Unit_HRR_UncapturedHostWrite_Direct", cap.path, 5,
+                     {{"HIP_HRR_HOST_SNAPSHOTS", "0"}});
 
   SECTION("guard ON -> clean exit 2") {
     auto [ret, out] = hrr_playback_env(
@@ -723,7 +726,8 @@ HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
  */
 TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_nulloptional"};
-  hrr_capture_direct("Unit_HRR_NullOptionalPtr_Direct", cap.path);
+  hrr_capture_direct("Unit_HRR_NullOptionalPtr_Direct", cap.path, 5,
+                     {{"HIP_HRR_HOST_SNAPSHOTS", "0"}});
 
   auto [ret, out] = hrr_playback_env(
       cap.path,
@@ -1799,6 +1803,38 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileNotingUnreplayable) {
 }
 
 /**
+ * Unit_HRR_ForkedChildStaysIncomplete
+ * -----------------------------------
+ *   - A forked child drops a record before its first one opens its archive.
+ *     The child's manifest says "complete": false, the parent's says true.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkedChildStaysIncomplete) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_forked_child_stays_incomplete"};
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkedChildStaysIncomplete_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+  const std::vector<fs::path> archives = hrr_process_archives(cap.path);
+  REQUIRE(archives.size() == 2);
+  int children = 0;
+  for (const fs::path& archive : archives) {
+    const std::string manifest = read_text_file(archive / "manifest.json");
+    INFO("Process manifest:\n" << manifest);
+    const fs::path& other = archive == archives[0] ? archives[1] : archives[0];
+    const std::string other_pid = other.filename().string().substr(std::strlen("pid-"));
+    const bool child = manifest.find("\"parent_pid\": " + other_pid + ",") != std::string::npos;
+    children += child ? 1 : 0;
+    CHECK(manifest.find(child ? "\"complete\": false" : "\"complete\": true") !=
+          std::string::npos);
+  }
+  REQUIRE(children == 1);
+}
+
+/**
  * Unit_HRR_ForkedChildRecordsAfterShutdown
  * ----------------------------------------
  *   - A forked child that exits normally without recording leaves no archive,
@@ -1943,6 +1979,42 @@ HRR_TEST_CASE(Unit_HRR_ForkBetweenCaptureFlushAndClose) {
   REQUIRE(hrr::load_archive(archive.string(), arc));
   CHECK(arc.complete);
   check_ends_in_trailer(archive, arc);
+}
+
+/**
+ * Unit_HRR_CloseDuringCrashManifest
+ * ---------------------------------
+ *   - The capture shutdown does not close the archive's directory descriptors
+ *     while a crash callback on another thread writes the manifest through
+ *     one of them: the workload dies of its SIGSEGV, not exit code 3, and its
+ *     hold saw the shutdown start.
+ */
+HRR_TEST_CASE(Unit_HRR_CloseDuringCrashManifest) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_close_during_crash_manifest"};
+  hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+  proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+  set_proc_search_path(proc);
+  const int ret = proc.runWithTimeout("\"Unit_HRR_CloseDuringCrashManifest_Direct\"", 120);
+  INFO("Capture exit code: " << ret << "\n" << proc.getOutput());
+  CHECK(proc.getOutput().find("capture shutdown started while the crash callback was held") !=
+        std::string::npos);
+  REQUIRE(ret == 128 + SIGSEGV);
+}
+
+/**
+ * Unit_HRR_ForkDuringBlobWrite
+ * ----------------------------
+ *   - fork() waits for a blob write in flight, so the child holds no
+ *     descriptor of a blobs/<xx> directory in the parent's archive.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkDuringBlobWrite) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_during_blob_write"};
+  hrr::test::SpawnProc proc(hrr_self_exe());
+  proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+  set_proc_search_path(proc);
+  const int ret = proc.runWithTimeout("\"Unit_HRR_ForkDuringBlobWrite_Direct\"", 120);
+  INFO("Capture exit code: " << ret);
+  REQUIRE(ret == 0);
 }
 #endif  // !_WIN32
 

@@ -325,6 +325,7 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
 //
 // hrr_capture_direct: spawn a hidden _Direct workload with HIP_HRR_CAPTURE_OUTPUT
 //   set, REQUIRE a clean capture, and assert the archive has >= min_events.
+//   Pairs in env are set in the workload's environment as well.
 //
 // hrr_playback_env: run hrr-playback with arbitrary extra environment pairs
 //   (e.g. HIP_HRR_REPLAY_ZERO_INIT / HIP_HRR_REPLAY_DIVERGENCE_ABORT) and return
@@ -336,9 +337,11 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
 // ---------------------------------------------------------------------------
 inline void hrr_capture_direct(const std::string& direct_case,
                                const fs::path& cap_path,
-                               size_t min_events = 5) {
+                               size_t min_events = 5,
+                               const std::vector<std::pair<std::string, std::string>>& env = {}) {
   { hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
+    for (const auto& kv : env) proc.setEnv(kv.first, kv.second);
     { set_proc_search_path(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
     INFO("Capture exit: " << ret);

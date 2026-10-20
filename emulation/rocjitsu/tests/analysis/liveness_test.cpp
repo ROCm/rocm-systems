@@ -7166,6 +7166,17 @@ TEST(GeneratedInstDefUse, DppBoundCtrlZeroRotateDoesNotReadDestination) {
   EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
 }
 
+TEST(GeneratedInstDefUse, DppBoundCtrlZeroBroadcastDoesNotReadDestination) {
+  for (uint32_t control : {0x142u, 0x143u}) {
+    SCOPED_TRACE(control);
+    auto inst = decode_cdna4({kVop1MovWord0Dpp, kDppFullMasks | (control << 8) | 2u});
+    ASSERT_NE(inst, nullptr);
+    InstDefUse idu(*inst);
+    EXPECT_TRUE(idu.defs.contains({RegClass::VGPR, 5, 1}));
+    EXPECT_FALSE(idu.uses.contains({RegClass::VGPR, 5, 1}));
+  }
+}
+
 TEST(GeneratedInstDefUse, Vop1DppPartialMaskReadsFullWidthDestination) {
   // v_mov_b64_e32 writes a VGPR pair (v[6:7]). A partial DPP row mask preserves
   // the whole 64-bit destination, so the implicit use must match the width-2

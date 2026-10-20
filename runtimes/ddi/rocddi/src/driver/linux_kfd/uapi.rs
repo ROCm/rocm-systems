@@ -28,9 +28,11 @@ pub(super) const GET_AVAILABLE_MEMORY: u64 = request(3, 0x23, 16);
 pub(super) const UPDATE_QUEUE: u64 = request(1, 0x07, 24);
 pub(super) const CREATE_EVENT: u64 = request(3, 0x08, 32);
 pub(super) const DESTROY_EVENT: u64 = request(1, 0x09, 8);
+pub(super) const SET_EVENT: u64 = request(1, 0x0a, 8);
 pub(super) const RESET_EVENT: u64 = request(1, 0x0b, 8);
 pub(super) const WAIT_EVENTS: u64 = request(3, 0x0c, 24);
 pub(super) const SET_SCRATCH_BACKING_VA: u64 = request(3, 0x11, 16);
+pub(super) const GET_TILE_CONFIG: u64 = request(3, 0x12, 40);
 pub(super) const SET_TRAP_HANDLER: u64 = request(1, 0x13, 24);
 pub(super) const GET_APERTURES: u64 = request(3, 0x14, 16);
 pub(super) const ACQUIRE_VM: u64 = request(1, 0x15, 8);
@@ -49,6 +51,7 @@ pub(super) const SVM: u64 = request(3, 0x20, 24);
 pub(super) const IPC_IMPORT_HANDLE: u64 = request(3, 0x80, 48);
 pub(super) const IPC_EXPORT_HANDLE: u64 = request(3, 0x81, 32);
 pub(super) const SPM: u64 = request(3, 0x84, 32);
+pub(super) const PC_SAMPLE: u64 = request(3, 0x85, 32);
 pub(super) const AIS: u64 = request(3, 0x87, 40);
 
 pub(super) const AIS_READ: u32 = 1;
@@ -69,6 +72,19 @@ pub(super) const SVM_ATTR_GRANULARITY: u32 = 7;
 pub(super) const SPM_OP_ACQUIRE: u32 = 0;
 pub(super) const SPM_OP_RELEASE: u32 = 1;
 pub(super) const SPM_OP_SET_DESTINATION: u32 = 2;
+pub(super) const PC_SAMPLE_QUERY_CAPABILITIES: u32 = 0;
+pub(super) const PC_SAMPLE_CREATE: u32 = 1;
+pub(super) const PC_SAMPLE_DESTROY: u32 = 2;
+pub(super) const PC_SAMPLE_START: u32 = 3;
+pub(super) const PC_SAMPLE_STOP: u32 = 4;
+/// Query every supported format instead of the configuration of an active trace.
+pub(super) const PC_SAMPLE_QUERY_TYPE_FULL: u32 = 1;
+pub(super) const PC_SAMPLE_METHOD_HOST_TRAP: u32 = 1;
+pub(super) const PC_SAMPLE_METHOD_STOCHASTIC: u32 = 2;
+pub(super) const PC_SAMPLE_UNIT_MICROSECONDS: u32 = 0;
+pub(super) const PC_SAMPLE_UNIT_CYCLES: u32 = 1;
+pub(super) const PC_SAMPLE_UNIT_INSTRUCTIONS: u32 = 2;
+pub(super) const PC_SAMPLE_FLAG_POWER_OF_TWO: u64 = 1;
 
 const IOCTL_SIZE_MAX: usize = (1 << 14) - 1;
 
@@ -115,6 +131,7 @@ pub(super) const SVM_FLAGS: u32 = SVM_FLAG_HOST_ACCESS
     | SVM_FLAG_GPU_ALWAYS_MAPPED
     | SVM_FLAG_EXT_COHERENT;
 
+/// KFD UAPI version returned by `GET_VERSION`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct Version {
@@ -122,6 +139,7 @@ pub(super) struct Version {
     pub minor: u32,
 }
 
+/// GPU, CPU, and system clock readings returned by KFD.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct ClockCounters {
@@ -133,6 +151,7 @@ pub(super) struct ClockCounters {
     pub pad: u32,
 }
 
+/// Available device memory returned for one KFD GPU ID.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct AvailableMemory {
@@ -141,6 +160,21 @@ pub(super) struct AvailableMemory {
     pub pad: u32,
 }
 
+/// Native tile and address configuration for one GPU.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct TileConfig {
+    pub tiles_ptr: u64,
+    pub macro_tiles_ptr: u64,
+    pub num_tile_configs: u32,
+    pub num_macro_tile_configs: u32,
+    pub gpu_id: u32,
+    pub gb_addr_config: u32,
+    pub num_banks: u32,
+    pub num_ranks: u32,
+}
+
+/// Global wave synchronization slots assigned to a queue.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct AllocQueueGws {
@@ -150,6 +184,7 @@ pub(super) struct AllocQueueGws {
     pub pad: u32,
 }
 
+/// Request half of a KFD file-to-VRAM or VRAM-to-file transfer.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct AisInput {
@@ -161,6 +196,7 @@ pub(super) struct AisInput {
     pub descriptor: i32,
 }
 
+/// Copied-byte count and status returned by a KFD file transfer.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct AisOutput {
@@ -169,6 +205,7 @@ pub(super) struct AisOutput {
     pub pad: i32,
 }
 
+/// Overlapping input and output halves of the KFD AIS ioctl.
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub(super) union AisArgs {
@@ -203,6 +240,7 @@ impl AisArgs {
     }
 }
 
+/// KFD queue creation request and returned queue identity.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct CreateQueue {
@@ -225,6 +263,7 @@ pub(super) struct CreateQueue {
     pub metadata_ring_size: u32,
 }
 
+/// KFD queue destruction request.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct DestroyQueue {
@@ -232,6 +271,7 @@ pub(super) struct DestroyQueue {
     pub pad: u32,
 }
 
+/// Mutable native queue scheduling and ring parameters.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct UpdateQueue {
@@ -242,6 +282,7 @@ pub(super) struct UpdateQueue {
     pub priority: u32,
 }
 
+/// Compute-unit mask request for a native queue.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct SetCuMask {
@@ -250,6 +291,7 @@ pub(super) struct SetCuMask {
     pub mask: u64,
 }
 
+/// LDS, scratch, and GPU VM address limits for one GPU.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct Aperture {
@@ -263,6 +305,7 @@ pub(super) struct Aperture {
     pub pad: u32,
 }
 
+/// Pointer and count used to retrieve native GPU apertures.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct Apertures {
@@ -271,6 +314,7 @@ pub(super) struct Apertures {
     pub pad: u32,
 }
 
+/// Associates a DRM render descriptor with a KFD GPU VM.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct AcquireVm {
@@ -278,6 +322,7 @@ pub(super) struct AcquireVm {
     pub gpu_id: u32,
 }
 
+/// KFD runtime enablement request and reported capabilities.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct RuntimeEnable {
@@ -294,6 +339,7 @@ pub(super) struct CreateProcess {
     pub pad: u32,
 }
 
+/// KFD memory allocation request and returned native handle.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct AllocMemory {
@@ -305,6 +351,7 @@ pub(super) struct AllocMemory {
     pub flags: u32,
 }
 
+/// KFD memory release request.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct FreeMemory {
@@ -322,6 +369,7 @@ pub(super) struct MapMemory {
     pub success: u32,
 }
 
+/// Metadata and size queried for an imported DMA-BUF.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct DmaBufInfo {
@@ -333,6 +381,7 @@ pub(super) struct DmaBufInfo {
     pub descriptor: u32,
 }
 
+/// KFD import request and returned allocation handle.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct ImportDmaBuf {
@@ -342,6 +391,7 @@ pub(super) struct ImportDmaBuf {
     pub descriptor: u32,
 }
 
+/// KFD export request and returned DMA-BUF descriptor.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ExportDmaBuf {
@@ -350,6 +400,7 @@ pub(super) struct ExportDmaBuf {
     pub descriptor: u32,
 }
 
+/// Native shared handle produced from a KFD allocation.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct IpcExportHandle {
@@ -359,6 +410,7 @@ pub(super) struct IpcExportHandle {
     pub flags: u32,
 }
 
+/// Native shared handle import and returned mapping details.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct IpcImportHandle {
@@ -370,6 +422,7 @@ pub(super) struct IpcImportHandle {
     pub flags: u32,
 }
 
+/// SVM range request followed by its native attribute records.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct SvmArgs {
@@ -379,6 +432,7 @@ pub(super) struct SvmArgs {
     pub attribute_count: u32,
 }
 
+/// One native SVM attribute name and value.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct SvmAttribute {
@@ -386,6 +440,7 @@ pub(super) struct SvmAttribute {
     pub value: u32,
 }
 
+/// Stream performance monitor control and data-loss result.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct Spm {
@@ -398,6 +453,31 @@ pub(super) struct Spm {
     pub has_data_loss: u32,
 }
 
+/// One PC sampling mode, interval, and capability result.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct PcSampleInfo {
+    pub interval: u64,
+    pub interval_min: u64,
+    pub interval_max: u64,
+    pub flags: u64,
+    pub method: u32,
+    pub unit: u32,
+}
+
+/// KFD PC sampling request and native trace identity.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct PcSampleArgs {
+    pub sample_info_ptr: u64,
+    pub num_sample_info: u32,
+    pub operation: u32,
+    pub gpu_id: u32,
+    pub trace_id: u32,
+    pub flags: u32,
+    pub reserved: u32,
+}
+
 impl Default for ExportDmaBuf {
     fn default() -> Self {
         Self {
@@ -408,6 +488,7 @@ impl Default for ExportDmaBuf {
     }
 }
 
+/// KFD event creation request and returned event slot.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct CreateEvent {
@@ -420,6 +501,7 @@ pub(super) struct CreateEvent {
     pub slot_index: u32,
 }
 
+/// KFD event destruction request.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct DestroyEvent {
@@ -427,6 +509,7 @@ pub(super) struct DestroyEvent {
     pub pad: u32,
 }
 
+/// KFD event reset request.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct ResetEvent {
@@ -446,6 +529,7 @@ pub(super) struct EventData {
     pub pad: u32,
 }
 
+/// KFD event wait request and completion result.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct WaitEvents {
@@ -456,6 +540,7 @@ pub(super) struct WaitEvents {
     pub result: u32,
 }
 
+/// Scratch backing address selected for one GPU.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct SetScratchBackingVa {
@@ -464,6 +549,7 @@ pub(super) struct SetScratchBackingVa {
     pub pad: u32,
 }
 
+/// Trap handler and argument addresses selected for one GPU.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct SetTrapHandler {
@@ -539,6 +625,15 @@ const _: () = {
     assert!(offset_of!(Spm, gpu_id) == 20);
     assert!(offset_of!(Spm, bytes_copied) == 24);
     assert!(offset_of!(Spm, has_data_loss) == 28);
+    assert!(size_of::<PcSampleInfo>() == 40);
+    assert!(offset_of!(PcSampleInfo, method) == 32);
+    assert!(offset_of!(PcSampleInfo, unit) == 36);
+    assert!(size_of::<PcSampleArgs>() == 32);
+    assert!(offset_of!(PcSampleArgs, num_sample_info) == 8);
+    assert!(offset_of!(PcSampleArgs, operation) == 12);
+    assert!(offset_of!(PcSampleArgs, gpu_id) == 16);
+    assert!(offset_of!(PcSampleArgs, trace_id) == 20);
+    assert!(PC_SAMPLE == 0xc020_4b85);
     assert!(size_of::<CreateEvent>() == 32);
     assert!(offset_of!(CreateEvent, event_id) == 24);
     assert!(size_of::<DestroyEvent>() == 8);

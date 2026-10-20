@@ -483,11 +483,64 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 //   [+12..23] block[3] (uint32_t[3])
 //   [+24..27] shared_mem (uint32_t)
 //   [+28..29] num_args (uint16_t)
-//   [+30..31] num_snapshots (uint16_t, always 0)
+//   [+30..31] num_snapshots (uint16_t)
 //   per arg:  u8 value_kind, u16 size, <size> bytes data
 //             value_kind: 0=scalar, 1=gpu-pointer, 2=hidden,
 //                         3=scalar/struct with embedded gpu pointer(s);
 //             kind 3 appends u16 n_ptrs then n_ptrs * u16 byte offsets.
+//   per snapshot (v10): u64 ptr_handle, u64 offset, u64 length, u64 hash_lo,
+//             u64 hash_hi, u8 direction (0)
+//   u32 num_attrs, u32 attr stride, num_attrs * stride bytes
+
+// (destination, blob, length) of each copy; blob_cache_ is never evicted.
+using HostSnapCopies = std::vector<std::tuple<void*, const void*, size_t>>;
+static void host_snapshot_copy(void* data) {
+    auto* copies = static_cast<HostSnapCopies*>(data);
+    for (auto& [dst, src, len] : *copies) memcpy(dst, src, len);
+    delete copies;
+}
+
+// Write a launch's pinned host snapshots back when its stream reaches it, by a
+// host function queued ahead of the kernel. The replay thread does not wait
+// for the stream, which may wait on work it has yet to submit. hipHostFree and
+// hipHostUnregister wait for every stream, so the allocation outlives the copy.
+// Nothing is restored when the stream captures into a graph, where the kernel
+// runs only when the graph is launched.
+static hipError_t restore_host_snapshots(PlaybackContext& ctx, const uint8_t* rec,
+                                         uint16_t n, hipStream_t stream,
+                                         const std::string& kernel_name) {
+    hipStreamCaptureStatus cs = hipStreamCaptureStatusNone;
+    if (hipStreamIsCapturing(stream, &cs) != hipSuccess || cs != hipStreamCaptureStatusNone) {
+        ctx.host_snapshots_skipped += n;
+        return hipSuccess;
+    }
+    auto copies = std::make_unique<HostSnapCopies>();
+    for (uint16_t i = 0; i < n; i++, rec += kHostSnapRecordSize) {
+        uint64_t hash[2];
+        memcpy(hash, rec + 24, 16);
+        size_t blob_len = 0;
+        const void* blob = ctx.load_blob(hash[0], hash[1], &blob_len);
+        // Refused for the host memory cap or a read error, not merely absent.
+        if (!blob && ctx.fatal_error.load(std::memory_order_acquire))
+            return hipErrorUnknown;
+        const char* why  = nullptr;
+        void* dst = hrr_host_snapshot_target(ctx, rec, blob, blob_len, &why);
+        if (!dst) {
+            ctx.host_snapshots_refused++;
+            fprintf(stderr, "[HRR] '%s': pinned host snapshot %u %s — refused\n",
+                    compact_kernel_name(kernel_name).c_str(), i, why);
+            continue;
+        }
+        copies->emplace_back(dst, blob, blob_len);
+    }
+    if (copies->empty()) return hipSuccess;
+    const size_t k = copies->size();
+    hipError_t r = HRR_HIP_CHECK(hipLaunchHostFunc(stream, host_snapshot_copy, copies.get()));
+    if (r != hipSuccess) return r;
+    copies.release();
+    ctx.host_snapshots_restored += k;
+    return hipSuccess;
+}
 
 // ext_global_worksize: the captured grid[] holds *global work-item counts*
 // (HSA/OpenCL semantics, as passed to hipExtModuleLaunchKernel), NOT workgroup
@@ -864,11 +917,15 @@ static void decode_kernel_args(
             // may be a genuine scalar (a large count, a double, a packed value)
             // that was mis-flagged — overwriting it with null would silently
             // corrupt it. Only rewrite the word when it actually resolves.
-            auto try_translate_word = [&](size_t off, const char* src) -> bool {
+            auto try_translate_word = [&](size_t off, const char* src, bool flagged) -> bool {
                 if (off + 8 > arg_size) return false;
                 uint64_t rec_ptr; memcpy(&rec_ptr, data + off, 8);
-                // null, small, or a packed-integer false positive
-                if (!va_shaped(rec_ptr)) return false;
+                // null, small, or a packed-integer false positive. A word capture
+                // flagged inside a pinned host allocation need not look like a
+                // device VA: a host address can have small low 32 bits.
+                if (!va_shaped(rec_ptr) &&
+                    !(flagged && ctx.in_pinned_host(rec_ptr)))
+                    return false;
                 void* live = ctx.translate_ptr(rec_ptr);
                 // Same bypassed-segment materialisation as a whole-pointer
                 // argument: a struct field pointing into memory HIP never saw
@@ -893,7 +950,7 @@ static void decode_kernel_args(
             // First honor the capture-recorded offsets (these may be unaligned).
             std::vector<char> handled(arg_size, 0);
             for (uint16_t off : ptr_offsets) {
-                if (try_translate_word(off, "captured"))
+                if (try_translate_word(off, "captured", true))
                     for (int b = 0; b < 8 && static_cast<size_t>(off) + b < arg_size; b++)
                         handled[off + b] = 1;
                 else if (ctx.verbose)
@@ -916,7 +973,7 @@ static void decode_kernel_args(
                 (std::getenv("HIP_HRR_REPLAY_NO_RESCAN") != nullptr);
             for (size_t off = 0; !no_rescan && off + 8 <= arg_size; ) {
                 if (handled[off]) { off += 1; continue; }
-                if (try_translate_word(off, "rescan")) off += 8;
+                if (try_translate_word(off, "rescan", false)) off += 8;
                 else off += 1;
             }
         } else {
@@ -1067,6 +1124,15 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
                        arg_storage, &rls, dbg_dump_ptrs ? &dbg_ptrs : nullptr,
                        dbg_dump_ptrs ? &dbg_args : nullptr);
 
+    const uint8_t* snapshots = p;
+    if (!hrr_host_snapshots_fit(p, end, num_snapshots)) {
+        fprintf(stderr, "[HRR] '%s': %u pinned host snapshot records run past the "
+                "event — refused\n", kernel_name.c_str(), num_snapshots);
+        ctx.host_snapshots_refused += num_snapshots;
+        num_snapshots = 0;
+    }
+    p += static_cast<size_t>(num_snapshots) * kHostSnapRecordSize;
+
     // Launch-attribute tail: u32 count, u32 per-entry stride, then the
     // entries. Every launch payload carries it (count 0 for a plain launch).
     std::vector<hipLaunchAttribute> launch_attrs;
@@ -1114,6 +1180,13 @@ static hipError_t replay_kernel_launch(PlaybackContext& ctx, const uint8_t* pl,
     hipStream_t stream = ctx.translate_stream(stream_rec);
     const size_t kernel_ordinal =
         ctx.kernels_launched.load(std::memory_order_relaxed) + 1;
+    if (hipError_t sr = num_snapshots ? restore_host_snapshots(ctx, snapshots, num_snapshots,
+                                                               stream, kernel_name)
+                                      : hipSuccess;
+        sr != hipSuccess) {
+        for (const auto& g : rls.guards) hrr_block_guard_teardown(g);
+        return sr;
+    }
 
     if (ctx.audit_host_args) {
         for (auto& [idx, rec, live] : dbg_ptrs) {

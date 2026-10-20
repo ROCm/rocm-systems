@@ -1876,7 +1876,8 @@ class Device : public RuntimeObject {
   virtual device::Program* createProgram(amd::Program& owner, option::Options* options = NULL) = 0;
 
   //! Allocate a chunk of device memory as a cache for a CL memory object
-  virtual device::Memory* createMemory(Memory& owner) const = 0;
+  virtual device::Memory* createMemory(
+      Memory& owner, Memory::ErrorCode* errorCode = nullptr) const = 0;
 
   //! Allocate a chunk of device memory with address alignment
   virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const = 0;
