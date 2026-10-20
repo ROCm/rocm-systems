@@ -15,6 +15,8 @@ rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "fakes/wrap_fakes.cc: rcclParamForceCe()")
 # allocator-test.cc copies misc/utils.cc's pointer hash rather than linking utils.cc.
 rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
+  "uintptr_t h = reinterpret_cast<uintptr_t>(key);" "allocator-test.cc: ncclHashPointer()")
+rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
   "h ^= h >> 32;" "allocator-test.cc: ncclHashPointer()")
 rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
   "h *= 0x9e3779b97f4a7c13;" "allocator-test.cc: ncclHashPointer()")

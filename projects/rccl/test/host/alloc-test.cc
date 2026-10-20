@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -20,13 +21,32 @@
 #include <cstring>
 #include <functional>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <set>
 #include <string>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
+// alloc.h's malloc and posix_memalign return 0xff-filled memory, so the zeroing checks never rely on
+// the allocator handing back a dirty block. The std headers alloc.h pulls in are included above.
+static void* DirtyMalloc(size_t n) {
+  void* p = std::malloc(n);
+  if (p != nullptr) std::memset(p, 0xff, n);
+  return p;
+}
+static int DirtyPosixMemalign(void** p, size_t align, size_t n) {
+  int ret = ::posix_memalign(p, align, n);
+  if (ret == 0) std::memset(*p, 0xff, n);
+  return ret;
+}
+#define malloc(n) DirtyMalloc(n)
+#define posix_memalign(p, align, n) DirtyPosixMemalign(p, align, n)
 #include "alloc.h"
+#undef malloc
+#undef posix_memalign
 #include "debug.h"
 #include "fakes/alloc_micro_fakes.h"
 #include "ScopedHook.h"
@@ -374,19 +394,11 @@ TEST_F(AllocMicrotest, Calloc_ZeroesAndOwnsThroughUniquePtrs) {
   EXPECT_EQ(many, nullptr);
 }
 
-// Frees a block of `bytes` full of 0xff so the next malloc of that size likely reuses dirty memory.
-void LeaveDirtyBlock(size_t bytes) {
-  void* dirty = std::malloc(bytes);
-  std::memset(dirty, 0xff, bytes);
-  std::free(dirty);
-}
-
 TEST_F(AllocMicrotest, Realloc_GrowsKeepingContentsAndZeroingTheTail) {
   int* p = nullptr;
   ASSERT_EQ(ncclRealloc(&p, 0, 2), ncclSuccess);
   p[0] = 5;
   p[1] = 6;
-  LeaveDirtyBlock(64 * sizeof(int));
   ASSERT_EQ(ncclReallocQuiet(&p, 2, 64), ncclSuccess);
   EXPECT_EQ(p[0], 5);
   EXPECT_EQ(p[1], 6);
@@ -418,10 +430,6 @@ TEST_F(AllocMicrotest, IbMalloc_PageAlignedAndZeroed) {
   void* p = this;
   ASSERT_EQ(ncclIbMalloc(&p, 0), ncclSuccess);
   EXPECT_EQ(p, nullptr);
-  void* dirty = nullptr;
-  ASSERT_EQ(posix_memalign(&dirty, 4096, 4096), 0);
-  std::memset(dirty, 0xff, 4096);
-  free(dirty);
   ASSERT_EQ(ncclIbMalloc(&p, 100), ncclSuccess);
   EXPECT_EQ(reinterpret_cast<uintptr_t>(p) % 4096, 0u);
   for (int i = 0; i < 100; i++) ASSERT_EQ(static_cast<char*>(p)[i], 0) << i;
@@ -556,8 +564,23 @@ TEST_F(AllocMicrotest, HostCalloc_Failures) {
 
 #if ROCM_VERSION >= 71200
 
-// In this arm the ncclCuMemHostAlloc macro expands to an ncclCuMemHostAllocDebug nothing defines, so
-// these tests call the function by its parenthesized name.
+// In this arm the ncclCuMemHostAlloc macro expands to an ncclCuMemHostAllocDebug nothing declares, so
+// the tests below call the function by its parenthesized name and the KnownBug test pins the macro.
+template <typename P>
+constexpr auto HostAllocDebugDeclared(P ptr) -> decltype(ncclCuMemHostAllocDebug(ptr, nullptr, 1, "", 0, ""), true) {
+  return true;
+}
+constexpr bool HostAllocDebugDeclared(...) { return false; }
+#define ALLOC_TEST_STR(...) #__VA_ARGS__
+#define ALLOC_TEST_EXPANDED(...) ALLOC_TEST_STR(__VA_ARGS__)
+
+// Pins AICOMRCCL-3047; a fix flips this pin.
+TEST_F(AllocMicrotest, CuMemHostAlloc_KnownBug_MacroNamesAnUndeclaredFunction) {
+  const std::string expansion = ALLOC_TEST_EXPANDED(ncclCuMemHostAlloc(p, h, n));
+  EXPECT_EQ(expansion.rfind("ncclCuMemHostAllocDebug(", 0), 0u) << expansion;
+  EXPECT_FALSE(HostAllocDebugDeclared(static_cast<void**>(nullptr)));
+}
+
 TEST_F(AllocMicrotest, CuMemHostAlloc_MapsHostMemoryForTheDeviceAndTheCpu) {
   void* p = nullptr;
   hipMemGenericAllocationHandle_t h = nullptr;

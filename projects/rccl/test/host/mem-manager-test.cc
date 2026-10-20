@@ -565,18 +565,24 @@ TEST_F(MemManagerMicrotest, Suspend_ReleaseFailureStillMarksTheEntryReleased) {
   }
 }
 
+// Track prepends, so the offload entry is walked first and the scratch entry would be torn down next.
 TEST_F(MemManagerMicrotest, Suspend_OffloadBackupFailureStopsAtThatEntry) {
   std::vector<char> device(kSize);
+  ncclDynMemEntry* later = Track(Addr(0x5000), ncclMemScratch, 0x15);
   ncclDynMemEntry* offload = Track(device.data(), ncclMemOffload, 0x12);
-  ncclDynMemEntry* later = Track(Addr(0x5000), ncclMemOffload, 0x15);
-  ScopedHook hipHostMalloc(g_hipHostMalloc, [](void** ptr, size_t, unsigned) {
+  int backups = 0;
+  ScopedHook hipHostMalloc(g_hipHostMalloc, [&](void** ptr, size_t, unsigned) {
+    backups++;
     *ptr = nullptr;
     return hipErrorOutOfMemory;
   });
   EXPECT_EQ(ncclCommMemSuspend(comm_.get()), ncclUnhandledCudaError);
-  EXPECT_EQ(later->state, ncclDynMemStateActive);
+  EXPECT_EQ(backups, 1);
   EXPECT_EQ(offload->state, ncclDynMemStateActive);
+  EXPECT_EQ(later->state, ncclDynMemStateActive);
+  EXPECT_EQ(later->handle, Handle(0x15));
   EXPECT_TRUE(unmaps_.empty());
+  EXPECT_TRUE(releases_.empty());
   EXPECT_EQ(mgr_->released, 0);
 }
 
