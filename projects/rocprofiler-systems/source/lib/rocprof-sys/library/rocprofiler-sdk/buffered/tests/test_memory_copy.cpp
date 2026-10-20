@@ -132,42 +132,6 @@ TEST(memory_copy_test, on_memory_copy_forwards_record_fields_to_dependencies)
     EXPECT_CALL(*g_metadata_registry_mock, ensure_track(Eq(expected_track))).Times(1);
     EXPECT_CALL(*g_metadata_registry_mock, add_stream(Eq(k_mock_stream_id))).Times(1);
     EXPECT_CALL(*g_buffer_storage_mock, store_memory_copy(Eq(expected_sample))).Times(1);
-    EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(false));
-
-    on_memory_copy<mock_sdk, externals>(&record, nullptr);
-
-    g_metadata_registry_mock.reset();
-    g_buffer_storage_mock.reset();
-}
-
-TEST(memory_copy_test, on_memory_copy_writes_timemory_bundle_when_enabled)
-{
-    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
-    g_buffer_storage_mock    = std::make_unique<StrictMock<gmock_buffer_storage>>();
-
-    mock_sdk::memory_copy_record_t record{};
-    record.thread_id       = 111;
-    record.start_timestamp = 1000;
-    record.end_timestamp   = 2500;
-
-    // src/dst agent logical_node_id and get_thread_info_sequent_tid are fixed at 0 in
-    // mock_domain_service.hpp.
-    constexpr std::int32_t  k_mock_logical_node_id = 0;
-    constexpr std::uint64_t k_mock_sequent_tid     = 0;
-    const std::string       expected_name          = fmt::format(
-        "memory_copy: {} -> {}", k_mock_logical_node_id, k_mock_logical_node_id);
-    const std::uint64_t expected_elapsed_ns =
-        record.end_timestamp - record.start_timestamp;
-
-    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread).Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, ensure_track).Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, add_stream).Times(1);
-    EXPECT_CALL(*g_buffer_storage_mock, store_memory_copy).Times(1);
-    EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(true));
-    EXPECT_CALL(*g_buffer_storage_mock,
-                write_timemory_bundle(Eq(expected_name), Eq(k_mock_sequent_tid),
-                                      Eq(expected_elapsed_ns)))
-        .Times(1);
 
     on_memory_copy<mock_sdk, externals>(&record, nullptr);
 
@@ -198,25 +162,5 @@ TEST_P(memory_copy_unknown_agent_test, drops_record)
 
 INSTANTIATE_TEST_SUITE_P(memory_copy_test, memory_copy_unknown_agent_test,
                          ::testing::Bool());
-
-TEST(memory_copy_test, on_memory_copy_skips_timemory_bundle_for_unknown_thread)
-{
-    g_metadata_registry_mock = std::make_unique<StrictMock<gmock_metadata_registry>>();
-    g_buffer_storage_mock    = std::make_unique<StrictMock<gmock_buffer_storage>>();
-
-    mock_sdk::memory_copy_record_t record{};
-    record.thread_id = externals::k_unknown_tid;
-
-    EXPECT_CALL(*g_metadata_registry_mock, ensure_thread).Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, ensure_track).Times(1);
-    EXPECT_CALL(*g_metadata_registry_mock, add_stream).Times(1);
-    EXPECT_CALL(*g_buffer_storage_mock, store_memory_copy).Times(1);
-    EXPECT_CALL(*g_buffer_storage_mock, get_use_timemory).WillOnce(Return(true));
-
-    EXPECT_NO_THROW((on_memory_copy<mock_sdk, externals>(&record, nullptr)));
-
-    g_metadata_registry_mock.reset();
-    g_buffer_storage_mock.reset();
-}
 
 }  // namespace rocprofsys::domains::buffered
