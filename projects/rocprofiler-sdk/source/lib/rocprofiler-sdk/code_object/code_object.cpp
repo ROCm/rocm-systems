@@ -400,7 +400,7 @@ std::atomic<bool> is_shutdown{false};
 auto&
 get_destroy_mutex()
 {
-    static auto _v = std::mutex{};
+    static auto _v = std::recursive_mutex{};
     return _v;
 }
 
@@ -1199,6 +1199,11 @@ executable_destroy_internal(hsa_executable_t executable)
 hsa_status_t
 executable_destroy(hsa_executable_t executable)
 {
+    // destroy mutex is recursive so it is safe for executable_destroy_internal to acquire it.
+    // this higher level lock was introduced to prevent the internal HSA executable_destroy
+    // (get_destroy_function) from running concurrently with the iterate_hsa_executables function.
+    auto _lk = std::unique_lock{get_destroy_mutex()};
+
     // Serialize all executable_destroy calls to prevent:
     // 1. Concurrent access to code objects in shutdown()
     // 2. Use-after-free when multiple threads destroy same executable
