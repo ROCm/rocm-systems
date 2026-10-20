@@ -193,11 +193,11 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
             y1_mfma = peakOps
 
         if dtype in MFMA_DATATYPES:
-            if dtype[:1] == "I":
-                target_precision = (dtype)
+            if dtype[:1] == "I" or dtype[:1] == "B":
+                target_precision = dtype
             elif dtype[:1] == "F":
                 target_precision = "F" + dtype[2:]
-            else: # MX format
+            else:  # MX format
                 target_precision = "MXF" + dtype[4:]
 
             peakMFMA = float(
@@ -266,11 +266,11 @@ def calc_ai(mspec, sort_type, ret_df):
     df = df.sort_values(by=["Kernel_Name"])
     df = df.reset_index(drop=True)
 
-    total_flops = valu_flops = mfma_flops_f6f4 = mfma_flops_f8 = mfma_flops_mxf8 = mfma_flops_bf16 = (
-        mfma_flops_f16
-    ) = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = lds_data = L1cache_data = (
-        L2cache_data
-    ) = hbm_data = calls = totalDuration = avgDuration = 0.0
+    total_flops = valu_flops = mfma_flops_f6f4 = mfma_flops_f8 = mfma_flops_mxf8 = (
+        mfma_flops_bf16
+    ) = mfma_flops_f16 = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = lds_data = (
+        L1cache_data
+    ) = L2cache_data = hbm_data = calls = totalDuration = avgDuration = 0.0
 
     kernelName = ""
 

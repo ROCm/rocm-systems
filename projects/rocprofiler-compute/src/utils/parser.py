@@ -885,24 +885,26 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
                                     out = eval(compile(row[expr], "<string>", "eval"))
 
                                     if np.isnan(out):
-                                        row[expr] = ""
+                                        df.at[idx, expr] = ""
                                     else:
-                                        row[expr] = out
+                                        df.at[idx, expr] = out
                                 except TypeError:
-                                    row[expr] = ""
+                                    df.at[idx, expr] = ""
                                 except AttributeError as ae:
                                     if (
                                         str(ae)
                                         == "'NoneType' object has no attribute 'get'"
                                     ):
-                                        row[expr] = ""
+                                        df.at[idx, expr] = ""
                                     else:
                                         console_error("analysis", str(ae))
+                                except Exception:
+                                    df.at[idx, expr] = ""
 
                             else:
                                 # If not insert nan, the whole col might be treated
                                 # as string but not nubmer if there is NONE
-                                row[expr] = ""
+                                df.at[idx, expr] = ""
 
             # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
 
