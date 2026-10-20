@@ -410,6 +410,15 @@ jobs:
             CMAKE_CONFIG_FLAGS+=(-DCMAKE_CXX_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang++")
           fi
 
+          # ConSan has explicit required coverage in the Release and GCC lanes.
+          if [[ "${{ matrix.name }}" == release || "${{ matrix.name }}" == ubsan-gcc ]]; then
+            CMAKE_CONFIG_FLAGS+=(
+              -DRJ_BUILD_CONSAN_COMPILER=ON
+              -DRJ_BUILD_CONSAN_RUNTIME=ON
+              -DRJ_BUILD_CONSAN_ANALYZER=ON
+            )
+          fi
+
           CXXFLAGS=""
           if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
             CXXFLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
@@ -443,6 +452,25 @@ jobs:
 
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
+
+      - name: Require ConSan unit, integration, and simulated end-to-end coverage
+        if: matrix.name == 'release' || matrix.name == 'ubsan-gcc'
+        run: |
+          python3 "${ROCJITSU_SOURCE_DIR}/tests/code/consan/run_required.py" \
+            --build "${ROCJITSU_BUILD_DIR}" \
+            --output "${ROCJITSU_BUILD_DIR}/Testing/ConSanRequired" \
+            --jobs "${ROCJITSU_CORPUS_WORKERS}"
+
+      - name: Upload ConSan coverage and process evidence
+        if: always() && (matrix.name == 'release' || matrix.name == 'ubsan-gcc')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: consan-${{ matrix.name }}
+          path: |
+            ${{ env.ROCJITSU_BUILD_DIR }}/Testing/ConSanRequired
+            ${{ env.ROCJITSU_BUILD_DIR }}/Testing/ConSan
+          if-no-files-found: error
+          retention-days: 7
 
       # This lane exists to race the engine's worker threads against each
       # other, and the shipped configs get there by omitting num_threads and

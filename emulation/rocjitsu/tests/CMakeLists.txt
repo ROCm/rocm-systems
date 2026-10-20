@@ -936,6 +936,45 @@ if(RJ_BUILD_CONSAN_RUNTIME)
     endif()
 endif()
 
+if(RJ_BUILD_CONSAN_ANALYZER)
+    add_executable(consan_analysis_test code/consan/analyze_test.cpp)
+    target_link_libraries(
+        consan_analysis_test
+        PRIVATE rocjitsu_consan_analysis GTest::gtest_main
+    )
+    rj_configure_target(consan_analysis_test WARNINGS)
+    rj_add_gtest_tests(consan_analysis_test)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_library(
+            consan_analyze_allocation_failure
+            SHARED
+            code/consan/analyze_allocation_failure.cpp
+        )
+        target_link_libraries(
+            consan_analyze_allocation_failure
+            PRIVATE ${CMAKE_DL_LIBS}
+        )
+        rj_configure_target(consan_analyze_allocation_failure WARNINGS)
+        add_test(
+            NAME ConSanAnalysis.CliUnexpectedException
+            COMMAND
+                ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/code/consan/analyze_exception_test.py
+                --analyzer $<TARGET_FILE:rj_consan_analyze> --injector
+                $<TARGET_FILE:consan_analyze_allocation_failure>
+        )
+    endif()
+    if(CMAKE_NM AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_test(
+            NAME ConSanAnalysis.SymbolBoundary
+            COMMAND
+                ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
+                -DANALYZER=$<TARGET_FILE:rj_consan_analyze> -P
+                ${CMAKE_CURRENT_SOURCE_DIR}/code/consan/check_analysis_symbols.cmake
+        )
+    endif()
+endif()
+
 # These existing suites exercise ELF inspection, CFG construction, kernel
 # reachability, and register queries using only the static-analysis composition.
 add_executable(

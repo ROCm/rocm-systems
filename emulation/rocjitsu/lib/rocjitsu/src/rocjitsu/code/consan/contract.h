@@ -59,6 +59,7 @@ inline constexpr uint32_t kReportEntry = 8;
 inline constexpr uint32_t kReportRows = 12;
 inline constexpr uint32_t kReportRowStride = 16;
 inline constexpr uint32_t kReportSites = 20;
+inline constexpr uint32_t kReportReservedBegin = 24;
 
 inline constexpr uint32_t kRowSerial = 0;
 inline constexpr uint32_t kRowEntry = 8;
@@ -66,6 +67,7 @@ inline constexpr uint32_t kRowWave = 12;
 inline constexpr uint32_t kRowStatus = 16;
 inline constexpr uint32_t kRowLoss = 20;
 inline constexpr uint32_t kRowFinalSequence = 24;
+inline constexpr uint32_t kRowReservedBegin = 28;
 inline constexpr uint32_t kRowEntered = 1;
 inline constexpr uint32_t kRowExited = 2;
 inline constexpr uint32_t kRowExhausted = 4;
@@ -80,6 +82,7 @@ inline constexpr uint32_t kRecordLdsOffset = 24;
 inline constexpr uint32_t kRecordWidth = 28;
 inline constexpr uint32_t kRecordGuestMask = 32;
 inline constexpr uint32_t kRecordFlags = 40;
+inline constexpr uint32_t kRecordReservedBegin = 44;
 inline constexpr uint32_t kAccessCommitted = 0x43534143;
 inline constexpr uint32_t kExactGuestMask = 1;
 } // namespace wire

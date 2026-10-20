@@ -82,3 +82,16 @@ if(RJ_BUILD_CONSAN_COMPILER)
     )
     rj_configure_target(rj_consan_prepare PRIVATE_INCLUDES WARNINGS)
 endif()
+
+if(RJ_BUILD_CONSAN_ANALYZER)
+    add_executable(rj_consan_analyze rj_consan_analyze.cpp)
+    target_link_libraries(rj_consan_analyze PRIVATE rocjitsu_consan_analysis)
+    rj_configure_target(rj_consan_analyze WARNINGS)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(
+            rj_consan_analyze
+            PRIVATE
+                "LINKER:-Map,${CMAKE_CURRENT_BINARY_DIR}/rj_consan_analyze.link.map"
+        )
+    endif()
+endif()
