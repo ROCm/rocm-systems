@@ -94,9 +94,16 @@ std::function<ncclResult_t(struct ncclSocket*, ncclSocketDescriptor*)> g_ncclSoc
 std::function<ncclResult_t(char*, union ncclSocketAddress*, int, int, int*)> g_ncclFindInterfaces =
     DefaultNcclFindInterfaces;
 
-ASSERT_HOOK_MATCHES_PROD(g_ncclSocketProgress, ncclSocketProgress);
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketInit, ncclSocketInit);
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketListen, ncclSocketListen);
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketGetAddr, ncclSocketGetAddr);
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketConnect, ncclSocketConnect);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketAccept, ncclSocketAccept);
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketReady, ncclSocketReady);
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketProgress, ncclSocketProgress);
 ASSERT_HOOK_MATCHES_PROD(g_ncclSocketClose, ncclSocketClose);
+ASSERT_HOOK_MATCHES_PROD(g_ncclSocketGetFd, ncclSocketGetFd);
+ASSERT_HOOK_MATCHES_PROD(g_ncclFindInterfaces, ncclFindInterfaces);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 void ResetSocketFakes() {
