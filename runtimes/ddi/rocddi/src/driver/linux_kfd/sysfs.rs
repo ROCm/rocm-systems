@@ -833,6 +833,7 @@ fn read_node(
     Ok(Some(Endpoint {
         id,
         name,
+        product_name: None,
         pci: Some(pci),
         kind: EndpointKind::Gpu {
             info: GpuInfo {
@@ -843,6 +844,8 @@ fn read_node(
                 unique_id,
                 hive_id,
                 asic_family_id: family_id,
+                drm_asic_family_id: None,
+                counter_frequency_hz: None,
                 asic_revision: (capability & 0x03c0_0000) >> 22,
                 maximum_engine_clock_mhz,
                 memory_bus_width_bits,

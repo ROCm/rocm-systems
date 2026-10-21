@@ -48,7 +48,7 @@ use crate::memory::{
 };
 use crate::os::native_error;
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, EndpointDetails, GpuDetails};
+use crate::topology::Endpoint;
 use crate::{Error, ErrorKind};
 pub(crate) use allocation::LinuxAllocation;
 pub(crate) use event::KfdSignalEvent;
@@ -562,7 +562,7 @@ impl Driver for LinuxKfdDriver {
             id,
         )
     }
-    fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
+    fn populate_endpoint(&self, endpoint: &mut Endpoint) -> Result<(), Error> {
         self.ensure_open()?;
         if endpoint.gpu().is_none() {
             return Err(error(
@@ -570,7 +570,8 @@ impl Driver for LinuxKfdDriver {
                 "the Linux KFD driver reports only GPU endpoints",
             ));
         }
-        Ok(operations::query_endpoint_details(endpoint))
+        operations::populate_endpoint(endpoint);
+        Ok(())
     }
     fn activate(&self, endpoint: &Endpoint) -> Result<DeviceState, Error> {
         if endpoint.gpu().is_none() {
@@ -580,7 +581,7 @@ impl Driver for LinuxKfdDriver {
             ));
         }
         let current = self.open_endpoint(endpoint.id)?;
-        if &current != endpoint {
+        if !endpoint.matches_discovery(&current) {
             return Err(error(
                 ErrorKind::DeviceLost,
                 "endpoint metadata changed before activation",

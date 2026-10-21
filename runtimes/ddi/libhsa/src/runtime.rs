@@ -927,10 +927,14 @@ impl HsaState {
             .gpus
             .try_reserve(endpoints.len())
             .map_err(|_| OUT_OF_RESOURCES)?;
-        for endpoint in endpoints {
-            let Some(info) = endpoint.gpu().copied() else {
+        for mut endpoint in endpoints {
+            if endpoint.gpu().is_none() {
                 continue;
-            };
+            }
+            session
+                .populate_endpoint(&mut endpoint)
+                .map_err(map_error)?;
+            let info = endpoint.gpu().copied().ok_or(ERROR)?;
             let agent = HsaAgent {
                 handle: GPU_AGENT_BASE + pending.gpus.len() as u64,
             };
@@ -947,20 +951,17 @@ impl HsaState {
                     u32::try_from(cache.size_bytes).unwrap_or(u32::MAX),
                 ));
             }
-            let details = session
-                .query_endpoint_details(&endpoint)
-                .map_err(map_error)?;
-            let gpu_details = details.gpu.unwrap_or_default();
-            let asic_family_id = gpu_details.asic_family_id.unwrap_or(info.asic_family_id);
-            let timestamp_frequency_hz = gpu_details.counter_frequency_hz.unwrap_or(0);
+            let asic_family_id = info.drm_asic_family_id.unwrap_or(info.asic_family_id);
+            let timestamp_frequency_hz = info.counter_frequency_hz.unwrap_or(0);
             if lifetime == DriverContextLifetime::Process {
                 // Activation may retain a primary VM even when it returns an
                 // error. A later generation must use a private context.
                 PRIMARY_CONTEXT_USED.store(true, Ordering::Release);
             }
             let device = session.activate(&endpoint).map_err(map_error)?;
-            let product_name = details
+            let product_name = endpoint
                 .product_name
+                .clone()
                 .unwrap_or_else(|| "AMD Radeon Graphics".to_owned());
             let mmio_remap = device.gpu().and_then(|gpu| gpu.map_mmio_remap()).ok();
             let hdp_flush = hdp_flush_pointers(
