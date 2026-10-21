@@ -133,10 +133,14 @@ bool WaitcheckTarget::is_xcnt_drain(const Instruction &inst) {
   return static_cast<int64_t>(static_cast<int32_t>(op->encoding_value()));
 }
 
-[[nodiscard]] bool WaitcheckTarget::is_cdna4_mubuf_lds_load(const Instruction &inst,
-                                                            rj_code_arch_t arch) {
-  if ((arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4) ||
-      !inst.mnemonic().starts_with("buffer_load") || inst.raw_encoding() == nullptr ||
+[[nodiscard]] bool WaitcheckTarget::is_cdna_lds_dma_load(const Instruction &inst,
+                                                         rj_code_arch_t arch) {
+  if (arch != ROCJITSU_CODE_ARCH_CDNA3 && arch != ROCJITSU_CODE_ARCH_CDNA4)
+    return false;
+  const auto mnemonic = inst.mnemonic();
+  if (mnemonic.starts_with("scratch_load_lds_") || mnemonic.starts_with("global_load_lds_"))
+    return true;
+  if (!mnemonic.starts_with("buffer_load") || inst.raw_encoding() == nullptr ||
       inst.size() < 2 * static_cast<int>(sizeof(uint32_t)))
     return false;
 
@@ -339,7 +343,7 @@ WaitcheckTarget::classify_events_into(const Instruction &inst, rj_code_arch_t ar
     return util::Result::success();
   }
 
-  if (is_cdna4_mubuf_lds_load(inst, arch)) {
+  if (is_cdna_lds_dma_load(inst, arch)) {
     events.emplace_back(WaitCounterKind::Load, WaitEventKind::LdsDirect,
                         TrackedRegisterSource::None, /*check_uses=*/false,
                         /*check_defs=*/false, /*check_exec_defs=*/false, std::nullopt, std::nullopt,
