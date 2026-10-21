@@ -36,7 +36,8 @@ export DEBUG_CLR_ENABLE_ABCE=1 GPU_MAX_SDMA_DEVICE_QUEUES=16
 ./copy-engine-bw -b 1024 -e 4194304 -c 4 -d 7 --wgsPerDestination 2
 ./copy-engine-latency -b 256 -e 1048576 -c 1
 ./copy-engine-allgather -g 8 -b 4096 -e 268435456
-mpirun -x DEBUG_CLR_ENABLE_ABCE -x GPU_MAX_SDMA_DEVICE_QUEUES -n 8 ./copy-engine-allgather-mpi
+mpirun --bind-to core --map-by numa -x LD_LIBRARY_PATH -x DEBUG_CLR_ENABLE_ABCE \
+  -x GPU_MAX_SDMA_DEVICE_QUEUES -n 8 ./copy-engine-allgather-mpi
 ```
 
 `--help` lists every option. Sizes sweep in powers of two from `-b` to `-e`. Each size is verified
@@ -94,8 +95,9 @@ Two ways to run it, with the same kernel:
 - `copy-engine-allgather`: one process sets up every GPU, launches one kernel on each in its own
   stream and times each GPU with events.
 - `copy-engine-allgather-mpi`: one MPI rank per GPU, as in the reference. Rank `i` drives GPU `i`
-  and reaches its peers' buffers and signals through IPC handles. Run it with `mpirun -n <GPUs>`;
-  `--numGpus` must be 0 or equal to the number of ranks.
+  and reaches its peers' buffers and signals through IPC handles. Run it with
+  `mpirun --bind-to core --map-by numa -n <GPUs>`, without the binding the times vary a lot from
+  run to run; `--numGpus` must be 0 or equal to the number of ranks.
 
 Both report the mean and the maximum over GPUs of the per-iteration event time.
 
@@ -138,23 +140,20 @@ host chose, and every copy retires its own completion word. So:
 
 - On an 8x MI300X node, `copy-engine-bw -d 7` reached ~290 GB/s against ~41 GB/s for `-d 1`.
   Warps sharing a destination share one ring, while different destinations use different routes.
-- Allgather on 8 MI300X GPUs, 4 KiB total (one 512 B chunk per GPU). Each iteration is a kernel
-  launch, and the time per iteration is the kernel (about 10 us: two submits per warp, then the
-  waits) plus the gap before the next kernel starts on that GPU. That gap is 2.5 us in some runs and
-  12 - 35 us in others, at random from run to run, and in long runs it settles at about 12 us. The
-  host launch call takes only 1.4 - 2.2 us, so the host is not the limit. So with the default one
-  collective per launch, `copy-engine-allgather` (one process or MPI) and the reference
-  `sdma-ep-allgather` all print anything from 11.4 to 33 us for the same work, in repeated runs of
-  the same binary.
-  `--repeats N` runs N collectives inside each kernel launch, which leaves the gap out. With
-  `--repeats 200` the single-process run gives 10.7 - 11.1 us on every run. The MPI build gives
-  15.7 - 17.4 us, 5 us more than the single process; peers reached through IPC handles are slower,
-  and at 256 MiB too (about 4%: 724 us against 693 us). The reference has no such option.
-  At 32 MiB and 256 MiB (about 100 us and 690 - 725 us) all three agree within 5%. Single
-  iterations of the MPI runs sometimes stalled for milliseconds (ours: 5.3 ms mean at 32 MiB once;
-  the reference: 1.2 - 2.5 ms at 256 MiB); the cause is unknown.
-- The HIP version needs a second submit for the "sent" signal (about 1.6 us), where the reference
-  packs its put, signal and counter into one reservation.
+- Allgather on 8 MI300X GPUs under MPI. **Bind the ranks**: `mpirun --bind-to core --map-by numa`
+  puts ranks 0-3 on cores of package 0 and 4-7 on package 1. Open MPI's default placement gave
+  4 KiB times that varied from run to run (11 - 34 us for the reference `sdma-ep-allgather`, 13 - 33
+  us for this tool, identical settings); with the binding every run was stable: reference
+  11 - 12 us, this tool 13.2 - 13.3 us. The cause of the variation is a gap of 2.5 to 35 us between
+  consecutive kernels of a rank that depends on where the process runs (the kernel itself takes
+  about 10 us and the host launch call 1.4 - 2.2 us); I did not find which part of the placement
+  matters.
+  - This tool bound, 8 ranks, `--skip-verification`: 13.3 us at 4 KiB, 14 us at 64 KiB, 16 us at
+    1 MiB, 98 us at 32 MiB, 692 us at 256 MiB (345 GiB/s). The reference at 256 MiB: 724 us.
+  - The 1.5 - 2 us gap at 4 KiB is the second submit this tool needs for the "sent" signal (about
+    1.6 us), where the reference packs its put, signal and counter into one reservation.
+  - `--repeats N` runs N collectives per kernel launch, which leaves the gap between kernels out;
+    the reference has no such option.
 - A submit call costs about 2.8 us: reserve ring space, write the packets, ring the doorbell. That
   is the `Submit [us]` column.
 - Mean device latency of one copy, 5 interleaved runs against `sdma-ep-latency` (which reports one

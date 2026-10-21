@@ -12,9 +12,10 @@ ITERATIONS="${ITERATIONS:-20}"
 # shellcheck source=benchmark-common.sh
 source "${script_dir}/benchmark-common.sh"
 
-# USE_MPI=1 runs the MPI build, one rank per GPU, under MPIRUN (default mpirun).
+# USE_MPI=1 runs the MPI build, one rank per GPU, under MPIRUN. Binding the ranks matters: with
+# Open MPI's default placement the times vary a lot from run to run.
 USE_MPI="${USE_MPI:-0}"
-MPIRUN="${MPIRUN:-mpirun}"
+MPIRUN="${MPIRUN:-mpirun --bind-to core --map-by numa}"
 if [[ "${USE_MPI}" == 1 ]]; then
   ALLGATHER_BENCHMARK="${ALLGATHER_BENCHMARK:-${BUILD_DIR}/copy-engine-allgather-mpi}"
 else
@@ -37,7 +38,7 @@ for ((gpus = MIN_GPUS; gpus <= MAX_GPUS; gpus *= 2)); do
   gpu_args=(--numGpus "${gpus}")
   if [[ "${USE_MPI}" == 1 ]]; then
     read -ra launcher <<<"${MPIRUN}"
-    launcher+=(-x DEBUG_CLR_ENABLE_ABCE -x GPU_MAX_SDMA_DEVICE_QUEUES -n "${gpus}")
+    launcher+=(-x LD_LIBRARY_PATH -x DEBUG_CLR_ENABLE_ABCE -x GPU_MAX_SDMA_DEVICE_QUEUES -n "${gpus}")
     gpu_args=()
   fi
   command=("${launcher[@]}" "${ALLGATHER_BENCHMARK}" "${gpu_args[@]}"
