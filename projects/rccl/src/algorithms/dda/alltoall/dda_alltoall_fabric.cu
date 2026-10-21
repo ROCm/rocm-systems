@@ -8,6 +8,8 @@
 
 #include "algorithms/dda/device/CollCommon.h"
 #include "algorithms/dda/alltoall/alltoall_dda_fabric.h"
+#include "algorithms/dda/alltoall/alltoall_dda_fabric_tdm.h"
+#include "archinfo.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -18,13 +20,18 @@
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <utility>
 
 // Push model: each rank writes its chunks into peers' scratch instead of reading from them.
-// Env: RCCL_DDA_A2A_PUSH.
+// Env: RCCL_DDA_A2A_PUSH. RCCL_DDA_A2A_TDM=1 moves that exchange through the tensor data mover
+// when the pointers and the per-rank byte count are 256-byte aligned. RCCL_DDA_A2A_TDM_TILE_KB
+// is 4, 8, or 16 (default 8).
 RCCL_PARAM(DdaA2APush, "DDA_A2A_PUSH", 0);
+RCCL_PARAM(DdaA2ATdm, "DDA_A2A_TDM", 0);
+RCCL_PARAM(DdaA2ATdmTileKB, "DDA_A2A_TDM_TILE_KB", 8);
 
 namespace {
 
@@ -34,6 +41,53 @@ using nccl_dda_detail::DdaFabricBarrierState;
 // kernel is instantiated for int8_t, so `bytes` is the per-block element count.
 static inline std::pair<dim3, dim3> ddaAllToAllFabricGeom(ncclComm* comm, size_t bytes) {
   return dda::common::getGridAndBlockDims(bytes, 1, comm->ddaFabricMaxBlocks);
+}
+
+// One warp per window of UnrollPeers tiles. The block count stays inside the
+// barrier's flag allocation.
+static inline std::pair<dim3, dim3> ddaAllToAllFabricTdmGeom(ncclComm* comm, size_t bytesPerRank, int tileBytes) {
+  const size_t unrollPeers = dda::common::kDdaA2ATdmWindowBytes / tileBytes;
+  const size_t tilesPerPeer = (bytesPerRank + tileBytes - 1) / tileBytes;
+  const size_t warpsNeeded =
+      dda::common::divRoundUp(tilesPerPeer * static_cast<size_t>(comm->nRanks), unrollPeers);
+  const uint32_t blocks = dda::common::calcBlockCount(warpsNeeded, dda::common::kDdaA2ATdmMaxWarpsPerBlock,
+                                                      comm->ddaFabricMaxBlocks);
+  const uint32_t warpsPerBlock =
+      std::min<uint32_t>(dda::common::kDdaA2ATdmMaxWarpsPerBlock, dda::common::divRoundUp(warpsNeeded, blocks));
+  return {dim3(blocks), dim3(warpsPerBlock * dda::common::kDdaA2ATdmWave)};
+}
+
+static bool ddaAllToAllFabricTdmEligible(ncclComm* comm, const void* sendbuff, const void* recvbuff,
+                                         size_t bytesPerRank) {
+  if (!rcclParamDdaA2ATdm() || !TDM_TOOLCHAIN_AVAILABLE || comm->archName == nullptr ||
+      !IsArchMatch(comm->archName, "gfx1250")) {
+    return false;
+  }
+  const int tileKB = rcclParamDdaA2ATdmTileKB();
+  if (tileKB != 4 && tileKB != 8 && tileKB != 16) return false;
+  if ((bytesPerRank % dda::common::kDdaA2ATdmAlign) != 0) return false;
+  auto aligned = [](const void* p) {
+    return (reinterpret_cast<uintptr_t>(p) % dda::common::kDdaA2ATdmAlign) == 0;
+  };
+  return aligned(sendbuff) && aligned(recvbuff) && aligned(comm->ddaScratch);
+}
+
+// Opt this instantiation into the full dynamic LDS once; each launch then asks for only what it needs.
+// The static is per template instantiation, so each tile shape is set up independently.
+template <int TileBytes, int UnrollPeers>
+static ncclResult_t ddaAllToAllFabricTdmPrepare() {
+  static std::atomic<bool> done{false};
+  if (done.load(std::memory_order_acquire)) return ncclSuccess;
+  int dev = 0;
+  int maxSmem = 0;
+  CUDACHECK(cudaGetDevice(&dev));
+  CUDACHECK(cudaDeviceGetAttribute(&maxSmem, cudaDevAttrMaxSharedMemoryPerBlockOptin, dev));
+  if (dda::common::kDdaA2ATdmMaxSmemBytes > maxSmem) return ncclInvalidUsage;
+  CUDACHECK(cudaFuncSetAttribute(dda::common::ddaAllToAllFabricTdmPush<TileBytes, UnrollPeers>,
+                                 cudaFuncAttributeMaxDynamicSharedMemorySize,
+                                 dda::common::kDdaA2ATdmMaxSmemBytes));
+  done.store(true, std::memory_order_release);
+  return ncclSuccess;
 }
 
 template <typename T>
@@ -65,6 +119,56 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   T** d_ipcbuffs = reinterpret_cast<T**>(peerPtrsDev);
 
   const char* unroll = (nRanks == 4 || nRanks == 8) ? " (unrolled)" : " (runtime)";
+  if (rcclParamDdaA2APush() && ddaAllToAllFabricTdmEligible(comm, sendbuff, recvbuff, count)) {
+    const int tileBytes = rcclParamDdaA2ATdmTileKB() << 10;
+    auto tdmGridBlock = ddaAllToAllFabricTdmGeom(comm, count, tileBytes);
+    const auto& tdmGrid = tdmGridBlock.first;
+    const auto& tdmBlock = tdmGridBlock.second;
+    const int warpsPerBlock = tdmBlock.x / dda::common::kDdaA2ATdmWave;
+    const int smemBytes = warpsPerBlock * dda::common::kDdaA2ATdmWindowBytes;
+    const uint8_t* sendBytes = static_cast<const uint8_t*>(sendbuff);
+    uint8_t* recvBytes = static_cast<uint8_t*>(recvbuff);
+    uint8_t* const* scratch = reinterpret_cast<uint8_t* const*>(d_ipcbuffs);
+
+    ncclResult_t prep = ncclSuccess;
+    switch (tileBytes) {
+    case 4 << 10:
+      prep = ddaAllToAllFabricTdmPrepare<4 << 10, 4>();
+      break;
+    case 16 << 10:
+      prep = ddaAllToAllFabricTdmPrepare<16 << 10, 1>();
+      break;
+    default:
+      prep = ddaAllToAllFabricTdmPrepare<8 << 10, 2>();
+      break;
+    }
+    if (prep == ncclSuccess) {
+      INFO(NCCL_COLL,
+           "DDA fabric AllToAll: launching TDM push kernel: nRanks=%d count=%zu tile=%d grid=%u block=%u smem=%d",
+           nRanks, count, tileBytes, tdmGrid.x, tdmBlock.x, smemBytes);
+      const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+      switch (tileBytes) {
+      case 4 << 10:
+        hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricTdmPush<4 << 10, 4>), tdmGrid, tdmBlock, smemBytes,
+                              stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, scratch, recvBytes, sendBytes,
+                              count, comm->rank, nRanks, barrierHost);
+        break;
+      case 16 << 10:
+        hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricTdmPush<16 << 10, 1>), tdmGrid, tdmBlock, smemBytes,
+                              stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, scratch, recvBytes, sendBytes,
+                              count, comm->rank, nRanks, barrierHost);
+        break;
+      default:
+        hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricTdmPush<8 << 10, 2>), tdmGrid, tdmBlock, smemBytes,
+                              stream, /*startEvent=*/nullptr, stopEvent, /*flags=*/0, scratch, recvBytes, sendBytes,
+                              count, comm->rank, nRanks, barrierHost);
+        break;
+      }
+      CUDACHECK(cudaGetLastError());
+      return ncclSuccess;
+    }
+    INFO(NCCL_COLL, "DDA fabric AllToAll: TDM push unavailable (smem %d), using the vector push", smemBytes);
+  }
   if (rcclParamDdaA2APush()) {
     INFO(NCCL_COLL, "DDA fabric AllToAll: launching push kernel: nRanks=%d count=%zu grid=%u block=%u%s", nRanks,
          count, grid.x, block.x, unroll);
