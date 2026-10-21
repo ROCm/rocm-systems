@@ -284,6 +284,14 @@ Environments may change between independent historical runs. Runs sharing a
 `comparisonId` must have the same normalized environment because plugin overhead is
 valid only when the compared executions use the same environment.
 
+Benchmark workflow runs include `workflow.commit_sha` (label **Workflow commit**)
+and `tensile.commit_sha` (label **Tensile commit**) for the workflow-tools revision
+and pinned Tensile source revision. These are separate from the measured Rocjitsu
+`source.commit`. Their key/value pairs participate in the existing environment
+identity: different workflow or Tensile revisions intentionally distinguish
+comparison environments. Older runs may omit these details; do not rewrite
+historical run files to add them.
+
 ### `targets` and results
 
 `targets` must contain exactly one group for every target defined by the referenced catalog. Each group contains:
@@ -299,6 +307,12 @@ Every result contains:
 - `durationSeconds`: positive numeric seconds for a completed result; `null` for failed or timed-out results.
 - `status`: required; `completed`, `failed`, or `timeout`.
 - `error`: failure description or `null`.
+- `timing_results_s`: optional array of individual timing samples in seconds, in
+  input measurement order (not sorted). The benchmark converter preserves these
+  samples and uses their median for a completed result's `durationSeconds`. Failed
+  and timed-out results keep a `null` duration, even if samples are present. The
+  current validator accepts this extra field, but normalization omits it from the
+  UI model; the dashboard uses `durationSeconds`, not the sample vector.
 
 Failed and timed-out tests must remain in `results`. Omitting a catalog result invalidates the run instead of silently changing its denominator.
 
