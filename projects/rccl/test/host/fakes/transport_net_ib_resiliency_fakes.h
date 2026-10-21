@@ -36,6 +36,11 @@ extern std::function<ncclResult_t(struct ncclIbResiliency*, struct ncclIbConnect
 extern std::function<ncclResult_t(struct ncclIbResiliency*)> g_ncclIbResiliencyClose;
 extern std::function<ncclResult_t(struct ncclIbResiliency*, uint32_t, uint64_t, uint)>
     g_ncclIbResiliencyRemoteCompletionRecordsSet;
+extern std::function<ncclResult_t(struct ncclIbResiliency*, struct ncclIbQp*,
+                                  struct ncclIbNetCommDevBase*, int, bool*)>
+    g_ncclIbResiliencyQpReconfigure;
+extern std::function<ncclResult_t(struct ncclIbResiliency*, int, bool*)>
+    g_ncclIbResiliencyQpsReconfigure;
 
 void ResetTransportNetIbResiliencyFakes();
 
