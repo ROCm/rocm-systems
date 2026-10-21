@@ -16,8 +16,8 @@
 
 namespace rocjitsu::amdgpu {
 
-/// @brief Decoded GFX9 image descriptor (T#) for GET_RESINFO and IMAGE_LOAD/STORE.
-struct Gfx9ImageResource {
+/// @brief Decoded image descriptor fields used by image queries and linear accesses.
+struct ImageResource {
   uint64_t base = 0; ///< Byte address of mip 0, slice 0.
   uint32_t data_format = 0;
   uint32_t num_format = 0;
@@ -35,21 +35,21 @@ struct Gfx9ImageResource {
 };
 
 /// SQ_RSRC_IMG_* resource types.
-inline constexpr uint32_t kGfx9Image1d = 8;
-inline constexpr uint32_t kGfx9Image2d = 9;
-inline constexpr uint32_t kGfx9Image3d = 10;
-inline constexpr uint32_t kGfx9ImageCube = 11;
-inline constexpr uint32_t kGfx9Image1dArray = 12;
-inline constexpr uint32_t kGfx9Image2dArray = 13;
-inline constexpr uint32_t kGfx9Image2dMsaa = 14;
-inline constexpr uint32_t kGfx9Image2dMsaaArray = 15;
+inline constexpr uint32_t kImage1d = 8;
+inline constexpr uint32_t kImage2d = 9;
+inline constexpr uint32_t kImage3d = 10;
+inline constexpr uint32_t kImageCube = 11;
+inline constexpr uint32_t kImage1dArray = 12;
+inline constexpr uint32_t kImage2dArray = 13;
+inline constexpr uint32_t kImage2dMsaa = 14;
+inline constexpr uint32_t kImage2dMsaaArray = 15;
 
 /// @brief Decode the fields shared by GFX9 image queries and linear accesses.
-inline Gfx9ImageResource decode_gfx9_image_resource(const std::array<uint32_t, 8> &r) {
+inline ImageResource decode_gfx9_image_resource(const std::array<uint32_t, 8> &r) {
   const auto field = [&](uint32_t bit, uint32_t width) {
     return util::extract_bits_from_words(r.data(), bit, width);
   };
-  Gfx9ImageResource resource;
+  ImageResource resource;
   resource.base = ((uint64_t{field(32, 8)} << 32) | r[0]) << 8;
   resource.data_format = field(52, 6);
   resource.num_format = field(58, 4);
@@ -74,14 +74,13 @@ inline std::array<uint32_t, 4> image_resource_info(const std::array<uint32_t, 8>
     return util::extract_bits_from_words(r.data(), bit, width);
   };
   const uint32_t type = field(124, 4);
-  if (type < kGfx9Image1d)
+  if (type < kImage1d)
     return {};
   const bool gfx9 = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2;
-  const Gfx9ImageResource gfx9_resource =
-      gfx9 ? decode_gfx9_image_resource(r) : Gfx9ImageResource{};
+  const ImageResource gfx9_resource = gfx9 ? decode_gfx9_image_resource(r) : ImageResource{};
   const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
   const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1;
-  const bool msaa = type >= kGfx9Image2dMsaa;
+  const bool msaa = type >= kImage2dMsaa;
   const uint32_t base =
       msaa ? 0 : (gfx9 ? gfx9_resource.base_level : field(gfx12 ? 57 : 108, gfx12 ? 5 : 4));
   const uint32_t last =
@@ -102,14 +101,14 @@ inline std::array<uint32_t, 4> image_resource_info(const std::array<uint32_t, 8>
   const uint32_t layers = depth > base_array ? depth - base_array : 0;
   const bool uav3d = !gfx9 && field(gfx12 ? 164 : 160, 1);
   switch (type) {
-  case kGfx9Image1d:
+  case kImage1d:
     return {width, 0, 0, levels};
-  case kGfx9Image2d:
-  case kGfx9Image2dMsaa:
+  case kImage2d:
+  case kImage2dMsaa:
     return {width, height, 0, levels};
-  case kGfx9Image3d:
+  case kImage3d:
     return {width, height, uav3d ? layers : mip_size(depth), levels};
-  case kGfx9Image1dArray:
+  case kImage1dArray:
     return {width, layers, 0, levels};
   default:
     return {width, height, layers, levels}; // Cube depth is in faces, not cubes.

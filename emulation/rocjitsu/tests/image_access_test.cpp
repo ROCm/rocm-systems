@@ -40,7 +40,7 @@ struct Image {
   uint32_t data_format = kDfmt32;
   uint32_t num_format = kNfmtUint;
   uint32_t width = 1, height = 1, depth = 1, pitch = 64;
-  uint32_t type = amdgpu::kGfx9Image2d;
+  uint32_t type = amdgpu::kImage2d;
   uint32_t selectors = kXOne;
   uint32_t swizzle_mode = 0;
 };
@@ -170,7 +170,7 @@ TEST_F(Cdna2ImageAccessTest, StoreThenLoadRoundTripsActiveLanesOfAnR32Image) {
 
 TEST_F(Cdna2ImageAccessTest, ArrayLayersFollowRowsOfPitchElements) {
   Image image;
-  image.type = amdgpu::kGfx9Image2dArray;
+  image.type = amdgpu::kImage2dArray;
   image.width = 3;
   image.height = 2;
   image.depth = 2;
@@ -184,7 +184,7 @@ TEST_F(Cdna2ImageAccessTest, ArrayLayersFollowRowsOfPitchElements) {
 
 TEST_F(Cdna2ImageAccessTest, OneDimensionalArraysTakeTheLayerFromTheSecondCoordinate) {
   Image image;
-  image.type = amdgpu::kGfx9Image1dArray;
+  image.type = amdgpu::kImage1dArray;
   image.width = 4;
   image.depth = 3;
   bind(image);
@@ -197,12 +197,12 @@ TEST_F(Cdna2ImageAccessTest, OneDimensionalArraysTakeTheLayerFromTheSecondCoordi
 
 TEST_F(Cdna2ImageAccessTest, ArrayWithoutDaUsesLayerZeroAndIgnoresTheNextRegister) {
   wf->set_exec(1);
-  for (uint32_t type : {amdgpu::kGfx9Image1dArray, amdgpu::kGfx9Image2dArray}) {
+  for (uint32_t type : {amdgpu::kImage1dArray, amdgpu::kImage2dArray}) {
     SCOPED_TRACE(type);
     Image image;
     image.type = type;
     image.width = 3;
-    image.height = type == amdgpu::kGfx9Image1dArray ? 1 : 2;
+    image.height = type == amdgpu::kImage1dArray ? 1 : 2;
     image.depth = 2;
     bind(image);
     const uint32_t y = image.height - 1;
@@ -210,7 +210,7 @@ TEST_F(Cdna2ImageAccessTest, ArrayWithoutDaUsesLayerZeroAndIgnoresTheNextRegiste
     const uint64_t layer_one = address + image.height * image.pitch * 4;
     for (uint32_t unrelated : {1u, 0xffffffffu}) {
       SCOPED_TRACE(unrelated);
-      write_coordinates(0, type == amdgpu::kGfx9Image1dArray
+      write_coordinates(0, type == amdgpu::kImage1dArray
                                ? std::array<uint32_t, 3>{2, unrelated, unrelated}
                                : std::array<uint32_t, 3>{2, y, unrelated});
       memory.write32(address, 0x12345678);
@@ -227,7 +227,7 @@ TEST_F(Cdna2ImageAccessTest, ArrayWithoutDaUsesLayerZeroAndIgnoresTheNextRegiste
 
 TEST_F(Cdna2ImageAccessTest, A16PacksThreeCoordinatesAndIgnoresTheFinalHighHalf) {
   Image image;
-  image.type = amdgpu::kGfx9Image2dArray;
+  image.type = amdgpu::kImage2dArray;
   image.width = 3;
   image.height = 2;
   image.depth = 2;
@@ -386,7 +386,7 @@ TEST_F(Cdna2ImageAccessTest, TiledSwizzleModesStopAsUnimplemented) {
 
 TEST_F(Cdna2ImageAccessTest, ThreeDimensionalSparseStoreUsesPaddedSlicePitch) {
   Image image;
-  image.type = amdgpu::kGfx9Image3d;
+  image.type = amdgpu::kImage3d;
   image.width = 3;
   image.height = 2;
   image.depth = 2;
@@ -521,7 +521,7 @@ TEST(ImageAccessTest, RdnaLinearR32DescriptorsPrepareTheExpectedMemoryAccess) {
     set(78, gfx12 ? 16 : 14, 0);
     set(96, 12, kXOne);
     set(116, 5, 0); // Linear.
-    set(124, 4, amdgpu::kGfx9Image2d);
+    set(124, 4, amdgpu::kImage2d);
     set(128, gfx12 ? 14 : 13, 63);
     for (uint32_t i = 0; i < words.size(); ++i)
       cu->write_sgpr(wf->sgpr_alloc().base + i, words[i]);

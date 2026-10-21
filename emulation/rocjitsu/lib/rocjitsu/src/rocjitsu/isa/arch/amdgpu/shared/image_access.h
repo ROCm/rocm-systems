@@ -1,8 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_GFX9_IMAGE_ACCESS_H_
-#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_GFX9_IMAGE_ACCESS_H_
+#ifndef ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ACCESS_H_
+#define ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ACCESS_H_
 
 #include "rocjitsu/isa/arch/amdgpu/shared/buffer_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
@@ -61,7 +61,6 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   state.elem_size = 1;
   state.buffer_d16 = fields.d16;
   state.buffer_components = static_cast<uint32_t>(std::popcount(fields.dmask & 15u));
-  state.buffer_format_encoding = BufferFormatEncoding::Gfx9;
   if (fields.lwe)
     return fail(InstructionExecutionError::UnimplementedInstruction);
   if (state.buffer_components == 0 || (!state.is_load && !fields.unorm))
@@ -75,7 +74,7 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   const auto arch = wf.cu().arch();
   const bool gfx9 = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2;
   const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
-  Gfx9ImageResource resource;
+  ImageResource resource;
   if (gfx9) {
     resource = decode_gfx9_image_resource(words);
   } else {
@@ -96,7 +95,7 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
     resource.pitch = gfx12 ? resource.width : field(128, 14) + 1;
   }
 
-  if (resource.type < kGfx9Image1d || resource.data_format == 0)
+  if (resource.type < kImage1d || resource.data_format == 0)
     return util::Result::success();
 
   // DMASK selects memory components; D16 packs their values into consecutive
@@ -108,10 +107,10 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
       selectors |= ((resource.selectors >> (3 * component)) & 7) << (3 * packed++);
   state.buffer_selectors = selectors;
 
-  const bool layered = resource.type == kGfx9Image1dArray || resource.type == kGfx9Image2dArray;
-  if (resource.type == kGfx9ImageCube || resource.type > kGfx9Image2dArray ||
-      resource.swizzle_mode != 0 || resource.base_level != 0 || resource.last_level != 0 ||
-      resource.base_array != 0 || resource.array_pitch != 0)
+  const bool layered = resource.type == kImage1dArray || resource.type == kImage2dArray;
+  if (resource.type == kImageCube || resource.type > kImage2dArray || resource.swizzle_mode != 0 ||
+      resource.base_level != 0 || resource.last_level != 0 || resource.base_array != 0 ||
+      resource.array_pitch != 0)
     return fail(InstructionExecutionError::UnimplementedInstruction);
   // The six-bit image DFMT must fit the buffer decoder's four-bit packed key.
   if (gfx9 && resource.data_format > 15)
@@ -130,8 +129,8 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   if (!format.value())
     return util::Result::success();
 
-  const bool has_y = resource.type != kGfx9Image1d && resource.type != kGfx9Image1dArray;
-  const bool has_slice = resource.type == kGfx9Image3d || (layered && fields.da);
+  const bool has_y = resource.type != kImage1d && resource.type != kImage1dArray;
+  const bool has_slice = resource.type == kImage3d || (layered && fields.da);
   const uint32_t coordinates = 1 + (has_y ? 1 : 0) + (has_slice ? 1 : 0);
   const uint32_t slice_rows = has_y ? resource.height : 1;
   RegisterAccess regs(wf);
@@ -159,4 +158,4 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
 
 } // namespace rocjitsu::amdgpu
 
-#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_GFX9_IMAGE_ACCESS_H_
+#endif // ROCJITSU_ISA_ARCH_AMDGPU_SHARED_IMAGE_ACCESS_H_
