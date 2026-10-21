@@ -87,6 +87,8 @@ def make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df):
         _runs={workload_path: SimpleNamespace(sys_info=sys_info_df)},
         _pmc_df_per_workload={workload_path: pmc_df},
         _arch_configs={"gfx90a": arch_config},
+        _pass_layout_per_workload={},
+        _roofline_ceilings_per_workload={},
         get_args=lambda: SimpleNamespace(),
     )
 

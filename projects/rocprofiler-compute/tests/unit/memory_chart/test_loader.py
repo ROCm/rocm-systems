@@ -52,12 +52,17 @@ ABOVE = {**INNER, "column": 3, "position": "above", "host": "data_fabric"}
 
 
 def panel_metric_names(arch):
-    """Memory chart metric names of an arch, in config order, duplicates kept."""
+    """User-facing memory chart metric names, in config order.
+
+    ``_collect.*`` rows stay in the panel YAML for formula evaluation. They
+    are not chart metrics, matching the analysis database export.
+    """
     return [
         name
         for source in PanelConfigs.for_arch(arch)["data source"]
         for table in source.values()
         for name in table.get("metric") or {}
+        if not str(name).startswith("_collect.")
     ]
 
 
@@ -118,6 +123,14 @@ def test_layout_shows_every_panel_metric_and_no_other(path, arch):
         f"not in the {arch} memory chart panel: {sorted(shown - panel)}"
     )
     assert not panel - shown, f"missing from {path.name}: {sorted(panel - shown)}"
+
+
+@pytest.mark.parametrize("arch", ("gfx908", "gfx90a", "gfx942", "gfx950"))
+def test_panel_metric_names_keep_vl1_hit_and_omit_collect_rows(arch):
+    names = panel_metric_names(arch)
+    assert "VL1 Hit" in names
+    assert "_collect.vl1d_hit_atom" not in names
+    assert "_collect.vl1d_hit_non_rw" not in names
 
 
 @pytest.mark.parametrize("arch", MEMORY_CHART_ARCHS)
