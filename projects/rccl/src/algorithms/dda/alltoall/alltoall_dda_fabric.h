@@ -160,9 +160,6 @@ __launch_bounds__(512)
   __global__ void ddaAllToAllFabricPushPeer(T* const* __restrict__ ipcbuffs, T* __restrict__ recvbuff, size_t count,
                                             const T* __restrict__ sendbuff, int selfRank, int nRanks,
                                             int blocksPerPeer, unsigned pieces, FabricGpuBarrier barrier) {
-  // A peer's scratch is free to overwrite once that peer's block has reached this op.
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
-
   constexpr size_t countPerThread = sizeof(uint4) / sizeof(T);
   const size_t nLines = count / countPerThread;
   const int k = blockIdx.x / blocksPerPeer;
@@ -175,6 +172,9 @@ __launch_bounds__(512)
   T* const dst = ipcbuffs[peer] + static_cast<size_t>(selfRank) * count;
   const T* const src = sendbuff + static_cast<size_t>(peer) * count;
   const size_t slot = static_cast<size_t>(srcRank) * count;
+
+  // Entry handshake instead of a full barrier: only peer reads the slot this block writes, so wait for peer alone.
+  if (k != 0) barrier.signalWaitPeer(srcRank, peer, blockIdx.x);
 
   {
     // The host never passes pieces == 0, so the kernel does not guard it. Adding a check inside the kernel (for example
