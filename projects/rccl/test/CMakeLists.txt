@@ -412,6 +412,7 @@ if(BUILD_TESTS)
       device/HierarchicalShuffleTests.cpp
       device/NcclUtilityDeviceTests.cpp
       device/ChannelMaskMapTests.cpp
+      device/CoopApplicationBuildTests.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
