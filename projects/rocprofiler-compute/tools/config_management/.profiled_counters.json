@@ -64,7 +64,6 @@
       "GL2C_HIT_sum",
       "GL2C_MC_WRREQ_sum",
       "GL2C_MISS_sum",
-      "GRBM_GUI_ACTIVE",
       "SQC_DCACHE_HITS_sum",
       "SQC_DCACHE_MISSES_sum",
       "SQC_DCACHE_REQ_sum",
@@ -119,7 +118,6 @@
       "CPC_UTCL2IU_BUSY"
     ],
     "0600": [
-      "GRBM_GUI_ACTIVE",
       "GRBM_SPI_BUSY",
       "SPI_CSN_WAVE"
     ],
@@ -155,7 +153,6 @@
       "SQ_WAVE_CYCLES_sum"
     ],
     "0900": [
-      "GRBM_GUI_ACTIVE",
       "TCP_DATA_FIFO_STALL_sum",
       "TCP_GATE_EN2",
       "TCP_GL1_REQ_READ_128B_sum",
@@ -219,7 +216,6 @@
       "GRBM_COUNT",
       "GRBM_CP_BUSY",
       "GRBM_GL2C_BUSY",
-      "GRBM_GUI_ACTIVE",
       "GRBM_TA_BUSY"
     ],
     "always": [
@@ -240,7 +236,6 @@
       "GL2C_HIT_sum",
       "GL2C_MISS_sum",
       "GL2C_REQ_sum",
-      "GRBM_GUI_ACTIVE_sum",
       "SP_VALU_FLOPS_FP16_TRANS_sum",
       "SP_VALU_FLOPS_FP16_sum",
       "SP_VALU_FLOPS_FP32_TRANS_sum",
@@ -325,7 +320,6 @@
       "GLARBC_REQ_WRITE_32B_sum",
       "GLARBC_REQ_WRITE_64B_sum",
       "GLARBC_STALL_BUFFER_FULL_sum",
-      "GRBM_GUI_ACTIVE_sum",
       "SQC_DCACHE_BUSY_CYCLES_sum",
       "SQC_DCACHE_HITS_sum",
       "SQC_DCACHE_INFLIGHT_LEVEL_ACCUM",
@@ -412,7 +406,6 @@
       "CPC_ME1_DC0_SPI_BUSY_sum"
     ],
     "0600": [
-      "GRBM_GUI_ACTIVE_sum",
       "SPI_ALL_WAVE_IN_FLIGHT_sum",
       "SPI_ALL_WAVE_ITEMS_sum",
       "SPI_ALL_WAVE_RESTORED_sum",
@@ -521,7 +514,6 @@
       "SQ_VMEM_REQ_ROW1_STALL_CYCLES_sum"
     ],
     "0800": [
-      "GRBM_GUI_ACTIVE_sum",
       "TX_VCA_ADDRESSER_STALLED_CYCLES_sum",
       "TX_VCA_ASYNC_BARRIER_WAVEFRONT_sum",
       "TX_VCA_ASYNC_CLUSTER_LOAD_WAVEFRONT_sum",
@@ -571,7 +563,6 @@
       "TX_VMW_VMW_VCA_REQ_STALL_sum"
     ],
     "0900": [
-      "GRBM_GUI_ACTIVE_sum",
       "TX_VMW_ALLOC_STALL_sum",
       "TX_VMW_ATOMIC_SETCONFLICT_STALL_sum",
       "TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_LDS_STALLED_CYCLES_sum",
@@ -867,7 +858,6 @@
       "GRBM_CP_BUSY_sum",
       "GRBM_GL1CC_BUSY_sum",
       "GRBM_GLARB_BUSY_sum",
-      "GRBM_GUI_ACTIVE_sum",
       "GRBM_SDMA_BUSY_sum",
       "GRBM_SPI_BUSY_sum",
       "GRBM_UTCL1_BUSY_sum",
@@ -880,7 +870,6 @@
   },
   "gfx908": {
     "0200": [
-      "GRBM_GUI_ACTIVE",
       "SQC_DCACHE_HITS",
       "SQC_DCACHE_MISSES",
       "SQC_DCACHE_REQ",
@@ -913,7 +902,6 @@
       "TCP_TOTAL_CACHE_ACCESSES_sum"
     ],
     "0300": [
-      "GRBM_GUI_ACTIVE",
       "SPI_CSN_NUM_THREADGROUPS",
       "SQC_DCACHE_HITS",
       "SQC_DCACHE_REQ",
@@ -997,7 +985,6 @@
     ],
     "0600": [
       "GRBM_COUNT",
-      "GRBM_GUI_ACTIVE",
       "GRBM_SPI_BUSY",
       "SPI_CSN_BUSY",
       "SPI_CSN_NUM_THREADGROUPS",
@@ -1019,14 +1006,12 @@
       "SQ_BUSY_CYCLES"
     ],
     "0700": [
-      "GRBM_GUI_ACTIVE",
       "SPI_CSN_WAVE",
       "SQ_ACTIVE_INST_ANY",
       "SQ_INSTS",
       "SQ_LEVEL_WAVES_ACCUM",
       "SQ_WAIT_ANY",
       "SQ_WAIT_INST_ANY",
-      "SQ_WAVES",
       "SQ_WAVES_RESTORED",
       "SQ_WAVES_SAVED",
       "SQ_WAVE_CYCLES"
@@ -1046,7 +1031,6 @@
       "TA_FLAT_WRITE_WAVEFRONTS_sum"
     ],
     "1100": [
-      "GRBM_GUI_ACTIVE",
       "SQ_ACTIVE_INST_ANY",
       "SQ_ACTIVE_INST_SCA",
       "SQ_ACTIVE_INST_VALU",
@@ -1063,7 +1047,6 @@
       "SQ_THREAD_CYCLES_VALU"
     ],
     "1200": [
-      "GRBM_GUI_ACTIVE",
       "SQ_ACTIVE_INST_LDS",
       "SQ_INSTS_LDS",
       "SQ_INST_LEVEL_LDS_ACCUM",
@@ -1100,7 +1083,6 @@
       "SQC_TC_STALL"
     ],
     "1500": [
-      "GRBM_GUI_ACTIVE",
       "TA_ADDR_STALLED_BY_TC_CYCLES_sum",
       "TA_ADDR_STALLED_BY_TD_CYCLES_sum",
       "TA_BUFFER_ATOMIC_WAVEFRONTS_sum",
@@ -1166,7 +1148,6 @@
       "TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum"
     ],
     "1700": [
-      "GRBM_GUI_ACTIVE",
       "TCC_ALL_TC_OP_INV_EVICT_sum",
       "TCC_ALL_TC_OP_WB_WRITEBACK_sum",
       "TCC_ATOMIC_sum",
@@ -1222,7 +1203,6 @@
   },
   "gfx90a": {
     "0200": [
-      "GRBM_GUI_ACTIVE",
       "SQC_DCACHE_HITS",
       "SQC_DCACHE_MISSES",
       "SQC_DCACHE_REQ",
@@ -1276,7 +1256,6 @@
       "TCP_TOTAL_CACHE_ACCESSES_sum"
     ],
     "0300": [
-      "GRBM_GUI_ACTIVE",
       "SPI_CSN_NUM_THREADGROUPS",
       "SQC_DCACHE_HITS",
       "SQC_DCACHE_REQ",
@@ -1359,7 +1338,6 @@
     ],
     "0600": [
       "GRBM_COUNT",
-      "GRBM_GUI_ACTIVE",
       "GRBM_SPI_BUSY",
       "SPI_CSN_BUSY",
       "SPI_CSN_NUM_THREADGROUPS",
@@ -1381,14 +1359,12 @@
       "SQ_BUSY_CYCLES"
     ],
     "0700": [
-      "GRBM_GUI_ACTIVE",
       "SPI_CSN_WAVE",
       "SQ_ACTIVE_INST_ANY",
       "SQ_INSTS",
       "SQ_LEVEL_WAVES_ACCUM",
       "SQ_WAIT_ANY",
       "SQ_WAIT_INST_ANY",
-      "SQ_WAVES",
       "SQ_WAVES_RESTORED",
       "SQ_WAVES_SAVED",
       "SQ_WAVE_CYCLES"
@@ -1432,7 +1408,6 @@
       "TA_FLAT_WRITE_WAVEFRONTS_sum"
     ],
     "1100": [
-      "GRBM_GUI_ACTIVE",
       "SQ_ACTIVE_INST_ANY",
       "SQ_ACTIVE_INST_FLAT",
       "SQ_ACTIVE_INST_MISC",
@@ -1475,7 +1450,6 @@
       "SQ_VALU_MFMA_BUSY_CYCLES"
     ],
     "1200": [
-      "GRBM_GUI_ACTIVE",
       "SQ_ACTIVE_INST_LDS",
       "SQ_INSTS_LDS",
       "SQ_INST_LEVEL_LDS_ACCUM",
@@ -1512,7 +1486,6 @@
       "SQC_TC_STALL"
     ],
     "1500": [
-      "GRBM_GUI_ACTIVE",
       "SQ_VMEM_TA_ADDR_FIFO_FULL",
       "SQ_VMEM_TA_CMD_FIFO_FULL",
       "SQ_VMEM_WR_TA_DATA_FIFO_FULL",
@@ -1582,7 +1555,6 @@
       "TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum"
     ],
     "1700": [
-      "GRBM_GUI_ACTIVE",
       "TCC_ALL_TC_OP_INV_EVICT_sum",
       "TCC_ALL_TC_OP_WB_WRITEBACK_sum",
       "TCC_ATOMIC_sum",
@@ -1640,7 +1612,6 @@
   },
   "gfx940": {
     "0200": [
-      "GRBM_GUI_ACTIVE",
       "SQC_DCACHE_HITS",
       "SQC_DCACHE_MISSES",
       "SQC_DCACHE_REQ",
@@ -1696,7 +1667,6 @@
       "TCP_TOTAL_CACHE_ACCESSES_sum"
     ],
     "0300": [
-      "GRBM_GUI_ACTIVE",
       "SPI_CSN_NUM_THREADGROUPS",
       "SQC_DCACHE_HITS",
       "SQC_DCACHE_REQ",
@@ -1783,7 +1753,6 @@
     ],
     "0600": [
       "GRBM_COUNT",
-      "GRBM_GUI_ACTIVE",
       "GRBM_SPI_BUSY",
       "SPI_CSN_BUSY",
       "SPI_CSN_NUM_THREADGROUPS",
@@ -1805,14 +1774,12 @@
       "SQ_BUSY_CYCLES"
     ],
     "0700": [
-      "GRBM_GUI_ACTIVE",
       "SPI_CSN_WAVE",
       "SQ_ACTIVE_INST_ANY",
       "SQ_INSTS",
       "SQ_LEVEL_WAVES_ACCUM",
       "SQ_WAIT_ANY",
       "SQ_WAIT_INST_ANY",
-      "SQ_WAVES",
       "SQ_WAVES_RESTORED",
       "SQ_WAVES_SAVED",
       "SQ_WAVE_CYCLES"
@@ -1856,7 +1823,6 @@
       "TA_FLAT_WRITE_WAVEFRONTS_sum"
     ],
     "1100": [
-      "GRBM_GUI_ACTIVE",
       "SQ_ACTIVE_INST_ANY",
       "SQ_ACTIVE_INST_FLAT",
       "SQ_ACTIVE_INST_MISC",
@@ -1900,7 +1866,6 @@
       "SQ_VALU_MFMA_BUSY_CYCLES"
     ],
     "1200": [
-      "GRBM_GUI_ACTIVE",
       "SQ_ACTIVE_INST_LDS",
       "SQ_INSTS_LDS",
       "SQ_INST_LEVEL_LDS_ACCUM",
@@ -1937,7 +1902,6 @@
       "SQC_TC_STALL"
     ],
     "1500": [
-      "GRBM_GUI_ACTIVE",
       "SQ_VMEM_TA_ADDR_FIFO_FULL",
       "SQ_VMEM_TA_CMD_FIFO_FULL",
       "SQ_VMEM_WR_TA_DATA_FIFO_FULL",
@@ -2003,7 +1967,6 @@
       "TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum"
     ],
     "1700": [
-      "GRBM_GUI_ACTIVE",
       "TCC_ALL_TC_OP_INV_EVICT_sum",
       "TCC_ALL_TC_OP_WB_WRITEBACK_sum",
       "TCC_ATOMIC_sum",
@@ -2059,7 +2022,6 @@
   },
   "gfx941": {
     "0200": [
-      "GRBM_GUI_ACTIVE",
       "SQC_DCACHE_HITS",
       "SQC_DCACHE_MISSES",
       "SQC_DCACHE_REQ",
@@ -2115,7 +2077,6 @@
       "TCP_TOTAL_CACHE_ACCESSES_sum"
     ],
     "0300": [
-      "GRBM_GUI_ACTIVE",
       "SPI_CSN_NUM_THREADGROUPS",
       "SQC_DCACHE_HITS",
       "SQC_DCACHE_REQ",
@@ -2202,7 +2163,6 @@
     ],
     "0600": [
       "GRBM_COUNT",
-      "GRBM_GUI_ACTIVE",
       "GRBM_SPI_BUSY",
       "SPI_CSN_BUSY",
       "SPI_CSN_NUM_THREADGROUPS",
@@ -2224,14 +2184,12 @@
       "SQ_BUSY_CYCLES"
     ],
     "0700": [
-      "GRBM_GUI_ACTIVE",
       "SPI_CSN_WAVE",
       "SQ_ACTIVE_INST_ANY",
       "SQ_INSTS",
       "SQ_LEVEL_WAVES_ACCUM",
       "SQ_WAIT_ANY",
       "SQ_WAIT_INST_ANY",
-      "SQ_WAVES",
       "SQ_WAVES_RESTORED",
       "SQ_WAVES_SAVED",
       "SQ_WAVE_CYCLES"
@@ -2275,7 +2233,6 @@
       "TA_FLAT_WRITE_WAVEFRONTS_sum"
     ],
     "1100": [
-      "GRBM_GUI_ACTIVE",
       "SQ_ACTIVE_INST_ANY",
       "SQ_ACTIVE_INST_FLAT",
       "SQ_ACTIVE_INST_MISC",
@@ -2319,7 +2276,6 @@
       "SQ_VALU_MFMA_BUSY_CYCLES"
     ],
     "1200": [
-      "GRBM_GUI_ACTIVE",
       "SQ_ACTIVE_INST_LDS",
       "SQ_INSTS_LDS",
       "SQ_INST_LEVEL_LDS_ACCUM",
@@ -2356,7 +2312,6 @@
       "SQC_TC_STALL"
     ],
     "1500": [
-      "GRBM_GUI_ACTIVE",
       "SQ_VMEM_TA_ADDR_FIFO_FULL",
       "SQ_VMEM_TA_CMD_FIFO_FULL",
       "SQ_VMEM_WR_TA_DATA_FIFO_FULL",
@@ -2422,7 +2377,6 @@
       "TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum"
     ],
     "1700": [
-      "GRBM_GUI_ACTIVE",
       "TCC_ALL_TC_OP_INV_EVICT_sum",
       "TCC_ALL_TC_OP_WB_WRITEBACK_sum",
       "TCC_ATOMIC_sum",
@@ -2478,7 +2432,6 @@
   },
   "gfx942": {
     "0200": [
-      "GRBM_GUI_ACTIVE",
       "SQC_DCACHE_HITS",
       "SQC_DCACHE_MISSES",
       "SQC_DCACHE_REQ",
@@ -2534,7 +2487,6 @@
       "TCP_TOTAL_CACHE_ACCESSES_sum"
     ],
     "0300": [
-      "GRBM_GUI_ACTIVE",
       "SPI_CSN_NUM_THREADGROUPS",
       "SQC_DCACHE_HITS",
       "SQC_DCACHE_REQ",
@@ -2622,7 +2574,6 @@
     ],
     "0600": [
       "GRBM_COUNT",
-      "GRBM_GUI_ACTIVE",
       "GRBM_SPI_BUSY",
       "SPI_CSN_BUSY",
       "SPI_CSN_NUM_THREADGROUPS",
@@ -2644,14 +2595,12 @@
       "SQ_BUSY_CYCLES"
     ],
     "0700": [
-      "GRBM_GUI_ACTIVE",
       "SPI_CSN_WAVE",
       "SQ_ACTIVE_INST_ANY",
       "SQ_INSTS",
       "SQ_LEVEL_WAVES_ACCUM",
       "SQ_WAIT_ANY",
       "SQ_WAIT_INST_ANY",
-      "SQ_WAVES",
       "SQ_WAVES_RESTORED",
       "SQ_WAVES_SAVED",
       "SQ_WAVE_CYCLES"
@@ -2695,7 +2644,6 @@
       "TA_FLAT_WRITE_WAVEFRONTS_sum"
     ],
     "1100": [
-      "GRBM_GUI_ACTIVE",
       "SQ_ACTIVE_INST_ANY",
       "SQ_ACTIVE_INST_FLAT",
       "SQ_ACTIVE_INST_MISC",
@@ -2739,7 +2687,6 @@
       "SQ_VALU_MFMA_BUSY_CYCLES"
     ],
     "1200": [
-      "GRBM_GUI_ACTIVE",
       "SQ_ACTIVE_INST_LDS",
       "SQ_INSTS_LDS",
       "SQ_INST_LEVEL_LDS_ACCUM",
@@ -2776,7 +2723,6 @@
       "SQC_TC_STALL"
     ],
     "1500": [
-      "GRBM_GUI_ACTIVE",
       "SQ_VMEM_TA_ADDR_FIFO_FULL",
       "SQ_VMEM_TA_CMD_FIFO_FULL",
       "SQ_VMEM_WR_TA_DATA_FIFO_FULL",
@@ -2842,7 +2788,6 @@
       "TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum"
     ],
     "1700": [
-      "GRBM_GUI_ACTIVE",
       "TCC_ALL_TC_OP_INV_EVICT_sum",
       "TCC_ALL_TC_OP_WB_WRITEBACK_sum",
       "TCC_ATOMIC_sum",
@@ -2899,7 +2844,6 @@
   },
   "gfx950": {
     "0200": [
-      "GRBM_GUI_ACTIVE",
       "SQC_DCACHE_HITS",
       "SQC_DCACHE_MISSES",
       "SQC_DCACHE_REQ",
@@ -2957,7 +2901,6 @@
       "TCP_TOTAL_CACHE_ACCESSES_sum"
     ],
     "0300": [
-      "GRBM_GUI_ACTIVE",
       "SPI_CS0_NUM_THREADGROUPS",
       "SPI_CS1_NUM_THREADGROUPS",
       "SPI_CS2_NUM_THREADGROUPS",
@@ -3065,7 +3008,6 @@
     ],
     "0600": [
       "GRBM_COUNT",
-      "GRBM_GUI_ACTIVE",
       "GRBM_SPI_BUSY",
       "SPI_CS0_BUSY",
       "SPI_CS0_CRAWLER_STALL",
@@ -3106,7 +3048,6 @@
       "SQ_BUSY_CYCLES"
     ],
     "0700": [
-      "GRBM_GUI_ACTIVE",
       "SPI_CS0_WAVE",
       "SPI_CS1_WAVE",
       "SPI_CS2_WAVE",
@@ -3116,7 +3057,6 @@
       "SQ_LEVEL_WAVES_ACCUM",
       "SQ_WAIT_ANY",
       "SQ_WAIT_INST_ANY",
-      "SQ_WAVES",
       "SQ_WAVES_RESTORED",
       "SQ_WAVES_SAVED",
       "SQ_WAVE_CYCLES"
@@ -3162,7 +3102,6 @@
       "TA_FLAT_WRITE_WAVEFRONTS_sum"
     ],
     "1100": [
-      "GRBM_GUI_ACTIVE",
       "SQ_ACTIVE_INST_ANY",
       "SQ_ACTIVE_INST_FLAT",
       "SQ_ACTIVE_INST_MISC",
@@ -3208,7 +3147,6 @@
       "SQ_VALU_MFMA_BUSY_CYCLES"
     ],
     "1200": [
-      "GRBM_GUI_ACTIVE",
       "SQ_ACTIVE_INST_LDS",
       "SQ_INSTS_LDS",
       "SQ_INSTS_LDS_ATOMIC",
@@ -3253,7 +3191,6 @@
       "SQC_TC_STALL"
     ],
     "1500": [
-      "GRBM_GUI_ACTIVE",
       "SQ_VMEM_TA_ADDR_FIFO_FULL",
       "SQ_VMEM_TA_CMD_FIFO_FULL",
       "SQ_VMEM_WR_TA_DATA_FIFO_FULL",
@@ -3343,7 +3280,6 @@
       "TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum"
     ],
     "1700": [
-      "GRBM_GUI_ACTIVE",
       "TCC_ALL_TC_OP_INV_EVICT_sum",
       "TCC_ALL_TC_OP_WB_WRITEBACK_sum",
       "TCC_ATOMIC_SECTORS_sum",
@@ -3427,7 +3363,6 @@
     "3000": [
       "GRBM_COUNT",
       "GRBM_EA_BUSY",
-      "GRBM_GUI_ACTIVE",
       "SQ_BUSY_CYCLES",
       "SQ_INSTS_VMEM",
       "SQ_VMEM_TA_CMD_FIFO_FULL",

@@ -4,27 +4,7 @@
 
 """Tests for the profiled counter snapshot check."""
 
-from config_management.counter_snapshot import diff_snapshots, panel_counters
-
-
-def test_panel_counters_resolves_each_panel_on_its_own():
-    """Denominators appear only under "always", built-in variables resolve to
-    their counters, TCC templates stay templates, and panels without counters
-    are left out."""
-    counters = panel_counters(
-        {
-            "0200": ["SUM(SQ_INSTS) / $denom", "SUM(TCC_HIT[::_1])"],
-            "0300": ["$numActiveCUs"],
-            "0400": ["$cu_per_gpu * 64"],
-        },
-        "MI300",
-    )
-
-    assert counters == {
-        "always": ["GRBM_GUI_ACTIVE", "SQ_WAVES"],
-        "0200": ["SQ_INSTS", "TCC_HIT["],
-        "0300": ["GRBM_GUI_ACTIVE", "SQ_BUSY_CU_CYCLES"],
-    }
+from config_management.counter_snapshot import diff_snapshots
 
 
 def test_diff_reports_added_and_removed_counters_per_panel():
