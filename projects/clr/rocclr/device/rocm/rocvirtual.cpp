@@ -4289,6 +4289,25 @@ void VirtualGPU::submitFillMemory(amd::FillMemoryCommand& cmd) {
 }
 
 // ================================================================================================
+void VirtualGPU::dispatchMemoryPublicationBarrier(amd::Command& cmd) {
+  if (cmd.getPktCapturingState()) {
+    // This release must precede the notification on every graph launch. Issuing
+    // a barrier on the capture queue would only fence graph instantiation.
+    hsa_barrier_and_packet_t packet{};
+    packet.header = kBarrierPacketReleaseHeader;
+    std::memcpy(const_cast<uint8_t*>(cmd.getAqlPacket()), &packet, sizeof(packet));
+    if (metadata_preloader_.HasMetadataQueue()) {
+      // Keep the metadata and AQL packet arrays parallel, with an invalid slot
+      // for this non-kernel packet.
+      cmd.getMetadataPacket();
+    }
+  } else {
+    // Also consumes pending cross-engine dependencies, including SDMA copies.
+    dispatchBarrierPacket(kBarrierPacketReleaseHeader);
+  }
+}
+
+// ================================================================================================
 void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
   // Make sure VirtualGPU has an exclusive access to the resources
   std::scoped_lock lock(execution());
@@ -4357,6 +4376,9 @@ void VirtualGPU::submitStreamOperation(amd::StreamOperationCommand& cmd) {
       }
     }
   } else if (type == ROCCLR_COMMAND_STREAM_WRITE_VALUE) {
+    // The system-scope release at the end of the blit dispatch is too late:
+    // the host or a peer can observe the relaxed notification store first.
+    dispatchMemoryPublicationBarrier(cmd);
     // Even though the blit kernel uses system scope atomic, we still need to add system scope on
     // the AQLPacket because atomics on kernels can bypass L2 cache on some hardware.
     addSystemScope();
@@ -4396,13 +4418,13 @@ void VirtualGPU::submitBatchMemoryOperation(amd::BatchMemoryOperationCommand& cm
   std::scoped_lock lock(execution());
   profilingBegin(cmd);
 
-  // System scope is needed here to order this packet against writes made by EARLIER
-  // packets on the same stream, not for the write performed by this one. The blit kernel
-  // already stores the value with system scope, so the value itself reaches a peer agent
-  // without any flush -- which is precisely the hazard: data left in this agent's L2 by a
-  // preceding agent-scope dispatch (e.g. fillBuffer) has not drained yet, so the value
-  // overtakes it. The system-scope acquire makes this agent's caches coherent before the
-  // packet runs. Matches submitStreamOperation(), which does the same for its blit paths.
+  if (cmd.hasWrites()) {
+    dispatchMemoryPublicationBarrier(cmd);
+  }
+
+  // Keep the dispatch's system acquire/release scopes for the wait operations
+  // and for commands following this batch. Publication of earlier stream writes
+  // needs the separate release above, before any notification can be observed.
   addSystemScope();
 
   bool result = blitMgr().batchMemOps(cmd.getParamPtr(), cmd.paramSize(), cmd.count());

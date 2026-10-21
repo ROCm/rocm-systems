@@ -1092,12 +1092,13 @@ class BatchMemoryOperationCommand : public Command {
  public:
   BatchMemoryOperationCommand(HostQueue& queue, cl_command_type cmdType, uint32_t count,
                               uint32_t flags, EventWaitList& eventWaitList, const void* paramArray,
-                              size_t paramSize)
+                              size_t paramSize, bool hasWrites)
       : Command(queue, cmdType, eventWaitList),
         count_(count),
         paramArray_(paramArray),
         flags_(flags),
-        paramSize_(paramSize) {
+        paramSize_(paramSize),
+        hasWrites_(hasWrites) {
     // Sanity check
     assert(((cmdType == ROCCLR_COMMAND_BATCH_STREAM)) && "Invalid batch memory operation");
   }
@@ -1110,12 +1111,15 @@ class BatchMemoryOperationCommand : public Command {
   const void* getParamPtr() { return paramArray_; }
   //! Return the size of a single mem op param in bytes
   const size_t paramSize() const { return paramSize_; }
+  //! Whether this batch publishes memory written by earlier stream commands.
+  bool hasWrites() const { return hasWrites_; }
 
  private:
   uint32_t count_;          // !< The number of operations in the array.
   uint32_t flags_;          // !< Reserved for future expansion. Must be 0.
   const void* paramArray_;  // !< Pointer to the array of individual operations
   size_t paramSize_;        // !< size in bytes of the param array passed
+  bool hasWrites_;         // !< Requires a system release before the batch starts
 };
 
 /*! \brief      A generic copy memory command

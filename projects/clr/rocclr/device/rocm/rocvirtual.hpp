@@ -722,6 +722,9 @@ class VirtualGPU : public device::VirtualDevice {
   //! consecutive-system-scope optimization, fence_state_ tracking).
   void adjustHeader(uint16_t& header);
 
+  //! Release earlier stream writes to the system before a memory notification.
+  void dispatchMemoryPublicationBarrier(amd::Command& cmd);
+
   //! Dispatches a barrier with blocking HSA signals
   void dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet);
 

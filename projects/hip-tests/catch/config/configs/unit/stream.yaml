@@ -457,6 +457,9 @@ stream:
   Unit_hipStreamBatchMemOp_Negative_Tests:
     <<: *level_default
     tags: [memory]
+  Unit_hipStreamMemOp_PublishPriorCopies:
+    <<: *level_default
+    tags: [synchronization, memory, graph]
   Unit_hipStreamBatchMemOp_SequentialOrdering:
     <<: *level_default
     disabled:

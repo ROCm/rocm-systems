@@ -4145,10 +4145,16 @@ class hipGraphBatchMemOpNode : public GraphNode {
       return status;
     }
     amd::Command::EventWaitList waitList;
+    const auto* params = batchMemOpNodeParam_.paramArray;
+    const bool hasWrites = std::any_of(
+        params, params + batchMemOpNodeParam_.count, [](const hipStreamBatchMemOpParams& op) {
+          return op.operation == hipStreamMemOpWriteValue32 ||
+                 op.operation == hipStreamMemOpWriteValue64;
+        });
     amd::BatchMemoryOperationCommand* command = new amd::BatchMemoryOperationCommand(
         *stream, ROCCLR_COMMAND_BATCH_STREAM, batchMemOpNodeParam_.count,
         batchMemOpNodeParam_.flags, waitList, batchMemOpNodeParam_.paramArray,
-        sizeof(hipStreamBatchMemOpParams));
+        sizeof(hipStreamBatchMemOpParams), hasWrites);
     commands_.emplace_back(command);
     return hipSuccess;
   }
