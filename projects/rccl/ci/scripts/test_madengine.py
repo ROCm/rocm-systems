@@ -1977,6 +1977,23 @@ else
 fi
 """
 
+# sglang's nixl backend registers every KV-cache buffer with every RDMA NIC,
+# and each bnxt_re registration needs physically contiguous host memory (an
+# order-9 allocation). On a node whose RAM is nearly all page cache those fail
+# -- "bnxt_re3: Failed to register user MR - rc = -12" in dmesg -- and the
+# server that hits one dies at startup with NIXL_ERR_BACKEND. The nodes are
+# held exclusively, so drop the clean page cache and compact before each phase.
+# Best effort: without passwordless sudo the phase runs as before.
+RELEASE_HOST_MEMORY = """\
+#!/bin/bash
+if sudo -n sh -c 'sync; echo 1 > /proc/sys/vm/drop_caches; echo 1 > /proc/sys/vm/compact_memory'; then
+    echo "  ok   $(hostname -s) free=$(free -g | awk '/^Mem:/ {print $4}')G"
+else
+    echo "  skip $(hostname -s): no passwordless sudo"
+fi
+exit 0
+"""
+
 # Run on every node once the phases are done. The images are per-run tags that
 # no later run can reuse, and each is tens of GB on a node's local disk.
 CLEANUP_IMAGES = """\
@@ -2079,10 +2096,16 @@ def run_ab_in_one_allocation(
             "  exit 3",
             "}",
         ]
+        release_memory = work_dir / "ab" / "release_host_memory.sh"
+        release_memory.write_text(RELEASE_HOST_MEMORY)
     for phase, run_dir in phases:
+        script_lines += ["", f'echo "===== phase: {phase} ====="']
+        if workload_config.get("family") == "sglang-disagg":
+            script_lines.append(
+                'srun --ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1 '
+                f"--overlap bash {shlex.quote(str(release_memory))}"
+            )
         script_lines += [
-            "",
-            f'echo "===== phase: {phase} ====="',
             f"cd {shlex.quote(str(run_dir))} || exit 1",
             "madengine run -m manifest.json -o perf.csv --live-output --verbose",
             "echo $? > " + shlex.quote(str(run_dir / "exit_code")),
