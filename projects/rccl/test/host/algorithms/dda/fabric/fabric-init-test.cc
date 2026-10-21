@@ -137,14 +137,7 @@ class FabricInitMicrotest : public FabricLedgerTest {
     SetMicroEnvAbsent("RCCL_DDA_FABRIC_MAXBLOCKS");
     g_hostAllocs.Reset();
     // Host-to-host copies must land inside a tracked host block.
-    auto ledgerCopy = g_hipMemcpy;
-    g_hipMemcpy = [ledgerCopy](void* dst, const void* src, size_t n, hipMemcpyKind kind) {
-      if (kind == hipMemcpyHostToHost && !g_hostAllocs.Covers(dst, n)) {
-        ++g_hostAllocs.refusedCopies;
-        return hipErrorInvalidValue;
-      }
-      return ledgerCopy(dst, src, n, kind);
-    };
+    g_hipMemcpy = g_hostAllocs.GuardHostCopies(g_hipMemcpy);
     g_loadParam = [this](const char* name, int64_t deftVal) {
       const bool unset = !bufferSize_.has_value() || std::string(name) != "RCCL_DDA_FABRIC_BUFFER_SIZE";
       return unset ? deftVal : *bufferSize_;
