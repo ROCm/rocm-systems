@@ -8,7 +8,7 @@ import numpy as np
 
 from aie.iron import ObjectFifo, Program, Runtime, Worker
 from aie.iron.controlflow import range_
-from aie.dialects.aiex import npu_load_pdi
+from aie.dialects.aiex import npu_load_pdi, dma_channel_reset_for
 
 PROBLEM_SIZE = 1024
 MEM_TILE_WIDTH = 64
@@ -72,6 +72,15 @@ def my_vector_bias_add():
         # this design's dispatch and corrupts vector_scalar_mul.py's output.
         if FULL_ELF and positional[0] != "npu3":
             npu_load_pdi(device_ref="main")
+        # Required on aie4 (npu3): re-arm every objectFifo's DMA channel before this dispatch
+        # touches it. The runtime does not gap back-to-back full-ELF dispatches to cover for
+        # this; without the reset, the next run's control code reconfigures a channel before the
+        # previous run's DMA has drained, shifting output by one memtile double-buffer. aiecc's
+        # default pipeline never emits this reset on its own, so every aie4 full-ELF design needs
+        # it. See aiex.dma_channel_reset_for's own doc.
+        if FULL_ELF and positional[0] == "npu3":
+            for fifo in ("in", "in_fwd", "out", "out_fwd"):
+                dma_channel_reset_for(fifo)
         in_handle.fill(inTensor)
         out_handle.drain(outTensor, wait=True)
 

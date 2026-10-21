@@ -19,7 +19,7 @@ import sys
 
 from aie.iron import ObjectFifo, Program, Runtime, Worker
 from aie.iron.controlflow import range_
-from aie.dialects.aiex import npu_load_pdi
+from aie.dialects.aiex import npu_load_pdi, dma_channel_reset_for
 
 PROBLEM_SIZE = 1024
 MEM_TILE_WIDTH = 64
@@ -96,6 +96,16 @@ def my_vector_scalar_mul():
         # back stretches of the output shifted by 128 elements.
         if FULL_ELF and positional[0] != "npu3":
             npu_load_pdi(device_ref="main")
+        # Required on aie4 (npu3): re-arm every objectFifo's DMA channel before this dispatch
+        # touches it. The runtime does not gap back-to-back full-ELF dispatches to cover for
+        # this; without the reset, this design corrupts the same way the comment above describes
+        # for an unwanted second load_pdi (output shifted by 128 elements), because the next
+        # dispatch reconfigures a memtile channel before the previous run's DMA has drained.
+        # aiecc's default pipeline never emits this reset on its own, so every aie4 full-ELF
+        # design needs it. See aiex.dma_channel_reset_for's own doc.
+        if FULL_ELF and positional[0] == "npu3":
+            for fifo in ("in", "in_fwd", "out", "out_fwd"):
+                dma_channel_reset_for(fifo)
         in_handle.fill(inoutTensor)
         out_handle.drain(inoutTensor, wait=True)
 

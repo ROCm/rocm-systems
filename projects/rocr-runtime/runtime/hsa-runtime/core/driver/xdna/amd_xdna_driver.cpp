@@ -338,17 +338,6 @@ constexpr uint32_t DEV_ADDR_OFFSET_MASK = 0x02FFFFFF;
 /// aie2p and aie4 alike (XRT's patch57/patch57_aie4 add the same get_ddr_aie_addr_offset()).
 constexpr uint64_t DDR_AIE_ADDR_OFFSET = 0x80000000;
 
-/// @brief Minimum gap enforced between one UMQ packet's retirement and the next one's doorbell,
-/// on top of whatever CERT's own wait already took. A full ELF's control code begins by
-/// configuring the array, which is not safe to apply right on top of a run that just ended (it
-/// does not reset the memtile DMA channels), and CERT retiring a packet is not evidence enough
-/// that this has settled: measured on aie4 with vsadd, publishing the next packet 500 us or less
-/// after the previous one's wait returned corrupts output every time, 800 us or more is clean
-/// every time. This is double that, for margin across silicon and firmware revisions; it is not
-/// derived from any driver- or firmware-documented bound, since none is exposed -- this is the
-/// control code's property, not this submission path's.
-constexpr uint32_t UMQ_INTER_PACKET_GAP_US = 2000;
-
 /// @brief Dwords of padding declared on a PDI + instruction sequence command's payload.
 ///
 /// The firmware aborts a command chain whose slot carries an odd argument count below 15. The
@@ -954,17 +943,12 @@ struct KmqMetadata {
 /// HSA-visible AQL packet ring every queue already has) is handed to the device directly as the
 /// hwctx's umq_bo, and submission is a single doorbell write, the same as a GPU hardware queue.
 struct UmqMetadata {
-  /// @brief Agent associated with this UMQ.
-  const AieAgent* agent = nullptr;
   /// @brief Hardware context the queue dispatches against.
   uint32_t hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
   /// @brief Doorbell register, mapped for the lifetime of the queue.
   volatile uint32_t* doorbell = nullptr;
   /// @brief Header at the start of the queue's buffer.
   host_queue_header* header = nullptr;
-  /// @brief Control-code copies of packets whose wait failed. CERT may still run such a packet,
-  /// so its copy is only freed once the hardware context is destroyed.
-  std::vector<void*> orphaned_ctrl_copies;
 };
 
 /// @brief Flushes the CPU cache for the packet's arguments.
@@ -1787,8 +1771,20 @@ hsa_status_t XdnaDriver::CreateUserModeQueue(void* ring_buf, const core::Agent& 
   create_hwctx_args.num_tiles = num_cols * num_core_rows;
   err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &create_hwctx_args);
   if (err != HSA_STATUS_SUCCESS) {
-    log_warning_n(10, "AIE: failed to create a hardware context for a UMQ queue (errno=%d: %s).\n",
-                  errno, strerror(errno));
+    // This call always supplies a nonzero num_tiles and a valid umq_bo handle, ruling out every
+    // other EINVAL the driver's hwctx-create path can return. What is left is its umq_bo size
+    // check, which fails this way when kernel-mode submission needs a driver-owned packet ring
+    // this (user-mode-sized) umq_bo does not have.
+    if (err == HSA_STATUS_ERROR_INVALID_ARGUMENT) {
+      log_warning_n(10,
+                    "AIE: failed to create a hardware context for a UMQ queue (errno=%d: %s). "
+                    "This usually means the device is in kernel-mode submission; AIE4 user-mode "
+                    "dispatch needs the device's kernel_mode_submission debugfs setting at 0.\n",
+                    errno, strerror(errno));
+    } else {
+      log_warning_n(10, "AIE: failed to create a hardware context for a UMQ queue (errno=%d: %s).\n",
+                    errno, strerror(errno));
+    }
     return err;
   }
   MAKE_NAMED_SCOPE_GUARD(hwctx_guard, [&] {
@@ -1808,7 +1804,6 @@ hsa_status_t XdnaDriver::CreateUserModeQueue(void* ring_buf, const core::Agent& 
   }
 
   auto umq_metadata = std::make_unique<UmqMetadata>();
-  umq_metadata->agent = &static_cast<const AieAgent&>(agent);
   umq_metadata->hw_ctx_handle = create_hwctx_args.handle;
   umq_metadata->doorbell = doorbell_ptr;
   umq_metadata->header = header;
@@ -1836,14 +1831,6 @@ hsa_status_t XdnaDriver::DestroyUserModeQueue(void* queue_metadata) const {
   if (umq_metadata->hw_ctx_handle != AMDXDNA_INVALID_CTX_HANDLE) {
     err = DestroyHwCtx(fd_, umq_metadata->hw_ctx_handle);
     umq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
-  }
-
-  // Only once the hardware context is gone can CERT no longer be running the packets these
-  // belong to. A context that failed to destroy may still be, so they are leaked instead.
-  if (err == HSA_STATUS_SUCCESS) {
-    for (void* ctrl_copy : umq_metadata->orphaned_ctrl_copies) {
-      umq_metadata->agent->system_deallocator()(ctrl_copy);
-    }
   }
   return err;
 }
@@ -1951,11 +1938,10 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
   host_queue_header* header = static_cast<UmqMetadata*>(queue_metadata)->header;
 
   // One packet at a time, each rung and waited on individually, rather than the whole batch under
-  // one doorbell, and gapped from every other packet on this device -- not just the rest of this
-  // batch, since npu3 has one device-wide partition that firmware time-shares among every
-  // hardware context (see UMQ_INTER_PACKET_GAP_US). The gap is paid after every packet rather than
-  // tracked against a last-readied time, since the next packet to use this device may come from a
-  // different queue entirely.
+  // one doorbell: CERT retiring a packet does not mean the array is safe to reconfigure for the
+  // next one, since a full ELF's control code does not reset its own memtile DMA channels before
+  // reusing them. The kernel owns that, via aiex.dma_channel_reset_for on its objectFifos
+  // (confirmed on real aie4 hardware to remove the requirement entirely, not just reduce it).
   for (uint64_t i = 0; i < num_pkts; ++i) {
     const uint64_t idx = first_pkt_idx + i;
     hsa_amd_aie_kernel_dispatch_packet_t& pkt = ring[idx % ring_capacity];
@@ -1983,18 +1969,15 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
     // way a rejected packet does.
     //
     // TranslateUmqPacket overwrote this packet's kernel_object with the address of a per-dispatch
-    // control-code copy it allocated through this same agent's system allocator. It is freed once
-    // CERT is confirmed done with it, before the ring slot is reused. If the wait fails instead,
-    // the packet cannot be recalled -- CERT may already be running it or still run it -- so the
-    // copy stays allocated until the hardware context is destroyed.
+    // control-code copy it allocated through this same agent's system allocator; freed here
+    // either way.
     void* const ctrl_copy = reinterpret_cast<void*>(
         (static_cast<uint64_t>(pkt.kernel_object_high) << 32) | pkt.kernel_object_low);
     const hsa_status_t wait_err = WaitUmqCmd(fd_, queue_metadata, idx);
+    aie_agent.system_deallocator()(ctrl_copy);
     if (wait_err != HSA_STATUS_SUCCESS) {
-      static_cast<UmqMetadata*>(queue_metadata)->orphaned_ctrl_copies.push_back(ctrl_copy);
       return wait_err;
     }
-    aie_agent.system_deallocator()(ctrl_copy);
     // Retired is not the same as succeeded: a failed packet is retired too, so its return code
     // decides. A failed packet is not retired here, so its completion signal is never decremented,
     // and the packets after it are not run, the same as a rejected one.
@@ -2004,7 +1987,6 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
     if ((return_code & 0xF) != ERT_CMD_STATE_COMPLETED) {
       return HSA_STATUS_ERROR;
     }
-    os::uSleep(UMQ_INTER_PACKET_GAP_US);
     // A UMQ device (AMDXDNA_DEV_TYPE_UMQ) is cache-coherent with the CPU, which is why XRT's
     // sync_bo does nothing for one and why UMQ submission never flushes before dispatch either.
     RetireCompletedPackets(ring, ring_capacity - 1, idx, /*num_pkts=*/1,
