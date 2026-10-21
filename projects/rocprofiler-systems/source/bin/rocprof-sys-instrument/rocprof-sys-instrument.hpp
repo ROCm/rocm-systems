@@ -214,8 +214,7 @@ rocprofsys_get_address_space(patch_pointer_t const& _bpatch, int _cmdc, char** _
             verbprintf(4, "[env] %s=%s\n", itr.first.c_str(), itr.second.c_str());
         }
 
-        if(_cmdc < 1) errprintf(-127, "No command provided\n");
-
+        // Empty _cmdc is rejected in main before this helper is called.
         if(is_text_file(_cmdv[0]))
         {
             errprintf(-1,
