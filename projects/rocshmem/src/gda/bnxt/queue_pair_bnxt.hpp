@@ -418,14 +418,15 @@ __device__ inline __noinline__ bool QueuePairBNXT::try_quiet_until_single(uint64
   struct bnxt_re_req_cqe *cqe = (struct bnxt_re_req_cqe *) cq.buf;
   uint32_t sq_depth = sq.depth;
 
-  uint32_t sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
-
-  // Derive the tail from posted so both come from one read
+  // Read posted before the CQE, so completions that land in between can only make this report not yet.
+  // The tail is derived from posted so both come from one read.
   uint64_t posted  = __scoped_atomic_load_n(&sq.posted, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
   uint32_t sq_tail = static_cast<uint32_t>(posted % sq_depth);
 
+  uint32_t sq_head = (((cqe->con_indx & 0xFFFF) * GDA_BNXT_WQE_SLOT_COUNT) % sq_depth);
+
   uint32_t in_flight = (sq_tail - sq_head + sq_depth) % sq_depth;
-  return posted - in_flight >= target;
+  return in_flight <= posted - target;
 }
 
 // precondition: called with all active lanes using different QPs

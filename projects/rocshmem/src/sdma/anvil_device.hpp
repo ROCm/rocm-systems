@@ -298,9 +298,9 @@ struct SdmaQueueDeviceHandle {
         __builtin_amdgcn_wave_barrier();
         __atomic_signal_fence(__ATOMIC_SEQ_CST);
 
-        // Relaxed device-scope atomic store writes directly to GL2, making
-        // maxWritePtr visible to quiet callers on other CUs.
-        __scoped_atomic_store_n(&maxWritePtr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        // committedWptr releases the next writer before this point, so a later writer can finish first.
+        // Take the max so maxWritePtr never moves back. Device scope makes it visible to quiet callers on other CUs.
+        __scoped_atomic_fetch_max(&maxWritePtr, pendingWptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
         break;
       }
       __builtin_amdgcn_s_sleep(1);
