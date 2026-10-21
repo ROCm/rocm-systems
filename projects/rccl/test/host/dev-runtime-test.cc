@@ -1921,8 +1921,11 @@ TEST_F(SymMemoryRegisterGinTest, MultipleGlobalSegments_FlagsRegistrationMultiSe
 // NCCL_MULTI_SEGMENT_REGISTER=0: a device-only multi-segment window is rejected
 // before any GIN registration; a single-segment window still registers.
 TEST_F(SymMemoryRegisterGinTest, MultiSegmentRegisterOff_RejectsMultiSegmentWindow) {
+  // RCCL: the register seam includes the generation array.
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
+                   return ncclSuccess;
+                 });
 
   mem.maxGlobalNumSegments = 2;
   EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
@@ -2078,7 +2081,8 @@ TEST_F(SymMemoryRegisterGinElasticTest, MultiSegmentRegisterOff_RegistersOneWind
   });
   ScopedHook gather(g_devrBootstrapAllGather, AgreeingAllGather());
   std::vector<size_t> sizes;
-  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void*, size_t size, void*[], ncclGinWindow_t[], int, bool, int) {
+  // RCCL: the register seam includes the generation array.
+  ScopedHook reg(g_devrGinRegister, [&](ncclComm*, void*, size_t size, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
     sizes.push_back(size);
     return ncclSuccess;
   });
@@ -2111,8 +2115,9 @@ TEST_F(SymMemoryRegisterGinElasticTest, SingleHostSegment_RequiresDmabuf) {
                      return hipSuccess;
                    });
   std::vector<bool> needDmabuf;
+  // RCCL: the register seam includes the generation array.
   ScopedHook reg(g_devrGinRegister,
-                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool dmabuf, int) {
+                 [&](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool dmabuf, int) {
                    needDmabuf.push_back(dmabuf);
                    return ncclSuccess;
                  });
@@ -2146,8 +2151,11 @@ TEST_F(SymMemoryRegisterGinElasticTest, HostSegment_DmabufDisabled_FailsClosed) 
                      }
                      return hipSuccess;
                    });
+  // RCCL: the register seam includes the generation array.
   ScopedHook reg(g_devrGinRegister,
-                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], int, bool, int) { return ncclSuccess; });
+                 [](ncclComm*, void*, size_t, void*[], ncclGinWindow_t[], uint32_t[], int, bool, int) {
+                   return ncclSuccess;
+                 });
 
   EXPECT_EQ(symMemoryRegisterGin(comm, &mem), ncclInvalidUsage);
   EXPECT_EQ(reg.calls, 0);
