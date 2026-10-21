@@ -8,6 +8,8 @@ test_categories:
       - test_evaluation_pipeline
       - test_metric_evaluator
       - test_utils_counter_defs
+      - test_yaml_inherit_loader
+      - test_metric_library
       - test_parser
       - test_argparser
       - test_profile_section
@@ -22,6 +24,7 @@ test_categories:
       - test_amdsmi_interface
       - test_noise_clamper
       - test_benchmark_base
+      - test_ceilings
       - test_analysis_cli
       - test_pattern_matching
       - test_list_metrics_cli
@@ -38,6 +41,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_run_benchmark
       - test_report_shell
       - test_num_xcds_spec_class
       - test_profiler_base
@@ -95,6 +99,8 @@ test_categories:
       - test_evaluation_pipeline
       - test_metric_evaluator
       - test_utils_counter_defs
+      - test_yaml_inherit_loader
+      - test_metric_library
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -110,6 +116,7 @@ test_categories:
       - test_amdsmi_interface
       - test_noise_clamper
       - test_benchmark_base
+      - test_ceilings
       - test_analysis_cli
       - test_pattern_matching
       - test_list_metrics_cli
@@ -117,6 +124,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_run_benchmark
       - test_report_shell
       - test_rocpd_data
       - test_torch_trace_coverage
@@ -194,6 +202,8 @@ test_categories:
       - test_evaluation_pipeline
       - test_metric_evaluator
       - test_utils_counter_defs
+      - test_yaml_inherit_loader
+      - test_metric_library
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -209,6 +219,7 @@ test_categories:
       - test_amdsmi_interface
       - test_noise_clamper
       - test_benchmark_base
+      - test_ceilings
       - test_analysis_cli
       - test_pattern_matching
       - test_list_metrics_cli
@@ -216,6 +227,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_run_benchmark
       - test_report_shell
       - test_rocpd_data
       - test_torch_trace_coverage
@@ -293,6 +305,8 @@ test_categories:
       - test_evaluation_pipeline
       - test_metric_evaluator
       - test_utils_counter_defs
+      - test_yaml_inherit_loader
+      - test_metric_library
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -308,6 +322,7 @@ test_categories:
       - test_amdsmi_interface
       - test_noise_clamper
       - test_benchmark_base
+      - test_ceilings
       - test_analysis_cli
       - test_pattern_matching
       - test_list_metrics_cli
@@ -315,6 +330,7 @@ test_categories:
       - test_roofline_calc
       - test_roofline_analyze
       - test_roofline_main
+      - test_run_benchmark
       - test_report_shell
       - test_rocpd_data
       - test_torch_trace_coverage
