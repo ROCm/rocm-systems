@@ -138,8 +138,12 @@ inline std::vector<std::uint8_t> read_file(const std::filesystem::path& path) {
 
 /// Writes one packet into the next queue slot and fills its kernargs. Does not ring the doorbell,
 /// so a caller can batch several packets into one command chain.
+///
+/// @param is_aie4 selects the packet opcode: aie4 (npu3) dispatches through UMQ, everything else
+/// through KMQ. Same packet layout either way -- only the opcode CERT/the kernel driver reads
+/// differs (see rocrtst/suites/aie/test_dispatch.cc's own is_aie4 ? ..._UMQ : ..._KMQ).
 inline std::uint64_t dispatch_packet(std::uint64_t kernel_object, void* input, void* output,
-                                     std::uint64_t* kernargs, hsa_queue_t* q) {
+                                     std::uint64_t* kernargs, hsa_queue_t* q, bool is_aie4) {
   kernargs[0] = reinterpret_cast<std::uint64_t>(input);
   kernargs[1] = reinterpret_cast<std::uint64_t>(output);
   kernargs[2] = DATA_SIZE;  // input size
@@ -160,7 +164,7 @@ inline std::uint64_t dispatch_packet(std::uint64_t kernel_object, void* input, v
   pkt.header = (HSA_AMD_AIE_PACKET_TYPE_READY << HSA_PACKET_HEADER_TYPE) |
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
       (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-  pkt.opcode = HSA_AMD_AIE_PACKET_OPCODE_KMQ;
+  pkt.opcode = is_aie4 ? HSA_AMD_AIE_PACKET_OPCODE_UMQ : HSA_AMD_AIE_PACKET_OPCODE_KMQ;
   pkt.count = 24;
   pkt.completion_signal.handle = 0;
   pkt.kernel_object_low = kernel_object & 0xFFFFFFFF;
@@ -226,6 +230,9 @@ class HsaHarness {
   std::uint64_t kernel_object = 0;
   std::vector<std::uint32_t*> inputs;
   std::vector<std::uint32_t*> outputs;
+  // Which opcode dispatch_packet needs for this agent. Read once here rather than per dispatch,
+  // since the agent doesn't change for the harness's lifetime.
+  bool is_aie4 = false;
 
  private:
   void Acquire(std::int32_t num_dispatches, const std::filesystem::path& hsaco_path,
@@ -237,10 +244,14 @@ class HsaHarness {
       throw std::runtime_error("No AIE agent found");
     }
 
+    char agent_name[64] = {};
+    if (hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_name) != HSA_STATUS_SUCCESS) {
+      throw std::runtime_error("Failed to read the AIE agent's name");
+    }
+    is_aie4 = std::strcmp(agent_name, "aie4") == 0;
+
     if (required_arch != nullptr) {
-      char agent_name[64] = {};
-      if (hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_name) != HSA_STATUS_SUCCESS ||
-          std::strcmp(agent_name, required_arch) != 0) {
+      if (std::strcmp(agent_name, required_arch) != 0) {
         throw std::runtime_error(std::string("this benchmark needs a ") + required_arch +
                                  " agent, found '" + agent_name + "'");
       }

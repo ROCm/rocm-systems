@@ -9,9 +9,9 @@ import numpy as np
 import sys
 
 from aie.iron import ObjectFifo, Program, Runtime, Worker
-from aie.iron.device import NPU1Col1, NPU2Col1
+from aie.iron.device import NPU1Col1, NPU2Col1, NPU3Col1
 from aie.iron.controlflow import range_
-from aie.dialects.aiex import npu_load_pdi
+from aie.dialects.aiex import npu_load_pdi, dma_channel_reset_for
 
 PROBLEM_SIZE = 1024
 MEM_TILE_WIDTH = 64
@@ -24,11 +24,13 @@ FULL_ELF = "--full-elf" in sys.argv[1:]
 positional = [a for a in sys.argv[1:] if not a.startswith("--")]
 
 if not positional:
-    raise ValueError("[ERROR] Expected a device name ('npu' or 'npu2')")
+    raise ValueError("[ERROR] Expected a device name ('npu', 'npu2' or 'npu3')")
 if positional[0] == "npu":
     dev = NPU1Col1()
 elif positional[0] == "npu2":
     dev = NPU2Col1()
+elif positional[0] == "npu3":
+    dev = NPU3Col1()
 else:
     raise ValueError("[ERROR] Device name {} is unknown".format(positional[0]))
 
@@ -64,9 +66,19 @@ def my_vector_bias_add():
         # AIE_PARTITION PDI before the sequence runs. A full ELF has no xclbin,
         # so the sequence must load the PDI itself -- without this the cores
         # never start and the closing DMA token wait never retires, which the
-        # driver reports as ERT_CMD_STATE_TIMEOUT.
-        if FULL_ELF:
+        # driver reports as ERT_CMD_STATE_TIMEOUT. Skipped on aie4 (npu3), whose
+        # control code already configures the array in its own first job: loading
+        # the PDI on top applies that configuration twice.
+        if FULL_ELF and positional[0] != "npu3":
             npu_load_pdi(device_ref="main")
+        # Required on aie4 (npu3): re-arm every objectFifo's DMA channel before this dispatch
+        # touches it. Back-to-back full-ELF dispatches of this design are not otherwise gapped to
+        # cover for this; without the reset, the next dispatch's control code reconfigures a
+        # channel before the previous run's DMA has drained, corrupting output. aiecc's default
+        # pipeline never emits this reset on its own, so every aie4 full-ELF design needs it.
+        if FULL_ELF and positional[0] == "npu3":
+            for fifo in ("in", "in_fwd", "out", "out_fwd"):
+                dma_channel_reset_for(fifo)
         in_handle.fill(inTensor)
         out_handle.drain(outTensor, wait=True)
 

@@ -25,9 +25,10 @@ using aie_bench::KERNARG_ENTRIES;
 const std::filesystem::path g_hsaco_path = STRINGIFY(DEFAULT_ELF_HSACO_PATH);
 const char* const g_kernel_name = DEFAULT_ELF_KERNEL_NAME;
 
-// Full-ELF dispatch is aie2p only; aie2 has neither the firmware command nor the preemption
-// support it is built on.
-constexpr const char* g_required_arch = "aie2p";
+// Full-ELF dispatch is aie2p and aie4 only; aie2 has neither the firmware command nor the
+// preemption support it is built on. DEFAULT_REQUIRED_ARCH is AIE_HSACO_ARCH from the CMake
+// build, i.e. whichever of the two this build was configured for.
+constexpr const char* g_required_arch = DEFAULT_REQUIRED_ARCH;
 
 }  // namespace
 
@@ -52,7 +53,7 @@ static void VectorScalarAddHSAELF(benchmark::State& state) {
       std::uint64_t last_wr_idx = 0;
       for (std::int32_t i = 0; i < num_dispatches; ++i) {
         last_wr_idx =
-            dispatch_packet(h.kernel_object, h.inputs[i], h.outputs[i], kernargs[i], h.queue);
+            dispatch_packet(h.kernel_object, h.inputs[i], h.outputs[i], kernargs[i], h.queue, h.is_aie4);
       }
 
       // The doorbell store submits and waits, so the whole batch is timed.
@@ -92,7 +93,7 @@ static void VectorScalarAddHSAELFAllocKernargs(benchmark::State& state) {
       for (std::int32_t i = 0; i < num_dispatches; ++i) {
         auto* kernargs = kernarg_alloc.allocate<std::uint64_t>(KERNARG_ENTRIES);
         last_wr_idx =
-            dispatch_packet(h.kernel_object, h.inputs[i], h.outputs[i], kernargs, h.queue);
+            dispatch_packet(h.kernel_object, h.inputs[i], h.outputs[i], kernargs, h.queue, h.is_aie4);
       }
 
       hsa_signal_store_screlease(h.queue->doorbell_signal, last_wr_idx);
