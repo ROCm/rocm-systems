@@ -626,7 +626,6 @@ add_executable(
     matrix_coexecution_test.cpp
     packed_fmac_constants_test.cpp
     matrix_coexecution_lifetime_test.cpp
-    scaling_thread_counts_test.cpp
     sparse_memory_test.cpp
     cpu_dispatch_pool_test.cpp
     simdojo_sim_test.cpp
@@ -1460,16 +1459,6 @@ rj_add_test(
         "bin/rj_decode_benchmark"
 )
 
-# --- Scaling test (standalone executable) ---
-
-add_executable(scaling_test scaling_test.cpp)
-target_link_libraries(
-    scaling_test
-    PRIVATE ${RJ_OBJECT_LIBS} util flatbuffers Threads::Threads
-)
-target_compile_options(scaling_test PRIVATE -O2)
-rj_configure_target(scaling_test TEST)
-
 # --- Interposer tests run through the rocjitsu CLI launcher ---
 # All tests that need the simulated GPU go through:
 #   rocjitsu --config <cfg> -- <test_binary> [args]
@@ -1995,6 +1984,22 @@ target_compile_definitions(
 # --- Interposer loader initialization regression tests ---
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(standalone_plugin_abi_test standalone_plugin_abi_test.cpp)
+    # Keep this loader independent of core objects and librocjitsu.so so they
+    # cannot hide unresolved simulator symbols in the standalone module.
+    target_link_libraries(
+        standalone_plugin_abi_test
+        PRIVATE util simdojo_headers ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(standalone_plugin_abi_test TEST)
+    add_dependencies(standalone_plugin_abi_test rocjitsu_plugin_race_so)
+    add_test(
+        NAME ExecutionPluginAbi.StandaloneRaceModuleLoads
+        COMMAND
+            standalone_plugin_abi_test $<TARGET_FILE:rocjitsu_plugin_race_so>
+            race
+    )
+
     # Keep inline register accessors in a separate DSO without linking core
     # objects into it, so missing exports cannot be hidden by static linkage.
     add_library(register_observer_probe MODULE register_observer_probe.cpp)

@@ -27,6 +27,7 @@ from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.floating_policy import (
     F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
+    SDWA_ROUNDED_F16_OPS,
 )
 import textwrap
 import re
@@ -52,6 +53,7 @@ from amdisa.fieldless_policy import (
 )
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
+    F32_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
     INTEGER_RESULT_OPERATIONS,
     InstructionSemantics,
@@ -1027,6 +1029,8 @@ class CodeGenerator:
     def _sdwa_output_policy(sem: InstructionSemantics | None) -> str:
         if sem and sem.name in FLUSH_NEAREST_F32_OPS:
             return ', amdgpu::sdwa::OutputPolicy::FLUSH_NEAREST'
+        if sem and sem.name in SDWA_ROUNDED_F16_OPS:
+            return ', amdgpu::sdwa::OutputPolicy::ROUNDED'
         return ''
 
     @staticmethod
@@ -1060,12 +1064,12 @@ class CodeGenerator:
     def _apply_sdwa_f16_omod(
         body: str, instruction: str, *, transcendental: bool = False
     ) -> str:
-        """Retain the producer's legacy SDWA F16 OMOD ordering.
+        """Keep the producer's current SDWA F16 OMOD ordering.
 
         TRANS producers already return rounded halves; ordinary producers scale
         before narrowing. Arithmetic producers retain their MODE-aware helper.
-        This ordering lacks SDWA hardware validation; VOP3 captures do not
-        establish it. Migrating SDWA requires separate capture evidence.
+        gfx1030 SDWA captures round before OMOD; SDWA_ROUNDED_F16_OPS follow
+        that order and the rest await their own captures.
         """
         helper = 'finish_rounded_f16' if transcendental else 'round_f16_result'
         body = body.replace(
@@ -6646,8 +6650,8 @@ class CodeGenerator:
                     'f64_i32',
                     'f64_u32',
                 )
-                is_f32_to_integer = (
-                    cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
+                is_f32_input_conversion = (
+                    cls == 'vector_unary' and dtype in F32_INPUT_CONVERSION_DTYPES
                 )
                 is_f16_input_conversion = (
                     cls == 'vector_unary' and dtype in F16_INPUT_CONVERSION_DTYPES
@@ -6657,7 +6661,7 @@ class CodeGenerator:
                     and (
                         is_float_op
                         or is_integer_to_float
-                        or is_f32_to_integer
+                        or is_f32_input_conversion
                         or is_f16_input_conversion
                     )
                     and not is_true16_mov
@@ -6670,7 +6674,8 @@ class CodeGenerator:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
                     integer_result = (
-                        is_f32_to_integer or op in INTEGER_RESULT_OPERATIONS
+                        dtype in F32_TO_INTEGER_DTYPES
+                        or op in INTEGER_RESULT_OPERATIONS
                     )
                     if 'clamp' in inst_fields and not integer_result:
                         ef.add('clamp')
@@ -8156,31 +8161,42 @@ class CodeGenerator:
         return '\n'.join(L)
 
     def _gen_smem_atomic(self, sem: InstructionSemantics) -> str:
-        # This emitter uses a global pointer and one 32-bit data register.
-        if (
-            sem.name.upper() != 'S_ATOMIC_DEC'
-            or sem.operation != 'dec'
-            or sem.elem_size != 4
-            or sem.num_elems != 1
-        ):
+        # This emitter computes a global address; buffer forms need V# addressing.
+        if sem.name.upper().startswith('S_BUFFER_ATOMIC_'):
             raise ValueError(
-                f'{sem.name}: smem_atomic supports only 32-bit S_ATOMIC_DEC '
-                f'(operation={sem.operation!r}, elem_size={sem.elem_size}, '
-                f'num_elems={sem.num_elems})'
+                f'{sem.name}: smem_atomic supports only global S_ATOMIC_* addressing'
             )
+        # Semantics has no op-less smem_atomic fallback, so a missing op is a
+        # derivation bug rather than an unimplemented variant.
+        op_enum = self._ATOMIC_OP_ENUM.get(sem.operation)
+        if op_enum is None:
+            raise ValueError(
+                f'{sem.name}: unsupported smem_atomic operation: {sem.operation}'
+            )
+        # Compare-swap carries more data dwords than it returns.
+        data_dwords = sem.num_elems
+        return_dwords = sem.elem_size // 4
         L = [
-            '  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);',
+            f'  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, {data_dwords}u);',
             '  if (!data_register) return;',
             '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
             '  d->dst_register = *data_register;',
-            '  d->num_dwords = 1;',
-            '  d->elem_size = 4;',
-            f'  d->atomic_op = {self._ATOMIC_OP_ENUM[sem.operation]};',
-            # Scalar atomic GLC selects return data, not cache policy.
-            '  d->is_load = inst_.glc != 0;',
-            '  d->mtype = amdgpu::Mtype::UC;',
-            '  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);',
         ]
+        if return_dwords != data_dwords:
+            L.append(f'  d->dst_register.width = {return_dwords};')
+        L.extend(
+            [
+                f'  d->num_dwords = {return_dwords};',
+                f'  d->elem_size = {sem.elem_size};',
+                f'  d->atomic_op = {op_enum};',
+                f'  d->is_load = {self._smem_atomic_return_expr()};',
+                '  d->mtype = amdgpu::Mtype::UC;',
+            ]
+        )
+        for i in range(data_dwords):
+            L.append(
+                f'  d->store_data[{i}] = amdgpu::read_scalar_register(wf, *data_register, {i});'
+            )
         self._append_wait_counter_type(L, sem)
         L.extend(
             [
@@ -8262,6 +8278,14 @@ class CodeGenerator:
         if self.isa_spec.profile.coherency_model == MemoryCoherencyModel.GFX12_SCOPE_TH:
             return 'amdgpu::gfx12_atomic_returns(inst_.th)'
         return f'({sc0_expr} != 0)'
+
+    def _smem_atomic_return_expr(self) -> str:
+        """Return the expression that marks whether a scalar atomic returns old data.
+
+        SMEM retains GLC on CDNA3/4, whose vector atomics use SC0 to select the
+        return value. Scalar atomic GLC selects return data, not cache policy.
+        """
+        return 'inst_.glc != 0'
 
     def _cache_flags_includes(self) -> list[str]:
         """Return cache_flags header path(s) for this ISA's coherency model.
@@ -10954,9 +10978,7 @@ class CodeGenerator:
                         )
                         if _is_optional_atomic_return:
                             if inst_sem.semantic_class == 'smem_atomic':
-                                # SMEM retains GLC on CDNA3/4, whose vector
-                                # atomics use SC0 to select the return value.
-                                returns_data = 'inst_.glc != 0'
+                                returns_data = self._smem_atomic_return_expr()
                             else:
                                 sc0, _, _ = self._coherency_exprs()
                                 returns_data = self._atomic_return_expr(sc0)
