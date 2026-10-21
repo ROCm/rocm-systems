@@ -1118,7 +1118,8 @@ TEST(InstructionMixPluginTest, ReportsExecutedMnemonicsAsJsonl) {
 }
 
 TEST(InstructionMixPluginTest, CancellationKeepsAttemptedInstructionsWithoutCompletingDispatch) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
