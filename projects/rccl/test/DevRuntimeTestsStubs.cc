@@ -162,13 +162,10 @@ ncclResult_t ncclSpaceAlloc(struct ncclSpace*, int64_t, int64_t, int, int64_t* o
 ncclResult_t ncclSpaceFree(struct ncclSpace*, int64_t, int64_t) { return ncclSuccess; }
 
 // ---------------------------------------------------------------------------
-// cuMem allocation tracking / peer import. windowRegisterNonSym takes the cuMem
-// branch for VMM buffers, which reaches ncclP2pImportShareableBuffer and (via
-// ncclCudaFree in alloc.h) the mem-manager untrack helpers. Report cuMem as
-// disabled so the micro-tests keep exercising the legacy IPC branch.
+// cuMem allocation tracking / peer import. windowRegisterNonSym's cuMem branch
+// reaches these helpers. ncclCuMemEnable() above stays on for the fake VMM path.
 // ---------------------------------------------------------------------------
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
-int ncclCuMemEnable() { return 0; }
 ncclResult_t ncclMemUntrackDynamic(struct ncclMemManager*, void*, struct ncclMemUntrackInfo*) { return ncclSuccess; }
 ncclResult_t ncclMemUntrackPersist(struct ncclMemManager*, void*, size_t) { return ncclSuccess; }
 ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm*, int, size_t, ncclIpcDesc*, void** devMemPtr, void*,
