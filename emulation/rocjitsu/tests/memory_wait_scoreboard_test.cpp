@@ -27,6 +27,7 @@
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <thread>
@@ -38,7 +39,7 @@ using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
 using namespace rocjitsu::test::cdna5;
 
-// Diagnostic tests opt in; explicit empty settings exercise production defaults.
+// Diagnostic tests select warn explicitly; empty settings exercise production defaults.
 std::string memory_wait_test_config(std::string_view setting = "warn",
                                     std::string_view xcnt_setting = "") {
   std::ifstream file(kGfx1250ConfigPath);
@@ -931,7 +932,8 @@ TEST(MemoryWaitExecutionTest, InlineDsResultAndCounterOnlyNopUseOrderedQueue) {
                                                {.simm16 = static_cast<uint16_t>(threshold)}));
     append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 258, .vdst = 3}));
     append_instruction(code, S_ENDPGM_GFX12);
-    Gfx1250Sim sim(memory_wait_test_config());
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
     test::AqlQueue queue(sim.memory, sim.cp());
     queue.dispatch(kernel, 32, 32);
@@ -951,7 +953,8 @@ TEST(MemoryWaitExecutionTest, CounterAdmissionPrecedesTheIncomingInstructionsReg
       append_instruction(code, cdna5::build_vds(cdna5::kDsNopVds));
     append_instruction(code, cdna5::build_vds(cdna5::kDsSwizzleB32Vds, {.addr = 2, .vdst = 3}));
     append_instruction(code, S_ENDPGM_GFX12);
-    Gfx1250Sim sim(memory_wait_test_config());
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
     test::AqlQueue queue(sim.memory, sim.cp());
     queue.dispatch(kernel, 32, 32);
@@ -974,7 +977,8 @@ TEST(MemoryWaitExecutionTest, ReturnMessageResultsRequireZeroWait) {
                                                {.simm16 = static_cast<uint16_t>(threshold)}));
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 6}));
     append_instruction(code, S_ENDPGM_GFX12);
-    Gfx1250Sim sim(memory_wait_test_config());
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
     test::AqlQueue queue(sim.memory, sim.cp());
     queue.dispatch(kernel, 32, 32);
@@ -1022,7 +1026,8 @@ TEST(MemoryWaitExecutionTest, MessageResultsCheckM0AndOnlyConsumedExecWords) {
           append_instruction(code,
                              cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 2}));
         append_instruction(code, S_ENDPGM_GFX12);
-        Gfx1250Sim sim(memory_wait_test_config());
+        Gfx1250Sim sim;
+        ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
         auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
         test::AqlQueue queue(sim.memory, sim.cp());
         queue.dispatch(kernel, 32, 32);
@@ -1037,7 +1042,7 @@ TEST(MemoryWaitExecutionTest, MessageResultsCheckM0AndOnlyConsumedExecWords) {
 }
 
 TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComplete) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (bool zero_exec : {false, true}) {
     for (unsigned threshold : {0u, 1u, 2u}) {
       SCOPED_TRACE(zero_exec);
@@ -1058,8 +1063,9 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComp
       append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 258, .vdst = 3}));
       append_instruction(code, S_ENDPGM_GFX12);
       uint32_t properties = 0;
-      AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-      Gfx1250Sim sim(memory_wait_test_config());
+      RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
       write_global_u32(*sim.memory, 0x400000, 0x12345678);
       auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                      false, properties, 16);
@@ -1137,7 +1143,7 @@ TEST(MemoryWaitExecutionTest, ReusedInstructionResolvesCurrentSourceAndDestinati
 }
 
 TEST(MemoryWaitExecutionTest, ScalarMissingWaitWarnsWithoutChangingTheResult) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (bool wait : {false, true}) {
     SCOPED_TRACE(wait);
     std::vector<uint32_t> code;
@@ -1147,8 +1153,9 @@ TEST(MemoryWaitExecutionTest, ScalarMissingWaitWarnsWithoutChangingTheResult) {
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 5}));
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
-    AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-    Gfx1250Sim sim(memory_wait_test_config());
+    RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                    false, properties, 16);
@@ -1436,6 +1443,67 @@ TEST(MemoryWaitExecutionTest, IncomingFlatOverwriteUsesItsOwnOrderingAndRoutedLa
   }
 }
 
+TEST(MemoryWaitExecutionTest, Gfx12LoadDestinationsUseTheirActualWidth) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (bool overlap : {false, true}) {
+      SCOPED_TRACE(static_cast<unsigned>(arch));
+      SCOPED_TRACE(overlap);
+      GpuMemory memory("load_width_memory");
+      L2Cache l2("load_width_l2");
+      ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+      config.arch = arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 128;
+      config.vgprs_per_wf = 32;
+      auto cu = ComputeUnitCore::create("load_width_cu", config, &memory, &l2);
+      auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(1);
+      auto decoder = Decoder::create(arch);
+      auto &state = wf->ensure_memory_wait_scoreboard();
+      for (bool second : {false, true}) {
+        // RADV's vkQuake shader loads RGBA into v[4:7], then R into v3.
+        // gfx1250 has tensor VIMAGE operations rather than image_load; use
+        // its corresponding four-word and one/two-word buffer loads.
+        const uint8_t data = second ? 3 : 4;
+        const uint8_t mask = second ? (overlap ? 3 : 1) : 15;
+        const auto words =
+            arch == ROCJITSU_CODE_ARCH_RDNA4
+                ? rdna4::build_vimage(rdna4::kImageLoadVimage,
+                                      {.dim = 5,
+                                       .dmask = mask,
+                                       .vdata = data,
+                                       .rsrc = static_cast<uint16_t>(second ? 8 : 0),
+                                       .vaddr0 = 3,
+                                       .vaddr1 = 0,
+                                       .vaddr2 = 2})
+                : cdna5::build_vbuffer(second ? (overlap ? cdna5::kBufferLoadB64Vbuffer
+                                                         : cdna5::kBufferLoadB32Vbuffer)
+                                              : cdna5::kBufferLoadB128Vbuffer,
+                                       {.vdata = data});
+        util::StringDiagnostic error;
+        auto decoded = decoder->decode_window(words, 0, error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
+        EXPECT_EQ(decoded.value()->dst_operand(0)->size_bits(), second ? (overlap ? 64 : 32) : 128);
+        state.check_instruction(*decoded.value(), *wf);
+        cu->track_memory_wait(*decoded.value(), *wf);
+        wf->pc += 12;
+      }
+      // A genuine overlapping destination still needs a wait on both gfx12
+      // targets: counter order does not imply ordered VGPR writeback.
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), overlap ? 1u : 0u);
+      if (!overlap) {
+        state.wait(WaitCounterKind::Load, 1);
+        state.access({RegClass::VGPR, 4, 4}, 1, 0xf, false);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+        state.access({RegClass::VGPR, 3, 1}, 1, 0xf, false);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+      }
+    }
+  }
+}
+
 TEST(MemoryWaitExecutionTest, LegacyImageOverwritesCheckTheIncomingCompletionClass) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
                     ROCJITSU_CODE_ARCH_RDNA3_5})
@@ -1483,7 +1551,7 @@ TEST(MemoryWaitExecutionTest, LegacyImageOverwritesCheckTheIncomingCompletionCla
 }
 
 TEST(MemoryWaitExecutionTest, BarrierObserversPreservePendingResults) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   class BarrierSnapshot final : public ExecutionPlugin {
   public:
     BarrierSnapshot() : ExecutionPlugin("barrier_snapshot") {}
@@ -1497,7 +1565,8 @@ TEST(MemoryWaitExecutionTest, BarrierObserversPreservePendingResults) {
   };
   for (bool wait : {false, true}) {
     SCOPED_TRACE(wait);
-    Gfx1250Sim sim(memory_wait_test_config());
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     auto observer = std::make_unique<BarrierSnapshot>();
     auto *snapshot = observer.get();
     ASSERT_TRUE(sim.plugin_group->add(std::move(observer)));
@@ -1511,7 +1580,7 @@ TEST(MemoryWaitExecutionTest, BarrierObserversPreservePendingResults) {
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 5}));
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
-    AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                    false, properties, 16);
@@ -1551,7 +1620,8 @@ TEST(MemoryWaitExecutionTest, BarrierSccReadAndOverwriteNeedTheKmWait) {
                                                           4 | ((consumer == 3 ? 9 : 10) << 6)),
                                                       .sdst = 4}));
         append_instruction(code, S_ENDPGM_GFX12);
-        Gfx1250Sim sim(memory_wait_test_config());
+        Gfx1250Sim sim;
+        ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
         auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
         test::AqlQueue queue(sim.memory, sim.cp());
         queue.dispatch(kernel, group_size, group_size);
@@ -1672,7 +1742,7 @@ TEST(MemoryWaitExecutionTest, Wave64MaskReadChecksPendingVccHighWord) {
 }
 
 TEST(MemoryWaitExecutionTest, ScalarVccLoadChecksOnlyTheConsumedOrWrittenWords) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (unsigned destination : {106u, 107u}) {
     for (unsigned consumer : {0u, 1u, 2u, 3u, 4u}) {
       for (bool wait : {false, true}) {
@@ -1699,8 +1769,9 @@ TEST(MemoryWaitExecutionTest, ScalarVccLoadChecksOnlyTheConsumedOrWrittenWords) 
                              cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 106, .sdst = 4}));
         append_instruction(code, S_ENDPGM_GFX12);
         uint32_t properties = 0;
-        AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-        Gfx1250Sim sim(memory_wait_test_config());
+        RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+        Gfx1250Sim sim;
+        ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
         write_global_u32(*sim.memory, 0x400000, 1);
         auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                        false, properties, 16);
@@ -2006,7 +2077,7 @@ TEST(MemoryWaitExecutionTest, NarrowStoresCheckOnlyConsumedBytes) {
 }
 
 TEST(MemoryWaitExecutionTest, GlobalFlatResultNeedsOnlyItsLoadCounter) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (unsigned waits : {0u, 1u, 2u, 3u}) {
     SCOPED_TRACE(waits);
     std::vector<uint32_t> code;
@@ -2021,8 +2092,9 @@ TEST(MemoryWaitExecutionTest, GlobalFlatResultNeedsOnlyItsLoadCounter) {
     append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 258, .vdst = 3}));
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
-    AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-    Gfx1250Sim sim(memory_wait_test_config());
+    RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                    false, properties, 16);
@@ -2036,7 +2108,7 @@ TEST(MemoryWaitExecutionTest, GlobalFlatResultNeedsOnlyItsLoadCounter) {
 }
 
 TEST(MemoryWaitExecutionTest, VectorWaitDiagnosticsCanBeSilenced) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (unsigned mode = 0; mode < 5; ++mode) {
     SCOPED_TRACE(mode);
     std::vector<uint32_t> code;
@@ -2054,8 +2126,9 @@ TEST(MemoryWaitExecutionTest, VectorWaitDiagnosticsCanBeSilenced) {
       append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0}));
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
-    AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-    Gfx1250Sim sim(memory_wait_test_config(mode == 3 ? "off" : "warn"));
+    RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config(mode == 3 ? "off" : "warn")));
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                    false, properties, 16);
@@ -2238,29 +2311,39 @@ void enable_multi_group_replay(std::vector<uint32_t> &code) {
   code.push_back(1);
 }
 
-std::array<uint64_t, 2> run_xcnt_kernel(std::vector<uint32_t> code,
-                                        std::string_view xcnt_setting = "warn", unsigned vgprs = 32,
-                                        std::string_view memory_setting = "warn") {
-  using namespace rocr::llvm::amdhsa;
+util::FailureOr<std::array<uint64_t, 2>> run_xcnt_kernel(std::vector<uint32_t> code,
+                                                         std::string_view xcnt_setting = "warn",
+                                                         unsigned vgprs = 32,
+                                                         std::string_view memory_setting = "warn",
+                                                         std::string_view wait_checking = "") {
+  using namespace rocjitsu::amdhsa;
   append_instruction(code, S_WAIT_KMCNT_0_GFX12);
   append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0}));
   append_instruction(code, cdna5::build_sopp(cdna5::kSWaitStorecntSopp, {.simm16 = 0}));
   append_instruction(code, S_ENDPGM_GFX12);
-  Gfx1250Sim sim(memory_wait_test_config(memory_setting, xcnt_setting));
+  std::string config = memory_wait_test_config(memory_setting, xcnt_setting);
+  if (!wait_checking.empty())
+    config.insert(config.find('{') + 1, std::format("\"wait_checking\":\"{}\",", wait_checking));
+  Gfx1250Sim sim;
+  sim.initialize(config);
+  if (testing::Test::HasFatalFailure())
+    return util::Result::failure();
   write_global_u32(*sim.memory, 0x400000, 0x12345678);
   uint32_t properties = 0;
-  AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+  RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
   auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, vgprs, 2, false, false,
                                  false, properties, 16);
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch(kernel, 32, 32, 0x400000);
   step_until_halted(*sim.engine, *sim.cu());
   EXPECT_EQ(sim.snapshot->snapshots().size(), 1u);
-  if (memory_setting != "warn" && xcnt_setting != "warn") {
+  if (wait_checking == "off" ||
+      (wait_checking.empty() && memory_setting == "off" && xcnt_setting != "warn")) {
     EXPECT_FALSE(sim.cu()->wf(0)->memory_wait_checks_enabled());
     EXPECT_EQ(sim.cu()->wf(0)->memory_wait_scoreboard(), nullptr);
   }
-  return {sim.cu()->xcnt_diagnostic_count(), sim.cu()->memory_wait_diagnostic_count()};
+  return std::array<uint64_t, 2>{sim.cu()->xcnt_diagnostic_count(),
+                                 sim.cu()->memory_wait_diagnostic_count()};
 }
 
 TEST(XcntExecutionTest, ScalarAddressOverwriteNeedsZeroXOrKmWait) {
@@ -2282,7 +2365,9 @@ TEST(XcntExecutionTest, ScalarAddressOverwriteNeedsZeroXOrKmWait) {
     if (wait == 6)
       append_instruction(code, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0}));
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
-    const auto counts = run_xcnt_kernel(code);
+    auto counts_result = run_xcnt_kernel(code);
+    ASSERT_TRUE(counts_result.succeeded());
+    const auto counts = std::move(counts_result).value();
     EXPECT_EQ(counts[0], wait == 1 || wait == 3 || wait == 6 ? 0u : 1u);
     EXPECT_EQ(counts[1], 0u);
   }
@@ -2306,7 +2391,9 @@ TEST(XcntExecutionTest, ScalarRegisterOffsetOverwriteNeedsTranslationOrCompletio
                                     {.simm16 = 0}));
       append_instruction(
           code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = overwritten}));
-      const auto counts = run_xcnt_kernel(code);
+      auto counts_result = run_xcnt_kernel(code);
+      ASSERT_TRUE(counts_result.succeeded());
+      const auto counts = std::move(counts_result).value();
       EXPECT_EQ(counts[0], selector != 124 && !wait ? 1u : 0u);
       EXPECT_EQ(counts[1], 0u);
     }
@@ -2338,10 +2425,313 @@ TEST(XcntExecutionTest, VectorAddressAndExecRespectPartialTranslationAndLoadWait
             code, cdna5::build_sop1(
                       cdna5::kSMovB32Sop1,
                       {.ssrc0 = 128, .sdst = static_cast<uint8_t>(consumer == 1 ? 0 : 126)}));
-      const auto counts = run_xcnt_kernel(code);
+      auto counts_result = run_xcnt_kernel(code);
+      ASSERT_TRUE(counts_result.succeeded());
+      const auto counts = std::move(counts_result).value();
       EXPECT_EQ(counts[0], wait && (consumer == 0 || wait % 2 == 0) ? 0u : 1u);
       EXPECT_EQ(counts[1], 0u);
     }
+}
+
+TEST(MemoryWaitExecutionTest, BlockDependenciesUseCapturedDwordMask) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (bool scratch : {false, true}) {
+      for (bool load : {false, true}) {
+        if (!load && arch != ROCJITSU_CODE_ARCH_CDNA5)
+          continue; // XCNT replay is currently qualified only for CDNA5.
+        for (uint16_t data_base : {32, 240}) {
+          for (uint32_t mask : {0u, 1u, 0x80000001u, 0x55555555u, 0xffffffffu}) {
+            SCOPED_TRACE(testing::Message()
+                         << "arch=" << arch << " scratch=" << scratch << " load=" << load
+                         << " mask=" << mask << " data_base=" << data_base);
+            GpuMemory memory("block_wait_memory");
+            L2Cache l2("block_wait_l2");
+            ComputeUnitCore::Config config{};
+            config.arch = arch;
+            config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+            config.xcnt_diagnostics = MemoryWaitDiagnostics::Warn;
+            config.num_wf_slots = 1;
+            config.sgprs_per_wf = 128;
+            config.vgprs_per_wf = 256;
+            config.lds_size_kb = 64;
+            auto cu = ComputeUnitCore::create("block_wait_cu", config, &memory, &l2);
+            auto *wf = cu->dispatch_wf(0, 0x100, 128, 256, 32);
+            ASSERT_NE(wf, nullptr);
+            wf->set_exec(1);
+            wf->set_mode_raw(1u << 25);
+            wf->set_m0(mask);
+            for (uint32_t reg = 0; reg < 256; ++reg)
+              cu->write_vgpr(wf->vgpr_alloc().base + reg, 0, 0);
+            const auto build_words =
+                [&]<typename Fields>(std::array<uint32_t, 3> (*builder)(uint16_t, Fields),
+                                     uint16_t opcode) {
+                  Fields fields{.saddr = 124,
+                                .vdst = uint8_t(load ? data_base : 0),
+                                .vsrc = uint8_t(load ? 0 : data_base),
+                                .vaddr = 0};
+                  if constexpr (requires { fields.sve; })
+                    fields.sve = 1;
+                  return builder(opcode, fields);
+                };
+            std::array<uint32_t, 3> words;
+            if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              words = scratch ? build_words(cdna5::build_vscratch, load ? cdna5::kScratchLoadBlock
+                                                                        : cdna5::kScratchStoreBlock)
+                              : build_words(cdna5::build_vglobal, load ? cdna5::kGlobalLoadBlock
+                                                                       : cdna5::kGlobalStoreBlock);
+            } else {
+              words = scratch ? build_words(rdna4::build_vscratch, load ? rdna4::kScratchLoadBlock
+                                                                        : rdna4::kScratchStoreBlock)
+                              : build_words(rdna4::build_vglobal, load ? rdna4::kGlobalLoadBlock
+                                                                       : rdna4::kGlobalStoreBlock);
+            }
+            auto decoder = Decoder::create(arch);
+            util::StringDiagnostic error;
+            auto decoded = decoder->decode_window(words, 0, error.emitter());
+            ASSERT_TRUE(decoded.succeeded()) << error.message();
+            cu->track_memory_wait(*decoded.value(), *wf);
+            ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).succeeded());
+            wf->set_m0(~mask); // Dependencies retain the mask captured before execution.
+            auto &scoreboard = *wf->memory_wait_scoreboard();
+            const auto counter = load ? WaitCounterKind::Load : WaitCounterKind::Store;
+            EXPECT_EQ(scoreboard.outstanding(counter), 1u); // Even M0=0 occupies a slot.
+            if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::X), 1u);
+            }
+            for (uint16_t word = 0; word < 32; ++word) {
+              if (data_base + word >= 256)
+                continue;
+              // A diagnostic retires its dependency to suppress repeats. Reissue
+              // before each probe so every word is checked independently.
+              if (word != 0) {
+                scoreboard.wait(counter, 0);
+                scoreboard.wait(WaitCounterKind::X, 0);
+                wf->set_m0(mask);
+                cu->track_memory_wait(*decoded.value(), *wf);
+                wf->set_m0(~mask);
+              }
+              const auto before =
+                  load ? cu->memory_wait_diagnostic_count() : cu->xcnt_diagnostic_count();
+              scoreboard.access({RegClass::VGPR, static_cast<uint16_t>(data_base + word), 1}, 1,
+                                0xf,
+                                /*write=*/!load);
+              const auto after =
+                  load ? cu->memory_wait_diagnostic_count() : cu->xcnt_diagnostic_count();
+              EXPECT_EQ(after - before, (mask >> word) & 1u) << "word=" << word;
+            }
+            scoreboard.wait(counter, 0);
+            scoreboard.wait(WaitCounterKind::X, 0);
+            EXPECT_TRUE(scoreboard.empty());
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, BlockPrechecksRespectMaskAndPerDwordOwnership) {
+  struct Case {
+    uint8_t data_base;
+    uint32_t mask;
+    uint16_t pending_register;
+    bool owned_word;
+    bool fallback;
+  };
+  constexpr Case cases[] = {{32, 1, 32, true, false},          {32, 1, 33, false, false},
+                            {240, 1, 240, true, false},        {240, 1, 241, false, false},
+                            {240, 1, 0, false, false},         {240, 0x10000, 0, false, true},
+                            {240, 0x10000, 240, false, false}, {240, 0xffffffff, 255, true, false},
+                            {240, 0xffffffff, 0, false, true}, {240, 0, 240, false, false},
+                            {240, 0, 0, false, false}};
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    GpuMemory memory("block_precheck_memory");
+    L2Cache l2("block_precheck_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 256;
+    auto cu = ComputeUnitCore::create("block_precheck_cu", config, &memory, &l2);
+    auto *wave = cu->dispatch_wf(0, 0x100, 128, 256, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    auto decoder = Decoder::create(arch);
+    auto &state = wave->ensure_memory_wait_scoreboard();
+    for (bool scratch : {false, true}) {
+      for (bool load : {false, true}) {
+        for (const auto &c : cases) {
+          const auto build_words =
+              [&]<typename Fields>(std::array<uint32_t, 3> (*builder)(uint16_t, Fields),
+                                   uint16_t opcode) {
+                Fields fields{.saddr = 124,
+                              .vdst = uint8_t(load ? c.data_base : 0),
+                              .vsrc = uint8_t(load ? 0 : c.data_base),
+                              .vaddr = 2}; // Keep address registers separate from VGPR0 fallback.
+                if constexpr (requires { fields.sve; })
+                  fields.sve = 1;
+                return builder(opcode, fields);
+              };
+          const auto words = [&] {
+            if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+              return scratch ? build_words(cdna5::build_vscratch, load ? cdna5::kScratchLoadBlock
+                                                                       : cdna5::kScratchStoreBlock)
+                             : build_words(cdna5::build_vglobal, load ? cdna5::kGlobalLoadBlock
+                                                                      : cdna5::kGlobalStoreBlock);
+            return scratch ? build_words(rdna4::build_vscratch, load ? rdna4::kScratchLoadBlock
+                                                                     : rdna4::kScratchStoreBlock)
+                           : build_words(rdna4::build_vglobal,
+                                         load ? rdna4::kGlobalLoadBlock : rdna4::kGlobalStoreBlock);
+          }();
+          util::StringDiagnostic error;
+          auto decoded = decoder->decode_window(words, 0, error.emitter());
+          ASSERT_TRUE(decoded.succeeded()) << error.message();
+          for (bool waited : {false, true}) {
+            for (uint64_t pending_lanes : {1u, 2u}) {
+              SCOPED_TRACE(testing::Message()
+                           << "arch=" << arch << " scratch=" << scratch << " load=" << load
+                           << " base=" << unsigned(c.data_base) << " mask=" << c.mask
+                           << " pending=" << c.pending_register << " lanes=" << pending_lanes
+                           << " waited=" << waited);
+              state.clear();
+              state.bind(wave->pc, wave, &ComputeUnitCore::report_memory_wait);
+              // DS and global loads have no WAW ordering; stores consume a
+              // pending global load. Both checks must happen before execution.
+              const auto counter = load ? WaitCounterKind::Ds : WaitCounterKind::Load;
+              state.add({state.issue(counter),
+                         0x80,
+                         pending_lanes,
+                         {RegClass::VGPR, c.pending_register, 1},
+                         counter,
+                         0xf});
+              if (waited)
+                state.wait(counter, 0);
+              wave->set_m0(c.mask);
+              const auto before = cu->memory_wait_diagnostic_count();
+              state.check_instruction(*decoded.value(), *wave);
+              EXPECT_EQ(cu->memory_wait_diagnostic_count() - before,
+                        !waited && pending_lanes == 1 && (c.owned_word || (!load && c.fallback)));
+              EXPECT_EQ(decoded.value()->data(), nullptr);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(XcntExecutionTest, BlockStoreProtectsOwnedWordsAndVgpr0Fallback) {
+  struct Case {
+    uint8_t source;
+    uint32_t mask;
+    uint8_t overwritten;
+    bool hazard;
+  };
+  constexpr Case cases[] = {
+      {32, 1, 32, true},          {32, 1, 33, false},         {240, 1, 240, true},
+      {240, 1, 241, false},       {240, 1, 0, false},         {240, 0x10000, 0, true},
+      {240, 0x10000, 240, false}, {240, 0xffffffff, 0, true}, {240, 0xffffffff, 255, true},
+      {240, 0, 0, false}};
+  for (bool scratch : {false, true}) {
+    for (const auto &c : cases) {
+      for (bool waited : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "scratch=" << scratch << " source=" << unsigned(c.source)
+                                        << " mask=" << c.mask << " overwritten="
+                                        << unsigned(c.overwritten) << " waited=" << waited);
+        GpuMemory memory("block_source_memory");
+        L2Cache l2("block_source_l2");
+        ComputeUnitCore::Config config{};
+        config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+        config.xcnt_diagnostics = MemoryWaitDiagnostics::Warn;
+        config.num_wf_slots = 2;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 256;
+        auto cu = ComputeUnitCore::create("block_source_cu", config, &memory, &l2);
+        ASSERT_NE(cu->dispatch_wf(0, 0x100, 128, 256, 32), nullptr);
+        auto *wave = cu->dispatch_wf(1, 0x100, 128, 256, 32);
+        ASSERT_NE(wave, nullptr);
+        ASSERT_GT(wave->vgpr_alloc().base, 0u);
+        wave->set_exec(1);
+        wave->set_mode_raw(1u << 25);
+        wave->set_m0(c.mask);
+        for (uint32_t reg = 0; reg < 256; ++reg)
+          cu->write_vgpr(wave->vgpr_alloc().base + reg, 0, 0x12340000u + reg);
+        cu->write_vgpr(wave->vgpr_alloc().base + 2, 0, 0);
+        cu->write_vgpr(wave->vgpr_alloc().base + 3, 0, 0);
+        const auto words =
+            scratch ? cdna5::build_vscratch(cdna5::kScratchStoreBlock,
+                                            {.saddr = 124, .sve = 1, .vsrc = c.source, .vaddr = 2})
+                    : cdna5::build_vglobal(cdna5::kGlobalStoreBlock,
+                                           {.saddr = 124, .vsrc = c.source, .vaddr = 2});
+        auto decoder = Decoder::create(config.arch);
+        util::StringDiagnostic error;
+        auto decoded = decoder->decode_window(words, 0, error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
+        cu->track_memory_wait(*decoded.value(), *wave);
+        ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+        const auto &data = *decoded.value()->data_as<VectorMemState>();
+        for (uint32_t word = 0; word < 32; ++word) {
+          if (!(c.mask & (uint32_t{1} << word)))
+            continue;
+          uint32_t captured = 0;
+          std::memcpy(&captured, &data.store_data[word * sizeof(uint32_t)], sizeof(captured));
+          EXPECT_EQ(captured, 0x12340000u + (c.source + word < 256 ? c.source + word : 0));
+        }
+        wave->set_m0(~c.mask);
+        auto &state = *wave->memory_wait_scoreboard();
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Store), 1u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::X), 1u);
+        if (waited)
+          state.wait(WaitCounterKind::X, 0);
+        const auto overwrite_words =
+            cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = c.overwritten});
+        auto overwrite = decoder->decode_window(overwrite_words, 0, error.emitter());
+        ASSERT_TRUE(overwrite.succeeded()) << error.message();
+        state.check_instruction(*overwrite.value(), *wave);
+        EXPECT_EQ(cu->xcnt_diagnostic_count(), !waited && c.hazard);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+      }
+    }
+  }
+}
+
+TEST(XcntExecutionTest, BlockStoreMaskedDataStillProtectsOverlappingAddress) {
+  for (bool scratch : {false, true}) {
+    SCOPED_TRACE(scratch);
+    GpuMemory memory("block_address_memory");
+    L2Cache l2("block_address_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.xcnt_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 128;
+    auto cu = ComputeUnitCore::create("block_address_cu", config, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, 0x100, 128, 128, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    wf->set_mode_raw(1u << 25);
+    wf->set_m0(1); // Disabled data words still supply the address: v33, or v[33:34].
+    for (uint32_t reg = 32; reg < 64; ++reg)
+      cu->write_vgpr(wf->vgpr_alloc().base + reg, 0, 0);
+    const auto words =
+        scratch ? cdna5::build_vscratch(cdna5::kScratchStoreBlock,
+                                        {.saddr = 124, .sve = 1, .vsrc = 32, .vaddr = 33})
+                : cdna5::build_vglobal(cdna5::kGlobalStoreBlock,
+                                       {.saddr = 124, .vsrc = 32, .vaddr = 33});
+    auto decoder = Decoder::create(config.arch);
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(words, 0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    cu->track_memory_wait(*decoded.value(), *wf);
+    ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).succeeded());
+    auto &scoreboard = *wf->memory_wait_scoreboard();
+    scoreboard.access({RegClass::VGPR, 35, 1}, 1, 0xf, true);
+    EXPECT_EQ(cu->xcnt_diagnostic_count(), 0u);
+    scoreboard.access({RegClass::VGPR, 33, 2}, 1, 0xf, true);
+    EXPECT_EQ(cu->xcnt_diagnostic_count(), 1u);
+  }
 }
 
 TEST(XcntExecutionTest, StoreDataIsProtectedAndSourceReadsAreAllowed) {
@@ -2362,7 +2752,9 @@ TEST(XcntExecutionTest, StoreDataIsProtectedAndSourceReadsAreAllowed) {
                                                              : cdna5::kSWaitStorecntSopp,
                                                  {.simm16 = 0}));
     append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 129, .vdst = 1}));
-    const auto counts = run_xcnt_kernel(code);
+    auto counts_result = run_xcnt_kernel(code);
+    ASSERT_TRUE(counts_result.succeeded());
+    const auto counts = std::move(counts_result).value();
     EXPECT_EQ(counts[0], wait == 1 || wait == 3 ? 0u : 1u);
     EXPECT_EQ(counts[1], 0u);
   }
@@ -2376,10 +2768,27 @@ TEST(XcntExecutionTest, CompletionAndReplaySettingsAreIndependent) {
       append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 0));
       append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 5}));
       append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
-      const auto counts = run_xcnt_kernel(code, xcnt, 32, memory);
+      auto counts_result = run_xcnt_kernel(code, xcnt, 32, memory);
+      ASSERT_TRUE(counts_result.succeeded());
+      const auto counts = std::move(counts_result).value();
       EXPECT_EQ(counts[0], xcnt == "warn" ? 1u : 0u);
-      EXPECT_EQ(counts[1], memory == "warn" ? 1u : 0u);
+      EXPECT_EQ(counts[1], memory != "off" ? 1u : 0u);
     }
+}
+
+TEST(XcntExecutionTest, LaunchModesOverridePerCuSettings) {
+  for (std::string_view mode : {"", "on", "off", "all"}) {
+    SCOPED_TRACE(mode);
+    std::vector<uint32_t> code;
+    append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 0));
+    append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 5}));
+    append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
+    auto counts_result = run_xcnt_kernel(code, "warn", 32, "off", mode);
+    ASSERT_TRUE(counts_result.succeeded());
+    const auto counts = std::move(counts_result).value();
+    EXPECT_EQ(counts[0], mode.empty() || mode == "all" ? 1u : 0u);
+    EXPECT_EQ(counts[1], mode == "on" || mode == "all" ? 1u : 0u);
+  }
 }
 
 TEST(XcntExecutionTest, ReplayOnlyCheckingRetainsCompletionOrdering) {
@@ -2396,14 +2805,17 @@ TEST(XcntExecutionTest, ReplayOnlyCheckingRetainsCompletionOrdering) {
                                                              : cdna5::kSWaitStorecntSopp,
                                                  {.simm16 = 0}));
     append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 129, .vdst = 0}));
-    EXPECT_EQ(run_xcnt_kernel(code, "warn", 32, "off"),
+    auto counts_result = run_xcnt_kernel(code, "warn", 32, "off");
+    ASSERT_TRUE(counts_result.succeeded());
+    EXPECT_EQ(counts_result.value(),
               (std::array<uint64_t, 2>{wait == 1 || wait == 2 ? 0u : 1u, 0}));
   }
 }
 
 TEST(XcntExecutionTest, InvalidDiagnosticSettingsAreRejected) {
-  EXPECT_THROW(Gfx1250Sim(memory_wait_test_config("no")), std::invalid_argument);
-  EXPECT_THROW(Gfx1250Sim(memory_wait_test_config("", "no")), std::invalid_argument);
+  Gfx1250Sim sim;
+  EXPECT_THROW(sim.initialize(memory_wait_test_config("no")), std::invalid_argument);
+  EXPECT_THROW(sim.initialize(memory_wait_test_config("", "no")), std::invalid_argument);
 }
 
 TEST(XcntExecutionTest, SingleGroupVmemIsOutsideQualifiedCoverage) {
@@ -2412,7 +2824,9 @@ TEST(XcntExecutionTest, SingleGroupVmemIsOutsideQualifiedCoverage) {
   append_instruction(code, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
                                                 {.saddr = 0, .vdst = 2, .vaddr = 0}));
   append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 0}));
-  EXPECT_EQ(run_xcnt_kernel(code), (std::array<uint64_t, 2>{0, 0}));
+  auto counts_result = run_xcnt_kernel(code);
+  ASSERT_TRUE(counts_result.succeeded());
+  EXPECT_EQ(counts_result.value(), (std::array<uint64_t, 2>{0, 0}));
 }
 
 TEST(XcntExecutionTest, GroupTransitionsAndVmemDestinationsProvideImplicitOrdering) {
@@ -2438,7 +2852,9 @@ TEST(XcntExecutionTest, GroupTransitionsAndVmemDestinationsProvideImplicitOrderi
       append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 0}));
     else
       append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 1}));
-    const auto counts = run_xcnt_kernel(code);
+    auto counts_result = run_xcnt_kernel(code);
+    ASSERT_TRUE(counts_result.succeeded());
+    const auto counts = std::move(counts_result).value();
     EXPECT_EQ(counts[0], mode == 2 ? 1u : 0u);
     EXPECT_EQ(counts[1], 0u);
   }
@@ -2453,7 +2869,9 @@ TEST(XcntExecutionTest, ReplaySourcesUseTheExecutedHighVgprBank) {
   append_instruction(code, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
                                                 {.saddr = 0, .vdst = 2, .vaddr = 0}));
   append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 129, .vdst = 0}));
-  EXPECT_EQ(run_xcnt_kernel(code, "warn", 320), (std::array<uint64_t, 2>{1, 0}));
+  auto counts_result = run_xcnt_kernel(code, "warn", 320);
+  ASSERT_TRUE(counts_result.succeeded());
+  EXPECT_EQ(counts_result.value(), (std::array<uint64_t, 2>{1, 0}));
 }
 
 TEST(XcntExecutionTest, ReplayAddressFootprintsHonorScratchAndBufferEnableBits) {
@@ -2499,6 +2917,56 @@ TEST(XcntExecutionTest, ReplayAddressFootprintsHonorScratchAndBufferEnableBits) 
             offen + idxen, 1);
 }
 
+TEST(XcntExecutionTest, FlatReplayCompletionFollowsTheWholeRequestRoute) {
+  GpuMemory memory("flat_replay_memory");
+  L2Cache l2("flat_replay_l2");
+  ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  config.xcnt_diagnostics = MemoryWaitDiagnostics::Warn;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 64;
+  auto cu = ComputeUnitCore::create("flat_replay_cu", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(3);
+  wf->set_mode_raw(wf->mode_raw() | (1u << 25));
+  auto decoder = Decoder::create(config.arch);
+  for (bool load : {false, true}) {
+    SCOPED_TRACE(load);
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(
+        cdna5::build_vflat(load ? cdna5::kFlatLoadB32Vflat : cdna5::kFlatStoreB32Vflat,
+                           {.saddr = kModernNullSelector, .vdst = 8, .vsrc = 8, .vaddr = 0}),
+        0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    const auto vmem_counter = load ? WaitCounterKind::Load : WaitCounterKind::Store;
+    for (uint64_t shared_lanes : {0u, 1u, 2u, 3u}) {
+      SCOPED_TRACE(shared_lanes);
+      set_test_flat_domains(*cu, *wf, shared_lanes);
+      for (auto waited : {vmem_counter, WaitCounterKind::Ds, WaitCounterKind::X}) {
+        SCOPED_TRACE(static_cast<unsigned>(waited));
+        auto &state = wf->ensure_memory_wait_scoreboard();
+        state.clear();
+        cu->track_memory_wait(*decoded.value(), *wf);
+        ASSERT_EQ(state.outstanding(WaitCounterKind::X), 1u);
+        unsigned reports = 0;
+        state.bind(0x200, &reports, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
+        state.wait(waited, 0);
+        state.access({RegClass::VGPR, 0, 2}, 3, 0xf, true);
+        // Any global lane keeps replay sources protected until VMEM completes,
+        // even when the first lane is LDS. Uniform shared requests use DS.
+        const bool reusable = waited == WaitCounterKind::X ||
+                              waited == (shared_lanes == 3 ? WaitCounterKind::Ds : vmem_counter);
+        EXPECT_EQ(reports, reusable ? 0u : 1u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::X), reusable ? 0u : 1u);
+      }
+    }
+  }
+}
+
 TEST(XcntExecutionTest, EmptyExecWithoutPendingTranslationsHasNoReplayDependency) {
   std::vector<uint32_t> code;
   enable_multi_group_replay(code);
@@ -2506,7 +2974,9 @@ TEST(XcntExecutionTest, EmptyExecWithoutPendingTranslationsHasNoReplayDependency
   append_instruction(code, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
                                                 {.saddr = 0, .vdst = 2, .vaddr = 0}));
   append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 129, .sdst = 126}));
-  EXPECT_EQ(run_xcnt_kernel(code), (std::array<uint64_t, 2>{0, 0}));
+  auto counts_result = run_xcnt_kernel(code);
+  ASSERT_TRUE(counts_result.succeeded());
+  EXPECT_EQ(counts_result.value(), (std::array<uint64_t, 2>{0, 0}));
 }
 
 TEST(XcntExecutionTest, EmptyExecStoreCannotUseAnOlderCompletionToDrainReplaySources) {
@@ -2536,7 +3006,9 @@ TEST(XcntExecutionTest, EmptyExecStoreCannotUseAnOlderCompletionToDrainReplaySou
       // Scalar sources can be overwritten even with EXEC zero. Only a real load
       // completion or an X wait proves that this older address is safe to change.
       append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
-      EXPECT_EQ(run_xcnt_kernel(code), (std::array<uint64_t, 2>{wait ? 1u : 2u, 0}));
+      auto counts_result = run_xcnt_kernel(code);
+      ASSERT_TRUE(counts_result.succeeded());
+      EXPECT_EQ(counts_result.value(), (std::array<uint64_t, 2>{wait ? 1u : 2u, 0}));
     }
 }
 
@@ -3254,7 +3726,7 @@ TEST(MemoryWaitShadowTest, RangeQueriesMatchIndividualBitsAtWordAndBankBoundarie
 }
 
 TEST(MemoryWaitExecutionTest, WaterfallKeepsPendingResultsInTheirIssuingLanesAndBank) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (bool rmw : {false, true})
     for (unsigned bank : {0u, 1u, 3u})
       for (int wait : {-1, 0, 1})
@@ -3307,8 +3779,9 @@ TEST(MemoryWaitExecutionTest, WaterfallKeepsPendingResultsInTheirIssuingLanesAnd
             emit(cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 258, .vdst = 3}));
           emit(S_ENDPGM_GFX12);
           uint32_t properties = 0;
-          AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-          Gfx1250Sim sim(memory_wait_test_config());
+          RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+          Gfx1250Sim sim;
+          ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
           write_global_u32(*sim.memory, 0x400000, 0x12345678);
           const auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 1024, 2,
                                                false, false, false, properties, 16);
@@ -3383,7 +3856,7 @@ TEST_F(MemoryWaitScoreboardTest, PendingBitsMatchLiveEventsThroughMixedRetiremen
 }
 
 TEST(MemoryWaitExecutionTest, MemoryProducerOverwriteIsCheckedBeforeExecution) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   class BeforeObserver final : public ExecutionPlugin {
   public:
     BeforeObserver(uint64_t pc, ComputeUnitCore *cu)
@@ -3425,13 +3898,14 @@ TEST(MemoryWaitExecutionTest, MemoryProducerOverwriteIsCheckedBeforeExecution) {
       else
         emit(cdna5::build_vds(cdna5::kDsLoadU16Vds, {.addr = 0, .vdst = 2}));
       emit(S_ENDPGM_GFX12);
-      Gfx1250Sim sim(memory_wait_test_config());
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
       auto observer = std::make_unique<BeforeObserver>(consumer, sim.cu());
       auto *observed = observer.get();
       sim.plugin_group->add(std::move(observer));
       sim.soc->set_plugin_group(sim.plugin_group);
       uint32_t properties = 0;
-      AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+      RJ_AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
       write_global_u32(*sim.memory, 0x400000, 0x12345678);
       const auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false,
                                            false, false, properties, 16);
@@ -3740,10 +4214,8 @@ TEST(MemoryWaitFootprintTest, ScalarRelativeAccessesMatchExecution) {
       util::StringDiagnostic error;
       auto decoded = decoder->decode_window(words, 0, error.emitter());
       ASSERT_TRUE(decoded.succeeded()) << error.message();
-      for (uint32_t m0 : {0u, 3u, 35u, 37u, 74u, 92u, 102u, 104u, 0x2303u}) {
-        if ((op == 1 && (m0 & 0xffu) > 100) || (op == 3 && (m0 & 0xffu) >= 48) ||
-            (op == 2 && (m0 & 0xffu) >= 96))
-          continue;
+      for (uint32_t m0 :
+           {0u, 3u, 35u, 37u, 74u, 92u, 102u, 104u, 0x230003u, 0x100u, 0x80000002u, 0xffffffffu}) {
         SCOPED_TRACE(m0);
         wf->set_exec_raw(~uint64_t{0});
         wf->set_m0(m0);
@@ -3755,25 +4227,24 @@ TEST(MemoryWaitFootprintTest, ScalarRelativeAccessesMatchExecution) {
         // Named-register getters/setters do not issue scalar-observer callbacks.
         // Supplement those aliases from the documented scalar selector map.
         const unsigned width = op == 1 || op == 3 ? 2 : 1;
-        const unsigned src = 4 + (op < 2 || op == 4 ? (m0 & 0xffu) * width : 0);
-        const unsigned dst = 32 + (op == 4   ? (m0 >> 8) & 0xffu
-                                   : op >= 2 ? (m0 & 0xffu) * width
-                                             : 0);
-        auto named = [&](unsigned selector, auto &accesses) {
-          for (unsigned word = 0; word < width; ++word) {
-            const auto current = selector + word;
-            if (current == 106 || current == 107)
-              accesses.push_back({RegClass::VCC, static_cast<uint16_t>(current - 106), 1});
-            else if (current == 126 || current == 127)
-              accesses.push_back({RegClass::EXEC, static_cast<uint16_t>(current - 126), 1});
-            else if (arch == ROCJITSU_CODE_ARCH_CDNA4 && (current == 102 || current == 103))
-              accesses.push_back({RegClass::FLAT_SCRATCH, static_cast<uint16_t>(current - 102), 1});
-            else if (current == (arch == ROCJITSU_CODE_ARCH_CDNA4 ? 124u : 125u))
-              accesses.push_back({RegClass::M0, 0, 1});
-          }
+        const uint64_t offset = width == 2 ? m0 & ~1u : m0;
+        uint64_t src = 4 + (op == 4 ? m0 & 0x3ffu : op < 2 ? offset : 0);
+        const uint64_t dst = 32 + (op == 4 ? (m0 >> 16) & 0x3ffu : op >= 2 ? offset : 0);
+        const auto valid = [&](uint64_t selector) {
+          return selector + width <= 108 &&
+                 !(arch == ROCJITSU_CODE_ARCH_CDNA4 && selector >= 102 && selector < 104);
         };
-        named(src, reads);
-        named(dst, writes);
+        if (!valid(src))
+          src = 0;
+        auto named = [&](uint64_t selector, auto &accesses) {
+          for (unsigned word = 0; word < width; ++word)
+            if (selector + word == 106 || selector + word == 107)
+              accesses.push_back({RegClass::VCC, static_cast<uint16_t>(selector + word - 106), 1});
+        };
+        if (valid(dst)) {
+          named(src, reads);
+          named(dst, writes);
+        }
         wf->set_exec_raw(~uint64_t{0});
         wf->set_m0(m0);
         auto &state = wf->ensure_memory_wait_scoreboard();
@@ -4783,7 +5254,8 @@ TEST(MemoryWaitExecutionTest, BarrierM0ReadChecksMessageReturnBeforeExecution) {
       append_instruction(code, cdna5::build_sopp(cdna5::kSWaitKmcntSopp, {.simm16 = 0}));
     append_instruction(code, cdna5::build_sop1(cdna5::kSBarrierSignalSop1, {.ssrc0 = 125}));
     append_instruction(code, S_ENDPGM_GFX12);
-    Gfx1250Sim sim(memory_wait_test_config());
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
     test::AqlQueue queue(sim.memory, sim.cp());
     queue.dispatch(kernel, 32, 32);

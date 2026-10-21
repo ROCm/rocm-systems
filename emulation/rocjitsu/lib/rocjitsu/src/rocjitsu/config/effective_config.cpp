@@ -13,7 +13,6 @@
 #include <cstddef>
 #include <filesystem>
 #include <fstream>
-#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -323,33 +322,59 @@ FailureOr<std::string> json_with_cpu_thread_budget(std::string_view json, uint32
   if (rewritten.failed())
     return Result::failure();
 
-  // The schema parser reports a bad document by throwing. Callers of this function
-  // handle failure through the returned result, so that message is emitted here.
-  uint32_t applied = 0;
-  try {
-    applied = with_parsed_simulation_config_json(
-        rewritten.value(), rocjitsu::kEmbeddedSchema,
-        [](const fb::SimulationConfig *config) { return config->cpu_thread_budget(); });
-  } catch (const std::runtime_error &error) {
-    return emit_error.emit() << error.what();
-  }
-  if (applied != budget)
+  FailureOr<uint32_t> applied = with_parsed_simulation_config_json(
+      rewritten.value(), rocjitsu::kEmbeddedSchema, emit_error,
+      [](const fb::SimulationConfig *config) -> FailureOr<uint32_t> {
+        return config->cpu_thread_budget();
+      });
+  if (applied.failed())
+    return Result::failure();
+  if (applied.value() != budget)
     return emit_error.emit() << "cannot apply cpu_thread_budget to the simulation config";
   return std::move(rewritten.value());
 }
 
-FailureOr<std::string> write_effective_config(const std::string &source_path, uint32_t budget,
-                                              pid_t pid,
-                                              const util::DiagnosticEmitter &emit_error) {
-  // Reading the source throws when the file cannot be opened. The launch path
-  // reports that through the same result as a rewrite or publish failure.
-  std::string source_json;
-  try {
-    source_json = read_config_file(source_path);
-  } catch (const std::runtime_error &error) {
-    return emit_error.emit() << error.what();
+FailureOr<std::string> json_with_launch_overrides(std::string_view json,
+                                                  const LaunchOverrides &overrides,
+                                                  const util::DiagnosticEmitter &emit_error) {
+  std::string rewritten(json);
+  if (overrides.cpu_thread_budget) {
+    auto result = json_with_cpu_thread_budget(rewritten, *overrides.cpu_thread_budget, emit_error);
+    if (result.failed())
+      return Result::failure();
+    rewritten = std::move(result.value());
   }
-  FailureOr<std::string> json = json_with_cpu_thread_budget(source_json, budget, emit_error);
+  if (overrides.wait_checking) {
+    const char *value = *overrides.wait_checking == WaitChecking::Off  ? "\"off\""
+                        : *overrides.wait_checking == WaitChecking::On ? "\"on\""
+                                                                       : "\"all\"";
+    auto result = set_top_level_field(rewritten, "wait_checking", value, emit_error);
+    if (result.failed())
+      return Result::failure();
+    rewritten = std::move(result.value());
+    auto applied = with_parsed_simulation_config_json(
+        rewritten, rocjitsu::kEmbeddedSchema, emit_error,
+        [](const fb::SimulationConfig *config) -> FailureOr<std::optional<WaitChecking>> {
+          return config->wait_checking()
+                     ? parse_wait_checking(config->wait_checking()->string_view())
+                     : std::nullopt;
+        });
+    if (applied.failed())
+      return Result::failure();
+    if (applied.value() != overrides.wait_checking)
+      return emit_error.emit() << "cannot apply wait_checking to the simulation config";
+  }
+  return rewritten;
+}
+
+FailureOr<std::string> write_effective_config(const std::string &source_path,
+                                              const LaunchOverrides &overrides, pid_t pid,
+                                              const util::DiagnosticEmitter &emit_error) {
+  FailureOr<std::string> source_json = read_config_file(source_path, emit_error);
+  if (source_json.failed())
+    return Result::failure();
+  FailureOr<std::string> json =
+      json_with_launch_overrides(source_json.value(), overrides, emit_error);
   if (json.failed())
     return Result::failure();
 

@@ -23,6 +23,7 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <regex>
@@ -657,6 +658,17 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
   }
 
   return status;
+}
+
+amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& metrics,
+                                                 int64_t* temperature) {
+  // A max-value reading is the not-applicable sentinel (e.g. an APU with no
+  // PLX/VRSOC sensor); surface it as unsupported instead of a bogus reading.
+  if (metrics.temperature_vrsoc == std::numeric_limits<uint16_t>::max()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  *temperature = metrics.temperature_vrsoc;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t* pcie_speed) {
@@ -1723,6 +1735,17 @@ auto smi_amdgpu_parse_driver_versions(std::string_view module_version,
                                   full_version);
 
   return AMDSMI_STATUS_SUCCESS;
+}
+
+auto smi_amdgpu_format_driver_date(std::string_view drm_date) -> std::string {
+  if (drm_date == "0") {
+    return {};
+  }
+  if (drm_date.size() == 8) {
+    return std::string{drm_date.substr(0, 4)} + "/" + std::string{drm_date.substr(4, 2)} + "/" +
+           std::string{drm_date.substr(6, 2)} + " 00:00";
+  }
+  return std::string{drm_date};
 }
 
 auto smi_amdgpu_get_active_dkms_version(std::string_view dkms_root, std::string_view release,

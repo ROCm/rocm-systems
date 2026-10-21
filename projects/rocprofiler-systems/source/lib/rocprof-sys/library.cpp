@@ -3,8 +3,10 @@
 
 #include <array>
 #include <cstdint>
+#include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <timemory/log/color.hpp>
+#include <timemory/tpls/cereal/cereal/cereal.hpp>
 //
 //  above should always be included first
 //
@@ -31,8 +33,8 @@
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
-#include "core/output_file_registry.hpp"
-#include "core/perfetto_fwd.hpp"
+#include "core/output/output_summary.hpp"
+#include "core/process_environment_info.hpp"
 #include "core/progress/bar.hpp"
 #include "core/progress/callback.hpp"
 #include "core/timemory.hpp"
@@ -59,7 +61,6 @@
 #include "library/kokkosp.hpp"
 #include "library/process_sampler.hpp"
 #include "library/rocprofiler-sdk.hpp"
-#include "library/rocprofiler-sdk/roctx_client.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
@@ -94,6 +95,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -406,13 +408,14 @@ rocprofsys_preinit_cache()
     std::stringstream _extdata_stream;
     config::print_settings_json(_extdata_stream);
 
-    trace_cache::get_metadata_registry().set_process({ .pid         = getpid(),
-                                                       .ppid        = getppid(),
-                                                       .command     = _command,
-                                                       .environment = "",
-                                                       .extdata = _extdata_stream.str(),
-                                                       .start   = 0,
-                                                       .end     = 0 });
+    trace_cache::get_metadata_registry().set_process(
+        { .pid         = getpid(),
+          .ppid        = getppid(),
+          .command     = _command,
+          .environment = dump_environment(capture_process_environment()),
+          .extdata     = _extdata_stream.str(),
+          .start       = 0,
+          .end         = 0 });
 }
 
 void
@@ -608,6 +611,9 @@ rocprofsys_init_library_hidden()
         return;
     }
 
+    // Runs again on re-attach, so each attach session gets its own run clock.
+    output::registry::instance().start_new_session();
+
     auto const _thread_state_guard = state::thread::scoped(state::thread::Internal);
 
     if(_debug_init)
@@ -739,11 +745,13 @@ rocprofsys_init_tooling_hidden(void)
     (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
 
         component::mpi_gotcha::subscribe_to_init_event([](int rank, int size) {
-            nlohmann::json _environment_json;
-            _environment_json["MPI_COMM_WORLD_SIZE"] = size;
-            _environment_json["MPI_COMM_WORLD_RANK"] = rank;
+            // Captured again rather than reusing the preinit snapshot: it is a cheap walk
+            // of environ, and MPI_Init replaces the stored environment as a whole.
+            auto environment                   = capture_process_environment();
+            environment["MPI_COMM_WORLD_RANK"] = rank;
+            environment["MPI_COMM_WORLD_SIZE"] = size;
 
-            set_metadata_environment_json(_environment_json.dump());
+            set_metadata_environment_json(dump_environment(environment));
         });
 #endif
 
@@ -818,7 +826,7 @@ rocprofsys_init_tooling_hidden(void)
                     std::chrono::duration<double>{ spec.duration });
 
                 // Safety-net subscriber for category-traited recording paths
-                // (timemory storage, perfetto trace_events from callbacks not
+                // (timemory storage, trace-cache events from callbacks not
                 // covered by a subsystem pause subscriber).
                 get_control_session()->subscribe(
                     { .on_pause =
@@ -859,7 +867,7 @@ rocprofsys_init_tooling_hidden(void)
                     control::scope::sampling);
             }
 
-            rocprofiler_sdk::create_roctx_client();
+            rocprofiler_sdk::create_roctx_trigger();
         }
 
         state::process::set(
@@ -913,13 +921,6 @@ rocprofsys_init_tooling_hidden(void)
         sampling::block_signals();
     }
 
-    // perfetto initialization
-    if(get_use_perfetto())
-    {
-        LOG_DEBUG("Setting up Perfetto...");
-        rocprofsys::perfetto::setup();
-    }
-
     if(get_use_causal())
     {
         causal::start_experimenting();
@@ -956,17 +957,8 @@ rocprofsys_init_tooling_hidden(void)
         }
     }
 
-    if(get_use_perfetto())
-    {
-        LOG_DEBUG("Starting Perfetto...");
-        rocprofsys::perfetto::start();
-    }
-
     categories::setup();
 
-    // if static objects are destroyed in the inverse order of when they are
-    // created this should ensure that finalization is called before perfetto
-    // ends the tracing session
     static auto const _ensure_finalization = ensure_finalization();
 
     return true;
@@ -1107,7 +1099,8 @@ rocprofsys_finalize_hidden(void)
     // disable initialization callback
     threading::remove_callback(&ensure_initialization);
 
-    const bool _is_child = is_child_process();
+    const bool  is_child = is_child_process();
+    const pid_t pid      = getpid();
     state::thread::set(state::thread::Completed);
 
     // return if not active
@@ -1119,7 +1112,7 @@ rocprofsys_finalize_hidden(void)
 
     set_metadata_process_end_timestamp(control::clocks::timeline_ns<std::int64_t>());
 
-    if(_is_child)
+    if(is_child)
     {
         state::process::set(state::process::Finalized);
 
@@ -1135,7 +1128,7 @@ rocprofsys_finalize_hidden(void)
         const auto _agents  = get_agent_manager_instance().get_agents();
         _manager.shutdown();
         const auto metadata_filepath =
-            trace_cache::utility::get_metadata_filepath(get_root_process_id(), getpid());
+            trace_cache::utility::get_metadata_filepath(get_root_process_id(), pid);
         _manager.get_metadata_registry().save_to_file(metadata_filepath, _agents);
 
         std::quick_exit(EXIT_SUCCESS);
@@ -1390,16 +1383,12 @@ rocprofsys_finalize_hidden(void)
         sampling::post_process();
     }
 
-    auto _output_registry = output_file_registry{};
-
     if(get_use_causal())
     {
         LOG_DEBUG("Registering causal output files...");
         auto _base = config::get_causal_output_filename();
-        _output_registry.register_file(fmt::format("{}.json", _base),
-                                       output_format::causal_json);
-        _output_registry.register_file(fmt::format("{}.txt", _base),
-                                       output_format::causal_text);
+        output::registry::instance().register_file(fmt::format("{}.json", _base), pid);
+        output::registry::instance().register_file(fmt::format("{}.txt", _base), pid);
     }
 
     if(get_use_process_sampling())
@@ -1421,14 +1410,6 @@ rocprofsys_finalize_hidden(void)
     LOG_DEBUG("Flushing pending region cache entries...");
     rocprofsys_flush_pending_region_cache_hidden();
 
-    bool _perfetto_output_error = false;
-    if(get_use_perfetto())
-    {
-        LOG_DEBUG("Finalizing perfetto...");
-        rocprofsys::perfetto::post_process(_timemory_manager.get(),
-                                           _perfetto_output_error, _output_registry);
-    }
-
     {
         auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         _manager.shutdown();
@@ -1445,15 +1426,15 @@ rocprofsys_finalize_hidden(void)
             } };
         } };
 
-        _manager.post_process_bulk(_output_registry, _tracker);
+        _manager.post_process_bulk(_tracker);
     }
 
     if(_timemory_manager && _timemory_manager != nullptr)
     {
-        _timemory_manager->add_metadata([](auto& ar) {
-            auto _maps = tim::procfs::read_maps(process::get_id());
+        _timemory_manager->add_metadata([pid](auto& archive) {
+            auto maps  = tim::procfs::read_maps(pid);
             auto _libs = std::set<std::string>{};
-            for(auto& itr : _maps)
+            for(auto& itr : maps)
             {
                 auto&& _path = itr.pathname;
                 if(!_path.empty() && _path.at(0) != '[' && path::is_regular_file(_path))
@@ -1461,8 +1442,8 @@ rocprofsys_finalize_hidden(void)
                     _libs.emplace(_path);
                 }
             }
-            ar(tim::cereal::make_nvp("memory_maps_files", _libs),
-               tim::cereal::make_nvp("memory_maps", _maps));
+            archive(tim::cereal::make_nvp("memory_maps_files", _libs),
+                    tim::cereal::make_nvp("memory_maps", maps));
         });
 
         static auto const* attach_add_session_id =
@@ -1508,30 +1489,25 @@ rocprofsys_finalize_hidden(void)
                     continue;
                 }
 
-                _output_registry.register_file(
-                    settings::compose_output_filename(_comp_name, "txt", _cfg),
-                    output_format::text, _comp_name);
-                _output_registry.register_file(
-                    settings::compose_output_filename(_comp_name, "json", _cfg),
-                    output_format::json, _comp_name);
+                output::registry::instance().register_file(
+                    settings::compose_output_filename(_comp_name, "txt", _cfg), pid);
+                output::registry::instance().register_file(
+                    settings::compose_output_filename(_comp_name, "json", _cfg), pid);
             }
         }
     }
 
     if(config::output_filtering::is_log_output_enabled_for_current_mpi_rank())
     {
-        _output_registry.print_summary();
+        output::registry::instance().record_process(output::process_metadata{
+            .pid = pid, .ppid = getppid(), .command = config::get_exe_name() });
+
+        std::cout << output::registry::instance().format_summary();
     }
 
     categories::shutdown();
 
     _finalization.stop();
-
-    if(_perfetto_output_error)
-    {
-        throw std::runtime_error(fmt::format("Error opening perfetto output file: {}",
-                                             get_perfetto_output_filename()));
-    }
 
     if(_push_count > _pop_count)
     {
@@ -1579,9 +1555,6 @@ rocprofsys_reset_for_reattach_hidden(void)
 
 namespace
 {
-// if static objects are destroyed randomly (relatively uncommon behavior)
-// this might call finalization before perfetto ends the tracing session
-// but static variable in rocprofsys_init_tooling_hidden is more likely
 auto _ensure_finalization = ensure_finalization(true);
 auto _manager             = tim::manager::instance();
 auto _settings            = tim::settings::shared_instance();

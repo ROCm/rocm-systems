@@ -32,7 +32,11 @@ communicator and window setup. The validated AMD path is ``GIN_IB_PROXY``:
    export NCCL_GIN_TYPE=2
    export NCCL_CUMEM_ENABLE=1
    export NCCL_DMABUF_ENABLE=1
-   export NCCL_IB_MERGE_NICS=0
+
+NIC fusion does not have to be disabled, and enabling it has no effect on GIN
+either way: GIN and the host RMA proxy build no vNICs of their own and keep
+using the physical devices, so fusion aggregates bandwidth for the regular
+transport only.
 
 The ROCm runtime and NIC driver must support exporting and registering VMM
 allocations. ``NCCL_DMABUF_ENABLE=1`` is the validated registration path;
@@ -264,10 +268,13 @@ indexed GIN resources.
 ``NCCL_GIN_IB_TC``, added in upstream NCCL 2.30.7, applies to the connections
 of the IB proxy backend (``NCCL_GIN_TYPE=2``). The one-sided host RMA
 operations run on the same backend and use the same traffic class. The
-rocSHMEM GDA backend (``NCCL_GIN_TYPE=6``) doesn't read ``NCCL_GIN_IB_TC``,
-``NCCL_IB_TC``, or ``ginTrafficClass``; its queue pairs take their traffic
-class from ``ROCSHMEM_GDA_TRAFFIC_CLASS``. Anvil SDMA (``NCCL_GIN_TYPE=7``)
-moves data within a node without a NIC, so traffic class doesn't apply to it.
+rocSHMEM GDA backend (``NCCL_GIN_TYPE=6``) also honors it: its RoCE queue
+pairs take their traffic class from ``NCCL_GIN_IB_TC`` when set, then from
+``NCCL_IB_TC``, and only then from the host communicator traffic class.
+Unlike the IB proxy backend, the GDA backend does not consult the
+device-communicator ``ginTrafficClass``, because its queue pairs are created
+before that value is available. The ``ROCSHMEM_GDA_TRAFFIC_CLASS`` environment
+variable no longer affects RCCL-driven GIN-GDA queue pairs.
 
 The 128-byte, versioned GIN proxy descriptor and per-context proxy progress are
 internal implementation details and require no application configuration.

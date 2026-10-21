@@ -12,13 +12,20 @@
 
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
+#include <map>
+#include <vector>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <atomic>
+#include <chrono>
 #include <unistd.h>
 
 #include <gtest/gtest.h>
 
+#include "accl_profiler.h"
 #include "accl_shim.h"
 #include "common/ProcessIsolatedTestRunner.hpp"
 
@@ -26,6 +33,16 @@
 extern "C" {
   int test_acclDatatypeSize(const char* dt);
   double test_acclBusBwFactor(const char* func, int nRanks);
+  size_t test_acclParseMinSize(const char* env, int* bad);
+  int  test_acclRefCount(void* ctx);
+  void test_acclMarkFinalized(void* coll);
+  void test_acclFreeColl(void* ctx, void* coll);
+  int  test_acclCollSlot(void* ctx, void* coll);
+  int  test_acclProxyOpSlot(void* ctx, void* op);
+  int  test_acclProxyOpMutexDestroyed(void* ctx, int slot);
+  void test_acclWriteDummyRecord(void* ctx);
+  int  test_acclOutputFd(void* ctx);
+  unsigned long test_acclProxyOpGeneration(void* ctx, int slot);
 }
 extern ncclResult_t acclPluginInit(void**, uint64_t, int*, const char*,
                                    int, int, int, ncclDebugLogger_t);
@@ -43,19 +60,156 @@ namespace RcclUnitTesting {
 // Shared helpers for the lifecycle tests
 // =========================================================================
 
-// Returns the plugin's whole JSONL output for `commHashHex`, or "" if absent.
-// Must be called inside the isolated child, since the filename embeds its pid.
-static std::string ReadProfilerOutput(const char* dir, const char* commHashHex) {
+// Per-test profiler output directory, unique to this process.
+//
+// The plugin creates ACCL_PROFILER_OUTPUT_DIR itself (mkdir 0755) and never
+// removes it, so a fixed path such as /tmp/accl_test_lifecycle ends up owned by
+// whichever user ran the suite first; every later user's fopen() then fails and
+// the tests that read their own output fail for unrelated reasons.  mkdtemp()
+// gives each run its own directory, which teardown removes recursively.
+//
+// RUN_ISOLATED_TEST_WITH_ENV fork+execv's a fresh copy of this binary, so the
+// child re-runs the whole TEST() body.  The child must therefore adopt the
+// directory the parent passed down in the environment instead of creating a
+// second one, or the reader and the plugin would disagree on the path.
+class ScopedProfilerDir {
+ public:
+  explicit ScopedProfilerDir(const char* tag) {
+    if (getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar) != nullptr) {
+      const char* inherited = getenv("ACCL_PROFILER_OUTPUT_DIR");
+      if (inherited) path_ = inherited;
+      return;
+    }
+    std::string tmpl = std::string("/tmp/accl_test_") + tag + "_XXXXXX";
+    std::vector<char> buf(tmpl.c_str(), tmpl.c_str() + tmpl.size() + 1);
+    const char* made = mkdtemp(buf.data());
+    EXPECT_NE(made, nullptr)
+        << "mkdtemp(" << tmpl << ") failed: " << strerror(errno);
+    if (made) {
+      path_ = made;
+      owner_ = true;
+    }
+  }
+
+  ScopedProfilerDir(const ScopedProfilerDir&) = delete;
+  ScopedProfilerDir& operator=(const ScopedProfilerDir&) = delete;
+
+  // Runs only in the parent, and only after executeAllTests() has reaped the
+  // child, so no writer can still be holding a file open in here.
+  ~ScopedProfilerDir() {
+    if (!owner_) return;
+    std::error_code ec;
+    // Recursive: the plugin writes one .jsonl per rank into the directory.
+    std::filesystem::remove_all(path_, ec);
+  }
+
+  const std::string& path() const { return path_; }
+  const char* c_str() const { return path_.c_str(); }
+
+ private:
+  std::string path_;
+  bool owner_ = false;
+};
+
+// Tests that point ACCL_PROFILER_OUTPUT_DIR *below* the mkdtemp root cannot
+// recover that root from ScopedProfilerDir in the re-exec'd child, because there
+// it adopts ACCL_PROFILER_OUTPUT_DIR — the derived path, not the root. They pass
+// the root down in this variable instead.
+static const char kProfilerRootEnvVar[] = "ACCL_TEST_PROFILER_ROOT";
+
+// The mkdtemp root for the current process, parent or re-exec'd child.
+static std::string ProfilerDirRoot(const ScopedProfilerDir& dir) {
+    const char* inherited = getenv(kProfilerRootEnvVar);
+    return inherited ? std::string(inherited) : dir.path();
+}
+
+// The path the plugin writes for `commHashHex` under `dir`. Must be called
+// inside the isolated child, since the filename embeds its pid.
+static std::string ProfilerOutputPath(const char* dir, const char* commHashHex) {
     char hostname[256] = {0};
     gethostname(hostname, sizeof(hostname) - 1);
     char path[1024];
     snprintf(path, sizeof(path), "%s/accl_profiler_rank0_%s_pid%d_%s.jsonl",
              dir, hostname, (int)getpid(), commHashHex);
-    std::ifstream ifs(path);
+    return std::string(path);
+}
+
+// Number of currently-open descriptors pointing at `path`, via /proc/self/fd.
+// Used to observe the FILE* itself rather than a proxy for it.
+static int OpenFdCountFor(const std::string& path) {
+    int n = 0;
+    std::error_code ec;
+    std::filesystem::directory_iterator it("/proc/self/fd", ec);
+    if (ec) return -1;
+    for (const auto& entry : it) {
+        std::error_code lec;
+        const auto target = std::filesystem::read_symlink(entry.path(), lec);
+        if (!lec && target.string() == path) n++;
+    }
+    return n;
+}
+
+// Returns the plugin's whole JSONL output for `commHashHex`, or "" if absent.
+static std::string ReadProfilerOutput(const char* dir, const char* commHashHex) {
+    std::ifstream ifs(ProfilerOutputPath(dir, commHashHex));
     if (!ifs.good()) return std::string();
     std::stringstream ss;
     ss << ifs.rdbuf();
     return ss.str();
+}
+
+// Returns the first per-collective record in `commHashHex`'s file, or "" if
+// the run emitted none. finalize() always appends a summary line, so a
+// non-empty file does not by itself mean a collective was profiled; select on
+// the "coll_perf" key rather than taking the first line.
+static std::string ReadCollRecord(const char* dir, const char* commHashHex) {
+    std::istringstream lines(ReadProfilerOutput(dir, commHashHex));
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line.find("\"coll_perf\"") != std::string::npos) return line;
+    }
+    return std::string();
+}
+
+// Returns the LAST summary line in `commHashHex`'s file -- the one finalize
+// wrote -- or "" if absent.
+static std::string ReadSummaryLine(const char* dir, const char* commHashHex) {
+    std::istringstream lines(ReadProfilerOutput(dir, commHashHex));
+    std::string line, summary;
+    // Deliberately no break: keep overwriting so we end up holding the last.
+    while (std::getline(lines, line)) {
+        if (line.find("\"summary\"") != std::string::npos) summary = line;
+    }
+    return summary;
+}
+
+// Returns the numeric value of "key":<number> in `json`, or -1 if absent.
+static double JsonNumber(const std::string& json, const char* key) {
+    std::string needle = std::string("\"") + key + "\":";
+    size_t pos = json.find(needle);
+    if (pos == std::string::npos) return -1;
+    return strtod(json.c_str() + pos + needle.size(), nullptr);
+}
+
+// Every loss counter the summary carries, in emission order.
+static const char* const kSummaryCounters[] = {
+    "dropped_collectives", "leaked_collectives", "inflight_collectives",
+    "dropped_proxy_ops", "dropped_proxy_steps", "overflow_proxy_ops",
+    "stale_proxy_steps", "outstanding_proxy_ops", "outstanding_proxy_steps"};
+
+// Checks the whole counter vector, not just the one a test is named for:
+// "complete":false is cleared by any non-zero counter, so a test that asserts
+// only its own would still pass if a different channel had fired instead.
+// Counters absent from `expected` must read 0.
+static void ExpectSummaryCounters(
+    const std::string& summary,
+    const std::map<std::string, double>& expected) {
+    for (const char* key : kSummaryCounters) {
+        auto it = expected.find(key);
+        const double want = (it == expected.end()) ? 0.0 : it->second;
+        EXPECT_EQ(JsonNumber(summary, key), want)
+            << key << " in summary: " << summary;
+    }
 }
 
 // Fills a Coll event descriptor with the fields every lifecycle test needs.
@@ -70,6 +224,60 @@ static void MakeCollDescr(ncclProfilerEventDescr_v5_t* d, uint8_t nChannels,
     d->coll.count = count;
     d->coll.seqNumber = seqNumber;
     d->coll.nChannels = nChannels;
+}
+
+// Fills a KernelCh event descriptor parented to `collHandle`.
+static void MakeKernelChDescr(ncclProfilerEventDescr_v5_t* d, void* collHandle,
+                              int channelId, uint64_t pTimer) {
+    memset(d, 0, sizeof(*d));
+    d->type = ncclProfileKernelCh;
+    d->parentObj = collHandle;
+    d->kernelCh.channelId = channelId;
+    d->kernelCh.pTimer = pTimer;
+}
+
+// Fills a ProxyOp event descriptor parented to `collHandle`. Hand-built copies
+// of this had already drifted apart on peer and channelId.
+static void MakeProxyOpDescr(ncclProfilerEventDescr_v5_t* d, void* collHandle,
+                             int channelId, int peer, int nSteps, int isSend) {
+    memset(d, 0, sizeof(*d));
+    d->type = ncclProfileProxyOp;
+    d->parentObj = collHandle;
+    d->proxyOp.channelId = channelId;
+    d->proxyOp.peer = peer;
+    d->proxyOp.nSteps = nSteps;
+    d->proxyOp.isSend = isSend;
+}
+
+// Fills a ProxyStep event descriptor parented to `opHandle`.
+static void MakeProxyStepDescr(ncclProfilerEventDescr_v5_t* d, void* opHandle,
+                               int step) {
+    memset(d, 0, sizeof(*d));
+    d->type = ncclProfileProxyStep;
+    d->parentObj = opHandle;
+    d->proxyStep.step = step;
+}
+
+// Drives one single-channel collective to completion and returns its coll
+// handle, or nullptr if the size filter rejected it at start.
+static void* RunSingleChannelColl(void* ctx, uint64_t seqNumber, size_t count) {
+    ncclProfilerEventDescr_v5_t cd;
+    MakeCollDescr(&cd, /*nChannels=*/1, seqNumber, count);
+    void* coll = nullptr;
+    EXPECT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+    if (!coll) return nullptr;
+
+    ncclProfilerEventDescr_v5_t kd;
+    MakeKernelChDescr(&kd, coll, /*channelId=*/0, /*pTimer=*/1000000);
+    void* kch = nullptr;
+    EXPECT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
+    EXPECT_EQ(acclPluginStopEvent(coll), 0);
+    ncclProfilerEventStateArgs_v5_t sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.kernelCh.pTimer = 1010000;
+    EXPECT_EQ(acclPluginRecordEventState(kch, ncclProfilerKernelChStop, &sa), 0);
+    EXPECT_EQ(acclPluginStopEvent(kch), 0);
+    return coll;
 }
 
 // =========================================================================
@@ -171,13 +379,130 @@ TEST(AcclProfilerInit, InitAndFinalize) {
     );
 }
 
+// A multi-level ACCL_PROFILER_OUTPUT_DIR is what README.md documents, and a
+// plain mkdir() only ever creates the last component: with two levels missing
+// it fails ENOENT, fopen() then fails, and the whole run writes nothing while
+// the activation mask still drives the full event stream into the plugin.
+TEST(AcclProfilerInit, NestedOutputDirIsCreated) {
+    ScopedProfilerDir dir("nesteddir");
+    // The re-exec'd child's ScopedProfilerDir adopts ACCL_PROFILER_OUTPUT_DIR,
+    // which by then is already the nested path, so deriving `nested` from it a
+    // second time would nest twice. Carry the root in its own variable instead.
+    const std::string root = ProfilerDirRoot(dir);
+    // Two levels below the mkdtemp root: one mkdir() cannot reach this.
+    const std::string nested = root + "/a/b";
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerInit.NestedOutputDirIsCreated",
+        [&nested]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD112, &mask, "nested_dir_test",
+                                     1, 1, 0, nullptr), 0);
+            ASSERT_NE(ctx, nullptr);
+            test_acclWriteDummyRecord(ctx);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            const std::string out = ReadProfilerOutput(nested.c_str(), "0xd112");
+            ASSERT_FALSE(out.empty())
+                << "no output file under " << nested
+                << ": the plugin did not create the nested directory";
+            EXPECT_NE(out.find("\"summary\""), std::string::npos);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", nested}, {kProfilerRootEnvVar, root}}
+    );
+}
+
+// getenv() returns a non-NULL pointer for a set-but-empty variable, so a plain
+// !outDir check left outDir == "" and every rank assembled
+// "/accl_profiler_rank*.jsonl" at the filesystem root: EACCES unprivileged, and
+// silently successful as root in a container. Both are quiet — ACCL_WARN is
+// level WARN and the RCCL default with NCCL_DEBUG unset is ERROR — so an empty
+// value has to fall back to the same /tmp the unset case uses.
+TEST(AcclProfilerInit, EmptyOutputDirFallsBackToTmp) {
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerInit.EmptyOutputDirFallsBackToTmp",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD113, &mask, "empty_dir_test",
+                                     1, 1, 0, nullptr), 0);
+            ASSERT_NE(ctx, nullptr);
+            test_acclWriteDummyRecord(ctx);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            // "" as a directory makes ReadProfilerOutput look at "/...", which
+            // is exactly where the unfixed plugin wrote.
+            EXPECT_TRUE(ReadProfilerOutput("", "0xd113").empty())
+                << "plugin wrote to the filesystem root";
+            EXPECT_FALSE(ReadProfilerOutput("/tmp", "0xd113").empty())
+                << "empty ACCL_PROFILER_OUTPUT_DIR did not fall back to /tmp";
+
+            // No ScopedProfilerDir owns /tmp, so remove our own file. The name
+            // carries this pid and the comm hash, so nothing else can match.
+            std::error_code ec;
+            std::filesystem::remove(ProfilerOutputPath("/tmp", "0xd113"), ec);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", ""}}
+    );
+}
+
+// An ACCL_PROFILER_OUTPUT_DIR long enough to truncate the assembled path must
+// be refused, not written to. Truncation cuts the rank/pid/hash suffix — and,
+// once the directory alone exceeds the buffer, the trailing path component too
+// — so the plugin used to silently create one mangled non-.jsonl file that
+// accl_report.py's *.jsonl glob can never find.
+TEST(AcclProfilerInit, OverlongOutputDirWritesNothing) {
+    ScopedProfilerDir dir("longdir");
+    const std::string root = ProfilerDirRoot(dir);
+    // 1024 is sizeof(acclCommContext::outputPath); build past it out of
+    // components each well under NAME_MAX so the directory itself is legal.
+    std::string deep = root;
+    for (int i = 0; deep.size() < 1100; i++) {
+        deep += "/" + std::string(200, static_cast<char>('a' + i));
+    }
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerInit.OverlongOutputDirWritesNothing",
+        [&root, &deep]() {
+            std::error_code ec;
+            // Create it here, not via the plugin: the point under test is the
+            // truncation, so the directory must already exist either way.
+            std::filesystem::create_directories(deep, ec);
+            ASSERT_FALSE(ec) << "could not create " << deep.size()
+                             << "-char directory: " << ec.message();
+
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD1E7, &mask, "long_dir_test",
+                                     1, 1, 0, nullptr), 0);
+            ASSERT_NE(ctx, nullptr);
+            test_acclWriteDummyRecord(ctx);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            // Nothing anywhere under the temp root: a truncated path can land
+            // in any ancestor directory, not just the one that was requested.
+            std::vector<std::string> created;
+            for (const auto& e :
+                 std::filesystem::recursive_directory_iterator(root, ec)) {
+                if (e.is_regular_file()) {
+                    created.push_back(e.path().filename().string());
+                }
+            }
+            EXPECT_TRUE(created.empty())
+                << "an overlong output dir still produced " << created.size()
+                << " file(s), first: " << (created.empty() ? "" : created[0]);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", deep}, {kProfilerRootEnvVar, root}}
+    );
+}
+
 // =========================================================================
 // Full lifecycle: Coll → KernelCh → stop → finalize → check output JSONL
 // =========================================================================
 TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
+    ScopedProfilerDir dir("lifecycle");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.CollWithKernelChProducesOutput",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0xBEEF, &mask, "lifecycle_test",
@@ -231,12 +556,8 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             // Verify output file contains valid JSONL
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "/tmp/accl_test_lifecycle/accl_profiler_rank0_%s_pid%d_0xbeef.jsonl",
-                hostname, (int)getpid());
+            const std::string path =
+                ProfilerOutputPath(ProfilerDirRoot(dir).c_str(), "0xbeef");
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
             std::string line;
@@ -253,7 +574,264 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
             EXPECT_NE(line.find("\"coll_timing_source\":\"gpu_globaltimer\""),
                        std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_lifecycle"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// ACCL_PROFILER_MIN_SIZE_BYTES: collectives below the threshold are dropped at
+// start, and one exactly at the threshold is kept.
+//
+// Every other test leaves the variable unset, so gMinMsgSize is 0 and both the
+// comparison and its inverse hold for every size those tests use — deleting the
+// filter outright does not move them.  The equal case is a separate collective
+// because the comparison is a strict `<`: a `<=` typo would still drop 4096 B
+// and still keep 16384 B, so only the 8192 B collective can see it.
+//
+// The threshold is read once per acclPluginInit() into that comm's context; the
+// isolated runner fork+execv's /proc/self/exe, so the child re-reads the
+// environment from scratch.
+// =========================================================================
+TEST(AcclProfilerMinSize, DropsBelowThresholdAndKeepsEqual) {
+    ScopedProfilerDir dir("minsize");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerMinSize.DropsBelowThresholdAndKeepsEqual",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x5127, &mask, "minsize_test",
+                                     1, 2, 0, nullptr), 0);
+            ASSERT_NE(ctx, nullptr);
+
+            auto runColl = [&](uint64_t seqNumber, size_t count) -> void* {
+                return RunSingleChannelColl(ctx, seqNumber, count);
+            };
+
+            // MakeCollDescr uses ncclFloat32, which acclDatatypeSize reports as
+            // 4 bytes, so count scales by 4: 1024 -> 4096 B, 2048 -> 8192 B,
+            // 4096 -> 16384 B against a threshold of 8192.
+            EXPECT_EQ(runColl(/*seqNumber=*/80, /*count=*/1024), nullptr)
+                << "4096 B is below ACCL_PROFILER_MIN_SIZE_BYTES=8192 and must "
+                   "be rejected with a NULL handle";
+            EXPECT_NE(runColl(/*seqNumber=*/81, /*count=*/2048), nullptr)
+                << "8192 B is exactly the threshold and the comparison is a "
+                   "strict `<`, so this collective must be profiled";
+            EXPECT_NE(runColl(/*seqNumber=*/82, /*count=*/4096), nullptr)
+                << "16384 B is above the threshold and must be profiled";
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string out = ReadProfilerOutput(dir.c_str(), "0x5127");
+            ASSERT_FALSE(out.empty()) << "No profiler output produced";
+
+            // Count coll records only: finalize() always appends a summary line.
+            int records = 0;
+            std::istringstream lines(out);
+            std::string line;
+            while (std::getline(lines, line)) {
+                if (line.find("\"coll_perf\"") != std::string::npos) records++;
+            }
+            EXPECT_EQ(records, 2)
+                << "Expected the two admitted collectives only, got " << records
+                << ":\n" << out;
+
+            EXPECT_EQ(out.find("\"coll_sn\":80"), std::string::npos)
+                << "The filtered collective must not reach the JSONL: " << out;
+            EXPECT_EQ(out.find("\"coll_msg_size_bytes\":4096"),
+                      std::string::npos) << out;
+            EXPECT_NE(out.find("\"coll_msg_size_bytes\":8192"),
+                      std::string::npos)
+                << "The at-threshold collective is missing: " << out;
+            EXPECT_NE(out.find("\"coll_msg_size_bytes\":16384"),
+                      std::string::npos)
+                << "The above-threshold collective is missing: " << out;
+
+            // A size-filtered collective is never allocated, so it must not be
+            // counted as lost — the summary still describes a clean run.
+            std::string s = ReadSummaryLine(dir.c_str(), "0x5127");
+            ASSERT_FALSE(s.empty()) << "no summary line was written";
+            EXPECT_NE(s.find("\"complete\":true"), std::string::npos)
+                << "a size-filtered collective was miscounted as lost: " << s;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()},
+         {"ACCL_PROFILER_MIN_SIZE_BYTES", "8192"}}
+    );
+}
+
+// =========================================================================
+// The size threshold belongs to the communicator that read it.
+//
+// ACCL_PROFILER_MIN_SIZE_BYTES used to land in a file static, so the last
+// acclPluginInit() in the process decided the filter for every communicator,
+// including ones created earlier: a second comm created with the variable unset
+// silently inherited the first comm's threshold (the assignment is conditional,
+// so an unset variable does not even reset it), and the minSize= each comm had
+// already echoed in its own init log no longer described what it applied.
+//
+// Reaching that needs a setenv between two communicator creations in one
+// process, which no RCCL path performs -- the environment is normally fixed for
+// the life of the process, every comm reads the same number, and last-init-wins
+// is invisible. The test does it explicitly because that is the property the
+// per-context field establishes, not because a caller stumbles into it.
+// =========================================================================
+TEST(AcclProfilerMinSize, ThresholdIsPerCommunicator) {
+    ScopedProfilerDir dir("minsize_percomm");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerMinSize.ThresholdIsPerCommunicator",
+        [&dir]() {
+            // 1024 x ncclFloat32 is 4096 B; reports whether it was admitted.
+            auto runSmallColl = [](void* ctx, uint64_t seqNumber) -> bool {
+                return RunSingleChannelColl(ctx, seqNumber, /*count=*/1024)
+                       != nullptr;
+            };
+
+            // Comm A is created with a threshold above the 4096 B collective.
+            ASSERT_EQ(setenv("ACCL_PROFILER_MIN_SIZE_BYTES", "8192", 1), 0);
+            void* ctxA = nullptr;
+            int maskA = 0;
+            ASSERT_EQ(acclPluginInit(&ctxA, 0x5128, &maskA, "minsize_comm_a",
+                                     1, 2, 0, nullptr), 0);
+            ASSERT_NE(ctxA, nullptr);
+
+            // Comm B is created with no threshold at all and must profile
+            // everything. Unsetting also covers the conditional assignment: a
+            // file static keeps its old value when the getenv returns NULL.
+            ASSERT_EQ(unsetenv("ACCL_PROFILER_MIN_SIZE_BYTES"), 0);
+            void* ctxB = nullptr;
+            int maskB = 0;
+            ASSERT_EQ(acclPluginInit(&ctxB, 0x5129, &maskB, "minsize_comm_b",
+                                     1, 2, 0, nullptr), 0);
+            ASSERT_NE(ctxB, nullptr);
+
+            EXPECT_TRUE(runSmallColl(ctxB, /*seqNumber=*/90))
+                << "comm B was created with ACCL_PROFILER_MIN_SIZE_BYTES unset, "
+                   "so its threshold is 0 and a 4096 B collective must be "
+                   "profiled; it inherited comm A's 8192 B threshold instead";
+
+            // The reverse direction: comm A must still enforce the threshold it
+            // read, so comm B's creation cannot have relaxed it either.
+            EXPECT_FALSE(runSmallColl(ctxA, /*seqNumber=*/91))
+                << "comm A read ACCL_PROFILER_MIN_SIZE_BYTES=8192 and must keep "
+                   "dropping 4096 B collectives after comm B was created";
+
+            ASSERT_EQ(acclPluginFinalize(ctxA), 0);
+            ASSERT_EQ(acclPluginFinalize(ctxB), 0);
+
+            // Each comm writes its own file, keyed by commHash.
+            const std::string recB = ReadCollRecord(dir.c_str(), "0x5129");
+            ASSERT_FALSE(recB.empty()) << "comm B emitted no collective record";
+            EXPECT_NE(recB.find("\"coll_sn\":90"), std::string::npos) << recB;
+
+            EXPECT_TRUE(ReadCollRecord(dir.c_str(), "0x5128").empty())
+                << "comm A emitted a record for a collective below its own "
+                   "threshold";
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// acclParseMinSize — ACCL_PROFILER_MIN_SIZE_BYTES validation.
+//
+// The threshold used to go through atol(), whose failure modes are all silent.
+// The dangerous direction is a value that comes out ENORMOUS: every collective
+// then fails the `<` filter, every start hands back a NULL handle, nothing is
+// ever allocated, and finalize writes a summary reporting zero drops over zero
+// records. The output file looks like a clean run of a job that did no
+// collectives. "-1" reaches that through the unsigned conversion and an
+// over-long digit string reaches it through atol()'s saturation to LONG_MAX.
+// =========================================================================
+struct MinSizeParseCase {
+    const char* input;
+    int         expectBad;
+    size_t      expectValue;
+};
+
+class AcclParseMinSizeTest
+    : public ::testing::TestWithParam<MinSizeParseCase> {};
+
+TEST_P(AcclParseMinSizeTest, MatchesExpected) {
+    const MinSizeParseCase& c = GetParam();
+    int bad = -1;
+    size_t got = test_acclParseMinSize(c.input, &bad);
+    EXPECT_EQ(bad, c.expectBad) << "input: \"" << c.input << "\"";
+    EXPECT_EQ(got, c.expectValue) << "input: \"" << c.input << "\"";
+}
+
+INSTANTIATE_TEST_SUITE_P(Values, AcclParseMinSizeTest, ::testing::Values(
+    // Accepted.
+    MinSizeParseCase{"0", 0, 0},
+    MinSizeParseCase{"8192", 0, 8192},
+    MinSizeParseCase{"  8192  ", 0, 8192},
+    // An all-blank value is the shell idiom for "off", so it is the default
+    // rather than an error.
+    MinSizeParseCase{"", 0, 0},
+    MinSizeParseCase{"   ", 0, 0},
+    // Rejected. Every one of these produced a usable-looking number from atol().
+    MinSizeParseCase{"-1", 1, 0},        // was SIZE_MAX: filters everything
+    MinSizeParseCase{"-8192", 1, 0},
+    // Same case reached through the rest of the whitespace class. strtoull
+    // skips all of it, so a skip loop that only knows ' ' and '\t' leaves the
+    // '-' for strtoull to wrap to ULLONG_MAX -- silently, without ERANGE.
+    MinSizeParseCase{"\n-1", 1, 0},
+    MinSizeParseCase{"\r-1", 1, 0},
+    MinSizeParseCase{"\v-1", 1, 0},
+    MinSizeParseCase{"\f-1", 1, 0},
+    MinSizeParseCase{"\n8192\n", 0, 8192},
+    MinSizeParseCase{"99999999999999999999999", 1, 0},  // was LONG_MAX: ditto
+    MinSizeParseCase{"abc", 1, 0},       // was 0, indistinguishable from a real 0
+    MinSizeParseCase{"0x2000", 1, 0},    // was 0, not 8192 as the writer meant
+    MinSizeParseCase{"8192garbage", 1, 0},  // was 8192, ignoring the tail
+    MinSizeParseCase{"8192 4096", 1, 0},
+    MinSizeParseCase{"8.5", 1, 0}
+));
+
+// End to end: a negative threshold must not silently swallow the whole run.
+// Before the validation this wrote a file holding nothing but a summary line
+// claiming "complete":true, which is the one thing the loss accounting on this
+// plugin is supposed to make impossible.
+TEST(AcclProfilerMinSize, NegativeThresholdDoesNotSwallowTheRun) {
+    ScopedProfilerDir dir("minsize_negative");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerMinSize.NegativeThresholdDoesNotSwallowTheRun",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x512A, &mask, "minsize_neg_test",
+                                     1, 2, 0, nullptr), 0);
+            ASSERT_NE(ctx, nullptr);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/95,
+                          /*count=*/1024);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr)
+                << "ACCL_PROFILER_MIN_SIZE_BYTES=-1 converted to SIZE_MAX and "
+                   "filtered out a 4096 B collective";
+
+            ncclProfilerEventDescr_v5_t kd;
+            MakeKernelChDescr(&kd, coll, /*channelId=*/0, /*pTimer=*/1000000);
+            void* kch = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
+            EXPECT_EQ(acclPluginStopEvent(coll), 0);
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 1010000;
+            EXPECT_EQ(acclPluginRecordEventState(
+                kch, ncclProfilerKernelChStop, &sa), 0);
+            EXPECT_EQ(acclPluginStopEvent(kch), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            const std::string rec = ReadCollRecord(dir.c_str(), "0x512a");
+            ASSERT_FALSE(rec.empty())
+                << "the run emitted no collective record at all, and its "
+                   "summary line still reads: "
+                << ReadSummaryLine(dir.c_str(), "0x512a");
+            EXPECT_NE(rec.find("\"coll_sn\":95"), std::string::npos) << rec;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()},
+         {"ACCL_PROFILER_MIN_SIZE_BYTES", "-1"}}
     );
 }
 
@@ -261,9 +839,10 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
 // ProxyOp refcount: verify proxy ops don't cause use-after-free
 // =========================================================================
 TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
+    ScopedProfilerDir dir("proxy");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.ProxyOpAfterKernelStopIsValid",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0xCAFE, &mask, "proxy_test",
@@ -297,13 +876,8 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
 
             // Start ProxyOp (referencing the same coll)
             ncclProfilerEventDescr_v5_t proxyDescr;
-            memset(&proxyDescr, 0, sizeof(proxyDescr));
-            proxyDescr.type = ncclProfileProxyOp;
-            proxyDescr.parentObj = collHandle;
-            proxyDescr.proxyOp.channelId = 0;
-            proxyDescr.proxyOp.peer = 1;
-            proxyDescr.proxyOp.nSteps = 1;
-            proxyDescr.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&proxyDescr, collHandle, /*channelId=*/0, /*peer=*/1,
+                             /*nSteps=*/1, /*isSend=*/1);
 
             void* proxyHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &proxyHandle, &proxyDescr), 0);
@@ -320,12 +894,7 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             // Verify the output JSONL carries proxy op data
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "/tmp/accl_test_proxy/accl_profiler_rank0_%s_pid%d_0xcafe.jsonl",
-                hostname, (int)getpid());
+            const std::string path = ProfilerOutputPath(dir.c_str(), "0xcafe");
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
             std::string line;
@@ -334,7 +903,7 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
                 << "Record must carry the proxy op that stopped after the kernel";
             EXPECT_NE(line.find("\"n_send_ops\":1"), std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_proxy"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
 }
 
@@ -342,9 +911,10 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
 // Pool exhaustion: full pool returns NULL and drops the collective
 // =========================================================================
 TEST(AcclProfilerLifecycle, PoolFullReturnsNull) {
+    ScopedProfilerDir dir("pool");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.PoolFullReturnsNull",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0xD00D, &mask, "pool_test",
@@ -388,7 +958,7 @@ TEST(AcclProfilerLifecycle, PoolFullReturnsNull) {
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_pool"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
 }
 
@@ -396,9 +966,10 @@ TEST(AcclProfilerLifecycle, PoolFullReturnsNull) {
 // Coll stop before KernelCh: verify no corrupt/duplicate records
 // =========================================================================
 TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
+    ScopedProfilerDir dir("ordering");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.CollStopBeforeAllChannels",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0xFACE, &mask, "ordering_test",
@@ -455,12 +1026,7 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             // Verify exactly one record with both channels
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "/tmp/accl_test_ordering/accl_profiler_rank0_%s_pid%d_0xface.jsonl",
-                hostname, (int)getpid());
+            const std::string path = ProfilerOutputPath(dir.c_str(), "0xface");
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
 
@@ -483,7 +1049,7 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
             EXPECT_NE(line.find("\"coll_timing_source\":\"gpu_globaltimer\""),
                        std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_ordering"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
 }
 
@@ -491,9 +1057,10 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
 // ProxyStep lifecycle: Coll → KernelCh → ProxyOp → ProxyStep → stop all
 // =========================================================================
 TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
+    ScopedProfilerDir dir("proxystep");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.FullProxyStepDecomposition",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0xA1B2, &mask, "proxystep_test",
@@ -516,32 +1083,21 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
 
             // Start KernelCh
             ncclProfilerEventDescr_v5_t kchDescr;
-            memset(&kchDescr, 0, sizeof(kchDescr));
-            kchDescr.type = ncclProfileKernelCh;
-            kchDescr.parentObj = collHandle;
-            kchDescr.kernelCh.channelId = 0;
-            kchDescr.kernelCh.pTimer = 5000000;
+            MakeKernelChDescr(&kchDescr, collHandle, /*channelId=*/0,
+                              /*pTimer=*/5000000);
             void* kchHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &kchHandle, &kchDescr), 0);
 
             // Start ProxyOp
             ncclProfilerEventDescr_v5_t proxyDescr;
-            memset(&proxyDescr, 0, sizeof(proxyDescr));
-            proxyDescr.type = ncclProfileProxyOp;
-            proxyDescr.parentObj = collHandle;
-            proxyDescr.proxyOp.channelId = 0;
-            proxyDescr.proxyOp.peer = 1;
-            proxyDescr.proxyOp.nSteps = 1;
-            proxyDescr.proxyOp.isSend = 1;
+            MakeProxyOpDescr(&proxyDescr, collHandle, /*channelId=*/0, /*peer=*/1,
+                             /*nSteps=*/1, /*isSend=*/1);
             void* proxyHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &proxyHandle, &proxyDescr), 0);
 
             // Start ProxyStep
             ncclProfilerEventDescr_v5_t stepDescr;
-            memset(&stepDescr, 0, sizeof(stepDescr));
-            stepDescr.type = ncclProfileProxyStep;
-            stepDescr.parentObj = proxyHandle;
-            stepDescr.proxyStep.step = 0;
+            MakeProxyStepDescr(&stepDescr, proxyHandle, /*step=*/0);
             void* stepHandle = nullptr;
             ASSERT_EQ(acclPluginStartEvent(ctx, &stepHandle, &stepDescr), 0);
 
@@ -572,12 +1128,7 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "/tmp/accl_test_proxystep/accl_profiler_rank0_%s_pid%d_0xa1b2.jsonl",
-                hostname, (int)getpid());
+            const std::string path = ProfilerOutputPath(dir.c_str(), "0xa1b2");
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
             std::string line;
@@ -585,7 +1136,356 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
             EXPECT_NE(line.find("\"n_proxy_ops\":1"), std::string::npos);
             EXPECT_NE(line.find("\"n_send_ops\":1"), std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_proxystep"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// Proxy-step state attribution: RCCL announces a state on ENTRY, so the
+// interval between two announcements belongs to the FIRST of the two.
+// Charging it to the state being entered shifts every bucket by one, hiding
+// the real GPU wait under proxy_peer_wait_us and dropping the trailing
+// SendWait interval entirely.
+// =========================================================================
+TEST(AcclProfilerLifecycle, ProxyStepIntervalsChargedToStateBeingLeft) {
+    ScopedProfilerDir dir("stateattr");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.ProxyStepIntervalsChargedToStateBeingLeft",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xC3D4, &mask, "stateattr_test",
+                                     1, 2, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t collDescr;
+            MakeCollDescr(&collDescr, 1, 31, 256);
+            void* collHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &collDescr), 0);
+
+            ncclProfilerEventDescr_v5_t kchDescr;
+            MakeKernelChDescr(&kchDescr, collHandle, /*channelId=*/0,
+                              /*pTimer=*/5000000);
+            void* kchHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kchHandle, &kchDescr), 0);
+
+            ncclProfilerEventDescr_v5_t proxyDescr;
+            MakeProxyOpDescr(&proxyDescr, collHandle, /*channelId=*/0, /*peer=*/1,
+                             /*nSteps=*/1, /*isSend=*/1);
+            void* proxyHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &proxyHandle, &proxyDescr), 0);
+
+            ncclProfilerEventDescr_v5_t stepDescr;
+            MakeProxyStepDescr(&stepDescr, proxyHandle, /*step=*/0);
+            void* stepHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &stepHandle, &stepDescr), 0);
+
+            // Mirror the send-side ordering in src/transport/net.cc: each state
+            // is announced as the step enters it, so the long sleep below is
+            // time spent waiting on the GPU, between SendGPUWait and
+            // SendPeerWait.
+            // kTrailUs differs from kShortUs on purpose: with both equal, the
+            // interval charge-on-entry would put in SendWait and the one
+            // charge-on-exit puts there are the same number, so the
+            // proxy_network_us assertion below could not tell them apart.
+            const int kLongUs = 40000;
+            const int kShortUs = 2000;
+            const int kTrailUs = 20000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                stepHandle, ncclProfilerProxyStepSendGPUWait, nullptr), 0);
+            usleep(kLongUs);
+            ASSERT_EQ(acclPluginRecordEventState(
+                stepHandle, ncclProfilerProxyStepSendPeerWait_v4, nullptr), 0);
+            usleep(kShortUs);
+            ASSERT_EQ(acclPluginRecordEventState(
+                stepHandle, ncclProfilerProxyStepSendWait, nullptr), 0);
+            usleep(kTrailUs);
+            ASSERT_EQ(acclPluginStopEvent(stepHandle), 0);
+
+            ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 5010000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                kchHandle, ncclProfilerKernelChStop, &sa), 0);
+            ASSERT_EQ(acclPluginStopEvent(kchHandle), 0);
+            ASSERT_EQ(acclPluginStopEvent(proxyHandle), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string out = ReadProfilerOutput(dir.c_str(), "0xc3d4");
+            ASSERT_FALSE(out.empty()) << "no profiler output in " << dir.path();
+
+            // One proxy op, so the per-op divisor is 1 and the JSON values are
+            // the raw accumulated microseconds.
+            const double half = kLongUs / 2.0;
+            EXPECT_GT(JsonNumber(out, "proxy_gpu_wait_us"), half)
+                << "the GPU wait must land in proxy_gpu_wait_us, not the next "
+                   "bucket: " << out;
+            EXPECT_LT(JsonNumber(out, "proxy_peer_wait_us"), half)
+                << "proxy_peer_wait_us must not absorb the preceding GPU wait: "
+                << out;
+            // The interval after the last announced state is only recovered if
+            // the stop path closes it. Charge-on-entry would put kShortUs here;
+            // charge-on-exit puts kTrailUs, so the midpoint separates them.
+            EXPECT_GT(JsonNumber(out, "proxy_network_us"),
+                      (kShortUs + kTrailUs) / 2.0)
+                << "the trailing SendWait interval must not be dropped: " << out;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// Proxy decomposition denominators
+//
+// A send op only ever passes through the send-side states and a recv op only
+// through the recv-side ones, so averaging a one-sided total over n_proxy_ops
+// scales it by that class's share of the op mix.  Drive a 4-send/4-recv
+// collective with known per-op state durations and check each component lands
+// on its per-class mean; dividing by n_proxy_ops would halve all four.
+// =========================================================================
+
+// Mirrors how src/transport/net.cc drives a step: announce the state on ENTRY,
+// then spend the time in it. The interval is charged to the state being left,
+// so each sleep below lands in the bucket named just above it, and the last
+// sleep of each side is closed by the step stop.
+//
+// Send side: 4 ms SendGPUWait, 3 ms SendPeerWait, 1 ms SendWait.
+// Recv side: 0.5 ms RecvWait, 5 ms RecvFlushWait, 2 ms RecvGPUWait.
+static void DriveProxyOpWithTimings(void* ctx, void* coll, int isSend,
+                                    void** opOut) {
+    ncclProfilerEventDescr_v5_t od;
+    MakeProxyOpDescr(&od, coll, /*channelId=*/0, /*peer=*/1,
+                     /*nSteps=*/1, /*isSend=*/isSend);
+    ASSERT_EQ(acclPluginStartEvent(ctx, opOut, &od), 0);
+
+    ncclProfilerEventDescr_v5_t sd;
+    MakeProxyStepDescr(&sd, *opOut, /*step=*/0);
+    void* step = nullptr;
+    ASSERT_EQ(acclPluginStartEvent(ctx, &step, &sd), 0);
+
+    if (isSend) {
+        ASSERT_EQ(acclPluginRecordEventState(
+            step, ncclProfilerProxyStepSendGPUWait, nullptr), 0);
+        usleep(4000);
+        ASSERT_EQ(acclPluginRecordEventState(
+            step, ncclProfilerProxyStepSendPeerWait_v4, nullptr), 0);
+        usleep(3000);
+        ASSERT_EQ(acclPluginRecordEventState(
+            step, ncclProfilerProxyStepSendWait, nullptr), 0);
+        usleep(1000);
+    } else {
+        ASSERT_EQ(acclPluginRecordEventState(
+            step, ncclProfilerProxyStepRecvWait, nullptr), 0);
+        usleep(500);
+        ASSERT_EQ(acclPluginRecordEventState(
+            step, ncclProfilerProxyStepRecvFlushWait, nullptr), 0);
+        usleep(5000);
+        ASSERT_EQ(acclPluginRecordEventState(
+            step, ncclProfilerProxyStepRecvGPUWait, nullptr), 0);
+        usleep(2000);
+    }
+    ASSERT_EQ(acclPluginStopEvent(step), 0);
+}
+
+// A proxy op or step still held at finalize keeps the context alive, and must:
+// that handle may still be delivered, since proxy events come straight from the
+// proxy progress thread, which is shared via comm->sharedRes and outlives one
+// comm's teardown. So the loss cannot be reclaimed -- it has to be REPORTED,
+// or a run that silently dropped proxy timing reads as clean. Three kinds never
+// reach acclFreeProxyOp/acclFreeProxyStep on their own: an op with no
+// collective parent, an op whose stop never arrives (coll->proxyOpIndices is
+// filled at op STOP, so the coll drain cannot see it), and any unstopped step.
+//
+// The output descriptor is a shared process limit rather than a fixed per-comm
+// cost, so it is released at finalize even though the context is not.
+TEST(AcclProfilerLifecycle, OutstandingProxyEventsAreReportedAtFinalize) {
+    ScopedProfilerDir dir("orphanproxy");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.OutstandingProxyEventsAreReportedAtFinalize",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD1D5, &mask, "orphan_proxy_test",
+                                     1, 8, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, 1, 41, 1);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr);
+
+            ncclProfilerEventDescr_v5_t od;
+            MakeProxyOpDescr(&od, coll, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
+            void* op = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
+            ASSERT_NE(op, nullptr);
+
+            // The same op with no collective parent: in no index list at all.
+            od.parentObj = nullptr;
+            void* parentlessOp = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &parentlessOp, &od), 0);
+            ASSERT_NE(parentlessOp, nullptr);
+
+            ncclProfilerEventDescr_v5_t sd;
+            MakeProxyStepDescr(&sd, op, /*step=*/0);
+            void* step = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &step, &sd), 0);
+            ASSERT_NE(step, nullptr);
+
+            // Deliberately no stop for any of the three.
+            const std::string path = ProfilerOutputPath(dir.c_str(), "0xd1d5");
+            ASSERT_EQ(OpenFdCountFor(path), 1)
+                << "plugin did not open " << path;
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            EXPECT_EQ(OpenFdCountFor(path), 0)
+                << "output file still open after finalize: a context held by an "
+                   "outstanding proxy event would hold the descriptor forever";
+
+            const std::string summary = ReadSummaryLine(dir.c_str(), "0xd1d5");
+            ASSERT_FALSE(summary.empty());
+            // Outstanding, not dropped or stale: nothing here was rejected.
+            // The collective is a leak too -- its op never stopped, so it never
+            // reached its completion predicate.
+            ExpectSummaryCounters(summary, {{"outstanding_proxy_ops", 2},
+                                            {"outstanding_proxy_steps", 1},
+                                            {"leaked_collectives", 1}});
+            // The loss has to reach the consumer; it cannot be reclaimed.
+            EXPECT_NE(summary.find("\"complete\":false"), std::string::npos);
+
+            // The other half of the contract: those handles are still live, so
+            // their late stops must find a context, not freed memory. Each
+            // releases its reference, and the last one tears the context down.
+            EXPECT_EQ(acclPluginStopEvent(step), 0);
+            EXPECT_EQ(acclPluginStopEvent(op), 0);
+            EXPECT_EQ(acclPluginStopEvent(parentlessOp), 0);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+TEST(AcclProfilerLifecycle, ProxyComponentsAveragedOverTheirOwnOpClass) {
+    ScopedProfilerDir dir("proxydenom");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.ProxyComponentsAveragedOverTheirOwnOpClass",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD1D0, &mask, "denom_test",
+                                     1, 8, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, 1, 31, 256);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+
+            ncclProfilerEventDescr_v5_t kd;
+            MakeKernelChDescr(&kd, coll, /*channelId=*/0, /*pTimer=*/1000000);
+            void* kch = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
+
+            // 6 send / 2 recv, not 4/4: with equal counts the two divisors are
+            // interchangeable, so swapping them would still produce the right
+            // numbers and this test would pass.
+            void* ops[8] = {nullptr};
+            for (int i = 0; i < 8; i++) {
+                DriveProxyOpWithTimings(ctx, coll, i < 6 ? 1 : 0, &ops[i]);
+                ASSERT_NE(ops[i], nullptr);
+            }
+
+            ASSERT_EQ(acclPluginStopEvent(coll), 0);
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 1010000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                kch, ncclProfilerKernelChStop, &sa), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch), 0);
+            for (int i = 0; i < 8; i++) {
+                ASSERT_EQ(acclPluginStopEvent(ops[i]), 0);
+            }
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            const std::string line = ReadCollRecord(dir.c_str(), "0xd1d0");
+            ASSERT_FALSE(line.empty());
+
+            EXPECT_EQ(JsonNumber(line, "n_proxy_ops"), 8);
+            EXPECT_EQ(JsonNumber(line, "n_send_ops"), 6);
+            EXPECT_EQ(JsonNumber(line, "n_recv_ops"), 2);
+
+            // usleep only guarantees a lower bound, so each window is
+            // [nominal, 2x nominal): wide enough for scheduling jitter, tight
+            // enough to exclude both the /n_proxy_ops value and a send/recv
+            // divisor swap.
+            struct { const char* key; double lo, hi; } expect[] = {
+                {"proxy_gpu_wait_us",      4000, 8000},
+                {"proxy_peer_wait_us",     3000, 6000},
+                {"proxy_flush_us",         5000, 10000},
+                {"proxy_gpu_recv_wait_us", 2000, 4000},
+                // One send op's network time plus one recv op's.
+                {"proxy_network_us",       1500, 3000},
+            };
+            for (auto& e : expect) {
+                double v = JsonNumber(line, e.key);
+                EXPECT_GE(v, e.lo) << e.key
+                    << " is below one op class's mean, so it was averaged over"
+                       " every proxy op instead of over its own class";
+                EXPECT_LT(v, e.hi) << e.key << " far above expected";
+            }
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// A send-only collective has n_recv_ops == 0. The recv-side numerators are 0
+// too, so those fields must read 0 rather than NaN or inf.
+TEST(AcclProfilerLifecycle, SendOnlyCollectiveReportsZeroRecvComponents) {
+    ScopedProfilerDir dir("sendonly");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.SendOnlyCollectiveReportsZeroRecvComponents",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xD1D1, &mask, "sendonly_test",
+                                     1, 8, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, 1, 32, 256);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+
+            ncclProfilerEventDescr_v5_t kd;
+            MakeKernelChDescr(&kd, coll, /*channelId=*/0, /*pTimer=*/1000000);
+            void* kch = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &kch, &kd), 0);
+
+            void* op = nullptr;
+            DriveProxyOpWithTimings(ctx, coll, 1, &op);
+            ASSERT_NE(op, nullptr);
+
+            ASSERT_EQ(acclPluginStopEvent(coll), 0);
+            ncclProfilerEventStateArgs_v5_t sa;
+            memset(&sa, 0, sizeof(sa));
+            sa.kernelCh.pTimer = 1010000;
+            ASSERT_EQ(acclPluginRecordEventState(
+                kch, ncclProfilerKernelChStop, &sa), 0);
+            ASSERT_EQ(acclPluginStopEvent(kch), 0);
+            ASSERT_EQ(acclPluginStopEvent(op), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            const std::string line = ReadCollRecord(dir.c_str(), "0xd1d1");
+            ASSERT_FALSE(line.empty());
+
+            EXPECT_EQ(JsonNumber(line, "n_recv_ops"), 0);
+            EXPECT_EQ(line.find("nan"), std::string::npos)
+                << "a zero op count must not reach a division: " << line;
+            EXPECT_EQ(line.find("inf"), std::string::npos) << line;
+            EXPECT_DOUBLE_EQ(JsonNumber(line, "proxy_flush_us"), 0.0);
+            EXPECT_DOUBLE_EQ(JsonNumber(line, "proxy_gpu_recv_wait_us"), 0.0);
+            EXPECT_GE(JsonNumber(line, "proxy_gpu_wait_us"), 4000);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
 }
 
@@ -595,9 +1495,10 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
 // launch gets channelIds starting where the first left off)
 // =========================================================================
 TEST(AcclProfilerLifecycle, AbsoluteChannelIdAboveNChannelsAccepted) {
+    ScopedProfilerDir dir("chbound");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.AbsoluteChannelIdAboveNChannelsAccepted",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0xCB01, &mask, "chbound_test",
@@ -654,7 +1555,7 @@ TEST(AcclProfilerLifecycle, AbsoluteChannelIdAboveNChannelsAccepted) {
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_chbound"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
 }
 
@@ -662,9 +1563,10 @@ TEST(AcclProfilerLifecycle, AbsoluteChannelIdAboveNChannelsAccepted) {
 // Kernel timing assertions: verify gpu_kernel_avg/min/max_us in output
 // =========================================================================
 TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
+    ScopedProfilerDir dir("ktime");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.KernelTimingFieldsPresent",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0xD1D2, &mask, "ktime_test",
@@ -715,12 +1617,7 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "/tmp/accl_test_ktime/accl_profiler_rank0_%s_pid%d_0xd1d2.jsonl",
-                hostname, (int)getpid());
+            const std::string path = ProfilerOutputPath(dir.c_str(), "0xd1d2");
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
             std::string line;
@@ -730,7 +1627,7 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
             EXPECT_NE(line.find("\"gpu_kernel_min_us\":100.00"), std::string::npos);
             EXPECT_NE(line.find("\"gpu_kernel_max_us\":200.00"), std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_ktime"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
 }
 
@@ -740,9 +1637,10 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
 // channels is delivered to the plugin as nChannels == 0.
 // =========================================================================
 TEST(AcclProfilerNChannels, Wrapped256IsProfiledNotDropped) {
+    ScopedProfilerDir dir("nch256");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerNChannels.Wrapped256IsProfiledNotDropped",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0x2601, &mask, "nch256_test",
@@ -783,7 +1681,7 @@ TEST(AcclProfilerNChannels, Wrapped256IsProfiledNotDropped) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             std::string out =
-                ReadProfilerOutput("/tmp/accl_test_nch256", "0x2601");
+                ReadProfilerOutput(dir.c_str(), "0x2601");
             ASSERT_FALSE(out.empty()) << "No profiler output produced";
             EXPECT_NE(out.find("\"coll_sn\":70"), std::string::npos)
                 << "The 256-channel collective must produce a record";
@@ -793,7 +1691,7 @@ TEST(AcclProfilerNChannels, Wrapped256IsProfiledNotDropped) {
                       std::string::npos)
                 << "The raw ABI value must stay visible so 0 is never ambiguous";
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_nch256"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
 }
 
@@ -802,9 +1700,10 @@ TEST(AcclProfilerNChannels, Wrapped256IsProfiledNotDropped) {
 // while the proxy thread is still delivering KernelCh events into it, which is
 // a use-after-free on a recycled slot. Leaking the slot is the safe direction.
 TEST(AcclProfilerNChannels, Wrapped256DoesNotFinalizeEarly) {
+    ScopedProfilerDir dir("nch_early");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerNChannels.Wrapped256DoesNotFinalizeEarly",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0x2602, &mask, "nch_early_test",
@@ -839,15 +1738,17 @@ TEST(AcclProfilerNChannels, Wrapped256DoesNotFinalizeEarly) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             std::string out =
-                ReadProfilerOutput("/tmp/accl_test_nch_early", "0x2602");
+                ReadProfilerOutput(dir.c_str(), "0x2602");
             ASSERT_FALSE(out.empty()) << "Summary line should still be written";
             EXPECT_EQ(out.find("\"coll_perf\""), std::string::npos)
                 << "1 of 256 channels reported: the collective must not be "
                    "finalized, because its slot is still live for RCCL";
-            EXPECT_NE(out.find("\"leaked_collectives\":1"), std::string::npos)
-                << "The unfinalized slot must be counted as leaked, not hidden";
+            // The unfinalized slot must be counted as leaked, not hidden, and
+            // no other loss channel may have fired instead.
+            ExpectSummaryCounters(ReadSummaryLine(dir.c_str(), "0x2602"),
+                                  {{"leaked_collectives", 1}});
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_nch_early"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
 }
 
@@ -855,9 +1756,10 @@ TEST(AcclProfilerNChannels, Wrapped256DoesNotFinalizeEarly) {
 // End-of-run summary: data loss must be visible in the output itself
 // =========================================================================
 TEST(AcclProfilerSummary, CleanRunReportsComplete) {
+    ScopedProfilerDir dir("sum_clean");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerSummary.CleanRunReportsComplete",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0x5101, &mask, "sum_clean_test",
@@ -887,22 +1789,34 @@ TEST(AcclProfilerSummary, CleanRunReportsComplete) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             std::string out =
-                ReadProfilerOutput("/tmp/accl_test_sum_clean", "0x5101");
+                ReadProfilerOutput(dir.c_str(), "0x5101");
             ASSERT_FALSE(out.empty());
             // Emitted even when nothing was lost: a missing summary must mean
             // "the run died before finalize", never "the run was clean".
             EXPECT_NE(out.find("\"complete\":true"), std::string::npos);
-            EXPECT_NE(out.find("\"dropped_collectives\":0"), std::string::npos);
-            EXPECT_NE(out.find("\"leaked_collectives\":0"), std::string::npos);
+            // Every counter, so "complete":true is checked against the same
+            // vector the loss tests check against.
+            const std::string s = ReadSummaryLine(dir.c_str(), "0x5101");
+            ExpectSummaryCounters(s, {});
+            // The pool sizes are how a consumer tells "0 drops" from "0 drops
+            // because the pool was 16x bigger", so the producer must emit them.
+            EXPECT_EQ(JsonNumber(s, "coll_pool_size"), ACCL_COLL_POOL_SIZE);
+            EXPECT_EQ(JsonNumber(s, "proxy_op_pool_size"),
+                      ACCL_PROXY_OP_POOL_SIZE);
+            EXPECT_EQ(JsonNumber(s, "proxy_step_pool_size"),
+                      ACCL_PROXY_STEP_POOL_SIZE);
+            EXPECT_EQ(JsonNumber(s, "max_proxy_ops_per_coll"),
+                      ACCL_MAX_PROXY_OPS);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_sum_clean"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
 }
 
 TEST(AcclProfilerSummary, LeakedSlotsAreCounted) {
+    ScopedProfilerDir dir("sum_leak");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerSummary.LeakedSlotsAreCounted",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0x5102, &mask, "sum_leak_test",
@@ -922,20 +1836,23 @@ TEST(AcclProfilerSummary, LeakedSlotsAreCounted) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             std::string out =
-                ReadProfilerOutput("/tmp/accl_test_sum_leak", "0x5102");
+                ReadProfilerOutput(dir.c_str(), "0x5102");
             ASSERT_FALSE(out.empty());
-            EXPECT_NE(out.find("\"leaked_collectives\":3"), std::string::npos)
-                << "Every slot the drain reclaims must be counted";
             EXPECT_NE(out.find("\"complete\":false"), std::string::npos);
+            // Every slot the drain reclaims must be counted, and as a leak
+            // rather than as one of the other loss channels.
+            ExpectSummaryCounters(ReadSummaryLine(dir.c_str(), "0x5102"),
+                                  {{"leaked_collectives", 3}});
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_sum_leak"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
     );
 }
 
 TEST(AcclProfilerSummary, PoolExhaustionIsCounted) {
+    ScopedProfilerDir dir("sum_pool");
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerSummary.PoolExhaustionIsCounted",
-        []() {
+        [&dir]() {
             void* ctx = nullptr;
             int mask = 0;
             ASSERT_EQ(acclPluginInit(&ctx, 0x5103, &mask, "sum_pool_test",
@@ -962,15 +1879,829 @@ TEST(AcclProfilerSummary, PoolExhaustionIsCounted) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             std::string out =
-                ReadProfilerOutput("/tmp/accl_test_sum_pool", "0x5103");
+                ReadProfilerOutput(dir.c_str(), "0x5103");
             ASSERT_FALSE(out.empty());
-            EXPECT_NE(out.find("\"dropped_collectives\":2"), std::string::npos)
-                << "Both rejected allocations must be counted";
-            EXPECT_NE(out.find("\"leaked_collectives\":256"), std::string::npos)
-                << "The pinned slots the drain reclaims are leaks, not drops";
             EXPECT_NE(out.find("\"complete\":false"), std::string::npos);
+            // Both rejected allocations are drops; the 256 pinned slots the
+            // drain reclaims are leaks. The two must not be conflated.
+            ExpectSummaryCounters(ReadSummaryLine(dir.c_str(), "0x5103"),
+                                  {{"dropped_collectives", 2},
+                                   {"leaked_collectives", 256}});
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_sum_pool"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+
+// =========================================================================
+// Context lifetime: a ProxyOp/ProxyStep handle must keep the context alive
+//
+// acclAllocProxyOp and acclAllocProxyStep hand out pointers INTO
+// acclCommContext (the pools are embedded by value) but take no reference on
+// it, so acclPluginFinalize can free the context while those handles are still
+// live. RCCL delivers proxy events from the proxy progress thread, which is
+// shared across communicators (comm->sharedRes), so a split-comm teardown can
+// finalize one context while events for it are still in flight.
+//
+// These are crash tests by construction: sizeof(acclCommContext) is ~4.4 MB,
+// which is far above glibc's 128 KB mmap threshold, so free() munmaps the
+// region and any later dereference of the handle is a hard SIGSEGV rather than
+// a silent read of stale bytes. The process-isolated runner reports the dead
+// child as a failure, so no sanitizer build is required to catch this.
+// =========================================================================
+TEST(AcclProfilerLifecycle, ProxyStepOutlivingFinalizeKeepsContextAlive) {
+    ScopedProfilerDir dir("ctxref_step");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.ProxyStepOutlivingFinalizeKeepsContextAlive",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xC7F1, &mask, "ctxref_step",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/1, /*count=*/1024);
+            void* collHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &cd), 0);
+            ASSERT_NE(collHandle, nullptr);
+
+            ncclProfilerEventDescr_v5_t od;
+            MakeProxyOpDescr(&od, collHandle, /*channelId=*/0, /*peer=*/1,
+                             /*nSteps=*/1, /*isSend=*/1);
+            void* opHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &opHandle, &od), 0);
+            ASSERT_NE(opHandle, nullptr);
+
+            ncclProfilerEventDescr_v5_t sd;
+            MakeProxyStepDescr(&sd, opHandle, /*step=*/0);
+            void* stepHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &stepHandle, &sd), 0);
+            ASSERT_NE(stepHandle, nullptr);
+
+            // The proxy op never stops, so nProxyOpsCompleted stays below
+            // nProxyOpsStarted and the collective cannot finalize here. Its slot
+            // is still in use when finalize runs, which is the teardown-orphan
+            // shape the drain exists to handle.
+            ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            // stepHandle points into ctx->proxyStepPool. If finalize freed the
+            // context, this dereferences unmapped memory and the child dies.
+            EXPECT_EQ(acclPluginStopEvent(stepHandle), 0)
+                << "ProxyStep stop after finalize must not touch a freed context";
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+TEST(AcclProfilerLifecycle, ProxyOpOutlivingFinalizeKeepsContextAlive) {
+    ScopedProfilerDir dir("ctxref_op");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.ProxyOpOutlivingFinalizeKeepsContextAlive",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0xC7F2, &mask, "ctxref_op",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/2, /*count=*/1024);
+            void* collHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &collHandle, &cd), 0);
+            ASSERT_NE(collHandle, nullptr);
+
+            ncclProfilerEventDescr_v5_t od;
+            MakeProxyOpDescr(&od, collHandle, /*channelId=*/0, /*peer=*/1,
+                             /*nSteps=*/1, /*isSend=*/1);
+            void* opHandle = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &opHandle, &od), 0);
+            ASSERT_NE(opHandle, nullptr);
+
+            ASSERT_EQ(acclPluginStopEvent(collHandle), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            // opHandle points into ctx->proxyOpPool. Same contract as above.
+            EXPECT_EQ(acclPluginStopEvent(opHandle), 0)
+                << "ProxyOp stop after finalize must not touch a freed context";
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+
+// =========================================================================
+// acclPluginFinalize's drain must not release a slot whose owner has already
+// claimed it.
+//
+// A collective whose owner has passed acclShouldFinalize (finalized = 1) but
+// has not yet reached acclFreeColl still has collPoolUsed set. The drain then
+// destroys its mutex and decrements refCount for a slot the owner is going to
+// release itself. The owner's own decrement drives the count below zero, and
+// because the drain's extra decrement already took it to zero,
+// acclPluginFinalize frees the context out from under the still-running owner.
+//
+// The check is a crash test by construction: sizeof(acclCommContext) is ~4.4 MB,
+// far above glibc's mmap threshold, so free() unmaps the region and the owner's
+// next touch is a hard SIGSEGV. The process-isolated runner reports the dead
+// child as a failure, so no sanitizer build is required.
+// =========================================================================
+TEST(AcclProfilerLifecycle, DrainLeavesSlotsAnOwnerAlreadyClaimed) {
+    ScopedProfilerDir dir("drain_claim");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.DrainLeavesSlotsAnOwnerAlreadyClaimed",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x4B01, &mask, "drain_claim",
+                                     1, 1, 0, nullptr), 0);
+            EXPECT_EQ(test_acclRefCount(ctx), 1) << "init holds one reference";
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/1, /*count=*/1024);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr);
+            EXPECT_EQ(test_acclRefCount(ctx), 2) << "the live collective holds one";
+
+            // The owner has passed acclShouldFinalize and is between
+            // acclFinalizeCollective and acclFreeColl. Its slot is still in use.
+            test_acclMarkFinalized(coll);
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            // The drain must not have released a slot the owner still owns, so
+            // the owner's reference must survive finalize. On the unpatched
+            // plugin this reads a freed context.
+            EXPECT_EQ(test_acclRefCount(ctx), 1)
+                << "drain released a slot whose owner had already claimed it";
+
+            // This is the state inflight_collectives exists to name: the record
+            // may never reach disk, so the run must not read as clean.
+            ExpectSummaryCounters(ReadSummaryLine(dir.c_str(), "0x4b01"),
+                                  {{"inflight_collectives", 1}});
+
+            // Now the owner finishes. This is its normal next step, and it must
+            // not drive the count negative or touch a freed context.
+            test_acclFreeColl(ctx, coll);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// acclPluginFinalize must not close the output file out from under a writer.
+//
+// It fcloses ctx->outputFile with no outputMutex held, while acclWriteRecord
+// checks that pointer under the mutex and then fprintf()s. A writer that
+// passed the check writes into a closed FILE*.
+//
+// There is no deterministic single-threaded shape for this one, so it is a
+// stress test: a writer loop against a concurrent finalize. It fails by killing
+// the child (glibc faults inside vfprintf on the freed FILE*), which the
+// isolated runner reports. Note ASan cannot see this directly because glibc is
+// uninstrumented.
+// =========================================================================
+TEST(AcclProfilerLifecycle, FinalizeDoesNotCloseOutputUnderAWriter) {
+    ScopedProfilerDir dir("fclose_race");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.FinalizeDoesNotCloseOutputUnderAWriter",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x4A01, &mask, "fclose_race",
+                                     1, 1, 0, nullptr), 0);
+
+            // Model the only real writer: acclFinalizeAndFree running on the
+            // proxy thread. Its collective holds a context reference and it has
+            // already claimed the slot, so the context cannot be freed under it.
+            // Without that reference the test would be measuring the context
+            // free, not the file close.
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/1, /*count=*/1024);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr);
+            test_acclMarkFinalized(coll);
+
+            std::atomic<bool> go{false};
+            std::atomic<long> writes{0};
+            std::thread writer([&]() {
+                while (!go.load(std::memory_order_acquire)) { }
+                for (int i = 0; i < 200000; i++) {
+                    test_acclWriteDummyRecord(ctx);
+                    writes.fetch_add(1, std::memory_order_relaxed);
+                }
+            });
+            go.store(true, std::memory_order_release);
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            // Sample before finalize: the loop keeps incrementing after
+            // outputFile is NULLed, so the post-join count cannot show overlap.
+            const long writesBeforeFinalize = writes.load();
+            EXPECT_EQ(acclPluginFinalize(ctx), 0);
+            writer.join();
+            EXPECT_GT(writesBeforeFinalize, 0)
+                << "writer never ran before finalize; test proved nothing";
+
+            // The owner releases last, which is what frees the context.
+            test_acclFreeColl(ctx, coll);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+
+// =========================================================================
+// A run that lost proxy data must not report itself complete.
+//
+// The proxy-op and proxy-step pools drop silently when full, and a completed
+// proxy op is discarded when its collective already holds ACCL_MAX_PROXY_OPS.
+// None of the three affects the emitted records in any visible way: the
+// decomposition simply understates the proxy side. The only place the loss can
+// surface is the end-of-run summary, so each of these drives one loss channel
+// and asserts the summary both counts it and clears "complete".
+// =========================================================================
+TEST(AcclProfilerSummary, ProxyOpPoolExhaustionIsCounted) {
+    ScopedProfilerDir dir("op_pool");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerSummary.ProxyOpPoolExhaustionIsCounted",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x7001, &mask, "op_pool",
+                                     1, 1, 0, nullptr), 0);
+
+            // Pin every proxy-op slot by starting ops and never stopping them.
+            ncclProfilerEventDescr_v5_t od;
+            MakeProxyOpDescr(&od, nullptr, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
+            for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE; i++) {
+                void* h = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &h, &od), 0);
+                ASSERT_NE(h, nullptr) << "pool exhausted early at i=" << i;
+            }
+            // The next three have nowhere to go and must be counted.
+            for (int i = 0; i < 3; i++) {
+                void* h = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &h, &od), 0);
+                EXPECT_EQ(h, nullptr) << "a full proxy-op pool must return NULL";
+            }
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string s = ReadSummaryLine(dir.c_str(), "0x7001");
+            ASSERT_FALSE(s.empty()) << "no summary line was written";
+            // The 1024 pinned ops are outstanding too; naming both is what
+            // ties "complete":false to the drop rather than to them.
+            ExpectSummaryCounters(s, {{"dropped_proxy_ops", 3},
+                                      {"outstanding_proxy_ops",
+                                       ACCL_PROXY_OP_POOL_SIZE}});
+            EXPECT_NE(s.find("\"complete\":false"), std::string::npos)
+                << "a run that dropped proxy ops reported itself complete: " << s;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+TEST(AcclProfilerSummary, ProxyStepPoolExhaustionIsCounted) {
+    ScopedProfilerDir dir("step_pool");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerSummary.ProxyStepPoolExhaustionIsCounted",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x7002, &mask, "step_pool",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t od;
+            MakeProxyOpDescr(&od, nullptr, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
+            void* op = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
+            ASSERT_NE(op, nullptr);
+
+            ncclProfilerEventDescr_v5_t sd;
+            MakeProxyStepDescr(&sd, op, /*step=*/0);
+            for (int i = 0; i < ACCL_PROXY_STEP_POOL_SIZE; i++) {
+                void* h = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &h, &sd), 0);
+                ASSERT_NE(h, nullptr) << "pool exhausted early at i=" << i;
+            }
+            for (int i = 0; i < 2; i++) {
+                void* h = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &h, &sd), 0);
+                EXPECT_EQ(h, nullptr) << "a full proxy-step pool must return NULL";
+            }
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string s = ReadSummaryLine(dir.c_str(), "0x7002");
+            ASSERT_FALSE(s.empty()) << "no summary line was written";
+            ExpectSummaryCounters(s, {{"dropped_proxy_steps", 2},
+                                      {"outstanding_proxy_ops", 1},
+                                      {"outstanding_proxy_steps",
+                                       ACCL_PROXY_STEP_POOL_SIZE}});
+            EXPECT_NE(s.find("\"complete\":false"), std::string::npos)
+                << "a run that dropped proxy steps reported itself complete: " << s;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+TEST(AcclProfilerSummary, ProxyOpOverflowPerCollectiveIsCounted) {
+    ScopedProfilerDir dir("op_overflow");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerSummary.ProxyOpOverflowPerCollectiveIsCounted",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x7003, &mask, "op_overflow",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/1, /*count=*/1024);
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr);
+
+            // Two more ops than the collective can record. They complete
+            // normally; the plugin has nowhere to put the last two.
+            ncclProfilerEventDescr_v5_t od;
+            MakeProxyOpDescr(&od, coll, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
+            for (int i = 0; i < ACCL_MAX_PROXY_OPS + 2; i++) {
+                void* h = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &h, &od), 0);
+                ASSERT_NE(h, nullptr);
+                ASSERT_EQ(acclPluginStopEvent(h), 0);
+            }
+            ASSERT_EQ(acclPluginStopEvent(coll), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            std::string s = ReadSummaryLine(dir.c_str(), "0x7003");
+            ASSERT_FALSE(s.empty()) << "no summary line was written";
+            // No KernelCh ever arrives, so acclShouldFinalize never fires and
+            // the drain reclaims the collective: that leak is expected here.
+            ExpectSummaryCounters(s, {{"overflow_proxy_ops", 2},
+                                      {"leaked_collectives", 1}});
+            EXPECT_NE(s.find("\"complete\":false"), std::string::npos)
+                << "a run that discarded proxy ops reported itself complete: " << s;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// A proxy op's mutex must outlive every tenancy of its pool slot.
+//
+// The ProxyStep stop path locks step->parentObj->mutex, and a step handle can
+// still be live after its parent op's slot has been released — the plugin frees
+// ops from three places that a step knows nothing about. Destroying the mutex
+// per free therefore leaves that lock aimed at a destroyed mutex as soon as the
+// slot is reissued, and the reissued op's accumulators take the stray step's
+// timings.
+//
+// The invariant is checked directly: glibc marks a destroyed mutex with
+// __kind == -1, so a freed slot whose mutex reads -1 has been destroyed. Both
+// halves matter — after the free and after the slot has been handed out again.
+// =========================================================================
+TEST(AcclProfilerLifecycle, ProxyOpMutexSurvivesSlotRelease) {
+    ScopedProfilerDir dir("opmutex");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLifecycle.ProxyOpMutexSurvivesSlotRelease",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x4B02, &mask, "opmutex",
+                                     1, 1, 0, nullptr), 0);
+
+            // A proxy op with no parent collective is freed by its own stop
+            // event, which is the shortest path through acclFreeProxyOp.
+            ncclProfilerEventDescr_v5_t od;
+            MakeProxyOpDescr(&od, nullptr, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/2, /*isSend=*/1);
+            void* op = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
+            ASSERT_NE(op, nullptr);
+            int slot = test_acclProxyOpSlot(ctx, op);
+            ASSERT_GE(slot, 0);
+            EXPECT_EQ(test_acclProxyOpMutexDestroyed(ctx, slot), 0)
+                << "a live proxy op must have a live mutex";
+
+            // A step that is still outstanding when the op is released. This is
+            // the handle that later reaches pthread_mutex_lock(&op->mutex).
+            ncclProfilerEventDescr_v5_t sd;
+            MakeProxyStepDescr(&sd, op, /*step=*/0);
+            void* step = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &step, &sd), 0);
+            ASSERT_NE(step, nullptr);
+
+            ASSERT_EQ(acclPluginStopEvent(op), 0);   // releases the slot
+            EXPECT_EQ(test_acclProxyOpMutexDestroyed(ctx, slot), 0)
+                << "acclFreeProxyOp destroyed the slot mutex; the outstanding "
+                   "ProxyStep stop now locks a destroyed mutex";
+
+            // Reissue the slot, then let the stale step stop. The mutex must
+            // still be live for the new tenant too.
+            void* op2 = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &op2, &od), 0);
+            ASSERT_EQ(test_acclProxyOpSlot(ctx, op2), slot)
+                << "expected the freed slot to be handed out again";
+            EXPECT_EQ(test_acclProxyOpMutexDestroyed(ctx, slot), 0)
+                << "reissued proxy op slot has a destroyed mutex";
+
+            ASSERT_EQ(acclPluginStopEvent(step), 0);
+            ASSERT_EQ(acclPluginStopEvent(op2), 0);
+            EXPECT_EQ(test_acclProxyOpMutexDestroyed(ctx, slot), 0);
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// Reusing a coll pool slot must not write the slot's mutex.
+//
+// acclAllocColl clears a reclaimed slot. The mutex lives inside that struct and
+// is created once in acclPluginInit, so the clear has to step around it: a stale
+// KernelCh start can be inside pthread_mutex_lock(&coll->mutex) at that instant,
+// and that path does not take collPoolMutex. Saving the mutex, memsetting the
+// struct and writing the saved bytes back restores the same values, but the
+// intervening zero-and-restore is still a write racing a live lock — and POSIX
+// does not define copying a pthread_mutex_t at all.
+//
+// The write is not visible as a value: the saved and restored bytes are the
+// bytes that were already there, so no before/after comparison can separate
+// fixed from unfixed. What is visible is the race itself, so the test runs the
+// two paths against each other. glibc's lock fast path asserts on __owner, and a
+// lock word zeroed mid-acquire trips it.
+//
+// The unfixed failure therefore arrives as an abort, or as the hang it can take
+// instead — a waiter parked on a lock word that is then zeroed is never woken.
+// The body runs in a forked child, so both are reported as a test failure rather
+// than taking the whole binary down, and the config carries an explicit timeout
+// because the runner otherwise waits forever and a regression would stall the
+// suite instead of failing it.
+//
+// Measured: unfixed dies on every run in under 200 ms; fixed never writes the
+// mutex bytes, so there is nothing left to race and the loop is unconditionally
+// clean, finishing in about the same time.
+// =========================================================================
+static constexpr int kCollMutexTimeoutSeconds = 60;
+
+TEST(AcclProfilerLifecycle, CollSlotReuseDoesNotWriteTheSlotMutex) {
+    ScopedProfilerDir dir("collmutex");
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+        "AcclProfilerLifecycle.CollSlotReuseDoesNotWriteTheSlotMutex",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x4B03, &mask, "collmutex",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t cd;
+            memset(&cd, 0, sizeof(cd));
+            cd.type = ncclProfileColl;
+            cd.coll.func = "AllReduce";
+            cd.coll.algo = "Ring";
+            cd.coll.proto = "Simple";
+            cd.coll.datatype = "ncclFloat32";
+            cd.coll.count = 1024;
+            cd.coll.nChannels = 1;
+
+            void* coll = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &coll, &cd), 0);
+            ASSERT_NE(coll, nullptr);
+            const int slot = test_acclCollSlot(ctx, coll);
+            ASSERT_EQ(slot, 0) << "expected the first coll to take slot 0";
+
+            // The stale handle. This is exactly what RCCL still holds when a
+            // KernelCh event arrives after the coll's slot has been released:
+            // an interior pointer into the pool, with no idea the slot moved on.
+            std::atomic<bool> stop{false};
+            std::atomic<unsigned long> locks{0};
+            std::thread kernelCh([&]() {
+                ncclProfilerEventDescr_v5_t kd;
+                memset(&kd, 0, sizeof(kd));
+                kd.type = ncclProfileKernelCh;
+                kd.parentObj = coll;
+                kd.kernelCh.channelId = 0;
+                while (!stop.load(std::memory_order_relaxed)) {
+                    void* kh = nullptr;
+                    // Reaches pthread_mutex_lock(&coll->mutex) whenever the slot
+                    // currently reads as a live coll; the type check skips the
+                    // instants when the reuse has the header zeroed.
+                    if (acclPluginStartEvent(ctx, &kh, &kd) == 0 && kh) {
+                        locks.fetch_add(1, std::memory_order_relaxed);
+                    }
+                }
+            });
+
+            // Free and immediately re-take the same slot. Each iteration runs
+            // acclAllocColl's clear while the thread above is locking.
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::seconds(20);
+            for (int i = 0; i < 400000; i++) {
+                test_acclFreeColl(ctx, coll);
+                void* again = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &again, &cd), 0);
+                ASSERT_EQ(again, coll) << "expected slot " << slot << " back";
+                if ((i & 0x3FF) == 0 &&
+                    std::chrono::steady_clock::now() > deadline) {
+                    break;
+                }
+            }
+
+            stop.store(true, std::memory_order_relaxed);
+            kernelCh.join();
+            EXPECT_GT(locks.load(), 0u)
+                << "the KernelCh thread never took coll->mutex, so nothing was "
+                   "raced against the slot reuse and this test proved nothing";
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+        })
+        .withEnvironment({{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}})
+        .withTimeout(std::chrono::seconds(kCollMutexTimeoutSeconds))
+    );
+}
+
+// =========================================================================
+// The debug-log path itself.
+//
+// Every other test passes nullptr for logfn, which leaves gLogFn NULL and makes
+// ACCL_WARN and ACCL_INFO no-ops: neither the (level, flags) pair each macro
+// uses nor the one-shot guards that keep a pool-exhaustion warning from
+// repeating per drop can be observed at all. Only the pair and the call count
+// are asserted; the message text is not a contract.
+// =========================================================================
+namespace {
+struct LogRecord { int level; unsigned long flags; };
+std::vector<LogRecord> gLogRecords;
+
+void RecordingLogger(int level, unsigned long flags, const char*, int,
+                     const char*, ...) {
+    gLogRecords.push_back({level, flags});
+}
+
+int CountLogsAt(int level) {
+    int n = 0;
+    for (const auto& r : gLogRecords) if (r.level == level) n++;
+    return n;
+}
+}  // namespace
+
+TEST(AcclProfilerLogging, WarningsUseAllSubsysAndFireOncePerPool) {
+    ScopedProfilerDir dir("logger");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerLogging.WarningsUseAllSubsysAndFireOncePerPool",
+        [&dir]() {
+            gLogRecords.clear();
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x7101, &mask, "logger",
+                                     1, 1, 0, RecordingLogger), 0);
+
+            // init logs its configuration at INFO: routine chatter, so it stays
+            // on NCCL_PROFILE and must not be broadcast to every subsystem.
+            ASSERT_GT(CountLogsAt(4), 0) << "init logged nothing at INFO";
+            for (const auto& r : gLogRecords) {
+                if (r.level == 4) {
+                    EXPECT_EQ(r.flags, 0x4000UL)
+                        << "INFO must stay on NCCL_PROFILE";
+                }
+            }
+            EXPECT_EQ(CountLogsAt(3), 0) << "a clean init must not warn";
+
+            // Exhaust the coll pool, then keep going. The guard means the
+            // extra drops add no further lines.
+            ncclProfilerEventDescr_v5_t cd;
+            MakeCollDescr(&cd, /*nChannels=*/1, /*seqNumber=*/0, /*count=*/64);
+            for (int i = 0; i < ACCL_COLL_POOL_SIZE + 5; i++) {
+                void* h = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &h, &cd), 0);
+            }
+            ASSERT_EQ(CountLogsAt(3), 1)
+                << "coll pool exhaustion must warn exactly once, not once per "
+                   "dropped collective";
+            for (const auto& r : gLogRecords) {
+                if (r.level == 3) {
+                    EXPECT_EQ(r.flags, ~0UL)
+                        << "a WARN on NCCL_PROFILE is dropped under the default "
+                           "NCCL_DEBUG_SUBSYS mask, which hides every report of "
+                           "lost profiling data";
+                }
+            }
+
+            // The proxy-op pool carries its own guard, so it adds one more.
+            ncclProfilerEventDescr_v5_t od;
+            MakeProxyOpDescr(&od, nullptr, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
+            for (int i = 0; i < ACCL_PROXY_OP_POOL_SIZE + 5; i++) {
+                void* h = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &h, &od), 0);
+            }
+            EXPECT_EQ(CountLogsAt(3), 2)
+                << "the proxy-op pool guard is separate and must fire once";
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+            // finalize warns once more for the INCOMPLETE run.
+            EXPECT_GE(CountLogsAt(3), 3);
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// A write failure must reach the summary.
+//
+// ferror() is the only place a discarded fprintf failure (ENOSPC, EIO) is still
+// visible: the records on disk are truncated while every loss counter reads 0,
+// so without the flag such a run emits "complete":true. Closing the stream's
+// descriptor makes the next flush fail and sets the sticky error bit; dup2
+// restores a working descriptor so finalize can still write the summary that
+// reports it.
+// =========================================================================
+TEST(AcclProfilerSummary, WriteErrorClearsComplete) {
+    ScopedProfilerDir dir("write_error");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerSummary.WriteErrorClearsComplete",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x7105, &mask, "write_error",
+                                     1, 1, 0, nullptr), 0);
+
+            const int fd = test_acclOutputFd(ctx);
+            ASSERT_GE(fd, 0) << "plugin opened no output file";
+            const int saved = dup(fd);
+            ASSERT_GE(saved, 0);
+            ASSERT_EQ(close(fd), 0);
+
+            // fflush inside acclWriteRecord now fails on a closed descriptor.
+            test_acclWriteDummyRecord(ctx);
+
+            // Put a working descriptor back at the same number. The stream's
+            // error bit is sticky, so it survives the repair.
+            ASSERT_EQ(dup2(saved, fd), fd);
+            ASSERT_EQ(close(saved), 0);
+
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            const std::string s = ReadSummaryLine(dir.c_str(), "0x7105");
+            ASSERT_FALSE(s.empty()) << "no summary line was written";
+            EXPECT_NE(s.find("\"write_error\":true"), std::string::npos)
+                << "a truncated file must name its cause: " << s;
+            EXPECT_NE(s.find("\"complete\":false"), std::string::npos)
+                << "a run whose writes failed reported itself complete: " << s;
+            // Nothing else fired: write_error is the only reason here.
+            ExpectSummaryCounters(s, {});
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// A ProxyStep that outlives its parent op's tenancy must be dropped.
+//
+// The op's slot is freed from three paths a step knows nothing about, so it can
+// be reissued before the step stops. Charging the stale step's timings to the
+// new tenant silently corrupts an unrelated collective's decomposition, which
+// is worse than losing the step: the generation pinned at start is what
+// separates the two.
+// =========================================================================
+TEST(AcclProfilerSummary, StaleProxyStepIsDroppedAndCounted) {
+    ScopedProfilerDir dir("stalestep");
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AcclProfilerSummary.StaleProxyStepIsDroppedAndCounted",
+        [&dir]() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x7106, &mask, "stalestep",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t od;
+            MakeProxyOpDescr(&od, nullptr, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
+            void* op = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
+            ASSERT_NE(op, nullptr);
+            const int slot = test_acclProxyOpSlot(ctx, op);
+            ASSERT_GE(slot, 0);
+            const unsigned long gen0 = test_acclProxyOpGeneration(ctx, slot);
+
+            ncclProfilerEventDescr_v5_t sd;
+            MakeProxyStepDescr(&sd, op, /*step=*/0);
+            void* step = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &step, &sd), 0);
+            ASSERT_NE(step, nullptr);
+            ASSERT_EQ(acclPluginRecordEventState(
+                step, ncclProfilerProxyStepSendGPUWait, nullptr), 0);
+            usleep(5000);
+
+            ASSERT_EQ(acclPluginStopEvent(op), 0);   // releases the slot
+
+            void* op2 = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &op2, &od), 0);
+            ASSERT_EQ(test_acclProxyOpSlot(ctx, op2), slot)
+                << "expected the freed slot to be handed out again";
+            EXPECT_EQ(test_acclProxyOpGeneration(ctx, slot), gen0 + 1)
+                << "every alloc must bump the slot's tenancy";
+
+            // The stale stop lands on the new tenant's address.
+            ASSERT_EQ(acclPluginStopEvent(step), 0);
+            ASSERT_EQ(acclPluginStopEvent(op2), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+
+            const std::string s = ReadSummaryLine(dir.c_str(), "0x7106");
+            ASSERT_FALSE(s.empty()) << "no summary line was written";
+            ExpectSummaryCounters(s, {{"stale_proxy_steps", 1}});
+            EXPECT_NE(s.find("\"complete\":false"), std::string::npos)
+                << "a dropped step is still lost data: " << s;
+        },
+        {{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}}
+    );
+}
+
+// =========================================================================
+// Reusing a proxy-op slot must not write the slot's mutex.
+//
+// ProxyOpMutexSurvivesSlotRelease checks only that the mutex is not destroyed,
+// which a memset running straight through it would still satisfy: that clear
+// zeroes __kind rather than setting it to -1. The property here is the race
+// itself, so this mirrors CollSlotReuseDoesNotWriteTheSlotMutex on the proxy
+// side -- a thread driving ProxyStep stops into pthread_mutex_lock(&op->mutex)
+// while the slot is freed and re-allocated underneath it. Unfixed, glibc's lock
+// fast path aborts on the zeroed owner word, or a parked waiter is never woken;
+// the forked child reports both as a failure, and the explicit timeout keeps a
+// regression from stalling the suite.
+// =========================================================================
+static constexpr int kProxyOpMutexTimeoutSeconds = 60;
+
+TEST(AcclProfilerLifecycle, ProxyOpSlotReuseDoesNotWriteTheSlotMutex) {
+    ScopedProfilerDir dir("opmutexrace");
+    RUN_ISOLATED_TESTS(
+        ProcessIsolatedTestRunner::TestConfig(
+        "AcclProfilerLifecycle.ProxyOpSlotReuseDoesNotWriteTheSlotMutex",
+        []() {
+            void* ctx = nullptr;
+            int mask = 0;
+            ASSERT_EQ(acclPluginInit(&ctx, 0x4B04, &mask, "opmutexrace",
+                                     1, 1, 0, nullptr), 0);
+
+            ncclProfilerEventDescr_v5_t od;
+            MakeProxyOpDescr(&od, nullptr, /*channelId=*/0, /*peer=*/0,
+                             /*nSteps=*/1, /*isSend=*/1);
+            void* op = nullptr;
+            ASSERT_EQ(acclPluginStartEvent(ctx, &op, &od), 0);
+            ASSERT_NE(op, nullptr);
+            const int slot = test_acclProxyOpSlot(ctx, op);
+            ASSERT_EQ(slot, 0) << "expected the first proxy op to take slot 0";
+
+            // Stale-handle traffic: each step stop locks op->mutex at the
+            // address RCCL still holds, with no idea the slot moved on.
+            std::atomic<bool> stop{false};
+            std::atomic<unsigned long> locks{0};
+            std::thread steps([&]() {
+                ncclProfilerEventDescr_v5_t sd;
+                MakeProxyStepDescr(&sd, op, /*step=*/0);
+                while (!stop.load(std::memory_order_relaxed)) {
+                    void* sh = nullptr;
+                    if (acclPluginStartEvent(ctx, &sh, &sd) == 0 && sh) {
+                        // Start pins the generation under op->mutex and stop
+                        // compares it under the same lock: two more chances to
+                        // be inside the lock while the clear runs.
+                        if (acclPluginStopEvent(sh) == 0) {
+                            locks.fetch_add(1, std::memory_order_relaxed);
+                        }
+                    }
+                }
+            });
+
+            // Free and immediately re-take the same slot, so every iteration
+            // runs acclAllocProxyOp's clear beside those locks.
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::seconds(20);
+            for (int i = 0; i < 400000; i++) {
+                ASSERT_EQ(acclPluginStopEvent(op), 0);
+                void* again = nullptr;
+                ASSERT_EQ(acclPluginStartEvent(ctx, &again, &od), 0);
+                ASSERT_EQ(again, op) << "expected slot " << slot << " back";
+                if ((i & 0x3FF) == 0 &&
+                    std::chrono::steady_clock::now() > deadline) {
+                    break;
+                }
+            }
+
+            stop.store(true, std::memory_order_relaxed);
+            steps.join();
+            EXPECT_GT(locks.load(), 0u)
+                << "no ProxyStep ever took op->mutex, so nothing was raced "
+                   "against the slot reuse and this test proved nothing";
+
+            ASSERT_EQ(acclPluginStopEvent(op), 0);
+            ASSERT_EQ(acclPluginFinalize(ctx), 0);
+        })
+        .withEnvironment({{"ACCL_PROFILER_OUTPUT_DIR", dir.path()}})
+        .withTimeout(std::chrono::seconds(kProxyOpMutexTimeoutSeconds))
     );
 }
 
