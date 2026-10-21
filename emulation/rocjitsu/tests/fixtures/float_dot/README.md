@@ -6,6 +6,8 @@ tests consume the captured bits directly and require no GPU.
 
 | Header | Contents |
 | --- | --- |
+| `rdna_f8_samples.h` | Selected RDNA4 FP8/BF8 WMMA output words. |
+| `rdna_integer_samples.h` | Selected RDNA integer WMMA/SWMMAC output words. |
 | `gfx1100_cases.h` | GFX11 FP32-output DOT2 cases and a WMMA matrix. |
 | `gfx1201_cases.h` | GFX12 FP32-output DOT2 cases and WMMA matrices. |
 | `packed_operand_cases.h` | 440 packed WMMA instruction/operand captures for modifiers, selectors and inline constants. |
@@ -27,3 +29,17 @@ Comparisons include every output bit, including NaNs and preserved halves.
 The GFX11 fixtures also test RDNA3.5 dispatch, without claiming a physical
 RDNA3.5 measurement. The captures qualify dense F16/BF16 DOT2/WMMA arithmetic
 on these two cards; they do not establish behavior for other matrix formats.
+
+## RDNA matrix regressions
+
+The `rdna_*_test.cpp` tests retain a few raw results captured on W7900
+(`gfx1100`) and R9700 (`gfx1201`). They run without a GPU. The arithmetic models
+are inferred from these observations, not specifications of hardware internals.
+
+Integer cases distinguish intermediate saturation, sparse index selection, and
+operand overlap. Inputs use the original capture seed and xorshift sequence.
+
+FP8/BF8 cases distinguish native-format arithmetic and NaN precedence.
+
+Tests sample destination words and check that other registers remain unchanged.
+This deliberately small corpus is regression coverage, not exhaustive validation.

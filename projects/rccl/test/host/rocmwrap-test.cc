@@ -450,7 +450,7 @@ TEST_F(RocmwrapMicrotest, CapabilityCheck_EachCheapGateFailureReturnsZeroWithout
          return hipSuccess;
        };
      },
-     "requires HIP_VERSION >= 7.2.0"},
+     "requires ROCm >= 7.12 or the 7.0.2.x backport"},
     {"no VMM", [] { SetVmmAttribute(0); }, "requires VMM RDMA support"},
   };
   for (const auto& c : cases) {

@@ -110,7 +110,7 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
   }
 
   // Common to all four tiers: everything the shape checks look at but the size.
-  void ExpectShapeRejections(EligibleFn fn) {
+  void ExpectShapeRejections(EligibleFn fn, bool gatedByDdaLL) {
     EXPECT_TRUE(Eligible(fn, 64));
     EXPECT_FALSE(Eligible(fn, 0));
     EXPECT_FALSE(fn(nullptr, kSendbuff, kRecvbuff, 64, ncclFloat32, ncclSum));
@@ -152,7 +152,8 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     }
     mock_.setFabricResourcesPresent(true);
     params_["RCCL_DDA_LL"] = 0;
-    EXPECT_FALSE(Eligible(fn, 64));
+    // RCCL_DDA_LL gates only the LL tier; LL128 is gated by RCCL_DDA_LL128 upstream of these checks.
+    EXPECT_EQ(!gatedByDdaLL, Eligible(fn, 64));
     params_.erase("RCCL_DDA_LL");
   }
 
@@ -161,19 +162,19 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
 };
 
 TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_SharedShapeChecks) {
-  ExpectShapeRejections(ddaLLArOneShotEligible);
+  ExpectShapeRejections(ddaLLArOneShotEligible, true);
   comm().ddaLLEpochDev = nullptr;
   EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 64));
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, LLTwoShotEligible_SharedShapeChecks) {
-  ExpectShapeRejections(ddaLLArTwoShotEligible);
+  ExpectShapeRejections(ddaLLArTwoShotEligible, true);
   comm().ddaLLEpochDev = nullptr;
   EXPECT_TRUE(Eligible(ddaLLArTwoShotEligible, 64));
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, LL128OneShotEligible_SharedShapeChecksAndEpoch) {
-  ExpectShapeRejections(ddaLL128ArOneShotEligible);
+  ExpectShapeRejections(ddaLL128ArOneShotEligible, false);
   comm().ddaLLEpochLen = 0;
   EXPECT_FALSE(Eligible(ddaLL128ArOneShotEligible, 64));
   comm().ddaLLEpochLen = 1;
@@ -182,7 +183,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LL128OneShotEligible_SharedShapeChecksAndE
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, LL128TwoShotEligible_SharedShapeChecksAndEpoch) {
-  ExpectShapeRejections(ddaLL128ArTwoShotEligible);
+  ExpectShapeRejections(ddaLL128ArTwoShotEligible, false);
   comm().ddaLLEpochLen = 0;
   EXPECT_FALSE(Eligible(ddaLL128ArTwoShotEligible, 64));
   comm().ddaLLEpochLen = 1;
@@ -385,7 +386,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotPassesWholeMessageEpochAndBan
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
-  ASSERT_EQ(launch.args.size(), 9u);
+  ASSERT_EQ(launch.args.size(), 10u);
   EXPECT_EQ(launch.Arg<float**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<float*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const float*>(2), kSendbuff);
@@ -394,6 +395,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotPassesWholeMessageEpochAndBan
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
   EXPECT_EQ(launch.Arg<size_t>(8), (32u << 20) + 16);
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(9).flag, comm().abortFlagDev);
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotPassesWholeCountEpochAndBank) {
@@ -402,7 +404,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotPassesWholeCountEpochAndBank)
   const DdaLaunch& launch = RunOneLL(256);
   EXPECT_EQ(launch.block.x, 1024u);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
-  ASSERT_EQ(launch.args.size(), 9u);
+  ASSERT_EQ(launch.args.size(), 10u);
   EXPECT_EQ(launch.Arg<float**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<float*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const float*>(2), kSendbuff);
@@ -411,6 +413,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotPassesWholeCountEpochAndBank)
   EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
   EXPECT_EQ(launch.Arg<size_t>(8), (32u << 20) + 16);
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(9).flag, comm().abortFlagDev);
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotPassesBytesSlicesEpochAndBank) {
@@ -418,7 +421,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotPassesBytesSlicesEpochAndB
   const DdaLaunch& launch = RunOneLL128(1000, ncclBfloat16);
   EXPECT_EQ(launch.block.x, 512u);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
-  ASSERT_EQ(launch.args.size(), 10u);
+  ASSERT_EQ(launch.args.size(), 11u);
   EXPECT_EQ(launch.Arg<bf16**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<bf16*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const bf16*>(2), kSendbuff);
@@ -428,6 +431,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_OneShotPassesBytesSlicesEpochAndB
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
   EXPECT_EQ(launch.Arg<size_t>(8), 2u);
   EXPECT_EQ(launch.Arg<size_t>(9), (32u << 20) + 16);
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_TwoShotPassesShardBytesAndSlices) {
@@ -436,7 +440,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_TwoShotPassesShardBytesAndSlices)
   const DdaLaunch& launch = RunOneLL128(8 * 1000, ncclBfloat16);
   EXPECT_EQ(launch.block.x, 512u);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
-  ASSERT_EQ(launch.args.size(), 10u);
+  ASSERT_EQ(launch.args.size(), 11u);
   EXPECT_EQ(launch.Arg<bf16**>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<bf16*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const bf16*>(2), kSendbuff);
@@ -446,6 +450,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_TwoShotPassesShardBytesAndSlices)
   EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
   EXPECT_EQ(launch.Arg<size_t>(8), 2u);
   EXPECT_EQ(launch.Arg<size_t>(9), (32u << 20) + 16);
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
 }
 
 // One-shot LL: a block per 512 packets of the message, capped at ddaFabricMaxBlocks.
