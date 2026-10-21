@@ -1,0 +1,22 @@
+l1i.bw:
+  name: L1I BW
+  formula: 128 * SUM(SQC_TC_INST_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Bandwidth of instruction cache requests to the GL1 cache. High values may indicate
+    instruction cache pressure from large kernels or frequent instruction cache misses.
+  peak: $sqc_per_gpu * 64 * $max_sclk / 1000
+l1i.hit_rate_excl_dup:
+  name: L1I Hit Rate (Excluding Duplicate Misses)
+  formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
+  unit: Percent
+  description: >-
+    Percentage of instruction fetch requests that hit in the instruction cache. High
+    hit rates are essential for sustained instruction throughput. Low hit rates may
+    indicate large kernel code size or divergent control flow.
+  peak: 100
+l1i.req:
+  name: L1I Requests
+  formula: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''

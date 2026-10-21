@@ -11,12 +11,14 @@ For every arch in src/rocprof_compute_soc/metric_library/, check that:
   3. metrics and variables have the required fields and types; "peak" is a
      theoretical peak and "peak_empirical" a roofline benchmark ceiling;
   4. every ceiling the roofline benchmark measures on the arch is the
-     "peak_empirical" of exactly one metric, or is in CEILINGS_WITHOUT_METRIC;
+     "peak_empirical" of exactly one metric, or is in CEILINGS_WITHOUT_METRIC or the
+     arch's ARCH_CEILINGS_WITHOUT_METRIC, and each entry there is measured;
   5. metric ids look like "{category}.{subcategory}_{name}", name hardware rather than
      a view, and live in the file named after their category, so each id is unique on
      the arch;
-  6. no two metrics on the arch share a formula;
-  7. units use one spelling;
+  6. no two metrics on the arch share a formula (except SHARED_FORMULA_IDS);
+  7. units use one spelling, and each metric id has one name and one unit on every
+     arch;
   8. the library matches analysis_configs: every equation a row shows is a library
      formula (DISPLAY_VARIANTS list the rows that show one in another form), every
      formula is shown, every row's unit is its metric's unit (except UNIT_VARIANTS),
@@ -41,7 +43,7 @@ from format_yaml import normalize_equation, sort_top_level_keys  # noqa: E402
 
 import config  # noqa: E402
 from rocprof_compute_soc.soc_base import OmniSoC_Base  # noqa: E402
-from roofline.benchmark.ceilings import measured_ceilings  # noqa: E402
+from roofline.benchmark.ceilings import ALL_CEILINGS, measured_ceilings  # noqa: E402
 from roofline.run_benchmark import BENCHMARKING_SUPPORTED  # noqa: E402
 from utils.metric_library import (  # noqa: E402
     METRIC_LIBRARY_PARENT_ARCH,
@@ -88,21 +90,26 @@ METRIC_REQUIRED_FIELDS = ("name", "formula", "unit", "description")
 METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical", "coll_level")
 # A roofline benchmark ceiling, the measured peak in "peak_empirical".
 EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
-# Ceilings the roofline benchmark measures that no row shows as a peak: the VALU
-# integer rates, MALL bandwidth (analyze skips MALL, roofline_calc.py), and the gfx950
-# F4 and F6 MFMA rates (the roofline shows only the combined F6F4 rate).
-CEILINGS_WITHOUT_METRIC = (
-    "I8Ops",
-    "I32Ops",
-    "I64Ops",
-    "MALLBw",
-    "MFMAF4Flops",
-    "MFMAF6Flops",
-)
+# Ceilings the roofline benchmark measures that no row shows as a peak: on every arch,
+# the VALU integer rates and MALL bandwidth (analyze skips MALL, roofline_calc.py); per
+# arch, the rates the roofline combines or does not show.
+CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops", "MALLBw")
+ARCH_CEILINGS_WITHOUT_METRIC = {
+    # The roofline shows the combined F6F4 MFMA rate.
+    "gfx950": ("MFMAF4Flops", "MFMAF6Flops"),
+    # The roofline shows the F32 and F64 VALU rates only.
+    "gfx115x": ("FP16Flops", "BF16Flops"),
+    # The VALU rows show theoretical peaks.
+    "gfx1250": ("FP16Flops", "FP32Flops", "FP64Flops"),
+}
 VARIABLE_FIELDS = ("formula",)
 # Ids allowed to share another id's formula (id -> that id): the same counters bounded
-# by a different measured ceiling. gfx950 counts MXF8 MFMA work in the F8 counter.
-SHARED_FORMULA_IDS = {"compute.mfma_flops_mxf8": "compute.mfma_flops_f8"}
+# by a different measured ceiling. gfx950 and gfx1250 count MXF8 matrix work in the F8
+# counter.
+SHARED_FORMULA_IDS = {
+    "compute.mfma_flops_mxf8": "compute.mfma_flops_f8",
+    "compute.wmma_flops_mxfp8": "compute.wmma_flops_fp8",
+}
 
 ANALYSIS_CONFIGS = (
     Path(config.rocprof_compute_home) / "rocprof_compute_soc" / "analysis_configs"
@@ -115,18 +122,9 @@ SECONDS_SCALE = "/(SUM(End_Timestamp-Start_Timestamp)/1e9)"
 NANOSECONDS = "/SUM(End_Timestamp-Start_Timestamp)"
 # TODO(AIPROFCOMP-820): remove with the row equation check when the old panel files are
 # deleted (see "Equivalence with analysis_configs" below).
-# Rows showing a metric in another display form (positional id -> label, metric id,
-# row equation). Without a row equation, the row shows the formula in Bytes/s (the
-# library keeps GB/s); with one, the row writes the formula differently.
-_CDNA_MEMORY_CHART_VARIANTS = {
-    "3.1.16": ("VL1_L2 Read BW", "vl1d.l2_rd_bw", None),
-    "3.1.17": ("VL1_L2 Write BW", "vl1d.l2_wr_bw", None),
-    "3.1.18": ("VL1_L2 Atomic BW", "vl1d.l2_atomic_bw", None),
-    "3.1.21": ("sL1D_L2 Read BW", "sl1d.l2_rd_bw", None),
-    "3.1.24": ("IL1_L2 Read BW", "l1i.l2_bw", None),
-    "3.1.26": ("L2-Fabric Read BW", "fabric.rd_bw", None),
-    "3.1.27": ("L2-Fabric Write and Atomic BW", "fabric.wr_atomic_bw", None),
-}
+# Rows that write a metric's formula differently (positional id -> label, metric id,
+# row equation). A row in Bytes/s needs no entry: its unit says it shows a GB/s formula
+# scaled by 1e9.
 # The roofline's L2 bandwidth at its bytes per request (64 up to gfx941, then 128).
 _ROOFLINE_L2_BW_EQUATION = (
     "{} * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
@@ -157,24 +155,15 @@ _PIPELINE_MFMA_UTIL = (
 )
 DISPLAY_VARIANTS = {
     "gfx908": {
-        **_CDNA_MEMORY_CHART_VARIANTS,
         "4.1.9": _ROOFLINE_L2_BW,
         "4.1.11": _ROOFLINE_LDS_BW,
     },
     "gfx90a": {
-        **_CDNA_MEMORY_CHART_VARIANTS,
         "4.1.9": _ROOFLINE_L2_BW,
         "4.1.11": _ROOFLINE_LDS_BW,
         "11.2.7": _PIPELINE_MFMA_UTIL,
     },
     "gfx940": {
-        **_CDNA_MEMORY_CHART_VARIANTS,
-        "3.1.28": ("Estimated HBM Read BW", "fabric.hbm_rd_bw_est", None),
-        "3.1.29": (
-            "Estimated HBM Write and Atomic BW",
-            "fabric.hbm_wr_atomic_bw_est",
-            None,
-        ),
         "4.1.10": _ROOFLINE_L2_BW,
         "4.1.12": _ROOFLINE_LDS_BW,
         "11.2.7": _PIPELINE_MFMA_UTIL,
@@ -188,23 +177,6 @@ DISPLAY_VARIANTS["gfx950"] = {
         "SUM(128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum "
         "+ 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)",
     ),
-    "3.1.19": ("VL1_L2 Read BW", "vl1d.l2_rd_bw", None),
-    "3.1.20": ("VL1_L2 Write BW", "vl1d.l2_wr_bw", None),
-    "3.1.21": ("VL1_L2 Atomic BW", "vl1d.l2_atomic_bw", None),
-    "3.1.24": ("sL1D_L2 Read BW", "sl1d.l2_rd_bw", None),
-    "3.1.27": ("IL1_L2 Read BW", "l1i.l2_bw", None),
-    "3.1.29": ("L2-Fabric Read BW", "fabric.rd_bw", None),
-    "3.1.30": ("L2-Fabric Write and Atomic BW", "fabric.wr_atomic_bw", None),
-    "3.1.31": ("HBM Read BW", "fabric.hbm_rd_bw", None),
-    "3.1.32": ("HBM Write BW", "fabric.hbm_wr_bw", None),
-    "3.1.33": ("HBM Atomic BW", "fabric.hbm_atomic_bw", None),
-    "3.1.34": ("HBM Write and Atomic BW", "fabric.hbm_wr_atomic_bw", None),
-    "3.1.35": ("xGMI Read BW", "fabric.xgmi_rd_bw", None),
-    "3.1.36": ("xGMI Write BW", "fabric.xgmi_wr_bw", None),
-    "3.1.37": ("xGMI Atomic BW", "fabric.xgmi_atomic_bw", None),
-    "3.1.38": ("PCIe Read BW", "fabric.pcie_rd_bw", None),
-    "3.1.39": ("PCIe Write BW", "fabric.pcie_wr_bw", None),
-    "3.1.40": ("PCIe Atomic BW", "fabric.pcie_atomic_bw", None),
     "4.1.12": _ROOFLINE_L2_BW_128B,
     "4.1.14": _ROOFLINE_LDS_BW,
     "11.2.9": _PIPELINE_MFMA_UTIL,
@@ -286,11 +258,87 @@ DISPLAY_VARIANTS["gfx942"] = {
         "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
     ),
 }
+DISPLAY_VARIANTS["gfx115x"] = {
+    "4.1.0": (
+        "VALU FLOPs",
+        "compute.valu_flops",
+        "SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(End_Timestamp - Start_Timestamp)",
+    ),
+    "4.1.1": (
+        "VALU FLOPs (F64)",
+        "compute.valu_flops_f64",
+        "SUM($wave_size * SQ_INSTS_VALU_DP_sum) / SUM(End_Timestamp - Start_Timestamp)",
+    ),
+}
+DISPLAY_VARIANTS["gfx1250"] = {
+    "3.3.4": (
+        "GL0 Hit Rate",
+        "gl0.hit_rate",
+        "SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum) * 100",
+    ),
+}
+# Counter names detect_counters() takes from YAML comments and descriptions rather than
+# formulas (D1); the library does not collect them.
+KNOWN_COUNTER_DIFFERENCES = {
+    "gfx115x": (
+        "GL2C_EA_RDREQ_96B",
+        "SPI_BUSY",
+        "SQ_INSTS_INTERNAL",
+        "SQ_INSTS_VALU",
+        "SQ_INSTS_VALU_TRANS",
+        "TCP_GATE_EN2_sum",
+    ),
+    "gfx1250": (
+        "GRBM_CP_BUSY",
+        "GRBM_GUI_ACTIVE",
+        "SPI_ALL_WAVE",
+        "SPI_CSN_NUM_THREADGROUPS",
+        "SPI_CSN_NUM_THREADGROUPS_sum",
+        "SPI_CSN_WAVE",
+        "SPI_CSN_WAVE_sum",
+        "SP_VALU_FLOPS",
+        "SQ_INSTS_TEX_LOAD_sum",
+        "SQ_INSTS_TEX_STORE_sum",
+        "SQ_VALU_WMMA_FLOP",
+        "TX_VMW",
+        "TX_VMW_GL1_PENDING_STALL",
+        "TX_VMW_LDS_ACTIVE",
+        "TX_VMW_LDS_INPUT_ACTIVE",
+        "TX_VMW_VMW_BUSY",
+    ),
+}
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
-UNIT_VARIANTS = {
-    arch: _CDNA_UNIT_VARIANTS
-    for arch in ("gfx908", "gfx90a", "gfx940", "gfx941", "gfx942")
+UNIT_VARIANTS = {arch: _CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942")}
+# gfx940 and gfx941 label integer ops in FLOPs.
+_GFX940_UNIT_VARIANTS = {
+    **_CDNA_UNIT_VARIANTS,
+    "11.3.1": ("IOPs (Total)", "(FLOPs + $normUnit)"),
+    "11.3.7": ("INT8 OPs", "(FLOPs + $normUnit)"),
+}
+UNIT_VARIANTS["gfx940"] = _GFX940_UNIT_VARIANTS
+UNIT_VARIANTS["gfx941"] = _GFX940_UNIT_VARIANTS
+UNIT_VARIANTS["gfx115x"] = {
+    "3.4.0": ("LDS Req", "(Requests + $normUnit)"),
+    "7.2.4": ("LDS Allocation", "Bytes"),
+    "9.2.0": ("Total Requests", "(Count + $normUnit)"),
+    "9.2.1": ("Read Requests", "(Count + $normUnit)"),
+    "9.2.2": ("Write Requests", "(Count + $normUnit)"),
+    "9.4.0": ("GL1 Read Requests", "(Count + $normUnit)"),
+    "9.4.2": ("GL1 Write Requests", "(Count + $normUnit)"),
+}
+UNIT_VARIANTS["gfx1250"] = {
+    "2.1.17": ("Active WGPs", "WGPs per Cycle"),
+    "3.4.0": ("LDS Load Requests", "(Requests + $normUnit)"),
+    "3.4.1": ("LDS Store Requests", "(Requests + $normUnit)"),
+    "3.4.2": ("LDS Atomic Requests", "(Requests + $normUnit)"),
+    "3.4.3": ("Async Load Requests", "(Requests + $normUnit)"),
+    "3.4.4": ("Async Store Requests", "(Requests + $normUnit)"),
+    "3.4.14": ("TDM Load Requests", "(Requests + $normUnit)"),
+    "3.4.15": ("TDM Store Requests", "(Requests + $normUnit)"),
+    "6.2.0": ("Dispatched Workgroups", "Count"),
+    "6.2.1": ("Dispatched Wavefronts", "Count"),
+    "7.2.5": ("LDS Allocation", "Bytes"),
 }
 UNIT_VARIANTS["gfx950"] = {
     **_CDNA_UNIT_VARIANTS,
@@ -319,13 +367,17 @@ def validate(metric_dir: Path, analysis_dir: Optional[Path] = None) -> list[str]
     With analysis_dir, also check each valid arch against its analysis configs.
     """
     errors: list[str] = []
+    valid_archs = []
     for arch in METRIC_LIBRARY_PARENT_ARCH:
         if not (metric_dir / arch).is_dir():
             continue
         arch_errors = validate_arch(metric_dir, arch)
+        if not arch_errors:
+            valid_archs.append(arch)
         if not arch_errors and analysis_dir is not None:
             arch_errors = equivalence_errors(metric_dir, analysis_dir, arch)
         errors.extend(arch_errors)
+    errors.extend(_name_unit_errors(metric_dir, valid_archs))
     errors.extend(
         f"[{path.name}] is not a known metric library arch"
         for path in sorted(metric_dir.iterdir())
@@ -517,6 +569,10 @@ def _metric_errors(entry: object, source: str, item: str) -> list[str]:
 
 def _ceiling_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
     measured = _arch_ceilings(arch)
+    without_metric = {
+        *CEILINGS_WITHOUT_METRIC,
+        *ARCH_CEILINGS_WITHOUT_METRIC.get(arch, ()),
+    }
     users = defaultdict(list)
     for metric_id, metric in metrics.items():
         match = EMPIRICAL_PEAK_RE.fullmatch(str(metric.get("peak_empirical")))
@@ -531,15 +587,22 @@ def _ceiling_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
             )
         elif len(metric_ids) > 1:
             errors.append(f"[{arch}] {metric_ids}: share the ceiling {ceiling}")
-        elif ceiling in CEILINGS_WITHOUT_METRIC:
+        elif ceiling in without_metric:
             errors.append(
-                f"[{arch}] {metric_ids}: {ceiling} is in CEILINGS_WITHOUT_METRIC"
+                f"[{arch}] {metric_ids}: {ceiling} is listed as a ceiling without a "
+                "metric"
             )
     errors.extend(
         f"[{arch}] the roofline benchmark measures {ceiling}, but no metric has it as "
         "'peak_empirical'; add it to the metric it bounds, or to "
-        "CEILINGS_WITHOUT_METRIC"
-        for ceiling in sorted(measured - set(users) - set(CEILINGS_WITHOUT_METRIC))
+        "CEILINGS_WITHOUT_METRIC or ARCH_CEILINGS_WITHOUT_METRIC"
+        for ceiling in sorted(measured - set(users) - without_metric)
+    )
+    errors.extend(
+        f"[{arch}] ARCH_CEILINGS_WITHOUT_METRIC lists {ceiling}, which the roofline "
+        f"benchmark does not measure on {arch}; remove it"
+        for ceiling in ARCH_CEILINGS_WITHOUT_METRIC.get(arch, ())
+        if ceiling not in measured
     )
     return errors
 
@@ -566,6 +629,20 @@ def _shared_formula_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
         != _canonical(metrics[partner].get("formula"))
     )
     return errors
+
+
+def _name_unit_errors(metric_dir: Path, archs: list[str]) -> list[str]:
+    """Check that each metric id has one name and one unit on every arch (D8)."""
+    values = defaultdict(lambda: defaultdict(list))
+    for arch in archs:
+        for metric_id, metric in load_metric_library(metric_dir, arch).metrics.items():
+            values[metric_id][(metric["name"], metric["unit"])].append(arch)
+    return [
+        f"{metric_id}: one name and unit on every arch, not "
+        + "; ".join(f"{name!r} [{unit}] on {on}" for (name, unit), on in found.items())
+        for metric_id, found in sorted(values.items())
+        if len(found) > 1
+    ]
 
 
 def _arch_ceilings(arch: str) -> set[str]:
@@ -610,7 +687,7 @@ def _row_metric_id(
     named_id = names.get(row.label.casefold())
     if row.equation is None:
         return named_id
-    metric_id = formulas.get(row.equation)
+    metric_id = formulas.get(_gb_per_second(row))
     if metric_id is not None and SHARED_FORMULA_IDS.get(named_id) == metric_id:
         return named_id
     return metric_id
@@ -642,12 +719,7 @@ def _variant_errors(
         return [f"[{arch}] {row.legacy_id} is now {row.label!r}; update variants"]
     if metric_id not in library.metrics:
         return [f"[{arch}] {row.legacy_id} {label}: no metric {metric_id}"]
-    if row_equation:
-        expected = _canonical(row_equation)
-    else:
-        formula = _canonical(library.metrics[metric_id]["formula"])
-        expected = formula.replace(NANOSECONDS, SECONDS_SCALE)
-    if row.equation == expected:
+    if row.equation == _canonical(row_equation):
         return []
     return [f"[{arch}] {row.legacy_id} {label}: not the listed form of {metric_id}"]
 
@@ -695,10 +767,14 @@ def _unit_errors(
     for row, metric_id in zip(rows, metric_ids):
         if row.unit is None or metric_id is None:
             continue
-        label, unit = unit_variants.get(
-            row.legacy_id, (row.label, library.metrics[metric_id]["unit"])
-        )
-        if row.label != label:
+        metric_unit = library.metrics[metric_id]["unit"]
+        label, unit = unit_variants.get(row.legacy_id, (row.label, metric_unit))
+        if row.legacy_id in unit_variants and unit == metric_unit:
+            errors.append(
+                f"[{arch}] {row.legacy_id} {row.label}: the unit of {metric_id}; "
+                "remove it from UNIT_VARIANTS"
+            )
+        elif row.label != label:
             errors.append(
                 f"[{arch}] {row.legacy_id} is now {row.label!r}; update unit variants"
             )
@@ -719,23 +795,28 @@ def _peak_errors(
     """Check that row peaks and library peaks match, both ways.
 
     Each row's peak is its metric's "peak" or "peak_empirical", and each library peak
-    is the peak of a row that shows the metric. A measured peak on an arch the roofline
-    benchmark does not run on is skipped.
+    is the peak of a row that shows the metric. A Bytes/s row shows its peak in Bytes/s.
+    A row's measured peak is skipped where the roofline benchmark does not measure that
+    ceiling on the arch (always, on an arch without a benchmark); a ceiling no
+    benchmark writes is still an error.
     """
-    benchmarked = bool(_arch_ceilings(arch))
+    measured = _arch_ceilings(arch)
     errors = []
-    shown_peaks = defaultdict(set)
+    shown_fields = defaultdict(set)
     for row, metric_id in zip(rows, metric_ids):
         if row.peak is None or metric_id is None:
             continue
-        if not benchmarked and EMPIRICAL_PEAK_RE.search(row.peak):
+        ceiling = EMPIRICAL_PEAK_RE.search(row.peak)
+        if ceiling and ceiling.group(1) in ALL_CEILINGS - measured:
             continue
-        shown_peaks[metric_id].add(row.peak)
         metric = library.metrics[metric_id]
-        if row.peak not in (
-            _canonical(metric.get("peak")),
-            _canonical(metric.get("peak_empirical")),
-        ):
+        fields = [
+            field
+            for field in ("peak", "peak_empirical")
+            if field in metric and row.peak == _row_peak(row, _canonical(metric[field]))
+        ]
+        shown_fields[metric_id].update(fields)
+        if not fields:
             errors.append(
                 f"[{arch}] {row.legacy_id} {row.label}: peak {row.peak} is neither the "
                 f"'peak' nor the 'peak_empirical' of {metric_id}"
@@ -744,9 +825,29 @@ def _peak_errors(
         f"[{arch}] {metric_id}: no analysis config row shows its '{field}'"
         for metric_id, metric in library.metrics.items()
         for field in ("peak", "peak_empirical")
-        if field in metric and _canonical(metric[field]) not in shown_peaks[metric_id]
+        if field in metric and field not in shown_fields[metric_id]
     )
     return errors
+
+
+def _gb_per_second(row: "_Row") -> Optional[str]:
+    """Return a row's equation, with a Bytes/s row's time in nanoseconds (GB/s)."""
+    if row.unit == "Bytes/s" and row.equation.endswith(SECONDS_SCALE):
+        return row.equation[: -len(SECONDS_SCALE)] + NANOSECONDS
+    return row.equation
+
+
+def _row_peak(row: "_Row", peak: str) -> str:
+    """Return a library peak (GB/s) as row shows it.
+
+    A Bytes/s row shows a theoretical "<MHz term> / 1000" as "<MHz term> * 1e6", and a
+    measured "$<ceiling>_empirical_peak" as "... * 1e9".
+    """
+    if row.unit != "Bytes/s":
+        return peak
+    if peak.endswith("/1000"):
+        return peak[: -len("/1000")] + "*1e6"
+    return f"{peak}*1e9"
 
 
 def _counter_errors(
@@ -757,7 +858,8 @@ def _counter_errors(
     detect_counters() scans the panel text, so it also takes the counter name a
     raw-counter row is labeled with ("TA_TA_BUSY", "TCP_GATE_EN1 (free running
     cycles)"), whose formula reads "<name>_sum". The library takes counters from
-    formulas only (D1), so those names are not missing.
+    formulas only (D1), so those names are not missing, nor are the names listed in
+    KNOWN_COUNTER_DIFFERENCES.
     """
     has_membw_panel = any(
         (analysis_dir / arch).glob(f"{MEMBW_ANALYSIS_PANEL_ID}_*.yaml")
@@ -769,10 +871,14 @@ def _counter_errors(
     )
     label_names = {row.label.split()[0] for row in rows}
     row_labels = {name for name in label_names if f"{name}_sum" in actual}
+    known = set(KNOWN_COUNTER_DIFFERENCES.get(arch, ()))
     errors = []
-    if expected - actual - row_labels:
-        missing = sorted(expected - actual - row_labels)
+    if expected - actual - row_labels - known:
+        missing = sorted(expected - actual - row_labels - known)
         errors.append(f"[{arch}] counters missing: {missing}")
+    if known - (expected - actual):
+        stale = sorted(known - (expected - actual))
+        errors.append(f"[{arch}] KNOWN_COUNTER_DIFFERENCES lists {stale}; remove them")
     if actual - expected:
         errors.append(f"[{arch}] extra counters: {sorted(actual - expected)}")
     return errors
@@ -837,19 +943,28 @@ def _make_soc(arch: str, analysis_dir: Path, membw_analysis: bool) -> OmniSoC_Ba
         set_selected=None,
     )
     machine_specs = SimpleNamespace(
-        gpu_arch=arch,
+        gpu_arch=_member_arch(arch),
         gpu_series=_gpu_series(arch),
         l2_banks=16,
         num_xcd=1,
         rocminfo_lines=None,
     )
     soc = OmniSoC_Base(args, machine_specs)
-    soc.set_arch(arch)
+    soc.set_arch(_member_arch(arch))
     return soc
 
 
 def _gpu_series(arch: str) -> Optional[str]:
-    return mi_gpu_specs.get_gpu_series(arch)
+    return mi_gpu_specs.get_gpu_series(_member_arch(arch))
+
+
+def _member_arch(arch: str) -> str:
+    """Return a GPU arch that uses arch's analysis configs (gfx1150 for gfx115x)."""
+    return next(
+        gpu_arch
+        for gpu_arch in sorted(mi_gpu_specs.get_gpu_series_dict())
+        if canonical_config_arch(gpu_arch) == arch
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -1,0 +1,8 @@
+vl1d.ai:
+  name: AI L1
+  formula: SUM($wave_size * SQ_INSTS_VALU_sum) / (64 * SUM(TCP_GL1_REQ_READ_sum + TCP_GL1_REQ_WRITE_sum))
+  unit: FLOPs/Byte
+  description: >-
+    Arithmetic Intensity relative to the L1 cache. This metric shows compute density
+    relative to L1 cache traffic. Higher values indicate better data reuse upstream
+    of L1, while lower values suggest heavy traffic into L1.

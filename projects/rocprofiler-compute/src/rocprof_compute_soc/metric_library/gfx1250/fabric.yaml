@@ -1,0 +1,11 @@
+fabric.ai_hbm:
+  name: AI HBM
+  formula: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / (32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum + GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum))
+  unit: FLOPs/Byte
+  description: Arithmetic intensity relative to HBM bandwidth.
+fabric.hbm_bw:
+  name: HBM Bandwidth
+  formula: 32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum + GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total HBM bandwidth.
+  peak_empirical: $HBMBw_empirical_peak

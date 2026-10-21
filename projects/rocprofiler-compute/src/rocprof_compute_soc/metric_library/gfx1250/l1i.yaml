@@ -1,0 +1,49 @@
+l1i.bw:
+  name: L1I BW
+  formula: 64 * SUM(SQC_ICACHE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total Instruction Cache data bandwidth.
+  peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
+l1i.hit_rate_excl_dup:
+  name: L1I Hit Rate (Excluding Duplicate Misses)
+  formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
+  unit: Percent
+  description: Instruction Cache hit rate.
+  peak: 100
+l1i.hits_per_req:
+  name: L1I Hits per Request
+  formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
+  unit: Percent
+  description: Instruction Cache hit rate.
+l1i.icache_gl1_rd_bw:
+  name: ICache-GL1 Read Bandwidth
+  formula: 128 * SUM(SQC_TC_INST_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Instruction Cache miss fill bandwidth from GL1.
+l1i.icache_gl1_req_lat:
+  name: ICache-GL1 Request Latency
+  formula: SUM(SQC_ICACHE_TC_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_TC_INST_REQ_sum)
+  unit: Cycles
+  description: Average latency of Instruction Cache requests sent to GL1.
+l1i.icache_lat:
+  name: ICache Latency
+  formula: SUM(SQC_ICACHE_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_ICACHE_REQ_sum)
+  unit: Cycles
+  description: Average Instruction Cache request latency.
+l1i.icache_req_stall_rate:
+  name: ICache Request Stall Rate
+  formula: 100 * SUM(SQC_ICACHE_INPUT_VALID_READYB_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of shader-busy cycles the instruction fetch unit is stalled.
+l1i.icache_util:
+  name: ICache Utilization
+  formula: 100 * SUM(SQC_ICACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
+  unit: Percent
+  description: >-
+    Percentage of shader-busy cycles the Instruction Cache is serving requests.
+l1i.req:
+  name: L1I Requests
+  formula: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Total Instruction Cache fetch requests.

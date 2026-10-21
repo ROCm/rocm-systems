@@ -1,0 +1,122 @@
+gl0.ai:
+  name: AI GL0
+  formula: SUM($wave_size * SQ_INSTS_VALU_sum) / (64 * SUM(TCP_REQ_sum))
+  unit: FLOPs/Byte
+  description: >-
+    Arithmetic Intensity relative to the L0 cache (TCP). Higher values indicate more
+    compute operations per byte of data loaded, suggesting compute-bound behavior.
+    Lower values suggest memory-bound behavior limited by L0 bandwidth.
+gl0.busy:
+  name: GL0 Busy (TCP)
+  formula: 100 * SUM(TCP_GATE_EN2) / SUM(GRBM_GUI_ACTIVE * MAX(1, TO_INT($cu_per_gpu / 2)))
+  unit: Percent
+  description: >-
+    Percentage of cycles the GL0 vector cache (TCP) is actively processing requests.
+    Each Workgroup Processor has its own GL0/TCP instance. Low utilization may indicate
+    compute-bound workloads with minimal memory traffic or idle shader engines.
+gl0.bw:
+  name: GL0 Cache BW (TCP Cache)
+  formula: 64 * SUM(TCP_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Bandwidth of requests to the GL0 vector cache (TCP Cache). This represents the
+    rate at which the shader cores are requesting data from the cache hierarchy. High
+    bandwidth indicates memory-intensive workloads.
+  peak: $cu_per_gpu * 128 * $max_sclk / 1000
+  peak_empirical: $L0Bw_empirical_peak
+gl0.data_fifo_stall:
+  name: Data FIFO Stall
+  formula: SUM(TCP_DATA_FIFO_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    Cycles the GL0 cache data FIFO was stalled. High stall counts may indicate data
+    path congestion or insufficient buffering for high-throughput workloads.
+gl0.gl1_back_pressure:
+  name: GL1 Back Pressure
+  formula: SUM(TCP_GL1_TCP_BACK_PRESSURE_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    Cycles the GL0 cache was stalled due to backpressure from the GL1 cache. High
+    values indicate GL1 cache contention or bandwidth limitations impacting GL0 throughput.
+gl0.gl1_cache_bw:
+  name: GL0-GL1 Bandwidth
+  formula: 64 * SUM(TCP_GL1_REQ_READ_sum + TCP_GL1_REQ_WRITE_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Achieved bandwidth between the GL0 (TCP Cache) and GL1 caches. This represents
+    GL0 miss traffic. High bandwidth relative to peak may indicate cache pressure
+    at the GL0 level or memory access patterns with poor locality.
+  peak_empirical: $L1Bw_empirical_peak
+gl0.gl1_rd_128b_req:
+  name: GL1 Read 128B Requests
+  formula: SUM(TCP_GL1_REQ_READ_128B_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of 128-byte read requests forwarded from GL0 (TCP) to GL1 cache. This represents
+    large cache line fetches for memory-intensive workloads.
+gl0.gl1_rd_bw:
+  name: GL0-GL1 Read Bandwidth
+  formula: 64 * SUM(TCP_GL1_REQ_READ_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: ''
+gl0.gl1_rd_req:
+  name: GL0-GL1 Read Requests
+  formula: SUM(TCP_GL1_REQ_READ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Number of read requests forwarded from GL0 (TCP) to GL1 cache due to misses. This
+    represents GL0 miss traffic that must be serviced by higher cache levels.
+gl0.gl1_wr_bw:
+  name: GL0-GL1 Write Bandwidth
+  formula: 64 * SUM(TCP_GL1_REQ_WRITE_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: ''
+gl0.gl1_wr_req:
+  name: GL0-GL1 Write Requests
+  formula: SUM(TCP_GL1_REQ_WRITE_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Number of write requests forwarded from GL0 (TCP) to GL1 cache. This includes
+    writebacks and stores that missed in GL0.
+gl0.hit_rate:
+  name: GL0 Hit Rate
+  formula: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
+  unit: Percent
+  description: >-
+    Percentage of GL0 vector cache (TCP Cache) requests that hit in cache. The TCP
+    cache is the first-level cache for vector memory operations. High hit rates reduce
+    traffic to the GL1 cache and improve memory access latency.
+  peak: 100
+gl0.miss_req:
+  name: GL0 Miss Requests
+  formula: SUM(TCP_REQ_MISS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of GL0 cache requests that missed and required fetching from the GL1 cache.
+    High miss counts increase memory access latency. Consider improving data locality
+    or access patterns to reduce misses.
+gl0.rd_req:
+  name: GL0 Read Requests
+  formula: SUM(TCP_REQ_READ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''
+gl0.ta_req_stall:
+  name: TA Req Stall
+  formula: SUM(TCP_TCP_TA_REQ_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    Cycles the Texture Addresser was stalled waiting for the GL0 cache to accept requests.
+    High stall counts indicate GL0 cache backpressure limiting memory request throughput.
+gl0.total_req:
+  name: GL0 Total Requests
+  formula: SUM(TCP_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Total number of requests to the GL0 vector cache, including reads, writes, and
+    atomics. This represents the overall memory traffic generated by vector memory
+    instructions from the shader cores.
+gl0.wr_req:
+  name: GL0 Write Requests
+  formula: SUM(TCP_REQ_WRITE_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: ''

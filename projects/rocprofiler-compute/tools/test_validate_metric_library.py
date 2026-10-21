@@ -68,12 +68,26 @@ def gfx90a_copy(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def gfx115x_copy(tmp_path, monkeypatch):
+    """Copies of the gfx115x metric library and analysis configs."""
+    monkeypatch.setattr(MetricLibrary, "_cache", {})
+    return copy_shipped_trees(tmp_path, ["gfx115x"])
+
+
+@pytest.fixture
 def gfx950_copy(tmp_path, monkeypatch):
     """Copies of the gfx950 chain's metric library and analysis configs."""
     monkeypatch.setattr(MetricLibrary, "_cache", {})
     return copy_shipped_trees(
         tmp_path, ["gfx908", "gfx90a", "gfx940", "gfx942", "gfx950"]
     )
+
+
+@pytest.fixture
+def gfx1250_copy(tmp_path, monkeypatch):
+    """Copies of the gfx1250 metric library and analysis configs."""
+    monkeypatch.setattr(MetricLibrary, "_cache", {})
+    return copy_shipped_trees(tmp_path, ["gfx1250"])
 
 
 def copy_shipped_trees(root, archs):
@@ -293,7 +307,25 @@ def test_metrics_cannot_share_a_ceiling(tree, measured):
 def test_ceiling_without_metric_cannot_be_used(tree, measured):
     write_base_metrics(tree, with_peak_empirical(BASE_METRIC, "I8Ops"))
     errors = validate(tree)
-    assert any("I8Ops is in CEILINGS_WITHOUT_METRIC" in error for error in errors)
+    assert any("I8Ops is listed as a ceiling without a metric" in e for e in errors)
+
+
+@pytest.mark.parametrize(
+    "field, shown",
+    [("name: SALU Busy", "'SALU Busy' [Percent]"), ("unit: Cycles", "[Cycles]")],
+)
+def test_an_id_has_one_name_and_unit_on_every_arch(tree, field, shown):
+    replace_in(
+        tree / "gfx_c1" / "compute.yaml",
+        "compute.salu_util:\n",
+        f"compute.salu_util:\n  {field}\n",
+    )
+    errors = validate(tree)
+    assert any(
+        error.startswith("compute.salu_util: one name and unit on every arch")
+        and shown in error
+        for error in errors
+    )
 
 
 def test_unknown_arch_directory(tree):
@@ -359,6 +391,17 @@ def test_changed_unit(gfx908_copy):
     assert any("unit 'Percent' is not 'Cycles' (cp.cpc_l2_util)" in e for e in errors)
 
 
+def test_unit_variant_must_differ(gfx908_copy, monkeypatch):
+    monkeypatch.setitem(
+        validate_metric_library.UNIT_VARIANTS,
+        "gfx908",
+        {"7.1.8": ("LDS Allocation", "Bytes per Workgroup")},
+    )
+    assert any(
+        "remove it from UNIT_VARIANTS" in error for error in validate(*gfx908_copy)
+    )
+
+
 def test_changed_variable(gfx908_copy):
     library, configs = gfx908_copy
     replace_in(
@@ -402,18 +445,41 @@ def test_changed_row_measured_peak(gfx90a_copy):
     assert any("4.1.11 LDS Bandwidth: peak $L2Bw_empirical_peak" in e for e in errors)
 
 
-def test_shared_formula_rows_show_the_id_their_label_names(gfx950_copy):
-    """MXF8 rows read the F8 counter but are checked against compute.mfma_flops_mxf8."""
-    library, configs = gfx950_copy
+@pytest.mark.parametrize(
+    "arch, label, mx_ceiling, ceiling, metric_id",
+    [
+        (
+            "gfx950",
+            "MFMA FLOPs (MXF8)",
+            "MFMAMXF8",
+            "MFMAF8",
+            "compute.mfma_flops_mxf8",
+        ),
+        (
+            "gfx1250",
+            "WMMA FLOPs (MXFP8)",
+            "WMMAMXF8",
+            "WMMAF8",
+            "compute.wmma_flops_mxfp8",
+        ),
+    ],
+)
+def test_shared_formula_rows_show_the_id_their_label_names(
+    tmp_path, monkeypatch, arch, label, mx_ceiling, ceiling, metric_id
+):
+    """MXF8 rows read the F8 counter but are checked against their own id."""
+    monkeypatch.setattr(MetricLibrary, "_cache", {})
+    chain = metric_library.arch_chain(arch)
+    library, configs = copy_shipped_trees(tmp_path, chain)
     replace_in(
-        configs / "gfx950" / "0400_roofline.yaml",
-        "$MFMAMXF8Flops_empirical_peak",
-        "$MFMAF8Flops_empirical_peak",
+        configs / arch / "0400_roofline.yaml",
+        f"${mx_ceiling}Flops_empirical_peak",
+        f"${ceiling}Flops_empirical_peak",
     )
     errors = validate(library, configs)
     assert any(
-        "MFMA FLOPs (MXF8): peak $MFMAF8Flops_empirical_peak is neither" in error
-        and error.endswith("compute.mfma_flops_mxf8")
+        f"{label}: peak ${ceiling}Flops_empirical_peak is neither" in error
+        and error.endswith(metric_id)
         for error in errors
     )
 
@@ -454,6 +520,71 @@ def test_variant_position_must_exist(gfx908_copy, monkeypatch):
     assert "[gfx908] UNIT_VARIANTS lists 99.9.9, but no row has that position" in errors
 
 
+def test_only_bytes_per_second_rows_are_scaled(gfx90a_copy):
+    """3.1.26 keeps its Bytes/s equation but claims GB/s: 1e9 off, so an error."""
+    library, configs = gfx90a_copy
+    replace_in(
+        configs / "gfx90a" / "0300_memory_chart.yaml",
+        "/ 1e9)\n          unit: Bytes/s\n        L2-Fabric Write",
+        "/ 1e9)\n          unit: GB/s\n        L2-Fabric Write",
+    )
+    errors = validate(library, configs)
+    assert any("3.1.26 L2-Fabric Read BW: not a library formula" in e for e in errors)
+
+
+def test_unknown_measured_peak_is_an_error(gfx1250_copy):
+    """gfx1250 skips WMMA-F64, so its row peak is not checked; a typo still is."""
+    library, configs = gfx1250_copy
+    replace_in(
+        configs / "gfx1250" / "0400_roofline.yaml",
+        "$WMMAF64Flops_empirical_peak",
+        "$WMMAF64Flopz_empirical_peak",
+    )
+    errors = validate(library, configs)
+    assert any("peak $WMMAF64Flopz_empirical_peak is neither" in e for e in errors)
+
+
+def test_arch_ceiling_without_metric_must_be_measured(gfx115x_copy, monkeypatch):
+    monkeypatch.setitem(
+        validate_metric_library.ARCH_CEILINGS_WITHOUT_METRIC,
+        "gfx115x",
+        ("FP16Flops", "BF16Flops", "MFMAF8Flops"),
+    )
+    errors = validate(*gfx115x_copy)
+    assert any("lists MFMAF8Flops, which the roofline" in e for e in errors)
+
+
+def test_bytes_per_second_row_shows_its_peak_scaled(gfx115x_copy):
+    """Roofline 4.1.3 shows its peak in Bytes/s: "$L1Bw_empirical_peak * 1e9"."""
+    library, configs = gfx115x_copy
+    replace_in(
+        configs / "gfx115x" / "0400_roofline.yaml",
+        "$L1Bw_empirical_peak * 1e9",
+        "$L1Bw_empirical_peak * 1e6",
+    )
+    errors = validate(library, configs)
+    assert any(
+        "GL1 Cache BW: peak $L1Bw_empirical_peak*1e6 is neither" in e for e in errors
+    )
+
+
+@pytest.mark.parametrize(
+    "known, message",
+    [
+        (("SPI_BUSY",), "counters missing: ['GL2C_EA_RDREQ_96B'"),
+        (
+            validate_metric_library.KNOWN_COUNTER_DIFFERENCES["gfx115x"] + ("SQ_X",),
+            "KNOWN_COUNTER_DIFFERENCES lists ['SQ_X']",
+        ),
+    ],
+)
+def test_known_counter_differences_are_exact(gfx115x_copy, monkeypatch, known, message):
+    monkeypatch.setattr(
+        validate_metric_library, "KNOWN_COUNTER_DIFFERENCES", {"gfx115x": known}
+    )
+    assert any(message in error for error in validate(*gfx115x_copy))
+
+
 def test_changed_rewritten_display_variant(gfx908_copy):
     library, configs = gfx908_copy
     replace_in(
@@ -465,8 +596,9 @@ def test_changed_rewritten_display_variant(gfx908_copy):
     assert any("4.1.11 LDS Bandwidth: not the listed form" in e for e in errors)
 
 
-def test_changed_scaled_display_variant(gfx90a_copy):
-    """3.1.26 is checked even though row 17.2.0 also shows fabric.rd_bw."""
+def test_changed_bytes_per_second_row(gfx90a_copy):
+    """3.1.26 shows fabric.rd_bw in Bytes/s; it is checked even though row 17.2.0 also
+    shows fabric.rd_bw."""
     library, configs = gfx90a_copy
     replace_in(
         configs / "gfx90a" / "0300_memory_chart.yaml",
@@ -474,11 +606,11 @@ def test_changed_scaled_display_variant(gfx90a_copy):
         "TCC_EA_RDREQ_32B_sum) * 128) / (SUM(End",
     )
     errors = validate(library, configs)
-    assert any("3.1.26 L2-Fabric Read BW: not the listed form" in e for e in errors)
+    assert any("3.1.26 L2-Fabric Read BW: not a library formula" in e for e in errors)
 
 
 def test_renamed_display_variant(gfx908_copy):
     library, configs = gfx908_copy
-    path = configs / "gfx908" / "0300_memory_chart.yaml"
-    replace_in(path, "VL1_L2 Read BW", "VL1_L2 Rd BW")
-    assert any("3.1.16 is now" in error for error in validate(library, configs))
+    path = configs / "gfx908" / "0400_roofline.yaml"
+    replace_in(path, "LDS Bandwidth:", "LDS BW:")
+    assert any("4.1.11 is now" in error for error in validate(library, configs))

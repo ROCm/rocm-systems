@@ -1,0 +1,16 @@
+l2.ai:
+  name: AI L2
+  formula: SUM($wave_size * SQ_INSTS_VALU_sum) / SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_WRITE_32B_sum * 32 + GL1C_GL2_REQ_WRITE_64B_sum * 64)
+  unit: FLOPs/Byte
+  description: >-
+    Arithmetic Intensity relative to the L2 cache. This metric shows compute density
+    relative to L2 cache traffic. Higher values indicate better data reuse upstream
+    of L2, while lower values suggest heavy traffic into L2.
+l2.bw:
+  name: L2 Cache BW
+  formula: SUM(GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_COMPRESSED_READ_96_REQ_sum * 96) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Bandwidth of read operations at the L2 cache level. This metric shows overall
+    L2 cache utilization and helps identify memory subsystem bottlenecks.
+  peak: $total_l2_chan * 128 * $max_sclk / 1000

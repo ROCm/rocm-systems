@@ -1,0 +1,359 @@
+gl0.ai:
+  name: AI GL0
+  formula: SUM(SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum + SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192) / SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum)
+  unit: FLOPs/Byte
+  description: Arithmetic intensity relative to GL0 data bandwidth.
+gl0.atomic_req:
+  name: GL0 Atomic Requests
+  formula: SUM(TX_VMW_VEC32_REQ_ATOMIC_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of GL0 atomic requests.
+gl0.capacity_stall_rate:
+  name: Cache Capacity Stall Rate
+  formula: 100 * SUM(TX_VMW_ALLOC_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled due to no free GL0 cache lines or MSHR entries.
+gl0.gl1_atomic_bw:
+  name: GL0-GL1 Atomic Bandwidth
+  formula: 128 * SUM(TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total GL0-GL1 atomic bandwidth.
+gl0.gl1_atomic_req_with_return:
+  name: GL0-GL1 Atomic Requests - With Return
+  formula: SUM(TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of returning GL0-GL1 atomic requests.
+gl0.gl1_atomic_req_without_return:
+  name: GL0-GL1 Atomic Requests - Without Return
+  formula: SUM(TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of non-returning GL0-GL1 atomic requests.
+gl0.gl1_cluster_req:
+  name: GL0-GL1 Cluster Request
+  formula: SUM(TX_VMW_GL1_CLUSTER_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of GL0-GL1 cluster-scoped read requests.
+gl0.gl1_cluster_req_lat:
+  name: GL0-GL1 Cluster Request Latency
+  formula: SUM(TX_VMW_GL1_CLUSTER_LATENCY_sum) / SUM(TX_VMW_GL1_CLUSTER_REQ_sum)
+  unit: Cycles
+  description: Average GL0-GL1 cluster request latency.
+gl0.gl1_memory_req_fifo_stall_rate:
+  name: GL1 Memory Request FIFO Stall Rate
+  formula: 100 * SUM(TX_VMW_MEM_REQ_FIFO_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled because the GL1 request FIFO is full.
+gl0.gl1_prefetch_req_cu_scope:
+  name: GL0-GL1 Prefetch Request - CU Scope
+  formula: SUM(TX_VMW_GL1_REQ_CU_PREFETCH_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of CU-scoped GL0-GL1 prefetch requests.
+gl0.gl1_prefetch_req_gl2_scope:
+  name: GL0-GL1 Prefetch Request - GL2 Scope
+  formula: SUM(TX_VMW_GL1_REQ_L2_PREFETCH_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of GL2-scoped GL0-GL1 prefetch requests.
+gl0.gl1_rd_bw:
+  name: GL0-GL1 Read Bandwidth
+  formula: SUM(TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total GL0-GL1 read bandwidth.
+gl0.gl1_rd_lat:
+  name: GL0-GL1 Read Latency
+  formula: SUM(TX_VMW_GL1_READ_LATENCY_sum) / SUM(TX_VMW_GL1_REQ_READ_sum)
+  unit: Cycles
+  description: Average GL0-GL1 read latency.
+gl0.gl1_rd_req:
+  name: GL0-GL1 Read Requests
+  formula: SUM(TX_VMW_GL1_REQ_READ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of GL0-GL1 read requests.
+gl0.gl1_req_stall:
+  name: GL0-GL1 Request Stall
+  formula: 100 * SUM(TX_VMW_GL1_VMW_BACK_PRESSURE_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles GL0 is stalled sending requests to GL1.
+gl0.gl1_wr_bw:
+  name: GL0-GL1 Write Bandwidth
+  formula: SUM(TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: Total GL0-GL1 write bandwidth.
+gl0.gl1_wr_lat:
+  name: GL0-GL1 Write Latency
+  formula: SUM(TX_VMW_GL1_WRITE_LATENCY_sum) / SUM(TX_VMW_GL1_REQ_WRITE_sum)
+  unit: Cycles
+  description: Average GL0-GL1 write latency.
+gl0.gl1_wr_req:
+  name: GL0-GL1 Write Requests
+  formula: SUM(TX_VMW_GL1_REQ_WRITE_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of GL0-GL1 write requests.
+gl0.gl2_cache_bw:
+  name: GL2 Cache Bandwidth
+  formula: 128 * SUM(TX_VMW_GL1_REQ_READ_sum + TX_VMW_GL1_REQ_WRITE_sum + TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: GL2 Cache bandwidth.
+  peak_empirical: $L2Bw_empirical_peak
+gl0.hit_rate:
+  name: GL0 Hit Rate
+  formula: 100 * SUM(TX_VMW_REQ_sum - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum)
+  unit: Percent
+  description: GL0 cache hit rate.
+  peak: 100
+gl0.lat_fifo_stall_rate:
+  name: Latency FIFO Stall Rate
+  formula: 100 * SUM(TX_VMW_LFIFO_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled because the GL0 latency FIFO is full.
+gl0.lookup_hit_rate:
+  name: GL0 Cache Lookup Hit Rate
+  formula: 100 * SUM(1 - TX_VMW_REQ_MISS_sum) / SUM(TX_VMW_REQ_sum)
+  unit: Percent
+  description: GL0 cache lookup hit rate.
+gl0.ram_bank_conflict_stall_rate_rd:
+  name: Cache RAM Bank Conflict Stall Rate - Read
+  formula: 100 * SUM(TX_VMW_READ_DATACONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles a GL0 SRAM read is stalled due to a bank conflict.
+gl0.ram_bank_conflict_stall_rate_wr:
+  name: Cache RAM Bank Conflict Stall Rate - Write
+  formula: 100 * SUM(TX_VMW_WRITE_DATACONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles a GL0 SRAM write is stalled due to a bank conflict.
+gl0.ram_rd_stall_by_gl1_wr:
+  name: GL0 Cache RAM Read Stall by GL1 Write
+  formula: 100 * SUM(TX_VMW_GL1_GRANT_READ_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles a GL0 SRAM read is stalled by an incoming GL1 fill.
+gl0.rd_sectors:
+  name: GL0 Read Sectors
+  formula: SUM(TX_VMW_SECTORS_READ_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of GL0 cache sectors read.
+gl0.req_lat:
+  name: GL0 Request Latency
+  formula: SUM(TX_VMW_VMW_LATENCY_sum) / SUM(TX_VMW_REQ_sum)
+  unit: Cycles
+  description: Average GL0 cache request latency.
+gl0.req_stall_rate:
+  name: Request Stall Rate
+  formula: 100 * SUM(TX_VMW_VMW_VCA_REQ_STALL_sum) / SUM(TX_VMW_GATE_EN1_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles the GL0 cache cannot accept a new request.
+gl0.return_queue_pending_stall_rate:
+  name: Return Queue Pending Stall Rate
+  formula: 100 * SUM(TX_VMW_GL1_PENDING_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled on a pending GL1 return.
+gl0.sector_lookup_hit_rate:
+  name: GL0 Cache Sector Lookup Hit Rate
+  formula: 100 * SUM(1 - TX_VMW_SECTOR_MISS_sum) / SUM(TX_VMW_SECTORS_sum)
+  unit: Percent
+  description: GL0 cache sector-level lookup hit rate.
+gl0.segment_conflict_stall_rate_cache:
+  name: Segment Conflict Stall Rate - Cache
+  formula: 100 * SUM(TX_VMW_CROSS_PORT_SEGMENT_CONFLICT_VC_STALLED_CYCLES_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles the GL0 cache is stalled due to a cross-port segment
+    conflict.
+gl0.set_conflict_stall_rate_atomics:
+  name: Set Conflict Stall Rate - Atomics
+  formula: 100 * SUM(TX_VMW_ATOMIC_SETCONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles a GL0 atomic is stalled due to a cache set conflict.
+gl0.set_conflict_stall_rate_cache_rd:
+  name: Set Conflict Stall Rate - Cache Read
+  formula: 100 * SUM(TX_VMW_READ_SETCONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles a GL0 read is stalled due to a cache set conflict.
+gl0.set_conflict_stall_rate_cache_wr:
+  name: Set Conflict Stall Rate - Cache Write
+  formula: 100 * SUM(TX_VMW_WRITE_SETCONFLICT_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles a GL0 write is stalled due to a cache set conflict.
+gl0.set_conflict_stall_same_port:
+  name: Set Conflict Stall - Same Port
+  formula: 100 * SUM(TX_VMW_SET_CONFLICT_STALL_SAME_PORT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled due to a same-port GL0 set conflict.
+gl0.slot_hit_rate:
+  name: Slot Hit Rate
+  formula: 100 * SUM(TX_VMW_SLOT_HIT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles a GL0 cache access hits a valid slot.
+gl0.slot_replacement_rate:
+  name: Slot Replacement Rate
+  formula: 100 * SUM(TX_VMW_SLOT_REPLACEMENT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles a GL0 cache slot is being replaced.
+gl0.slot_replacement_stall_cross_port:
+  name: Slot Replacement Stall - Cross Port
+  formula: 100 * SUM(TX_VMW_SLOT_STALL_CROSS_PORT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled due to a cross-port slot replacement.
+gl0.slot_replacement_stall_same_port:
+  name: Slot Replacement Stall - Same Port
+  formula: 100 * SUM(TX_VMW_SLOT_STALL_SAME_PORT_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled due to a same-port slot replacement.
+gl0.total_conflict_stall_rate:
+  name: Cache Total Conflict Stall Rate
+  formula: 100 * SUM(TX_VMW_TOTAL_CONFLICT_STALLS_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles stalled due to any GL0 cache conflict.
+gl0.total_gl0_sectors:
+  name: Total GL0 Sectors
+  formula: SUM(TX_VMW_SECTORS_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Total cache sectors involved in GL0 requests.
+gl0.total_req:
+  name: GL0 Total Requests
+  formula: SUM(TX_VMW_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Total GL0 cache requests.
+gl0.total_req_rd:
+  name: GL0 Total Requests - Read
+  formula: SUM(TX_VMW_REQ_READ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of GL0 read requests.
+gl0.total_req_wr:
+  name: GL0 Total Requests - Write
+  formula: SUM(TX_VMW_REQ_WRITE_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of GL0 write requests.
+gl0.utcl0_lfifo_full_stall:
+  name: UTCL0 LFIFO Full Stall
+  formula: 100 * SUM(TX_VMW_UTCL0_LFIFO_FULL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles UTCL0 is stalled because its LFIFO is full.
+gl0.utcl0_lfifo_not_present_stall:
+  name: UTCL0 LFIFO Not-Present Stall
+  formula: 100 * SUM(TX_VMW_UTCL0_STALL_LFIFO_NOT_RES_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles UTCL0 is stalled waiting for an LFIFO slot.
+gl0.utcl0_lookup_hit_on_miss_rate:
+  name: UTCL0 Lookup Hit-on-Miss Rate
+  formula: 100 * SUM(TX_VMW_UTCL0_MISS_UNDER_MISS_sum) / SUM(TX_VMW_UTCL0_REQUEST_sum)
+  unit: Percent
+  description: >-
+    Percentage of UTCL0 translation requests served by a pending miss.
+gl0.utcl0_lookup_hit_rate:
+  name: UTCL0 Lookup Hit Rate
+  formula: 100 * SUM(TX_VMW_UTCL0_TRANSLATION_HIT_sum) / SUM(TX_VMW_UTCL0_REQUEST_sum)
+  unit: Percent
+  description: UTCL0 TLB hit rate.
+gl0.utcl0_lookup_lat:
+  name: UTCL0 Lookup Latency
+  formula: SUM(TX_VMW_UTCL0_INFLIGHT_sum) / SUM(TX_VMW_UTCL0_REQUEST_sum)
+  unit: Cycles
+  description: Average UTCL0 address translation latency.
+gl0.utcl0_max_inflight_stall:
+  name: UTCL0 Max Inflight Stall
+  formula: 100 * SUM(TX_VMW_UTCL0_STALL_INFLIGHT_MAX_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles UTCL0 has reached the maximum in-flight translation
+    limit.
+gl0.utcl0_miss_fifo_stall:
+  name: UTCL0 Miss FIFO Stall
+  formula: 100 * SUM(TX_VMW_UTCL0_STALL_MISSFIFO_FULL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles UTCL0 cannot process a new miss due to a full miss
+    FIFO.
+gl0.utcl0_req:
+  name: UTCL0 Requests
+  formula: SUM(TX_VMW_UTCL0_REQUEST_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Total address translation requests sent to UTCL0.
+gl0.utcl0_thrash_stall_rate:
+  name: UTCL0 Thrash Stall Rate
+  formula: 100 * SUM(TX_VMW_UTCL0_STALL_THRASHING_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: Percentage of VMW-busy cycles the UTCL0 TLB is thrashing.
+gl0.utcl0_utcl1_req:
+  name: UTCL0-UTCL1 Requests
+  formula: SUM(TX_VMW_UTCL0_UTCL1_REQUEST_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: Number of UTCL0 TLB misses forwarded to UTCL1.
+gl0.utcl0_utcl1_req_internal_retry:
+  name: UTCL0-UTCL1 Requests - Internal Retry
+  formula: SUM(TX_VMW_UTCL0_INTERNAL_RETRY_REQ_sum) / SUM($denom)
+  unit: (Requests + $normUnit)
+  description: >-
+    Number of UTCL0-UTCL1 translation requests retried internally.
+gl0.utcl0_utcl1_returns:
+  name: UTCL0-UTCL1 Returns
+  formula: SUM(TX_VMW_UTCL0_UTCL1_RETURN_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of translation results returned from UTCL1 to UTCL0.
+gl0.utcl0_utcl1_returns_no_retry_fault:
+  name: UTCL0-UTCL1 Returns - No Retry Fault
+  formula: SUM(TX_VMW_UTCL0_UTCL1_XNACK_NO_RETRY_FAULT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of UTCL1 returns with a non-retriable fault.
+gl0.utcl0_utcl1_returns_partial_resident_fault:
+  name: UTCL0-UTCL1 Returns - Partial Resident Fault
+  formula: SUM(TX_VMW_UTCL0_UTCL1_XNACK_PRT_FAULT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: >-
+    Number of UTCL1 returns for partially-resident address spaces.
+gl0.utcl0_utcl1_returns_permission_fault:
+  name: UTCL0-UTCL1 Returns - Permission Fault
+  formula: SUM(TX_VMW_UTCL0_UTCL1_PERM_FAULT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of UTCL1 returns with a page permission fault.
+gl0.utcl0_utcl1_returns_xnack_retry:
+  name: UTCL0-UTCL1 Returns - XNACK Retry
+  formula: SUM(TX_VMW_UTCL0_UTCL1_XNACK_RETRY_FAULT_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of UTCL1 returns requiring an XNACK retry.
+gl0.utcl1_req_lat:
+  name: UTCL1 Request Latency
+  formula: SUM(TX_VMW_UTCL0_UTCL1_INFLIGHT_sum) / SUM(TX_VMW_UTCL0_UTCL1_REQUEST_sum)
+  unit: Cycles
+  description: Average UTCL0-to-UTCL1 translation latency.
+gl0.utcl1_req_stall:
+  name: UTCL1 Request Stall
+  formula: 100 * SUM(TX_VMW_UTCL0_STALL_UTCL1_REQ_OUT_OF_CREDITS_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles UTCL0 is stalled sending to UTCL1.
+gl0.util:
+  name: GL0 Utilization
+  formula: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
+gl0.wr_sectors:
+  name: GL0 Write Sectors
+  formula: SUM(TX_VMW_SECTORS_WRITE_sum) / SUM($denom)
+  unit: (Count + $normUnit)
+  description: Number of GL0 cache sectors written.
+gl0.wr_stall_rate_gl1_rd_return:
+  name: Cache Write Stall Rate - GL1 Read Return
+  formula: 100 * SUM(TX_VMW_GL1_VMW_RDRET_STALL_sum) / SUM(TX_VMW_VMW_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of VMW-busy cycles a GL0 write is stalled by an incoming GL1 read-return.
