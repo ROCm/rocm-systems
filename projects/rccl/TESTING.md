@@ -18,7 +18,7 @@ A practical reference for new hires. Covers every test suite, when to use it, wh
 10. [Suite F — `rccl-UnitTestsFixtures` device/ (GPU Kernel Tests)](#10-suite-f--rccl-unittestsfixturesdevice-gpu-kernel-tests)
 11. [Suites G and H — Host-Only Tests (`test/host/`)](#11-suites-g-and-h--host-only-tests-testhost)
 12. [The Python Test Runner](#12-the-python-test-runner)
-13. [Multi-Node Testing with `mnctl`](#13-multi-node-testing-with-mnctl)
+13. [Multi-Node Testing](#13-multi-node-testing)
 14. [Test Infrastructure Reference](#14-test-infrastructure-reference)
 15. [Decision Guide — Which Suite?](#15-decision-guide--which-suite)
 16. [Day-to-Day Cheat Sheet](#16-day-to-day-cheat-sheet)
@@ -58,15 +58,25 @@ test/
 │                             fakes/, and run_host_tests.sh
 ├── transport/              ← MPI transport-layer tests (P2P, SHM, NET, IB)
 ├── proxy_trace/            ← proxy-trace subsystem tests
-└── latency_profiler/       ← latency-profiler subsystem tests
+├── latency_profiler/       ← latency-profiler subsystem tests
+├── gin/                    ← GIN (rocSHMEM / Anvil) host-side tests
+├── ce/                     ← copy-engine collective tests
+├── mem_manager/            ← memory-manager tests
+├── plugin/, ext-plugins/   ← plugin-interface and external-plugin tests
+├── amdsmi_wrap_test/       ← amdsmi_wrap layer tests
+├── ir-device/              ← device IR tests
+├── kernel-count/           ← pytest guards against device-kernel growth
+└── nccl4py/                ← Python binding tests
 
 tools/scripts/test_runner/
 ├── test_runner.py          ← Python orchestration entry point
-├── configs/                ← JSON suite configs (ci-precheckin, mi300x_mellanox_ib, …)
+├── configs/                ← JSON suite configs (ci-precheckin, host_tests,
+│                             mi300x_mellanox_ib, mi355x_thor2_roce, …)
 └── lib/                    ← internal runner modules
 
 docker/
-└── mnctl/                  ← Python multi-node Docker orchestrator
+├── Dockerfile.ubuntu       ← ROCm image that builds RCCL + rccl-tests
+└── README.md               ← build/run instructions, incl. multi-node mpirun
 ```
 
 Top-level `test/*.cpp` files are collective tests, fixture tests, and MPI tests; their binary assignment is entirely determined by which `set(…_SOURCE_FILES …)` list they appear in inside `test/CMakeLists.txt`.
@@ -85,6 +95,22 @@ Top-level `test/*.cpp` files are collective tests, fixture tests, and MPI tests;
 | `rccl-HostUnitTests` | Host pipeline / standalone only | No | Host-only (no GPU, no `librccl.so`) functional tests compiled against real RCCL source |
 | `rccl-UnitTestsMicro*` | Release **or** Debug (or standalone) | No | Host-only microtests: one unit under test per binary, `static` helpers and failure branches via fakes |
 
+The lettered suites above are where almost all tests live. `test/CMakeLists.txt` also defines a number of small, self-contained, special-purpose binaries that are built conditionally and run under `ctest`:
+
+| Binary | Built when | What it covers |
+|--------|-----------|----------------|
+| `rccl-UnitTestsNetTelemetry` | always (CTest only, no gtest) | `net_telemetry.cc`, compiled directly with its own harness; CPU-only |
+| `rccl-UnitTestsGdr` | always | `gdr_peermem.cc` sysfs scan against a mock `memory_peers` tree; CPU-only |
+| `rccl-UnitTestsUtilityHostOnly` | always | `nccl_device/utility.h` compiled as plain C++ (no `__HIPCC__`) |
+| `rccl-UnitTestsDevRuntime` | ROCm ≥ 6.4 | `#include`s hipified `dev_runtime.cc` to reach its file-static `symMemory*` helpers |
+| `rccl-UnitTestsAmdSmi` | ROCm ≥ 6.4, Debug | `amdsmi_wrap` fabric predicates and telemetry reduction |
+| `rccl-UnitTestsGinSdmaPolicy`, `…GinSdmaAllGatherPolicy`, `…GinSdmaBroadcastPolicy` | GIN enabled (policy tests need an rccl-tests checkout) | GIN-SDMA segment/tier/chunk math compiled with `GIN_SDMA_HOST_ONLY`; CPU-only |
+| `rccl-UnitTestsGinSdmaAllGatherGpu` | GIN enabled | On-GPU AllGather tier predicate and LSA addressing |
+| `rccl-UnitTestsGinAnvilPlugin`, `…GinAnvilConnCheckDevice`, `…GinAnvilSdmaFactory` | `ENABLE_ROCSHMEM_GIN` (+ ROCm ≥ 6.4) | GIN Anvil plugin, connection-check kernels, SDMA factory |
+| `rccl-HostApiCustomGinPluginMPI` | MPI tests enabled | Minimal MPI binary for the NCCL 2.30.7 custom-GIN-plugin regression |
+
+If you are adding a test for a narrowly scoped, dependency-light unit, check whether one of these (or a host-only microtest, [Section 11](#11-suites-g-and-h--host-only-tests-testhost)) is a better home than one of the big lettered binaries.
+
 ---
 
 ## 4. Building the Tests
@@ -96,7 +122,7 @@ Top-level `test/*.cpp` files are collective tests, fixture tests, and MPI tests;
 | ROCm | 6.4.0 | Fixture and fixture-debug binaries require `ROCM_VERSION >= 60400` |
 | CMake | 3.16 | |
 | OpenMPI (or MPICH) | any | Required for Suite D; default install path `/opt/ompi` |
-| Python | 3.6+ | For `test_runner.py` and `mnctl`; stdlib only, no pip dependencies |
+| Python | 3.6+ | For `test_runner.py`; stdlib only, no pip dependencies (the kernel-count / accl-reporter guards additionally need `pytest`) |
 
 ### 4.2 Using `install.sh`
 
@@ -142,6 +168,8 @@ Test binaries land at `build/{release,debug}/test/rccl-UnitTests*`.
 
 ### 4.3 Direct CMake (advanced)
 
+`install.sh` is the canonical entry point; reach for raw CMake only when you need an option it does not expose.
+
 ```bash
 mkdir -p build/debug && cd build/debug
 
@@ -172,11 +200,11 @@ python3 tools/scripts/test_runner/test_runner.py \
 
 ### What it tests
 
-End-to-end collective operations (AllReduce, AllGather, AllToAll, Broadcast, Gather, Reduce, ReduceScatter, Scatter, SendRecv, GroupCall, NonBlocking) plus the recorder, proxy-trace, and latency-profiler subsystems. Tests spawn child worker processes internally via `CallCollectiveForked` — no MPI installation is needed.
+End-to-end collective operations (AllReduce, AllGather, AllToAll, AllToAllV, Broadcast, Gather, Reduce, ReduceScatter, Scatter, SendRecv, GroupCall, NonBlocking) plus registration, RAS JSON, teardown stress, the recorder, proxy-trace, and latency-profiler subsystems. Tests spawn child worker processes internally (via `TestBed`, or the standalone `callCollectiveForked()` helper in `test/common/CallCollectiveForked.hpp`) — no MPI installation is needed.
 
 ### Test framework: TestBed
 
-`TestBed` (`test/common/TestBed.hpp`) is a custom harness that forks child worker processes, assigns GPUs, initialises RCCL communicators, runs the collective, and verifies correctness. The primary entry point is `RunSimpleSweep()`; lower-level control is available via `RunSimpleConfig()`.
+`TestBed` (`test/common/TestBed.hpp`) is a custom harness that forks child worker processes (`common/TestBedChild.cpp`), assigns GPUs, initialises RCCL communicators, runs the collective, and verifies correctness. The high-level entry point is `RunSimpleSweep()`; for finer control, drive the phases directly: `InitComms()` → `SetCollectiveArgs()` → `AllocateMem()` → `PrepareData()` → `ExecuteCollectives()` → `ValidateResults()` → `DestroyComms()`.
 
 **Canonical example:** any existing `test/*Tests.cpp` file that uses `TestBed`. `test/AllReduceTests.cpp` is a good starting point — it covers in-place, out-of-place, managed memory, graph capture, and bias variants, showing the range of parameters `RunSimpleSweep()` accepts.
 
@@ -215,7 +243,7 @@ Tests that depend **only on header-defined symbols** — `inline`, `static`, `co
 
 GPU kernel tests (Suite F) are also part of this binary; see [Section 10](#10-suite-f--rccl-unittestsfixturesdevice-gpu-kernel-tests).
 
-**Canonical example:** `test/BitOpsTests.cpp` (plain GTest against a header-only utility). `test/CommTests.cpp` is another clean example.
+**Canonical example:** `test/BitOpsTests.cpp` (plain GTest against a header-only utility). `test/NcclUtilityTests.cpp` and `test/MiscTests.cpp` are other clean examples.
 
 ### Adding a test
 
@@ -259,8 +287,9 @@ If Test 1 sets `NCCL_P2P_NET_CHUNKSIZE=12345` and Test 2 clears it, the static v
 - `test/common/ProcessIsolatedTestFramework.md` — full documentation with worked examples
 
 **Canonical examples:**
-- `test/AllocTests.cpp` — plain GTest against internal symbols (no env-var sensitivity)
-- `test/ArgCheckTests.cpp` — `RUN_ISOLATED_TEST_WITH_ENV` for env-var-sensitive code
+- `test/AllocTests.cpp` — mostly plain GTest against internal symbols, with a few isolated tests where state leaks
+- `test/ArgCheckTests.cpp` — `RUN_ISOLATED_TEST` where the test body needs a fresh process
+- `test/ChannelDefaultsTests.cpp` / `test/EnvPluginTests.cpp` — `RUN_ISOLATED_TEST_WITH_ENV` for env-var-sensitive code
 - `test/ProxyTests.cpp` — larger example combining both patterns
 - `test/RcclWrapTests.cpp` — process-isolated tests for ROCm library wrapping, which caches state in statics
 - `test/TransportTests.cpp` — transport setup tests using the `TransportUtils.hpp` helpers to construct minimal `ncclComm` / `ncclChannel` structures without a real network fabric
@@ -272,12 +301,15 @@ The available isolation macros are:
 | `RUN_ISOLATED_TEST(name, lambda)` | Single test, inherits parent environment |
 | `RUN_ISOLATED_TEST_WITH_ENV(name, lambda, {{k,v},…})` | Single test, custom environment |
 | `RUN_ISOLATED_TESTS(TestConfig("A", lA), TestConfig("B", lB), …)` | Multiple tests in one `TEST()` |
+| `RUN_ISOLATED_TESTS_WITH_OPTIONS(options, …)` | As above, with shared runner options (timeout, clean env, GPU count) |
+
+`TestConfig` is a builder: `withEnvironment()`, `withTimeout()`, `withCleanEnvironment()`, `clearVariable()`, `setVariable()`, `withNumGpus()`.
 
 ### Adding a test
 
 For code that does **not** cache environment variables: add a plain `TEST()` block following `test/AllocTests.cpp`.
 
-For code that **does** cache environment variables into statics: use `RUN_ISOLATED_TEST_WITH_ENV` following `test/ArgCheckTests.cpp`.
+For code that **does** cache environment variables into statics: use `RUN_ISOLATED_TEST_WITH_ENV` following `test/ChannelDefaultsTests.cpp`.
 
 Add new source files to `TEST_FIXTURE_DEBUG_SOURCE_FILES` in `test/CMakeLists.txt`.
 
@@ -599,52 +631,47 @@ The annotated template at `tools/scripts/test_runner/configs/test_config_sample.
 
 To register a new test: add an entry to the `tests` array of the appropriate `test_configurations` block in `ci-precheckin.json` (for single-node tests) or `mi300x_mellanox_ib.json` (for MPI/network tests).
 
-The host-only suites have their own `unit_tests_micro_<stem>` configurations in `ci-precheckin.json`; a new microtest binary must be added there (and to `lib/test_executor.py`'s microtest list, which llvm-cov reads as `--object`) as well as to `test/host/CMakeLists.txt` and `run_host_tests.sh`.
+The host-only microtests have their own `unit_tests_micro_<stem>` configurations in `ci-precheckin.json` (and `configs/host_tests.json` holds the CPU-only kernel-count guards); a new microtest binary must be added there (and to `lib/test_executor.py`'s microtest list, which llvm-cov reads as `--object`) as well as to `test/host/CMakeLists.txt` and `run_host_tests.sh`.
 
 ---
 
-## 13. Multi-Node Testing with `mnctl`
+## 13. Multi-Node Testing
 
-`docker/mnctl/` is a pure Python 3 tool (no pip dependencies) that builds ROCm Docker containers, deploys them across multiple nodes, wires up inter-container SSH, and leaves you with a ready-to-use MPI cluster.
+On `develop` there is no multi-node orchestrator: multi-node runs are plain `mpirun` invocations against a hostfile, optionally inside the ROCm container built from `docker/Dockerfile.ubuntu`.
+
+> **`mnctl`.** A Python multi-node Docker orchestrator (`docker/mnctl/`, driving build → deploy → inter-container SSH → teardown with `python3 -m mnctl --run` / `--launch-all --ssh` / `--verify` / `--stop-all`, and SLURM auto-detection) exists on the unmerged branch `origin/users/atulkulk/mndock`. It is not on `develop`, so the instructions below are what works today; see `docker/mnctl/README.md` on that branch if you are using it.
 
 ```bash
+# Build the image (fetches rccl, rccl-tests and rocshmem, builds for gfx942 by default)
 cd projects/rccl/docker
+docker build -t rccl-tests -f Dockerfile.ubuntu --pull .
 
-# ── Single node: build and launch ──
-python3 -m mnctl --run
-docker exec -it rccl-mn bash
+# Interactive container on a GPU host
+docker run --rm --device=/dev/kfd --device=/dev/dri --group-add video \
+  --ipc=host --network=host --cap-add=SYS_PTRACE \
+  --security-opt seccomp=unconfined -it rccl-tests /bin/bash
+```
 
-# ── Multi-node (reads ~/.mnctl_hostfile or SLURM_NODELIST automatically) ──
-cat > ~/.mnctl_hostfile <<'EOF'
+Build arguments worth knowing: `ROCM_IMAGE_NAME` / `ROCM_IMAGE_TAG` (base image), `ROCM_SYSTEMS_REPO` / `ROCM_SYSTEMS_REF` (source to fetch — must be a branch, a `projects/`-containing tag, or a full SHA), `GPU_TARGETS` (one target, several separated by `;`, or empty for all), and `RCCL_BUILD_ARGS` (extra `install.sh` flags, e.g. `--rocshmem`).
+
+Running the MPI suite across nodes:
+
+```bash
+cat > ~/.my_hostfile <<'EOF'
 node-a slots=8
 node-b slots=8
 EOF
 
-python3 -m mnctl --launch-all --ssh     # build, deploy, auto-generate SSH keys
-
-# Verify inter-container SSH
-python3 -m mnctl --verify
-
-# Run MPI tests across nodes
-docker exec -it rccl-mn bash
-mpirun -np 16 \
-  --hostfile ~/.mnctl_hostfile --map-by slot \
-  --mca plm_rsh_agent "ssh -p 2224 -o StrictHostKeyChecking=no -q" \
-  --allow-run-as-root \
-  /workspace/build/debug/test/rccl-UnitTestsMPI \
-  --gtest_filter="NetMPITest.*"
-
-# ── Tear down ──
-python3 -m mnctl --stop-all
+RCCL_TEST_MPI_HOSTFILE=~/.my_hostfile \
+  mpirun -np 16 --hostfile ~/.my_hostfile \
+    --map-by slot \
+    --mca plm_rsh_agent "ssh -o StrictHostKeyChecking=no -q" \
+    --allow-run-as-root \
+    ./build/debug/test/rccl-UnitTestsMPI \
+    --gtest_filter="NetMPITest.*"
 ```
 
-**Key features:**
-- SLURM auto-detection (reads `SLURM_NODELIST` if no hostfile is present)
-- Shared-filesystem detection (skips rsync when nodes share storage)
-- SSH key auto-generation, or bring your own (`--ssh ~/.ssh/id_rsa`)
-- Streaming output from remote containers
-
-Full documentation: `docker/mnctl/README.md`.
+`RCCL_TEST_MPI_HOSTFILE` is also what the Python test runner reads to pick up a hostfile for multi-node configurations. Full container documentation: `docker/README.md`.
 
 ---
 
@@ -665,7 +692,7 @@ Full documentation: `docker/mnctl/README.md`.
 | `common/DeviceBufferHelpers.hpp` | Typed `DeviceBuffer<T>` with upload/download helpers (MPI tests) |
 | `device/DeviceTestBase.hpp` | `DeviceTestBase`, `DeviceBuffer<T>`, `gridFor`, `syncAndCheck` (Suite F) |
 | `common/TestChecks.hpp` | `RCCL_TEST_CHECK`, `HIP_TEST_CHECK`, `MPICHECK`, `TEST_INFO`, `TEST_WARN`, … |
-| `common/EnvVars.hpp` | RAII `SetEnvVar`/`UnsetEnvVar` helpers |
+| `common/EnvVars.hpp` | `EnvVars` config object that parses the `UT_*` test-harness environment variables and detects the local arch |
 | `common/TransportUtils.hpp` | Helpers for constructing minimal `ncclComm`/`ncclChannel` structures in transport tests (Suite C) |
 | `host/ScopedHook.h` | Installs, counts and auto-restores a fake's `std::function` seam (Suites G/H) |
 | `host/fakes/*.h` | Controllable seams for externals, named after the production TU that defines the symbol (Suites G/H) |
@@ -679,7 +706,7 @@ Full documentation: `docker/mnctl/README.md`.
 | `test/host/SUMMARY.md` | `rccl-HostUnitTests` overview (what it contains, how it links) |
 | `test/common/ProcessIsolatedTestFramework.md` | Full `ProcessIsolatedTestRunner` documentation |
 | `test/common/MPITestFramework.md` | Full MPI test framework documentation |
-| `docker/mnctl/README.md` | `mnctl` multi-node Docker tool |
+| `docker/README.md` | ROCm container build/run instructions, incl. multi-node `mpirun` |
 | `tools/scripts/test_runner/README.md` | Python test runner documentation |
 | `tools/scripts/test_runner/configs/test_config_sample.json` | Annotated JSON config schema template |
 | `../rccl-tests/README.md` | rccl-tests build, usage, and full argument reference |
@@ -726,7 +753,7 @@ flowchart TD
 
     Q6 -- No --> Q7{"Does the code cache\nenv vars in statics?"}
 
-    Q7 -- Yes --> SC_env["**Suite C** — rccl-UnitTestsFixturesDebug\nUse RUN_ISOLATED_TEST_WITH_ENV\nFollow test/ArgCheckTests.cpp"]
+    Q7 -- Yes --> SC_env["**Suite C** — rccl-UnitTestsFixturesDebug\nUse RUN_ISOLATED_TEST_WITH_ENV\nFollow test/ChannelDefaultsTests.cpp"]
     Q7 -- No --> SC_plain["**Suite C** — rccl-UnitTestsFixturesDebug\nPlain GTest\nFollow test/AllocTests.cpp"]
 ```
 
@@ -889,6 +916,11 @@ LD_LIBRARY_PATH=/opt/rocm/lib HSA_FORCE_FINE_GRAIN_PCIE=1 python3 -m pytest
 | `ROCM_PATH` | Override ROCm installation directory (default: `/opt/rocm`) |
 | `HSA_NO_SCRATCH_RECLAIM=1` | Suppress GPU scratch-memory reclaim; recommended for stability |
 | `UT_POW2_GPUS=1` | Restrict tests to power-of-two GPU counts |
+| `UT_MIN_GPUS` / `UT_MAX_GPUS` | Bound the GPU counts TestBed sweeps over |
+| `UT_VERBOSE=1` | Verbose TestBed output |
+| `UT_SHOW_NAMES=1` / `UT_SHOW_TIMING=1` | List test-case names / per-case timing |
+| `UT_TIMEOUT_US` | Per-child timeout in microseconds |
+| `UT_PRINT_VALUES` | Print input/output/expected arrays on mismatch |
 | `NCCL_CUMEM_ENABLE=1` | Enable cuMem virtual-memory backing; required for symmetric buffer registration (`-R 2`) in rccl-tests |
 | `RCCL_TESTS_NET_COUNTER_ENABLE=1` | Enable NIC counter collection in rccl-tests (bnxt_re / ionic NICs) |
 | `RCCL_TESTS_NIC_COUNTER_LIST=rx_cnp_pkts,...` | Comma-separated subset of counters to collect (default: all counters for the detected NIC type) |
