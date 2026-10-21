@@ -23,6 +23,33 @@ enum amdf_memory_class_e {
   AMDF_MEMORY_CLASS_PRIVATE = 3,
 };
 
+/// Additional physical placement required from an allocating profile.
+/// Scope selection already establishes SYSTEM or device-local storage. These
+/// constraints refine that choice without selecting device consumers.
+typedef uint32_t amdf_memory_placement_kind_t;
+enum amdf_memory_placement_kind_e {
+  /// No additional placement beyond the selected scope and profile.
+  AMDF_MEMORY_PLACEMENT_KIND_NONE = 0,
+  /// Fresh host pages reside on one operating-system NUMA node. Construction
+  /// fails instead of allocating on another node. This does not move borrowed
+  /// or imported pages and does not change the allocating thread's policy.
+  AMDF_MEMORY_PLACEMENT_KIND_HOST_NUMA = 1,
+};
+
+/// Set of supported explicit placement kinds, with bit 1 << kind set. NONE
+/// needs no capability bit and is always valid for an allocating profile.
+typedef uint32_t amdf_memory_placement_kinds_t;
+
+/// Required or achieved refinement of an allocation's physical placement.
+typedef struct amdf_memory_placement_t {
+  /// Placement constraint; NONE is the zero-initialized default.
+  amdf_memory_placement_kind_t kind;
+  /// Operating-system NUMA node number for HOST_NUMA; zero for NONE. This is
+  /// an OS topology coordinate, not a GPU endpoint or a scope ordinal. Native
+  /// allocation can fail if the node is unavailable or disallowed by policy.
+  uint32_t node;
+} amdf_memory_placement_t;
+
 /// Required or achieved properties of a memory attachment.
 typedef uint64_t amdf_memory_flags_t;
 enum amdf_memory_flag_bits_e {
@@ -35,19 +62,34 @@ enum amdf_memory_flag_bits_e {
   /// The allocation can hold directly published user-mode queue state.
   AMDF_MEMORY_FLAG_QUEUE_STORAGE = UINT64_C(1) << 3,
   /// Host and device access requires no explicit host cache transition.
+  /// Device cache transitions and atomic access are separate capabilities.
   AMDF_MEMORY_FLAG_HOST_COHERENT = UINT64_C(1) << 4,
   /// A stable device address is established before creation returns.
   AMDF_MEMORY_FLAG_DEVICE_ADDRESS = UINT64_C(1) << 5,
+  /// Native mapping-source handles are prepared before construction returns.
+  /// This access may supply ordinary backing to stable address reservations.
+  /// It does not transfer backing ownership or track installed aliases.
+  AMDF_MEMORY_FLAG_MAPPING_SOURCE = UINT64_C(1) << 6,
+  /// Backing can supply independently replaceable WRITE_BACK host aliases.
+  /// Native source handles are prepared during construction. This property
+  /// does not follow from HOST_VISIBLE or a device's MAPPING_SOURCE access.
+  AMDF_MEMORY_FLAG_HOST_MAPPING_SOURCE = UINT64_C(1) << 7,
+  /// memory_map supplies ordinary host pages usable as native file-I/O
+  /// buffers, including page-pinned direct I/O. File alignment, resource
+  /// admission, completion, and durability remain caller responsibilities.
+  /// This does not imply storage-to-VRAM, RDMA, or absence of storage-stack
+  /// copies. Other aliases do not inherit this property.
+  AMDF_MEMORY_FLAG_HOST_FILE_IO = UINT64_C(1) << 8,
 };
 
-/// Exact device page-table access granted to one memory attachment.
+/// Exact page-table access granted to one memory attachment or projection.
 typedef uint32_t amdf_memory_access_t;
 enum amdf_memory_access_bit_e {
-  /// Device loads are permitted from the attachment.
+  /// Loads are permitted from the attachment or projection.
   AMDF_MEMORY_ACCESS_READ = 1u << 0,
-  /// Device stores are permitted to the attachment.
+  /// Stores are permitted to the attachment or projection.
   AMDF_MEMORY_ACCESS_WRITE = 1u << 1,
-  /// Device instruction fetches are permitted from the attachment.
+  /// Instruction fetches are permitted from the attachment or projection.
   AMDF_MEMORY_ACCESS_EXECUTE = 1u << 2,
 };
 
@@ -61,6 +103,8 @@ enum amdf_memory_address_kind_e {
   /// XDNA firmware buffer arguments or scoped instruction-storage addresses.
   /// This is not an address to place directly in a shim DMA descriptor.
   AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE = 2,
+  /// A process host pointer, returned by a host reservation projection.
+  AMDF_MEMORY_ADDRESS_HOST = 3,
 };
 
 /// Set of address kinds, with bit `1 << amdf_memory_address_kind_t` set for
@@ -340,8 +384,9 @@ typedef struct amdf_memory_construction_capabilities_t {
   /// when this operation consumes no caller pages. This is a caller-established
   /// property of the source mapping, not inferred from its pointer value.
   amdf_host_cacheability_t registered_host_cacheability;
-  /// Reserved for compatible growth and always zero.
-  uint32_t reserved;
+  /// Explicit placement constraints supported by CREATE; zero for REGISTER
+  /// and IMPORT. No bit promises that a node remains online or has capacity.
+  amdf_memory_placement_kinds_t placement_kinds;
   /// Power-of-two base alignment guaranteed when callers request no stronger
   /// alignment.
   uint64_t minimum_alignment;
@@ -378,7 +423,8 @@ typedef struct amdf_memory_access_requirements_t {
   amdf_memory_access_t access;
   /// Reserved for compatible growth; must be zero.
   uint32_t reserved;
-  /// Required access properties: QUEUE_STORAGE, HOST_COHERENT, DEVICE_ADDRESS.
+  /// Required access properties: QUEUE_STORAGE, HOST_COHERENT, DEVICE_ADDRESS,
+  /// MAPPING_SOURCE.
   amdf_memory_flags_t flags;
   /// Interfaces whose complete logical-range addresses must be established.
   amdf_memory_address_kinds_t address_kinds;
@@ -419,6 +465,17 @@ typedef struct amdf_memory_access_capabilities_t {
   amdf_memory_address_kinds_t address_kinds;
 } amdf_memory_access_capabilities_t;
 
+/// Properties established for an exact host view.
+typedef uint32_t amdf_host_mapping_features_t;
+enum amdf_host_mapping_feature_bits_e {
+  /// Native file operations can access and pin this ordinary host view.
+  /// File completion publishes reads into the buffer; file writes consume
+  /// previously system-visible bytes. FILE_IO pair queries describe the
+  /// device-side visibility operations. The caller retains the mapping and
+  /// backing until every accepted I/O and final reader has completed.
+  AMDF_HOST_MAPPING_FEATURE_FILE_IO = UINT32_C(1) << 0,
+};
+
 /// Range and access capabilities of explicit host mappings.
 typedef struct amdf_host_mapping_capabilities_t {
   /// Maximum logical mapping length in bytes.
@@ -429,8 +486,8 @@ typedef struct amdf_host_mapping_capabilities_t {
   uint64_t byte_length_granularity;
   /// Host read and write requests accepted by the profile.
   amdf_memory_map_flags_t supported_access;
-  /// Reserved for future use and always zero.
-  uint32_t reserved;
+  /// Features guaranteed for views returned by memory_map on this profile.
+  amdf_host_mapping_features_t features;
 } amdf_host_mapping_capabilities_t;
 
 /// Immutable construction and transport capabilities of one memory profile.
@@ -458,6 +515,11 @@ typedef struct amdf_memory_profile_t {
   amdf_memory_flags_t guaranteed_flags;
   /// Properties which callers may require from this profile.
   amdf_memory_flags_t supported_flags;
+  /// Cached native prerequisite status. OK means the construction route was
+  /// available at discovery, not that capacity is reserved. An unavailable
+  /// optional route retains its native reason without failing profile queries
+  /// or unrelated routes. Construction remains authoritative.
+  amdf_status_t availability;
   /// Provider-owned physical allocation limits, or all-zero without CREATE.
   amdf_memory_construction_capabilities_t allocation;
   /// Caller-owned host registration limits, or all-zero without REGISTER.
@@ -516,7 +578,8 @@ typedef struct amdf_memory_create_info_t {
   uint32_t memory_profile_ordinal;
   /// Number of entries in accesses; zero requests CPU-only system memory.
   uint32_t access_count;
-  /// Required backing properties: HOST_VISIBLE, DEVICE_LOCAL and SHAREABLE.
+  /// Required backing properties: HOST_VISIBLE, DEVICE_LOCAL, SHAREABLE and
+  /// HOST_MAPPING_SOURCE and HOST_FILE_IO.
   amdf_memory_flags_t required_flags;
   /// Logical byte length established for every requested consumer. Native
   /// allocation rounding is reported separately and grants no additional
@@ -529,7 +592,9 @@ typedef struct amdf_memory_create_info_t {
   /// keeps this address range backed by the same live pages through
   /// `memory_destroy`. A failed native detach can leave registrations live;
   /// that error does not authorize recycling the source. Registration does
-  /// not take ownership.
+  /// not take ownership. Construction may maintain every CPU cache line
+  /// intersecting this logical range; the caller excludes concurrent access
+  /// to those lines until construction returns, including through aliases.
   void* registered_host_pointer;
   /// Caller-ordered consumers, consumed during the call and not retained.
   /// Devices must be unique and belong to the scope's instance. NULL at zero
@@ -542,6 +607,10 @@ typedef struct amdf_memory_create_info_t {
   amdf_host_cacheability_t registered_host_cacheability;
   /// Reserved for compatible growth; must be zero.
   uint32_t reserved;
+  /// Additional required placement for CREATE. NONE preserves the selected
+  /// profile's ordinary policy. REGISTER requires NONE because the caller
+  /// already owns the pages; this operation never relocates them.
+  amdf_memory_placement_t placement;
 } amdf_memory_create_info_t;
 
 /// Immutable backing properties of one live memory resource.
@@ -561,7 +630,8 @@ typedef struct amdf_memory_info_t {
   uint32_t access_count;
   /// Reserved for compatible growth; always zero.
   uint32_t reserved;
-  /// Achieved backing properties: HOST_VISIBLE, DEVICE_LOCAL and SHAREABLE.
+  /// Achieved backing properties: HOST_VISIBLE, DEVICE_LOCAL, SHAREABLE and
+  /// HOST_MAPPING_SOURCE.
   amdf_memory_flags_t flags;
   /// Byte offset of logical byte zero in the physical backing.
   uint64_t source_byte_offset;
@@ -578,6 +648,9 @@ typedef struct amdf_memory_info_t {
   uint64_t native_allocation_granularity;
   /// Identity shared by attachments to the same physical backing, when known.
   amdf_physical_memory_id_t physical_backing_id;
+  /// Enforced placement of owned backing. NONE makes no additional guarantee
+  /// about registered/imported pages, even when their source has placement.
+  amdf_memory_placement_t placement;
 } amdf_memory_info_t;
 
 /// Immutable facts of one established device access to a memory resource.
@@ -625,7 +698,8 @@ typedef struct amdf_memory_import_info_t {
   uint32_t memory_profile_ordinal;
   /// Number of entries in accesses.
   uint32_t access_count;
-  /// Required backing properties: HOST_VISIBLE, DEVICE_LOCAL and SHAREABLE.
+  /// Required backing properties: HOST_VISIBLE, DEVICE_LOCAL, SHAREABLE and
+  /// HOST_MAPPING_SOURCE.
   amdf_memory_flags_t required_flags;
   /// Minimum power-of-two destination device-address alignment, or zero for
   /// profile policy. A nonzero external source offset must be divisible by
@@ -802,7 +876,7 @@ typedef struct amdf_host_mapping_info_t {
   amdf_host_cacheability_t cacheability;
   /// First mapped byte borrowed until `host_mapping_destroy` is called.
   void* pointer;
-  /// Byte offset of `pointer` within the logical memory attachment.
+  /// Byte offset of `pointer` within its memory or reservation owner.
   uint64_t memory_byte_offset;
   /// Mapped byte length.
   uint64_t byte_length;
@@ -812,8 +886,8 @@ typedef struct amdf_host_mapping_info_t {
   uint64_t byte_length_granularity;
   /// Host cache-line length in bytes, or zero when not applicable.
   uint32_t cache_line_size;
-  /// Reserved for future use and always zero.
-  uint32_t reserved;
+  /// Properties of this exact view, independent of other aliases or bindings.
+  amdf_host_mapping_features_t features;
   /// Available host flush operation, independent of any consumer's coherence.
   /// UNKNOWN means unsupported; NONE means no cache operation is necessary.
   amdf_cache_transition_t flush;
@@ -829,9 +903,15 @@ enum amdf_memory_site_kind_e {
   AMDF_MEMORY_SITE_KIND_DEVICE = 0,
   /// A live host mapping, including its range and CPU cache behavior.
   AMDF_MEMORY_SITE_KIND_HOST = 1,
+  /// OS-managed native file-buffer access through value.host.mapping. The
+  /// view must report FILE_IO. A file read is a memory producer; a file write
+  /// is a memory consumer. The caller supplies I/O completion and excludes
+  /// conflicting access. This site owns no file, queue, or I/O request and
+  /// does not describe raw-controller DMA or mutual atomic access.
+  AMDF_MEMORY_SITE_KIND_FILE_IO = 2,
 };
 
-/// One concrete device access or host mapping in a pair query.
+/// One concrete device, CPU, or native file-buffer access in a pair query.
 typedef struct amdf_memory_site_t {
   /// Must be `AMDF_STRUCTURE_TYPE_MEMORY_SITE`.
   amdf_structure_type_t type;
@@ -854,15 +934,23 @@ typedef struct amdf_memory_site_t {
       /// Exact queue family used for access and cache transitions.
       uint32_t queue_family_ordinal;
     } device;
-    /// Host mapping supplying memory identity, range and cache behavior.
-    amdf_host_mapping_t* host_mapping;
+    /// CPU or file-buffer view and the backing being qualified for that view.
+    struct {
+      /// Live mapping supplying the address range and immutable cache policy.
+      amdf_host_mapping_t* mapping;
+      /// Backing to qualify for a reservation view. Required for a reservation
+      /// view; NULL for a view created by memory_map, which knows its backing.
+      /// The query is conditional on corresponding bytes being installed. It
+      /// neither inspects current bindings nor retains this memory.
+      amdf_memory_t* source_memory;
+    } host;
   } value;
 } amdf_memory_site_t;
 
 /// One prospective access within a scope/profile construction contract.
 /// DEVICE names an exact queue family; it does not qualify shader/program-side
-/// cache operations. HOST names a view created through memory_map on that
-/// backing.
+/// cache operations. HOST and FILE_IO name a view created through memory_map
+/// on that backing; FILE_IO additionally requires its reported view feature.
 typedef struct amdf_memory_profile_site_t {
   /// Selects the active member of value.
   amdf_memory_site_kind_t kind;

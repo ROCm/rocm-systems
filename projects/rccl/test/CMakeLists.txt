@@ -386,6 +386,7 @@ if(BUILD_TESTS)
 
     set(TEST_FIXTURE_SOURCE_FILES
       BitOpsTests.cpp
+      NcclUtilityTests.cpp
       IommuPassthrough_test.cpp
       MatchSubnet_test.cpp
       MiscTests.cpp
@@ -396,8 +397,11 @@ if(BUILD_TESTS)
       Gfx1250SendRecvLl128WindowTests.cpp
       VersionInfoTests.cpp
       device/TestOp128.cpp
+      device/TestFp8Reduce.cpp
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
+      device/DdaIpcGpuBarrierOrderingTests.cpp
+      device/DdaVecElementAddTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestAsyncCopy.cpp
@@ -406,6 +410,7 @@ if(BUILD_TESTS)
       device/GinBackendMaskDispatch_test.cpp
       device/GinAnvilIpcDevice_test.cpp
       device/HierarchicalShuffleTests.cpp
+      device/NcclUtilityDeviceTests.cpp
       device/ChannelMaskMapTests.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
@@ -676,6 +681,17 @@ if(BUILD_TESTS)
   add_test(NAME rccl-UnitTestsGinSdmaPolicy COMMAND rccl-UnitTestsGinSdmaPolicy)
   set_tests_properties(rccl-UnitTestsGinSdmaPolicy PROPERTIES LABELS "unit")
 
+  # utility.h as plain C++ for its !NCCL_DEVICE_COMPILE branches; not with CXX=hipcc, which defines __HIPCC__ and fails strict CI.
+  add_executable(rccl-UnitTestsUtilityHostOnly NcclUtilityHostOnlyTests.cpp)
+  set_source_files_properties(NcclUtilityHostOnlyTests.cpp PROPERTIES LANGUAGE CXX)
+  target_include_directories(rccl-UnitTestsUtilityHostOnly PRIVATE ${PROJECT_SOURCE_DIR}/src/include)
+  target_compile_definitions(rccl-UnitTestsUtilityHostOnly PRIVATE __HIP_PLATFORM_AMD__)
+  target_link_libraries(rccl-UnitTestsUtilityHostOnly PRIVATE ${GTEST_BOTH_LIBRARIES} Threads::Threads)
+  set_target_properties(rccl-UnitTestsUtilityHostOnly PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+  add_test(NAME rccl-UnitTestsUtilityHostOnly COMMAND rccl-UnitTestsUtilityHostOnly)
+  set_tests_properties(rccl-UnitTestsUtilityHostOnly PROPERTIES LABELS "unit")
+
   # GIN Anvil-SDMA hybrid AllGather (-D 3) policy host unit test (no GPU).
   # Compiles gin_sdma_allgather_policy.h from the sibling rccl-tests project with
   # GIN_SDMA_HOST_ONLY (no librccl / device codegen needed), validating the exact
@@ -789,7 +805,10 @@ if(BUILD_TESTS)
       graph/TuningTests.cpp
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
+      graph/P2pPxnLevel1NetIdTests.cpp
+      graph/TopoGpuDevTests.cpp
       graph/TopoTests.cpp
+      graph/Mi350pPcieTopoTests.cpp
       transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       transport/NetIbCast/NetIbCastMultiplaneTests.cpp
       common/main_fixtures.cpp
@@ -890,7 +909,8 @@ if(BUILD_TESTS)
   # rccl-UnitTestsAmdSmi: tests for the amdsmi_wrap layer.
   #
   # AmdSmiFabricTests.cpp covers the fabric predicates and struct layout pinned in
-  # amdsmi_wrap.h. Those are header-inline, so they need no librccl.so symbols and
+  # amdsmi_wrap.h, and AmdSmiFabricTelemetryTests.cpp the telemetry sample reduction
+  # beside them. Those are header-inline, so they need no librccl.so symbols and
   # run in both Release and Debug.
   #
   # AmdSmiWrapTests.cpp drives the amd_smi_* API itself, so it needs symbols that
@@ -902,6 +922,7 @@ if(BUILD_TESTS)
     # main_altrsmi.cpp is a plain InitGoogleTest/RUN_ALL_TESTS entry point, reused here.
     set(TEST_AMDSMI_SOURCE_FILES
       AmdSmiFabricTests.cpp
+      AmdSmiFabricTelemetryTests.cpp
       common/main_altrsmi.cpp
     )
 
@@ -996,6 +1017,7 @@ if(BUILD_TESTS)
       common/MPITestCore.cpp
       common/MPIEnvironment.cpp
       common/TestChecks.cpp
+      common/VerifiableFp8.cpp
       transport/TransportMPIBase.cpp
       transport/P2pMPITests.cpp
       transport/NetMPITests.cpp
@@ -1008,6 +1030,8 @@ if(BUILD_TESTS)
       transport/NetIbMPI/FaultInjectTests.cpp
       transport/NetIbMPI/GidChangeTests.cpp
       transport/NetIbMPI/OpsFaultUnitTests.cpp
+      transport/NetIbMPI/NetIbWqeLatMonUnitTests.cpp
+      transport/NetIbMPI/NetIbWqeLatMonTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
       transport/GinDeviceMPITests.cpp
@@ -1020,6 +1044,7 @@ if(BUILD_TESTS)
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
       HostApiCustomGinPluginMPITests.cpp
+      GinConnectLeakMPITests.cpp
       RmaExternalPluginPutSignalMPITests.cpp
       plugin/net_reload_plugin.cpp
       mem_manager/SuspendResumeMPITests.cpp
@@ -1029,13 +1054,19 @@ if(BUILD_TESTS)
       GrowMPITests.cpp
       GinNcclTimeoutMPITests.cpp
       InspectorPromP2pMPITests.cpp
+      ProfilerKernelChMPITests.cpp
       SymmetricKernelMPITests.cpp
       SymmetricWindowMPITests.cpp
       DeviceApiMPITests.cpp
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp
       DdaAllReduceMPITests.cpp
+      DdaReduceScatterMPITests.cpp
+      DdaReduceScatterLL128MPITests.cpp
+      DdaCollOpCountMPI_test.cpp
       DdaFabricSimpleMPITests.cpp
+      DdaIpcIndexDataMPITests.cpp
+      DdaFp8MPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 
@@ -1067,6 +1098,38 @@ if(BUILD_TESTS)
       "LINKER:--export-dynamic-symbol=ncclRmaPlugin_v13")
 
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
+
+    # Recorder profiler plugin for ProfilerKernelChMPITests. Unlike
+    # rccl-test-profiler-stub it is a working profiler: it records what RCCL
+    # delivers so the test can check it. It builds against the standalone headers
+    # an external plugin ships with rather than RCCL's own, and it lands and
+    # installs beside the test binary, which is where the test looks for it.
+    add_library(rccl-test-profiler-kch-recorder SHARED plugin/profiler_kernelch_recorder.cpp)
+    target_include_directories(rccl-test-profiler-kch-recorder PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/../plugins/profiler/example/nccl
+      ${CMAKE_CURRENT_SOURCE_DIR}/plugin)
+    set_target_properties(rccl-test-profiler-kch-recorder PROPERTIES
+      CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    add_dependencies(rccl-UnitTestsMPI rccl-test-profiler-kch-recorder)
+    target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+      RCCL_TEST_KCH_RECORDER_NAME="$<TARGET_FILE_NAME:rccl-test-profiler-kch-recorder>")
+    install(TARGETS rccl-test-profiler-kch-recorder
+      LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+      COMPONENT tests)
+
+    # Loadable GIN plugin for GinConnectLeakMPITest, built and installed beside the test binary.
+    add_library(rccl-test-gin-fault-plugin SHARED plugin/gin_fault_plugin.cpp)
+    target_include_directories(rccl-test-gin-fault-plugin PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
+    target_link_libraries(rccl-test-gin-fault-plugin PRIVATE hip::host)
+    if(TARGET rccl)
+      add_dependencies(rccl-test-gin-fault-plugin rccl)
+    endif()
+    add_dependencies(rccl-UnitTestsMPI rccl-test-gin-fault-plugin)
+    target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+      RCCL_TEST_GIN_FAULT_PLUGIN_NAME="$<TARGET_FILE_NAME:rccl-test-gin-fault-plugin>")
+    install(TARGETS rccl-test-gin-fault-plugin
+      LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+      COMPONENT tests)
 
     # Hand the in-tree Inspector plugin to InspectorPromP2pMPITests so it can
     # load a profiler without the caller setting NCCL_INSPECTOR_PLUGIN_SO.

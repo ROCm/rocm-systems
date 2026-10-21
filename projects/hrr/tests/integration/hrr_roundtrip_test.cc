@@ -673,7 +673,10 @@ HRR_TEST_CASE(Unit_HRR_ZeroInitRoundtrip) {
  */
 HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_divergence"};
-  hrr_capture_direct("Unit_HRR_UncapturedHostWrite_Direct", cap.path);
+  // Pinned host snapshots would record the flag, so the write stays unseen only
+  // without them.
+  hrr_capture_direct("Unit_HRR_UncapturedHostWrite_Direct", cap.path, 5,
+                     {{"HIP_HRR_HOST_SNAPSHOTS", "0"}});
 
   SECTION("guard ON -> clean exit 2") {
     auto [ret, out] = hrr_playback_env(
@@ -723,7 +726,8 @@ HRR_TEST_CASE(Unit_HRR_DivergenceAbortRoundtrip) {
  */
 TEST_CASE("Unit_HRR_NullOptionalPtrRoundtrip", "[.][hrr-repro]") {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_nulloptional"};
-  hrr_capture_direct("Unit_HRR_NullOptionalPtr_Direct", cap.path);
+  hrr_capture_direct("Unit_HRR_NullOptionalPtr_Direct", cap.path, 5,
+                     {{"HIP_HRR_HOST_SNAPSHOTS", "0"}});
 
   auto [ret, out] = hrr_playback_env(
       cap.path,
@@ -1060,6 +1064,7 @@ HRR_TEST_CASE(Unit_HRR_MetadataManifest) {
   const std::string compute_capability = json_string_value(metadata, "compute_capability");
   const std::string pci = json_string_value(metadata, "pci");
   const std::string uuid = json_string_value(metadata, "uuid");
+  const std::string luid = json_string_value(metadata, "luid");
 
   CHECK(ordinal >= 0);
   CHECK_FALSE(json_object_value(metadata, "properties").empty());
@@ -1070,9 +1075,44 @@ HRR_TEST_CASE(Unit_HRR_MetadataManifest) {
   CHECK(compute_mode >= 0);
   CHECK_FALSE(compute_capability.empty());
   CHECK(std::count(compute_capability.begin(), compute_capability.end(), '.') == 1);
-  CHECK_FALSE(pci.empty());
-  CHECK(std::count(pci.begin(), pci.end(), ':') == 2);
-  CHECK_FALSE(uuid.empty());
+  // The keys stay, blank: they would identify the individual GPU and replay
+  // needs none of them.
+  for (const char* key : {"\"pci\": \"\"", "\"uuid\": \"\"", "\"luid\": \"\""}) {
+    INFO("Blank field: " << key);
+    CHECK(metadata.find(key) != std::string::npos);
+  }
+  CHECK(pci.empty());
+  CHECK(uuid.empty());
+  CHECK(luid.empty());
+
+  // The workload hands hipChooseDevice the properties of device 0: the same
+  // identifiers are blanked in the copy events.bin keeps, and the rest stays.
+  uint16_t version = 0;
+  FILE* f = hrr::open_record_stream((archive_path / "events.bin").string(), HRR_MAGIC,
+                                    HRR_VERSION, &version);
+  REQUIRE(f != nullptr);
+  std::vector<uint8_t> raw;
+  int choose_records = 0;
+  while (hrr::read_raw_record(f, raw) == hrr::RecordStatus::Ok) {
+    const auto* hdr = reinterpret_cast<const hrr_event_header*>(raw.data());
+    if (hdr->event_type != HRR_API_HIPCHOOSEDEVICE) continue;
+    REQUIRE(raw.size() >= sizeof(hrr_args_hipChooseDevice));
+    const auto* a = reinterpret_cast<const hrr_args_hipChooseDevice*>(raw.data());
+    REQUIRE(a->prop_present == 1);
+    hipDeviceProp_t prop;
+    std::memcpy(&prop, a->prop_bytes, sizeof(prop));
+    ++choose_records;
+    CHECK(std::string(prop.name).size() > 0);
+    CHECK(prop.multiProcessorCount > 0);
+    CHECK(std::all_of(std::begin(prop.uuid.bytes), std::end(prop.uuid.bytes),
+                      [](char c) { return c == 0; }));
+    CHECK(std::all_of(std::begin(prop.luid), std::end(prop.luid), [](char c) { return c == 0; }));
+    CHECK(prop.pciDomainID == 0);
+    CHECK(prop.pciBusID == 0);
+    CHECK(prop.pciDeviceID == 0);
+  }
+  fclose(f);
+  CHECK(choose_records == 1);
 }
 
 HRR_TEST_CASE(Unit_HRR_StreamAdvancedRoundtrip) {
@@ -1799,6 +1839,38 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileNotingUnreplayable) {
 }
 
 /**
+ * Unit_HRR_ForkedChildStaysIncomplete
+ * -----------------------------------
+ *   - A forked child drops a record before its first one opens its archive.
+ *     The child's manifest says "complete": false, the parent's says true.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkedChildStaysIncomplete) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_forked_child_stays_incomplete"};
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkedChildStaysIncomplete_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+  const std::vector<fs::path> archives = hrr_process_archives(cap.path);
+  REQUIRE(archives.size() == 2);
+  int children = 0;
+  for (const fs::path& archive : archives) {
+    const std::string manifest = read_text_file(archive / "manifest.json");
+    INFO("Process manifest:\n" << manifest);
+    const fs::path& other = archive == archives[0] ? archives[1] : archives[0];
+    const std::string other_pid = other.filename().string().substr(std::strlen("pid-"));
+    const bool child = manifest.find("\"parent_pid\": " + other_pid + ",") != std::string::npos;
+    children += child ? 1 : 0;
+    CHECK(manifest.find(child ? "\"complete\": false" : "\"complete\": true") !=
+          std::string::npos);
+  }
+  REQUIRE(children == 1);
+}
+
+/**
  * Unit_HRR_ForkedChildRecordsAfterShutdown
  * ----------------------------------------
  *   - A forked child that exits normally without recording leaves no archive,
@@ -1943,6 +2015,42 @@ HRR_TEST_CASE(Unit_HRR_ForkBetweenCaptureFlushAndClose) {
   REQUIRE(hrr::load_archive(archive.string(), arc));
   CHECK(arc.complete);
   check_ends_in_trailer(archive, arc);
+}
+
+/**
+ * Unit_HRR_CloseDuringCrashManifest
+ * ---------------------------------
+ *   - The capture shutdown does not close the archive's directory descriptors
+ *     while a crash callback on another thread writes the manifest through
+ *     one of them: the workload dies of its SIGSEGV, not exit code 3, and its
+ *     hold saw the shutdown start.
+ */
+HRR_TEST_CASE(Unit_HRR_CloseDuringCrashManifest) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_close_during_crash_manifest"};
+  hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+  proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+  set_proc_search_path(proc);
+  const int ret = proc.runWithTimeout("\"Unit_HRR_CloseDuringCrashManifest_Direct\"", 120);
+  INFO("Capture exit code: " << ret << "\n" << proc.getOutput());
+  CHECK(proc.getOutput().find("capture shutdown started while the crash callback was held") !=
+        std::string::npos);
+  REQUIRE(ret == 128 + SIGSEGV);
+}
+
+/**
+ * Unit_HRR_ForkDuringBlobWrite
+ * ----------------------------
+ *   - fork() waits for a blob write in flight, so the child holds no
+ *     descriptor of a blobs/<xx> directory in the parent's archive.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkDuringBlobWrite) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_fork_during_blob_write"};
+  hrr::test::SpawnProc proc(hrr_self_exe());
+  proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+  set_proc_search_path(proc);
+  const int ret = proc.runWithTimeout("\"Unit_HRR_ForkDuringBlobWrite_Direct\"", 120);
+  INFO("Capture exit code: " << ret);
+  REQUIRE(ret == 0);
 }
 #endif  // !_WIN32
 

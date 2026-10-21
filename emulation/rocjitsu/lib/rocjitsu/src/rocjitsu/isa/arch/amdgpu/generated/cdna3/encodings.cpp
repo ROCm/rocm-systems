@@ -5,7 +5,6 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/encodings.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "util/except.h"
 #include <cstring>
 #include <string>
@@ -270,8 +269,8 @@ bool Vop1::has_encoded_dpp() const {
   return inst_.op <= 1 || (inst_.op >= 5 && inst_.op <= 8) || (inst_.op >= 10 && inst_.op <= 14) ||
          (inst_.op >= 17 && inst_.op <= 20) || (inst_.op >= 27 && inst_.op <= 36) ||
          inst_.op == 39 || (inst_.op >= 41 && inst_.op <= 47) ||
-         (inst_.op >= 51 && inst_.op <= 52) || (inst_.op >= 55 && inst_.op <= 74) ||
-         (inst_.op >= 77 && inst_.op <= 79) || inst_.op == 82 || (inst_.op >= 84 && inst_.op <= 87);
+         (inst_.op >= 51 && inst_.op <= 52) || (inst_.op >= 55 && inst_.op <= 79) ||
+         inst_.op == 82 || (inst_.op >= 84 && inst_.op <= 87);
 }
 
 void Vop1::append_mnemonic(std::string &out) const {
@@ -355,6 +354,8 @@ bool Vop1::has_encoded_literal32() const {
   case 72:
   case 73:
   case 74:
+  case 75:
+  case 76:
   case 77:
   case 78:
   case 79:
@@ -374,8 +375,8 @@ bool Vop1::has_encoded_sdwa() const {
   return inst_.op <= 1 || (inst_.op >= 5 && inst_.op <= 8) || (inst_.op >= 10 && inst_.op <= 14) ||
          (inst_.op >= 17 && inst_.op <= 20) || (inst_.op >= 27 && inst_.op <= 36) ||
          inst_.op == 39 || (inst_.op >= 41 && inst_.op <= 47) ||
-         (inst_.op >= 51 && inst_.op <= 52) || (inst_.op >= 55 && inst_.op <= 74) ||
-         (inst_.op >= 77 && inst_.op <= 79) || inst_.op == 82 || (inst_.op >= 84 && inst_.op <= 87);
+         (inst_.op >= 51 && inst_.op <= 52) || (inst_.op >= 55 && inst_.op <= 79) ||
+         inst_.op == 82 || (inst_.op >= 84 && inst_.op <= 87);
 }
 
 Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn)
