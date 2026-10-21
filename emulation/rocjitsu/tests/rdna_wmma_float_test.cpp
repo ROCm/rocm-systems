@@ -9,11 +9,11 @@ using namespace rocjitsu::matrix_test;
 
 TEST(RdnaWmmaFloat, NativeF8Arithmetic) {
   // FP8_FP8, wave64: finite nonuniform inputs and D overlapping A.
-  check(ROCJITSU_CODE_ARCH_RDNA4, 64, {0xcc464000u, 0x1c421100u}, 0x000000f0u, f8_input(64, false),
-        kWmmaFp8);
+  check(ROCJITSU_CODE_ARCH_RDNA4, 64, {0xcc464000u, 0x1c421100u}, 0x000000f0u,
+        float_input(64, 8, false), kWmmaFp8);
   // BF8_BF8, wave32: finite nonuniform inputs and D overlapping B.
-  check(ROCJITSU_CODE_ARCH_RDNA4, 32, {0xcc494008u, 0x1c421100u}, 0x000000f0u, f8_input(32, true),
-        kWmmaBf8);
+  check(ROCJITSU_CODE_ARCH_RDNA4, 32, {0xcc494008u, 0x1c421100u}, 0x000000f0u,
+        float_input(32, 8, true), kWmmaBf8);
   // FP8_BF8: the two operand formats must not be interchanged.
   check(ROCJITSU_CODE_ARCH_RDNA4, 32, {0xcc474018u, 0x1c421100u}, 0x000000f0u,
         uniform_input({0x013840b8u, 0x407b3c01u, 0xbf000000u, 0x13579bdfu, 0xeeddc988u}),
