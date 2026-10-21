@@ -105,8 +105,9 @@ constexpr DbiTargetParams kRdna4Params{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_T
 } // namespace
 
 // Shared fixture: loads the target's vector_add_probe and rj_nop_probe builds,
-// resolves rj_nop_probe, finds the first relocatable anchor that the probe-call
-// resource policy accepts, and patches it via Instrumentor's probe-call path
+// resolves rj_nop_probe, tries the first anchor of each kernel-reachable block
+// in turn, and patches the first one the probe-call resource policy accepts via
+// Instrumentor's probe-call path
 // (InstrumentationPoint::probe_obj + probe_symbol). The concrete suites at the
 // bottom of this file bind a DbiTargetParams and gate static vs hardware.
 class HsaDbiNopProbeFixture : public ::testing::Test {

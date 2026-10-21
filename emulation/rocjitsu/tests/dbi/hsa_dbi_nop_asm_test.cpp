@@ -67,8 +67,10 @@ constexpr DbiTargetParams kRdna4Params{ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_T
 
 } // namespace
 
-// Shared fixture: loads the target's vector_add build, decodes .text, finds the
-// first two relocatable anchors, and patches them via Instrumentor. The
+// Shared fixture: loads the target's vector_add build, takes one anchor from
+// each of the kernel's first two reachable blocks that can anchor one
+// (kernel_blocks() and first_anchor()), so code laid out ahead of the kernel is
+// never chosen, and patches them via Instrumentor. The
 // concrete suites at the bottom of this file inherit it so CMake can register
 // one CTest entry per (target, gating policy) pair:
 //   - HsaDbiNopAsm<Target>Static.*   - no GPU needed, registered unconditionally

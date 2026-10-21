@@ -90,9 +90,6 @@ TEST(KernelDescriptorScan, SingleKernelDecodesAllFields) {
   EXPECT_EQ(at_offset.private_segment_fixed_size, 256u);
 }
 
-// A descriptor whose decoded entry lands outside .text is dropped. Rewrite the
-// fixture descriptor's entry so it points at the descriptor's own (.rodata)
-// address instead of .text, then confirm the walk excludes it.
 // The object-wide scan covers each .text section and keeps every descriptor.
 TEST(KernelDescriptorScan, ObjectScanFindsEveryKernel) {
   const auto image = make_gfx950_two_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/0);
@@ -104,6 +101,9 @@ TEST(KernelDescriptorScan, ObjectScanFindsEveryKernel) {
   EXPECT_EQ(found[1].kernel_name, "test_kernel1");
 }
 
+// A descriptor whose decoded entry lands outside .text is dropped. Rewrite the
+// fixture descriptor's entry so it points at the descriptor's own (.rodata)
+// address instead of .text, then confirm the walk excludes it.
 TEST(KernelDescriptorScan, EntryOutsideTextIsDropped) {
   auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
   const auto located = scan_via_text_section(image);
