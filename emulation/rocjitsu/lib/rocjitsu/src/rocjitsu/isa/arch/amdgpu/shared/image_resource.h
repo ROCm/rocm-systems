@@ -44,10 +44,15 @@ inline constexpr uint32_t kImage2dArray = 13;
 inline constexpr uint32_t kImage2dMsaa = 14;
 inline constexpr uint32_t kImage2dMsaaArray = 15;
 
+inline uint32_t image_resource_field(const std::array<uint32_t, 8> &r, uint32_t bit,
+                                     uint32_t width) {
+  return util::extract_bits_from_words(r.data(), bit, width);
+}
+
 /// @brief Decode the fields shared by GFX9 image queries and linear accesses.
 inline ImageResource decode_gfx9_image_resource(const std::array<uint32_t, 8> &r) {
   const auto field = [&](uint32_t bit, uint32_t width) {
-    return util::extract_bits_from_words(r.data(), bit, width);
+    return image_resource_field(r, bit, width);
   };
   ImageResource resource;
   resource.base = ((uint64_t{field(32, 8)} << 32) | r[0]) << 8;
@@ -67,24 +72,69 @@ inline ImageResource decode_gfx9_image_resource(const std::array<uint32_t, 8> &r
   return resource;
 }
 
+/// @brief Decode the GFX11 image fields shared by queries and linear accesses.
+inline ImageResource decode_gfx11_image_resource(const std::array<uint32_t, 8> &r) {
+  const auto field = [&](uint32_t bit, uint32_t width) {
+    return image_resource_field(r, bit, width);
+  };
+  ImageResource resource;
+  resource.base = ((uint64_t{field(32, 8)} << 32) | r[0]) << 8;
+  resource.data_format = field(52, 8);
+  resource.width = field(62, 14) + 1;
+  resource.height = field(78, 14) + 1;
+  resource.selectors = field(96, 12);
+  resource.base_level = field(108, 4);
+  resource.last_level = field(112, 4);
+  resource.swizzle_mode = field(116, 5);
+  resource.type = field(124, 4);
+  resource.depth = field(128, 13) + 1;
+  resource.pitch = field(128, 14) + 1;
+  resource.base_array = field(144, 13);
+  return resource;
+}
+
+/// @brief Decode the GFX12 image fields shared by queries and linear accesses.
+inline ImageResource decode_gfx12_image_resource(const std::array<uint32_t, 8> &r) {
+  const auto field = [&](uint32_t bit, uint32_t width) {
+    return image_resource_field(r, bit, width);
+  };
+  ImageResource resource;
+  resource.base = ((uint64_t{field(32, 8)} << 32) | r[0]) << 8;
+  resource.data_format = field(49, 8);
+  resource.width = field(62, 16) + 1;
+  resource.height = field(78, 16) + 1;
+  resource.selectors = field(96, 12);
+  resource.base_level = field(57, 5);
+  resource.last_level = field(111, 5);
+  resource.swizzle_mode = field(116, 5);
+  resource.type = field(124, 4);
+  resource.depth = field(128, 14) + 1;
+  resource.pitch = resource.width;
+  resource.base_array = field(144, 13);
+  return resource;
+}
+
 /// Descriptor-only IMAGE_GET_RESINFO; no image allocation or texture addressing is needed.
 inline std::array<uint32_t, 4> image_resource_info(const std::array<uint32_t, 8> &r,
                                                    rj_code_arch_t arch, uint32_t lod) {
   const auto field = [&](uint32_t bit, uint32_t width) {
-    return util::extract_bits_from_words(r.data(), bit, width);
+    return image_resource_field(r, bit, width);
   };
-  const uint32_t type = field(124, 4);
+  const bool gfx9 = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2;
+  const bool gfx11 = arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+  const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool shared_decode = gfx9 || gfx11 || gfx12;
+  const ImageResource resource = gfx9    ? decode_gfx9_image_resource(r)
+                                 : gfx11 ? decode_gfx11_image_resource(r)
+                                 : gfx12 ? decode_gfx12_image_resource(r)
+                                         : ImageResource{};
+  const uint32_t type = shared_decode ? resource.type : field(124, 4);
   if (type < kImage1d)
     return {};
-  const bool gfx9 = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2;
-  const ImageResource gfx9_resource = gfx9 ? decode_gfx9_image_resource(r) : ImageResource{};
-  const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
   const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1;
   const bool msaa = type >= kImage2dMsaa;
-  const uint32_t base =
-      msaa ? 0 : (gfx9 ? gfx9_resource.base_level : field(gfx12 ? 57 : 108, gfx12 ? 5 : 4));
-  const uint32_t last =
-      msaa ? 0 : (gfx9 ? gfx9_resource.last_level : field(gfx12 ? 111 : 112, gfx12 ? 5 : 4));
+  const uint32_t base = msaa ? 0 : (shared_decode ? resource.base_level : field(108, 4));
+  const uint32_t last = msaa ? 0 : (shared_decode ? resource.last_level : field(112, 4));
   if (last < base)
     return {};
   const uint32_t levels = last - base + 1;
@@ -92,12 +142,11 @@ inline std::array<uint32_t, 4> image_resource_info(const std::array<uint32_t, 8>
     return {0, 0, 0, levels};
   const uint32_t level = base + lod;
   const auto mip_size = [level](uint32_t size) { return std::max(1u, size >> level); };
-  const uint32_t width =
-      mip_size(gfx9 ? gfx9_resource.width : field(62, gfx12 || gfx10 ? 16 : 14) + 1);
+  const uint32_t width = mip_size(shared_decode ? resource.width : field(62, gfx10 ? 16 : 14) + 1);
   const uint32_t height =
-      mip_size(gfx9 ? gfx9_resource.height : field(78, gfx12 || gfx10 ? 16 : 14) + 1);
-  const uint32_t depth = gfx9 ? gfx9_resource.depth : field(128, gfx12 ? 14 : gfx10 ? 16 : 13) + 1;
-  const uint32_t base_array = gfx9 ? gfx9_resource.base_array : field(144, gfx10 ? 16 : 13);
+      mip_size(shared_decode ? resource.height : field(78, gfx10 ? 16 : 14) + 1);
+  const uint32_t depth = shared_decode ? resource.depth : field(128, gfx10 ? 16 : 13) + 1;
+  const uint32_t base_array = shared_decode ? resource.base_array : field(144, gfx10 ? 16 : 13);
   const uint32_t layers = depth > base_array ? depth - base_array : 0;
   const bool uav3d = !gfx9 && field(gfx12 ? 164 : 160, 1);
   switch (type) {

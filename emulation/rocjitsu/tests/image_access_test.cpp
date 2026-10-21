@@ -523,6 +523,8 @@ TEST(ImageAccessTest, RdnaLinearR32DescriptorsPrepareTheExpectedMemoryAccess) {
     set(116, 5, 0); // Linear.
     set(124, 4, amdgpu::kImage2d);
     set(128, gfx12 ? 14 : 13, 63);
+    if (gfx12)
+      set(157, 1, 1); // Adjacent GFX12 field is not part of BASE_ARRAY.
     for (uint32_t i = 0; i < words.size(); ++i)
       cu->write_sgpr(wf->sgpr_alloc().base + i, words[i]);
     cu->write_vgpr(wf->vgpr_alloc().base, 0, 0);
@@ -541,6 +543,31 @@ TEST(ImageAccessTest, RdnaLinearR32DescriptorsPrepareTheExpectedMemoryAccess) {
     EXPECT_EQ(state.buffer_format, 20u);
     wf->halt();
   }
+}
+
+TEST(ImageAccessTest, UnsupportedArchitectureIsRejected) {
+  amdgpu::GpuMemory memory{"unsupported_image_memory"};
+  amdgpu::L2Cache l2{"unsupported_image_l2"};
+  l2.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = ROCJITSU_CODE_ARCH_RDNA2;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 32;
+  cfg.vgprs_per_wf = 32;
+  auto cu = amdgpu::ComputeUnitCore::create("unsupported_image_cu", cfg, &memory, &l2);
+  auto *wf = cu->dispatch_wf(0, 0, 32, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(1);
+
+  amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
+  state.is_load = true;
+  EXPECT_TRUE(amdgpu::prepare_image_access(
+                  *wf, state, 0, 0,
+                  {.dmask = 1, .a16 = false, .d16 = false, .lwe = false, .da = true, .unorm = true})
+                  .failed());
+  EXPECT_EQ(wf->instruction_execution_error(),
+            amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  wf->halt();
 }
 
 } // namespace

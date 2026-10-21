@@ -65,34 +65,40 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
     return fail(InstructionExecutionError::UnimplementedInstruction);
   if (state.buffer_components == 0 || (!state.is_load && !fields.unorm))
     return fail(InstructionExecutionError::UnsupportedOperandValue);
+  const auto arch = wf.cu().arch();
+  const bool gfx9 = arch == ROCJITSU_CODE_ARCH_CDNA2;
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    state.buffer_format_encoding = BufferFormatEncoding::Gfx9;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    state.buffer_format_encoding = BufferFormatEncoding::Gfx11;
+    break;
+  default:
+    return fail(InstructionExecutionError::UnimplementedInstruction);
+  }
   if (!scalar_selector_range_is_backed(wf, resource_reg, 8))
     return util::Result::success();
 
   std::array<uint32_t, 8> words{};
   for (uint32_t i = 0; i < words.size(); ++i)
     words[i] = read_scalar_selector(wf, resource_reg + i);
-  const auto arch = wf.cu().arch();
-  const bool gfx9 = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2;
-  const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
   ImageResource resource;
-  if (gfx9) {
+  switch (arch) {
+  case ROCJITSU_CODE_ARCH_CDNA2:
     resource = decode_gfx9_image_resource(words);
-  } else {
-    const auto field = [&](uint32_t bit, uint32_t width) {
-      return util::extract_bits_from_words(words.data(), bit, width);
-    };
-    resource.base = ((uint64_t{field(32, 8)} << 32) | words[0]) << 8;
-    resource.data_format = field(gfx12 ? 49 : 52, 8);
-    resource.width = field(62, gfx12 ? 16 : 14) + 1;
-    resource.height = field(78, gfx12 ? 16 : 14) + 1;
-    resource.selectors = field(96, 12);
-    resource.base_level = field(gfx12 ? 57 : 108, gfx12 ? 5 : 4);
-    resource.last_level = field(gfx12 ? 111 : 112, gfx12 ? 5 : 4);
-    resource.swizzle_mode = field(116, 5);
-    resource.type = field(124, 4);
-    resource.depth = field(128, gfx12 ? 14 : 13) + 1;
-    resource.base_array = field(144, gfx12 ? 14 : 13);
-    resource.pitch = gfx12 ? resource.width : field(128, 14) + 1;
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA3:
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    resource = decode_gfx11_image_resource(words);
+    break;
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    resource = decode_gfx12_image_resource(words);
+    break;
+  default:
+    return fail(InstructionExecutionError::UnimplementedInstruction);
   }
 
   if (resource.type < kImage1d || resource.data_format == 0)
@@ -117,10 +123,6 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
     return fail(InstructionExecutionError::UnimplementedInstruction);
   state.buffer_format =
       gfx9 ? resource.data_format | (resource.num_format << 4) : resource.data_format;
-  state.buffer_format_encoding = gfx9                               ? BufferFormatEncoding::Gfx9
-                                 : arch == ROCJITSU_CODE_ARCH_RDNA1 ? BufferFormatEncoding::Rdna1
-                                 : arch == ROCJITSU_CODE_ARCH_RDNA2 ? BufferFormatEncoding::Rdna2
-                                                                    : BufferFormatEncoding::Gfx11;
   const auto format = prepare_buffer_format_state(state);
   // Buffer decoder failure does not imply an illegal image format: images
   // also support formats such as SRGB that the buffer table does not model.

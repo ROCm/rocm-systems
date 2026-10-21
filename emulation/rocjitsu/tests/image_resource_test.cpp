@@ -55,6 +55,8 @@ protected:
     set(124, 4, type);
     set(128, 13, 17);
     set(gfx9 ? 160 : 144, 13, view ? 3 : 0);
+    if (gfx12)
+      set(157, 1, 1); // Adjacent GFX12 field is not part of BASE_ARRAY.
     if (uav)
       set(gfx12 ? 164 : 160, 1, 1);
     return r;
