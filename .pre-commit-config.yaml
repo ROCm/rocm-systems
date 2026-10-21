@@ -1,4 +1,3 @@
-# Touched so rocjitsu-formatting creates the required "pre-commit" check-run for therock-pr-bot on docs-only PRs.
 exclude: |
   (?x)
     third_party/
