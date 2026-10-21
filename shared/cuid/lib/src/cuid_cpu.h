@@ -26,8 +26,13 @@ class CuidCpu : public CuidDevice {
   bool key_gated_identity() const override { return true; }
   amdcuid_status_t get_temporary_input(CuidUtilities::AuxiliaryInput& input) const override;
   static amdcuid_status_t discover(std::vector<DevicePtr>& cpus);
+  static amdcuid_status_t discover(const std::string& cpu_base_path,
+                                   const std::string& cpuinfo_path, std::vector<DevicePtr>& cpus);
   static amdcuid_status_t discover_single(amdcuid_cpu_info* cpu_info,
                                           const std::string& device_path);
+  static amdcuid_status_t discover_single(amdcuid_cpu_info* cpu_info,
+                                          const std::string& device_path,
+                                          const std::string& cpuinfo_path);
 
   // Virtual accessor overrides
   amdcuid_status_t get_vendor_id(uint16_t& vendor_id) const override;

@@ -3,8 +3,12 @@
 
 #include "src/cuid_cpu.h"
 
+#include <dirent.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <climits>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -36,11 +40,13 @@ bool get_cpuid_info(uint16_t& vendor_id, uint16_t& family, uint16_t& model, uint
     return false;
   }
 
-  // Check for AMD vendor (AuthenticAMD)
+  // AuthenticAMD or GenuineIntel; any other vendor has no CUID.
   if (ebx == 0x68747541 && edx == 0x69746E65 && ecx == 0x444D4163) {
-    vendor_id = 0x1022;  // AMD vendor ID
+    vendor_id = 0x1022;
+  } else if (ebx == 0x756E6547 && edx == 0x49656E69 && ecx == 0x6C65746E) {
+    vendor_id = 0x8086;
   } else {
-    vendor_id = 0x8086;  // Intel or other
+    vendor_id = 0;
   }
 
   // CPUID leaf 1: Get family, model, stepping
@@ -77,228 +83,187 @@ bool get_cpuid_info(uint16_t& vendor_id, uint16_t& family, uint16_t& model, uint
 #endif
 }
 
-}  // namespace
+// A non-negative decimal field, or -1 when malformed.
+int parse_int(const std::string& text) {
+  if (text.empty()) return -1;
+  char* end = nullptr;
+  errno = 0;
+  const long value = std::strtol(text.c_str(), &end, 10);
+  if (errno == ERANGE || *end != '\0' || value < 0 || value > INT_MAX) return -1;
+  return static_cast<int>(value);
+}
 
-/**
- * @brief CPU information parsed from /proc/cpuinfo
- */
-struct ProcCpuInfo {
-  int processor = -1;   // Logical processor number
-  int physical_id = 0;  // Socket/package ID
-  int core_id = 0;      // Core ID within package
-  int apic_id = 0;      // APIC ID
-  int family = 0;
-  int model = 0;
-  int stepping = 0;
-  std::string vendor_id;  // "AuthenticAMD" or "GenuineIntel"
-  bool is_amd = false;
-};
+}  // namespace
 
 namespace {
 
-/**
- * @brief Parse /proc/cpuinfo to discover CPUs without root privileges
- *
- * This is the primary method for CPU discovery that works without sudo.
- * Returns information about all logical processors on the system.
- */
-amdcuid_status_t parse_proc_cpuinfo(std::vector<ProcCpuInfo>& cpus) {
-  std::ifstream cpuinfo("/proc/cpuinfo");
-  if (!cpuinfo) {
-    return AMDCUID_STATUS_CPUINFO_ERROR;
-  }
+struct CpuSignature {
+  uint16_t family = 0;
+  uint16_t model = 0;
+  uint8_t stepping = 0;
+};
 
-  cpus.clear();
-  ProcCpuInfo current;
+// Family, model and stepping of package `package`, from the first
+// /proc/cpuinfo block whose physical id names it; a malformed one is an error,
+// not a reason to try the next. These are the values CPUID leaf 1 gives on a
+// logical CPU of that package.
+amdcuid_status_t package_signature(const std::string& cpuinfo_path, int package,
+                                   CpuSignature& signature) {
+  std::ifstream cpuinfo(cpuinfo_path);
+  if (!cpuinfo) return AMDCUID_STATUS_CPUINFO_ERROR;
+  int physical_id = -1, family = -1, model = -1, stepping = -1;
   std::string line;
-
+  bool found = false;
   while (std::getline(cpuinfo, line)) {
-    // Empty line marks end of processor entry
     if (line.empty()) {
-      if (current.processor >= 0) {
-        cpus.push_back(current);
-        current = ProcCpuInfo();
+      if (physical_id == package) {
+        found = true;
+        break;
       }
+      physical_id = family = model = stepping = -1;
       continue;
     }
-
-    // Parse key : value
-    size_t colon = line.find(':');
+    const size_t colon = line.find(':');
     if (colon == std::string::npos) continue;
-
     std::string key = line.substr(0, colon);
     std::string value = line.substr(colon + 1);
-
-    // Trim whitespace
     while (!key.empty() && (key.back() == ' ' || key.back() == '\t')) key.pop_back();
     while (!value.empty() && (value.front() == ' ' || value.front() == '\t')) value.erase(0, 1);
-
-    if (key == "processor") {
-      current.processor = std::stoi(value);
-    } else if (key == "vendor_id") {
-      current.vendor_id = value;
-      current.is_amd = (value == "AuthenticAMD");
+    if (key == "physical id") {
+      physical_id = parse_int(value);
     } else if (key == "cpu family") {
-      current.family = std::stoi(value);
+      family = parse_int(value);
     } else if (key == "model") {
-      current.model = std::stoi(value);
+      model = parse_int(value);
     } else if (key == "stepping") {
-      current.stepping = std::stoi(value);
-    } else if (key == "physical id") {
-      current.physical_id = std::stoi(value);
-    } else if (key == "core id") {
-      current.core_id = std::stoi(value);
-    } else if (key == "apicid") {
-      current.apic_id = std::stoi(value);
+      stepping = parse_int(value);
     }
   }
+  if (!found && physical_id != package) return AMDCUID_STATUS_CPUINFO_ERROR;
+  if (family < 0 || family > 0xFFFF || model < 0 || model > 0xFF || stepping < 0 || stepping > 0xF)
+    return AMDCUID_STATUS_INVALID_FORMAT;
+  signature.family = static_cast<uint16_t>(family);
+  signature.model = static_cast<uint16_t>(model);
+  signature.stepping = static_cast<uint8_t>(stepping);
+  return AMDCUID_STATUS_SUCCESS;
+}
 
-  // Don't forget the last entry
-  if (current.processor >= 0) {
-    cpus.push_back(current);
-  }
+// Logical CPU number of a "cpuN" directory name, or -1.
+int logical_cpu(const std::string& name) {
+  if (name.size() < 4 || name.compare(0, 3, "cpu") != 0) return -1;
+  return parse_int(name.substr(3));
+}
 
-  if (cpus.empty()) {
-    return AMDCUID_STATUS_CPUINFO_ERROR;
-  }
-
+amdcuid_status_t fill_package(amdcuid_cpu_info& info, uint16_t vendor_id, int package,
+                              const std::string& cpuinfo_path) {
+  CpuSignature signature;
+  const amdcuid_status_t status = package_signature(cpuinfo_path, package, signature);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+  std::memset(&info.header, 0, sizeof(info.header));
+  info.header.device_type = AMDCUID_DEVICE_TYPE_CPU;
+  info.header.fields.cpu.vendor_id = vendor_id;
+  info.header.fields.cpu.family = signature.family;
+  info.header.fields.cpu.model = signature.model;
+  info.header.fields.cpu.device_id =
+      static_cast<uint16_t>(((signature.family & 0xFF) << 8) | signature.model);
+  info.header.fields.cpu.revision_id = signature.stepping;
+  // UnitID names a sub-unit, and a package is published as a whole, so zero.
+  // Not an APIC ID: that moves with firmware enumeration or a disabled core.
+  // The physical package ID in S's routing ID separates the sockets.
+  info.header.fields.cpu.unit_id = 0;
+  info.header.fields.cpu.physical_id = static_cast<uint16_t>(package);
   return AMDCUID_STATUS_SUCCESS;
 }
 
 }  // namespace
 
-/**
- * @brief Discover CPUs without root privileges using /proc/cpuinfo
- *
- * This implementation reads from /proc/cpuinfo which is readable by all users.
- * The ACPI MADT parsing (which requires root) is moved to
- * get_hardware_fingerprint() where privileged operations are expected.
- */
 amdcuid_status_t CuidCpu::discover(std::vector<DevicePtr>& cpus) {
+  return discover("/sys/devices/system/cpu", "/proc/cpuinfo", cpus);
+}
+
+amdcuid_status_t CuidCpu::discover(const std::string& cpu_base_path,
+                                   const std::string& cpuinfo_path, std::vector<DevicePtr>& cpus) {
   cpus.clear();
-
-  // Parse /proc/cpuinfo - works without root
-  std::vector<ProcCpuInfo> proc_cpus;
-  amdcuid_status_t status = parse_proc_cpuinfo(proc_cpus);
-
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    return status;
-  }
-
-  // Get CPU information from CPUID (same for all cores)
   uint16_t vendor_id = 0, family = 0, model = 0, device_id = 0;
   uint8_t stepping = 0;
-  bool cpuid_available = get_cpuid_info(vendor_id, family, model, device_id, stepping);
-
-  // Group logical processors by physical package (socket). For each socket,
-  // pick the representative entry with the lowest APIC ID — this is the
-  // bootstrap processor convention used by firmware to represent the package.
-  std::map<int, const ProcCpuInfo*> socket_rep;
-  for (const auto& proc_info : proc_cpus) {
-    auto it = socket_rep.find(proc_info.physical_id);
-    if (it == socket_rep.end() || proc_info.apic_id < it->second->apic_id) {
-      socket_rep[proc_info.physical_id] = &proc_info;
-    }
+  if (!get_cpuid_info(vendor_id, family, model, device_id, stepping) || vendor_id == 0) {
+    return AMDCUID_STATUS_UNSUPPORTED;
   }
 
-  // Create one CPU device per physical socket using the representative entry.
-  for (const auto& kv : socket_rep) {
-    const ProcCpuInfo* rep = kv.second;
-    amdcuid_cpu_info info{};
-    std::memset(&info.header, 0, sizeof(info.header));
-
-    info.header.device_type = AMDCUID_DEVICE_TYPE_CPU;
-
-    if (cpuid_available) {
-      info.header.fields.cpu.vendor_id = vendor_id;
-      info.header.fields.cpu.family = family;
-      info.header.fields.cpu.model = model;
-      info.header.fields.cpu.device_id = device_id;
-      info.header.fields.cpu.revision_id = stepping;
-    } else {
-      info.header.fields.cpu.vendor_id = rep->is_amd ? 0x1022 : 0x8086;
-      info.header.fields.cpu.family = static_cast<uint16_t>(rep->family);
-      info.header.fields.cpu.model = static_cast<uint16_t>(rep->model);
-      info.header.fields.cpu.device_id = static_cast<uint16_t>((rep->family << 8) | rep->model);
-      info.header.fields.cpu.revision_id = static_cast<uint8_t>(rep->stepping);
+  DIR* dir = opendir(cpu_base_path.c_str());
+  if (!dir) return AMDCUID_STATUS_CPUINFO_ERROR;
+  // Each package is represented by its lowest-numbered logical CPU.
+  std::map<int, int> packages;
+  struct dirent* entry;
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
+  while ((entry = readdir(dir)) != NULL) {
+    const int cpu = logical_cpu(entry->d_name);
+    if (cpu < 0) continue;
+    const std::string id_path =
+        cpu_base_path + "/" + entry->d_name + "/topology/physical_package_id";
+    if (access(id_path.c_str(), F_OK) != 0) continue;
+    const int package = parse_int(CuidUtilities::read_sysfs_file(id_path));
+    if (package < 0 || package > UINT16_MAX) {
+      LOG(DEBUG, "CUID discovery: skipping " << entry->d_name << " (bad physical_package_id)");
+      continue;
     }
+    auto found = packages.find(package);
+    if (found == packages.end() || cpu < found->second) packages[package] = cpu;
+  }
+  closedir(dir);
 
-    // UnitID names a sub-unit, and a package is published as a whole, so zero.
-    // Not an APIC ID: that is a topology address, identical across identically
-    // configured hosts and moved by firmware enumeration or a disabled core.
-    // The socket is separated by its fingerprint (PPIN, or the SMBIOS UUID
-    // folded with physical_id).
-    info.header.fields.cpu.unit_id = 0;
-    info.header.fields.cpu.physical_id = static_cast<uint16_t>(kv.first);
-    info.header.fields.cpu.core = static_cast<uint16_t>(rep->processor);  // logical CPU number
-
-    // device_node points to the representative logical CPU's sysfs path.
-    info.device_node = "/sys/devices/system/cpu/cpu" + std::to_string(rep->processor);
-
+  for (const auto& package : packages) {
+    amdcuid_cpu_info info{};
+    const amdcuid_status_t status = fill_package(info, vendor_id, package.first, cpuinfo_path);
+    if (status != AMDCUID_STATUS_SUCCESS) {
+      LOG(DEBUG, "CUID discovery: skipping CPU package "
+                     << package.first << " (" << amdcuid_status_to_string(status) << ")");
+      continue;
+    }
+    info.header.fields.cpu.core = static_cast<uint16_t>(package.second);
+    info.device_node = "/sys/devices/system/cpu/cpu" + std::to_string(package.second);
     cpus.emplace_back(std::make_shared<CuidCpu>(info));
   }
-
+  if (cpus.empty()) return AMDCUID_STATUS_CPUINFO_ERROR;
   return AMDCUID_STATUS_SUCCESS;
 }
 
-/**
- * @brief Discover a single CPU by its sysfs device path
- *
- * Device path should be like /sys/devices/system/cpu/cpu0
- * Reads topology info from sysfs and CPU info from CPUID.
- */
 amdcuid_status_t CuidCpu::discover_single(amdcuid_cpu_info* cpu_info,
                                           const std::string& device_path) {
+  return discover_single(cpu_info, device_path, "/proc/cpuinfo");
+}
+
+amdcuid_status_t CuidCpu::discover_single(amdcuid_cpu_info* cpu_info,
+                                          const std::string& device_path,
+                                          const std::string& cpuinfo_path) {
   if (!cpu_info) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
-
-  // Verify the path exists and extract CPU number
-  size_t cpu_pos = device_path.find("cpu");
-  if (cpu_pos == std::string::npos) {
+  if (device_path.find("cpu") == std::string::npos) {
     return AMDCUID_STATUS_INVALID_ARGUMENT;
   }
 
-  // Read topology information from sysfs
-  std::string topology_path = device_path + "/topology";
+  const std::string physical_package_str =
+      CuidUtilities::read_sysfs_file(device_path + "/topology/physical_package_id");
+  if (physical_package_str.empty()) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
 
-  std::string physical_package_str =
-      CuidUtilities::read_sysfs_file(topology_path + "/physical_package_id");
-  std::string core_id_str = CuidUtilities::read_sysfs_file(topology_path + "/core_id");
-
-  if (physical_package_str.empty() || core_id_str.empty()) {
-    return AMDCUID_STATUS_DEVICE_NOT_FOUND;
-  }
-
-  // Zero only the POD header; preserve std::string device_node
-  std::memset(&cpu_info->header, 0, sizeof(cpu_info->header));
-  cpu_info->device_node.clear();
-  cpu_info->header.device_type = AMDCUID_DEVICE_TYPE_CPU;
-
-  // Get CPU info from CPUID instruction
   uint16_t vendor_id = 0, family = 0, model = 0, device_id = 0;
   uint8_t stepping = 0;
-  if (get_cpuid_info(vendor_id, family, model, device_id, stepping)) {
-    cpu_info->header.fields.cpu.vendor_id = vendor_id;
-    cpu_info->header.fields.cpu.family = family;
-    cpu_info->header.fields.cpu.model = model;
-    cpu_info->header.fields.cpu.device_id = device_id;
-    cpu_info->header.fields.cpu.revision_id = stepping;
-  } else {
-    return AMDCUID_STATUS_CPUINFO_ERROR;
-  }
+  if (!get_cpuid_info(vendor_id, family, model, device_id, stepping))
+    return AMDCUID_STATUS_UNSUPPORTED;
+  if (vendor_id == 0) return AMDCUID_STATUS_UNSUPPORTED;
 
-  // Set topology fields from sysfs
-  cpu_info->header.fields.cpu.physical_id = static_cast<uint16_t>(std::stoi(physical_package_str));
-  cpu_info->header.fields.cpu.core = static_cast<uint16_t>(std::stoi(core_id_str));
+  const int physical_id = parse_int(physical_package_str);
+  if (physical_id < 0 || physical_id > UINT16_MAX) return AMDCUID_STATUS_INVALID_FORMAT;
+  const size_t slash = device_path.find_last_of('/');
+  const int cpu = logical_cpu(device_path.substr(slash == std::string::npos ? 0 : slash + 1));
 
-  // Zero, as in discover(): the logical CPU number from the sysfs path would
-  // make a socket's identifier depend on which of its threads the caller named.
-  cpu_info->header.fields.cpu.unit_id = 0;
-
-  // Store the device path for later lookup
-  cpu_info->device_node = device_path;
-
+  amdcuid_cpu_info info{};
+  const amdcuid_status_t status = fill_package(info, vendor_id, physical_id, cpuinfo_path);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+  info.header.fields.cpu.core = static_cast<uint16_t>(cpu > 0 && cpu <= UINT16_MAX ? cpu : 0);
+  info.device_node = device_path;
+  *cpu_info = info;
   return AMDCUID_STATUS_SUCCESS;
 }
 

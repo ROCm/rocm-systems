@@ -22,6 +22,8 @@ bool same(const amdcuid_id_t& a, const amdcuid_id_t& b) {
 amdcuid_status_t lookup(const std::string& name, amdcuid_id_t& id) {
   if (name.compare(0, 4, "bdf=") == 0)
     return amdcuid_get_handle_by_bdf(name.substr(4).c_str(), AMDCUID_DEVICE_TYPE_GPU, &id);
+  if (name.compare(0, 4, "nic=") == 0)
+    return amdcuid_get_handle_by_bdf(name.substr(4).c_str(), AMDCUID_DEVICE_TYPE_NIC, &id);
   if (name.compare(0, 3, "fd=") == 0) {
     const int fd = open(name.substr(3).c_str(), O_RDONLY | O_CLOEXEC);
     if (fd < 0) return AMDCUID_STATUS_FILE_ERROR;
@@ -59,9 +61,8 @@ bool auxiliary_bit(amdcuid_id_t id) {
   return raw[14] & 0x20;
 }
 
-// A temporary handle has no primary: root is refused with UNSUPPORTED and the
-// buffer is left alone; anyone else is refused for privilege first. Every
-// other query still answers.
+// A temporary handle has no primary: every caller is refused with UNSUPPORTED
+// and the buffer is left alone. Every other query still answers.
 bool no_primary(amdcuid_id_t id) {
   amdcuid_id_t primary;
   std::memset(&primary, 0xA5, sizeof(primary));
@@ -69,8 +70,7 @@ bool no_primary(amdcuid_id_t id) {
   uint32_t length = sizeof(primary);
   const auto status =
       amdcuid_query_device_property(id, AMDCUID_QUERY_PRIMARY_CUID, &primary, &length);
-  const auto want = geteuid() == 0 ? AMDCUID_STATUS_UNSUPPORTED : AMDCUID_STATUS_PERMISSION_DENIED;
-  if (status != want || !same(primary, sentinel)) {
+  if (status != AMDCUID_STATUS_UNSUPPORTED || !same(primary, sentinel)) {
     std::cerr << "primary of a temporary CUID: " << amdcuid_status_to_string(status) << '\n';
     return false;
   }
@@ -304,13 +304,13 @@ int main(int argc, char** argv) {
                ? 0
                : 1;
   }
-  if (action == "unnamed-vf") {
+  if (action == "host-vf") {
     for (int n = 2; n < argc; ++n) {
       amdcuid_gpu_info info{};
       info.header.device_type = AMDCUID_DEVICE_TYPE_GPU;
       info.header.fields.gpu.vendor_id = 0x1002;
       info.render_node = argv[n];
-      info.unnamed_vf = true;
+      info.host_vf = true;
       CuidGpu vf(info);
       uint64_t fingerprint = 0xDEADBEEF;
       const bool root = geteuid() == 0;
@@ -322,7 +322,16 @@ int main(int argc, char** argv) {
       amdcuid_derived_id derived{};
       const auto derived_status = vf.get_derived_cuid(derived);
       if (primary_status != AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) return 1;
-      if (derived_status != AMDCUID_STATUS_UNSUPPORTED) return 1;
+      // A VF is named by its own address with UnitID 0, never as a partition
+      // and never with a UnitID the driver published.
+      if (!vf.get_info().partition_attr_dir.empty()) {
+        if (derived_status != AMDCUID_STATUS_UNSUPPORTED) return 1;
+      } else {
+        uint16_t unit_id = 0xFFFF;
+        CuidUtilities::AuxiliaryInput input{};
+        if (vf.get_temporary_input(input) == AMDCUID_STATUS_SUCCESS && input.unit_id != 0) return 1;
+        if (vf.get_unit_id(unit_id) == AMDCUID_STATUS_SUCCESS && unit_id != 0) return 1;
+      }
     }
     return 0;
   }
@@ -454,15 +463,19 @@ int main(int argc, char** argv) {
                      std::to_string(device) + ":" + std::to_string(revision) + ":" +
                      std::to_string(pci_class));
       uint64_t fingerprint = 0;
-      if (std::string(bdf) == "0000:a1:00.0" && geteuid() == 0 &&
-          (!query(handle, AMDCUID_QUERY_HARDWARE_FINGERPRINT, fingerprint) ||
-           fingerprint != 0x1234abcd))
+      uint32_t fingerprint_length = sizeof(fingerprint);
+      if (amdcuid_query_device_property(handle, AMDCUID_QUERY_HARDWARE_FINGERPRINT, &fingerprint,
+                                        &fingerprint_length) != AMDCUID_STATUS_UNSUPPORTED)
         return 1;
     }
+    amdcuid_id_t unbound{};
+    if (amdcuid_get_handle_by_bdf("0000:c1:00.0", AMDCUID_DEVICE_TYPE_GPU, &unbound) ==
+        AMDCUID_STATUS_SUCCESS)
+      return 1;
     std::sort(gpus.begin(), gpus.end());
     const std::vector<std::string> want{"0000:03:00.0 4098:29603:1:768",
                                         "0000:63:00.0 4098:29603:1:768",
-                                        "0000:a1:00.0 4098:29857:5:768"};
+                                        "0000:a1:00.0 4098:29857:5:4608"};
     if (gpus == want) return 0;
     for (const auto& gpu : gpus) std::cerr << "gpu " << gpu << '\n';
     return 1;

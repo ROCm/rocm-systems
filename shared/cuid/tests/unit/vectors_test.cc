@@ -760,3 +760,42 @@ TEST(cuidtstUnprivileged, PlatformTemporaryCuidMatchesTvPlat) {
   EXPECT_EQ(CuidUtilities::get_cuid_as_string(&actual.UUIDv8_representation),
             CuidUtilities::get_cuid_as_string(&expected.UUIDv8_representation));
 }
+
+// The specification's format vectors, by the specification's names: serial
+// 0x06C5349BD3AAABD4, RevisionID 0, DeviceID 0x73A3, VendorID 0x1002, GPU.
+TEST(cuidtstUnprivileged, SpecFormatVectors) {
+  struct Case {
+    const char* name;
+    uint16_t unit_id;
+    const char* payload;
+    const char* uuid;
+  };
+  for (const Case& c :
+       {Case{"P-1", 0, "d4abaad39b34c5060000a37302108000", "d4abaad3-9b34-8c50-9800-028dcc084200"},
+        Case{"P-QPX2", 9, "d4abaad39b34c5060900a37302108000",
+             "d4abaad3-9b34-8c50-9824-028dcc084200"},
+        Case{"U-MAX", 0x1FFF, "d4abaad39b34c506ff00a37302109f00",
+             "d4abaad3-9b34-8c50-9bfc-028dcc08427c"}}) {
+    amdcuid_primary_id id = {};
+    ASSERT_EQ(CuidUtilities::generate_primary_cuid(0x06C5349BD3AAABD4ULL, c.unit_id, 0x00, 0x73A3,
+                                                   0x1002, AMDCUID_DEVICE_TYPE_GPU, &id, false),
+              AMDCUID_STATUS_SUCCESS)
+        << c.name;
+    EXPECT_EQ(to_hex(id.raw_bits, sizeof(id.raw_bits)), c.payload) << c.name;
+    EXPECT_EQ(CuidUtilities::get_cuid_as_string(&id.UUIDv8_representation), c.uuid) << c.name;
+  }
+
+  amdcuid_primary_id primary = {};
+  ASSERT_EQ(CuidUtilities::generate_primary_cuid(0x06C5349BD3AAABD4ULL, 0, 0x00, 0x73A3, 0x1002,
+                                                 AMDCUID_DEVICE_TYPE_GPU, &primary, false),
+            AMDCUID_STATUS_SUCCESS);
+  uint8_t key[key_length];
+  for (size_t i = 0; i < key_length; ++i) key[i] = static_cast<uint8_t>(i);
+  cuid_hmac hmac(key);
+  amdcuid_derived_id derived = {};
+  ASSERT_EQ(CuidUtilities::generate_derived_cuid(&primary, &derived, &hmac),
+            AMDCUID_STATUS_SUCCESS);
+  EXPECT_EQ(to_hex(derived.raw_bits, sizeof(derived.raw_bits)), "73488f9eea526ce1004989fe906c1a00");
+  EXPECT_EQ(CuidUtilities::get_cuid_as_string(&derived.UUIDv8_representation),
+            "73488f9e-ea52-86ce-8401-2627fa41b068");
+}
