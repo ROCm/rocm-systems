@@ -66,6 +66,129 @@ REATTACH_INVARIANT_FILTER = (
     r"^kernel_(include_regex|exclude_regex|iteration_range)$"
 )
 
+_BASH_COMPLETION_VALUE_HELP = {
+    "output_format": (
+        (
+            "rocpd",
+            "Complete SQLite output; all services and future additions (default)",
+        ),
+        ("json", "JSON for ad hoc programmatic analysis; schema is not stable"),
+        (
+            "csv",
+            "Deprecated direct CSV; export using rocpd convert; incomplete coverage; "
+            "new services are rocpd-only",
+        ),
+        (
+            "pftrace",
+            "Deprecated direct Perfetto output; export using rocpd convert; "
+            "incomplete coverage; new services are rocpd-only",
+        ),
+        (
+            "otf2",
+            "Deprecated direct OTF2 output; export using rocpd convert; incomplete "
+            "coverage; new services are rocpd-only",
+        ),
+    ),
+    "log_level": (
+        ("fatal", "Fatal errors only"),
+        ("error", "Errors and fatal errors"),
+        ("warning", "Warnings and errors"),
+        ("info", "Informational messages"),
+        ("trace", "Detailed tracing diagnostics"),
+        ("env", "Environment configuration"),
+        ("config", "Resolved tool configuration"),
+    ),
+    "ompt_trace": (
+        ("all", "Collect every OMPT category (default)"),
+        ("thread", "Thread lifecycle events"),
+        ("parallel", "Parallel-region events"),
+        ("task", "Task lifecycle and scheduling events"),
+        ("sync", "Synchronization-region events"),
+        ("mutex", "Mutex events"),
+        ("target", "Target offload events"),
+        ("device", "Device lifecycle events"),
+        ("error", "OMPT error events"),
+        ("true", "Alias for all categories"),
+        ("false", "Disable OMPT tracing explicitly"),
+    ),
+    "replay_mode": (
+        ("application", "Re-run the application once per counter group (default)"),
+        (
+            "kernel",
+            "Replay kernels in process; beta and requires "
+            "--kernel-replay-beta-enabled",
+        ),
+    ),
+    "spm_sample_interval_unit": (("sclk_cycles", "Shader-clock cycles"),),
+    "pc_sampling_unit": (
+        ("instructions", "Sample by retired instructions"),
+        ("cycles", "Sample by device cycles"),
+        ("time", "Sample by elapsed time"),
+    ),
+    "pc_sampling_method": (
+        ("stochastic", "Hardware stochastic sampling"),
+        ("host_trap", "Host-trap sampling"),
+    ),
+    "summary_units": (
+        ("sec", "Seconds"),
+        ("msec", "Milliseconds"),
+        ("usec", "Microseconds"),
+        ("nsec", "Nanoseconds"),
+    ),
+    "collection_period_unit": (
+        ("sec", "Seconds (default)"),
+        ("hour", "Hours"),
+        ("min", "Minutes"),
+        ("msec", "Milliseconds"),
+        ("usec", "Microseconds"),
+        ("nsec", "Nanoseconds"),
+    ),
+    "perfetto_backend": (
+        ("inprocess", "In-process Perfetto backend"),
+        ("system", "System backend; requires traced and perfetto daemons"),
+    ),
+    "perfetto_buffer_fill_policy": (
+        ("discard", "Drop new records when the buffer is full"),
+        ("ring_buffer", "Overwrite the oldest records when the buffer is full"),
+    ),
+    "agent_index": (
+        ("relative", "Logical agent index after cgroup masking (default)"),
+        ("absolute", "Physical KFD topology node index"),
+        ("type-relative", "Logical index within each agent type"),
+    ),
+    "att_resource_mode": (
+        (
+            "code-object",
+            "Allocate at the first code object for each GPU (default)",
+        ),
+        ("default", "Let the profiler choose the allocation point"),
+        ("hsa", "Allocate during HSA initialization"),
+    ),
+    "summary_output_file": (
+        ("stderr", "Write the summary to standard error (default)"),
+        ("stdout", "Write the summary to standard output"),
+    ),
+}
+
+_BASH_COMPLETION_PATH_TYPES = {
+    "input": "file",
+    "extra_counters": "file",
+    "preload": "file",
+    "summary_output_file": "file",
+    "output_directory": "directory",
+    "rocm_root": "directory",
+    "att_library_path": "directory",
+}
+
+_BASH_COMPLETION_BOOLEAN_HELP = (
+    ("true", "Enable; implied when the option is specified without a value"),
+    ("false", "Disable explicitly"),
+)
+
+_BASH_COMPLETION_FILE_DIRECTIVE = "__ROCPROFV3_COMPLETE_FILE__"
+_BASH_COMPLETION_DIRECTORY_DIRECTIVE = "__ROCPROFV3_COMPLETE_DIRECTORY__"
+_BASH_COMPLETION_DELEGATE_DIRECTIVE = "__ROCPROFV3_COMPLETE_DELEGATE__"
+
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes"""
@@ -481,7 +604,8 @@ class omptTraceArgAction(argparse.Action):
         setattr(args, f"{self.dest}_operations", ",".join(tokens))
 
 
-def parse_arguments(args=None):
+def build_argument_parser():
+
     usage_examples = """
 
 %(prog)s requires double-hyphen (--) before the application to be executed, e.g.
@@ -1198,19 +1322,6 @@ For attachment profiling of running processes:
         help="[Attach mode only] Generate output files synchronously during detachment (default: async). Use this option when scripts need to access output files immediately after rocprofv3 exits",
     )
 
-    if args is None:
-        args = sys.argv[1:]
-
-    rocp_args = args[:]
-
-    app_args = []
-
-    for idx, itr in enumerate(args):
-        if itr == "--":
-            rocp_args = args[0:idx]
-            app_args = args[(idx + 1) :]
-            break
-
     att_options = parser.add_argument_group("Advanced Thread Trace (ATT) options")
 
     add_parser_bool_argument(
@@ -1322,7 +1433,155 @@ For attachment profiling of running processes:
         help="Collect occupancy data without instruction-level detail.",
     )
 
-    return (parser.parse_args(rocp_args), app_args)
+    return parser
+
+
+def parse_arguments(args=None):
+    if args is None:
+        args = sys.argv[1:]
+
+    rocp_args = args[:]
+    app_args = []
+
+    for idx, itr in enumerate(args):
+        if itr == "--":
+            rocp_args = args[0:idx]
+            app_args = args[(idx + 1) :]
+            break
+
+    return (build_argument_parser().parse_args(rocp_args), app_args)
+
+
+def _bash_completion_description(value):
+    if value in (None, argparse.SUPPRESS):
+        return ""
+    return " ".join(str(value).replace("%%", "%").replace("\t", " ").split())
+
+
+def _bash_completion_record(value, description=""):
+    description = _bash_completion_description(description)
+    return f"{value}\t{description}" if description else value
+
+
+def _bash_completion_value_help(action):
+    if isinstance(action, booleanArgAction):
+        return _BASH_COMPLETION_BOOLEAN_HELP
+
+    metadata = _BASH_COMPLETION_VALUE_HELP.get(action.dest, ())
+    if action.dest == "ompt_trace":
+        descriptions = dict(metadata)
+        values = (*OMPT_TRACE_CATEGORIES, "true", "false")
+        return tuple((value, descriptions.get(value, "")) for value in values)
+
+    if action.choices is None:
+        return metadata
+
+    choices = tuple(str(choice) for choice in action.choices)
+    choice_set = set(choices)
+    ordered = [
+        (value, description) for value, description in metadata if value in choice_set
+    ]
+    documented = {value for value, _ in ordered}
+    ordered.extend((value, "") for value in choices if value not in documented)
+    return tuple(ordered)
+
+
+def _bash_completion_for_action(action, current, prefix=""):
+    records = []
+    current_lower = current.lower()
+    for value, description in _bash_completion_value_help(action):
+        if value.lower().startswith(current_lower):
+            records.append(_bash_completion_record(f"{prefix}{value}", description))
+
+    path_type = _BASH_COMPLETION_PATH_TYPES.get(action.dest)
+    if path_type == "file":
+        records.append(_BASH_COMPLETION_FILE_DIRECTIVE)
+    elif path_type == "directory":
+        records.append(_BASH_COMPLETION_DIRECTORY_DIRECTIVE)
+
+    return records
+
+
+def _bash_completion_options(parser, current):
+    records = []
+    if "--".startswith(current):
+        records.append(
+            _bash_completion_record(
+                "--", "Separate rocprofv3 options from the application command"
+            )
+        )
+
+    for action in parser._actions:
+        if action.help == argparse.SUPPRESS:
+            continue
+        description = _bash_completion_description(action.help)
+        for option in action.option_strings:
+            if option.startswith(current):
+                records.append(_bash_completion_record(option, description))
+    return records
+
+
+def _bash_completion_records(parser, words, cword):
+    while len(words) <= cword:
+        words.append("")
+
+    current = words[cword]
+    previous = words[cword - 1] if cword > 0 else ""
+    option_actions = {
+        option: action for action in parser._actions for option in action.option_strings
+    }
+
+    for index, word in enumerate(words[1:cword], start=1):
+        if word == "--":
+            return [f"{_BASH_COMPLETION_DELEGATE_DIRECTIVE}\t{index + 1}"]
+
+    if current.startswith("-") and "=" in current:
+        option, value = current.split("=", 1)
+        action = option_actions.get(option)
+        if action is not None:
+            return _bash_completion_for_action(action, value, f"{option}=")
+
+    if current.startswith("-"):
+        return _bash_completion_options(parser, current)
+
+    if previous.startswith("-"):
+        option = previous.split("=", 1)[0]
+        action = option_actions.get(option)
+        if action is not None and action.nargs != 0:
+            if "=" not in previous or action.nargs in ("*", "+"):
+                return _bash_completion_for_action(action, current)
+
+    for word in reversed(words[1:cword]):
+        if word == "--":
+            break
+        if word.startswith("-"):
+            option = word.split("=", 1)[0]
+            action = option_actions.get(option)
+            if action is not None and action.nargs in ("*", "+"):
+                return _bash_completion_for_action(action, current)
+            break
+
+    return _bash_completion_options(parser, current)
+
+
+def emit_bash_completion(args):
+    if not args:
+        return 2
+
+    try:
+        cword = int(args[0])
+    except ValueError:
+        return 2
+
+    words = list(args[1:])
+    if cword < 0 or not words:
+        return 2
+
+    records = _bash_completion_records(build_argument_parser(), words, cword)
+    if records:
+        sys.stdout.write("\n".join(records))
+        sys.stdout.write("\n")
+    return 0
 
 
 def parse_yaml(yaml_file):
@@ -2891,5 +3150,8 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    ec = main(sys.argv[1:])
+    if os.environ.get("_ROCPROFV3_BASH_COMPLETE") == "1":
+        ec = emit_bash_completion(sys.argv[1:])
+    else:
+        ec = main(sys.argv[1:])
     sys.exit(ec)
