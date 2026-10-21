@@ -85,8 +85,18 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
 bool ncclDevrIsOneLsaTeam(struct ncclComm* comm) { ::abort(); }
 ncclResult_t ncclGinA2AFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinAllReduceFinalize(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclGinFinalize(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t g_ncclGinFinalizeResult = ncclSuccess;
+int g_ncclGinFinalizeCalls = 0;
+ncclResult_t ncclGinFinalize(struct ncclComm* comm) {
+  g_ncclGinFinalizeCalls++;
+  return g_ncclGinFinalizeResult;
+}
+ncclResult_t g_ncclGinHostFinalizeResult = ncclSuccess;
+int g_ncclGinHostFinalizeCalls = 0;
+ncclResult_t ncclGinHostFinalize(struct ncclComm* comm) {
+  g_ncclGinHostFinalizeCalls++;
+  return g_ncclGinHostFinalizeResult;
+}
 ncclResult_t ncclGinSetDefaultBackend(struct ncclComm* comm, uint64_t) { return ncclSuccess; }
 // Omitted when RCCL_STUBS_OMIT_ncclInitKernelsForDevice is defined -- the unit
 // under test defines this itself (enqueue.cc:90).
@@ -156,7 +166,12 @@ ncclResult_t ncclRmaFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclRmaCeInit(struct ncclComm* comm) { return ncclSuccess; }
 bool ncclRmaProxyEnabled(struct ncclComm* comm) { return false; }
 ncclResult_t ncclRmaProxyConnectOnce(struct ncclComm* comm) { return ncclSuccess; }
-ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) { return ncclSuccess; }
+ncclResult_t g_ncclRmaProxyFinalizeResult = ncclSuccess;
+int g_ncclRmaProxyFinalizeCalls = 0;
+ncclResult_t ncclRmaProxyFinalize(struct ncclComm* comm) {
+  g_ncclRmaProxyFinalizeCalls++;
+  return g_ncclRmaProxyFinalizeResult;
+}
 // ncclStrongStreamDestruct and the rest of src/misc/strongstream.cc: strongstream_stubs.cc.
 // ncclSymkFinalize: fakes/sym_kernels_fakes.cc, alongside the rest of src/sym_kernels.cc's fakes.
 ncclResult_t ncclTunerPluginLoad(struct ncclComm* comm) { ::abort(); }
@@ -285,6 +300,12 @@ void ResetNcclStubs() {
   g_initChannelLastId = -1;
   g_cleanupCallOrder.clear();
   g_ncclCeFinalizeResult = ncclSuccess;
+  g_ncclGinFinalizeResult = ncclSuccess;
+  g_ncclGinFinalizeCalls = 0;
+  g_ncclGinHostFinalizeResult = ncclSuccess;
+  g_ncclGinHostFinalizeCalls = 0;
+  g_ncclRmaProxyFinalizeResult = ncclSuccess;
+  g_ncclRmaProxyFinalizeCalls = 0;
   g_ncclMnnvlCheckResult = ncclSuccess;
   g_ncclMnnvlCheckCalls = 0;
   g_ncclTunerPluginUnloadLastComm = nullptr;

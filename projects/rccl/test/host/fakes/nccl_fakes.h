@@ -104,6 +104,13 @@ extern std::function<ncclResult_t(struct ncclMemManager*, void* /*ptr*/,
                                   int /*ownerDev*/, void* /*ownerPtr*/)>
     g_memTrackImportFromPeer;
 
+// Defaults succeed without tracking; UntrackDynamic reports a live persistent entry.
+struct ncclMemUntrackInfo;
+extern std::function<ncclResult_t(struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+                                  hipMemAllocationHandleType, ncclMemType_t)>
+    g_memTrack;
+extern std::function<ncclResult_t(struct ncclMemManager*, void*, struct ncclMemUntrackInfo*)> g_memUntrackDynamic;
+
 // NCCL_PARAM redirector: p2p-test.cc replaces the body of every
 // NCCL_PARAM(name, env, deftVal) generator in the #included p2p.cc with a
 // thin trampoline that calls g_loadParam(env, deftVal) on every invocation
@@ -120,7 +127,7 @@ extern std::function<int64_t(const char* /*env*/, int64_t /*deftVal*/)>
 
 // The two device ids and the isXGMI out-parameter; the topo system and the inter-GPU knobs are dropped.
 // maxInter is carried because init.cc:1834 passes an explicit 1 where graph.h:90 defaults to MAX_XGMI_INTER_GPUS.
-extern std::function<ncclResult_t(int /*cudaDev1*/, int /*cudaDev2*/, bool* /*isXGMI*/, int /*maxInter*/)>
+extern std::function<ncclResult_t(int /*dev1*/, int /*dev2*/, bool* /*isXGMI*/, int /*maxInter*/)>
     g_ncclTopoGetLinkType;
 extern int g_ncclTopoGetLinkTypeCalls;
 

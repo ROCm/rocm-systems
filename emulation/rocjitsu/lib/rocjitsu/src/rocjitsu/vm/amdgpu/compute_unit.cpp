@@ -219,9 +219,37 @@ static std::unique_ptr<ComputeUnitCore> create_functional_cu(std::string name,
   return std::make_unique<Base>(std::move(name), config, memory, l2);
 }
 
-std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
-                                                         GpuMemory *memory, L2Cache *l2,
-                                                         simdojo::ExecMode exec_mode) {
+namespace {
+template <typename F> decltype(auto) with_compute_unit_isa(rj_code_arch_t arch, F &&fn) {
+  switch (arch) {
+    // \NPI new ISA family: add its architecture-to-ISA mapping here.
+  case ROCJITSU_CODE_ARCH_CDNA1:
+    return fn.template operator()<cdna1::Isa>();
+  case ROCJITSU_CODE_ARCH_CDNA2:
+    return fn.template operator()<cdna2::Isa>();
+  case ROCJITSU_CODE_ARCH_CDNA3:
+    return fn.template operator()<cdna3::Isa>();
+  case ROCJITSU_CODE_ARCH_CDNA4:
+    return fn.template operator()<cdna4::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA1:
+    return fn.template operator()<rdna1::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA2:
+    return fn.template operator()<rdna2::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA3:
+    return fn.template operator()<rdna3::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA3_5:
+    return fn.template operator()<rdna3_5::Isa>();
+  case ROCJITSU_CODE_ARCH_RDNA4:
+    return fn.template operator()<rdna4::Isa>();
+  case ROCJITSU_CODE_ARCH_CDNA5:
+    return fn.template operator()<cdna5::Isa>();
+  default:
+    throw std::runtime_error("Unsupported architecture for ComputeUnit");
+  }
+}
+} // namespace
+
+void ComputeUnitCore::validate(const Config &config) {
   if (config.target != ROCJITSU_CODE_TARGET_INVALID) {
     const IsaTargetRegistry &registry = default_isa_target_registry();
     const IsaTargetDescriptor *target_descriptor = registry.find(config.target);
@@ -235,36 +263,25 @@ std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const
       throw util::ConfigError("execution is not implemented for the concrete GPU target");
   }
 
-  // Helper: instantiate the ISA-specific CU for the given execution mode.
-#define ROCJITSU_CU_CASE(ARCH_ENUM, ISA_TYPE)                                                      \
-  case ARCH_ENUM:                                                                                  \
-    validate_compute_unit_config<ISA_TYPE>(config);                                                \
-    switch (exec_mode) {                                                                           \
-    case simdojo::ExecMode::FUNCTIONAL:                                                            \
-      return create_functional_cu<ISA_TYPE>(std::move(name), config, memory, l2);                  \
-    case simdojo::ExecMode::CLOCKED:                                                               \
-      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, ISA_TYPE>>(           \
-          std::move(name), config, memory, l2);                                                    \
-    }                                                                                              \
-    break
+  with_compute_unit_isa(config.arch,
+                        [&]<GpuIsa Isa>() { validate_compute_unit_config<Isa>(config); });
+}
 
-  switch (config.arch) {
-    // \NPI new ISA family: add ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_<NAME>, <isa>::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA1, cdna1::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA2, cdna2::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA3, cdna3::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA4, cdna4::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA1, rdna1::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA2, rdna2::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3, rdna3::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA3_5, rdna3_5::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_RDNA4, rdna4::Isa);
-    ROCJITSU_CU_CASE(ROCJITSU_CODE_ARCH_CDNA5, cdna5::Isa);
-  default:
-    break;
-  }
-#undef ROCJITSU_CU_CASE
-  throw std::runtime_error("Unsupported architecture for ComputeUnit");
+std::unique_ptr<ComputeUnitCore> ComputeUnitCore::create(std::string name, const Config &config,
+                                                         GpuMemory *memory, L2Cache *l2,
+                                                         simdojo::ExecMode exec_mode) {
+  validate(config);
+
+  return with_compute_unit_isa(config.arch, [&]<GpuIsa Isa>() -> std::unique_ptr<ComputeUnitCore> {
+    switch (exec_mode) {
+    case simdojo::ExecMode::FUNCTIONAL:
+      return create_functional_cu<Isa>(std::move(name), config, memory, l2);
+    case simdojo::ExecMode::CLOCKED:
+      return std::make_unique<IsaExecComputeUnit<simdojo::ExecMode::CLOCKED, Isa>>(
+          std::move(name), config, memory, l2);
+    }
+    throw std::runtime_error("Unsupported architecture for ComputeUnit");
+  });
 }
 
 Wavefront *ComputeUnitCore::dispatch_wf(uint32_t wg_id, uint64_t pc, uint32_t num_sgprs,
@@ -406,9 +423,7 @@ void ComputeUnitCore::flush_cp_notifications() {
     std::vector<std::pair<uint32_t, uint32_t>> ready;
     {
       std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
-      if (pending_vm_faults_.empty() && pending_queue_exceptions_.empty() &&
-          pending_wg_completions_.empty() && !pending_capacity_change_ &&
-          pending_execution_failures_.empty())
+      if (!has_pending_cp_notifications())
         return;
       faults.swap(pending_vm_faults_);
       execution_failures.swap(pending_execution_failures_);
@@ -891,10 +906,16 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes,
 }
 
 void ComputeUnitCore::tick_pipelines() {
-  scalar_mem_pipeline_.tick();
-  global_mem_pipeline_.tick();
-  local_mem_pipeline_.tick();
-  tensor_dma_pipeline_.tick();
+  // Functional accesses normally complete at issue. Retry only pipelines
+  // with retained work, avoiding four out-of-line calls on scalar-only steps.
+  if (!scalar_mem_pipeline_.empty())
+    scalar_mem_pipeline_.tick();
+  if (!global_mem_pipeline_.empty())
+    global_mem_pipeline_.tick();
+  if (!local_mem_pipeline_.empty())
+    local_mem_pipeline_.tick();
+  if (!tensor_dma_pipeline_.empty())
+    tensor_dma_pipeline_.tick();
 }
 
 VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
@@ -921,30 +942,31 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
       if ((d.lane_mask & ~scratch_lanes & lane_bit) != 0) {
         const uint64_t address = d.per_lane_addr[lane];
         if (address >= shared_aperture_base_ && address <= shared_aperture_limit_) {
-          if (((address - shared_aperture_base_) & (uint64_t{1} << 31)) != 0)
+          if (arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
+              ((address - shared_aperture_base_) & (uint64_t{1} << 31)) != 0)
             flat_dds_lane_mask |= lane_bit;
           else
             flat_local_lane_mask |= lane_bit;
         }
       }
     }
-    // Under the current uniform-address-space assumption, FLAT operations
-    // targeting the shared aperture use the LDS pipeline. Scratch-targeting
-    // FLATs stay on the global path. Counter participation is selected from all
-    // requesting lanes below, independently of the first-lane functional route.
+    // Normalize shared addresses once for both routes. The global operation
+    // excludes those lanes, and retries reuse this state without rerouting.
     const uint64_t request_lanes = transpose_request_lane_mask(d, wf_size);
-    const uint32_t first_lane =
-        request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
     const uint64_t flat_shared_lane_mask = flat_local_lane_mask | flat_dds_lane_mask;
-    if (first_lane < wf_size && (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0) {
+    d.flat_local_lane_mask = flat_local_lane_mask & request_lanes;
+    d.flat_dds_lane_mask = flat_dds_lane_mask & request_lanes;
+    if (flat_shared_lane_mask != 0) {
       if (observe_routed_access) {
         std::ranges::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
         pre_routing_addresses = {pre_routing_address_storage.data(), wf_size};
       }
       for (uint32_t lane = 0; lane < wf_size; ++lane) {
-        if (d.lane_mask & (1ULL << lane))
-          d.per_lane_addr[lane] = (d.per_lane_addr[lane] - shared_aperture_base_) + wf.lds_base();
+        if (flat_shared_lane_mask & (uint64_t{1} << lane))
+          d.per_lane_addr[lane] = d.per_lane_addr[lane] - shared_aperture_base_ + wf.lds_base();
       }
+    }
+    if (request_lanes != 0 && (request_lanes & ~flat_shared_lane_mask) == 0) {
       inst->data()->set_tag(LOCAL_MEM);
       d.wait_counter_type = WaitCounterType::LGKMCNT;
       const auto *issue = inst->amdgpu_memory_issue_info();
@@ -1304,8 +1326,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   // map X to a position issued below for this instruction: zero-EXEC operations
   // may be skipped by an empty completion queue while older X entries remain.
   const bool flat_local_route =
-      flat && flat_requests &&
-      (flat_shared_lanes & (uint64_t{1} << std::countr_zero(flat_requests)));
+      flat && flat_requests != 0 && (flat_requests & ~flat_shared_lanes) == 0;
   const auto xcnt_completion_counter =
       flat_local_route ? WaitCounterKind::Ds : classified.front().counter;
   std::optional<WaitCounterKind> xcnt_completion;
@@ -1516,40 +1537,54 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
 void ComputeUnitCore::update_wf_states() {
   ++cycle_counter_;
 
-  for (auto &w : wfs_) {
-    if (!w)
+#ifndef NDEBUG
+  // A missed activity transition would otherwise leave a wave outside every
+  // hot-path scan and silently prevent its dispatch from completing.
+  for (size_t slot = active_slot_limit_; slot < wfs_.size(); ++slot)
+    assert((!wfs_[slot] || wfs_[slot]->is_halted()) &&
+           "excluded wavefront slot must be halted or empty");
+#endif
+
+  for (uint32_t slot = 0; slot < active_slot_limit_; ++slot) {
+    auto &wf = wfs_[slot];
+    if (!wf)
       continue;
-    if (w->state() == WfState::WAITCNT && w->wait_satisfied()) {
-      w->set_state(WfState::RUNNING);
-      w->set_ready_cycle(cycle_counter_);
-    } else if (w->state() == WfState::ENDING && w->wait_counters().empty()) {
-      w->halt();
+    if (wf->state() == WfState::WAITCNT && wf->wait_satisfied()) {
+      wf->set_state(WfState::RUNNING);
+      wf->set_ready_cycle(cycle_counter_);
+    } else if (wf->state() == WfState::ENDING && wf->wait_counters().empty()) {
+      wf->halt();
     }
   }
 
-  for (auto &w : wfs_) {
-    if (!w)
+  for (uint32_t slot = 0; slot < active_slot_limit_; ++slot) {
+    auto &wf = wfs_[slot];
+    if (!wf)
       continue;
-    if (w->state() != WfState::BARRIER || w->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)
+    if (wf->state() != WfState::BARRIER || wf->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)
       continue;
-    uint32_t did = w->dispatch_id();
-    uint32_t wg = w->wg_id();
+    uint32_t did = wf->dispatch_id();
+    uint32_t wg = wf->wg_id();
     bool all_at_barrier = true;
-    for (auto &w2 : wfs_) {
-      if (w2 && w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() != WfState::HALTED &&
-          (w2->state() != WfState::BARRIER ||
-           w2->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)) {
+    for (uint32_t other = 0; other < active_slot_limit_; ++other) {
+      auto &other_wf = wfs_[other];
+      if (other_wf && other_wf->dispatch_id() == did && other_wf->wg_id() == wg &&
+          other_wf->state() != WfState::HALTED &&
+          (other_wf->state() != WfState::BARRIER ||
+           other_wf->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)) {
         all_at_barrier = false;
         break;
       }
     }
     if (all_at_barrier) {
       std::vector<Wavefront *> barrier_wfs;
-      for (auto &w2 : wfs_)
-        if (w2 && w2->dispatch_id() == did && w2->wg_id() == wg &&
-            w2->state() == WfState::BARRIER &&
-            w2->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
-          barrier_wfs.push_back(w2.get());
+      for (uint32_t other = 0; other < active_slot_limit_; ++other) {
+        auto &other_wf = wfs_[other];
+        if (other_wf && other_wf->dispatch_id() == did && other_wf->wg_id() == wg &&
+            other_wf->state() == WfState::BARRIER &&
+            other_wf->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
+          barrier_wfs.push_back(other_wf.get());
+      }
       notify_barrier_complete(barrier_wfs);
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
@@ -1622,13 +1657,16 @@ void AsyncInstructionWindow::materialize() {
 void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCache *admission,
                                               uint32_t wave_size, bool has_accvgprs) {
   // CDNA4 MFMA and the default gfx1250 allowlist have cheap encoding filters.
-  // On a cache hit,
-  // non-candidates use the ordinary issue body, including its fetchability and
+  // For retained dispatch bindings and legacy memory, resident non-candidates
+  // use the ordinary issue body, including its fetchability and
   // debugger checks. A cache miss uses full decoding below.
   // This hint never executes a cached word or bypasses instruction validation.
   if (async_mma_policy::supported(arch())) {
     uint32_t word;
-    if (inst_cache_.peek_word(active->pc, active->process_id(), word)) {
+    const GpuVmAccess *vm_access = active->vm_access();
+    const bool resident = vm_access ? inst_cache_.peek_word(*vm_access, active->pc, word)
+                                    : inst_cache_.peek_word(active->pc, active->process_id(), word);
+    if (resident) {
       if (!async_mma_policy::encoding_may_be_candidate(arch(), word)) {
         issue_instruction(active);
         if (active->is_halted())
@@ -1996,7 +2034,7 @@ template <bool EnableAsync>
     return;
   }
 
-  {
+  if (inst->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) {
     auto mn = std::string_view(inst->mnemonic());
     if (mn.find("s_setpc") != std::string_view::npos ||
         mn.find("s_swappc") != std::string_view::npos) {
@@ -2245,10 +2283,12 @@ template <bool EnableAsync>
   // the generated call sites use. A local copy here would keep checking the
   // old bits if the EXCP set ever widened.
   const uint32_t new_alu_causes = active->pending_alu_causes() & kAluExceptionTrapstsMask;
-  const uint32_t enabled_alu_causes = alu_exception_trap_enables(*active);
-  if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
-      alu_exception_handler_(*active))
-    return;
+  if (new_alu_causes != 0) {
+    const uint32_t enabled_alu_causes = alu_exception_trap_enables(*active);
+    if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
+        alu_exception_handler_(*active))
+      return;
+  }
 
   // s_rfe follows the same target-minus-size convention as other control-flow
   // instructions. Publish the handler-driven stop only after the common PC
@@ -2284,7 +2324,8 @@ template <bool EnableAsync>
   tick_pipelines();
   update_wf_states();
 
-  for (auto &wf : wfs_) {
+  for (uint32_t slot = 0; slot < active_slot_limit_; ++slot) {
+    auto &wf = wfs_[slot];
     if (!wf)
       continue;
     if (wf->state() == WfState::RUNNING && !wf->debug_paused()) {
