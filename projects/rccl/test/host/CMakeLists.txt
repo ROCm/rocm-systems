@@ -7,9 +7,13 @@ include("${CMAKE_CURRENT_LIST_DIR}/cmake/RcclTargetHelpers.cmake")
 # at configure time. Paths are relative to this file, so the same checks cover
 # the in-build and standalone contexts.
 set(_rccl_src_root "${CMAKE_CURRENT_LIST_DIR}/../../src")
-rccl_assert_source_line("${_rccl_src_root}/include/gdrwrap.h"
-  "gdr_info_t* info, uint32_t pinFlags = 0) {"
+set(_rccl_gdr_map_pointer_default [=[
+static ncclResult_t ncclGdrCudaMapPointer(void* data, size_t size, gdr_mh_t* mh, void** map, size_t* mapSize,
+                                          gdr_info_t* info, uint32_t pinFlags = 0) {]=])
+rccl_assert_source_text_count("${_rccl_src_root}/include/gdrwrap.h"
+  "${_rccl_gdr_map_pointer_default}" 2
   "fakes/gdrwrap_fakes.h: micro_ncclGdrCudaMapPointer() default")
+unset(_rccl_gdr_map_pointer_default)
 rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MinNchannels, \"MIN_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMinNchannels()")
 rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
