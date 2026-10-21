@@ -80,7 +80,7 @@ RegisterEffects register_effects(const Instruction &inst, rj_code_arch_t arch, u
     }
     return false;
   }();
-  if (!Ops::is_cdna4_mubuf_lds_load(inst, arch)) {
+  if (!Ops::is_cdna_lds_dma_load(inst, arch)) {
     for (int i = 0; i < inst.num_dst_operands(); ++i) {
       const auto *op = inst.dst_operand(i);
       if (!op)
