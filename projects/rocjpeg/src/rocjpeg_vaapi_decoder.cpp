@@ -793,6 +793,7 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
     if (jpeg_stream_params == nullptr || decode_params == nullptr) {
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
+    std::lock_guard<std::mutex> lock(submit_mutex_);
 
     if (sizeof(jpeg_stream_params->picture_parameter_buffer) != sizeof(VAPictureParameterBufferJPEGBaseline) ||
         sizeof(jpeg_stream_params->quantization_matrix_buffer) != sizeof(VAIQMatrixBufferJPEGBaseline) ||
@@ -931,6 +932,9 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
     if (jpeg_streams_params == nullptr || decode_params == nullptr || surface_ids == nullptr) {
         return ROCJPEG_STATUS_INVALID_PARAMETER;
     }
+    // DecodeBatchedAsync calls this without the decoder's mutex_, so this lock alone keeps concurrent
+    // submits from interleaving on the VA context and the shared buffer IDs.
+    std::lock_guard<std::mutex> lock(submit_mutex_);
 
     // Group the JPEG streams in the jpeg_streams_params array based on their chroma subsampling, width, and height.
     // Store the groups in an unordered map, where the key is a JpegStreamKey struct and the value is a vector of integers

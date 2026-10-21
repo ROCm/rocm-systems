@@ -558,8 +558,9 @@ RocJpegStatus RocJpegDecoder::DecodeBatchedAsync(RocJpegStreamHandle *jpeg_strea
     VcnJpegSpec current_vcn_jpeg_spec = jpeg_vaapi_decoder_.GetCurrentVcnJpegSpec();
     std::vector<VASurfaceID> surface_ids(batch_size);
 
-    // SubmitDecodeBatched does not touch pending_decodes_ — hold no lock during GPU submission
-    // so DecodeBatchedSync can concurrently drain its own states on the sync thread.
+    // SubmitDecodeBatched does not touch pending_decodes_ — do not hold mutex_ during GPU submission
+    // so DecodeBatchedSync can concurrently drain its own states on the sync thread. SubmitDecodeBatched
+    // serializes concurrent submits with its own lock.
     for (int i = 0; i < batch_size; i += current_vcn_jpeg_spec.num_jpeg_cores) {
         int batch_end = std::min(i + static_cast<int>(current_vcn_jpeg_spec.num_jpeg_cores), batch_size);
         int current_batch_size = batch_end - i;

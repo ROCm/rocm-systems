@@ -386,6 +386,7 @@ private:
     VABufferID va_huffmantable_buf_id_; // The VAAPI Huffman table buffer ID
     VABufferID va_slice_param_buf_id_; // The VAAPI slice parameter buffer ID
     VABufferID va_slice_data_buf_id_; // The VAAPI slice data buffer ID
+    std::mutex submit_mutex_; // Serializes SubmitDecode/SubmitDecodeBatched, which share the VA context and the buffer IDs above
     /**
      * @brief A map that associates GPU UUIDs with their corresponding render node indices.
      * 
