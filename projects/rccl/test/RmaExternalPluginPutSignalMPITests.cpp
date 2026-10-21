@@ -56,6 +56,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <fcntl.h>
+#include <unistd.h>
 
 using namespace MPITestConstants;
 using namespace RCCLTestGuards;
@@ -86,8 +88,14 @@ inline int winMode()
 
 long countLines(const char* path)
 {
-    FILE* f = fopen(path, "r");
-    if (f == nullptr) return 0;
+    if (path == nullptr || path[0] == '\0') return 0;
+    int fd = open(path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return 0;
+    FILE* f = fdopen(fd, "r");
+    if (f == nullptr) {
+        close(fd);
+        return 0;
+    }
     long n = 0;
     int c;
     while ((c = fgetc(f)) != EOF)
@@ -98,8 +106,10 @@ long countLines(const char* path)
 
 void resetCounterFile(const char* path)
 {
-    FILE* f = fopen(path, "w");
-    if (f != nullptr) fclose(f);
+    if (path == nullptr || path[0] == '\0') return;
+    // O_NOFOLLOW rejects a symlink planted at the counter path before this open.
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (fd >= 0) close(fd);
 }
 } // namespace
 

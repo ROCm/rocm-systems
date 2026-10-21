@@ -112,6 +112,9 @@ public:
   static constexpr size_t GpuMemoryChunkSize = 2 * (1ULL << 30);   // 2 GB
   static constexpr uint32_t kNumberOfHsaEvents = 1024;   //!< Note: may change in the future to 8K, KMD should define it
   static constexpr uint32_t kAqlPayloadId = 1 << 24;
+  // DXUMD_SCHEDULERIDENTIFIER_COMPUTE0 from the KMD scheduler enum (kdx_umd.h,
+  // not on this include path). The PM4 path must run on COMPUTE0.
+  static constexpr uint32_t kSchedulerIdCompute0 = 5;
 
   WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id);
   ~WDDMDevice();
@@ -162,6 +165,7 @@ public:
   bool SupportStateShadowingByCpFw(void) const { return device_info_.state_shadowing_by_cpfw; }
   bool SupportPlatformAtomic(void) const { return device_info_.platform_atomic_support; }
   bool IsAqlSupported() const { return device_info_.hwsInfo.hwsMask.aql_queue != 0; }
+  bool IsSdmaSupported() const { return device_info_.hwsInfo.hwsMask.sdma_queue != 0; }
 
   uint32_t GetSdmaEngine(uint32_t idx) {
     assert(idx < NumSdmaEngine());
@@ -194,6 +198,9 @@ public:
                       uint64_t command_size, uint64_t fence_value);
   bool SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint64_t command_size,
                         uint64_t SubmitToAqlQueue);
+  // Native HSA SDMA user-queue submit: rings the WDDM HwQueue doorbell for a
+  // ring whose packets (including the progress FENCE/TRAP) were written by ROCr.
+  bool SubmitToSdmaHwQueue(WDDMQueue* queue, uint64_t wptr_in_bytes);
 
   bool WaitPagingFence(WDDMQueue *queue) {
     uint64_t value = page_fence_value_;
@@ -216,7 +223,8 @@ public:
   uint32_t LdsBlocks(const hsa_kernel_dispatch_packet_t *pkt);
   uint32_t GetCmdbufSize(void) const { return cmdbuf_size_; }
   uint32_t GetAqlFrameSize(void) const { return cmdbuf_aql_frame_size_; }
-  static uint32_t GetAqlFrameNum(void) { return cmdbuf_aql_frame_num_; }
+  uint32_t GetAqlFrameNum(void) const { return cmdbuf_aql_frame_num_; }
+  uint32_t GetAqlMergeLimit(void) const { return cmdbuf_aql_merge_limit_; }
 
   bool AllocUserQueueMemFromUMD(void) const {
     // stage 1 HWS queue memory is allocated by KMD.
@@ -264,7 +272,8 @@ private:
   bool DestroyPagingQueue(void);
   void *Lock(D3DKMT_HANDLE handle);
   bool Unlock(D3DKMT_HANDLE handle);
-  bool CreateContext(int engine, D3DKMT_HANDLE *handle, uint64_t debugger_data = 0);
+  bool CreateContext(int engine, D3DKMT_HANDLE *handle, uint64_t debugger_data = 0,
+                     bool sdma_native = false);
   bool DestroyContext(D3DKMT_HANDLE handle);
 
   void SetPowerOptimization(bool restore);
@@ -291,7 +300,12 @@ private:
 
   uint32_t cmdbuf_size_;
   uint32_t cmdbuf_aql_frame_size_;
-  static const uint32_t cmdbuf_aql_frame_num_;
+  // Both narrowed by InitCmdbufInfo(): the ring so it keeps fitting in a fixed
+  // byte budget as the frame size grows, the merge limit so a run of merged
+  // AQL packets stays inside one frame.
+  static constexpr uint32_t kMaxAqlFrameNum = 0x1000;
+  uint32_t cmdbuf_aql_frame_num_ = kMaxAqlFrameNum;
+  uint32_t cmdbuf_aql_merge_limit_ = kMaxAqlFrameNum;
   uint32_t node_id_;
   // device info
   Wkmi::DeviceInfo device_info_;

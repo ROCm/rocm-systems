@@ -64,20 +64,8 @@ target_sources(
     atomic_wf_queue_gtest.cpp
     envvar_gtest.cpp
     backend_bc_buffer_register_gtest.cpp
+    anvil_engine_map_gtest.cpp
 )
-
-if (USE_SDMA)
-  target_sources(
-    ${PROJECT_NAME}
-    PRIVATE
-      gin_anvil_sdma_factory_test.cpp
-  )
-  target_include_directories(
-    ${PROJECT_NAME}
-    PRIVATE
-      ${CMAKE_SOURCE_DIR}/include
-  )
-endif()
 
 if (USE_IPC)
   target_sources(

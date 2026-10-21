@@ -31,8 +31,8 @@ namespace rocprofsys::pmc
  *     auto nic_dev = std::make_shared<nic::device<Backend>>(...);
  *
  *     std::vector<device_slice> devices;
- *     devices.emplace_back(gpu_dev, device_type::GPU);
- *     devices.emplace_back(nic_dev, device_type::NIC);
+ *     devices.emplace_back(gpu_dev, device_type::gpu);
+ *     devices.emplace_back(nic_dev, device_type::nic);
  *
  *     for (auto& dev : devices) {
  *         std::cout << dev.get_name() << ": " << dev.get_product_name() << "\n";

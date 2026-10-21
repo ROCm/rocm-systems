@@ -42,6 +42,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cinttypes>
 #include <condition_variable>
 #include <iostream>
@@ -73,7 +74,7 @@ public:
             context(0),
             queue(0),
             syncobj(0),
-            sync_addr(NULL),
+            sync_addr(nullptr),
             cmdbuf(0),
             cmdbuf_addr(cmdbuf_addr),
             cmdbuf_size(cmdbuf_size),
@@ -87,6 +88,12 @@ public:
   virtual hsa_status_t Fini(void) { return HSA_STATUS_SUCCESS; }
   virtual void RingDoorbell(uint64_t value) { }
   virtual void* GetHsaQueueAddr(void) const { return reinterpret_cast<void*>(GetCmdbufAddr()); }
+
+  // amd_queue_t backing memory; only ComputeQueue has one, SDMAQueue returns nullptr.
+  virtual GpuMemory* GetAmdQueueMemory(void) const { return nullptr; }
+
+  //!< True only for a native WDDM SDMA user queue (overridden by SDMAQueue).
+  virtual bool IsNativeSdma(void) const { return false; }
 
   hsa_status_t SwsInit(void);
   hsa_status_t SwsFini(void);
@@ -147,6 +154,12 @@ public:
   D3DKMT_HANDLE cwsr_mem_handle_ = 0;           //!< KMT allocation handle of CWSR region (passed as CwsrMemHandle)
   volatile int64_t* error_reason_ = nullptr;     //!< ErrorReason payload ptr (QueueResource::ErrorReason)
   HSAuint32 error_event_id_ = 0;                 //!< ErrorEventId from HsaEvent::EventId (0 if no event)
+
+  //!< GPU VA of the HwQueue progress fence, from CreateHwQueue. 0 when not native SDMA.
+  uint64_t hwqueue_progress_fence_va_ = 0;
+  //!< HwQueue progress fence id. Per the KMD spec the UMD increments it by 1 per submit.
+  //!< SDMA user queue only -- other queue types use different fence mechanisms.
+  uint64_t hwqueue_fence_id_ = 0;
 };
 
 class ComputeQueue : public WDDMQueue {
@@ -188,9 +201,9 @@ public:
   }
 
   hsa_status_t Process(void);
-  uint64_t * GetDoorbellPtr() const { return (uint64_t *)&doorbell_signal_value_; }
+  uint64_t * GetDoorbellPtr() const { return doorbell_ptr_; }
   void RingDoorbell(uint64_t value);
-  GpuMemory* GetAmdQueueMemory() const { return amd_queue_memory_; }
+  GpuMemory* GetAmdQueueMemory() const override { return amd_queue_memory_; }
 
  private:
   hsa_status_t KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *packet);
@@ -222,7 +235,12 @@ public:
   // ib_size is the current ib size.
   uint64_t ib_size;
 
-  // record the last submitted aql frame write index
+  // This queue's submission ordinal: the number of PM4 frames it has submitted,
+  // which is also the fence value the most recent submission signals and, once
+  // the GPU reaches it, the value *sync_addr holds. It counts submissions
+  // rather than AQL packets, because one submission owns one physical frame
+  // however many merged packets that frame ended up holding. See
+  // impl/wddm/cmdbuf_frame_ring.h for the reuse invariant it indexes.
   uint64_t sync_point;
 
   uint64_t cmdbuf_aql_frame_write_index;
@@ -255,18 +273,18 @@ private:
   uint32_t ScratchSizePerWave() { return scratch_size_per_wave_; }
   uint64_t GetKernelObjAddr(uint64_t addr) const;
   void InitScratchSRD();
-  GpuMemoryHandle amd_queue_mem_;
   GpuMemory* amd_queue_memory_;     //!< Memory object associated with amd_queue_t structure from ROCr
-  amd_queue_v2_t *amd_queue_;
   amd_queue_v2_t *amd_queue_rocr_;  //!< AQL queue, allocated in rocr and pointing to the header
   uint64_t amd_queue_size_rocr_;    //!< Size of the AQL queue allocated in ROCR, including header
-  uint64_t doorbell_signal_value_;
-  volatile std::atomic<int64_t> *error_code_;
+  GpuMemoryHandle doorbell_mem_;
+  uint64_t *doorbell_ptr_;          //!< amd_signal_t::hardware_doorbell_ptr exposed to ROCr
   std::thread aql_to_pm4_thread_;
-  bool thread_stop_;
+  std::thread fault_monitor_thread_;
+  std::atomic<bool> thread_stop_;
   std::mutex thread_cond_lock_;
   std::condition_variable thread_cond_;
   static void AqlToPm4Thread(ComputeQueue *queue);
+  static void FaultMonitorThread(ComputeQueue *queue);
 
   uint64_t scratch_waves_;
   uint64_t dispatch_waves_;
@@ -302,12 +320,46 @@ public:
   }
 
   uint64_t * GetRingWptr(void) { return &wptr_next_; }
-  uint64_t * GetRingRptr(void) { return WDDMQueue::GetSyncAddr(); }
+
+  //!< Byte-valued ring read pointer for HsaQueueResource::Queue_read_ptr. Native SDMA user
+  //!< queue: the KMD reports it into amd_queue_t::read_dispatch_id, in the AmdQueueT page this
+  //!< queue allocated. Legacy SWS uses GetSyncAddr(), where the UMD writes the byte count.
+  uint64_t * GetRingRptr(void) {
+    if (native_sdma_ && amd_queue_memory_ != nullptr &&
+        amd_queue_memory_->CpuAddress() != nullptr) {
+      volatile uint64_t* rptr =
+          &reinterpret_cast<amd_queue_t*>(amd_queue_memory_->CpuAddress())->read_dispatch_id;
+      return const_cast<uint64_t*>(rptr);
+    }
+    return WDDMQueue::GetSyncAddr();
+  }
   uint64_t * GetDoorbellPtr() { return &doorbell_; }
   void RingDoorbell(uint64_t value);
+
+  //!< Writes the progress-fence epilogue into the tail of [start, end) and submits it through
+  //!< the WDDM HwQueue.
+  bool SubmitNative(uint64_t start, uint64_t end);
   void* GetHsaQueueAddr(void) const { return reinterpret_cast<void*>(GetCmdbufAddr()); }
 
+  //!< True when this queue submits via the native WDDM SDMA HwQueue path, not the SWS thread.
+  bool IsNativeSdma(void) const { return native_sdma_; }
+
+  //!< Bytes appended per native-SDMA doorbell: one FENCE packet carrying the progress fence.
+  //!< Also the headroom the producer must reserve, via HsaNodeProperties::NativeSDMAEpilogueBytes.
+  static constexpr uint32_t kHwQueueEpilogueBytes = 8 * 4;
+
+  //!< amd_queue_t the KMD reports read_dispatch_id (rptr) into; required for an SDMA-AQL
+  //!< queue. nullptr on the legacy path.
+  GpuMemory* GetAmdQueueMemory(void) const { return amd_queue_memory_; }
+
 private:
+  GpuMemory* amd_queue_memory_ = nullptr;
+  bool native_sdma_ = false;
+
+  //!< If true, dependency POLL_REGMEM packets are left in the ring for the SDMA engine to
+  //!< execute; if false(default), they are emulated on SdmaThread. Only used in the native path.
+  bool gpu_poll_ = false;
+
   uint64_t wptr_next_;
   uint64_t wptr_pre_;
   uint64_t rptr_next;
@@ -321,6 +373,12 @@ private:
   std::mutex thread_cond_lock_;
   std::condition_variable thread_cond_;
   static void SdmaThread(SDMAQueue *queue);
+
+  //!< Used for lock-free synchronization with worker thread.
+  std::atomic<uint32_t> thread_pending_{0};
+
+  //!< True when [start, end) starts with a dependency POLL_REGMEM packet.
+  bool ContainPollPacket(uint64_t start, uint64_t end);
 
   struct SDMA_PKT_POLL_REGMEM {
     union {

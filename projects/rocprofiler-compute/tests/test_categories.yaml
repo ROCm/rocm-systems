@@ -38,7 +38,6 @@ test_categories:
       - test_source_snapshot_analysis
       - test_per_kernel_isa_export
       - test_rocpd_data
-      - test_torch_trace_coverage
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
@@ -58,12 +57,20 @@ test_categories:
       - test_conftest
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
+      - test_mem_chart_gfx1250
+      - test_membw_engine
+      - test_membw_guidance
+      - test_membw_metric_extract
+      - test_membw_pipeline
+      - test_membw_tree_spec
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-compression
+      - test-torch-trace-collector
     therock_ci_exclude:
       - test_profile_live_attach_detach
       - test_metric_validation
@@ -75,22 +82,13 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Core functionality - Run on every PR (target: < 30 min)"
+    description: "Core functionality - Run on every PR (target: < 30 min). Slow profile tests (>150s on gfx1151) are covered by nightly full runs."
     test_patterns:
-      - test_profile_dispatch
       - test_profile_kernel_execution
-      - test_profile_misc
-      - test_profile_path
       - test_pc_sampling
-      - test_profile_roofline_dir
       - test_profile_roofline_bench
-      - test_profile_roofline_plot
-      - test_profile_roofline_validation
-      - test_profile_section
       - test_profile_sets_func
-      - test_profile_sort
       - test_profile_iteration_multiplexing_1
-      - test_profile_iteration_multiplexing_2
       - test_profile_iteration_multiplexing_stochastic
       - test_aggregation
       - test_expression
@@ -145,12 +143,20 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
+      - test_mem_chart_gfx1250
+      - test_membw_engine
+      - test_membw_guidance
+      - test_membw_metric_extract
+      - test_membw_pipeline
+      - test_membw_tree_spec
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-compression
+      - test-torch-trace-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_live_attach_detach
@@ -236,12 +242,20 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
+      - test_mem_chart_gfx1250
+      - test_membw_engine
+      - test_membw_guidance
+      - test_membw_metric_extract
+      - test_membw_pipeline
+      - test_membw_tree_spec
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-compression
+      - test-torch-trace-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_live_attach_detach
@@ -327,12 +341,20 @@ test_categories:
       - test_rocprofv3_avail_interface
       - test_mem_chart_gfx9
       - test_mem_chart_gfx11
+      - test_mem_chart_gfx1250
+      - test_membw_engine
+      - test_membw_guidance
+      - test_membw_metric_extract
+      - test_membw_pipeline
+      - test_membw_tree_spec
       - test_native_tool_finder
       - test_metrics_common
       - test_tty
       - test-rocprofiler-compute-tool
       - test_soc_base
       - test-pc-sampling-collector
+      - test-compression
+      - test-torch-trace-collector
       - test_profile_torch_trace
       - test_profile_triton_trace
       - test_profile_live_attach_detach
@@ -351,6 +373,7 @@ test_categories:
     test_patterns:
       - test-rocprofiler-compute-tool
       - test-pc-sampling-collector
+      - test-compression
     labels:
       - "sanitizer"
 

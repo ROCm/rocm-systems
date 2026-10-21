@@ -41,6 +41,7 @@
 ////////////////////////////////////////////////////////////////////////////////
 
 #include <cinttypes>
+#include <algorithm>
 #include <bitset>
 
 #if defined(__linux__)
@@ -48,6 +49,8 @@
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #include <linux/mman.h>
+#include <poll.h>
+#include <cerrno>
 #endif
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -61,8 +64,6 @@
 namespace wsl {
 namespace thunk {
 
-const uint32_t WDDMDevice::cmdbuf_aql_frame_num_ = 0x1000;
-
 WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id)
   : adapter_(adapter), adapter_luid_(adapter_luid), node_id_(node_id), init_status_(kDeviceSuccess) {
   memset(&device_info_, 0, sizeof(device_info_));
@@ -70,10 +71,23 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   NTSTATUS ret = ParseDeviceInfo();
   pr_rocr_info("kmd_version:%" PRIu32 "\n", device_info_.kmd_version);
   device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
-  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d use_pm4_override=%" PRIu64 "\n",
+  // The KMD only accepts PM4 packets on COMPUTE0, but wkmi defaults compute_schedid
+  // to COMPUTE1 whenever AQL-on-compute1 is supported. Override to COMPUTE0 for the
+  // PM4 path.
+  if (dxg_runtime->use_pm4_) {
+     if (EngineOrdinal(kSchedulerIdCompute0, &device_info_) >= 0) {
+       device_info_.compute_schedid = kSchedulerIdCompute0;
+     } else {
+       pr_err("PM4 path requires COMPUTE0 schedId=%" PRIu32 " but it is not present; keeping compute_schedid=%" PRIu32 "\n",
+              kSchedulerIdCompute0, device_info_.compute_schedid);
+     }
+  }
+  pr_rocr_info("hwsInfo: aql_queue=%d computeHwsEnabled=%d sdma_queue=%d use_pm4_override=%" PRIu64
+           " compute_schedid=%" PRIu32 "\n",
            device_info_.hwsInfo.hwsMask.aql_queue,
            device_info_.hwsInfo.hwsMask.computeHwsEnabled,
-           (uint64_t)dxg_runtime->use_pm4_);
+           device_info_.hwsInfo.hwsMask.sdma_queue,
+           (uint64_t)dxg_runtime->use_pm4_, device_info_.compute_schedid);
 
   if (ret == STATUS_OBJECT_NAME_NOT_FOUND || ret == STATUS_REVISION_MISMATCH) {
     // Skip adapter
@@ -483,7 +497,8 @@ bool WDDMDevice::Unlock(D3DKMT_HANDLE handle) {
   return false;
 }
 
-bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE* handle, uint64_t debugger_data) {
+bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE* handle, uint64_t debugger_data,
+                               bool sdma_native) {
   void *priv_data;
   int priv_size;
 
@@ -496,7 +511,7 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE* handle, uint64_t debug
   assert(priv_data);
   memset(priv_data, 0, priv_size);
   Wkmi::FillinContextPrivData(priv_data, SupportStateShadowingByCpFw(),
-                              device_info_.compute_schedid, debugger_data);
+                              engine, debugger_data, sdma_native);
 
   D3DKMT_CREATECONTEXTVIRTUAL args = {0};
   args.hDevice = device_;
@@ -511,6 +526,8 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE* handle, uint64_t debug
   else
     args.Flags.DisableGpuTimeout = Wkmi::ShouldDisableGpuTimeout(engine, &device_info_);
 
+  pr_debug("CreateContext engine=%d ordinal=%d hws=%d sdma_native=%d\n",
+           engine, ordinal, (int)IsHwsEnabled(engine), (int)sdma_native);
   NTSTATUS ret = DXCORE_CALL(D3DKMTCreateContextVirtual(&args));
   if (ret == STATUS_SUCCESS) {
     *handle = args.hContext;
@@ -665,10 +682,86 @@ void WDDMDevice::InitCmdbufInfo(void) {
     sizeof(DispatchTemplate) +
     sizeof(AtomicTemplate) * 2;
 
-  // Add safety margin to account for alignment and future additions
-  cmdbuf_aql_frame_size_ += 128;
+  // Worst-case PM4 of a single AQL packet, before the PMC headroom is added.
+  const uint32_t aql_packet_size = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
+
+  // WSL multi-counter PM4 frame headroom (computed worst case).
+  //
+  // A vendor-specific (PMC) AQL packet is expanded in
+  // VendorSpecificAqlToPm4() by inlining the aqlprofile-built PM4 IB that
+  // programs and reads the hardware counters, followed by the fixed
+  // completion trailer already budgeted above. That inlined IB is what
+  // overflowed the previous small margin on multi-counter collection
+  // ("used 616 bytes, limit 544 bytes"). Its size grows with the number of
+  // counters in a pass and, per counter, with the number of block instances
+  // the counter is read from, so we size for the worst case here (device
+  // init runs before any --pmc set is known).
+  //
+  // Byte costs use the real gfx11 PM4 packet sizes (see gfx11_cmd_builder.h):
+  //   SET_UCONFIG_REG (GRBM index / control) = 3 dw = 12 B
+  //   COPY_DATA       (select / read)         = 6 dw = 24 B
+  // Per counter, worst case:
+  //   start: GRBM index (12) + select (24) + control (24)      = 60 B -> 64
+  //   read : per instance -> GRBM index (12) + 2x COPY_DATA(48) = 60 B -> 64
+  // The heaviest blocks (WGP-class on gfx11) are read once per WGP, so a
+  // single counter's worst-case read-instance count is the device WGP count
+  // (CU/2); that also upper-bounds the SE*SA fanout of other blocks. The 32
+  // below is only a byte budget, not a ceiling anyone enforces: no upstream
+  // invariant caps the events in a pass, and the one hardware limit that is
+  // checked is per (block, block_index) in CounterPacketConstruct::can_collect(),
+  // so a pass may emit many more events than this. What keeps an oversized pass
+  // from overflowing the frame is the runtime bounds check in
+  // VendorSpecificAqlToPm4() - and, since every translation path now measures
+  // the frame cumulatively, the matching checks in KernelDispatchAqlToPm4() and
+  // BarrierGenericAqlToPm4() - not this constant. The original 128 B alignment
+  // slack is retained, and the per-counter cost still scales with device
+  // geometry instead of being a blunt over-allocation.
+  constexpr uint32_t kFrameAlignmentMargin    = 128;
+  // Per-pass fixed overhead independent of the counter count: the shared PMC
+  // programming aqlprofile emits once around the per-counter loop
+  // (pmc_builder.h GpuPmcBuilder::Start/Stop/Read/Enable/Disable/WaitIdle).
+  // Rough gfx11 tally, using the packet sizes in gfx11_cmd_builder.h
+  // (EVENT_WRITE 2 dw = 8 B, SET_SH/UCONFIG_REG 3 dw = 12 B, COPY_DATA 6 dw =
+  // 24 B, ACQUIRE_MEM 8 dw = 32 B):
+  //   perfmon ctrl : CP_PERFMON_CNTL reset/start/stop + SQ_PERFCOUNTER_CTRL/CTRL2
+  //                  + GRBM broadcast resets, ~10 writes @ 12-24 B     ~= 220 B
+  //   wait-idle    : ~4 x EVENT_WRITE barrier @ 8 B                    ~=  32 B
+  //   cache flush  : ~2 x ACQUIRE_MEM @ 32 B                           ~=  64 B
+  //   enable/disable: 2 x COMPUTE_PERFCOUNT_ENABLE SET_SH_REG @ 12 B   ~=  24 B
+  //   sync waits   : ~2 x WAIT_REG_MEM (7 dw = 28 B)                   ~=  56 B
+  //                                                          subtotal  ~= 396 B
+  // 512 rounds that up with ~115 B slack (per-counter / per-instance costs are
+  // budgeted separately below), so it is a safe fixed bound.
+  constexpr uint32_t kPmcFixedOverheadBytes   = 512;  // perfmon ctrl + wait-idle barriers + cache flush + enable
+  constexpr uint32_t kPmcStartBytesPerCounter = 64;
+  constexpr uint32_t kPmcReadBytesPerInstance = 64;
+  constexpr uint32_t kMaxPmcCountersPerPass   = 32;
+
+  const uint32_t wgp_count = std::max<uint32_t>(1u, ComputeUnitCount() / 2);
+  const uint32_t sesa =
+    std::max<uint32_t>(1u, NumShaderEngine() * ShaderArrayPerShaderEngine());
+  const uint32_t max_counter_instances = std::max(wgp_count, sesa);
+  const uint32_t per_counter_bytes =
+    kPmcStartBytesPerCounter + max_counter_instances * kPmcReadBytesPerInstance;
+
+  cmdbuf_aql_frame_size_ += kFrameAlignmentMargin + kPmcFixedOverheadBytes +
+                            kMaxPmcCountersPerPass * per_counter_bytes;
 
   cmdbuf_aql_frame_size_ = rocr::AlignUp(cmdbuf_aql_frame_size_, 0x10);
+
+  // Only a vendor-specific (PMC) frame uses the headroom above, but all frames
+  // are sized alike, so cap the ring depth instead of letting the whole
+  // allocation scale with the frame size.
+  constexpr uint32_t kCmdbufBudgetBytes = 2 * 1024 * 1024;
+
+  cmdbuf_aql_frame_num_ =
+      std::clamp(kCmdbufBudgetBytes / cmdbuf_aql_frame_size_, 1u, kMaxAqlFrameNum);
+
+  // SwitchAql2PM4() keeps merging consecutive dispatch packets into the current
+  // frame until the write index reaches a multiple of this limit, so a merge
+  // run must not be able to outgrow one frame.
+  cmdbuf_aql_merge_limit_ =
+      std::clamp(cmdbuf_aql_frame_size_ / aql_packet_size, 1u, cmdbuf_aql_frame_num_);
 
   cmdbuf_size_ = rocr::AlignUp(cmdbuf_aql_frame_num_ * cmdbuf_aql_frame_size_, 0x1000);
 }
@@ -801,7 +894,8 @@ void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
 }
 
 bool WDDMDevice::CreateQueue(WDDMQueue* queue, uint64_t debugger_data) {
-  if (!CreateContext(queue->queue_engine, &queue->context, debugger_data)) return false;
+  if (!CreateContext(queue->queue_engine, &queue->context, debugger_data, queue->IsNativeSdma()))
+    return false;
 
   GpuMemory *gpu_mem = nullptr;
   if (queue->cmdbuf_addr == 0) {
@@ -1017,7 +1111,7 @@ void WDDMDevice::FillCwsrHeader(void* cpu_addr, uint64_t ctx_save_restore_size,
 
 bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   void *priv_data;
-  int priv_size;
+  static const int priv_size = Wkmi::GetHwQueuePrivDataSize();
 
   // Allocate CWSR (Context Wave Save/Restore) region in system (GTT) memory.
   // Matches Linux: anonymous mmap + register_svm_range(alwaysMapped=true).
@@ -1031,6 +1125,9 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
     GpuMemoryCreateInfo cwsr_create_info{};
     cwsr_create_info.domain = Wkmi::kSystem;
     cwsr_create_info.size = AllocateCwsrSize(&ctx_save_restore_size, &debug_memory_size);
+    if (IsAqlSupported()) {
+      cwsr_create_info.mem_flags |= Wkmi::kAqlCwsr;
+    }
 
     GpuMemory *cwsr_gpu_mem = nullptr;
     ErrorCode cwsr_code = CreateGpuMemory(cwsr_create_info, &cwsr_gpu_mem);
@@ -1047,25 +1144,23 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
     FillCwsrHeader(cwsr_gpu_mem->CpuAddress(), ctx_save_restore_size,
                    debug_memory_size, num_xcc, queue->error_reason_, queue->error_event_id_);
   }
-
-  priv_size = Wkmi::GetHwQueuePrivDataSize();
   priv_data = malloc(priv_size);
   assert(priv_data);
   memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
   uint32_t* doorbell_loc = nullptr;
-  // amd_queue_memory_ / KmtHandle and AQL parameters only apply when the queue
-  // is an AQL ComputeQueue. SDMAQueue (and SwsCompute non-AQL queues) must not
-  // be down-cast to ComputeQueue here -- doing so reads garbage and crashes.
-  ComputeQueue* compute_queue = dynamic_cast<ComputeQueue*>(queue);
-  D3DKMT_HANDLE resource = 0;
-  bool is_aql = false;
-  if (compute_queue != nullptr && IsAqlSupported()) {
-    auto queue_memory = compute_queue->GetAmdQueueMemory();
-    resource = queue_memory->KmtHandle();
-    is_aql = true;
+  // ComputeQueue (AQL or PM4) has amd_queue_t memory -> pass its user-queue handle; SDMAQueue
+  // returns nullptr -> resource=0. resource must NOT be gated on is_aql (that zeroed it -> KMD c0000001).
+  GpuMemory* queue_memory = queue->GetAmdQueueMemory();
+  D3DKMT_HANDLE resource = queue_memory ? queue_memory->KmtHandle() : 0;
+
+  Wkmi::HwQueueKind kind = Wkmi::kHwQueuePm4;
+  if (queue->IsNativeSdma()) {
+    kind = Wkmi::kHwQueueSdma;
+  } else if (queue_memory != nullptr && IsAqlSupported()) {
+    kind = Wkmi::kHwQueueAql;
   }
-  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, is_aql,
+  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, kind,
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),
       reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc,
       queue->cwsr_mem_handle_);
@@ -1078,7 +1173,7 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
 
   NTSTATUS ret = DXCORE_CALL(D3DKMTCreateHwQueue(&createHwQueue));
   if (ret != STATUS_SUCCESS) {
-    pr_err("fail %x\n", ret);
+    pr_err("fail %x kind=%d\n", ret, (int)kind);
     free(priv_data);
     if (queue->cwsr_mem_ != nullptr) {
       delete GpuMemory::Convert(queue->cwsr_mem_);
@@ -1096,6 +1191,9 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   queue->queue = createHwQueue.hHwQueue;
   queue->syncobj = createHwQueue.hHwQueueProgressFence;
   queue->sync_addr = (uint64_t *)createHwQueue.HwQueueProgressFenceCPUVirtualAddress;
+  if (kind == Wkmi::kHwQueueSdma) {
+    queue->hwqueue_progress_fence_va_ = createHwQueue.HwQueueProgressFenceGPUVirtualAddress;
+  }
 
   return true;
 }
@@ -1124,9 +1222,7 @@ bool WDDMDevice::DestroyHwQueue(WDDMQueue *queue) {
 bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
                                 uint64_t command_size, uint64_t fence_value) {
   void *priv_data;
-  int priv_size;
-
-  priv_size = Wkmi::GetSubmitPrivDataSize();
+  static const int priv_size = Wkmi::GetSubmitPrivDataSize();
   priv_data = malloc(priv_size);
   assert(priv_data);
   memset(priv_data, 0, priv_size);
@@ -1158,7 +1254,7 @@ bool WDDMDevice::SetCuMask(uint32_t doorbell, uint32_t cu_mask_count,
 #if defined(WIN32)
   pr_debug("set CU mask doorbell: %d -> %d\n", doorbell, cu_mask_count);
   // Fill private KMD data
-  int priv_size = Wkmi::GetCuMaskPrivDataSize();
+  static const int priv_size = Wkmi::GetCuMaskPrivDataSize();
   void* priv_data = alloca(priv_size);
   memset(priv_data, 0, priv_size);
   Wkmi::FillinCuMaskPrivData(priv_data, doorbell, cu_mask_count, queue_cu_mask);
@@ -1200,6 +1296,33 @@ bool WDDMDevice::SubmitToAqlQueue(WDDMQueue* queue, uint64_t command_addr, uint6
 }
 
 // ================================================================================================
+bool WDDMDevice::SubmitToSdmaHwQueue(WDDMQueue* queue, uint64_t wptr_in_bytes) {
+  static const int priv_size = Wkmi::GetSdmaSubmitPrivDataSize();
+  void* priv_data = alloca(priv_size);
+  memset(priv_data, 0, priv_size);
+  Wkmi::FillinSdmaSubmitPrivData(priv_data, wptr_in_bytes);
+
+  // The ring's FENCE packet writes this same id to the progress-fence VA; they must agree
+  // for the OS fence to advance.
+  // fence_id was already incremented by RingDoorbell before appending the FENCE packet.
+  uint64_t fence_id = queue->hwqueue_fence_id_;
+
+  D3DKMT_SUBMITCOMMANDTOHWQUEUE args = {
+      .hHwQueue = queue->queue,
+      .HwQueueProgressFenceId = fence_id,
+      .CommandBuffer = queue->cmdbuf_addr,
+      .CommandLength = static_cast<UINT>(wptr_in_bytes),
+      .PrivateDriverDataSize = static_cast<UINT>(priv_size),
+      .pPrivateDriverData = priv_data};
+  NTSTATUS ret = DXCORE_CALL(D3DKMTSubmitCommandToHwQueue(&args));
+  if (ret != STATUS_SUCCESS) {
+    pr_err("fail %lx\n", (long)ret);
+    return false;
+  }
+  return true;
+}
+
+// ================================================================================================
 bool WDDMDevice::Escape(void* priv_data, uint32_t priv_size, bool hw_access) const {
   D3DKMT_ESCAPE d3dkmt_escape = {.hAdapter = adapter_,
                                  .hDevice = device_,
@@ -1218,9 +1341,8 @@ bool WDDMDevice::Escape(void* priv_data, uint32_t priv_size, bool hw_access) con
 
 // ================================================================================================
 uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t* mailbox) {
-#if defined(WIN32)
-  // Reset maibox locaiton to 0
   *mailbox = 0;
+#if defined(WIN32)
   // Start from 1, since 0 is the default state and can't be identified in KMD
   for (uint32_t event_id = 1; event_id < kNumberOfHsaEvents; event_id++) {
     // Check if the current slot is free and assing the mailbox
@@ -1246,6 +1368,9 @@ uint32_t WDDMDevice::RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t*
       }
     }
   }
+#else
+  // No KMD events on Linux; returning 0 makes ComputeQueue fall back to stall detection.
+  pr_debug("RegisterEvent: KMD event registration not available on Linux\n");
 #endif
   return 0;
 }
@@ -1275,6 +1400,11 @@ bool WDDMDevice::UnregisterEvent(uint32_t event_id, HANDLE event_handle) {
 // ================================================================================================
 HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_elems,
                                                bool wait_all, uint32_t msec) {
+  // num_elems sizes a stack allocation below; bound it to the event table width.
+  if (num_elems > kNumberOfHsaEvents) {
+    pr_err("event count %u exceeds maximum %u\n", num_elems, kNumberOfHsaEvents);
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+  }
 #if defined(WIN32)
   HANDLE* event_handles_ = reinterpret_cast<HANDLE*>(_alloca(sizeof(HANDLE) * num_elems));
   for (uint32_t i = 0; i < num_elems; ++i) {
@@ -1311,6 +1441,53 @@ HSAKMT_STATUS WDDMDevice::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_
       }
       size_to_process -= MAXIMUM_WAIT_OBJECTS;
     }
+  }
+#else
+  // Linux: poll() on eventfds
+  auto* pfds = reinterpret_cast<struct pollfd*>(alloca(sizeof(struct pollfd) * num_elems));
+  auto* signaled = reinterpret_cast<bool*>(alloca(sizeof(bool) * num_elems));
+  for (uint32_t i = 0; i < num_elems; ++i) {
+    void* handle = reinterpret_cast<Event*>(events[i])->GetHandle();
+    pfds[i].fd = static_cast<int>(reinterpret_cast<intptr_t>(handle));
+    pfds[i].events = POLLIN;
+    pfds[i].revents = 0;
+    signaled[i] = false;
+  }
+
+  uint32_t effective_msec = msec;
+  constexpr uint32_t kWaitTimeout = 6000;
+  if (!dxg_runtime->disable_wait_timeout_ && (effective_msec > kWaitTimeout)) {
+    effective_msec = kWaitTimeout;
+  }
+
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(effective_msec);
+  uint32_t signaled_count = 0;
+
+  while (true) {
+    auto now = std::chrono::steady_clock::now();
+    int remaining_ms = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+    if (remaining_ms < 0) remaining_ms = 0;
+
+    int ret = poll(pfds, num_elems, remaining_ms);
+    if (ret < 0) {
+      if (errno == EINTR) continue;  // Interrupted, not failed; retry on same deadline.
+      pr_err("poll() failed, errno %d\n", errno);
+      return HSAKMT_STATUS_WAIT_FAILURE;
+    }
+    if (ret > 0) {
+      for (uint32_t i = 0; i < num_elems; ++i) {
+        if ((pfds[i].revents & POLLIN) && !signaled[i]) {
+          uint64_t val;
+          // Another waiter may have consumed the counter since poll(); EFD_NONBLOCK gives EAGAIN.
+          if (read(pfds[i].fd, &val, sizeof(val)) != static_cast<ssize_t>(sizeof(val))) continue;
+          if (!wait_all) return HSAKMT_STATUS_SUCCESS;
+          signaled[i] = true;
+          signaled_count++;
+        }
+      }
+      if (wait_all && signaled_count >= num_elems) return HSAKMT_STATUS_SUCCESS;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) break;
   }
 #endif
   return HSAKMT_STATUS_WAIT_TIMEOUT;
@@ -1371,7 +1548,14 @@ bool WDDMDevice::SetTrapHandler(uint64_t tba, uint64_t tma) const {
   memset(priv_data, 0, priv_size);
   Wkmi::FillinTrapHandlerPrivData(priv_data, tba, tma);
 
-  return Escape(priv_data, priv_size, true);
+  const bool ok = Escape(priv_data, priv_size, true);
+  if (ok) {
+    pr_info("SetTrapHandler tba=0x%" PRIx64 " tma=0x%" PRIx64 " accepted\n", tba, tma);
+  } else {
+    pr_err("SetTrapHandler tba=0x%" PRIx64 " tma=0x%" PRIx64 " rejected by KMD;"
+           " faults will fall back to stall detection\n", tba, tma);
+  }
+  return ok;
 }
 
 

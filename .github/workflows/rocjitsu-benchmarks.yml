@@ -1,0 +1,431 @@
+name: "rocjitsu-benchmarks"
+
+on:
+  push:
+    branches:
+      - "develop"
+    paths:
+      - "emulation/rocjitsu/**"
+      - ".github/workflows/rocjitsu-benchmarks.yml"
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: "Rocjitsu commit SHA to benchmark"
+        required: true
+        type: string
+
+# Each job grants only the access it needs.
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  ROCJITSU_SHA: ${{ inputs.commit || github.sha }}
+  CORPUS_SHA: b83ff7c47cedd7c0fac3b9c0d015b7322fbd53e7
+  TENSILE_SHA: dd77374194a3ea1a7258cd54f87af6747b6362a5
+  ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
+  CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
+  TENSILE_SOURCE: ${{ github.workspace }}/tensile-source
+  RESULTS_BRANCH: gh-pages-rocjitsu
+  RESULTS_ARTIFACT: rocjitsu-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+  RESULTS_DOWNLOAD_DIR: ${{ github.workspace }}/benchmark-results
+
+jobs:
+  benchmark:
+    if: ${{ github.ref_type == 'branch' }}
+    name: Run performance benchmark
+    runs-on: rocjitsu-benchmark
+    timeout-minutes: 210
+    permissions:
+      contents: read
+    outputs:
+      run_attempt: ${{ steps.metadata.outputs.run_attempt }}
+      raw_ready: ${{ steps.upload_raw.outcome == 'success' }}
+      dashboard_ready: ${{ steps.upload_dashboard.outcome == 'success' }}
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --user 0:0
+      env:
+        DEBIAN_FRONTEND: noninteractive
+
+    steps:
+      - name: Set benchmark paths
+        run: |
+          BENCHMARK_DIR="${RUNNER_TEMP}/rocjitsu-benchmark-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          {
+            echo "BENCHMARK_DIR=${BENCHMARK_DIR}"
+            echo "ROCJITSU_BUILD_DIR=${BENCHMARK_DIR}/build"
+            echo "ROCJITSU_VENV=${BENCHMARK_DIR}/venv"
+            echo "TENSILE_VENV=${BENCHMARK_DIR}/tensile-venv"
+            echo "ROCJITSU_RESULT_DIR=${BENCHMARK_DIR}/results"
+          } >> "${GITHUB_ENV}"
+
+      - name: Install base dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            clang \
+            cmake \
+            git \
+            libclang-rt-dev \
+            libdrm-dev \
+            libomp-dev \
+            libzstd-dev \
+            ninja-build \
+            python3-dev \
+            zlib1g-dev
+
+      - name: Checkout rocm-systems
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: rocm-systems
+          ref: ${{ env.ROCJITSU_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a commit from develop
+        working-directory: rocm-systems
+        run: |
+          if ! git merge-base --is-ancestor HEAD origin/develop; then
+            echo "The selected commit must be in develop's history." >&2
+            exit 1
+          fi
+
+      # Use the workflow's converter even when benchmarking an older Rocjitsu commit.
+      - name: Checkout workflow tools
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: workflow-source
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: emulation/rocjitsu/website/dashboard/scripts/dashboard-data
+
+      - name: Record benchmark metadata
+        id: metadata
+        working-directory: rocm-systems
+        run: |
+          COMMIT_MESSAGE="$(git show -s --format=%s HEAD)"
+          {
+            printf 'commit_message=%s\n' "${COMMIT_MESSAGE}"
+            printf 'machine=%s\n' "${RUNNER_NAME}"
+            printf 'run_attempt=%s\n' "${GITHUB_RUN_ATTEMPT}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout benchmark corpus
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ROCm/rocjitsu-test-corpus
+          ref: ${{ env.CORPUS_SHA }}
+          path: rocjitsu-test-corpus
+          persist-credentials: false
+
+      - name: Checkout pinned Tensile source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ROCm/rocm-libraries
+          ref: ${{ env.TENSILE_SHA }}
+          path: tensile-source
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install benchmark dependencies
+        run: |
+          python -m venv "${ROCJITSU_VENV}"
+          "${ROCJITSU_VENV}/bin/python" -m pip install \
+            --disable-pip-version-check \
+            -r "${CORPUS_SOURCE_DIR}/benchmarks/requirements.txt"
+
+          python -m venv "${TENSILE_VENV}"
+          "${TENSILE_VENV}/bin/python" -m pip install \
+            -r "${TENSILE_SOURCE}/projects/hipblaslt/tensilelite/requirements.txt"
+
+          ROCM_PATH="$("${ROCJITSU_VENV}/bin/rocm-sdk" path --root)"
+          {
+            echo "ROCM_PATH=${ROCM_PATH}"
+            echo "HIP_PATH=${ROCM_PATH}"
+            echo "PYTHON=${ROCJITSU_VENV}/bin/python"
+            echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${ROCM_PATH}/lib/llvm/lib:${ROCM_PATH}/lib/host-math/lib"
+            echo "PATH=${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${ROCJITSU_VENV}/bin:/usr/local/bin:/usr/bin:/bin"
+          } >> "${GITHUB_ENV}"
+
+      - name: Build rocjitsu
+        run: |
+          cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_BUILD_DIR}" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DLTO=OFF \
+            -DRJ_ENABLE_ASAN=OFF \
+            -DRJ_ENABLE_MSAN=OFF \
+            -DRJ_ENABLE_TSAN=OFF \
+            -DRJ_ENABLE_UBSAN=OFF \
+            -DCMAKE_C_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang" \
+            -DCMAKE_CXX_COMPILER="${ROCM_PATH}/lib/llvm/bin/amdclang++"
+          cmake --build "${ROCJITSU_BUILD_DIR}" \
+            --parallel "$(($(nproc) / 2))" \
+            --target rocjitsu_bin rocjitsu_shared
+
+      - name: Install ROCISA and build native adapter
+        timeout-minutes: 45
+        run: |
+          export ROCISA_BACKEND=native
+          export PYTHON="${TENSILE_VENV}/bin/python"
+          export PATH="${TENSILE_VENV}/bin:${PATH}"
+          "${TENSILE_VENV}/bin/python" -m pip install --no-deps \
+            --config-settings="build-dir=${BENCHMARK_DIR}/rocisa-build" \
+            --config-settings="cmake.define.ROCM_PATH=${ROCM_PATH}" \
+            --config-settings="cmake.define.CMAKE_CXX_COMPILER=${ROCM_PATH}/bin/amdclang++" \
+            "${TENSILE_SOURCE}/projects/hipblaslt/tensilelite/rocisa"
+          cmake \
+            -S "${CORPUS_SOURCE_DIR}/corpus/benchmarks/tensile_candidates" \
+            -B "${BENCHMARK_DIR}/tensile-native" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DROCM_PATH="${ROCM_PATH}" \
+            -DCMAKE_PREFIX_PATH="${ROCM_PATH}" \
+            -DCMAKE_CXX_COMPILER="${ROCM_PATH}/bin/amdclang++" \
+            -DROCmCMakeBuildTools_DIR="${ROCM_PATH}/share/rocmcmakebuildtools/cmake" \
+            -DLLVM_DIR="${ROCM_PATH}/lib/llvm/lib/cmake/llvm" \
+            -DTENSILE_SOURCE="${TENSILE_SOURCE}" \
+            -DPython_EXECUTABLE="${TENSILE_VENV}/bin/python" \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+          cmake --build "${BENCHMARK_DIR}/tensile-native" \
+            --parallel "$(($(nproc) / 2))" \
+            --target tensile_candidate tensile_candidate_host_tests
+          "${BENCHMARK_DIR}/tensile-native/tensile_candidate_host_tests"
+
+      - name: Generate pinned Tensile artifacts
+        id: prepare
+        timeout-minutes: 45
+        run: |
+          export PYTHON="${TENSILE_VENV}/bin/python"
+          export PATH="${TENSILE_VENV}/bin:${PATH}"
+          "${TENSILE_VENV}/bin/python" "${CORPUS_SOURCE_DIR}/corpus/benchmarks/tensile_candidates/generate.py" \
+            --source-root "${TENSILE_SOURCE}" \
+            --output "${BENCHMARK_DIR}/tensile-artifacts"
+          {
+            echo "TENSILE_CANDIDATE_ARTIFACTS=${BENCHMARK_DIR}/tensile-artifacts"
+            echo "TENSILE_CANDIDATE_RUNNER=${BENCHMARK_DIR}/tensile-native/tensile_candidate"
+          } >> "${GITHUB_ENV}"
+
+      - name: Run performance suite
+        if: ${{ success() && steps.prepare.outcome == 'success' }}
+        timeout-minutes: 60
+        id: benchmark
+        working-directory: ${{ env.CORPUS_SOURCE_DIR }}
+        run: |
+          # Capture only this invocation; keep console output visible.
+          set +e
+          "${ROCJITSU_VENV}/bin/python" -m benchmarks.runner \
+            --rocjitsu-source-dir "${ROCJITSU_SOURCE_DIR}" \
+            --build-dir "${ROCJITSU_BUILD_DIR}" \
+            --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/gfx950_mi355x_kmd.json" \
+            --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json" \
+            --run-wrapper "\"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
+            --manifest benchmarks/suites/performance-v1.toml \
+            --output "${ROCJITSU_RESULT_DIR}" | tee "${BENCHMARK_DIR}/runner-output.txt"
+          RUNNER_PIPE_STATUS=("${PIPESTATUS[@]}")
+          set -e
+          RUNNER_EXIT="${RUNNER_PIPE_STATUS[0]}"
+          if [[ "${RUNNER_PIPE_STATUS[1]}" -ne 0 ]]; then exit "${RUNNER_PIPE_STATUS[1]}"; fi
+          case "${RUNNER_EXIT}" in
+            0) SUITE_STATUS=completed ;;
+            1) SUITE_STATUS=failed ;;
+            *) exit "${RUNNER_EXIT}" ;;
+          esac
+          # Only main's final line follows a normal run_suite return. An abort
+          # can also exit 1 and set finished_at, so neither alone is sufficient.
+          EXPECTED_ARTIFACT="$(realpath -- "${ROCJITSU_RESULT_DIR}")/run.json"
+          if [[ "$(tail -n 1 "${BENCHMARK_DIR}/runner-output.txt")" != "run ${SUITE_STATUS}: ${EXPECTED_ARTIFACT}" ]]; then
+            echo "Runner did not report normal suite completion." >&2
+            exit 1
+          fi
+          if ! python -m json.tool "${ROCJITSU_RESULT_DIR}/run.json" > /dev/null; then exit 1; fi
+          if [[ "${RUNNER_EXIT}" -eq 1 ]]; then
+            echo "case_failures=true" >> "${GITHUB_OUTPUT}"
+            echo "::warning::Suite completed with benchmark failures; preserving results."
+          fi
+
+      - name: Upload workload failure diagnostics
+        if: ${{ !cancelled() && (steps.benchmark.outcome == 'failure' || steps.benchmark.outputs.case_failures == 'true') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}-diagnostics
+          path: |
+            ${{ env.ROCJITSU_RESULT_DIR }}/*/*/cases/*/stdout.txt
+            ${{ env.ROCJITSU_RESULT_DIR }}/*/*/cases/*/stderr.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload original raw benchmark JSON
+        id: upload_raw
+        if: ${{ !cancelled() && (steps.benchmark.outcome == 'success' || steps.benchmark.outcome == 'failure') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}-raw
+          path: ${{ env.ROCJITSU_RESULT_DIR }}/run.json
+          if-no-files-found: error
+          retention-days: 14
+
+      # The new dashboard requires both default and single thread-policy data.
+      # This workflow publishes only default-policy dashboard data to match the
+      # existing dashboard. Normal completion may include failed/timeout cases;
+      # runner errors and aborted suites still fail before conversion.
+      - name: Prepare dashboard benchmark result
+        id: dashboard
+        if: ${{ !cancelled() && steps.benchmark.outcome == 'success' }}
+        env:
+          BENCHMARK_COMMIT_MESSAGE: ${{ steps.metadata.outputs.commit_message }}
+          BENCHMARK_MACHINE: ${{ steps.metadata.outputs.machine }}
+          BENCHMARK_WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          python "${GITHUB_WORKSPACE}/workflow-source/emulation/rocjitsu/website/dashboard/scripts/dashboard-data/prepare-benchmark-result.py" \
+            --raw-run "${ROCJITSU_RESULT_DIR}/run.json" \
+            --output "${BENCHMARK_DIR}/dashboard/github-${GITHUB_RUN_ID}-attempt-${GITHUB_RUN_ATTEMPT}-default.json" \
+            --run-id "${GITHUB_RUN_ID}" --run-attempt "${GITHUB_RUN_ATTEMPT}" \
+            --repository "${GITHUB_REPOSITORY}" --event "${GITHUB_EVENT_NAME}" \
+            --commit-message "${BENCHMARK_COMMIT_MESSAGE}" --machine "${BENCHMARK_MACHINE}" \
+            --workflow-sha "${BENCHMARK_WORKFLOW_SHA}" --tensile-sha "${TENSILE_SHA}"
+
+      - name: Upload dashboard benchmark JSON
+        id: upload_dashboard
+        if: ${{ !cancelled() && steps.dashboard.outcome == 'success' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}-dashboard
+          path: ${{ env.BENCHMARK_DIR }}/dashboard/*.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish benchmark results
+    needs: benchmark
+    # Failed-job reruns reuse artifacts from the successful benchmark attempt.
+    env:
+      BENCHMARK_RUN_ATTEMPT: ${{ needs.benchmark.outputs.run_attempt }}
+      RESULTS_ARTIFACT: rocjitsu-benchmark-${{ github.run_id }}-${{ needs.benchmark.outputs.run_attempt }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/develop' && needs.benchmark.outputs.raw_ready == 'true' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: rocjitsu-benchmark-publication
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      - name: Download original raw JSON
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}-raw
+          path: ${{ env.RESULTS_DOWNLOAD_DIR }}/raw
+
+      - name: Download dashboard JSON
+        if: ${{ needs.benchmark.outputs.dashboard_ready == 'true' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}-dashboard
+          path: ${{ env.RESULTS_DOWNLOAD_DIR }}/dashboard
+
+      - name: Checkout publication validator
+        if: ${{ needs.benchmark.outputs.dashboard_ready == 'true' }}
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: workflow-source
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            emulation/rocjitsu/website/dashboard/scripts
+            emulation/rocjitsu/website/dashboard/src/data
+
+      - name: Set up Node.js
+        if: ${{ needs.benchmark.outputs.dashboard_ready == 'true' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.13.0"
+
+      - name: Checkout publication branch
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          path: publication
+          ref: ${{ env.RESULTS_BRANCH }}
+
+      - name: Publish benchmark files
+        working-directory: publication
+        env:
+          DASHBOARD_READY: ${{ needs.benchmark.outputs.dashboard_ready }}
+          DASHBOARD_VALIDATOR: ${{ github.workspace }}/workflow-source/emulation/rocjitsu/website/dashboard/scripts/validate-dashboard-data.mjs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          DESTINATION="raw-benchmarks/github-${GITHUB_RUN_ID}-attempt-${BENCHMARK_RUN_ATTEMPT}"
+          DATA=rocjitsu-dashboard/data
+          NAME="github-${GITHUB_RUN_ID}-attempt-${BENCHMARK_RUN_ATTEMPT}-default.json"
+          CATALOG_REFERENCE_FAILED=0
+          if [[ "${DASHBOARD_READY}" == true ]]; then
+            if ! CATALOG="$(jq -er \
+              '.testCatalog | select(type == "string") | select(test("^test-catalogs/[A-Za-z0-9._-]+\\.json\\z"))' \
+              "${RESULTS_DOWNLOAD_DIR}/dashboard/${NAME}")"; then
+              echo "Invalid dashboard test catalog reference; publishing raw only." >&2
+              CATALOG_REFERENCE_FAILED=1
+            fi
+          fi
+
+          # A concurrent writer may advance the publication branch before our push.
+          # Retry from the latest branch with three attempts, reapplying files and merging the index.
+          for ATTEMPT in 1 2 3; do
+            git fetch origin "${RESULTS_BRANCH}"
+            git checkout --detach FETCH_HEAD
+
+            # Publish the raw benchmark JSON.
+            mkdir -p "${DESTINATION}"
+            cp "${RESULTS_DOWNLOAD_DIR}/raw/run.json" "${DESTINATION}/raw.json"
+            git add -- "${DESTINATION}/raw.json"
+
+            # Recheck the catalog against the latest publication branch.
+            CATALOG_FAILED="${CATALOG_REFERENCE_FAILED}"
+            if [[ "${DASHBOARD_READY}" == true && "${CATALOG_FAILED}" -eq 0 ]]; then
+              CATALOG_PATH="$(realpath -m -- "${DATA}/${CATALOG}")"
+              if [[ "${CATALOG_PATH}" != "$(realpath -m -- "${DATA}")/"* || ! -f "${CATALOG_PATH}" ]]; then
+                echo "Required dashboard test catalog is missing or outside the data directory; publishing raw only: ${CATALOG}" >&2
+                CATALOG_FAILED=1
+              fi
+              # Publish the dashboard benchmark JSON and update the index.json.
+              if [[ "${CATALOG_FAILED}" -eq 0 ]]; then
+                mkdir -p "${DATA}/runs"
+                cp "${RESULTS_DOWNLOAD_DIR}/dashboard/${NAME}" "${DATA}/runs/${NAME}"
+                if [[ ! -f "${DATA}/index.json" ]]; then
+                  printf '{"runFiles":[]}\n' > "${DATA}/index.json"
+                fi
+                jq --arg file "runs/${NAME}" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                  '.runFiles = ((.runFiles // []) + [$file] | unique) | .generatedAt = $now' \
+                  "${DATA}/index.json" > "${DATA}/index.json.tmp"
+                mv "${DATA}/index.json.tmp" "${DATA}/index.json"
+                git add -- "${DATA}/runs/${NAME}" "${DATA}/index.json"
+              fi
+            fi
+
+            if [[ "${DASHBOARD_READY}" == true && "${CATALOG_FAILED}" -eq 0 ]] &&
+              ! node "${DASHBOARD_VALIDATOR}" "${DATA}"; then
+              echo "Dashboard dataset failed validation; publishing raw only." >&2
+              # Discard only this attempt's dashboard edits, keeping the raw archive staged.
+              git restore --source=HEAD --staged --worktree -- "${DATA}"
+              CATALOG_FAILED=1
+            fi
+
+            # Even after a successful raw-only push (or an unchanged archive),
+            # report catalog or dataset failure so the skipped dashboard update stays visible.
+            if git diff --cached --quiet; then exit "${CATALOG_FAILED}"; fi
+            git commit -m "Publish benchmark ${GITHUB_RUN_ID}.${BENCHMARK_RUN_ATTEMPT}"
+            if git push origin "HEAD:${RESULTS_BRANCH}"; then exit "${CATALOG_FAILED}"; fi
+            if [[ "${ATTEMPT}" -lt 3 ]]; then sleep 2; fi
+          done
+          echo "Publication failed after 3 attempts" >&2
+          exit 1

@@ -12,24 +12,60 @@
 
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
+#include "util/diagnostic.h"
 
+#include <algorithm>
+#include <charconv>
+#include <cstdint>
 #include <fstream>
+#include <optional>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace rocjitsu {
 namespace config {
 
-inline std::string read_config_file(const std::string &path) {
+/// @brief Launch override: disable checks, enable ordinary checks, or also enable XCNT.
+enum class WaitChecking { Off, On, All };
+
+/// @brief Parse the on/off/all launch modes, distinct from per-CU warn/off policies.
+inline std::optional<WaitChecking> parse_wait_checking(std::string_view value) {
+  if (value == "off")
+    return WaitChecking::Off;
+  if (value == "on")
+    return WaitChecking::On;
+  if (value == "all")
+    return WaitChecking::All;
+  return std::nullopt;
+}
+
+/// @brief Parse a complete unsigned 32-bit decimal value.
+inline std::optional<uint32_t> parse_uint32(std::string_view text) {
+  uint32_t value = 0;
+  const std::from_chars_result result =
+      std::from_chars(text.data(), text.data() + text.size(), value);
+  if (result.ec != std::errc{} || result.ptr != text.data() + text.size())
+    return std::nullopt;
+  return value;
+}
+
+/// @brief Read a config file into a string.
+/// @param emit_error Destination for failure diagnostics.
+/// @returns File contents on success, or failure after emitting a diagnostic
+/// containing @p path when the file cannot be opened or read.
+inline util::FailureOr<std::string> read_config_file(const std::string &path,
+                                                     util::DiagnosticEmitter emit_error) {
   std::ifstream file(path);
   if (!file.is_open())
-    throw std::runtime_error("Cannot open file: " + path);
+    return emit_error.emit() << "Cannot open file: " << path;
 
   std::ostringstream contents;
-  contents << file.rdbuf();
+  file >> std::noskipws >> contents.rdbuf();
+  if (file.bad() || !file.eof())
+    return emit_error.emit() << "Cannot read file: " << path;
   return contents.str();
 }
 
@@ -38,19 +74,27 @@ inline std::string read_config_file(const std::string &path) {
 /// @details FlatBuffers returns pointers into `Parser::builder_`. Keeping the
 /// parser local to this helper makes the lifetime explicit: callers must copy
 /// any values they need inside @p callback rather than retaining raw pointers.
+/// The callback must return util::FailureOr<T> or util::Result so parsing failures
+/// can be returned through the same result type.
+/// @param emit_error Destination for failure diagnostics.
 /// @param skip_unexpected_fields Preserve the general simulation config's
 /// forward-compatible unknown-field behavior when true; use false for strict
 /// sub-configs whose misspelled keys could change execution behavior.
 template <typename Callback>
-decltype(auto)
-with_parsed_simulation_config_json(const std::string &json, const std::string &schema_text,
-                                   Callback &&callback, bool skip_unexpected_fields = true) {
-  flatbuffers::Parser parser;
+auto with_parsed_simulation_config_json(const std::string &json, const std::string &schema_text,
+                                        util::DiagnosticEmitter emit_error, Callback &&callback,
+                                        bool skip_unexpected_fields = true)
+    -> std::invoke_result_t<Callback, const fb::SimulationConfig *> {
+  flatbuffers::IDLOptions options;
+  // Preserve an explicit scalar default (notably cpu_dispatch_threads=1),
+  // whose meaning differs from an omitted automatic setting in JSON.
+  options.force_defaults = true;
+  flatbuffers::Parser parser(options);
   parser.opts.skip_unexpected_fields_in_json = skip_unexpected_fields;
   if (!parser.Parse(schema_text.c_str()))
-    throw std::runtime_error("Failed to parse schema: " + std::string(parser.error_));
+    return emit_error.emit() << "Failed to parse schema: " << parser.error_;
   if (!parser.Parse(json.c_str()))
-    throw std::runtime_error("Failed to parse JSON config: " + std::string(parser.error_));
+    return emit_error.emit() << "Failed to parse JSON config: " << parser.error_;
   const fb::SimulationConfig *config =
       flatbuffers::GetRoot<fb::SimulationConfig>(parser.builder_.GetBufferPointer());
   return std::forward<Callback>(callback)(config);
@@ -76,12 +120,13 @@ inline PciDeviceConfig pci_device_from_fb(const fb::PciDeviceInfo *pci) {
 
 /// @brief Convert a FlatBuffers KFD identity table into the runtime config form.
 ///
-/// @details This copies only scalar/string topology values. The resulting
-/// config owns its marketing-name string so it is safe after the FlatBuffers
-/// parser storage goes out of scope.
+/// @details The resulting config owns its strings and IP versions so it is safe
+/// after the FlatBuffers parser storage goes out of scope.
 /// @param json_path JSON path of @p device, used in validation diagnostics.
-inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
-                                          std::string_view json_path) {
+/// @param emit_error Destination for failure diagnostics.
+inline util::FailureOr<KfdDeviceConfig> kfd_device_from_fb(const fb::KfdDeviceInfo *device,
+                                                           std::string_view json_path,
+                                                           util::DiagnosticEmitter emit_error) {
   KfdDeviceConfig config;
   if (device == nullptr)
     return config;
@@ -99,16 +144,37 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
   config.revision_id = device->revision_id();
   config.pci_revision_id = device->pci_revision_id();
   config.simd_count = device->simd_count();
-  config.max_waves_per_simd = device->max_waves_per_simd();
-  config.num_shader_engines = device->num_shader_engines();
-  config.num_shader_arrays_per_engine = device->num_shader_arrays_per_engine();
-  config.num_cu_per_sh = device->num_cu_per_sh();
+  if (const auto value = device->max_waves_per_simd()) {
+    config.max_waves_per_simd = *value;
+    config.discovery_overrides.max_waves_per_simd = *value;
+  }
+  if (const auto value = device->num_shader_engines()) {
+    config.num_shader_engines = *value;
+    config.discovery_overrides.num_shader_engines = *value;
+  }
+  if (const auto value = device->num_shader_arrays_per_engine()) {
+    config.num_shader_arrays_per_engine = *value;
+    config.discovery_overrides.num_shader_arrays_per_engine = *value;
+  }
+  if (const auto value = device->num_cu_per_sh()) {
+    config.num_cu_per_sh = *value;
+    config.discovery_overrides.num_cu_per_sh = *value;
+  }
   config.simd_per_cu = device->simd_per_cu();
-  config.wave_front_size = device->wave_front_size();
-  config.max_slots_scratch_cu = device->max_slots_scratch_cu();
+  if (const auto value = device->wave_front_size()) {
+    config.wave_front_size = *value;
+    config.discovery_overrides.wave_front_size = *value;
+  }
+  if (const auto value = device->max_slots_scratch_cu()) {
+    config.max_slots_scratch_cu = *value;
+    config.discovery_overrides.max_slots_scratch_cu = *value;
+  }
   config.local_mem_size = device->local_mem_size();
   config.vram_type = device->vram_type();
-  config.lds_size_kb = device->lds_size_kb();
+  if (const auto value = device->lds_size_kb()) {
+    config.lds_size_kb = *value;
+    config.discovery_overrides.lds_size_kb = *value;
+  }
   config.mem_width = device->mem_width();
   config.mem_clk_max = device->mem_clk_max();
   config.l1_size_kb = device->l1_size_kb();
@@ -121,9 +187,8 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
   config.num_sdma_xgmi_engines = device->num_sdma_xgmi_engines();
   config.num_sdma_queues_per_engine = device->num_sdma_queues_per_engine();
   if (config.num_sdma_engines != 0 && config.num_sdma_queues_per_engine == 0)
-    throw std::runtime_error(std::string(json_path) +
-                             ".num_sdma_queues_per_engine must be nonzero when " +
-                             std::string(json_path) + ".num_sdma_engines is nonzero");
+    return emit_error.emit() << json_path << ".num_sdma_queues_per_engine must be nonzero when "
+                             << json_path << ".num_sdma_engines is nonzero";
   config.num_cp_queues = device->num_cp_queues();
   config.max_engine_clk_fcompute = device->max_engine_clk_fcompute();
   config.location_id = device->location_id();
@@ -132,6 +197,19 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
   config.capability = device->capability();
   config.capability2 = device->capability2();
   config.debug_prop = device->debug_prop();
+  if (const auto *versions = device->ip_versions()) {
+    for (const auto *version : *versions) {
+      if (version->hardware_id() == 0 || version->major() == 0)
+        return emit_error.emit() << json_path
+                                 << ".ip_versions requires nonzero hardware_id and major";
+      if (std::ranges::any_of(config.ip_versions, [&](const DeviceIpVersion &existing) {
+            return existing.hardware_id == version->hardware_id();
+          }))
+        return emit_error.emit() << json_path << ".ip_versions contains a duplicate hardware_id";
+      config.ip_versions.push_back(
+          {version->hardware_id(), version->major(), version->minor(), version->revision()});
+    }
+  }
   return config;
 }
 

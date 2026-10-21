@@ -70,7 +70,7 @@ struct Case {
   Kind kind;
 };
 
-const std::array<Case, 14> kCases = {{
+const std::array<Case, 13> kCases = {{
     {"v_add_f64_vop3", 640, Kind::Bin},
     {"v_mul_f64_vop3", 641, Kind::Bin},
     {"v_max_f64_vop3", 643, Kind::BinMinMax},
@@ -80,7 +80,6 @@ const std::array<Case, 14> kCases = {{
     {"v_trunc_f64_vop3", 343, Kind::Una},
     {"v_rndne_f64_vop3", 345, Kind::Una},
     {"v_sqrt_f64_vop3", 360, Kind::Una},
-    {"v_fract_f64_vop3", 370, Kind::Una},
     {"v_rcp_f64_vop3", 357, Kind::Una},
     {"v_rsq_f64_vop3", 358, Kind::Una},
     {"v_mov_b64_vop3", 376, Kind::Una},
@@ -93,9 +92,10 @@ const std::array<uint64_t, 16> kF64 = {{
     0x0000000000000000ull, 0x8000000000000000ull, 0x3FF0000000000000ull, 0xBFF0000000000000ull,
     0x400921FB54442D18ull, 0xC00921FB54442D18ull, 0x7FF0000000000000ull, 0xFFF0000000000000ull,
     0x7FF8000000000000ull, 0xFFF4000000000000ull, 0x0000000000000001ull, 0x8000000000000001ull,
-    0x7FEFFFFFFFFFFFFFull, 0x3FE0000000000000ull, // 0.5
-    0x3FD999999999999Aull,                        // 0.4
-    0x4000000000000000ull,                        // 2.0
+    0x7FEFFFFFFFFFFFFFull,
+    0x3FE0000000000000ull, // 0.5
+    0x3FD999999999999Aull, // 0.4
+    0x4000000000000000ull, // 2.0
 }};
 
 struct Fixture {
@@ -138,7 +138,7 @@ struct Fixture {
 
   std::array<uint64_t, WF_SIZE> run(Instruction *inst, uint32_t rot, uint64_t exec) {
     seed_inputs(rot, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)

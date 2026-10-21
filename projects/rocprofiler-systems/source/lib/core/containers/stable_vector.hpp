@@ -8,16 +8,18 @@
 #include "core/containers/operators.hpp"
 
 #include <algorithm>
+#include <cassert>
+#include <concepts>
+#include <cstddef>
 #include <initializer_list>
 #include <iterator>
+#include <limits>
 #include <memory>
-#include <numeric>
-#include <type_traits>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace container
+namespace rocprofsys::container
 {
 template <typename Tp, size_t ChunkSizeV = ROCPROFSYS_MAX_THREADS,
           size_t AlignN = alignof(Tp)>
@@ -32,17 +34,17 @@ public:
     using size_type       = size_t;
     using difference_type = std::ptrdiff_t;
 
-    static constexpr const size_t chunk_size = ChunkSizeV;
+    static constexpr const size_t k_chunk_size = ChunkSizeV;
 
 private:
     template <size_t N>
     struct is_pow2
     {
-        static constexpr bool value = (N & (N - 1)) == 0;
+        static constexpr bool k_value = (N & (N - 1)) == 0;
     };
 
     static_assert(ChunkSizeV > 0, "ChunkSize needs to be greater than zero");
-    static_assert(is_pow2<ChunkSizeV>::value, "ChunkSize needs to be a power of 2");
+    static_assert(is_pow2<ChunkSizeV>::k_value, "ChunkSize needs to be a power of 2");
 
     using this_type       = stable_vector<Tp, ChunkSizeV, AlignN>;
     using const_this_type = const stable_vector<Tp, ChunkSizeV, AlignN>;
@@ -50,46 +52,46 @@ private:
     template <typename ContainerT>
     struct iterator_base
     {
-        iterator_base(ContainerT* c = nullptr, size_type i = 0)
-        : m_container(c)
-        , m_index(i)
+        constexpr iterator_base(ContainerT* container = nullptr, size_type index = 0)
+        : m_container(container)
+        , m_index(index)
         {}
 
-        iterator_base& operator+=(size_type i)
+        constexpr iterator_base& operator+=(size_type count)
         {
-            m_index += i;
+            m_index += count;
             return *this;
         }
-        iterator_base& operator-=(size_type i)
+        constexpr iterator_base& operator-=(size_type count)
         {
-            m_index -= i;
+            m_index -= count;
             return *this;
         }
-        iterator_base& operator++()
+        constexpr iterator_base& operator++()
         {
             ++m_index;
             return *this;
         }
-        iterator_base& operator--()
+        constexpr iterator_base& operator--()
         {
             --m_index;
             return *this;
         }
 
-        difference_type operator-(const iterator_base& it)
+        constexpr difference_type operator-(const iterator_base& other)
         {
-            assert(m_container == it.m_container);
-            return m_index - it.m_index;
+            assert(m_container == other.m_container);
+            return m_index - other.m_index;
         }
 
-        bool operator<(const iterator_base& it) const
+        constexpr bool operator<(const iterator_base& other) const
         {
-            assert(m_container == it.m_container);
-            return m_index < it.m_index;
+            assert(m_container == other.m_container);
+            return m_index < other.m_index;
         }
-        bool operator==(const iterator_base& it) const
+        constexpr bool operator==(const iterator_base& other) const
         {
-            return m_container == it.m_container && m_index == it.m_index;
+            return m_container == other.m_container && m_index == other.m_index;
         }
 
     protected:
@@ -107,7 +109,7 @@ public:
         using iterator_base<this_type>::iterator_base;
         friend struct const_iterator;
 
-        reference operator*() { return (*this->m_container)[this->m_index]; }
+        constexpr reference operator*() { return (*this->m_container)[this->m_index]; }
     };
 
     struct const_iterator
@@ -116,20 +118,23 @@ public:
     {
         using iterator_base<const_this_type>::iterator_base;
 
-        const_iterator(const iterator& it)
-        : iterator_base<const_this_type>(it.m_container, it.m_index)
+        constexpr const_iterator(const iterator& other)
+        : iterator_base<const_this_type>(other.m_container, other.m_index)
         {}
 
-        const_reference operator*() const { return (*this->m_container)[this->m_index]; }
-
-        bool operator==(const const_iterator& it) const
+        constexpr const_reference operator*() const
         {
-            return iterator_base<const_this_type>::operator==(it);
+            return (*this->m_container)[this->m_index];
         }
 
-        friend bool operator==(const iterator& l, const const_iterator& r)
+        constexpr bool operator==(const const_iterator& other) const
         {
-            return r == l;
+            return iterator_base<const_this_type>::operator==(other);
+        }
+
+        friend constexpr bool operator==(const iterator& lhs, const const_iterator& rhs)
+        {
+            return rhs == lhs;
         }
     };
 
@@ -148,7 +153,7 @@ public:
     stable_vector(const stable_vector& other);
     stable_vector(stable_vector&& other) noexcept;
 
-    stable_vector& operator=(stable_vector v);
+    stable_vector& operator=(stable_vector other);
 
     iterator       begin() noexcept { return { this, 0 }; }
     const_iterator begin() const noexcept { return { this, 0 }; }
@@ -158,27 +163,38 @@ public:
     const_iterator end() const noexcept { return { this, size() }; }
     const_iterator cend() const noexcept { return end(); }
 
-    size_type size() const noexcept
+    // size()/max_size()/capacity()/empty() are pure arithmetic over m_chunks.size() and
+    // are constexpr-capable for a default-constructed (empty) instance; element access
+    // below goes through std::unique_ptr, which has no constexpr member functions before
+    // C++23, so the chunked storage itself cannot be built or indexed in a constant
+    // expression.
+    [[nodiscard]] constexpr size_type size() const noexcept
     {
         return empty() ? 0 : (m_chunks.size() - 1) * ChunkSizeV + m_chunks.back()->size();
     }
-    size_type max_size() const noexcept { return std::numeric_limits<size_type>::max(); }
-    size_type capacity() const noexcept { return m_chunks.size() * ChunkSizeV; }
+    [[nodiscard]] constexpr size_type max_size() const noexcept
+    {
+        return std::numeric_limits<size_type>::max();
+    }
+    [[nodiscard]] constexpr size_type capacity() const noexcept
+    {
+        return m_chunks.size() * ChunkSizeV;
+    }
 
-    bool empty() const noexcept { return m_chunks.size() == 0; }
+    [[nodiscard]] constexpr bool empty() const noexcept { return m_chunks.empty(); }
 
     void reserve(size_type new_capacity);
     void shrink_to_fit() noexcept {}
 
-    bool operator==(const this_type& c) const
+    bool operator==(const this_type& other) const
     {
-        return size() == c.size() && std::equal(cbegin(), cend(), c.cbegin());
+        return size() == other.size() && std::equal(cbegin(), cend(), other.cbegin());
     }
-    bool operator!=(const this_type& c) const { return !operator==(c); }
+    bool operator!=(const this_type& other) const { return !operator==(other); }
 
-    void swap(this_type& v) { std::swap(m_chunks, v.m_chunks); }
+    void swap(this_type& other) { std::swap(m_chunks, other.m_chunks); }
 
-    friend void swap(this_type& l, this_type& r) { l.swap(r); }
+    friend void swap(this_type& lhs, this_type& rhs) { lhs.swap(rhs); }
 
     reference       front() { return m_chunks.front()->front(); }
     const_reference front() const { return front(); }
@@ -186,19 +202,19 @@ public:
     reference       back() { return m_chunks.back()->back(); }
     const_reference back() const { return back(); }
 
-    void push_back(const Tp& t);
-    void push_back(Tp&& t);
+    void push_back(const Tp& value);
+    void push_back(Tp&& value);
 
     template <typename... Args>
     decltype(auto) emplace_back(Args&&... args);
 
-    reference operator[](size_type i);
+    reference operator[](size_type idx);
 
-    const_reference operator[](size_type i) const;
+    const_reference operator[](size_type idx) const;
 
-    reference at(size_type i);
+    reference at(size_type idx);
 
-    const_reference at(size_type i) const;
+    const_reference at(size_type idx) const;
 
 private:
     using chunk_type   = container::aligned_static_vector<Tp, ChunkSizeV, AlignN, true>;
@@ -266,17 +282,17 @@ stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(stable_vector&& other) noex
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(std::initializer_list<Tp> ilist)
 {
-    for(const auto& t : ilist)
+    for(const auto& item : ilist)
     {
-        emplace_back(t);
+        emplace_back(item);
     }
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 stable_vector<Tp, ChunkSizeV, AlignN>&
-stable_vector<Tp, ChunkSizeV, AlignN>::operator=(stable_vector v)
+stable_vector<Tp, ChunkSizeV, AlignN>::operator=(stable_vector other)
 {
-    swap(v);
+    swap(other);
     return *this;
 }
 
@@ -288,10 +304,10 @@ stable_vector<Tp, ChunkSizeV, AlignN>::add_chunk()
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-typename stable_vector<Tp, ChunkSizeV, AlignN>::chunk_type&
+stable_vector<Tp, ChunkSizeV, AlignN>::chunk_type&
 stable_vector<Tp, ChunkSizeV, AlignN>::last_chunk()
 {
-    if(ROCPROFSYS_UNLIKELY(m_chunks.empty() || m_chunks.back()->size() == ChunkSizeV))
+    if(m_chunks.empty() || m_chunks.back()->size() == ChunkSizeV) [[unlikely]]
     {
         add_chunk();
     }
@@ -312,63 +328,66 @@ stable_vector<Tp, ChunkSizeV, AlignN>::reserve(size_type new_capacity)
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 void
-stable_vector<Tp, ChunkSizeV, AlignN>::push_back(const Tp& t)
+stable_vector<Tp, ChunkSizeV, AlignN>::push_back(const Tp& value)
 {
-    last_chunk().push_back(t);
+    last_chunk().push_back(value);
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 void
-stable_vector<Tp, ChunkSizeV, AlignN>::push_back(Tp&& t)
+stable_vector<Tp, ChunkSizeV, AlignN>::push_back(Tp&& value)
 {
-    last_chunk().push_back(std::move(t));
+    last_chunk().push_back(std::move(value));
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-typename stable_vector<Tp, ChunkSizeV, AlignN>::reference
-stable_vector<Tp, ChunkSizeV, AlignN>::operator[](size_type i)
+stable_vector<Tp, ChunkSizeV, AlignN>::reference
+stable_vector<Tp, ChunkSizeV, AlignN>::operator[](size_type idx)
 {
-    return (*m_chunks[i / ChunkSizeV])[i % ChunkSizeV];
+    return (*m_chunks[idx / ChunkSizeV])[idx % ChunkSizeV];
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-typename stable_vector<Tp, ChunkSizeV, AlignN>::const_reference
-stable_vector<Tp, ChunkSizeV, AlignN>::operator[](size_type i) const
+stable_vector<Tp, ChunkSizeV, AlignN>::const_reference
+stable_vector<Tp, ChunkSizeV, AlignN>::operator[](size_type idx) const
 {
-    return const_cast<this_type&>(*this)[i];
+    return const_cast<this_type&>(*this)[idx];
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-typename stable_vector<Tp, ChunkSizeV, AlignN>::reference
-stable_vector<Tp, ChunkSizeV, AlignN>::at(size_type i)
+stable_vector<Tp, ChunkSizeV, AlignN>::reference
+stable_vector<Tp, ChunkSizeV, AlignN>::at(size_type idx)
 {
-    if(ROCPROFSYS_UNLIKELY(i >= size()))
+    if(idx >= size()) [[unlikely]]
     {
-        throw ::rocprofsys::exception<std::out_of_range>(
-            "stable_vector::at(" + std::to_string(i) + "). size is " +
-            std::to_string(size()));
+        throw std::out_of_range{ "stable_vector::at(" + std::to_string(idx) +
+                                 "). size is " + std::to_string(size()) };
     }
 
-    return operator[](i);
+    return operator[](idx);
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN>
-typename stable_vector<Tp, ChunkSizeV, AlignN>::const_reference
-stable_vector<Tp, ChunkSizeV, AlignN>::at(size_type i) const
+stable_vector<Tp, ChunkSizeV, AlignN>::const_reference
+stable_vector<Tp, ChunkSizeV, AlignN>::at(size_type idx) const
 {
-    return const_cast<this_type&>(*this).at(i);
+    return const_cast<this_type&>(*this).at(idx);
 }
 
 template <typename Tp, size_t ChunkSizeV, size_t AlignN, typename... Args>
 auto
-resize(stable_vector<Tp, ChunkSizeV, AlignN>& _v, size_t _n, Args&&... args)
+resize(stable_vector<Tp, ChunkSizeV, AlignN>& vec, size_t count, Args&&... args)
 {
-    if(_n > _v.capacity()) _v.reserve(_n);
+    if(count > vec.capacity())
+    {
+        vec.reserve(count);
+    }
 
-    while(_v.size() < _n)
-        _v.emplace_back(std::forward<Args>(args)...);
+    while(vec.size() < count)
+    {
+        vec.emplace_back(std::forward<Args>(args)...);
+    }
 
-    return _v.size();
+    return vec.size();
 }
-}  // namespace container
-}  // namespace rocprofsys
+}  // namespace rocprofsys::container

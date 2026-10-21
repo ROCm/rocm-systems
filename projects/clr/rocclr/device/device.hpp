@@ -24,11 +24,9 @@
 #include "devsignal.hpp"
 #include "utils/nontemporal.hpp"
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 #include "devurilocator.hpp"
-#endif
-#endif
+#endif  // DEVICE_ADDRESS_SANITIZER
 
 #include <array>
 #include <cassert>
@@ -54,6 +52,7 @@ class FillMemoryCommand;
 class CopyMemoryCommand;
 class CopyMemoryP2PCommand;
 class BatchCopyMemoryCommand;
+class BatchCopyMemoryRectCommand;
 class BatchWriteMemoryCommand;
 class BatchReadMemoryCommand;
 class MapMemoryCommand;
@@ -113,6 +112,19 @@ enum MemRangeAttribute : uint32_t {
                              ///< set for specified device
   LastPrefetchLocation = 4,  ///< The last location to which the range was prefetched
   CoherencyMode = 100,       ///< Current coherency mode for the specified range
+};
+
+// DMA-BUF mapping-type flags for GetHandleForAddressRange
+enum MemRangeDmaBufMappingType : uint64_t {
+  MemRangeDmaBufMappingTypePcie = 0x1,  ///< Maps dmabuf via pcie, requires large bar support
+};
+
+// DMA-BUF mapping results for GetHandleForAddressRange.
+// kNotSupported is returned on unsupported devices.
+enum HandleExportResult : uint32_t {
+  kSuccess = 0,   ///< Handle was exported.
+  kNotSupported,  ///< Request is valid but unsupported on this device.
+  kError,         ///< Export failed.
 };
 
 //! Maps hipFuncCache_t to group memory carveout percentage.
@@ -759,6 +771,8 @@ class Settings {
   void enableExtension(uint name) { extensions_ |= static_cast<uint64_t>(1) << name; }
 
   size_t stagedXferSize_ = 0;     //!< Staged buffer size
+  size_t sdma_swap_alignment_ = 0;  //!< SDMA swap address alignment
+  size_t sdma_indirect_max_size_ = 0;  //!< Max SDMA indirect copy size
 
  private:
   //! Disable copy constructor
@@ -988,8 +1002,9 @@ class Memory {
   MemAccess GetAccess() const { return memAccess_; }
 
   //! Retrieves shareable handle for hipMalloc'ed address range.
-  virtual bool GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle) {
-    return false;
+  virtual HandleExportResult GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
+                                               unsigned long long flags) {
+    return HandleExportResult::kError;
   }
 
  protected:
@@ -1319,6 +1334,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitCopyMemory(amd::CopyMemoryCommand& cmd) = 0;
   virtual void submitCopyMemoryP2P(amd::CopyMemoryP2PCommand& cmd) = 0;
   virtual void submitBatchCopyMemory(amd::BatchCopyMemoryCommand& cmd) = 0;
+  virtual void SubmitBatchCopyMemoryRect(amd::BatchCopyMemoryRectCommand& cmd) = 0;
   virtual void SubmitBatchWriteMemory(amd::BatchWriteMemoryCommand& cmd) = 0;
   virtual void SubmitBatchReadMemory(amd::BatchReadMemoryCommand& cmd) = 0;
   virtual void submitMapMemory(amd::MapMemoryCommand& cmd) = 0;
@@ -1862,7 +1878,8 @@ class Device : public RuntimeObject {
   virtual device::Program* createProgram(amd::Program& owner, option::Options* options = NULL) = 0;
 
   //! Allocate a chunk of device memory as a cache for a CL memory object
-  virtual device::Memory* createMemory(Memory& owner) const = 0;
+  virtual device::Memory* createMemory(
+      Memory& owner, Memory::ErrorCode* errorCode = nullptr) const = 0;
 
   //! Allocate a chunk of device memory with address alignment
   virtual device::Memory* createMemory(size_t size, size_t alignment = 0) const = 0;
@@ -2182,6 +2199,20 @@ class Device : public RuntimeObject {
   }
 
   /**
+   * Recovers the location and size of a VMM allocation.
+   *
+   * @param amd_mem_obj physical memory object of the allocation
+   * @param location_type [out] where the allocation resides
+   * @param device_id [out] owning device for device memory, InvalidDeviceId otherwise
+   * @param size [out] allocation size in bytes
+   * @return True when the backend reported them; false leaves the caller on its default.
+   */
+  virtual bool getVmmAllocInfo(amd::Memory& amd_mem_obj, VmmLocationType* location_type,
+                               int* device_id, size_t* size) const {
+    return false;
+  }
+
+  /**
    * @return True if the device successfully applied the SVM attributes in HMM for device memory
    */
   virtual bool SetSvmAttributes(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
@@ -2236,7 +2267,11 @@ class Device : public RuntimeObject {
   virtual void ReleaseGlobalSignal(void* signal) const {}
   virtual void RetainGlobalSignal(void* signal) const {}
 
-  virtual bool CreateHwEvents(int count, std::vector<void*>& hw_events) const { return false; }
+  //! batched allocates all events together, which is slower to create; use it for sets that are
+  //! pooled and reused. Only a batched set may be placed in device memory.
+  virtual bool CreateHwEvents(int count, bool batched, std::vector<void*>& hw_events) const {
+    return false;
+  }
   virtual void DestroyHwEvent(void* hw_event) const {}
 
   //! Re-arm already-allocated HW event signals so they can be reused by a new
@@ -2263,7 +2298,12 @@ class Device : public RuntimeObject {
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
   };
 
-  virtual uint8_t* CreateBarrierPacket() const { return nullptr; }
+  //! Create a barrier packet that waits on num_deps signals. num_deps == 1
+  //! yields a single-signal barrier where the device has one; otherwise a
+  //! barrier-AND (up to five dep_signal slots). dep_signal[0] and the
+  //! single-signal field share an offset, so callers patch slot 0 either way.
+  //! num_deps == 0 is a completion-only barrier.
+  virtual uint8_t* CreateBarrierPacket(int num_deps = 0) const { return nullptr; }
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
                                    const std::vector<void*>& hw_events) const {}
 
@@ -2422,23 +2462,18 @@ class Device : public RuntimeObject {
   //! Sets the group memory carveout percentage hint for the device
   void UpdateGroupMemCarveout(uint8_t percent) { group_mem_carveout_hint_ = percent; }
 
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   virtual device::UriLocator* createUriLocator() const = 0;
-#endif
-#endif
 
-#if defined(__linux__) && defined(__clang__)
-#if __has_feature(address_sanitizer)
   void reportDeviceMemoryLeaks();
   static void reportAllDeviceMemoryLeaks();
-#endif
 #endif
 
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
-  bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
+  HandleExportResult GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
+                                              unsigned long long flags);
 
   // Registers a memory object allocated via hostcall for later cleanup.
   void TrackHostcallMemory(amd::Memory* memory);

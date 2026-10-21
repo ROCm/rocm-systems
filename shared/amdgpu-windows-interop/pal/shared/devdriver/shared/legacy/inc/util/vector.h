@@ -339,7 +339,13 @@ namespace DevDriver
                 const size_t allocSize = sizeof(T) * newCapacity;
                 T* pData = static_cast<T*>(DD_MALLOC(allocSize, alignof(T), m_allocCb));
 
-                DD_ASSERT(pData != nullptr);
+                // If the allocation failed (e.g. out of memory), leave the vector unchanged rather than
+                // dereferencing the null pointer below.
+                if (pData == nullptr)
+                {
+                    DD_ASSERT_REASON("Failed to allocate memory in Vector::Reserve");
+                    return;
+                }
 
                 // If the struct is not a POD, then we need to construct objects
                 if (is_type_trivial() == false)
@@ -387,6 +393,14 @@ namespace DevDriver
         {
             // TODO: Reserve should return whether allocation failed
             Reserve(newSize);
+
+            // If Reserve failed to grow the capacity (out of memory), do NOT advance m_size past the
+            // real capacity - doing so would leave the vector reporting a size backed by no storage and
+            // subsequent element.
+            if (newSize > m_capacity)
+            {
+                return;
+            }
 
             // If the object isn't a POD and we are shrinking the size, we need to replace destroyed objects with
             // default constructed instances.

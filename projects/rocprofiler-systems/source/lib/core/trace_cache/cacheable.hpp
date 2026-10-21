@@ -16,10 +16,7 @@
 
 using namespace std::chrono_literals;
 
-namespace rocprofsys
-{
-
-namespace trace_cache
+namespace rocprofsys::trace_cache
 {
 
 struct cacheable_t
@@ -56,14 +53,17 @@ const auto get_metadata_filepath = [](const int& ppid, const int& pid) {
 
 template <typename Type>
     requires type_traits::supported_cache_type<Type>
-__attribute__((always_inline)) inline constexpr size_t
+__attribute__((always_inline)) constexpr size_t
 get_size(Type&& val)
 {
     using DecayedType = std::decay_t<Type>;
 
-    if constexpr(type_traits::is_string_view_v<DecayedType> ||
-                 type_traits::is_vector_v<DecayedType> ||
-                 type_traits::is_span_v<DecayedType>)
+    if constexpr(type_traits::is_string_view_v<DecayedType>)
+    {
+        return val.size() + sizeof(char) + sizeof(size_t);
+    }
+    else if constexpr(type_traits::is_vector_v<DecayedType> ||
+                      type_traits::is_span_v<DecayedType>)
     {
         using ContainerType     = std::decay_t<decltype(val)>;
         const size_t item_size  = sizeof(typename ContainerType::value_type);
@@ -85,7 +85,7 @@ get_size(Type&& val)
 }
 
 template <typename Type, typename... Types>
-__attribute__((always_inline)) inline constexpr size_t
+__attribute__((always_inline)) constexpr size_t
 get_size(Type&& val, Types&&... vals)
 {
     return get_size(std::forward<Type>(val)) + get_size(std::forward<Types>(vals)...);
@@ -100,9 +100,17 @@ store_value(const Type& value, std::uint8_t* buffer, size_t& position)
 
     auto* dest = buffer + position;
 
-    if constexpr(type_traits::is_string_view_v<DecayedType> ||
-                 type_traits::is_vector_v<DecayedType> ||
-                 type_traits::is_span_v<DecayedType>)
+    if constexpr(type_traits::is_string_view_v<DecayedType>)
+    {
+        const size_t data_size  = value.size();
+        const size_t entry_size = sizeof(size_t) + data_size + sizeof(char);
+        std::memcpy(dest, &data_size, sizeof(size_t));
+        std::memcpy(dest + sizeof(size_t), value.data(), data_size);
+        dest[entry_size - sizeof(char)] = '\0';
+        position += entry_size;
+    }
+    else if constexpr(type_traits::is_vector_v<DecayedType> ||
+                      type_traits::is_span_v<DecayedType>)
     {
         const size_t total_size  = get_size(value);
         const size_t header_size = sizeof(size_t);
@@ -150,13 +158,13 @@ parse_value(std::uint8_t*& data_pos, Type& arg)
         std::memcpy(&string_size, data_pos, sizeof(size_t));
         data_pos += sizeof(size_t);
         arg = std::string_view{ reinterpret_cast<const char*>(data_pos), string_size };
-        data_pos += string_size;
+        data_pos += string_size + sizeof(char);
     }
     else if constexpr(type_traits::is_vector_v<DecayedType> ||
                       type_traits::is_span_v<DecayedType>)
     {
         using ContainerType     = std::decay_t<decltype(arg)>;
-        using ItemType          = typename ContainerType::value_type;
+        using ItemType          = ContainerType::value_type;
         const size_t item_size  = sizeof(ItemType);
         size_t       total_size = 0;
         std::memcpy(&total_size, data_pos, sizeof(size_t));
@@ -202,5 +210,4 @@ parse_value(std::uint8_t*& data_pos, Type& arg, Types&... args)
 }
 
 }  // namespace utility
-}  // namespace trace_cache
-}  // namespace rocprofsys
+}  // namespace rocprofsys::trace_cache

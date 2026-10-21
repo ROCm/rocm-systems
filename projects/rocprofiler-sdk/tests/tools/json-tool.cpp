@@ -1739,6 +1739,17 @@ rocprofiler_timestamp_t fini_time            = 0;
 rocprofiler_thread_id_t main_tid             = 0;
 auto                    kfd_configure_status = ROCPROFILER_STATUS_SUCCESS;
 
+// KFD event tracing is legitimately unavailable both when the driver is too old
+// to report the events and when the KFD device node is absent altogether (e.g.
+// WSL2, which exposes /dev/dxg but not /dev/kfd). Neither is a tool failure, and
+// in both cases the KFD sections of the output must not be validated.
+bool
+kfd_tracing_unavailable(rocprofiler_status_t status)
+{
+    return status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL ||
+           status == ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+}
+
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
@@ -2326,7 +2337,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             page_migrate_event_buffer);
 
         constexpr auto message = "buffer tracing service for page migration configure";
-        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+        if(kfd_tracing_unavailable(kfd_configure_status))
             std::cerr << message
                       << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
                       << std::endl;
@@ -2343,7 +2354,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             kfd_page_fault_event_buffer);
 
         constexpr auto message = "buffer tracing service for page migration configure";
-        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+        if(kfd_tracing_unavailable(kfd_configure_status))
             std::cerr << message
                       << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
                       << std::endl;
@@ -2360,7 +2371,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                          kfd_queue_event_buffer);
 
         constexpr auto message = "buffer tracing service for page migration configure";
-        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+        if(kfd_tracing_unavailable(kfd_configure_status))
             std::cerr << message
                       << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
                       << std::endl;
@@ -2377,7 +2388,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             kfd_unmap_from_gpu_event_buffer);
 
         constexpr auto message = "buffer tracing service for page migration configure";
-        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+        if(kfd_tracing_unavailable(kfd_configure_status))
             std::cerr << message
                       << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
                       << std::endl;
@@ -2394,7 +2405,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             kfd_droped_events_event_buffer);
 
         constexpr auto message = "buffer tracing service for page migration configure";
-        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+        if(kfd_tracing_unavailable(kfd_configure_status))
             std::cerr << message
                       << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
                       << std::endl;
@@ -2411,7 +2422,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             kfd_page_migrate_records_buffer);
 
         constexpr auto message = "buffer tracing service for page migration configure";
-        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+        if(kfd_tracing_unavailable(kfd_configure_status))
             std::cerr << message
                       << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
                       << std::endl;
@@ -2428,7 +2439,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                          kfd_page_fault_records_buffer);
 
         constexpr auto message = "buffer tracing service for page migration configure";
-        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+        if(kfd_tracing_unavailable(kfd_configure_status))
             std::cerr << message
                       << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
                       << std::endl;
@@ -2445,7 +2456,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                          kfd_queue_records_buffer);
 
         constexpr auto message = "buffer tracing service for page migration configure";
-        if(kfd_configure_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+        if(kfd_tracing_unavailable(kfd_configure_status))
             std::cerr << message
                       << " failed: " << rocprofiler_get_status_string(kfd_configure_status)
                       << std::endl;
@@ -2804,14 +2815,13 @@ write_json(call_stack_t* _call_stack)
         namespace sdk           = ::rocprofiler::sdk;
         using JSONOutputArchive = cereal::MinimalJSONOutputArchive;
 
-        constexpr auto json_prec    = 32;
-        constexpr auto json_indent  = JSONOutputArchive::Options::IndentChar::space;
-        auto           json_opts    = JSONOutputArchive::Options{json_prec, json_indent, 1};
-        auto           json_ar      = JSONOutputArchive{*ofs, json_opts};
-        auto           buffer_names = sdk::get_buffer_tracing_names();
-        auto           callbk_names = sdk::get_callback_tracing_names();
-        auto           validate_kfd_events =
-            (kfd_configure_status != ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL);
+        constexpr auto json_prec           = 32;
+        constexpr auto json_indent         = JSONOutputArchive::Options::IndentChar::space;
+        auto           json_opts           = JSONOutputArchive::Options{json_prec, json_indent, 1};
+        auto           json_ar             = JSONOutputArchive{*ofs, json_opts};
+        auto           buffer_names        = sdk::get_buffer_tracing_names();
+        auto           callbk_names        = sdk::get_callback_tracing_names();
+        auto           validate_kfd_events = !kfd_tracing_unavailable(kfd_configure_status);
 
         json_ar.setNextName("rocprofiler-sdk-json-tool");
         json_ar.startNode();

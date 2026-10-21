@@ -8,6 +8,9 @@
 // upper-bound logic in src/graph/paths.cc (ncclMaxP2pNchannels,
 // ncclP2pChannelsUpperBound, ncclTopoComputeP2pChannels).
 //
+// Also the only fixture reaching the multi-node halving loop, so it covers the
+// maxP2pPeers divisor there. The saturate block is covered in ChannelDefaultsTests.cpp.
+//
 // Each case runs in an isolated process so ncclParamMaxP2pNChannels()'s cached
 // parse is fresh per env value (same pattern as TopoEnvPolicyTests).
 //
@@ -92,6 +95,8 @@ struct P2pChannelsComm
         comm->nChannels                 = nChannels;
         comm->p2pnChannelsPerPeer       = seedP2pPerPeer;
         comm->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
+        // Matches what paths.cc resolves an unset maxP2pPeers to. Override for a smaller set.
+        comm->p2pMaxPeers               = nRanks;
     }
 
     void initSingleNode(const char* gcn, int nRanks, int nChannels, int seedP2pPerPeer, int cu = 0)
@@ -347,6 +352,8 @@ TEST(P2pMaxNchannelsMultiNodeTests, Gfx950_2Node16Rank_UnsetEnv_CapsAt32)
             int p2pnChannels = -1;
             ASSERT_EQ(fixture.computeP2pChannels(&p2pnChannels), ncclSuccess);
             EXPECT_EQ(p2pnChannels, 32);
+            // divUp(16 peers, 2) = 8; 64 halves five times before 2*8 < 32.
+            EXPECT_EQ(fixture.comm->p2pnChannelsPerPeer, 2);
         });
 }
 
@@ -362,6 +369,8 @@ TEST(P2pMaxNchannelsMultiNodeTests, Gfx950_2Node16Rank_Explicit256_Skips32Cap)
             int p2pnChannels = -1;
             ASSERT_EQ(fixture.computeP2pChannels(&p2pnChannels), ncclSuccess);
             EXPECT_EQ(p2pnChannels, std::min(256, MAXCHANNELS));
+            // divUp(16 peers, 2) = 8; 128 halves three times before 16*8 < 256.
+            EXPECT_EQ(fixture.comm->p2pnChannelsPerPeer, 16);
         },
         {{"NCCL_MAX_P2P_NCHANNELS", "256"}});
 }
@@ -379,6 +388,196 @@ TEST(P2pMaxNchannelsMultiNodeTests, Gfx950_2Node8Rank_HalfSub_UnsetEnv_CapsAt16)
             int p2pnChannels = -1;
             ASSERT_EQ(fixture.computeP2pChannels(&p2pnChannels), ncclSuccess);
             EXPECT_EQ(p2pnChannels, 16);
+            // divUp(8 peers, 2) = 4; 32 halves four times before 2*4 < 16.
+            EXPECT_EQ(fixture.comm->p2pnChannelsPerPeer, 2);
+        });
+}
+
+// --- maxP2pPeers drives the multi-node per-peer reduction -------------------
+// Fewer declared peers stop the halving loop earlier, leaving more channels per peer.
+
+TEST(P2pMaxNchannelsMultiNodeTests, Gfx950_2Node16Rank_MaxP2pPeers4_KeepsHigherPerPeer)
+{
+    RUN_ISOLATED_TEST(
+        "Gfx950_2Node16Rank_MaxP2pPeers4_KeepsHigherPerPeer",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            P2pChannelsComm fixture;
+            fixture.initMultiNode("gfx950", /*nNodes=*/2, /*nRanks=*/16, /*localGpus=*/8,
+                                  /*nChannels=*/128, /*seedP2pPerPeer=*/64);
+            fixture.comm->p2pMaxPeers = 4;
+            int p2pnChannels = -1;
+            ASSERT_EQ(fixture.computeP2pChannels(&p2pnChannels), ncclSuccess);
+            EXPECT_EQ(p2pnChannels, 32) << "the peer count must not move the pool";
+            // divUp(4 peers, 2) = 2; 64 halves three times before 8*2 < 32.
+            // nRanks divisor would give 2; a skipped loop would give 32.
+            EXPECT_EQ(fixture.comm->p2pnChannelsPerPeer, 8);
+        });
+}
+
+TEST(P2pMaxNchannelsMultiNodeTests, Gfx950_2Node16Rank_MaxP2pPeersEqualsNRanks_MatchesDefault)
+{
+    RUN_ISOLATED_TEST(
+        "Gfx950_2Node16Rank_MaxP2pPeersEqualsNRanks_MatchesDefault",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            P2pChannelsComm fixture;
+            fixture.initMultiNode("gfx950", /*nNodes=*/2, /*nRanks=*/16, /*localGpus=*/8,
+                                  /*nChannels=*/128, /*seedP2pPerPeer=*/64);
+            fixture.comm->p2pMaxPeers = 16;
+            int p2pnChannels = -1;
+            ASSERT_EQ(fixture.computeP2pChannels(&p2pnChannels), ncclSuccess);
+            EXPECT_EQ(p2pnChannels, 32);
+            EXPECT_EQ(fixture.comm->p2pnChannelsPerPeer, 2) << "unset must behave as before";
+        });
+}
+
+TEST(P2pMaxNchannelsMultiNodeTests, Gfx950_2Node8Rank_HalfSub_MaxP2pPeers2_KeepsHigherPerPeer)
+{
+    RUN_ISOLATED_TEST(
+        "Gfx950_2Node8Rank_HalfSub_MaxP2pPeers2_KeepsHigherPerPeer",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            P2pChannelsComm fixture;
+            fixture.initMultiNode("gfx950", /*nNodes=*/2, /*nRanks=*/8, /*localGpus=*/4,
+                                  /*nChannels=*/64, /*seedP2pPerPeer=*/32);
+            fixture.comm->p2pMaxPeers = 2;
+            int p2pnChannels = -1;
+            ASSERT_EQ(fixture.computeP2pChannels(&p2pnChannels), ncclSuccess);
+            EXPECT_EQ(p2pnChannels, 16);
+            // divUp(2 peers, 2) = 1; 32 halves twice before 8 < 16. nRanks would give 2.
+            EXPECT_EQ(fixture.comm->p2pnChannelsPerPeer, 8);
+        });
+}
+
+// Both divisors compose: gfx1250 multi-node is saturate-on plus the halving loop, and is
+// where p2pnChannelsPerPeer reaches its new maximum. Saturate sets it to pool/maxP2pPeers,
+// then divUp(2, NCCL_MAX_DEV_WORK_P2P_PER_BATCH) == 1 leaves the loop with nothing to do.
+TEST(P2pMaxNchannelsMultiNodeTests, Gfx1250_2Node_SaturateAndHalvingLoopCompose)
+{
+    RUN_ISOLATED_TEST(
+        "Gfx1250_2Node_SaturateAndHalvingLoopCompose",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            ::unsetenv("RCCL_SATURATE_P2P_NCHANNELS");  // on by default for gfx1250
+            P2pChannelsComm fixture;
+            fixture.initMultiNode("gfx1250", /*nNodes=*/2, /*nRanks=*/16, /*localGpus=*/8,
+                                  /*nChannels=*/64, /*seedP2pPerPeer=*/8);
+            fixture.comm->p2pMaxPeers = 2;
+            int p2pnChannels = -1;
+            ASSERT_EQ(fixture.computeP2pChannels(&p2pnChannels), ncclSuccess);
+            // Saturate gives pow2Down(pool / 2); the loop then finds ppp * 1 < pool.
+            EXPECT_EQ(fixture.comm->p2pnChannelsPerPeer, p2pnChannels / 2);
+            EXPECT_LE(fixture.comm->p2pnChannelsPerPeer, p2pnChannels);
+        });
+}
+
+// Negative control: a whole-device single-node comm reaches neither halving loop, so the peer
+// count is inert. Partitioned comms do reach the single-node one -- see
+// Gfx950_SingleNode8Rank_MloPartFitsPeersInOneRound.
+TEST(P2pMaxNchannelsMultiNodeTests, SingleNode_MaxP2pPeersDoesNotReachHalvingLoop)
+{
+    RUN_ISOLATED_TEST(
+        "SingleNode_MaxP2pPeersDoesNotReachHalvingLoop",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            int perPeer[2] = {-1, -1};
+            const int peers[2] = {8, 2};
+            for(int i = 0; i < 2; i++)
+            {
+                P2pChannelsComm fixture;
+                fixture.initSingleNode("gfx950", /*nRanks=*/8, /*nChannels=*/64,
+                                       /*seedP2pPerPeer=*/32);
+                fixture.comm->p2pMaxPeers = peers[i];
+                int p2pnChannels = -1;
+                ASSERT_EQ(fixture.computeP2pChannels(&p2pnChannels), ncclSuccess);
+                perPeer[i] = fixture.comm->p2pnChannelsPerPeer;
+            }
+            EXPECT_EQ(perPeer[0], perPeer[1]);
+        });
+}
+
+// --- hasMloPart drives the single-node per-peer reduction -------------------
+// Across compute partitions the on-package fabric is the bottleneck the network is above
+// multi-node, so the per-peer count comes down until the declared peers fit one round of the
+// pool. Three legs: many peers reduce it, few peers leave it alone, and a whole-device comm
+// is untouched whatever its peer count.
+
+TEST(P2pMaxNchannelsSingleNodeTests, Gfx950_SingleNode8Rank_MloPartFitsPeersInOneRound)
+{
+    RUN_ISOLATED_TEST(
+        "Gfx950_SingleNode8Rank_MloPartFitsPeersInOneRound",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            struct
+            {
+                bool mloPart;
+                int  peers;
+                int  expectedPerPeer;
+            } cases[] = {
+                // divUp(8 peers, 2) = 4; 64 halves twice before 16*4 stops exceeding the pool.
+                {true, 8, 16},
+                // divUp(2 peers, 2) = 1, so a workload declaring few peers keeps the whole pool.
+                {true, 2, 64},
+                // Gate off: a whole-device comm keeps what it had, peer count notwithstanding.
+                {false, 8, 64},
+            };
+            for(const auto& c : cases)
+            {
+                P2pChannelsComm fixture;
+                fixture.initSingleNode("gfx950", /*nRanks=*/8, /*nChannels=*/64,
+                                       /*seedP2pPerPeer=*/32);
+                fixture.comm->hasMloPart  = c.mloPart;
+                fixture.comm->p2pMaxPeers = c.peers;
+                int p2pnChannels          = -1;
+                ASSERT_EQ(fixture.computeP2pChannels(&p2pnChannels), ncclSuccess);
+                EXPECT_EQ(p2pnChannels, 64) << "the peer count must not move the pool";
+                EXPECT_EQ(fixture.comm->p2pnChannelsPerPeer, c.expectedPerPeer)
+                    << "hasMloPart=" << c.mloPart << " peers=" << c.peers;
+            }
+        });
+}
+
+// A pinned nChannelsPerNetPeer is what makes the net-bound branch decline to run, so the else
+// is reached multi-node as well as single-node. The MLOPart reduction must not take that as its
+// cue: ncclTopoGetNchannels() hands the pinned value back as the count for every remote peer, so
+// halving here would quietly undo the pin the branch above stepped aside for. Sizing against the
+// on-package fabric is a single-node argument; multi-node the network is the bottleneck.
+//
+// Both legs pin the knob, so neither reaches the net-bound branch, and the per-peer count must
+// come out the same whether or not the ranks are partitions. Without the nNodes test the
+// partitioned leg is halved and the two diverge.
+TEST(P2pMaxNchannelsMultiNodeTests, MultiNode_PinnedNetPeerChannelsSurviveMloPart)
+{
+    RUN_ISOLATED_TEST(
+        "MultiNode_PinnedNetPeerChannelsSurviveMloPart",
+        []()
+        {
+            ::unsetenv("NCCL_MAX_P2P_NCHANNELS");
+            int perPeer[2] = {-1, -1};
+            int pool[2]    = {-1, -1};
+            const bool mloPart[2] = {true, false};
+            for(int i = 0; i < 2; i++)
+            {
+                P2pChannelsComm fixture;
+                fixture.initMultiNode("gfx950", /*nNodes=*/2, /*nRanks=*/16, /*localGpus=*/8,
+                                      /*nChannels=*/64, /*seedP2pPerPeer=*/32);
+                fixture.comm->hasMloPart = mloPart[i];
+                // Enough declared peers that the loop would bite if it ran.
+                fixture.comm->p2pMaxPeers = 16;
+                fixture.comm->config.nChannelsPerNetPeer = 32;
+                ASSERT_EQ(fixture.computeP2pChannels(&pool[i]), ncclSuccess);
+                perPeer[i] = fixture.comm->p2pnChannelsPerPeer;
+            }
+            EXPECT_EQ(perPeer[0], perPeer[1])
+                << "a pinned nChannelsPerNetPeer was reduced on the partitioned comm";
+            EXPECT_EQ(pool[0], pool[1]);
         });
 }
 

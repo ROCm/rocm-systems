@@ -3,11 +3,11 @@
 
 /// @file vop3_cvt_f64_simd_correctness_test.cpp
 /// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3 form
-/// of the six mixed-width f64<->32-bit conversions on CDNA4. Their scalar
-/// generated bodies drop the abs/neg/omod/clamp modifier reads (verified
-/// per-op), so the VOP3 form is bit-identical to the VOP1 form and reuses the
-/// existing try_execute_cvt_{f64_to_b32, b32_to_f64}_simd glue via a `_vop3 ->
-/// _vop1` fallback in simd_probe_line. The process runs one fixed execute mode
+/// of the six mixed-width f64<->32-bit conversions on CDNA4. Unmodified VOP3
+/// encodings are bit-identical to their VOP1 forms and reuse the existing
+/// try_execute_cvt_{f64_to_b32, b32_to_f64}_simd glue via a `_vop3 -> _vop1`
+/// fallback in simd_probe_line. V_CVT_F64_F32 takes this shortcut only when its
+/// source and destination modifiers are inactive. The process runs one fixed execute mode
 /// (RJ_FORCE_SCALAR, immutable); each case runs TWICE in the same process -- once
 /// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC
 /// -- and the destination word pairs are asserted equal with EXPECT_EQ
@@ -86,9 +86,10 @@ const std::array<uint64_t, 16> kF64In = {{
     0x0000000000000000ull, 0x8000000000000000ull, 0x3FF0000000000000ull, 0xBFF0000000000000ull,
     0x400921FB54442D18ull, 0xC00921FB54442D18ull, 0x7FF0000000000000ull, 0xFFF0000000000000ull,
     0x7FF8000000000000ull, 0xFFF4000000000000ull, 0x0000000000000001ull, 0x8000000000000001ull,
-    0x7FEFFFFFFFFFFFFFull, 0x41E0000000000000ull, // 2^31
-    0x41F0000000000000ull,                        // 2^32
-    0xC1E0000000000001ull,                        // -2^31 - eps
+    0x7FEFFFFFFFFFFFFFull,
+    0x41E0000000000000ull, // 2^31
+    0x41F0000000000000ull, // 2^32
+    0xC1E0000000000001ull, // -2^31 - eps
 }};
 const std::array<uint32_t, 16> kB32In = {{
     0x00000000u,
@@ -154,7 +155,7 @@ struct Fixture {
 
   std::array<uint64_t, WF_SIZE> run(Instruction *inst, const CvtCase &c, uint64_t exec) {
     seed_inputs(c, exec);
-    cu->execute_instruction(inst, *wf);
+    EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane)

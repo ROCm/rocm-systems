@@ -146,8 +146,9 @@ typedef struct rj_vm_gpu_info_t {
 /// @param[out] vm The newly created VM handle.
 /// @retval ROCJITSU_STATUS_SUCCESS VM was created successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_INVALID_FILE The JSON file could not be opened.
-/// @retval ROCJITSU_STATUS_ERROR Parsing or construction failed.
+/// @retval ROCJITSU_STATUS_INVALID_FILE The file could not be opened or read,
+/// config parsing or validation failed, or an exception was caught during VM creation.
+/// @retval ROCJITSU_STATUS_ERROR The loaded configuration does not contain a SoC.
 RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm);
 
 /// @brief Create a VM from a JSON configuration string.
@@ -156,8 +157,9 @@ RJ_API_EXPORT rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode,
 /// @param[in] mode VM creation mode (DEFAULT, LOCAL, or DAEMON).
 /// @param[out] vm The newly created VM handle.
 /// @retval ROCJITSU_STATUS_SUCCESS VM was created successfully.
-/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_ERROR Parsing or construction failed.
+/// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL, config parsing
+/// or validation failed, or an exception was caught during VM creation.
+/// @retval ROCJITSU_STATUS_ERROR The loaded configuration does not contain a SoC.
 RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode,
                                                    rj_vm_t **vm);
 
@@ -169,10 +171,12 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_
 /// through the C++ PluginLoader, so a C-API host (e.g. the mirage daemon) can
 /// enable plugins without linking the simulator's C++ ABI. Call once after
 /// rj_vm_create / rj_vm_create_from_string and before rj_vm_run. A config with
-/// no `plugins` attaches an empty group (near-zero overhead). This function must
-/// complete before the first rj_vm_step or rj_vm_run call and must not overlap
-/// either call; that ordering keeps plugin initialization and replacement
-/// outside the simulation-callback interval.
+/// no `plugins` attaches an empty group (near-zero overhead). Plugin load
+/// failures are best-effort unless the config sets the top-level
+/// `require_all_plugins` boolean to true. This function must complete before the
+/// first rj_vm_step or rj_vm_run call and must not overlap either call; that
+/// ordering keeps plugin initialization and replacement outside the
+/// simulation-callback interval.
 /// @param[in] vm VM handle from rj_vm_create / rj_vm_create_from_string.
 /// @param[in] config_json The full config-file JSON (same text used to create
 ///            the VM). Never NULL.
@@ -183,7 +187,8 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_
 ///            dynamic-linker search path (the interposer/local path).
 /// @retval ROCJITSU_STATUS_SUCCESS Plugins were configured (or none declared).
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL.
-/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC or configuration failed.
+/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC, configuration failed, or a
+///                               required plugin could not be loaded.
 RJ_API_EXPORT rj_status_t rj_vm_load_plugins(rj_vm_t *vm, const char *config_json,
                                              const char *plugin_dir);
 
@@ -222,7 +227,7 @@ RJ_API_EXPORT void rj_vm_destroy(rj_vm_t *vm);
 /// on success.
 /// @retval ROCJITSU_STATUS_SUCCESS Step completed successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT @p vm is NULL.
-/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC.
+/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC or execution failed.
 /// @retval ROCJITSU_STATUS_UNSUPPORTED The VM has multiple engine partitions.
 RJ_API_EXPORT rj_status_t rj_vm_step(rj_vm_t *vm, int *active);
 

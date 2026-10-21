@@ -18,6 +18,8 @@
 #include <hip/hip_runtime.h>
 #include <comm.h>
 #include <ce_coll.h>
+#include <dev_runtime.h>
+#include <rccl_common.h>
 
 #include <cstdint>
 #include <vector>
@@ -96,10 +98,10 @@ protected:
         debugGuard_.reset();
     }
 
-    // Batch buffer for ncclPrepUCSync: capacity = NCCL_CE_SYNC_OPS_PER_RANK_UC * nRanks.
+    // Batch buffer for ncclPrepUCSync: capacity is based on the LSA-local team.
     std::vector<hipStreamBatchMemOpParams> makePrepSyncBatch() const
     {
-        size_t batchSize = NCCL_CE_SYNC_OPS_PER_RANK_UC * ceComm->nRanks;
+        size_t batchSize = NCCL_CE_SYNC_OPS_PER_RANK_UC * ceComm->devrState.lsaSize;
         return std::vector<hipStreamBatchMemOpParams>(batchSize);
     }
 
@@ -108,6 +110,17 @@ protected:
     {
         if(ceComm->nRanks < n)
             GTEST_SKIP() << "Need >= " << n << " MPI ranks";
+    }
+
+    // Skip if the LSA team has fewer than n ranks. Assertions scoped to the LSA
+    // domain must guard on it: 2 nodes x 1 rank gives nRanks=2 but lsaSize=1,
+    // which would otherwise satisfy requireMinRanks(2) and then assert on an
+    // empty batch.
+    void requireMinLsaRanks(int n)
+    {
+        if(ceComm->devrState.lsaSize < n)
+            GTEST_SKIP() << "Need >= " << n << " ranks in the LSA team, have "
+                         << ceComm->devrState.lsaSize;
     }
 
     // Allocate a batch, call ncclPrepUCSync once, and return both for inspection.
@@ -274,7 +287,7 @@ TEST_F(CeInternalMPITest, FiniAfterZeroCollectives)
 // external --timeout (same pattern as the CE dispatch tests above).
 TEST_F(CeInternalMPITest, GraphThenEagerAllReduceDoesNotHang)
 {
-    // CE AllReduce range is [NCCL_CE_AR_MIN_MSG_BYTES, NCCL_CE_AR_MAX_MSG_BYTES];
+    // CE AllReduce range is [NCCL_CE_AR_MIN_MSG_BYTES, RCCL_CE_AR_2SHOT_MAX_BYTES];
     // 8MiB of float32 sits comfortably inside it.
     constexpr size_t kElem = (8ull * 1024 * 1024) / sizeof(float);
     const int nRanks = ceComm->nRanks;
@@ -357,22 +370,25 @@ TEST_F(CeInternalMPITest, PrepUCSyncIncrementsCeSeqNum)
     }
 }
 
-// SYNC-02: ncclPrepUCSync produces exactly 2*(nRanks-1) ops (one WRITE +
-//          one WAIT per remote rank).
+// SYNC-02: ncclPrepUCSync produces exactly 2*(lsaSize-1) ops (one WRITE +
+//          one WAIT per remote LSA rank). On a single node lsaSize == nRanks.
 TEST_F(CeInternalMPITest, PrepUCSyncOpCount)
 {
     requireMinRanks(2);
-    const int nRanks = ceComm->nRanks;
+    requireMinLsaRanks(2);
+    const int lsaSize = ceComm->devrState.lsaSize;
     auto [batch, opIdx] = callPrepUCSync();
-    EXPECT_EQ(opIdx, static_cast<size_t>(2 * (nRanks - 1)))
-        << "expected 2*(nRanks-1) ops for nRanks=" << nRanks;
+    EXPECT_EQ(opIdx, static_cast<size_t>(2 * (lsaSize - 1)))
+        << "expected 2*(lsaSize-1) ops for lsaSize=" << lsaSize
+        << " nRanks=" << ceComm->nRanks;
 }
 
 // SYNC-03: No WRITE_VALUE op targets the local rank's own ready slot.
 TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
 {
     requireMinRanks(2);
-    const int rank = ceComm->rank;
+    requireMinLsaRanks(2);
+    const int lsaRank = ceComm->devrState.lsaSelf;
 
     auto [batch, opIdx] = callPrepUCSync();
 
@@ -381,7 +397,7 @@ TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
     // on the host-side pointer is valid for comparison with batch op addresses,
     // which are also expressed as host-visible hipDeviceptr_t values.
     uint32_t*      readyPtrs = reinterpret_cast<uint32_t*>(ceComm->ceColl.baseUCSymReadyPtr);
-    hipDeviceptr_t selfReady = reinterpret_cast<hipDeviceptr_t>(&readyPtrs[rank]);
+    hipDeviceptr_t selfReady = reinterpret_cast<hipDeviceptr_t>(&readyPtrs[lsaRank]);
     int selfTargets = 0;
     for(size_t i = 0; i < opIdx; ++i)
     {
@@ -390,7 +406,7 @@ TEST_F(CeInternalMPITest, PrepUCSyncNoSelfTargetedOp)
             ++selfTargets;
     }
     EXPECT_EQ(selfTargets, 0)
-        << "A WRITE_VALUE op targeted rank " << rank << "'s own ready slot";
+        << "A WRITE_VALUE op targeted LSA rank " << lsaRank << "'s own ready slot";
 }
 
 // SYNC-04: ceSeqNum wraps correctly from UINT32_MAX → 0.
@@ -449,6 +465,51 @@ TEST_F(CeInternalMPITest, SeqNumWrapAroundCollective)
                           << " expected=" << errExp << " got=" << errAct;
         }
     }
+}
+
+// BATCH-01: ncclCeFreeBatchOpsParams is idempotent. Hierarchical AllGather frees
+// per-chunk scratch inside its chunk loop and once more at function exit, both on
+// the same object, so a release that does not clear the pointers double-frees.
+// Single-node, so this pins the invariant wherever the suite runs.
+TEST_F(CeInternalMPITest, FreeBatchOpsParamsIsIdempotent)
+{
+    ncclCeBatchOpsParams params{};
+    ASSERT_EQ(ncclCeInitBatchOpsParams(&params, 4), ncclSuccess);
+    ASSERT_NE(params.srcs, nullptr);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    ASSERT_NE(params.attrs, nullptr);
+    ASSERT_NE(params.attrIdxs, nullptr);
+#endif
+
+    // ncclCeInitBatchOpsParams already leaves the counters and the sync flag at
+    // 0/false, so drive them off those values first. Otherwise the assertions
+    // below would pass without the release ever clearing anything.
+    params.numOps         = 4;
+    params.intraBatchSync = true;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    params.numAttrs = 4;
+#endif
+
+    ncclCeFreeBatchOpsParams(&params);
+    ASSERT_EQ(params.srcs, nullptr);
+    ASSERT_EQ(params.dsts, nullptr);
+    ASSERT_EQ(params.sizes, nullptr);
+    EXPECT_EQ(params.numOps, 0);
+    EXPECT_FALSE(params.intraBatchSync);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    // Also allocated by ncclCeInitBatchOpsParams, so the release has to clear them
+    // too or the second free in ncclHierCeAllGather passes dangling pointers.
+    ASSERT_EQ(params.attrs, nullptr);
+    ASSERT_EQ(params.attrIdxs, nullptr);
+    EXPECT_EQ(params.numAttrs, 0);
+#endif
+
+    // Must not double-free.
+    ncclCeFreeBatchOpsParams(&params);
+    EXPECT_EQ(params.srcs, nullptr);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    EXPECT_EQ(params.attrs, nullptr);
+#endif
 }
 
 // ===========================================================================
@@ -621,6 +682,248 @@ TEST_F(CeInternalMPITest, AlltoAllvMissingSizesReturnsInvalidUsage)
     ncclCeCollArgs args{};
     args.sizes = nullptr;
     EXPECT_EQ(ncclCeAlltoAllv(ceComm, &args, getActiveStream()), ncclInvalidUsage);
+}
+
+// ===========================================================================
+// CeAllReduceLsaGuard – ncclCeAllReduce addresses peers by world rank, which is
+// only the LSA rank when one LSA team spans the comm. These run on comms where
+// it does not: 2+ nodes, or one node with NCCL_LSA_TEAM_SIZE below the rank
+// count. CE init is not a precondition (it never happens on these comms).
+// ===========================================================================
+
+class CeAllReduceLsaTestBase : public MPITestBase
+{
+protected:
+    ncclComm* comm_ = nullptr;
+
+    void SetUp() override
+    {
+        MPITestBase::SetUp();
+        if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
+            return;
+        if(!validateTestPrerequisites(/*min_processes=*/2))
+            GTEST_SKIP() << "Requires 2+ ranks";
+
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+        comm_ = static_cast<ncclComm*>(getActiveCommunicator());
+        ASSERT_NE(comm_, nullptr);
+    }
+
+    void TearDown() override
+    {
+        comm_ = nullptr;
+        MPITestBase::TearDown();
+    }
+
+    // Rank-unique send data (rank + 1) and a sentinel in recv, so a partial
+    // write or a stale result is visible.
+    void fillBuffers(void* send, void* recv, size_t count)
+    {
+        ASSERT_EQ(hipSuccess, ceFillRankScalarFloat(send, count, comm_->rank));
+        ASSERT_EQ(hipSuccess, hipMemsetD32(reinterpret_cast<hipDeviceptr_t>(recv), kSentinelBits, count));
+    }
+
+    bool recvStillSentinel(void* recv, size_t count)
+    {
+        std::vector<uint32_t> host(count);
+        if(hipMemcpy(host.data(), recv, count * sizeof(uint32_t), hipMemcpyDeviceToHost) != hipSuccess)
+            return false;
+        for(uint32_t v : host)
+            if(v != kSentinelBits)
+                return false;
+        return true;
+    }
+
+    bool allReduceSumCorrect(void* recv, size_t count)
+    {
+        const int nRanks = comm_->nRanks;
+        const float expected = static_cast<float>(nRanks) * static_cast<float>(nRanks + 1) / 2.0f;
+        size_t errIdx; float errExp, errAct;
+        return RCCLTestHelpers::verifyBufferData<float>(
+            recv, count, [expected](size_t) { return expected; }, 0, 1e-3, &errIdx, &errExp, &errAct);
+    }
+
+    bool ceAllReduceSelected(const void* send, void* recv, size_t count)
+    {
+        int algo = 0, proto = 0, nCh = 0;
+        ncclResult_t res = rcclGetCollImplInfo(comm_, ncclFuncAllReduce, count, ncclFloat32, ncclSum,
+                                               send, recv, /*graphCapturing=*/0, &algo, &proto, &nCh);
+        return res == ncclSuccess && (algo == RCCL_CE_REGISTERED || algo == RCCL_CE_2SHOT);
+    }
+
+    static constexpr uint32_t kSentinelBits = 0x7fc0dead; // a NaN float, never an AllReduce sum
+    // One staging-slot chunk: a single-step call.
+    static constexpr size_t kSingleStepBytes = 64 * 1024;
+    // 256 MiB total gives every shard several chunks, so totalSteps > 1 and the
+    // persistent reduce kernel would be queued before Phase 1.
+    static constexpr size_t kPipelinedBytes = 256ull * 1024 * 1024;
+};
+
+class CeAllReduceLsaGuardTest : public CeAllReduceLsaTestBase
+{
+protected:
+    void SetUp() override
+    {
+        CeAllReduceLsaTestBase::SetUp();
+        if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
+            return;
+        // The LSA size is comm-wide (NCCL_LSA_TEAM_SIZE and node layout), so
+        // every rank takes the same branch.
+        if(ncclDevrIsOneLsaTeam(comm_))
+            GTEST_SKIP() << "One LSA team spans the comm; run on 2+ nodes or set "
+                            "NCCL_LSA_TEAM_SIZE below the rank count";
+    }
+};
+
+// The positive side of the guard: one node, one LSA team spanning the comm.
+class CeAllReduceSpanningLsaTest : public CeAllReduceLsaTestBase
+{
+protected:
+    void SetUp() override
+    {
+        CeAllReduceLsaTestBase::SetUp();
+        if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
+            return;
+        if(!ncclDevrIsOneLsaTeam(comm_))
+            GTEST_SKIP() << "LSA team does not span the comm; run on one node without NCCL_LSA_TEAM_SIZE";
+    }
+};
+
+// LSA-01: a direct ncclCeAllReduce on a comm whose LSA team does not span it
+// returns ncclInvalidUsage on every rank before staging or any launch, for both
+// the single-step and the pipelined geometry. Without the guard the pipelined
+// call leaves a persistent reduce kernel waiting on the stream.
+TEST_F(CeAllReduceLsaGuardTest, RejectsBeforeStagingOrLaunch)
+{
+    using namespace RCCLTestGuards;
+    for(size_t bytes : {kSingleStepBytes, kPipelinedBytes})
+    {
+        SCOPED_TRACE(testing::Message() << "bytes=" << bytes);
+        const size_t count = ceAllReduceAlignedCount(bytes / sizeof(float), comm_->nRanks);
+        ASSERT_GT(count, 0u);
+
+        void* send = nullptr;
+        void* recv = nullptr;
+        ASSERT_EQ(hipSuccess, hipMalloc(&send, count * sizeof(float)));
+        DeviceBufferAutoGuard sendGuard(send);
+        ASSERT_EQ(hipSuccess, hipMalloc(&recv, count * sizeof(float)));
+        DeviceBufferAutoGuard recvGuard(recv);
+        ASSERT_NO_FATAL_FAILURE(fillBuffers(send, recv, count));
+        ASSERT_EQ(hipSuccess, hipDeviceSynchronize());
+
+        const ncclResult_t ret = ncclCeAllReduce(comm_, send, recv, count, ncclFloat32, ncclSum,
+                                                 getActiveStream(), /*recvWin=*/nullptr,
+                                                 /*profilerArgs=*/nullptr);
+        EXPECT_TRUE(MPIHelpers::allRanksTrue(ret == ncclInvalidUsage))
+            << "rank " << comm_->rank << " got " << ncclGetErrorString(ret)
+            << "; every rank must reject a split LSA team";
+        EXPECT_EQ(comm_->ceColl.ceARTmpBuf, nullptr) << "guard must run before staging is allocated";
+        EXPECT_EQ(hipSuccess, hipStreamQuery(getActiveStream())) << "guard must run before any launch";
+        EXPECT_TRUE(recvStillSentinel(recv, count)) << "rejected call wrote into recvbuff";
+    }
+}
+
+// LSA-02: after the rejection the comm and stream are still usable. A public
+// AllReduce on the same stream completes with the correct sum, which would
+// hang behind a leftover persistent reduce kernel.
+TEST_F(CeAllReduceLsaGuardTest, CommUsableAfterRejection)
+{
+    using namespace RCCLTestGuards;
+    const size_t count = ceAllReduceAlignedCount(kPipelinedBytes / sizeof(float), comm_->nRanks);
+
+    void* send = nullptr;
+    void* recv = nullptr;
+    ASSERT_EQ(hipSuccess, hipMalloc(&send, count * sizeof(float)));
+    DeviceBufferAutoGuard sendGuard(send);
+    ASSERT_EQ(hipSuccess, hipMalloc(&recv, count * sizeof(float)));
+    DeviceBufferAutoGuard recvGuard(recv);
+    ASSERT_NO_FATAL_FAILURE(fillBuffers(send, recv, count));
+
+    ASSERT_TRUE(MPIHelpers::allRanksTrue(
+        ncclCeAllReduce(comm_, send, recv, count, ncclFloat32, ncclSum, getActiveStream(), nullptr, nullptr) ==
+        ncclInvalidUsage));
+
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(send, recv, count, ncclFloat32, ncclSum, getActiveCommunicator(),
+                                             getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    EXPECT_TRUE(MPIHelpers::allRanksTrue(allReduceSumCorrect(recv, count)))
+        << "AllReduce after the rejected CE call produced a wrong result";
+}
+
+// LSA-03: the public API never reaches CE AllReduce on a split LSA team, even
+// with CE forced. Registered CE is rejected by ncclCeAvailable, and 2-shot needs
+// a staging buffer that only a CE AllReduce allocates, so it must stay null.
+// Each size is called twice so the second call would see staging from the first.
+TEST_F(CeAllReduceLsaGuardTest, PublicAllReduceNeverSelectsCe)
+{
+    using namespace RCCLTestGuards;
+    if(!isCeAllReduceDispatchConfigured() ||
+       MPIHelpers::getEnvParam("RCCL_FORCE_CE_ALLREDUCE", 0) != 1)
+        GTEST_SKIP() << "Needs the forced CE AllReduce env: NCCL_CTA_POLICY=2, NCCL_LOCAL_REGISTER=0, "
+                        "NCCL_CUMEM_ENABLE=1, RCCL_CE_ALLREDUCE=1, RCCL_FORCE_CE_ALLREDUCE=1";
+
+    for(size_t bytes : {kSingleStepBytes, size_t(8) * 1024 * 1024, kPipelinedBytes})
+    {
+        SCOPED_TRACE(testing::Message() << "bytes=" << bytes);
+        const size_t count = ceAllReduceAlignedCount(bytes / sizeof(float), comm_->nRanks);
+
+        void* send = nullptr;
+        void* recv = nullptr;
+        ASSERT_EQ(hipSuccess, hipMalloc(&send, count * sizeof(float)));
+        DeviceBufferAutoGuard sendGuard(send);
+        ASSERT_EQ(hipSuccess, hipMalloc(&recv, count * sizeof(float)));
+        DeviceBufferAutoGuard recvGuard(recv);
+
+        EXPECT_FALSE(MPIHelpers::anyRankTrue(ceAllReduceSelected(send, recv, count)))
+            << "selector reports CE AllReduce on a split LSA team";
+        for(int call = 0; call < 2; ++call)
+        {
+            ASSERT_NO_FATAL_FAILURE(fillBuffers(send, recv, count));
+            ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(send, recv, count, ncclFloat32, ncclSum,
+                                                     getActiveCommunicator(), getActiveStream()));
+            ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+            EXPECT_TRUE(MPIHelpers::allRanksTrue(allReduceSumCorrect(recv, count))) << "call " << call;
+        }
+    }
+    EXPECT_EQ(comm_->ceColl.ceARTmpBuf, nullptr) << "a CE AllReduce ran and allocated staging";
+}
+
+// LSA-04: on a spanning LSA team, forced CE on plain buffers is selected before
+// staging exists, allocates it, and every call returns the correct sum.
+TEST_F(CeAllReduceSpanningLsaTest, ForcedUnregisteredAllReduceUsesCe)
+{
+    using namespace RCCLTestGuards;
+    if(!isCeAllReduceDispatchConfigured() ||
+       MPIHelpers::getEnvParam("RCCL_FORCE_CE_ALLREDUCE", 0) != 1)
+        GTEST_SKIP() << "Needs the forced CE AllReduce env: NCCL_CTA_POLICY=2, NCCL_LOCAL_REGISTER=0, "
+                        "NCCL_CUMEM_ENABLE=1, RCCL_CE_ALLREDUCE=1, RCCL_FORCE_CE_ALLREDUCE=1";
+    ASSERT_EQ(comm_->ceColl.ceARTmpBuf, nullptr) << "staging must not exist before the first CE AllReduce";
+
+    for(size_t bytes : {kSingleStepBytes, size_t(8) * 1024 * 1024})
+    {
+        SCOPED_TRACE(testing::Message() << "bytes=" << bytes);
+        const size_t count = ceAllReduceAlignedCount(bytes / sizeof(float), comm_->nRanks);
+
+        void* send = nullptr;
+        void* recv = nullptr;
+        ASSERT_EQ(hipSuccess, hipMalloc(&send, count * sizeof(float)));
+        DeviceBufferAutoGuard sendGuard(send);
+        ASSERT_EQ(hipSuccess, hipMalloc(&recv, count * sizeof(float)));
+        DeviceBufferAutoGuard recvGuard(recv);
+
+        for(int call = 0; call < 2; ++call)
+        {
+            SCOPED_TRACE(testing::Message() << "call " << call);
+            EXPECT_TRUE(MPIHelpers::allRanksTrue(ceAllReduceSelected(send, recv, count)))
+                << "selector does not report CE AllReduce on a spanning LSA team";
+            ASSERT_NO_FATAL_FAILURE(fillBuffers(send, recv, count));
+            ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(send, recv, count, ncclFloat32, ncclSum,
+                                                     getActiveCommunicator(), getActiveStream()));
+            ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+            EXPECT_TRUE(MPIHelpers::allRanksTrue(allReduceSumCorrect(recv, count)));
+            EXPECT_NE(comm_->ceColl.ceARTmpBuf, nullptr) << "the CE AllReduce did not allocate staging";
+        }
+    }
 }
 
 // ===========================================================================

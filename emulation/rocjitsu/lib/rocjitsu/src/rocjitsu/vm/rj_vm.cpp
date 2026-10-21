@@ -12,12 +12,14 @@
 #include "rocjitsu/vm/soc.h"
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "util/diagnostic.h"
 #include "util/log.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
-#include "linux/uapi/kfd_ioctl.h"
+#include "uapi/linux/kfd_ioctl.h"
 RJ_DIAGNOSTIC_POP
 
+#include <algorithm>
 #include <cerrno>
 #include <cstring>
 #include <memory>
@@ -54,6 +56,7 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
         partition_socs.push_back(extra_soc);
     }
   }
+  loaded.apply_cpu_dispatch_threads();
   // XCD partitions (config num_threads): run each XCD on its own engine
   // partition/thread so the XCDs execute concurrently across their separate L2s.
   const uint32_t num_threads_requested = loaded.engine_config.num_threads;
@@ -63,7 +66,6 @@ rj_status_t create_from_loaded(config::LoadedConfig &loaded, rj_vm_mode_t mode, 
     util::Logger::warn("num_threads clamped: requested=", num_threads_requested,
                        ", effective=", num_threads_used);
   loaded.engine_config.num_threads = num_threads_used;
-
   bool serve = (mode == RJ_VM_MODE_LOCAL || mode == RJ_VM_MODE_DAEMON);
   bool daemon = (mode == RJ_VM_MODE_DAEMON);
   if (serve) {
@@ -163,6 +165,14 @@ bool reconstruct_embedded_pointers(uint32_t cmd, void *arg, size_t arg_size, siz
     return entry_size == 0 || count <= inline_size / entry_size;
   };
   switch (cmd) {
+  case AMDKFD_IOC_SET_CU_MASK: {
+    auto *args = static_cast<kfd_ioctl_set_cu_mask_args *>(arg);
+    if (args->num_cu_mask == 0 || args->num_cu_mask % 32 != 0 ||
+        !has_entries(std::min(args->num_cu_mask, 1024u) / 32, sizeof(uint32_t)))
+      return false;
+    args->cu_mask_ptr = reinterpret_cast<uint64_t>(extra);
+    break;
+  }
   case AMDKFD_IOC_WAIT_EVENTS: {
     auto *args = static_cast<kfd_ioctl_wait_events_args *>(arg);
     if (!has_entries(args->num_events, sizeof(kfd_event_data)))
@@ -247,8 +257,13 @@ rj_status_t rj_vm_create(const char *json_path, rj_vm_mode_t mode, rj_vm_t **vm)
   if (!json_path || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
-    auto loaded = config::load_config(json_path, rocjitsu::kEmbeddedSchema);
-    return create_from_loaded(loaded, mode, vm);
+    util::StringDiagnostic diagnostic;
+    auto loaded = config::load_config(json_path, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    if (loaded.failed()) {
+      util::Logger::warn("rj_vm_create failed: ", diagnostic.message());
+      return ROCJITSU_STATUS_INVALID_FILE;
+    }
+    return create_from_loaded(loaded.value(), mode, vm);
   } catch (const std::exception &e) {
     util::Logger::warn("rj_vm_create failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_FILE;
@@ -259,8 +274,14 @@ rj_status_t rj_vm_create_from_string(const char *json, rj_vm_mode_t mode, rj_vm_
   if (!json || !vm)
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   try {
-    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
-    return create_from_loaded(loaded, mode, vm);
+    util::StringDiagnostic diagnostic;
+    auto loaded =
+        config::load_config_from_string(json, rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+    if (loaded.failed()) {
+      util::Logger::warn("rj_vm_create_from_string failed: ", diagnostic.message());
+      return ROCJITSU_STATUS_INVALID_ARGUMENT;
+    }
+    return create_from_loaded(loaded.value(), mode, vm);
   } catch (const std::exception &e) {
     util::Logger::warn("rj_vm_create_from_string failed: ", e.what());
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
@@ -316,6 +337,8 @@ rj_status_t rj_vm_step(rj_vm_t *vm, int *active) {
     return ROCJITSU_STATUS_UNSUPPORTED;
 
   bool any_active = vm->engine->step();
+  if (vm->engine->exit_code() != 0)
+    return ROCJITSU_STATUS_ERROR;
   if (active)
     *active = any_active ? 1 : 0;
   return ROCJITSU_STATUS_SUCCESS;
@@ -350,7 +373,12 @@ rj_status_t rj_vm_save_checkpoint(const rj_vm_t *vm, const char *path, uint64_t 
   if (!vm->soc)
     return ROCJITSU_STATUS_ERROR;
   try {
-    config::save_checkpoint(path, *vm->soc, tick, vm->engine_config);
+    auto engine_config = vm->engine_config;
+    if (engine_config.num_threads == vm->loaded.execution_threads.engines)
+      engine_config.num_threads = vm->loaded.requested_engine_threads;
+    config::save_checkpoint(path, *vm->soc, tick, engine_config, vm->loaded.cpu_dispatch_threads,
+                            vm->loaded.cpu_thread_budget, vm->loaded.thread_allocations,
+                            vm->loaded.legacy_auto_dispatch, vm->loaded.async_helper_threads);
     return ROCJITSU_STATUS_SUCCESS;
   } catch (const std::exception &) {
     return ROCJITSU_STATUS_ERROR;

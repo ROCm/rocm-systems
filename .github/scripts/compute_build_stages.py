@@ -19,7 +19,8 @@ Stage selection is delegated to TheRock's build topology (the single source of
 truth), imported from the TheRock checkout so this script owns no dependency
 math and cannot drift from the actual build graph:
 
-    BuildTopology.get_stages_for_projects(projects)
+    BuildTopology.resolve_alias_to_artifact(project)  # project -> artifact
+    BuildTopology.get_stages_for_artifacts(artifacts)
         -> the minimal set of stages needed to BUILD the changed projects
            (impacted stages plus their upstream build dependencies).
 
@@ -34,8 +35,14 @@ Usage:
         --run-all-tests false \
         --therock-path _therock
 
-Output (to $GITHUB_OUTPUT), written as ``build_stages=<value>``:
-    a comma-separated allowlist of stages to build (empty string = build all)
+It also emits ``windows_amdgpu_families=none`` when every changed project is
+disabled on Windows in the topology, so TheRock skips the Windows build. Any
+other case emits an empty value, which keeps the workflow's default families.
+
+Output (to $GITHUB_OUTPUT):
+    build_stages=<value>: a comma-separated allowlist of stages to build
+        (empty string = build all)
+    windows_amdgpu_families=<value>: "none" to skip Windows, else empty
 """
 
 import argparse
@@ -62,10 +69,8 @@ FULL_BUILD_PROJECTS = {
     # Legacy profiler bucket used THEROCK_ENABLE_ALL=ON.
     "aqlprofile",
     "rocprofiler",
-    "rocprofiler-compute",
     "rocprofiler-register",
     "rocprofiler-sdk",
-    "rocprofiler-systems",
     "roctracer",
 }
 
@@ -122,16 +127,23 @@ def compute_build_stages(
         logger.warning(f"Topology load failed ({e}) -> build all stages")
         return []
 
-    # Fail safe on ANY unrecognized project. get_stages_for_projects() silently
+    # Fail safe on ANY unrecognized project. get_stages_for_artifacts() silently
     # ignores names it cannot resolve, so a mixed input like "rdc,unknown" would
     # otherwise return only rdc's stages and wrongly narrow the build. Require
     # every changed project to resolve to an artifact before narrowing.
-    unknown = [p for p in projects if topology.resolve_project_to_artifact(p) is None]
+    #
+    # NOTE: TheRock removed get_stages_for_projects()/resolve_project_to_artifact()
+    # after the previously pinned ref. We resolve projects -> artifacts with
+    # resolve_alias_to_artifact() (which understands artifact names, subproject
+    # aliases from artifact_subprojects.json, split_databases, and BUILD_TOPOLOGY
+    # source_paths) and then map artifacts -> stages with get_stages_for_artifacts().
+    resolved = {p: topology.resolve_alias_to_artifact(p) for p in projects}
+    unknown = [p for p, art in resolved.items() if art is None]
     if unknown:
         logger.info(f"Unrecognized project(s) {sorted(unknown)} -> build all stages")
         return []
 
-    required = set(topology.get_stages_for_projects(projects))
+    required = set(topology.get_stages_for_artifacts(list(resolved.values())))
     if not required:
         logger.info("No stages mapped for changed projects -> build all stages")
         return []
@@ -148,14 +160,63 @@ def compute_build_stages(
     return build_stages
 
 
-def set_github_output(build_stages: List[str]) -> None:
-    value = ",".join(build_stages)
+def compute_windows_families(
+    changed_projects: str,
+    therock_path: str,
+    run_all_tests: bool = False,
+) -> str:
+    """Return "none" when every changed project is disabled on Windows, else "".
+
+    An empty value keeps the workflow's default Windows families.
+    """
+    if run_all_tests:
+        return ""
+
+    projects = _parse_projects(changed_projects)
+    if not projects:
+        return ""
+
+    therock_build_tools_str = os.fspath((Path(therock_path) / "build_tools").resolve())
+    if therock_build_tools_str not in sys.path:
+        sys.path.insert(0, therock_build_tools_str)
+
+    try:
+        from _therock_utils.build_topology import get_topology
+
+        topology = get_topology()
+    except Exception as e:  # noqa: BLE001 - never let this analysis break CI
+        logger.warning(f"Topology load failed ({e}) -> keep Windows")
+        return ""
+
+    for project in projects:
+        artifact = topology.resolve_alias_to_artifact(project)
+        if artifact is None:
+            logger.info(f"Unrecognized project {project} -> keep Windows")
+            return ""
+        if "windows" not in topology.artifacts[artifact].disable_platforms:
+            logger.info(f"{project} builds on Windows -> keep Windows")
+            return ""
+
+    logger.info(
+        f"All changed projects are Linux-only {sorted(projects)} -> skip Windows"
+    )
+    return "none"
+
+
+def set_github_output(
+    build_stages: List[str], windows_families: str, changed_projects: str
+) -> None:
+    lines = [
+        f"build_stages={','.join(build_stages)}",
+        f"windows_amdgpu_families={windows_families}",
+        f"changed_projects={changed_projects}",
+    ]
     output_file = os.environ.get("GITHUB_OUTPUT", "")
     if not output_file:
-        print(f"build_stages={value}")
+        print("\n".join(lines))
         return
     with open(output_file, "a") as f:
-        f.write(f"build_stages={value}\n")
+        f.write("".join(f"{line}\n" for line in lines))
 
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
@@ -181,12 +242,31 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
-    build_stages = compute_build_stages(
-        changed_projects=args.changed_projects,
-        therock_path=args.therock_path,
-        run_all_tests=str(args.run_all_tests).strip().lower() == "true",
+    changed_projects = ",".join(
+        sorted(
+            {
+                (
+                    "projects/amdsmi"
+                    if project.strip() == "shared/cuid"
+                    else project.strip()
+                )
+                for project in args.changed_projects.split(",")
+                if project.strip()
+            }
+        )
     )
-    set_github_output(build_stages)
+    run_all_tests = str(args.run_all_tests).strip().lower() == "true"
+    build_stages = compute_build_stages(
+        changed_projects=changed_projects,
+        therock_path=args.therock_path,
+        run_all_tests=run_all_tests,
+    )
+    windows_families = compute_windows_families(
+        changed_projects=changed_projects,
+        therock_path=args.therock_path,
+        run_all_tests=run_all_tests,
+    )
+    set_github_output(build_stages, windows_families, changed_projects)
     return 0
 
 

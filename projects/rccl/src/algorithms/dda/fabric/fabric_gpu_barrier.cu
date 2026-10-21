@@ -5,7 +5,6 @@
  * See LICENSE.txt for license information.
  ************************************************************************/
 
-#include <cassert>
 #include <memory>
 #include <vector>
 
@@ -19,10 +18,11 @@
 namespace dda::common {
 
 /* static */ __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>
-FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* bootstrap,
-                                struct ncclMemManager* manager) {
-  if (nRanks <= 0 || nRanks > kDdaMaxNranks) {
-    WARN("FabricGpuBarrier::mallocAndInit: nRanks %d out of range (1..%d)", nRanks, kDdaMaxNranks);
+FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* bootstrap, struct ncclMemManager* manager,
+                                DdaKernelParams params) {
+  if (nRanks <= 0 || nRanks > kDdaMaxNranks || selfRank < 0 || selfRank >= nRanks || nBlocks <= 0) {
+    WARN("FabricGpuBarrier::mallocAndInit: invalid geometry nRanks=%d, selfRank=%d, nBlocks=%d",
+         nRanks, selfRank, nBlocks);
     return {nullptr, FabricGpuBarrier{}};
   }
 
@@ -96,7 +96,7 @@ FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* boo
     return {nullptr, FabricGpuBarrier{}};
   }
 
-  FabricGpuBarrier barrier(nBlocks, selfRank, nRanks, static_cast<FlagType**>(peerFlagsDev->get()));
+  FabricGpuBarrier barrier(nBlocks, selfRank, nRanks, static_cast<FlagType**>(peerFlagsDev->get()), params);
 
   auto resources = std::make_unique<FabricGpuBarrierResources>();
   resources->fabricMemHandler = std::move(memHandler);

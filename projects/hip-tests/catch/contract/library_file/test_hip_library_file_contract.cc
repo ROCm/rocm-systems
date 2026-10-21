@@ -7,6 +7,7 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hiprtc.h>
 #include <hip_test_common.hh>
+#include <hip_test_temp_path.hh>
 
 #include <cstdio>
 #include <fstream>
@@ -68,15 +69,15 @@ bool CompileLibrarySource(std::vector<char>& code) {
   return true;
 }
 
-// Compiles the library source and writes it to a unique per-test file in the
-// current working directory, returning the path. Skips when HIPRTC is
-// unavailable. The caller must remove the file when done.
+// Compile to a temp file: an installed test tree may be read-only.
+// Caller removes the returned path.
 std::string WriteCodeObjectFile(const char* suffix) {
   std::vector<char> code;
   if (!CompileLibrarySource(code)) {
     HIP_SKIP_TEST("HIPRTC compilation is not supported by this device/runtime path.");
   }
-  const std::string path = std::string("hip-contract-library-file-") + suffix + ".code";
+  const std::string path =
+      hip_test::TempPath("hip-contract-library-file-" + std::string(suffix), ".code");
   std::ofstream out(path, std::ios::binary);
   REQUIRE(out.is_open());
   out.write(code.data(), static_cast<std::streamsize>(code.size()));

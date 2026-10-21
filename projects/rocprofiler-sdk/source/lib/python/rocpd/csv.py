@@ -2,7 +2,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -326,6 +326,32 @@ def write_graph_launch_csv(importData, config) -> None:
     write_sql_query_to_csv(importData, config, query, "graph_launch")
 
 
+def write_hip_event_csv(importData, config) -> None:
+
+    agent_id = build_agent_id_string(config.agent_index_value)
+
+    query = f"""
+        SELECT
+            guid,
+            'HIP_EVENT' AS Kind,
+            name AS Operation,
+            {agent_id} AS Agent_Id,
+            queue_id,
+            stream_id,
+            tid AS Thread_Id,
+            hip_event_handle AS Event_Handle,
+            source_queue_id AS Source_Queue_Id,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp,
+            duration AS Duration
+        FROM "hip_events"
+        ORDER BY
+            guid ASC, start ASC, end DESC
+    """
+    write_sql_query_to_csv(importData, config, query, "hip_event")
+
+
 def write_memory_allocation_csv(importData, config) -> None:
 
     agent_id = build_agent_id_string(config.agent_index_value)
@@ -429,7 +455,15 @@ def write_spm_counters_csv(importData, config) -> None:
         "vgpr_count",
         "accum_vgpr_count",
         "sgpr_count",
-        "counter_name || '[XCC: ' || xcc || ', SE: ' || shader_engine || ', Instance: ' || instance || ']' AS counter_name",
+        (
+            "counter_name || '[XCC: ' || COALESCE(xcc, '') || "
+            "', Instance: ' || COALESCE(instance, '') || "
+            "', SE: ' || COALESCE(shader_engine, '') || "
+            "', SA: ' || COALESCE(shader_array, '') || "
+            "', WGP: ' || COALESCE(wgp, '') || ']' AS counter_name"
+            if "spm_counter_location" in importData.supported_features
+            else "counter_name || '[XCC: ' || xcc || ', SE: ' || shader_engine || ', Instance: ' || instance || ']' AS counter_name"
+        ),
         "value AS Counter_Value",
         "timestamp AS Timestamp",
     ]
@@ -507,6 +541,9 @@ def write_csv(importData, config):
 
     if "spm_counters" in importData.supported_features:
         write_spm_counters_csv(importData, config)
+
+    if "hip_event" in importData.supported_features:
+        write_hip_event_csv(importData, config)
 
 
 def execute(input, config=None, **kwargs):

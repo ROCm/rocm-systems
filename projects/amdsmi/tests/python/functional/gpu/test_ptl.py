@@ -96,7 +96,3 @@ class TestGpuPtl(unittest.TestCase):
             self.fail("PTL set did not take effect:\n  " + "\n  ".join(mismatches))
         if tested == 0:
             self.skipTest("No PTL-capable GPUs found")
-
-
-if __name__ == "__main__":
-    unittest.main()

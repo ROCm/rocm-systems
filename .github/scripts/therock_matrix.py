@@ -8,7 +8,9 @@ subtree_to_project_map = {
     "projects/amdsmi": "amdsmi",  # amdsmi changes run amdsmi + its downstream dependents
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
-    "projects/cuid": "rdc",
+    "projects/hrr": "hrr",
+    # amd-smi compiles shared/cuid in-tree when no installed amdcuid is found.
+    "shared/cuid": "amdsmi",
     "projects/hipfile": "storage_libs",
     "projects/hip": "runtimes",
     "projects/hip-tests": "runtimes",
@@ -34,7 +36,11 @@ subtree_to_project_map = {
 
 project_map = {
     "core": {
-        "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_PROFILER=ON"],
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_CORE=ON",
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_PROFILER=ON",
+        ],
         "projects_to_test": "amdsmi, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",  # will run sanity test to cover rocminfo
     },
     # amdsmi changes fan out to its downstream dependents across rocm-systems
@@ -96,6 +102,16 @@ project_map = {
     "runtimes": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],
         "projects_to_test": "hip-tests, rocrtst, rocprofiler-sdk, rocr-debug-agent, rocgdb-cpu, rocgdb-gpu, rocgdb-corefile",
+    },
+    # HRR changes require a blocking build of the runtime and HRR test binaries,
+    # but GPU execution is handled separately on datacenter/nightly runners.
+    "hrr": {
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_CORE=ON",
+            "-DTHEROCK_BUILD_TESTING=ON",
+        ],
+        "projects_to_test": "",
     },
     "all": {
         "cmake_options": ["-DTHEROCK_ENABLE_ALL=ON"],

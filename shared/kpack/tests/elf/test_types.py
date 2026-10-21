@@ -9,6 +9,8 @@ from rocm_kpack.elf.types import (
     R_X86_64_RELATIVE,
     R_X86_64_64,
     EM_X86_64,
+    EM_RISCV,
+    R_RISCV_RELATIVE,
 )
 
 
@@ -121,6 +123,33 @@ class TestArchConfig:
         assert isinstance(config, ArchConfig)
         assert config.page_size == 0x1000
         assert config.r_relative == R_X86_64_RELATIVE
+
+    def test_riscv64_config(self):
+        """get_arch_config returns correct values for riscv64.
+
+        e_machine and the RELATIVE relocation type are fixed by the ELF
+        gABI / RISC-V psABI; the page size is the 4 KiB base page used by
+        Linux on riscv64.
+        """
+        assert EM_RISCV == 243
+        assert R_RISCV_RELATIVE == 3
+        config = get_arch_config(EM_RISCV)
+        assert isinstance(config, ArchConfig)
+        assert config.page_size == 0x1000
+        assert config.r_relative == R_RISCV_RELATIVE
+
+    def test_riscv64_relative_relocation_target(self):
+        """A riscv64 RELATIVE reloc resolves via the riscv64 arch config."""
+        r_relative = get_arch_config(EM_RISCV).r_relative
+        rela = RelaEntry(
+            r_offset=0x1000,
+            r_info=RelaEntry.make_info(sym=0, type_=R_RISCV_RELATIVE),
+            r_addend=0x5000,
+        )
+        assert rela.get_target_address(r_relative=r_relative) == 0x5000
+        assert rela.targets_range(0x5000, 0x1000, r_relative=r_relative) is True
+        # The x86_64 default must not misclassify a riscv64 relocation.
+        assert rela.get_target_address() is None
 
     def test_unknown_machine_raises(self):
         """get_arch_config raises ValueError for unsupported machine types."""

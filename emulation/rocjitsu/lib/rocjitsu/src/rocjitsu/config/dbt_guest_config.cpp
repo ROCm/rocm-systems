@@ -3,6 +3,8 @@
 
 #include "rocjitsu/config/dbt_guest_config.h"
 
+#include "rocjitsu/vm/amdgpu/pci/gpu_generation_registry.h"
+
 #include "rocjitsu/config/config_common.h"
 #include "rocjitsu/kmd/linux/rpc.h"
 
@@ -18,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -99,7 +102,8 @@ void validate_dbt_simulator_device_limits(const DbtGuestConfig &guest,
                              std::to_string(simulator_device.wave_front_size) + ")");
 }
 
-DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
+util::FailureOr<DbtGuestConfig> dbt_guest_from_fb(const fb::DbtGuestConfig *guest,
+                                                  util::DiagnosticEmitter emit_error) {
   DbtGuestConfig config;
   if (guest == nullptr)
     return config;
@@ -115,7 +119,13 @@ DbtGuestConfig dbt_guest_from_fb(const fb::DbtGuestConfig *guest) {
     config.host.simulator_config_path = guest->simulator_config()->str();
   config.log_level = guest->log_level();
   config.signal_backtrace = guest->signal_backtrace();
-  config.guest_device = kfd_device_from_fb(guest->guest_device(), "dbt_guest.guest_device");
+  auto guest_device =
+      kfd_device_from_fb(guest->guest_device(), "dbt_guest.guest_device", emit_error);
+  if (guest_device.failed())
+    return util::Result::failure();
+  config.guest_device = std::move(guest_device).value();
+  if (config.guest_device.present)
+    (void)resolve_gpu_generation_topology(config.guest_device);
   config.guest_revision = silicon_revision_from_fb(guest->guest_revision());
   config.host_revision = silicon_revision_from_fb(guest->host_revision());
   validate_guest_device_geometry(config.guest_device);
@@ -137,14 +147,20 @@ std::string resolve_dbt_host_config_path(const std::string &dbt_config_path,
   return (dbt_path.parent_path() / host_path).lexically_normal().string();
 }
 
-DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
-  const std::string json = read_config_file(path);
+util::FailureOr<DbtGuestConfig>
+load_dbt_guest_config_from_file(const std::string &path, util::DiagnosticEmitter emit_error) {
+  auto json = read_config_file(path, emit_error);
+  if (json.failed())
+    return util::Result::failure();
   bool has_dbt_guest = false;
-  DbtGuestConfig parsed = with_parsed_simulation_config_json(
-      json, rocjitsu::kEmbeddedSchema, [&has_dbt_guest](const fb::SimulationConfig *config) {
+  auto parsed = with_parsed_simulation_config_json(
+      json.value(), rocjitsu::kEmbeddedSchema, emit_error,
+      [&has_dbt_guest, emit_error](const fb::SimulationConfig *config) {
         has_dbt_guest = config->dbt_guest() != nullptr;
-        return dbt_guest_from_fb(config->dbt_guest());
+        return dbt_guest_from_fb(config->dbt_guest(), emit_error);
       });
+  if (parsed.failed())
+    return util::Result::failure();
   if (!has_dbt_guest)
     return parsed;
 
@@ -152,8 +168,10 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
   // DBT guest block selects execution behavior and must reject misspelled keys
   // instead of silently falling back to the hardware backend.
   return with_parsed_simulation_config_json(
-      json, rocjitsu::kEmbeddedSchema,
-      [](const fb::SimulationConfig *config) { return dbt_guest_from_fb(config->dbt_guest()); },
+      json.value(), rocjitsu::kEmbeddedSchema, emit_error,
+      [emit_error](const fb::SimulationConfig *config) {
+        return dbt_guest_from_fb(config->dbt_guest(), emit_error);
+      },
       false);
 }
 
@@ -220,8 +238,13 @@ std::optional<DbtRuntimeConfigHandoff> parse_dbt_runtime_config_handoff(std::str
   return DbtRuntimeConfigHandoff{std::string(config_path), std::move(resolved_gpu_id)};
 }
 
-DbtGuestConfig load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHandoff &handoff) {
-  DbtGuestConfig config = load_dbt_guest_config_from_file(handoff.config_path);
+util::FailureOr<DbtGuestConfig>
+load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHandoff &handoff,
+                                   util::DiagnosticEmitter emit_error) {
+  auto loaded = load_dbt_guest_config_from_file(handoff.config_path, emit_error);
+  if (loaded.failed())
+    return util::Result::failure();
+  DbtGuestConfig config = std::move(loaded).value();
   if (handoff.resolved_gpu_id) {
     apply_resolved_dbt_host_gpu_id(config, *handoff.resolved_gpu_id);
   } else if (config.enabled && config.host.gpu_id == 0) {
@@ -231,7 +254,8 @@ DbtGuestConfig load_dbt_guest_config_from_handoff(const DbtRuntimeConfigHandoff 
   return config;
 }
 
-std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
+util::FailureOr<std::optional<DbtGuestConfig>>
+load_dbt_guest_config_from_runtime_config(util::DiagnosticEmitter emit_error) {
   // Try the handoff tiers in priority order, opening the first that exists:
   //   1. $ROCJITSU_INVOCATION_DIR/config_path — the launcher exports this dir before
   //      execvp so every descendant (incl. grandchildren via ctest, whose PID differs)
@@ -262,7 +286,10 @@ std::optional<DbtGuestConfig> load_dbt_guest_config_from_runtime_config() {
   std::optional<DbtRuntimeConfigHandoff> handoff = parse_dbt_runtime_config_handoff(contents);
   if (!handoff)
     return std::nullopt;
-  return load_dbt_guest_config_from_handoff(*handoff);
+  auto loaded = load_dbt_guest_config_from_handoff(*handoff, emit_error);
+  if (loaded.failed())
+    return util::Result::failure();
+  return std::optional<DbtGuestConfig>(std::move(loaded).value());
 }
 
 } // namespace config

@@ -99,7 +99,7 @@
 namespace rocr {
 
 namespace AMD {
-const uint64_t CP_DMA_DATA_TRANSFER_CNT_MAX = (1 << 26);
+const uint64_t CP_DMA_DATA_TRANSFER_CNT_MAX = (1 << 26) - 1;
 
 GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xnack_mode,
                    uint32_t index, core::DriverType driver_type)
@@ -124,6 +124,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
           [this](void* base, size_t size, bool large) { ReleaseScratch(base, size, large); }),
       trap_handler_tma_region_(NULL),
       rec_sdma_eng_override_(false),
+      sdma_native_(node_props.NativeSDMASupported),
       pcs_hosttrap_data_(),
       pcs_stochastic_data_(),
       xgmi_cpu_gpu_(false),
@@ -131,7 +132,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       extended_aql_dispatch_supported_(false),
       workgroup_clusters_supported_(false),
       kern_cluster_max_dim_({ INT32_MAX, UINT16_MAX, UINT16_MAX }),
-      cluster_max_dim_({ 1, 1, 1 }) {
+      cluster_max_dim_({ 1, 1, 1 }),
+      persisting_l2_cache_size_(0) {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
@@ -230,7 +232,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
 
   assert(isa != nullptr && "ISA registry inconsistency.");
 
-  // A0 silicon requires the "strict" ISA variant. Re-point A0 devices to the 
+  // A0 silicon requires the "strict" ISA variant. Re-point A0 devices to the
   // strict variant by name so the reported ISA and code-object
   // selection target the A0-safe ISA. Later steppings keep the base target.
   if (properties_.Capability.ui32.ASICRevision == 0 &&
@@ -466,8 +468,12 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
       (assemble_target == AssembleTarget::AQL ? sizeof(amd_kernel_code_t) : 0);
   code_buf_size = AlignUp(header_size + asic_shader->size, 0x1000);
 
+  // NonPaged: GPU-executed code, and a trap handler that can itself fault turns one fault into a
+  // retry storm.
   code_buf = system_allocator()(code_buf_size, 0x1000,
-    core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateExecutableBlitKernelObject);
+                                core::MemoryRegion::AllocateExecutable |
+                                    core::MemoryRegion::AllocateExecutableBlitKernelObject |
+                                    core::MemoryRegion::AllocateNonPaged);
   assert(code_buf != NULL && "Code buffer allocation failed");
 
   memset(code_buf, 0, code_buf_size);
@@ -619,8 +625,8 @@ void GpuAgent::InitScratchPool() {
 
   void* scratch_base = nullptr;
   hsa_status_t err = driver().AllocateScratchMemory(node_id(), max_scratch_len, &scratch_base);
-  assert(err == HSA_STATUS_SUCCESS && "AllocateScratchMemory failed");
-  assert(IsMultipleOf(scratch_base, 0x1000) &&
+  debug_warning(err == HSA_STATUS_SUCCESS && "AllocateScratchMemory failed");
+  assert((err != HSA_STATUS_SUCCESS || IsMultipleOf(scratch_base, 0x1000)) &&
          "Scratch base is not page aligned!");
 
   scratch_pool_. ~SmallHeap();
@@ -700,6 +706,15 @@ void GpuAgent::InitCacheList() {
   for (size_t i = 0; i < caches_.size(); i++)
     caches_[i].reset(new core::Cache(deviceName + " L" + std::to_string(cache_props_[i].CacheLevel),
                                      cache_props_[i].CacheLevel, cache_props_[i].CacheSize));
+}
+
+size_t GpuAgent::GetMaxPersistingL2CacheSize() const {
+  for (const auto& cache : cache_props_) {
+    if ((cache.CacheLevel == 2) && (cache.PersistingCacheSizeMax)) {
+      return cache.PersistingCacheSizeMax;
+    }
+  }
+  return 0;
 }
 
 void GpuAgent::InitDerivedCuid() {
@@ -874,7 +889,7 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
       break;
     case 11:
     case 12:
-      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG() && !sdma_native_) {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV4());
       } else if (supported_isas()[0]->GetMinorVersion() >= 5) {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV6());
@@ -1269,7 +1284,7 @@ hsa_status_t GpuAgent::DmaCopy(void* dst, core::Agent& dst_agent,
   }
 
   // For non-gang H2D/D2H copies, bypass the gang lock entirely.
-  // H2D uses BlitHostToDev, D2H uses BlitDevToHost. Since they use separate engines 
+  // H2D uses BlitHostToDev, D2H uses BlitDevToHost. Since they use separate engines
   // and separate blit objects, no serialization needed.
   if (gang_factor == 1) {
     const bool is_h2d = (src_agent.device_type() == core::Agent::kAmdCpuDevice);
@@ -2121,8 +2136,9 @@ hsa_status_t GpuAgent::DmaCopyBatchFallback(
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC:
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST:
   case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
-    // No shader-blit equivalent for broadcast/swap/indirect yet; these are the
-    // slots for the 1-to-N / swap / indirect blit shaders once added. Until
+  case HSA_AMD_MEMORY_COPY_OP_RECT:
+    // No shader-blit equivalent for broadcast/swap/indirect/rect yet; these are the
+    // slots for the 1-to-N / swap / indirect / rect blit shaders once added. Until
     // then, reject under SDMA=0 (same as the SDMA fan-out path would), leaving
     // the completion signal untouched as above.
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -2220,6 +2236,14 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
       status = DmaCopyIndirect(op, dep_signals);
       break;
+    case HSA_AMD_MEMORY_COPY_OP_RECT: {
+      const bool from_host =
+          core::Agent::Convert(op.src_agent)->device_type() == core::Agent::kAmdCpuDevice;
+      status =
+          DmaCopyRect(op.rect_src, op.rect_dst, op.range_list, op.num_entries,
+                      from_host ? hsaHostToDevice : hsaDeviceToDevice, dep_signals, out_signal);
+      break;
+    }
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
@@ -2231,9 +2255,10 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset,
-                                   const hsa_pitched_ptr_t* src, const hsa_dim3_t* src_offset,
-                                   const hsa_dim3_t* range, hsa_amd_copy_direction_t dir,
+hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
+                                   const hsa_amd_memory_copy_rect_ptr_t* dsts,
+                                   const hsa_dim3_t* ranges, uint16_t num_rects,
+                                   hsa_amd_copy_direction_t dir,
                                    std::vector<core::Signal*>& dep_signals,
                                    core::Signal& out_signal) {
   if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
@@ -2254,8 +2279,8 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_pitched_ptr_t* dst, const hsa_dim3_
   }
 
   BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((*blit).get());
-  hsa_status_t stat = sdmaBlit->SubmitCopyRectCommand(dst, dst_offset, src, src_offset, range,
-                                                      dep_signals, out_signal);
+  hsa_status_t stat =
+      sdmaBlit->SubmitCopyRectCommand(srcs, dsts, ranges, num_rects, dep_signals, out_signal);
 
   return stat;
 }
@@ -2500,7 +2525,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         }
       }
       // Fallback for when KFD is returning zero.
-      *((uint32_t*)value) = 64;
+      *((uint32_t*)value) = 256;
       break;
     case HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT:
       *((uint32_t*)value) =
@@ -2728,6 +2753,23 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       // GPU agents can participate in host memory DMA-BUF export if the system supports virtual memory APIs
       *static_cast<bool*>(value) = core::Runtime::runtime_singleton_->VirtualMemApiSupported();
       break;
+  case HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE:{
+        *((size_t*)value) = persisting_l2_cache_size_;
+        break;
+    }
+  case HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE: {
+        *((size_t*)value) = GetMaxPersistingL2CacheSize();
+        break;
+      }
+    case HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH:
+      *static_cast<bool*>(value) = PcieStoresNeedFlush();
+      break;
+    case HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED:
+      *static_cast<bool*>(value) = HostAtomicsSupported();
+      break;
+    case HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED:
+      *static_cast<bool*>(value) = SignalHintsSupported();
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
@@ -2735,6 +2777,56 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
   return HSA_STATUS_SUCCESS;
 }
 
+// CP FW writes amd_queue_t::caps only once it has processed a packet on the queue, so the first
+// query runs an empty barrier-AND on the utility queue and reads the bit there.
+bool GpuAgent::SignalHintsSupported() const {
+  std::call_once(signal_hints_once_, [this]() {
+    core::unique_signal_ptr completion(new core::DefaultSignal(1));
+    if (!completion->IsValid()) return;
+    core::Queue* queue = (*queues_[QueueUtility]).get();
+    hsa_queue_t& hsa_queue = queue->amd_queue_.hsa_queue;
+    const uint64_t index = queue->AddWriteIndexAcqRel(1);
+    while (index - queue->LoadReadIndexRelaxed() >= hsa_queue.size) {
+      os::YieldThread();
+    }
+    auto* packet = reinterpret_cast<hsa_barrier_and_packet_t*>(hsa_queue.base_address) +
+                   (index & (hsa_queue.size - 1));
+    memset(reinterpret_cast<uint8_t*>(packet) + sizeof(uint32_t), 0,
+           sizeof(*packet) - sizeof(uint32_t));
+    packet->completion_signal = core::Signal::Convert(completion.get());
+    atomic::Store(reinterpret_cast<uint32_t*>(packet),
+                  uint32_t(HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE),
+                  std::memory_order_release);
+    core::Signal::Convert(hsa_queue.doorbell_signal)->StoreRelease(index);
+    completion->WaitAcquire(HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
+    signal_hints_supported_ = (queue->amd_queue_.caps & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
+  });
+  return signal_hints_supported_;
+}
+
+hsa_status_t GpuAgent::SetAgentAttribute(hsa_agent_info_t attribute, void* value) {
+  const size_t attribute_u = static_cast<size_t>(attribute);
+
+  switch (attribute_u) {
+    case HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE: {
+      const size_t requested = *((size_t*)value);
+
+      // Validate against hardware maximum
+      const size_t maxSize = GetMaxPersistingL2CacheSize();
+      if (requested > maxSize) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+      hsa_status_t status = driver().SetPersistingCacheSize(node_id(), requested);
+
+      if (status != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      persisting_l2_cache_size_ = requested;
+      break;
+    }
+    default:
+      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      break;
+  }
+  return HSA_STATUS_SUCCESS;
+}
 hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, uint64_t flags,
                                    core::HsaEventCallback event_callback, void* data,
                                    uint32_t private_segment_size, uint32_t group_segment_size,
@@ -3195,7 +3287,7 @@ hsa_status_t GpuAgent::SetAsyncScratchThresholds(size_t use_once_limit) {
 
 void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_time_t& time) {
   uint64_t start, end;
-  signal->GetRawTs(false, start, end);
+  signal->GetRawTs(start, end);
 
   if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
     debug_print("Signal %p time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
@@ -3213,7 +3305,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
 
 void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_time_t& time) {
   uint64_t start, end;
-  signal->GetRawTs(true, start, end);
+  signal->GetRawTs(start, end);
 
   if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
     debug_print("Signal %p async copy time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
@@ -3790,6 +3882,8 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   // Detect if we need PM4 fallback (non-large-BAR systems cannot use CPU atomics on VRAM)
   pcs_data->use_pm4_fallback = !LargeBarEnabled();
 
+  if (is_gfx1250()) pcs_data->use_pm4_fallback = true;
+
   // Allocate cache-line aligned per-XCC data array
   // Each per_xcc_pcs_data_t is 64-byte aligned to prevent false sharing between XCCs
   pcs_data->xcc_data = new per_xcc_pcs_data_t[pcs_data->num_xcc]();
@@ -3798,12 +3892,12 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     pcs_data->xcc_data[i].host_write_offset = 0;
     pcs_data->xcc_data[i].host_read_offset = 0;
     pcs_data->xcc_data[i].lost_sample_count.store(0, std::memory_order_relaxed);
-    pcs_data->xcc_data[i].which_buffer = 0;
+    pcs_data->xcc_data[i].which_buffer.store(0, std::memory_order_relaxed);
     pcs_data->xcc_data[i].thread = nullptr;
     pcs_data->xcc_data[i].done_sig0.handle = 0;
     pcs_data->xcc_data[i].done_sig1.handle = 0;
     pcs_data->xcc_data[i].host_buffer_begin = nullptr;  // Set after host_buffer allocation
-    // PM4 fallback resources (per-XCC to avoid races on multi-XCC systems)
+    // PM4 drain resources (per-XCC to avoid races on multi-XCC systems)
     pcs_data->xcc_data[i].old_val = nullptr;
     pcs_data->xcc_data[i].cmd_data = nullptr;
     pcs_data->xcc_data[i].cmd_data_sz = 0;
@@ -3819,7 +3913,7 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
           HSA::hsa_signal_destroy(pcs_data->xcc_data[i].done_sig0);
         if (pcs_data->xcc_data[i].done_sig1.handle)
           HSA::hsa_signal_destroy(pcs_data->xcc_data[i].done_sig1);
-        // Clean up per-XCC PM4 fallback resources
+        // Clean up per-XCC PM4 drain resources
         if (pcs_data->xcc_data[i].old_val) {
           system_deallocator()(pcs_data->xcc_data[i].old_val);
           pcs_data->xcc_data[i].old_val = nullptr;
@@ -4088,8 +4182,11 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
     per_xcc_host_buffer_size = 2 * per_xcc_buffer_share;
   }
 
-  // Ensure minimum viable buffer size (at least 2x sample size for double-buffering)
-  per_xcc_host_buffer_size = std::max(per_xcc_host_buffer_size, 2 * session.sample_size());
+  // Ensure minimum viable buffer size (at least 2x sample size for double-buffering). Host
+  // buffers must hold whole samples: the overflow clamp writes up to the free space, and a
+  // partial sample would misalign every record read after it. AlignUp would work as well.
+  per_xcc_host_buffer_size = std::max(AlignDown(per_xcc_host_buffer_size, session.sample_size()),
+                                      2 * session.sample_size());
   trap_buffer_size = std::max(trap_buffer_size, session.sample_size());
 
   // Total host buffer ~= 2 * buffer_size (reasonable overhead, not num_xcc multiplier)
@@ -4202,7 +4299,12 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
           ? pcs_data->device_data_base
           : (pcs_stochastic_data_.session ? pcs_stochastic_data_.device_data_base : nullptr);
 
-  if (UpdateTrapHandlerWithPCS(hosttrap_buffers, stochastic_buffers, deviceAllocSize) !=
+  /* A stride of 0 tells the trap handler to use the buffer base directly.  A single-XCC
+     agent allocates one buffer, so the base is the only valid address. */
+  const uint32_t per_xcc_size =
+      (properties_.NumXcc > 1) ? static_cast<uint32_t>(deviceAllocSize) : 0;
+
+  if (UpdateTrapHandlerWithPCS(hosttrap_buffers, stochastic_buffers, per_xcc_size) !=
       HSA_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
 
@@ -4243,10 +4345,14 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
           : pcs_stochastic_data_.device_data_base;  // Preserve if still active
 
   uint32_t per_xcc_size = 0;
-  if (hosttrap_buffers && pcs_hosttrap_data_.device_data_base)
-    per_xcc_size = std::max(per_xcc_size, static_cast<uint32_t>(pcs_hosttrap_data_.per_xcc_device_stride));
-  if (stochastic_buffers && pcs_stochastic_data_.device_data_base)
-    per_xcc_size = std::max(per_xcc_size, static_cast<uint32_t>(pcs_stochastic_data_.per_xcc_device_stride));
+  if (properties_.NumXcc > 1) {
+    if (hosttrap_buffers)
+      per_xcc_size = std::max(per_xcc_size,
+                              static_cast<uint32_t>(pcs_hosttrap_data_.per_xcc_device_stride));
+    if (stochastic_buffers)
+      per_xcc_size = std::max(per_xcc_size,
+                              static_cast<uint32_t>(pcs_stochastic_data_.per_xcc_device_stride));
+  }
 
   hsa_status_t tma_status = UpdateTrapHandlerWithPCS(hosttrap_buffers, stochastic_buffers, per_xcc_size);
   if (tma_status != HSA_STATUS_SUCCESS) {
@@ -4260,7 +4366,7 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
         HSA::hsa_signal_destroy(pcs_data->xcc_data[xcc_id].done_sig0);
       if (pcs_data->xcc_data[xcc_id].done_sig1.handle)
         HSA::hsa_signal_destroy(pcs_data->xcc_data[xcc_id].done_sig1);
-      // Clean up per-XCC PM4 fallback resources
+      // Clean up per-XCC PM4 drain resources
       if (pcs_data->xcc_data[xcc_id].old_val) {
         system_deallocator()(pcs_data->xcc_data[xcc_id].old_val);
         pcs_data->xcc_data[xcc_id].old_val = nullptr;
@@ -4326,31 +4432,15 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
   // done signals as an exit sentinel to wake worker threads, so restore the
   // expected initial values before creating new monitoring threads.
   //
-  // Also reset device-side counters (buf_write_val, buf_written_val0/1) to ensure
-  // host and device agree on buffer parity. Without this, a previous session could
-  // leave buf_write_val with bit 63 set to 1 (buffer 1), while host resets which_buffer
-  // to 0, causing a parity mismatch where trap handlers increment buf_written_val1
-  // but host waits on buf_written_val0.
+  // which_buffer is deliberately left alone: it shadows bit 63 of the device's buf_write_val,
+  // which survives a stop/start pair. Forcing it back to 0 here would make the host drain
+  // buf_written_val0 while the trap handler keeps filling buffer 1, and the WAIT_REG_MEM in
+  // the PM4 flush path would then poll for a count that never arrives.
   for (uint32_t xcc_id = 0; xcc_id < pcs_data->num_xcc; xcc_id++) {
     pcs_data->xcc_data[xcc_id].host_write_offset = 0;
     pcs_data->xcc_data[xcc_id].host_read_offset = 0;
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig0, 1);
     HSA::hsa_signal_store_screlease(pcs_data->xcc_data[xcc_id].done_sig1, 1);
-    pcs_data->xcc_data[xcc_id].which_buffer = 0;
-
-    // Reset device-side counters to ensure buffer parity agreement.
-    // Use DmaFill (shader blit) which works for both large-BAR and non-large-BAR systems,
-    // consistent with how PcSamplingCreateFromId initializes device memory.
-    if (pcs_data->xcc_data[xcc_id].device_data) {
-      if (DmaFill(&pcs_data->xcc_data[xcc_id].device_data->buf_write_val, 0, 2) !=
-              HSA_STATUS_SUCCESS ||
-          DmaFill(&pcs_data->xcc_data[xcc_id].device_data->buf_written_val0, 0, 1) !=
-              HSA_STATUS_SUCCESS ||
-          DmaFill(&pcs_data->xcc_data[xcc_id].device_data->buf_written_val1, 0, 1) !=
-              HSA_STATUS_SUCCESS) {
-        return HSA_STATUS_ERROR;
-      }
-    }
   }
   pcs_data->consumer_exit.store(false, std::memory_order_relaxed);
   pcs_data->pending_flush_count = 0;
@@ -4556,7 +4646,8 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
   uint8_t* buffer[2];
 
   // Get references to this XCC's buffers and state (using cached values)
-  uint32_t& which_buffer = pcs_data->xcc_data[xcc_id].which_buffer;
+  const uint32_t which_buffer =
+      pcs_data->xcc_data[xcc_id].which_buffer.load(std::memory_order_acquire);
   const size_t per_xcc_host_buffer_size = pcs_data->per_xcc_host_buffer_size;
   uint8_t* host_buffer_begin = pcs_data->xcc_data[xcc_id].host_buffer_begin;
   const size_t samples_per_trap_buffer = pcs_data->samples_per_trap_buffer;
@@ -4629,11 +4720,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
         to_copy = sample_count * session.sample_size();
         break;
       }
-#if defined(_MSC_VER)
-      _mm_pause();
-#elif defined(__x86_64__) || defined(__i386__)
-      __builtin_ia32_pause();
-#endif
+      cpu_relax();
     }
 
     // NOTE: Caller (PcSamplingFlush or PcSamplingThreadPerXCC) must hold host_buffer_mutex.
@@ -4669,18 +4756,24 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC(
     rocr::atomic::Store(bwv_written, 0U, std::memory_order_release);
   }
 
-  which_buffer = next_buffer;
+  pcs_data->xcc_data[xcc_id].which_buffer.store(next_buffer, std::memory_order_release);
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
     pcs_data_t* pcs_data, pcs::PcsRuntime::PcSamplingSession& session, uint32_t xcc_id) {
-  // PM4 fallback for non-large-BAR systems where CPU cannot directly access VRAM.
+  // Drain the trap buffers entirely on the command processor so the copy stays in the same
+  // coherent domain as the trap handler's payload writes.
   // Uses ATOMIC_MEM for buffer swap, WAIT_REG_MEM + DMA_DATA for copy, WRITE_DATA for reset.
 
   if (!pcs_data->xcc_data[xcc_id].device_data) {
     return HSA_STATUS_SUCCESS;
   }
+
+  // ExecutePM4 stages the command stream in the queue's single indirect buffer and returns as
+  // soon as the doorbell is rung, so a concurrent submission would overwrite commands the
+  // command processor has not fetched yet. Hold the lock across both submit-and-wait pairs.
+  std::lock_guard<std::mutex> pm4_lock(pcs_pm4_mutex_);
 
   uint32_t next_buffer;
   uint64_t reset_write_val;
@@ -4696,12 +4789,15 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   const uint32_t pred_exec_cmd_sz = 2;
 
   // Get references to this XCC's buffers and state (using cached values)
-  uint32_t& which_buffer = pcs_data->xcc_data[xcc_id].which_buffer;
+  const uint32_t which_buffer =
+      pcs_data->xcc_data[xcc_id].which_buffer.load(std::memory_order_acquire);
   const size_t per_xcc_host_buffer_size = pcs_data->per_xcc_host_buffer_size;
   uint8_t* host_buffer_begin = pcs_data->xcc_data[xcc_id].host_buffer_begin;
   const size_t samples_per_trap_buffer = pcs_data->samples_per_trap_buffer;
 
-  // Per-XCC PM4 resources (avoids races on multi-XCC non-large-BAR systems)
+  // Per-XCC scratch (cmd_data / old_val / exec_pm4_signal): each thread builds its
+  // command stream and owns its completion signal independently. The shared-queue
+  // submit-and-wait itself is serialized by pcs_pm4_mutex_ (see lock above).
   uint32_t* cmd_data = pcs_data->xcc_data[xcc_id].cmd_data;
   const size_t cmd_data_sz = pcs_data->xcc_data[xcc_id].cmd_data_sz;
   uint64_t* old_val = pcs_data->xcc_data[xcc_id].old_val;
@@ -4721,7 +4817,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   device_buffer[1] = device_buffer[0] + samples_per_trap_buffer * session.sample_size();
 
   /*
-   * Double-buffer atomic swap mechanism (PM4 path for non-large-BAR systems):
+   * Double-buffer atomic swap mechanism (PM4 drain path):
    * We use a double-buffer mechanism so that trap handler calls are writing to one buffer while
    * ROCr is copying data from the other buffer.
    *
@@ -4764,8 +4860,10 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   // memory addresses, not execution units. We route all PM4 commands through XCC 0's command
   // processor to avoid multi-XCC scheduling complexity. This is acceptable because:
   // 1. PM4 operations are I/O bound (memory transfers), not compute bound
-  // 2. Each XCC thread submits to the shared queue independently (no lock contention)
-  // 3. The per-XCC threading model still provides parallelism at the thread level
+  // 2. Each XCC thread builds its command stream independently; the submit-and-wait
+  //    on the shared queue is serialized by pcs_pm4_mutex_
+  // 3. Parallelism remains at the sampling and command-construction level; only the
+  //    PM4 submit-and-wait on the shared queue is serialized
   if (properties_.NumXcc > 1) {
     cmd_data[0] = PM4_HDR(PM4_HDR_IT_OPCODE_PRED_EXEC, pred_exec_cmd_sz, supported_isas()[0]->GetMajorVersion());
     cmd_data[1] = PM4_PRED_EXEC_DW2_EXEC_COUNT(i - pred_exec_cmd_sz) |
@@ -4787,7 +4885,10 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   do {
     val = HSA::hsa_signal_wait_scacquire(exec_pm4_signal, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
                                          HSA_WAIT_STATE_BLOCKED);
-    if (val == -1) return HSA_STATUS_SUCCESS;  // Session stopped
+    // Session stopped: device swap already issued but the host selector flip below is
+    // skipped. Safe only because this path is reached during teardown, when no worker
+    // is bound to a done_sig.
+    if (val == -1) return HSA_STATUS_SUCCESS;
     if (val == 0) break;
   } while (true);
 
@@ -4841,10 +4942,14 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   if (properties_.NumXcc > 1) i += pred_exec_cmd_sz;
   memset(cmd_data, 0, cmd_data_sz);
 
-  // WAIT_REG_MEM: Wait for trap handler to finish writing samples
+  // WAIT_REG_MEM: Wait for trap handler to finish writing samples.
+  // The completion counter must be polled with GREATER-OR-EQUAL, not strict EQUAL.
+  // The trap-handler counter atomics run at SYSTEM scope, so the completion value is
+  // already visible to the CP past GL2; an overshoot past the armed reference still
+  // satisfies the poll instead of hanging on a value that is never matched exactly.
   cmd_data[i++] =
       PM4_HDR(PM4_HDR_IT_OPCODE_WAIT_REG_MEM, wait_reg_mem_cmd_sz, supported_isas()[0]->GetMajorVersion());
-  cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_EQUAL_TO_REFERENCE |
+  cmd_data[i++] = PM4_WAIT_REG_MEM_DW1(PM4_WAIT_REG_MEM_FUNCTION_GREATER_OR_EQUAL_REF |
                                        PM4_WAIT_REG_MEM_MEM_SPACE_MEMORY_SPACE |
                                        PM4_WAIT_REG_MEM_OPERATION_WAIT_REG_MEM);
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW2_MEM_POLL_ADDR_LO(buf_written_val_addr[which_buffer]);
@@ -4854,7 +4959,12 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW6(PM4_WAIT_REG_MEM_POLL_INTERVAL(4) |
                                        PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
 
-  // ACQUIRE_MEM: Flush L2 cache for GFX12 before DMA copy
+  // ACQUIRE_MEM: writeback GL2 before the DMA on GFX12 only. Its trap handler writes the
+  // sample payload with vector global_store scope:SCOPE_SYS and the CP DMA reads relative to
+  // GL2, so a GL2_WB is needed on the CP side. GFX9 deliberately omits this: its trap handler
+  // writes the payload with scalar stores and already flushes them to the TCC/L2 domain the
+  // DMA reads through (s_dcache_wb + s_waitcnt lgkmcnt(0) in trap_handler.s) before it
+  // increments the counter this path's WAIT_REG_MEM polls, so the payload is already visible.
   if (supported_isas()[0]->GetMajorVersion() == 12 &&
       (supported_isas()[0]->GetMinorVersion() == 0 || supported_isas()[0]->GetMinorVersion() == 5)) {
     cmd_data[i++] =
@@ -4948,7 +5058,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffersPerXCC_PM4(
     pcs_data->xcc_data[xcc_id].host_write_offset = write_offset + to_copy;
   }
 
-  which_buffer = next_buffer;
+  pcs_data->xcc_data[xcc_id].which_buffer.store(next_buffer, std::memory_order_release);
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4959,15 +5069,18 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
     // by the consumer thread which aggregates data across all XCCs.
     pcs::PcsRuntime::PcSamplingSession& session = *pcs_data.session;
     per_xcc_pcs_data_t& xcc = pcs_data.xcc_data[xcc_id];
-    uint32_t& which_buffer = xcc.which_buffer;
 
     // Get this XCC's double-buffer done signals
     hsa_signal_t done_sig[] = {xcc.done_sig0, xcc.done_sig1};
 
     while (true) {
+      // Re-read the selector on every iteration: PcSamplingFlush can move it from another
+      // thread, and the wait below binds to one signal object for its whole duration.
+      uint32_t cur = xcc.which_buffer.load(std::memory_order_acquire);
+
       // Wait for trap handler to signal buffer is ready (val=0) or exit (val=-1)
       hsa_signal_value_t val = HSA::hsa_signal_wait_scacquire(
-          done_sig[which_buffer], HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+          done_sig[cur], HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
       if (val == -1) {
         // Exit signal received - notify consumer and exit.
@@ -4987,7 +5100,7 @@ void GpuAgent::PcSamplingThreadPerXCC(pcs_data_t& pcs_data, uint32_t xcc_id,
       }
 
       // Reset signal for next buffer fill cycle
-      HSA::hsa_signal_store_screlease(done_sig[which_buffer], 1);
+      HSA::hsa_signal_store_screlease(done_sig[cur], 1);
 
       // Flush device buffer to host buffer (under per-XCC mutex)
       {
@@ -5160,13 +5273,31 @@ hsa_status_t GpuAgent::PcSamplingFlush(pcs::PcsRuntime::PcSamplingSession& sessi
   std::lock_guard<std::mutex> delivery_lock(pcs_data->delivery_mutex);
 
   // First, flush device buffers to host buffers for all XCCs
+  auto drain_active_buffer = [&](uint32_t xcc_index) {
+    return pcs_data->use_pm4_fallback
+        ? PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data, session, xcc_index)
+        : PcSamplingFlushDeviceBuffersPerXCC(pcs_data, session, xcc_index);
+  };
+
   for (uint32_t xcc_id = 0; xcc_id < pcs_data->num_xcc; xcc_id++) {
     per_xcc_pcs_data_t& xcc = pcs_data->xcc_data[xcc_id];
     std::lock_guard<std::mutex> lock(xcc.host_buffer_mutex);
 
-    hsa_status_t flush_status = pcs_data->use_pm4_fallback
-        ? PcSamplingFlushDeviceBuffersPerXCC_PM4(pcs_data, session, xcc_id)
-        : PcSamplingFlushDeviceBuffersPerXCC(pcs_data, session, xcc_id);
+    // Two swaps == net identity: which_buffer returns to the worker's bound half.
+    // BOTH drains MUST run unconditionally regardless of the first status; an odd
+    // swap count reintroduces the permanent selector desync this fix resolves.
+    const uint32_t before =
+        pcs_data->xcc_data[xcc_id].which_buffer.load(std::memory_order_acquire);
+    hsa_status_t flush_status = drain_active_buffer(xcc_id);       // swap 1
+    hsa_status_t other_half_status = drain_active_buffer(xcc_id);  // swap 2
+    const uint32_t after =
+        pcs_data->xcc_data[xcc_id].which_buffer.load(std::memory_order_acquire);
+    if (after != before) {
+      log_warning_n(1, "PC sampling XCC %u: flush left the buffer selector at %u, expected %u\n",
+                    xcc_id, after, before);
+    }
+    assert(after == before && "PcSamplingFlush must leave the selector on the worker's half");
+    if (flush_status == HSA_STATUS_SUCCESS) flush_status = other_half_status;
 
     if (flush_status != HSA_STATUS_SUCCESS) {
       if (first_error == HSA_STATUS_SUCCESS) first_error = flush_status;
