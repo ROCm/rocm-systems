@@ -5,8 +5,8 @@
  ************************************************************************/
 
 // Routes a unit's calls into the src/transport/p2p.cc registration entry points to the micro_* trampolines in
-// transport_p2p_reg_fakes.h, for a binary that also compiles the real p2p.cc. Include it immediately before the
-// #include <UNIT>_CC_PATH and transport_p2p_reg_seam_undef.h straight after. No include guard on purpose.
+// transport_p2p_reg_fakes.h, for a binary that also compiles the real p2p.cc. Include it before the
+// #include <UNIT>_CC_PATH and transport_p2p_reg_seam_undef.h after it. No include guard on purpose.
 
 // The headers declaring the renamed names, so a rename never rewrites a declaration.
 #include "p2p.h"

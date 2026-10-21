@@ -19,7 +19,6 @@
 #include <set>
 #include <vector>
 
-#include "RegisterScene.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/transport_p2p_reg_fakes.h"
 #include "fakes/transport_reg_stubs.h"
@@ -33,6 +32,8 @@
 #include "fakes/transport_p2p_reg_seam_undef.h"
 
 namespace {
+
+void* Ptr(uintptr_t addr) { return reinterpret_cast<void*>(addr); }
 
 constexpr int kRanks = 8;
 constexpr size_t kCount = 1024;  // ncclFloat32 elements
@@ -52,7 +53,7 @@ struct RegCall {
   }
 };
 
-// ncclTransports[0]: canConnect answers from `connectable` and records the peer rank asked about.
+// Transport canConnect: answers from `connectable` and records the peer rank asked about.
 struct FakeP2pTransport {
   std::set<int> connectable;
   ncclResult_t result = ncclSuccess;
@@ -69,18 +70,12 @@ struct FakeP2pTransport {
     return result;
   }
 };
-FakeP2pTransport* g_activeP2p = nullptr;
-ncclResult_t TrampCanConnect(int* ret, ncclComm* comm, ncclTopoGraph* graph, ncclPeerInfo* mine,
-                             ncclPeerInfo* theirs) {
-  return g_activeP2p->canConnect(ret, comm, graph, mine, theirs);
-}
-ncclTransport g_fakeP2pTransport = {"FakeP2P", TrampCanConnect, {}, {}};
 
 class RegisterCollMicrotestBase : public ::testing::Test {
  protected:
   std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
   ncclTaskColl task_{};
-  ncclRegCleanupQueue cleanupQueue_{};
+  ncclCommCallbackQueue cleanupQueue_{};
   void* outSend_[NCCL_MAX_LOCAL_RANKS] = {};
   void* outRecv_[NCCL_MAX_LOCAL_RANKS] = {};
   bool needConnect_ = false;
@@ -114,15 +109,14 @@ class RegisterCollMicrotestBase : public ::testing::Test {
     task_.regBufType = -1;
     // Graph registration on, as on ROCm >= 7.12, but no capture: a graph seam reached outside one fails loudly.
     g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"GRAPH_REGISTER", 1}});
-    g_activeP2p = &p2p_;
-    ncclTransports[0] = &g_fakeP2pTransport;
+    g_transportCanConnect = [this](int* ret, ncclComm* comm, ncclTopoGraph* graph, ncclPeerInfo* mine,
+                                   ncclPeerInfo* theirs) { return p2p_.canConnect(ret, comm, graph, mine, theirs); };
   }
 
   void TearDown() override {
     free(task_.sendNetHandles);
     free(task_.recvNetHandles);
     free(task_.srecvNetHandles);
-    g_activeP2p = nullptr;
     ResetNcclFakes();
     ResetTransportP2pRegFakes();
     ResetTransportStubs();
@@ -210,7 +204,7 @@ class RegisterCollMicrotestBase : public ::testing::Test {
   }
   void NetGraphRegisters(std::vector<int> results) {
     g_ncclNetGraphRegisterBuffer = [this, results](ncclComm*, const void* buff, size_t size, ncclConnector** conns,
-                                                   int n, int* flag, void** handle, ncclRegCleanupQueue* queue,
+                                                   int n, int* flag, void** handle, ncclCommCallbackQueue* queue,
                                                    int* nElts) {
       EXPECT_EQ(queue, &cleanupQueue_);
       EXPECT_EQ(nElts, &task_.nCleanupQueueElts);
@@ -232,7 +226,7 @@ class RegisterCollMicrotestBase : public ::testing::Test {
   }
   void CollnetGraphRegisters(std::set<int> okTypes) {
     g_ncclCollnetGraphRegisterBuffer = [this, okTypes](ncclComm*, const void* buff, size_t size, int type, int* flag,
-                                                       void** handle, ncclRegCleanupQueue* queue, int* nElts) {
+                                                       void** handle, ncclCommCallbackQueue* queue, int* nElts) {
       EXPECT_EQ(queue, &cleanupQueue_);
       EXPECT_EQ(nElts, &task_.nCleanupQueueElts);
       collnetGraph_.push_back({buff, size, type, {}, {}});
@@ -505,7 +499,7 @@ TEST_F(RegisterCollNvlsMicrotest, LocalNotRegisteredInCapture_FallsBackToGraphRe
   UseGraphCapture();
   NvlsLocalRegisters(0);
   g_ncclNvlsGraphRegisterBuffer = [this](ncclComm*, const void*, void*, size_t, size_t, int* reged, void**, void**,
-                                         ncclRegCleanupQueue* queue, int* nElts) {
+                                         ncclCommCallbackQueue* queue, int* nElts) {
     EXPECT_EQ(queue, &cleanupQueue_);
     EXPECT_EQ(nElts, &task_.nCleanupQueueElts);
     *reged = 1;
@@ -519,7 +513,7 @@ TEST_F(RegisterCollNvlsMicrotest, LocalNotRegisteredInCapture_FallsBackToGraphRe
 TEST_F(RegisterCollNvlsMicrotest, CaptureWithoutLocalRegister_RegistersPerGraphOnly) {
   UseGraphCapture(/*localRegister=*/0);
   g_ncclNvlsGraphRegisterBuffer = [](ncclComm*, const void*, void*, size_t, size_t, int* reged, void**, void**,
-                                     ncclRegCleanupQueue*, int*) {
+                                     ncclCommCallbackQueue*, int*) {
     *reged = 1;
     return ncclSuccess;
   };
@@ -609,7 +603,7 @@ TEST_F(RegisterCollNvlsCollnetMicrotest, LocalRegisteredInCapture_SkipsGraphRegi
 TEST_F(RegisterCollNvlsCollnetMicrotest, GraphSendSideNotRegistered_SkipsGraphRecvSide) {
   UseGraphCapture(/*localRegister=*/0);
   g_ncclNvlsGraphRegisterBuffer = [](ncclComm*, const void*, void*, size_t, size_t, int* reged, void**, void**,
-                                     ncclRegCleanupQueue*, int*) {
+                                     ncclCommCallbackQueue*, int*) {
     *reged = 1;
     return ncclSuccess;
   };

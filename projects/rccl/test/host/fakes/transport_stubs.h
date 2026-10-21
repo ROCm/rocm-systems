@@ -17,6 +17,7 @@
 #include "nccl.h"
 
 struct ncclComm;
+struct ncclPeerInfo;
 struct ncclProxyConnector;
 struct ncclReg;
 struct ncclTopoGraph;
@@ -53,6 +54,11 @@ extern int g_ncclNvlsTuningCalls;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, void*)> g_ncclNetDeregBuffer;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, void*)> g_ncclCollnetDeregBuffer;
 extern std::function<ncclResult_t(struct ncclComm*, struct ncclReg*)> g_ncclNvlsUbDeregister;
+
+// canConnect of both ncclTransports slots (src/transport.cc). Default: every peer is reachable.
+extern std::function<ncclResult_t(int*, struct ncclComm*, struct ncclTopoGraph*, struct ncclPeerInfo*,
+                                  struct ncclPeerInfo*)>
+    g_transportCanConnect;
 
 void ResetTransportStubs();
 

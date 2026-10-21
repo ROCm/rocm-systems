@@ -64,10 +64,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `FreshRegistration*`, `ConnStepAcquireMicrotest.*`.
   - `register/register.cc`, `register/coll_reg.cc` and `register/sendrecv_reg.cc`
     (`REGISTER_CC_PATH`, `COLL_REG_CC_PATH`, `SENDRECV_REG_CC_PATH`, from `register-test.cc`,
-    `coll-reg-test.cc` and `sendrecv-reg-test.cc`, helpers in `RegisterScene.h`); suites
-    `Register*`. Their calls into `p2p.cc`, compiled here for real, go through
-    `fakes/transport_p2p_reg_seam.h`, and `register-test.cc` renames the unit's definitions of the
-    three names `nccl_fakes.cc` keeps as seams for `p2p-test.cc`.
+    `coll-reg-test.cc` and `sendrecv-reg-test.cc`); suites `Register*`. Their calls into `p2p.cc`,
+    compiled here for real, go through `fakes/transport_p2p_reg_seam.h`, and `fakes/register_seam.h`
+    renames `register.cc`'s definitions of the three names `nccl_fakes.cc` keeps as seams for
+    `p2p-test.cc`.
   - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
@@ -836,7 +836,8 @@ test reads as "force this precondition, then call the unit under test". Where a
 single branch depends on HIP version (only one arm is live per build, but the
 test can't know which at authoring time), pair the factories that drive each
 version's arm so the test passes regardless of the toolchain — see
-`ForceLegacyCudaRegister` + `ForceLegacyIpcCapable` in `p2p-test.cc`.
+`ForceLegacyCudaRegister` in `p2p-test.cc` + `ForceLegacyIpcCapable` in
+`fakes/hip_fakes.h`.
 
 ## Dealing with each kind of dependency
 

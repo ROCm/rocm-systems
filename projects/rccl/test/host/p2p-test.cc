@@ -548,24 +548,6 @@ auto ForceLegacyCudaRegister()
     };
 }
 
-// ForceLegacyIpcCapable -- the HIP_VERSION >= 71260540 analogue of
-// ForceLegacyCudaRegister. On that HIP the fresh-registration arm reads
-// legacy-IPC capability from hipPointerGetAttribute (p2p.cc line 1152)
-// rather than from ncclParamLegacyCudaRegister(). Tests that need the
-// `else if (legacyIpcCap)` legacy-export arm install this hook (in addition
-// to ForceLegacyCudaRegister, which drives the < 71260540 branch) so they
-// pass regardless of the toolchain's HIP version. Returns hipSuccess and
-// reports the buffer as legacy-IPC-capable.
-auto ForceLegacyIpcCapable()
-{
-    return [](void* data, hipPointer_attribute attribute,
-              hipDeviceptr_t) -> hipError_t {
-        if (data && attribute == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE)
-            *static_cast<int*>(data) = 1;
-        return hipSuccess;
-    };
-}
-
 // TopoDirectP2p -- the g_ncclTopoCheckP2p hook every direct-P2P case in the
 // canConnect tests needs: reports the pair as p2p-capable (p2p = 1) with no
 // intermediate hop (inter = -1). Returned as a plain lambda so call sites
