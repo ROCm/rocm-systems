@@ -40,6 +40,7 @@
 
 #include "gin/gin_rocshmem_gda_factory.h"
 #include "gin/gin_ibv_shim.h"
+#include "rocmwrap.h"
 #include "dv_dlopen.h"
 #include <gda/queue_pair_provider.hpp>
 #include <gda/gda_enums.hpp>
@@ -112,6 +113,39 @@ struct gin_dest_info {
   union ibv_gid gid;
 };
 
+// Fine-grained device allocator for BNXT QP/CQ buffers. rccl-native replacement
+// for rocSHMEM's HIPAllocatorFinegrained: fine-grained VRAM so the NIC sees GPU
+// writes without a cache flush, plus a DMA-BUF export for GPU-direct registration.
+struct GinFinegrainedAllocator {
+  int allocate(void** ptr, size_t size) {
+    if (hipExtMallocWithFlags(ptr, size, hipDeviceMallocFinegrained) != hipSuccess) {
+      *ptr = nullptr;
+      return -1;
+    }
+    return 0;
+  }
+
+  void deallocate(void* ptr) {
+    if (ptr) (void)hipFree(ptr);
+  }
+
+  // Export a DMA-BUF fd+offset for a device allocation. Returns hipSuccess and
+  // fills fd/offset, or an error (leaving fd=-1) when unsupported. The fd is
+  // owned by the caller. Gated on the optional HSA export symbol being present.
+  hipError_t GetDmabufHandle(void* dev_ptr, size_t size, int* dmabuf_fd, uint64_t* dmabuf_offset) {
+    if (dev_ptr == nullptr || dmabuf_fd == nullptr || dmabuf_offset == nullptr) return hipErrorInvalidValue;
+    *dmabuf_fd = -1;
+    *dmabuf_offset = 0;
+    if (pfn_hsa_amd_portable_export_dmabuf == nullptr) return hipErrorNotSupported;
+    int fd = -1;
+    uint64_t offset = 0;
+    if (pfn_hsa_amd_portable_export_dmabuf(dev_ptr, size, &fd, &offset) != HSA_STATUS_SUCCESS) return hipErrorInvalidValue;
+    *dmabuf_fd = fd;
+    *dmabuf_offset = offset;
+    return hipSuccess;
+  }
+};
+
 struct rocshmem_gin_qp_set {
   // GPU QP initialization — must be a member to access QueuePair private fields via friend
   int initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx);
@@ -133,7 +167,7 @@ struct rocshmem_gin_qp_set {
   std::vector<struct bnxt_host_qp> bnxt_qps;
   std::vector<struct bnxt_host_cq> bnxt_scqs;
   std::vector<struct bnxt_host_cq> bnxt_rcqs;
-  HIPAllocator* qp_allocator = nullptr;
+  GinFinegrainedAllocator* qp_allocator = nullptr;
 #endif
 #if defined(GDA_MLX5)
   mlx5dv_funcs_t mlx5dv{};
@@ -559,7 +593,7 @@ static int gin_create_cqs(rocshmem_gin_qp_set* set) {
     {
       set->bnxt_scqs.resize(n);
       set->bnxt_rcqs.resize(n);
-      if (!set->qp_allocator) set->qp_allocator = new HIPAllocatorFinegrained();
+      if (!set->qp_allocator) set->qp_allocator = new GinFinegrainedAllocator();
 
       int cqe = 1;  // CQE compression: only need length 1
       int dmabuf_enabled = gin_ibv_is_dmabuf_supported(set->nic.pd_orig);
@@ -688,7 +722,7 @@ static int gin_create_qps(rocshmem_gin_qp_set* set) {
   case GDAProvider::BNXT:
     {
       set->bnxt_qps.resize(n);
-      if (!set->qp_allocator) set->qp_allocator = new HIPAllocatorFinegrained();
+      if (!set->qp_allocator) set->qp_allocator = new GinFinegrainedAllocator();
 
       for (int i = 0; i < n; i++) {
         auto* ctx = set->nic.context;
