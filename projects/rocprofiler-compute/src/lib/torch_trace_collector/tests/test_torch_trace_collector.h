@@ -5,7 +5,7 @@
 
 #include <gtest/gtest.h>
 
-class TorchTraceCollectorTest : public ::testing::Test
+class TestTorchTraceCollector : public ::testing::Test
 {
 protected:
     void SetUp() override;

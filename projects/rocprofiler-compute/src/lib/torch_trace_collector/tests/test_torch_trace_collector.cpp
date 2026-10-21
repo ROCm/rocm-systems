@@ -108,13 +108,13 @@ std::string captured_schema_arguments(const char*                     name,
 
 }  // namespace
 
-void TorchTraceCollectorTest::SetUp()
+void TestTorchTraceCollector::SetUp()
 {
     ASSERT_EQ(torch_trace_collector_install(), 0);
     roctx_range_intercept::start_recording();
 }
 
-void TorchTraceCollectorTest::TearDown()
+void TestTorchTraceCollector::TearDown()
 {
     (void)roctx_range_intercept::stop_recording();
     while (torch_trace_collector_pop_launcher_tid() == 0)
@@ -153,7 +153,7 @@ TEST(TorchTraceCollectorBeforeInstall, ConcurrentFirstInstall_EnablesLauncherWit
     EXPECT_EQ(torch_trace_collector_pop_launcher_tid(), 0);
 }
 
-TEST_F(TorchTraceCollectorTest, RecordFunctionLayout_MatchesRealAccessors)
+TEST_F(TestTorchTraceCollector, RecordFunctionLayout_MatchesRealAccessors)
 {
     const std::vector<c10::IValue> inputs{std::int64_t{9}, true};
     at::RecordFunction             record(at::RecordScope::USER_SCOPE);
@@ -237,7 +237,7 @@ TEST(TorchAbiLayout, TensorListLayout_MatchesRealStorage)
     check_storage(reserved_value);
 }
 
-TEST_F(TorchTraceCollectorTest, EachRecordScope_ProducesOneBalancedRange)
+TEST_F(TestTorchTraceCollector, EachRecordScope_ProducesOneBalancedRange)
 {
     constexpr std::array<const char*, 10> names = {"FUNCTION",
                                                    "BACKWARD_FUNCTION",
@@ -262,7 +262,7 @@ TEST_F(TorchTraceCollectorTest, EachRecordScope_ProducesOneBalancedRange)
     }
 }
 
-TEST_F(TorchTraceCollectorTest, NestedRecordsWithException_StayBalanced)
+TEST_F(TestTorchTraceCollector, NestedRecordsWithException_StayBalanced)
 {
     EXPECT_THROW(
         {
@@ -278,7 +278,7 @@ TEST_F(TorchTraceCollectorTest, NestedRecordsWithException_StayBalanced)
     EXPECT_EQ(captured.pops, 2u);
 }
 
-TEST_F(TorchTraceCollectorTest, FailedChildPush_PreservesParentRange)
+TEST_F(TestTorchTraceCollector, FailedChildPush_PreservesParentRange)
 {
     {
         at::RecordFunction parent(at::RecordScope::USER_SCOPE);
@@ -291,7 +291,7 @@ TEST_F(TorchTraceCollectorTest, FailedChildPush_PreservesParentRange)
     EXPECT_EQ(captured.pops, 1u);
 }
 
-TEST_F(TorchTraceCollectorTest, NestedLaunchers_RestorePreviousThreadId)
+TEST_F(TestTorchTraceCollector, NestedLaunchers_RestorePreviousThreadId)
 {
     EXPECT_NE(torch_trace_collector_pop_launcher_tid(), 0);
     ASSERT_EQ(torch_trace_collector_push_launcher_tid(101), 0);
@@ -312,7 +312,7 @@ TEST_F(TorchTraceCollectorTest, NestedLaunchers_RestorePreviousThreadId)
     EXPECT_EQ(captured.pops, 4u);
 }
 
-TEST_F(TorchTraceCollectorTest, PropagatedLauncher_OutlivesOriginalScope)
+TEST_F(TestTorchTraceCollector, PropagatedLauncher_OutlivesOriginalScope)
 {
     ASSERT_EQ(torch_trace_collector_push_launcher_tid(12345), 0);
     const at::ThreadLocalState launcher_state;
@@ -336,7 +336,7 @@ TEST_F(TorchTraceCollectorTest, PropagatedLauncher_OutlivesOriginalScope)
     EXPECT_EQ(captured.pops, 3u);
 }
 
-TEST_F(TorchTraceCollectorTest, OverlappingLaunchers_KeepThreadIdsIsolated)
+TEST_F(TestTorchTraceCollector, OverlappingLaunchers_KeepThreadIdsIsolated)
 {
     ASSERT_EQ(torch_trace_collector_push_launcher_tid(101), 0);
     std::promise<void> published;
@@ -367,7 +367,7 @@ TEST_F(TorchTraceCollectorTest, OverlappingLaunchers_KeepThreadIdsIsolated)
     EXPECT_EQ(captured.pops, 2u);
 }
 
-TEST_F(TorchTraceCollectorTest, TensorAndScalarArguments_IncludeShapesDtypesAndTags)
+TEST_F(TestTorchTraceCollector, TensorAndScalarArguments_IncludeShapesDtypesAndTags)
 {
     const auto matrix = at::empty({2, 3}, at::TensorOptions().dtype(at::kFloat));
     const auto scalar = at::empty({}, at::TensorOptions().dtype(at::kLong));
@@ -377,7 +377,7 @@ TEST_F(TorchTraceCollectorTest, TensorAndScalarArguments_IncludeShapesDtypesAndT
     EXPECT_EQ(captured_arguments({}), "n/a");
 }
 
-TEST_F(TorchTraceCollectorTest, RegisteredSchema_CapturesArgumentNamesAndOverloads)
+TEST_F(TestTorchTraceCollector, RegisteredSchema_CapturesArgumentNamesAndOverloads)
 {
     const auto tensor = at::empty({2, 3});
     EXPECT_EQ(captured_schema_arguments("aten::add", "Tensor", {tensor, tensor, std::int64_t{1}}),
@@ -390,7 +390,7 @@ TEST_F(TorchTraceCollectorTest, RegisteredSchema_CapturesArgumentNamesAndOverloa
               "(self=float32[2x3], dtype=Int, non_blocking=Bool, copy=Bool, memory_format=None)");
 }
 
-TEST_F(TorchTraceCollectorTest, ReloadedSchemas_RefreshNamesOnWarmAndColdThreads)
+TEST_F(TestTorchTraceCollector, ReloadedSchemas_RefreshNamesOnWarmAndColdThreads)
 {
     constexpr auto       name = "schema_cache_regression::reload";
     constexpr std::array argument_names{"original_input", "replacement_input", "final_input"};
@@ -463,7 +463,7 @@ TEST_F(TorchTraceCollectorTest, ReloadedSchemas_RefreshNamesOnWarmAndColdThreads
     worker.get();
 }
 
-TEST_F(TorchTraceCollectorTest, ForwardBackwardDispatch_CapturesArgumentsAndBalancesRanges)
+TEST_F(TestTorchTraceCollector, ForwardBackwardDispatch_CapturesArgumentsAndBalancesRanges)
 {
     const auto input = at::randn({2, 3}).requires_grad_(true);
     roctx_range_intercept::start_recording();
@@ -486,7 +486,7 @@ TEST_F(TorchTraceCollectorTest, ForwardBackwardDispatch_CapturesArgumentsAndBala
                     { return message.find("|scope=BACKWARD_FUNCTION|") != std::string::npos; }));
 }
 
-TEST_F(TorchTraceCollectorTest, TensorListsAndTopLevelInputs_RespectSeparateBounds)
+TEST_F(TestTorchTraceCollector, TensorListsAndTopLevelInputs_RespectSeparateBounds)
 {
     const auto                 tensor = at::empty({2}, at::TensorOptions().dtype(at::kHalf));
     constexpr std::string_view seven_elements =
@@ -523,13 +523,15 @@ TEST_F(TorchTraceCollectorTest, TensorListsAndTopLevelInputs_RespectSeparateBoun
     EXPECT_EQ(arguments.substr(arguments.size() - 5), "Bool)");
 }
 
-TEST_F(TorchTraceCollectorTest, LongArguments_TruncateAndTerminateOutput)
+TEST_F(TestTorchTraceCollector, LongArguments_TruncateAndTerminateOutput)
 {
     const std::vector<std::int64_t> dimensions(64, 1);
     const auto                      tensor = at::empty(dimensions);
     const std::vector<c10::IValue>  inputs(32, tensor);
     const auto                      arguments = captured_arguments(inputs);
-    EXPECT_EQ(arguments.size(), torch_trace_collector::detail::kMaxArgsLength + 4);
+    EXPECT_EQ(arguments.size(),
+              torch_trace_collector::detail::kMaxArgsLength +
+                  torch_trace_collector::detail::kTruncationSuffixLength);
     EXPECT_EQ(arguments.substr(arguments.size() - 4), "...)");
 
     std::string tensor_text = "float32[1";
@@ -561,7 +563,7 @@ TEST_F(TorchTraceCollectorTest, LongArguments_TruncateAndTerminateOutput)
     EXPECT_EQ(torch_trace_collector::detail::capture_args(record, nullptr, 0), required);
 }
 
-TEST_F(TorchTraceCollectorTest, ExtendedDtypes_MatchRuntimeMinor)
+TEST_F(TestTorchTraceCollector, ExtendedDtypes_MatchRuntimeMinor)
 {
     const auto tensor = at::empty({2}, at::TensorOptions().dtype(at::ScalarType::UInt16));
     EXPECT_EQ(captured_arguments({tensor}), "(uint16[2])");
