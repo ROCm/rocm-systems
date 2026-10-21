@@ -129,9 +129,7 @@ bool is_valid_bdf(const std::string& bdf);
 constexpr uint16_t kAuxFormatPcie = 1;
 constexpr uint16_t kAuxFormatCpu = 2;
 
-// The temporary CUID's 256-bit input structure S, per the CUID specification
-// but with two boundaries repaired so the widths sum to 256: the published
-// table gives Format 0-16 and Machine ID 17-143, which overlap and total 257.
+// The temporary CUID's 256-bit input structure S, per the CUID specification.
 // Packed LSB-first, each field little-endian.
 //
 //   bits   0:15   Format          1 = PCIe device, 2 = CPU or platform
@@ -169,8 +167,9 @@ uint32_t routing_id_from_bdf(const std::string& bdf);
 // The segment's bits 16:31, which the Routing ID has no room for.
 uint16_t segment_high_from_bdf(const std::string& bdf);
 
-// Routing ID and segment high of `bdf` into `input`.
-void set_pcie_routing(AuxiliaryInput& input, const std::string& bdf);
+// Routing ID and segment high of `bdf` into `input`; INVALID_FORMAT for a
+// malformed or out-of-range address.
+amdcuid_status_t set_pcie_routing(AuxiliaryInput& input, const std::string& bdf);
 
 // Pack S from `input` and `machine_id`, at the field positions documented on
 // AuxiliaryInput above. Those positions are wire format: the kernel implements
@@ -225,27 +224,19 @@ constexpr uint16_t partition_unit_id(unsigned n, unsigned k) {
 // GPU VF (SR-IOV Virtual Function) utilities
 int extract_render_minor(const std::string& path);
 
-// What a device turned out to be, as far as SR-IOV is concerned. The two
-// questions are separate because the answers are used differently.
-//
-// On a host a VF's physfn link is visible, and its index says which share of the
-// card this is, so the VF is a sub-unit: the card's serial plus that index names
-// it, exactly as a partition index does.
-//
-// In a guest there is no physfn link and the index is unknowable. What is
-// reachable there -- the PCIe Device Serial Number, if the VF exposes one at all
-// -- belongs to the physical card, and nothing distinguishes it from the card's
-// own identity, so every guest sharing that card would publish the same one and
-// it would be the host's. CuidGpu::get_hardware_fingerprint() declines it, asking
-// amdgpu through gpu_reports_vf_mode(). A temporary CUID needs no serial: the
-// guest's machine-id and the VF's BDF name it.
-struct VfIdentity {
-  bool is_vf = false;        // sysfs shows a physfn link: a VF as its host sees it
-  bool index_known = false;  // ... and we could determine which one
-  uint16_t unit_id = 0;      // 1-based index, or 0 when not a VF / unknown
-};
+// The class and subclass (16 bits) of the PCI function at `function_path`,
+// from its sysfs `class` ("0x" and six hex digits) or, when that file is
+// empty, from configuration space through `bdf`. INVALID_FORMAT for a
+// malformed value, the read's status when neither can be read.
+amdcuid_status_t read_pci_class(const std::string& function_path, const std::string& bdf,
+                                uint16_t& pci_class);
 
-VfIdentity get_gpu_vf_identity(const std::string& device_path);
+// A VF, on a host or in a guest, is named by its own BDF with UnitID 0, like
+// any PCI function. Whatever serial a VF can reach -- the PCIe Device Serial
+// Number, if it exposes one -- belongs to the physical card, so
+// CuidGpu::get_hardware_fingerprint() declines it: on a host, told by the
+// physfn link; in a guest, by asking amdgpu through gpu_reports_vf_mode().
+bool is_host_vf(const std::string& device_path);
 
 // Whether amdgpu says the GPU behind `device_path` runs as a VF. It needs the
 // render node, which not every caller may open, so it decides only what a

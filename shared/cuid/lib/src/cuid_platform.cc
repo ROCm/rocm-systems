@@ -15,20 +15,11 @@
 CuidPlatform::CuidPlatform(const amdcuid_platform_info& i) : m_info({i}) {}
 
 amdcuid_status_t CuidPlatform::discover(std::vector<DevicePtr>& platforms) {
-  // Platform is a singleton - only one platform per system
+  // Exactly one platform, named by the machine ID alone: its temporary CUID
+  // needs no SMBIOS, so a host or container without DMI still has one.
   amdcuid_platform_info info = {};
   info.header.device_type = AMDCUID_DEVICE_TYPE_PLATFORM;
 
-  std::string vendor, name, version;
-  amdcuid_status_t status = SmbiosUtil::get_board_info(vendor, name, version);
-  if (status != AMDCUID_STATUS_SUCCESS) {
-    // FILE NOT FOUND status given here, which means smbios info not available
-    return AMDCUID_STATUS_UNSUPPORTED;
-  }
-  uint16_t vendor_id = (uint16_t)strtol(vendor.c_str(), nullptr, 16);
-  info.header.fields.platform.vendor_id = vendor_id;
-
-  // Create platform device
   platforms.emplace_back(std::make_shared<CuidPlatform>(info));
 
   return AMDCUID_STATUS_SUCCESS;
@@ -132,7 +123,9 @@ amdcuid_status_t CuidPlatform::get_temporary_input(CuidUtilities::AuxiliaryInput
 
 const amdcuid_platform_info& CuidPlatform::get_info() const { return m_info; }
 
+// SMBIOS names the board vendor as text ("HPE", "Supermicro"), not a PCI
+// vendor ID.
 amdcuid_status_t CuidPlatform::get_vendor_id(uint16_t& vendor_id) const {
-  vendor_id = m_info.header.fields.platform.vendor_id;
-  return AMDCUID_STATUS_SUCCESS;
+  vendor_id = 0;
+  return AMDCUID_STATUS_UNSUPPORTED;
 }

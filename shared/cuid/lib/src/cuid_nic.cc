@@ -12,6 +12,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -24,46 +25,70 @@
 CuidNic::CuidNic(const amdcuid_nic_info& i) : m_info(i) {}
 
 amdcuid_status_t CuidNic::discover(std::vector<DevicePtr>& nics) {
-  return discover("/sys/class/net", nics);
+  return discover("/sys/bus/pci/devices", "/sys/class/net", nics);
 }
 
-amdcuid_status_t CuidNic::discover(const std::string& nic_base_path, std::vector<DevicePtr>& nics) {
-  DIR* dir = opendir(nic_base_path.c_str());
-  if (!dir) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+namespace {
 
-  // One PCI function can carry several interfaces (switchdev representors,
-  // multi-port functions), all with one BDF and so one CUID. Keep one per BDF,
-  // the first by name, so the choice does not depend on readdir order.
-  std::map<std::string, std::string> by_bdf;
+// The first network interface of a PCI function by name, or "" when the
+// caller's network namespace shows none.
+std::string first_interface(const std::string& function_path) {
+  DIR* dir = opendir((function_path + "/net").c_str());
+  if (!dir) return "";
+  std::string first;
   struct dirent* entry;
-  // This call site owns its DIR*, which is all POSIX requires for readdir to be
-  // safe; readdir_r is deprecated and must not be adopted.
   // NOLINTNEXTLINE(concurrency-mt-unsafe)
   while ((entry = readdir(dir)) != NULL) {
-    if (entry->d_name[0] != '.') {
-      std::string device_path = nic_base_path + "/" + entry->d_name + "/device";
-      // lo and other virtual interfaces have no PCI function behind them, so
-      // the device link, not the name, is what excludes them.
-      const std::string bdf = CuidUtilities::readlink_bdf(device_path);
-      if (bdf.empty()) {
-        continue;
-      }
-      auto found = by_bdf.emplace(bdf, device_path).first;
-      if (device_path < found->second) found->second = device_path;
-    }
+    const std::string name = entry->d_name;
+    if (name[0] == '.') continue;
+    if (first.empty() || name < first) first = name;
   }
   closedir(dir);
-  for (const auto& nic : by_bdf) {
+  return first;
+}
+
+bool is_network_class(uint16_t pci_class) {
+  return (pci_class >> 8) == 0x02 || pci_class == 0x0d20 || pci_class == 0x0d21 ||
+         pci_class == 0x0d80;
+}
+
+}  // namespace
+
+amdcuid_status_t CuidNic::discover(const std::string& pci_base_path,
+                                   const std::string& net_base_path, std::vector<DevicePtr>& nics) {
+  DIR* dir = opendir(pci_base_path.c_str());
+  if (!dir) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+  // A NIC is a PCI function of a network class, whether or not an interface
+  // for it is visible in the caller's network namespace.
+  std::vector<std::string> bdfs;
+  struct dirent* entry;
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
+  while ((entry = readdir(dir)) != NULL) {
+    const std::string name = entry->d_name;
+    if (!CuidUtilities::is_valid_bdf(name)) continue;
+    uint16_t pci_class = 0;
+    if (CuidUtilities::read_pci_class(pci_base_path + "/" + name, name, pci_class) !=
+            AMDCUID_STATUS_SUCCESS ||
+        !is_network_class(pci_class))
+      continue;
+    bdfs.push_back(name);
+  }
+  closedir(dir);
+  std::sort(bdfs.begin(), bdfs.end());
+  for (const auto& bdf : bdfs) {
+    const std::string function_path = pci_base_path + "/" + bdf;
     amdcuid_nic_info info = {};
-    const auto status = discover_single(&info, nic.second);
+    const auto status = discover_single(&info, function_path);
     if (status != AMDCUID_STATUS_SUCCESS) {
-      LOG(DEBUG, "CUID discovery: skipping NIC " << nic.first << " ("
-                                                 << amdcuid_status_to_string(status) << ")");
+      LOG(DEBUG, "CUID discovery: skipping NIC " << bdf << " (" << amdcuid_status_to_string(status)
+                                                 << ")");
       continue;
     }
+    const std::string iface = first_interface(function_path);
+    info.network_interface = iface.empty() ? function_path : net_base_path + "/" + iface;
     nics.emplace_back(std::make_shared<CuidNic>(info));
   }
-  if (nics.size() == 0) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
+  if (nics.empty()) return AMDCUID_STATUS_DEVICE_NOT_FOUND;
 
   return AMDCUID_STATUS_SUCCESS;
 }
@@ -74,37 +99,36 @@ amdcuid_status_t CuidNic::discover_single(amdcuid_nic_info* nic_info,
   info.header.device_type = AMDCUID_DEVICE_TYPE_NIC;
 
   std::string bdf = CuidUtilities::readlink_bdf(device_path);
+  if (bdf.empty()) {
+    const size_t slash = device_path.rfind('/');
+    const std::string last = device_path.substr(slash == std::string::npos ? 0 : slash + 1);
+    if (CuidUtilities::is_valid_bdf(last)) bdf = last;
+  }
 
   const auto identity_status =
       PciUtil::read_identity(device_path, bdf, info.header.fields.nic.vendor_id,
                              info.header.fields.nic.device_id, info.header.fields.nic.revision_id);
   if (identity_status != AMDCUID_STATUS_SUCCESS) return identity_status;
 
-  std::string pci_class = CuidUtilities::read_sysfs_file(device_path + "/class");
   uint16_t pci_class_integer = 0;
-  if (pci_class.empty() && !bdf.empty()) {
-    // if file read fails, attempt to get from pci config
-    uint8_t class_id_bytes[2] = {0};
-    const uint16_t offset = 0xa;
-    amdcuid_status_t status = PciUtil::read_pci_config_space(bdf, class_id_bytes, 2, offset);
-    uint16_t class_id_int = PciUtil::load_le16(class_id_bytes);
-    pci_class_integer = (status == AMDCUID_STATUS_SUCCESS) ? class_id_int : 0;
-  } else {
-    // sysfs class file returns 24-bit value (class:subclass:prog_if), shift
-    // right by 8 to get 16-bit class:subclass
-    pci_class_integer = (uint16_t)(strtol(pci_class.c_str(), nullptr, 16) >> 8);
-  }
+  const amdcuid_status_t class_status =
+      CuidUtilities::read_pci_class(device_path, bdf, pci_class_integer);
+  if (class_status != AMDCUID_STATUS_SUCCESS) return class_status;
   info.header.fields.nic.pci_class = pci_class_integer;
+  // Network controllers (0x02xx) and 802.11 wireless (0x0d20, 0x0d21, 0x0d80)
+  // only: a lookup by any other function's BDF, Bluetooth and IR included,
+  // must not name it a NIC.
+  if (!is_network_class(pci_class_integer)) return AMDCUID_STATUS_UNSUPPORTED;
 
   info.bdf = bdf;
-  std::string full_device_node;
-  size_t last_slash = device_path.rfind('/');
-  if (last_slash != std::string::npos && last_slash > 0) {
-    full_device_node = device_path.substr(0, last_slash);
+  const std::string suffix = "/device";
+  if (device_path.size() > suffix.size() &&
+      device_path.compare(device_path.size() - suffix.size(), suffix.size(), suffix) == 0) {
+    info.network_interface = device_path.substr(0, device_path.size() - suffix.size());
   } else {
-    full_device_node = device_path;
+    const std::string iface = first_interface(device_path);
+    info.network_interface = iface.empty() ? device_path : "/sys/class/net/" + iface;
   }
-  info.network_interface = full_device_node;
   *nic_info = info;
 
   return AMDCUID_STATUS_SUCCESS;
@@ -213,7 +237,8 @@ amdcuid_status_t CuidNic::get_temporary_input(CuidUtilities::AuxiliaryInput& aux
 
   aux = {};
   aux.format = CuidUtilities::kAuxFormatPcie;
-  CuidUtilities::set_pcie_routing(aux, bdf);
+  const amdcuid_status_t routing = CuidUtilities::set_pcie_routing(aux, bdf);
+  if (routing != AMDCUID_STATUS_SUCCESS) return routing;
   aux.revision_id = m_info.header.fields.nic.revision_id;
   aux.device_id = m_info.header.fields.nic.device_id;
   aux.vendor_id = m_info.header.fields.nic.vendor_id;
