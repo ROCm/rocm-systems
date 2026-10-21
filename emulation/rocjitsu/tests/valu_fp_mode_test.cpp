@@ -4488,9 +4488,9 @@ std::vector<DotLane> dot_family_lanes() {
       0x8030a352u, 0x3f5d8020u, {}, kSplitModes);
   // FP8/BF8 DOT4 selects source halves exactly as the integer forms do. LLVM
   // rejects explicit selectors for these opcodes, so only raw encodings reach
-  // it; the gfx1201 probe swept all 16 selector combinations over 4096 lanes
-  // each. Taking the unselected register instead gives 0xc440d3f2 and
-  // 0xc8c0571c.
+  // it; the gfx1201 probe swept all 16 selector combinations and captured
+  // these two lanes under every fp8_modes value. Taking the unselected
+  // register instead gives 0xc440d3f2 and 0xc8c0571c.
   add("Fp8Fp8HighHalfSrc0", dot4_fp8_fp8, {.opsel = 1}, 0x5456573cu, 0xee8eca41u, 0x44212c8eu,
       0xc4360bf2u, {}, fp8_modes);
   add("Bf8Bf8HighHalfSrc0", dot4_bf8_bf8, {.opsel = 1}, 0x5456573cu, 0xee8eca41u, 0x44212c8eu,

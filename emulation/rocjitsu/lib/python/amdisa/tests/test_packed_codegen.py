@@ -31,8 +31,8 @@ def test_dot4_iu8_uses_operand_signedness_modifiers():
 
     assert 'src0_signed = (inst_.neg & 0x1u) != 0' in cpp
     assert 'src1_signed = (inst_.neg & 0x2u) != 0' in cpp
-    assert 'static_cast<int8_t>(raw_a)' in cpp
-    assert 'static_cast<int8_t>(raw_b)' in cpp
+    assert 'static_cast<int8_t>(src0_bits)' in cpp
+    assert 'static_cast<int8_t>(src1_bits)' in cpp
     assert 'int64_t sum' in cpp
     assert 'std::numeric_limits<int32_t>::min()' in cpp
     assert 'std::numeric_limits<int32_t>::max()' in cpp
@@ -165,8 +165,8 @@ def test_dot8_iu4_uses_operand_signedness_modifiers():
 
     assert 'src0_signed = (inst_.neg & 0x1u) != 0' in cpp
     assert 'src1_signed = (inst_.neg & 0x2u) != 0' in cpp
-    assert 'raw_a | ~0xF' in cpp
-    assert 'raw_b | ~0xF' in cpp
+    assert 'src0_bits | ~0xF' in cpp
+    assert 'src1_bits | ~0xF' in cpp
     assert 'int64_t sum' in cpp
     assert 'std::numeric_limits<int32_t>::min()' in cpp
     assert 'std::numeric_limits<int32_t>::max()' in cpp
@@ -803,7 +803,8 @@ def test_dot_dispatch_covers_every_semantic_class():
 
     The generator keeps no dot2_/dot4_/dot8_ prefix fallback, so a class with
     no entry would generate a body that throws ``UnimplementedInst``. Checking
-    the other direction too rejects handlers for classes no ISA defines.
+    the other direction too rejects handlers for classes no ISA defines,
+    including bare ``dot2``/``dot4``/``dot8`` routes.
     """
     import os
     from pathlib import Path
@@ -838,4 +839,5 @@ def test_dot_dispatch_covers_every_semantic_class():
                 found.add(sem.semantic_class)
 
     assert found, 'no DOT semantic classes found; the ISA specs did not load'
-    assert found == {cls for cls in DISPATCH if cls.startswith(prefixes)}
+    routes = ('dot2', 'dot4', 'dot8')
+    assert found == {cls for cls in DISPATCH if cls.startswith(routes)}

@@ -10415,9 +10415,9 @@ inline void execute_v_dot4_i32_i8_vop3p([[maybe_unused]] Inst &inst,
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     for (int i = 0; i < 4; ++i) {
-      int8_t a = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);
-      int8_t b = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      int8_t src0_elem = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);
+      int8_t src1_elem = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst.inst_.clamp && amdgpu::dot4_clamp_supported(wf)) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -10445,13 +10445,13 @@ inline void execute_v_dot4_i32_iu8_vop3p([[maybe_unused]] Inst &inst,
     const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 4; ++i) {
-      uint32_t raw_a = (raw0 >> (i * 8)) & 0xFF;
-      uint32_t raw_b = (raw1 >> (i * 8)) & 0xFF;
-      int32_t a = src0_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_a))
-                              : static_cast<int32_t>(raw_a);
-      int32_t b = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_b))
-                              : static_cast<int32_t>(raw_b);
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      uint32_t src0_bits = (raw0 >> (i * 8)) & 0xFF;
+      uint32_t src1_bits = (raw1 >> (i * 8)) & 0xFF;
+      int32_t src0_elem = src0_signed ? static_cast<int32_t>(static_cast<int8_t>(src0_bits))
+                                      : static_cast<int32_t>(src0_bits);
+      int32_t src1_elem = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(src1_bits))
+                                      : static_cast<int32_t>(src1_bits);
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst.inst_.clamp && amdgpu::dot4_clamp_supported(wf)) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -10476,9 +10476,9 @@ inline void execute_v_dot4_u32_u8_vop3p([[maybe_unused]] Inst &inst,
     raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
     for (int i = 0; i < 4; ++i) {
-      uint8_t a = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);
-      uint8_t b = static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF);
-      sum += static_cast<uint32_t>(a) * b;
+      uint8_t src0_elem = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);
+      uint8_t src1_elem = static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF);
+      sum += static_cast<uint32_t>(src0_elem) * src1_elem;
     }
     if (inst.inst_.clamp && amdgpu::dot4_clamp_supported(wf))
       sum = std::min(sum, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));
@@ -10542,13 +10542,13 @@ inline void execute_v_dot8_i32_i4_vop3p([[maybe_unused]] Inst &inst,
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     for (int i = 0; i < 8; ++i) {
-      int32_t a = static_cast<int32_t>((raw0 >> (i * 4)) & 0xF);
-      if (a & 0x8)
-        a |= ~0xF;
-      int32_t b = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);
-      if (b & 0x8)
-        b |= ~0xF;
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      int32_t src0_elem = static_cast<int32_t>((raw0 >> (i * 4)) & 0xF);
+      if (src0_elem & 0x8)
+        src0_elem |= ~0xF;
+      int32_t src1_elem = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);
+      if (src1_elem & 0x8)
+        src1_elem |= ~0xF;
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst.inst_.clamp) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -10576,13 +10576,15 @@ inline void execute_v_dot8_i32_iu4_vop3p([[maybe_unused]] Inst &inst,
     const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
     const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
     for (int i = 0; i < 8; ++i) {
-      uint32_t raw_a = (raw0 >> (i * 4)) & 0xF;
-      uint32_t raw_b = (raw1 >> (i * 4)) & 0xF;
-      int32_t a = src0_signed ? static_cast<int32_t>((raw_a & 0x8) ? (raw_a | ~0xF) : raw_a)
-                              : static_cast<int32_t>(raw_a);
-      int32_t b = src1_signed ? static_cast<int32_t>((raw_b & 0x8) ? (raw_b | ~0xF) : raw_b)
-                              : static_cast<int32_t>(raw_b);
-      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);
+      uint32_t src0_bits = (raw0 >> (i * 4)) & 0xF;
+      uint32_t src1_bits = (raw1 >> (i * 4)) & 0xF;
+      int32_t src0_elem =
+          src0_signed ? static_cast<int32_t>((src0_bits & 0x8) ? (src0_bits | ~0xF) : src0_bits)
+                      : static_cast<int32_t>(src0_bits);
+      int32_t src1_elem =
+          src1_signed ? static_cast<int32_t>((src1_bits & 0x8) ? (src1_bits | ~0xF) : src1_bits)
+                      : static_cast<int32_t>(src1_bits);
+      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);
     }
     if (inst.inst_.clamp) {
       sum = std::clamp(sum, static_cast<int64_t>(std::numeric_limits<int32_t>::min()),
@@ -10607,9 +10609,9 @@ inline void execute_v_dot8_u32_u4_vop3p([[maybe_unused]] Inst &inst,
     raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
     for (int i = 0; i < 8; ++i) {
-      uint32_t a = (raw0 >> (i * 4)) & 0xF;
-      uint32_t b = (raw1 >> (i * 4)) & 0xF;
-      sum += a * b;
+      uint32_t src0_elem = (raw0 >> (i * 4)) & 0xF;
+      uint32_t src1_elem = (raw1 >> (i * 4)) & 0xF;
+      sum += src0_elem * src1_elem;
     }
     if (inst.inst_.clamp)
       sum = std::min(sum, static_cast<uint64_t>(std::numeric_limits<uint32_t>::max()));

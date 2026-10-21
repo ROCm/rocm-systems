@@ -4579,11 +4579,11 @@ template <int ElemBits, bool Signed, typename Inst>
         using I64 = util::stdx::fixed_size_simd<int64_t, W>;
         I64 sum = util::stdx::static_simd_cast<I64>(std::bit_cast<I>(acc));
         for (int i = 0; i < N; ++i) {
-          const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-          const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-          const I a = std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits));
-          const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
-          sum += util::stdx::static_simd_cast<I64>(a * b);
+          const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
+          const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
+          const I src0_elem = std::bit_cast<I>(simd_sign_extend_u32(src0_bits, ElemBits));
+          const I src1_elem = std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits));
+          sum += util::stdx::static_simd_cast<I64>(src0_elem * src1_elem);
         }
         util::stdx::where(sum < I64(std::numeric_limits<int32_t>::min()), sum) =
             I64(std::numeric_limits<int32_t>::min());
@@ -4595,11 +4595,11 @@ template <int ElemBits, bool Signed, typename Inst>
 #endif
       U sum = acc;
       for (int i = 0; i < N; ++i) {
-        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-        const I a = std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits));
-        const I b = std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits));
-        sum += std::bit_cast<U>(a * b);
+        const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
+        const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
+        const I src0_elem = std::bit_cast<I>(simd_sign_extend_u32(src0_bits, ElemBits));
+        const I src1_elem = std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits));
+        sum += std::bit_cast<U>(src0_elem * src1_elem);
       }
       dst.template store_native<uint32_t>(base, sum, chunk);
     } else {
@@ -4608,9 +4608,9 @@ template <int ElemBits, bool Signed, typename Inst>
         using U64 = util::stdx::fixed_size_simd<uint64_t, W>;
         U64 sum = util::stdx::static_simd_cast<U64>(acc);
         for (int i = 0; i < N; ++i) {
-          const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-          const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-          sum += util::stdx::static_simd_cast<U64>(ea * eb);
+          const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
+          const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
+          sum += util::stdx::static_simd_cast<U64>(src0_bits * src1_bits);
         }
         util::stdx::where(sum > U64(std::numeric_limits<uint32_t>::max()), sum) =
             U64(std::numeric_limits<uint32_t>::max());
@@ -4620,9 +4620,9 @@ template <int ElemBits, bool Signed, typename Inst>
 #endif
       U sum = acc;
       for (int i = 0; i < N; ++i) {
-        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-        sum += ea * eb;
+        const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
+        const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
+        sum += src0_bits * src1_bits;
       }
       dst.template store_native<uint32_t>(base, sum, chunk);
     }
@@ -4642,12 +4642,13 @@ template <int ElemBits, bool Signed, typename Inst>
 enum class Vop3pDotHalfFormat { F16, BF16 };
 
 /// VOP3P v_dot2_f32_{f16,bf16} SIMD fast path. Two half-precision products plus
-/// an f32 accumulator collapse into a single f32 lane: result = a0*b0 + a1*b1 +
-/// acc (plain `*` / `+`, left-to-right — matching the scalar, NOT a contracted
-/// fma). op_sel / op_sel_hi pick the halves of src0/src1 (gated to the default
-/// packing op_sel == 0 && op_sel_hi == 3); neg / neg_hi flip the src0/src1
-/// product-operand signs; on the accumulator neg_hi bit 2 is ABS, applied before
-/// neg bit 2, as in the scalar body. The encoded CLAMP field is ignored for
+/// an f32 accumulator collapse into a single f32 lane: result =
+/// src0_lo*src1_lo + src0_hi*src1_hi + acc (plain `*` / `+`, left-to-right —
+/// matching the scalar, NOT a contracted fma). op_sel / op_sel_hi pick the
+/// halves of src0/src1 (gated to the default packing op_sel == 0 &&
+/// op_sel_hi == 3); neg / neg_hi flip the src0/src1 product-operand signs; on
+/// the accumulator neg_hi bit 2 is ABS, applied before neg bit 2, as in the
+/// scalar body. The encoded CLAMP field is ignored for
 /// floating DOT instructions. NaN-input payload divergence is accepted, as for
 /// the pk_fma slices.
 /// @tparam Fmt Selects F16 or BF16 widening of the half-precision sources.
@@ -4674,10 +4675,10 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
   using F = util::native<float>;
   using U = util::native<uint32_t>;
-  const bool neg_a0 = inst.inst_.neg & 1u;
-  const bool neg_b0 = inst.inst_.neg & 2u;
-  const bool neg_a1 = inst.inst_.neg_hi & 1u;
-  const bool neg_b1 = inst.inst_.neg_hi & 2u;
+  const bool neg_src0_lo = inst.inst_.neg & 1u;
+  const bool neg_src1_lo = inst.inst_.neg & 2u;
+  const bool neg_src0_hi = inst.inst_.neg_hi & 1u;
+  const bool neg_src1_hi = inst.inst_.neg_hi & 2u;
   // Widen one half, then flip its sign (NEG only; the product sources have no ABS).
   const auto half = [](U raw, bool negate) {
     F value;
@@ -4701,11 +4702,11 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
     const U raw1 = src1.template load_native<uint32_t>(base);
     const F acc = std::bit_cast<F>(source_modifier::apply<fp_format::F32>(
         src2.template load_native<uint32_t>(base), 2, inst.inst_.neg_hi, inst.inst_.neg));
-    const F a0 = half(raw0 & 0xFFFFu, neg_a0);
-    const F a1 = half(raw0 >> 16, neg_a1);
-    const F b0 = half(raw1 & 0xFFFFu, neg_b0);
-    const F b1 = half(raw1 >> 16, neg_b1);
-    F r = a0 * b0 + a1 * b1 + acc;
+    const F src0_lo = half(raw0 & 0xFFFFu, neg_src0_lo);
+    const F src0_hi = half(raw0 >> 16, neg_src0_hi);
+    const F src1_lo = half(raw1 & 0xFFFFu, neg_src1_lo);
+    const F src1_hi = half(raw1 >> 16, neg_src1_hi);
+    F r = src0_lo * src1_lo + src0_hi * src1_hi + acc;
     dst.template store_native<float>(base, r, chunk);
   }
   return true;
@@ -4766,13 +4767,15 @@ template <int ElemBits, typename Inst>
       using I64 = util::stdx::fixed_size_simd<int64_t, W>;
       I64 sum = util::stdx::static_simd_cast<I64>(std::bit_cast<I>(acc));
       for (int i = 0; i < N; ++i) {
-        const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-        const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-        const I a = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits))
-                                : util::stdx::static_simd_cast<I>(ea);
-        const I b = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits))
-                                : util::stdx::static_simd_cast<I>(eb);
-        sum += util::stdx::static_simd_cast<I64>(a * b);
+        const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
+        const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
+        const I src0_elem = src0_signed
+                                ? std::bit_cast<I>(simd_sign_extend_u32(src0_bits, ElemBits))
+                                : util::stdx::static_simd_cast<I>(src0_bits);
+        const I src1_elem = src1_signed
+                                ? std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits))
+                                : util::stdx::static_simd_cast<I>(src1_bits);
+        sum += util::stdx::static_simd_cast<I64>(src0_elem * src1_elem);
       }
       util::stdx::where(sum < I64(std::numeric_limits<int32_t>::min()), sum) =
           I64(std::numeric_limits<int32_t>::min());
@@ -4784,13 +4787,13 @@ template <int ElemBits, typename Inst>
 #endif
     U sum = acc;
     for (int i = 0; i < N; ++i) {
-      const U ea = (raw0 >> (i * ElemBits)) & kElemMask;
-      const U eb = (raw1 >> (i * ElemBits)) & kElemMask;
-      const I a = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(ea, ElemBits))
-                              : util::stdx::static_simd_cast<I>(ea);
-      const I b = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(eb, ElemBits))
-                              : util::stdx::static_simd_cast<I>(eb);
-      sum += std::bit_cast<U>(a * b);
+      const U src0_bits = (raw0 >> (i * ElemBits)) & kElemMask;
+      const U src1_bits = (raw1 >> (i * ElemBits)) & kElemMask;
+      const I src0_elem = src0_signed ? std::bit_cast<I>(simd_sign_extend_u32(src0_bits, ElemBits))
+                                      : util::stdx::static_simd_cast<I>(src0_bits);
+      const I src1_elem = src1_signed ? std::bit_cast<I>(simd_sign_extend_u32(src1_bits, ElemBits))
+                                      : util::stdx::static_simd_cast<I>(src1_bits);
+      sum += std::bit_cast<U>(src0_elem * src1_elem);
     }
     dst.template store_native<uint32_t>(base, sum, chunk);
   }

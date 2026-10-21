@@ -1390,8 +1390,12 @@ def gen_dot2_true16(
         f'      return uint16_t(amdgpu::source_modifier::apply<{fmt}>(bits & 0xffffu, source, inst_.abs, inst_.neg));'
     )
     L.append('    };')
-    L.append('    const uint16_t src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);')
-    L.append('    const uint16_t src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);')
+    L.append(
+        '    const uint16_t src0_lo = half(raw0, 0), src0_hi = half(raw0 >> 16, 0);'
+    )
+    L.append(
+        '    const uint16_t src1_lo = half(raw1, 1), src1_hi = half(raw1 >> 16, 1);'
+    )
     L.append('    const uint16_t acc = half(acc_bits, 2);')
     # ISA discrepancy: the ISA (RDNA3/RDNA4 section 7.2.4) expects BF16 DOT2
     # to round to nearest even and flush denormals, but gfx1201 rounds the sum
@@ -1464,20 +1468,30 @@ def gen_dot4(
             L.append('    const bool src1_signed = (inst_.neg & 0x2u) != 0;')
         L.append('    for (int i = 0; i < 4; ++i) {')
         if cls == 'dot4_i32_iu8':
-            L.append('      uint32_t raw_a = (raw0 >> (i * 8)) & 0xFF;')
-            L.append('      uint32_t raw_b = (raw1 >> (i * 8)) & 0xFF;')
+            L.append('      uint32_t src0_bits = (raw0 >> (i * 8)) & 0xFF;')
+            L.append('      uint32_t src1_bits = (raw1 >> (i * 8)) & 0xFF;')
             L.append(
-                '      int32_t a = src0_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_a))'
+                '      int32_t src0_elem = src0_signed ? static_cast<int32_t>(static_cast<int8_t>(src0_bits))'
             )
-            L.append('                              : static_cast<int32_t>(raw_a);')
             L.append(
-                '      int32_t b = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(raw_b))'
+                '                                      : static_cast<int32_t>(src0_bits);'
             )
-            L.append('                              : static_cast<int32_t>(raw_b);')
+            L.append(
+                '      int32_t src1_elem = src1_signed ? static_cast<int32_t>(static_cast<int8_t>(src1_bits))'
+            )
+            L.append(
+                '                                      : static_cast<int32_t>(src1_bits);'
+            )
         else:
-            L.append('      int8_t a = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);')
-            L.append('      int8_t b = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);')
-        L.append('      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);')
+            L.append(
+                '      int8_t src0_elem = static_cast<int8_t>((raw0 >> (i * 8)) & 0xFF);'
+            )
+            L.append(
+                '      int8_t src1_elem = static_cast<int8_t>((raw1 >> (i * 8)) & 0xFF);'
+            )
+        L.append(
+            '      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);'
+        )
         L.append('    }')
         L.append('    if (inst_.clamp && amdgpu::dot4_clamp_supported(wf)) {')
         L.append(
@@ -1510,9 +1524,13 @@ def gen_dot4(
             f'    uint64_t sum = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
         )
         L.append('    for (int i = 0; i < 4; ++i) {')
-        L.append('      uint8_t a = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);')
-        L.append('      uint8_t b = static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF);')
-        L.append('      sum += static_cast<uint32_t>(a) * b;')
+        L.append(
+            '      uint8_t src0_elem = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);'
+        )
+        L.append(
+            '      uint8_t src1_elem = static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF);'
+        )
+        L.append('      sum += static_cast<uint32_t>(src0_elem) * src1_elem;')
         L.append('    }')
         L.append('    if (inst_.clamp && amdgpu::dot4_clamp_supported(wf))')
         L.append(
@@ -1548,22 +1566,32 @@ def gen_dot8(
             L.append('    const bool src1_signed = (inst_.neg & 0x2u) != 0;')
         L.append('    for (int i = 0; i < 8; ++i) {')
         if cls == 'dot8_i32_iu4':
-            L.append('      uint32_t raw_a = (raw0 >> (i * 4)) & 0xF;')
-            L.append('      uint32_t raw_b = (raw1 >> (i * 4)) & 0xF;')
+            L.append('      uint32_t src0_bits = (raw0 >> (i * 4)) & 0xF;')
+            L.append('      uint32_t src1_bits = (raw1 >> (i * 4)) & 0xF;')
             L.append(
-                '      int32_t a = src0_signed ? static_cast<int32_t>((raw_a & 0x8) ? (raw_a | ~0xF) : raw_a)'
+                '      int32_t src0_elem = src0_signed ? static_cast<int32_t>((src0_bits & 0x8) ? (src0_bits | ~0xF) : src0_bits)'
             )
-            L.append('                              : static_cast<int32_t>(raw_a);')
             L.append(
-                '      int32_t b = src1_signed ? static_cast<int32_t>((raw_b & 0x8) ? (raw_b | ~0xF) : raw_b)'
+                '                                      : static_cast<int32_t>(src0_bits);'
             )
-            L.append('                              : static_cast<int32_t>(raw_b);')
+            L.append(
+                '      int32_t src1_elem = src1_signed ? static_cast<int32_t>((src1_bits & 0x8) ? (src1_bits | ~0xF) : src1_bits)'
+            )
+            L.append(
+                '                                      : static_cast<int32_t>(src1_bits);'
+            )
         else:
-            L.append('      int32_t a = static_cast<int32_t>((raw0 >> (i * 4)) & 0xF);')
-            L.append('      if (a & 0x8) a |= ~0xF;')
-            L.append('      int32_t b = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);')
-            L.append('      if (b & 0x8) b |= ~0xF;')
-        L.append('      sum += static_cast<int64_t>(a) * static_cast<int64_t>(b);')
+            L.append(
+                '      int32_t src0_elem = static_cast<int32_t>((raw0 >> (i * 4)) & 0xF);'
+            )
+            L.append('      if (src0_elem & 0x8) src0_elem |= ~0xF;')
+            L.append(
+                '      int32_t src1_elem = static_cast<int32_t>((raw1 >> (i * 4)) & 0xF);'
+            )
+            L.append('      if (src1_elem & 0x8) src1_elem |= ~0xF;')
+        L.append(
+            '      sum += static_cast<int64_t>(src0_elem) * static_cast<int64_t>(src1_elem);'
+        )
         L.append('    }')
         L.append('    if (inst_.clamp) {')
         L.append(
@@ -1578,9 +1606,9 @@ def gen_dot8(
             f'    uint64_t sum = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
         )
         L.append('    for (int i = 0; i < 8; ++i) {')
-        L.append('      uint32_t a = (raw0 >> (i * 4)) & 0xF;')
-        L.append('      uint32_t b = (raw1 >> (i * 4)) & 0xF;')
-        L.append('      sum += a * b;')
+        L.append('      uint32_t src0_elem = (raw0 >> (i * 4)) & 0xF;')
+        L.append('      uint32_t src1_elem = (raw1 >> (i * 4)) & 0xF;')
+        L.append('      sum += src0_elem * src1_elem;')
         L.append('    }')
         L.append('    if (inst_.clamp)')
         L.append(

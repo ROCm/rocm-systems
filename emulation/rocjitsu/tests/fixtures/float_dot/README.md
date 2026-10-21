@@ -77,7 +77,7 @@ kept it set.
 | DOT follow-up probe | ABS+NEG on C for every floating DOT form, including true16 BF16; integer OP_SEL combined with NEG and CLAMP near the limits | Plain forms: 15, including one denormal input or output bit at a time (`0x70`, `0xb0`, `0xd0`, `0xe0`), one rounding field at a time (`0xf3`, `0xfc`) and FP16_OVFL; modifier forms: 9 |
 | WMMA C-floor probe (`gfx1201`, wave32) | `V_WMMA_F32_16X16X16_BF16` and `V_WMMA_BF16_16X16X16_BF16` with only k=0 of A nonzero, small BF16 products and subnormal C; 16,384 cases per opcode | kernel default |
 | Witness probe | Single lanes chosen so that one rule change alters the result: the negative-C floor unit at both floors, FP8/BF8 one-grid alignment, and a zero-product accumulator | `0xf0`, `0x30`, `0xc0`, `0x00`, `0xf3`, `0xfc` |
-| FP8/BF8 selector probe (`gfx1201`) | `V_DOT4_F32_{FP8,BF8}_{FP8,BF8}` over all 16 OP_SEL/OP_SEL_HI combinations, 4096 lanes each, with an integer DOT4 control | kernel default |
+| FP8/BF8 selector probe (`gfx1201`) | Raw encodings of all four `V_DOT4_F32_{FP8,BF8}_{FP8,BF8}` opcodes over all 16 OP_SEL/OP_SEL_HI combinations, 1,024 fixed-seed lanes each, including the two selector witnesses | 11: kernel default `0xf0`, `0x70`, `0xb0`, `0xd0`, `0xe0`, `0xf3`, `0xfc`, `0x30`, `0xc0`, `0x00`, `0xff` |
 
 ### Measured and extrapolated behaviour
 
@@ -91,7 +91,8 @@ capture.
 FP8/BF8 DOT4 selects source halves exactly as the integer DOT4/DOT8 forms do.
 LLVM rejects explicit selectors for these opcodes, so only raw encodings reach
 the rule; `Fp8Fp8HighHalfSrc0` and `Bf8Bf8HighHalfSrc0` are the decoded
-witnesses.
+witnesses. The selector probe captured both under every MODE their tests use,
+with the same result each time; none of its 64 forms changes with MODE.
 
 ### The negative-C floor unit
 
