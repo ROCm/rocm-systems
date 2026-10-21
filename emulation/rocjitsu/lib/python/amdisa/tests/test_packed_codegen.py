@@ -430,20 +430,27 @@ def test_fp8_dot4_rejects_other_accumulation_models():
         )
 
 
-def test_integer_dot4_dot8_select_source_halves():
-    for gen, cls in (
-        (gen_dot4, 'dot4_i32_iu8'),
-        (gen_dot4, 'dot4_u32_u8'),
-        (gen_dot4, 'dot4_i32_i8'),
-        (gen_dot8, 'dot8_i32_iu4'),
-        (gen_dot8, 'dot8_u32_u4'),
-        (gen_dot8, 'dot8_i32_i4'),
+def test_dot4_dot8_select_source_halves():
+    """Every DOT4/DOT8 form selects halves, including the FP8/BF8 floats."""
+    fp8 = {
+        'operation': 'fp8_fp8',
+        'dot_accumulation': FloatDotAccumulation.GFX12,
+    }
+    for gen, cls, extra in (
+        (gen_dot4, 'dot4_i32_iu8', {}),
+        (gen_dot4, 'dot4_u32_u8', {}),
+        (gen_dot4, 'dot4_i32_i8', {}),
+        (gen_dot4, 'dot4_f32_fp8', fp8),
+        (gen_dot8, 'dot8_i32_iu4', {}),
+        (gen_dot8, 'dot8_u32_u4', {}),
+        (gen_dot8, 'dot8_i32_i4', {}),
     ):
         cpp = gen(
             ['vdst'],
             ['src0', 'src1', 'src2'],
             cls,
             opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+            **extra,
         )
         for i in range(2):
             assert (

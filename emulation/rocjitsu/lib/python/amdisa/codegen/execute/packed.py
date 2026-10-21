@@ -1408,13 +1408,14 @@ def gen_dot2_true16(
     return '\n'.join(L)
 
 
-def _append_dot_int_halves(L: list[str], opsel_exprs: tuple[str, str]) -> None:
-    """Apply VOP3P OP_SEL/OP_SEL_HI to the packed integer sources of DOT4/DOT8.
+def _append_dot_source_halves(L: list[str], opsel_exprs: tuple[str, str]) -> None:
+    """Apply VOP3P OP_SEL/OP_SEL_HI to the packed sources of DOT4/DOT8.
 
     gfx1201 and gfx1100 treat each 32-bit source as two 16-bit halves: OP_SEL
     picks the half used for bits 15:0 and OP_SEL_HI the half for bits 31:16,
     as for packed 16-bit math. The assembler default (op_sel:[0,0],
-    op_sel_hi:[1,1]) keeps the register as is. src2 is unaffected. RDNA2,
+    op_sel_hi:[1,1]) keeps the register as is. src2 is unaffected. The gfx1201
+    FP8/BF8 DOT4 forms select halves the same way as the integer forms. RDNA2,
     CDNA1-4 and CDNA5 share this body without a hardware capture.
     """
     opsel, opsel_hi = opsel_exprs
@@ -1452,8 +1453,7 @@ def gen_dot4(
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     L.append(f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
     L.append(f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
-    if cls != 'dot4_f32_fp8':
-        _append_dot_int_halves(L, opsel_exprs)
+    _append_dot_source_halves(L, opsel_exprs)
 
     if cls in ('dot4_i32_i8', 'dot4_i32_iu8'):
         L.append(
@@ -1537,7 +1537,7 @@ def gen_dot8(
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     L.append(f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
     L.append(f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
-    _append_dot_int_halves(L, opsel_exprs)
+    _append_dot_source_halves(L, opsel_exprs)
 
     if cls in ('dot8_i32_i4', 'dot8_i32_iu4'):
         L.append(

@@ -53,13 +53,13 @@ This deliberately small corpus is regression coverage, not exhaustive validation
 ## Inline DOT captures
 
 `valu_fp_mode_test.cpp` and `gfx12_dot_test.cpp` also hold DOT lanes copied
-from five separate probe batches. The VALU and DOT probes compiled one HIP
+from six separate probe batches. The VALU and DOT probes compiled one HIP
 kernel per instruction and modifier form, set MODE with `s_setreg` around the
 instruction, and wrote the raw destination bits for 8,192 fixed-seed lanes
 (special-value cross products, random values and, for integer DOT, operands
 near the accumulator limits). The same binaries were replayed under rocjitsu.
-The WMMA and witness probes are described in their rows below. The probe
-sources are not part of this repository.
+The WMMA, witness and selector probes are described in their rows below. The
+probe sources are not part of this repository.
 
 | Card | Host software |
 | --- | --- |
@@ -77,14 +77,21 @@ kept it set.
 | DOT follow-up probe | ABS+NEG on C for every floating DOT form, including true16 BF16; integer OP_SEL combined with NEG and CLAMP near the limits | Plain forms: 15, including one denormal input or output bit at a time (`0x70`, `0xb0`, `0xd0`, `0xe0`), one rounding field at a time (`0xf3`, `0xfc`) and FP16_OVFL; modifier forms: 9 |
 | WMMA C-floor probe (`gfx1201`, wave32) | `V_WMMA_F32_16X16X16_BF16` and `V_WMMA_BF16_16X16X16_BF16` with only k=0 of A nonzero, small BF16 products and subnormal C; 16,384 cases per opcode | kernel default |
 | Witness probe | Single lanes chosen so that one rule change alters the result: the negative-C floor unit at both floors, FP8/BF8 one-grid alignment, and a zero-product accumulator | `0xf0`, `0x30`, `0xc0`, `0x00`, `0xf3`, `0xfc` |
+| FP8/BF8 selector probe (`gfx1201`) | `V_DOT4_F32_{FP8,BF8}_{FP8,BF8}` over all 16 OP_SEL/OP_SEL_HI combinations, 4096 lanes each, with an integer DOT4 control | kernel default |
 
 ### Measured and extrapolated behaviour
 
 Measured on both cards: true16 DOT2, VOP3P DOT2 F32 including NEG_HI on C as
 ABS, and integer DOT4/DOT8 half selection with NEG and CLAMP. Measured on
-`gfx1201` only: FP8/BF8 DOT4 and the WMMA C-floor cases. RDNA3.5 reuses the
-RDNA3 rules. RDNA2, CDNA1–4 and CDNA5 share the generated DOT bodies (NEG_HI on
-C as ABS, integer half selection) without a capture.
+`gfx1201` only: FP8/BF8 DOT4, its OP_SEL/OP_SEL_HI half selection, and the WMMA
+C-floor cases. RDNA3.5 reuses the RDNA3 rules. RDNA2, CDNA1–4 and CDNA5 share
+the generated DOT bodies (NEG_HI on C as ABS, integer half selection) without a
+capture.
+
+FP8/BF8 DOT4 selects source halves exactly as the integer DOT4/DOT8 forms do.
+LLVM rejects explicit selectors for these opcodes, so only raw encodings reach
+the rule; `Fp8Fp8HighHalfSrc0` and `Bf8Bf8HighHalfSrc0` are the decoded
+witnesses.
 
 ### The negative-C floor unit
 

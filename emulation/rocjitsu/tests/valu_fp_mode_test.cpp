@@ -4486,6 +4486,15 @@ std::vector<DotLane> dot_family_lanes() {
   // An ordinary captured lane: subnormal factors with a negative accumulator.
   add("Bf8Bf8SubnormalFactorsNegativeAccumulator", dot4_bf8_bf8, {}, 0xb3510221u, 0xc48c2309u,
       0x8030a352u, 0x3f5d8020u, {}, kSplitModes);
+  // FP8/BF8 DOT4 selects source halves exactly as the integer forms do. LLVM
+  // rejects explicit selectors for these opcodes, so only raw encodings reach
+  // it; the gfx1201 probe swept all 16 selector combinations over 4096 lanes
+  // each. Taking the unselected register instead gives 0xc440d3f2 and
+  // 0xc8c0571c.
+  add("Fp8Fp8HighHalfSrc0", dot4_fp8_fp8, {.opsel = 1}, 0x5456573cu, 0xee8eca41u, 0x44212c8eu,
+      0xc4360bf2u, {}, fp8_modes);
+  add("Bf8Bf8HighHalfSrc0", dot4_bf8_bf8, {.opsel = 1}, 0x5456573cu, 0xee8eca41u, 0x44212c8eu,
+      0xc8bff16cu, {}, fp8_modes);
   // Integer DOT4/DOT8 read each source as two 16-bit halves: OP_SEL picks the
   // half for bits 15:0 and OP_SEL_HI the half for bits 31:16. Both cards agree.
   // These lanes must also take the integer DOT SIMD path.
