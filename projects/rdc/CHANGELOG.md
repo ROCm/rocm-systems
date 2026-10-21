@@ -34,6 +34,16 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Resolved Issues
 
+- Profiling fields report an error, instead of another GPU's or a previous sample's values, when a counter sample fails, or when the size of a counter cannot be read.
+
+- The profiling FLOPS percent fields (`RDC_FI_PROF_EVAL_FLOPS_16_PERCENT`, `RDC_FI_PROF_EVAL_FLOPS_32_PERCENT` and `RDC_FI_PROF_EVAL_FLOPS_64_PERCENT`) are not supported on a GPU that reports no SIMD per compute unit. They were 0.
+
+- `rdcd` no longer crashes at its first read of a profiling field when the profiler finds no GPU, and a profiler that fails to start fails each profiling field instead of stopping the updates of every field.
+
+- Profiling fields of a GPU that the profiler cannot read are read again at their update interval, not at every update.
+
+- The profiler module, `librdc_rocp.so`, exports only its module functions, and RDC binds all of its symbols when it loads it and keeps it loaded. Its own copy of RDC's GPU table functions could take the place of `librdc`'s in later calls.
+
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
 
 - `rdc_status_string()` now describes `RDC_ST_DISABLED_MODULE`. It returned "Unknown", so the rdcd log reported a disabled module as an unknown error.

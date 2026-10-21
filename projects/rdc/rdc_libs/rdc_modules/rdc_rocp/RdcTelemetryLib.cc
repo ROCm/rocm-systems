@@ -225,8 +225,11 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
     status = rocp_p->rocp_lookup_bulk(gpu_fields, bulk_data, bulk_types, bulk_statuses);
     if (status != RDC_ST_OK) {
       RDC_LOG(RDC_ERROR, "Error in bulk lookup for GPU " << gpu_index);
-      // Continue with next GPU even if this one failed
-      continue;
+      // Its fields still go to the callback, each with the failure, so that the watch table
+      // records the attempt instead of asking for them again at every update.
+      bulk_data.assign(gpu_fields.size(), rdc_field_value_data{});
+      bulk_types.assign(gpu_fields.size(), DOUBLE);
+      bulk_statuses.assign(gpu_fields.size(), status);
     }
 
     // Distribute results to callback buffer

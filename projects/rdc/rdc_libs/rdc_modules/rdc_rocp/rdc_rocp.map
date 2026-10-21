@@ -1,0 +1,14 @@
+/* The symbols librdc_rocp.so exports (rdc_rocp/CMakeLists.txt): the module API that RdcRocpLib
+   loads and rocprofiler-sdk's tool entry point. Everything else stays inside the module. */
+{
+  global:
+    rdc_module_init;
+    rdc_module_destroy;
+    rdc_telemetry_fields_query;
+    rdc_telemetry_fields_value_get;
+    rdc_telemetry_fields_watch;
+    rdc_telemetry_fields_unwatch;
+    rocprofiler_configure;
+  local:
+    *;
+};

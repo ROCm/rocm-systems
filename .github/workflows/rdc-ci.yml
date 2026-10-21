@@ -314,6 +314,33 @@ jobs:
           fi
         done
         echo "${module}: needs librdc.so.1, resolves, defines no test hook"
+        # The installed ROCp module, which RdcRocpLib loads RTLD_NOW | RTLD_GLOBAL: it needs
+        # librdc_bootstrap.so.1, for strncpy_with_null; its whole closure must relocate (this
+        # image has ROCr and rocprofiler-sdk); and it exports its module API and
+        # rocprofiler-sdk's tool entry point only, so that its own copies of SmiUtils and the
+        # logger do not come before librdc's in later symbol lookups.
+        module="${ROCM_DIR}/lib/rdc/librdc_rocp.so"
+        out="$(readelf -d "${module}" 2>&1)" || { echo "readelf failed on ${module}"; exit 1; }
+        if ! grep -q '(NEEDED).*\[librdc_bootstrap\.so\.1\]' <<<"${out}"; then
+          echo "${module} does not need librdc_bootstrap.so.1"
+          exit 1
+        fi
+        out="$(ldd -r "${module}" 2>&1)" || { echo "ldd failed on ${module}"; exit 1; }
+        if grep -q -e 'not found' -e 'undefined symbol' <<<"${out}"; then
+          echo "${module} does not resolve:"
+          grep -e 'not found' -e 'undefined symbol' <<<"${out}"
+          exit 1
+        fi
+        out="$(nm -D --defined-only "${module}" 2>&1)" || { echo "nm failed on ${module}"; exit 1; }
+        extra="$(awk '$2 != "A" {print $3}' <<<"${out}" \
+          | grep -vxE 'rdc_module_(init|destroy)|rdc_telemetry_fields_(query|value_get|watch|unwatch)|rocprofiler_configure' \
+          || true)"
+        if test -n "${extra}"; then
+          echo "${module} exports more than its module API:"
+          head -20 <<<"${extra}"
+          exit 1
+        fi
+        echo "${module}: needs librdc_bootstrap.so.1, resolves, exports only its module API"
 
     - name: Check the installed fake-GPU suite
       shell: bash
@@ -778,7 +805,8 @@ jobs:
           pkg-config \
           python3 \
           python3-pip \
-          rocm-core
+          rocm-core \
+          rocprofiler-sdk
         pip3 install pytest pytest-timeout prometheus_client
 
     - name: Check the compiler
@@ -936,6 +964,13 @@ jobs:
         }
         test -x build-clang/tests/unit/rdc_rocr_pin_tests \
           || { echo "no build-clang/tests/unit/rdc_rocr_pin_tests"; exit 1; }
+        # The ROCp gtest, which needs rocprofiler-sdk's headers (the tools step).
+        rocp="${CLANG_PREFIX}/share/rdc/rdctst_tests/rdc_rocp_tests"
+        test -x "${rocp}" || {
+          echo "no ${rocp}"
+          if test -e "${rocp}.absent"; then echo "${rocp}.absent is installed"; fi
+          exit 1
+        }
 
     - name: Run the tests
       shell: bash
