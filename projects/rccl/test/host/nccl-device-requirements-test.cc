@@ -264,7 +264,7 @@ TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_BufferSizeAnd
   }
 }
 
-// A 1-rank team makes nPeers = 0, so idivRcp32(0) divides by zero. Pins AICOMRCCL-3121; a fix flips this pin.
+// A 1-rank team makes nPeers = 0, so idivRcp32(0) divides by zero; a fix flips this pin.
 TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_KnownBug_SingleRankTeamDividesByZero) {
 #if defined(__x86_64__)  // AArch64 UDIV returns 0 instead of trapping.
   volatile int nRanksVolatile = 1;  // keeps -O2 from folding the divide away
