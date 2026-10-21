@@ -36,38 +36,25 @@ DOC_PATTERNS = (
 class CoverageRule:
     """Paths that `workflow` already checks on PRs to `branches`.
 
-    The examples drive the tests: every rule must show what it covers and what
-    it must not. Only `workflow`'s trigger is tested, not whether branch
-    protection requires it.
+    tests/rccl_change_sets_test.py needs covered and look-alike examples for
+    every rule. It checks `workflow`'s trigger, not whether branch protection
+    requires it.
     """
 
     name: str
     workflow: str
     branches: tuple[str, ...]
     patterns: tuple[str, ...]
-    covered_examples: tuple[str, ...]
-    lookalike_examples: tuple[str, ...]
 
 
 COVERAGE_RULES = (
+    # Builds and runs test/host standalone. The in-tree BUILD_TESTS=ON build of
+    # test/host (and its CMake) is only compiled by TheRock Multi-Arch CI.
     CoverageRule(
         name="host-only unit tests",
         workflow=".github/workflows/rccl-host-unit-tests.yml",
         branches=("develop",),
         patterns=("projects/rccl/test/host/*",),
-        covered_examples=(
-            "projects/rccl/test/host/CMakeLists.txt",
-            "projects/rccl/test/host/run_host_tests.sh",
-            "projects/rccl/test/host/fakes/os_fakes.cc",
-        ),
-        lookalike_examples=(
-            "projects/rccl/test/host",
-            "projects/rccl/test/hostile.cc",
-            "projects/rccl/test/hostfoo/x.cc",
-            "projects/rccl/test/CMakeLists.txt",
-            "projects/rccl/src/test/host/x.cc",
-            "projects/rccl-tests/test/host/x.cc",
-        ),
     ),
 )
 
