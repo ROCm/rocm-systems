@@ -137,9 +137,32 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
     trafficClass = cctx->comm->config.trafficClass;
   }
 
+  // NIC affinity: use rccl's topology engine (same as GDAKI's selection path,
+  // ncclTopoGetLocalNet -> net getProperties) to pick the local NIC for this
+  // GPU, and pass its device name to the factory. Best-effort: on failure the
+  // factory selects the first usable active device.
+  const char* preferredNic = nullptr;
+  char preferredNicName[128] = {0};
+  {
+    // Use the global comm rank (identifies this process's GPU in the topology),
+    // not the GIN-team `rank` which may be a strided/custom subset.
+    int64_t netId = -1;
+    int netDev = -1;
+    if (ncclTopoGetLocalNet(cctx->comm->topo, cctx->comm->rank, /*channelId=*/0, &netId, &netDev) == ncclSuccess &&
+        netDev >= 0) {
+      ncclNetProperties_t props;
+      if (cctx->comm->ncclNet->getProperties(netDev, &props) == ncclSuccess && props.name != nullptr) {
+        snprintf(preferredNicName, sizeof(preferredNicName), "%s", props.name);
+        preferredNic = preferredNicName;
+        INFO(NCCL_INIT, "GIN rocshmem-gda: comm rank %d GPU-local NIC: %s (netDev %d)", cctx->comm->rank,
+             preferredNicName, netDev);
+      }
+    }
+  }
+
   // Create QPs during connect (like GDAKI creates IB connections in connect)
   int rc = rocshmem_gin_create_qps(nranks, rank, ginGdaBootstrapAllgather, cctx->comm->bootstrap, trafficClass,
-                                   &cctx->qpSet, &cctx->gpu_qp_ptrs);
+                                   preferredNic, &cctx->qpSet, &cctx->gpu_qp_ptrs);
   if (rc != 0) {
     WARN("GIN rocshmem-gda: failed to create QPs");
     delete cctx;

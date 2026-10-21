@@ -46,7 +46,6 @@
 #include <gda/gda_enums.hpp>
 #include <gda/debug_gda.hpp>
 #include <envvar.hpp>
-#include <gda/topology.hpp>
 #include <bit.hpp>
 #include <util.hpp>
 #include <constants.hpp>
@@ -153,6 +152,10 @@ struct rocshmem_gin_qp_set {
   int nRanks;
   int myRank;
   GDAProvider provider;  // GDAProvider enum
+
+  // Preferred NIC device name (e.g. "mlx5_0") from the caller's topology-based
+  // selection; empty means "first usable active device".
+  std::string preferred_nic_name;
 
   // NIC state (owned by this set)
   GinNicDevice nic;
@@ -293,15 +296,15 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
     return -1;
   }
 
-  // Use topology-aware NIC selection (same as GDABackend::select_nics)
-  int gpu_dev = 0;
-  (void)hipGetDevice(&gpu_dev);
-  std::string closest_nic;
-  if (GetClosestNicToGpu(gpu_dev, nullptr, &closest_nic) >= 0) {
-    LOG_TRACE("GIN QP factory: GPU %d closest NIC: %s", gpu_dev, closest_nic.c_str());
+  // NIC affinity is decided by the caller using rccl's topology engine
+  // (ncclTopoGetLocalNet, same as GDAKI) and passed in as a device name. Empty
+  // means no preference — select the first usable active device.
+  const std::string& closest_nic = set->preferred_nic_name;
+  if (!closest_nic.empty()) {
+    LOG_TRACE("GIN QP factory: preferred NIC for this GPU: %s", closest_nic.c_str());
   }
 
-  // Find the selected device (or first active if topology unavailable)
+  // Find the selected device (or first active if no preference given)
   for (int d = 0; d < ndev; d++) {
     // If topology selected a NIC, skip non-matching devices
     if (!closest_nic.empty() && closest_nic != gin_ibv_get_device_name(dev_list[d])) {
@@ -411,6 +414,8 @@ static int gin_open_ib_device(rocshmem_gin_qp_set* set) {
       continue;
     }
 
+    int gpu_dev = -1;
+    (void)hipGetDevice(&gpu_dev);
     LOG_INFO("GIN QP factory: GPU %d using %s port %d (provider=%d) "
              "gid_index=%d gid=%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
              gpu_dev, set->nic.nic_name.c_str(), set->nic.port, set->provider, set->nic.gid_index, set->nic.gid.raw[0],
@@ -1114,8 +1119,8 @@ int rocshmem_gin_qp_set::initialize_host_gpu_qp(QueuePair* host_gpu_qp, int idx)
 ///////////////////////////////////////////////////////////////////////////////
 
 int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, void* buf, size_t size),
-                            void* allgather_ctx, int traffic_class, rocshmem_gin_qp_set_t* out_qp_set,
-                            void*** out_gpu_qps) {
+                            void* allgather_ctx, int traffic_class, const char* preferred_nic_name,
+                            rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps) {
   // Note: log_pe_number and device-side logd_constants must be initialized
   // by the consumer binary (e.g. rccl-tests) which links rocshmem's device
   // bitcode and can resolve HIP_SYMBOL(logd_constants).
@@ -1124,6 +1129,7 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
   set->nRanks = nRanks;
   set->myRank = myRank;
   set->traffic_class = static_cast<uint8_t>(traffic_class);
+  if (preferred_nic_name != nullptr) set->preferred_nic_name = preferred_nic_name;
 
   // 1. Open IB device and detect provider
   if (gin_open_ib_device(set) != 0) {

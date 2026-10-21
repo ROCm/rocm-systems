@@ -73,14 +73,17 @@ typedef struct rocshmem_gin_qp_set* rocshmem_gin_qp_set_t;
  * @param[in]  allgather_ctx Opaque context passed to allgather.
  * @param[in]  traffic_class IB traffic class (0-255) for QP INIT->RTR.
  *                           Value 0 means no specific TC (default behavior).
+ * @param[in]  preferred_nic_name  ibverbs device name (e.g. "mlx5_0") selected by
+ *                           the caller's topology affinity (ncclTopoGetLocalNet).
+ *                           NULL or empty selects the first usable active device.
  * @param[out] out_qp_set   Opaque handle to the created QP set.
  * @param[out] out_gpu_qps  GPU-accessible array of nRanks QueuePair pointers.
  *
  * @return 0 on success, non-zero on failure.
  */
 GIN_QP_API int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, void* buf, size_t size),
-                                       void* allgather_ctx, int traffic_class, rocshmem_gin_qp_set_t* out_qp_set,
-                                       void*** out_gpu_qps);
+                                       void* allgather_ctx, int traffic_class, const char* preferred_nic_name,
+                                       rocshmem_gin_qp_set_t* out_qp_set, void*** out_gpu_qps);
 
 /**
  * @brief Destroy a set of GIN QPs and release all IB resources.
