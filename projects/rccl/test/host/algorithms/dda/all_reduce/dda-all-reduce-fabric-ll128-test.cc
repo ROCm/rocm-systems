@@ -80,7 +80,7 @@ class DdaAllReduceFabricLL128Microtest : public ::testing::Test {
   template <typename T>
   void ExpectLaunchOf(const DdaLaunch& launch, size_t count, size_t lines) {
     EXPECT_EQ(launch.kernel, (Kernel<T, 8>()));
-    ASSERT_EQ(launch.args.size(), 9u);
+    ASSERT_EQ(launch.args.size(), 10u);
     EXPECT_EQ(launch.Arg<T**>(0), comm().ddaPeerPtrsDev);
     EXPECT_EQ(launch.Arg<T*>(1), kRecvbuff);
     EXPECT_EQ(launch.Arg<const T*>(2), kSendbuff);
@@ -90,6 +90,7 @@ class DdaAllReduceFabricLL128Microtest : public ::testing::Test {
     EXPECT_EQ(launch.Arg<uint32_t*>(6), comm().ddaLLEpochDev);
     EXPECT_EQ(launch.Arg<int>(7), comm().ddaLLEpochLen);
     EXPECT_EQ(launch.Arg<size_t>(8), lines);
+    EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(9).flag, comm().abortFlagDev);
   }
 
   DdaFabricMockComm mock_;
