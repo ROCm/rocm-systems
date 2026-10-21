@@ -70,6 +70,9 @@ protected:
             why = "requires >= 2 processes on >= 2 nodes";
         else if (envInt("RCCL_IB_GDR_FLUSH_FLAG", 0) == 0)
             why = "requires RCCL_IB_GDR_FLUSH_FLAG=1";
+        else if (envInt("NCCL_IB_SPLIT_DATA_ON_QPS", 0) != 0 &&
+                 std::max(configuredQps(), envInt("RCCL_IB_QPS_PER_P2P", 0)) > NCCL_GDR_FLUSH_MAX_WAIT_QPS)
+            why = "the flag needs at most NCCL_GDR_FLUSH_MAX_WAIT_QPS QPs per request";
         int skip = why.empty() ? 0 : 1;
         MPI_Allreduce(MPI_IN_PLACE, &skip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
         if (skip && why.empty()) why = "another rank cannot run this test";

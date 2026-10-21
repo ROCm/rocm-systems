@@ -82,11 +82,14 @@ static int ncclIbCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const
 RCCL_PARAM(IbGdrFlushFlag, "IB_GDR_FLUSH_FLAG", 0);
 
 static_assert(NCCL_IB_MAX_QPS * NCCL_GDR_FLUSH_FLAG_STRIDE <= GPU_PAGE_SIZE, "per-QP GDR flush flags must fit in one page");
+static_assert((NCCL_IB_MAX_QPS + NCCL_GDR_FLUSH_MAX_WAIT_QPS - 1) * NCCL_GDR_FLUSH_FLAG_STRIDE <= GPU_PAGE_SIZE,
+              "the GPU polls NCCL_GDR_FLUSH_MAX_WAIT_QPS flags from any first QP, all within the page");
 static_assert(NCCL_IB_MAX_QPS < 256, "per-QP GDR flush flag first index and count are packed in 8 bits each");
 
 static bool ncclIbFlagFlushEligible(struct ncclIbNetCommBase* base) {
   return rcclParamIbGdrFlushFlag() != 0 && base->vProps.ndevs == 1 && base->nDataQps == 1 &&
-         base->nqps <= NCCL_IB_MAX_QPS && base->resiliency == NULL && base->recvMatchingScheme == BY_INDEX;
+         base->nqps <= NCCL_IB_MAX_QPS && ncclIbCommBaseGetNqpsPerRequest(base) <= NCCL_GDR_FLUSH_MAX_WAIT_QPS &&
+         base->resiliency == NULL && base->recvMatchingScheme == BY_INDEX;
 }
 
 NCCL_PARAM(IbSubnetAwareRouting, "IB_SUBNET_AWARE_ROUTING", 0);

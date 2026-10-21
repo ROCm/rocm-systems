@@ -126,13 +126,19 @@ class Primitives<T, RedOp, Fan, Direct,
   __device__ __forceinline__ void waitGdrFlushFlag(uint64_t* flag, uint64_t* seqs, uint64_t seqStep) {
     uint64_t desc = ld_volatile_global(seqs + seqStep % NCCL_STEPS);
     uint64_t seq = desc & NCCL_GDR_FLUSH_SEQ_MASK;
-    int first = (int)((desc >> NCCL_GDR_FLUSH_FIRST_SHIFT) & 0xff);
     int count = (int)(desc >> NCCL_GDR_FLUSH_COUNT_SHIFT);
+    flag += ((desc >> NCCL_GDR_FLUSH_FIRST_SHIFT) & 0xff) * (NCCL_GDR_FLUSH_FLAG_STRIDE / sizeof(uint64_t));
     int spins = 0;
-    for (int q = first; q < first + count; q++) {
-      while (ld_volatile_global(flag + q * (NCCL_GDR_FLUSH_FLAG_STRIDE / sizeof(uint64_t))) < seq) {
-        if (checkAbort(flags, Aborted, spins)) return;
-      }
+    while (true) {
+      // Load every slot unconditionally so all loads are in flight before the first wait.
+      uint64_t v[NCCL_GDR_FLUSH_MAX_WAIT_QPS];
+#pragma unroll
+      for (int q = 0; q < NCCL_GDR_FLUSH_MAX_WAIT_QPS; q++)
+        v[q] = ld_volatile_global(flag + q * (NCCL_GDR_FLUSH_FLAG_STRIDE / sizeof(uint64_t)));
+      bool landed = true;
+#pragma unroll
+      for (int q = 0; q < NCCL_GDR_FLUSH_MAX_WAIT_QPS; q++) landed &= (q >= count) | (v[q] >= seq);
+      if (landed || checkAbort(flags, Aborted, spins)) return;
     }
   }
 
