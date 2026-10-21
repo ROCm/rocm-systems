@@ -478,8 +478,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     suites `NetIbInitMicrotest.*`.
   - `net_ib/reg.cc` (`NET_IB_REG_CC_PATH`, from `net_ib/reg-test.cc`);
     suites `NetIbRegMicrotest.*`.
+  - `net_ib/gin.cc` (`NET_IB_GIN_CC_PATH`, from `net_ib/gin-test.cc`);
+    suites `NetIbGinMicrotest.*`.
   - `net_ib/gdr.cc` (`NET_IB_GDR_CC_PATH`, from `net_ib/gdr-test.cc`);
     suites `NetIbGdrMicrotest.*`.
+  - `net_ib/wqe_lat_mon.cc` and `net_ib/wqe_lat_mon.h`
+    (`NET_IB_WQE_LAT_MON_CC_PATH`, from `net_ib/wqe-lat-mon-test.cc`);
+    suites `NetIbWqeLatMonMicrotest.*`.
   - `net_ib/net_ib_gid_inspect.cc` (`NET_IB_GID_INSPECT_CC_PATH`, from
     `net_ib/net-ib-gid-inspect-test.cc`); suites
     `NetIbGidInspectMicrotest.*`.
