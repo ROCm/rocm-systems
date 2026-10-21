@@ -6,14 +6,14 @@
       "prompt": "which PyTorch operator is launching the slow GPU kernels in my model?",
       "sample": "simple_net.py",
       "expected_behavior": [
-        "collects with --experimental --torch-trace",
+        "collects with --experimental --trace-ml-api torch",
         "lists the captured operators to find the slow ones",
         "checks the documented PyTorch version requirement"
       ],
       "unexpected_behavior": [
         "guesses an operator pattern without listing the captured operators first"
       ],
-      "logs_contain": ["--torch-trace", "--list-torch-operators"]
+      "logs_contain": ["--trace-ml-api torch", "--list-operators torch"]
     },
     {
       "id": "tt-map-kernels-to-model-code",
@@ -24,29 +24,29 @@
         "profiles the Python script with torch tracing enabled",
         "advises profiling a few steady-state iterations rather than a full run"
       ],
-      "logs_contain": ["--torch-trace"]
+      "logs_contain": ["--trace-ml-api torch"]
     },
     {
       "id": "tt-triton-inductor-kernels",
       "skill_should_trigger": true,
       "prompt": "my model uses torch.compile, how do I attribute the generated Triton kernels?",
       "expected_behavior": [
-        "uses --torch-trace, because --triton-trace does not capture kernels that torch.compile generates"
+        "uses --trace-ml-api torch, because --trace-ml-api triton does not capture kernels that torch.compile generates"
       ],
       "unexpected_behavior": [
-        "relies on --triton-trace alone to capture torch.compile kernels"
+        "relies on --trace-ml-api triton alone to capture torch.compile kernels"
       ],
-      "logs_contain": ["--torch-trace"]
+      "logs_contain": ["--trace-ml-api torch"]
     },
     {
       "id": "tt-filter-by-operator",
       "skill_should_trigger": true,
       "prompt": "show me the counters for just the conv2d operators in this torch-trace workload",
       "expected_behavior": [
-        "filters with --torch-operator",
+        "filters with --operator",
         "treats the pattern as a shell-style glob rather than a regex"
       ],
-      "logs_contain": ["--torch-operator"]
+      "logs_contain": ["--operator"]
     },
     {
       "id": "tt-custom-roctx-unsupported",

@@ -34,7 +34,7 @@ full requirement list is in the Torch trace section of
 ```bash
 rocprof-compute profile \
     --experimental \
-    --torch-trace \
+    --trace-ml-api torch \
     --name <workload_name> \
     -- python <script.py> <args>
 ```
@@ -42,14 +42,14 @@ rocprof-compute profile \
 For Triton kernels launched through Triton's Python runtime (`@triton.jit`):
 
 ```bash
-rocprof-compute profile --experimental --triton-trace --name <name> -- python <script.py>
+rocprof-compute profile --experimental --trace-ml-api triton --name <name> -- python <script.py>
 ```
 
 `torch.compile` / Inductor fused kernels use PyTorch's static launcher, so they
-do not get `|triton` ranges. Attribute them with `--torch-trace`.
+do not get `|triton` ranges. Attribute them with `--trace-ml-api torch`.
 
-The two combine, and `--ml-api-trace` turns on every supported framework
-backend at once.
+The two combine as `--trace-ml-api torch,triton`. A bare `--trace-ml-api`
+traces torch, triton, and jax.
 
 Tracing adds overhead on top of the usual counter replay. Profile a few
 iterations of a steady-state model rather than a full training run, and skip
@@ -69,28 +69,28 @@ Profile preserves each pass's raw marker and counter CSVs with the
 ## 3. List the captured operators
 
 List when you need the operator names from this run; filtering does not
-require a prior list. Do not pass `--list-*-operators` and `--*-operator`
+require a prior list. Do not pass `--list-operators` and `--operator`
 on the same command; listing ignores the filter. These flags require
 `--output-format stdout` (the default):
 
 ```bash
 rocprof-compute analyze \
     --path ./workloads/<name>/<gpu_model> \
-    --experimental --list-torch-operators
+    --experimental --list-operators torch
 ```
 
 This prints the operators as a call tree sorted by GPU duration, with
 `file:line` on each node that recorded a source location, plus kernel
 launch statistics, so it also shows which operators are worth opening.
 
-The Triton equivalent is `--list-triton-operators`.
+The Triton equivalent is `--list-operators triton`.
 
 ## 4. Filter to an operator
 
 ```bash
 rocprof-compute analyze \
     --path ./workloads/<name>/<gpu_model> \
-    --experimental --torch-operator '*relu*'
+    --experimental --operator 'torch:*relu*'
 ```
 
 Patterns are shell-style globs, not regexes, matched against a `/`-separated
@@ -99,8 +99,7 @@ on the reconstructed path, and `all` or `'*'` matches everything. Several
 patterns can be given, space or comma separated.
 Quote patterns so the shell does not expand them.
 
-`--triton-operator` works the same way. `*rmsnorm_kernel*` matches the
-rmsnorm nodes on a Triton tree.
+`--operator triton:*rmsnorm_kernel*` works the same way.
 
 Worked examples are in the PyTorch operator analysis section of
 [the analyze CLI guide](../../docs/how-to/analyze/cli.rst).
