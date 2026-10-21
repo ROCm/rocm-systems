@@ -2905,9 +2905,12 @@ struct CopyBufferBatchDescriptor {
 bool KernelBlitManager::useShaderCopyBufferPath(const Memory& srcMemory, const Memory& dstMemory,
                                                 size_t size, amd::CopyMetadata copyMetadata,
                                                 bool* useLimitedP2pBlitWg) const {
-  bool isP2pOrIpc = (&srcMemory.dev() != &dstMemory.dev()) ||
-                    srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared() ||
-                    srcMemory.owner()->vmmImported() || dstMemory.owner()->vmmImported();
+  // A same-device VMM-imported/IPC copy is intra-device, not P2P.
+  const bool importedCrossDevice =
+      (srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared() ||
+       srcMemory.owner()->vmmImported() || dstMemory.owner()->vmmImported()) &&
+      (srcMemory.getOwningAgent().handle != dstMemory.getOwningAgent().handle);
+  bool isP2pOrIpc = (&srcMemory.dev() != &dstMemory.dev()) || importedCrossDevice;
   const bool smallP2pOrIpc = isP2pOrIpc && size <= dev().settings().sdma_p2p_threshold_;
   if (useLimitedP2pBlitWg != nullptr) {
     *useLimitedP2pBlitWg = smallP2pOrIpc;
