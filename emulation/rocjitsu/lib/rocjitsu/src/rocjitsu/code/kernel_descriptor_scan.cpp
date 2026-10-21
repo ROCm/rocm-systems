@@ -73,20 +73,6 @@ text_vaddr_for_section(uint64_t text_offset, uint64_t text_size,
   return std::nullopt;
 }
 
-[[nodiscard]] std::optional<uint64_t> add_signed_offset(uint64_t base, int64_t offset) {
-  if (offset >= 0) {
-    const uint64_t positive = static_cast<uint64_t>(offset);
-    if (positive > std::numeric_limits<uint64_t>::max() - base)
-      return std::nullopt;
-    return base + positive;
-  }
-  // Form the magnitude without negating INT64_MIN.
-  const uint64_t magnitude = static_cast<uint64_t>(-(offset + 1)) + 1;
-  if (magnitude > base)
-    return std::nullopt;
-  return base - magnitude;
-}
-
 } // namespace
 
 std::vector<KernelDescriptorInfo>

@@ -21,7 +21,7 @@ Result reject(ContractError *error, ContractErrorCode code, std::string message)
 
 Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, bool prepared,
                      ContractError *error) {
-  const auto *target = target_profile(manifest.target);
+  const TargetProfile *target = target_profile(manifest.target);
   if (target == nullptr)
     return reject(error, ContractErrorCode::InvalidFacts, "unsupported artifact target");
   Elf64_Ehdr header{};
@@ -34,25 +34,24 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
       header.e_ident[EI_ABIVERSION] != ELFABIVERSION_AMDGPU_HSA_V5 || header.e_type != ET_DYN ||
       header.e_machine != EM_AMDGPU || (header.e_flags & EF_AMDGPU_MACH) != target->elf_machine ||
       (header.e_flags & ~uint32_t{0xfff}) != 0 || header.e_shentsize != sizeof(Elf64_Shdr) ||
-      header.e_phentsize != sizeof(Elf64_Phdr) ||
-      !util::is_range_in_bounds(header.e_shoff, uint64_t{header.e_shnum} * sizeof(Elf64_Shdr),
-                                image.size()) ||
-      !util::is_range_in_bounds(header.e_phoff, uint64_t{header.e_phnum} * sizeof(Elf64_Phdr),
-                                image.size()) ||
-      header.e_shstrndx >= header.e_shnum)
+      header.e_phentsize != sizeof(Elf64_Phdr) || header.e_shstrndx >= header.e_shnum)
     return reject(error, ContractErrorCode::InvalidEncoding,
                   "artifact ELF target, ABI or tables are inconsistent");
-  Elf64_Shdr strings{};
-  std::memcpy(&strings, image.data() + header.e_shoff + header.e_shstrndx * sizeof(strings),
-              sizeof(strings));
+  const std::optional<std::vector<Elf64_Shdr>> sections =
+      read_elf_table<Elf64_Shdr>(image, header.e_shoff, header.e_shnum, header.e_shentsize);
+  const std::optional<std::vector<Elf64_Phdr>> segments =
+      read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
+  if (!sections || !segments)
+    return reject(error, ContractErrorCode::InvalidEncoding,
+                  "artifact ELF target, ABI or tables are inconsistent");
+  const Elf64_Shdr &strings = (*sections)[header.e_shstrndx];
   if (!util::is_range_in_bounds(strings.sh_offset, strings.sh_size, image.size()))
     return reject(error, ContractErrorCode::InvalidEncoding,
                   "artifact section names are truncated");
   std::optional<Elf64_Shdr> text;
   size_t text_index = 0;
   for (size_t index = 0; index < header.e_shnum; ++index) {
-    Elf64_Shdr section{};
-    std::memcpy(&section, image.data() + header.e_shoff + index * sizeof(section), sizeof(section));
+    const Elf64_Shdr &section = (*sections)[index];
     if ((section.sh_flags & (SHF_EXECINSTR | SHF_ALLOC)) != (SHF_EXECINSTR | SHF_ALLOC))
       continue;
     if (text || section.sh_name >= strings.sh_size || section.sh_type != SHT_PROGBITS ||
@@ -60,7 +59,7 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
         section.sh_size > UINT64_MAX - section.sh_addr)
       return reject(error, ContractErrorCode::InvalidEncoding,
                     "artifact executable section is ambiguous");
-    const auto name =
+    const std::span<const uint8_t> name =
         image.subspan(strings.sh_offset + section.sh_name, strings.sh_size - section.sh_name);
     if (name.size() < 6 || std::memcmp(name.data(), ".text", 6) != 0)
       return reject(error, ContractErrorCode::InvalidEncoding,
@@ -73,12 +72,13 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
   if (!text || text->sh_size != expected_text)
     return reject(error, ContractErrorCode::IdentityMismatch,
                   "artifact text extent differs from facts");
-  const auto kernels = scan_kernel_descriptors(image, text->sh_offset, text->sh_size, text_index);
-  const auto &entry = manifest.entry;
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(image, text->sh_offset, text->sh_size, text_index);
+  const EntryFacts &entry = manifest.entry;
   if (kernels.size() != 1 || kernels.front().kernel_name != entry.name)
     return reject(error, ContractErrorCode::IdentityMismatch,
                   "artifact entry/symbol does not match facts");
-  const auto &kernel = kernels.front();
+  const KernelDescriptorInfo &kernel = kernels.front();
   const uint64_t descriptor_offset =
       prepared ? entry.prepared_descriptor_offset : entry.original_descriptor_offset;
   const uint64_t entry_offset =
@@ -102,9 +102,7 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
                   "artifact descriptor differs from its binding facts");
   bool loaded_descriptor = false;
   bool loaded_text = false;
-  for (size_t index = 0; index < header.e_phnum; ++index) {
-    Elf64_Phdr segment{};
-    std::memcpy(&segment, image.data() + header.e_phoff + index * sizeof(segment), sizeof(segment));
+  for (const Elf64_Phdr &segment : *segments) {
     if (segment.p_type != PT_LOAD)
       continue;
     if (!util::is_range_in_bounds(segment.p_offset, segment.p_filesz, image.size()) ||
@@ -114,16 +112,9 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
     if (util::is_range_in_bounds(descriptor_offset, 64, segment.p_offset + segment.p_filesz) &&
         descriptor_offset >= segment.p_offset) {
       const uint64_t descriptor_vaddr = segment.p_vaddr + (descriptor_offset - segment.p_offset);
-      const int64_t relative = kernel.descriptor.kernel_code_entry_byte_offset;
-      const uint64_t expected = text->sh_addr + entry_offset;
-      if (relative >= 0)
-        loaded_descriptor |= uint64_t(relative) <= UINT64_MAX - descriptor_vaddr &&
-                             descriptor_vaddr + uint64_t(relative) == expected;
-      else {
-        const uint64_t magnitude = uint64_t(-(relative + 1)) + 1;
-        loaded_descriptor |=
-            magnitude <= descriptor_vaddr && descriptor_vaddr - magnitude == expected;
-      }
+      const std::optional<uint64_t> loaded_entry =
+          add_signed_offset(descriptor_vaddr, kernel.descriptor.kernel_code_entry_byte_offset);
+      loaded_descriptor |= loaded_entry && *loaded_entry == text->sh_addr + entry_offset;
     }
     // This MVP has one executable section. Require its complete instruction
     // image, not just entry bytes or zero-filled memory beyond p_filesz.
@@ -140,7 +131,7 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
     return reject(error, ContractErrorCode::InvalidEncoding,
                   "artifact entry/descriptor is not loaded");
   std::string metadata_error;
-  const auto metadata = inspect_metadata(image, kernel, &metadata_error);
+  const FailureOr<MetadataResources> metadata = inspect_metadata(image, kernel, &metadata_error);
   if (metadata.failed())
     return reject(error, ContractErrorCode::InvalidFacts, metadata_error);
   if (metadata.value().maximum_workgroup_size != entry.maximum_workgroup_size)
@@ -193,27 +184,30 @@ Result verify_artifact_images(const Manifest &manifest, std::span<const uint8_t>
 FailureOr<LoadedArtifact> load_artifact(const std::filesystem::path &directory,
                                         std::span<const uint8_t> original,
                                         std::string_view concrete_target, ContractError *error) {
-  const auto *target = target_profile(concrete_target);
+  const TargetProfile *target = target_profile(concrete_target);
   if (target == nullptr)
     return reject(error, ContractErrorCode::InvalidFacts,
                   "ConSan artifact requires a supported concrete GPU agent");
-  const auto ready = read(directory / "ready", kProducerContract.size(), error);
+  const FailureOr<std::vector<uint8_t>> ready =
+      read(directory / "ready", kProducerContract.size(), error);
   if (ready.failed())
     return Result::failure();
   if (!std::ranges::equal(ready.value(), kProducerContract))
     return reject(error, ContractErrorCode::IncompatibleContract,
                   "artifact ready marker has wrong contract");
   const ContractLimits limits;
-  const auto bytes = read(directory / "facts.bin", limits.metadata_bytes, error);
+  const FailureOr<std::vector<uint8_t>> bytes =
+      read(directory / "facts.bin", limits.metadata_bytes, error);
   if (bytes.failed())
     return Result::failure();
-  auto manifest = decode_manifest(bytes.value(), error);
+  FailureOr<Manifest> manifest = decode_manifest(bytes.value(), error);
   if (manifest.failed())
     return Result::failure();
   if (manifest.value().target != target->id)
     return reject(error, ContractErrorCode::IdentityMismatch,
                   "concrete agent differs from artifact target");
-  auto image = read(directory / "prepared.hsaco", limits.image_bytes, error);
+  FailureOr<std::vector<uint8_t>> image =
+      read(directory / "prepared.hsaco", limits.image_bytes, error);
   if (image.failed() ||
       verify_artifact_images(manifest.value(), original, image.value(), error).failed())
     return Result::failure();
