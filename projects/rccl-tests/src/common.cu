@@ -1616,14 +1616,16 @@ static bool DiscoverRdmaNics(NetworkCounterContext& ctx) {
   return true;
 }
 
-// Use the most common NIC type's table. Discovered devices of another known
-// type (e.g. a frontend NIC) are skipped; an explicit NCCL_IB_HCA list is kept.
+// Use the most common NIC type's table (a tie goes to the first NCCL_IB_HCA
+// device). Discovered devices of another known type (e.g. a frontend NIC) are
+// skipped; an explicit NCCL_IB_HCA list is kept.
 static NicType SelectNicType(NetworkCounterContext& ctx, bool& mixed, std::vector<std::string>& skipped) {
   std::vector<NicType> types;
   for (const auto& ib : ctx.ib_names) { types.push_back(NetCounterDetectNicType(ib)); }
-  NicType nic_type = NetCounterDominantNicType(types, mixed);
   const char* hca = getenv("NCCL_IB_HCA");
-  std::vector<bool> keep = NetCounterKeepDevices(types, nic_type, hca && hca[0] != '\0');
+  bool explicit_list = hca && hca[0] != '\0';
+  NicType nic_type = NetCounterDominantNicType(types, mixed, explicit_list);
+  std::vector<bool> keep = NetCounterKeepDevices(types, nic_type, explicit_list);
   std::vector<std::string> nics, ibs;
   for (size_t i = 0; i < types.size(); i++) {
     if (!keep[i]) {

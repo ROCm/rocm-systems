@@ -90,6 +90,16 @@ TEST(Collector, NicType_MajorityWins) {
   EXPECT_FALSE(mixed);
 }
 
+TEST(Collector, NicType_ExplicitListTieGoesToFirstListed) {
+  bool mixed = false;
+  EXPECT_EQ(NetCounterDominantNicType({NIC_MLX5, NIC_BNXT_RE}, mixed, true), NIC_MLX5);
+  EXPECT_TRUE(mixed);
+  EXPECT_EQ(NetCounterDominantNicType({NIC_BNXT_RE, NIC_MLX5}, mixed, true), NIC_BNXT_RE);
+  std::vector<NicType> node = {NIC_MLX5};  // listed first, but outnumbered
+  node.insert(node.end(), 8, NIC_BNXT_RE);
+  EXPECT_EQ(NetCounterDominantNicType(node, mixed, true), NIC_BNXT_RE);
+}
+
 TEST(Collector, NicType_KeepDevices) {
   std::vector<NicType> types = {NIC_MLX5, NIC_BNXT_RE, NIC_UNKNOWN, NIC_BNXT_RE};
   EXPECT_EQ(NetCounterKeepDevices(types, NIC_BNXT_RE, false), (std::vector<bool>{false, true, true, true}));
