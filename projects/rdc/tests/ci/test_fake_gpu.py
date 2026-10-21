@@ -59,11 +59,8 @@ UNREACHED_APIS = {
     "amdsmi_get_afids_from_cper": "needs CPER records; the fake reports none by default",
     "amdsmi_get_gpu_accelerator_partition_profile_config": "partition profile query",
     "amdsmi_get_gpu_compute_process_gpus": "needs processes; the fake reports none by default",
-    "amdsmi_get_lib_version": "component version query, not exposed by rdci",
-    "amdsmi_get_power_cap_info": "rdci config has no --host option",
-    "amdsmi_set_power_cap": "rdci config has no --host option",
-    "amdsmi_set_gpu_clk_limit": "rdci config has no --host option",
-    "amdsmi_set_gpu_perf_level": "rdci config has no --host option",
+    "amdsmi_set_gpu_perf_level": "rdci config --clear resets the performance level only when "
+    "the reported maximum clock differs from the top supported frequency; the fake's are equal",
     "amdsmi_reset_gpu": "policy reset action needs a breached threshold",
 }
 
@@ -605,6 +602,9 @@ def _workload_commands(field_ids):
         ("policy", "-g", "{gid}", "-T", "95", "-A", "0"),
         ("policy", "-g", "{gid}", "--get"),
         ("policy", "-g", "{gid}", "--clear"),
+        ("config", "-g", "{gid}", "-s", "-p", "400", "-x", "1500", "-m", "1200"),
+        ("config", "-g", "{gid}", "-c"),
+        ("discovery", "-v"),
         ("diag", "-g", "{gid}", "-r", "1"),
     ]
 

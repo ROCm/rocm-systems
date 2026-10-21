@@ -17,6 +17,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Resolved Issues
 
+- `rdci config -m` sets the memory clock limit instead of failing, and `rdci config` accepts `--host`.
+
+- `rdci config` exits with an error code when the request fails, instead of printing nothing or a success message and exiting with 0.
+
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
 
 - `rdc_status_string()` now describes `RDC_ST_DISABLED_MODULE`. It returned "Unknown", so the rdcd log reported a disabled module as an unknown error.

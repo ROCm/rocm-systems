@@ -105,6 +105,7 @@ struct Rule {
 struct GpuState {
   uint64_t power_cap_uw = 750ULL * 1000 * 1000;
   uint64_t gfx_clk_limit[2] = {500, 2100};
+  uint64_t mem_clk_limit[2] = {900, 1300};
   amdsmi_dev_perf_level_t perf_level = AMDSMI_DEV_PERF_LEVEL_AUTO;
 };
 
@@ -815,11 +816,16 @@ amdsmi_status_t amdsmi_set_gpu_clk_limit(amdsmi_processor_handle processor_handl
                                          amdsmi_clk_limit_type_t limit_type, uint64_t clk_value) {
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p)) return done(st);
-  if (clk_type != AMDSMI_CLK_TYPE_GFX || clk_value < 500 || clk_value > 2100) {
+  // The ranges amdsmi_get_clock_info reports.
+  const bool gfx = clk_type == AMDSMI_CLK_TYPE_GFX && clk_value >= 500 && clk_value <= 2100;
+  const bool mem = clk_type == AMDSMI_CLK_TYPE_MEM && clk_value >= 900 && clk_value <= 1300;
+  if (!gfx && !mem) {
     return AMDSMI_STATUS_INVAL;
   }
   std::lock_guard<std::mutex> lock(g_mutex);
-  g_state[p->gpu].gfx_clk_limit[limit_type == AMDSMI_CLK_LIMIT_MIN ? 0 : 1] = clk_value;
+  GpuState& state = g_state[p->gpu];
+  (gfx ? state.gfx_clk_limit : state.mem_clk_limit)[limit_type == AMDSMI_CLK_LIMIT_MIN ? 0 : 1] =
+      clk_value;
   return AMDSMI_STATUS_SUCCESS;
 }
 
