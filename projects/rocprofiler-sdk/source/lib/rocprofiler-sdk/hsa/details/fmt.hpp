@@ -284,8 +284,7 @@ struct formatter<hsa_amd_memory_copy_op_type_t>
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST");
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST");
-#    if HSA_AMD_INTERFACE_VERSION_MAJOR > 1 ||                                                     \
-        (HSA_AMD_INTERFACE_VERSION_MAJOR == 1 && HSA_AMD_INTERFACE_VERSION_MINOR >= 37)
+#    if HSA_AMD_INTERFACE_VERSION >= ROCPROFILER_COMPUTE_VERSION(1, 37, 0)
             case HSA_AMD_MEMORY_COPY_OP_RECT:
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_RECT");
 #    endif
@@ -455,8 +454,7 @@ struct formatter<hsa_amd_memory_copy_op_t>
                     wait,
                     signal,
                     reserved);
-#    if HSA_AMD_INTERFACE_VERSION_MAJOR > 1 ||                                                     \
-        (HSA_AMD_INTERFACE_VERSION_MAJOR == 1 && HSA_AMD_INTERFACE_VERSION_MINOR >= 37)
+#    if HSA_AMD_INTERFACE_VERSION >= ROCPROFILER_COMPUTE_VERSION(1, 37, 0)
             case HSA_AMD_MEMORY_COPY_OP_RECT:
                 if(op.reserved0 != 0)
                 {
