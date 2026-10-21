@@ -488,8 +488,13 @@ def main():
         if measure_only:
             print("These measurements can serve as a future baseline for this GPU.")
     else:
-        summary_box(summary_rows, overall_ok, measure_only=measure_only)
-        print("No streams were measured (check ROCDECODE_PERF_DIR and the baseline).")
+        if measure_only:
+            summary_box(summary_rows, overall_ok, measure_only=measure_only)
+            print("ERROR: No streams were measured; no results CSV was saved.",
+                  file=sys.stderr)
+            return 1
+        summary_box(summary_rows, overall_ok)
+        print("No streams were compared (check ROCDECODE_PERF_DIR and the baseline).")
     elapsed = int(time.time() - t0)
     print(f"Elapsed: {elapsed // 60}m {elapsed % 60}s")
     print()
