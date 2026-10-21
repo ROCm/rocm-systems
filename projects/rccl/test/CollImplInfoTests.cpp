@@ -366,7 +366,7 @@ namespace RcclUnitTesting
       if (mode.checkSymk) symk = QuerySymk(comms[0], coll, count, dt, ncclSum);
       NCCLCHECK(ncclGroupEnd());
 
-      const bool selIsSym = sel.algoName == "SYM" || sel.algoName == "SymTDM";
+      const bool selIsSym = IsSymmetricAlgoName(sel.algoName);
       if (sawSym && selIsSym) *sawSym = true;
       if (nCe && sel.algoName == "CE")
       {
@@ -401,7 +401,7 @@ namespace RcclUnitTesting
           // equal the log -- and must never claim SYM.
           EXPECT_EQ(symk.algoName, sel.algoName)
             << "symk-reported algo != logged-selected algo\nLOG:\n" << log;
-          EXPECT_TRUE(symk.algoName != "SYM" && symk.algoName != "SymTDM")
+          EXPECT_FALSE(IsSymmetricAlgoName(symk.algoName))
             << "symk reported SYM with cuMem disabled\nLOG:\n" << log;
         }
         else if (selIsSym)
@@ -516,46 +516,11 @@ namespace RcclUnitTesting
 
       if (mode.registerSym)
       {
-        symSend.resize(nRanks);
-        symRecv.resize(nRanks);
-
-        // cuMem-backed allocation is local per rank -- do it before the group.
-        bool allocOk = true;
-        for (int i = 0; i < nRanks && allocOk; i++)
-        {
-          HIPCALL(hipSetDevice(i));
-          symSend[i].comm = comms[i];
-          symRecv[i].comm = comms[i];
-          if (ncclMemAlloc(&symSend[i].ptr, sendBytes) != ncclSuccess ||
-              ncclMemAlloc(&symRecv[i].ptr, recvBytes) != ncclSuccess)
-            allocOk = false;
-        }
-
-        // Symmetric-window registration is a COLLECTIVE op: every rank must register
-        // inside a single group, else the first rank blocks forever waiting on peers
-        // (in-process multi-GPU). Mirrors tryRegisterInputWindows in DeviceApiTests.
-        // In-group calls defer, so the real status is ncclGroupEnd()'s.
-        ncclResult_t regRes = allocOk ? ncclSuccess : ncclInternalError;
-        if (allocOk)
-        {
-          std::vector<ncclResult_t> rr(2 * nRanks, ncclSuccess);
-          NCCLCHECK(ncclGroupStart());
-          for (int i = 0; i < nRanks; i++)
-          {
-            HIPCALL(hipSetDevice(i));
-            if (!mode.ceAllReduce)
-            {
-              rr[2 * i] = ncclCommWindowRegister(comms[i], symSend[i].ptr, sendBytes,
-                                                 &symSend[i].win, NCCL_WIN_COLL_SYMMETRIC);
-            }
-            rr[2 * i + 1] = ncclCommWindowRegister(comms[i], symRecv[i].ptr, recvBytes,
-                                                   &symRecv[i].win, NCCL_WIN_COLL_SYMMETRIC);
-          }
-          ncclResult_t ge = ncclGroupEnd();
-          for (ncclResult_t r : rr)
-            if (r != ncclSuccess) { regRes = r; break; }
-          if (regRes == ncclSuccess) regRes = ge;
-        }
+        // CE AllReduce registers only the receive buffers, so symk cannot claim it.
+        ncclResult_t regRes =
+          RCCLTestHelpers::ncclSymBufAllocPerRank(comms, sendBytes, symSend, !mode.ceAllReduce);
+        if (regRes == ncclSuccess)
+          regRes = RCCLTestHelpers::ncclSymBufAllocPerRank(comms, recvBytes, symRecv);
 
         if (regRes != ncclSuccess)
         {

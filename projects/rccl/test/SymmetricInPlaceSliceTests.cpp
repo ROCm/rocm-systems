@@ -118,32 +118,15 @@ namespace RcclUnitTesting
       std::vector<ncclComm_t> comms(nRanks);
       ASSERT_EQ(ncclSuccess, ncclCommInitAll(comms.data(), nRanks, nullptr));
 
-      std::vector<hipStream_t>             streams(nRanks);
-      std::vector<RCCLTestHelpers::SymBuf> bufs(nRanks);
-      bool                                 allocOk = true;
+      std::vector<hipStream_t> streams(nRanks);
       for (int i = 0; i < nRanks; i++)
       {
         HIP_CHECK(hipSetDevice(i));
         HIP_CHECK(hipStreamCreate(&streams[i]));
-        bufs[i].comm = comms[i];
-        allocOk      = ncclMemAlloc(&bufs[i].ptr, totalBytes) == ncclSuccess && allocOk;
       }
 
-      // Window registration is collective, so every rank registers inside one group.
-      ncclResult_t regRes = allocOk ? ncclSuccess : ncclSystemError;
-      if (allocOk)
-      {
-        std::vector<ncclResult_t> rr(nRanks, ncclSuccess);
-        ASSERT_EQ(ncclSuccess, ncclGroupStart());
-        for (int i = 0; i < nRanks; i++)
-        {
-          HIP_CHECK(hipSetDevice(i));
-          rr[i] = ncclCommWindowRegister(comms[i], bufs[i].ptr, totalBytes, &bufs[i].win, NCCL_WIN_COLL_SYMMETRIC);
-        }
-        regRes = ncclGroupEnd();
-        for (ncclResult_t r : rr)
-          if (r != ncclSuccess) regRes = r;
-      }
+      std::vector<RCCLTestHelpers::SymBuf> bufs;
+      const ncclResult_t regRes = RCCLTestHelpers::ncclSymBufAllocPerRank(comms, totalBytes, bufs);
 
       std::string skip;
       if (regRes != ncclSuccess)

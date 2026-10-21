@@ -582,6 +582,7 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicro, and gin_fakes.cc supplies ncclGinQueryLastError to Init.
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
     gin-host-test.cc
+    fakes/devcomm_fakes.cc               # ncclTeamRail
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc

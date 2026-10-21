@@ -34,6 +34,8 @@
 
 #include SYM_KERNELS_CC_PATH
 
+#include "SymTdmTestHelpers.h"
+
 namespace {
 
 bool KernelBitSet(uint32_t mask, ncclSymkKernelId id) { return (mask >> static_cast<int>(id)) & 1u; }
@@ -112,12 +114,7 @@ TEST_F(SymKernelMicrotest, MaxChunkElts_UnhandledCombination_ReturnsZeroRegardle
 // ---- ncclSymkMask: kmask assembly (2GB/64GB thresholds, Tma gating, Gin gating; hasLsaMultimem false throughout) ----
 
 // Factory lambdas (see ForceLegacyCudaRegister/ReuseSysmemHandlesOn): every other param keeps its default.
-std::function<int64_t(const char*, int64_t)> SymTmaEnable(int64_t value) {
-  return [value](const char* env, int64_t deftVal) -> int64_t {
-    return std::string(env) == "SYM_TMA_ENABLE" ? value : deftVal;
-  };
-}
-
+// SymTmaEnable is in SymTdmTestHelpers.h.
 std::function<int64_t(const char*, int64_t)> SymGinKernelsEnable(int64_t value) {
   return [value](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "SYM_GIN_KERNELS_ENABLE" ? value : deftVal;
@@ -139,25 +136,8 @@ class SymKernelMaskTest : public SymKernelMicrotest {
   // AllReduce's nBusBytes multiplier is 1, so nElts*4 (f32) controls the byte count exactly, cell-aligned.
   static size_t NEltsForBytes(size_t bytes) { return bytes / ncclTypeSize(kTy); }
 
-  // ncclSymkTmaAvailable() keys on archName under __HIP_PLATFORM_AMD__ and minCompCap otherwise;
-  // set both so a case reads the same either way.
-  void MakeTmaCapableComm() {
-    comm_->minCompCap = 100;
-    comm_->archName = const_cast<char*>("gfx1250");
-  }
-  void MakeTmaIncapableComm() {
-    comm_->minCompCap = 99;
-    comm_->archName = const_cast<char*>("gfx950");
-  }
-
-  // ROCm also needs the SDK's TDM header, so only cases asserting a kernel SURVIVES need this.
-  static bool TmaReachableOnThisBuild() {
-#if defined(__HIP_PLATFORM_AMD__)
-    return TDM_TOOLCHAIN_AVAILABLE;
-#else
-    return true;
-#endif
-  }
+  void MakeTmaCapableComm() { SetTdmCapableArch(comm_.get()); }
+  void MakeTmaIncapableComm() { SetSymkArch(comm_.get(), "gfx950", 95, /*warpSize=*/64); }
 };
 
 TEST_F(SymKernelMaskTest, JustBelow2GB_LLKernelSurvives) {

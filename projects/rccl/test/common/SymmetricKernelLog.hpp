@@ -45,6 +45,12 @@ namespace RcclUnitTesting
   {
     return kernel.find("Tma") != std::string::npos;
   }
+
+  // Algorithm names rcclGetAlgoName and rcclSymKGetInfo report for a symmetric kernel.
+  inline bool IsSymmetricAlgoName(const std::string& algo)
+  {
+    return algo == "SYM" || algo == "SymTDM";
+  }
 }  // namespace RcclUnitTesting
 
 #endif  // SYMMETRIC_KERNEL_LOG_HPP
