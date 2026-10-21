@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Passive hardware discovery records and topology relationships.
 //!
 //! An endpoint describes hardware discovered in one generation-consistent
@@ -11,7 +14,7 @@
 //! state object.
 
 use crate::driver;
-use crate::host_storage::{Buffer, Shared};
+use crate::memory::storage::Shared;
 use crate::memory::{DeviceAccess, HostCacheability};
 
 pub mod platform;
@@ -42,8 +45,13 @@ pub struct PciInfo {
 /// Immutable native cache metadata associated with one endpoint.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CacheInfo {
+    /// Hierarchy level reported by the native topology.
     pub(crate) level: u32,
-    pub(crate) size: u32,
+    /// Cache capacity in bytes.
+    pub(crate) size_bytes: u64,
+    /// Native cache-line size in bytes.
+    pub(crate) line_size_bytes: u32,
+    /// Native cache type encoding.
     pub(crate) kind: u32,
 }
 
@@ -54,10 +62,16 @@ impl CacheInfo {
         self.level
     }
 
-    /// Returns the cache capacity in bytes reported by native topology.
+    /// Returns the cache capacity in bytes.
     #[must_use]
-    pub const fn size(&self) -> u32 {
-        self.size
+    pub const fn size_bytes(&self) -> u64 {
+        self.size_bytes
+    }
+
+    /// Returns the native cache-line size in bytes.
+    #[must_use]
+    pub const fn line_size_bytes(&self) -> u32 {
+        self.line_size_bytes
     }
 }
 
@@ -65,11 +79,17 @@ impl CacheInfo {
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MemoryLinkType {
+    /// `HyperTransport` link.
     HyperTransport,
+    /// `QuickPath` Interconnect link.
     Qpi,
+    /// PCI Express link.
     Pcie,
+    /// InfiniBand link.
     Infiniband,
+    /// AMD XGMI link.
     Xgmi,
+    /// Link type not recognized by this runtime.
     Unknown,
 }
 
@@ -77,14 +97,23 @@ pub enum MemoryLinkType {
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MemoryLinkInfo {
+    /// Native minimum latency value for this direction.
     pub(crate) minimum_latency: u32,
+    /// Native maximum latency value for this direction.
     pub(crate) maximum_latency: u32,
+    /// Native minimum bandwidth value for this direction.
     pub(crate) minimum_bandwidth: u32,
+    /// Native maximum bandwidth value for this direction.
     pub(crate) maximum_bandwidth: u32,
+    /// Whether 32-bit atomics may cross this link.
     pub(crate) atomic_support_32bit: bool,
+    /// Whether 64-bit atomics may cross this link.
     pub(crate) atomic_support_64bit: bool,
+    /// Whether the link preserves coherent memory access.
     pub(crate) coherent_support: bool,
+    /// Native interconnect classification.
     pub(crate) kind: MemoryLinkType,
+    /// Native NUMA weight used for relative distance queries.
     pub(crate) numa_distance: u32,
 }
 
@@ -150,20 +179,28 @@ impl MemoryLinkInfo {
     }
 }
 
+/// Driver-local node identity used to relate discovered topology records.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct TopologyKey {
+    /// Native topology node or group number.
     pub(crate) group: u32,
+    /// Native member identity within that group.
     pub(crate) member: u32,
 }
 
-/// Provider-local directed link. Host classification is explicit rather than
+/// Driver-local directed link. Host classification is explicit rather than
 /// inferred from an operating-system node or GPU identifier.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct MemoryLink {
+    /// Topology key at the directed link's origin.
     pub(crate) source: TopologyKey,
+    /// Topology key at the directed link's destination.
     pub(crate) target: TopologyKey,
+    /// The origin represents host memory rather than a device.
     pub(crate) source_is_host: bool,
+    /// The destination represents host memory rather than a device.
     pub(crate) target_is_host: bool,
+    /// Native latency, bandwidth, and coherency facts for this direction.
     pub(crate) info: MemoryLinkInfo,
 }
 
@@ -186,14 +223,14 @@ pub struct GpuQueueCapabilities {
     pub aql_system_cache_control: bool,
     /// Direct native PM4 transport is implemented for this endpoint.
     pub pm4: bool,
-    /// Bounded DRM-mediated PM4 submission is qualified for this endpoint.
+    /// Bounded driver-mediated PM4 submission is qualified for this endpoint.
     pub kernel_pm4: bool,
     /// System-memory release/acquire through PM4 cache controls is qualified
     /// for this endpoint and host architecture.
     pub pm4_system_cache_control: bool,
     /// Direct monotonic-64-bit SDMA transport is implemented.
     pub sdma: bool,
-    /// Bounded DRM-mediated SDMA submission is qualified for this endpoint.
+    /// Bounded driver-mediated SDMA submission is qualified for this endpoint.
     pub kernel_sdma: bool,
     /// System-memory release/acquire through the selected SDMA protocol is
     /// qualified for this endpoint and host architecture.
@@ -207,6 +244,8 @@ pub struct GpuQueueCapabilities {
 /// is published; opening an endpoint never substitutes guessed dimensions.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct GpuInfo {
+    /// Native KFD GPU identity used to resolve imported allocation placement.
+    pub native_gpu_id: u32,
     /// Exact GFX major version.
     pub gfx_major: u32,
     /// Exact GFX minor version.
@@ -223,6 +262,10 @@ pub struct GpuInfo {
     pub asic_revision: u32,
     /// Maximum compute-engine clock in megahertz.
     pub maximum_engine_clock_mhz: u32,
+    /// VRAM interface width in bits reported by the native memory bank.
+    pub memory_bus_width_bits: u32,
+    /// Maximum VRAM clock in megahertz reported by the native memory bank.
+    pub maximum_memory_clock_mhz: u32,
     /// Hardware wavefront lanes.
     pub wavefront_size: u32,
     /// Active compute units after harvesting.
@@ -233,7 +276,7 @@ pub struct GpuInfo {
     pub maximum_wave_count_per_compute_unit: u32,
     /// Maximum number of address watchpoints reported by the backend.
     pub maximum_address_watch_point_count: u32,
-    /// Native context-save scratch-wave bound per compute unit.
+    /// Hardware context-save scratch-wave bound per compute unit.
     pub maximum_scratch_wave_count_per_compute_unit: u32,
     /// LDS bytes per compute unit.
     pub local_data_share_byte_length: u64,
@@ -255,8 +298,64 @@ pub struct GpuInfo {
     pub packet_processor_firmware_version: u32,
     /// SDMA firmware revision reported by the backend.
     pub sdma_firmware_version: u32,
+    /// Maximum persisting L2 cache reservation in bytes reported by topology.
+    /// Zero means the native driver did not report support.
+    pub persisting_l2_cache_size_max: u32,
+    /// The native GPU exposes `UALink` fabric handles for virtual memory.
+    pub fabric_handles_supported: bool,
     /// GPU queue transports qualified by the current backend.
     pub queues: GpuQueueCapabilities,
+}
+
+impl GpuInfo {
+    pub(crate) const fn scratch_bytes_per_xcc(gfx_major: u32) -> u64 {
+        if gfx_major >= 12 {
+            8_u64 << 30
+        } else {
+            4_u64 << 30
+        }
+    }
+
+    /// Maximum per-device scratch aperture implied by the GPU generation and
+    /// active XCC count. This is an address-space bound, not a reservation.
+    #[must_use]
+    pub const fn maximum_scratch_aperture_bytes(&self) -> u64 {
+        (self.xcc_count as u64).saturating_mul(Self::scratch_bytes_per_xcc(self.gfx_major))
+    }
+}
+
+/// Additional endpoint information queried through its owning driver.
+///
+/// The passive [`Endpoint`] keeps identity and discovered capabilities. This
+/// record may include optional information from other native sources without
+/// activating a device.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub struct EndpointDetails {
+    /// Optional product name for display to applications.
+    pub product_name: Option<String>,
+    /// Kind-specific information beyond the passive endpoint record.
+    pub kind: EndpointDetailsKind,
+}
+
+/// Kind-specific information obtained without activating an endpoint.
+///
+/// The endpoint itself records its engine kind. `Other` means its driver has
+/// no additional kind-specific information to report.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[non_exhaustive]
+pub enum EndpointDetailsKind {
+    /// Additional GPU information supplied by a qualified driver source.
+    #[non_exhaustive]
+    Gpu {
+        /// ASIC family from an additional source, if reported. The passive
+        /// GPU record supplies the fallback.
+        asic_family_id: Option<u32>,
+        /// GPU timestamp frequency in hertz, if reported.
+        counter_frequency_hz: Option<u64>,
+    },
+    /// No additional kind-specific information is available.
+    Other,
 }
 
 /// Kind-specific capabilities attached to one passive endpoint.
@@ -287,7 +386,7 @@ pub enum EndpointKind {
 /// to backing.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Endpoint {
-    /// Provider-scoped opaque native identity.
+    /// Opaque platform identity, unique among endpoints in one session.
     pub id: [u8; 16],
     /// UTF-8 diagnostic name with NUL termination.
     pub name: [u8; 128],
@@ -314,11 +413,11 @@ pub struct Endpoint {
     /// Supported device permission bits. Every allocation requires READ and may
     /// independently request the supported WRITE and EXECUTE bits.
     pub supported_permissions: DeviceAccess,
-    pub(crate) caches: Option<Shared<Buffer<CacheInfo>>>,
-    pub(crate) memory_links: Option<Shared<Buffer<MemoryLink>>>,
+    pub(crate) caches: Option<Shared<Vec<CacheInfo>>>,
+    pub(crate) memory_links: Option<Shared<Vec<MemoryLink>>>,
     pub(crate) topology_key: TopologyKey,
-    pub(crate) provider_instance: u64,
-    pub(crate) native: driver::EndpointSelector,
+    pub(crate) driver_instance: driver::DriverInstanceId,
+    pub(crate) selector: driver::EndpointSelector,
 }
 
 impl Endpoint {
@@ -347,7 +446,7 @@ impl Endpoint {
     #[doc(hidden)]
     #[must_use]
     pub fn memory_link_to(&self, owner: &Self) -> Option<MemoryLinkInfo> {
-        if self.provider_instance != owner.provider_instance {
+        if self.driver_instance != owner.driver_instance {
             return None;
         }
         self.memory_links.as_ref().and_then(|links| {
@@ -391,10 +490,25 @@ impl Endpoint {
     /// construct this endpoint record.
     #[must_use]
     pub fn can_access_local_memory(&self, owner: &Self) -> bool {
-        self.provider_instance == owner.provider_instance
+        self.driver_instance == owner.driver_instance
             && ((self.topology_key == owner.topology_key)
                 || self
                     .memory_link_to(owner)
                     .is_some_and(|link| link.hop_count() != 0))
+    }
+}
+
+impl EndpointDetails {
+    /// Returns a kind-matched result with no additional driver information.
+    pub(crate) fn empty_for(endpoint: &Endpoint) -> Self {
+        Self {
+            product_name: None,
+            kind: endpoint
+                .gpu()
+                .map_or(EndpointDetailsKind::Other, |_| EndpointDetailsKind::Gpu {
+                    asic_family_id: None,
+                    counter_frequency_hz: None,
+                }),
+        }
     }
 }

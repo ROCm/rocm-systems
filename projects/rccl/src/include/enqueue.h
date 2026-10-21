@@ -9,6 +9,7 @@
 #define NCCL_ENQUEUE_H_
 
 #include "comm.h"
+#include "info.h"
 #include "group.h"
 #include "collectives.h"
 #include "utils.h"
@@ -46,6 +47,7 @@ ncclResult_t ncclLaunchKernelBefore_NoUncapturedCuda(struct ncclComm* comm, stru
 ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan);
 ncclResult_t ncclLaunchKernelAfter_NoCuda(struct ncclComm* comm, struct ncclKernelPlan* plan);
 ncclResult_t ncclLaunchFinish(struct ncclComm* comm);
+ncclResult_t ncclValidateCollConfigLaunchCompletionEvents(struct ncclComm* comm);
 
 // Addon backends launch onto the user's stream themselves instead of going through doLaunches, which is what
 // makes comm->cudaDev current and installs the cross-stream dependency. Bracket such a launch with these.
@@ -78,6 +80,20 @@ inline ncclResult_t rcclAddonLaunch(struct ncclComm* comm, cudaStream_t stream, 
   return rcclAddonLaunchEnd(comm, stream, state, launch());
 }
 
+// An addon collective that returns before ncclEnqueueCheck must still print its per-collective COLL line and
+// advance comm->opCount on the user's comm. Hierarchical addons use this too: their sub-collectives run on the
+// separate intra/inter comms (and log there under their own names), so the parent comm is counted here exactly
+// once, matching the native path.
+void rcclLogCollInfo(const struct ncclInfo& info);
+
+template <typename LaunchFn>
+inline ncclResult_t rcclAddonLaunch(const struct ncclInfo& info, LaunchFn&& launch) {
+  rcclLogCollInfo(info);
+  ncclResult_t result = rcclAddonLaunch(info.comm, info.stream, std::forward<LaunchFn>(launch));
+  if (result == ncclSuccess) info.comm->opCount++;
+  return result;
+}
+
 ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool* needConnect, ncclSimInfo_t* simInfo);
 ncclResult_t ncclTasksRegAndEnqueue(struct ncclComm* comm);
 
@@ -93,6 +109,11 @@ static inline size_t ncclFuncRecvCount(ncclFunc_t func, int nRanks, size_t count
 rccl_static inline size_t ncclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_t count) {
   return func == ncclFuncAllGather || func == ncclFuncReduceScatter ? nRanks * count : count;
 }
+// Match the public AllGather in-place convention: each rank's input aliases
+// its own slice of the aggregate receive buffer.
+static inline bool ncclAllGatherIsInPlace(const void* sendbuff, const void* recvbuff, int rank, size_t perRankBytes) {
+  return (uintptr_t)sendbuff == (uintptr_t)recvbuff + size_t(rank) * perRankBytes;
+}
 
 ncclResult_t ncclGetCollNetSupport(struct ncclComm* comm, struct ncclTaskColl* task, int* collNetSupport);
 ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, int collNetSupport, int nvlsSupport,
@@ -100,8 +121,8 @@ ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, i
 bool ncclTestBudget(struct ncclKernelPlanBudget* budget, int nWorkBatches, ssize_t nWorkBytes);
 
 void ncclAddWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,
-                            enum ncclDevWorkType workType, int devFuncId, uint32_t workOffset, int p2pEpoch = -1,
-                            int p2pRound = -1, bool newBatch = false);
+                            enum ncclDevWorkType workType, int devFuncId, int progressSlot, uint32_t workOffset,
+                            int p2pEpoch = -1, int p2pRound = -1, bool newBatch = false);
 
 // RCCL-only shim: sets plan->kernelFn / kernelSpecialized using the file-local
 // ncclKerns table in enqueue.cc, for upstream-style schedulers (e.g.

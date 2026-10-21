@@ -351,16 +351,20 @@ bool resolve_host_gpu(rocjitsu::config::DbtGuestConfig *dbt_guest,
   return false;
 }
 
-std::vector<KfdGpuOrdinal>
+util::FailureOr<std::vector<KfdGpuOrdinal>>
 dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
-                           const rocjitsu::config::DbtGuestConfig &dbt_guest) {
+                           const rocjitsu::config::DbtGuestConfig &dbt_guest,
+                           util::DiagnosticEmitter emit_error) {
   if (dbt_guest.host.backend == rocjitsu::config::DbtExecutionBackend::Hardware)
     return real_kfd_gpu_ordinals();
 
   const std::string host_config_path = rocjitsu::config::resolve_dbt_host_config_path(
       dbt_config_path, dbt_guest.host.simulator_config_path);
-  rocjitsu::config::LoadedConfig loaded =
-      rocjitsu::config::load_config(host_config_path, rocjitsu::kEmbeddedSchema);
+  auto maybe_loaded =
+      rocjitsu::config::load_config(host_config_path, rocjitsu::kEmbeddedSchema, emit_error);
+  if (maybe_loaded.failed())
+    return util::Result::failure();
+  const auto &loaded = maybe_loaded.value();
   std::vector<rocjitsu::config::KfdDeviceConfig> devices = loaded.devices;
   if (devices.empty() && loaded.device.present)
     devices.push_back(loaded.device);
@@ -391,6 +395,12 @@ void print_usage() {
          "                    Replace cpu_thread_budget for this launch only; the\n"
          "                    config file is left unchanged. Zero selects automatic\n"
          "                    sizing. Not available with --attach.\n"
+         "  --wait-checking <mode>, --wait-checking=<mode>\n"
+         "                    Override every CU and GPU for this launch:\n"
+         "                    on = ordinary checks, off = no wait checks,\n"
+         "                    all = ordinary plus gfx1250 XCNT.\n"
+         "                    Omission keeps JSON settings and defaults. The source\n"
+         "                    config is unchanged. Not available with --attach.\n"
          "  --vfio-socket <path>\n"
          "                    Serve the configured GPU as a PCI function to a VMM over\n"
          "                    the vfio-user protocol on this AF_UNIX socket, instead of\n"
@@ -416,7 +426,7 @@ int main(int argc, char *argv[]) {
   const char *config_path = nullptr;
   const char *vfio_socket = nullptr;
   bool thread_budget_table = false;
-  std::optional<uint32_t> cpu_thread_budget;
+  config::LaunchOverrides overrides;
   int vfio_ready_fd = -1;
   bool daemon_mode = false;
   bool attach_mode = false;
@@ -443,9 +453,21 @@ int main(int argc, char *argv[]) {
         std::cerr << "rocjitsu: --cpu-thread-budget requires a value\n";
         return 1;
       }
-      cpu_thread_budget = config::parse_uint32(value);
-      if (!cpu_thread_budget) {
+      overrides.cpu_thread_budget = config::parse_uint32(value);
+      if (!overrides.cpu_thread_budget) {
         std::cerr << "rocjitsu: --cpu-thread-budget requires an unsigned integer\n";
+        return 1;
+      }
+    } else if (arg == "--wait-checking" || arg.starts_with("--wait-checking=")) {
+      const size_t equals = arg.find('=');
+      std::string_view value;
+      if (equals != std::string_view::npos)
+        value = arg.substr(equals + 1);
+      else if (i + 1 < argc)
+        value = argv[++i];
+      overrides.wait_checking = config::parse_wait_checking(value);
+      if (!overrides.wait_checking) {
+        std::cerr << "rocjitsu: --wait-checking requires on, off, or all\n";
         return 1;
       }
     } else if (arg == "--vfio-socket" && i + 1 < argc) {
@@ -498,22 +520,28 @@ int main(int argc, char *argv[]) {
   }
 
   // Attaching joins a daemon that already built its machine from its own config,
-  // so there is nothing left here for a budget to apply to.
-  if (cpu_thread_budget && attach_mode) {
+  // so these overrides cannot change it.
+  if (overrides.cpu_thread_budget && attach_mode) {
     std::cerr << "rocjitsu: --cpu-thread-budget cannot be combined with --attach\n";
     return 1;
   }
+  if (overrides.wait_checking && attach_mode) {
+    std::cerr << "rocjitsu: --wait-checking cannot be combined with --attach\n";
+    return 1;
+  }
 
-  // Applying the budget to a copy keeps the override inside this launch: the
+  // Applying overrides to a copy keeps them inside this launch: the
   // config the user named is never rewritten, and simulations built from other
-  // configs in the same process tree keep the budgets their own configs ask for.
+  // configs in the same process tree keep their own settings.
   util::StringDiagnostic launch_config_diagnostic;
   auto config_json_for_this_launch = [&]() -> rocjitsu::FailureOr<std::string> {
-    std::string json = rocjitsu::config::read_config_file(abs_config);
-    if (!cpu_thread_budget)
-      return json;
-    return rocjitsu::config::json_with_cpu_thread_budget(json, *cpu_thread_budget,
-                                                         launch_config_diagnostic.emitter());
+    auto json = rocjitsu::config::read_config_file(abs_config, launch_config_diagnostic.emitter());
+    if (json.failed())
+      return util::Result::failure();
+    if (overrides.empty())
+      return std::move(json.value());
+    return rocjitsu::config::json_with_launch_overrides(json.value(), overrides,
+                                                        launch_config_diagnostic.emitter());
   };
 
   if (thread_budget_table) {
@@ -528,8 +556,14 @@ int main(int argc, char *argv[]) {
                                  launch_config_diagnostic.message());
         return 1;
       }
-      auto settings = rocjitsu::config::load_execution_thread_settings_from_string(
-          json.value(), rocjitsu::kEmbeddedSchema);
+      auto maybe_settings = rocjitsu::config::load_execution_thread_settings_from_string(
+          json.value(), rocjitsu::kEmbeddedSchema, launch_config_diagnostic.emitter());
+      if (maybe_settings.failed()) {
+        std::cerr << std::format("rocjitsu: thread allocation failed: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+      auto &settings = maybe_settings.value();
       const uint32_t host = rocjitsu::amdgpu::available_host_threads();
       std::cout
           << "Budget | num_threads | cpu_dispatch_threads per GPU | async_helper_threads | Total\n";
@@ -568,11 +602,11 @@ int main(int argc, char *argv[]) {
   // The copy lives in this invocation's runtime directory, beside the config-path
   // handoff an exec'd workload already reads, so the same cleanup reclaims it.
   auto write_config_for_this_launch = [&]() {
-    if (!cpu_thread_budget)
+    if (overrides.empty())
       return true;
     util::StringDiagnostic diagnostic;
     rocjitsu::FailureOr<std::string> written = rocjitsu::config::write_effective_config(
-        abs_config, *cpu_thread_budget, my_pid, diagnostic.emitter());
+        abs_config, overrides, my_pid, diagnostic.emitter());
     if (written.failed()) {
       std::cerr << std::format("rocjitsu: {}\n", diagnostic.message());
       cleanup_runtime_files(my_pid);
@@ -609,9 +643,23 @@ int main(int argc, char *argv[]) {
 
   rocjitsu::config::DbtGuestConfig dbt_guest_config;
   try {
-    dbt_guest_config = rocjitsu::config::load_dbt_guest_config_from_file(abs_config);
-    if (!dbt_guest_config.enabled)
-      (void)rocjitsu::config::load_config(abs_config, rocjitsu::kEmbeddedSchema);
+    auto maybe_dbt_guest = rocjitsu::config::load_dbt_guest_config_from_file(
+        abs_config, launch_config_diagnostic.emitter());
+    if (maybe_dbt_guest.failed()) {
+      std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                               launch_config_diagnostic.message());
+      return 1;
+    }
+    dbt_guest_config = std::move(maybe_dbt_guest.value());
+    if (!dbt_guest_config.enabled) {
+      auto validated = rocjitsu::config::validate_config(abs_config, rocjitsu::kEmbeddedSchema,
+                                                         launch_config_diagnostic.emitter());
+      if (validated.failed()) {
+        std::cerr << std::format("rocjitsu: failed to parse config: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+    }
   } catch (const std::exception &e) {
     std::cerr << std::format("rocjitsu: failed to parse config: {}\n", e.what());
     return 1;
@@ -622,11 +670,19 @@ int main(int argc, char *argv[]) {
     return 1;
   }
   // A dbt_guest simulator_config is resolved relative to the config naming it, and
-  // it, not this config, is what the host VM is built from. Moving the budget onto
-  // a copy would therefore both break that path and miss the config it must reach.
-  if (dbt_guest_mode && cpu_thread_budget && !dbt_guest_config.host.simulator_config_path.empty()) {
+  // it, not this config, is what the host VM is built from. Moving overrides onto
+  // a copy would therefore both break that path and miss the config they must reach.
+  if (dbt_guest_mode && overrides.cpu_thread_budget &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
     std::cerr << std::format("rocjitsu: --cpu-thread-budget cannot be combined with a dbt_guest "
                              "simulator_config; set cpu_thread_budget in {} instead\n",
+                             dbt_guest_config.host.simulator_config_path);
+    return 1;
+  }
+  if (dbt_guest_mode && overrides.wait_checking &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << std::format("rocjitsu: --wait-checking cannot be combined with a dbt_guest "
+                             "simulator_config; set wait_checking in {} instead\n",
                              dbt_guest_config.host.simulator_config_path);
     return 1;
   }
@@ -661,7 +717,14 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     try {
-      dbt_execution_gpus = dbt_execution_gpu_ordinals(abs_config, dbt_guest_config);
+      auto maybe_gpus = dbt_execution_gpu_ordinals(abs_config, dbt_guest_config,
+                                                   launch_config_diagnostic.emitter());
+      if (maybe_gpus.failed()) {
+        std::cerr << std::format("rocjitsu: failed to load DBT execution topology: {}\n",
+                                 launch_config_diagnostic.message());
+        return 1;
+      }
+      dbt_execution_gpus = std::move(maybe_gpus.value());
     } catch (const std::exception &e) {
       std::cerr << std::format("rocjitsu: failed to load DBT execution topology: {}\n", e.what());
       return 1;

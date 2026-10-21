@@ -11,6 +11,10 @@
 #include "p2p_resiliency_cast.h"
 #include "net_telemetry.h"
 #include "qp_sharing.h"
+#include "multiplane.h"
+#include <mutex>
+
+#include <atomic>
 
 NCCL_PARAM(IbCastGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbCastRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -62,8 +66,70 @@ struct ncclChannelToUd {
   bool udAllocated;
 };
 
+// Controls AINIC QP-to-UDMA assignment, see ncclIbCastUDMAPolicy. Values outside
+// the enum behave as ChannelAffinity (init.cc warns about them).
+RCCL_PARAM(IbCastUDMAPolicy, "IB_UDMA_POLICY", 0);
 static ncclChannelToUd nccl_channel_ud_map[MAX_IB_DEVS][MAXCHANNELS][ncclIbChannelTypeMax];
 static bool nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
+static std::atomic<unsigned int> nccl_p2p_udma_idx[MAX_IB_DEVS] = {};
+// The PD is shared by all comms on a device and its uDMA mask takes effect at
+// QP creation. This lock spans selection through ibv_create_qp; it is separate
+// from ncclIbDev::mutex so QP creation does not serialize against MR registration.
+static std::mutex nccl_udma_mutex[MAX_IB_DEVS];
+static bool nccl_udma_mask_warned[MAX_IB_DEVS];
+
+constexpr int8_t ncclIbCastUDMANone = (int8_t)-1;
+constexpr int8_t ncclIbCastUDMALow = (int8_t)IONIC_UDMA_MASK_LOW;
+constexpr int8_t ncclIbCastUDMAHigh = (int8_t)IONIC_UDMA_MASK_HIGH;
+
+static ncclIbCastUDMAPolicy ncclIbCastGetUDMAPolicy() {
+  int64_t policy = rcclParamIbCastUDMAPolicy();
+  if (policy < (int64_t)ncclIbCastUDMAPolicy::First || policy > (int64_t)ncclIbCastUDMAPolicy::Last) {
+    return ncclIbCastUDMAPolicy::ChannelAffinity;
+  }
+  return (ncclIbCastUDMAPolicy)policy;
+}
+
+static int8_t ncclIbCastSelectUDMA(const struct ncclIbQpCreateAttr* createQpAttrs) {
+  const ncclIbCastUDMAPolicy policy = ncclIbCastGetUDMAPolicy();
+  if (policy == ncclIbCastUDMAPolicy::DriverDefault) {
+    return ncclIbCastUDMANone;
+  }
+
+  if (policy == ncclIbCastUDMAPolicy::SplitConnection) {
+    const bool highUd = __builtin_parity(static_cast<unsigned>(createQpAttrs->channelId)) ^
+                        (createQpAttrs->qpIdx & 1);
+    return highUd ? ncclIbCastUDMAHigh : ncclIbCastUDMALow;
+  }
+
+  if ((policy == ncclIbCastUDMAPolicy::P2pRoundRobin) && createQpAttrs->isP2p) {
+    unsigned int udmaIdx = nccl_p2p_udma_idx[createQpAttrs->ibDevN].fetch_add(1, std::memory_order_relaxed);
+    bool useHighUdma = (udmaIdx & 1) != 0;
+    return useHighUdma ? ncclIbCastUDMAHigh : ncclIbCastUDMALow;
+  }
+
+  if (createQpAttrs->isQpSharingEnabled && (createQpAttrs->qpSharingGroupIdx >= 0)) {
+    // When only one sharing group exists, alternate UDMA engine per QP within
+    // the group so both DMA engines are utilized.  With multiple groups the
+    // existing per-group alternation already distributes across engines.
+    int udmaSelector = (rcclParamIbCastCommNGroups() == 1)
+                        ? createQpAttrs->qpIdx
+                        : createQpAttrs->qpSharingGroupIdx;
+    return (udmaSelector % 2 == 0) ? ncclIbCastUDMALow : ncclIbCastUDMAHigh;
+  }
+
+  enum ncclIbChannelType channelType =
+    createQpAttrs->isDataQp ? ncclIbChannelTypeData : ncclIbChannelTypeCts;
+  ncclChannelToUd* channelToUd =
+    &nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channelType];
+  if (!channelToUd->udAllocated) {
+    bool lastUd = nccl_channel_last_ud[createQpAttrs->ibDevN][channelType];
+    channelToUd->udId = lastUd;
+    channelToUd->udAllocated = true;
+    nccl_channel_last_ud[createQpAttrs->ibDevN][channelType] = !lastUd;
+  }
+  return channelToUd->udId ? ncclIbCastUDMAHigh : ncclIbCastUDMALow;
+}
 
 static inline bool IbCastIsCtsOffloadEnabled(int isP2p) {
   return IbCastOffloadEnabled && !(isP2p && rcclParamIbCastP2pDisableCts());
@@ -122,6 +188,8 @@ ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
     }
     base->pd = ibDev->pd;
   }
+
+  IbCastGidInfoSnapshot(base, ibDev);
 
   if (ibDev->maxCqe > 0 && cqSize > ibDev->maxCqe) {
     WARN("NET/IB: %s: requested CQ size %ld exceeds device %s max_cqe %d, clamping",
@@ -391,6 +459,17 @@ ncclResult_t IbCastGetGidIndex(struct ibv_context* context, uint8_t portNum, str
 
   return ncclSuccess;
 }
+
+ncclResult_t IbCastGidInfoQuery(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
+                                struct ncclIbGidInfo* gidInfo) {
+  if (context == NULL || portAttr == NULL || gidInfo == NULL) return ncclInternalError;
+  gidInfo->link_layer = portAttr->link_layer;
+  NCCLCHECK(IbCastGetGidIndex(context, portNum, portAttr, &gidInfo->localGidIndex));
+  if (gidInfo->localGidIndex < 0) return ncclInternalError;
+  NCCLCHECK(wrap_ibv_query_gid(context, portNum, gidInfo->localGidIndex, &gidInfo->localGid));
+  return ncclSuccess;
+}
+
 ncclResult_t IbCastQpInit(struct ncclIbQp* qp) {
   struct ncclIbQpInitAttr* initAttr = &qp->initAttr;
   struct ibv_qp_attr qpAttr;
@@ -436,7 +515,6 @@ static ncclResult_t ncclIbCreateQpMlx5(struct ncclIbQpCreateAttr* createQpAttrs,
 
 static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs, struct ncclIbQp* qp) {
   struct ibv_qp_init_attr qpInitAttr;
-  enum ncclIbChannelType channel_type = (createQpAttrs->isDataQp ? ncclIbChannelTypeData : ncclIbChannelTypeCts);
   memset(&qpInitAttr, 0, sizeof(struct ibv_qp_init_attr));
   qpInitAttr.qp_context = createQpAttrs->qpContext;
   qpInitAttr.send_cq = createQpAttrs->cq;
@@ -479,32 +557,29 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     qpInitAttr.sq_sig_all &= (~(1 << 25));
   }
 
-  if (createQpAttrs->isQpSharingEnabled && (createQpAttrs->qpSharingGroupIdx >= 0)) {
-    // When only one sharing group exists, alternate UDMA engine per QP within
-    // the group so both DMA engines are utilized.  With multiple groups the
-    // existing per-group alternation already distributes across engines.
-    int udmaSelector = (rcclParamIbCastCommNGroups() == 1)
-                        ? createQpAttrs->qpIdx
-                        : createQpAttrs->qpSharingGroupIdx;
-    uint8_t mask = (udmaSelector % 2 == 0) ? IONIC_UDMA_MASK_LOW : IONIC_UDMA_MASK_HIGH;
-    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, mask);
-  } else {
-    if (!nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated) {
-      bool lud = nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type];
-      nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId = lud;
-      nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udAllocated = true;
-      nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type] =
-        !(nccl_channel_last_ud[createQpAttrs->ibDevN][channel_type]);
-    }
-    if (nccl_channel_ud_map[createQpAttrs->ibDevN][createQpAttrs->channelId][channel_type].udId) {
-      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_HIGH);
-    } else {
-      wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, IONIC_UDMA_MASK_LOW);
-    }
-  }
+  {
+    // Hold the uDMA lock from selection through ibv_create_qp so concurrent
+    // creators cannot overwrite the PD mask, and so the channel map stays consistent.
+    std::lock_guard<std::mutex> lock(nccl_udma_mutex[createQpAttrs->ibDevN]);
 
-  NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
-  NCCLCHECK(wrap_ionicdv_qp_set_gda(qp->qp, false, true));
+    int8_t udma_id = ncclIbCastSelectUDMA(createQpAttrs);
+    if (udma_id != ncclIbCastUDMANone &&
+        wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, (uint8_t)udma_id) != ncclSuccess &&
+        !nccl_udma_mask_warned[createQpAttrs->ibDevN]) {
+      nccl_udma_mask_warned[createQpAttrs->ibDevN] = true;
+      WARN("NET/IB : %s: ionic_dv_pd_set_udma_mask failed, QPs keep the PD's current uDMA mask",
+           IbCastDevs[createQpAttrs->ibDevN].devName);
+    }
+
+    NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
+  }
+  if (wrap_ionicdv_qp_set_gda(qp->qp, false, true) != ncclSuccess) {
+    static std::once_flag gdaWarnOnce;
+    std::call_once(gdaWarnOnce, []() {
+      WARN("NET/IB-CAST : ionic_dv_qp_set_gda is unavailable or failed; IB-CAST QPs are created without GDA receive "
+           "mode. Upgrade libionic for full IB-CAST support.");
+    });
+  }
   qp->ctsQpSlot = createQpAttrs->ctsQpSlot;
   return ncclSuccess;
 }
@@ -513,6 +588,7 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
 // channelId and isDataQp from the saved ncclIbQp fields — these control
 // AINIC driver behavior (UDMA load balancing and sq_sig_all feature flags)
 // and differ between sender QPs (isDataQp=true) and receiver QPs (isDataQp=false).
+// UDMA SplitConnection also requires qpIdx (see IbCastQpStripe); flush QPs leave it 0.
 void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out) {
   memset(out, 0, sizeof(*out));
   out->type = IBV_QPT_RC;
@@ -607,6 +683,53 @@ ncclResult_t IbCastQpRtr(struct ncclIbQp* qp) {
   qpAttr.ah_attr.sl = rtrAttr->sl;
   qpAttr.ah_attr.src_path_bits = 0;
   qpAttr.ah_attr.port_num = rtrAttr->localIbPort;
+
+  // Multiplane: program per-plane PUEC routes if configured.
+  // IbCastMultiplaneEnable is set once at init — when false the entire block is skipped
+  // with zero per-QP overhead.  The loopback check (GDR/RMA flush QPs where remote ==
+  // local) is deferred behind the global so non-multiplane paths never pay for the memcmp.
+  if (IbCastMultiplaneEnable &&
+      memcmp(&rtrAttr->remoteGid, &rtrAttr->localGid, sizeof(union ibv_gid)) != 0) {
+    NCCLCHECK(IbCastMultiplaneLoad());
+    union ibv_gid pipGids[MULTIPLANE_MAX_PIPS];
+    int nPips = 0;
+    NCCLCHECK(IbCastMultiplaneGetPipGids(&rtrAttr->remoteGid, pipGids, &nPips));
+    if (nPips > 0) {
+      // Our own PIPs, used as the per-plane source. Leaving the source zero makes
+      // the driver do a source-unconstrained route lookup, which for a peer on this
+      // same host resolves via the kernel local table and yields source ==
+      // destination on both the IP and the MAC, so the frames are undeliverable.
+      union ibv_gid localPipGids[MULTIPLANE_MAX_PIPS];
+      int nLocalPips = 0;
+      NCCLCHECK(IbCastMultiplaneGetPipGids(&rtrAttr->localGid, localPipGids, &nLocalPips));
+      if (nLocalPips == 0) {
+        WARN("Multiplane: local VIP has no PIP mapping — skipping PUEC route programming");
+      } else if (nLocalPips < nPips) {
+        WARN("Multiplane: local VIP maps to %d PIPs but remote maps to %d; programming only %d planes",
+             nLocalPips, nPips, nLocalPips);
+      }
+      // Program only planes where both local and remote PIPs are available.
+      // Never program a route with a zero SGID — it causes source-unconstrained
+      // lookups that break same-host traffic.
+      int nRoutes = std::min(nLocalPips, nPips);
+      for (int i = 0; i < nRoutes; i++) {
+        struct ionic_dv_puec_route route = {};
+        route.dgid = pipGids[i];
+        route.sgid = localPipGids[i];
+        route.flow_label = qpAttr.ah_attr.grh.flow_label;
+        route.hop_limit = qpAttr.ah_attr.grh.hop_limit;
+        route.sl = qpAttr.ah_attr.sl;
+        route.traffic_class = qpAttr.ah_attr.grh.traffic_class;
+        route.flags = 0;
+        ncclResult_t puecRet = wrap_ionicdv_qp_set_puec_plane_route(qp->qp, i, &route);
+        if (puecRet != ncclSuccess) {
+          WARN("Multiplane: PUEC route programming failed for plane %d", i);
+          break;
+        }
+      }
+    }
+  }
+
   TRACE(NCCL_NET, "NET/IB: %s: qpn=%u mtu=%d dst=%u ll=%u port=%u sl: %d tc: %d", __func__, qp->qp->qp_num,
         qpAttr.path_mtu, qpAttr.dest_qp_num, rtrAttr->linkLayer, qpAttr.ah_attr.port_num, qpAttr.ah_attr.sl,
         qpAttr.ah_attr.grh.traffic_class);
@@ -851,7 +974,8 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     // on the devices as follows:
     // Dev0 -> QP0, QP2
     // Dev1 -> QP1, QP3
-    uint devIndex = qpIndex % comm->base.vProps.ndevs;
+    int devIndex;
+    NCCLCHECK(IbCastQpStripe(qpIndex, comm->base.vProps.ndevs, &devIndex, &qpCreateAttrs.qpIdx));
     ncclIbSendCommDev* commDev = &comm->devs[devIndex];
     ncclIbDev* ibDev = &IbCastDevs[commDev->base.ibDevN];
     ncclIbQp* localQp = &comm->base.qps[qpIndex];
@@ -868,7 +992,6 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     qpCreateAttrs.ibDevN = commDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
     qpCreateAttrs.isP2p = comm->base.isP2p;
-    qpCreateAttrs.qpIdx = qpIndex / comm->base.vProps.ndevs;
 
     if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
       if (ibDev->ar == 0) {
@@ -1300,6 +1423,7 @@ ib_recv_dev_list:
   comm->base.isP2p = isP2p;
   comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p) && !handle->isRMA;
   comm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(comm->useCtsOffload);
+  IbCastInitOptRecvCompletion(&comm->base, comm->useCtsOffload);
 
   INFO(NCCL_NET, "NET/IB: IbCastConnect isP2p=%d isRMA=%d useCtsOffload=%d recvMatchingScheme=%d", isP2p, handle->isRMA,
        comm->useCtsOffload, comm->base.recvMatchingScheme);
@@ -1352,6 +1476,7 @@ ib_recv_dev_list:
   meta.ndevs = comm->base.vProps.ndevs;
   meta.isP2p = isP2p;
   meta.isRMA = handle->isRMA;
+  meta.optRecvCompletion = comm->base.optRecvCompletion;
   meta.sharedGroupIdx = -1;
   meta.commId = 0;
   // TODO - QP sharing
@@ -1369,7 +1494,7 @@ ib_recv_dev_list:
     NCCLCHECKGOTO(IbCastSenderQpsCreate(comm, &meta, channelId, depthMult), ret, fail);
     comm->telChId = channelId;
     comm->telChStats = NULL;
-  
+
     // Telemetry-only: skip when off. IbCastQpCreate() left every telQpStats NULL,
     // the untracked value the hooks expect.
     if (rcclTelemetryOn()) {
@@ -1428,13 +1553,7 @@ ib_recv_dev_list:
     devInfo->rkey = commDev->ctsFifoMr->rkey;
 
     // Pack local GID info
-    devInfo->link_layer = commDev->base.gidInfo.link_layer = ibDev->portAttr.link_layer;
-    NCCLCHECKGOTO(IbCastGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr,
-                                    &commDev->base.gidInfo.localGidIndex),
-                  ret, fail);
-    NCCLCHECKGOTO(wrap_ibv_query_gid(ibDev->context, ibDev->portNum, commDev->base.gidInfo.localGidIndex,
-                                     &commDev->base.gidInfo.localGid),
-                  ret, fail);
+    devInfo->link_layer = commDev->base.gidInfo.link_layer;
     devInfo->gid.global.subnet_prefix = commDev->base.gidInfo.localGid.global.subnet_prefix;
     devInfo->gid.global.interface_id = commDev->base.gidInfo.localGid.global.interface_id;
 
@@ -1512,6 +1631,7 @@ ib_connect:
   if (stage->offset != sizeof(remMeta)) return ncclSuccess;
 
   memcpy(&remMeta, stage->buffer, sizeof(ncclIbConnectionMetadata));
+  comm->base.optRecvCompletion = comm->base.optRecvCompletion && remMeta.optRecvCompletion;
 
   // ensure that the remote devices have the same link layer than the local devices used in the connection.
   if (comm->base.vProps.ndevs > 0) {
@@ -1664,7 +1784,8 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     // on the devices as follows:
     // Dev0 -> QP0, QP2
     // Dev1 -> QP1, QP3
-    uint devIndex = qpIndex % rComm->base.vProps.ndevs;
+    int devIndex;
+    NCCLCHECK(IbCastQpStripe(qpIndex, rComm->base.vProps.ndevs, &devIndex, &qpCreateAttrs.qpIdx));
     ncclIbRecvCommDev* rCommDev = &rComm->devs[devIndex];
     ncclIbDev* ibDev = &IbCastDevs[rCommDev->base.ibDevN];
     ncclIbQpInfo* remQpInfo = &remMeta->qpInfo[qpIndex];
@@ -1687,7 +1808,6 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
     qpCreateAttrs.isP2p = rComm->base.isP2p;
-    qpCreateAttrs.qpIdx = qpIndex / rComm->base.vProps.ndevs;
 
     if (rComm->base.resiliency) {
       IbCastResiliencyDataRqSizeGet(rComm->base.resiliency, devIndex, &qpCreateAttrs.maxRecvWorkRequest);
@@ -1931,6 +2051,10 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
 
   struct IbCastSharedQp* recvExistingSlot = IbCastFindSharedQp(&recvProbeKey);
 
+  // QP sharing disables CTS offload.
+  rComm->useCtsOffload = false;
+  IbCastInitOptRecvCompletion(&rComm->base, rComm->useCtsOffload);
+
   if (recvExistingSlot != NULL) {
     // SECONDARY receiver: reuse existing QPs
     INFO(NCCL_NET, "NET/IB: %s: QP sharing SECONDARY receiver commId=%u group=%d",
@@ -1939,7 +2063,6 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
     rComm->base.qpSharing.isPrimary = false;
     int primaryNqps = IbCastCountGroupQpSlots(&recvPeerAddr, recvPeerProcTag, remMeta->senderIbDevIdx, false, remMeta->sharedGroupIdx);
     rComm->base.qpSharing.groupNqps = primaryNqps;
-    rComm->useCtsOffload = false;
 
     IbCastSharedQpKey recvKey;
     memset(&recvKey, 0, sizeof(recvKey));
@@ -2032,7 +2155,6 @@ static ncclResult_t IbCastQpSharingReceiverSetup(
     INFO(NCCL_NET, "NET/IB: %s: QP sharing PRIMARY receiver commId=%u group=%d",
          __func__, rComm->base.qpSharing.netIbCommId, recvGroupIdx);
     rComm->base.qpSharing.isPrimary = true;
-    rComm->useCtsOffload = false; // sender useCtsOffload is also false: IbCastOffloadEnabled=false at init (init.cc)
     *outRole = QP_SHARING_PRIMARY;
   }
 
@@ -2218,6 +2340,7 @@ ib_recv:
   rComm->base.isP2p = remMeta.isP2p;
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
   rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
+  IbCastInitOptRecvCompletion(&rComm->base, rComm->useCtsOffload);
   INFO(NCCL_NET, "NET/IB: ncclIbAccept isP2p=%d isRMA=%d useCtsOffload=%d (IbP2pDisableCts=%ld) recvMatchingScheme=%d",
        remMeta.isP2p, remMeta.isRMA, rComm->useCtsOffload, rcclParamIbCastP2pDisableCts(),
        rComm->base.recvMatchingScheme);
@@ -2293,12 +2416,6 @@ ib_recv:
       NCCLCHECKGOTO(IbCastResiliencyDevInit(rComm->base.resiliency, i, &IbCastDevs[ibDevN]), ret, fail);
     }
     ibDev = IbCastDevs + ibDevN;
-    NCCLCHECKGOTO(IbCastGetGidIndex(ibDev->context, ibDev->portNum, &ibDev->portAttr,
-                                    &rCommDev->base.gidInfo.localGidIndex),
-                  ret, fail);
-    NCCLCHECKGOTO(wrap_ibv_query_gid(ibDev->context, ibDev->portNum, rCommDev->base.gidInfo.localGidIndex,
-                                     &rCommDev->base.gidInfo.localGid),
-                  ret, fail);
     if (link_layer == IBV_LINK_LAYER_UNSPECIFIED) link_layer = ibDev->portAttr.link_layer;
     if (link_layer != ibDev->portAttr.link_layer) {
       int ibDev0 = rComm->devs[0].base.ibDevN;
@@ -2497,7 +2614,7 @@ ib_recv:
 
     // Fill Handle
     meta.devs[i].lid = ibDev->portAttr.lid;
-    meta.devs[i].link_layer = rCommDev->base.gidInfo.link_layer = ibDev->portAttr.link_layer;
+    meta.devs[i].link_layer = rCommDev->base.gidInfo.link_layer;
     meta.devs[i].ib_port = ibDev->portNum;
     meta.devs[i].gid.global.subnet_prefix = rCommDev->base.gidInfo.localGid.global.subnet_prefix;
     meta.devs[i].gid.global.interface_id = rCommDev->base.gidInfo.localGid.global.interface_id;
@@ -2510,6 +2627,8 @@ ib_recv:
 
   meta.ndevs = rComm->base.vProps.ndevs;
   meta.isP2p = remMeta.isP2p;
+  meta.optRecvCompletion = rComm->base.optRecvCompletion;
+  rComm->base.optRecvCompletion = rComm->base.optRecvCompletion && remMeta.optRecvCompletion;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
 
   stage->state = ncclIbCommStateSend;

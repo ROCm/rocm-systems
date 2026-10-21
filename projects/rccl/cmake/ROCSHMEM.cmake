@@ -24,7 +24,7 @@ include(ExternalProject)
 
 # Pinned mono-repo commit for rocshmem source checkout.
 # Used by both install.sh (setup_rocshmem_worktree) and cmake (auto-detect below).
-set(ROCSHMEM_MONO_HASH "33d980d7ca1f0bf90cfe4ff9106310abcf47b550" CACHE STRING
+set(ROCSHMEM_MONO_HASH "f636cc5be66716349dd9ed42eebb7b4d651fbb20" CACHE STRING
     "Pinned rocm-systems commit hash for rocshmem source checkout")
 
 function(add_rocshmem_targets)
@@ -142,9 +142,15 @@ function(add_rocshmem_targets)
         endif()
         message(STATUS "rocSHMEM: building from ${ROCSHMEM_SOURCE_DIR}")
 
+        # Both of these are named by absolute path as graph inputs -- the
+        # archive by target_link_libraries, the header by the copy_files
+        # custom command on the GIN path -- so ninja needs an edge producing
+        # them; add_dependencies() gives only an order-only edge.
         ExternalProject_Add(rocshmem_ext
             SOURCE_DIR          "${ROCSHMEM_SOURCE_DIR}"
             INSTALL_DIR         "${ROCSHMEM_INSTALL_DIR}"
+            BUILD_BYPRODUCTS    "${ROCSHMEM_INSTALL_DIR}/lib/librocshmem.a"
+                                "${ROCSHMEM_INSTALL_DIR}/include/rocshmem/rocshmem_config.h"
             UPDATE_DISCONNECTED TRUE
             LOG_DOWNLOAD        FALSE
             LOG_CONFIGURE       FALSE

@@ -8,7 +8,9 @@
 #include "util/log.h"
 
 #include <cstring>
+#include <optional>
 #include <ranges>
+#include <span>
 #include <utility>
 
 namespace rocjitsu {
@@ -27,6 +29,7 @@ public:
   int numProgramHeaders() const override { return static_cast<int>(ehdr_.e_phnum); }
   uint64_t sectionHeaderOff() const override { return ehdr_.e_shoff; }
   int numSectionHeaders() const override { return static_cast<int>(ehdr_.e_shnum); }
+  uint64_t sectionHeaderEntrySize() const override { return ehdr_.e_shentsize; }
   int sectionHeaderStrIdx() const override { return static_cast<int>(ehdr_.e_shstrndx); }
   uint32_t flags() const override { return ehdr_.e_flags; }
 
@@ -86,11 +89,16 @@ Executable::Executable(const std::string &path) {
 
   // Standalone AMD GPU HSA device ELF.
   if (ehdr.e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA) {
+    if (!load_program_headers(ehdr)) {
+      is_valid_ = false;
+      return;
+    }
     load_device_elf();
     return;
   }
 
-  // x86 host ELF (fat binary with .hip_fatbin section).
+  // x86 host ELF is a container for .hip_fatbin, not a GPU load image. Its
+  // host program headers do not describe the extracted device objects.
   if (ehdr.e_ident[EI_OSABI] == ELFOSABI_NONE) {
     header_ = std::make_unique<HsaHeader>(ehdr);
     load_fat_binary();
@@ -136,31 +144,34 @@ void Executable::load_device_elf() {
 void Executable::load_fat_binary() {
   // Parse section headers to find .hip_fatbin.
   const int num_shdrs = header_->numSectionHeaders();
-  if (num_shdrs < 0 ||
-      !fits_in_bounds(header_->sectionHeaderOff(),
-                      static_cast<uint64_t>(num_shdrs) * sizeof(Elf64_Shdr), image_.size())) {
+  if (num_shdrs < 0) {
     is_valid_ = false;
     return;
   }
-  std::vector<Elf64_Shdr> section_hdrs(static_cast<size_t>(num_shdrs));
-  std::memcpy(section_hdrs.data(), image_.data() + header_->sectionHeaderOff(),
-              section_hdrs.size() * sizeof(Elf64_Shdr));
-
-  int shstrndx = header_->sectionHeaderStrIdx();
-  if (shstrndx < 0 || static_cast<size_t>(shstrndx) >= section_hdrs.size()) {
+  const std::span image(reinterpret_cast<const uint8_t *>(image_.data()), image_.size());
+  std::optional<std::vector<Elf64_Shdr>> section_hdrs = read_elf_table<Elf64_Shdr>(
+      image, header_->sectionHeaderOff(), static_cast<uint64_t>(num_shdrs),
+      header_->sectionHeaderEntrySize());
+  if (!section_hdrs) {
     is_valid_ = false;
     return;
   }
 
-  auto &shstrtab = section_hdrs[shstrndx];
+  int shstrndx = header_->sectionHeaderStrIdx();
+  if (shstrndx < 0 || static_cast<size_t>(shstrndx) >= section_hdrs->size()) {
+    is_valid_ = false;
+    return;
+  }
+
+  const Elf64_Shdr &shstrtab = (*section_hdrs)[shstrndx];
   if (!fits_in_bounds(shstrtab.sh_offset, shstrtab.sh_size, image_.size())) {
     is_valid_ = false;
     return;
   }
   const char *shstrtab_data = image_.data() + shstrtab.sh_offset;
 
-  for (size_t section_index = 0; section_index < section_hdrs.size(); ++section_index) {
-    const Elf64_Shdr &shdr = section_hdrs[section_index];
+  for (size_t section_index = 0; section_index < section_hdrs->size(); ++section_index) {
+    const Elf64_Shdr &shdr = (*section_hdrs)[section_index];
     if (shdr.sh_type == SHT_NULL)
       continue;
     if (shdr.sh_name >= shstrtab.sh_size)
@@ -176,7 +187,8 @@ void Executable::load_fat_binary() {
 
     if (sec_name == ".hip_fatbin") {
       std::unique_ptr<char[]> sec_data(std::make_unique<char[]>(shdr.sh_size));
-      std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
+      if (shdr.sh_size != 0)
+        std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
       auto section =
           std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr, section_index);
       load_hip_fatbin(*section);
@@ -209,9 +221,11 @@ void Executable::load_hip_fatbin(const Section &fatbin_section) {
     return;
   }
 
-  // Every bundle entry needs an offset, a size, and an ID length before its ID bytes.
-  constexpr size_t kMinBundleEntrySize = 3 * sizeof(uint64_t);
-  if (bundle_hdr.num_code_objs > (fatbin_size - cursor) / kMinBundleEntrySize) {
+  // The fixed prefix is offset, size, and bundle_entry_id_size, before the
+  // variable-length bundle identifier.
+  constexpr uint64_t kBundleInfoFixedBytes = 3 * sizeof(uint64_t);
+  const uint64_t remaining = fatbin_size - cursor;
+  if (bundle_hdr.num_code_objs > remaining / kBundleInfoFixedBytes) {
     is_valid_ = false;
     return;
   }
@@ -253,14 +267,13 @@ void Executable::load_hip_fatbin(const Section &fatbin_section) {
 
     if (parts[0] == CLANG_OFFLOAD_KIND_HIP || parts[0] == CLANG_OFFLOAD_KIND_HIPV4) {
       util::Logger::debug_print(__func__, ": Fatbin has target triple ", parts[5]);
-      const uint64_t fatbin_offset = fatbin_section.sectionOffset() + info.offset;
-      if (!fits_in_bounds(fatbin_offset, info.size, image_.size())) {
+      if (!fits_in_bounds(info.offset, info.size, fatbin_size)) {
         is_valid_ = false;
         return;
       }
 
       auto co = std::make_unique<AmdGpuCodeObject>(
-          reinterpret_cast<const uint8_t *>(image_.data() + fatbin_offset),
+          reinterpret_cast<const uint8_t *>(fatbin_data + info.offset),
           static_cast<size_t>(info.size), parts[0], parts[5]);
       if (!co->is_valid()) {
         is_valid_ = false;

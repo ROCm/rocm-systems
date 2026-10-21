@@ -477,6 +477,13 @@ SPECIALIZE_REDUCE(FuncSum, rccl_bfloat8, 2, fp8x2_storage_t, hadd2_b(x, y))
 SPECIALIZE_REDUCE(FuncProd, rccl_bfloat8, 1, rccl_bfloat8, rccl_bfloat8(float(x) * float(y)))
 SPECIALIZE_REDUCE(FuncMinMax, rccl_bfloat8, 1, rccl_bfloat8,
                   rccl_bfloat8(fn.isMinNotMax ? fminf(float(x), float(y)) : fmaxf(float(x), float(y))))
+
+#if defined(RCCL_FP8_HAS_PK8)
+// gfx1250 converts 8 fp8 lanes per instruction, so reduce a whole BytePack<8>
+// at once instead of letting Apply_Reduce recurse down to pairs.
+SPECIALIZE_REDUCE(FuncSum, rccl_float8, 8, fp8x8_storage_t, hadd8(x, y))
+SPECIALIZE_REDUCE(FuncSum, rccl_bfloat8, 8, fp8x8_storage_t, hadd8_b(x, y))
+#endif
 #endif
 #endif
 
@@ -1429,8 +1436,9 @@ DEFINE_Apply_LoadMultimem_sum(uint32_t, u32, 4) DEFINE_Apply_LoadMultimem_minmax
 #endif
 
 #if defined(RCCL_BFLOAT16)
-#if NCCL_CUDA_ARCH_SPECIFIC == 1000 || NCCL_CUDA_ARCH_SPECIFIC == 1010 || NCCL_CUDA_ARCH_FAMILY_SPECIFIC == 1000 || \
-  NCCL_CUDA_ARCH_FAMILY_SPECIFIC == 1010 || NCCL_CUDA_ARCH_SPECIFIC == 1200 || NCCL_CUDA_ARCH_SPECIFIC == 1210
+#if NCCL_CUDA_ARCH_SPECIFIC == 1000 || NCCL_CUDA_ARCH_SPECIFIC == 1010 || NCCL_CUDA_ARCH_SPECIFIC == 1070 || \
+  NCCL_CUDA_ARCH_FAMILY_SPECIFIC == 1000 || NCCL_CUDA_ARCH_FAMILY_SPECIFIC == 1010 || \
+  NCCL_CUDA_ARCH_SPECIFIC == 1200 || NCCL_CUDA_ARCH_SPECIFIC == 1210
                     DEFINE_Apply_LoadMultimem_sum_v4_and_xparts(__nv_fp8_e4m3, e4m3x4, 4)
                       DEFINE_Apply_LoadMultimem_minmax_v4_and_xparts(__nv_fp8_e4m3, e4m3x4, 4)
                         DEFINE_Apply_LoadMultimem_sum_v4_and_xparts(__nv_fp8_e5m2, e5m2x4, 4)

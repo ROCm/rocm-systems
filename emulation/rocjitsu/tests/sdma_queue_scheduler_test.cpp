@@ -31,6 +31,7 @@
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu::amdgpu {
@@ -780,12 +781,14 @@ TEST_F(SdmaQueueSchedulerTest, GracefulDetachPreservesBlockedPacketStateUntilItD
   ASSERT_TRUE(wait_until([this]() { return memory_->read_attempts() != 0; }));
   EXPECT_EQ(scheduler_.prepare_detach(queue), QueuePrepareCloseStatus::Busy);
   EXPECT_TRUE(scheduler_.contains(queue));
+  EXPECT_FALSE(gpu_vm_.unregister_address_space(address_space_));
 
   memory_->set_reads_unavailable(false);
   ASSERT_TRUE(
       wait_until([this]() { return memory_->load<uint64_t>(kReadPointer) == sizeof(uint32_t); }));
   EXPECT_EQ(scheduler_.prepare_detach(queue), QueuePrepareCloseStatus::Ready);
   EXPECT_FALSE(scheduler_.contains(queue));
+  EXPECT_TRUE(gpu_vm_.unregister_address_space(address_space_));
 }
 
 TEST_F(SdmaQueueSchedulerTest, DisableRejectsBlockedPacketStateSoGracefulDetachCanDrain) {
@@ -815,13 +818,20 @@ TEST_F(SdmaQueueSchedulerTest, DetachWaitsForActiveServiceAndRejectsLaterNotific
 
   EXPECT_EQ(scheduler_.notify(queue, sizeof(uint32_t)), QueueSubmissionStatus::Accepted);
   ASSERT_TRUE(memory_->wait_for_read_attempts(1));
-  std::future<bool> detached =
-      std::async(std::launch::async, [this, queue]() { return scheduler_.detach(queue); });
+  std::future<std::pair<bool, bool>> detached = std::async(std::launch::async, [this, queue]() {
+    const bool closed = scheduler_.detach(queue);
+    // Check on the closing thread before future synchronization gives the
+    // worker another opportunity to release its QueueRecord reference.
+    const bool unregistered = gpu_vm_.unregister_address_space(address_space_);
+    return std::pair{closed, unregistered};
+  });
   EXPECT_EQ(detached.wait_for(20ms), std::future_status::timeout);
 
   memory_->permit_one_read();
   ASSERT_EQ(detached.wait_for(1s), std::future_status::ready);
-  EXPECT_TRUE(detached.get());
+  const auto [closed, unregistered] = detached.get();
+  EXPECT_TRUE(closed);
+  EXPECT_TRUE(unregistered);
 
   const uint32_t reads_after_detach = memory_->read_attempts();
   EXPECT_EQ(scheduler_.notify(queue, 2 * sizeof(uint32_t)), QueueSubmissionStatus::Faulted);

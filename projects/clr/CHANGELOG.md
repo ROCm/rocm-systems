@@ -2,18 +2,34 @@
 
 Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs.amd.com/projects/HIP/en/latest/index.html)
 
-## HIP 10.2.0 for ROCm 10.2.0
+## HIP 7.17.0 for ROCm 10.2.0
 
 ### Added
 * New HIP APIs
     - Module Management: support for API parity with corresponding CUDA API.
       * `hipModuleEnumerateFunctions` returns the function handles defined in a loaded module.
-* Disable HRR capture feature
+    - Library Management: support for API parity with corresponding CUDA API.
+      * `hipLibraryGetModule` returns the module handle associated with a library.
+      * `hipKernelSetAttributeForDevice` sets a device-wide attribute for a kernel on a specific device.
+* Support for recovering allocation properties from imported virtual memory handles. `hipMemGetAllocationPropertiesFromHandle` now correctly reports `hipMemLocationTypeHost` for host-backed allocations imported via `hipMemImportFromShareableHandle`, instead of always reporting device memory. For device-backed allocations, it reports the owning device rather than the device that was current when the handle was imported.
+* Support in WSL 2 to prevent indefinite application hangs and to report errors for device-side faults, including out-of-bounds writes, null pointer dereferences, and device asserts.
 
 ### Resolved issues
-* A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.
 
-## HIP 10.1.0 for ROCm 10.1.0
+* Fixed a regression where HIP applications on MI300A and other APUs failed at the first stream creation, `hipMemcpy`, `hipMemset`, or kernel launch with out-of-memory or invalid-argument errors after device-memory AQL rings were enabled by default (`DEBUG_CLR_AQL_DEV_QUEUE=1`). Large BAR now requires a real CPU link and a discrete agent, so APUs keep system-memory rings. WSL/Windows still uses CPU access to the GPU pool for discrete GPUs, because that path does not report link hops the way KFD does. Workaround before the fix: `DEBUG_CLR_AQL_DEV_QUEUE=0`.
+* A registered `__device__` global that is absent from the loaded code object no longer aborts the process. Symbol lookup now returns `hipErrorInvalidSymbol` from the runtime's variable materialization path (`hipGetSymbolAddress`, `hipLibraryGetGlobal`, and related entry points). `hipModuleGetGlobal` still reports `hipErrorNotFound` for a missing name.
+* Fixed `__hip_bfloat162` comparisons that ignored or misread the high lane. `__hbneu2` now returns true only when both lanes are unordered-not-equal, `__hgt2` and `__hisnan2` now return the per-lane result in `.y` instead of always 1.0, and the `<`, `<=`, `>`, `>=` operators now compare `.y` with `.y`. Code that relied on the previous results may see different values.
+
+### Changed
+
+* Stream priority is now disabled to avoid known queue-priority-related issues. Priority streams are currently not supported.
+* HRR capture feature is now disabled.
+
+### Known issues
+
+* A GPU Timeout Detection and Recovery (TDR) event may occur on ROCm 10.2 running under WSL 2 (Windows Subsystem for Linux 2) when executing the `vllm_rocm_gpt-oss-20b_default_inf_fp4` `vLLM` inference workload.
+
+## HIP 7.16.0 for ROCm 10.1.0
 
 ### Added
 * New HIP APIs
@@ -35,7 +51,7 @@ The HIP/HSA runtime now correctly releases allocated signal objects during strea
 
 * Under WSL2 (Windows Subsystem for Linux 2), GPU device-side memory faults may not be reported correctly and can result in the process hanging.
 
-## HIP 10.0.0 for ROCm 10.0.0
+## HIP 7.15.0 for ROCm 10.0.0
 
 ### Added
 * New HIP APIs

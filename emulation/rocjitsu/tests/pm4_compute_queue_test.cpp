@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "embedded_schema.h"
+#include "config_test_util.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
+#include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/soc.h"
 #include "simdojo/sim/simulation.h"
@@ -28,7 +29,7 @@ namespace {
 
 class Pm4QueueMemory final : public AddressSpaceTranslator, public PhysicalMemoryAccess {
 public:
-  Pm4QueueMemory() : bytes_(0x1000) {}
+  Pm4QueueMemory() : bytes_(0x4000) {}
 
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
     if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
@@ -124,14 +125,15 @@ protected:
     address_space = gpu_vm.register_translated(1, memory, memory);
     ASSERT_TRUE(address_space);
     memory->store<uint32_t>(kReadPointer, 0);
-    auto loaded = config::load_config_from_string(R"({"max_ticks":100000,"num_threads":1,
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(R"({"max_ticks":100000,"num_threads":1,
       "vm":{"arch":"cdna3"},"topology":{"root":{"name":"soc","type":"soc","children":[
       {"name":"vram","type":"gpu_memory"},{"name":"xcd0","type":"xcd","children":[
       {"name":"l2","type":"l2_cache"},{"name":"cp","type":"command_processor"},
       {"name":"se0","type":"shader_engine","children":[{"name":"cu0","type":"compute_unit"}]}]}]},
       "links":[{"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
       {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}]}})",
-                                                  kEmbeddedSchema);
+                                                    loaded));
     cp = loaded.soc()->xcd(0)->command_processor();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
     engine->topology().set_root(loaded.take_root());
@@ -165,6 +167,55 @@ protected:
   uint32_t next_queue_id = 1;
 };
 
+TEST_F(Pm4ComputeQueueTest, RejectsSubmissionsForUnknownQueueOrProcess) {
+  ASSERT_TRUE(
+      cp->register_drm_queue({.address_space = address_space, .process_id = 7, .queue_id = 1}));
+  constexpr uint32_t kOutput = 0x300;
+  const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
+  for (size_t word_index = 0; word_index < words.size(); ++word_index)
+    memory->store<uint32_t>(kRing + word_index * 4, words[word_index]);
+
+  uint32_t completions = 0;
+  for (const auto &[queue_id, process_id] : {std::pair{2u, 7u}, std::pair{1u, 8u}}) {
+    Pm4Submission submission;
+    submission.buffers.push_back({.address = kRing, .dwords = words.size()});
+    submission.complete = [&](bool) { ++completions; };
+    EXPECT_FALSE(cp->submit_pm4(queue_id, process_id, std::move(submission)));
+  }
+
+  service();
+  service();
+  EXPECT_EQ(completions, 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+}
+
+TEST_F(Pm4ComputeQueueTest, RejectsSubmissionsForNativeRingQueue) {
+  const auto registration = cp->register_queue({.address_space = address_space,
+                                                .process_id = 7,
+                                                .queue_id = 1,
+                                                .ring_base_va = kRing,
+                                                .ring_size = kRingBytes,
+                                                .read_ptr_va = kReadPointer,
+                                                .packet_format = QueuePacketFormat::Pm4});
+  ASSERT_NE(registration, 0u);
+  constexpr uint32_t kOutput = 0x300;
+  const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
+  for (size_t word_index = 0; word_index < words.size(); ++word_index)
+    memory->store<uint32_t>(kRing + word_index * 4, words[word_index]);
+
+  uint32_t completions = 0;
+  Pm4Submission submission;
+  submission.buffers.push_back({.address = kRing, .dwords = words.size()});
+  submission.complete = [&](bool) { ++completions; };
+  EXPECT_FALSE(cp->submit_pm4(1, 7, std::move(submission)));
+
+  service();
+  service();
+  EXPECT_EQ(completions, 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
+  EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 0u);
+}
+
 TEST_F(Pm4ComputeQueueTest, SubmissionDefersEffectsUntilTheCpServicesTheQueue) {
   memory->store<uint32_t>(kRing, 0xc0017900);
   memory->store<uint32_t>(kRing + 4, 0x40);
@@ -185,6 +236,148 @@ TEST_F(Pm4ComputeQueueTest, SubmissionDefersEffectsUntilTheCpServicesTheQueue) {
   EXPECT_EQ(memory->load<uint32_t>(kReadPointer), 3u);
 }
 
+TEST_F(Pm4ComputeQueueTest, NativeRingResumesAfterPublishingAnInitiallyUnreadyGart) {
+  constexpr uint64_t aperture = 0x10000;
+  constexpr uint64_t page_table = 0x1000;
+  constexpr uint64_t physical_page = 0x2000;
+  // One readable/writable system page, also marked as a leaf PDE.
+  constexpr uint64_t page_flags = (uint64_t{1} << 63) | 0x63;
+  memory->store<uint64_t>(page_table, physical_page | page_flags);
+  memory->store<uint32_t>(physical_page + kRing, 0xc0017900);
+  memory->store<uint32_t>(physical_page + kRing + 4, 0x40);
+  memory->store<uint32_t>(physical_page + kRing + 8, 0xdeadbeef);
+  address_space = gpu_vm.initialize_gart_address_space();
+  ASSERT_TRUE(address_space);
+  ASSERT_FALSE(gpu_vm.lookup(address_space)->ready);
+  uint32_t writes = 0;
+  const auto registration = attach({.write_uconfig_register =
+                                        [&](uint64_t, uint32_t value) {
+                                          EXPECT_EQ(value, 0xdeadbeefu);
+                                          ++writes;
+                                          return Pm4RegisterWriteStatus::Complete;
+                                        }},
+                                   aperture + kRing, aperture + kReadPointer);
+  ASSERT_NE(registration, 0u);
+  ASSERT_EQ(cp->notify_pm4_queue_doorbell(registration, 3), QueueSubmissionStatus::Accepted);
+
+  service();
+  EXPECT_EQ(writes, 0u);
+  EXPECT_EQ(memory->load<uint32_t>(physical_page + kReadPointer), 0u);
+  ASSERT_TRUE(gpu_vm.publish_gart(
+      {.page_table_base = page_table, .aperture_start = aperture, .aperture_end = aperture + 0xfff},
+      memory));
+  service();
+  EXPECT_EQ(writes, 1u);
+  EXPECT_EQ(memory->load<uint32_t>(physical_page + kReadPointer), 3u);
+  service();
+  EXPECT_EQ(writes, 1u);
+}
+
+TEST_F(Pm4ComputeQueueTest, SubmittedStreamResumesAfterPublishingAnInitiallyUnreadyGart) {
+  constexpr uint64_t aperture = 0x10000;
+  constexpr uint64_t page_table = 0x1000;
+  constexpr uint64_t physical_page = 0x2000;
+  constexpr uint64_t page_flags = (uint64_t{1} << 63) | 0x63;
+  memory->store<uint64_t>(page_table, physical_page | page_flags);
+  memory->store<uint32_t>(physical_page + kRing, 0xc0033700);
+  memory->store<uint32_t>(physical_page + kRing + 4, 0x100);
+  memory->store<uint32_t>(physical_page + kRing + 8, aperture + kReadPointer);
+  memory->store<uint32_t>(physical_page + kRing + 12, 0);
+  memory->store<uint32_t>(physical_page + kRing + 16, 0xdeadbeef);
+  address_space = gpu_vm.initialize_gart_address_space();
+  ASSERT_TRUE(address_space);
+  ASSERT_TRUE(
+      cp->register_drm_queue({.address_space = address_space, .process_id = 1, .queue_id = 1}));
+  uint32_t completions = 0;
+  Pm4Submission submission;
+  submission.buffers.push_back({.address = aperture + kRing, .dwords = 5});
+  submission.complete = [&](bool success) {
+    EXPECT_TRUE(success);
+    ++completions;
+  };
+  ASSERT_TRUE(cp->submit_pm4(1, 1, std::move(submission)));
+
+  service();
+  EXPECT_EQ(completions, 0u);
+  EXPECT_EQ(memory->load<uint32_t>(physical_page + kReadPointer), 0u);
+  ASSERT_TRUE(gpu_vm.publish_gart(
+      {.page_table_base = page_table, .aperture_start = aperture, .aperture_end = aperture + 0xfff},
+      memory));
+  service();
+  EXPECT_EQ(completions, 1u);
+  EXPECT_EQ(memory->load<uint32_t>(physical_page + kReadPointer), 0xdeadbeefu);
+  service();
+  EXPECT_EQ(completions, 1u);
+}
+
+TEST_F(Pm4ComputeQueueTest, BlockedSubmissionsKeepStallRecheckWorkBounded) {
+  bool ready = false;
+  uint32_t completed = 0;
+  for (uint32_t id : {1u, 2u}) {
+    ASSERT_TRUE(cp->register_drm_queue({.address_space = address_space, .queue_id = id}));
+    Pm4Submission submission;
+    submission.ready = [&] { return ready; };
+    submission.complete = [&](bool success) {
+      EXPECT_TRUE(success);
+      ++completed;
+    };
+    ASSERT_TRUE(cp->submit_pm4(id, 0, std::move(submission)));
+  }
+
+  // A persistent dependency must back off even when several queues and several
+  // service sites request a retry. Duplicate retries would multiply at each tick
+  // and prevent later shader or dependency-completion events from progressing.
+  while (engine->context(cp->partition_id()).current_tick() < 20000u)
+    ASSERT_TRUE(engine->step());
+  EXPECT_LT(cp->doorbell_handle_count_for_test(), 64u);
+  EXPECT_EQ(completed, 0u);
+
+  ready = true;
+  // Readiness alone must be observed by the coalesced timer.
+  for (uint32_t i = 0; i < 8 && completed != 2; ++i)
+    service();
+  EXPECT_EQ(completed, 2u);
+}
+
+TEST_F(Pm4ComputeQueueTest, ProducerCompletionWakesEarlierConsumerPromptly) {
+  bool fence = false;
+  uint32_t consumer_done = 0, producer_done = 0;
+  ASSERT_TRUE(cp->register_drm_queue({.address_space = address_space, .queue_id = 1}));
+  ASSERT_TRUE(cp->register_drm_queue({.address_space = address_space, .queue_id = 2}));
+  Pm4Submission consumer;
+  consumer.ready = [&] { return fence; };
+  consumer.complete = [&](bool success) {
+    EXPECT_TRUE(success);
+    ++consumer_done;
+  };
+  ASSERT_TRUE(cp->submit_pm4(1, 0, std::move(consumer)));
+  auto tick = [&] { return engine->context(cp->partition_id()).current_tick(); };
+  while (tick() < 20000)
+    ASSERT_TRUE(engine->step());
+  Pm4Submission producer;
+  producer.complete = [&](bool success) {
+    EXPECT_TRUE(success);
+    fence = true;
+    ++producer_done;
+  };
+  const auto start = tick();
+  ASSERT_TRUE(cp->submit_pm4(2, 0, std::move(producer)));
+  ASSERT_TRUE(engine->step());
+  ASSERT_EQ(producer_done, 1u);
+  ASSERT_EQ(consumer_done, 0u);
+  for (unsigned i = 0; i < 8 && consumer_done == 0; ++i)
+    ASSERT_TRUE(engine->step());
+  EXPECT_EQ(consumer_done, 1u);
+  EXPECT_LE(tick() - start, 1u);
+  const auto passes = cp->doorbell_handle_count_for_test();
+  unsigned stale_steps = 0;
+  while (engine->step())
+    ASSERT_LT(++stale_steps, 20u);
+  // Completing both submissions may request one final retry, but superseded
+  // long deadlines must not enter the CP handler after all work is retired.
+  EXPECT_LE(cp->doorbell_handle_count_for_test() - passes, 1u);
+}
+
 TEST_F(Pm4ComputeQueueTest, BoundsEachQueueServiceTurn) {
   constexpr uint64_t kLargeRing = 0x400;
   constexpr uint64_t kLargeReadPointer = 0xe00;
@@ -193,6 +386,15 @@ TEST_F(Pm4ComputeQueueTest, BoundsEachQueueServiceTurn) {
   for (uint32_t packet = 0; packet < kPacketCount; ++packet)
     memory->store<uint32_t>(kLargeRing + packet * sizeof(uint32_t), 0xffff1000);
   memory->store<uint32_t>(kLargeReadPointer, 0);
+
+  ASSERT_TRUE(cp->register_drm_queue({.address_space = address_space, .queue_id = 99}));
+  Pm4Submission blocked;
+  blocked.ready = [] { return false; };
+  ASSERT_TRUE(cp->submit_pm4(99, 0, std::move(blocked)));
+  auto tick = [&] { return engine->context(cp->partition_id()).current_tick(); };
+  while (tick() < 20000)
+    ASSERT_TRUE(engine->step());
+  const auto start = tick();
 
   const auto registration = attach({}, kLargeRing, kLargeReadPointer, kLargeRingBytes);
   ASSERT_NE(registration, 0u);
@@ -204,6 +406,7 @@ TEST_F(Pm4ComputeQueueTest, BoundsEachQueueServiceTurn) {
 
   service();
   EXPECT_EQ(memory->load<uint32_t>(kLargeReadPointer), kPacketCount);
+  EXPECT_LE(tick() - start, 1u);
 }
 
 TEST_F(Pm4ComputeQueueTest, RetainsItsAddressSpaceUntilDetach) {
@@ -752,7 +955,7 @@ TEST(Pm4QueueBindingTest, RejectsUnsupportedVmPollingThroughTheComputeQueueBindi
   command_processor.set_gpu_vm(&gpu_vm);
   GpuQueueRegistry registry(gpu_vm);
   const std::shared_ptr<QueueBindingFactory> binding_factory =
-      command_processor.make_pm4_queue_binding_factory({});
+      make_compute_queue_binding_factory(command_processor, {});
 
   for (const QueueDoorbellMode mode :
        {QueueDoorbellMode::HostPolled, QueueDoorbellMode::VmPolled}) {
@@ -793,12 +996,11 @@ TEST(Pm4QueueBindingTest, GracefulRegistryRemovalKeepsHandleUntilPublicationComp
   command_processor.set_gpu_vm(&gpu_vm);
   GpuQueueRegistry registry(gpu_vm);
   uint32_t writes = 0;
-  const std::shared_ptr<QueueBindingFactory> binding_factory =
-      command_processor.make_pm4_queue_binding_factory(
-          {.write_uconfig_register = [&](uint64_t, uint32_t) {
-            ++writes;
-            return Pm4RegisterWriteStatus::Complete;
-          }});
+  const std::shared_ptr<QueueBindingFactory> binding_factory = make_compute_queue_binding_factory(
+      command_processor, {.write_uconfig_register = [&](uint64_t, uint32_t) {
+        ++writes;
+        return Pm4RegisterWriteStatus::Complete;
+      }});
   const QueueHandle queue = registry.register_queue({
       .identity = {.address_space = address_space, .process_id = 1, .queue_id = 7},
       .ring = {.base_address = kRing, .size_bytes = 64, .consumer_pointer_address = kReadPointer},

@@ -1353,6 +1353,8 @@ class Parser:
                             item
                             for item in self.isa_spec.encoding_map['ENC_FLAT'].insts
                             if item.opcode == opcode
+                            and item.required_flat_segment
+                            == self.profile.unique_flat_segment(enc_name)
                         ),
                         None,
                     )
@@ -1412,6 +1414,15 @@ class Parser:
                     if dt_ptr == -1:
                         continue
                     decode_func = f'decode{inst.fmt_name}'
+                    if (
+                        retain_segment
+                        and sum(
+                            item.opcode == opcode
+                            for item in self.isa_spec.encoding_map['ENC_FLAT'].insts
+                        )
+                        > 1
+                    ):
+                        decode_func = f'decodeFlatSegment{opcode}'
                     if enc.is_primary_decode:
                         dt[dt_ptr].decode_func = decode_func
                         dt[dt_ptr].inst_name = inst.fmt_name

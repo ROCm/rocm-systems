@@ -124,7 +124,8 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
                 continue;
             }
 
-            if (rocjpeg_utils.GetChannelPitchAndSizes(decode_params_batch[index], temp_subsampling, temp_widths.data(), temp_heights.data(), num_channels, output_images[current_batch_size], channel_sizes)) {
+            decode_params_batch[current_batch_size] = RocJpegUtils::FitCropToImage(decode_params, temp_widths[0], temp_heights[0], false);
+            if (rocjpeg_utils.GetChannelPitchAndSizes(decode_params_batch[current_batch_size], temp_subsampling, temp_widths.data(), temp_heights.data(), num_channels, output_images[current_batch_size], channel_sizes)) {
                 std::cerr << "ERROR: Failed to get the channel pitch and sizes" << std::endl;
                 return;
             }

@@ -1,8 +1,12 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! Queue lifecycle and publication contracts exercised without a native GPU.
 
 #![allow(clippy::unwrap_used)]
 
 use super::*;
+use rocddi::memory::storage::Allocator;
 use rocddi::{Error, ErrorKind};
 use std::ptr;
 use std::sync::Arc;
@@ -86,7 +90,7 @@ impl Environment {
     }
 }
 
-fn fixture_queue(environment: &Environment, allocator: Allocator) -> (Owned<Queue>, Arc<Fixture>) {
+fn fixture_queue(environment: &Environment) -> (Owned<Queue>, Arc<Fixture>) {
     let fixture = Arc::new(Fixture {
         consumed: AtomicU64::new(0),
         producer: AtomicU64::new(0),
@@ -99,58 +103,54 @@ fn fixture_queue(environment: &Environment, allocator: Allocator) -> (Owned<Queu
         retire_on_call: AtomicU64::new(u64::MAX),
     });
     let id = amdf_queue_id_t { words: [11, 13] };
-    let owner = Owned::new(
-        Queue {
-            native: NativeQueue::Fixture(fixture.clone()),
-            allocator,
-            device: ptr::NonNull::<Device>::dangling().as_ptr(),
-            device_queues: &raw const environment.queues,
-            device_reset_epoch: &raw const environment.epoch,
-            _scratch_borrow: None,
-            info: amdf_user_queue_info_t {
-                queue_id: id,
-                reset_epoch: 7,
-                command_type: AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
-                format_version: 1,
-                capabilities: AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER
-                    | AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
-                ring_byte_length: 4096,
-                ..Default::default()
-            },
-            host_mapping: amdf_user_queue_mapping_info_t {
-                queue_id: id,
-                queue_reset_epoch: 7,
-                ring_address: 0x1000,
-                ring_byte_length: 4096,
-                read_index_address: 0x2000,
-                write_index_address: 0x2008,
-                doorbell_address: 0x3000,
-                index_bits: 64,
-                doorbell_bits: 64,
-                ..Default::default()
-            },
-            device_mapping: Some(amdf_user_queue_mapping_info_t {
-                producer_device_id: amdf_device_id_t { words: [7, 9] },
-                queue_id: id,
-                queue_reset_epoch: 7,
-                producer_reset_epoch: 7,
-                ring_address: 0x4000,
-                ring_byte_length: 4096,
-                read_index_address: 0x5000,
-                write_index_address: 0x5008,
-                doorbell_address: 0x6000,
-                index_bits: 64,
-                doorbell_bits: 64,
-                ..Default::default()
-            }),
-            mappings: AtomicU64::new(0),
-            destroying: AtomicBool::new(false),
-            terminal: AtomicU64::new(0),
-            consumed: AtomicU64::new(0),
-            producer: AtomicU64::new(0),
+    let owner = Owned::new(Queue {
+        native: NativeQueue::Fixture(fixture.clone()),
+        device: ptr::NonNull::<Device>::dangling().as_ptr(),
+        device_queues: &raw const environment.queues,
+        device_reset_epoch: &raw const environment.epoch,
+        _scratch_borrow: None,
+        info: amdf_user_queue_info_t {
+            queue_id: id,
+            reset_epoch: 7,
+            command_type: AMDF_QUEUE_COMMAND_TYPE_GPU_AQL,
+            format_version: 1,
+            capabilities: AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER
+                | AMDF_USER_QUEUE_CAPABILITY_DEVICE_PRODUCER,
+            ring_byte_length: 4096,
+            ..Default::default()
         },
-        Allocator::system(),
-    )
+        host_mapping: amdf_user_queue_mapping_info_t {
+            queue_id: id,
+            queue_reset_epoch: 7,
+            ring_address: 0x1000,
+            ring_byte_length: 4096,
+            read_index_address: 0x2000,
+            write_index_address: 0x2008,
+            doorbell_address: 0x3000,
+            index_bits: 64,
+            doorbell_bits: 64,
+            ..Default::default()
+        },
+        device_mapping: Some(amdf_user_queue_mapping_info_t {
+            producer_device_id: amdf_device_id_t { words: [7, 9] },
+            queue_id: id,
+            queue_reset_epoch: 7,
+            producer_reset_epoch: 7,
+            ring_address: 0x4000,
+            ring_byte_length: 4096,
+            read_index_address: 0x5000,
+            write_index_address: 0x5008,
+            doorbell_address: 0x6000,
+            index_bits: 64,
+            doorbell_bits: 64,
+            ..Default::default()
+        }),
+        mappings: AtomicU64::new(0),
+        destroying: AtomicBool::new(false),
+        terminal: AtomicU64::new(0),
+        consumed: AtomicU64::new(0),
+        producer: AtomicU64::new(0),
+    })
     .unwrap();
     (owner, fixture)
 }
@@ -179,7 +179,7 @@ fn family(command: u32) -> amdf_queue_family_info_t {
         format_features: if pm4 {
             AMDF_GPU_PM4_FORMAT_FEATURE_ACQUIRE_MEM_GCR
         } else if command == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA {
-            AMDF_GPU_SDMA_FORMAT_FEATURE_GCR | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM
+            AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM
         } else {
             0
         },
@@ -300,6 +300,7 @@ fn native_transport() -> queue::QueueTransport {
         ring_host_address: 0x1000,
         ring_device_address: 0x1000,
         ring_size_bytes: 4096,
+        sdma_engine_id: None,
         read_index_host_address: 0x2000,
         read_index_device_address: 0x4000,
         write_index_host_address: 0x2008,
@@ -415,6 +416,44 @@ fn pm4_transport_requires_dword_units_and_a_wrapping_read_index() {
 }
 
 #[test]
+fn invalid_native_transport_rolls_back_and_reports_cleanup_failure() {
+    let family = family(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+    let mut native = native_transport();
+    native.doorbell_host_address = 0;
+    assert!(matches!(
+        creation_transports(native, &family),
+        Err(INTERNAL)
+    ));
+    let invalid = INTERNAL;
+
+    let queues = AtomicU64::new(1);
+    let mapped_error = std::cell::Cell::new(false);
+    assert_eq!(
+        rollback_creation_result(&queues, invalid, Ok(()), |_| {
+            mapped_error.set(true);
+            BUSY
+        }),
+        INTERNAL
+    );
+    assert!(!mapped_error.get());
+    assert_eq!(queues.load(Ordering::Acquire), 0);
+
+    let queues = AtomicU64::new(1);
+    let failure = Error::Operation {
+        kind: ErrorKind::Busy,
+        detail: "injected rollback failure with live backing",
+    };
+    assert_eq!(
+        rollback_creation_result(&queues, invalid, Err(failure), |error| {
+            assert_eq!(error.kind(), ErrorKind::Busy);
+            BUSY
+        }),
+        BUSY
+    );
+    assert_eq!(queues.load(Ordering::Acquire), 0);
+}
+
+#[test]
 fn cached_queries_do_not_observe_native_loss_and_mapping_blocks_teardown() {
     #[repr(C)]
     struct Extended {
@@ -422,7 +461,7 @@ fn cached_queries_do_not_observe_native_loss_and_mapping_blocks_teardown() {
         tail: [u8; 16],
     }
     let environment = Environment::new();
-    let (queue, fixture) = fixture_queue(&environment, Allocator::system());
+    let (queue, fixture) = fixture_queue(&environment);
     fixture.error.store(LOST, Ordering::Relaxed);
     let pointer = queue.into_raw().cast();
     let mut extended = Extended {
@@ -497,15 +536,11 @@ fn failed_mapping_preserves_output_and_does_not_add_a_borrow() {
     let environment = Environment::new();
     // SAFETY: These stateless callbacks remain live and allocation always fails.
     let allocator = unsafe {
-        Allocator::from_callbacks(
-            ptr::null_mut(),
-            Some(reject_allocation),
-            None,
-            Some(empty_free),
-        )
+        Allocator::from_callbacks(ptr::null_mut(), Some(reject_allocation), Some(empty_free))
     }
     .unwrap();
-    let (queue, _) = fixture_queue(&environment, allocator);
+    let (queue, _) = fixture_queue(&environment);
+    let _scope = allocator.scope();
     let pointer = queue.into_raw().cast();
     let sentinel = ptr::NonNull::<amdf_user_queue_mapping_t>::dangling().as_ptr();
     let mut mapping = sentinel;
@@ -528,7 +563,7 @@ fn failed_mapping_preserves_output_and_does_not_add_a_borrow() {
 #[test]
 fn short_status_headers_and_native_errors_leave_outputs_unchanged() {
     let environment = Environment::new();
-    let (queue, fixture) = fixture_queue(&environment, Allocator::system());
+    let (queue, fixture) = fixture_queue(&environment);
     let pointer = queue.into_raw().cast();
     let mut output = status_output();
     output.structure_size = 8;
@@ -559,7 +594,7 @@ fn short_status_headers_and_native_errors_leave_outputs_unchanged() {
 #[test]
 fn first_terminal_failure_is_sticky_and_transient_errors_do_not_poison_the_queue() {
     let environment = Environment::new();
-    let (queue, fixture) = fixture_queue(&environment, Allocator::system());
+    let (queue, fixture) = fixture_queue(&environment);
     fixture.error.store(BUSY, Ordering::Relaxed);
     assert!(matches!(queue.sample(), Err(BUSY)));
     fixture.error.store(0, Ordering::Relaxed);
@@ -576,7 +611,7 @@ fn first_terminal_failure_is_sticky_and_transient_errors_do_not_poison_the_queue
 #[test]
 fn zero_timeout_observes_once_and_wait_uses_a_single_deadline() {
     let environment = Environment::new();
-    let (queue, fixture) = fixture_queue(&environment, Allocator::system());
+    let (queue, fixture) = fixture_queue(&environment);
     fixture.producer.store(4, Ordering::Release);
     assert_eq!(
         wait_consumed(&queue, 4, 0, u64::MAX, Instant::now()),
@@ -600,7 +635,7 @@ fn zero_timeout_observes_once_and_wait_uses_a_single_deadline() {
 #[test]
 fn unconsumed_queue_teardown_is_retryable_and_keeps_the_parent_borrow() {
     let environment = Environment::new();
-    let (queue, fixture) = fixture_queue(&environment, Allocator::system());
+    let (queue, fixture) = fixture_queue(&environment);
     fixture.producer.store(1, Ordering::Release);
     let pointer = queue.into_raw().cast();
     // SAFETY: Destruction failure leaves this handle live for the retry.
@@ -621,19 +656,9 @@ fn unconsumed_queue_teardown_is_retryable_and_keeps_the_parent_borrow() {
 }
 
 #[test]
-fn partial_native_teardown_revokes_cached_addresses_and_preserves_cleanup_retry() {
+fn partial_native_teardown_consumes_handle_without_replaying_cleanup() {
     let environment = Environment::new();
-    // SAFETY: These static callbacks reject all allocation and own no state.
-    let allocator = unsafe {
-        Allocator::from_callbacks(
-            ptr::null_mut(),
-            Some(reject_allocation),
-            None,
-            Some(empty_free),
-        )
-    }
-    .unwrap();
-    let (queue, fixture) = fixture_queue(&environment, allocator);
+    let (queue, fixture) = fixture_queue(&environment);
     fixture.fail_destroy_once.store(true, Ordering::Release);
     let pointer = queue.into_raw().cast();
     // SAFETY: No mappings or publications remain. The injected error occurs
@@ -641,60 +666,26 @@ fn partial_native_teardown_revokes_cached_addresses_and_preserves_cleanup_retry(
     unsafe { assert_eq!(destroy(pointer), INTERNAL) };
     assert!(!fixture.backing_live.load(Ordering::Acquire));
     assert_eq!(fixture.destroy_calls.load(Ordering::Relaxed), 1);
-    assert_eq!(environment.queues.load(Ordering::Relaxed), 1);
-
-    let sentinel = ptr::NonNull::<amdf_user_queue_mapping_t>::dangling().as_ptr();
-    let mut mapping = sentinel;
-    let mut queue_info = amdf_user_queue_info_t {
-        r#type: AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO,
-        structure_size: structure_size::<amdf_user_queue_info_t>(),
-        ring_byte_length: 0xcafe,
-        ..Default::default()
-    };
-    let mut queue_status = status_output();
-    // SAFETY: Failed destruction retains this live cleanup owner. Public use
-    // must fail before metadata allocation, cached publication, or native reads.
-    unsafe {
-        assert_eq!(
-            map(pointer, ptr::null_mut(), &raw mut mapping),
-            PRECONDITION
-        );
-        assert_eq!(mapping, sentinel);
-        assert_eq!(info(pointer, &raw mut queue_info), PRECONDITION);
-        assert_eq!(queue_info.ring_byte_length, 0xcafe);
-        assert_eq!(status(pointer, &raw mut queue_status), PRECONDITION);
-        assert_eq!(queue_status.consumed_index, 0xface);
-        assert_eq!(queue_status.producer_index, 0xbeef);
-        assert_eq!(wait(pointer, 0, 0, 0), PRECONDITION);
-        assert_eq!(fixture.progress_calls.load(Ordering::Relaxed), 1);
-        assert_eq!(destroy(pointer), 0);
-    }
-    assert_eq!(fixture.destroy_calls.load(Ordering::Relaxed), 2);
+    // The consumed pointer must never be queried or retried. Unreleased native
+    // backing is retained, while the device no longer has a public child.
+    assert_eq!(fixture.progress_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(fixture.destroy_calls.load(Ordering::Relaxed), 1);
     assert_eq!(environment.queues.load(Ordering::Relaxed), 0);
 }
 
 #[test]
-fn native_busy_after_teardown_begins_does_not_restore_mapping_access() {
+fn native_busy_after_teardown_begins_consumes_handle() {
     let environment = Environment::new();
-    let (queue, fixture) = fixture_queue(&environment, Allocator::system());
+    let (queue, fixture) = fixture_queue(&environment);
     fixture.fail_destroy_once.store(true, Ordering::Release);
     fixture.destroy_errno.store(16, Ordering::Release);
     let pointer = queue.into_raw().cast();
     let native_busy = (u64::from(AMDF_STATUS_DOMAIN_ERRNO) << 32) | 16;
-    let sentinel = ptr::NonNull::<amdf_user_queue_mapping_t>::dangling().as_ptr();
-    let mut mapping = sentinel;
-    // SAFETY: The native failure preserves this owner for cleanup only; it is
-    // distinct from the earlier, mutation-free unconsumed-publication check.
+    // SAFETY: The native failure occurs after the mutation-free preflight.
     unsafe {
         assert_eq!(destroy(pointer), native_busy);
-        assert_eq!(
-            map(pointer, ptr::null_mut(), &raw mut mapping),
-            PRECONDITION
-        );
-        assert_eq!(mapping, sentinel);
-        assert_eq!(wait(pointer, 0, 0, 0), PRECONDITION);
-        assert_eq!(destroy(pointer), 0);
     }
     assert_eq!(fixture.progress_calls.load(Ordering::Relaxed), 1);
+    assert_eq!(fixture.destroy_calls.load(Ordering::Relaxed), 1);
     assert_eq!(environment.queues.load(Ordering::Relaxed), 0);
 }
