@@ -25,6 +25,11 @@ FLUSH_NEAREST_F32_OPS = frozenset(
     }
 )
 
+# F16 results rounded before SDWA OMOD, which the SDWA store applies, as VOP3
+# does. gfx1030 SDWA matches VOP3 for both bit for bit. sema_lower rejects a
+# rounded F16 FRACT/LDEXP destination whose instruction is missing here.
+SDWA_ROUNDED_F16_OPS = frozenset({'V_FRACT_F16', 'V_LDEXP_F16'})
+
 
 @dataclass(frozen=True)
 class F16TransOperation:
@@ -70,6 +75,6 @@ F16_FLUSHED_SOURCE_CALLS = frozenset(
 )
 
 # Integral rounding whose source honors MODE input flushing, in every format.
-# TRUNC and RNDNE give a signed zero for a subnormal either way; FRACT's input
-# flush is not implemented.
+# TRUNC and RNDNE give a signed zero for a subnormal either way; FRACT flushes
+# in shared/fract.h.
 INPUT_FLUSHED_ROUNDING = frozenset({'ceil', 'floor'})

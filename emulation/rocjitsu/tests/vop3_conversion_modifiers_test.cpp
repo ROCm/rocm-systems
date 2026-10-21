@@ -209,6 +209,66 @@ TEST_P(Vop3ConversionModifierTest, FloatToIntegerConversionAppliesSourceModifier
   }
 }
 
+TEST_P(Vop3ConversionModifierTest, FloatToDoubleConversionAppliesModifiers) {
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("cvt_f64_f32_modifier_mem");
+    amdgpu::L2Cache l2("cvt_f64_f32_modifier_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("cvt_f64_f32_modifier", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+    ASSERT_NE(wf, nullptr);
+    const uint32_t vb = wf->vgpr_alloc().base;
+    constexpr uint64_t sentinel = 0xdeadbeefcafef00dull;
+
+    // VOP3 V_CVT_F64_F32 is opcode 336 on GFX9 and 400 on later encodings.
+    for (uint32_t source_modifiers = 0; source_modifiers < 4; ++source_modifiers) {
+      for (uint32_t omod = 0; omod < 4; ++omod) {
+        for (uint32_t clamp = 0; clamp < 2; ++clamp) {
+          const std::array<uint32_t, 2> words{
+              (gfx9() ? 0xd0000002u : 0xd4000002u) | ((gfx9() ? 336u : 400u) << 16) |
+                  (clamp << 15) | ((source_modifiers & 1u) << 8),
+              256u | (omod << 27) | ((source_modifiers >> 1) << 29)};
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+
+          for (uint64_t exec : {wf->wf_size() == 64 ? ~0ull : 0xffffffffull, 0x55ull}) {
+            wf->set_exec(exec);
+            for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+              cu->write_vgpr(vb, lane, std::bit_cast<uint32_t>(-7.75f));
+              cu->write_vgpr(vb + 2, lane, static_cast<uint32_t>(sentinel));
+              cu->write_vgpr(vb + 3, lane, static_cast<uint32_t>(sentinel >> 32));
+            }
+
+            ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+            const bool positive = source_modifiers == 1 || source_modifiers == 2;
+            double expected_value = positive ? 7.75 : -7.75;
+            expected_value *= std::array{1.0, 2.0, 4.0, 0.5}[omod];
+            if (clamp)
+              expected_value = std::clamp(expected_value, 0.0, 1.0);
+            const uint64_t expected = std::bit_cast<uint64_t>(expected_value);
+            for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+              const uint64_t actual = static_cast<uint64_t>(cu->read_vgpr(vb + 2, lane)) |
+                                      (static_cast<uint64_t>(cu->read_vgpr(vb + 3, lane)) << 32);
+              EXPECT_EQ(actual, exec & (1ull << lane) ? expected : sentinel)
+                  << "arch=" << GetParam() << " source_modifiers=" << source_modifiers
+                  << " omod=" << omod << " clamp=" << clamp << " scalar=" << force_scalar
+                  << " exec=" << exec << " lane=" << lane;
+            }
+          }
+        }
+      }
+    }
+    wf->halt();
+  }
+}
+
 TEST_P(Vop3ConversionModifierTest, NearestRoundsTiesUpWithoutRoundingAdjacentInputs) {
   struct Case {
     uint32_t bits;

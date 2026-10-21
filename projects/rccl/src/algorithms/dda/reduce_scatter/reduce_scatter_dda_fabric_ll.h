@@ -73,7 +73,8 @@ __launch_bounds__(512)
                                            int selfRank, int nRanksRt,
                                            uint32_t* __restrict__ epochDev, // per-block LL epoch cells
                                            int epochLen, // number of cells in epochDev
-                                           size_t bankSize) { // scratch bank size (from host)
+                                           size_t bankSize, // scratch bank size (from host)
+                                           DdaKernelParams params) {
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = recvcount * sizeof(T);
@@ -171,11 +172,16 @@ __launch_bounds__(512)
         if (r < nRanks) {
           const int peer = (selfRank + r) % nRanks;
           const uint32_t* src = reinterpret_cast<const uint32_t*>(myBase + (size_t)peer * slot + pk);
-          while (f0[i] != flag || f1[i] != flag) {
-            ddaLLLoadLineB128(src, d0[i], f0[i], d1[i], f1[i]);
+          // A matching first load is kept. A miss polls through the shared
+          // helper so a revoked communicator can leave the spin.
+          if (f0[i] != flag || f1[i] != flag) {
+            if (!ddaLLWaitLineFlags(reinterpret_cast<const volatile LLPacket16*>(src), flag, params, d0[i], f0[i],
+                                    d1[i], f1[i])) {
+              ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
+              return;
+            }
           }
-          acc0 = vecElementAdd<T>(acc0, d0[i]);
-          acc1 = vecElementAdd<T>(acc1, d1[i]);
+          ddaLLAddPayload<T>(acc0, acc1, d0[i], d1[i]);
         }
       }
     }

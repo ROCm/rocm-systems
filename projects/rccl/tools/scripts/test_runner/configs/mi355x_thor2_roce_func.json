@@ -347,6 +347,19 @@
           "name": "NetIB_Props_InvalidDevice",
           "description": "Test error handling when querying properties of invalid InfiniBand device",
           "test_filter": "NetIbMPITest.GetDevicePropertiesInvalidDevice"
+        },
+        {
+          "name": "NetIB_Props_CastPortSpeedParity",
+          "description": "IB and IB-CAST report the same per-device speed (ibv_query_port_speed when libibverbs exports it, else active_speed/active_width)",
+          "test_filter": "NetIbMPITest.CastPortSpeedMatchesIb"
+        },
+        {
+          "name": "NetIB_Props_CastPortSpeedParity_QueryDisabled",
+          "description": "IB and IB-CAST report the same per-device speed with NCCL_IB_QUERY_PORT_SPEED=0 (active_speed/active_width only)",
+          "test_filter": "NetIbMPITest.CastPortSpeedMatchesIb",
+          "env_variables": {
+            "NCCL_IB_QUERY_PORT_SPEED": "0"
+          }
         }
       ]
     },
@@ -1361,6 +1374,11 @@
           "name": "SubnetMatchesAny",
           "description": "subnetMatchesAny skips invalid/zero GIDs and matches against the remaining set",
           "test_filter": "NetIbCastSubnet.SubnetMatchesAny"
+        },
+        {
+          "name": "SignalingRateTable",
+          "description": "ibvSpeeds[] maps every IB signaling rate, including FDR10, to its Mb/s value",
+          "test_filter": "NetIbCastSpeed.SignalingRateTable"
         }
       ]
     },
@@ -2949,6 +2967,52 @@
         }
       ]
     },
+    "revoke_mpi_tests_dda_ipc": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "RCCL_MPI_LOG_ALL_RANKS": "1"
+      },
+      "tests": [
+        {
+          "name": "IncompleteCollective_DdaIpcAllReduce",
+          "description": "Rank 7 skips DDA-IPC AllReduce so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAllReduce"
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcAllReduceTree",
+          "description": "Rank 7 skips a 512 KiB DDA-IPC AllReduce so ranks 0-6 wait in the tree kernel's IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAllReduceTree"
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcAllGather",
+          "description": "Rank 7 skips DDA-IPC AllGather so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAllGather"
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcReduceScatter",
+          "description": "Rank 7 skips DDA-IPC ReduceScatter so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcReduceScatter"
+        },
+        {
+          "name": "IncompleteCollective_DdaIpcAlltoAll",
+          "description": "Rank 7 skips DDA-IPC AlltoAll so ranks 0-6 wait in IpcGpuBarrier; asserts DDA-IPC via rcclGetCollImplInfo; revoke must unblock stream sync then shrink",
+          "test_filter": "RevokeDdaIpcMPITest.IncompleteCollective_DdaIpcAlltoAll"
+        },
+        {
+          "name": "ShrinkAbort_DisablesDdaOnParent",
+          "description": "NCCL_SHRINK_ABORT on an 8-rank DDA-IPC parent: the parent stops selecting DDA and the 7-rank child AllReduce succeeds",
+          "test_filter": "RevokeDdaIpcMPITest.ShrinkAbort_DisablesDdaOnParent"
+        }
+      ]
+    },
+
     "revoke_mpi_tests_multinode": {
       "extends": "default",
       "is_gtest": true,
@@ -3994,6 +4058,12 @@
       "name": "Revoke MPI Tests (4-rank, single-node)",
       "description": "ncclCommRevoke scenarios requiring 4 ranks on one node: truly in-flight collective recovery via shrink (device-side abortFlag path) and NCCL_SHRINK_ABORT child rank renumbering",
       "config": "revoke_mpi_tests_4rank",
+      "enabled": true
+    },
+    {
+      "name": "Revoke MPI Tests - DDA IPC (8-rank, single-node)",
+      "description": "ncclCommRevoke unblocks ranks spinning in the DDA-IPC IpcGpuBarrier for AllReduce, AllGather, ReduceScatter and AlltoAll when one rank skips the collective",
+      "config": "revoke_mpi_tests_dda_ipc",
       "enabled": true
     },
     {
