@@ -27,6 +27,14 @@ std::string hex(const Digest &digest_bytes) {
   return result;
 }
 
+TEST(ConSanDigest, OptionsIdentityNamesTheSoftwareAddressGroupReservation) {
+  const std::string reservation =
+      "address-groups-per-site=" + std::to_string(kAddressGroupsPerSite) + ";";
+  EXPECT_NE(kMvpOptions.find(reservation), std::string_view::npos);
+  EXPECT_EQ(hex(mvp_options_digest()),
+            "083a76759fc07e774f153ef7d0f6611a48e23a8102352687fd6d5f9d4c39521a");
+}
+
 TEST(ConSanDigest, KnownAnswersIncludePaddingAndMultipleBlocks) {
   const std::array<std::pair<std::string_view, std::string_view>, 4> answers = {{
       {"", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
