@@ -92,6 +92,26 @@ and closes the capture.
 The runtime neither compiles nor diagnoses races. Its transport completion does
 not synchronize guest LDS accesses.
 
+Applications integrating the plugin must check completion values and finish
+status. When the plugin rejects a tracked dispatch before submission, it records
+failure and stores `-1` to its non-null application completion signal. This
+releases a waiter for a value less than `1`, but does not mean that the kernel
+ran. Accept only exactly `0` as normal completion, and check it before reading
+kernel output. A timeout or any other completion value is an execution failure.
+The [example runner](../tests/dbi/consan_hsa_runner.cpp) enforces these checks.
+
+Keep resources alive until their ownership handoffs have drained. The runner
+uses a successful `rj_consan_drain()` before releasing each completed dispatch's
+signal. Call `rj_consan_finish()` while HSA and the remaining dispatch resources
+are still alive, and check for return `0` before tearing them down or calling
+`hsa_shut_down`. A nonzero finish status means the capture was not successfully
+saved, even if earlier kernels completed normally. The plugin
+refuses HSA shutdown until finish reaches its terminal state. Shutdown acceptance
+does not establish capture success; the application must retain the finish
+status. A failed finish does not promise recovery from work still in flight.
+Unexpected C++ exceptions terminate the process and do not promise recovery,
+cleanup or completion of outstanding work.
+
 ### Offline diagnosis
 
 The analyzer validates the closed capture, joins GPU observations to static

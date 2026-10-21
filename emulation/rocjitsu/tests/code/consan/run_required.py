@@ -29,6 +29,8 @@ def required_names():
         suffix = f'{gpu}Wave{wave}'
         for case in (
             'AssemblyLoweringPreservesConcreteIdentityAndLoadableImages',
+            'PreparedCdnaDescriptorMustAllocateItsDeclaredOrdinarySgprs',
+            'ProbeScalarDependenciesHaveTargetRequiredGuards',
             'HipWorkloadsMustContainQualifiedNativeLdsSites',
             'GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoundaries',
         ):

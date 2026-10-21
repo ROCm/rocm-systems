@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/result.h"
 
 #include <array>
@@ -32,11 +33,13 @@ inline constexpr std::string_view kMvpOptions =
 // Software record slots for distinct effective LDS address groups per wave/site.
 // Remaining lanes after these slots are filled cause one lost occurrence;
 // this reservation count is independent of the GPU's hardware LDS banks.
-inline constexpr uint32_t kBanksPerSite = 4;
+inline constexpr uint32_t kAddressGroupsPerSite = 4;
 inline constexpr uint32_t kReportHeaderBytes = 64;
 inline constexpr uint32_t kRowHeaderBytes = 64;
 inline constexpr uint32_t kAccessRecordBytes = 64;
 inline constexpr uint32_t kContextBytes = 64;
+inline constexpr std::array<KernargExtensionPayloadLayout, 1> kContextPointerPayloads = {
+    {{.size = sizeof(uint64_t), .alignment = alignof(uint64_t)}}};
 
 enum class AnalysisKind : uint32_t { Invalid = 0, LdsRaceDetection = 1 };
 enum class RecordKind : uint32_t { Access = 1 };

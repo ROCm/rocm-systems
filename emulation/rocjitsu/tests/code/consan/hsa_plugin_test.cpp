@@ -77,6 +77,12 @@ protected:
     initialize_api();
     ASSERT_TRUE(load_(&table_, 0, 0, nullptr));
     installed_ = true;
+    const rj_consan_statistics initial = statistics_();
+    EXPECT_EQ(initial.submitted, 0u);
+    EXPECT_EQ(initial.forwarded, 0u);
+    EXPECT_EQ(initial.copied, 0u);
+    EXPECT_EQ(initial.written, 0u);
+    EXPECT_EQ(initial.reused, 0u);
     const uint32_t input_value = 7;
     std::memcpy(arguments_.data(), &input_value, 4);
   }

@@ -63,9 +63,10 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
   for (const SiteFacts &site : facts.sites) {
     auto &group = groups[site.id];
     bool vacant = false;
-    for (uint32_t bank = 0; bank < kBanksPerSite; ++bank) {
-      const auto record = row.subspan(
-          kRowHeaderBytes + (site.first_slot + bank) * kAccessRecordBytes, kAccessRecordBytes);
+    for (uint32_t address_group = 0; address_group < kAddressGroupsPerSite; ++address_group) {
+      const auto record =
+          row.subspan(kRowHeaderBytes + (site.first_slot + address_group) * kAccessRecordBytes,
+                      kAccessRecordBytes);
       if (all_zero(record)) {
         vacant = true;
         continue;

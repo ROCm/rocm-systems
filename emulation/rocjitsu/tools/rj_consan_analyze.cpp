@@ -41,7 +41,8 @@ int main(int argc, char **argv) {
       return kExitInputError;
   }
   std::ifstream file(argv[1], std::ios::binary | std::ios::ate);
-  if (!file || file.tellg() < 0 || uint64_t(file.tellg()) > CaptureLimits{}.file_bytes) {
+  if (!file || file.tellg() < 0 ||
+      static_cast<uint64_t>(file.tellg()) > CaptureLimits{}.file_bytes) {
     std::cerr << "capture input error: missing, unseekable or oversized input\n";
     return kExitInputError;
   }
@@ -53,12 +54,13 @@ int main(int argc, char **argv) {
     return kExitInputError;
   }
   ContractError error;
-  auto capture = decode_capture(bytes, &error);
+  rocjitsu::FailureOr<Capture> capture = decode_capture(bytes, &error);
   if (capture.failed()) {
     std::cerr << "capture input error: " << error.message << '\n';
     return kExitInputError;
   }
-  const auto result = analyze_capture(capture.value(), options, &error);
+  const rocjitsu::FailureOr<LdsRaceResult> result =
+      analyze_capture(capture.value(), options, &error);
   if (result.failed()) {
     std::cerr << "analysis input error: " << error.message << '\n';
     return kExitInputError;

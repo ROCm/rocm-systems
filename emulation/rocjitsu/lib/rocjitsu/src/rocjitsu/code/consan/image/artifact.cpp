@@ -5,6 +5,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/consan/image/metadata.h"
 #include "rocjitsu/code/consan/target.h"
+#include "util/bit.h"
 
 #include <cstring>
 #include <fstream>
@@ -16,10 +17,6 @@ Result reject(ContractError *error, ContractErrorCode code, std::string message)
   if (error != nullptr)
     *error = {code, std::move(message)};
   return Result::failure();
-}
-
-bool fits(uint64_t offset, uint64_t size, uint64_t extent) {
-  return offset <= extent && size <= extent - offset;
 }
 
 Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, bool prepared,
@@ -38,15 +35,17 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
       header.e_machine != EM_AMDGPU || (header.e_flags & EF_AMDGPU_MACH) != target->elf_machine ||
       (header.e_flags & ~uint32_t{0xfff}) != 0 || header.e_shentsize != sizeof(Elf64_Shdr) ||
       header.e_phentsize != sizeof(Elf64_Phdr) ||
-      !fits(header.e_shoff, uint64_t{header.e_shnum} * sizeof(Elf64_Shdr), image.size()) ||
-      !fits(header.e_phoff, uint64_t{header.e_phnum} * sizeof(Elf64_Phdr), image.size()) ||
+      !util::is_range_in_bounds(header.e_shoff, uint64_t{header.e_shnum} * sizeof(Elf64_Shdr),
+                                image.size()) ||
+      !util::is_range_in_bounds(header.e_phoff, uint64_t{header.e_phnum} * sizeof(Elf64_Phdr),
+                                image.size()) ||
       header.e_shstrndx >= header.e_shnum)
     return reject(error, ContractErrorCode::InvalidEncoding,
                   "artifact ELF target, ABI or tables are inconsistent");
   Elf64_Shdr strings{};
   std::memcpy(&strings, image.data() + header.e_shoff + header.e_shstrndx * sizeof(strings),
               sizeof(strings));
-  if (!fits(strings.sh_offset, strings.sh_size, image.size()))
+  if (!util::is_range_in_bounds(strings.sh_offset, strings.sh_size, image.size()))
     return reject(error, ContractErrorCode::InvalidEncoding,
                   "artifact section names are truncated");
   std::optional<Elf64_Shdr> text;
@@ -57,7 +56,7 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
     if ((section.sh_flags & (SHF_EXECINSTR | SHF_ALLOC)) != (SHF_EXECINSTR | SHF_ALLOC))
       continue;
     if (text || section.sh_name >= strings.sh_size || section.sh_type != SHT_PROGBITS ||
-        !fits(section.sh_offset, section.sh_size, image.size()) ||
+        !util::is_range_in_bounds(section.sh_offset, section.sh_size, image.size()) ||
         section.sh_size > UINT64_MAX - section.sh_addr)
       return reject(error, ContractErrorCode::InvalidEncoding,
                     "artifact executable section is ambiguous");
@@ -84,9 +83,11 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
       prepared ? entry.prepared_descriptor_offset : entry.original_descriptor_offset;
   const uint64_t entry_offset =
       prepared ? entry.prepared_entry_offset : entry.original_entry_offset;
-  const uint32_t kernarg = prepared
-                               ? ((uint64_t{entry.original_kernarg_bytes} + 7) & ~uint64_t{7}) + 16
-                               : entry.original_kernarg_bytes;
+  const std::optional<KernargExtensionLayout> wrapper =
+      make_kernarg_extension_layout(entry.original_kernarg_bytes, kContextPointerPayloads);
+  if (!wrapper)
+    return reject(error, ContractErrorCode::ResourceLimit, "artifact kernarg wrapper overflows");
+  const uint32_t kernarg = prepared ? wrapper->wrapper_size : entry.original_kernarg_bytes;
   if (kernel.descriptor_file_offset != descriptor_offset ||
       kernel.entry_text_offset != entry_offset || entry_offset > UINT64_MAX - text->sh_addr ||
       ((text->sh_addr + entry_offset) % 256) != 0 ||
@@ -106,11 +107,11 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
     std::memcpy(&segment, image.data() + header.e_phoff + index * sizeof(segment), sizeof(segment));
     if (segment.p_type != PT_LOAD)
       continue;
-    if (!fits(segment.p_offset, segment.p_filesz, image.size()) ||
+    if (!util::is_range_in_bounds(segment.p_offset, segment.p_filesz, image.size()) ||
         segment.p_filesz > segment.p_memsz || segment.p_memsz > UINT64_MAX - segment.p_vaddr)
       return reject(error, ContractErrorCode::InvalidEncoding,
                     "artifact load segment has invalid extent");
-    if (fits(descriptor_offset, 64, segment.p_offset + segment.p_filesz) &&
+    if (util::is_range_in_bounds(descriptor_offset, 64, segment.p_offset + segment.p_filesz) &&
         descriptor_offset >= segment.p_offset) {
       const uint64_t descriptor_vaddr = segment.p_vaddr + (descriptor_offset - segment.p_offset);
       const int64_t relative = kernel.descriptor.kernel_code_entry_byte_offset;
@@ -127,7 +128,8 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
     // This MVP has one executable section. Require its complete instruction
     // image, not just entry bytes or zero-filled memory beyond p_filesz.
     loaded_text |= text->sh_offset >= segment.p_offset &&
-                   fits(text->sh_offset, text->sh_size, segment.p_offset + segment.p_filesz) &&
+                   util::is_range_in_bounds(text->sh_offset, text->sh_size,
+                                            segment.p_offset + segment.p_filesz) &&
                    (segment.p_flags & PF_X) != 0 &&
                    segment.p_vaddr + (text->sh_offset - segment.p_offset) == text->sh_addr;
   }
@@ -148,6 +150,17 @@ Result inspect_image(const Manifest &manifest, std::span<const uint8_t> image, b
                    metadata.value().vgprs != entry.prepared_vgprs))
     return reject(error, ContractErrorCode::IdentityMismatch,
                   "prepared metadata resources differ from facts");
+  if (prepared &&
+      (target->arch == ROCJITSU_CODE_ARCH_CDNA3 || target->arch == ROCJITSU_CODE_ARCH_CDNA4)) {
+    const uint32_t allocated_sgprs =
+        (RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
+                            amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT) +
+         1) *
+        8;
+    if (ordinary_sgpr_bound(target->arch, allocated_sgprs) < entry.prepared_sgprs)
+      return reject(error, ContractErrorCode::IdentityMismatch,
+                    "prepared descriptor does not allocate its declared ordinary SGPRs");
+  }
   return Result::success();
 }
 

@@ -35,15 +35,16 @@ protected:
   }
 
   size_t row(uint32_t wave) const { return kReportHeaderBytes + wave * stride_; }
-  size_t record(uint32_t wave, uint32_t site, uint32_t bank = 0) const {
-    return row(wave) + kRowHeaderBytes + (site * kBanksPerSite + bank) * kAccessRecordBytes;
+  size_t record(uint32_t wave, uint32_t site, uint32_t address_group = 0) const {
+    return row(wave) + kRowHeaderBytes +
+           (site * kAddressGroupsPerSite + address_group) * kAccessRecordBytes;
   }
 
   void access(uint32_t wave, uint32_t site, uint32_t sequence, uint32_t offset = 0,
-              uint64_t mask = 1, uint32_t bank = 0, uint32_t execution = 0) {
+              uint64_t mask = 1, uint32_t address_group = 0, uint32_t execution = 0) {
     auto &report = capture_.executions[execution].report;
     const auto &facts = capture_.header.manifest.sites[site];
-    const size_t base = record(wave, site, bank);
+    const size_t base = record(wave, site, address_group);
     for (const auto &[field, value] : std::array<std::pair<uint32_t, uint32_t>, 9>{
              {{wire::kRecordCommit, wire::kAccessCommitted},
               {wire::kRecordAnalysis, uint32_t(facts.analysis)},
@@ -108,7 +109,7 @@ protected:
                              .prepared_guest_size = 8,
                              .probe_offset = uint64_t{site} * 128 + 64,
                              .probe_size = 64,
-                             .first_slot = site * kBanksPerSite});
+                             .first_slot = site * kAddressGroupsPerSite});
     }
     capture_.executions.clear();
     append_execution();
@@ -409,8 +410,8 @@ TEST_F(ConSanAnalysis, DuplicateOccurrencesAndOverlappingMasksCannotInflateFindi
 }
 
 TEST_F(ConSanAnalysis, ReservationLossRetainsValidFindingsButMakesCoverageIncomplete) {
-  for (uint32_t bank = 0; bank < 4; ++bank)
-    access(0, 0, 1, bank * 4, 1u << bank, bank);
+  for (uint32_t address_group = 0; address_group < 4; ++address_group)
+    access(0, 0, 1, address_group * 4, 1u << address_group, address_group);
   access(1, 1, 1);
   wire::write_u32(capture_.executions[0].report, row(0) + wire::kRowLoss, 1);
   wire::write_u32(capture_.executions[0].report, row(0) + wire::kRowStatus,

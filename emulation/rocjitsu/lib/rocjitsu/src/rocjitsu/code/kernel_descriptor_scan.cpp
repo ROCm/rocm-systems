@@ -6,6 +6,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/isa/register_set.h"
+#include "util/bit.h"
 
 #include <algorithm>
 #include <cstring>
@@ -21,13 +22,6 @@ namespace {
 using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 
 static_assert(sizeof(KD) == 64, "AMDHSA kernel descriptor size changed");
-
-// True if [offset, offset + length) fits within [0, size) without overflow (the
-// image is an arbitrary span, so offset + length may wrap). Use before forming any
-// pointer into the image.
-[[nodiscard]] bool range_in_bounds(uint64_t offset, uint64_t length, uint64_t size) {
-  return offset <= size && length <= size - offset;
-}
 
 [[nodiscard]] std::optional<std::string>
 kernel_descriptor_symbol_name(const Elf64_Sym &sym, const char *strtab, size_t strtab_size) {
@@ -136,7 +130,7 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
     size_t strtab_size = 0;
     if (symbol_section.sh_link < section_hdrs->size()) {
       const Elf64_Shdr &strtab_shdr = (*section_hdrs)[symbol_section.sh_link];
-      if (range_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image.size())) {
+      if (util::is_range_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image.size())) {
         strtab = reinterpret_cast<const char *>(image.data() + strtab_shdr.sh_offset);
         strtab_size = strtab_shdr.sh_size;
       }
@@ -163,8 +157,8 @@ scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, ui
 
       const Elf64_Shdr &owner = (*section_hdrs)[owner_index];
       const uint64_t delta = symbol.st_value - owner.sh_addr;
-      if (!range_in_bounds(owner.sh_offset, owner.sh_size, image.size()) ||
-          !range_in_bounds(delta, sizeof(KD), owner.sh_size))
+      if (!util::is_range_in_bounds(owner.sh_offset, owner.sh_size, image.size()) ||
+          !util::is_range_in_bounds(delta, sizeof(KD), owner.sh_size))
         continue;
       const uint64_t file_offset = owner.sh_offset + delta;
       if (!seen_descriptor_offsets.insert(file_offset).second)

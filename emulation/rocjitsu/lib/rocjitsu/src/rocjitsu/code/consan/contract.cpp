@@ -5,6 +5,7 @@
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/consan/target.h"
 
+#include "util/bit.h"
 #include "util/sha256.h"
 
 #include <algorithm>
@@ -33,10 +34,6 @@ Result reject(ContractError *error, ContractErrorCode code, std::string_view mes
 void clear_error(ContractError *error) {
   if (error != nullptr)
     *error = {};
-}
-
-bool fits(uint64_t offset, uint64_t extent, uint64_t bound) {
-  return offset <= bound && extent <= bound - offset;
 }
 
 class Encoder {
@@ -213,8 +210,7 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
                   "empty image or unsupported target, ABI, scope or options");
 
   const EntryFacts &entry = manifest.entry;
-  const uint64_t wrapper_bytes = ((uint64_t{entry.original_kernarg_bytes} + 7) & ~uint64_t{7}) + 16;
-  if (wrapper_bytes > std::numeric_limits<uint32_t>::max())
+  if (!make_kernarg_extension_layout(entry.original_kernarg_bytes, kContextPointerPayloads))
     return reject(error, ContractErrorCode::ResourceLimit, "wrapper exceeds descriptor size field");
   if (entry.id != 0 || entry.name.empty() || entry.name.find('\0') != std::string::npos ||
       !std::has_single_bit(entry.kernarg_alignment) || entry.kernarg_alignment < 8 ||
@@ -227,12 +223,12 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
       entry.maximum_workgroup_size > 1024)
     return reject(error, ContractErrorCode::InvalidFacts, "invalid entry ABI or resources");
 
-  if (!fits(entry.original_descriptor_offset, 64, manifest.original.bytes) ||
-      !fits(entry.prepared_descriptor_offset, 64, manifest.prepared.bytes) ||
+  if (!util::is_range_in_bounds(entry.original_descriptor_offset, 64, manifest.original.bytes) ||
+      !util::is_range_in_bounds(entry.prepared_descriptor_offset, 64, manifest.prepared.bytes) ||
       manifest.original_text_bytes == 0 || manifest.original_text_bytes > manifest.original.bytes ||
       manifest.prepared_text_bytes == 0 || manifest.prepared_text_bytes > manifest.prepared.bytes ||
-      !fits(entry.original_entry_offset, 4, manifest.original_text_bytes) ||
-      !fits(entry.prepared_entry_offset, 4, manifest.prepared_text_bytes) ||
+      !util::is_range_in_bounds(entry.original_entry_offset, 4, manifest.original_text_bytes) ||
+      !util::is_range_in_bounds(entry.prepared_entry_offset, 4, manifest.prepared_text_bytes) ||
       (entry.original_entry_offset % 4) != 0 || (entry.prepared_entry_offset % 4) != 0 ||
       manifest.sites.empty())
     return reject(error, ContractErrorCode::InvalidFacts,
@@ -251,12 +247,15 @@ Result validate_manifest(const Manifest &manifest, ContractError *error,
         (site.probe_size % 4) != 0 || (site.original_offset % 4) != 0 ||
         (site.prepared_guest_offset % 4) != 0 || (site.probe_offset % 4) != 0 ||
         site.original_offset < previous_original_end ||
-        !fits(site.original_offset, site.original_size, manifest.original_text_bytes) ||
-        !fits(site.prepared_guest_offset, site.prepared_guest_size, manifest.prepared_text_bytes) ||
-        !fits(site.probe_offset, site.probe_size, manifest.prepared_text_bytes) ||
-        uint64_t{site.first_slot} != uint64_t{index} * kBanksPerSite)
+        !util::is_range_in_bounds(site.original_offset, site.original_size,
+                                  manifest.original_text_bytes) ||
+        !util::is_range_in_bounds(site.prepared_guest_offset, site.prepared_guest_size,
+                                  manifest.prepared_text_bytes) ||
+        !util::is_range_in_bounds(site.probe_offset, site.probe_size,
+                                  manifest.prepared_text_bytes) ||
+        uint64_t{site.first_slot} != uint64_t{index} * kAddressGroupsPerSite)
       return reject(error, ContractErrorCode::InvalidFacts,
-                    "invalid site identity, mapping or bank");
+                    "invalid site identity, mapping or address group");
     previous_original_end = site.original_offset + site.original_size;
     guest_ranges.emplace_back(site.prepared_guest_offset,
                               site.prepared_guest_offset + site.prepared_guest_size);
@@ -367,23 +366,22 @@ FailureOr<LaunchLayout> plan_launch(const Manifest &manifest, const LaunchDimens
     return reject(error, ContractErrorCode::UnsupportedLaunch,
                   "native LDS capture requires one bounded 1D workgroup and no private segment");
 
-  const uint64_t row_stride =
-      kRowHeaderBytes + uint64_t{manifest.sites.size()} * kBanksPerSite * kAccessRecordBytes;
+  const uint64_t row_stride = kRowHeaderBytes + uint64_t{manifest.sites.size()} *
+                                                    kAddressGroupsPerSite * kAccessRecordBytes;
   const uint32_t waves = (dimensions.workgroup[0] + manifest.wave_size - 1) / manifest.wave_size;
   const uint64_t report_bytes = kReportHeaderBytes + waves * row_stride;
-  const uint64_t original_pointer_offset =
-      (uint64_t{manifest.entry.original_kernarg_bytes} + 7) & ~uint64_t{7};
-  const uint64_t wrapper_bytes = original_pointer_offset + 16;
+  const std::optional<KernargExtensionLayout> kernarg =
+      make_kernarg_extension_layout(manifest.entry.original_kernarg_bytes, kContextPointerPayloads);
   if (row_stride > std::numeric_limits<uint32_t>::max() || report_bytes > limits.report_bytes ||
-      wrapper_bytes > std::numeric_limits<uint32_t>::max())
+      !kernarg)
     return reject(error, ContractErrorCode::ResourceLimit,
                   "report or wrapper extent exceeds budget");
   const uint32_t group_bytes = std::max(packet_group_bytes, manifest.entry.prepared_group_bytes);
   if (group_bytes > 65536)
     return reject(error, ContractErrorCode::UnsupportedLaunch, "LDS extent exceeds subset limit");
-  return LaunchLayout{.wrapper_bytes = static_cast<uint32_t>(wrapper_bytes),
-                      .original_pointer_offset = static_cast<uint32_t>(original_pointer_offset),
-                      .context_pointer_offset = static_cast<uint32_t>(original_pointer_offset + 8),
+  return LaunchLayout{.wrapper_bytes = kernarg->wrapper_size,
+                      .original_pointer_offset = kernarg->original_kernarg_pointer_offset,
+                      .context_pointer_offset = kernarg->payload_offsets[0],
                       .row_stride = static_cast<uint32_t>(row_stride),
                       .report_bytes = report_bytes,
                       .group_bytes = group_bytes,

@@ -76,7 +76,7 @@ endforeach()
 # requirement; the simulation library is deliberately absent from the link.
 target_link_libraries(
     rocjitsu_analysis_internal
-    PUBLIC util Threads::Threads simdojo_headers
+    PUBLIC util Threads::Threads simdojo_headers rocjitsu_kernel_descriptor_scan
 )
 set_target_properties(
     rocjitsu_analysis_internal
@@ -117,7 +117,14 @@ foreach(_object_lib IN LISTS ROCJITSU_DBT_BASE_OBJECT_LIBS)
         PRIVATE $<TARGET_OBJECTS:${_object_lib}>
     )
 endforeach()
-target_link_libraries(rocjitsu_dbt_internal PUBLIC util Threads::Threads)
+target_link_libraries(
+    rocjitsu_dbt_internal
+    PUBLIC
+        util
+        Threads::Threads
+        rocjitsu_kernel_descriptor_scan
+        rocjitsu_kernarg_extension
+)
 set_target_properties(
     rocjitsu_dbt_internal
     PROPERTIES POSITION_INDEPENDENT_CODE ON
@@ -163,6 +170,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         rocjitsu_gfx1250_b0_to_a0
         PRIVATE
             rocjitsu_cdna5_model_registry
+            rocjitsu_kernel_descriptor_scan
+            rocjitsu_kernarg_extension
             simdojo_headers
             util
             Threads::Threads

@@ -10,7 +10,10 @@ target_include_directories(
         $<BUILD_INTERFACE:${ROCJITSU_SRC_DIR}>
         $<BUILD_INTERFACE:${ROCJITSU_INCLUDE_DIR}>
 )
-target_link_libraries(rocjitsu_consan_contract PUBLIC util)
+target_link_libraries(
+    rocjitsu_consan_contract
+    PUBLIC util rocjitsu_kernarg_extension
+)
 rj_configure_target(rocjitsu_consan_contract WARNINGS HIDDEN)
 
 if(RJ_BUILD_CONSAN_COMPILER OR RJ_BUILD_CONSAN_RUNTIME)

@@ -107,12 +107,12 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
   if (kernels.size() != 1)
     return reject(error, "final descriptor is unavailable");
   KernelDescriptorInfo kernel = kernels.front();
-  const uint64_t wrapper_size =
-      ((uint64_t{program.kernel.descriptor.kernarg_size} + 7) & ~uint64_t{7}) + 16;
-  if (wrapper_size > UINT32_MAX)
+  const std::optional<KernargExtensionLayout> kernarg = make_kernarg_extension_layout(
+      program.kernel.descriptor.kernarg_size, kContextPointerPayloads);
+  if (!kernarg)
     return reject(error, "wrapper size overflow");
   std::string metadata_error;
-  const MetadataResources resources{static_cast<uint32_t>(wrapper_size), 8, plan.sgprs, plan.vgprs,
+  const MetadataResources resources{kernarg->wrapper_size, 8, plan.sgprs, plan.vgprs,
                                     program.maximum_workgroup_size};
   if (update_metadata(artifact.image, kernel, resources, &metadata_error).failed())
     return reject(error, metadata_error);

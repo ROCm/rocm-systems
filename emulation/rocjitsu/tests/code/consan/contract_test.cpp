@@ -370,30 +370,41 @@ TEST_F(ConSanContract, TwoChecksShareOneStaticReservationPerAccessSite) {
             2u * 4u * kAccessRecordBytes);
 }
 
-TEST_F(ConSanContract, WrapperSizingAgreesWithExistingGenericWriter) {
-  constexpr std::array<KernargExtensionPayloadLayout, 1> payloads = {{{.size = 8, .alignment = 8}}};
-  for (uint32_t original_bytes : {1u, 8u, 16u, 17u, 64u, 65536u}) {
+TEST_F(ConSanContract, WrapperPreservesIndependentWireLayoutAndOriginalArguments) {
+  struct ExpectedLayout {
+    uint32_t original_bytes;
+    uint32_t original_pointer;
+    uint32_t context_pointer;
+    uint32_t wrapper_bytes;
+  };
+  constexpr std::array cases = {
+      ExpectedLayout{1, 8, 16, 24},   ExpectedLayout{8, 8, 16, 24},
+      ExpectedLayout{16, 16, 24, 32}, ExpectedLayout{17, 24, 32, 40},
+      ExpectedLayout{64, 64, 72, 80}, ExpectedLayout{65536, 65536, 65544, 65552}};
+  for (const ExpectedLayout &expected : cases) {
     Manifest manifest = example();
-    manifest.entry.original_kernarg_bytes = original_bytes;
+    manifest.entry.original_kernarg_bytes = expected.original_bytes;
     const FailureOr<LaunchLayout> planned = plan_launch(manifest, kLaunch, 8, 0);
     ASSERT_TRUE(planned.succeeded());
+    EXPECT_EQ(planned.value().wrapper_bytes, expected.wrapper_bytes);
+    EXPECT_EQ(planned.value().original_pointer_offset, expected.original_pointer);
+    EXPECT_EQ(planned.value().context_pointer_offset, expected.context_pointer);
     const std::optional<KernargExtensionLayout> generic =
-        make_kernarg_extension_layout(original_bytes, payloads);
+        make_kernarg_extension_layout(expected.original_bytes, kContextPointerPayloads);
     ASSERT_TRUE(generic);
-    EXPECT_EQ(planned.value().wrapper_bytes, generic->wrapper_size);
-    EXPECT_EQ(planned.value().original_pointer_offset, generic->original_kernarg_pointer_offset);
-    EXPECT_EQ(planned.value().context_pointer_offset, generic->payload_offsets[0]);
-    std::vector<uint8_t> wrapper(generic->wrapper_size);
-    std::vector<uint8_t> original(original_bytes, 0xa5);
+    std::vector<uint8_t> wrapper(expected.wrapper_bytes, 0xff);
+    std::vector<uint8_t> original(expected.original_bytes, 0xa5);
     const std::array<uint8_t, 8> pointer = {1, 2, 3, 4, 5, 6, 7, 8};
     const std::array<KernargExtensionPayloadWrite, 1> writes = {
         {{.data = pointer.data(), .size = 8}}};
     ASSERT_TRUE(
         write_kernarg_extension_wrapper(wrapper, *generic, original.data(), 0x1234, writes));
-    EXPECT_TRUE(std::equal(original.begin(), original.end(), wrapper.begin()));
-    EXPECT_EQ(wrapper[planned.value().original_pointer_offset], 0x34);
-    EXPECT_TRUE(std::equal(pointer.begin(), pointer.end(),
-                           wrapper.begin() + planned.value().context_pointer_offset));
+    std::vector<uint8_t> expected_bytes(expected.wrapper_bytes);
+    std::copy(original.begin(), original.end(), expected_bytes.begin());
+    expected_bytes[expected.original_pointer] = 0x34;
+    expected_bytes[expected.original_pointer + 1] = 0x12;
+    std::copy(pointer.begin(), pointer.end(), expected_bytes.begin() + expected.context_pointer);
+    EXPECT_EQ(wrapper, expected_bytes);
   }
 }
 
