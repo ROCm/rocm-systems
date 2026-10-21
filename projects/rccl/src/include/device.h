@@ -314,6 +314,8 @@ struct ncclConnInfo {
 // Byte distance between per-QP flags: each flag sits alone in a GPU L2
 // cacheline so NIC writes and GPU polls of different QPs never share one.
 #define NCCL_GDR_FLUSH_FLAG_STRIDE 128
+// Most per-QP flags one step can wait on; the GPU polls them all at once.
+#define NCCL_GDR_FLUSH_MAX_WAIT_QPS 8
 
 struct ncclProxyConnector {
   bool initialized;

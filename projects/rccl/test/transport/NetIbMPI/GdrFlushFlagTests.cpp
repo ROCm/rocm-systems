@@ -40,6 +40,7 @@ constexpr int      kDescFirstShift = 48;
 constexpr int      kDescCountShift = 56;
 constexpr uint64_t kDescSeqMask    = (1ULL << kDescFirstShift) - 1;
 constexpr int      kFlagStrideU64  = 128 / sizeof(uint64_t); // NCCL_GDR_FLUSH_FLAG_STRIDE
+constexpr int      kMaxWaitQps     = 8;                      // NCCL_GDR_FLUSH_MAX_WAIT_QPS
 
 struct ObserverResult {
     unsigned long long mismatches;
@@ -154,6 +155,7 @@ protected:
         std::string why;
         if (!flagEnvEnabled()) why = "requires RCCL_IB_GDR_FLUSH_FLAG=1";
         else if (!gdrPtrSupport()) why = "no GDR backend (neither peermem nor dma-buf) on this device";
+        else if (expectedFlagCount() > kMaxWaitQps) why = "the flag needs at most 8 QPs per request";
         int skip = why.empty() ? 0 : 1;
         MPI_Allreduce(MPI_IN_PLACE, &skip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
         if (skip && why.empty()) why = "peer rank cannot run the flag path";
