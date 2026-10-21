@@ -29,7 +29,7 @@
       "binary": "host/rccl-UnitTestsMicroBootstrap",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "BootstrapMicrotests", "description": "Host-only bootstrap microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
