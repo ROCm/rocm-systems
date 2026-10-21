@@ -9735,7 +9735,7 @@ TEST(Pm4DispatchTest, BooleanPredicationOrdersReadsAndOnlySuppressesFlaggedPacke
 }
 
 TEST(Pm4DispatchTest, InstructionFailureReclaimsWgpReservationsForOtherQueues) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   constexpr uint32_t kSSubvectorLoopBegin = 0xBD800000u;
 
   constexpr uint32_t kFirstQueue = 71;
@@ -9766,8 +9766,8 @@ TEST(Pm4DispatchTest, InstructionFailureReclaimsWgpReservationsForOtherQueues) {
             words.insert(words.end(), payload.begin(), payload.end());
           };
           uint32_t rsrc1 = 0, rsrc2 = 0;
-          AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, 1);
-          AMDHSA_BITS_SET(rsrc2, COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, kWgpLdsBytes / 512);
+          RJ_AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, 1);
+          RJ_AMDHSA_BITS_SET(rsrc2, COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, kWgpLdsBytes / 512);
           packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeNumThreadX, 64, 1, 1});
           packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmLo, uint32_t(code >> 8), 0});
           packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmRsrc1, rsrc1, rsrc2});
@@ -9883,7 +9883,7 @@ TEST(AqlDispatchTest, ForcedCloseCancelsWavesAndReclaimsLdsWithoutCompletion) {
 }
 
 TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) {
-  using namespace rocr::llvm::amdhsa;
+  using namespace rocjitsu::amdhsa;
   for (uint32_t dispatch_threads : {1u, 2u}) {
     SCOPED_TRACE(dispatch_threads);
     VmFixture f("cdna5", 2, 1, 64, 128);
@@ -9909,7 +9909,7 @@ TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) 
     const uint32_t end = 0xBFB00000u;
     const uint64_t kernel = f.write_kernel(0x1000, &end, sizeof(end), 128, 256, 1);
     uint16_t preload = 0;
-    AMDHSA_BITS_SET(preload, KERNARG_PRELOAD_SPEC_LENGTH, 1);
+    RJ_AMDHSA_BITS_SET(preload, KERNARG_PRELOAD_SPEC_LENGTH, 1);
     f.mem()->load_image(reinterpret_cast<const uint8_t *>(&preload), sizeof(preload),
                         kernel + offsetof(kernel_descriptor_t, kernarg_preload));
     f.mem()->write32(0x2000, 0x12345678u);
