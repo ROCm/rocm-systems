@@ -506,6 +506,23 @@ TEST(WaitcheckStream, DirectToLdsParityOrderingIsIncomplete) {
   }
 }
 
+TEST(WaitcheckStream, FlatFamilyLdsTransfersDoNotCertifyUnwaitedLdsConsumers) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4})
+    for (uint32_t segment : {1u, 2u})
+      for (uint32_t opcode = 38; opcode <= 42; ++opcode) {
+        SCOPED_TRACE(testing::Message()
+                     << "arch=" << arch << " segment=" << segment << " opcode=" << opcode);
+        const Program program{0xdc000000u | (opcode << 18) | (segment << 14),
+                              0x08040002u,              // scratch/global_load_lds_*.
+                              0xd86c0000u, 0x00000001u, // ds_read_b32 v0, v1.
+                              0xbf810000u};             // s_endpgm.
+        const auto report = analyze(program, arch);
+        ASSERT_TRUE(report.incomplete);
+        EXPECT_EQ(report.instructions_analyzed, 0u);
+        EXPECT_NE(report.incomplete->reason.find("parity"), std::string::npos);
+      }
+}
+
 TEST(WaitcheckStream, InvalidOptionsAndTruncatedInputFail) {
   for (auto options :
        {WaitcheckStreamOptions{.wave_size = 16}, WaitcheckStreamOptions{.wave_size = 128}}) {

@@ -615,6 +615,7 @@ add_executable(
     ds_memory_snapshot_test.cpp
     ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
+    flat_lds_transfer_test.cpp
     scalar_buffer_store_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
@@ -644,6 +645,7 @@ add_executable(
     shared_infra_test.cpp
     scalar_buffer_test.cpp
     scalar_cache_policy_test.cpp
+    scalar_cache_discard_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
     denormal_test.cpp

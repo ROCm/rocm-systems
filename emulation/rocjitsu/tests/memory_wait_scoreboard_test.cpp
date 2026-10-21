@@ -1304,7 +1304,7 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
     cu->set_plugin_group(group);
     group->onInit();
     auto decoder = Decoder::create(arch);
-    for (unsigned scalar_mode : {0u, 1u, 2u}) {
+    for (unsigned scalar_mode : {0u, 1u, 2u, 3u}) {
       for (int offset : {0, 4, -4}) {
         for (uint64_t exec : {uint64_t{0}, uint64_t{1}, uint64_t{0b1010}, uint64_t{0xf}}) {
           SCOPED_TRACE(scalar_mode);
@@ -1313,13 +1313,16 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
           wf->set_exec(exec);
           const uint8_t saddr = scalar_mode == 0   ? (null127 ? 127 : 124)
                                 : scalar_mode == 1 ? 0
-                                                   : 96;
+                                : scalar_mode == 2 ? 96
+                                                   : 127;
+          // 127 is a second NULL selector on RDNA; CDNA5 rejects it during decode.
+          const bool has_scalar = scalar_mode == 1 || scalar_mode == 2;
           RegisterAccess(*wf).write_sgpr64(wf->sgpr_alloc().base, shared);
           const uint64_t addresses[] = {
               shared + 0x100, shared + (uint64_t{1} << 31) + 0x100, uint64_t{8} << 32,
               cdna5 ? 0x400080 | (uint64_t{3} << 52) : private_base + 0x80};
           for (unsigned lane = 0; lane < 4; ++lane) {
-            const uint64_t value = addresses[lane] - (scalar_mode && !legacy_cdna ? shared : 0);
+            const uint64_t value = addresses[lane] - (has_scalar && !legacy_cdna ? shared : 0);
             const unsigned base = wf->vgpr_alloc().base + (cdna5 ? 256 : 0);
             cu->write_vgpr(base, lane, static_cast<uint32_t>(value));
             cu->write_vgpr(base + 1, lane, value >> 32);
@@ -1362,6 +1365,10 @@ TEST(MemoryWaitExecutionTest, DecodedFlatPlansMatchExecutedAddressesBeforeAnyReg
                                            .ioffset = static_cast<uint32_t>(offset) & 0xffffff}));
           util::StringDiagnostic error;
           auto decoded = decoder->decode_window(words, 0, error.emitter());
+          if (cdna5 && scalar_mode == 3) {
+            EXPECT_FALSE(decoded.succeeded()) << "CDNA5 does not accept the RDNA NULL alias";
+            continue;
+          }
           ASSERT_TRUE(decoded.succeeded()) << error.message();
           auto &inst = *decoded.value();
           ASSERT_TRUE(inst.is_memory_wait_producer());

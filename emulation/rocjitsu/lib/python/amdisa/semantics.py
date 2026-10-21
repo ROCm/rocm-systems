@@ -1819,6 +1819,10 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     # Cache invalidation / writeback instructions.
     if upper in ('S_DCACHE_INV', 'S_DCACHE_INV_VOL'):
         return InstructionSemantics(name, 'dcache_inv')
+    if upper in ('S_DCACHE_DISCARD', 'S_DCACHE_DISCARD_X2'):
+        return InstructionSemantics(
+            name, 'dcache_discard', num_elems=2 if upper.endswith('_X2') else 1
+        )
     if upper in ('S_DCACHE_WB', 'S_DCACHE_WB_VOL'):
         return InstructionSemantics(name, 'dcache_wb')
     if upper == 'S_GL1_INV':
@@ -2052,6 +2056,18 @@ def _derive_flat_atomic_info(suffix: str, is_x2: bool) -> tuple[str, int, int] |
 def _derive_flat(name: str) -> InstructionSemantics | None:
     """Derive semantics for a FLAT (Flat/Global/Scratch memory) instruction."""
     upper = name.upper()
+    if upper.startswith('SCRATCH_LOAD_LDS_'):
+        suffix = upper.removeprefix('SCRATCH_LOAD_LDS_')
+        info = _FLAT_DATA_MAP.get(suffix)
+        if info is not None and info[1] == 1:
+            size, count, signed = info
+            return InstructionSemantics(
+                name,
+                'scratch_load_lds',
+                elem_size=size,
+                num_elems=1,
+                sign_extend=signed,
+            )
     if upper == 'GLOBAL_INV':
         return InstructionSemantics(name, 'gl1_inv')
     if upper == 'GLOBAL_WB':

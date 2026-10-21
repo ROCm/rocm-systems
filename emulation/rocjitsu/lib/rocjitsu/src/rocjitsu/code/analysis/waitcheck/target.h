@@ -302,7 +302,7 @@ struct WaitcheckTarget {
 
   [[nodiscard]] static std::optional<int64_t> first_barrier_id(const Instruction &inst);
 
-  [[nodiscard]] static bool is_cdna4_mubuf_lds_load(const Instruction &inst, rj_code_arch_t arch);
+  [[nodiscard]] static bool is_cdna_lds_dma_load(const Instruction &inst, rj_code_arch_t arch);
 
   [[nodiscard]] static std::optional<uint32_t> vinterp_wait_exp(const Instruction &inst);
 
