@@ -64,6 +64,12 @@ protected:
 
     static mock_per_gpu_stats_t& gpu(std::size_t ordinal)
     {
+        // Filling a slot means that GPU is active. hipFile reports num_gpus == 0,
+        // and a zero-filled struct, until then; backend treats that as unavailable.
+        if(mock_wrapper::next_stats.num_gpus == 0)
+        {
+            mock_wrapper::next_stats.num_gpus = 1;
+        }
         return mock_wrapper::next_stats.per_gpu_stats[ordinal];
     }
 };
@@ -230,11 +236,36 @@ TEST_F(HipFileBackendTest, failed_query_reports_unavailable_and_zeros)
     EXPECT_EQ(snapshot.per_gpu[0].read_bytes, 0U);
 }
 
-TEST_F(HipFileBackendTest, successful_query_reports_available)
+TEST_F(HipFileBackendTest, successful_query_with_no_active_gpu_is_unavailable)
+{
+    // hipFileGetStatsL3 returns success and zeros when the target has not performed
+    // hipFile I/O, and for the whole run when HIPFILE_STATS_LEVEL disables recording.
+    mock_backend backend{};
+    const auto&  snapshot = backend.get_stats(k_ts_1);
+
+    EXPECT_FALSE(backend.is_available());
+    EXPECT_EQ(snapshot.per_gpu[0].read_bytes, 0U);
+}
+
+TEST_F(HipFileBackendTest, successful_query_with_active_gpu_reports_available)
+{
+    gpu(0).read_bytes = bytes::k_b256;
+
+    mock_backend backend{};
+
+    EXPECT_EQ(backend.get_stats(k_ts_1).per_gpu[0].read_bytes, bytes::k_b256);
+    EXPECT_TRUE(backend.is_available());
+}
+
+TEST_F(HipFileBackendTest, availability_starts_when_a_gpu_becomes_active)
 {
     mock_backend backend{};
-    static_cast<void>(backend.get_stats(k_ts_1));
 
+    static_cast<void>(backend.get_stats(k_ts_1));
+    EXPECT_FALSE(backend.is_available());
+
+    gpu(0).read_bytes = bytes::k_kb4;
+    EXPECT_EQ(backend.get_stats(k_ts_2).per_gpu[0].read_bytes, bytes::k_kb4);
     EXPECT_TRUE(backend.is_available());
 }
 
@@ -304,6 +335,8 @@ TEST_F(HipFileBackendTest, inactive_gpu_slots_are_zero_filled)
 
     // per_gpu_stats is indexed by ordinal, not packed, so the populated slot must stay
     // at its ordinal and every other slot must read zero rather than garbage.
+    // An idle slot's zeros are a measurement once some other GPU is active.
+    EXPECT_TRUE(backend.is_available());
     EXPECT_EQ(snapshot.per_gpu[k_inactive_gpu_slot].read_bytes, bytes::k_kb4);
     EXPECT_EQ(snapshot.per_gpu[k_zero_gpu_slot].read_bytes, 0U);
     EXPECT_EQ(snapshot.per_gpu[k_adjacent_gpu_slot].read_bytes, 0U);
