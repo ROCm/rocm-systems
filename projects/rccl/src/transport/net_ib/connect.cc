@@ -1207,6 +1207,10 @@ exit:
   stage->state = ncclIbCommStateStart;
   return ret;
 fail:
+  if (comm && comm->devs[0].flagFlushSrcMr != nullptr) {
+    (void)wrap_ibv_dereg_mr(comm->devs[0].flagFlushSrcMr);
+    comm->devs[0].flagFlushSrcMr = nullptr;
+  }
   free(comm);
   goto exit;
 }
@@ -1524,7 +1528,7 @@ uint64_t ncclIbGetGpuFlushFlagSeq(void* recvComm) {
 static ncclResult_t ncclIbFreeFlagFlush(struct ncclIbRecvComm* rComm) {
   if (rComm->flagFlushMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(rComm->flagFlushMr));
   rComm->flagFlushMr = nullptr;
-  if (rComm->flagFlushDmabufFd > 0) close(rComm->flagFlushDmabufFd);
+  if (rComm->flagFlushDmabufFd >= 0) close(rComm->flagFlushDmabufFd);
   rComm->flagFlushDmabufFd = -1;
 #if defined(__HIP_PLATFORM_AMD__)
   if (rComm->flagFlushGpuMem != nullptr) CUDACHECK(hipFree((void*)rComm->flagFlushGpuMem));
@@ -2072,6 +2076,7 @@ exit:
   lComm->stage = NULL;
   return ret;
 fail:
+  if (rComm) (void)ncclIbFreeFlagFlush(rComm);
   free(rComm);
   goto exit;
 }

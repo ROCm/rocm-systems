@@ -162,6 +162,22 @@ protected:
         return skip ? why : std::string();
     }
 
+    std::string DisabledSkipReason() {
+        std::string why;
+        if (flagEnvEnabled()) why = "requires RCCL_IB_GDR_FLUSH_FLAG unset or 0";
+        else if (!gdrPtrSupport()) why = "no GDR backend (neither peermem nor dma-buf) on this device";
+        int skip = why.empty() ? 0 : 1;
+        MPI_Allreduce(MPI_IN_PLACE, &skip, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        if (skip && why.empty()) why = "peer rank cannot run the disabled flag path";
+        return skip ? why : std::string();
+    }
+
+    static bool AnyRankFailed() {
+        int failed = HasFailure() ? 1 : 0;
+        MPI_Allreduce(MPI_IN_PLACE, &failed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        return failed != 0;
+    }
+
     // Rank 0 reports whether the recv comm negotiated the flag; both ranks
     // receive the answer so they leave the test together.
     bool FlagNegotiated(const ConnectionPair& pair, uint64_t** flags) {
@@ -355,9 +371,9 @@ TEST_F(GdrFlushFlagTest, Negotiated_FlagsZeroedAndHintDefaultsOff) {
 TEST_F(GdrFlushFlagTest, Disabled_NoFlagAndHintIgnored) {
     ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit));
-    if (flagEnvEnabled()) GTEST_SKIP() << "requires RCCL_IB_GDR_FLUSH_FLAG unset or 0";
     AssertInitAndGetDevices(nullptr);
-    if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
+    const std::string why = DisabledSkipReason();
+    if (!why.empty()) GTEST_SKIP() << why;
 
     const int rank = MPIEnvironment::world_rank;
     ConnectionPair pair;
@@ -431,7 +447,8 @@ TEST_F(GdrFlushFlagTest, PerRequestGating_RandomHintsAndSizes) {
     const int kIters = 300;
     std::vector<uint64_t> lastSeq(configuredQps(), 0);
     std::string err;
-    for (int it = 0; it < kIters && !HasFailure(); it++) {
+    for (int it = 0; it < kIters; it++) {
+        if (AnyRankFailed()) break;
         const bool flagged = rng() & 1;
         const size_t size = kSizes[rng() % (sizeof(kSizes) / sizeof(kSizes[0]))];
         const int seed = (it * 13 + 1) % 256;
@@ -443,9 +460,12 @@ TEST_F(GdrFlushFlagTest, PerRequestGating_RandomHintsAndSizes) {
             int tags[1] = {tag};
             void* mhs[1] = {mh};
             const uint64_t descBefore = ncclIbGetGpuFlushFlagSeq(pair.recvComm);
-            ASSERT_TRUE(PostFlaggedRecv(pair.recvComm, flagged, 1, bufs, sizes, tags, mhs, &req, &err)) << err;
+            const bool posted = PostFlaggedRecv(pair.recvComm, flagged, 1, bufs, sizes, tags, mhs, &req, &err);
+            EXPECT_TRUE(posted) << err;
             int got[1] = {0};
-            ASSERT_TRUE(TightWait(req, got, &err)) << "iter " << it << ": " << err;
+            const bool completed = posted && TightWait(req, got, &err);
+            EXPECT_TRUE(completed) << "iter " << it << ": " << err;
+            if (!completed) continue;
             EXPECT_EQ(got[0], (int)size) << "iter " << it;
             CheckCompletion(pair.recvComm, flags, snap, flagged, it, descBefore, "gating");
             if (flagged) {
@@ -458,12 +478,15 @@ TEST_F(GdrFlushFlagTest, PerRequestGating_RandomHintsAndSizes) {
             EXPECT_TRUE(VerifyPattern(buffer, size, seed, &err))
                 << "iter " << it << " flagged=" << flagged << " size=" << size << ": " << err;
         } else {
-            ASSERT_EQ(initializeBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed)), hipSuccess);
-            ASSERT_TRUE(TightSend(pair.sendComm, buffer, size, tag, mh, &req, &err)) << err;
-            ASSERT_TRUE(TightWait(req, nullptr, &err)) << err;
+            const bool initialized =
+                initializeBufferWithPattern<uint8_t>(buffer, size, makeBytePattern(seed)) == hipSuccess;
+            EXPECT_TRUE(initialized);
+            const bool posted = initialized && TightSend(pair.sendComm, buffer, size, tag, mh, &req, &err);
+            EXPECT_TRUE(posted) << err;
+            EXPECT_TRUE(posted && TightWait(req, nullptr, &err)) << err;
         }
     }
-    MPI_Barrier(MPI_COMM_WORLD);
+    (void)AnyRankFailed();
 }
 
 // Many outstanding multi-receives with mixed hints are posted before the
@@ -665,24 +688,38 @@ TEST_F(GdrFlushFlagTest, GpuObserver_PayloadVisibleOnceFlagSet) {
     const int count = expectedFlagCount();
     const int kIters = 120;
     std::string err;
-    for (int it = 0; it < kIters && !HasFailure(); it++) {
+    for (int it = 0; it < kIters; it++) {
+        if (AnyRankFailed()) break;
         const int b = it & 1;
         const size_t size = kSizes[it % (sizeof(kSizes) / sizeof(kSizes[0]))];
         const int seed = (it * 37 + 11) % 256;
         void* req = nullptr;
+        int setupFailed = 0;
         if (rank == 0) {
             *res = ObserverResult{0, ULLONG_MAX, 0};
             void* rb[1] = {bufs[b]};
             size_t rs[1] = {size};
             int rt[1] = {it};
             void* rh[1] = {mhs[b]};
-            ASSERT_TRUE(PostFlaggedRecv(pair.recvComm, true, 1, rb, rs, rt, rh, &req, &err)) << err;
-            hipLaunchKernelGGL(observeFlagsThenData, dim3(64), dim3(256), 0, stream, flags, expectedFirstQp(it), count,
-                               (uint64_t)it + 1, (const uint8_t*)bufs[b], size, seed, timeoutTicks, res);
-            ASSERT_EQ(hipGetLastError(), hipSuccess);
+            if (!PostFlaggedRecv(pair.recvComm, true, 1, rb, rs, rt, rh, &req, &err)) {
+                ADD_FAILURE() << err;
+                setupFailed = 1;
+            } else {
+                hipLaunchKernelGGL(observeFlagsThenData, dim3(64), dim3(256), 0, stream, flags, expectedFirstQp(it),
+                                   count, (uint64_t)it + 1, (const uint8_t*)bufs[b], size, seed, timeoutTicks, res);
+                if (hipGetLastError() != hipSuccess) {
+                    ADD_FAILURE() << "observer kernel launch failed";
+                    setupFailed = 1;
+                }
+            }
         } else {
-            ASSERT_EQ(initializeBufferWithPattern<uint8_t>(bufs[b], size, makeBytePattern(seed)), hipSuccess);
+            if (initializeBufferWithPattern<uint8_t>(bufs[b], size, makeBytePattern(seed)) != hipSuccess) {
+                ADD_FAILURE() << "send buffer initialization failed";
+                setupFailed = 1;
+            }
         }
+        MPI_Allreduce(MPI_IN_PLACE, &setupFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        if (setupFailed) break;
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0) {
             int got[1] = {0};
@@ -694,8 +731,9 @@ TEST_F(GdrFlushFlagTest, GpuObserver_PayloadVisibleOnceFlagSet) {
                 << ": GPU read stale payload after the flag, first bad byte " << res->firstBad;
             EXPECT_EQ(ncclIbGetGpuFlushFlagSeq(pair.recvComm), expectedDesc(it));
         } else {
-            ASSERT_TRUE(TightSend(pair.sendComm, bufs[b], size, it, mhs[b], &req, &err)) << err;
-            ASSERT_TRUE(TightWait(req, nullptr, &err)) << err;
+            const bool posted = TightSend(pair.sendComm, bufs[b], size, it, mhs[b], &req, &err);
+            EXPECT_TRUE(posted) << err;
+            EXPECT_TRUE(posted && TightWait(req, nullptr, &err)) << err;
         }
     }
     if (stream) (void)hipStreamDestroy(stream);
@@ -723,7 +761,8 @@ TEST_F(GdrFlushFlagTest, Lifecycle_ReconnectFreshStateNoLeaks) {
     size_t freeBefore = 0, totalMem = 0;
     constexpr int kCycles = 12;
     std::string err;
-    for (int cycle = 0; cycle <= kCycles && !HasFailure(); cycle++) {
+    for (int cycle = 0; cycle <= kCycles; cycle++) {
+        if (AnyRankFailed()) break;
         if (cycle == 1) {
             MPI_Barrier(MPI_COMM_WORLD);
             before = CaptureRdmaResources();

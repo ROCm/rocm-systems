@@ -171,16 +171,22 @@ TEST_F(GdrFlushFlagProtoSwitchMPITest, P2pAllToAll_Ll128SimpleSwitch_BackToBack)
     };
 
     std::vector<void*> sendBufs((size_t)kOps * nPeers, nullptr), recvBufs((size_t)kOps * nPeers, nullptr);
+    bool allocOk = true;
     for (size_t b = 0; b < sendBufs.size(); b++) {
-        ASSERT_EQ(hipMalloc(&sendBufs[b], maxSize), hipSuccess);
-        ASSERT_EQ(hipMalloc(&recvBufs[b], maxSize), hipSuccess);
+        allocOk &= hipMalloc(&sendBufs[b], maxSize) == hipSuccess;
+        allocOk &= hipMalloc(&recvBufs[b], maxSize) == hipSuccess;
     }
     auto freeAll = [&]() {
         for (size_t b = 0; b < sendBufs.size(); b++) {
-            (void)hipFree(sendBufs[b]);
-            (void)hipFree(recvBufs[b]);
+            if (sendBufs[b]) (void)hipFree(sendBufs[b]);
+            if (recvBufs[b]) (void)hipFree(recvBufs[b]);
         }
     };
+    if (!AllOk(allocOk)) {
+        ADD_FAILURE() << "hipMalloc failed on at least one rank";
+        freeAll();
+        return;
+    }
 
     std::vector<uint8_t> host(maxSize);
     bool dataOk = true;
@@ -270,13 +276,28 @@ TEST_F(GdrFlushFlagProtoSwitchMPITest, Collectives_LatencyToFlaggedSimpleSwitch_
     float *arSmallSend = nullptr, *arSmallRecv = nullptr, *arLargeSend = nullptr, *arLargeRecv = nullptr,
           *rsRecv = nullptr;
     void *p2pSend = nullptr, *p2pRecv = nullptr;
-    ASSERT_EQ(hipMalloc((void**)&arSmallSend, 65536 * sizeof(float)), hipSuccess);
-    ASSERT_EQ(hipMalloc((void**)&arSmallRecv, 4 * 65536 * sizeof(float)), hipSuccess);
-    ASSERT_EQ(hipMalloc((void**)&arLargeSend, kLargeCount * sizeof(float)), hipSuccess);
-    ASSERT_EQ(hipMalloc((void**)&arLargeRecv, kLargeCount * sizeof(float)), hipSuccess);
-    ASSERT_EQ(hipMalloc((void**)&rsRecv, rsCount * sizeof(float)), hipSuccess);
-    ASSERT_EQ(hipMalloc(&p2pSend, kP2pBytes), hipSuccess);
-    ASSERT_EQ(hipMalloc(&p2pRecv, 2 * kP2pBytes), hipSuccess);
+    bool allocOk = true;
+    allocOk &= hipMalloc((void**)&arSmallSend, 65536 * sizeof(float)) == hipSuccess;
+    allocOk &= hipMalloc((void**)&arSmallRecv, 4 * 65536 * sizeof(float)) == hipSuccess;
+    allocOk &= hipMalloc((void**)&arLargeSend, kLargeCount * sizeof(float)) == hipSuccess;
+    allocOk &= hipMalloc((void**)&arLargeRecv, kLargeCount * sizeof(float)) == hipSuccess;
+    allocOk &= hipMalloc((void**)&rsRecv, rsCount * sizeof(float)) == hipSuccess;
+    allocOk &= hipMalloc(&p2pSend, kP2pBytes) == hipSuccess;
+    allocOk &= hipMalloc(&p2pRecv, 2 * kP2pBytes) == hipSuccess;
+    auto freeAll = [&]() {
+        if (arSmallSend) (void)hipFree(arSmallSend);
+        if (arSmallRecv) (void)hipFree(arSmallRecv);
+        if (arLargeSend) (void)hipFree(arLargeSend);
+        if (arLargeRecv) (void)hipFree(arLargeRecv);
+        if (rsRecv) (void)hipFree(rsRecv);
+        if (p2pSend) (void)hipFree(p2pSend);
+        if (p2pRecv) (void)hipFree(p2pRecv);
+    };
+    if (!AllOk(allocOk)) {
+        ADD_FAILURE() << "hipMalloc failed on at least one rank";
+        freeAll();
+        return;
+    }
 
     auto inVal = [&](int r, size_t i, int iter) { return (float)((r + 1) * (int)((i + iter) % 13 + 1)); };
     auto sumVal = [&](size_t i, int iter) {
@@ -354,13 +375,7 @@ TEST_F(GdrFlushFlagProtoSwitchMPITest, Collectives_LatencyToFlaggedSimpleSwitch_
     EXPECT_GT(totals[0], 0) << "no NET recv connection negotiated the flag";
     EXPECT_GT(totals[1], 0) << "SIMPLE steps never published a flag descriptor";
 
-    (void)hipFree(arSmallSend);
-    (void)hipFree(arSmallRecv);
-    (void)hipFree(arLargeSend);
-    (void)hipFree(arLargeRecv);
-    (void)hipFree(rsRecv);
-    (void)hipFree(p2pSend);
-    (void)hipFree(p2pRecv);
+    freeAll();
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
