@@ -208,27 +208,35 @@ public:
     // LLVM AMDHSA's .amdhsa_kernel convention, already required by shared
     // metadata admission; arbitrary descriptor symbol naming is not admitted.
     const std::string symbol = module->facts->entry.name + ".kd";
+    hsa_executable_symbol_t resolved_symbol{};
+    uint64_t kernel_object = 0;
     status = core_.hsa_executable_get_symbol_by_name_fn(executable, symbol.c_str(), &module->agent,
-                                                        &module->symbol);
+                                                        &resolved_symbol);
     uint32_t kernarg = 0, group = 0, private_bytes = 0;
     if (status == HSA_STATUS_SUCCESS)
       status = core_.hsa_executable_symbol_get_info_fn(
-          module->symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &module->kernel_object);
+          resolved_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object);
     if (status == HSA_STATUS_SUCCESS)
       status = core_.hsa_executable_symbol_get_info_fn(
-          module->symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &kernarg);
+          resolved_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &kernarg);
     if (status == HSA_STATUS_SUCCESS)
       status = core_.hsa_executable_symbol_get_info_fn(
-          module->symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &group);
+          resolved_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &group);
     if (status == HSA_STATUS_SUCCESS)
       status = core_.hsa_executable_symbol_get_info_fn(
-          module->symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &private_bytes);
+          resolved_symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &private_bytes);
     const auto layout = plan_launch(*module->facts, {{1, 1, 1}, {1, 1, 1}}, group, private_bytes);
     std::lock_guard lock(mutex_);
-    if (status != HSA_STATUS_SUCCESS || layout.failed() || module->kernel_object == 0 ||
+    // Symbol queries run outside the lock. Finish or executable destruction may
+    // have revoked this admission before the binding and workers are installed.
+    if (closed_ || module_ != module)
+      return reject_locked("freeze admission ended during HSA symbol queries");
+    if (status != HSA_STATUS_SUCCESS || layout.failed() || kernel_object == 0 ||
         kernarg != layout.value().wrapper_bytes ||
         group != module->facts->entry.prepared_group_bytes)
       return reject_locked("loaded HSA symbol/resources do not match prepared facts");
+    module->symbol = resolved_symbol;
+    module->kernel_object = kernel_object;
     if (!started_ && !start_locked(module->facts))
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     return HSA_STATUS_SUCCESS;
@@ -610,11 +618,17 @@ private:
     return true;
   }
 
-  void reject_packet_locked(const hsa_kernel_dispatch_packet_t &packet, std::string_view message) {
-    fail_locked(RuntimeStatus::InvalidFacts, message);
+  void fail_dispatch_completion_locked(const hsa_kernel_dispatch_packet_t &packet) {
+    if ((packet.header & 0xff) != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+      return;
     const auto found = signals_.find(packet.completion_signal.handle);
     if (found != signals_.end() && !found->second.pending)
       core_.hsa_signal_store_screlease_fn(packet.completion_signal, -1);
+  }
+
+  void reject_packet_locked(const hsa_kernel_dispatch_packet_t &packet, std::string_view message) {
+    fail_locked(RuntimeStatus::InvalidFacts, message);
+    fail_dispatch_completion_locked(packet);
   }
 
   void release_unsubmitted_locked(Launch &launch) {
@@ -639,6 +653,16 @@ private:
       writer(packets, count);
       return;
     }
+    if (count != 1 || type != HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+      std::lock_guard lock(mutex_);
+      fail_locked(RuntimeStatus::InvalidFacts, "only individual kernel dispatches are admitted");
+      const auto *bytes = static_cast<const uint8_t *>(packets);
+      for (uint64_t index = 0; index < count; ++index) {
+        std::memcpy(&packet, bytes + index * sizeof(packet), sizeof(packet));
+        fail_dispatch_completion_locked(packet);
+      }
+      return;
+    }
     auto launch = std::make_shared<Launch>();
     {
       std::lock_guard lock(mutex_);
@@ -651,8 +675,7 @@ private:
       // Admit the binding, nonoverlap, dedicated signal, and bounded launch
       // before allocating resources or exposing any packet to HSA.
       const auto signal = signals_.find(packet.completion_signal.handle);
-      if (count != 1 || type != HSA_PACKET_TYPE_KERNEL_DISPATCH || packet.setup != 1 || closed_ ||
-          status_ != RuntimeStatus::Success ||
+      if (packet.setup != 1 || closed_ || status_ != RuntimeStatus::Success ||
           statistics_.submitted >= CaptureLimits{}.executions || !module_ ||
           packet.kernel_object != module_->kernel_object || active_gpu_ ||
           signal == signals_.end() || !signal->second.dedicated || signal->second.used ||

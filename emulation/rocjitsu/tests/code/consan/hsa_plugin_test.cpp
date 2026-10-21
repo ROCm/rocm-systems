@@ -227,7 +227,9 @@ protected:
     return core_.hsa_signal_create_fn(1, 0, nullptr, &signal_) == HSA_STATUS_SUCCESS;
   }
 
-  void submit(uint32_t grid = 64, const void *arguments = nullptr, uint16_t workgroup = 64) {
+  hsa_kernel_dispatch_packet_t dispatch_packet(hsa_signal_t completion, uint32_t grid = 64,
+                                               const void *arguments = nullptr,
+                                               uint16_t workgroup = 64) {
     hsa_kernel_dispatch_packet_t packet{};
     packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH | (1u << HSA_PACKET_HEADER_BARRIER);
     packet.setup = 1;
@@ -238,7 +240,13 @@ protected:
     packet.kernel_object = 0x123400;
     packet.group_segment_size = 8;
     packet.kernarg_address = const_cast<void *>(arguments ? arguments : arguments_.data());
-    packet.completion_signal = signal_;
+    packet.completion_signal = completion;
+    return packet;
+  }
+
+  void submit(uint32_t grid = 64, const void *arguments = nullptr, uint16_t workgroup = 64) {
+    const hsa_kernel_dispatch_packet_t packet =
+        dispatch_packet(signal_, grid, arguments, workgroup);
     ASSERT_NE(handler_, nullptr);
     handler_(&packet, 1, 0, handler_context_, packet_writer);
   }
@@ -361,6 +369,11 @@ protected:
   }
   static hsa_status_t symbol_info(hsa_executable_symbol_t, hsa_executable_symbol_info_t attribute,
                                   void *value) {
+    if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT &&
+        current_->resume_symbol_query_.valid()) {
+      current_->symbol_query_entered_.set_value();
+      current_->resume_symbol_query_.wait();
+    }
     if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT)
       *static_cast<uint64_t *>(value) = 0x123400;
     else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE)
@@ -455,6 +468,12 @@ protected:
     });
     return current_->signal_values_.at(signal.handle);
   }
+  static void barrier_writer(const void *packets, uint64_t count) {
+    ASSERT_EQ(count, 1u);
+    std::memcpy(&current_->published_, packets, sizeof(current_->published_));
+    ++current_->published_packets_;
+  }
+
   static void packet_writer(const void *packets, uint64_t count) {
     ASSERT_EQ(count, 1u);
     auto &state = *current_;
@@ -507,6 +526,8 @@ protected:
   hsa_kernel_dispatch_packet_t published_{};
   std::mutex fake_mutex_;
   std::condition_variable fake_condition_;
+  std::promise<void> symbol_query_entered_;
+  std::shared_future<void> resume_symbol_query_;
   std::map<uint64_t, hsa_signal_value_t> signal_values_;
   std::map<uint64_t, std::span<const uint8_t>> readers_;
   std::map<void *, size_t> allocations_;
@@ -550,7 +571,51 @@ protected:
         },
         ::testing::ExitedWithCode(86), "consan injected exception");
   }
+
+  void expect_interrupted_freeze(bool finish_during_query) {
+    // Keep a regression in worker teardown inside a subprocess: the original
+    // race destroys joinable threads and terminates during OnUnload.
+    ASSERT_EXIT(
+        {
+          std::set_terminate([] { std::_Exit(86); });
+          ::alarm(5);
+          if (core_.hsa_code_object_reader_create_from_memory_fn(original_.data(), original_.size(),
+                                                                 &reader_) != HSA_STATUS_SUCCESS ||
+              core_.hsa_executable_load_agent_code_object_fn({7}, {1}, reader_, nullptr, nullptr) !=
+                  HSA_STATUS_SUCCESS)
+            std::_Exit(81);
+          std::promise<void> resume;
+          resume_symbol_query_ = resume.get_future().share();
+          auto entered = symbol_query_entered_.get_future();
+          auto frozen = std::async(std::launch::async,
+                                   [&] { return core_.hsa_executable_freeze_fn({7}, nullptr); });
+          if (entered.wait_for(std::chrono::seconds(2)) != std::future_status::ready)
+            std::_Exit(82);
+          const bool interrupted = finish_during_query
+                                       ? finish_() != 0
+                                       : core_.hsa_executable_destroy_fn({7}) == HSA_STATUS_SUCCESS;
+          resume.set_value();
+          const hsa_status_t status = frozen.get();
+          if (!finish_during_query)
+            (void)finish_();
+          const bool no_capture =
+              std::filesystem::is_empty(directory_) && statistics_().submitted == 0;
+          unload_();
+          if (!interrupted || status != HSA_STATUS_ERROR_INVALID_ARGUMENT || !no_capture)
+            std::_Exit(83);
+          std::_Exit(0);
+        },
+        ::testing::ExitedWithCode(0), "");
+  }
 };
+
+TEST_F(ConSanHsaPluginDeathTest, FinishDuringFreezePreventsWorkerStartupAndUnloadsNormally) {
+  expect_interrupted_freeze(true);
+}
+
+TEST_F(ConSanHsaPluginDeathTest, DestroyDuringFreezeInvalidatesTheAdmittedModule) {
+  expect_interrupted_freeze(false);
+}
 
 TEST_F(ConSanHsaPluginDeathTest, HsaHookExceptionTerminatesInsteadOfReturningAStatus) {
   expect_termination([&] {
@@ -747,6 +812,89 @@ TEST_F(ConSanHsaPlugin, InvalidGeometryFailsBeforeAllocation) {
   EXPECT_EQ(allocation_calls_, 0u);
   EXPECT_EQ(load_signal(signal_), -1);
   EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, RejectedBatchNotifiesEveryDiscardedDispatch) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  hsa_signal_t second{};
+  ASSERT_EQ(core_.hsa_signal_create_fn(1, 0, nullptr, &second), HSA_STATUS_SUCCESS);
+  const std::array packets{dispatch_packet(signal_), dispatch_packet(second)};
+  handler_(packets.data(), packets.size(), 0, handler_context_, packet_writer);
+  EXPECT_EQ(load_signal(signal_), -1);
+  EXPECT_EQ(load_signal(second), -1);
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_EQ(allocation_calls_, 0u);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
+}
+
+TEST_F(ConSanHsaPlugin, RejectedBatchPreservesSignalsForAlreadyPendingWork) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  submit();
+  ASSERT_EQ(published_packets_, 1u);
+  hsa_signal_t second{};
+  ASSERT_EQ(core_.hsa_signal_create_fn(1, 0, nullptr, &second), HSA_STATUS_SUCCESS);
+  const std::array packets{dispatch_packet(signal_), dispatch_packet(second)};
+  handler_(packets.data(), packets.size(), 0, handler_context_, packet_writer);
+  EXPECT_EQ(load_signal(signal_), 1);
+  EXPECT_EQ(load_signal(second), -1);
+  EXPECT_EQ(published_packets_, 1u);
+  EXPECT_EQ(statistics_().submitted, 1u);
+  EXPECT_EQ(statistics_().forwarded, 0u);
+  store_signal(published_.completion_signal, 0);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  EXPECT_EQ(statistics_().forwarded, 1u);
+  EXPECT_EQ(forwarding_calls_, 1u);
+}
+
+TEST_F(ConSanHsaPlugin, RejectedBatchDoesNotTreatBarrierCompletionAsDispatchCompletion) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  hsa_signal_t second{};
+  ASSERT_EQ(core_.hsa_signal_create_fn(1, 0, nullptr, &second), HSA_STATUS_SUCCESS);
+  std::array packets{dispatch_packet(signal_), dispatch_packet(second)};
+  packets[0].header = HSA_PACKET_TYPE_BARRIER_AND;
+  handler_(packets.data(), packets.size(), 0, handler_context_, packet_writer);
+  EXPECT_EQ(load_signal(signal_), 1);
+  EXPECT_EQ(load_signal(second), -1);
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, RejectedNonDispatchPacketDoesNotModifyATrackedSignal) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  hsa_kernel_dispatch_packet_t packet{};
+  packet.header = HSA_PACKET_TYPE_AGENT_DISPATCH;
+  packet.completion_signal = signal_;
+  handler_(&packet, 1, 0, handler_context_, packet_writer);
+  EXPECT_EQ(load_signal(signal_), 1);
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_NE(finish_(), 0);
+}
+
+TEST_F(ConSanHsaPlugin, IndividualBarriersStillPassThroughWithoutDispatchAdmission) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  hsa_barrier_and_packet_t packet{};
+  packet.completion_signal = signal_;
+  for (const uint16_t type : {HSA_PACKET_TYPE_BARRIER_AND, HSA_PACKET_TYPE_BARRIER_OR}) {
+    packet.header = type;
+    handler_(&packet, 1, 0, handler_context_, barrier_writer);
+    EXPECT_EQ(published_.header, type);
+    EXPECT_EQ(published_.completion_signal.handle, signal_.handle);
+  }
+  EXPECT_EQ(published_packets_, 2u);
+  EXPECT_EQ(load_signal(signal_), 1);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_EQ(allocation_calls_, 0u);
+  EXPECT_EQ(finish_(), 0);
 }
 
 TEST_F(ConSanHsaPlugin, ShortOriginalArgumentAllocationFailsBeforePublication) {
