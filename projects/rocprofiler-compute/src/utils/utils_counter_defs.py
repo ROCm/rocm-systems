@@ -225,37 +225,30 @@ def accum_base_counter(counter: str) -> Optional[str]:
 def pmc_slot_cost(counter: str, present: Optional[Collection[str]] = None) -> int:
     """Perfmon register slots charged when adding ``counter`` to a bucket.
 
-    Named ``*_ACCUM`` counters are ``accumulate(BASE, HIGH_RES)`` metrics and
-    need two registers (BASE + HIGH_RES accum) when alone. If ``BASE`` is
-    already in ``present``, only the HIGH_RES slot is charged (+1). Conversely,
-    adding ``BASE`` when ``BASE_ACCUM`` is already present charges 0 (BASE was
-    included in the ACCUM cost). All other PMCs cost 1.
+    Named ``*_ACCUM`` counters are ``accumulate(BASE, HIGH_RES)`` metrics.
+    aqlprofile programs an extra register for HIGH_RES, so an ACCUM always
+    costs 2. A named BASE next to its ACCUM costs 1, so the pair costs 3 and
+    cannot fill an 8-deep SQ bucket with six other SQ counters. That headroom
+    is required on ROCm 10.1.0; packing BASE+ACCUM into a full SQ bucket
+    returns AQLProfile 4096. All other PMCs cost 1.
 
     For an order-independent total over a finished set, use
-    ``pmc_bucket_slot_cost``.
+    ``pmc_bucket_slot_cost``. ``present`` is kept for call-site
+    compatibility; ACCUM cost no longer depends on it.
     """
+    _ = present
     name = _pmc_bare_name(counter)
-    present_names = {_pmc_bare_name(p) for p in present} if present else set()
-
-    base = accum_base_counter(name)
-    if base is not None:
-        return 1 if base in present_names else 2
-
-    if f"{name}{_ACCUM_SUFFIX}" in present_names:
-        return 0
+    if accum_base_counter(name) is not None:
+        return 2
     return 1
 
 
 def pmc_bucket_slot_cost(counters: Collection[str]) -> int:
     """Order-independent slot total for a set of PMC names in one block bucket.
 
-    Equivalent to ``len(names) +`` number of ``*_ACCUM`` whose BASE is not also
-    in the set (each such ACCUM still needs its BASE register).
+    Equivalent to ``len(names) +`` number of ``*_ACCUM`` names (each needs the
+    extra HIGH_RES register beyond the named PMC).
     """
     names = {_pmc_bare_name(c) for c in counters}
-    missing_base = 0
-    for name in names:
-        base = accum_base_counter(name)
-        if base is not None and base not in names:
-            missing_base += 1
-    return len(names) + missing_base
+    accum_extra = sum(1 for name in names if accum_base_counter(name) is not None)
+    return len(names) + accum_extra

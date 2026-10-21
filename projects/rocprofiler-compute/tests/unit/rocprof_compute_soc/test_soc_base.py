@@ -366,19 +366,19 @@ def test_counter_file_accum_costs_two_slots(perfmon_config):
     assert cf.blocks["SQ"].avail == perfmon_config["SQ"] - 2
 
 
-def test_counter_file_accum_shares_base_slot(perfmon_config):
-    """BASE + BASE_ACCUM together still cost 2, order-independent."""
+def test_counter_file_accum_pair_costs_three_slots(perfmon_config):
+    """BASE + BASE_ACCUM together cost 3, order-independent."""
     forward = CounterFile("fwd", perfmon_config)
     assert forward.add("SQ_INST_LEVEL_SMEM") is True
     assert forward.blocks["SQ"].avail == perfmon_config["SQ"] - 1
     assert forward.add("SQ_INST_LEVEL_SMEM_ACCUM") is True
-    assert forward.blocks["SQ"].avail == perfmon_config["SQ"] - 2
+    assert forward.blocks["SQ"].avail == perfmon_config["SQ"] - 3
 
     reverse = CounterFile("rev", perfmon_config)
     assert reverse.add("SQ_INST_LEVEL_SMEM_ACCUM") is True
     assert reverse.blocks["SQ"].avail == perfmon_config["SQ"] - 2
     assert reverse.add("SQ_INST_LEVEL_SMEM") is True
-    assert reverse.blocks["SQ"].avail == perfmon_config["SQ"] - 2
+    assert reverse.blocks["SQ"].avail == perfmon_config["SQ"] - 3
 
 
 def test_limited_set_add_respects_explicit_cost():
