@@ -211,16 +211,15 @@ TEST(Collector, IbHw_LookupOrder) {
   EXPECT_EQ(out, (std::map<std::string, uint64_t>{{"a", 1}, {"b", 3}, {"c", 5}, {"d", 7}}));
 }
 
-TEST(Collector, Delta_48BitWrap) {
+TEST(Collector, Delta_DecreaseIsNA) {
   CounterDescriptor d{"rx_cnp_pkts", COUNTER_SRC_IB_HW, false, ""};
   uint64_t delta = 0;
-  // A bnxt_re 48-bit counter wrapped mid-run (values seen on hardware).
-  EXPECT_TRUE(NetCounterComputeDelta(Snap({{"rx_cnp_pkts", 281424878623392ULL}}, 0),
-                                     Snap({{"rx_cnp_pkts", 10669293278ULL}}, 1), d, &delta));
-  EXPECT_EQ(delta, 60767380542ULL);
-  // A decrease from above 2^48 cannot be a 48-bit wrap: N/A, not a huge value.
-  EXPECT_FALSE(NetCounterComputeDelta(Snap({{"rx_cnp_pkts", (1ULL << 48) + 10}}, 0),
+  // A wrap (32 or 48 bits) or a reset: N/A, not a huge value.
+  EXPECT_FALSE(NetCounterComputeDelta(Snap({{"rx_cnp_pkts", 4000000000ULL}}, 0),
                                       Snap({{"rx_cnp_pkts", 5}}, 1), d, &delta));
+  // Values from a real bnxt_re rx_bytes wrap.
+  EXPECT_FALSE(NetCounterComputeDelta(Snap({{"rx_cnp_pkts", 281424878623392ULL}}, 0),
+                                      Snap({{"rx_cnp_pkts", 10669293278ULL}}, 1), d, &delta));
   CounterDescriptor p{"pfc_rx_transitions", COUNTER_SRC_ETHTOOL, true, "", "pfc_pri*_rx_transitions"};
   EXPECT_FALSE(NetCounterComputeDelta(Snap({{"pfc_pri3_rx_transitions", (1ULL << 50)}}, 0),
                                       Snap({{"pfc_pri3_rx_transitions", 1}}, 1), p, &delta));
