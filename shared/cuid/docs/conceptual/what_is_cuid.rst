@@ -253,7 +253,7 @@ The library packs a 32-octet structure ``S`` for the component and computes ``HM
      - Segment high
      - ``segment >> 16`` for a PCIe function, so a VMD domain such as ``10000`` stays apart from domain ``0000``; 0 otherwise.
 
-There is one temporary CUID per CPU package, per PCIe function and for the platform. A CPU whose vendor is neither ``AuthenticAMD`` nor ``GenuineIntel`` has none. Any input that cannot be read is an error, never a zero.
+There is one temporary CUID per CPU package, per PCIe function and for the platform. A CPU whose vendor is neither ``AuthenticAMD`` nor ``GenuineIntel`` has none. Any input that cannot be read is an error, never a zero: that component has no CUID, and every other component is still listed.
 
 A temporary CUID is node-local: it names a component only on the installation whose machine-id produced it, and only while the component stays at the same PCIe address or socket. It changes when the machine-id changes or the component moves, and a same-model replacement in the same slot gets the same value.
 
@@ -271,7 +271,7 @@ GPU partitions
 
 A GPU split into ``n >= 2`` compute partitions has one component per partition beside the whole GPU. Partition ``k`` (``0 <= k < n``, the partition's xcp id) has UnitID ``n*(n-1)/2 + 1 + k``: DPX 2 and 3, TPX 4 to 6, QPX 7 to 10, CPX on 6 XCCs 16 to 21, CPX on 8 XCCs 29 to 36. The whole GPU has UnitID 0, and a GPU in SPX is the whole GPU alone, with no separate partition. A partition uses its parent's PCIe address and IDs.
 
-The library reads a partition's UnitID from its ``cuid_unit_id`` where amdgpu publishes one. Otherwise it reads the KFD topology under ``/sys/class/kfd/kfd/topology/nodes``, which any user can read: the node whose ``drm_render_minor`` is the partition's render node gives the parent as ``domain`` and ``location_id & ~7``, and ``k = location_id & 7``; ``n`` is the number of GPU nodes with that parent, and their indices must be exactly ``0`` to ``n-1``. A partition whose UnitID cannot be determined, for example because KFD is not loaded, has no CUID.
+The library reads a partition's UnitID from its ``cuid_unit_id`` where amdgpu publishes one. Otherwise it reads the KFD topology under ``/sys/class/kfd/kfd/topology/nodes``: the node whose ``drm_render_minor`` is the partition's render node gives the parent as ``domain`` and ``location_id & ~7``, and ``k = location_id & 7``; ``n`` is the number of GPU nodes with that parent, and their indices must be exactly ``0`` to ``n-1``. ``n`` must also agree with the parent's ``current_compute_partition`` (DPX 2, TPX 3, QPX 4; CPX any ``n >= 2``). KFD hides the nodes of GPUs outside the caller's device cgroup, so in a container given only some of a GPU's partitions the count is unknowable; when any node cannot be read, no UnitID comes from KFD. A partition whose UnitID cannot be determined, for example because KFD is not loaded or some of its nodes are hidden, has no CUID.
 
 NIC functions
 =============

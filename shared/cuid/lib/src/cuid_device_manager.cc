@@ -32,18 +32,11 @@ amdcuid_status_t CuidDeviceManager::get_devices_on_system() {
   for (const auto& subsystem : subsystems) {
     std::vector<DevicePtr> found;
     const auto status = subsystem.discover(found);
-    // Absence of an entire subsystem is expected. A returned component whose
-    // identity cannot be constructed is handled separately by the strict index.
-    if (found.empty() &&
-        (status == AMDCUID_STATUS_SUCCESS || status == AMDCUID_STATUS_UNSUPPORTED ||
-         status == AMDCUID_STATUS_DEVICE_NOT_FOUND)) {
+    // A subsystem that cannot be read costs only its own components.
+    if (status != AMDCUID_STATUS_SUCCESS) {
       LOG(DEBUG, "CUID discovery: no " << subsystem.name << " components ("
                                        << amdcuid_status_to_string(status) << ")");
       continue;
-    }
-    if (status != AMDCUID_STATUS_SUCCESS) {
-      shutdown();
-      return status;
     }
     discovered_devices.insert(discovered_devices.end(), found.begin(), found.end());
   }
