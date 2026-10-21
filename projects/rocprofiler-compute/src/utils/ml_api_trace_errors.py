@@ -5,6 +5,26 @@ from typing import Optional
 
 import pandas as pd
 
+_UNMATCHED_KERNEL_NAME_PREVIEW = 10
+
+
+def _format_unmatched_kernel_message(unmatched_rows: pd.DataFrame) -> str:
+    count = len(unmatched_rows)
+    names: list[str] = []
+    if "Kernel_Name" in unmatched_rows.columns:
+        names = list(
+            dict.fromkeys(str(value) for value in unmatched_rows["Kernel_Name"])
+        )
+    preview = ", ".join(names[:_UNMATCHED_KERNEL_NAME_PREVIEW])
+    if len(names) > _UNMATCHED_KERNEL_NAME_PREVIEW:
+        return (
+            f"{count} unmatched dispatches; first "
+            f"{_UNMATCHED_KERNEL_NAME_PREVIEW} Kernel_Names: {preview}"
+        )
+    if preview:
+        return f"{count} unmatched dispatches; Kernel_Names: {preview}"
+    return f"{count} unmatched dispatches"
+
 
 class MlApiTraceError(Exception):
     """Base class for ML API trace analyze failures."""
@@ -173,24 +193,3 @@ class MarkerNotNestedError(MlApiTraceError):
             f"Operator_Name={operator_name} Thread_Id={thread_id} "
             f"Start_Timestamp={start_timestamp}"
         )
-
-
-_UNMATCHED_KERNEL_NAME_PREVIEW = 10
-
-
-def _format_unmatched_kernel_message(unmatched_rows: pd.DataFrame) -> str:
-    count = len(unmatched_rows)
-    names: list[str] = []
-    if "Kernel_Name" in unmatched_rows.columns:
-        names = list(
-            dict.fromkeys(str(value) for value in unmatched_rows["Kernel_Name"])
-        )
-    preview = ", ".join(names[:_UNMATCHED_KERNEL_NAME_PREVIEW])
-    if len(names) > _UNMATCHED_KERNEL_NAME_PREVIEW:
-        return (
-            f"{count} unmatched dispatches; first "
-            f"{_UNMATCHED_KERNEL_NAME_PREVIEW} Kernel_Names: {preview}"
-        )
-    if preview:
-        return f"{count} unmatched dispatches; Kernel_Names: {preview}"
-    return f"{count} unmatched dispatches"

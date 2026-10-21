@@ -20,6 +20,7 @@ from utils.utils_analysis import (
     copy_matched_operator_subtree,
     filter_forest_by_backends,
     get_matrix_ops_type,
+    iter_call_tree_paths,
     process_ml_api_trace_output,
     rollup_node_stats,
 )
@@ -73,26 +74,16 @@ def _collect_glob_matched_nodes(
     framewise_patterns: dict[str, list[str]],
 ) -> list[CallTreeNode]:
     """Return nodes whose backend matches and whose path or name glob-matches."""
-    matched_nodes: list[CallTreeNode] = []
-
-    def walk(node: CallTreeNode, ancestors: list[str]) -> None:
-        path = "/".join(ancestors + [node.name])
-        for backend, patterns in framewise_patterns.items():
-            if node.backend != backend:
-                continue
-            if any(
-                parser.torch_operator_pattern_matches(pattern, path)
-                or parser.torch_operator_pattern_matches(pattern, node.name)
-                for pattern in patterns
-            ):
-                matched_nodes.append(node)
-        for child in node.children:
-            walk(child, ancestors + [node.name])
-
-    for roots in forest.values():
-        for root in roots:
-            walk(root, [])
-    return matched_nodes
+    return [
+        node
+        for roots in forest.values()
+        for node, path in iter_call_tree_paths(roots)
+        if any(
+            parser.torch_operator_pattern_matches(pattern, "/".join(path))
+            or parser.torch_operator_pattern_matches(pattern, node.name)
+            for pattern in framewise_patterns.get(node.backend or "", [])
+        )
+    ]
 
 
 def _assign_kernel_ids_from_top(
