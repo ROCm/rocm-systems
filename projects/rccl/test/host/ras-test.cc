@@ -29,6 +29,7 @@
 #include "fakes/ras_message_test_support.h"
 #include "fakes/ras_registry_test_support.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/os_fakes.h"
 #include "fakes/param_redirect.h"
 #include "fakes/ras_fakes.h"
 #include "fakes/ras_param_fakes.h"
@@ -157,6 +158,8 @@ class RasMicrotest : public ::testing::Test {
     rasInitRefCount = 0;
     g_ncclSocketProgress = DefaultSocketProgress;
     ResetWholeFileSeams();
+    ResetSocketFakes();
+    ResetOsFakes();
   }
 };
 
@@ -454,7 +457,7 @@ void ResetWholeFileSeams() {
   g_socketGetFdResult = ncclSuccess;
   g_socketGetFdValue = 41;
   g_socketCloseCalls = g_socketPairCloseCalls = g_closeCalls = g_atexitCalls = g_pollCalls = 0;
-  ResetSocketFakes();
+  InstallSucceedingSocketFakes();
   g_ncclSocketInit = [](struct ncclSocket* sock, const union ncclSocketAddress* addr, uint64_t, enum ncclSocketType,
                         volatile uint32_t*, int, int) {
     if (g_socketInitResult == ncclSuccess && sock && addr) std::memcpy(&sock->addr, addr, sizeof(*addr));

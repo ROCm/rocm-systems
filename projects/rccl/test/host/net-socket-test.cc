@@ -119,7 +119,7 @@ ncclResult_t StreamClose(ncclSocket* sock, bool) {
 }
 
 void InstallSocketStreams() {
-  ResetSocketFakes();
+  InstallSucceedingSocketFakes();
   g_ncclSocketListen = StreamListen;
   g_ncclSocketConnect = StreamConnect;
   g_ncclSocketAccept = StreamAccept;
@@ -141,7 +141,7 @@ std::function<ncclResult_t(ncclSocket*, int*)> NotReadyOnCall(int n) {
       *running = 0;
       return ncclSuccess;
     }
-    return DefaultNcclSocketReady(sock, running);
+    return SucceedingSocketReady(sock, running);
   };
 }
 
@@ -442,7 +442,7 @@ TEST_F(NetSocketDevicesMicrotest, GetSpeed_CloseFails_ReturnsSystemError) {
 
 TEST_F(NetSocketDevicesMicrotest, CreateListener_DeviceOutOfRange_ReturnsInternalErrorWithoutSocket) {
   SetDevices(2);
-  ScopedHook init(g_ncclSocketInit, DefaultNcclSocketInit);
+  ScopedHook init(g_ncclSocketInit, SucceedingSocketInit);
   for (int dev : {-1, 2}) {
     SCOPED_TRACE(dev);
     ncclSocket sock{};
@@ -913,7 +913,7 @@ class NetSocketConnectMicrotest : public NetSocketMicrotest {
 
 TEST_F(NetSocketConnectMicrotest, Connect_DeviceOutOfRange_ReturnsInternalError) {
   MakeHandle(1, 1);
-  ScopedHook init(g_ncclSocketInit, DefaultNcclSocketInit);
+  ScopedHook init(g_ncclSocketInit, SucceedingSocketInit);
   void* sendComm = nullptr;
 
   EXPECT_EQ(Connect(&sendComm, -1), ncclInternalError);
@@ -938,7 +938,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_AllSocketsReady_SendsEachIndexAndRetur
     EXPECT_EQ(type, ncclSocketTypeNetSocket);
     EXPECT_EQ(abortFlag, nullptr);
     EXPECT_EQ(asyncFlag, 1);
-    return DefaultNcclSocketInit(sock, addr, magic, type, abortFlag, asyncFlag, retry);
+    return SucceedingSocketInit(sock, addr, magic, type, abortFlag, asyncFlag, retry);
   });
   void* sendComm = nullptr;
 
@@ -960,7 +960,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_AllSocketsReady_SendsEachIndexAndRetur
 
 TEST_F(NetSocketConnectMicrotest, Connect_NoDataSockets_ConnectsControlSocketOnly) {
   MakeHandle(0, 0);
-  ScopedHook init(g_ncclSocketInit, DefaultNcclSocketInit);
+  ScopedHook init(g_ncclSocketInit, SucceedingSocketInit);
   void* sendComm = nullptr;
 
   ASSERT_EQ(Connect(&sendComm), ncclSuccess);
@@ -973,7 +973,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_NoDataSockets_ConnectsControlSocketOnl
 
 TEST_F(NetSocketConnectMicrotest, Connect_FirstSocketNotReady_ResumesWithoutReconnecting) {
   MakeHandle(1, 1);
-  ScopedHook init(g_ncclSocketInit, DefaultNcclSocketInit);
+  ScopedHook init(g_ncclSocketInit, SucceedingSocketInit);
   ScopedHook ready(g_ncclSocketReady, NotReadyOnCall(0));
   void* sendComm = this;
 
@@ -989,7 +989,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_FirstSocketNotReady_ResumesWithoutReco
 
 TEST_F(NetSocketConnectMicrotest, Connect_LaterSocketNotReady_ResumesOnThatSocket) {
   MakeHandle(2, 1);
-  ScopedHook init(g_ncclSocketInit, DefaultNcclSocketInit);
+  ScopedHook init(g_ncclSocketInit, SucceedingSocketInit);
   ScopedHook ready(g_ncclSocketReady, NotReadyOnCall(1));
   void* sendComm = this;
 
@@ -1071,7 +1071,7 @@ TEST_F(NetSocketConnectMicrotest, Connect_SocketStepFails_PropagatesError) {
 TEST_F(NetSocketConnectMicrotest, Connect_GetDeviceFails_ReturnsCudaErrorBeforeConnecting) {
   MakeHandle(1, 1);
   ScopedHook device(g_hipGetDevice, [](int*) { return hipErrorNoDevice; });
-  ScopedHook init(g_ncclSocketInit, DefaultNcclSocketInit);
+  ScopedHook init(g_ncclSocketInit, SucceedingSocketInit);
   void* sendComm = this;
 
   EXPECT_EQ(Connect(&sendComm), ncclUnhandledCudaError);
@@ -1123,7 +1123,7 @@ TEST_F(NetSocketAcceptMicrotest, Accept_PeerSendsIndices_PlacesEachConnectionAnd
                                   ncclSocketType type, volatile uint32_t* abortFlag, int asyncFlag, int retry) {
     inits.push_back(sock);
     EXPECT_EQ(addr, nullptr);
-    return DefaultNcclSocketInit(sock, addr, magic, type, abortFlag, asyncFlag, retry);
+    return SucceedingSocketInit(sock, addr, magic, type, abortFlag, asyncFlag, retry);
   });
   std::vector<ncclSocket*> accepted;
   ScopedHook acceptHook(g_ncclSocketAccept, [&](ncclSocket* sock, ncclSocket* listenSock, bool retry) {
