@@ -874,7 +874,7 @@ typedef enum {
   RDC_HEALTH_WATCH_PCIE = 0x1,      //!< PCIe system watches
   RDC_HEALTH_WATCH_XGMI = 0x2,      //!< XGMI system watches
   RDC_HEALTH_WATCH_MEM = 0x4,       //!< Memory watches
-  RDC_HEALTH_WATCH_EEPROM = 0x8,    //!< EEPROM watches
+  RDC_HEALTH_WATCH_EEPROM = 0x8,    //!< EEPROM watches (cannot detect a corrupt EEPROM yet)
   RDC_HEALTH_WATCH_THERMAL = 0x10,  //!< Temperature watches
   RDC_HEALTH_WATCH_POWER = 0x20,    //!< Power watches
 } rdc_health_system_t;
@@ -909,7 +909,10 @@ typedef enum {
   RDC_FR_CLOCKS_THROTTLE_POWER = 1006,
   RDC_FR_XGMI_SINGLE_ERROR = 1007,
   RDC_FR_XGMI_MULTIPLE_ERROR = 1008,
-  RDC_FR_CORRUPT_EEPROM = 1009
+  RDC_FR_CORRUPT_EEPROM = 1009,
+  //! The health check of the component did not complete, for example because the GPU does not
+  //! support it; the message gives the RDC status that stopped it
+  RDC_FR_HEALTH_CHECK_NOT_RUN = 1010
 } rdc_health_error_code_t;
 
 /**
@@ -1773,6 +1776,8 @@ rdc_status_t rdc_health_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
  *
  *  @details If it has incidents.
  *  For each incident, check the component and error message.
+ *  A component whose check did not complete, for example because the GPU does not support it,
+ *  gets an incident with health ::RDC_HEALTH_RESULT_WARN and code ::RDC_FR_HEALTH_CHECK_NOT_RUN.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -1782,6 +1787,8 @@ rdc_status_t rdc_health_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  *  @retval ::RDC_ST_NOT_FOUND is returned if no health watches are set for the group.
+ *  @retval ::RDC_ST_MAX_LIMIT is returned if the incidents fill the response
+ *  (::HEALTH_MAX_ERROR_ITEMS); it holds the incidents found until then.
  */
 rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                               rdc_health_response_t* response);
@@ -1789,7 +1796,9 @@ rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_i
 /**
  *  @brief clear the health watch
  *
- *  @details For each group, clear the setting.
+ *  @details For each group, clear the setting. If the watch of its fields cannot stop, for
+ *  example because the group was destroyed, the setting is cleared anyway and that error is
+ *  returned.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
