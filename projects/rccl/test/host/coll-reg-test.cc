@@ -28,7 +28,9 @@
 #include "fakes/param_redirect.h"
 
 #include "fakes/transport_p2p_reg_seam.h"
+#include "fakes/transport_collnet_reg_seam.h"
 #include COLL_REG_CC_PATH
+#include "fakes/transport_collnet_reg_seam_undef.h"
 #include "fakes/transport_p2p_reg_seam_undef.h"
 
 namespace {
