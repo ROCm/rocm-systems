@@ -12,6 +12,13 @@ struct PreparedArtifact {
   std::vector<uint8_t> image;
 };
 
+/// @brief Check the shared prologue against ConSan's runtime wrapper offsets.
+/// @details The two layouts have independent payload declarations. Reject drift
+/// before publishing an artifact whose prologue would read a different slot.
+[[nodiscard]] Result validate_entry_kernarg_layout(const DbiEntryPrologue &prologue,
+                                                   const KernargExtensionLayout &kernarg,
+                                                   InputError &error);
+
 /// @brief Prepare one exact original image without runtime allocations or handles.
 [[nodiscard]] FailureOr<PreparedArtifact> prepare(std::span<const uint8_t> original,
                                                   const TargetProfile &target,

@@ -112,6 +112,8 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
       program.kernel.descriptor.kernarg_size, kContextPointerPayloads);
   if (!kernarg)
     return reject(error, "wrapper size overflow");
+  if (validate_entry_kernarg_layout(program.entry_plan.prologue, *kernarg, error).failed())
+    return Result::failure();
   std::string metadata_error;
   const MetadataResources resources{kernarg->wrapper_size, 8, plan.sgprs, plan.vgprs,
                                     program.maximum_workgroup_size};
@@ -167,6 +169,19 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
 }
 
 } // namespace
+
+Result validate_entry_kernarg_layout(const DbiEntryPrologue &prologue,
+                                     const KernargExtensionLayout &kernarg, InputError &error) {
+  if (kernarg.payload_offsets.size() != 1 ||
+      prologue.payload_byte_offset != kernarg.payload_offsets.front() ||
+      prologue.original_kernarg_pointer_offset != kernarg.original_kernarg_pointer_offset) {
+    error = {.code = InputErrorCode::UnsupportedEntry,
+             .text_offset = {},
+             .message = "entry prologue and ConSan kernarg wrapper offsets disagree"};
+    return Result::failure();
+  }
+  return Result::success();
+}
 
 Result validate_prepared(std::span<const uint8_t> original, const PreparedArtifact &artifact,
                          InputError &error) {
