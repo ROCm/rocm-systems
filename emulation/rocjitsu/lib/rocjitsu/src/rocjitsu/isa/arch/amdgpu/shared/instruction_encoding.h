@@ -10,6 +10,7 @@
 #include "rocjitsu/base/api.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -18,13 +19,6 @@
 namespace rocjitsu {
 class Operand;
 namespace amdgpu {
-
-/// Scalar MOVREL indexes in operand-sized words; the split form uses bytes of M0.
-constexpr uint32_t relative_scalar_selector(uint32_t selector, uint32_t width, uint32_t m0,
-                                            bool destination, bool split) {
-  const auto offset = (m0 >> (split && destination ? 8 : 0)) & 0xffu;
-  return selector + offset * (split ? 1 : width);
-}
 
 /// Add an M0-relative VGPR offset after resolving the encoded register bank.
 inline std::optional<uint32_t> relative_vgpr_index(std::optional<uint32_t> base, uint32_t offset,
@@ -69,6 +63,20 @@ constexpr unsigned ds_permute_lane(unsigned lane, uint32_t address, unsigned off
 }
 
 constexpr unsigned ds_swizzle_lane(unsigned lane, unsigned offset) {
+  const unsigned group = lane & ~31u;
+  const unsigned index = lane & 31u;
+  const unsigned mask = offset & 31u;
+  if (offset >= 0xe000) {
+    unsigned reversed = 0;
+    for (unsigned bit = 0; bit < 5; ++bit)
+      reversed |= ((index >> bit) & 1u) << (4u - bit);
+    return group | (reversed >> std::popcount(mask)) | (index & mask);
+  }
+  if (offset >= 0xc000) {
+    const unsigned distance = (offset >> 5) & 31u;
+    const unsigned rotated = offset & 0x400u ? index - distance : index + distance;
+    return group | (index & mask) | (rotated & ~mask & 31u);
+  }
   if (offset & 0x8000)
     return (lane & ~3u) | ((offset >> (2 * (lane & 3))) & 3);
   return (lane & ~31u) +
@@ -134,6 +142,8 @@ struct RegisterModifiers {
   bool src2_is_wave_mask = false;
   const Operand *wordwise_source0 = nullptr;
   const Operand *wordwise_source1 = nullptr;
+  /// Block load destination or store data, selected per DWORD by issue-time M0.
+  const Operand *block_data = nullptr;
   const Operand *buffer_resource = nullptr;
   const Operand *buffer_address = nullptr;
   const Operand *buffer_offset = nullptr;
@@ -219,12 +229,12 @@ enum class DppCtrlDialect {
 /// @brief Return true when a DPP control can read past a row or wave edge.
 ///
 /// These controls leave some destination lanes unwritten when BOUND_CTRL is
-/// zero. Rotates, mirrors, quad permutations, row-select, and row-xmask always
-/// map to valid lanes.
+/// zero. Rotates, mirrors, broadcasts, quad permutations, row-select, and
+/// row-xmask always map to valid lanes.
 inline bool dpp_ctrl_produces_oob(uint32_t dpp_ctrl) {
   return (dpp_ctrl >= ROW_SHL1 && dpp_ctrl <= ROW_SHL_MAX) ||
          (dpp_ctrl >= ROW_SHR1 && dpp_ctrl <= ROW_SHR_MAX) || dpp_ctrl == WF_SHL1 ||
-         dpp_ctrl == WF_SRL1 || dpp_ctrl == ROW_BCAST15 || dpp_ctrl == ROW_BCAST31;
+         dpp_ctrl == WF_SRL1;
 }
 
 /// @brief Return true for a documented DPP16 control encoding.

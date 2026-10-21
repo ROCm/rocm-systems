@@ -91,16 +91,17 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
-| `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance) |
+| `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance). Only a Debug build of the HIP runtime (no `NDEBUG`) reads it; a release build ignores it. Either way capture says on stderr whether it reads it, whatever the log level |
+| `HIP_HRR_HOST_SNAPSHOTS` | on | Record the pinned host memory each kernel reads before the launch, so replay can write it back. `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (default `64`) caps the allocation size. The archive then holds that host memory (see DESIGN.md, Pinned Host Snapshots) |
 
-On Linux the archive is readable only by the user who captured it (directories 0700, files 0600). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
+On Linux the archive is readable only by the user who captured it (directories 0700, files 0600). What an archive contains, which of it each capture mode records, and why replaying an archive means running its GPU code: [PRIVACY.md](PRIVACY.md). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
 
 ### `hrr-playback` CLI options
 
 | Option | Purpose |
 |--------|---------|
 | `--info` | Print archive summary and exit (no GPU) |
-| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
+| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index. Repair writes through a checked directory descriptor to a new, unpredictably named file and renames it into place; it never follows a symbolic link, and refuses an archive whose `events.bin`, `manifest.json` or `pid-*` directory is one (a link in the path you name on the command line is resolved), and keeps the permissions of the files it replaces. The reader still follows links when it reads. On Windows a link or directory junction (any reparse point) is refused by checking the file attributes, but the write is not made through a checked directory handle, so a link swapped in between the check and the write is not caught |
 | `--events` | With `--info`: print the full event log |
 | `--verbose` | Print each event as it is replayed |
 | `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events |
@@ -112,6 +113,13 @@ On Linux the archive is readable only by the user who captured it (directories 0
 | `--sync-after-event` | Sync after every event (slow; pinpoints faults/hangs) |
 | `--continue-on-error` | Report each HIP API error and keep replaying instead of aborting; for surveying which APIs fail, not for reproducing a fault |
 | `--sync-watchdog-ms N` | Abort if any device sync exceeds `N` ms (`0` = disabled) |
+| `--max-seq-waits N` | End the replay when an event's sequence number is still not reached after `N` waits with no progress and no HIP call in flight; a backstop, since a gap or duplicate in the recorded sequence is refused before the replay starts (default `5000000`, a few minutes) |
+| `--max-query-attempts N` | Stop retrying `hipEventQuery`/`hipStreamQuery` after `N` attempts that return `hipErrorNotReady` (default: no limit; the query waits for replayed work as a synchronize does) |
+| `--max-file-bytes N` | Refuse a blob or code object larger than `N` bytes (default `4294967296`, 4 GiB) |
+| `--max-threads N` | Refuse a `--multi-thread` replay of an archive that records more than `N` thread ids; checked before any thread is created (default `256`) |
+| `--max-events N` | Refuse an archive with more than `N` events; the reader stops loading at the first one past the cap. It counts events; each record's payload is separately limited in size (default `50000000`) |
+| `--max-host-bytes N` | End the replay when host memory held for the archive (blob and code-object caches, pinned and registered host buffers, graph operand buffers, D2H read-back buffers) would pass `N` bytes; a refusal ends the replay even under `--continue-on-error` (default `17179869184`, 16 GiB) |
+| `--max-wall-seconds S` | End the replay, with exit status 124, `S` seconds after the archive has loaded and replay starts (default `3600`; `0` = no limit; at most `31536000`, 365 days) |
 | `--trace-kernels` | One compact line before every kernel launch |
 | `--trace-sync` | Log sync begin/done around kernel syncs |
 | `--progress-kernels N` | Heartbeat every `N` launched kernels |
@@ -126,6 +134,27 @@ On Linux the archive is readable only by the user who captured it (directories 0
 | `--guard-min-bytes N` / `--guard-max-bytes N` | Size window for `--guard-blocks` |
 | `--guard-budget-mb N` | Cap guarded memory per launch (default `4096`) |
 | `--guard-exact-align` | Reproduce each guarded pointer's offset within an allocation granule bit for bit, at the cost of a larger unguarded tail |
+
+### Archive integers reach HIP only through translation
+
+An archive is untrusted input, so replay never hands the runtime a recorded
+integer as a pointer or an opaque handle unless it was translated through the
+replay's own maps. The playback generator enforces this: an API with a pointer
+or handle argument that has no translation is refused as unreplayable, by name,
+with `hipErrorNotSupported`. That covers texture references, external memory and
+semaphores, execution contexts, graphics resources and `hipLibraryGetGlobal`/
+`hipLibraryGetManaged`. `hipLinkAddFile` is refused because the path would be one
+the archive chose, `hipLinkCreate` is refused when a JIT option carries a
+pointer (a log buffer or a symbol table), and `hipStreamSetAttribute` and
+`hipGraphKernelNodeSetAttribute` translate the base pointer of an access policy
+window like `hipLaunchKernelExC` does. A 2D device copy whose source or destination
+is in no replay map is refused instead of run against the recorded address; a
+zero-extent or host-to-host 2D copy is a no-op. A fixed-size string in a record is
+copied into a bounded, NUL-terminated buffer before it is used.
+`tools/tests/test_gen_raw_slots.py` regenerates the handlers and fails if a raw
+cast of a recorded pointer or handle remains.
+`tools/tests/test_generated_files_current.py` fails if a checked-in generated
+source or the matrix expectations header is stale against the generator.
 
 ### External region annotations
 
@@ -207,7 +236,16 @@ capture.hrr/
 - **code_objects/** — code objects, content-addressed by hash (device images
   extracted by the runtime, for `hipModuleLoad` too); a launch
   records the hash so kernels sharing a name (Triton emits many `triton_`)
-  still resolve to the code object they came from
+  still resolve to the code object they came from. Their `.comment` and
+  `.debug*` sections, which hold the compiler build and the build paths of
+  debug information, are zeroed and retyped `SHT_NOBITS` before they are
+  stored, as are those of uncompressed fat binaries, so a debugger on a
+  replay sees no debug information. What the GPU loads is not touched:
+  kernel names stay, and so does a string a kernel keeps, such as the
+  source path a device `assert()` prints. Compressed (`CCOB`) fat binaries
+  and `hipLinkAddData` inputs are stored as they were passed.
+- **manifest.json** — counts, versions and device properties; the GPU's PCI
+  address, UUID and LUID are written blank
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
 
 Code objects read back from the runtime must start with `\x7fELF`,

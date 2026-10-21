@@ -16,6 +16,7 @@
 #include <vector>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <atomic>
 #include <mutex>
 #include <shared_mutex>
@@ -24,6 +25,8 @@
 
 #include "hrr/hrr_api_args.h"  // for HRR_API_COUNT, hrr_api_id_t
 #include "hrr_region_map.h"    // external region annotations (regions/*.hrrr)
+#include "hrr_replay_limits.h" // bounds on archive-driven waits and retries
+#include "hrr_jit_options.h"   // which JIT options carry a pointer
 
 // Whether a replayed H2D blob restore must be drained before subsequent
 // replay work. Draining is skipped while a stream graph capture is active,
@@ -282,7 +285,42 @@ struct PlaybackContext {
     // check this at the top of their event loop and exit immediately.
     // The spin-wait in dispatch_event also checks it to avoid deadlock when a
     // thread that was supposed to advance next_seq has already aborted.
-    std::atomic<bool> fatal_error{false};
+    // mutable: load_blob (const) sets it when a blob is refused.
+    mutable std::atomic<bool> fatal_error{false};
+
+    // Host memory held on behalf of the archive, against --max-host-bytes
+    // (hrr_replay_limits.h). A refused charge reports the site on stderr and
+    // returns false; the caller fails the API with hipErrorMemoryAllocation.
+    hrr::ByteBudget host_budget{hrr::kDefaultMaxHostBytes};
+    bool charge_host(uint64_t bytes, const char* what) {
+        if (host_budget.try_charge(bytes)) return true;
+        report_host_refusal(bytes, what);
+        return false;
+    }
+    // Say a charge was refused, and end the replay: the cap is a limit on the
+    // whole run, so --continue-on-error must not turn a refusal into a skipped
+    // event and carry on past it. Takes no charge, so a caller that already
+    // holds a refused ScopedCharge can report it without touching the budget.
+    void report_host_refusal(uint64_t bytes, const char* what) {
+        fprintf(stderr,
+                "[HRR] Fatal: %s needs %llu host bytes; %llu of the %llu-byte host "
+                "memory cap (--max-host-bytes) is already in use\n",
+                what, (unsigned long long)bytes, (unsigned long long)host_budget.used(),
+                (unsigned long long)host_budget.cap());
+        fatal_error.store(true, std::memory_order_release);
+    }
+
+    // Bounds on what the archive can make replay wait for (hrr_replay_limits.h).
+    // dispatch_event gives up on a sequence number that never becomes current
+    // after this many waits with no progress and no call in flight (a
+    // backstop: main refuses a gap or duplicate in the recorded sequence).
+    // A hipEventQuery/hipStreamQuery replay stops retrying hipErrorNotReady
+    // after max_query_attempts attempts (default: no limit).
+    uint64_t max_seq_waits      = hrr::kDefaultMaxSeqWaits;
+    // Calls in progress, ordered or not. A wait for the next turn does not
+    // count against max_seq_waits while this is non-zero.
+    std::atomic<int> calls_in_flight{0};
+    uint64_t max_query_attempts = hrr::kDefaultMaxQueryAttempts;
 
     // Stats — atomic for safe concurrent increment from replay threads.
     // total_kernel_ms is guarded by map_mutex (unique_lock) in the timing path.
@@ -302,6 +340,11 @@ struct PlaybackContext {
     // If d2h_attempted > 0 but d2h_pass == 0 && d2h_fail == 0, every check was
     // skipped — pointer translation or blob loading failed for all D2H events.
     std::atomic<size_t> d2h_attempted{0};
+    // Pinned host snapshot records written back, refused, and not applied
+    // because the launch was replayed into a graph capture.
+    std::atomic<size_t> host_snapshots_restored{0};
+    std::atomic<size_t> host_snapshots_refused{0};
+    std::atomic<size_t> host_snapshots_skipped{0};
 
     // Set true by note_d2h_fail when the running D2H-failure fraction crosses the
     // configured divergence-abort threshold. Distinguishes a clean "replay
@@ -445,7 +488,9 @@ struct PlaybackContext {
     }
 
     // IPC handles, recorded 64 bytes -> the 64 bytes this replay's exporter
-    // produced. An importer's handle names an export in the process that made
+    // produced. Filled only from legacy archives, whose handle field holds the
+    // handle bytes; capture now leaves it zero and such an export is not
+    // entered. An importer's handle names an export in the process that made
     // it, so replaying hipIpcOpenMemHandle with the recorded bytes opens
     // nothing; it has to be matched to the handle the replayed exporter
     // returned. Keyed by the recorded bytes because that is all the importing
@@ -508,6 +553,16 @@ struct PlaybackContext {
                        static_cast<ptrdiff_t>(rec - best_base);
         }
         return nullptr;
+    }
+
+    // Does v fall inside a pinned host allocation replay made?
+    bool in_pinned_host(uint64_t v) const {
+        std::shared_lock lk(map_mutex);
+        for (auto& [base, e] : alloc_map)
+            if ((e.kind == AllocKind::HostMalloc || e.kind == AllocKind::HostRegister) &&
+                v - base < e.size)
+                return true;
+        return false;
     }
 
     // Is this value an address from the capturing process — i.e. does it fall
@@ -721,11 +776,20 @@ struct PlaybackContext {
     void record_alloc(uint64_t rec, void* live, size_t sz,
                       AllocKind kind = AllocKind::Device) {
         std::unique_lock lk(map_mutex);
+        // A host entry still under this address is not given back here: its
+        // buffer is still live, so its charge stays with it. The host-allocating
+        // playback functions free a replaced entry first (free_replaced_host_alloc).
         alloc_map[rec] = {rec, live, sz, kind};
     }
     void remove_alloc(uint64_t rec) {
         std::unique_lock lk(map_mutex);
-        alloc_map.erase(rec);
+        auto it = alloc_map.find(rec);
+        if (it == alloc_map.end()) return;
+        // Host allocations were charged to host_budget before they were made.
+        if (it->second.kind == AllocKind::HostMalloc ||
+            it->second.kind == AllocKind::HostRegister)
+            host_budget.release(it->second.size);
+        alloc_map.erase(it);
     }
     // True if an allocation is already tracked under this recorded address.
     bool has_alloc(uint64_t rec) const {
@@ -747,7 +811,12 @@ struct PlaybackContext {
         if (!rec) return nullptr;
         std::unique_lock lk(map_mutex);
         auto& buf = host_landing_buffers[rec];
-        if (buf.size() < sz) buf.resize(sz);
+        if (buf.size() < sz) {
+            // Charge only the growth; a refusal leaves the buffer as it was.
+            if (!charge_host(sz - buf.size(), "graph host operand buffer"))
+                return nullptr;
+            buf.resize(sz);
+        }
         return buf.data();
     }
 
@@ -810,6 +879,9 @@ struct PlaybackContext {
     // Load a code object from archive_dir/code_objects/<hash>.hsaco
     const void* load_code_object(uint64_t hash_lo, uint64_t hash_hi,
                                  size_t* sz_out) const;
+    // Read `path` into blob_cache_ under `key`, charged to the host budget.
+    const void* cache_file(const std::string& key, const std::string& path,
+                           size_t* sz_out, const char* what) const;
     // Load a code object and cache the resulting hipModule_t
     hipModule_t load_module(uint64_t hash_lo, uint64_t hash_hi);
 
@@ -854,6 +926,14 @@ void hrr_place_hold(PlaybackContext& ctx, const std::vector<HrrVaRange>& plan);
 void hrr_place_reset(PlaybackContext& ctx);
 
 // ---------------------------------------------------------------------------
+// replay_query_until_success — call `once(arg)` until it stops returning
+// hipErrorNotReady, at most ctx.max_query_attempts times. Returns the first
+// result that is not hipErrorNotReady. If the bound is reached it names `api`,
+// sets ctx.fatal_error (so the replay ends even under --continue-on-error) and
+// returns hipErrorNotReady.
+hipError_t replay_query_until_success(PlaybackContext& ctx, const char* api,
+                                      hipError_t (*once)(void*), void* arg);
+
 // hrr_note_unreplayable — this API cannot be reproduced, and here is why.
 //
 // Called by the UNREPLAYABLE_PLAYBACK_APIS handlers before they return
@@ -924,6 +1004,50 @@ extern thread_local uint64_t hrr_dispatch_seq;
 // deadlocked kernel surfaces instead of hanging the replay forever. Normal
 // completion — including a genuine GPU fault — is returned to the caller.
 hipError_t hrr_watchdog_device_sync(PlaybackContext& ctx, const char* what);
+
+// One pinned host snapshot record of a kernel launch event: u64 ptr_handle,
+// u64 offset, u64 length, u64 hash_lo, u64 hash_hi, u8 direction (0).
+inline constexpr size_t kHostSnapRecordSize = 41;
+
+// Whether n whole records fit between p and the end of the event.
+inline bool hrr_host_snapshots_fit(const uint8_t* p, const uint8_t* end, uint16_t n) {
+    return p <= end && static_cast<size_t>(end - p) / kHostSnapRecordSize >= n;
+}
+
+// Where replay writes the blob of the record at `rec`, or nullptr with *why
+// saying why it refuses the record. The archive is input like any other: a
+// record must name the base of a pinned host allocation replay made, lie
+// inside it, and match its blob's length.
+inline void* hrr_host_snapshot_target(const PlaybackContext& ctx, const uint8_t* rec,
+                                      const void* blob, size_t blob_len,
+                                      const char** why) {
+    uint64_t ptr, off, len;
+    memcpy(&ptr, rec, 8);
+    memcpy(&off, rec + 8, 8);
+    memcpy(&len, rec + 16, 8);
+    void*  live = nullptr;
+    size_t size = 0;
+    {
+        std::shared_lock lk(ctx.map_mutex);
+        auto it = ctx.alloc_map.find(ptr);
+        if (it != ctx.alloc_map.end() && (it->second.kind == AllocKind::HostMalloc ||
+                                          it->second.kind == AllocKind::HostRegister)) {
+            live = it->second.live_ptr;
+            size = it->second.size;
+        }
+    }
+    if (rec[40] != 0)
+        *why = "has an unknown direction";
+    else if (!live)
+        *why = "names no pinned host allocation replay made";
+    else if (off > size || len > size - off)
+        *why = "lies outside its allocation";
+    else if (!blob || blob_len != len)
+        *why = "does not match its blob";
+    else
+        return static_cast<uint8_t*>(live) + off;
+    return nullptr;
+}
 
 // ---------------------------------------------------------------------------
 // Playback function signature and dispatch table

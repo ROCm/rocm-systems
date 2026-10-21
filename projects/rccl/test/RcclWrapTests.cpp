@@ -2438,7 +2438,7 @@ static void CreateCeAllReduceEligibleComm(
     mockComm->config.CTAPolicy   = NCCL_CTA_POLICY_ZERO;
 }
 
-// A count of float32 divisible by the 8 mock ranks; well within NCCL_CE_AR_MAX_MSG_BYTES.
+// A count of float32 divisible by the 8 mock ranks; well within RCCL_CE_AR_2SHOT_MAX_BYTES.
 static constexpr size_t kCeAllReduceCount = 4096;
 
 // rcclUseCeAr2Shot gates the Copy Engine AllReduce path. The CE kernels never
@@ -2900,9 +2900,9 @@ TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
 // test_runner/configs), and Rcclwrap.* is the only listed pattern this file
 // matches. A suite of their own would never be run.
 // ---------------------------------------------------------------------------
-// Which unroll factors are arch-pinned is a build property, not a constant:
-// BUILD_ALL_UNROLLS compiles every one for the targeted archs and pins none. Ask
-// the table for a pinned factor rather than hardcoding 32.
+// Which unroll factors are arch-pinned is a build property, not a constant.
+// BUILD_ALL_UNROLLS adds unroll 8 and 16 and leaves an existing pin in place.
+// Ask the table for a pinned factor rather than hardcoding 32.
 constexpr char kOtherArch[] = "gfx1200";
 
 TEST(Rcclwrap, UnrollFactor_RejectsArchRestrictedUnrollOnOtherArch)
@@ -3038,9 +3038,9 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
             // 4 ranks: totals.
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 32 * MiB);
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 128 * KiB);
-            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 16 * MiB);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 1 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), 128 * MiB);
-            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 2 * MiB);
+            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 64 * MiB);
             EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), 0ul);
             for (int nRanks : {8, 16, 32, 64}) {
                 comm->nRanks = nRanks;
@@ -3050,7 +3050,7 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), n * 256 * KiB) << nRanks;
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), std::min(n * 16 * MiB, 256 * MiB))
                     << nRanks;
-                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), n * 512 * KiB) << nRanks;
+                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
                 // Unscaled tiers keep their totals.
                 EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), 256 * MiB) << nRanks;
@@ -3099,6 +3099,28 @@ TEST(RcclDdaTierThresholds, ForceCeScratchPerArch)
     EXPECT_FALSE(rcclGetArchThresholds("gfx1250")->forceCeScratch);
     EXPECT_TRUE(rcclGetArchThresholds("gfx950")->forceCeScratch);
     EXPECT_TRUE(rcclGetArchThresholds("gfx942")->forceCeScratch);
+}
+
+// RCCL_TUNING_PARTITION_MODE: gfx1250 has its own DPX table, tuned on DPX nodes apart from
+// the SPX one; the other archs return one table for every mode.
+TEST(RcclDdaTierThresholds, TuningPartitionTablePerArch)
+{
+    const rcclArchThresholds* spx = rcclGetArchThresholds("gfx1250");
+    const rcclArchThresholds* dpx = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(spx, nullptr);
+    ASSERT_NE(dpx, nullptr);
+    EXPECT_EQ(spx, rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX));
+    EXPECT_NE(spx, dpx);
+    EXPECT_NE(0, std::memcmp(spx, dpx, sizeof(*spx))) << "the DPX table carries its own tuning";
+    // A few of the DPX-only entries, so a DPX value copied back over SPX shows up here.
+    EXPECT_EQ(dpx->agRingLL128MaxPerRank, (size_t)16 * 1024 * 1024);
+    EXPECT_EQ(dpx->arTreeLLMaxPerRank, (size_t)256 * 1024);
+    EXPECT_EQ(dpx->ddaLLMax[ncclFuncAlltoAll], (size_t)2 * 1024 * 1024);
+    EXPECT_NE(spx->agRingLL128MaxPerRank, dpx->agRingLL128MaxPerRank);
+    for (const char* arch : {"gfx950", "gfx942"})
+    {
+        EXPECT_EQ(rcclGetArchThresholds(arch), rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_DPX)) << arch;
+    }
 }
 
 
@@ -3263,6 +3285,8 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 // gfx1250, message just above the LL ceiling and within the LL128 band
 // (ddaLL128Max[A2A] = 1 MiB total):
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL128.
+// gfx1250, LL128 tier disabled (ddaLL128Max[A2A] = 0 after commit 363b197e):
+// a message just above the LL ceiling must fall to Direct p2p, not LL128.
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3271,22 +3295,20 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
     ASSERT_NE(tbl, nullptr);
     const size_t llMax    = tbl->ddaLLMax[ncclFuncAlltoAll];
     const size_t ll128Max = tbl->ddaLL128Max[ncclFuncAlltoAll];
-    ASSERT_GT(ll128Max, llMax) << "gfx1250 LL128 cap must exceed LL cap for AlltoAll";
+    ASSERT_GT(llMax,    0ul) << "gfx1250 must have a non-zero LL cap for AlltoAll";
+    ASSERT_GT(ll128Max, 0ul) << "gfx1250 must have a non-zero LL128 cap for AlltoAll";
 
-    // One 16*nRanks step above the LL ceiling, still within LL128.
-    // The alignment ensures each per-rank chunk is a multiple of 16 bytes
-    // (required by both LL128 and LL eligibility predicates).
+    // One alignment step above the LL ceiling falls into the LL128 band (llMax < msg <= ll128Max).
     const size_t align      = 16u * (size_t)comm->nRanks;
     const size_t totalBytes = ((llMax + align) / align) * align;
-    ASSERT_LE(totalBytes, ll128Max);
 
     rcclCollDecision dec{};
     ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
     EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
 }
 
-// gfx1250, message above all DDA caps (ddaVmmMax[A2A] = 0 disables VMM;
-// ddaLL128Max[A2A] = 1 MiB): anything above 1 MiB falls to Direct p2p.
+// gfx1250, message above all DDA caps (ddaVmmMax[A2A] = 0, ddaLL128Max[A2A] = 1 MiB):
+// anything above the LL128 ceiling falls to Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3296,7 +3318,9 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
     ASSERT_EQ(tbl->ddaVmmMax[ncclFuncAlltoAll], 0ul)
         << "gfx1250 VMM must be disabled for AlltoAll";
     const size_t ll128Max = tbl->ddaLL128Max[ncclFuncAlltoAll];
+    ASSERT_GT(ll128Max, 0ul) << "gfx1250 must have a non-zero LL128 cap for AlltoAll";
 
+    // One alignment step above the LL128 ceiling; VMM disabled, so this falls to Direct.
     const size_t align      = 16u * (size_t)comm->nRanks;
     const size_t totalBytes = ((ll128Max + align) / align) * align;
 
