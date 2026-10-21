@@ -4447,8 +4447,7 @@ amdsmi_status_t amdsmi_get_gpu_accelerator_partition_profile_config(
        << "\n | rsmi_dev_compute_partition_xcp_config_set(" << partition_type_str
        << ") Returning: " << smi_amdgpu_get_status_string(status, false)
        << "\n | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevSupportedXcpConfigs)
-       << "\n | Data: "
-       << "N/A";
+       << "\n | Data: " << "N/A";
     // std::cout << ss.str() << std::endl;
     LOG_DEBUG(ss);
 
@@ -6845,9 +6844,8 @@ amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf,
     return status;
   }
   std::ostringstream bdf_sstream;
-  bdf_sstream << __PRETTY_FUNCTION__ << " | [bdf] domain_number:"
-              << "bus_number:"
-              << "device_number."
+  bdf_sstream << __PRETTY_FUNCTION__
+              << " | [bdf] domain_number:" << "bus_number:" << "device_number."
               << "function_number = ";
   bdf_sstream << std::hex << std::setfill('0') << std::setw(4) << bdf.domain_number << ":";
   bdf_sstream << std::hex << std::setfill('0') << std::setw(2) << bdf.bus_number << ":";
@@ -6875,9 +6873,8 @@ amdsmi_status_t amdsmi_get_processor_handle_from_bdf(amdsmi_bdf_t bdf,
         return status;
       }
       amdsmi_bdf_t found_bdf = gpu_device->get_bdf();
-      bdf_sstream << __PRETTY_FUNCTION__ << " | [found_bdf] domain_number:"
-                  << "bus_number:"
-                  << "device_number."
+      bdf_sstream << __PRETTY_FUNCTION__
+                  << " | [found_bdf] domain_number:" << "bus_number:" << "device_number."
                   << "function_number = ";
       bdf_sstream << std::hex << std::setfill('0') << std::setw(4) << found_bdf.domain_number
                   << ":";

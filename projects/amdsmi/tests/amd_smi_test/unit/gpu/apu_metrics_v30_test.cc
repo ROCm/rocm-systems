@@ -1,8 +1,8 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Unit tests for the APU gpu_metrics v3.0 temperature fields that reach
-// amdsmi_apu_metrics_t. The table is filled in memory -- no GPU required.
+// Unit tests for the APU gpu_metrics v3.0 temperature and VCN activity fields that
+// reach amdsmi_apu_metrics_t. The table is filled in memory -- no GPU required.
 // Some APUs (e.g. Strix Halo) report 0 instead of the 0xFFFF sentinel for core
 // and skin temperatures that are not measured; those must surface as not
 // available rather than as 0 C.
@@ -77,4 +77,28 @@ TEST(GpuUnit, ApuMetricsV30NonZeroTemperatureIsKept) {
     EXPECT_EQ(metrics.apu_metrics->temperature_core[i], kNotAvailable) << "core " << i;
   }
   EXPECT_EQ(metrics.apu_metrics->temperature_skin, 3500);
+}
+
+TEST(GpuUnit, ApuMetricsV30VcnActivityIsWholePercent) {
+  ApuMetricsBase_v30_t apu_metrics;
+  auto* table = ResetV30Table(apu_metrics);
+  // Strix Halo during a 4K encode that DRM fdinfo measured at 58.6 % busy.
+  table->m_average_vcn_activity = 6067;
+  table->m_average_gfx_activity = 1;
+
+  const auto [status, metrics] = apu_metrics.copy_internal_to_external_metrics();
+  ASSERT_EQ(status, RSMI_STATUS_SUCCESS);
+  ASSERT_NE(metrics.apu_metrics, nullptr);
+  EXPECT_EQ(metrics.apu_metrics->average_vcn_activity, 61);
+  EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, 1);
+}
+
+TEST(GpuUnit, ApuMetricsV30VcnActivityNotAvailableIsKept) {
+  ApuMetricsBase_v30_t apu_metrics;
+  ResetV30Table(apu_metrics);
+
+  const auto [status, metrics] = apu_metrics.copy_internal_to_external_metrics();
+  ASSERT_EQ(status, RSMI_STATUS_SUCCESS);
+  ASSERT_NE(metrics.apu_metrics, nullptr);
+  EXPECT_EQ(metrics.apu_metrics->average_vcn_activity, kNotAvailable);
 }
