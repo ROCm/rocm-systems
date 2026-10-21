@@ -378,7 +378,7 @@ Source files are under `lib/rocjitsu/src/rocjitsu/vm/plugins/race_detector/`:
 ```
 race_detector/
 ├── plugin.h/.cpp            rocjitsu plugin adapter (translates hooks to core API)
-└── core/                    detection algorithm (does not depend on rocjitsu types)
+└── core/                    event tracking and lifetime
     ├── race_detector.h/.cpp  main detector: event allocation, validation, retirement
     ├── wave_race_state.h/.cpp  per-wave state: register tracking, waitcnt resolution
     ├── event_registry.h      append-only event store with prefix trimming
@@ -389,6 +389,9 @@ race_detector/
     └── profiler_interface.h  optional hook profiling
 ```
 
+Explicit wait decoding is shared with the core checker in
+`lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h`.
+
 ## Tests
 
 Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
@@ -397,6 +400,7 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   via `race_test_builder.h`, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
   multi-workgroup, and mixed counter scenarios.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
+- `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
   owns the gfx950 and gfx1151 end-to-end HIP programs. The
@@ -432,6 +436,15 @@ the corpus's `--case` option.
   asynchronous memory writes that overlap a pending load. Scalar-register WAW
   covers instruction writes and scalar loads that overlap pending scalar-memory
   destinations. LDS WAW is not currently reported.
+
+- **Embedded waits**: the plugin handles explicit wait instructions, including
+  `s_wait_idle` and RDNA4's compatibility `s_waitcnt`, but does not apply waits
+  embedded in other instructions. For example, RDNA4 `v_interp_p10_f32` with
+  `wait_exp:0` retires pending EXPCNT results in the core checker, while the
+  plugin leaves them pending and can report false register hazards. With
+  `wait_exp:7` (no wait), both keep those results pending. The shared
+  `wait_hazard_test.cpp` suite records this boundary. Supporting embedded waits
+  requires retirement before the instruction's register accesses.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently
