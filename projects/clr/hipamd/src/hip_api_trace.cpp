@@ -8,6 +8,7 @@
 #include <hip/amd_detail/hip_api_trace.hpp>
 
 #include "hip_internal.hpp"
+#include "platform/activity.hpp"
 
 #include <atomic>
 #include <cstdint>
@@ -1564,6 +1565,9 @@ template <typename Tp> void ToolsInit(Tp* table) {
   auto rocp_reg_status = rocprofiler_register_library_api_table(
       dispatch_table_info<Tp>::name, dispatch_table_info<Tp>::import_func,
       dispatch_table_info<Tp>::version, table_array.data(), table_array.size(), &lib_id);
+  if (rocp_reg_status == ROCP_REG_SUCCESS) {
+    amd::activity_prof::tool_attached.store(true, std::memory_order_relaxed);
+  }
 
   // TODO(jrmadsen): check environment variable? Does this need to compile on Windows?
   bool report_register_errors = false;
