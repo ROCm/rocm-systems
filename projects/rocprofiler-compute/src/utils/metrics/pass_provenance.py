@@ -34,13 +34,28 @@ _COUNTER_COL_RE = re.compile(r"raw_pmc_df\[['\"]([^'\"]+)['\"]\]")
 _AMMOLITE_VAR_RE = re.compile(r"ammolite__([A-Za-z0-9_]+)")
 _DIGIT_SPLIT_RE = re.compile(r"(\d+)")
 
+# Copied onto every dispatch row from the kernel launch. Not a Counter_Name,
+# so they never select or reject a perfmon pass.
+KERNEL_LAUNCH_COLUMNS = frozenset({
+    "Grid_Size",
+    "Workgroup_Size",
+    "LDS_Per_Workgroup",
+    "Scratch_Per_Workitem",
+    "Arch_VGPR",
+    "Accum_VGPR",
+    "SGPR",
+})
+
 # Wide-frame columns that are not hardware counters. $denom (per_kernel) and
 # per-second formulas name these, and they are never a Counter_Name in a pass.
-_NON_PMC_FRAME_COLUMNS = frozenset({
-    UNIT_COUNTER,
-    "Start_Timestamp",
-    "End_Timestamp",
-})
+_NON_PMC_FRAME_COLUMNS = (
+    frozenset({
+        UNIT_COUNTER,
+        "Start_Timestamp",
+        "End_Timestamp",
+    })
+    | KERNEL_LAUNCH_COLUMNS
+)
 
 _PASS_KEY_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 
@@ -227,8 +242,9 @@ def pass_scoped_builtins(layout: PassLayout, gpu_series: str) -> FrozenSet[str]:
 
 
 # Column names that are not perfmon counters. PassLayout records Counter_Name
-# only, so timestamps and the per-kernel unit must not decide the pass.
-_NON_PMC_BIND_NAMES = TIMESTAMP_COLUMNS | {UNIT_COUNTER}
+# only, so timestamps, the per-kernel unit, and kernel-launch fields must
+# not decide the pass.
+_NON_PMC_BIND_NAMES = TIMESTAMP_COLUMNS | {UNIT_COUNTER} | KERNEL_LAUNCH_COLUMNS
 
 
 def hardware_counters_for_pass_select(
@@ -237,9 +253,9 @@ def hardware_counters_for_pass_select(
 ) -> FrozenSet[str]:
     """PMC names used to choose a pass.
 
-    Timestamps and non-counter SUPPORTED_DENOM tokens are stripped. They do
-    not choose the pass. Hardware denominator counters such as SQ_WAVES and
-    GRBM_GUI_ACTIVE stay in the set.
+    Timestamps, kernel-launch fields, and non-counter SUPPORTED_DENOM tokens
+    are stripped. They do not choose the pass. Hardware denominator counters
+    such as SQ_WAVES and GRBM_GUI_ACTIVE stay in the set.
     """
     drop = set(_NON_PMC_BIND_NAMES)
     for formula in SUPPORTED_DENOM.values():
