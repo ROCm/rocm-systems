@@ -611,7 +611,7 @@ in the following table.
         | ``1``: Enabled (default). If no ordered ring passes validation,
           warn and fall back to the default ordering.
         | ``2``: Enabled, strict. If no ordered ring passes validation,
-          fail communicator initialization instead of falling back.     
+          fail communicator initialization instead of falling back.
 
     * - | ``NCCL_GIN_PLUGIN``
         | Selects external GIN (GPU-Initiated Networking) plugins.
