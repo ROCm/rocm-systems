@@ -19,6 +19,7 @@
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
+#include <cassert>
 #include <cstdint>
 #include <optional>
 
@@ -26,17 +27,22 @@ namespace rocjitsu {
 namespace amdgpu {
 namespace addr_calc {
 
+// Before CDNA3, bit 13 redirects the destination to LDS. GFX10 uses NULL
+// (125) for a vector address; GFX10.3 additionally uses 127 for no registers.
+enum class ScratchAddressMode { VectorEnable, LegacyCdna, Rdna1, Rdna2 };
+
 /// @brief Compute per-lane addresses for FLAT/GLOBAL/SCRATCH encoding.
 ///
 /// @details Populates d.per_lane_addr, d.lane_mask, and d.exec_mask.
 /// Handles all three segments:
 /// - FLAT (seg==0): 64-bit VGPR pair + unsigned 12-bit offset.
-/// - SCRATCH (seg==1): scratch_base + 32-bit VGPR + saddr + signed 13-bit offset.
+/// - SCRATCH (seg==1): scratch_base + 32-bit VGPR + saddr + signed 12-bit (RDNA) or 13-bit (CDNA)
+/// offset.
 /// - GLOBAL (seg==2): 64-bit saddr + 32-bit VGPR + signed 13-bit offset,
 ///   or 64-bit VGPR pair when saddr==0x7F.
 ///
 /// Requires: inst.seg, inst.saddr, inst.addr, inst.offset, inst.pad_12.
-template <typename FlatInst>
+template <ScratchAddressMode mode = ScratchAddressMode::VectorEnable, typename FlatInst>
 void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, VectorMemState &d) {
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
@@ -45,9 +51,19 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
   d.exec_mask = exec;
   d.wf_size = wf.wf_size();
 
-  // Compute signed 13-bit offset for GLOBAL/SCRATCH, unsigned 12-bit for FLAT.
+  // GLOBAL/SCRATCH immediates are signed; CDNA FLAT uses an unsigned offset.
   int64_t offset;
-  if (inst.seg != 0) {
+  constexpr bool rdna = mode == ScratchAddressMode::Rdna1 || mode == ScratchAddressMode::Rdna2;
+  if constexpr (rdna) {
+    // RDNA wrappers use this helper only for SCRATCH. Their GLOBAL/FLAT
+    // paths have different vector-offset and aperture rules.
+    if (inst.seg != 1) {
+      assert(false && "RDNA shared address calculation requires SCRATCH");
+      reject_vector_memory_access(d);
+      return;
+    }
+    offset = static_cast<int32_t>(inst.offset << 20) >> 20;
+  } else if (inst.seg != 0) {
     uint32_t raw;
     if constexpr (requires { inst.pad_12; })
       raw = inst.offset | (inst.pad_12 << 12);
@@ -59,7 +75,7 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
   }
 
   if (inst.seg == 1) {
-    // SCRATCH: architected flat scratch (GFX940/CDNA4).
+    // SCRATCH: wave-private memory with a dword-interleaved backing layout.
     // The hardware stores scratch in a dword-interleaved ("swizzled") layout:
     // a lane's private byte offset `off` maps to
     //   scratch_base + (off/4)*lane_count*4 + lane*4 + off%4
@@ -74,20 +90,33 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     const uint32_t lane_count = wf.wf_size();
     uint64_t scratch_base = wf.scratch_base();
     int64_t saddr_val = 0;
-    if (inst.saddr != 0x7F) {
+    if (inst.saddr != 0x7F && (!rdna || inst.saddr != 0x7D)) {
       const uint32_t sb_sel = inst.saddr;
       auto saddr = amdgpu::try_read_scalar_selector(wf, sb_sel);
       if (!saddr) {
         reject_vector_memory_access(d);
         return;
       }
-      saddr_val = static_cast<int32_t>(*saddr);
+      if constexpr (rdna)
+        saddr_val = *saddr;
+      else
+        // Preserve CDNA's existing arithmetic for high-bit scalar offsets.
+        // LLVM avoids these inputs before GFX12; changing their behavior
+        // requires separate hardware qualification.
+        saddr_val = static_cast<int32_t>(*saddr);
     }
     bool has_vaddr = true;
-    if constexpr (requires { inst.sve; })
-      has_vaddr = (inst.sve == 1);
-    else if (inst.seg == 1)
-      has_vaddr = (inst.lds == 1);
+    if constexpr (mode == ScratchAddressMode::LegacyCdna) {
+      has_vaddr = inst.saddr == 0x7F;
+    } else if constexpr (mode == ScratchAddressMode::Rdna1) {
+      has_vaddr = inst.saddr == 0x7D || inst.saddr == 0x7F;
+    } else if constexpr (mode == ScratchAddressMode::Rdna2) {
+      has_vaddr = inst.saddr == 0x7D;
+    } else if constexpr (requires { inst.sve; }) {
+      has_vaddr = inst.sve == 1;
+    } else {
+      has_vaddr = inst.lds == 1;
+    }
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
     if (has_vaddr)
