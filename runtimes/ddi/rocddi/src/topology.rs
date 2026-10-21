@@ -365,33 +365,25 @@ impl GpuInfo {
 /// The passive [`Endpoint`] keeps identity and discovered capabilities. This
 /// record may include optional information from other native sources without
 /// activating a device.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
 pub struct EndpointDetails {
     /// Optional product name for display to applications.
     pub product_name: Option<String>,
-    /// Kind-specific information beyond the passive endpoint record.
-    pub kind: EndpointDetailsKind,
+    /// Additional GPU facts, when the owning driver has a matching source.
+    /// `None` does not change the endpoint's kind or discovered capabilities.
+    pub gpu: Option<GpuDetails>,
 }
 
-/// Kind-specific information obtained without activating an endpoint.
-///
-/// The endpoint itself records its engine kind. `Other` means its driver has
-/// no additional kind-specific information to report.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// Additional GPU facts obtained without activating an endpoint.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[non_exhaustive]
-pub enum EndpointDetailsKind {
-    /// Additional GPU information supplied by a qualified driver source.
-    #[non_exhaustive]
-    Gpu {
-        /// ASIC family from an additional source, if reported. The passive
-        /// GPU record supplies the fallback.
-        asic_family_id: Option<u32>,
-        /// GPU timestamp frequency in hertz, if reported.
-        counter_frequency_hz: Option<u64>,
-    },
-    /// No additional kind-specific information is available.
-    Other,
+pub struct GpuDetails {
+    /// ASIC family from an additional source, if reported. The passive GPU
+    /// record supplies the fallback.
+    pub asic_family_id: Option<u32>,
+    /// GPU timestamp frequency in hertz, if reported.
+    pub counter_frequency_hz: Option<u64>,
 }
 
 /// Kind-specific capabilities attached to one passive endpoint.
@@ -531,20 +523,5 @@ impl Endpoint {
                 || self
                     .memory_link_to(owner)
                     .is_some_and(|link| link.hop_count() != 0))
-    }
-}
-
-impl EndpointDetails {
-    /// Returns a kind-matched result with no additional driver information.
-    pub(crate) fn empty_for(endpoint: &Endpoint) -> Self {
-        Self {
-            product_name: None,
-            kind: endpoint
-                .gpu()
-                .map_or(EndpointDetailsKind::Other, |_| EndpointDetailsKind::Gpu {
-                    asic_family_id: None,
-                    counter_frequency_hz: None,
-                }),
-        }
     }
 }
