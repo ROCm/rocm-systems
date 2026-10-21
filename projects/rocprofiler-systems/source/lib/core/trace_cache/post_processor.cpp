@@ -8,7 +8,6 @@
 #include "core/config.hpp"
 #include "core/output/output_summary.hpp"
 #include "core/perfetto/engine.hpp"
-#include "core/timemory.hpp"
 #include "core/trace_cache/cacheable.hpp"
 #include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/perfetto_processor.hpp"
@@ -29,7 +28,6 @@
 #include <string>
 #include <thread>
 #include <utility>
-#include <variant>
 #include <vector>
 
 namespace rocprofsys::trace_cache
@@ -70,14 +68,13 @@ make_wall_clock_options(const data::processor_config_t& process)
     auto const files =
         is_on(env_vars::FILE_OUTPUT, true) &&
         config::output_filtering::is_file_output_enabled_for_current_mpi_rank();
-    auto const suffix =
-        process._pid == process._ppid
-            ? std::visit([](const auto& value) { return fmt::format("{}", value); },
-                         settings::default_process_suffix())
-            : std::to_string(process._pid);
+    auto const suffix = process._pid == process._ppid
+                            ? config::get_output_process_suffix()
+                            : std::to_string(process._pid);
     return wall_clock_options{
-        .layout = { .flat     = is_on(env_vars::FLAT_PROFILE, false),
-                    .timeline = is_on(env_vars::TIMELINE_PROFILE, false) },
+        .layout = { .flat             = is_on(env_vars::FLAT_PROFILE, false),
+                    .timeline         = is_on(env_vars::TIMELINE_PROFILE, false),
+                    .collapse_threads = is_on(env_vars::COLLAPSE_THREADS, false) },
         .text   = files && is_on(env_vars::TEXT_OUTPUT, true),
         .json   = files && is_on(env_vars::JSON_OUTPUT, true),
         .cout   = is_on(env_vars::COUT_OUTPUT, false),

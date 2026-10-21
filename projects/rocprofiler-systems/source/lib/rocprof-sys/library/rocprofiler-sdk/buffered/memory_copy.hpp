@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <tuple>
 
 namespace rocprofsys::domains::buffered
 {
@@ -53,10 +54,10 @@ on_memory_copy(typename SdkBackend::memory_copy_record_t* record,
         return;
     }
 
-    const typename Externals::agent_t* src_agent = nullptr;
     try
     {
-        src_agent = &Externals::get_agent_manager().get_agent_by_handle(
+        // Only validates the source agent: records from an unknown agent are dropped
+        std::ignore = Externals::get_agent_manager().get_agent_by_handle(
             record->src_agent_id.handle);
     } catch(const std::out_of_range& e)
     {

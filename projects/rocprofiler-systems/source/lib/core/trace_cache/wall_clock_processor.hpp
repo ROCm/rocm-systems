@@ -18,15 +18,16 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace rocprofsys
 {
-class agent_manager;
+struct agent_manager;
 }
 
 namespace rocprofsys::trace_cache
 {
-class metadata_registry;
+struct metadata_registry;
 
 struct wall_clock_options
 {
@@ -44,8 +45,8 @@ class wall_clock_processor_t : public sample_processor_interface
 public:
     /**
      * @param metadata Source of kernel symbols used to name kernel dispatch rows.
-     * @param pid      Process the report belongs to; part of the output file name.
      * @param agents   Names the devices of memory copies.
+     * @param pid      Process the report belongs to; part of the output file name.
      * @param options  Layout and files of the report.
      */
     wall_clock_processor_t(std::shared_ptr<metadata_registry> metadata,
@@ -81,7 +82,8 @@ private:
     pid_t                              m_pid;
     std::shared_ptr<agent_manager>     m_agents;
     wall_clock_options                 m_options;
-    wall_clock_report                  m_report;
+    std::vector<wall_clock_interval>   m_regions;
+    std::vector<wall_clock_interval>   m_gpu_activity;
 };
 
 }  // namespace rocprofsys::trace_cache
