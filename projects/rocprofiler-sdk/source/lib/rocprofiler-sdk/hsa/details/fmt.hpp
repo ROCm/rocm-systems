@@ -284,6 +284,11 @@ struct formatter<hsa_amd_memory_copy_op_type_t>
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST");
             case HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST:
                 return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST");
+#    if HSA_AMD_INTERFACE_VERSION_MAJOR > 1 ||                                                     \
+        (HSA_AMD_INTERFACE_VERSION_MAJOR == 1 && HSA_AMD_INTERFACE_VERSION_MINOR >= 37)
+            case HSA_AMD_MEMORY_COPY_OP_RECT:
+                return fmt::format_to(ctx.out(), "HSA_AMD_MEMORY_COPY_OP_RECT");
+#    endif
         }
 
         auto value = static_cast<std::underlying_type_t<hsa_amd_memory_copy_op_type_t>>(op);
@@ -450,6 +455,32 @@ struct formatter<hsa_amd_memory_copy_op_t>
                     wait,
                     signal,
                     reserved);
+#    if HSA_AMD_INTERFACE_VERSION_MAJOR > 1 ||                                                     \
+        (HSA_AMD_INTERFACE_VERSION_MAJOR == 1 && HSA_AMD_INTERFACE_VERSION_MINOR >= 37)
+            case HSA_AMD_MEMORY_COPY_OP_RECT:
+                if(op.reserved0 != 0)
+                {
+                    reserved += fmt::format(", reserved0={}", op.reserved0);
+                }
+                return fmt::format_to(
+                    ctx.out(),
+                    "[MEMORY_COPY_OP type={}, version={}, num_entries={}, traffic_class={}, "
+                    "completion_signal={}, rect_src={}, src_agent={}, rect_dst={}, "
+                    "dst_agent_list={}, range_list={}{}{}{}]",
+                    type,
+                    op.version,
+                    op.num_entries,
+                    op.traffic_class,
+                    op.completion_signal.handle,
+                    fmt::ptr(op.rect_src),
+                    op.src_agent.handle,
+                    fmt::ptr(op.rect_dst),
+                    fmt::ptr(op.dst_agent_list),
+                    fmt::ptr(op.range_list),
+                    wait,
+                    signal,
+                    reserved);
+#    endif
         }
 
         auto value = static_cast<std::underlying_type_t<hsa_amd_memory_copy_op_type_t>>(op.type);
