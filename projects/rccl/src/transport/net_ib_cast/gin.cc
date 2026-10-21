@@ -357,6 +357,14 @@ ncclResult_t IbCastRmaIbProxyInit(void** ctx, uint64_t commId, ncclDebugLogger_t
   return IbCastGinIbInitType(ctx, commId, logFunction, ncclParamCastGinType());
 }
 
+// NCCL 2.32 RMA v16 query. Do not claim that a signal flushes all earlier puts on IB-CAST, so
+// GIN barriers keep issuing explicit flushes (pre-2.32 behaviour).
+ncclResult_t IbCastRmaIbProxyGetRmaProperties(void* collComm, ncclRmaProperties_t* rmaProps) {
+  (void)collComm;
+  rmaProps->flushesAllPutsOnAnySignal = false;
+  return ncclSuccess;
+}
+
 ncclResult_t IbCastRmaIbProxyGetProperties(int dev, ncclNetProperties_t* props) {
   NCCLCHECK(netIbCast.getProperties(dev, props));
   props->netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
@@ -741,7 +749,7 @@ ncclResult_t IbCastRmaIbProxyTest(void* collComm, void* request, int* done) {
       char line[SOCKET_NAME_MAXLEN + 1];
       char* hcaName = devBase->pd->context->device->name;
       WARN("NET/IB/GIN: Got completion from peer %s with status=%d opcode=%d len=%u vendor err %u (%s)%s%s%s%s hca %s",
-           ncclSocketToString(&addr, line), wc[i].status, wc[i].opcode, wc[i].byte_len, wc[i].vendor_err,
+           ncclSocketToString(&addr, line, sizeof(line)), wc[i].status, wc[i].opcode, wc[i].byte_len, wc[i].vendor_err,
            IbCastReqTypeStr[req->type], localGidStr ? " localGid " : "", localGidString,
            remoteGidStr ? " remoteGids" : "", remoteGidString, hcaName);
       return ncclRemoteError;
@@ -811,6 +819,7 @@ ncclResult_t IbCastRmaIbProxyIFlush(void* ginCtx, int context, void* mhandle, ui
 ncclRma_t IbCastRmaIbProxy = {"RMA_IB_PROXY",
                               IbCastRmaIbProxyInit,
                               IbCastDevices,
+                              IbCastRmaIbProxyGetRmaProperties,
                               IbCastRmaIbProxyGetProperties,
                               IbCastListen,
                               IbCastRmaIbProxyConnect,

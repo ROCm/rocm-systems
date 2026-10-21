@@ -1054,8 +1054,10 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="GUI",
         help=(
-            "\t\tActivate a GUI to interate with rocprofiler-compute metrics.\n"
-            "\t\tOptionally, specify port to launch application (DEFAULT: 8050)"
+            "\t\t(DEPRECATED) Activate a GUI to interate with rocprofiler-compute "
+            "metrics.\n"
+            "\t\tOptionally, specify port to launch application (DEFAULT: 8050)\n"
+            "\t\t--gui is deprecated and will be removed in a future release."
         ),
     )
     analyze_group.add_argument(
@@ -1067,8 +1069,9 @@ Examples:
         action=ExperimentalAction,
         experimental_enabled=experimental_enabled,
         feature_label="TUI",
-        help="\t\tActivate a Textual User Interface (TUI) to "
-        "interact with rocprofiler-compute metrics.",
+        help="\t\t(DEPRECATED) Activate a Textual User Interface (TUI) to "
+        "interact with rocprofiler-compute metrics.\n"
+        "\t\t--tui is deprecated and will be removed in a future release.",
     )
 
 

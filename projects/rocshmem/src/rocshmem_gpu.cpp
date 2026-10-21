@@ -1148,6 +1148,13 @@ __device__ __forceinline__ void direct_ctx_wait_until(rocshmem_ctx_t ctx,
   get_base_internal_ctx(ctx)->wait_until(ivars, cmp, val);
 }
 
+__device__ __forceinline__ uint64_t direct_ctx_signal_wait_until(
+    rocshmem_ctx_t ctx, uint64_t *sig_addr, int cmp, uint64_t cmp_value) {
+  get_base_internal_ctx(ctx)->ctxStats.incStat(NUM_SIGNAL_WAIT_UNTIL);
+  return get_base_internal_ctx(ctx)->signal_wait_until(sig_addr, cmp,
+                                                       cmp_value);
+}
+
 template <typename T>
 __device__ __forceinline__ void direct_ctx_wait_until_all(
     rocshmem_ctx_t ctx, T *ivars, size_t nelems, const int *status, int cmp,
@@ -2296,6 +2303,26 @@ ROCSHMEM_CTX_PUTMEM_SIGNAL_DEF(_nbi_wave)
 ROCSHMEM_SIGNAL_FETCH_DEF()
 ROCSHMEM_SIGNAL_FETCH_DEF(_wg)
 ROCSHMEM_SIGNAL_FETCH_DEF(_wave)
+
+#define ROCSHMEM_SIGNAL_OP_DEF(OP)                                           \
+  __device__ void rocshmem_ctx_signal_##OP(                                  \
+      rocshmem_ctx_t ctx, uint64_t *sig_addr, uint64_t signal, int pe) {     \
+    rocshmem_ctx_uint64_atomic_##OP(ctx, sig_addr, signal, pe);              \
+  }                                                                          \
+                                                                             \
+  __device__ void rocshmem_signal_##OP(                                      \
+      uint64_t *sig_addr, uint64_t signal, int pe) {                         \
+    rocshmem_uint64_atomic_##OP(sig_addr, signal, pe);                       \
+  }
+
+ROCSHMEM_SIGNAL_OP_DEF(add)
+ROCSHMEM_SIGNAL_OP_DEF(set)
+
+__device__ uint64_t rocshmem_signal_wait_until(uint64_t *sig_addr, int cmp,
+                                                uint64_t cmp_value) {
+  return direct_ctx_signal_wait_until(ROCSHMEM_CTX_DEFAULT, sig_addr, cmp,
+                                      cmp_value);
+}
 
 /******************************************************************************
  ****************************** Teams Interface *******************************

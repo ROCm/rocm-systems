@@ -116,7 +116,7 @@ TEST(scratch_memory_test, on_scratch_memory_forwards_record_fields_to_dependenci
         .thread_id               = record.thread_id,
         .agent_id_handle         = record.agent_id.handle,
         .queue_id_handle         = record.queue_id.handle,
-        .kind                    = static_cast<std::int32_t>(record.kind),
+        .name                    = "operation",
         .operation               = static_cast<std::int32_t>(record.operation),
         .flags                   = static_cast<std::int32_t>(record.flags),
         .allocation_size         = record.allocation_size,

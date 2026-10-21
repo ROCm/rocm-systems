@@ -1,0 +1,8 @@
+/node_modules/
+/dist/
+/.test-dist/
+/.test-data/
+/.vite/
+/coverage/
+/test-results/
+/playwright-report/

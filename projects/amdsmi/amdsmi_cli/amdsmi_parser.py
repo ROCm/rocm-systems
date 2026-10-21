@@ -231,7 +231,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add all subparsers
         if sys_argv is not None:
-            if any(arg in sys_argv for arg in ["--help", "-h"]):
+            if os.getenv("_ARGCOMPLETE") or any(arg in sys_argv for arg in ["--help", "-h"]):
                 self._add_version_parser(self.subparsers, version)
                 self._add_list_parser(self.subparsers, list)
                 self._add_static_parser(self.subparsers, static)
@@ -348,6 +348,22 @@ class AMDSMIParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
                 sys.argv[1], string_value, outputformat
             )
+
+    def _valid_ampp_profile_name(self, profile_name):
+        # Argument type validator. Same constraints as an AMPP field name:
+        # amdsmi_activate_ampp_profile() encodes the name to UTF-8, which
+        # raises for a lone surrogate (reachable through argv's
+        # surrogateescape) unless it is rejected here.
+        if AMDSMIHelpers.is_valid_ampp_field_name(profile_name):
+            return profile_name
+
+        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+            sys.argv[1],
+            ascii(profile_name),
+            self.helpers.get_output_format(),
+            hint="Profile name cannot be empty or exceed "
+            f"{amdsmi_interface.AMDSMI_MAX_STRING_LENGTH} bytes.",
+        )
 
     def _is_command_supported(self, user_input, acceptable_values, hint=None):
         if str(user_input).upper() not in acceptable_values:
@@ -1275,20 +1291,128 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         return _ValidatePtlFormat
 
+    def _ampp_configure_options(self):
+        """Custom action for --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...]"""
+        output_format = self.helpers.get_output_format()
+
+        class AMDSMIAmppConfigureArgs(argparse.Action):
+            def __call__(
+                self,
+                parser: AMDSMIParser,
+                namespace: argparse.Namespace,
+                values: list,
+                option_string: Optional[str] = None,
+            ) -> None:
+                if not values:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                        sys.argv[1], "Missing PROFILE_NAME argument", output_format
+                    )
+
+                ampp_configure_args = collections.namedtuple(
+                    "ampp_configure_args", ["profile_name", "fields", "file_path"]
+                )
+
+                # `@<path>` form: restore every writable profile with staged
+                # fields found in a JSON file (as produced by
+                # `amd-smi static --ampp --json`) in one call.
+                if values[0].startswith("@"):
+                    if len(values) > 1:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                            sys.argv[1],
+                            " ".join(values),
+                            output_format,
+                            hint="'@<path>' must be the only argument when loading profiles from a file.",
+                        )
+                    file_path = values[0][1:]
+                    if not file_path:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                            sys.argv[1],
+                            values[0],
+                            output_format,
+                            hint="File path cannot be empty after '@'.",
+                        )
+                    setattr(namespace, self.dest, ampp_configure_args(None, None, file_path))
+                    return
+
+                profile_name = values[0]
+                field_tokens = values[1:]
+
+                if not AMDSMIHelpers.is_valid_ampp_field_name(profile_name):
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                        sys.argv[1],
+                        ascii(profile_name),
+                        output_format,
+                        hint="Profile name cannot be empty or exceed "
+                        f"{amdsmi_interface.AMDSMI_MAX_STRING_LENGTH} bytes.",
+                    )
+
+                if not field_tokens:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(
+                        sys.argv[1],
+                        "Missing at least one KEY=VALUE field argument for --ampp-configure",
+                        output_format,
+                    )
+
+                fields = []
+                for token in field_tokens:
+                    if "=" not in token:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                            sys.argv[1],
+                            token,
+                            output_format,
+                            hint="Fields must be given as KEY=VALUE (e.g. PPT0_Limit=300).",
+                        )
+                    key, _, raw_value = token.partition("=")
+                    key = key.strip()
+                    raw_value = raw_value.strip()
+                    # Shares its name/value checks with the @<file> JSON
+                    # restore path (set_value.py) via AMDSMIHelpers so the
+                    # two can't drift apart.
+                    if not AMDSMIHelpers.is_valid_ampp_field_name(key):
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                            sys.argv[1],
+                            token,
+                            output_format,
+                            hint="Field name cannot be empty or exceed "
+                            f"{amdsmi_interface.AMDSMI_MAX_STRING_LENGTH} bytes in KEY=VALUE.",
+                        )
+                    value = AMDSMIHelpers.parse_ampp_field_value(raw_value)
+                    if value is None:
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
+                            sys.argv[1],
+                            token,
+                            output_format,
+                            hint="Field value must be an integer within int64 range "
+                            f"(got '{raw_value}').",
+                        )
+                    fields.append({"name": key, "value": value})
+
+                setattr(namespace, self.dest, ampp_configure_args(profile_name, fields, None))
+
+        return AMDSMIAmppConfigureArgs
+
     ### Building parsers ###
     @staticmethod
-    def _guard_gtt_gpu_conflict(parser, gtt_flags=("--gtt", "-G")):
-        """Override *parser*.error() so that combining any GTT flag with
+    def _guard_gtt_gpu_conflict(
+        parser, gtt_flags=("--gtt", "-G"), reason="--gtt is a system-wide setting, not per-GPU"
+    ):
+        """Override *parser*.error() so that combining any of *gtt_flags* with
         --gpu / -g produces a clear mutual-exclusion message instead of
-        the confusing "expected at least one argument" from --gpu."""
+        the confusing "expected at least one argument" from --gpu. Only
+        argparse's missing-value diagnostic is replaced."""
         _original_error = parser.error
 
         def _intercept(message):
-            if set(gtt_flags).intersection(sys.argv) and {"--gpu", "-g"}.intersection(sys.argv):
+            error_prefix = message.split(":", 1)[0]
+            if (
+                set(gtt_flags).intersection(sys.argv)
+                and {"--gpu", "-g"}.intersection(sys.argv)
+                and error_prefix in {"argument -g/--gpu", "argument --gpu/-g"}
+                and "expected at least one argument" in message
+            ):
                 flag_str = "/".join(gtt_flags)
                 _original_error(
-                    f"argument {flag_str}: not allowed with argument --gpu/-g "
-                    "(--gtt is a system-wide setting, not per-GPU)"
+                    f"argument {flag_str}: not allowed with argument --gpu/-g ({reason})"
                 )
             _original_error(message)
 
@@ -1506,6 +1630,18 @@ class AMDSMIParser(argparse.ArgumentParser):
         soc_pstate_help = "The available soc pstate policy"
         xgmi_plpd_help = "The available XGMI per-link power down policy"
         process_isolation_help = "The process isolation status"
+        cuid_help = (
+            "Component Unified ID: the derived CUID, its component type, whether it is a\n"
+            "temporary (auxiliary) identifier, and which layer answered.\n"
+            "Not part of the default `amd-smi static` output; ask for it.\n"
+            "The primary CUID is not shown by default either: its payload embeds the raw\n"
+            "serial number. Add --cuid-primary, as root, to include it."
+        )
+        cuid_primary_help = (
+            "Include the primary CUID in the CUID output, implying --cuid. Requires\n"
+            "privilege, and prints a value that embeds the device serial number. Do not\n"
+            "paste it into a bug report."
+        )
         profile_help = "Display current and available power profiles"
         clk_options = self.helpers.get_clock_types()[0]
         clk_options.remove("PCIE")
@@ -1517,7 +1653,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Options arguments help text for Hypervisors and Baremetal
         # Might be able to remove Sudo requirement in ROCm 7.0
         ras_help = "Displays RAS features information;\n\tSudo may be required for some features"
-        numa_help = "All numa node information"  # Linux Baremetal only
+        numa_help = "All numa node information"  # Linux only
         partition_help = (
             "Partition information:\n\t"
             "No longer available in default output.\n\tArgument is required to display."
@@ -1585,6 +1721,12 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "-r", "--ras", action="store_true", required=False, help=ras_help
             )
             static_parser.add_argument(
+                "-Y", "--cuid", action="store_true", required=False, help=cuid_help
+            )
+            static_parser.add_argument(
+                "-y", "--cuid-primary", action="store_true", required=False, help=cuid_primary_help
+            )
+            static_parser.add_argument(
                 "-C",
                 "--clock",
                 action="store",
@@ -1606,6 +1748,15 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "-m", "--mem-carveout", action="store_true", required=False, help=mem_carveout_help
             )
 
+            ampp_help = (
+                "Display AMPP (amdsmi power profile) recipe table: per-profile"
+                " version/active/writable/configured state and per-field"
+                " name/unit/value/min/max."
+            )
+            static_parser.add_argument(
+                "-A", "--ampp", action="store_true", required=False, help=ampp_help
+            )
+
             # Options to display on Hypervisors and Baremetal
             if self.helpers.is_hypervisor() or self.helpers.is_baremetal():
                 static_parser.add_argument(
@@ -1621,7 +1772,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     "-o", "--profile", action="store_true", required=False, help=profile_help
                 )
 
-            if self.helpers.is_linux() and not self.helpers.is_virtual_os():
+            if self.helpers.is_linux():
                 static_parser.add_argument(
                     "-u", "--numa", action="store_true", required=False, help=numa_help
                 )
@@ -1787,6 +1938,12 @@ class AMDSMIParser(argparse.ArgumentParser):
             "Switch temperature, clock, and usage to partition-scoped\n"
             "    (XCP/AID/MID) data sources; combine with those flags to scope it;"
             "\n    Only available for MI300 or newer ASICs"
+        )
+        show_unsupported_help = (
+            "Print every field, including the ones the GPU's gpu_metrics\n"
+            "    table version cannot carry and which are omitted by default;\n"
+            "    affects human-readable output only, since --json and --csv\n"
+            "    always print every field"
         )
 
         # Help text for Arguments only on Hypervisors
@@ -2187,7 +2344,10 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Add Universal Arguments & watch Args
         self._add_watch_arguments(metric_parser)
         self._add_device_arguments(metric_parser, required=False)
-        self._add_command_modifiers(metric_parser)
+        command_modifier_group = self._add_command_modifiers(metric_parser)
+        command_modifier_group.add_argument(
+            "--show-unsupported", action="store_true", required=False, help=show_unsupported_help
+        )
 
     def _add_process_parser(self, subparsers: argparse._SubParsersAction, func):
         if self.helpers.is_hypervisor():
@@ -2661,6 +2821,62 @@ class AMDSMIParser(argparse.ArgumentParser):
                     metavar="GB",
                 )
 
+                set_ampp_activate_help = (
+                    "Activate an AMPP (amdsmi power profile) by name."
+                    "\n\tUse `amd-smi static --ampp` to see available profiles."
+                )
+                set_value_exclusive_group.add_argument(
+                    "-A",
+                    "--ampp-activate",
+                    action="store",
+                    type=self._valid_ampp_profile_name,
+                    required=False,
+                    help=set_ampp_activate_help,
+                    metavar="PROFILE_NAME",
+                )
+
+                set_ampp_configure_help = (
+                    "Configure an AMPP (amdsmi power profile) custom slot by staging one or "
+                    "more KEY=VALUE fields, then committing them."
+                    "\n\tUse `amd-smi static --ampp` to see writable profiles and field names."
+                    "\n\tExample: --ampp-configure profile_2 PPT0_Limit=300"
+                    "\n\tAlternatively, pass @<path> to restore every writable profile found "
+                    "in a JSON file (as produced by `amd-smi static --ampp --json`)."
+                    "\n\tExample: --ampp-configure @profiles.json"
+                )
+                set_value_exclusive_group.add_argument(
+                    "--ampp-configure",
+                    action=self._ampp_configure_options(),
+                    nargs="+",
+                    required=False,
+                    help=set_ampp_configure_help,
+                    metavar=("PROFILE_NAME", "KEY=VALUE"),
+                )
+
+                set_node_balancing_mode_help = "Set NPM balancing mode: POWER_BALANCING or FREQUENCY_BALANCING.\n\tThis is a system-wide setting, not per-GPU."
+                set_value_exclusive_group.add_argument(
+                    "--node-balancing-mode",
+                    action="store",
+                    choices=["POWER_BALANCING", "FREQUENCY_BALANCING"],
+                    type=str.upper,
+                    required=False,
+                    help=set_node_balancing_mode_help,
+                    metavar="{POWER_BALANCING,FREQUENCY_BALANCING}",
+                )
+
+            # Node power limit is enabled on guest (1VF), maintain order
+            max_node_power_limit = self.helpers.get_max_node_power_limit()
+            set_node_power_limit_help = f"Set the node-level (NPM) power limit in watts.\n\tThis is a node-wide setting, not per-GPU.\n\tMax node power limit: {max_node_power_limit}"
+            set_value_exclusive_group.add_argument(
+                "-n",
+                "--node-power-limit",
+                action="store",
+                type=lambda value: self._positive_int(value, "--node-power-limit"),
+                required=False,
+                help=set_node_power_limit_help,
+                metavar="WATTS",
+            )
+
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
                 # Optional CPU Args
@@ -2869,6 +3085,24 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Reject --gtt combined with --gpu at the argparse level
         self._guard_gtt_gpu_conflict(set_value_parser, gtt_flags=("--gtt", "-G"))
+        # Improve the --gpu error message if combined with --node-balancing-mode;
+        # actual rejection happens at runtime in set_value.py, since these two
+        # flags sit in separate argparse groups and argparse itself never
+        # raises for this combination.
+        self._guard_gtt_gpu_conflict(
+            set_value_parser,
+            gtt_flags=("--node-balancing-mode",),
+            reason="--node-balancing-mode is a system-wide setting, not per-GPU",
+        )
+        # Improve the --gpu error message if combined with --node-power-limit;
+        # actual rejection happens at runtime in set_value.py, since these two
+        # flags sit in separate argparse groups and argparse itself never
+        # raises for this combination.
+        self._guard_gtt_gpu_conflict(
+            set_value_parser,
+            gtt_flags=("--node-power-limit", "-n"),
+            reason="--node-power-limit is a node-wide setting, not per-GPU",
+        )
 
         # Set accepts default devices of all
         self._add_device_arguments(set_value_parser, required=False)
@@ -3240,7 +3474,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         node_help = "Gets power and baseboard information for the node"
         node_subcommand_help = f"{self.description}\n\nReturns information for node 0 (OAM_ID 0) on the system.\
-                                \nIf no node argument is provided, all node information will be displayed."
+                                \nIf no node argument is provided, all node information except CUIDs will be displayed."
         node_optionals_title = "Node arguments"
 
         # Help text for Node arguments
@@ -3248,6 +3482,13 @@ class AMDSMIParser(argparse.ArgumentParser):
         base_board_temps_help = "Displays baseboard temperatures"
         gtt_help = "Displays GTT (shared GPU memory) size"
         tray_help = "Displays compute tray type and accelerator count"
+        node_cuid_help = (
+            "Lists the CUID of every component on the node: the platform, CPU\n"
+            "packages, GPUs, NPUs and NICs. Every CUID is temporary."
+        )
+        node_cuid_primary_help = (
+            "Include each component's primary CUID, implying --cuid. Requires root."
+        )
 
         node_parser = subparsers.add_parser(
             "node", help=node_help, description=node_subcommand_help
@@ -3275,6 +3516,12 @@ class AMDSMIParser(argparse.ArgumentParser):
         node_parser.add_argument(
             "-T", "--tray", action="store_true", required=False, help=tray_help
         )
+        node_parser.add_argument(
+            "-Y", "--cuid", action="store_true", required=False, help=node_cuid_help
+        )
+        node_parser.add_argument(
+            "-y", "--cuid-primary", action="store_true", required=False, help=node_cuid_primary_help
+        )
 
         # Add Universal Arguments
         self._add_command_modifiers(node_parser)
@@ -3290,8 +3537,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         fabric_optionals_title = "Fabric arguments"
 
         # Help text for arguments
-        topology_help = "Display fabric topology data (counters per category, instance, and item)"
-        info_help = "Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)"
+        topology_help = "Display fabric device configuration (BDF, bandwidth, latency, vPoD/pPoD, accelerator state)"
+        telemetry_help = "Display fabric telemetry data (counters per category, instance, and item)"
 
         # Create fabric subparser
         fabric_parser = subparsers.add_parser(
@@ -3301,12 +3548,31 @@ class AMDSMIParser(argparse.ArgumentParser):
         fabric_parser.formatter_class = lambda prog: AMDSMISubparserHelpFormatter(prog)
         fabric_parser.set_defaults(func=func)
 
+        # --topology changed meaning without failing to parse, so warn on explicit use.
+        # The no-flag default that turns both flags on is not a user asking for it.
+        class _WarnTopologySemanticsChange(argparse.Action):
+            def __init__(self, option_strings, dest, **kwargs):
+                super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+            def __call__(self, parser, args, values, option_string=None):
+                print(
+                    "amd-smi fabric: warning: --topology now reports fabric device "
+                    "configuration; the counters it previously reported moved to --telemetry",
+                    file=sys.stderr,
+                )
+                setattr(args, self.dest, True)
+
         # Optional Args
         fabric_parser.add_argument(
-            "-t", "--topology", action="store_true", required=False, help=topology_help
+            "-t",
+            "--topology",
+            action=_WarnTopologySemanticsChange,
+            default=False,
+            required=False,
+            help=topology_help,
         )
         fabric_parser.add_argument(
-            "-i", "--info", action="store_true", required=False, help=info_help
+            "-T", "--telemetry", action="store_true", required=False, help=telemetry_help
         )
 
         # Add Universal Arguments

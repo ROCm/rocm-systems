@@ -50,8 +50,8 @@ struct EventDimension
 
     EventDimension(std::string_view _name, size_t _extent)
     : id{get_dimension_table().at(_name)}
-    , name{_name}
     , extent{_extent}
+    , name{_name}
     {}
     ~EventDimension()                           = default;
     EventDimension(const EventDimension& other) = default;
@@ -126,7 +126,7 @@ public:
         sarrays = pm4_factory->GetShaderArraysNumber() * se_num;
 
         cu_num  = (pm4_factory->GetComputeUnitNumber() + sarrays - 1) / sarrays;
-        wgp_num = (pm4_factory->GetComputeUnitNumber() / 2 + sarrays - 1) / sarrays;
+        wgp_num = pm4_factory->GetNumWGPs();
 
         if(HasAttr(CounterBlockUmcAttr))
             block_instance_count = block_info->instance_count / num_aid;
@@ -135,31 +135,23 @@ public:
         else
             block_instance_count = block_info->instance_count;
 
+        // Match PMC READ/output flattening; the last dimension changes fastest.
         if(num_xccs > 1) dimensions.push_back({"XCD", num_xccs});
         if(num_aid > 1) dimensions.push_back({"AID", num_aid});
-
-        if(workgroup_processor)
-        {
-            dimensions.push_back({"WGP", wgp_num});
-            if(bIsGFX11)
-                dimensions.push_back({"INSTANCE", block_instance_count});
-            else if(block_instance_count > 1)
-                dimensions.push_back({"INSTANCE", block_instance_count});
-        }
-        else
+        if(!workgroup_processor || bIsGFX11 || block_instance_count > 1)
             dimensions.push_back({"INSTANCE", block_instance_count});
-
         if(shader_engine)
             dimensions.push_back(
                 {"SE", pm4_factory->GetShaderEnginesNumber() / (num_xccs > 0 ? num_xccs : 1)});
         if(shader_array) dimensions.push_back({"SA", pm4_factory->GetShaderArraysNumber()});
+        if(workgroup_processor) dimensions.push_back({"WGP", wgp_num});
     }
 
     size_t get_num_xccs() const { return num_xccs; };
     size_t get_total_elements() const
     {
         size_t acc = 1;
-        for(auto& d : dimensions)
+        for(const auto& d : dimensions)
             acc *= d.extent;
         return acc;
     }

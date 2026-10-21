@@ -272,3 +272,12 @@ ncclNet_t ncclNetIb = {
   ncclIbFinalize,
   ncclIbSetNetAttr,
 };
+
+#ifdef ENABLE_FAULT_INJECTION
+#include "net_ib_gid_inspect.h"
+
+extern "C" ncclResult_t ncclIbGidChangeEvent(int ibDev) {
+  if (ibDev < 0 || ibDev >= ncclNIbDevs) return ncclInvalidArgument;
+  return ncclIbEventGidChange(&ncclIbDevs[ibDev]);
+}
+#endif /* ENABLE_FAULT_INJECTION */

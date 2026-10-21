@@ -10,6 +10,8 @@
 
 #include "gin_anvil_plugin_test_stubs.h"
 
+#include "../common/ScopedEnv.hpp"
+
 #include "gin/gin_host_anvil_sdma.h"
 #include "comm.h"
 #include "nccl_device/gin/anvil_sdma/gin_anvil_ipc_table.h"
@@ -29,29 +31,6 @@
 
 namespace RcclUnitTesting
 {
-
-class ScopedEnv {
- public:
-  ScopedEnv(const char* name, const char* value) : name_(name) {
-    if (const char* prev = getenv(name)) {
-      had_ = true;
-      prev_ = prev;
-    }
-    setenv(name, value, 1);
-  }
-  ~ScopedEnv() {
-    if (had_) {
-      setenv(name_, prev_.c_str(), 1);
-    } else {
-      unsetenv(name_);
-    }
-  }
-
- private:
-  const char* name_;
-  std::string prev_;
-  bool had_{false};
-};
 
 struct HipFreeDeleter {
   void operator()(void* ptr) const {
@@ -849,6 +828,79 @@ TEST_F(GinAnvilPluginTest, ConnCheck_FailedBindRetriesGate) {
   stopGin(ictx, coll, ginCtx);
 }
 
+// closeColl must un-mark the set: erase also covers backend-drop paths that
+// never reach plugin finalize, so leaving erase only in finalize would leave a
+// recycled ncclComm* marked and skip the gate on the next job.
+TEST_F(GinAnvilPluginTest, ConnCheck_CloseCollUnmarksCommForReuse) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  ASSERT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
+  ginCtx = nullptr;
+  ASSERT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  coll = nullptr;
+  // Intentionally skip finalize: closeColl alone must clear the dedup mark.
+  // Host finalize still runs plugin finalize for a live backend (AICOMRCCL-2739),
+  // but that is a separate erase site and not required for reuse after closeColl.
+
+  connectColl(ictx, &coll, 2);
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 2);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 2);
+
+  stopGin(ictx, coll, ginCtx);
+}
+
+// destroyContext alone must leave the dedup marked: gin_host DevCommFree only
+// destroys contexts while the coll stays open, so a second bind on that coll
+// must still skip the gate (counters stay at 1/1).
+TEST_F(GinAnvilPluginTest, ConnCheck_DestroyContextKeepsDedupOnOpenColl) {
+  void* rawDevLsa = nullptr;
+  ASSERT_EQ(hipMalloc(&rawDevLsa, sizeof(uint64_t) * 2), hipSuccess);
+  HipAllocation devLsa(rawDevLsa);
+  GinAnvilPluginStubs::SetLsaSelfAddr(devLsa.get());
+
+  void* ictx = nullptr;
+  void* coll = nullptr;
+  void* ginCtx = nullptr;
+  startTwoRankGin(&ictx, &coll, &ginCtx);
+
+  char arena[4096] = {};
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  ASSERT_EQ(plugin_.destroyContext(ginCtx), ncclSuccess);
+  ginCtx = nullptr;
+  // Intentionally skip closeColl: matches ncclGinDevCommFree (destroyContext only).
+
+  ncclGinConfig_t cfg{};
+  cfg.nSignals = 2;
+  ncclNetDeviceHandle_v11_t* devHandle = nullptr;
+  ASSERT_EQ(plugin_.createContext(coll, &cfg, &ginCtx, &devHandle), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilBindResourceWindowSignals(mockComm_.get(), arena, 0, 1, 2), ncclSuccess);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckWriteCalls(), 1);
+  EXPECT_EQ(GinAnvilPluginStubs::GetConnCheckVerifyCalls(), 1);
+
+  stopGin(ictx, coll, ginCtx);
+}
+
 // A qualifying bind must still run the gate after an earlier ineligible bind on
 // the same comm (nSignals < nRanks must not mark the comm checked).
 TEST_F(GinAnvilPluginTest, ConnCheck_SkipThenQualifyingBindStillRunsGate) {
@@ -910,6 +962,47 @@ TEST_F(GinAnvilPluginTest, ConnCheck_UsesLsaTeamForBootstrap) {
   EXPECT_EQ(GinAnvilPluginStubs::GetLastIntraNodeBarrierRanks(), std::vector<int>({1, 0}));
 
   stopGin(ictx, coll, ginCtx);
+}
+
+// AICOMRCCL-2739: GinMPIDeviceTests.CommDestroy_FreesAnvilInitContext asserts on
+// this count. closeColl is all the pre-fix ncclGinHostFinalize reached, so the
+// init context must stay live through it and be released only by finalize.
+TEST_F(GinAnvilPluginTest, LiveInitCtx_ReleasedByFinalizeNotCloseColl) {
+  const int before = ncclGinAnvilPluginTestLiveInitCtxCount();
+
+  void* ictx = nullptr;
+  initCtx(&ictx);
+  void* otherIctx = nullptr;
+  initCtx(&otherIctx);
+  EXPECT_EQ(ncclGinAnvilPluginTestLiveInitCtxCount(), before + 2);
+
+  void* coll = nullptr;
+  connectColl(ictx, &coll);
+  ASSERT_NE(coll, nullptr);
+  ASSERT_EQ(plugin_.closeColl(coll), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilPluginTestLiveInitCtxCount(), before + 2);
+
+  ASSERT_EQ(plugin_.finalize(ictx), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilPluginTestLiveInitCtxCount(), before + 1);
+  ASSERT_EQ(plugin_.finalize(otherIctx), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilPluginTestLiveInitCtxCount(), before);
+}
+
+TEST_F(GinAnvilPluginTest, LiveInitCtx_FailedInitAndNullFinalizeLeaveCountUnchanged) {
+  const int before = ncclGinAnvilPluginTestLiveInitCtxCount();
+
+  void* ictx = nullptr;
+  {
+    ScopedEnv ty("NCCL_GIN_TYPE", "4");
+    EXPECT_EQ(plugin_.init(&ictx, 0, nullptr), ncclInternalError);
+  }
+  GinAnvilPluginStubs::SetProbeResult(0);
+  EXPECT_EQ(plugin_.init(&ictx, 0, nullptr), ncclInternalError);
+  EXPECT_EQ(ictx, nullptr);
+  EXPECT_EQ(ncclGinAnvilPluginTestLiveInitCtxCount(), before);
+
+  EXPECT_EQ(plugin_.finalize(nullptr), ncclSuccess);
+  EXPECT_EQ(ncclGinAnvilPluginTestLiveInitCtxCount(), before);
 }
 
 }  // namespace RcclUnitTesting

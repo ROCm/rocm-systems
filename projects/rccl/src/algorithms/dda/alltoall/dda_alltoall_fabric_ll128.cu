@@ -18,6 +18,7 @@
 #include "param.h"
 
 #include <cuda_runtime.h>
+#include <hip/hip_ext.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -119,21 +120,22 @@ static ncclResult_t ncclAllToAllDdaFabricLL128Typed(
   INFO(NCCL_COLL, "DDA fabric AllToAll LL128: nRanks=%d perChunkBytes=%zu grid=%ux%u block=%u (block-per-peer, bpp=%d)",
        nRanks, perChunkBytes, grid.x, grid.y, block.x, blocksPerPeer);
 
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
   switch (nRanks) {
   case 4:
-    dda::common::ddaAllToAllFabricLL128<T, 4>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perChunkBytes,
-                                   comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen);
     break;
   case 8:
-    dda::common::ddaAllToAllFabricLL128<T, 8>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perChunkBytes,
-                                   comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen);
     break;
   default:
-    dda::common::ddaAllToAllFabricLL128<T, 0>
-      <<<grid, block, 0, stream>>>(peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff), perChunkBytes,
-                                   comm->rank, nRanks, epochDev, epochLen);
+    hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
+                          stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
+                          perChunkBytes, comm->rank, nRanks, epochDev, epochLen);
     break;
   }
 
@@ -148,9 +150,6 @@ bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, vo
                                         ncclDataType_t datatype) {
   (void)sendbuff;
   (void)recvbuff;
-  if (!rcclParamDdaLL()) {
-    return false;
-  }
   if (comm == nullptr || comm->bootstrap == nullptr) {
     return false;
   }
@@ -163,7 +162,7 @@ bool ncclAllToAllDdaFabricLL128Eligible(ncclComm* comm, const void* sendbuff, vo
   if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
     return false;
   }
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return false;
   }
 
@@ -188,7 +187,7 @@ uint32_t ncclAllToAllDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclData
 
 ncclResult_t ncclAllToAllDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                         ncclComm* comm, cudaStream_t stream) {
-  if (datatype != ncclFloat32 && datatype != ncclFloat16 && datatype != ncclBfloat16) {
+  if (!rcclDdaDatatypeSupported(comm, datatype)) {
     return ncclInvalidArgument;
   }
   const int typeSize = ncclTypeSize(datatype);
