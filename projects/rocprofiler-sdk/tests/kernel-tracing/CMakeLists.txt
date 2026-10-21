@@ -89,3 +89,18 @@ rocprofiler_add_integration_validate_test(
     DISCOVERY_ARGS -k "test_kernel_dispatch_pipe_ids"
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/kernel-tracing-signal-less-test.json
          --signal-less-log ${kernel-tracing-signal-less-log})
+
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" ROCPROFV3_PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
+rocprofiler_add_integration_execute_test(
+    kernel-tracing-app-dispatch-time
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --kernel-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format csv --
+        $<TARGET_FILE:hsa_dispatch_time_testapp>
+    DEPENDS hsa_dispatch_time_testapp
+    TIMEOUT 45
+    WSL_TIMEOUT_SCALE
+    LABELS "integration-tests"
+    ENVIRONMENT "ROCPROFILER_QUEUE_INTERPOSITION=0" "${ROCPROFV3_PRELOAD_ENV}")
