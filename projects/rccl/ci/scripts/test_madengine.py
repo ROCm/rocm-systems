@@ -942,6 +942,14 @@ def _librccl_swap_snippet(bridge: str = "", kpack: bool = False) -> str:
       matters for the same reason in reverse: that destination resolves through
       the loader's search path, and leaving ours behind would silently change
       where its dependencies come from.
+
+      The tag is kept too: patchelf writes DT_RUNPATH unless told otherwise,
+      and DT_RPATH, which the SDK wheels' librccl carries, outranks
+      LD_LIBRARY_PATH while DT_RUNPATH does not. In the rocm10 sgl-dev image,
+      LD_LIBRARY_PATH names _rocm_sdk_devel/lib, which holds its own copy of
+      libamd_smi.so.27. As a RUNPATH the swapped library loads that copy next
+      to the _rocm_sdk_core one amdsmi uses. The two interpose on each other,
+      amdsmi then reports no GPUs, and so does torch.cuda.device_count().
     * **The gate compares unresolved sonames by LIBRARY, not by exact name**,
       per target, before and after. Counts alone are not enough -- dropping one
       missing soname while introducing another leaves the count unchanged. An
@@ -1007,9 +1015,10 @@ RUN set -e; \\
     while read -r t; do \\
       [ "$(readlink -f "$t")" = "$canon_src" ] && continue; \\
       rp="$(patchelf --print-rpath "$t" 2>/dev/null || true)"; \\
-      echo "  overwrite: $t (rpath: ${{rp:-none}})"; \\
+      if readelf -d "$t" 2>/dev/null | grep -qF '(RPATH)'; then tag=--force-rpath; else tag=; fi; \\
+      echo "  overwrite: $t (rpath: ${{rp:-none}}${{tag:+, kept as DT_RPATH}})"; \\
       cp -fL --remove-destination "$SRC" "$t"; \\
-      if [ -n "$rp" ]; then patchelf --set-rpath "$rp" "$t" || \\
+      if [ -n "$rp" ]; then patchelf $tag --set-rpath "$rp" "$t" || \\
         {{ echo "GATE FAIL: could not restore RUNPATH on $t"; exit 1; }}; \\
       else patchelf --remove-rpath "$t" || \\
         {{ echo "GATE FAIL: could not clear RUNPATH on $t"; exit 1; }}; fi; \\

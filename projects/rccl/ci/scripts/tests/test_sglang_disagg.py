@@ -123,6 +123,11 @@ class RecipeTest(TempWork):
         self.assertTrue(text.rstrip().endswith(tm.SGLANG_SWAP_TOOLS.rstrip()))
         self.assertLess(text.index("RUN echo payload"), text.index("patchelf"))
 
+    def test_swap_keeps_a_dt_rpath_a_dt_rpath(self):
+        snippet = tm._librccl_swap_snippet(kpack=True)
+        self.assertIn("grep -qF '(RPATH)'; then tag=--force-rpath", snippet)
+        self.assertIn('patchelf $tag --set-rpath "$rp" "$t"', snippet)
+
     def test_unexpected_recipe_fails(self):
         (self.work / "MAD" / tm.SGLANG_MAD_DOCKERFILE).write_text("FROM ubuntu\n")
         with self.assertRaisesRegex(RuntimeError, "FROM \\$BASE_DOCKER"):
