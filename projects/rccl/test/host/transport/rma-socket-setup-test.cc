@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cstdlib>
+#include <initializer_list>
 #include <vector>
 
 #include "ScopedHook.h"
@@ -24,6 +25,72 @@
 namespace {
 
 using rma_socket_test::Scene;
+
+class ScopedConnectHandshake {
+ private:
+  std::vector<int> acceptedRanks_;
+  size_t recvIndex_ = 0;
+  uint64_t nextMagic_;
+  int readyPollsPerPeer_;
+  int readyPolls_ = 0;
+
+ public:
+  ScopedConnectHandshake(std::initializer_list<int> acceptedRanks, uint64_t firstMagic = 0,
+                         int readyPollsPerPeer = 1)
+      : acceptedRanks_(acceptedRanks),
+        nextMagic_(firstMagic),
+        readyPollsPerPeer_(readyPollsPerPeer > 0 ? readyPollsPerPeer : 1),
+        init(g_ncclSocketInit,
+             [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType, volatile uint32_t*, int, int) {
+               return ncclSuccess;
+             }),
+        connect(g_ncclSocketConnect, [](ncclSocket*) { return ncclSuccess; }),
+        send(g_ncclSocketSend, [this](ncclSocket*, void* data, int size) {
+          if (data == nullptr || size != static_cast<int>(sizeof(int))) {
+            ADD_FAILURE() << "connect handshake sent an invalid rank buffer";
+            return ncclInternalError;
+          }
+          sentRanks.push_back(*static_cast<int*>(data));
+          return ncclSuccess;
+        }),
+        accept(g_ncclSocketAccept, [this](ncclSocket* sock, ncclSocket*, bool) {
+          sock->magic = nextMagic_++;
+          return ncclSuccess;
+        }),
+        ready(g_ncclSocketReady, [this](ncclSocket*, int* running) {
+          *running = (++readyPolls_ % readyPollsPerPeer_) == 0;
+          return ncclSuccess;
+        }),
+        recv(g_ncclSocketRecv, [this](ncclSocket*, void* data, int size) {
+          if (data == nullptr || size != static_cast<int>(sizeof(int))) {
+            ADD_FAILURE() << "connect handshake received an invalid rank buffer";
+            return ncclInternalError;
+          }
+          if (recvIndex_ >= acceptedRanks_.size()) {
+            ADD_FAILURE() << "connect handshake exhausted its accepted-rank script";
+            return ncclInternalError;
+          }
+          *static_cast<int*>(data) = acceptedRanks_[recvIndex_++];
+          return ncclSuccess;
+        }),
+        move(g_ncclSocketMove, [](ncclSocket* dst, ncclSocket* src) {
+          dst->magic = src->magic;
+          src->magic = 0;
+        }),
+        close(g_ncclSocketClose, [](ncclSocket*, bool) { return ncclSuccess; }) {}
+
+  std::vector<int> sentRanks;
+  ScopedHook<ncclResult_t(ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType, volatile uint32_t*, int,
+                          int)>
+      init;
+  ScopedHook<ncclResult_t(ncclSocket*)> connect;
+  ScopedHook<ncclResult_t(ncclSocket*, void*, int)> send;
+  ScopedHook<ncclResult_t(ncclSocket*, ncclSocket*, bool)> accept;
+  ScopedHook<ncclResult_t(ncclSocket*, int*)> ready;
+  ScopedHook<ncclResult_t(ncclSocket*, void*, int)> recv;
+  ScopedHook<void(ncclSocket*, ncclSocket*)> move;
+  ScopedHook<ncclResult_t(ncclSocket*, bool)> close;
+};
 
 class RmaSocketSetupMicrotest : public ::testing::Test {
  protected:
@@ -137,38 +204,7 @@ TEST_F(RmaSocketSetupMicrotest, Connect_AllPeersConnectedBuildsBidirectionalPeer
   ncclSocket listen{};
   std::array<ncclRmaSocketProxyHandle, nranks> handleStorage{};
   std::array<void*, nranks> handles{{&handleStorage[0], &handleStorage[1]}};
-  std::vector<int> sentRanks;
-  int acceptedPeer = nranks - 1;
-  uint64_t nextAcceptedMagic = 100;
-  int readyPolls = 0;
-  ScopedHook init(g_ncclSocketInit,
-                  [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType, volatile uint32_t*, int, int) {
-                    return ncclSuccess;
-                  });
-  ScopedHook connect(g_ncclSocketConnect, [](ncclSocket*) { return ncclSuccess; });
-  ScopedHook send(g_ncclSocketSend, [&sentRanks](ncclSocket*, void* data, int size) {
-    EXPECT_EQ(size, static_cast<int>(sizeof(int)));
-    sentRanks.push_back(*static_cast<int*>(data));
-    return ncclSuccess;
-  });
-  ScopedHook accept(g_ncclSocketAccept, [&nextAcceptedMagic](ncclSocket* sock, ncclSocket*, bool) {
-    sock->magic = nextAcceptedMagic++;
-    return ncclSuccess;
-  });
-  ScopedHook ready(g_ncclSocketReady, [&readyPolls](ncclSocket*, int* running) {
-    *running = (++readyPolls % 2) == 0;
-    return ncclSuccess;
-  });
-  ScopedHook recv(g_ncclSocketRecv, [&acceptedPeer](ncclSocket*, void* data, int size) {
-    EXPECT_EQ(size, static_cast<int>(sizeof(int)));
-    *static_cast<int*>(data) = acceptedPeer--;
-    return ncclSuccess;
-  });
-  ScopedHook move(g_ncclSocketMove, [](ncclSocket* dst, ncclSocket* src) {
-    dst->magic = src->magic;
-    src->magic = 0;
-  });
-  ScopedHook close(g_ncclSocketClose, [](ncclSocket*, bool) { return ncclSuccess; });
+  ScopedConnectHandshake handshake({1, 0}, /*firstMagic=*/100, /*readyPollsPerPeer=*/2);
   void* opaque = nullptr;
 
   ASSERT_EQ(ncclRmaSocketProxyConnect(nullptr, handles.data(), nranks, 0, &listen, &opaque), ncclSuccess);
@@ -178,14 +214,14 @@ TEST_F(RmaSocketSetupMicrotest, Connect_AllPeersConnectedBuildsBidirectionalPeer
   EXPECT_EQ(comm->nranks, nranks);
   EXPECT_EQ(comm->nextGlobalRequestId, 0u);
   EXPECT_EQ(comm->lastError, ncclSuccess);
-  EXPECT_EQ(sentRanks, (std::vector<int>{0, 0}));
-  EXPECT_EQ(init.calls, nranks * 2);
-  EXPECT_EQ(connect.calls, nranks);
-  EXPECT_EQ(send.calls, nranks);
-  EXPECT_EQ(accept.calls, nranks);
-  EXPECT_EQ(recv.calls, nranks);
-  EXPECT_EQ(ready.calls, nranks * 2);
-  EXPECT_EQ(move.calls, nranks);
+  EXPECT_EQ(handshake.sentRanks, (std::vector<int>{0, 0}));
+  EXPECT_EQ(handshake.init.calls, nranks * 2);
+  EXPECT_EQ(handshake.connect.calls, nranks);
+  EXPECT_EQ(handshake.send.calls, nranks);
+  EXPECT_EQ(handshake.accept.calls, nranks);
+  EXPECT_EQ(handshake.recv.calls, nranks);
+  EXPECT_EQ(handshake.ready.calls, nranks * 2);
+  EXPECT_EQ(handshake.move.calls, nranks);
   EXPECT_EQ(comm->peerReceiver[0].sock.magic, 101u);
   EXPECT_EQ(comm->peerReceiver[1].sock.magic, 100u);
   for (int peer = 0; peer < nranks; ++peer) {
@@ -196,7 +232,7 @@ TEST_F(RmaSocketSetupMicrotest, Connect_AllPeersConnectedBuildsBidirectionalPeer
   }
 
   EXPECT_EQ(ncclRmaSocketProxyCloseColl(comm), ncclSuccess);
-  EXPECT_EQ(close.calls, nranks * 2);
+  EXPECT_EQ(handshake.close.calls, nranks * 2);
 }
 
 TEST_F(RmaSocketSetupMicrotest, Connect_MissingPeerHandleReturnsErrorAndLeavesOutputNull) {
@@ -215,26 +251,12 @@ TEST_F(RmaSocketSetupMicrotest, Connect_InvalidAcceptedRankReturnsErrorAndCleans
   ncclRmaSocketProxyHandle handle{};
   void* handles[] = {&handle};
   void* opaque = reinterpret_cast<void*>(0x1);
-  ScopedHook init(g_ncclSocketInit,
-                  [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType, volatile uint32_t*, int, int) {
-                    return ncclSuccess;
-                  });
-  ScopedHook connect(g_ncclSocketConnect, [](ncclSocket*) { return ncclSuccess; });
-  ScopedHook send(g_ncclSocketSend, [](ncclSocket*, void*, int) { return ncclSuccess; });
-  ScopedHook accept(g_ncclSocketAccept, [](ncclSocket*, ncclSocket*, bool) { return ncclSuccess; });
-  ScopedHook ready(g_ncclSocketReady, [](ncclSocket*, int* running) {
-    *running = 1;
-    return ncclSuccess;
-  });
-  ScopedHook recv(g_ncclSocketRecv, [](ncclSocket*, void* data, int) {
-    *static_cast<int*>(data) = 1;
-    return ncclSuccess;
-  });
-  ScopedHook close(g_ncclSocketClose, [](ncclSocket*, bool) { return ncclSuccess; });
+  ScopedConnectHandshake handshake({1});
 
   EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles, 1, 0, &listen, &opaque), ncclInternalError);
   EXPECT_EQ(opaque, nullptr);
-  EXPECT_GE(close.calls, 3);
+  EXPECT_EQ(handshake.move.calls, 0);
+  EXPECT_GE(handshake.close.calls, 3);
 }
 
 TEST_F(RmaSocketSetupMicrotest, Connect_DuplicateAcceptedRankReturnsErrorAndCleansPartialState) {
@@ -243,34 +265,12 @@ TEST_F(RmaSocketSetupMicrotest, Connect_DuplicateAcceptedRankReturnsErrorAndClea
   std::array<ncclRmaSocketProxyHandle, nranks> handleStorage{};
   std::array<void*, nranks> handles{{&handleStorage[0], &handleStorage[1]}};
   void* opaque = reinterpret_cast<void*>(0x1);
-  ScopedHook init(g_ncclSocketInit,
-                  [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType, volatile uint32_t*, int, int) {
-                    return ncclSuccess;
-                  });
-  ScopedHook connect(g_ncclSocketConnect, [](ncclSocket*) { return ncclSuccess; });
-  ScopedHook send(g_ncclSocketSend, [](ncclSocket*, void*, int) { return ncclSuccess; });
-  ScopedHook accept(g_ncclSocketAccept, [](ncclSocket* sock, ncclSocket*, bool) {
-    sock->magic = 99;
-    return ncclSuccess;
-  });
-  ScopedHook ready(g_ncclSocketReady, [](ncclSocket*, int* running) {
-    *running = 1;
-    return ncclSuccess;
-  });
-  ScopedHook recv(g_ncclSocketRecv, [](ncclSocket*, void* data, int) {
-    *static_cast<int*>(data) = 0;
-    return ncclSuccess;
-  });
-  ScopedHook move(g_ncclSocketMove, [](ncclSocket* dst, ncclSocket* src) {
-    dst->magic = src->magic;
-    src->magic = 0;
-  });
-  ScopedHook close(g_ncclSocketClose, [](ncclSocket*, bool) { return ncclSuccess; });
+  ScopedConnectHandshake handshake({0, 0}, /*firstMagic=*/99);
 
   EXPECT_EQ(ncclRmaSocketProxyConnect(nullptr, handles.data(), nranks, 0, &listen, &opaque), ncclInternalError);
   EXPECT_EQ(opaque, nullptr);
-  EXPECT_EQ(move.calls, 1);
-  EXPECT_EQ(close.calls, nranks * 2 + 1);
+  EXPECT_EQ(handshake.move.calls, 1);
+  EXPECT_EQ(handshake.close.calls, nranks * 2 + 1);
 }
 
 TEST_F(RmaSocketSetupMicrotest, CreateContext_InvalidConfigurationIsRejected) {

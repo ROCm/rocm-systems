@@ -626,6 +626,7 @@ symbol.
 | `src/misc/gdr_peermem.cc` | `fakes/gdr_peermem_fakes.{h,cc}` |
 | `src/misc/gdr_probe.cc` (targets that do not compile the real probe) | `fakes/gdr_probe_fakes.{h,cc}` |
 | `src/misc/ibvwrap.cc` | `fakes/ibvwrap_fakes.{h,cc}` |
+| file-static RMA helpers in `src/include/gdrwrap.h` | `fakes/gdrwrap_fakes.{h,cc}` via `fakes/gdrwrap_seam.h` / `fakes/gdrwrap_seam_undef.h` |
 | ibverbs provider dv libraries (`libionic.so`, `libmlx5.so`) | `fakes/dv_provider_fake.cc` |
 | `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
 | `src/misc/mlx5dvwrap.cc` | `fakes/mlx5dvwrap_fakes.{h,cc}` |
@@ -650,12 +651,12 @@ symbol.
 | `src/transport/net_ib/p2p.cc` | `fakes/transport_net_ib_p2p_fakes.{h,cc}` |
 | `src/transport/net_ib/p2p_resiliency.cc` | `fakes/transport_net_ib_resiliency_fakes.{h,cc}` |
 | `src/transport/net_ib/p2p_resiliency_recovery.cc` | `fakes/transport_net_ib_recovery_fakes.{h,cc}` |
-| `src/transport/net_socket.cc` | `fakes/transport_net_socket_fakes.{h,cc}` |
-| `src/transport/net_socket/common.cc` | `fakes/transport_net_socket_common_fakes.{h,cc}` |
+| `src/transport/net_socket.cc` (targets that do not compile the real file) | `fakes/transport_net_socket_fakes.{h,cc}` |
+| `src/transport/net_socket/common.cc` (targets that do not compile the real file) | `fakes/transport_net_socket_common_fakes.{h,cc}` |
 | generated `sym_kernels_host.cc` (targets that do not compile it) | `fakes/sym_kernels_index_fakes.cc` |
 | rocSHMEM host API | `fakes/rocshmem_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
-| `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
+| selected entry points from `src/{transport,proxy}.cc`, `src/transport/{generic,coll_net,net,nvls}.cc`, `src/{graph/paths,tuning/tuning,plugin/net}.cc` (targets that do not compile the real files) | `fakes/transport_stubs.cc` |
 | `src/misc/socket.cc` | `fakes/socket_fakes.{h,cc}` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
 | libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`) | `fakes/libc_fakes.cc` |
