@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""ROCTX marker coverage for ``--torch-trace``.
+"""ROCTX marker coverage for ``--trace-ml-api torch``.
 
 ``--coverage-n`` is the number of sampled operators (default 20), split
 evenly between CUDA ``torch.ops`` and structural operators. Compares
@@ -123,7 +123,7 @@ def test_random_operator_kernel_coverage(
                 ],
             },
             workload_dir,
-            ["--experimental", "--torch-trace", "--iteration-multiplexing"],
+            ["--experimental", "--trace-ml-api", "torch", "--iteration-multiplexing"],
             check_success=True,
             app_name="coverage_workload",
         )
