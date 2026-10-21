@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added gfx117x WMMA instruction encodings (8- and 16-cycle variants), decoded as VALU instructions.
+- Added new WMMA instruction encodings (8- and 16-cycle variants), decoded as VALU instructions.
 
 ## Changelog for version 0.2.2 | ROCm 10.2
 
