@@ -19,9 +19,11 @@ import time
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fake_gpu_golden as golden  # noqa: E402
 from test_fake_gpu import (  # noqa: E402, F401 (rdcd and tools are fixtures)
     FACTOR,
     PREFIX,
+    Rdcd,
     _all_gpus_group,
     _first_file,
     _missing,
@@ -297,3 +299,77 @@ def test_topo_help_lists_the_options_it_takes(rdcd):
         assert "--gpu_index" in r.stdout, r.stdout
         assert not re.search(r"(?<![\w-])-g\b|--index\b|--reg\b", r.stdout), r.stdout
     assert "Topology Information" in rdcd.ok("topo", "--gpu_index", "0")
+
+
+# ---------------------------------------------------------------------------
+# rdci dmon: columns, a failed watch, and events from every GPU
+# ---------------------------------------------------------------------------
+def test_dmon_separates_its_columns(rdcd):
+    # DEV_NAME (2) is longer than its column; UUID (8) follows it.
+    out = rdcd.ok("dmon", "-i", "0", "-e", "2,8", "-c", "1", "-d", "500")
+    name = re.escape(golden.device_name(0))
+    assert re.search(rf"^0\s+{name}\s+\S", out, re.M), out
+
+
+def test_dmon_fails_when_its_watch_fails(rdcd, client):
+    r = _rdci(
+        rdcd,
+        "dmon",
+        "-i",
+        "0",
+        "-e",
+        "100",
+        "-c",
+        "2",
+        "-d",
+        "200",
+        client=client,
+        RDC_FAKE_CLIENT_FAIL="rdc_field_watch",
+    )
+    assert r.returncode != RDC_ST_OK, _text(r)
+    assert "rdci-dmon" not in rdcd.ok("group", "-l"), "dmon left its group behind"
+
+
+def _dmon_events(d, fields):
+    """dmon on GPUs 0 and 1 with the fake's events armed once dmon has started and read the
+    events already there; returns dmon's output."""
+    samples = int(4 + 2 * FACTOR)
+    cmd = [d.rdci_path, "dmon", "-i", "0,1", "-e", fields, "-c", str(samples), "-d", "1000"]
+    cmd += ["-u", "--host", f"127.0.0.1:{d.port}"]
+    proc = subprocess.Popen(
+        cmd, env=d.rdci_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
+    try:
+        time.sleep(2 * FACTOR)
+        d.arm()
+        out, _ = proc.communicate(timeout=(samples + 30) * FACTOR)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.communicate()
+        pytest.fail("rdci dmon did not end")
+    d.check_alive("rdci dmon with events")
+    assert proc.returncode == RDC_ST_OK, out
+    return out
+
+
+def test_dmon_reports_the_events_of_every_gpu(tools, tmp_path):
+    # GPU 1's event comes first, so it is older than GPU 0's.
+    d = Rdcd(tools, tmp_path, gpus=2, RDC_FAKE_EVENTS="1@1,1@0").start()
+    try:
+        out = _dmon_events(d, "2000,100")
+        for gpu in (0, 1):
+            assert re.search(rf"^{gpu}\s+\*\*Event: VM_PAGE_FAULT", out, re.M), (gpu, out)
+    finally:
+        code = d.stop()
+    assert code == 0, f"rdcd exited with {code}\n{d.output()}"
+
+
+def test_dmon_with_event_fields_only_ends_each_line(tools, tmp_path):
+    d = Rdcd(tools, tmp_path, gpus=2, RDC_FAKE_EVENTS="1@0").start()
+    try:
+        out = _dmon_events(d, "2000")
+        assert re.search(r"^0\s+\*\*Event: VM_PAGE_FAULT", out, re.M), out
+        assert not re.search(r"^\d+\s+\d+(\s|$)", out, re.M), f"GPU indexes run on:\n{out}"
+    finally:
+        code = d.stop()
+    assert code == 0, f"rdcd exited with {code}\n{d.output()}"

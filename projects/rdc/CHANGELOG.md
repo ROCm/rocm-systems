@@ -24,7 +24,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - rdcd, and processes that embed RDC, no longer crash when a policy with an undefined condition type or action is set.
 
-- `rdci policy` and `rdci config` exit with an error code when the request fails, instead of printing nothing or a success message and exiting with 0.
+- `rdci policy`, `rdci config` and `rdci dmon` exit with an error code when the request fails, instead of printing nothing or a success message and exiting with 0.
+
+- `rdci dmon` separates its columns, reports the events of every GPU, and no longer prints GPU indexes without values when it watches only event fields.
 
 - `rdci policy --help` and `rdci topo --help` print their help and exit successfully, and the topo help lists the options `rdci topo` accepts.
 

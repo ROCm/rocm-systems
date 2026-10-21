@@ -490,15 +490,17 @@ static void collect_new_notifs(rdc_handle_t h, const rdc_group_info_t& group_inf
 
   for (uint32_t gindex = 0; gindex < group_info.count; gindex++) {
     for (uint32_t findex = 0; findex < notif_fields.size(); findex++) {
+      // The time of this GPU's last event of this field
+      uint64_t& since = (*notif_ts)[gindex * notif_fields.size() + findex];
       // There may be multiple, repeated events; get all of them
       while (true) {
         ret = rdc_field_get_value_since(h, group_info.entity_ids[gindex], notif_fields[findex],
-                                        (*notif_ts)[findex], &next_ts, &value.val);
+                                        since, &next_ts, &value.val);
 
         if (ret == RDC_ST_NOT_FOUND) {
           break;
         } else if (ret == RDC_ST_OK) {
-          (*notif_ts)[findex] = next_ts;
+          since = next_ts;
           value.dev_ind = group_info.entity_ids[gindex];
           if (notif_pq != nullptr) {
             notif_pq->push(value);
@@ -608,6 +610,11 @@ void RdciDmonSubSystem::process() {
       rdc_handle_, options_[OPTIONS_GROUP_ID], options_[OPTIONS_FIELD_GROUP_ID],
       static_cast<uint64_t>(options_[OPTIONS_DELAY]) * 1000, max_keep_age, max_keep_samples);
   need_cleanup_ = true;
+  if (result != RDC_ST_OK) {
+    // The destructor's clean_up() removes the temporary groups
+    throw RdcException(result,
+                       std::string("Cannot watch the fields: ") + rdc_status_string(result));
+  }
 
   std::stringstream ss;
   amd::rdc::fld_id2name_map_t& field_id_to_descript = amd::rdc::get_field_id_description_from_id();
@@ -626,13 +633,14 @@ void RdciDmonSubSystem::process() {
     ss << "  ";
   }
   for (auto& reg_field : reg_fields) {
-    ss << std::left << std::setw(20) << field_id_string(reg_field);
+    ss << std::left << std::setw(20) << field_id_string(reg_field) << " ";
   }
   ss << std::endl;
 
   std::string header_line((std::istreambuf_iterator<char>(ss)), (std::istreambuf_iterator<char>()));
 
-  std::vector<uint64_t> notif_ts(notif_fields.size());
+  // One timestamp per GPU and event field
+  std::vector<uint64_t> notif_ts(group_info.count * notif_fields.size());
   field_pq_t notif_pq;
 
   // Call this once without printing out notifications to initialize
@@ -650,7 +658,8 @@ void RdciDmonSubSystem::process() {
 
     print_and_clr_notif_pq(&notif_pq, show_timpstamps_);
 
-    for (uint32_t gindex = 0; gindex < group_info.count; gindex++) {
+    // A row per GPU holds the regular fields' values; events print above
+    for (uint32_t gindex = 0; !reg_fields.empty() && gindex < group_info.count; gindex++) {
       std::cout << std::left << std::setw(10) << entity_to_string(group_info.entity_ids[gindex]);
       for (uint32_t findex = 0; findex < reg_fields.size(); findex++) {
         rdc_field_value value;
@@ -658,19 +667,19 @@ void RdciDmonSubSystem::process() {
         result = rdc_field_get_latest_value(rdc_handle_, group_info.entity_ids[gindex],
                                             reg_fields[findex], &value);
         if (result != RDC_ST_OK) {
-          std::cout << std::left << std::setw(20) << "N/A";
+          std::cout << std::left << std::setw(20) << "N/A" << " ";
         } else {
           if (show_timpstamps_ && findex == 0) {
             std::cout << std::left << std::setw(25) << ts_string(value.ts) << "  ";
           }
 
           if (value.type == INTEGER) {
-            std::cout << std::left << std::setw(20) << value.value.l_int;
+            std::cout << std::left << std::setw(20) << value.value.l_int << " ";
           } else if (value.type == DOUBLE) {
             std::cout << std::left << std::setw(20) << std::fixed << std::setprecision(3)
-                      << value.value.dbl;
+                      << value.value.dbl << " ";
           } else {
-            std::cout << std::left << std::setw(20) << value.value.str;
+            std::cout << std::left << std::setw(20) << value.value.str << " ";
           }
         }
 
@@ -679,9 +688,7 @@ void RdciDmonSubSystem::process() {
           return;
         }
       }
-      if (reg_fields.size()) {
-        std::cout << std::endl;
-      }
+      std::cout << std::endl;
     }
   }
 
