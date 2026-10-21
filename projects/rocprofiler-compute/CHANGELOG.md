@@ -72,6 +72,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed the aggregate L2 cache hit rate in the L2 Cache (per Channel) panel on AMD Instinct MI100 and MI200 Series.
 
+* Fixed PC sampling stall reasons counting samples where the wave issued an instruction.
+
 ### Upcoming changes
 
 ### Known issues
