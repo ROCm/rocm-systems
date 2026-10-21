@@ -1,5 +1,5 @@
 sl1d.atomic_req:
-  name: Atomic Req
+  name: sL1D Atomic Requests
   formula: SUM(SQC_DCACHE_ATOMIC) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -13,7 +13,7 @@ sl1d.bw:
     The number of bytes looked up in the sL1D cache per unit time.
   peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
 sl1d.bw_util:
-  name: Bandwidth Utilization
+  name: sL1D Bandwidth Utilization
   formula: 100000 * SUM(SQC_DCACHE_REQ) / SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp))
   unit: Percent
   description: >-
@@ -37,7 +37,7 @@ sl1d.hit_rate_incl_dup:
     cache. The ratio of the number of sL1D requests that hit over the number of all
     sL1D requests.
 sl1d.hits:
-  name: Hits
+  name: sL1D Hits
   formula: SUM(SQC_DCACHE_HITS) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -52,7 +52,7 @@ sl1d.hits_per_req:
     as the ratio of the number of sL1D requests that hit over the number of all sL1D
     requests.
 sl1d.l2_atomic_req:
-  name: Atomic Req
+  name: sL1D-L2 Atomic Requests
   formula: SUM(SQC_TC_DATA_ATOMIC_REQ) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -82,7 +82,7 @@ sl1d.l2_rd_bw:
   description: >-
     Bandwidth of read requests from the sL1D cache to the L2 cache per unit time.
 sl1d.l2_rd_req:
-  name: Read Req
+  name: sL1D-L2 Read Requests
   formula: SUM(SQC_TC_DATA_READ_REQ) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -95,7 +95,7 @@ sl1d.l2_stall_cycles:
     The total number of cycles the sL1D<->L2 interface was stalled, per normalization
     unit.
 sl1d.l2_wr_req:
-  name: Write Req
+  name: sL1D-L2 Write Requests
   formula: SUM(SQC_TC_DATA_WRITE_REQ) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
@@ -109,7 +109,7 @@ sl1d.misses_duplicated:
     The total number of sL1D requests that missed on a cache line that was already
     pending due to another request, per normalization unit.
 sl1d.misses_non_duplicated:
-  name: Misses - Non Duplicated
+  name: sL1D Misses - Non Duplicated
   formula: SUM(SQC_DCACHE_MISSES) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
