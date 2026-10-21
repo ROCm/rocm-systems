@@ -204,3 +204,64 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         )
     endif()
 endif()
+
+# DBI runtime hook: instruments code objects as ROCr loads them. Separate from
+# both hooks above; it shares no source with them. The production and test-only
+# libraries come from one function, so the test build cannot widen the shipped
+# ABI. The production library is built but not installed: without a way to
+# configure a probe it instruments nothing.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    function(rj_add_dbi_runtime_hook _target _export_map _test_hooks)
+        add_library(
+            ${_target}
+            SHARED
+            rj_hsa_dbi_runtime.cpp
+            dbi_runtime_sites.cpp
+        )
+        set_target_properties(${_target} PROPERTIES OUTPUT_NAME ${_target})
+        target_link_libraries(
+            ${_target}
+            PRIVATE
+                rocjitsu_analysis
+                rocjitsu_code
+                rocjitsu_code_object
+                rocjitsu_isa
+                rocjitsu_amdgpu_isa_model_registry
+                util
+                Threads::Threads
+        )
+        target_include_directories(
+            ${_target}
+            PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
+        )
+        target_link_libraries(${_target} PRIVATE rocjitsu_hsa_tools_headers)
+        rj_configure_target(${_target} WARNINGS HIDDEN)
+        if(_test_hooks)
+            target_compile_definitions(
+                ${_target}
+                PRIVATE RJ_DBI_RUNTIME_TEST_HOOKS
+            )
+        endif()
+        rj_set_hooks_exports(${_target} ${_export_map})
+        # Only the decoder-only registry is linked, so fail the link on an
+        # unresolved symbol rather than at dlopen. Sanitizer runtimes resolve
+        # their symbols at load time, so this is skipped under them.
+        if(
+            NOT RJ_ENABLE_ASAN
+            AND NOT RJ_ENABLE_UBSAN
+            AND NOT RJ_ENABLE_TSAN
+            AND NOT RJ_ENABLE_MSAN
+        )
+            target_link_options(${_target} PRIVATE "LINKER:-z,defs")
+        endif()
+    endfunction()
+
+    rj_add_dbi_runtime_hook(rocjitsu_dbi_runtime rocjitsu_dbi_runtime.map OFF)
+    if(BUILD_TESTING)
+        rj_add_dbi_runtime_hook(
+            rocjitsu_dbi_runtime_testing
+            rocjitsu_dbi_runtime_testing.map
+            ON
+        )
+    endif()
+endif()

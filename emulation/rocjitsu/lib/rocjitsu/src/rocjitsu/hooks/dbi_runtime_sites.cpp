@@ -4,14 +4,19 @@
 #include "rocjitsu/hooks/dbi_runtime_sites.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/code/analysis/control_flow.h"
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
 
+#include <algorithm>
 #include <cassert>
 #include <optional>
+#include <span>
 #include <utility>
+#include <vector>
 
 namespace rocjitsu::hooks {
 namespace {
@@ -21,6 +26,16 @@ namespace {
 [[nodiscard]] bool is_dbi_validated_arch(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4 ||
          arch == ROCJITSU_CODE_ARCH_RDNA4;
+}
+
+// Whether patching grew @p original's private segment, as a spill does.
+[[nodiscard]] bool grows_scratch(const KernelDescriptorInfo &original,
+                                 std::span<const uint8_t> patched_elf) {
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_object_kernel_descriptors(AmdGpuCodeObject(patched_elf.data(), patched_elf.size()));
+  assert(kernels.size() == 1 && "patch() keeps the one kernel");
+  return kernels.front().descriptor.private_segment_fixed_size >
+         original.descriptor.private_segment_fixed_size;
 }
 
 [[nodiscard]] rj_code_arch_t target_arch(rj_code_target_id_t target) {
@@ -44,10 +59,14 @@ const char *dbi_load_decision_name(DbiLoadDecision decision) {
     return "not-single-kernel";
   case DbiLoadDecision::UnsupportedControlFlow:
     return "unsupported-control-flow";
+  case DbiLoadDecision::PcRelativeAddress:
+    return "pc-relative-address";
   case DbiLoadDecision::NoSites:
     return "no-sites";
   case DbiLoadDecision::PatchFailed:
     return "patch-failed";
+  case DbiLoadDecision::GrowsScratch:
+    return "grows-scratch";
   case DbiLoadDecision::Count:
     break;
   }
@@ -97,6 +116,15 @@ DbiInstrumentation instrument_each_block(std::span<const uint8_t> elf, const Dbi
       return out;
     }
   }
+  // Any PC read is refused, including one that addresses code or .rodata,
+  // which do not move.
+  for (const BasicBlock *block : *blocks) {
+    if (std::ranges::any_of(instrumentor.block_instructions(*block),
+                            [](const Instruction *inst) { return reads_pc(*inst); })) {
+      out.decision = DbiLoadDecision::PcRelativeAddress;
+      return out;
+    }
+  }
   for (const BasicBlock *block : *blocks) {
     const std::optional<uint64_t> anchor = instrumentor.first_anchor(*block);
     if (!anchor) {
@@ -119,6 +147,10 @@ DbiInstrumentation instrument_each_block(std::span<const uint8_t> elf, const Dbi
   if (!patched.errors.empty()) {
     out.decision = DbiLoadDecision::PatchFailed;
     out.errors = std::move(patched.errors);
+    return out;
+  }
+  if (grows_scratch(kernel_list.front(), patched.elf_bytes)) {
+    out.decision = DbiLoadDecision::GrowsScratch;
     return out;
   }
   out.decision = DbiLoadDecision::Instrumented;
