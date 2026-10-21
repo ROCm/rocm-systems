@@ -270,7 +270,7 @@
       "binary": "host/rccl-UnitTestsMicroDebug",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "DebugMicrotests", "description": "Host-only debug.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
@@ -281,7 +281,7 @@
       "binary": "host/rccl-UnitTestsMicroApiTrace",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "ApiTraceMicrotests", "description": "Host-only misc/api_trace.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
@@ -292,7 +292,7 @@
       "binary": "host/rccl-UnitTestsMicroRecorder",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "RecorderMicrotests", "description": "Host-only misc/recorder.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
@@ -303,7 +303,7 @@
       "binary": "host/rccl-UnitTestsMicroCollTrace",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "CollTraceMicrotests", "description": "Host-only misc/latency_profiler microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
