@@ -10889,15 +10889,6 @@ rocprofiler-sdk:
             - gfx950
           block: TCC
           event: 115
-    - name: TCC_EA0_WRREQ_WRITE_ATOMIC_32B
-      description: Number of 32-byte TCC/EA atomic requests due to DRAM traffic, 1 64-byte request 
-        will be counted to 2.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx950
-          block: TCC
-          event: 116
     - name: TCC_EA0_WRREQ_WRITE_GMI_32B
       description: Number of 32-byte TCC/EA write requests due to GMI traffic, 1 64-byte request 
         will be counted to 2.
@@ -11196,14 +11187,6 @@ rocprofiler-sdk:
         - architectures:
             - gfx950
           expression: reduce(TCC_EA0_WRREQ_WRITE_DRAM,sum)
-    - name: TCC_EA0_WRREQ_WRITE_ATOMIC_32B_sum
-      description: Number of 32-byte TCC/EA atomic requests due to DRAM traffic, 1 64-byte request 
-        will be counted to 2. Sum over TCP instances.
-      properties: []
-      definitions:
-        - architectures:
-            - gfx950
-          expression: reduce(TCC_EA0_WRREQ_WRITE_ATOMIC_32B,sum)
     - name: TCC_EA0_WRREQ_WRITE_GMI_32B_sum
       description: Number of 32-byte TCC/EA write requests due to GMI traffic, 1 64-byte request 
         will be counted to 2. Sum over TCP instances.
@@ -12751,14 +12734,6 @@ rocprofiler-sdk:
             - gfx950
           block: TCP
           event: 40
-    - name: TCP_UTCL1_STALL_LFIFO_NO_RES
-      description: Total utcl1 stalls due to utcl2 latency hiding fifo output not resident
-      properties: []
-      definitions:
-        - architectures:
-            - gfx950
-          block: TCP
-          event: 53
     - name: TCP_TCP_TA_ADDR_STALL_CYCLES_sum
       description: TCP stalls TA addr interface. Sum over TCP instances.
       properties: []
@@ -12872,14 +12847,14 @@ rocprofiler-sdk:
         - architectures:
             - gfx950
           expression: reduce(TCP_UTCL1_LFIFO_FULL,sum)
-    - name: TCP_UTCL1_STALL_LFIFO_NO_RES_sum
+    - name: TCP_UTCL1_STALL_LFIFO_NOT_RES_sum
       description: Total utcl1 stalls due to utcl2 latency hiding fifo output not resident. Sum over
         TCP instances.
       properties: []
       definitions:
         - architectures:
             - gfx950
-          expression: reduce(TCP_UTCL1_STALL_LFIFO_NO_RES,sum)
+          expression: reduce(TCP_UTCL1_STALL_LFIFO_NOT_RES,sum)
     - name: TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum
       description: Total utcl1 stalls due to utcl2_req out of credits. Sum over TCP instances.
       properties: []
