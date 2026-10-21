@@ -194,7 +194,7 @@ l2.rd_req_rate:
   description: >-
     The number of L2 read requests per active L2 cycle, across all L2 channels.
 l2.stalled_on_lat_fifo:
-  name: Stalled on Latency FIFO
+  name: L2 Stalled on Latency FIFO
   formula: SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: ''

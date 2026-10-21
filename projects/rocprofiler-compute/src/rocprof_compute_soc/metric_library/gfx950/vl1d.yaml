@@ -248,7 +248,7 @@ vl1d.stalled_on_data:
     processing unit to send write/atomic data, divided by the number of cycles where
     the vL1D is active.
 vl1d.stalled_on_lat_fifo:
-  name: Stalled on Latency FIFO
+  name: vL1D Stalled on Latency FIFO
   formula: 100 * TCP_LFIFO_STALL_CYCLES_sum / TCP_GATE_EN1_sum
   unit: ''
   description: >-
