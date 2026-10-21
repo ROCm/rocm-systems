@@ -182,8 +182,39 @@ def test_extract_row_refs_ignores_non_pmc_frame_columns() -> None:
         "to_avg(raw_pmc_df['TA_BUSY'] / raw_pmc_df['Dispatch_Unit'])",
         "to_avg(raw_pmc_df['TA_BUSY'] / "
         "(raw_pmc_df['End_Timestamp'] - raw_pmc_df['Start_Timestamp']))",
+        "to_avg(raw_pmc_df['Arch_VGPR'])",
+        "to_avg(raw_pmc_df['Grid_Size'])",
     ])
     assert refs.direct_counters == frozenset({"TA_BUSY"})
+
+
+def test_kernel_launch_fields_are_not_cleared_by_pass_bind() -> None:
+    """VGPR, grid size, and the other launch fields are not perfmon counters."""
+    layout = PassLayout(
+        pass_keys=("pmc_perf_0",),
+        counters_by_pass={"pmc_perf_0": frozenset({"SQ_WAVES"})},
+        duplicated=frozenset(),
+    )
+    launch_exprs = [
+        "to_avg(raw_pmc_df['Arch_VGPR'])",
+        "to_avg(raw_pmc_df['Accum_VGPR'])",
+        "to_avg(raw_pmc_df['SGPR'])",
+        "to_avg(raw_pmc_df['Grid_Size'])",
+        "to_avg(raw_pmc_df['Workgroup_Size'])",
+        "to_avg(raw_pmc_df['LDS_Per_Workgroup'])",
+        "to_avg(raw_pmc_df['Scratch_Per_Workitem'])",
+    ]
+    metric_df = pd.DataFrame({"Avg": launch_exprs, "Min": launch_exprs})
+    used = bind_metric_tables_to_passes(
+        {1: metric_df},
+        {1: "metric_table"},
+        layout,
+        "MI300",
+        frozenset({"Avg", "Min"}),
+    )
+    assert used == set()
+    assert metric_df["Avg"].tolist() == launch_exprs
+    assert metric_df["Min"].tolist() == launch_exprs
 
 
 def test_extract_row_refs_normalizes_qualified_columns() -> None:
