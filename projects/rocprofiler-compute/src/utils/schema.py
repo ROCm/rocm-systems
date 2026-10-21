@@ -4,14 +4,11 @@
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 import pandas as pd
 
 from membw_analysis.models import MemBwAnalysisResult
-
-if TYPE_CHECKING:
-    from utils.utils_analysis import CallTreeNode
 
 
 @dataclass
@@ -64,6 +61,6 @@ class Workload:
     unmatched_kernel_frames: list[pd.DataFrame] = field(default_factory=list)
     # Consolidated marker rows after matching operator calls across passes.
     ml_api_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
-    # Nested operator trees keyed by Thread_Id.
-    ml_api_call_trees: dict[str, list["CallTreeNode"]] = field(default_factory=dict)
+    # Nested utils_analysis.CallTreeNode roots keyed by Thread_Id.
+    ml_api_call_trees: dict[str, list[Any]] = field(default_factory=dict)
     membw_result: Optional[MemBwAnalysisResult] = None
