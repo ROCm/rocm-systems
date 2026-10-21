@@ -216,25 +216,30 @@ void ComputeQueue::HandleError(hsa_status_t status) {
 void ComputeQueue::FaultMonitorThread(ComputeQueue* queue) {
   constexpr int kStallTimeoutMs = 30000;
   uint64_t last_rptr = 0;
+  uint64_t last_fence = 0;
   auto last_progress = std::chrono::steady_clock::now();
 
   while (!queue->thread_stop_) {
-    // Stall detection: rptr hasn't advanced while work is pending.
-    // Skipped when disable_wait_timeout_ is set (user opt-out for long-running kernels).
+    // Stall detection: neither rptr nor the GPU fence has advanced while work
+    // is pending.  On the !platform_atomic_support_ path the AqlToPm4Thread
+    // blocks in a fence wait before advancing rptr, so rptr alone is not a
+    // reliable progress indicator — the GPU fence (*sync_addr) still advances
+    // as submissions retire.
     if (!dxg_runtime->disable_wait_timeout_) {
       uint64_t current_rptr = queue->ring_rptr->load(std::memory_order_relaxed);
       uint64_t current_wptr = queue->ring_wptr->load(std::memory_order_relaxed);
-      if (current_rptr != last_rptr) {
+      uint64_t current_fence = queue->sync_addr ? LoadSyncValue(queue->sync_addr) : 0;
+      if (current_rptr != last_rptr || current_fence != last_fence) {
         last_rptr = current_rptr;
+        last_fence = current_fence;
         last_progress = std::chrono::steady_clock::now();
       } else if (current_wptr > current_rptr) {
         auto stall_duration = std::chrono::steady_clock::now() - last_progress;
         if (stall_duration > std::chrono::milliseconds(kStallTimeoutMs)) {
           if (queue->thread_stop_.exchange(true)) return;
           pr_err("GPU stall detected: rptr=%" PRIu64 " wptr=%" PRIu64
-                 " stalled for %dms — possible device memory fault\n",
-                 current_rptr, current_wptr, kStallTimeoutMs);
-          // error reason is not set. So setting this error as default
+                 " fence=%" PRIu64 " stalled for %dms — possible device memory fault\n",
+                 current_rptr, current_wptr, current_fence, kStallTimeoutMs);
           queue->HandleError(static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION));
           return;
         }
@@ -329,7 +334,6 @@ ComputeQueue::ComputeQueue(WDDMDevice* device, void* ring, uint64_t ring_size,
       needs_barrier(true),
       ready_to_submit(false),
       platform_atomic_support_(false),
-      signal_addr_(NULL),
       thread_stop_(false),
       scratch_waves_(device->MaxScratchSlotsPerCu() * device->ComputeUnitCount()),
       scratch_size_per_wave_(0),
@@ -839,7 +843,7 @@ hsa_status_t ComputeQueue::KernelDispatchAqlToPm4(char* cpu, hsa_kernel_dispatch
       i += cmd_util.BuildAtomicMem(signal_addr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i,
                                    cache_policy__mec_atomic_mem__bypass, -1);
     else
-      signal_addr_ = signal_addr;
+      pending_signals_.push_back(signal_addr);
   }
 
   // The ring_rptr is used to record pm4 queue rptr value,
@@ -932,7 +936,7 @@ hsa_status_t ComputeQueue::BarrierGenericAqlToPm4(char* cpu, hsa_barrier_and_pac
       i += cmd_util.BuildAtomicMem(signal_addr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i,
                                    cache_policy__mec_atomic_mem__bypass, -1);
     else
-      signal_addr_ = signal_addr;
+      pending_signals_.push_back(signal_addr);
   }
 
   // The ring_rptr is used to record pm4 queue rptr value,
@@ -1038,7 +1042,7 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char* cpu, amd_aql_pm4_ib* pac
         i += cmd_util.BuildAtomicMem(signal_addr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i,
                                      cache_policy__mec_atomic_mem__bypass, -1);
       else
-        signal_addr_ = signal_addr;
+        pending_signals_.push_back(signal_addr);
     }
   } else {
     if (packet->completion_signal.handle != 0) {
@@ -1170,22 +1174,24 @@ hsa_status_t ComputeQueue::Process(void) {
     ret = Submit();
     if (ret != HSA_STATUS_SUCCESS) return ret;
 
-    // CPU wait for GPU fence, and cpu update the signal.
-    if (!platform_atomic_support_ && signal_addr_) {
+    // CPU wait for GPU fence, then decrement all pending completion signals.
+    // Without platform atomics the GPU cannot decrement signals itself, so the
+    // AqlToPm4Thread does it on the CPU once the submission has retired.
+    if (!platform_atomic_support_ && !pending_signals_.empty()) {
       constexpr int kFaultTimeoutMs = 30000;
       auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kFaultTimeoutMs);
-      while (*sync_addr < sync_point) {
+      while (LoadSyncValue(sync_addr) < sync_point) {
         if (!dxg_runtime->disable_wait_timeout_ &&
             std::chrono::steady_clock::now() >= deadline) {
           pr_err("GPU fence timeout after %dms — possible device fault (sync_addr=%" PRIu64
-                 " expected=%" PRIu64 ")\n", kFaultTimeoutMs, *sync_addr, sync_point);
+                 " expected=%" PRIu64 ")\n", kFaultTimeoutMs, LoadSyncValue(sync_addr), sync_point);
           return static_cast<hsa_status_t>(HSA_STATUS_ERROR_MEMORY_APERTURE_VIOLATION);
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
-      // CPU update completional signal
-      rocr::atomic::Decrement(signal_addr_);
-      signal_addr_ = NULL;
+      for (uint64_t* addr : pending_signals_)
+        rocr::atomic::Decrement(addr);
+      pending_signals_.clear();
     }
 
     ready_to_submit = false;
