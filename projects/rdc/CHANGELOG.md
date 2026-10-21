@@ -6,6 +6,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Changed
 
+- **`rdci policy` sets exactly one condition per command**.
+  - A set fails when it gives none or more than one of `-M`, `-T` and `-P`. It kept only one of them, or with `-A` alone sent an undefined condition.
+
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
@@ -19,7 +22,11 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci config -m` sets the memory clock limit instead of failing, and `rdci config` accepts `--host`.
 
-- `rdci config` exits with an error code when the request fails, instead of printing nothing or a success message and exiting with 0.
+- rdcd, and processes that embed RDC, no longer crash when a policy with an undefined condition type or action is set.
+
+- `rdci policy` and `rdci config` exit with an error code when the request fails, instead of printing nothing or a success message and exiting with 0.
+
+- `rdci policy --help` prints its help and exits successfully.
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.
 

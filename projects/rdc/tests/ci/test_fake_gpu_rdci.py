@@ -1,4 +1,5 @@
-"""rdci against a fake-GPU rdcd: its options, help, exit statuses and what it prints.
+"""rdci against a fake-GPU rdcd: its options, help, exit statuses and what it prints, and the
+checks rdcd applies to policies it gets from any client.
 
 Runs from the installed fake-GPU suite and uses test_fake_gpu.py's harness. Some tests preload
 librdc_fake_client.so (tests/fake_amdsmi/fake_rdc_client.cc) into rdci, for replies that a
@@ -8,15 +9,18 @@ Environment, besides test_fake_gpu.py's:
   RDC_FAKE_CLIENT_LIB   librdc_fake_client.so to use (default: next to the fake amd-smi)
 """
 
+import json
 import os
 import subprocess
 import sys
+import time
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from test_fake_gpu import (  # noqa: E402, F401 (rdcd and tools are fixtures)
     FACTOR,
+    PREFIX,
     _all_gpus_group,
     _first_file,
     _missing,
@@ -27,6 +31,8 @@ from test_fake_gpu import (  # noqa: E402, F401 (rdcd and tools are fixtures)
 CLIENT_NAME = "librdc_fake_client.so"
 # rdc.h's rdc_status_t, which rdci also exits with.
 RDC_ST_OK = 0
+RDC_ST_BAD_PARAMETER = 5
+RDC_ST_NOT_FOUND = 6
 
 
 @pytest.fixture(scope="module")
@@ -159,3 +165,122 @@ def test_config_set_stops_at_a_failed_setting(rdcd):
         assert "Successfully configured" not in r.stdout, r.stdout
     finally:
         rdcd.rdci("config", "-g", gid, "-c")
+
+
+# ---------------------------------------------------------------------------
+# rdci policy: one defined condition per set, help, and the status of each command
+# ---------------------------------------------------------------------------
+def test_policy_set_without_a_condition_is_refused(rdcd):
+    gid = _all_gpus_group(rdcd, "pol")
+    r = rdcd.rdci("policy", "-g", gid, "-A", "1")
+    assert r.returncode == RDC_ST_BAD_PARAMETER, r.stdout + r.stderr
+    # A policy with an undefined condition crashed rdcd's policy thread within a second.
+    time.sleep(3 * FACTOR)
+    rdcd.check_alive("3 s after rdci policy -A 1")
+
+
+def test_policy_set_takes_one_condition(rdcd):
+    gid = _all_gpus_group(rdcd, "pol")
+    r = rdcd.rdci("policy", "-g", gid, "-T", "95", "-P", "300")
+    assert r.returncode == RDC_ST_BAD_PARAMETER, r.stdout + r.stderr
+    out = rdcd.rdci("policy", "-g", gid, "--get").stdout
+    assert "Temperature Limit" not in out and "Power Limit" not in out, out
+
+
+def test_policy_help_exits_successfully(rdcd):
+    r = rdcd.rdci("policy", "--help")
+    assert r.returncode == RDC_ST_OK, r.stdout + r.stderr
+    assert "Usage" in r.stdout and "rdci Error" not in r.stdout + r.stderr, r.stdout + r.stderr
+
+
+def test_policy_get_and_clear_on_a_group_without_policy(rdcd):
+    gid = _all_gpus_group(rdcd, "pol")
+    message = f"No policy is set on GPU group {gid}"
+    r = rdcd.rdci("policy", "-g", gid, "--get")
+    assert r.returncode == RDC_ST_NOT_FOUND and message in r.stdout, r.stdout + r.stderr
+    r = rdcd.rdci("policy", "-g", gid, "--clear")
+    assert r.returncode == RDC_ST_OK and message in r.stdout, r.stdout + r.stderr
+    assert "Policy is cleared" not in r.stdout, r.stdout
+
+
+def test_policy_clear_of_a_group_with_one_condition(rdcd):
+    gid = _all_gpus_group(rdcd, "pol")
+    rdcd.ok("policy", "-g", gid, "-T", "95")
+    assert f"Policy is cleared on GPU group {gid}" in rdcd.ok("policy", "-g", gid, "--clear")
+    assert "Temperature Limit" not in rdcd.ok("policy", "-g", gid, "--get")
+
+
+# ---------------------------------------------------------------------------
+# The C API, in a child process so a crash cannot take pytest down: rdcd (standalone) and
+# librdc (embedded) refuse undefined policy values
+# ---------------------------------------------------------------------------
+_CHILD = r"""
+import ctypes, json, sys, time
+lib = ctypes.CDLL(sys.argv[1])
+target, check, settle = sys.argv[2], sys.argv[3], float(sys.argv[4])
+class Policy(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_int), ("value", ctypes.c_int64), ("action", ctypes.c_int)]
+lib.rdc_init.argtypes = [ctypes.c_uint64]
+lib.rdc_connect.argtypes = [ctypes.c_char_p, ctypes.POINTER(ctypes.c_void_p), ctypes.c_char_p,
+                            ctypes.c_char_p, ctypes.c_char_p]
+lib.rdc_start_embedded.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_void_p)]
+lib.rdc_stop_embedded.argtypes = [ctypes.c_void_p]
+lib.rdc_disconnect.argtypes = [ctypes.c_void_p]
+lib.rdc_group_gpu_create.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p,
+                                     ctypes.POINTER(ctypes.c_uint32)]
+lib.rdc_policy_set.argtypes = [ctypes.c_void_p, ctypes.c_uint32, Policy]
+lib.rdc_policy_delete.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int]
+handle = ctypes.c_void_p()
+lib.rdc_init(0)
+if target == "embedded":
+    status = lib.rdc_start_embedded(0, ctypes.byref(handle))
+else:
+    status = lib.rdc_connect(target.encode(), ctypes.byref(handle), None, None, None)
+assert status == 0, f"start: {status}"
+group = ctypes.c_uint32()
+assert lib.rdc_group_gpu_create(handle, 0, b"checks", ctypes.byref(group)) == 0
+got = {}
+if check == "policy":
+    for name, policy in (("negative type", Policy(-1, 1, 0)), ("type past the last", Policy(3, 1, 0)),
+                         ("negative action", Policy(1, 95000, -1)),
+                         ("action past reset", Policy(1, 95000, 2))):
+        got[name] = lib.rdc_policy_set(handle, group.value, policy)
+    got["delete negative type"] = lib.rdc_policy_delete(handle, group.value, -1)
+    got["delete type past the last"] = lib.rdc_policy_delete(handle, group.value, 3)
+    # Last: on a tree without the check, the policy thread reads this far below its table.
+    got["most negative type"] = lib.rdc_policy_set(handle, group.value,
+                                                   Policy(-2**31, 1, 0))
+time.sleep(settle)  # rdc's policy thread checks every policy meanwhile
+print(json.dumps(got), flush=True)
+if target == "embedded":
+    lib.rdc_stop_embedded(handle)
+    lib.rdc_shutdown()
+else:
+    lib.rdc_disconnect(handle)
+"""
+
+
+def _api_child(target, check, env):
+    """Runs _CHILD; returns {call: status} or fails the test."""
+    bootstrap = _first_file(os.path.join(PREFIX, "lib", "librdc_bootstrap.so"))
+    if bootstrap is None:
+        _missing("librdc_bootstrap.so")
+    args = [sys.executable, "-c", _CHILD, bootstrap, target, check, str(2 * FACTOR)]
+    try:
+        r = subprocess.run(args, env=env, capture_output=True, text=True, timeout=120 * FACTOR)
+    except subprocess.TimeoutExpired:
+        pytest.fail(f"the {check} child hung (killed)")
+    assert r.returncode == 0, f"{check} child exited {r.returncode}\n{r.stdout}{r.stderr[-3000:]}"
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+def test_rdcd_refuses_undefined_policy_values(rdcd):
+    got = _api_child(f"127.0.0.1:{rdcd.port}", "policy", dict(os.environ))
+    rdcd.check_alive("policies with undefined values")
+    assert set(got.values()) == {RDC_ST_BAD_PARAMETER}, got
+
+
+def test_embedded_rdc_refuses_undefined_policy_values(tools):
+    env = dict(os.environ, LD_PRELOAD=tools[2], RDC_FAKE_GPUS="4")
+    got = _api_child("embedded", "policy", env)
+    assert set(got.values()) == {RDC_ST_BAD_PARAMETER}, got

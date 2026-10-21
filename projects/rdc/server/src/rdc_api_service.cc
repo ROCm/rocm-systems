@@ -839,6 +839,12 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   ::rdc::Policy p = request->policy();
 
   ::rdc::PolicyCondition cond = p.condition();
+  // Any client can send any value: check it before casting it to rdc.h's enums
+  if (static_cast<uint32_t>(cond.type()) > RDC_POLICY_COND_LAST ||
+      static_cast<uint32_t>(p.action()) > RDC_POLICY_ACTION_GPU_RESET) {
+    reply->set_status(RDC_ST_BAD_PARAMETER);
+    return ::grpc::Status::OK;
+  }
   policy.condition.type = static_cast<rdc_policy_condition_type_t>(cond.type());
   policy.condition.value = cond.value();
   policy.action = static_cast<rdc_policy_action_t>(p.action());
@@ -894,6 +900,12 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   (void)(context);
   if (!reply || !request) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  // Any client can send any value: check it before casting it to rdc.h's enum
+  if (static_cast<uint32_t>(request->condition_type()) > RDC_POLICY_COND_LAST) {
+    reply->set_status(RDC_ST_BAD_PARAMETER);
+    return ::grpc::Status::OK;
   }
 
   // call RDC Policy API

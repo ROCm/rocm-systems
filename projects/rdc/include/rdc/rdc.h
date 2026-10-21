@@ -1609,6 +1609,8 @@ const char* rdc_diagnostic_result_string(rdc_diag_result_t result);
  *
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned when the policy's condition type or action
+ *  is not one of the values rdc_policy_condition_type_t or rdc_policy_action_t defines.
  */
 rdc_status_t rdc_policy_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             rdc_policy_t policy);
@@ -1647,6 +1649,8 @@ rdc_status_t rdc_policy_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
  *  @param[in] condition_type The condition type to delete
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned when condition_type is not one of the values
+ *  rdc_policy_condition_type_t defines.
  */
 
 rdc_status_t rdc_policy_delete(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
