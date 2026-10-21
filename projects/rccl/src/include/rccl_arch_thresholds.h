@@ -25,6 +25,12 @@ enum { RCCL_DDA_FUNC_COUNT = ncclFuncAlltoAll + 1 };
 // inconsistent with the no-suppression meaning needed for symMaxR2 unused/uncapped slots.
 static constexpr size_t kThreshUnlimited = SIZE_MAX;
 
+// Returns true when totalBytes falls within the [minBytes, maxBytes] window.
+// maxBytes == 0 means disabled (returns false for any size).
+// maxBytes == kThreshUnlimited (SIZE_MAX) means no upper bound.
+// Warns once (via WARN) if minBytes > maxBytes with maxBytes != 0.
+bool rcclWindowFits(size_t totalBytes, size_t minBytes, size_t maxBytes);
+
 struct rcclArchThresholds {
   // DDA tier upper bounds, per collective.  gfx1250 uses fabric LL/LL128/VMM;
   // gfx942/gfx950 use ddaVmmMax as the DDA-IPC cap (LL/LL128 unused, stay 0).
@@ -53,13 +59,18 @@ struct rcclArchThresholds {
   // ceNonRegMax[func] = 0 means CE-Scratch / CE 2-shot disabled for that collective.
   // AllReduce 2-shot: this is a selector cap only. ceARTmpBuf is allocated at
   // NCCL_CE_AR_TMPBUF_DEFAULT_BYTES and grown only when this entry (or
-  // RCCL_CE_AR_MAX_MSG_BYTES) is larger.
+  // RCCL_CE_AR_2SHOT_MAX_BYTES) is larger.
   size_t ceNonRegMin[RCCL_DDA_FUNC_COUNT];
   size_t ceNonRegMax[RCCL_DDA_FUNC_COUNT];
 
+  // CE registered-window lower bound per collective, total bytes.
+  // CE-registered fires when ceRegMin[func] <= totalBytes <= ceRegMax[func].
+  // 0 means no lower bound. Independent of ceNonRegMin (the non-registered / scratch path).
+  size_t ceRegMin[RCCL_DDA_FUNC_COUNT];
+
   // CE registered-window upper bound per collective, total bytes.
   // For AllReduce: registered CE copies through user symmetric windows (tuning cap only).
-  // For AllGather: upper bound for CE-registered (R=2). 0 means no upper bound.
+  // For AllGather: upper bound for CE-registered (R=2).
   size_t ceRegMax[RCCL_DDA_FUNC_COUNT];
 
   // Symmetric kernel upper-bound per collective when recv buffer is registered (R2).
@@ -129,6 +140,14 @@ struct rcclArchThresholds {
   bool forceCeScratch;
 };
 
-const rcclArchThresholds* rcclGetArchThresholds(const char* gcn);
+// Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks
+// the table only; other archs have one table for every mode.
+enum rcclTuningPartition {
+  RCCL_TUNING_PARTITION_SPX = 0,
+  RCCL_TUNING_PARTITION_DPX = 1,
+};
+
+const rcclArchThresholds* rcclGetArchThresholds(const char* gcn,
+                                                rcclTuningPartition partition = RCCL_TUNING_PARTITION_SPX);
 
 #endif  // RCCL_ARCH_THRESHOLDS_H_

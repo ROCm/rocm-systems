@@ -392,6 +392,11 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_
     TRACE(NCCL_TUNING, "Skipping CE collective: window registration type %d is not supported", winRegType);
     return false;
   }
+
+  if (coll == ncclFuncAllReduce && (ty == ncclFloat8e4m3 || ty == ncclFloat8e5m2)) {
+    WARN("Skipping CE AllReduce: unsupported datatype: Float8");
+    return false;
+  }
   return true;
 }
 
@@ -475,8 +480,10 @@ bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType
     case ncclFuncAlltoAllv:
     case ncclFuncScatter:
     case ncclFuncGather:
-    case ncclFuncAllReduce:
       return true;
+    case ncclFuncAllReduce:
+      // The CE local reduce kernels have no fp8 instantiation (ce_reduce.cc returns ncclInvalidArgument).
+      return ty != ncclFloat8e4m3 && ty != ncclFloat8e5m2;
     default:
       return false;
     }
