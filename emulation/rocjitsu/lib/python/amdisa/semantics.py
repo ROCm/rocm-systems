@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 # Floating-source conversions that accept VOP3 ABS/NEG before integer conversion.
 F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32_f32'})
 
+# Mixed-type conversions that accept VOP3 ABS/NEG on an F32 source.
+F32_INPUT_CONVERSION_DTYPES = F32_TO_INTEGER_DTYPES | {'f64_f32'}
+
 # Mixed-type conversions that accept VOP3 ABS/NEG on a floating half source.
 F16_INPUT_CONVERSION_DTYPES = frozenset({'i16_f16', 'u16_f16', 'f32_f16'})
 
@@ -1799,6 +1802,26 @@ _SMEM_NARROW_LOAD_MAP = {
     'U16': (2, False),
 }
 
+# S_ATOMIC_* operations the CDNA ISAs define and the scalar pipeline supports.
+# Other flat atomic operations stay 'nop' even when the flat tables know them.
+_SMEM_ATOMIC_OPS = frozenset(
+    {
+        'swap',
+        'cmpswap',
+        'add',
+        'sub',
+        'smin',
+        'umin',
+        'smax',
+        'umax',
+        'and',
+        'or',
+        'xor',
+        'inc',
+        'dec',
+    }
+)
+
 
 def _derive_smem(name: str) -> InstructionSemantics | None:
     """Derive semantics for an SMEM (Scalar Memory) instruction."""
@@ -1826,12 +1849,23 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
-    if upper == 'S_ATOMIC_DEC':
-        return InstructionSemantics(
-            name, 'smem_atomic', operation='dec', elem_size=4, num_elems=1
-        )
-    # Other scalar atomics are not currently simulated.
     if '_ATOMIC_' in upper:
+        if upper.startswith('S_ATOMIC_'):
+            suffix = upper[len('S_ATOMIC_') :]
+            is_x2 = suffix.endswith('_X2')
+            if is_x2:
+                suffix = suffix[:-3]
+            info = _derive_flat_atomic_info(suffix, is_x2)
+            if info and info[0] in _SMEM_ATOMIC_OPS:
+                op, elem_size, data_dw_actual = info
+                return InstructionSemantics(
+                    name,
+                    'smem_atomic',
+                    operation=op,
+                    elem_size=elem_size,
+                    num_elems=data_dw_actual,
+                )
+        # Scalar buffer atomics are not currently simulated.
         return InstructionSemantics(name, 'nop')
 
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper

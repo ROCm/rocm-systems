@@ -190,6 +190,12 @@ public:
   /// @brief Format a scoreboard hazard using its owning wavefront context.
   static void report_memory_wait(void *context, const MemoryWaitScoreboard::Hazard &hazard);
 
+  /// @brief Validate ISA support and CU resource limits without allocating execution state.
+  /// @details Shared with create() so validation-only callers apply the same checks.
+  /// @param config CU configuration parameters.
+  /// @throws std::runtime_error if the target or resource limits are unsupported.
+  static void validate(const Config &config);
+
   /// @brief Create a compute unit for the given architecture and execution mode.
   /// @param name Human-readable name (e.g., "cu0").
   /// @param config CU configuration parameters.
@@ -1625,6 +1631,10 @@ protected:
   friend class GwsDevice; // Shared GWS store polls only this CU's waiters.
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
+
+// Keep LDS selection available to self-contained execution plugin modules.
+inline Lds &Wavefront::lds() { return lds_ ? *lds_ : cu_.lds(); }
+inline const Lds &Wavefront::lds() const { return lds_ ? *lds_ : cu_.lds(); }
 
 inline InstructionCache &InstructionComputeUnitView::instruction_cache() {
   return raw_cu().instruction_cache();

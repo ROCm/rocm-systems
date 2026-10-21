@@ -393,6 +393,11 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_
     TRACE(NCCL_TUNING, "Skipping CE collective: window registration type %d is not supported", winRegType);
     return false;
   }
+
+  if (coll == ncclFuncAllReduce && (ty == ncclFloat8e4m3 || ty == ncclFloat8e5m2)) {
+    WARN("Skipping CE AllReduce: unsupported datatype: Float8");
+    return false;
+  }
   return true;
 }
 

@@ -26,7 +26,7 @@
 // Messages larger than this are pipelined.
 #define NCCL_CE_AR_STAGING_BYTES (256ull * 1024 * 1024)
 
-// Fallback 2-shot max cap for rcclCeAr2ShotMax() when no arch table is present.
+// Fallback 2-shot max cap for rcclCeNonRegMaxTab(table, ncclFuncAllReduce) when no arch table is present.
 // Independent of NCCL_CE_AR_STAGING_BYTES (which governs buffer allocation).
 #ifndef NCCL_CE_AR_TMPBUF_DEFAULT_BYTES
 #define NCCL_CE_AR_TMPBUF_DEFAULT_BYTES (256ULL * 1024 * 1024)
