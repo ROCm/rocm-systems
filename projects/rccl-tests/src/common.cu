@@ -2023,8 +2023,23 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
         TESTCHECK(BenchTime(args, type, op, root, 0));
         usleep(delay_inout_place);
       }
-      if (enable_in_place)
+      if (enable_in_place) {
+        // In-place uses the recv allocation as the single buffer. Reduce-scatter's
+        // input is the send size, so that pass has to run on the send allocation.
+        const bool inplaceUsesSend = bufferLayout != kLayoutDefault && args->sendBytes > args->expectedBytes;
+        std::vector<void*> savedRecv;
+        if (inplaceUsesSend) {
+          savedRecv.resize(args->nGpus);
+          for (int i = 0; i < args->nGpus; i++) {
+            savedRecv[i] = args->recvbuffs[i];
+            args->recvbuffs[i] = args->sendbuffs[i];
+          }
+        }
         TESTCHECK(BenchTime(args, type, op, root, 1));
+        if (inplaceUsesSend) {
+          for (int i = 0; i < args->nGpus; i++) args->recvbuffs[i] = savedRecv[i];
+        }
+      }
       if(output_algo_proto_channels) {
         if(args->collTest->getAlgoProtoChannels) {
           int algo, proto, nchannels;
