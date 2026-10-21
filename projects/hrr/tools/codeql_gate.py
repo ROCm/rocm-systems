@@ -12,8 +12,11 @@ The alerts file lists every alert someone has looked at, each with the reason:
 Any other result is new: it is kept, reported as an error, and the exit status
 is 1. An entry names the rule, the file, the text of the flagged line and the
 sources the message links to (for a taint query, every input that reaches the
-sink), not a line number. So it survives code moving around it, and stops
-matching when the flagged line changes or a new input reaches it.
+sink), not a line number. A source is named by its caption, its file and the
+text of its line, because a caption alone does not tell two inputs apart:
+every fread is "user input (string read by fread)". So an entry survives code
+moving around it, and stops matching when the flagged line changes or a new
+input reaches it, even one with a caption already listed.
 An entry that matches nothing is reported as stale, without failing.
 
 Usage:
@@ -28,8 +31,10 @@ from pathlib import Path
 
 STATUSES = ("false-positive", "open")
 FIELDS = ("rule", "file", "code", "status", "reason")
-# "[user input (a command-line argument)](1)" in a result message.
-SOURCE_RE = re.compile(r"\[([^\]]*)\]\(\d+\)")
+SOURCE_FIELDS = ("caption", "file", "code")
+# "[user input (a command-line argument)](1)" in a result message: the caption,
+# and the id of the related location the input is at.
+SOURCE_RE = re.compile(r"\[([^\]]*)\]\((\d+)\)")
 
 
 class AlertsError(ValueError):
@@ -46,19 +51,29 @@ def load_alerts(path: Path) -> list[dict]:
         if missing:
             raise AlertsError(f"{path}: entry {i} lacks {', '.join(missing)}")
         if not isinstance(entry.get("sources"), list) or not all(
-                isinstance(s, str) for s in entry["sources"]):
-            raise AlertsError(f"{path}: entry {i} needs sources, a list of strings")
+                isinstance(s, dict) and all(isinstance(s.get(f), str) and s[f].strip()
+                                            for f in SOURCE_FIELDS)
+                for s in entry["sources"]):
+            raise AlertsError(f"{path}: entry {i} needs sources, a list of "
+                              f"{{{', '.join(SOURCE_FIELDS)}}} objects")
         if entry["status"] not in STATUSES:
             raise AlertsError(f"{path}: entry {i} has status {entry['status']!r}, "
                               f"expected one of {', '.join(STATUSES)}")
     return entries
 
 
+def place(loc) -> tuple[str, int]:
+    try:
+        phys = loc["physicalLocation"]
+        return phys["artifactLocation"]["uri"], int(phys["region"]["startLine"])
+    except (KeyError, TypeError, ValueError):
+        return "", 0
+
+
 def location(result: dict) -> tuple[str, int]:
     try:
-        loc = result["locations"][0]["physicalLocation"]
-        return loc["artifactLocation"]["uri"], int(loc["region"]["startLine"])
-    except (KeyError, IndexError, TypeError, ValueError):
+        return place(result["locations"][0])
+    except (KeyError, IndexError, TypeError):
         return "", 0
 
 
@@ -70,13 +85,29 @@ def source_line(root: Path, uri: str, line: int) -> str:
     return lines[line - 1].strip() if 0 < line <= len(lines) else ""
 
 
-def sources(result: dict) -> set[str]:
-    return set(SOURCE_RE.findall(result.get("message", {}).get("text", "")))
+def sources(result: dict, root: Path) -> set[tuple[str, str, str]]:
+    """The inputs the message links to, as (caption, file, text of the line).
+
+    A link with no related location gets an empty file and line, which no
+    entry names, so the result is new.
+    """
+    related = {loc.get("id"): loc for loc in result.get("relatedLocations", [])
+               if isinstance(loc, dict)}
+    found = set()
+    for caption, ref in SOURCE_RE.findall(result.get("message", {}).get("text", "")):
+        uri, line = place(related.get(int(ref)))
+        found.add((caption, uri, source_line(root, uri, line) if uri else ""))
+    return found
 
 
-def matches(entry: dict, result: dict, uri: str, code: str) -> bool:
+def entry_sources(entry: dict) -> set[tuple[str, str, str]]:
+    return {(s["caption"], s["file"], s["code"].strip()) for s in entry["sources"]}
+
+
+def matches(entry: dict, result: dict, uri: str, code: str,
+            srcs: set[tuple[str, str, str]]) -> bool:
     return (result.get("ruleId") == entry["rule"] and uri == entry["file"]
-            and code == entry["code"].strip() and sources(result) == set(entry["sources"]))
+            and code == entry["code"].strip() and srcs == entry_sources(entry))
 
 
 def gate(sarif: dict, entries: list[dict], root: Path) -> tuple[list[tuple], list[dict]]:
@@ -92,7 +123,9 @@ def gate(sarif: dict, entries: list[dict], root: Path) -> tuple[list[tuple], lis
         for result in run.get("results", []):
             uri, line = location(result)
             code = source_line(root, uri, line)
-            hit = next((i for i, e in enumerate(entries) if matches(e, result, uri, code)), None)
+            srcs = sources(result, root)
+            hit = next((i for i, e in enumerate(entries)
+                        if matches(e, result, uri, code, srcs)), None)
             if hit is not None:
                 used.add(hit)
                 if entries[hit]["status"] == "false-positive":

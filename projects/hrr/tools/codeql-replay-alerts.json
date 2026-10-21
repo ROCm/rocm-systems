@@ -1,12 +1,16 @@
 {
-  "_about": "CodeQL alerts on hrr-playback that have been reviewed. Read by codeql_gate.py (its docstring says what each field means), which .github/workflows/hrr-replay-codeql.yml runs. Reviewed with CodeQL 2.27.2, cpp-security-extended, on develop 839470366c.",
+  "_about": "CodeQL alerts on hrr-playback that have been reviewed. Read by codeql_gate.py (its docstring says what each field means), which .github/workflows/hrr-replay-codeql.yml runs. Reviewed with CodeQL 2.27.2, cpp-security-extended, on develop 839470366c; the sources, each named by caption, file and line text, were taken from a run at 4c2e036fcb on develop 25c7cab4d1.",
   "alerts": [
     {
       "rule": "cpp/path-injection",
       "file": "projects/hrr/playback/hrr_playback.cpp",
       "code": "FILE* f = fopen(path.string().c_str(), \"r\");",
       "sources": [
-        "user input (a command-line argument)"
+        {
+          "caption": "user input (a command-line argument)",
+          "file": "projects/hrr/playback/hrr_playback.cpp",
+          "code": "int main(int argc, char** argv) {"
+        }
       ],
       "status": "false-positive",
       "reason": "read_process_manifest reads a process manifest under the archive directory named on the command line. The person running hrr-playback chooses that path and can already read whatever it names; no trust boundary is crossed."
@@ -16,7 +20,11 @@
       "file": "projects/hrr/playback/hrr_playback.cpp",
       "code": "FILE* f = fopen((root / \"manifest.json\").string().c_str(), \"r\");",
       "sources": [
-        "user input (a command-line argument)"
+        {
+          "caption": "user input (a command-line argument)",
+          "file": "projects/hrr/playback/hrr_playback.cpp",
+          "code": "int main(int argc, char** argv) {"
+        }
       ],
       "status": "false-positive",
       "reason": "Opens manifest.json under the archive directory named on the command line: the same user-chosen path, joined with a fixed name."
@@ -26,7 +34,11 @@
       "file": "projects/hrr/playback/hrr_reader.cpp",
       "code": "FILE* f = fopen(file_path.c_str(), \"rb\");",
       "sources": [
-        "user input (a command-line argument)"
+        {
+          "caption": "user input (a command-line argument)",
+          "file": "projects/hrr/playback/hrr_playback.cpp",
+          "code": "int main(int argc, char** argv) {"
+        }
       ],
       "status": "false-positive",
       "reason": "open_record_stream opens a stream file (events.bin and the like) under the archive directory named on the command line. The directory is the user's choice and the file names are fixed."
@@ -36,11 +48,24 @@
       "file": "projects/hrr/playback/hrr_reader.cpp",
       "code": "FILE* f = fopen(file_path.c_str(), \"rb\");",
       "sources": [
-        "user input (a command-line argument)",
-        "user input (string read by fread)"
+        {
+          "caption": "user input (string read by fread)",
+          "file": "projects/hrr/playback/hrr_reader.cpp",
+          "code": "size_t got = fread(out.data(), 1, hdr_size, f);"
+        },
+        {
+          "caption": "user input (string read by fread)",
+          "file": "projects/hrr/playback/hrr_reader.cpp",
+          "code": "if (fread(out.data() + hdr_size, 1, pl_size, f) != pl_size) {"
+        },
+        {
+          "caption": "user input (a command-line argument)",
+          "file": "projects/hrr/playback/hrr_playback.cpp",
+          "code": "int main(int argc, char** argv) {"
+        }
       ],
       "status": "false-positive",
-      "reason": "read_file_capped opens a blob or code object under the archive directory named on the command line, in a file named after a hash from an archive record. The record's bytes reach the path only through hrr::hash_hex, which prints two uint64 values as exactly 32 hex digits, so a record cannot put a separator or '..' into the path. On 1 October this alert was reported at hip_playback.cpp:189."
+      "reason": "read_file_capped opens a blob or code object under the archive directory named on the command line, in a file named after a hash from an archive record, whose header and payload read_raw_record reads with the two freads listed. The record's bytes reach the path only through hrr::hash_hex, which prints two uint64 values as exactly 32 hex digits, so a record cannot put a separator or '..' into the path. On 1 October this alert was reported at hip_playback.cpp:189."
     }
   ]
 }
