@@ -65,7 +65,8 @@ inline Registers uniform_input(std::array<uint32_t, 5> words) {
 }
 
 // Reproduce finite matrix capture inputs, including legal sparse index pairs.
-inline Registers float_input(uint32_t width, uint32_t bits, bool bfloat) {
+// gfx12=false replicates factor lanes for the GFX11 (RDNA3) operand layout.
+inline Registers float_input(uint32_t width, uint32_t bits, bool bfloat, bool gfx12) {
   Registers input{};
   uint32_t rng = 0x12056f10u;
   constexpr uint32_t pairs[] = {4, 8, 12, 9, 13, 14};
@@ -93,7 +94,8 @@ inline Registers float_input(uint32_t width, uint32_t bits, bool bfloat) {
           value |= pairs[((rng >> (4 * i)) & 15) % 6] << (4 * i);
         }
       }
-      input[reg][lane] = value;
+      // RDNA3 repeats factor fragments; still advance the RNG for every lane.
+      input[reg][lane] = !gfx12 && reg < 16 && lane >= 16 ? input[reg][lane % 16] : value;
     }
   }
   return input;
