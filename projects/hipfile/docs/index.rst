@@ -46,6 +46,7 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
    .. grid-item-card:: Reference
 
       * :doc:`hipFile fastpath and fallback backends <reference/hipFile-io-backends>`
+      * :doc:`hipFile kernel P2PDMA support <reference/hipFile-kernel-p2pdma-support>`
       * :doc:`hipFile file registration <reference/hipFile-file-registration>`
       * :doc:`hipFile buffer registration <reference/hipFile-buffer-registration>`
       * :doc:`hipFile reference counting <reference/hipFile-reference-count>`

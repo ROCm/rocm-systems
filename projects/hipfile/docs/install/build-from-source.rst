@@ -23,8 +23,12 @@ see :ref:`ROCm Core SDK components <rocm:release-components>`.
   default is C++20.
 - HIP and HSA packages from ROCm so CMake can locate ``hip`` and ``hsa-runtime64``
 - ``libmount`` from ``util-linux`` for mount metadata parsing
-- A Linux kernel that exposes the peer-to-peer DMA (P2PDMA) paths hipFile expects for peer
-  transfers on AMD builds
+- A Linux kernel built with ``CONFIG_PCI_P2PDMA=y`` for the peer-to-peer DMA
+  fastpath. hipFile builds and runs without
+  it, but all I/O uses the fallback path. See :ref:`hipfile-check-p2pdma` for how
+  to check the running kernel, and
+  :doc:`/reference/hipFile-kernel-p2pdma-support` for which distribution kernels
+  enable the option.
 
 
 Build and install
