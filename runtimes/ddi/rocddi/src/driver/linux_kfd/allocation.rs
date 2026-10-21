@@ -204,6 +204,13 @@ impl LinuxAllocation {
         }
     }
 
+    pub(crate) fn remaining_backing_byte_length(&self) -> u64 {
+        match self {
+            Self::Kfd(allocation) => allocation.remaining_backing_byte_length(),
+            Self::DrmRegisteredHost(_) | Self::DrmImportedSystem(_) => 0,
+        }
+    }
+
     pub(super) fn export_dma_buf(&self) -> Result<DmaBuf, Error> {
         match self {
             Self::Kfd(allocation) => allocation.export_dma_buf(),

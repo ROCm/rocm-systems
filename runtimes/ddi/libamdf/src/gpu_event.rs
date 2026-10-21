@@ -32,7 +32,7 @@ pub(crate) unsafe extern "C" fn create(
             return Err(UNSUPPORTED);
         }
         let reset_epoch = device.current_reset_epoch();
-        let slot = Owned::<Event>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+        let slot = instance.owner_slot::<Event>()?;
         register(&device.events)?;
         let result = (|| {
             instance

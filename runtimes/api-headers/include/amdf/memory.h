@@ -55,7 +55,9 @@ typedef uint64_t amdf_memory_flags_t;
 enum amdf_memory_flag_bits_e {
   /// The allocation can be explicitly mapped for host access.
   AMDF_MEMORY_FLAG_HOST_VISIBLE = UINT64_C(1) << 0,
-  /// The physical placement is local to the attached device.
+  /// The physical placement is local to the attached device. Unified SYSTEM
+  /// storage may also provide this property; it does not require a separate
+  /// device-only heap. Host visibility and cache policy remain independent.
   AMDF_MEMORY_FLAG_DEVICE_LOCAL = UINT64_C(1) << 1,
   /// The physical backing can be exported and attached to another device.
   AMDF_MEMORY_FLAG_SHAREABLE = UINT64_C(1) << 2,
@@ -125,7 +127,8 @@ typedef uint64_t amdf_atomic_operations_t;
 enum amdf_atomic_operation_bits_e {
   /// Waits until an atomic value satisfies a supported condition.
   AMDF_ATOMIC_OPERATION_WAIT = UINT64_C(1) << 0,
-  /// Atomic store.
+  /// Naturally aligned atomic store, without read-modify-write. Support does
+  /// not authorize implementing a store with a stronger atomic transaction.
   AMDF_ATOMIC_OPERATION_STORE = UINT64_C(1) << 1,
   /// No-result atomic addition.
   AMDF_ATOMIC_OPERATION_ADD = UINT64_C(1) << 2,
@@ -652,6 +655,26 @@ typedef struct amdf_memory_info_t {
   /// about registered/imported pages, even when their source has placement.
   amdf_memory_placement_t placement;
 } amdf_memory_info_t;
+
+/// Cleanup outcome of memory destruction or failed construction rollback.
+/// This record owns no resource and creates no retry obligation. It is written
+/// on every call when requested, including when the operation itself fails.
+typedef struct amdf_memory_release_info_t {
+  /// First native cleanup error, or OK when cleanup succeeded or was
+  /// unnecessary. Construction returns its original error independently of this
+  /// value.
+  amdf_status_t status;
+  /// Allocation-owned native payload bytes whose relinquishment was not
+  /// established before metadata was consumed. Includes native rounding and
+  /// backing preserved after a failed consumer detach; excludes empty address
+  /// reservations and driver/library metadata. This is a conservative capacity
+  /// charge, not a measurement of resident pages or immediate OS availability.
+  /// REGISTER and IMPORT report zero because their backing belongs to another
+  /// owner. Zero does not grant permission to recycle registered/imported
+  /// source storage after a cleanup error; the source lifetime contract still
+  /// applies.
+  uint64_t abandoned_byte_length;
+} amdf_memory_release_info_t;
 
 /// Immutable facts of one established device access to a memory resource.
 typedef struct amdf_memory_access_info_t {

@@ -265,7 +265,9 @@ pub(crate) fn host_page_size() -> Result<u64, Error> {
 
 impl Drop for HostAllocation {
     fn drop(&mut self) {
-        if self.free().is_err() {
+        if let Err(error) = self.free() {
+            let (_, size) = self.extent();
+            crate::memory::device::record_rollback(error, size);
             // The mapping may still be live. Keep its owner from running a
             // second, unchecked unmap during this destructor.
             if let Some(mapping) = self.mapping.take() {
