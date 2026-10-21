@@ -468,7 +468,7 @@
       "binary": "host/rccl-UnitTestsMicroMemManager",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "MemManagerMicrotests", "description": "Host-only mem_manager microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
@@ -479,7 +479,7 @@
       "binary": "host/rccl-UnitTestsMicroAllocator",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "AllocatorMicrotests", "description": "Host-only allocator microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
@@ -490,7 +490,7 @@
       "binary": "host/rccl-UnitTestsMicroMnnvl",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "MnnvlMicrotests", "description": "Host-only mnnvl microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
@@ -501,7 +501,7 @@
       "binary": "host/rccl-UnitTestsMicroAlloc",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "AllocMicrotests", "description": "Host-only alloc.h microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
