@@ -142,7 +142,7 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   const bool layered = resource.type == kImage1dArray || resource.type == kImage2dArray;
   if (resource.type == kImageCube || resource.type > kImage2dArray || resource.swizzle_mode != 0 ||
       resource.base_level != 0 || resource.last_level != 0 || resource.base_array != 0 ||
-      resource.array_pitch != 0)
+      resource.array_pitch != 0 || resource.pitch == 0)
     return fail(InstructionExecutionError::UnimplementedInstruction);
   // The six-bit image DFMT must fit the buffer decoder's four-bit packed key.
   if (gfx9 && resource.data_format > 15)

@@ -44,6 +44,10 @@ inline constexpr uint32_t kImage2dArray = 13;
 inline constexpr uint32_t kImage2dMsaa = 14;
 inline constexpr uint32_t kImage2dMsaaArray = 15;
 
+inline bool image_resource_encodes_pitch(uint32_t type) {
+  return type == kImage1d || type == kImage2d || type == kImage2dMsaa;
+}
+
 inline uint32_t image_resource_field(const std::array<uint32_t, 8> &r, uint32_t bit,
                                      uint32_t width) {
   return util::extract_bits_from_words(r.data(), bit, width);
@@ -87,8 +91,12 @@ inline ImageResource decode_gfx11_image_resource(const std::array<uint32_t, 8> &
   resource.last_level = field(112, 4);
   resource.swizzle_mode = field(116, 5);
   resource.type = field(124, 4);
-  resource.depth = field(128, 13) + 1;
-  resource.pitch = field(128, 14) + 1;
+  if (image_resource_encodes_pitch(resource.type)) {
+    resource.depth = 1;
+    resource.pitch = field(128, 14) + 1;
+  } else {
+    resource.depth = field(128, 13) + 1;
+  }
   resource.base_array = field(144, 13);
   return resource;
 }
@@ -108,8 +116,12 @@ inline ImageResource decode_gfx12_image_resource(const std::array<uint32_t, 8> &
   resource.last_level = field(111, 5);
   resource.swizzle_mode = field(116, 5);
   resource.type = field(124, 4);
-  resource.depth = field(128, 14) + 1;
-  resource.pitch = resource.width;
+  if (image_resource_encodes_pitch(resource.type)) {
+    resource.depth = 1;
+    resource.pitch = field(128, 16) + 1;
+  } else {
+    resource.depth = field(128, 14) + 1;
+  }
   resource.base_array = field(144, 13);
   return resource;
 }
