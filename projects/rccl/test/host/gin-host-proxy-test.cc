@@ -5,15 +5,16 @@
  ************************************************************************/
 
 // Host-only microtests for src/gin/gin_host_proxy.cc, the GIN proxy backend over an RMA plugin, and the
-// versioned GPU-context writers in src/gin/proxy_gpucontext/. The RMA plugin and device allocations are seamed
-// in this TU, HIP and logging come from the shared fakes; GFDs are posted straight into the host-side queues.
+// versioned GPU-context writers in src/gin/proxy_gpucontext/. The RMA plugin and the device allocators are
+// seamed in this TU, HIP and logging come from the shared fakes; GFDs are posted straight into the host-side queues.
 
 #include <gtest/gtest.h>
 
 #include <fcntl.h>
 #include <unistd.h>
 
-#include <chrono>
+#include <algorithm>
+#include <atomic>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -21,6 +22,7 @@
 #include <cstring>
 #include <deque>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <set>
@@ -30,30 +32,12 @@
 
 #include "nccl.h"
 #include "alloc.h"
-#include "gdrwrap.h"
-#include "comm.h"
-#include "plugin/nccl_rma.h"
-#include "gin/gin_host_proxy.h"
-#include "gin/proxy_gpucontext/gpucontext.h"
 
-#include "../common/LogCapture.hpp"
-#include "ScopedHook.h"
-#include "fakes/hip_fakes.h"
-#include "fakes/nccl_fakes.h"
-
-using RcclUnitTesting::CaptureLog;
-using RcclUnitTesting::LogHas;
-
-// No shared owner for these.
-int64_t ncclParamIbDataDirect() { return 0; }
-gdr_t ncclGdrCopy = nullptr;
-
-// Device allocations: host memory standing in for GPU/GDR buffers.
+// Device allocators: host memory standing in for GPU buffers, each tagged with the allocator that made it.
 namespace {
 struct AllocCall {
   std::string kind;
   size_t bytes;
-  bool forceHost;
 };
 
 struct FakeMem {
@@ -63,8 +47,8 @@ struct FakeMem {
   int memcpyCalls = 0;
   ncclResult_t memcpyResult = ncclSuccess;
 
-  bool Record(const std::string& kind, size_t bytes, bool forceHost = false) {
-    calls.push_back({kind, bytes, forceHost});
+  bool Record(const std::string& kind, size_t bytes) {
+    calls.push_back({kind, bytes});
     return static_cast<int>(calls.size()) - 1 != failAt;
   }
   void* Alloc(const std::string& kind, size_t bytes) {
@@ -72,9 +56,19 @@ struct FakeMem {
     live[p] = kind;
     return p;
   }
-  ncclResult_t Free(void* p) {
+  // kinds: the allocators whose memory this free may release.
+  ncclResult_t Free(void* p, std::initializer_list<const char*> kinds) {
     if (p == nullptr) return ncclSuccess;
-    if (live.erase(p) == 0) return ncclInternalError;  // double free or foreign pointer
+    auto it = live.find(p);
+    if (it == live.end()) {
+      ADD_FAILURE() << "double free or foreign pointer " << p;
+      return ncclInternalError;
+    }
+    if (std::find(kinds.begin(), kinds.end(), it->second) == kinds.end()) {
+      ADD_FAILURE() << it->second << " memory " << p << " released by the wrong free";
+      return ncclInternalError;
+    }
+    live.erase(it);
     std::free(p);
     return ncclSuccess;
   }
@@ -85,28 +79,6 @@ struct FakeMem {
 };
 FakeMem g_mem;
 }  // namespace
-
-template <typename T>
-ncclResult_t FakeAllocMemCPUAccessible(T** ptr, T** devPtr, size_t nelem, int, void** gdrHandle,
-                                       struct ncclMemManager*, bool forceHost = false) {
-  if (!g_mem.Record("cpuAccessible", nelem * sizeof(T), forceHost)) return ncclUnhandledCudaError;
-  *ptr = static_cast<T*>(g_mem.Alloc("cpuAccessible", nelem * sizeof(T)));
-  if (ncclGdrCopy && !forceHost) {
-    // GDR: the GPU sees a separate mapping, tracked through the handle.
-    *devPtr = static_cast<T*>(g_mem.Alloc("gdrDev", nelem * sizeof(T)));
-    *gdrHandle = *devPtr;
-  } else {
-    *devPtr = *ptr;
-    if (gdrHandle) *gdrHandle = nullptr;
-  }
-  return ncclSuccess;
-}
-
-template <typename T>
-ncclResult_t FakeFreeMemCPUAccessible(T* ptr, void* gdrHandle, struct ncclMemManager*) {
-  if (gdrHandle) NCCLCHECK(g_mem.Free(gdrHandle));
-  return g_mem.Free(ptr);
-}
 
 ncclResult_t FakeCuMemAlloc(void** ptr, hipMemGenericAllocationHandle_t*, hipMemAllocationHandleType, size_t size,
                             struct ncclMemManager* = nullptr) {
@@ -123,9 +95,11 @@ ncclResult_t FakeCudaCalloc(T** ptr, size_t nelem) {
   return ncclSuccess;
 }
 
+// ncclCudaFree hands a cuMem buffer to ncclCuMemFree, but only while cuMem is enabled.
 template <typename T>
 ncclResult_t FakeCudaFree(T* ptr, struct ncclMemManager*) {
-  return g_mem.Free((void*)ptr);
+  if (ncclCuMemEnable()) return g_mem.Free((void*)ptr, {"cudaCalloc", "cuMem"});
+  return g_mem.Free((void*)ptr, {"cudaCalloc"});
 }
 
 template <typename T>
@@ -136,19 +110,29 @@ ncclResult_t FakeCudaMemcpy(T* dst, T* src, size_t nelem) {
   return ncclSuccess;
 }
 
-#define allocMemCPUAccessible FakeAllocMemCPUAccessible
-#define freeMemCPUAccessible FakeFreeMemCPUAccessible
+// Before gdrwrap.h, so the real allocMemCPUAccessible/freeMemCPUAccessible templates reach these seams.
 #define ncclCuMemAlloc FakeCuMemAlloc
 #undef ncclCudaCalloc
 #define ncclCudaCalloc(ptr, nelem, ...) FakeCudaCalloc(ptr, nelem)
 #define ncclCudaFree FakeCudaFree
 #define ncclCudaMemcpy FakeCudaMemcpy
 
-// Builds against HIP >= 7.12 compile the DMA-BUF export arm; test it on any HIP that has the export API.
-#if HIP_VERSION >= 70000000
-#undef NCCL_CUMEM_DMABUF_EXPORT_GATE
-#define NCCL_CUMEM_DMABUF_EXPORT_GATE 1
-#endif
+#include "gdrwrap.h"
+#include "comm.h"
+#include "plugin/nccl_rma.h"
+#include "gin/gin_host_proxy.h"
+#include "gin/proxy_gpucontext/gpucontext.h"
+
+#include "../common/LogCapture.hpp"
+#include "ScopedHook.h"
+#include "fakes/hip_fakes.h"
+#include "fakes/nccl_fakes.h"
+
+using RcclUnitTesting::CaptureLog;
+using RcclUnitTesting::LogHas;
+
+// src/init.cc owns it; no shared fake defines it.
+gdr_t ncclGdrCopy = nullptr;
 
 #include "fakes/param_redirect.h"
 // gin_host_proxy.cc's only other param, defined in src/transport/net_ib with no shared owner.
@@ -290,7 +274,7 @@ struct FakeRma {
       res = f.regMrSymDmaBufResults.front();
       f.regMrSymDmaBufResults.pop_front();
     }
-    if (offset != 0) return ncclInternalError;
+    if (offset != 0 || fd < 0) return ncclInternalError;
     if (res != ncclSuccess) return res;
     *mhandle = reinterpret_cast<void*>(0xA000 + f.regs.size());
     f.regs.push_back({collComm, data, size, type, mrFlags, fd, *mhandle});
@@ -396,6 +380,9 @@ struct FakeRma {
 
 bool FdIsOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
 
+// What ncclGdrInit() returns on a GDRCopy-capable AMD GPU.
+gdr_t const kGdrEnabled = reinterpret_cast<gdr_t>(0x12345678L);
+
 class GinHostProxyMicrotest : public ::testing::Test {
  protected:
   FakeRma rma_;
@@ -411,19 +398,24 @@ class GinHostProxyMicrotest : public ::testing::Test {
   std::deque<hipError_t> exportResults_;  // one per export; empty means success
   std::vector<size_t> exportSizes_;
   std::vector<int> exportedFds_;
-  hipError_t memsetResult_ = hipSuccess;
 
   ScopedHook<int64_t(const char*, int64_t)> params_{g_loadParam, [this](const char* env, int64_t deft) -> int64_t {
     if (std::strcmp(env, "GIN_PROXY_QUEUE_SIZE") == 0) return queueSizeParam_;
     if (std::strcmp(env, "GIN_PROXY_POLL_BATCH") == 0) return pollBatchParam_;
     return deft;
   }};
-  ScopedHook<hipError_t(void*, int, size_t)> memset_{g_hipMemset, [this](void* dst, int value, size_t bytes) {
-    if (memsetResult_ != hipSuccess) return memsetResult_;
-    std::memset(dst, value, bytes);
+  // GIN needs symmetricSupport (gin_host.cc), which needs cuMem.
+  ScopedHook<int()> cuMemEnable_{g_cuMemEnable, [] { return 1; }};
+  // allocMemCPUAccessible's host arm.
+  ScopedHook<hipError_t(void**, size_t, unsigned)> hostMalloc_{g_hipHostMalloc, [](void** ptr, size_t bytes, unsigned) {
+    if (!g_mem.Record("hostMalloc", bytes)) return hipErrorOutOfMemory;
+    *ptr = g_mem.Alloc("hostMalloc", bytes);
     return hipSuccess;
   }};
-#if HIP_VERSION >= 70000000
+  ScopedHook<hipError_t(void*)> hostFree_{g_hipHostFree, [](void* ptr) {
+    return g_mem.Free(ptr, {"hostMalloc"}) == ncclSuccess ? hipSuccess : hipErrorInvalidValue;
+  }};
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
   ScopedHook<hipError_t(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)> export_{
       g_hipMemGetHandleForAddressRange,
       [this](void* handle, hipDeviceptr_t, size_t size, hipMemRangeHandleType, unsigned long long) {
@@ -466,6 +458,11 @@ class GinHostProxyMicrotest : public ::testing::Test {
     if (collComm_) EXPECT_EQ(ncclSuccess, ncclGinProxy.closeColl(collComm_));
     if (listenComm_) EXPECT_EQ(ncclSuccess, ncclGinProxy.closeListen(listenComm_));
     collComm_ = listenComm_ = nullptr;
+  }
+  // Picks up plugin properties changed in rma_ after SetUp connected.
+  ncclResult_t Reconnect() {
+    CloseAll();
+    return ListenAndConnect(/*nRanks=*/2);
   }
 
   ncclGinProxyCollComm* CollComm() { return static_cast<ncclGinProxyCollComm*>(collComm_); }
@@ -572,9 +569,9 @@ class GinHostProxyRegMrMicrotest : public GinHostProxyMicrotest {
 
   void SetUp() override {
     GinHostProxyMicrotest::SetUp();
+    rma_.ptrSupport |= NCCL_PTR_DMABUF;
     ASSERT_EQ(ncclSuccess, ListenAndConnect(2));
     g_dmaBufEnable = 1;
-    CollComm()->props.ptrSupport |= NCCL_PTR_DMABUF;
   }
   void TearDown() override {
     CloseAll();
@@ -599,7 +596,9 @@ TEST_F(GinHostProxyRegMrMicrotest, Host_RegistersPlainWithoutDmaBuf) {
   EXPECT_TRUE(exportSizes_.empty());
 }
 
-#if HIP_VERSION >= 70000000
+// getDmaBufFd's export arm compiles only where rocmwrap.h's NCCL_CUMEM_DMABUF_EXPORT_GATE is on: the CMake
+// symbol probe agrees and HIP is >= 7.12.60540 or in the 7.0.2.x backport window. Elsewhere it always refuses.
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_RegistersThroughAnExportedDmaBufAndClosesIt) {
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
   ASSERT_EQ(1u, exportedFds_.size());
@@ -610,6 +609,21 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_RegistersThroughAnExportedDmaBufAndClose
   EXPECT_EQ(7u, rma_.regs[0].mrFlags);
   EXPECT_EQ(mhandle_, ginHandle_);
   EXPECT_FALSE(FdIsOpen(exportedFds_[0]));
+}
+#else
+TEST_F(GinHostProxyRegMrMicrotest, Cuda_WithoutTheExportArmRegistersPlain) {
+#if NCCL_CUMEM_DMABUF_EXPORT_PROBE
+  ScopedHook<hipError_t(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)> noExport(
+      g_hipMemGetHandleForAddressRange, [](void*, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long) {
+        ADD_FAILURE() << "exported without the export arm";
+        return hipErrorNotSupported;
+      });
+#endif
+  ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
+  ASSERT_EQ(1u, rma_.regs.size());
+  EXPECT_EQ(NCCL_PTR_CUDA, rma_.regs[0].type);
+  EXPECT_EQ(-1, rma_.regs[0].fd);
+  EXPECT_EQ(mhandle_, ginHandle_);
 }
 #endif
 
@@ -622,14 +636,15 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_DmaBufDisabledRegistersPlain) {
 }
 
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_PluginWithoutDmaBufSupportRegistersPlain) {
-  CollComm()->props.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA;
+  rma_.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA;
+  ASSERT_EQ(ncclSuccess, Reconnect());
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
   EXPECT_TRUE(exportSizes_.empty());
   ASSERT_EQ(1u, rma_.regs.size());
   EXPECT_EQ(-1, rma_.regs[0].fd);
 }
 
-#if HIP_VERSION >= 70000000
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_ExportFailureFallsBackToPlain) {
   exportResults_ = {hipErrorNotSupported};
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
@@ -639,7 +654,8 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_ExportFailureFallsBackToPlain) {
   EXPECT_EQ(mhandle_, ginHandle_);
 }
 
-// A rejected DMA-BUF registration retries once with a fresh, non-DataDirect export.
+// A rejected DMA-BUF registration retries once with a second export. The retry asks for a non-DataDirect
+// export, but that distinction is CUDA-only (CUDA_VERSION >= 12080), so on HIP it simply re-exports.
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_RejectedDmaBufRetriesWithASecondExport) {
   rma_.regMrSymDmaBufResults = {ncclSystemError, ncclSuccess};
   ASSERT_EQ(ncclSuccess, Reg(NCCL_PTR_CUDA));
@@ -786,24 +802,37 @@ TEST_F(GinHostProxyContextMicrotest, Create_PublishesOneGpuContextPerContext) {
   EXPECT_EQ(32, Ctx()->pollBatch);
 }
 
-TEST_F(GinHostProxyContextMicrotest, Create_ForcesOnlyTheQueuesIntoHostMemory) {
+TEST_F(GinHostProxyContextMicrotest, Create_AllocatesEachBufferWhereTheGpuAndProxyCanReachIt) {
   ASSERT_EQ(ncclSuccess, Create(Config(3, /*nContexts=*/1)));
   ASSERT_EQ(9u, g_mem.calls.size());
-  EXPECT_EQ("cpuAccessible", g_mem.calls[0].kind);  // counters
+  EXPECT_EQ("hostMalloc", g_mem.calls[0].kind);  // counters
   EXPECT_EQ(4 * sizeof(uint64_t), g_mem.calls[0].bytes);
-  EXPECT_FALSE(g_mem.calls[0].forceHost);
   EXPECT_EQ("cuMem", g_mem.calls[1].kind);  // signals
   EXPECT_EQ(3 * sizeof(uint64_t), g_mem.calls[1].bytes);
   EXPECT_EQ("cudaCalloc", g_mem.calls[2].kind);  // signal offsets
   EXPECT_EQ(3 * sizeof(uint64_t), g_mem.calls[2].bytes);
   // pis, lastIssuedGet, lastVisibleGet: one uint32 per rank each.
-  for (int i = 3; i < 6; i++) EXPECT_EQ(2 * sizeof(uint32_t), g_mem.calls[i].bytes) << i;
-  EXPECT_EQ(32 * 2 * sizeof(ncclGinProxyGfd_t), g_mem.calls[6].bytes);  // queues
-  EXPECT_TRUE(g_mem.calls[6].forceHost);
-  EXPECT_EQ(2 * sizeof(uint32_t), g_mem.calls[7].bytes);  // cis
-  EXPECT_FALSE(g_mem.calls[7].forceHost);
+  for (int i = 3; i < 6; i++) {
+    EXPECT_EQ("cudaCalloc", g_mem.calls[i].kind) << i;
+    EXPECT_EQ(2 * sizeof(uint32_t), g_mem.calls[i].bytes) << i;
+  }
+  EXPECT_EQ("hostMalloc", g_mem.calls[6].kind);  // queues
+  EXPECT_EQ(32 * 2 * sizeof(ncclGinProxyGfd_t), g_mem.calls[6].bytes);
+  EXPECT_EQ("hostMalloc", g_mem.calls[7].kind);  // cis
+  EXPECT_EQ(2 * sizeof(uint32_t), g_mem.calls[7].bytes);
   EXPECT_EQ("cudaCalloc", g_mem.calls[8].kind);  // the GPU-context array
   EXPECT_EQ(NCCL_GIN_PROXY_GPU_CONTEXT_MAX_SIZE, g_mem.calls[8].bytes);
+}
+
+// With GDRCopy, allocMemCPUAccessible puts counters and CIs in device memory; only the queues are forced to host.
+TEST_F(GinHostProxyContextMicrotest, Create_GdrCopyForcesOnlyTheQueuesIntoHostMemory) {
+  ncclGdrCopy = kGdrEnabled;
+  ASSERT_EQ(ncclSuccess, Create(Config(3, /*nContexts=*/1)));
+  EXPECT_EQ("cudaCalloc", g_mem.live.at(Ctx()->counters));
+  EXPECT_EQ("cudaCalloc", g_mem.live.at(Ctx()->hostGpuCtx[0].cis));
+  EXPECT_EQ("hostMalloc", g_mem.live.at(Ctx()->hostGpuCtx[0].queues));
+  EXPECT_NE(nullptr, Ctx()->countersGdrHandle);
+  EXPECT_NE(nullptr, Ctx()->hostGpuCtx[0].cisGdrHandle);
 }
 
 TEST_F(GinHostProxyContextMicrotest, Create_ZeroesAndRegistersSignalsStronglyOrderedAndNeverReset) {
@@ -830,7 +859,8 @@ TEST_F(GinHostProxyContextMicrotest, Create_ZeroesTheSignalBuffer) {
   for (int i = 0; i < 2 * 3; i++) EXPECT_EQ(0u, Ctx()->signalsDev[i]) << i;
   Destroy();
 
-  memsetResult_ = hipErrorInvalidValue;
+  ScopedHook<hipError_t(void*, int, size_t)> failMemset(g_hipMemset,
+                                                        [](void*, int, size_t) { return hipErrorInvalidValue; });
   EXPECT_EQ(ncclUnhandledCudaError, Create(Config(3)));
 }
 
@@ -883,23 +913,25 @@ TEST_F(GinHostProxyContextMicrotest, Create_WithoutSignalsOrCountersAllocatesNei
   EXPECT_EQ(NCCL_PTR_HOST, rma_.regs[0].type);
 }
 
-// Where counters live is allocMemCPUAccessible's call; the proxy logs the choice and must hand the GPU
-// the device-side pointer either way.
-TEST_F(GinHostProxyContextMicrotest, Create_GdrCopyChoosesTheCountersMappingTheGpuSees) {
+// Where counters live is allocMemCPUAccessible's call; the proxy logs the choice and hands the GPU the
+// device-side pointer it got back.
+TEST_F(GinHostProxyContextMicrotest, Create_GdrCopyChoosesWhereTheCountersLive) {
   RcclUnitTesting::ScopedDebugLogging info(NCCL_LOG_INFO, NCCL_ALL);
   ncclResult_t res = ncclInternalError;
   std::string log = CaptureLog([&] { res = Create(Config(3)); });
   ASSERT_EQ(ncclSuccess, res);
   EXPECT_TRUE(LogHas(log, "will not be using GDRCopy")) << log;
   EXPECT_EQ(nullptr, Ctx()->countersGdrHandle);
-  EXPECT_EQ(Ctx()->counters, GpuCtx()[0].counters);
+  EXPECT_EQ("hostMalloc", g_mem.live.at(Ctx()->counters));
+  EXPECT_EQ(Ctx()->countersDev, GpuCtx()[0].counters);
   Destroy();
-  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
+  ncclGdrCopy = kGdrEnabled;
   log = CaptureLog([&] { res = Create(Config(3)); });
   ASSERT_EQ(ncclSuccess, res);
   EXPECT_FALSE(LogHas(log, "GDRCopy")) << log;
-  EXPECT_NE(nullptr, Ctx()->countersGdrHandle);
-  EXPECT_NE(Ctx()->counters, GpuCtx()[0].counters);
+  ASSERT_NE(nullptr, Ctx()->countersGdrHandle);
+  EXPECT_EQ(Ctx()->counters, static_cast<gdr_mem_desc_t*>(Ctx()->countersGdrHandle)->gdrDevMem);
+  EXPECT_EQ("cudaCalloc", g_mem.live.at(Ctx()->counters));
   EXPECT_EQ(Ctx()->countersDev, GpuCtx()[0].counters);
 }
 
@@ -911,17 +943,19 @@ TEST_F(GinHostProxyContextMicrotest, Create_QueueSizeMustBeAPowerOfTwoWithinTheP
   EXPECT_EQ(32u, QueueSizeFor(32));
   std::string log = CaptureLog([&] { EXPECT_EQ(32u, QueueSizeFor(64)); });
   EXPECT_TRUE(LogHas(log, "greater than the maximum outstanding requests")) << log;
-  log = CaptureLog([&] {
-    EXPECT_EQ(32u, QueueSizeFor(-5));  // wraps to a huge unsigned value
-    EXPECT_EQ(32u, QueueSizeFor(0));
-  });
+  log = CaptureLog([&] { EXPECT_EQ(32u, QueueSizeFor(-5)); });  // wraps to a huge unsigned value
+  EXPECT_TRUE(LogHas(log, "greater than the maximum outstanding requests")) << log;
+  EXPECT_FALSE(LogHas(log, "less than 1")) << log;
+  log = CaptureLog([&] { EXPECT_EQ(32u, QueueSizeFor(0)); });
   EXPECT_TRUE(LogHas(log, "less than 1")) << log;
+  EXPECT_FALSE(LogHas(log, "greater than")) << log;
   log = CaptureLog([&] { EXPECT_EQ(32u, QueueSizeFor(12)); });
   EXPECT_TRUE(LogHas(log, "not a power of two")) << log;
 }
 
 TEST_F(GinHostProxyContextMicrotest, Create_QueueLimitScalesWithMaxRecvs) {
-  CollComm()->props.maxRecvs = 4;
+  rma_.maxRecvs = 4;
+  ASSERT_EQ(ncclSuccess, Reconnect());
   EXPECT_EQ(128u, QueueSizeFor(-1));
   EXPECT_EQ(64u, QueueSizeFor(64));
 }
@@ -929,7 +963,8 @@ TEST_F(GinHostProxyContextMicrotest, Create_QueueLimitScalesWithMaxRecvs) {
 // The fallback size is never checked itself, so a plugin with a non-power-of-two maxRecvs gets a queue the
 // index mask (queueSize - 1) cannot wrap. Pins AICOMRCCL-2994; a fix flips this pin.
 TEST_F(GinHostProxyContextMicrotest, Create_NonPowerOfTwoMaxRecvs_KeepsANonPowerOfTwoQueue) {
-  CollComm()->props.maxRecvs = 3;
+  rma_.maxRecvs = 3;
+  ASSERT_EQ(ncclSuccess, Reconnect());
   EXPECT_EQ(96u, QueueSizeFor(-1));
   EXPECT_EQ(96u, QueueSizeFor(12));
 }
@@ -996,11 +1031,11 @@ TEST_F(GinHostProxyContextMicrotest, Destroy_ReleasesAllButTheSignalOffsets) {
   EXPECT_EQ(signalOffsets, g_mem.live.begin()->first);
 }
 
-TEST_F(GinHostProxyContextMicrotest, Destroy_FreesGdrCountersThroughTheirHandle) {
-  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
+TEST_F(GinHostProxyContextMicrotest, Destroy_FreesGdrMemoryThroughItsHandle) {
+  ncclGdrCopy = kGdrEnabled;
   ASSERT_EQ(ncclSuccess, Create(Config(3, 1, 0, /*nCounters=*/2)));
-  void* gdrDev = Ctx()->countersGdrHandle;
-  ASSERT_EQ(1u, g_mem.live.count(gdrDev));
+  ASSERT_NE(nullptr, Ctx()->countersGdrHandle);
+  ASSERT_NE(nullptr, Ctx()->hostGpuCtx[0].cisGdrHandle);
   Destroy();
   EXPECT_TRUE(g_mem.live.empty());
 }
@@ -1100,12 +1135,16 @@ TEST_F(GinHostProxyProgressMicrotest, Poll_WaitsForTheRestOfAPartiallyWrittenGfd
   for (auto& q : g.qword) q.raw |= 1;
   ncclGinProxyGfd_t* slot = Slot(0, 0, 0);
   __atomic_store_n(&slot->qword[0].raw, g.qword[0].raw, __ATOMIC_RELEASE);
+  // The producer finishes the GFD only once Progress() is under way; nothing waits on the clock.
+  std::atomic<bool> progressing{false};
   std::thread producer([&] {
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    while (!progressing.load(std::memory_order_acquire)) {
+    }
     for (int k = ncclGinProxyGfdQwords - 1; k > 0; k--) {
       __atomic_store_n(&slot->qword[k].raw, g.qword[k].raw, __ATOMIC_RELEASE);
     }
   });
+  progressing.store(true, std::memory_order_release);
   EXPECT_EQ(ncclSuccess, Progress());
   producer.join();
   ASSERT_EQ(1u, rma_.ops.size());

@@ -1416,6 +1416,21 @@ rccl_add_micro_binary(rccl-UnitTestsMicroWarpSpeed
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroGinHostProxy
 # ---------------------------------------------------------------------------
+# In-build, RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED arrives with rccl's own compile definitions; standalone
+# repeats the top-level probe, so rocmwrap.h's NCCL_CUMEM_DMABUF_EXPORT_GATE matches what rccl compiles.
+set(_MICRO_DMABUF_EXPORT_DEF "")
+if(NOT BUILD_TESTS)
+  include(CheckCXXSymbolExists)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+  set(CMAKE_REQUIRED_DEFINITIONS -D__HIP_PLATFORM_AMD__)
+  check_cxx_symbol_exists(hipMemGetHandleForAddressRange "hip/hip_runtime_api.h"
+    _MICRO_HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
+  unset(CMAKE_REQUIRED_DEFINITIONS)
+  set(CMAKE_TRY_COMPILE_TARGET_TYPE EXECUTABLE)
+  if(_MICRO_HIP_MEM_GET_HANDLE_FOR_ADDR_RANGE)
+    set(_MICRO_DMABUF_EXPORT_DEF RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
+  endif()
+endif()
 rccl_add_micro_binary(rccl-UnitTestsMicroGinHostProxy
   SOURCES ${TEST_MICRO_GIN_HOST_PROXY_SOURCE_FILES}
   EXTRA_INCLUDES
@@ -1423,6 +1438,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroGinHostProxy
     ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
+    ${_MICRO_DMABUF_EXPORT_DEF}
     GIN_HOST_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host_proxy.cc"
     GPUCONTEXT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/proxy_gpucontext/gpucontext.cc"
     GPUCONTEXT_V1_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/proxy_gpucontext/gpucontext_v1.cc"

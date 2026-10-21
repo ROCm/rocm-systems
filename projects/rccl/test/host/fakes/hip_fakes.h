@@ -176,8 +176,9 @@ extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/, 
 // hipSuccess -- the allocation seams hand out std::malloc'd host memory, so a
 // buffer production zeroes is genuinely zero when a test reads it back.
 extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/)> g_hipMemset;
-#if HIP_VERSION >= 70000000
-// The DMA-BUF export (HIP >= 7.0). The default reports the export unsupported.
+// The DMA-BUF export, where CMake's hipMemGetHandleForAddressRange probe found it (rocmwrap.h's
+// NCCL_CUMEM_DMABUF_EXPORT_PROBE). The default reports the export unsupported.
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
 extern std::function<hipError_t(void* /*handle*/, hipDeviceptr_t /*ptr*/, size_t /*size*/,
                                 hipMemRangeHandleType /*type*/, unsigned long long /*flags*/)>
     g_hipMemGetHandleForAddressRange;

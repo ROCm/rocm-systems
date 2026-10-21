@@ -40,7 +40,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAddressRange,         hipMemGetAddressRange)
 ASSERT_HOOK_MATCHES_PROD(g_hipIpcGetMemHandle,            hipIpcGetMemHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocationHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
-#if HIP_VERSION >= 70000000
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
 ASSERT_HOOK_MATCHES_PROD(g_hipMemGetHandleForAddressRange, hipMemGetHandleForAddressRange);
 #endif
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,                 hipMemRelease);
@@ -412,7 +412,7 @@ std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)
     g_hipMemcpyAsync = DefaultHipMemcpyAsync;
 std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync = DefaultHipMemsetAsync;
 std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
-#if HIP_VERSION >= 70000000
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
 static hipError_t DefaultHipMemGetHandleForAddressRange(void*, hipDeviceptr_t, size_t, hipMemRangeHandleType,
                                                         unsigned long long) {
     return hipErrorNotSupported;
@@ -679,7 +679,7 @@ void ResetHipFakes()
     g_hipMemcpyAsync                = DefaultHipMemcpyAsync;
     g_hipMemsetAsync                = DefaultHipMemsetAsync;
     g_hipMemset                     = DefaultHipMemset;
-#if HIP_VERSION >= 70000000
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
     g_hipMemGetHandleForAddressRange = DefaultHipMemGetHandleForAddressRange;
 #endif
     g_hipStreamCreateWithFlags      = DefaultHipStreamCreateWithFlags;
@@ -707,7 +707,7 @@ void ResetHipFakes()
 // ===========================================================================
 
 // --- hook-backed real symbols -------------------------------------------
-#if HIP_VERSION >= 70000000
+#if defined(RCCL_CUMEM_DMABUF_EXPORT_SUPPORTED)
 hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t ptr, size_t size, hipMemRangeHandleType type,
                                           unsigned long long flags) {
     return g_hipMemGetHandleForAddressRange(handle, ptr, size, type, flags);
