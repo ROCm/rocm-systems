@@ -10949,36 +10949,33 @@ class CodeGenerator:
                         )
                         # Compare-swap consumes two elements but returns one.
                         # Image TFE adds a status destination, not a payload
-                        # input. Keep these result widths independent of VDATA
-                        # so def/use reflects the registers actually accessed.
-                        _needs_atomic_return_view = (
-                            _is_optional_atomic_return
-                            and (
-                                (
-                                    inst_sem.semantic_class == 'buffer_atomic'
-                                    and inst_sem.operation in ('cmpswap', 'fcmpswap')
-                                )
-                                or (
-                                    inst_sem.semantic_class == 'image_atomic'
-                                    and (
-                                        'CMPSWAP' in inst.name
-                                        or 'tfe' in enc_field_names
-                                    )
-                                )
+                        # input. Keep these result widths independent of the
+                        # data operand so def/use reflects the registers
+                        # actually accessed.
+                        _needs_atomic_return_view = _is_optional_atomic_return and (
+                            (
+                                inst_sem.semantic_class
+                                in ('buffer_atomic', 'smem_atomic')
+                                and inst_sem.operation in ('cmpswap', 'fcmpswap')
                             )
-                            and opnd.name == 'vdata'
+                            or (
+                                inst_sem.semantic_class == 'image_atomic'
+                                and ('CMPSWAP' in inst.name or 'tfe' in enc_field_names)
+                            )
                         )
                         _needs_tied_destination_result_view = (
                             opnd.name == tied_destination_name
                             and tied_destination_result_name is not None
                         )
                         atomic_return_operand = (
-                            'vdata_return' if _needs_atomic_return_view else opnd.name
+                            f'{opnd.name}_return'
+                            if _needs_atomic_return_view
+                            else opnd.name
                         )
                         destination_operand = (
                             tied_destination_result_name
                             if _needs_tied_destination_result_view
-                            else opnd.name
+                            else atomic_return_operand
                         )
                         if _is_optional_atomic_return:
                             if inst_sem.semantic_class == 'smem_atomic':
@@ -11128,7 +11125,7 @@ class CodeGenerator:
                                     )
                             if _needs_atomic_return_view:
                                 private_members.append(
-                                    cgen.Statement('Operand vdata_return')
+                                    cgen.Statement(f'Operand {atomic_return_operand}')
                                 )
                                 if inst_sem.semantic_class == 'image_atomic':
                                     return_size = f'({opnd_size_expr})'
@@ -11139,12 +11136,12 @@ class CodeGenerator:
                                 else:
                                     return_size = str((inst_sem.elem_size or 4) * 8)
                                 opnd_ctor_init.append(
-                                    f'vdata_return({return_size}, '
+                                    f'{atomic_return_operand}({return_size}, '
                                     f'OperandType::{opr_type}, {operand_value})'
                                 )
                                 if _uses_vgpr_msb_roles or _uses_gpr_idx_roles:
                                     vgpr_msb_role_body.append(
-                                        'vdata_return.set_vgpr_msb_role('
+                                        f'{atomic_return_operand}.set_vgpr_msb_role('
                                         'amdgpu::VgprMsbRole::Dst);'
                                     )
                         elif opnd.fieldless:
