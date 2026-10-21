@@ -16,8 +16,10 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -34,6 +36,42 @@ std::vector<KernelDescriptorInfo> scan_via_text_section(const std::vector<uint8_
   EXPECT_FALSE(obj.text_sections().empty());
   const Section *text = obj.text_sections().front();
   return scan_kernel_descriptors({image.data(), image.size()}, text->sectionOffset(), text->size());
+}
+
+void rewrite_descriptor_entry(std::vector<uint8_t> &image, uint64_t descriptor_vaddr,
+                              uint64_t text_vaddr, int64_t entry_offset) {
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
+  std::memcpy(shdrs.data(), image.data() + ehdr.e_shoff, shdrs.size() * sizeof(Elf64_Shdr));
+
+  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
+    return shdr.sh_type == SHT_SYMTAB;
+  });
+  ASSERT_NE(symtab, shdrs.end());
+  std::vector<Elf64_Sym> symbols(symtab->sh_size / sizeof(Elf64_Sym));
+  std::memcpy(symbols.data(), image.data() + symtab->sh_offset, symbols.size() * sizeof(Elf64_Sym));
+  ASSERT_GT(symbols.size(), 1u);
+  Elf64_Sym &symbol = symbols[1];
+  ASSERT_LT(symbol.st_shndx, shdrs.size());
+  Elf64_Shdr &owner = shdrs[symbol.st_shndx];
+  const uint64_t descriptor_offset = owner.sh_offset + symbol.st_value - owner.sh_addr;
+  ASSERT_LE(descriptor_offset + sizeof(KD), image.size());
+
+  const auto text = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
+    return (shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR);
+  });
+  ASSERT_NE(text, shdrs.end());
+  text->sh_addr = text_vaddr;
+  owner.sh_addr = descriptor_vaddr;
+  symbol.st_value = descriptor_vaddr;
+
+  KD descriptor{};
+  std::memcpy(&descriptor, image.data() + descriptor_offset, sizeof(descriptor));
+  descriptor.kernel_code_entry_byte_offset = entry_offset;
+  std::memcpy(image.data() + descriptor_offset, &descriptor, sizeof(descriptor));
+  std::memcpy(image.data() + symtab->sh_offset, symbols.data(), symbols.size() * sizeof(Elf64_Sym));
+  std::memcpy(image.data() + ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
 }
 
 // The single fixture kernel is located with name, file offset, .text-relative
@@ -128,6 +166,97 @@ TEST(KernelDescriptorScan, NoMatchingTextSectionReturnsEmpty) {
   const auto found = scan_kernel_descriptors({image.data(), image.size()},
                                              /*text_offset=*/0xDEAD, /*text_size=*/0x4);
   EXPECT_TRUE(found.empty());
+}
+
+// Forming the magnitude of INT64_MIN must avoid signed negation overflow while
+// still resolving the entry at the first .text byte.
+TEST(KernelDescriptorScan, Int64MinEntryOffsetResolvesWithoutSignedOverflow) {
+  auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  constexpr uint64_t kTextVaddr = 0x1000;
+  constexpr uint64_t kDescriptorVaddr = (uint64_t{1} << 63) | kTextVaddr;
+  rewrite_descriptor_entry(image, kDescriptorVaddr, kTextVaddr,
+                           std::numeric_limits<int64_t>::min());
+
+  const auto found = scan_via_text_section(image);
+  ASSERT_EQ(found.size(), 1u);
+  EXPECT_EQ(found[0].entry_text_offset, 0u);
+}
+
+// Unsigned addition would wrap this descriptor entry precisely into .text, so
+// only the explicit positive-overflow guard keeps the false descriptor out.
+TEST(KernelDescriptorScan, PositiveEntryOffsetOverflowIsRejected) {
+  auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  rewrite_descriptor_entry(image, std::numeric_limits<uint64_t>::max() - 0xfff, 0x1000, 0x2000);
+  EXPECT_TRUE(scan_via_text_section(image).empty());
+}
+
+// Unsigned subtraction would wrap this descriptor entry precisely into .text,
+// so only the explicit negative-underflow guard keeps the false descriptor out.
+TEST(KernelDescriptorScan, NegativeEntryOffsetUnderflowIsRejected) {
+  auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  rewrite_descriptor_entry(image, 0x1000, std::numeric_limits<uint64_t>::max() - 0xffff, -0x11000);
+  EXPECT_TRUE(scan_via_text_section(image).empty());
+}
+
+// The raw descriptor scanner can read record prefixes from a larger stride,
+// but the code-object parser rejects layouts its patcher cannot preserve.
+TEST(KernelDescriptorScan, StridedSectionHeaderTableIsReadSafely) {
+  auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
+  std::memcpy(shdrs.data(), image.data() + ehdr.e_shoff, shdrs.size() * sizeof(Elf64_Shdr));
+
+  constexpr uint16_t kStride = 2 * sizeof(Elf64_Shdr);
+  const uint64_t strided_offset = image.size();
+  image.resize(image.size() + static_cast<size_t>(ehdr.e_shnum) * kStride, 0);
+  for (size_t section_index = 0; section_index < shdrs.size(); ++section_index) {
+    std::memcpy(image.data() + strided_offset + section_index * kStride, &shdrs[section_index],
+                sizeof(Elf64_Shdr));
+  }
+  ehdr.e_shoff = strided_offset;
+  ehdr.e_shentsize = kStride;
+  std::memcpy(image.data(), &ehdr, sizeof(ehdr));
+
+  const auto [text_offset, text_size] = clean_text_coords({kMovV3V2, 0xbf810000u});
+  EXPECT_EQ(scan_kernel_descriptors({image.data(), image.size()}, text_offset, text_size).size(),
+            1u);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_FALSE(obj.is_valid());
+}
+
+// Raw descriptor discovery handles larger symbol strides safely, while the
+// code-object parser rejects tables its patcher cannot relocate.
+TEST(KernelDescriptorScan, StridedSymbolTableIsReadSafely) {
+  auto image = make_gfx950_kernel_elf({kMovV3V2, 0xbf810000u}, /*private_bytes=*/64);
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
+  std::memcpy(shdrs.data(), image.data() + ehdr.e_shoff, shdrs.size() * sizeof(Elf64_Shdr));
+  const auto symbol_table = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
+    return shdr.sh_type == SHT_SYMTAB;
+  });
+  ASSERT_NE(symbol_table, shdrs.end());
+  std::vector<Elf64_Sym> symbols(symbol_table->sh_size / symbol_table->sh_entsize);
+  std::memcpy(symbols.data(), image.data() + symbol_table->sh_offset,
+              symbols.size() * sizeof(Elf64_Sym));
+
+  constexpr uint64_t kStride = 2 * sizeof(Elf64_Sym);
+  symbol_table->sh_offset = image.size();
+  symbol_table->sh_entsize = kStride;
+  symbol_table->sh_size = symbols.size() * kStride;
+  image.resize(image.size() + symbol_table->sh_size, 0);
+  for (size_t symbol_index = 0; symbol_index < symbols.size(); ++symbol_index) {
+    std::memcpy(image.data() + symbol_table->sh_offset + symbol_index * kStride,
+                &symbols[symbol_index], sizeof(Elf64_Sym));
+  }
+  std::memcpy(image.data() + ehdr.e_shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
+
+  const auto [text_offset, text_size] = clean_text_coords({kMovV3V2, 0xbf810000u});
+  EXPECT_EQ(scan_kernel_descriptors({image.data(), image.size()}, text_offset, text_size).size(),
+            1u);
+  AmdGpuCodeObject obj(image.data(), image.size());
+  EXPECT_FALSE(obj.is_valid());
 }
 
 // RDNA opts into Wave32 via COMPUTE_PGM_RSRC1's ENABLE_WAVEFRONT_SIZE32; a clear bit
