@@ -1652,7 +1652,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   // and goes straight to taskAppend), so /*acc=*/nullptr here is always correct.
   const bool ceAr2ShotEligible = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
-                                  ceAr2ShotEligible && twoShotWindow && force;
+                                  ceAr2ShotEligible && twoShotWindow;
   if (!query)
     INFO(NCCL_TUNING,
          "AR CE-2SHOT symkRequested=%d criteria:ceAllReduceAllowed=%d"
@@ -1681,12 +1681,11 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
       rcclCandSearchRecord(cs, RCCL_BACKEND_CE, cand, twoShotWindow);
     }
 
-    // (4) DDA fast paths. Shared gate: !symkRequested on every arch, and either
-    // gfx1250 (fabric may run even if CE is also eligible) or CE is not going to
-    // service this call (!ceAllReduceAllowed), subject to rcclDdaEnabled -- all
-    // folded into the helper. Passes the raw symk signal for the same reason as
-    // (3): symMaxR2 chooses between symk and CE-registered, it does not hand
-    // registered operands to DDA.
+    // (4) DDA fast paths. Both DDA and CE 2-shot are candidates in the search;
+    // rcclCandSearch arbitrates via probe order and the preferred-backend mask.
+    // rcclDdaEnabled gates individual DDA sub-paths. Passes the raw symk signal
+    // for the same reason as (3): symMaxR2 chooses between symk and CE-registered,
+    // it does not hand registered operands to DDA.
     //
     // GIN AllReduce is selected first in this function and requires symmetric
     // windows. By default it only claims messages >= 256 MiB, so DDA must still be
@@ -1703,7 +1702,7 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
     const bool ddaFabricArch1250 = IsArchMatch(comm->archName, "gfx1250");
     const size_t arDdaVmmMax =
       rcclDdaVmmThresholdCtxTab(archTable, ncclFuncAllReduce, winRegType, ceCapturing, comm->nRanks);
-    const bool arShouldTakeDda = rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, ceAllReduceAllowed, query);
+    const bool arShouldTakeDda = rcclAllReduceShouldTakeDdaPath(comm, count, datatype, ddaSymEligible, query);
     if (!cs.bestPreferredFound && arShouldTakeDda) {
       if (ddaFabricArch1250) {
         const size_t arDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncAllReduce, comm->nRanks);
