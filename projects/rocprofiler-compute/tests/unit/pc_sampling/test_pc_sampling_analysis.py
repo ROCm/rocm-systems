@@ -496,7 +496,14 @@ def test_aggregate_counts_issued_and_stalled() -> None:
     records = load_pc_sample_records(
         make_tool_data(
             stochastic=[
-                make_record(1, 0x10, 0, dispatch_id=0, wave_issued=True),
+                make_record(
+                    1,
+                    0x10,
+                    0,
+                    dispatch_id=0,
+                    wave_issued=True,
+                    stall_reason=f"{PREFIX}OTHER_WAIT",
+                ),
                 make_record(
                     1,
                     0x10,
