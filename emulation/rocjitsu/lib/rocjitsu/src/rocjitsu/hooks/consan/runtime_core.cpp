@@ -15,7 +15,7 @@ RuntimeStatus DispatchLifecycle::submitted() {
     return RuntimeStatus::InvalidTransition;
   if (facts_ == nullptr)
     return RuntimeStatus::InvalidFacts;
-  const auto layout =
+  const FailureOr<LaunchLayout> layout =
       plan_launch(*facts_, envelope_.dimensions, envelope_.group_bytes, envelope_.private_bytes);
   if (layout.failed())
     return RuntimeStatus::InvalidFacts;
@@ -88,7 +88,7 @@ RuntimeStatus SnapshotWriter::write_all(std::span<const uint8_t> bytes) {
 RuntimeStatus SnapshotWriter::start(const CaptureHeader &header, CaptureSink sink) {
   if (started_ || !sink.write || !sink.close || !sink.publish)
     return status_ = RuntimeStatus::InvalidTransition;
-  const auto prefix = encoder_.start(header);
+  const FailureOr<std::vector<uint8_t>> prefix = encoder_.start(header);
   if (prefix.failed())
     return status_ = RuntimeStatus::InvalidFacts;
   header_ = header;
@@ -102,7 +102,7 @@ RuntimeStatus SnapshotWriter::append(const OwnedSnapshot &snapshot) {
     return status_;
   if (!started_ || closed_ || snapshot.facts == nullptr || *snapshot.facts != header_.manifest)
     return status_ = RuntimeStatus::InvalidFacts;
-  const auto frame = encoder_.append(snapshot.execution);
+  const FailureOr<std::vector<uint8_t>> frame = encoder_.append(snapshot.execution);
   if (frame.failed())
     return status_ = RuntimeStatus::InvalidFacts;
   if (write_all(frame.value()) != RuntimeStatus::Success)
@@ -116,7 +116,7 @@ RuntimeStatus SnapshotWriter::finish() {
   if (closed_)
     return status_;
   if (status_ == RuntimeStatus::Success) {
-    const auto end = encoder_.finish();
+    const FailureOr<std::vector<uint8_t>> end = encoder_.finish();
     if (end.failed())
       status_ = RuntimeStatus::InvalidFacts;
     else

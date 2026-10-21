@@ -24,7 +24,7 @@ protected:
   }
 
   CapturedExecution envelope(uint64_t serial = 1, uint32_t generation = 1) {
-    auto result = test::execution(*facts_, serial, generation);
+    CapturedExecution result = test::execution(*facts_, serial, generation);
     result.report.clear();
     result.completion = 0;
     return result;
@@ -170,7 +170,7 @@ TEST_F(ConSanRuntimeCore, MissingFailedAndShortCopiesRemainDistinctAndDoNotPermi
 }
 
 TEST_F(ConSanRuntimeCore, IndependentSnapshotSurvivesSourcePoisonAndFactsUnloading) {
-  const auto original = raw_;
+  const std::vector<uint8_t> original = raw_;
   OwnedSnapshot snapshot = copied_snapshot();
   std::ranges::fill(raw_, 0xcd);
   facts_.reset();
@@ -194,10 +194,10 @@ TEST_F(ConSanRuntimeCore, SlowCollectorDoesNotHoldUpTheObserverOrAnotherCompleti
             RuntimeStatus::Success);
   std::promise<void> copying;
   std::promise<void> permit_copy;
-  auto entered = copying.get_future();
-  auto proceed = permit_copy.get_future();
+  std::future<void> entered = copying.get_future();
+  std::future<void> proceed = permit_copy.get_future();
   OwnedSnapshot snapshot;
-  auto collector = std::async(std::launch::async, [&] {
+  std::future<RuntimeStatus> collector = std::async(std::launch::async, [&] {
     return first.snapshot(
         [&](std::span<uint8_t> bytes) {
           copying.set_value();
@@ -207,7 +207,7 @@ TEST_F(ConSanRuntimeCore, SlowCollectorDoesNotHoldUpTheObserverOrAnotherCompleti
         },
         snapshot);
   });
-  const auto ready = entered.wait_for(std::chrono::seconds(5));
+  const std::future_status ready = entered.wait_for(std::chrono::seconds(5));
   if (ready != std::future_status::ready) {
     permit_copy.set_value();
     (void)collector.get();
@@ -239,7 +239,7 @@ TEST_F(ConSanRuntimeCore, ShortWritesAreRetriedAndMalformedRawRowsAreSavedUnchan
   EXPECT_EQ(writer.finish(), RuntimeStatus::Success);
   EXPECT_EQ(closes_, 1u);
   EXPECT_EQ(publishes_, 1u);
-  const auto decoded = decode_capture(output_);
+  const FailureOr<Capture> decoded = decode_capture(output_);
   ASSERT_TRUE(decoded.succeeded());
   EXPECT_EQ(decoded.value().executions.front().report, raw_);
 }
@@ -258,7 +258,7 @@ TEST_F(ConSanRuntimeCore, WriterFailureCannotPublishAnEndOrUndoIndependentCopyOw
     // write_all loop while injecting the next underlying write result.
     bool failing = false;
     CaptureSink controlled = sink();
-    const auto normal = controlled.write;
+    const std::function<int64_t(std::span<const uint8_t>)> normal = controlled.write;
     controlled.write = [&](std::span<const uint8_t> bytes) {
       return failing ? callbacks.write(bytes) : normal(bytes);
     };

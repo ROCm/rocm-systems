@@ -61,8 +61,8 @@ inline CapturedExecution execution(const Manifest &manifest, uint64_t serial,
   execution.storage_slot = 1;
   execution.storage_generation = generation;
   execution.arguments.resize(manifest.entry.original_kernarg_bytes);
-  const auto transport = initialize_transport(manifest, execution.dimensions, execution.group_bytes,
-                                              0, serial, 0x10000);
+  const FailureOr<TransportImage> transport = initialize_transport(
+      manifest, execution.dimensions, execution.group_bytes, 0, serial, 0x10000);
   if (transport.succeeded()) {
     execution.context = transport.value().context;
     execution.report = transport.value().report;

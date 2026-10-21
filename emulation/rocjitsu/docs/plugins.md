@@ -598,7 +598,8 @@ Callbacks must not retain instruction or wave references. There is no completion
 notification. Holding the callback mutex does not provide a complete
 architectural snapshot.
 
-Throughput, instruction mix, and kernel logging support this contract. ConSan
-keeps synchronous execution until its dependency-event access and diagnostic
-context support concurrent register hooks within one wave. Plugins and the host
+Throughput, instruction mix, and kernel logging support this contract. The
+[simulator race detector](race-detector.md) keeps synchronous execution until
+its dependency-event access and diagnostic context support concurrent register
+hooks within one wave. Plugins and the host
 must be rebuilt together, as for other execution-plugin interface changes.

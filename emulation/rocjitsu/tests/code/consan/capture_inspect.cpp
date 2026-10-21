@@ -9,6 +9,7 @@
 
 int main(int argc, char **argv) {
   using namespace rocjitsu::consan;
+  using rocjitsu::FailureOr;
   if (argc != 2)
     return 2;
   std::ifstream file(argv[1], std::ios::binary | std::ios::ate);
@@ -20,16 +21,16 @@ int main(int argc, char **argv) {
   if (!file)
     return 2;
   ContractError error;
-  const auto captured = decode_capture(bytes, &error);
+  const FailureOr<Capture> captured = decode_capture(bytes, &error);
   if (captured.failed()) {
     std::cerr << "capture input error: " << error.message << '\n';
     return 2;
   }
-  const auto &capture = captured.value();
+  const Capture &capture = captured.value();
   std::cout << "{\"execution_conditions\":" << capture.header.execution_conditions
             << ",\"sites\":[";
   bool first = true;
-  for (const auto &site : capture.header.manifest.sites) {
+  for (const SiteFacts &site : capture.header.manifest.sites) {
     if (!first)
       std::cout << ',';
     first = false;
@@ -39,19 +40,20 @@ int main(int argc, char **argv) {
   }
   std::cout << "],\"executions\":[";
   first = true;
-  for (const auto &execution : capture.executions) {
+  for (const CapturedExecution &execution : capture.executions) {
     if (!first)
       std::cout << ',';
     first = false;
-    const auto layout = plan_launch(capture.header.manifest, execution.dimensions,
-                                    execution.group_bytes, execution.private_bytes);
+    const FailureOr<LaunchLayout> layout =
+        plan_launch(capture.header.manifest, execution.dimensions, execution.group_bytes,
+                    execution.private_bytes);
     if (layout.failed())
       return 2;
     std::cout << "{\"serial\":" << execution.serial << ",\"slot\":" << execution.storage_slot
               << ",\"generation\":" << execution.storage_generation << ",\"report_address\":"
               << *wire::read_u64(execution.context, wire::kContextReportPointer)
               << ",\"argument_u32\":";
-    if (const auto argument = wire::read_u32(execution.arguments, 0))
+    if (const std::optional<uint32_t> argument = wire::read_u32(execution.arguments, 0))
       std::cout << *argument;
     else
       std::cout << "null";
@@ -68,11 +70,11 @@ int main(int argc, char **argv) {
                 << *wire::read_u32(execution.report, row + wire::kRowFinalSequence)
                 << ",\"records\":[";
       bool first_record = true;
-      for (const auto &site : capture.header.manifest.sites) {
+      for (const SiteFacts &site : capture.header.manifest.sites) {
         for (uint32_t address_group = 0; address_group < kAddressGroupsPerSite; ++address_group) {
           const size_t record =
               row + kRowHeaderBytes + (site.first_slot + address_group) * kAccessRecordBytes;
-          const auto commit = *wire::read_u32(execution.report, record + wire::kRecordCommit);
+          const uint32_t commit = *wire::read_u32(execution.report, record + wire::kRecordCommit);
           if (commit == 0)
             continue;
           if (!first_record)

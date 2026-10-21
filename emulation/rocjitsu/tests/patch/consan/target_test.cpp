@@ -78,7 +78,7 @@ TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiVal
       ASSERT_EQ(changed.size(), expected.size());
       for (const bool prepared_image : {false, true}) {
         std::vector<uint8_t> image = prepared_image ? prepared.value().image : original;
-        const auto position =
+        const std::vector<uint8_t>::iterator position =
             std::search(image.begin(), image.end(), expected.begin(), expected.end());
         ASSERT_NE(position, image.end());
         ASSERT_EQ(
@@ -281,21 +281,21 @@ TEST_P(ConSanTargetStatic, ProbeScalarDependenciesHaveTargetRequiredGuards) {
 }
 
 TEST_P(ConSanTargetStatic, AssemblyLoweringPreservesConcreteIdentityAndLoadableImages) {
-  const auto mode = GetParam();
-  const auto *target = target_profile(mode.target);
+  const test::TargetMode mode = GetParam();
+  const TargetProfile *target = target_profile(mode.target);
   ASSERT_NE(target, nullptr);
   for (const uint32_t fixture : {1u, 2u, 3u, 4u, 6u, 11u, 12u, 13u, 14u}) {
     SCOPED_TRACE(mode.target + std::string(" native-") + std::to_string(fixture));
-    const auto original =
+    const std::vector<uint8_t> original =
         test::read_fixture(test::target_fixture_path(mode, "native-" + std::to_string(fixture)));
     ASSERT_FALSE(original.empty());
     InputError error;
-    const auto input =
+    const FailureOr<InputProgram> input =
         build_input_program(original, *target_profile(mode.target), "lds_producer_consumer", error);
     ASSERT_TRUE(input.succeeded()) << error.message;
     EXPECT_EQ(input.value().wave_size, mode.wave_size);
     ASSERT_FALSE(input.value().accesses.empty());
-    const auto prepared =
+    const FailureOr<PreparedArtifact> prepared =
         prepare(original, *target_profile(mode.target), "lds_producer_consumer", error);
     ASSERT_TRUE(prepared.succeeded()) << error.message;
     EXPECT_EQ(prepared.value().manifest.target, target->id);
@@ -305,27 +305,28 @@ TEST_P(ConSanTargetStatic, AssemblyLoweringPreservesConcreteIdentityAndLoadableI
                                        &image_error)
                     .succeeded())
         << image_error.message;
-    const auto encoded = encode_manifest(prepared.value().manifest);
+    const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(prepared.value().manifest);
     ASSERT_TRUE(encoded.succeeded());
-    const auto decoded = decode_manifest(encoded.value());
+    const FailureOr<Manifest> decoded = decode_manifest(encoded.value());
     ASSERT_TRUE(decoded.succeeded());
     EXPECT_EQ(decoded.value(), prepared.value().manifest);
   }
 }
 
 TEST_P(ConSanTargetStatic, GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoundaries) {
-  const auto mode = GetParam();
-  const auto *target = target_profile(mode.target);
-  auto original = test::read_fixture(test::target_fixture_path(mode, "native-1"));
+  const test::TargetMode mode = GetParam();
+  const TargetProfile *target = target_profile(mode.target);
+  std::vector<uint8_t> original = test::read_fixture(test::target_fixture_path(mode, "native-1"));
   InputError error;
-  const auto input =
+  const FailureOr<InputProgram> input =
       build_input_program(original, *target_profile(mode.target), "lds_producer_consumer", error);
   ASSERT_TRUE(input.succeeded()) << error.message;
   if (target->arch == ROCJITSU_CODE_ARCH_CDNA3 || target->arch == ROCJITSU_CODE_ARCH_CDNA4 ||
       target->arch == ROCJITSU_CODE_ARCH_RDNA3) {
-    const auto offset = input.value().text_file_offset + input.value().accesses[0].original_offset;
-    auto gds = original;
-    const auto word = *wire::read_u32(gds, offset);
+    const uint64_t offset =
+        input.value().text_file_offset + input.value().accesses[0].original_offset;
+    std::vector<uint8_t> gds = original;
+    const uint32_t word = *wire::read_u32(gds, offset);
     ASSERT_TRUE(wire::write_u32(
         gds, offset, word | (1u << (mode.wave_size == 64 && target->id < 1000 ? 16 : 17))));
     EXPECT_TRUE(
@@ -335,15 +336,16 @@ TEST_P(ConSanTargetStatic, GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoun
   }
   if (target->id != 942 && target->id != 950)
     return;
-  auto prepared = prepare(original, *target_profile(mode.target), "lds_producer_consumer", error);
+  FailureOr<PreparedArtifact> prepared =
+      prepare(original, *target_profile(mode.target), "lds_producer_consumer", error);
   ASSERT_TRUE(prepared.succeeded()) << error.message;
-  auto &artifact = prepared.value();
+  PreparedArtifact &artifact = prepared.value();
   AmdGpuCodeObject image(artifact.image.data(), artifact.image.size());
-  const auto &text = *image.text_sections().front();
-  const auto kernels = scan_kernel_descriptors(artifact.image, text.sectionOffset(), text.size(),
-                                               text.sectionHeaderIndex());
+  const Section &text = *image.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels = scan_kernel_descriptors(
+      artifact.image, text.sectionOffset(), text.size(), text.sectionHeaderIndex());
   ASSERT_EQ(kernels.size(), 1u);
-  auto descriptor = kernels[0].descriptor;
+  rocjitsu::amdhsa::kernel_descriptor_t descriptor = kernels[0].descriptor;
   namespace kd = rocjitsu::amdhsa;
   EXPECT_EQ(
       (RJ_AMDHSA_BITS_GET(descriptor.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
@@ -360,14 +362,14 @@ TEST_P(ConSanTargetStatic, GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoun
 }
 
 TEST_P(ConSanTargetStatic, HipWorkloadsMustContainQualifiedNativeLdsSites) {
-  const auto mode = GetParam();
+  const test::TargetMode mode = GetParam();
   for (const uint32_t fixture : {1u, 2u, 3u}) {
     SCOPED_TRACE(mode.target + std::string(" HIP-") + std::to_string(fixture));
-    const auto original =
+    const std::vector<uint8_t> original =
         test::read_fixture(test::target_fixture_path(mode, "hip-" + std::to_string(fixture)));
     ASSERT_FALSE(original.empty());
     InputError error;
-    const auto input =
+    const FailureOr<InputProgram> input =
         build_input_program(original, *target_profile(mode.target), "lds_producer_consumer", error);
     if (std::string_view(mode.target) == "gfx1250") {
       EXPECT_TRUE(input.failed());
@@ -379,11 +381,11 @@ TEST_P(ConSanTargetStatic, HipWorkloadsMustContainQualifiedNativeLdsSites) {
     EXPECT_EQ(input.value().wave_size, mode.wave_size);
     ASSERT_FALSE(input.value().accesses.empty());
     uint32_t reads = 0, writes = 0;
-    for (const auto &site : input.value().accesses)
+    for (const NativeLdsAccess &site : input.value().accesses)
       (site.kind == AccessKind::Read ? reads : writes)++;
     EXPECT_GT(reads, 0u);
     EXPECT_EQ(writes != 0, fixture != 3);
-    const auto prepared =
+    const FailureOr<PreparedArtifact> prepared =
         prepare(original, *target_profile(mode.target), "lds_producer_consumer", error);
     ASSERT_TRUE(prepared.succeeded()) << error.message;
     EXPECT_TRUE(validate_prepared(original, prepared.value(), error).succeeded()) << error.message;

@@ -446,7 +446,7 @@ TEST_F(ConSanContract, SegmentMinimaPreserveOriginalPacketExtents) {
 }
 
 TEST_F(ConSanContract, TargetWaveFactsRoundTripAndRowsFollowActualGeometry) {
-  for (const auto &target : kNativeLdsTargets) {
+  for (const TargetProfile &target : kNativeLdsTargets) {
     for (const uint32_t wave_size : {32u, 64u}) {
       Manifest manifest = example();
       manifest.target = target.id;
@@ -455,20 +455,21 @@ TEST_F(ConSanContract, TargetWaveFactsRoundTripAndRowsFollowActualGeometry) {
         EXPECT_TRUE(validate_manifest(manifest).failed());
         continue;
       }
-      const auto encoded = encode_manifest(manifest);
+      const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(manifest);
       ASSERT_TRUE(encoded.succeeded());
-      const auto decoded = decode_manifest(encoded.value());
+      const FailureOr<Manifest> decoded = decode_manifest(encoded.value());
       ASSERT_TRUE(decoded.succeeded());
       EXPECT_EQ(decoded.value(), manifest);
       for (const uint32_t threads : {1u, wave_size, wave_size * 3, wave_size * 3 + 1, 1024u}) {
         const LaunchDimensions dimensions{{threads, 1, 1}, {threads, 1, 1}};
-        const auto layout = plan_launch(manifest, dimensions, 8, 0);
+        const FailureOr<LaunchLayout> layout = plan_launch(manifest, dimensions, 8, 0);
         ASSERT_TRUE(layout.succeeded());
         const uint32_t waves = (threads + wave_size - 1) / wave_size;
         EXPECT_EQ(layout.value().wave_count, waves);
         EXPECT_EQ(layout.value().report_bytes,
                   kReportHeaderBytes + waves * layout.value().row_stride);
-        const auto transport = initialize_transport(manifest, dimensions, 8, 0, 17, 0x10000);
+        const FailureOr<TransportImage> transport =
+            initialize_transport(manifest, dimensions, 8, 0, 17, 0x10000);
         ASSERT_TRUE(transport.succeeded());
         EXPECT_EQ(wire::read_u32(transport.value().report, wire::kReportRows), waves);
         EXPECT_EQ(wire::read_u32(transport.value().context, wire::kContextWorkgroup), threads);
@@ -484,7 +485,7 @@ TEST_F(ConSanContract, TargetWaveFactsRoundTripAndRowsFollowActualGeometry) {
 }
 
 TEST_F(ConSanContract, OldProducerCannotBeDecodedAsTheNewMaskLayout) {
-  auto bytes = encode_manifest(example());
+  FailureOr<std::vector<uint8_t>> bytes = encode_manifest(example());
   ASSERT_TRUE(bytes.succeeded());
   constexpr std::array<uint8_t, 16> old = {0x48, 0x9b, 0x15, 0x5f, 0x6c, 0x1a, 0x40, 0xf8,
                                            0xa3, 0x07, 0x8e, 0x2d, 0x73, 0xb6, 0x09, 0xc4};

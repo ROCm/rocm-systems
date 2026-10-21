@@ -63,6 +63,10 @@ InstrumentedCodeObject      -- patched ELF + diagnostics
 
 ### Responsibilities
 
+ConSan shares several instrumentation building blocks but owns a separate LDS
+lowering pipeline; see [Extending ConSan](consan.md#extending-consan) for the
+current reuse boundary and the shared-infrastructure discussion.
+
 - Lazy CFG construction: blocks are decoded on the first call that needs them via `Decoder::create(arch)` + `BasicBlock::build(obj, *decoder)`. Decoder creation failure (RV32I/RV64I/INVALID) surfaces as a structured `ValidationResult` / `InstrumentedCodeObject` error, not a crash.
 - `validate_points()` looks up the decoded `Instruction` at each requested `anchor_offset` and runs `validate_anchor()`. All-or-nothing today: any per-site failure empties `sites` and reports diagnostics in `errors`.
 - `patch()` runs validation, then per-site `make_trampoline_plan()` + `TrampolineBuilder::build()` as preflight. Only after every site succeeds does it splice patched anchor bytes into a local `.text` copy, `append_words()` each trampoline after the original bytes as a local code cave, and grow the section in one `replace_text()` call. Returns `InstrumentedCodeObject{elf_bytes, errors, warnings}`.

@@ -33,7 +33,7 @@ void write_json_string(std::ostream &out, std::string_view value) {
   out << '"';
 }
 
-void participant(std::ostream &out, const LdsRaceParticipant &value) {
+void write_participant(std::ostream &out, const LdsRaceParticipant &value) {
   out << "{\"wave\":" << value.wave << ",\"site\":" << value.site
       << ",\"sequence\":" << value.sequence << ",\"mask\":" << value.mask
       << ",\"offset\":" << value.offset << ",\"width\":" << value.width
@@ -41,10 +41,10 @@ void participant(std::ostream &out, const LdsRaceParticipant &value) {
       << (value.access == AccessKind::Write ? "write" : "read") << "\"}";
 }
 
-void examples(std::ostream &out, const std::vector<LdsRaceFinding> &findings) {
+void write_examples(std::ostream &out, const std::vector<LdsRaceFinding> &findings) {
   out << '[';
   bool first = true;
-  for (const auto &finding : findings) {
+  for (const LdsRaceFinding &finding : findings) {
     if (!first)
       out << ',';
     first = false;
@@ -56,10 +56,10 @@ void examples(std::ostream &out, const std::vector<LdsRaceFinding> &findings) {
     else
       out << ",\"reason\":\"ordinary_store_exact_mask\"";
     out << ",\"first\":";
-    participant(out, finding.first);
+    write_participant(out, finding.first);
     if (finding.kind == LdsRaceFindingKind::CrossWave) {
       out << ",\"second\":";
-      participant(out, finding.second);
+      write_participant(out, finding.second);
     }
     out << '}';
   }
@@ -85,7 +85,7 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
       << ",\"cross_wave_pairs\":" << result.cross_wave_pairs
       << ",\"collision_groups\":" << result.collision_groups << ",\"executions\":[";
   bool first = true;
-  for (const auto &execution : result.executions) {
+  for (const LdsRaceExecutionResult &execution : result.executions) {
     if (!first)
       out << ',';
     first = false;
@@ -101,7 +101,7 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
         << ",\"collision_groups\":" << execution.collision_groups
         << ",\"collision_lane_pairs\":" << execution.collision_lane_pairs << ",\"issues\":[";
     bool first_issue = true;
-    for (const auto &issue : execution.issues) {
+    for (const LdsRaceIntegrityIssue &issue : execution.issues) {
       if (!first_issue)
         out << ',';
       first_issue = false;
@@ -120,9 +120,9 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
       out << '}';
     }
     out << "],\"cross_wave_examples\":";
-    examples(out, execution.cross_wave_examples);
+    write_examples(out, execution.cross_wave_examples);
     out << ",\"collision_examples\":";
-    examples(out, execution.collision_examples);
+    write_examples(out, execution.collision_examples);
     out << '}';
   }
   out << "]}\n";

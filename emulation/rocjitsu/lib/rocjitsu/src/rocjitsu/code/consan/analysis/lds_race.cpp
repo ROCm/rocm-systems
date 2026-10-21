@@ -40,8 +40,9 @@ struct SiteGroup {
 void read_wave(const Manifest &facts, const CapturedExecution &execution,
                const LaunchLayout &layout, uint32_t wave, LdsRaceExecutionResult &result,
                std::vector<Observation> &observations) {
-  const auto row = std::span(execution.report)
-                       .subspan(kReportHeaderBytes + wave * layout.row_stride, layout.row_stride);
+  const std::span<const uint8_t> row =
+      std::span(execution.report)
+          .subspan(kReportHeaderBytes + wave * layout.row_stride, layout.row_stride);
   const uint32_t status = *wire::read_u32(row, wire::kRowStatus);
   const uint32_t loss = *wire::read_u32(row, wire::kRowLoss);
   const uint32_t final = *wire::read_u32(row, wire::kRowFinalSequence);
@@ -61,10 +62,10 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
     issue(result, wave, UINT32_MAX, "range_reservation_exhausted");
   std::map<uint32_t, SiteGroup> groups;
   for (const SiteFacts &site : facts.sites) {
-    auto &group = groups[site.id];
+    SiteGroup &group = groups[site.id];
     bool vacant = false;
     for (uint32_t address_group = 0; address_group < kAddressGroupsPerSite; ++address_group) {
-      const auto record =
+      const std::span<const uint8_t> record =
           row.subspan(kRowHeaderBytes + (site.first_slot + address_group) * kAccessRecordBytes,
                       kAccessRecordBytes);
       if (all_zero(record)) {
@@ -127,8 +128,8 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
   }
   // The compiler admits only forward control flow. Distinct dynamically
   // executed sites therefore retain increasing original instruction order.
-  auto previous = groups.end();
-  for (auto it = groups.begin(); it != groups.end(); ++it) {
+  std::map<uint32_t, SiteGroup>::iterator previous = groups.end();
+  for (std::map<uint32_t, SiteGroup>::iterator it = groups.begin(); it != groups.end(); ++it) {
     if (it->second.records.empty())
       continue;
     if (previous != groups.end() && previous->second.sequence >= it->second.sequence) {
@@ -164,17 +165,17 @@ void compare(const std::vector<const Observation *> &first,
     return;
   result.cross_wave_pairs += uint64_t{first.size()} * second.size();
   uint64_t first_lanes = 0, second_lanes = 0;
-  for (const auto *observation : first)
+  for (const Observation *observation : first)
     first_lanes += observation->lanes();
-  for (const auto *observation : second)
+  for (const Observation *observation : second)
     second_lanes += observation->lanes();
   result.cross_wave_lane_pairs += first_lanes * second_lanes;
   if (second.empty())
     return;
-  for (const auto *a : first) {
+  for (const Observation *a : first) {
     if (result.cross_wave_examples.size() >= examples)
       break;
-    for (const auto *b : second) {
+    for (const Observation *b : second) {
       if (result.cross_wave_examples.size() >= examples)
         break;
       result.cross_wave_examples.push_back({LdsRaceFindingKind::CrossWave, a->participant,
@@ -190,9 +191,9 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
                                                   uint32_t examples) {
   LdsRaceExecutionResult result;
   result.serial = execution.serial;
-  const auto layout =
+  const FailureOr<LaunchLayout> layout =
       plan_launch(facts, execution.dimensions, execution.group_bytes, execution.private_bytes);
-  const auto report = std::span(execution.report);
+  const std::span<const uint8_t> report = std::span(execution.report);
   if (layout.failed() || report.size() != layout.value().report_bytes ||
       wire::read_u64(report, wire::kReportSerial) != execution.serial ||
       wire::read_u32(report, wire::kReportEntry) != facts.entry.id ||
@@ -209,10 +210,10 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
     read_wave(facts, execution, layout.value(), wave, result, observations);
   result.valid_observations = observations.size();
   std::map<uint32_t, Bucket> words;
-  for (const auto &observation : observations) {
-    const auto &participant = observation.participant;
-    auto &bucket = words[participant.offset];
-    auto &wave = bucket.waves[participant.wave];
+  for (const Observation &observation : observations) {
+    const LdsRaceParticipant &participant = observation.participant;
+    Bucket &bucket = words[participant.offset];
+    Bucket::Wave &wave = bucket.waves[participant.wave];
     (participant.access == AccessKind::Write ? wave.writes : wave.reads).push_back(&observation);
     if (participant.access == AccessKind::Write && observation.lanes() > 1) {
       const uint64_t pairs = uint64_t{observation.lanes()} * (observation.lanes() - 1) / 2;
