@@ -74,7 +74,7 @@ static inline uint64_t abce_ring_atomic_load_hw(const volatile uint64_t* ptr) {
 }
 
 // Stores a word the engine reads (the write pointer, the doorbell): relaxed and
-// system-scope; abce_ring_atomic_fence_release() orders what comes before it.
+// system-scope, so it is written through.
 static inline void abce_ring_atomic_store_hw(volatile uint64_t* ptr, uint64_t value) {
   uint64_t* stable_ptr = (uint64_t*)(uintptr_t)ptr;
 #if defined(__HIP_DEVICE_COMPILE__)
@@ -147,6 +147,40 @@ static inline void abce_ring_cursor_store_release(uint64_t* ptr, uint64_t value)
 #endif  // __HIP_DEVICE_COMPILE__
 }
 
+// Waits for the calling thread's stores to land, with no cache maintenance.
+// gfx10/gfx11 never run a device producer, so they keep a full release.
+static inline void abce_ring_wait_stores(void) {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__GFX9__)
+  __atomic_signal_fence(__ATOMIC_SEQ_CST);
+  __builtin_amdgcn_s_waitcnt(0);
+  __atomic_signal_fence(__ATOMIC_SEQ_CST);
+#elif defined(__HIP_DEVICE_COMPILE__) && defined(__GFX12__)
+  __asm__ __volatile__("s_wait_storecnt 0x0" ::: "memory");
+#else
+  abce_ring_atomic_fence_release();
+#endif
+}
+
+// The commit hand-off orders only the producers' write-through queue-word
+// stores, so on device a store wait replaces release/acquire and no L2 is
+// written back or invalidated.
+static inline uint64_t abce_ring_commit_load(const uint64_t* commit_cursor) {
+#if defined(__HIP_DEVICE_COMPILE__)
+  return abce_ring_cursor_load(commit_cursor);
+#else
+  return abce_ring_cursor_load_acquire(commit_cursor);
+#endif  // __HIP_DEVICE_COMPILE__
+}
+
+static inline void abce_ring_commit_store(uint64_t* commit_cursor, uint64_t value) {
+#if defined(__HIP_DEVICE_COMPILE__)
+  abce_ring_wait_stores();
+  abce_ring_cursor_store(commit_cursor, value);
+#else
+  abce_ring_cursor_store_release(commit_cursor, value);
+#endif  // __HIP_DEVICE_COMPILE__
+}
+
 // Backs off inside a spin-wait: sleeps a wave on device, yields the CPU on host.
 static inline void abce_ring_pause(void) {
 #if defined(__HIP_DEVICE_COMPILE__)
@@ -181,8 +215,9 @@ static inline uint64_t abce_ring_reservation_bytes(const abce_ring_reservation_t
 // because C does not accept _Alignas between `struct` and the tag; it still
 // gives the whole struct 64-byte alignment, which the size assertion below
 // confirms.
+// 128 bytes, a gfx9 L2 line, so two rings' cursors never share a line.
 typedef struct abce_ring_control_t {
-  ABCE_ALIGNAS(64) uint64_t reserve_cursor;
+  ABCE_ALIGNAS(128) uint64_t reserve_cursor;
   uint64_t commit_cursor;
   // Highest published write index, for the host ring's drain. A device ring
   // leaves it alone: its host drains through the queue's own pointers.
@@ -193,8 +228,8 @@ typedef struct abce_ring_control_t {
   uint64_t cached_read_index;
 } abce_ring_control_t;
 
-ABCE_STATIC_ASSERT(sizeof(abce_ring_control_t) == 64,
-                   "ring control must occupy one cache line");
+ABCE_STATIC_ASSERT(sizeof(abce_ring_control_t) == 128,
+                   "ring control must occupy one gfx9 L2 line");
 
 //===----------------------------------------------------------------------===//
 // Producer / publisher callbacks
@@ -226,6 +261,8 @@ typedef struct abce_ring_producer_t {
   uint64_t* cached_read_index;
   uint64_t size;  // ring size in bytes; MUST be a power of two.
   abce_ring_load_read_index_fn_t load_read_index;
+  // Null folds wrap padding into the payload's own reservation (see
+  // abce_ring_reserve()).
   abce_ring_publish_padding_fn_t publish_padding;
   void* user_data;
 } abce_ring_producer_t;
@@ -270,21 +307,28 @@ static inline uint64_t abce_ring_pad_bytes(uint64_t start, uint64_t bytes, uint6
 // means every payload smaller than the ring can make progress once the ring is
 // empty, even when padding + payload exceeds the ring size.
 //
+// Without publish_padding the padding is folded into one reservation instead:
+// [start, end - bytes) is the tail the caller fills with NOPs, and the payload
+// is the last |bytes| from offset zero. One reservation means one publish, at
+// the cost of |bytes| being at most half the ring.
+//
 // Blocks until the engine has freed enough space. Fails only when the request
 // can never fit.
-static inline abce_status_t abce_ring_reserve(const abce_ring_producer_t* producer, uint64_t bytes,
-                                              abce_ring_reservation_t* out_reservation) {
-  if (!producer || !producer->reserve_cursor || !producer->load_read_index ||
-      !producer->publish_padding || !out_reservation)
+static inline abce_status_t abce_ring_reserve_(const abce_ring_producer_t* producer,
+                                               uint64_t bytes, bool block,
+                                               abce_ring_reservation_t* out_reservation) {
+  if (!producer || !producer->reserve_cursor || !producer->load_read_index || !out_reservation)
     return ABCE_STATUS_INVALID_ARGUMENT;
   const uint64_t size = producer->size;
   if (!abce_is_power_of_two(size) || bytes == 0) return ABCE_STATUS_INVALID_ARGUMENT;
-  if (bytes >= size) return ABCE_STATUS_OUT_OF_RANGE;
+  const bool fold_padding = !producer->publish_padding;
+  if (bytes >= size || (fold_padding && bytes > size / 2)) return ABCE_STATUS_OUT_OF_RANGE;
 
   for (;;) {
     uint64_t current = abce_ring_cursor_load(producer->reserve_cursor);
     const uint64_t pad_bytes = abce_ring_pad_bytes(current, bytes, size);
-    const uint64_t reservation_bytes = pad_bytes != 0 ? pad_bytes : bytes;
+    const uint64_t reservation_bytes =
+        fold_padding ? pad_bytes + bytes : (pad_bytes != 0 ? pad_bytes : bytes);
     const uint64_t next = current + reservation_bytes;
     bool has_room = producer->cached_read_index &&
                     abce_ring_can_write_upto(abce_ring_cursor_load(producer->cached_read_index),
@@ -294,9 +338,10 @@ static inline abce_status_t abce_ring_reserve(const abce_ring_producer_t* produc
       if (producer->cached_read_index)
         abce_ring_cursor_store(producer->cached_read_index, read_index);
       has_room = abce_ring_can_write_upto(read_index, size, next);
+      if (!has_room && !block) return ABCE_STATUS_NOT_READY;
     }
     if (has_room && abce_ring_cursor_cas(producer->reserve_cursor, &current, next)) {
-      if (pad_bytes != 0) {
+      if (pad_bytes != 0 && !fold_padding) {
         abce_ring_reservation_t padding;
         padding.start = current;
         padding.end = next;
@@ -313,6 +358,20 @@ static inline abce_status_t abce_ring_reserve(const abce_ring_producer_t* produc
   }
 }
 
+static inline abce_status_t abce_ring_reserve(const abce_ring_producer_t* producer, uint64_t bytes,
+                                              abce_ring_reservation_t* out_reservation) {
+  return abce_ring_reserve_(producer, bytes, true, out_reservation);
+}
+
+// abce_ring_reserve() that returns NOT_READY, reserving nothing, instead of
+// waiting for the engine to free space. It still retries a CAS lost to another
+// producer.
+static inline abce_status_t abce_ring_try_reserve(const abce_ring_producer_t* producer,
+                                                  uint64_t bytes,
+                                                  abce_ring_reservation_t* out_reservation) {
+  return abce_ring_reserve_(producer, bytes, false, out_reservation);
+}
+
 // Publishes [start, end) in reservation order: waits indefinitely until it is
 // this producer's turn (the commit cursor reached |reservation->start|),
 // invokes publish() to advance the hardware write pointer and ring the
@@ -327,17 +386,17 @@ static inline abce_status_t abce_ring_publish(const abce_ring_publisher_t* publi
       !abce_ring_reservation_is_valid(reservation))
     return ABCE_STATUS_INVALID_ARGUMENT;
 
-  uint64_t observed_commit_index = abce_ring_cursor_load_acquire(publisher->commit_cursor);
+  uint64_t observed_commit_index = abce_ring_commit_load(publisher->commit_cursor);
   while (observed_commit_index != reservation->start) {
     if (publisher->wait) {
       publisher->wait(publisher->user_data, publisher->commit_cursor, observed_commit_index);
     } else {
       abce_ring_pause();
     }
-    observed_commit_index = abce_ring_cursor_load_acquire(publisher->commit_cursor);
+    observed_commit_index = abce_ring_commit_load(publisher->commit_cursor);
   }
   publisher->publish(publisher->user_data, reservation->end);
-  abce_ring_cursor_store_release(publisher->commit_cursor, reservation->end);
+  abce_ring_commit_store(publisher->commit_cursor, reservation->end);
   return ABCE_STATUS_OK;
 }
 
