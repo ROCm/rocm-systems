@@ -4567,9 +4567,9 @@ TEST_F(InitMicrotestIsolated, NcclInit_UnreadableKernelVersion_ReturnsSystemErro
           ASSERT_TRUE(LogHas(log, "Could not read kernel version from /proc/version")) << "actual log:\n" << log;
           ASSERT_EQ(0, iommu.calls);
         }
-        // The empty-version hook is gone. A regression that stored the error in initResult
-        // before returning would make this second call fail. cpuid and iommu stay hooked so
-        // this call does not depend on the host.
+        // The empty-version hook is gone. This second call pins that the early return left
+        // initOnceFlag unlatched, so a later ncclInit() can still initialise. cpuid and iommu
+        // stay hooked so this call does not depend on the host.
         ScopedHook sysText(g_microTopoGetStrFromSys,
                            [](const char*, const char* file, char* out, int maxLen) {
                              return SysFileText(file, "0", out, maxLen);
