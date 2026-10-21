@@ -55,6 +55,10 @@ jobs:
     # analyze all run in this container.
     container:
       image: rocm/dev-ubuntu-22.04:7.2@sha256:05af5f04a06b04676d4c7438997d0deadaeb7478961ad621376e199bf3aeb644
+    # In a container the default run shell is sh, which is dash here.
+    defaults:
+      run:
+        shell: bash
     steps:
       # The image has no git, and without it checkout downloads the whole
       # repository instead of the sparse tree.
