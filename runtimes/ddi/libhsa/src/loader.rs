@@ -406,15 +406,15 @@ fn parse_and_load(
     )
     .map_err(map_loader_error)?;
     Ok((
-        LoadedObject::new(
+        LoadedObject {
             image,
-            LoadedMetadata {
+            metadata: LoadedMetadata {
                 handle: 0,
                 agent,
                 kind: object_kind,
                 uri,
             },
-        ),
+        },
         symbols,
     ))
 }
@@ -1158,7 +1158,7 @@ unsafe fn load_executable_code_object(
         Ok(handle) => handle,
         Err(status) => return status,
     };
-    object.metadata_mut().handle = loaded_handle;
+    object.metadata.handle = loaded_handle;
     let mut handles = Vec::with_capacity(symbols.len());
     for _ in &symbols {
         let handle = match runtime.allocate_handle() {
@@ -2081,7 +2081,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_segment_descriptors(
                     .core
                     .loaded()
                     .iter()
-                    .map(|object| object.image().segments().len())
+                    .map(|object| object.image.segments().len())
                     .sum::<usize>()
             })
             .sum::<usize>();
@@ -2104,15 +2104,15 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_segment_descriptors(
         for executable_handle in executable_handles {
             let executable = &runtime.loader.executables[&executable_handle];
             for object in executable.core.loaded() {
-                for segment in object.image().segments() {
+                for segment in object.image.segments() {
                     let descriptor = HsaLoaderSegmentDescriptor {
-                        agent: object.metadata().agent,
+                        agent: object.metadata.agent,
                         executable: HsaExecutable {
                             handle: executable_handle,
                         },
                         code_object_storage_type: LOADER_STORAGE_MEMORY,
-                        code_object_storage_base: object.image().code_object().as_ptr().cast(),
-                        code_object_storage_size: object.image().code_object().len(),
+                        code_object_storage_base: object.image.code_object().as_ptr().cast(),
+                        code_object_storage_size: object.image.code_object().len(),
                         code_object_storage_offset: segment.storage_offset,
                         segment_base: segment.address as usize as *const c_void,
                         segment_size: segment.size,
@@ -2157,7 +2157,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_query_executable(
                     .core
                     .loaded()
                     .iter()
-                    .any(|object| object.image().contains(address))
+                    .any(|object| object.image.contains(address))
                     .then_some(*handle)
             })
         else {
@@ -2199,7 +2199,7 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_executable_iterate_loaded_code_objec
                 .loaded()
                 .iter()
                 .map(|object| HsaLoadedCodeObject {
-                    handle: object.metadata().handle,
+                    handle: object.metadata.handle,
                 })
                 .collect::<Vec<_>>()
         };
@@ -2245,14 +2245,14 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_loaded_code_object_get_info(
                         .core
                         .loaded()
                         .iter()
-                        .find(|object| object.metadata().handle == loaded_code_object.handle)
+                        .find(|object| object.metadata.handle == loaded_code_object.handle)
                         .map(|object| (*handle, object))
                 })
         else {
             return INVALID_CODE_OBJECT;
         };
         let load_delta =
-            i128::from(object.image().device_base()) - i128::from(object.image().virtual_base());
+            i128::from(object.image.device_base()) - i128::from(object.image.virtual_base());
         let Ok(load_delta) = i64::try_from(load_delta) else {
             return INVALID_CODE_OBJECT;
         };
@@ -2262,26 +2262,26 @@ pub unsafe extern "C" fn hsa_ven_amd_loader_loaded_code_object_get_info(
                 LOADER_INFO_EXECUTABLE => value.cast::<HsaExecutable>().write(HsaExecutable {
                     handle: executable_handle,
                 }),
-                LOADER_INFO_KIND => value.cast::<u32>().write(object.metadata().kind),
-                LOADER_INFO_AGENT => value.cast::<HsaAgent>().write(object.metadata().agent),
+                LOADER_INFO_KIND => value.cast::<u32>().write(object.metadata.kind),
+                LOADER_INFO_AGENT => value.cast::<HsaAgent>().write(object.metadata.agent),
                 LOADER_INFO_STORAGE_TYPE => value.cast::<u32>().write(LOADER_STORAGE_MEMORY),
                 LOADER_INFO_STORAGE_MEMORY_BASE => value
                     .cast::<u64>()
-                    .write(object.image().code_object().as_ptr() as usize as u64),
+                    .write(object.image.code_object().as_ptr() as usize as u64),
                 LOADER_INFO_STORAGE_MEMORY_SIZE => value
                     .cast::<u64>()
-                    .write(u64::try_from(object.image().code_object().len()).unwrap_or(u64::MAX)),
+                    .write(u64::try_from(object.image.code_object().len()).unwrap_or(u64::MAX)),
                 LOADER_INFO_STORAGE_FILE => return INVALID_ARGUMENT,
                 LOADER_INFO_LOAD_DELTA => value.cast::<i64>().write(load_delta),
-                LOADER_INFO_LOAD_BASE => value.cast::<u64>().write(object.image().device_base()),
-                LOADER_INFO_LOAD_SIZE => value.cast::<u64>().write(object.image().size()),
+                LOADER_INFO_LOAD_BASE => value.cast::<u64>().write(object.image.device_base()),
+                LOADER_INFO_LOAD_SIZE => value.cast::<u64>().write(object.image.size()),
                 LOADER_INFO_URI_LENGTH => value
                     .cast::<u32>()
-                    .write(u32::try_from(object.metadata().uri.len()).unwrap_or(u32::MAX)),
+                    .write(u32::try_from(object.metadata.uri.len()).unwrap_or(u32::MAX)),
                 LOADER_INFO_URI => std::ptr::copy_nonoverlapping(
-                    object.metadata().uri.as_ptr(),
+                    object.metadata.uri.as_ptr(),
                     value.cast::<u8>(),
-                    object.metadata().uri.len(),
+                    object.metadata.uri.len(),
                 ),
                 _ => return INVALID_ARGUMENT,
             }

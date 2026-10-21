@@ -72,12 +72,6 @@ fn process_page_slot() -> &'static ProcessPageSlot {
 struct ProcessSignalEventPageGuard(MutexGuard<'static, ProcessPage>);
 
 impl ProcessSignalEventPageGuard {
-    /// Address of the page KFD may have installed, including uncertain offers.
-    #[must_use]
-    fn host_address(&self) -> Option<usize> {
-        self.0.host_address
-    }
-
     /// GPU mailbox base recorded for this endpoint when the page was offered.
     #[must_use]
     fn device_address(&self, endpoint_id: [u8; 16]) -> Option<u64> {
@@ -99,7 +93,7 @@ impl ProcessSignalEventPageGuard {
         endpoints: impl IntoIterator<Item = [u8; 16]>,
         require_identity: bool,
     ) -> Result<Option<(usize, u64)>, Error> {
-        let Some(host) = self.host_address() else {
+        let Some(host) = self.0.host_address else {
             return Ok(None);
         };
         let mut selected = None;
@@ -152,12 +146,6 @@ impl ProcessSignalEventPageGuard {
     /// Marks the process page as installed after a valid event was created.
     fn confirm(&mut self) {
         self.0.confirmed = true;
-    }
-
-    /// Whether KFD has returned a valid event for the process page.
-    #[must_use]
-    fn is_confirmed(&self) -> bool {
-        self.0.confirmed
     }
 }
 
@@ -288,12 +276,6 @@ impl SignalEventPage {
                 detail: "signal event page lost its allocation",
             })?
             .device_address(device)
-    }
-
-    /// Whether this page was offered to KFD, even if event creation failed.
-    #[must_use]
-    fn was_offered(&self) -> bool {
-        self.attempted
     }
 
     /// Transfers a page used in an event creation attempt to KFD process
@@ -481,7 +463,7 @@ impl SignalEventService {
                 let usable = self.page.as_ref().is_some_and(|page| {
                     Self::page_mappings(page, device, peers, require_identity).is_ok()
                 });
-                if !usable && self.page.as_ref().is_some_and(SignalEventPage::was_offered) {
+                if !usable && self.page.as_ref().is_some_and(|page| page.attempted) {
                     return Err(Error::Operation {
                         kind: ErrorKind::Unsupported,
                         detail: "offered KFD signal page cannot change GPU mappings",
@@ -508,7 +490,7 @@ impl SignalEventService {
         } else {
             create_signal_event(gpu, None)
         };
-        let offered = install && self.page.as_ref().is_some_and(SignalEventPage::was_offered);
+        let offered = install && self.page.as_ref().is_some_and(|page| page.attempted);
         if offered {
             if let Some(process) = process.as_mut() {
                 process.record_offer(host, mappings)?;
@@ -519,7 +501,7 @@ impl SignalEventService {
             offered,
             process
                 .as_ref()
-                .map_or(self.confirmed, ProcessSignalEventPageGuard::is_confirmed),
+                .map_or(self.confirmed, |process| process.0.confirmed),
             || create_signal_event(gpu, None),
         )?;
         if let Some(process) = process.as_mut() {
@@ -569,8 +551,7 @@ impl SignalEventService {
     /// Retains the page for a retry if native transfer fails.
     pub fn release(&mut self) -> Result<bool, Error> {
         self.ensure_process()?;
-        let unresolved =
-            self.page.as_ref().is_some_and(SignalEventPage::was_offered) && !self.confirmed;
+        let unresolved = self.page.as_ref().is_some_and(|page| page.attempted) && !self.confirmed;
         if let Some(page) = self.page.as_mut() {
             page.retain_for_process()?;
         }
