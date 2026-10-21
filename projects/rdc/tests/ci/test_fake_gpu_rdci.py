@@ -1,9 +1,9 @@
 """rdci against a fake-GPU rdcd: its options, help, exit statuses and what it prints, and the
-checks rdcd applies to policies it gets from any client.
+checks rdcd applies to names and policies it gets from any client.
 
 Runs from the installed fake-GPU suite and uses test_fake_gpu.py's harness. Some tests preload
 librdc_fake_client.so (tests/fake_amdsmi/fake_rdc_client.cc) into rdci, for replies that a
-well-behaved rdcd does not send: a failing call.
+well-behaved rdcd does not send: a failing call, or names with control characters.
 
 Environment, besides test_fake_gpu.py's:
   RDC_FAKE_CLIENT_LIB   librdc_fake_client.so to use (default: next to the fake amd-smi)
@@ -25,6 +25,7 @@ from test_fake_gpu import (  # noqa: E402, F401 (rdcd and tools are fixtures)
     PREFIX,
     Rdcd,
     _all_gpus_group,
+    _created_id,
     _first_file,
     _missing,
     rdcd,
@@ -70,6 +71,17 @@ def _rdci(d, *args, client=None, timeout=30, **client_env):
 
 def _text(r):
     return (r.stdout + r.stderr).decode(errors="replace")
+
+
+def _strings(doc):
+    """Every string in a parsed JSON document."""
+    if isinstance(doc, str):
+        return [doc]
+    if isinstance(doc, dict):
+        return [s for value in doc.values() for s in _strings(value)]
+    if isinstance(doc, list):
+        return [s for value in doc for s in _strings(value)]
+    return []
 
 
 # ---------------------------------------------------------------------------
@@ -215,7 +227,7 @@ def test_policy_clear_of_a_group_with_one_condition(rdcd):
 
 # ---------------------------------------------------------------------------
 # The C API, in a child process so a crash cannot take pytest down: rdcd (standalone) and
-# librdc (embedded) refuse undefined policy values
+# librdc (embedded) refuse undefined policy values and unclean names
 # ---------------------------------------------------------------------------
 _CHILD = r"""
 import ctypes, json, sys, time
@@ -231,6 +243,9 @@ lib.rdc_stop_embedded.argtypes = [ctypes.c_void_p]
 lib.rdc_disconnect.argtypes = [ctypes.c_void_p]
 lib.rdc_group_gpu_create.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_char_p,
                                      ctypes.POINTER(ctypes.c_uint32)]
+lib.rdc_group_field_create.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
+                                       ctypes.POINTER(ctypes.c_uint32), ctypes.c_char_p,
+                                       ctypes.POINTER(ctypes.c_uint32)]
 lib.rdc_policy_set.argtypes = [ctypes.c_void_p, ctypes.c_uint32, Policy]
 lib.rdc_policy_delete.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int]
 handle = ctypes.c_void_p()
@@ -253,6 +268,14 @@ if check == "policy":
     # Last: on a tree without the check, the policy thread reads this far below its table.
     got["most negative type"] = lib.rdc_policy_set(handle, group.value,
                                                    Policy(-2**31, 1, 0))
+else:
+    fields = (ctypes.c_uint32 * 1)(100)
+    for name in json.loads(sys.argv[5]):
+        raw = bytes.fromhex(name)
+        out = ctypes.c_uint32()
+        got["group " + name] = lib.rdc_group_gpu_create(handle, 0, raw, ctypes.byref(out))
+        got["field group " + name] = lib.rdc_group_field_create(handle, 1, fields, raw,
+                                                                ctypes.byref(out))
 time.sleep(settle)  # rdc's policy thread checks every policy meanwhile
 print(json.dumps(got), flush=True)
 if target == "embedded":
@@ -263,12 +286,13 @@ else:
 """
 
 
-def _api_child(target, check, env):
+def _api_child(target, check, env, names=()):
     """Runs _CHILD; returns {call: status} or fails the test."""
     bootstrap = _first_file(os.path.join(PREFIX, "lib", "librdc_bootstrap.so"))
     if bootstrap is None:
         _missing("librdc_bootstrap.so")
     args = [sys.executable, "-c", _CHILD, bootstrap, target, check, str(2 * FACTOR)]
+    args.append(json.dumps([name.hex() for name in names]))
     try:
         r = subprocess.run(args, env=env, capture_output=True, text=True, timeout=120 * FACTOR)
     except subprocess.TimeoutExpired:
@@ -451,3 +475,80 @@ def test_discovery_version_fails_with_its_query(tools, tmp_path):
     finally:
         code = d.stop()
     assert code == 0, f"rdcd exited with {code}\n{d.output()}"
+
+
+# ---------------------------------------------------------------------------
+# Names: rdcd and librdc refuse names that are not clean text
+# ---------------------------------------------------------------------------
+# Names that are not clean text: a control character, or not valid UTF-8 (RFC 3629).
+UNCLEAN_NAMES = [
+    b"esc\x1b[31m",
+    b"tab\tname",
+    b"del\x7f",
+    b"csi\xc2\x9b31m",
+    b"lone\x9b",
+    b"latin\xe9",
+    b"overlong\xc0\x80",
+    b"surrogate\xed\xa0\x80",
+    b"past\xf4\x90\x80\x80",
+    b"cut\xe2\x82",
+]
+# rdcd gets only valid UTF-8 from rdci: the client's protocol buffers refuse to send the rest.
+CONTROL_NAMES = [b"esc\x1b[31m", b"tab\tname", b"del\x7f", b"csi\xc2\x9b31m"]
+
+
+def test_embedded_rdc_refuses_unclean_names(tools):
+    env = dict(os.environ, LD_PRELOAD=tools[2], RDC_FAKE_GPUS="4")
+    got = _api_child("embedded", "names", env, UNCLEAN_NAMES + ["calf\u00e9".encode()])
+    assert got.pop("group " + "calf\u00e9".encode().hex()) == RDC_ST_OK, got
+    assert got.pop("field group " + "calf\u00e9".encode().hex()) == RDC_ST_OK, got
+    assert set(got.values()) == {RDC_ST_BAD_PARAMETER}, got
+
+
+def test_rdcd_refuses_names_with_control_characters(rdcd):
+    for name in CONTROL_NAMES:
+        r = _rdci(rdcd, "group", "-c", name)
+        assert r.returncode == RDC_ST_BAD_PARAMETER, (name, _text(r))
+        r = _rdci(rdcd, "fieldgroup", "-c", name, "-f", "100")
+        assert r.returncode == RDC_ST_BAD_PARAMETER, (name, _text(r))
+    listed = _rdci(rdcd, "group", "-l").stdout + _rdci(rdcd, "fieldgroup", "-l").stdout
+    assert not [name for name in CONTROL_NAMES if name in listed], listed
+    r = _rdci(rdcd, "group", "-c", "calf\u00e9".encode())
+    assert r.returncode == RDC_ST_OK, _text(r)
+
+
+# ---------------------------------------------------------------------------
+# rdci escapes control characters in text from rdcd
+# ---------------------------------------------------------------------------
+NAME = b'esc\x1b[31m "quote" csi\xc2\x9b back\\slash'
+NAME_IN_TEXT = rb'esc\x1b[31m "quote" csi\xc2\x9b back\slash'  # how rdci prints it
+NAME_IN_JSON = 'esc\x1b[31m "quote" csi\x9b back\\slash'  # what a JSON parser reads back
+
+
+def test_rdci_shows_control_characters_from_rdcd_escaped(rdcd, client):
+    gid = _all_gpus_group(rdcd, "named")
+    fgid = _created_id(rdcd.ok("fieldgroup", "-c", "named_fields", "-f", "100"))
+    rdcd.ok("stats", "-s", "named_job", "-g", gid)
+    try:
+        for command in (
+            ("group", "-l"),
+            ("group", "-g", gid, "-i"),
+            ("fieldgroup", "-l"),
+            ("fieldgroup", "-g", fgid, "-i"),
+            ("stats", "-j", "named_job", "-v"),
+        ):
+            r = _rdci(rdcd, *command, client=client, RDC_FAKE_CLIENT_NAME=NAME)
+            assert r.returncode == RDC_ST_OK, (command, _text(r))
+            assert b"\x1b" not in r.stdout and b"\xc2\x9b" not in r.stdout, (command, r.stdout)
+            assert NAME_IN_TEXT in r.stdout, (command, r.stdout)
+            r = _rdci(rdcd, *command, "--json", client=client, RDC_FAKE_CLIENT_NAME=NAME)
+            assert r.returncode == RDC_ST_OK, (command, _text(r))
+            assert b"\x1b" not in r.stdout and b"\xc2\x9b" not in r.stdout, (command, r.stdout)
+            try:
+                doc = json.loads(r.stdout)
+            except ValueError as e:
+                pytest.fail(f"rdci {' '.join(command)} --json is not JSON ({e}):\n{r.stdout!r}")
+            assert NAME_IN_JSON in _strings(doc), (command, doc)
+    finally:
+        rdcd.rdci("stats", "-x", "named_job")
+        rdcd.rdci("stats", "-r", "named_job")

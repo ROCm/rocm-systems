@@ -40,6 +40,7 @@ THE SOFTWARE.
 #include "common/rdc_utils.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
@@ -542,7 +543,7 @@ static void print_and_clr_notif_pq(field_pq_t* notif_pq, bool ts) {
     }
 
     std::cout << std::left << "   **Event: " << field_id_to_descript.at(v.val.field_id).label;
-    std::cout << std::left << "\t\"" << v.val.value.str << "\"";
+    std::cout << std::left << "\t\"" << rdc_escape_text(v.val.value.str, false) << "\"";
 
     std::cout << std::endl;
   }
@@ -679,7 +680,8 @@ void RdciDmonSubSystem::process() {
             std::cout << std::left << std::setw(20) << std::fixed << std::setprecision(3)
                       << value.value.dbl << " ";
           } else {
-            std::cout << std::left << std::setw(20) << value.value.str << " ";
+            std::cout << std::left << std::setw(20) << rdc_escape_text(value.value.str, false)
+                      << " ";
           }
         }
 

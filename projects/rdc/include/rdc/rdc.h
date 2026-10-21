@@ -1237,13 +1237,16 @@ rdc_status_t rdc_device_get_component_version(rdc_handle_t p_rdc_handle, rdc_com
  *  @param[in] type The type of the group. RDC_GROUP_DEFAULT includes all the
  *  GPUs on the node, and RDC_GROUP_EMPTY creates an empty group.
  *
- *  @param[in] group_name The group name specified as NULL terminated C String
+ *  @param[in] group_name The group name specified as NULL terminated C String.
+ *  A name must be valid UTF-8 (RFC 3629) and hold no control character: no C0
+ *  control (0x00-0x1F), DEL (0x7F) or C1 control (U+0080-U+009F).
  *
  *  @param[inout] p_rdc_group_id Caller provided pointer to rdc_gpu_group_t.
  *  Upon successful call, the value will contain the group id for following
  *  group API calls.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned when group_name is not such a name.
  */
 rdc_status_t rdc_group_gpu_create(rdc_handle_t p_rdc_handle, rdc_group_type_t type,
                                   const char* group_name, rdc_gpu_group_t* p_rdc_group_id);
@@ -1332,10 +1335,13 @@ rdc_status_t rdc_group_gpu_destroy(rdc_handle_t p_rdc_handle, rdc_gpu_group_t p_
  *  field group.
  *
  *  @param[in] field_group_name Unique name for this group of fields.
+ *  A name must be valid UTF-8 (RFC 3629) and hold no control character: no C0
+ *  control (0x00-0x1F), DEL (0x7F) or C1 control (U+0080-U+009F).
  *
  *  @param[out] rdc_field_group_id Handle to the newly-created field group
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned when field_group_name is not such a name.
  */
 rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle, uint32_t num_field_ids,
                                     rdc_field_t* field_ids, const char* field_group_name,

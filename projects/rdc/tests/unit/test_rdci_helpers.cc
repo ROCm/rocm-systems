@@ -20,18 +20,114 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-// GpuPartitions() (common/rdc_utils.h) gives each GPU index the socket and partition that
-// RDC's partition IDs (gS.P) name; rdci discovery -i prints them.
+// Helpers rdci uses for what rdcd sends: rdc_escape_text() and rdc_is_clean_text()
+// (rdc_lib/rdc_common.h) keep terminal control characters out of rdci's output and out of new
+// group and field group names; GpuPartitions() (common/rdc_utils.h) gives each GPU index the
+// socket and partition that RDC's partition IDs (gS.P) name.
 
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "common/rdc_utils.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace {
+
+std::string escape(const std::string& text) { return rdc_escape_text(text, false); }
+std::string escape_json(const std::string& text) { return rdc_escape_text(text, true); }
+bool clean(const std::string& text) { return rdc_is_clean_text(text.data(), text.size()); }
+
+// Text that is not valid UTF-8 (RFC 3629) or that holds a control character.
+const std::vector<std::string> kUnclean = {
+    "\x1b[31mred",           // ESC
+    "tab\there",             // C0
+    std::string("a\0b", 3),  // NUL
+    "x\x7f",                 // DEL
+    "\xc2\x9b"
+    "31m",  // U+009B, the 8-bit CSI
+    "\x9b"
+    "31m",               // a lone continuation byte
+    "latin1 \xe9t\xe9",  // Latin-1, not UTF-8
+    "\xff",              // never in UTF-8
+    "\xc0\x80",          // overlong NUL
+    "\xe0\x80\x9b",      // overlong CSI
+    "\xed\xa0\x80",      // a UTF-16 surrogate
+    "\xf4\x90\x80\x80",  // above U+10FFFF
+    "\xf5\x80\x80\x80",  // a lead byte past U+10FFFF
+    "ok\xe2\x82",        // truncated at the end
+};
+
+TEST(RdcEscapeText, KeepsPrintableText) {
+  EXPECT_EQ(escape("GPU group 1 (rack A)"), "GPU group 1 (rack A)");
+  EXPECT_EQ(escape("calf\xc3\xa9"), "calf\xc3\xa9");          // U+00E9, two bytes
+  EXPECT_EQ(escape("\xc2\xa0"), "\xc2\xa0");                  // U+00A0 is no control
+  EXPECT_EQ(escape("\xe2\x82\xac 5"), "\xe2\x82\xac 5");      // U+20AC, three bytes
+  EXPECT_EQ(escape("\xf0\x9f\x98\x80"), "\xf0\x9f\x98\x80");  // U+1F600, four bytes
+  EXPECT_EQ(escape("a\"b\\c"), "a\"b\\c");  // quotes and backslashes are text outside JSON
+}
+
+TEST(RdcEscapeText, EscapesC0ControlsAndDelete) {
+  EXPECT_EQ(escape("\x1b[31mred"), "\\x1b[31mred");
+  EXPECT_EQ(escape("a\tb\nc\rd"), "a\\x09b\\x0ac\\x0dd");
+  EXPECT_EQ(escape("bell\x07"), "bell\\x07");
+  EXPECT_EQ(escape(std::string("a\0b", 3)), "a\\x00b");
+  EXPECT_EQ(escape("x\x7f"), "x\\x7f");
+}
+
+TEST(RdcEscapeText, EscapesC1ControlsAndEachByteOfInvalidUtf8) {
+  EXPECT_EQ(escape("\xc2\x9b"
+                   "31m"),
+            "\\xc2\\x9b31m");
+  EXPECT_EQ(escape("\xc2\x80"), "\\xc2\\x80");
+  EXPECT_EQ(escape("\x9b"
+                   "31m"),
+            "\\x9b31m");
+  EXPECT_EQ(escape("latin1 \xe9t\xe9"), "latin1 \\xe9t\\xe9");
+  EXPECT_EQ(escape("\xff"), "\\xff");
+  EXPECT_EQ(escape("\xc0\x80"), "\\xc0\\x80");
+  EXPECT_EQ(escape("\xe0\x80\x9b"), "\\xe0\\x80\\x9b");
+  EXPECT_EQ(escape("\xed\xa0\x80"), "\\xed\\xa0\\x80");
+  EXPECT_EQ(escape("\xf4\x90\x80\x80"), "\\xf4\\x90\\x80\\x80");
+  EXPECT_EQ(escape("\xf5\x80\x80\x80"), "\\xf5\\x80\\x80\\x80");
+  EXPECT_EQ(escape("ok\xe2\x82"), "ok\\xe2\\x82");
+  EXPECT_EQ(escape("\xe2\x82"
+                   "A"),
+            "\\xe2\\x82A");
+}
+
+TEST(RdcEscapeText, JsonFormEscapesEachCharacterOnce) {
+  EXPECT_EQ(escape_json("\x1b[31m"), "\\u001b[31m");
+  EXPECT_EQ(escape_json("a\tb"), "a\\u0009b");
+  EXPECT_EQ(escape_json("x\x7f"), "x\\u007f");
+  EXPECT_EQ(escape_json("\xc2\x9b"), "\\u009b");  // one C1 character, one escape
+  EXPECT_EQ(escape_json("\x9b"), "\\u009b");      // an invalid byte reads as U+00HH
+  EXPECT_EQ(escape_json("a\"b\\c"), "a\\\"b\\\\c");
+  EXPECT_EQ(escape_json("calf\xc3\xa9"), "calf\xc3\xa9");
+}
+
+TEST(RdcIsCleanText, AcceptsPrintableUtf8) {
+  EXPECT_TRUE(clean(""));
+  EXPECT_TRUE(clean("rdci-dmon-group"));
+  EXPECT_TRUE(clean("calf\xc3\xa9 \xc2\xa0 \xe2\x82\xac \xf0\x9f\x98\x80"));
+  EXPECT_TRUE(clean("a\"b\\c"));
+}
+
+TEST(RdcIsCleanText, RejectsControlsAndInvalidUtf8) {
+  for (const std::string& text : kUnclean) {
+    EXPECT_FALSE(clean(text)) << escape(text);
+  }
+}
+
+TEST(RdcIsCleanText, ChecksOnlyTheGivenLength) {
+  EXPECT_TRUE(rdc_is_clean_text("ab\x1b", 2));
+  EXPECT_FALSE(rdc_is_clean_text("ab\x1b", 3));
+  EXPECT_TRUE(rdc_is_clean_text("calf\xc3\xa9", 6));
+  EXPECT_FALSE(rdc_is_clean_text("calf\xc3\xa9", 5));  // the cut leaves half a character
+}
 
 // GpuPartitions() takes, for each GPU index, the partition count rdc_get_num_partition()
 // reports: its socket's count, 1 for a partitionable GPU in SPX mode, UINT16_MAX for a GPU that

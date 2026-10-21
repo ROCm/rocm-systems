@@ -153,8 +153,8 @@ void RdciDiscoverySubSystem::show_attributes() {
     const rdc_device_attributes_t& attribute = attributes[i];
     if (is_json_output()) {
       if (available[i]) {
-        std::cout << "{\"gpu_index\": \"" << i << "\", \"device_name\": \"" << attribute.device_name
-                  << "\"}";
+        std::cout << "{\"gpu_index\": \"" << i << "\", \"device_name\": \""
+                  << rdc_escape_text(attribute.device_name, true) << "\"}";
       } else {
         std::cout << "{\"gpu_index\": \"" << i << "\", \"available\": false}";
       }
@@ -162,7 +162,8 @@ void RdciDiscoverySubSystem::show_attributes() {
         std::cout << ",";
       }
     } else {
-      std::cout << i << "\t\t" << (available[i] ? attribute.device_name : "unavailable")
+      std::cout << i << "\t\t"
+                << (available[i] ? rdc_escape_text(attribute.device_name, false) : "unavailable")
                 << std::endl;
     }
   }
@@ -266,11 +267,11 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
 
     if (!is_json_output()) {
       std::cout << std::setw(12) << std::left << i << std::setw(20) << "" << std::setw(25)
-                << attribute.device_name << std::setw(8) << phys_xcc_str << std::setw(8)
-                << phys_decoder_str << std::endl;
+                << rdc_escape_text(attribute.device_name, false) << std::setw(8) << phys_xcc_str
+                << std::setw(8) << phys_decoder_str << std::endl;
     } else {
       std::cout << "{\"gpu_index\": \"" << i << "\", "
-                << "\"device_name\": \"" << attribute.device_name << "\", "
+                << "\"device_name\": \"" << rdc_escape_text(attribute.device_name, true) << "\", "
                 << "\"physical\": {"
                 << "\"xcc\": \"" << phys_xcc_str << "\", "
                 << "\"decoder\": \"" << phys_decoder_str << "\" "
@@ -349,13 +350,13 @@ void RdciDiscoverySubSystem::show_version() {
     std::cout << "\"version\" : ";
     std::cout << '{';
     std::cout << "\"rdcd\": "
-              << "\"" << rdcdv.version << "\", ";
+              << "\"" << rdc_escape_text(rdcdv.version, true) << "\", ";
     std::cout << "\"amdsmi_lib\": "
-              << "\"" << smiv.version << "\"";
+              << "\"" << rdc_escape_text(smiv.version, true) << "\"";
     std::cout << '}';
   } else {
-    std::cout << "RDCD : " << rdcdv.version << "  |  "
-              << "AMDSMI Library : " << smiv.version << std::endl;
+    std::cout << "RDCD : " << rdc_escape_text(rdcdv.version, false) << "  |  "
+              << "AMDSMI Library : " << rdc_escape_text(smiv.version, false) << std::endl;
   }
 
   return;

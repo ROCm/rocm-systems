@@ -33,6 +33,7 @@ THE SOFTWARE.
 #include "common/rdc_utils.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
@@ -172,13 +173,14 @@ void RdciDiagSubSystem::process() {
     const rdc_diag_test_result_t& test_result = response.diag_info[i];
     if (test_result.info[0] != '\0') {
       std::cout << std::setw(26) << std::left << get_test_name(test_result.test_case) + ":"
-                << test_result.info << "\n";
+                << rdc_escape_text(test_result.info, false) << "\n";
     }
     for (uint32_t j = 0; j < test_result.per_gpu_result_count; j++) {
       const rdc_diag_per_gpu_result_t& gpu_result = test_result.gpu_results[j];
       if (strlen(gpu_result.gpu_result.msg) > 0) {
         // Support both GPU and CPU device result reporting
-        std::cout << " Device " << gpu_result.gpu_index << " " << gpu_result.gpu_result.msg << "\n";
+        std::cout << " Device " << gpu_result.gpu_index << " "
+                  << rdc_escape_text(gpu_result.gpu_result.msg, false) << "\n";
       }
     }
   }

@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcGroupSettingsImpl.h"
 
+#include <cstring>
 #include <ctime>
 
 #include "amd_smi/amdsmi.h"
@@ -55,6 +56,10 @@ RdcGroupSettingsImpl::RdcGroupSettingsImpl(const RdcPartitionPtr& partition)
 
 rdc_status_t RdcGroupSettingsImpl::rdc_group_gpu_create(const char* group_name,
                                                         rdc_gpu_group_t* p_rdc_group_id) {
+  // rdci prints names to other users: clean text only
+  if (group_name == nullptr || !rdc_is_clean_text(group_name, strlen(group_name))) {
+    return RDC_ST_BAD_PARAMETER;
+  }
   RDC_LOG(RDC_DEBUG, "Create group " << group_name);
   rdc_group_info_t ginfo;
   strncpy_with_null(ginfo.group_name, group_name, RDC_MAX_STR_LENGTH);
@@ -186,6 +191,11 @@ rdc_status_t RdcGroupSettingsImpl::rdc_group_field_create(uint32_t num_field_ids
                                                           rdc_field_t* field_ids,
                                                           const char* field_group_name,
                                                           rdc_field_grp_t* rdc_field_group_id) {
+  // rdci prints names to other users: clean text only
+  if (field_group_name == nullptr ||
+      !rdc_is_clean_text(field_group_name, strlen(field_group_name))) {
+    return RDC_ST_BAD_PARAMETER;
+  }
   RDC_LOG(RDC_DEBUG, "Create field group " << field_group_name);
   rdc_field_group_info_t finfo;
   finfo.count = num_field_ids;

@@ -396,8 +396,8 @@ void RdciConfigSubSystem::display_config_settings(rdc_config_setting_list_t& rdc
                 ss << std::fixed << std::setprecision(0) << mhz;
                 json_ss << mhz;
               } else {
-                ss << value.value.str;
-                json_ss << value.value.str;
+                ss << rdc_escape_text(value.value.str, false);
+                json_ss << "\"" << rdc_escape_text(value.value.str, true) << "\"";
               }
             }
             ss << std::endl;
@@ -426,8 +426,8 @@ void RdciConfigSubSystem::display_config_settings(rdc_config_setting_list_t& rdc
                 ss << std::fixed << std::setprecision(0) << mhz;
                 json_ss << mhz;
               } else {
-                ss << value.value.str;
-                json_ss << value.value.str;
+                ss << rdc_escape_text(value.value.str, false);
+                json_ss << "\"" << rdc_escape_text(value.value.str, true) << "\"";
               }
             }
             ss << std::endl;
@@ -455,8 +455,8 @@ void RdciConfigSubSystem::display_config_settings(rdc_config_setting_list_t& rdc
                 ss << std::fixed << std::setprecision(3) << watts;
                 json_ss << watts;
               } else {
-                ss << value.value.str;
-                json_ss << value.value.str;
+                ss << rdc_escape_text(value.value.str, false);
+                json_ss << "\"" << rdc_escape_text(value.value.str, true) << "\"";
               }
             }
             ss << std::endl;

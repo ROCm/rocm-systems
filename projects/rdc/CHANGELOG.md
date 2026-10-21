@@ -6,6 +6,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 ### Changed
 
+- **RDC rejects GPU group and field group names that contain control characters or are not valid UTF-8**.
+  - rdci also shows control characters in any text it gets from rdcd as escapes, so that text can no longer send terminal escape sequences to another user's terminal.
+
 - **`rdci policy` sets exactly one condition per command**.
   - A set fails when it gives none or more than one of `-M`, `-T` and `-P`. It kept only one of them, or with `-A` alone sent an undefined condition.
 
@@ -23,6 +26,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdci config -m` sets the memory clock limit instead of failing, and `rdci config` accepts `--host`.
 
 - rdcd, and processes that embed RDC, no longer crash when a policy with an undefined condition type or action is set.
+
+- `rdci --json` output stays valid when text from rdcd contains quotes or backslashes.
 
 - `rdci policy`, `rdci config`, `rdci dmon` and `rdci discovery -v` exit with an error code when the request fails, instead of printing nothing or a success message and exiting with 0.
 

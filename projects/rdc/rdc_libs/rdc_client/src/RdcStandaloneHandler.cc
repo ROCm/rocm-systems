@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include "rdc.pb.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
+#include "rdc_lib/rdc_common.h"
 
 amd::rdc::RdcHandler* make_handler(const char* ip_and_port, const char* root_ca,
                                    const char* client_cert, const char* client_key) {
@@ -56,7 +57,8 @@ RdcStandaloneHandler::RdcStandaloneHandler(const char* ip_and_port, const char* 
 
 rdc_status_t RdcStandaloneHandler::error_handle(::grpc::Status status, uint32_t rdc_status) {
   if (!status.ok()) {
-    std::cout << status.error_message() << ". Error code:" << status.error_code() << std::endl;
+    std::cout << rdc_escape_text(status.error_message(), false)
+              << ". Error code:" << status.error_code() << std::endl;
     return RDC_ST_CLIENT_ERROR;
   }
 
@@ -619,7 +621,7 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
   while (reader->Read(&reply)) {
     if (reply.has_log()) {
       // TODO: Add different logging levels
-      std::cout << "LOG: " << reply.log() << std::endl;
+      std::cout << "LOG: " << rdc_escape_text(reply.log(), false) << std::endl;
       continue;
     }
     if (reply.has_response()) {
