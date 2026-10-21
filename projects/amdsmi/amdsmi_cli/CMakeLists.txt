@@ -50,6 +50,15 @@ add_dependencies(amdsmi_cli amdsmi_cli_subcommands)
 
 install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR} DESTINATION ${PY_CLI_INSTALL_DIR} COMPONENT dev)
 
+# Compiled message catalogs (gettext domain amdsmi_cli), e.g. locale/ru/LC_MESSAGES/amdsmi_cli.mo
+install(
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/locale/
+    DESTINATION ${PY_CLI_INSTALL_DIR}/${PY_PACKAGE_DIR}/locale
+    COMPONENT dev
+    FILES_MATCHING
+    PATTERN "*.mo"
+)
+
 install(
     PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}/amdsmi_cli.py
     DESTINATION ${PY_CLI_INSTALL_DIR}/${PY_PACKAGE_DIR}
