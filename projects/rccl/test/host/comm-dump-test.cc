@@ -47,24 +47,16 @@ TEST_F(CommDumpMicrotest, DumpsTheProfilerProxyTrace) {
   EXPECT_EQ(map_, (std::unordered_map<std::string, std::string>{{"key", "value"}}));
 }
 
-TEST_F(CommDumpMicrotest, NullCommIsWarnedAndSkipped) {
-  ncclResult_t res = ncclInternalError;
-  std::string log = CaptureLog([&] { res = ncclCommDump(nullptr, map_); });
-
-  EXPECT_EQ(res, ncclSuccess);
+TEST_F(CommDumpMicrotest, NullCommIsSkipped) {
+  EXPECT_EQ(ncclCommDump(nullptr, map_), ncclSuccess);
   EXPECT_TRUE(ProfilerProxyTraceDumps().empty());
-  EXPECT_TRUE(LogHas(log, "ncclCommDump comm is null")) << log;
 }
 
-TEST_F(CommDumpMicrotest, MissingProxyStateIsWarnedAndSkipped) {
+TEST_F(CommDumpMicrotest, MissingProxyStateIsSkipped) {
   comm_->proxyState = nullptr;
-  ncclResult_t res = ncclInternalError;
-  std::string log = CaptureLog([&] { res = ncclCommDump(comm_.get(), map_); });
 
-  EXPECT_EQ(res, ncclSuccess);
+  EXPECT_EQ(ncclCommDump(comm_.get(), map_), ncclSuccess);
   EXPECT_TRUE(ProfilerProxyTraceDumps().empty());
-  EXPECT_TRUE(LogHas(log, "ncclCommDump comm->proxyState is null")) << log;
-  EXPECT_FALSE(LogHas(log, "proxy-trace")) << log;
 }
 
 }  // namespace

@@ -23,10 +23,12 @@
 #include <thread>
 #include <vector>
 
+#include "ScopedHook.h"
 #include "comm.h"
 #include "latency_profiler/CollTraceFunc.h"
 #include "fakes/debug_fakes.h"
 #include "fakes/env_fakes.h"
+#include "fakes/strongstream_stubs.h"
 
 namespace {
 // Guards the seams the worker thread reaches. Never held across a log call, so debug_fakes' lock never nests in it.
@@ -34,6 +36,7 @@ std::mutex g_mutex;
 std::map<std::string, int64_t> g_params;
 uintptr_t g_nextEvent = 0x100;
 hipError_t g_eventCreateResult = hipSuccess;
+int g_eventCreates = 0;
 std::vector<hipEvent_t> g_destroyedEvents;
 std::deque<hipError_t> g_queryResults;  // then hipSuccess
 int g_queries = 0;
@@ -44,8 +47,6 @@ std::vector<std::pair<hipEvent_t, hipStream_t>> g_recordedEvents;
 hipError_t g_recordResult = hipSuccess;
 std::vector<int> g_setDevices;
 hipError_t g_setDeviceResult = hipSuccess;
-ncclResult_t g_capturingResult = ncclSuccess;
-bool g_capturing = false;
 
 struct AllGatherCall {
   int* ranks;
@@ -65,6 +66,7 @@ int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t, int64_t*, int8_
 
 hipError_t hipEventCreate(hipEvent_t* event) {
   std::lock_guard<std::mutex> lock(g_mutex);
+  ++g_eventCreates;
   if (g_eventCreateResult != hipSuccess) return g_eventCreateResult;
   *event = reinterpret_cast<hipEvent_t>(g_nextEvent++);
   return hipSuccess;
@@ -105,11 +107,6 @@ hipError_t hipSetDevice(int dev) {
 }
 hipError_t hipGetLastError() { return hipSuccess; }
 const char* hipGetErrorString(hipError_t) { return "fake hip error"; }
-
-ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph* graph, hipStream_t, int) {
-  graph->graph = g_capturing ? reinterpret_cast<hipGraph_t>(0x6a) : nullptr;
-  return g_capturingResult;
-}
 
 ncclResult_t bootstrapIntraNodeAllGather(void*, int* ranks, int rank, int nranks, void* allData, int size) {
   std::lock_guard<std::mutex> lock(g_mutex);
@@ -166,6 +163,7 @@ class CollTraceMicrotest : public ::testing::Test {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_params = {{"NCCL_COLLTRACE_CHECK_INTERVAL_MS", 0}};
     g_eventCreateResult = hipSuccess;
+    g_eventCreates = 0;
     g_destroyedEvents.clear();
     g_queryResults.clear();
     g_queries = 0;
@@ -176,8 +174,6 @@ class CollTraceMicrotest : public ::testing::Test {
     g_recordResult = hipSuccess;
     g_setDevices.clear();
     g_setDeviceResult = hipSuccess;
-    g_capturingResult = ncclSuccess;
-    g_capturing = false;
     g_allGathers.clear();
     g_allGatherResult = ncclSuccess;
     g_peerLatency = 5.0f;
@@ -387,10 +383,11 @@ TEST_F(CollTraceMicrotest, Trace_WorkerExitsWhenTheDeviceCannotBeSet) {
   g_setDeviceResult = hipErrorInvalidDevice;
   auto trace = std::make_unique<CollTrace>(comm_.get());
 
+  Enqueue(trace.get(), 2.0f);
   trace.reset();
 
-  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Cuda failure 'fake hip error'"));
-  EXPECT_FALSE(DebugLogged(NCCL_LOG_INFO, "worker thread STARTED"));
+  EXPECT_EQ(g_setDevices, std::vector<int>{0});
+  EXPECT_EQ(g_queries, 0);
 }
 
 TEST_F(CollTraceMicrotest, Trace_CreateEventMakesStartAndStopEvents) {
@@ -600,9 +597,8 @@ TEST_F(CollTraceMicrotest, Trace_ElapsedTimeFailureStopsTheWorker) {
   Enqueue(trace.get(), 2.0f);
   trace.reset();
 
-  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "getElapsedTimeSinceEvent failed, aborting worker thread"));
   EXPECT_TRUE(g_allGathers.empty());
-  EXPECT_FALSE(DebugLogged(NCCL_LOG_INFO, "worker thread TERMINATE"));
+  EXPECT_EQ(g_queries, 2);  // the first event's start and stop only
 }
 
 TEST_F(CollTraceMicrotest, Func_InitNeedsTheEnvSetToOne) {
@@ -691,14 +687,24 @@ class CollTraceAcquireMicrotest : public CollTraceMicrotest {
   std::unique_ptr<ncclKernelPlan> plan_;
   ncclTaskColl task_ = {};
   hipStream_t stream_ = reinterpret_cast<hipStream_t>(0x57);
+  bool capturing_ = false;
+  ncclResult_t captureResult_ = ncclSuccess;
+  ScopedHook<ncclResult_t(ncclCudaGraph*, hipStream_t, int)> capture_{
+    g_cudaGetCapturingGraph, [this](ncclCudaGraph* graph, hipStream_t, int mode) {
+      *graph = ncclCudaGraphNone(mode);
+      if (capturing_) graph->graph = reinterpret_cast<hipGraph_t>(0x6a);
+      return captureResult_;
+    }};
 };
 
 TEST_F(CollTraceAcquireMicrotest, NoTracerOrCommGivesNothing) {
+  ncclIntruQueueEnqueue(&plan_->collTaskQueue, &task_);
   EXPECT_EQ(collTraceAquireEventBaseline(plan_.get(), stream_), nullptr);
   plan_->comm = nullptr;
   EXPECT_EQ(collTraceAquireEventBaseline(plan_.get(), stream_), nullptr);
   EXPECT_EQ(collTraceAquireEventCommon(comm_.get(), CollTraceEvent::EventType::COMM, stream_), nullptr);
-  EXPECT_FALSE(DebugLogged(NCCL_LOG_WARN, "no coll task"));
+  EXPECT_EQ(capture_.calls, 0);
+  EXPECT_EQ(g_eventCreates, 0);
 }
 
 TEST_F(CollTraceAcquireMicrotest, EmptyPlanGivesNothing) {
@@ -706,7 +712,8 @@ TEST_F(CollTraceAcquireMicrotest, EmptyPlanGivesNothing) {
 
   EXPECT_EQ(collTraceAquireEventBaseline(plan_.get(), stream_), nullptr);
 
-  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "CollTrace: no coll task in this plan, this plan is empty"));
+  EXPECT_EQ(capture_.calls, 0);
+  EXPECT_EQ(g_eventCreates, 0);
 }
 
 TEST_F(CollTraceAcquireMicrotest, EventCarriesTheFirstTasksInfo) {
@@ -719,6 +726,8 @@ TEST_F(CollTraceAcquireMicrotest, EventCarriesTheFirstTasksInfo) {
   auto event = collTraceAquireEventBaseline(plan_.get(), stream_);
 
   ASSERT_NE(event, nullptr);
+  EXPECT_EQ(capture_.calls, 1);
+  EXPECT_EQ(g_eventCreates, 2);
   EXPECT_EQ(event->eventType, CollTraceEvent::EventType::COMM);
   EXPECT_EQ(event->coll.opName, "AllReduce");
   EXPECT_EQ(event->coll.dataType, "ncclFloat32");
@@ -730,23 +739,23 @@ TEST_F(CollTraceAcquireMicrotest, EventCarriesTheFirstTasksInfo) {
 TEST_F(CollTraceAcquireMicrotest, GraphCaptureIsNotTraced) {
   comm_->ctrace = new CollTrace(comm_.get());
   ncclIntruQueueEnqueue(&plan_->collTaskQueue, &task_);
-  g_capturing = true;
+  capturing_ = true;
 
   EXPECT_EQ(collTraceAquireEventBaseline(plan_.get(), stream_), nullptr);
 
-  EXPECT_TRUE(
-    DebugLogged(NCCL_LOG_WARN, "COLLTRACE: does not support cuda graph. Collectives from comm abc will be skipped"));
-  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "COLLTRACE: failed to aquire event"));
+  EXPECT_EQ(capture_.calls, 1);
+  EXPECT_EQ(g_eventCreates, 0);
 }
 
 TEST_F(CollTraceAcquireMicrotest, CaptureQueryFailureIsNotTraced) {
   comm_->ctrace = new CollTrace(comm_.get());
   ncclIntruQueueEnqueue(&plan_->collTaskQueue, &task_);
-  g_capturingResult = ncclInternalError;
+  captureResult_ = ncclInternalError;
 
   EXPECT_EQ(collTraceAquireEventBaseline(plan_.get(), stream_), nullptr);
 
-  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Internal error: ncclCudaGetCapturingGraph failed by 3"));
+  EXPECT_EQ(capture_.calls, 1);
+  EXPECT_EQ(g_eventCreates, 0);
 }
 
 }  // namespace

@@ -404,6 +404,7 @@ function(rccl_define_micro_source_lists)
     fakes/debug_fakes.cc
     fakes/collectives_fakes.cc
     fakes/env_fakes.cc
+    fakes/strongstream_stubs.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
