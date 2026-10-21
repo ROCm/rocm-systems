@@ -61,11 +61,8 @@ struct FieldSMIData {
   union {
     amdsmi_event_handle_t evt_handle;
   };
-  union {
-    amdsmi_counter_value_t counter_val;
-  };
   ~FieldSMIData() {}
-  FieldSMIData() : evt_handle(0), counter_val{0, 0, 0} {}
+  FieldSMIData() : evt_handle(0) {}
 };
 
 //!< The data structure to store the async fetch task
@@ -116,6 +113,9 @@ class RdcMetricFetcherImpl final : public RdcMetricFetcher {
 
   //!< Async metric retrieve
   std::map<RdcFieldKey, MetricValue> async_metrics_;
+  // The event counters. No lock of their own: RdcWatchTableImpl watches, unwatches and
+  // reads event fields (through RdcSmiLib) only under its watch_mutex_, and no other
+  // caller reads them.
   std::map<RdcFieldKey, std::shared_ptr<FieldSMIData>> smi_data_;
   std::queue<MetricTask> updated_tasks_;
   std::mutex task_mutex_;

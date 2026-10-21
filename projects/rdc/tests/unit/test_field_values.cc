@@ -21,7 +21,8 @@ THE SOFTWARE.
 */
 
 // The values RdcMetricFetcherImpl reads from the fake AMD SMI (tests/fake_amdsmi), their
-// statuses, the event counters RdcSmiLib starts, the records RdcTelemetryModule makes
+// statuses, the event counters it starts and releases, which RdcSmiLib watches, the
+// records RdcTelemetryModule makes
 // and the instance profiles RdcPartitionImpl reads.
 // The fake reads its RDC_FAKE_* knobs once per process, at the first amdsmi_init(),
 // so each case runs in a child process with its own knobs.
@@ -373,8 +374,8 @@ TEST(FieldValues, ABulkFetchOfUnfilledMetricsDoesNotDependOnTheStack) {
 // instance profiles
 // ---------------------------------------------------------------------------
 
-// A path for RDC_FAKE_ARM, unique to this process: the fake applies its rules once
-// the file exists.
+// A file path unique to this process: for RDC_FAKE_ARM, whose rules the fake applies
+// once the file exists, and for RDC_FAKE_LOG.
 std::string arm_path(const std::string& name) {
   return ::testing::TempDir() + "rdc_field_status_" + name + "_" + std::to_string(getpid());
 }
@@ -624,6 +625,96 @@ TEST(FieldStatus, AnInstanceProfileNamesItsResource) {
       }
     }
   });
+}
+
+// The calls of api in an RDC_FAKE_LOG file: one line each, "api gpu", plus " !" when a
+// rule failed the call.
+int calls(const std::string& log, const std::string& api) {
+  std::ifstream in(log);
+  int count = 0;
+  for (std::string line; std::getline(in, line);) {
+    if (line.compare(0, api.size() + 1, api + " ") == 0) ++count;
+  }
+  return count;
+}
+
+// A counter that fails to start is destroyed: the watch keeps no handle of it.
+TEST(Counters, ACounterThatFailsToStartIsReleased) {
+  if (!can_start_counters()) {
+    GTEST_SKIP() << "creating an event counter takes CAP_DAC_OVERRIDE";
+  }
+  const std::string log = arm_path("start_log");
+  unlink(log.c_str());
+  with_fake({{"RDC_FAKE_LOG", log},
+             {"RDC_FAKE_FAIL", "amdsmi_gpu_control_counter=AMDSMI_STATUS_UNKNOWN_ERROR"}},
+            [&log](RdcMetricFetcherImpl& fetcher) {
+              for (rdc_field_t field : {RDC_EVNT_XGMI_0_NOP_TX, RDC_EVNT_XGMI_0_THRPUT}) {
+                EXPECT_EQ(fetcher.acquire_smi_handle({0, field}), RDC_ST_UNKNOWN_ERROR);
+              }
+              EXPECT_EQ(calls(log, "amdsmi_gpu_create_counter"), 2);
+              EXPECT_EQ(calls(log, "amdsmi_gpu_destroy_counter"), 2);
+            });
+  unlink(log.c_str());
+}
+
+// A counter that fails to stop is still destroyed, and the unwatch reports the stop.
+TEST(Counters, ACounterThatFailsToStopIsReleased) {
+  if (!can_start_counters()) {
+    GTEST_SKIP() << "starting an event counter takes CAP_DAC_OVERRIDE";
+  }
+  const std::string armed = arm_path("stop_arm");
+  const std::string log = arm_path("stop_log");
+  unlink(armed.c_str());
+  unlink(log.c_str());
+  with_fake({{"RDC_FAKE_ARM", armed},
+             {"RDC_FAKE_LOG", log},
+             {"RDC_FAKE_FAIL", "amdsmi_gpu_control_counter=AMDSMI_STATUS_UNKNOWN_ERROR"}},
+            [&armed, &log](RdcMetricFetcherImpl& fetcher) {
+              ASSERT_EQ(fetcher.acquire_smi_handle({0, RDC_EVNT_XGMI_0_THRPUT}), RDC_ST_OK);
+              arm(armed);
+              EXPECT_EQ(fetcher.delete_smi_handle({0, RDC_EVNT_XGMI_0_THRPUT}),
+                        RDC_ST_UNKNOWN_ERROR);
+              EXPECT_EQ(calls(log, "amdsmi_gpu_create_counter"), 1);
+              EXPECT_EQ(calls(log, "amdsmi_gpu_destroy_counter"), 1);
+            });
+  unlink(armed.c_str());
+  unlink(log.c_str());
+}
+
+// A counter read that fails gives no value: not the previous reading, nor what the read left
+// in its output (RDC_FAKE_POISON fills a failed call's outputs with 0xA5 bytes).
+TEST(Counters, AFailedCounterReadReportsNoValue) {
+  if (!can_start_counters()) {
+    GTEST_SKIP() << "starting an event counter takes CAP_DAC_OVERRIDE";
+  }
+  const std::string armed = arm_path("read_arm");
+  unlink(armed.c_str());
+  with_fake({{"RDC_FAKE_ARM", armed},
+             {"RDC_FAKE_POISON", "1"},
+             {"RDC_FAKE_FAIL", "amdsmi_gpu_read_counter=AMDSMI_STATUS_UNKNOWN_ERROR"}},
+            [&armed](RdcMetricFetcherImpl& fetcher) {
+              const std::vector<rdc_field_t> fields = {RDC_EVNT_XGMI_0_NOP_TX,
+                                                       RDC_EVNT_XGMI_0_THRPUT};
+              for (rdc_field_t field : fields) {
+                ASSERT_EQ(fetcher.acquire_smi_handle({0, field}), RDC_ST_OK);
+              }
+              // The fake's counters count milliseconds.
+              std::this_thread::sleep_for(std::chrono::milliseconds(5));
+              for (rdc_field_t field : fields) {
+                rdc_field_value value = dirty_value();
+                ASSERT_EQ(fetcher.fetch_smi_field(0, field, &value), RDC_ST_OK);
+                ASSERT_GT(value.value.l_int, 0) << "field " << field;
+              }
+              arm(armed);
+              for (rdc_field_t field : fields) {
+                SCOPED_TRACE("field " + std::to_string(field));
+                rdc_field_value value = dirty_value();
+                EXPECT_NE(fetcher.fetch_smi_field(0, field, &value), RDC_ST_OK);
+                EXPECT_EQ(value.status, static_cast<int>(RDC_ST_UNKNOWN_ERROR));
+                EXPECT_EQ(value.value.l_int, 0);
+              }
+            });
+  unlink(armed.c_str());
 }
 
 }  // namespace
