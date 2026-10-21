@@ -10754,7 +10754,7 @@ amdsmi_status_t amdsmi_activate_ampp_profile(amdsmi_processor_handle processor_h
  *          ::AMDSMI_STATUS_NOT_SUPPORTED if the device has no app_modes/, or
  *          if the profile is not listed in config/writable_slot_mask,
  *          ::AMDSMI_STATUS_NO_PERM if the caller lacks write permission on
- *          app_modes/<profile_name>/config/* (typically requires
+ *          the files under app_modes/<profile_name>/config/ (typically requires
  *          root/CAP_SYS_ADMIN),
  *          ::AMDSMI_STATUS_INVAL if @p profile_name does not match any
  *          published profile_N, if @p fields contains a field name not

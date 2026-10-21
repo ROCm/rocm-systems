@@ -384,8 +384,9 @@ class CodeGenerator:
     _DST_OPERANDS_CAPACITY = 3
     _MEMORY_COUNTER_OBLIGATIONS_CAPACITY = 3
 
-    # Memory-pipeline semantics recognized by code generation. This table is
-    # also the source of truth for the MEMORY_OP instruction flag: every entry
+    # Memory-pipeline and addressed cache-maintenance semantics recognized by
+    # code generation. This table is also the source of truth for the MEMORY_OP
+    # instruction flag: every entry
     # has explicit issue-counter and completion-order metadata before it can
     # call a memory pipeline. Counter-producing operations outside those
     # pipelines (for example messages and timestamp queries) are intentionally
@@ -394,6 +395,8 @@ class CodeGenerator:
         'smem_load': 'scalar',
         'smem_store': 'scalar',
         'smem_atomic': 'scalar',
+        'dcache_discard': 'scalar',
+        'scratch_load_lds': 'vmem_load',
         'flat_load': 'flat_load',
         'flat_store': 'flat_store',
         'flat_atomic': 'flat_atomic',
@@ -4896,9 +4899,9 @@ class CodeGenerator:
             inst_enc.enc_name.upper() == 'ENC_FLAT'
             and {'seg', 'saddr'} <= enc_field_names
         ):
-            saddr_null = self._saddr_null_expr(inst_enc.enc_name)
+            saddr_present = self._flat_saddr_present_expr(inst_enc.enc_name)
             return (
-                f'if (inst_.saddr == {saddr_null}) return;'
+                f'if (!({saddr_present})) return;'
                 'if (inst_.seg == 1) {'
                 'uses.expand(RegisterRef{RegClass::SGPR, '
                 'static_cast<uint16_t>(inst_.saddr), 1});'
@@ -4994,6 +4997,14 @@ class CodeGenerator:
             'if (ref->cls == RegClass::VGPR) '
             f'{emit}'
         )
+
+    def _flat_saddr_present_expr(self, enc_name: str) -> str:
+        """Emit the profile's complete FLAT scalar-address presence test."""
+        null = self._saddr_null_expr(enc_name)
+        result = f'inst_.saddr != {null}'
+        for alias in self.isa_spec.profile.flat_saddr_null_aliases:
+            result += f' && inst_.saddr != {alias}'
+        return result
 
     def _saddr_null_expr(self, enc_name: str) -> str:
         """Return the profile-defined NULL-SADDR selector for an encoding."""
@@ -7793,7 +7804,7 @@ class CodeGenerator:
         if cls == 'smem_atomic':
             return self._gen_smem_atomic(sem)
 
-        if cls == 'flat_load':
+        if cls in ('flat_load', 'scratch_load_lds'):
             return self._gen_flat_load(dst_ops, src_ops, sem)
 
         if cls == 'flat_store':
@@ -7877,6 +7888,12 @@ class CodeGenerator:
 
         if cls == 'dcache_inv':
             return '  wf.cu().l1_scalar().invalidate_all();'
+
+        if cls == 'dcache_discard':
+            return (
+                '  if (auto addr = smem_calculate_address(inst_, wf))\n'
+                f'    wf.cu().l1_scalar().discard(*addr, {sem.num_elems}, wf.process_id());'
+            )
 
         if cls == 'dcache_wb':
             return '  wf.cu().l1_scalar().writeback_all(wf.process_id());'
@@ -8456,7 +8473,10 @@ class CodeGenerator:
         self, sem: InstructionSemantics, sem_class: str
     ) -> int:
         """Return the number of counter tokens contributed by one issue."""
-        if sem_class == 'smem_load' and (getattr(sem, 'num_elems', None) or 1) > 1:
+        if (
+            sem_class in ('smem_load', 'dcache_discard')
+            and (getattr(sem, 'num_elems', None) or 1) > 1
+        ):
             return 2
         # Scalar atomics count their memory-access width, independent of GLC;
         # compare-swap data dwords don't count.
@@ -8633,18 +8653,57 @@ class CodeGenerator:
             return f'wf.vgpr_alloc().base + {self._acc_vgpr_expr} + inst_.{field}'
         return f'wf.vgpr_alloc().base + inst_.{field}'
 
+    def _legacy_flat_lds_load(self, sem: InstructionSemantics) -> bool:
+        return (
+            self.isa_spec.profile.legacy_flat_lds
+            and sem.semantic_class == 'flat_load'
+            and sem.num_elems == 1
+            and sem.elem_size <= 4
+            and (
+                self.isa_spec.profile.legacy_flat_d16_lds
+                or not (sem.d16_hi or sem.d16_lo)
+            )
+        )
+
+    def _append_flat_lds_destination(self, lines: list[str], dedicated: bool) -> None:
+        indent = '  ' if dedicated else '    '
+        if not dedicated:
+            lines.append('  if (inst_.lds && (inst_.seg == 1 || inst_.seg == 2)) {')
+        lines.append(f'{indent}d->lds_dst = true;')
+        lines.append(f'{indent}d->lds_dword_extend = true;')
+        # FLAT-family LDS destinations use aligned M0: 16 bits on legacy
+        # LDS-bit encodings, 18 on CDNA3/4, plus the signed instruction offset.
+        profile = self.isa_spec.profile
+        assert profile.flat_lds_m0_mask is not None
+        mask = f'0x{profile.flat_lds_m0_mask:x}u'
+        width = profile.flat_offset_bits
+        assert width is not None
+        raw = 'inst_.offset' if width == 12 else '(inst_.offset | (inst_.pad_12 << 12))'
+        lines.append(
+            f'{indent}const int32_t offset = static_cast<int32_t>({raw} << {32-width}) >> {32-width};'
+        )
+        lines.append(
+            f'{indent}amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
+            f' static_cast<int64_t>(wf.m0() & {mask}) + offset, 4, 4);'
+        )
+        if not dedicated:
+            lines.append('  }')
+
     def _gen_flat_load(
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
         block = sem.name in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK')
+        dedicated_lds = sem.semantic_class == 'scratch_load_lds'
+        legacy_lds = self._legacy_flat_lds_load(sem)
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         L.append(
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
-        L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
+        if not dedicated_lds:
+            L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
         L.append(
             '  d->num_elems = amdgpu::kBlockDwordCount;'
@@ -8652,7 +8711,7 @@ class CodeGenerator:
             else f'  d->num_elems = {ne};'
         )
         L.append('  d->is_load = true;')
-        self._append_wait_counter_type(L, sem, 'flat_load')
+        self._append_wait_counter_type(L, sem, sem.semantic_class)
         if sem.sign_extend:
             L.append('  d->sign_extend = true;')
         if sem.d16_hi:
@@ -8678,6 +8737,8 @@ class CodeGenerator:
         if sem.name.startswith('CLUSTER_LOAD_'):
             L.append('  d->request_force_l1_bypass = true;')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
+        if dedicated_lds or legacy_lds:
+            self._append_flat_lds_destination(L, dedicated_lds)
         if block:
             L.append('  d->set_block_dword_mask(wf.m0());')
         L.append('  set_data(std::move(d));')
@@ -10734,6 +10795,12 @@ class CodeGenerator:
                         and inst_sem.semantic_class.startswith(('buffer_', 'tbuffer_'))
                         and 'lds' in inst_field_names
                     )
+                    legacy_flat_lds_load = bool(
+                        inst_sem and self._legacy_flat_lds_load(inst_sem)
+                    )
+                    dedicated_scratch_lds_load = bool(
+                        inst_sem and inst_sem.semantic_class == 'scratch_load_lds'
+                    )
                     readwrite_output_sources = []
                     vgpr_msb_role_body = []
                     src_idx = 0
@@ -10993,7 +11060,17 @@ class CodeGenerator:
                             conditional_dst_body.append(
                                 'if (!inst_.lds) dst_operands_[num_dst_++] = &vdata;'
                             )
-                        elif opnd.is_output:
+                        elif (
+                            legacy_flat_lds_load
+                            and opnd.is_output
+                            and opnd.name == 'vdst'
+                        ):
+                            conditional_dst_body.append(
+                                'if (!inst_.lds) dst_operands_[num_dst_++] = &vdst;'
+                            )
+                        elif opnd.is_output and not (
+                            dedicated_scratch_lds_load and opnd.name == 'vdst'
+                        ):
                             opnd_body.append(
                                 f'dst_operands_[{dst_idx}] = &{destination_operand};'
                             )
@@ -11173,11 +11250,14 @@ class CodeGenerator:
                         enc.enc_name
                     ).use_flat_mnemonic
                     if _has_flat_saddr and any(o.name == 'addr' for o in inst.operands):
-                        saddr_null = self._saddr_null_expr(enc.enc_name)
+                        saddr_present = self._flat_saddr_present_expr(enc.enc_name)
                         private_members.append(cgen.Statement('Operand saddr'))
                         opnd_ctor_init.append('saddr(0, OperandType::OPR_SREG, 0)')
 
-                    if buffer_lds_load:
+                    if buffer_lds_load or (
+                        legacy_flat_lds_load
+                        and not any(o.name == 'm0' for o in inst.operands)
+                    ):
                         private_members.append(cgen.Statement('Operand lds_m0'))
                         canonical_m0 = self._fieldless_canonical_value('OPR_SDST_M0')
                         opnd_ctor_init.append(
@@ -11264,10 +11344,7 @@ class CodeGenerator:
                                 arch.startswith('rdna')
                                 or enc.enc_name.upper() == 'ENC_VFLAT'
                             ):
-                                null = self._saddr_null_expr(enc.enc_name)
-                                present = f'inst_.saddr != {null}'
-                                if arch in ('rdna3', 'rdna3_5', 'rdna4'):
-                                    present += ' && inst_.saddr != 127'
+                                present = self._flat_saddr_present_expr(enc.enc_name)
                                 access_conditions.append(
                                     f'if ({present}) modifiers.flat_scalar_address = &saddr;'
                                 )
@@ -11734,11 +11811,26 @@ class CodeGenerator:
                             'SReg_32_XEXEC destination";'
                         )
 
+                    if (
+                        enc.enc_name.upper() == 'ENC_FLAT'
+                        and self.isa_spec.profile.legacy_flat_lds
+                    ):
+                        raw = f'reinterpret_cast<const {factory_op_encoding}*>(inst)'
+                        invalid_lds = (
+                            f'{raw}->lds && ({raw}->seg != 1 && {raw}->seg != 2)'
+                            if legacy_flat_lds_load
+                            else f'{raw}->lds'
+                        )
+                        factory_validation_parts.append(
+                            f'if ({invalid_lds}) '
+                            f'[[unlikely]] return emit_error.emit() << "{inst.name} has an invalid LDS destination";'
+                        )
+
                     if inst.required_flat_segment is not None:
                         factory_validation_parts.append(
                             f'if (reinterpret_cast<const {factory_op_encoding}*>(inst)->seg != '
                             f'{inst.required_flat_segment}u) [[unlikely]] return emit_error.emit() '
-                            f'<< "{inst.name} requires its GLOBAL segment";'
+                            f'<< "{inst.name} requires segment {inst.required_flat_segment}";'
                         )
 
                     # Public LLVM defines gfx1251's F64 WMMA as a wave32
@@ -11963,9 +12055,20 @@ class CodeGenerator:
                                 '  addr = Operand(32, OperandType::OPR_VGPR, '
                                 'reinterpret_cast<const OpEncoding*>(&inst_)->addr);'
                             )
-                            ctor_body_parts.append(
-                                f'  if (inst_.saddr != {saddr_null}) {{'
-                            )
+                            has_vaddr = self.isa_spec.profile.scratch_has_vaddr_expr
+                            if has_vaddr is not None:
+                                ctor_body_parts.append(
+                                    f'  if (!({has_vaddr})) {{\n'
+                                    '    for (uint8_t i = 0; i < num_src_; ++i) {\n'
+                                    '      if (src_operands_[i] != &addr) continue;\n'
+                                    '      for (uint8_t j = i + 1; j < num_src_; ++j)\n'
+                                    '        src_operands_[j - 1] = src_operands_[j];\n'
+                                    '      --num_src_;\n'
+                                    '      break;\n'
+                                    '    }\n'
+                                    '  }'
+                                )
+                            ctor_body_parts.append(f'  if ({saddr_present}) {{')
                             ctor_body_parts.append(
                                 '    saddr = Operand(32, OperandType::OPR_SREG, '
                                 'inst_.saddr);'
@@ -11979,14 +12082,9 @@ class CodeGenerator:
                                 if self.isa_spec.arch_name.startswith('rdna')
                                 else 'inst_.seg == 2'
                             )
-                            extra_null = (
-                                ' && inst_.saddr != 127'
-                                if self.isa_spec.arch_name in ('rdna3', 'rdna3_5')
-                                else ''
-                            )
                             ctor_body_parts.append(
                                 f'}} else if ({scalar_base_segment} && '
-                                f'inst_.saddr != {saddr_null}{extra_null}) {{'
+                                f'{saddr_present}) {{'
                             )
                             ctor_body_parts.append(
                                 '  addr = Operand(32, OperandType::OPR_VGPR, '
@@ -17516,6 +17614,12 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
             elif dte.sub_decode_funcs is not None:
                 factory_names.update(dte.sub_decode_funcs)
 
+        factory_names.update(
+            f'decode{inst.fmt_name}'
+            for enc in self.isa_spec.inst_encodings
+            for inst in enc.insts
+            if inst.required_flat_segment is not None
+        )
         return {
             class_name: factory_name
             for class_name in sorted(classes)
@@ -17643,6 +17747,24 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {{
         sub_decode_table_entries = []
         decode_funcs_found = set()
         _custom_decode_bodies: dict[str, object] = {}
+        segment_instructions: dict[int, list] = {}
+        for enc in self.isa_spec.inst_encodings:
+            for inst in enc.insts:
+                if inst.required_flat_segment is not None:
+                    segment_instructions.setdefault(inst.opcode, []).append(inst)
+        for opcode, instructions in segment_instructions.items():
+            if len(instructions) < 2:
+                continue
+            body = []
+            for inst in instructions:
+                body.append(
+                    cgen.Line(
+                        f'if (reinterpret_cast<const Flat::OpEncoding*>(opcode)->seg == '
+                        f'{inst.required_flat_segment}) return detail::decode{inst.fmt_name}(opcode, emit_error);'
+                    )
+                )
+            body.append(cgen.Statement('return decodeInvalid(opcode, emit_error)'))
+            _custom_decode_bodies[f'decodeFlatSegment{opcode}'] = cgen.Block(body)
         _custom_primary_decode_funcs: dict[int, str] = {}
         _custom_primary_decode_bodies: dict[str, object] = {}
 
