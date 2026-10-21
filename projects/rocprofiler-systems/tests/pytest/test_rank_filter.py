@@ -16,9 +16,11 @@ Each test runs `mpi-example` under `mpiexec -n 3` and asserts both:
 """
 
 from __future__ import annotations
+
 import re
-import pytest
 from pathlib import Path
+
+import pytest
 from conftest import RocprofsysTest, check_use_rocpd
 
 pytestmark = [pytest.mark.mpi, pytest.mark.rank_filter]

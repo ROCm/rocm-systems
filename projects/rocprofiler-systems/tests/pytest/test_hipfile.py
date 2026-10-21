@@ -9,10 +9,9 @@ Storage I/O telemetry (`hipfile-io`).
 from __future__ import annotations
 
 import subprocess
-
-import pytest
 from pathlib import Path
 
+import pytest
 from conftest import RocprofsysTest
 from rocprofsys import RocprofsysConfig
 

@@ -23,8 +23,9 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 _DISABLE_ENV = "ROCPROFSYS_DISABLE_TEST_CACHE"
 
@@ -333,7 +334,7 @@ def disable_for_process() -> None:
 
 
 @functools.lru_cache(maxsize=1)
-def get_shared_cache() -> Optional[PersistentCache]:
+def get_shared_cache() -> PersistentCache | None:
     """Return the process-wide cache, or ``None`` if disabled/unavailable.
 
     The result is memoized so the file is read at most once per process.
@@ -367,8 +368,8 @@ def _args_key(args: tuple, kwargs: dict) -> str:
 def persistent_cache(
     key: str,
     *,
-    to_cache: Optional[Callable[[Any], Any]] = None,
-    from_cache: Optional[Callable[[Any], Any]] = None,
+    to_cache: Callable[[Any], Any] | None = None,
+    from_cache: Callable[[Any], Any] | None = None,
     method: bool = False,
 ) -> Callable:
     """Persistently memoize a function across processes.
@@ -431,7 +432,7 @@ class persistent_cached_property:
 
     def __init__(self, func: Callable) -> None:
         self.func = func
-        self.attrname: Optional[str] = None
+        self.attrname: str | None = None
         self.__doc__ = func.__doc__
 
     def __set_name__(self, owner, name: str) -> None:

@@ -16,7 +16,7 @@ _COREUTILS_PATH = "/usr/bin/coreutils"
 _COREUTILS_LS_ARGS = ["--coreutils-prog=ls"]
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def get_ls_command() -> tuple[str, list[str]]:
     """Return the ``ls`` command name and any extra arguments.
 

@@ -613,7 +613,7 @@ def main():
             print(f"  mem_usage:            {gpu.mem_usage}")
             print(f"  xgmi:                 {gpu.xgmi}")
             print(f"  pcie:                 {gpu.pcie}")
-            print(f"  ---")
+            print("  ---")
             print(f"  busy (derived):       {gpu.busy}")
             print(f"  temp (derived):       {gpu.temp}")
             print(f"  power (derived):      {gpu.power}")

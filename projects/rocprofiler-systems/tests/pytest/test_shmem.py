@@ -6,10 +6,12 @@ Tests for SHMEM.
 """
 
 from __future__ import annotations
+
 import re
 import subprocess
-import pytest
 from pathlib import Path
+
+import pytest
 from conftest import RocprofsysTest
 
 pytestmark = [
@@ -70,7 +72,7 @@ def shmem_validated(rocprof_config) -> tuple[bool, str]:
     if not re.search(r"PE [0-9]+ received value [0-9]+ from PE [0-9]+", output):
         return (
             False,
-            f"PE [0-9]+ received value [0-9]+ from PE [0-9]+ not found in output",
+            "PE [0-9]+ received value [0-9]+ from PE [0-9]+ not found in output",
         )
     for pe in range(_SHMEM_NP):
         if f"Hello from PE {pe} of {_SHMEM_NP}" not in output:

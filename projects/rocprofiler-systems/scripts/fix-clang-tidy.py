@@ -50,7 +50,6 @@ import argparse
 import concurrent.futures
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import stat
@@ -58,6 +57,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
 try:
     import yaml

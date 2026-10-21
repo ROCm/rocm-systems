@@ -6,10 +6,12 @@ Tests rocprof-sys binaries
 """
 
 from __future__ import annotations
+
 import json
 import re
-import pytest
 import shutil
+
+import pytest
 from conftest import RocprofsysTest
 from rocprofsys.commands import get_ls_command
 
@@ -131,7 +133,7 @@ ENV_VAR_TO_JSON_PATH: dict[str, str] = {
 
 
 def flatten_json_keys(
-    obj: dict | list | str | int | float | bool, prefix: str = ""
+    obj: dict | list | str | float | bool, prefix: str = ""
 ) -> set[str]:
     """Recursively collect all leaf paths in a JSON object."""
     keys: set[str] = set()

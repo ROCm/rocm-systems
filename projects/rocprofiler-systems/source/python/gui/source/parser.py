@@ -2,7 +2,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-from __future__ import absolute_import
 
 __author__ = "AMD Research"
 __copyright__ = "Copyright 2023-2024, Advanced Micro Devices, Inc."
@@ -10,16 +9,17 @@ __license__ = "MIT"
 __maintainer__ = "AMD Research"
 __status__ = "Development"
 
-import sys
-import json
-import jsondiff
-import re
-import pandas as pd
-import numpy as np
-import math
-from collections import OrderedDict
-import os
 import glob
+import json
+import math
+import os
+import re
+import sys
+from collections import OrderedDict
+
+import jsondiff
+import numpy as np
+import pandas as pd
 
 num_stddev = 1.0
 
@@ -42,7 +42,7 @@ def stddev(_data):
     return float(num_stddev) * math.sqrt(_variance)
 
 
-class validation(object):
+class validation:
     def __init__(self, _exp_re, _pp_re, _virt, _expected, _tolerance):
         self.experiment_filter = re.compile(_exp_re)
         self.progress_pt_filter = re.compile(_pp_re)
@@ -81,7 +81,7 @@ class validation(object):
         )
 
 
-class throughput_point(object):
+class throughput_point:
     def __init__(self, _speedup):
         self.speedup = _speedup
         self.delta = []
@@ -110,7 +110,7 @@ class throughput_point(object):
         return sum(self.duration) / sum(self.delta)
 
 
-class latency_point(object):
+class latency_point:
     def __init__(self, _speedup):
         self.speedup = _speedup
         self.arrivals = []
@@ -146,7 +146,7 @@ class latency_point(object):
         return sum(self.get_difference()) / rate
 
 
-class line_speedup(object):
+class line_speedup:
     def __init__(self, _name="", _prog="", _exp_data=None, _exp_base=None):
         self.name = _name
         self.prog = _prog
@@ -211,7 +211,7 @@ class line_speedup(object):
         return False
 
 
-class experiment_progress(object):
+class experiment_progress:
     def __init__(self, _data):
         self.data = _data
 
@@ -391,7 +391,7 @@ def compute_speedups(runs, speedups=[], num_points=0, validate=[], debug=False):
             for itr in _data:
                 if len(itr) < num_points:
                     continue
-                print("")
+                print()
                 print(f"{itr}")
         sys.stdout.flush()
         validations = get_validations(validate)
@@ -629,7 +629,7 @@ def parse_files(
         elif file.endswith(".coz"):
             try:
                 f = open(file, "r")
-            except IOError as e:
+            except OSError as e:
                 sys.stderr.write(f"{e}\n")
                 continue
 

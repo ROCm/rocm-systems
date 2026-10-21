@@ -2,7 +2,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-from __future__ import absolute_import
 
 __author__ = "AMD Research"
 __copyright__ = "Copyright 2023-2024, Advanced Micro Devices, Inc."
@@ -11,16 +10,15 @@ __maintainer__ = "AMD Research"
 __status__ = "Development"
 
 import argparse
-import os.path
-import dash
-import dash_bootstrap_components as dbc
 import json
-
+import os.path
 from pathlib import Path
 
-from . import gui
-from .parser import parse_files, find_causal_files, set_num_stddev
-from . import __version__
+import dash
+import dash_bootstrap_components as dbc
+
+from . import __version__, gui
+from .parser import find_causal_files, parse_files, set_num_stddev
 
 
 def causal(args):

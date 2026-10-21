@@ -10,6 +10,7 @@ all subsequent tests in this module are skipped.
 """
 
 from __future__ import annotations
+
 import pytest
 from conftest import RocprofsysTest
 

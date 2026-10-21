@@ -6,12 +6,11 @@ Julia Tests.
 """
 
 from __future__ import annotations
-import pytest
-from conftest import RocprofsysTest
 
 import subprocess
-from typing import Optional
 
+import pytest
+from conftest import RocprofsysTest
 from rocprofsys.cache import persistent_cache
 
 pytestmark = [pytest.mark.julia]
@@ -23,7 +22,7 @@ pytestmark = [pytest.mark.julia]
 
 
 @persistent_cache("julia.lib_paths")
-def _resolve_julia_lib_paths(julia_binary: str) -> Optional[tuple[str, str]]:
+def _resolve_julia_lib_paths(julia_binary: str) -> tuple[str, str] | None:
     """Resolve Julia library paths by invoking the Julia binary.
 
     Results are cached across processes (``persistent_cache``), so the Julia
@@ -72,7 +71,7 @@ def _resolve_julia_lib_paths(julia_binary: str) -> Optional[tuple[str, str]]:
 
 
 @pytest.fixture
-def julia_lib_paths(rocprof_config) -> Optional[tuple[str, str]]:
+def julia_lib_paths(rocprof_config) -> tuple[str, str] | None:
     """Resolve the Julia-specific library paths, or None if unavailable."""
     if not rocprof_config.capabilities.julia_exec:
         return None

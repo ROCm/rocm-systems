@@ -6,8 +6,10 @@ NIC tests.
 """
 
 from __future__ import annotations
-import pytest
+
 import shutil
+
+import pytest
 from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.nic, pytest.mark.network]

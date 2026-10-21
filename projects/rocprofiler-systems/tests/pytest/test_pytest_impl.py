@@ -6,17 +6,18 @@ Unit tests for GPU-specific test counter selection.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+
 import getpass
 import os
-from pathlib import Path
 import tempfile
+from dataclasses import dataclass
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from conftest import RocprofsysTest, _validate_rocpd_candidates
-from rocprofsys import GPUInfo, TestResult as RocprofsysTestResult, ValidationResult
-from rocprofsys import cache
+from rocprofsys import GPUInfo, ValidationResult, cache
+from rocprofsys import TestResult as RocprofsysTestResult
 from rocprofsys.runners import (
     BinaryRewriteRunner,
     CausalRunner,

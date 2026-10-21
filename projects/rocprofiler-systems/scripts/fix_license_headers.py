@@ -138,7 +138,7 @@ def normalize_spdx_spacing(lines, prefix):
         # Match SPDX line with any spacing after colon
         new_line = re.sub(
             rf"^(\s*{re.escape(prefix)}\s*)SPDX-License-Identifier:\s+MIT",
-            rf"\1SPDX-License-Identifier: MIT",
+            r"\1SPDX-License-Identifier: MIT",
             line,
         )
         if new_line != line:

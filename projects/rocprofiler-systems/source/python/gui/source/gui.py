@@ -2,7 +2,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-from __future__ import absolute_import
 
 __author__ = "AMD Research"
 __copyright__ = "Copyright 2023, Advanced Micro Devices, Inc."
@@ -10,23 +9,20 @@ __license__ = "MIT"
 __maintainer__ = "AMD Research"
 __status__ = "Development"
 
-import glob
-import re
 import base64
+import glob
 import os
-import pandas as pd
-import dash_bootstrap_components as dbc
-import plotly.express as px
+import re
 
-from dash import html
+import dash_bootstrap_components as dbc
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+from dash import ctx, dcc, html
 from dash.dependencies import Input, Output, State
-from dash import dcc, ctx
 
 from .header import get_header
-from .parser import parse_files
-from .parser import parse_uploaded_file
-from .parser import find_causal_files
-import plotly.graph_objects as go
+from .parser import find_causal_files, parse_files, parse_uploaded_file
 
 file_timestamp = 0
 global_data = pd.DataFrame()
@@ -44,7 +40,7 @@ pd.set_option(
 def print_speedup_info(data):
     for idx in set(list(data.idx)):
         sub_data = data[data["idx"] == idx]
-        print("")
+        print()
         for sub_idx, row in sub_data.iterrows():
             print(
                 f"""[{row["point"]}][{row["progress points"]}][{row["line speedup"]}] speedup: {row["program speedup"]:6.1f} +/- {row["speedup err"]:6.2f}%"""

@@ -6,6 +6,7 @@ Tests for the trace time window example.
 """
 
 from __future__ import annotations
+
 import pytest
 from conftest import RocprofsysTest
 

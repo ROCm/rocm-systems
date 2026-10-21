@@ -2,7 +2,6 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-from __future__ import absolute_import
 
 __author__ = "AMD ROCm"
 __copyright__ = "Copyright 2026, Advanced Micro Devices, Inc."
@@ -16,9 +15,9 @@ This submodule imports the timemory Python function profiler
 """
 
 try:
+    import importlib
     import os
     import sys
-    import importlib
     from pathlib import Path
 
     # Set up ROCPROFSYS environment variables. The package sits at
@@ -38,20 +37,20 @@ try:
         )
 
     __all__ = [
-        "initialize",
-        "finalize",
-        "is_initialized",
-        "is_finalized",
-        "Profiler",
         "Config",
         "FakeProfiler",
+        "Profiler",
+        "config",
+        "coverage",
+        "finalize",
+        "initialize",
+        "is_finalized",
+        "is_initialized",
+        "noprofile",
+        "profile",
+        "profiler_finalize",
         "profiler_function",
         "profiler_init",
-        "profiler_finalize",
-        "config",
-        "profile",
-        "noprofile",
-        "coverage",
     ]
 
     def _load_profiler_bindings():
@@ -100,4 +99,4 @@ try:
     atexit.register(_finalize_at_exit)
 
 except Exception as e:
-    print("{}".format(e))
+    print(f"{e}")
