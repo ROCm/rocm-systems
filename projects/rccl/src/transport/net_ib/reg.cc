@@ -64,6 +64,7 @@ ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, 
   return ncclSuccess;
 }
 
+// RCCL: the fail path releases MRs created before a later device fails.
 ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle);
 
 /* DMA-BUF support */
@@ -90,7 +91,7 @@ ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
 exit:
   return ret;
 fail:
-  for (int i = 0; i < registered; i++) {
+  for (int i = 0; i < registered; i++) { // RCCL: drop MRs already created when a later device fails to register.
     struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
     (void)ncclIbDeregMrInternal(devComm, mhandleWrapper->mrs[i]);
   }

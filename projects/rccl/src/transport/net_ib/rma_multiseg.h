@@ -13,18 +13,18 @@
 #include <stdint.h>
 #include "nccl.h"
 
-// Cap on physical segments per GIN/RMA symmetric buffer. HIP dma-buf export
+// RCCL: cap on physical segments per GIN/RMA symmetric buffer. HIP dma-buf export
 // describes only the first physical segment, so registration allocates one MR
 // per segment up to this limit.
 #ifndef NCCL_RMA_MAX_SEGMENTS
 #define NCCL_RMA_MAX_SEGMENTS 16
 #endif
 
-// 32 WRs cover aligned 4/8-GPU 8 GiB windows; 16x8 GiB needs 48. Fail closed past 64.
+// RCCL: 32 WRs cover aligned 4/8-GPU 8 GiB windows; 16x8 GiB needs 48. Fail closed past 64.
 #define NCCL_RMA_MAX_DATA_WRS (4 * NCCL_RMA_MAX_SEGMENTS)
 #define NCCL_RMA_MAX_SIGNAL_WRS (NCCL_RMA_MAX_DATA_WRS + 1)
 #define NCCL_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_SEGMENTS
-// Sender QP depth with RMA multi-segment on. 256 is NET_IB_MAX_REQUESTS; connect.cc checks it.
+// RCCL: sender QP depth with RMA multi-segment on. 256 is NET_IB_MAX_REQUESTS; connect.cc checks it.
 #define NCCL_RMA_SEND_QP_WRS (2 * 256 + NCCL_RMA_MAX_SIGNAL_WRS)
 
 static inline size_t ncclRmaSegmentSliceBytes(size_t remaining, size_t localRemaining, size_t remoteRemaining) {
@@ -39,7 +39,7 @@ static inline int ncclRmaDataWrBudgetFull(int n, int maxWr) {
   return n >= maxWr;
 }
 
-// Paired data WRs to move `size` inside one local and one remote segment
+// RCCL: paired data WRs to move `size` inside one local and one remote segment
 // (UINT32_MAX SGE splits only). Returns maxWr+1 if the chain does not fit.
 static inline int ncclRmaCountPairedDataWrs(size_t size, int maxWr) {
   int n = 0;
@@ -61,7 +61,7 @@ static inline int ncclRmaSegIndexOf(const size_t* segOff, int nSeg, uint64_t off
   return nSeg - 1;
 }
 
-// Bytes of the next WR at (lOff, rOff) and the segments it lands in; the WR builder and the counter share it.
+// RCCL: bytes of the next WR at (lOff, rOff) and the segments it lands in; the WR builder and the counter share it.
 // Flush mode (localOff == NULL) takes the rest of the remote segment. Returns 0 past the end of either table.
 static inline size_t ncclRmaNextSlice(const size_t* localOff, int nLocal, const size_t* remoteOff, int nRemote,
                                       uint64_t lOff, uint64_t rOff, size_t rem, int* ls, int* rs) {
@@ -75,7 +75,7 @@ static inline size_t ncclRmaNextSlice(const size_t* localOff, int nLocal, const 
   return ncclRmaSegmentSliceBytes(rem, localOff[*ls + 1] - lOff, remoteRemaining);
 }
 
-// Count WRs for explicit local/remote segOff tables. Returns maxWr+1 if the chain does not fit.
+// RCCL: count WRs for explicit local/remote segOff tables. Returns maxWr+1 if the chain does not fit.
 static inline int ncclRmaCountLayoutDataWrs(const size_t* localOff, int nLocal, const size_t* remoteOff, int nRemote,
                                             uint64_t lOff, uint64_t rOff, size_t size, int maxWr) {
   int n = 0;
@@ -101,7 +101,7 @@ static inline int ncclRmaWrCreditsAvailable(int outstanding, int requested, int 
   return outstanding >= 0 && requested >= 0 && requested <= capacity && outstanding <= capacity - requested;
 }
 
-// Request ids are dense per comm and at most NCCL_RMA_CREDIT_IDS are live, so a chain's WR count
+// RCCL: request ids are dense per comm and at most NCCL_RMA_CREDIT_IDS are live, so a chain's WR count
 // lives at id % NCCL_RMA_CREDIT_IDS. Ids without an entry are single-MR ops at a fixed cost.
 #define NCCL_RMA_CREDIT_IDS 256
 struct ncclRmaWrCredits {
@@ -134,7 +134,7 @@ static inline void ncclRmaWrCreditsRecord(struct ncclRmaWrCredits* c, uint64_t i
   *wrs = (uint8_t)nWrs;
 }
 
-// True when ibv_post_send accepted a prefix that did not include the signaled last WR.
+// RCCL: true when ibv_post_send accepted a prefix that did not include the signaled last WR.
 static inline int ncclRmaPrefixPostLostSignaledTail(int posted, int nWr) {
   return posted > 0 && posted < nWr;
 }
@@ -144,12 +144,12 @@ static inline int ncclRmaSignalOffsetValid(size_t signalOff, size_t segmentEnd) 
          sizeof(uint64_t) <= segmentEnd - signalOff;
 }
 
-// Equal nSegments in [1, NCCL_RMA_MAX_SEGMENTS]. Terminal sizes may differ.
+// RCCL: equal nSegments in [1, NCCL_RMA_MAX_SEGMENTS]. Terminal sizes may differ.
 static inline int ncclRmaSegmentCountsMatch(int lhsSegments, int rhsSegments) {
   return lhsSegments == rhsSegments && lhsSegments >= 1 && lhsSegments <= NCCL_RMA_MAX_SEGMENTS;
 }
 
-// Peer segOff tables feed unsigned offset math: they must start at 0 and never decrease.
+// RCCL: peer segOff tables feed unsigned offset math: they must start at 0 and never decrease.
 static inline int ncclRmaSegOffTableValid(const size_t* segOff, int nSegments) {
   if (segOff == NULL || nSegments < 1 || nSegments > NCCL_RMA_MAX_SEGMENTS || segOff[0] != 0) return 0;
   for (int s = 0; s < nSegments; s++) {
@@ -158,13 +158,13 @@ static inline int ncclRmaSegOffTableValid(const size_t* segOff, int nSegments) {
   return 1;
 }
 
-// Per-rank segOff table from registration allgather; falls back to the local map.
+// RCCL: per-rank segOff table from registration allgather; falls back to the local map.
 static inline const size_t* ncclRmaPeerSegOff(const size_t* rankSegOff, const size_t* localSegOff, int rank) {
   if (rankSegOff == NULL || rank < 0) return localSegOff;
   return rankSegOff + (size_t)rank * (NCCL_RMA_MAX_SEGMENTS + 1);
 }
 
-// Count WRs the HCA accepted when ibv_post_send fails at badWr. Walk a
+// RCCL: count WRs the HCA accepted when ibv_post_send fails at badWr. Walk a
 // next-linked chain of nWr entries. badWr == NULL counts the whole chain.
 static inline int ncclRmaPostedWrCount(const void* wr, int nWr, const void* badWr, size_t nextOffset) {
   int posted = 0;
@@ -177,19 +177,19 @@ static inline int ncclRmaPostedWrCount(const void* wr, int nWr, const void* badW
   return posted;
 }
 
-// A failed handle calloc must not memcpy segOff before the status AllGather.
+// RCCL: a failed handle calloc must not memcpy segOff before the status AllGather.
 static inline int ncclRmaRegistrationHandleReady(const void* handle, int nSeg) {
   return handle != NULL && nSeg >= 1 && nSeg <= NCCL_RMA_MAX_SEGMENTS;
 }
 
-// After a prefix post, keep the request and return success so Test() drains.
+// RCCL: after a prefix post, keep the request and return success so Test() drains.
 // Callers NCCLCHECK the complete helper and never reach test() on error.
 static inline ncclResult_t ncclRmaPostedRequestStatus(ncclResult_t postRet, int posted) {
   if (postRet != ncclSuccess && posted > 0) return ncclSuccess;
   return postRet;
 }
 
-// Keep-or-free after ibv_post_send. posted==0 and error: free the slot.
+// RCCL: keep-or-free after ibv_post_send. posted==0 and error: free the slot.
 // Otherwise keep *request so Test() drains; mark FAILED if the signaled tail
 // was lost. gin.cc applies the IB side effects from these flags.
 static inline ncclResult_t ncclRmaCompletePostedRequest(ncclResult_t postRet, int posted, int nWr, int* keepRequest,
@@ -202,12 +202,12 @@ static inline ncclResult_t ncclRmaCompletePostedRequest(ncclResult_t postRet, in
   return ncclRmaPostedRequestStatus(postRet, posted);
 }
 
-// A freed request returns its sequence id only if no later request took one.
+// RCCL: a freed request returns its sequence id only if no later request took one.
 static inline void ncclRmaReleaseSeqId(uint64_t id, uint64_t* postedSeq) {
   if (id == *postedSeq) (*postedSeq)--;
 }
 
-// Per-segment DMA-BUF MRs for the RMA proxy. NCCL_MULTI_SEGMENT_REGISTER=0 keeps the
+// RCCL: per-segment DMA-BUF MRs for the RMA proxy. NCCL_MULTI_SEGMENT_REGISTER=0 keeps the
 // upstream single-MR path; the value must match on every rank.
 int64_t ncclParamMultiSegmentRegister();
 static inline bool rcclRmaMultiSegEnabled() { return ncclParamMultiSegmentRegister() != 0; }

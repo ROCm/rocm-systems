@@ -483,6 +483,18 @@ static ncclResult_t ncclGinProxyRegMrSym(void* ginCtx, void* addr, size_t size, 
   return ncclSuccess;
 }
 
+// RCCL: registers with a caller-supplied DMA-BUF fd, e.g. the owner's fd for an imported host segment.
+static ncclResult_t ncclGinProxyRegMrSymDmaBuf(void* ginCtx, void* addr, size_t size, int type, uint64_t offset,
+                                               int fd, uint64_t mrFlags, void** mhandle, void** ginHandle) {
+  struct ncclGinProxyCollComm* cComm = (struct ncclGinProxyCollComm*)ginCtx;
+  if (rmaBackend->regMrSymDmaBuf == nullptr || !(cComm->props.ptrSupport & NCCL_PTR_DMABUF)) {
+    return ncclGinProxyRegMrSym(ginCtx, addr, size, type, mrFlags, mhandle, ginHandle);
+  }
+  NCCLCHECK(rmaBackend->regMrSymDmaBuf(cComm->collComm, addr, size, type, offset, fd, mrFlags, mhandle));
+  *ginHandle = *mhandle;
+  return ncclSuccess;
+}
+
 static ncclResult_t ncclGinProxyDeregMrSym(void* collComm, void* mhandle) {
   struct ncclGinProxyCollComm* cComm = (struct ncclGinProxyCollComm*)collComm;
   // Deregister the memory region with the GIN plugin
@@ -723,7 +735,7 @@ ncclGin_t ncclGinProxy{
   ncclGinProxyConnect,
   ncclGinProxyCreateContext,
   ncclGinProxyRegMrSym,
-  NULL, // regMrSymDmaBuf() is not used by upper layer at the moment, hidden in RegMrSym.
+  ncclGinProxyRegMrSymDmaBuf, // RCCL: per-segment DMA-BUF registration
   ncclGinProxyDeregMrSym,
   ncclGinProxyDestroyContext,
   ncclGinProxyCloseColl,

@@ -1141,6 +1141,7 @@
       "timeout": 300,
       "description": "Multi-segment DMA-BUF RMA registration (AIRUNTIME-2351), 1 rank per node on 2 nodes. NCCL_CUMEM_ENABLE gates segment enumeration and RCCL_MPI_LOG_ALL_RANKS is what lets every rank read back the 'multi-segment buffer' INFO line; without either the tests would skip instead of exercising the per-segment path, so RCCL_TEST_RMA_MSEG_REQUIRE turns that skip into a failure.",
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_NET": "ib",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG_SUBSYS": "ALL",
@@ -1354,6 +1355,7 @@
       "timeout": 300,
       "description": "Post-path RMA multi-segment tests with 2 ranks on one node. The tests take any rank count, so more scale points only need another config with different num_nodes/num_ranks.",
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_NET": "ib",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG_SUBSYS": "ALL",
@@ -1376,6 +1378,7 @@
       "timeout": 600,
       "description": "Post-path RMA multi-segment tests with 4 ranks on each of 2 nodes: 7 queue pairs per rank in the all-pairs test and 7 sources in the many-to-one test.",
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_NET": "ib",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG_SUBSYS": "ALL",
@@ -1398,6 +1401,7 @@
       "timeout": 300,
       "description": "DeepEP HybridElasticSymmetricMemory windows ([GPU][CPU per local rank]). Extends net_ib_base rather than net_ib_rma_multisegment because extends merges test lists, and these tests assert exactly 4 shared-memory local ranks, so they need the 8-rank/2-node placement rather than that suite's 1 rank per node.",
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_NET": "ib",
         "NCCL_CUMEM_ENABLE": "1",
         "NCCL_DEBUG_SUBSYS": "ALL",

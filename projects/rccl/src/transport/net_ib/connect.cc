@@ -463,7 +463,7 @@ static ncclResult_t ncclIbCreateQpMlx5(struct ncclIbQpCreateAttr* createQpAttrs,
 
 ncclResult_t ncclIbQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs) {
   ncclIbWqeLatMonInit(&qp->latMon);
-  qp->maxSendWrs = createQpAttrs->maxSendWorkRequest;
+  qp->maxSendWrs = createQpAttrs->maxSendWorkRequest; // RCCL: credits stop at the depth this QP was created with.
   if (createQpAttrs->oooRq) {
     NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
     return ncclSuccess;
@@ -735,7 +735,7 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // Extra signal WRs only while multi-segment RMA is on. =0 keeps develop's depth.
+  // RCCL: extra signal WRs only while multi-segment RMA is on. =0 keeps develop's depth.
   qpCreateAttrs.maxSendWorkRequest = rcclRmaMultiSegEnabled() ? NCCL_RMA_SEND_QP_WRS : 2 * NET_IB_MAX_REQUESTS;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
@@ -1397,7 +1397,7 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    // Extra flush WRs only while multi-segment RMA is on. Off keeps the scratchpad depth.
+    // RCCL: extra flush WRs only while multi-segment RMA is on. Off keeps the scratchpad depth.
     qpCreateAttrs.maxSendWorkRequest = rcclRmaMultiSegEnabled()
       ? 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS
       : 2 * NET_IB_MAX_REQUESTS;
