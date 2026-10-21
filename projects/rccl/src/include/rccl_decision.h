@@ -57,8 +57,7 @@ enum : rcclBackendMask_t {
   RCCL_BACKEND_SYMMETRIC = 1u << 1,
   RCCL_BACKEND_CE        = 1u << 2,
   RCCL_BACKEND_DDA       = 1u << 3,
-  RCCL_BACKEND_KERNEL    = 1u << 4,
-  RCCL_BACKEND_ALL       = 0x1fu,
+  RCCL_BACKEND_ALL       = 0xfu,
 };
 
 // Returns the preferred backend mask for this communicator given the active
