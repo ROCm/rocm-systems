@@ -331,13 +331,18 @@ install(
 )
 
 # rdc_field_values_tests: the field values RdcMetricFetcherImpl reads from the fake
-# AMD SMI (tests/fake_amdsmi). Compiles RdcMetricFetcherImpl.cc and the files it
-# needs from librdc, and links the fake, which provides every amdsmi call, instead
-# of amd_smi, so it needs neither librdc nor a GPU.
+# AMD SMI (tests/fake_amdsmi) and their statuses, the event counters RdcSmiLib starts,
+# the records RdcTelemetryModule makes and RdcPartitionImpl's instance profiles.
+# Compiles those files and the ones they need from librdc, and links the fake, which
+# provides every amdsmi call, instead of amd_smi, so it needs neither librdc nor a GPU.
 add_executable(
     rdc_field_values_tests
     ${SRC_DIR}/test_field_values.cc
     ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcMetricFetcherImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcPartitionImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcSmiDiagnosticImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcSmiLib.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcTelemetryModule.cc
     ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
     ${PROJECT_SOURCE_DIR}/common/rdc_capabilities.cc
 )

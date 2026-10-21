@@ -115,7 +115,7 @@ void RdcTelemetryModule::get_fields_for_module(
       fields_in_module[module].push_back(fields[findex]);
     } else {
       RDC_LOG(RDC_DEBUG, "Unsupported field " << field_id_string(fields[findex].field_id));
-      rdc_gpu_field_value_t value;
+      rdc_gpu_field_value_t value = {};  // an integer 0, read at no time
       value.gpu_index = fields[findex].gpu_index;
       value.field_value.field_id = fields[findex].field_id;
       value.field_value.status = RDC_ST_NOT_SUPPORTED;

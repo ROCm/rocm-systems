@@ -35,6 +35,16 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` is N/A instead of 0 when the GPU reports no memory activity.
 
+- With `RDC_BULK_FETCH_ENABLED=true`, a failed read of one GPU's metrics no longer stops the bulk fetch of every GPU until RDC restarts; the fields of that GPU are read one by one for that update. A partition's `RDC_FI_GPU_CLOCK` and `RDC_FI_GPU_UTIL` are no longer the whole GPU's when the bulk fetch is enabled.
+
+- When a GPU's partition count cannot be read, so that the GPU counts as one partition, the partitions past the first are N/A for every field, as they were for `RDC_FI_GPU_CLOCK`. Their memory and activity fields reported values.
+
+- `RDC_FI_PCIE_TX` and `RDC_FI_PCIE_RX` are read again a second after a failed read, instead of staying N/A for 30 seconds.
+
+- `rdc_instance_profile_get()` sets the profile's `resource_type` to the resource asked for. It left whatever the caller's structure held.
+
+- RDC's log reports a field that fails to read with its AMD SMI status, and with the RDC status converted once, as `rdc.h` now documents for `rdc_field_value.status`. Some lines printed an RDC status as an AMD SMI one, or a status converted twice.
+
 - `RDC_FI_GPU_MEMORY_CUR_BANDWIDTH` no longer reports zero under DMA or copy-only memory traffic on GPUs whose instantaneous UMC activity does not reflect DMA transfers. It now derives memory activity from the `mem_activity_acc` accumulator over firmware time, and falls back to the instantaneous `umc_activity` reading when the accumulator or firmware timestamp is unavailable.
 
 - `rdci topo` and `rdc_device_topology_get()` now report the links of the requested GPU. They reported links between other GPU pairs, which showed the wrong link types on systems where GPU pairs are not all linked the same way, such as XGMI hives joined by PCIe.

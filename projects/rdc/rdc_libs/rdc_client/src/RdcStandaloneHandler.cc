@@ -1159,6 +1159,7 @@ rdc_status_t RdcStandaloneHandler::rdc_instance_profile_get(
     return err_status;
   }
 
+  profile->resource_type = resource_type;  // the reply describes the resource asked for
   profile->partition_resource = reply.partition_resource();
   profile->num_partitions_share_resource = reply.num_partitions_share_resource();
   return RDC_ST_OK;

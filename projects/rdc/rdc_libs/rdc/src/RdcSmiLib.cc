@@ -122,15 +122,21 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_watch(rdc_gpu_field_t* fields, uint
     return RDC_ST_BAD_PARAMETER;
   }
 
+  // The first event counter that fails to start; the other fields are watched all the
+  // same. A counter that is already counting is no failure.
+  rdc_status_t result = RDC_ST_OK;
   for (uint32_t i = 0; i < fields_count; i++) {
     ret = metric_fetcher_->acquire_smi_handle({fields[i].gpu_index, fields[i].field_id});
-    if (ret != RDC_ST_OK) {
+    if (ret != RDC_ST_OK && ret != RDC_ST_ALREADY_EXIST) {
       RDC_LOG(RDC_ERROR, "Failed to acquire amd_smi handle for field.");
+      if (result == RDC_ST_OK) {
+        result = ret;
+      }
     }
   }
   RDC_LOG(RDC_DEBUG, "acquire " << fields_count << " field handles from amd_smi_lib");
 
-  return RDC_ST_OK;
+  return result;
 }
 
 rdc_status_t RdcSmiLib::rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
@@ -139,12 +145,18 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
     return RDC_ST_BAD_PARAMETER;
   }
 
+  // The first event counter that fails to stop; a field without a counter is no failure.
+  rdc_status_t result = RDC_ST_OK;
   for (uint32_t i = 0; i < fields_count; i++) {
-    metric_fetcher_->delete_smi_handle({fields[i].gpu_index, fields[i].field_id});
+    rdc_status_t ret =
+        metric_fetcher_->delete_smi_handle({fields[i].gpu_index, fields[i].field_id});
+    if (ret != RDC_ST_OK && ret != RDC_ST_NOT_SUPPORTED && result == RDC_ST_OK) {
+      result = ret;
+    }
   }
   RDC_LOG(RDC_DEBUG, "delete " << fields_count << " field handles from amd_smi_lib");
 
-  return RDC_ST_OK;
+  return result;
 }
 
 rdc_status_t RdcSmiLib::rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS],

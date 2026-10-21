@@ -126,7 +126,7 @@ TEST_F(PowerUsageTest, ReportsCurrentSocketPowerWithoutAverage) {
 
   rdc_field_value value;
   EXPECT_EQ(fetch(&value), RDC_ST_OK);
-  EXPECT_EQ(value.status, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(value.status, RDC_ST_OK);
   EXPECT_EQ(value.type, INTEGER);
   EXPECT_EQ(value.value.l_int, 140000000);
 }
@@ -159,7 +159,7 @@ TEST_F(PowerUsageTest, NotAvailableWithoutSocketPower) {
   EXPECT_EQ(fetch(&value), RDC_ST_SMI_ERROR);
   EXPECT_EQ(value.field_id, RDC_FI_POWER_USAGE);
   EXPECT_EQ(value.type, INTEGER);
-  EXPECT_NE(value.status, AMDSMI_STATUS_SUCCESS);
+  EXPECT_NE(value.status, RDC_ST_OK);
 }
 
 TEST_F(PowerUsageTest, NotAvailableWithoutSocketPowerFromOlderAmdSmi) {
@@ -169,7 +169,7 @@ TEST_F(PowerUsageTest, NotAvailableWithoutSocketPowerFromOlderAmdSmi) {
   rdc_field_value value;
   EXPECT_EQ(fetch(&value), RDC_ST_SMI_ERROR);
   EXPECT_EQ(value.field_id, RDC_FI_POWER_USAGE);
-  EXPECT_NE(value.status, AMDSMI_STATUS_SUCCESS);
+  EXPECT_NE(value.status, RDC_ST_OK);
 }
 
 TEST_F(PowerUsageTest, BulkFetchReportsAverageSocketPower) {

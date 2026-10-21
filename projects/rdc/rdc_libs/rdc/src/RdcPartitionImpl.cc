@@ -39,6 +39,7 @@ rdc_status_t RdcPartitionImpl::rdc_instance_profile_get_impl(
   if (profile == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
+  profile->resource_type = resource_type;
   profile->partition_resource = 0;
   profile->num_partitions_share_resource = 0;
 
