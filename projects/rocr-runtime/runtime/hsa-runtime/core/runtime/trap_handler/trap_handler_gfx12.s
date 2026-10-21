@@ -42,13 +42,14 @@
 
 /// Trap Handler V2 source
 
-// Trap-during-VOP3PX instruction fixup. Scoped to gfx1250 revision 0; the
-// build for later revisions passes -defsym,HAVE_VOP3PX_FIXUP=0 to drop it.
-// Mirrors HAVE_VOP3PX_FIXUP in the first-level trap handler.
-// The S_SET_VGPR_MSB fixup below is NOT scoped - it applies to every
-// revision (KFD HAVE_VGPR_MSB_FIXUP).
+// Trap-during-VOP3PX instruction fixup.  Off unless a build opts in with
+// -defsym,HAVE_VOP3PX_FIXUP=1, which only the gfx1250 revision 0 build does.
+// Defaulting to off means a target added without a matching ASM_DEFSYM entry
+// gets the unmodified handler rather than a rewind it must not perform.
+// The VGPR MSB fixup below is deliberately not scoped - it applies to
+// every revision.
 .ifndef HAVE_VOP3PX_FIXUP
-  .set HAVE_VOP3PX_FIXUP                           , 1
+  .set HAVE_VOP3PX_FIXUP                           , 0
 .endif
 
 .set DOORBELL_ID_SIZE                              , 10
@@ -1276,8 +1277,8 @@
   s_cbranch_scc1    .fixup_three_dword                      // If VOPD3, 3 DWORD inst
  // Not VOP1, VOP2, VOPC, VOP3, VOP3SD, VOPD, or VOPD3.
  // Check if we are in the middle of VOP3PX.
-  s_and_b32         ttmp13, ttmp14, 0xffff0000              // Bits 31:16
 .if HAVE_VOP3PX_FIXUP
+  s_and_b32         ttmp13, ttmp14, 0xffff0000              // Bits 31:16
   s_cmp_eq_u32      ttmp13, 0xcc330000                      // If 31:16 = 0xcc33, this is 8 bytes past VOP3PX
   s_cbranch_scc1    .fixup_vop3px_middle
   s_cmp_eq_u32      ttmp13, 0xcc880000                      // If 31:16 = 0xcc88, this is 8 bytes past VOP3PX

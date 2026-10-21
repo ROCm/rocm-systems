@@ -46,14 +46,33 @@ cmake_minimum_required ( VERSION 3.7 )
 find_package(Clang REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 find_package(LLVM REQUIRED HINTS ${CMAKE_PREFIX_PATH}/llvm PATHS /opt/rocm/llvm )
 
-# gfx1250 is built twice from the same source: the default build keeps the
-# trap-during-VOP3PX instruction fixup (revision 0), the _rev1 build drops it
-# via -defsym.  GpuAgent::AssembleShader picks between them using the ASIC
-# revision reported by KFD.
+# gfx1250 is built twice from the same source.  The default build takes no
+# -defsym and so drops the trap-during-VOP3PX instruction fixup; it serves
+# revision 1 and later.  The _rev0 build opts the fixup back in with
+# HAVE_VOP3PX_FIXUP=1.  GpuAgent::AssembleShader picks between them using the
+# ASIC revision reported by KFD.  The opt-in direction is deliberate: a target
+# added here without a matching ASM_DEFSYM entry gets the handler without the
+# rewind, which is correct everywhere except revision 0.
 set (TARGET_DEVS "gfx900;gfx942;gfx950;gfx1010;gfx1030;gfx1100;gfx1200;gfx1250;gfx1250")
-set (POSTFIX "9;942;950;1010;10;11;12;1250;1250_rev1")
+set (POSTFIX "9;942;950;1010;10;11;12;1250;1250_rev0")
 set (SOURCE_SUFFIX ";;;;;;_gfx12;_gfx12;_gfx12")
-set (ASM_DEFSYM ";;;;;;;;HAVE_VOP3PX_FIXUP=0")
+set (ASM_DEFSYM ";;;;;;;;HAVE_VOP3PX_FIXUP=1")
+
+# The four lists above are indexed in parallel, so a miscounted separator in
+# any one of them silently pairs a value with the wrong target rather than
+# failing.  Keep them the same length.
+list (LENGTH TARGET_DEVS    _n_devs)
+list (LENGTH POSTFIX        _n_postfix)
+list (LENGTH SOURCE_SUFFIX  _n_suffix)
+list (LENGTH ASM_DEFSYM     _n_defsym)
+if (NOT _n_postfix EQUAL _n_devs OR
+    NOT _n_suffix  EQUAL _n_devs OR
+    NOT _n_defsym  EQUAL _n_devs)
+  message (FATAL_ERROR
+    "Trap handler target lists must be the same length: "
+    "TARGET_DEVS=${_n_devs} POSTFIX=${_n_postfix} "
+    "SOURCE_SUFFIX=${_n_suffix} ASM_DEFSYM=${_n_defsym}")
+endif()
 
 if(${CMAKE_VERBOSE_MAKEFILE})
   get_property(clang_path TARGET clang PROPERTY LOCATION)
@@ -70,9 +89,9 @@ function(gen_kernel_bc TARGET_ID INPUT_FILE OUTPUT_FILE DEFSYM)
 
   set(CODE_OBJECT "${OUTPUT_FILE}.hsaco")
 
-  ## Assembler symbol overrides, e.g. HAVE_VOP3PX_FIXUP=0.  The source provides
+  ## Assembler symbol overrides, e.g. HAVE_VOP3PX_FIXUP=1.  The source provides
   ## a default for every such symbol under .ifndef, so an empty DEFSYM yields
-  ## the unmodified handler.
+  ## the handler with every optional fixup left out.
   set(DEFSYM_ARG "")
   if(NOT "${DEFSYM}" STREQUAL "")
     set(DEFSYM_ARG "-Wa,-defsym,${DEFSYM}")
