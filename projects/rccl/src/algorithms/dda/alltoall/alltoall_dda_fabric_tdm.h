@@ -156,8 +156,8 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
   const int peer = (selfRank + k) % nRanks;
   const int from = (selfRank - k + nRanks) % nRanks;
 
-  // The previous collective's readers must be done with every scratch slot this block is about to overwrite.
-  barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
+  // Entry handshake instead of a full barrier: only peer reads the slot this block writes, so wait for peer alone.
+  if (k != 0) barrier.signalWaitPeer(from, peer, blockIdx.x);
 
   // Rounds a wave goes through and the pieces they are cut into. Every wave of every rank derives the same piece
   // count, since it depends only on bytesPerRank, blocksPerPeer and blockDim.
