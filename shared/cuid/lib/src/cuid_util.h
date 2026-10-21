@@ -31,7 +31,7 @@ class Logger {
   void log(LogLevel level, const std::string& msg) const;
 
  private:
-  Logger() : level_(INFO) {}
+  Logger() : level_(WARN) {}
   LogLevel level_;
 };
 
@@ -236,15 +236,21 @@ int extract_render_minor(const std::string& path);
 // reachable there -- the PCIe Device Serial Number, if the VF exposes one at all
 // -- belongs to the physical card, and nothing distinguishes it from the card's
 // own identity, so every guest sharing that card would publish the same one and
-// it would be the host's. The kernel declines to publish a CUID on a VF for this
-// reason; this structure is how the library declines.
+// it would be the host's. CuidGpu::get_hardware_fingerprint() declines it, asking
+// amdgpu through gpu_reports_vf_mode(). A temporary CUID needs no serial: the
+// guest's machine-id and the VF's BDF name it.
 struct VfIdentity {
-  bool is_vf = false;        // the device reports itself as a virtual function
+  bool is_vf = false;        // sysfs shows a physfn link: a VF as its host sees it
   bool index_known = false;  // ... and we could determine which one
   uint16_t unit_id = 0;      // 1-based index, or 0 when not a VF / unknown
 };
 
 VfIdentity get_gpu_vf_identity(const std::string& device_path);
+
+// Whether amdgpu says the GPU behind `device_path` runs as a VF. It needs the
+// render node, which not every caller may open, so it decides only what a
+// privileged query returns, never which components exist or their CUIDs.
+bool gpu_reports_vf_mode(const std::string& device_path);
 }  // namespace CuidUtilities
 
 #endif
