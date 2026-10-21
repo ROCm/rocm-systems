@@ -739,8 +739,12 @@ amdsmi_status_t amdsmi_get_gpu_activity(amdsmi_processor_handle processor_handle
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, info)) return done(st);
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  if (sentinel(__func__, p)) return fill_sentinel(info);
   memset(info, 0, sizeof(*info));
+  if (sentinel(__func__, p)) {
+    // amd-smi copies gpu_metrics' uint16_t marker into these uint32_t fields.
+    info->gfx_activity = info->umc_activity = info->mm_activity = UINT16_MAX;
+    return AMDSMI_STATUS_SUCCESS;
+  }
   info->gfx_activity = V(kGFX_ACTIVITY_PCT, p->gpu);
   info->umc_activity = V(kUMC_ACTIVITY_PCT, p->gpu);
   return AMDSMI_STATUS_SUCCESS;
@@ -751,7 +755,6 @@ amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_ha
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, gpu_busy_percent)) return done(st);
   if (gpu_busy_percent == nullptr) return AMDSMI_STATUS_INVAL;
-  if (sentinel(__func__, p)) return fill_sentinel(gpu_busy_percent);
   *gpu_busy_percent = V(kGFX_ACTIVITY_PCT, p->gpu);
   return AMDSMI_STATUS_SUCCESS;
 }
@@ -761,7 +764,6 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, info)) return done(st);
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
-  if (sentinel(__func__, p)) return fill_sentinel(info);
   memset(info, 0, sizeof(*info));
   if (clk_type == AMDSMI_CLK_TYPE_GFX) {
     info->clk = V(kGFX_CLK_MHZ, p->gpu);
@@ -776,6 +778,8 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor_handle,
     info->min_clk = 100;
     info->max_clk = 1000;
   }
+  // amd-smi: the range is known, the current clock is not.
+  if (sentinel(__func__, p)) info->clk = UINT32_MAX;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -802,6 +806,8 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
   f->frequency[0] = (mem ? 900 : 500) * mhz;
   f->frequency[1] = V(mem ? kMEM_CLK_MHZ : kGFX_CLK_MHZ, p->gpu) * mhz;
   f->frequency[2] = (mem ? 1300 : 2100) * mhz;
+  // amd-smi: no level is current, as for a power-gated clock domain.
+  if (sentinel(__func__, p)) f->current = UINT32_MAX;
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -1351,6 +1357,8 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
   const FakeProc* p;
   if (auto st = enter(__func__, processor_handle, &p, info)) return done(st);
   if (info == nullptr) return AMDSMI_STATUS_INVAL;
+  // amd-smi starts every counter at UINT64_MAX and fills in what the GPU provides.
+  if (sentinel(__func__, p)) return fill_sentinel(info);
   memset(static_cast<void*>(info), 0, sizeof(*info));
   info->reference_timestamp = now_ms() * 1000;
   info->acc_counter = counter_ms();

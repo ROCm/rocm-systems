@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include <sstream>
 #include <unordered_map>
 
+#include "amd_smi/amdsmi.h"
 #include "common/rdc_utils.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
@@ -614,10 +615,12 @@ rdc_status_t RdcWatchTableImpl::memory_check(rdc_gpu_group_t group_id, uint32_t 
   rdc_field_value start = {}, end = {};
   rdc_status_t result =
       get_start_end_values(group_id, gpu_index, RDC_FI_ECC_UNCORRECT_TOTAL, 0, nullptr, &end);
-  if (result != RDC_ST_OK) return result;
+  // A GPU without ECC has no count to check, but can still have retired pages. The
+  // fetcher returns RDC_ST_SMI_ERROR for every failure and keeps amd-smi's status in the value.
+  if (result != RDC_ST_OK && end.status != AMDSMI_STATUS_NOT_SUPPORTED) return result;
 
   uint64_t ecc_uncorrectable_count = 0;
-  ecc_uncorrectable_count = end.value.l_int;
+  if (result == RDC_ST_OK) ecc_uncorrectable_count = end.value.l_int;
   if (ecc_uncorrectable_count > 0) {
     rdc_health_incidents_t* incident = &response->incidents[response->incidents_count];
 
