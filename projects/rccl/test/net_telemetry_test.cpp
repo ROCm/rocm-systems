@@ -976,13 +976,15 @@ static void testEthtoolFallbackOrder(void) {
 
 static void testCounterDelta(void) {
   std::printf("testCounterDelta\n");
-  CHECK_EQ(rcclTelemetryCounterDelta(150, 100), 50);
-  CHECK_EQ(rcclTelemetryCounterDelta(-1, 100), -1);
-  CHECK_EQ(rcclTelemetryCounterDelta(100, -1), -1);
+  CHECK_EQ(rcclTelemetryCounterDelta(150, 100, 48), 50);
+  CHECK_EQ(rcclTelemetryCounterDelta(-1, 100, 48), -1);
+  CHECK_EQ(rcclTelemetryCounterDelta(100, -1, 48), -1);
   /* bnxt_re rx_bytes wrapped at 2^48 mid-run; the wire saw 60767380542 bytes. */
-  CHECK_EQ(rcclTelemetryCounterDelta(10669293278LL, 281424878623392LL), 60767380542LL);
+  CHECK_EQ(rcclTelemetryCounterDelta(10669293278LL, 281424878623392LL, 48), 60767380542LL);
   /* Went down from above 2^48: not a 48-bit wrap, so unknown. */
-  CHECK_EQ(rcclTelemetryCounterDelta(5, ((int64_t)1 << 48) + 10), -1);
+  CHECK_EQ(rcclTelemetryCounterDelta(5, ((int64_t)1 << 48) + 10, 48), -1);
+  /* No wrap width (32-bit wrap or reset): a decrease is unknown, not ~2^48. */
+  CHECK_EQ(rcclTelemetryCounterDelta(5, 4000000000LL, 0), -1);
 }
 
 /* ---- One slot per shared QP ----------------------------------------- */
@@ -1011,6 +1013,12 @@ static void testSetupQpsSharedKeys(void) {
     CHECK(handles[q] == rcclTelemetryQp(ch, q % 4));
   }
   CHECK_EQ(rcclTelemetrySetupQps(0, 4, keys, roles, 0, handles), 0);
+  /* NULL keys get no slot and do not collapse into one shared slot. */
+  keys[1] = keys[3] = NULL;
+  CHECK_EQ(rcclTelemetrySetupQps(0, 5, keys, roles, 4, handles), 2);
+  CHECK(handles[0] != NULL && handles[2] != NULL && handles[0] != handles[2]);
+  CHECK(handles[1] == NULL && handles[3] == NULL);
+  CHECK_EQ(rcclTelemetryChannel(0, 5)->num_qp_untracked, 0);
   resetState();
 }
 
@@ -1026,7 +1034,7 @@ static long long jsonInt(const std::string& json, const std::string& key) {
   return std::atoll(json.c_str() + at + key.size() + 4);
 }
 
-struct FakeCtr { const char* key; int base; int fin; };
+struct FakeCtr { const char* key; long long base; long long fin; };
 
 /* A bnxt_re device under the fake sysfs root, with base values written. */
 static std::string makeFakeBnxt(const std::string& r, const char* name, const std::vector<FakeCtr>& ctrs) {
@@ -1106,9 +1114,10 @@ static void testThor2SysfsNames(void) {
   const std::vector<FakeCtr> cur = {
     {"tx_cnp_pkts", 100, 107},      {"rx_cnp_pkts", 50, 53},       {"rx_out_of_buffer", 9, 11},
     {"rx_roce_errors", 1, 2},       {"rx_roce_discards", 4, 8},    {"tx_roce_errors", 0, 5},
-    {"tx_roce_discards", 3, 3},     {"res_mem_err", 2, 6},         {"rx_ecn_marked_pkts", 10, 30},
+    {"tx_roce_discards", 3, 1},     {"res_mem_err", 2, 6},         {"rx_ecn_marked_pkts", 10, 30},
     {"to_retransmits", 0, 1},       {"oos_drop_count", 5, 5},      {"tx_bytes", 1000, 5000},
-    {"rx_bytes", 2000, 2600},       {"tx_pkts", 10, 40},           {"rx_pkts", 20, 25},
+    {"rx_bytes", 281424878623392LL, 10669293278LL},                {"tx_pkts", 10, 40},
+    {"rx_pkts", 20, 25},
     {"res_mem_error", 100, 200},    {"rx_errors", 100, 300},
   };
   const std::vector<FakeCtr> old = {
@@ -1153,11 +1162,12 @@ static void testThor2SysfsNames(void) {
   CHECK_EQ(jsonInt(d0, "rx_errors"), 1);      /* rx_roce_errors, not rx_errors */
   CHECK_EQ(jsonInt(d0, "rx_discards"), 4);
   CHECK_EQ(jsonInt(d0, "tx_errors"), 5);
-  CHECK_EQ(jsonInt(d0, "tx_discards"), 0);
+  CHECK_EQ(jsonInt(d0, "tx_discards"), -1);   /* went down: unknown, not a wrap */
   CHECK_EQ(jsonInt(d0, "res_mem_error"), 4);  /* res_mem_err, not res_mem_error */
   CHECK_EQ(jsonInt(d0, "to_retransmits"), 1);
   CHECK_EQ(jsonInt(d0, "oos_drop_count"), 0);
   CHECK_EQ(jsonInt(d0, "delta_tx_bytes"), 4000);
+  CHECK_EQ(jsonInt(d0, "delta_rx_bytes"), 60767380542LL); /* one 48-bit wrap */
   CHECK_EQ(jsonInt(d0, "delta_rx_packets"), 5);
   CHECK_EQ(jsonInt(d0, "cnp_ignored"), -1);
   CHECK_EQ(jsonInt(d0, "rx_roce_error_pkts"), -1);

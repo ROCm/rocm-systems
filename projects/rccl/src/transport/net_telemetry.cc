@@ -134,6 +134,17 @@ static void** rcclTelemetryBlocksAlloc(void) {
   return (void**)calloc(RCCL_TELEMETRY_BLOCKS, sizeof(void*));
 }
 
+/* Charge QPs that got no slot to the device (and channel); warn once per process. */
+static void rcclTelemetryAddUntracked(RcclDeviceStats* dstat, RcclChannelStats* ch, int n) {
+  static int warned = 0;
+  if (ch != NULL) __atomic_fetch_add(&ch->num_qp_untracked, n, __ATOMIC_RELAXED);
+  __atomic_fetch_add(&dstat->num_qp_untracked, n, __ATOMIC_RELAXED);
+  if (!__atomic_exchange_n(&warned, 1, __ATOMIC_RELAXED)) {
+    fprintf(stderr, "RCCL NET_TELEMETRY: dev %d (%s): %d QP(s) got no telemetry slot; see num_qp_untracked\n",
+            (int)(dstat - rcclTelemetryDevs), dstat->roce_device, n);
+  }
+}
+
 int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots) {
   if (numSlots) *numSlots = 0;
   if (!rcclTelemetryOn() || devIdx < 0 || devIdx >= RCCL_TELEMETRY_MAX_DEVS || numQps <= 0) {
@@ -150,7 +161,7 @@ int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots) 
 
   /* No storage for such an index; charge its QPs to the device. */
   if (chIdx < 0 || chIdx >= RCCL_TELEMETRY_MAX_CHANNELS) {
-    __atomic_fetch_add(&dstat->num_qp_untracked, numQps, __ATOMIC_RELAXED);
+    rcclTelemetryAddUntracked(dstat, NULL, numQps);
     return -1;
   }
 
@@ -164,7 +175,7 @@ int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots) 
     ch = rcclTelemetryChannel(devIdx, chIdx);
   }
   if (ch == NULL) {
-    __atomic_fetch_add(&dstat->num_qp_untracked, numQps, __ATOMIC_RELAXED);
+    rcclTelemetryAddUntracked(dstat, NULL, numQps);
     pthread_mutex_unlock(&rcclTelemetryAllocLock);
     return -1;
   }
@@ -187,11 +198,8 @@ int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots) 
   }
   __atomic_store_n(&ch->num_qps, startSlot + granted, __ATOMIC_RELEASE);
 
-  if (granted < numQps) {
-    /* Allocation failed: report the shortfall instead of dropping it. */
-    __atomic_fetch_add(&ch->num_qp_untracked, numQps - granted, __ATOMIC_RELAXED);
-    __atomic_fetch_add(&dstat->num_qp_untracked, numQps - granted, __ATOMIC_RELAXED);
-  }
+  /* Allocation failed: report the shortfall instead of dropping it. */
+  if (granted < numQps) rcclTelemetryAddUntracked(dstat, ch, numQps - granted);
 
   int cur = __atomic_load_n(&dstat->num_channels, __ATOMIC_RELAXED);
   while (chIdx + 1 > cur) {
@@ -211,6 +219,7 @@ int rcclTelemetrySetupQps(int devIdx, int chIdx, const void* const* keys, const 
   int distinct = 0;
   for (int q = 0; q < n; q++) {
     handles[q] = NULL;
+    if (keys[q] == NULL) continue;
     int first = q;
     for (int j = 0; j < q && first == q; j++) {
       if (keys[j] == keys[q]) first = j;
@@ -221,6 +230,7 @@ int rcclTelemetrySetupQps(int devIdx, int chIdx, const void* const* keys, const 
   int startSlot = rcclTelemetrySetupChannel(devIdx, chIdx, distinct, &numSlots);
   int k = 0;
   for (int q = 0; q < n; q++) {
+    if (keys[q] == NULL) continue;  // no QP: stays NULL, not counted
     int first = q;
     for (int j = 0; j < q && first == q; j++) {
       if (keys[j] == keys[q]) first = j;
@@ -336,6 +346,7 @@ typedef struct {
   const char* rx_bytes;
   const char* tx_packets;
   const char* rx_packets;
+  int wrap_bits; /* 1..62 if these counters wrap at that width, else 0 */
 } RcclDeltaPatterns;
 
 typedef struct {
@@ -469,7 +480,7 @@ RCCL_TEL_HW_CONFIG(rcclHwConfigAinic, rcclHwcAinic, "ainic",
   /* RoCE traffic only: the ethtool frames_*_ok keys are absent on this NIC, and
    * netdev-level byte counts miss RDMA traffic entirely. */
   { HWC_IB_SYSFS, "tx_rdma_ucast_bytes", "rx_rdma_ucast_bytes",
-                  "tx_rdma_ucast_pkts",  "rx_rdma_ucast_pkts" });
+                  "tx_rdma_ucast_pkts",  "rx_rdma_ucast_pkts", 0 });
 
 /* ------------------------------------------------------------------ */
 /* MLX5 (NVIDIA/Mellanox ConnectX, mlx5_core driver)                   */
@@ -538,7 +549,7 @@ RCCL_TEL_HW_CONFIG(rcclHwConfigMlx5, rcclHwcMlx5, "mlx5",
    * almost all of it. The vport RDMA counters track the IB port counters
    * exactly (port_xmit_data * 4 == tx_vport_rdma_unicast_bytes). */
   { HWC_ETHTOOL, "tx_vport_rdma_unicast_bytes", "rx_vport_rdma_unicast_bytes",
-                 "tx_vport_rdma_unicast_packets", "rx_vport_rdma_unicast_packets" });
+                 "tx_vport_rdma_unicast_packets", "rx_vport_rdma_unicast_packets", 0 });
 
 /* ------------------------------------------------------------------ */
 /* THOR2 (Broadcom ConnectX-class NIC, bnxt_re driver)                 */
@@ -599,8 +610,9 @@ RCCL_TEL_HW_CONFIG(rcclHwConfigThor2, rcclHwcThor2, "thor2",
   /* Broadcom bnxt per-priority PFC frames + pause duration via ethtool NIC stats. */
   { "rx_pfc_ena_frames_pri%d",  "tx_pfc_ena_frames_pri%d",
     "pfc_pri%d_rx_duration_us",  "pfc_pri%d_tx_duration_us" },
-  /* bnxt_re exposes rx/tx_bytes + rx/tx_pkts in IB sysfs hw_counters. */
-  { HWC_IB_SYSFS, "tx_bytes", "rx_bytes", "tx_pkts", "rx_pkts" });
+  /* bnxt_re exposes rx/tx_bytes + rx/tx_pkts in IB sysfs hw_counters; they
+   * are 48 bits wide (rx_bytes wrapped mid-run on Thor2). */
+  { HWC_IB_SYSFS, "tx_bytes", "rx_bytes", "tx_pkts", "rx_pkts", 48 });
 
 /* ------------------------------------------------------------------ */
 /* Driver name → HW config resolution                                  */
@@ -1593,17 +1605,17 @@ static void rcclTelemetryCollectDebugfs(int64_t* hwc,
 /* Main hw-counter collection (HW-agnostic; driven by dev->hw_config)  */
 /* ------------------------------------------------------------------ */
 
-int64_t rcclTelemetryCounterDelta(int64_t cur, int64_t init) {
-  const int64_t wrap48 = (int64_t)1 << 48;
+int64_t rcclTelemetryCounterDelta(int64_t cur, int64_t init, int wrapBits) {
   if (cur < 0 || init < 0) return -1;
   if (cur >= init) return cur - init;
-  if (init < wrap48) return cur + wrap48 - init;
+  const int64_t span = wrapBits > 0 ? (int64_t)1 << wrapBits : 0;
+  if (init < span) return cur + span - init;
   return -1;
 }
 
 /* Replace eight absolute per-priority values with deltas vs. their baseline. */
 static void rcclTelemetryPfcDelta(int64_t* cur, const int64_t* init) {
-  for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) cur[p] = rcclTelemetryCounterDelta(cur[p], init[p]);
+  for (int p = 0; p < RCCL_TELEMETRY_NUM_PFC_PRIO; p++) cur[p] = rcclTelemetryCounterDelta(cur[p], init[p], 0);
 }
 
 static void rcclTelemetryCollectHwCounters(RcclDeviceStats* dev) {
@@ -1620,15 +1632,15 @@ static void rcclTelemetryCollectHwCounters(RcclDeviceStats* dev) {
                             &cur_tx_packets, &cur_rx_packets);
 
   /* snap_init < 0 means the baseline was never taken -> delta = -1 */
-  dev->delta_tx_bytes   = rcclTelemetryCounterDelta(cur_tx_bytes, dev->snap_init_tx_bytes);
-  dev->delta_rx_bytes   = rcclTelemetryCounterDelta(cur_rx_bytes, dev->snap_init_rx_bytes);
-  dev->delta_tx_packets = rcclTelemetryCounterDelta(cur_tx_packets, dev->snap_init_tx_packets);
-  dev->delta_rx_packets = rcclTelemetryCounterDelta(cur_rx_packets, dev->snap_init_rx_packets);
+  dev->delta_tx_bytes   = rcclTelemetryCounterDelta(cur_tx_bytes, dev->snap_init_tx_bytes, hw->delta.wrap_bits);
+  dev->delta_rx_bytes   = rcclTelemetryCounterDelta(cur_rx_bytes, dev->snap_init_rx_bytes, hw->delta.wrap_bits);
+  dev->delta_tx_packets = rcclTelemetryCounterDelta(cur_tx_packets, dev->snap_init_tx_packets, hw->delta.wrap_bits);
+  dev->delta_rx_packets = rcclTelemetryCounterDelta(cur_rx_packets, dev->snap_init_rx_packets, hw->delta.wrap_bits);
 
   /* 4. Transform absolute hw_counters/pfc_* values into deltas vs. the
    *    baseline captured by rcclTelemetrySnapshotInit. */
   for (int c = 0; c < hw->num_counters; c++)
-    dev->hw_counters[c] = rcclTelemetryCounterDelta(dev->hw_counters[c], dev->snap_init_hw_counters[c]);
+    dev->hw_counters[c] = rcclTelemetryCounterDelta(dev->hw_counters[c], dev->snap_init_hw_counters[c], 0);
   rcclTelemetryPfcDelta(dev->pfc_rx_frames, dev->snap_init_pfc_rx_frames);
   rcclTelemetryPfcDelta(dev->pfc_tx_frames, dev->snap_init_pfc_tx_frames);
   rcclTelemetryPfcDelta(dev->pfc_rx_pause_us, dev->snap_init_pfc_rx_pause_us);

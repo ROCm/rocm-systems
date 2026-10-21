@@ -47,7 +47,8 @@ fatal.
 * If the JSON cannot be written at exit, the reason and the path are printed.
 * If a QP or channel cannot be given a stats slot, it is counted in
   `num_qp_untracked` rather than dropped silently, and that count is in the
-  JSON next to the counters it is missing from.
+  JSON next to the counters it is missing from. The first such shortfall is
+  also printed on stderr.
 * A hardware counter that cannot be read is emitted as `-1`, never as `0`, so
   "not available" is never mistaken for "no events".
 
@@ -287,10 +288,13 @@ sysfs or the NIC counters.
   resiliency or OOO RQ), receive completions carry no post timestamp: they count
   in `num_wqe_rcvd` but not in `num_wqe_completed` or the latency histogram.
 - thor2 (`bnxt_re`): counter names differ across driver versions, so the table
-  falls back to older names. The IB sysfs byte counters can update late, so
-  `delta_*` is only reliable over the whole run. Some are 48 bits wide; one
-  wrap during the run is accounted for. Some firmware reports
-  `pfc_*_pause_us` as 0 while PFC frames are counted.
+  falls back to older names. The IB sysfs byte/packet counters can update
+  late, so `delta_*` is only reliable over the whole run. They are treated as
+  48 bits wide: one wrap during the run is accounted for, and a counter reset
+  reads as a wrap. Some firmware reports `pfc_*_pause_us` as 0 while PFC
+  frames are counted.
+- Any other HW counter that goes down during the run (a wrap or a reset)
+  reads -1.
 - With QP sharing, each communicator has its own QP slots, so a shared QP is
   counted once per communicator using it.
 - In `hw_samples`, a column the NIC cannot read falls back to a related counter:
