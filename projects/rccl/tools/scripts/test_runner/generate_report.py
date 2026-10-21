@@ -5,14 +5,11 @@
 """
 RCCL Functional Test HTML Report Generator
 Usage: python3 generate_report.py <run_dir> <output.html> [--mode SPX|DPX] [--bkc <version>]
-                                   [--rocm-label <str>] [--real-total N]
+                                   [--rocm-label <str>]
 
 <run_dir> must contain run.json and tests.jsonl (a single run directory from
 the test_runner's results/<run_id>/ output).
 
---real-total N     Actual gtest case count from --gtest_list_tests across all
-                   binaries.  When provided, shows a "Not Executed" stat and
-                   uses N as the suite total instead of cases_total from run.json.
 --rocm-label STR   Override ROCm version label (e.g. the /opt/rocm symlink name).
 """
 
@@ -127,7 +124,8 @@ header p  { font-size: .85rem; color: #aaa; margin-top: 4px; }
 .meta-table .meta-key { width: 160px; color: #333; font-weight: 700; text-transform: uppercase;
                         font-size: .72rem; letter-spacing: .4px; white-space: nowrap; }
 .meta-table .meta-val { word-break: break-all; }
-.summary-row { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 36px; }
+.summary-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 36px; align-items: flex-start; }
+.stat-group { display: flex; gap: 14px; flex-wrap: wrap; border: 2px solid #dee2e6; border-radius: 10px; padding: 10px; }
 .stat { flex: 1; min-width: 120px; border-radius: 8px; padding: 18px 22px;
         box-shadow: 0 1px 4px rgba(0,0,0,.08); text-align: center; }
 .stat .num  { font-size: 2.2rem; font-weight: 700; }
@@ -176,7 +174,7 @@ details[open] summary { border-bottom: 1px solid #eee; }
 # Report
 # ---------------------------------------------------------------------------
 
-def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_total=None):
+def generate(run, cases, mode, bkc_override, out_path, rocm_label=None):
     meta = run.get("metadata", {})
     versions = meta.get("versions", {})
     summary = run.get("summary", {})
@@ -193,9 +191,6 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
     pass_rate      = (passed / suite_total * 100) if suite_total else 0
     pass_rate_exec = (passed / executed   * 100) if executed   else 0
     duration = summary.get("duration_s", 0)
-
-    not_executed_raw = (real_total - suite_total) if real_total and real_total > suite_total else None
-    not_executed = not_executed_raw if (not_executed_raw is not None and not_executed_raw != disabled) else None
 
     # --- metadata from run.json; augment_report.py overlays node-level data from nodes.tsv ---
     node_names = run.get("node_names", [])
@@ -257,18 +252,18 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
 
     # ---- SUMMARY STATS ----
     configs_not_run = sum(len(v) for v in cases["skipped_by_reason"].values())
-    not_exec_stat = ""
-    if not_executed is not None:
-        not_exec_stat = f'<div class="stat" style="background:#fff3cd;color:#856404"><div class="num">{not_executed}</div><div class="lbl">Not Executed</div></div>'
     notrun_stat = f'<div class="stat notrun"><div class="num">{configs_not_run}</div><div class="lbl">Configs Not Run</div></div>' if configs_not_run else ""
+    extra_group = f'<div class="stat-group">{notrun_stat}</div>' if notrun_stat else ""
     stats_html = f"""
-    <div class="stat total">  <div class="num">{suite_total}</div>  <div class="lbl">Total Cases (Launched)</div></div>
-    <div class="stat passed"> <div class="num">{passed}</div> <div class="lbl">Passed</div></div>
-    <div class="stat failed"> <div class="num">{failed}</div> <div class="lbl">Failed</div></div>
-    <div class="stat timeout"><div class="num">{timeout}</div><div class="lbl">Timeout</div></div>
-    <div class="stat skipped"><div class="num">{skipped}</div><div class="lbl">Skipped</div></div>
-    <div class="stat disabled"><div class="num">{disabled}</div><div class="lbl">Disabled</div></div>
-    {notrun_stat}{not_exec_stat}
+    <div class="stat-group">
+      <div class="stat total">  <div class="num">{suite_total}</div>  <div class="lbl">Total Cases (Launched)</div></div>
+      <div class="stat passed"> <div class="num">{passed}</div> <div class="lbl">Passed</div></div>
+      <div class="stat failed"> <div class="num">{failed}</div> <div class="lbl">Failed</div></div>
+      <div class="stat timeout"><div class="num">{timeout}</div><div class="lbl">Timeout</div></div>
+      <div class="stat skipped"><div class="num">{skipped}</div><div class="lbl">Skipped</div></div>
+      <div class="stat disabled"><div class="num">{disabled}</div><div class="lbl">Disabled</div></div>
+    </div>
+    {extra_group}
     """
     legend_items = [
         ("Total Cases (Launched)", "All gtest cases from test configs that were actually launched. Does not include cases from configs skipped before execution (see Configs Not Run)."),
@@ -278,7 +273,6 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
         ("Skipped", "Binary ran, gtest case was selected, but called GTEST_SKIP() at runtime (e.g. missing feature or hardware)."),
         ("Disabled", "Gtest case name prefixed with DISABLED_; excluded from execution by the framework."),
         ("Configs Not Run", "Entire test configs the runner skipped before invoking the binary (e.g. requires more nodes than available). Reason shown in the Skipped section."),
-        ("Not Executed", "Cases whose test config was never launched (e.g. requires a second node, or a prior config timed out)."),
     ]
     legend_rows = "".join(
         f"<tr><td class='leg-key'>{_h(k)}</td><td class='leg-val'>{_h(v)}</td></tr>"
@@ -379,8 +373,6 @@ def main(argv=None):
     p.add_argument("--mode", default="SPX", choices=["SPX", "DPX"], help="Test mode (default: SPX)")
     p.add_argument("--bkc", default="", help="BKC version string")
     p.add_argument("--rocm-label", default="", help="ROCm label override (e.g. /opt/rocm symlink target name)")
-    p.add_argument("--real-total", type=int, default=0,
-                   help="True gtest case count from --gtest_list_tests across all binaries")
     p.add_argument("--config", default="",
                    help="Override config filename shown in the report (e.g. mi455_ainic_roce_func.json)")
     args = p.parse_args(argv)
@@ -388,8 +380,7 @@ def main(argv=None):
     if args.config:
         run["config_file"] = args.config
     generate(run, cases, args.mode, args.bkc, args.output,
-             rocm_label=args.rocm_label or None,
-             real_total=args.real_total or None)
+             rocm_label=args.rocm_label or None)
 
 
 if __name__ == "__main__":
