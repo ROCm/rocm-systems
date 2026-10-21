@@ -19,7 +19,7 @@ The headers are organized by API family under `include/`:
 These files are mirrors for runtime consumers; their primary sources remain:
 
 - `amdf`: based on `hrx-system/libamdf/include/amdf` at
-  `hrx-system@8cd8e8b913c3997f6c63515876edf265dbd4a854`;
+  `hrx-system@8bdaeca172e5cbcbcd83edb5284c4407e7e02ee8`;
 - `hsa`: `projects/rocr-runtime/runtime/hsa-runtime/inc` in this repository;
 - DRM: `projects/rocr-runtime/libhsakmt/include/hsakmt/drm` in this repository;
 - KFD ioctl and UDMABUF: `projects/rocr-runtime/libhsakmt/include/hsakmt/linux`
@@ -27,9 +27,10 @@ These files are mirrors for runtime consumers; their primary sources remain:
 - KFD sysfs: Linux `include/uapi/linux/kfd_sysfs.h` at
   [`e83f63da2ac776fbc30861e4ce8b798df6ee8a7a`](https://github.com/torvalds/linux/blob/e83f63da2ac776fbc30861e4ce8b798df6ee8a7a/include/uapi/linux/kfd_sysfs.h).
 
-The AMDF headers carry local pre-beta API changes, including removal of the
-instance host allocator callback, in addition to their AMD copyright and MIT
-SPDX preamble. The Rust `ddi/libamdf` provider implements ABI v11, GPU
+The AMDF headers track the upstream ABI v12 declarations and retain the
+AMD/MIT notices from this runtime's earlier headers. One local comment
+clarifies that native event-page availability can change after a
+capability query. The Rust `ddi/libamdf` provider implements ABI v12, GPU
 extension v3, and observation extension v1. It does not advertise the XDNA
 extension. The HSA, DRM, and UDMABUF mirrors are byte-identical to their
 primary files in this checkout. `kfd_ioctl.h` differs only in its DRM include

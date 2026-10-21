@@ -139,7 +139,7 @@ fn local_backing_uses_the_scope_owner_even_when_it_is_not_first() {
 fn duplicate_device_handles_are_invalid() {
     unsafe {
         let (instance, memory) = host_resource();
-        assert_eq!(destroy(memory), 0);
+        assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
         let scope = (&raw mut (*instance.cast::<Instance>()).scope).cast();
         let request = amdf_memory_device_access_t {
             device: std::ptr::null_mut(),
@@ -178,7 +178,12 @@ fn duplicate_device_handles_are_invalid() {
         let sentinel = std::ptr::NonNull::<amdf_memory_t>::dangling().as_ptr();
         let mut output = sentinel;
         assert_eq!(
-            create(scope, &raw const create_info, &raw mut output),
+            create(
+                scope,
+                &raw const create_info,
+                &raw mut output,
+                std::ptr::null_mut()
+            ),
             INVALID
         );
         assert_eq!(output, sentinel);
@@ -212,6 +217,7 @@ fn unsupported_import_preserves_the_external_value_and_output() {
                 &raw const import_info,
                 &raw mut external,
                 &raw mut output,
+                std::ptr::null_mut(),
             ),
             UNSUPPORTED
         );
@@ -219,7 +225,7 @@ fn unsupported_import_preserves_the_external_value_and_output() {
         assert_eq!(external.r#type, AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD);
         assert_eq!(external.payload.file_descriptor, 41);
         assert_eq!(external.byte_length, 4096);
-        assert_eq!(destroy(memory), 0);
+        assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
         assert_eq!(instance::destroy(instance), 0);
     }
 }
@@ -247,7 +253,7 @@ fn export_range_errors_are_invalid_and_preserve_output() {
         );
         assert_eq!(output.r#type, AMDF_EXTERNAL_MEMORY_TYPE_OPAQUE_FD);
         assert_eq!(output.byte_length, 77);
-        assert_eq!(destroy(memory), 0);
+        assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
         assert_eq!(instance::destroy(instance), 0);
     }
 }
@@ -280,7 +286,17 @@ unsafe fn host_resource() -> (*mut amdf_instance_t, *mut amdf_memory_t) {
         ..Default::default()
     };
     let mut memory = std::ptr::null_mut();
-    unsafe { assert_eq!(create(scope, &raw const parameters, &raw mut memory), 0) };
+    unsafe {
+        assert_eq!(
+            create(
+                scope,
+                &raw const parameters,
+                &raw mut memory,
+                std::ptr::null_mut()
+            ),
+            0
+        );
+    };
     (instance, memory)
 }
 
@@ -303,7 +319,7 @@ fn mapping_overrun_is_invalid_and_preserves_output() {
             INVALID
         );
         assert_eq!(mapping, sentinel);
-        assert_eq!(destroy(memory), 0);
+        assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
         assert_eq!(instance::destroy(instance), 0);
     }
 }
@@ -343,7 +359,7 @@ fn mapping_info_preserves_extended_output_header_and_tail() {
         assert_eq!(extended.info.byte_length, 257);
         assert_eq!(extended.tail, [0xa5; 16]);
         assert_eq!(unmap(mapping), 0);
-        assert_eq!(destroy(memory), 0);
+        assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
         assert_eq!(instance::destroy(instance), 0);
     }
 }
@@ -413,9 +429,9 @@ fn write_combined_views_require_fences_even_for_host_pairs() {
         assert_eq!(pair.release.kind, AMDF_CACHE_TRANSITION_KIND_GLOBAL);
         assert_eq!(pair.acquire.kind, AMDF_CACHE_TRANSITION_KIND_GLOBAL);
         assert_eq!(pair.flags & AMDF_MEMORY_PAIR_FLAG_FIXED_COST_KNOWN, 0);
-        assert_eq!(destroy(memory), BUSY);
+        assert_eq!(destroy(memory, std::ptr::null_mut()), BUSY);
         assert_eq!(unmap(mapping), 0);
-        assert_eq!(destroy(memory), 0);
+        assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
         assert_eq!(instance::destroy(instance), 0);
     }
 }
@@ -424,7 +440,7 @@ fn write_combined_views_require_fences_even_for_host_pairs() {
 fn unavailable_host_recipe_does_not_publish_a_host_visible_profile() {
     unsafe {
         let (instance, memory) = host_resource();
-        assert_eq!(destroy(memory), 0);
+        assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
         (*instance.cast::<Instance>()).host_write_back_cache = None;
         let scope = (&raw mut (*instance.cast::<Instance>()).scope).cast();
         let mut profile = amdf_memory_profile_t {
@@ -453,7 +469,7 @@ fn unavailable_host_recipe_does_not_publish_a_host_visible_profile() {
 fn registration_requires_the_declared_host_cacheability() {
     unsafe {
         let (instance, owned) = host_resource();
-        assert_eq!(destroy(owned), 0);
+        assert_eq!(destroy(owned, std::ptr::null_mut()), 0);
         let scope = (&raw mut (*instance.cast::<Instance>()).scope).cast();
         let mut profile = amdf_memory_profile_t {
             r#type: AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
@@ -487,12 +503,25 @@ fn registration_requires_the_declared_host_cacheability() {
         };
         let mut memory = std::ptr::null_mut();
         assert_eq!(
-            create(scope, &raw const parameters, &raw mut memory),
+            create(
+                scope,
+                &raw const parameters,
+                &raw mut memory,
+                std::ptr::null_mut()
+            ),
             UNSUPPORTED
         );
         assert!(memory.is_null());
         parameters.registered_host_cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK;
-        assert_eq!(create(scope, &raw const parameters, &raw mut memory), 0);
+        assert_eq!(
+            create(
+                scope,
+                &raw const parameters,
+                &raw mut memory,
+                std::ptr::null_mut()
+            ),
+            0
+        );
         let page = memory::host::host_page_size().unwrap();
         let address = bytes.as_ptr() as u64;
         let source_byte_offset = address & (page - 1);
@@ -528,9 +557,9 @@ fn registration_requires_the_declared_host_cacheability() {
         assert_eq!(mapping_info.cacheability, AMDF_HOST_CACHEABILITY_WRITE_BACK);
         mapping_info.pointer.cast::<u8>().write(0x5a);
         assert_eq!(bytes[3], 0x5a);
-        assert_eq!(destroy(memory), BUSY);
+        assert_eq!(destroy(memory, std::ptr::null_mut()), BUSY);
         assert_eq!(unmap(mapping), 0);
-        assert_eq!(destroy(memory), 0);
+        assert_eq!(destroy(memory, std::ptr::null_mut()), 0);
         bytes[3] = 0xa5;
         assert_eq!(bytes[3], 0xa5);
         assert_eq!(instance::destroy(instance), 0);
@@ -542,7 +571,7 @@ fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
     unsafe {
         let device = std::ptr::NonNull::<Device>::dangling().as_ptr();
         let other_device = device.wrapping_add(1);
-        let mut accesses = rocddi::memory::storage::try_vec_with_capacity(1).unwrap();
+        let mut accesses = OwnerVec::try_with_allocator(Allocator::system(), 1).unwrap();
         accesses
             .try_push(Access {
                 device,
@@ -559,6 +588,8 @@ fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
         let owner = Owned::new(Memory {
             scope: std::ptr::null_mut(),
             backing: Backing::Registered,
+            host_allocator: Allocator::system(),
+            allocated_backing: false,
             info: amdf_memory_info_t {
                 access_count: 1,
                 byte_length: 16 * 1024,
@@ -594,9 +625,9 @@ fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
             Err(RANGE)
         );
         let borrow = borrow_for_queue(pointer).unwrap();
-        assert_eq!(destroy(pointer.cast()), BUSY);
+        assert_eq!(destroy(pointer.cast(), std::ptr::null_mut()), BUSY);
         drop(borrow);
-        assert_eq!(destroy(pointer.cast()), 0);
+        assert_eq!(destroy(pointer.cast(), std::ptr::null_mut()), 0);
     }
 }
 
@@ -604,7 +635,7 @@ fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
 fn kernel_commands_require_exact_executable_device_access_and_logical_range() {
     unsafe {
         let device = std::ptr::NonNull::<Device>::dangling().as_ptr();
-        let mut accesses = rocddi::memory::storage::try_vec_with_capacity(1).unwrap();
+        let mut accesses = OwnerVec::try_with_allocator(Allocator::system(), 1).unwrap();
         accesses
             .try_push(Access {
                 device,
@@ -621,6 +652,8 @@ fn kernel_commands_require_exact_executable_device_access_and_logical_range() {
         let owner = Owned::new(Memory {
             scope: std::ptr::null_mut(),
             backing: Backing::Registered,
+            host_allocator: Allocator::system(),
+            allocated_backing: false,
             info: amdf_memory_info_t {
                 access_count: 1,
                 byte_length: 4096,
@@ -664,7 +697,7 @@ fn kernel_commands_require_exact_executable_device_access_and_logical_range() {
             kernel_command(pointer.cast(), 0, device, 7, 0, 24),
             Err(UNSUPPORTED)
         );
-        assert_eq!(destroy(pointer.cast()), 0);
+        assert_eq!(destroy(pointer.cast(), std::ptr::null_mut()), 0);
     }
 }
 
@@ -673,7 +706,7 @@ fn multi_device_access_queries_and_scratch_preserve_request_order() {
     unsafe {
         let first = std::ptr::NonNull::<Device>::dangling().as_ptr();
         let second = first.wrapping_add(1);
-        let mut accesses = rocddi::memory::storage::try_vec_with_capacity(2).unwrap();
+        let mut accesses = OwnerVec::try_with_allocator(Allocator::system(), 2).unwrap();
         for (ordinal, (device, address)) in [(first, 0x0080_0000), (second, 0x0090_0000)]
             .into_iter()
             .enumerate()
@@ -699,6 +732,8 @@ fn multi_device_access_queries_and_scratch_preserve_request_order() {
         let owner = Owned::new(Memory {
             scope: std::ptr::null_mut(),
             backing: Backing::Registered,
+            host_allocator: Allocator::system(),
+            allocated_backing: false,
             info: amdf_memory_info_t {
                 access_count: 2,
                 byte_length: 16 * 1024,
@@ -756,7 +791,7 @@ fn multi_device_access_queries_and_scratch_preserve_request_order() {
             queue_scratch(pointer.cast(), 1, first, 7, 0, 1),
             Err(INVALID)
         );
-        assert_eq!(destroy(pointer.cast()), 0);
+        assert_eq!(destroy(pointer.cast(), std::ptr::null_mut()), 0);
     }
 }
 

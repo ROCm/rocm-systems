@@ -10,7 +10,7 @@ use rocddi::device::gpu::queue::{
     self, QueueAccessWidth, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest,
     QueueRingMemory, QueueScratch,
 };
-use rocddi::memory::storage::Owned;
+use rocddi::memory::storage::{Allocator, Owned};
 
 use crate::generated::amdf::*;
 use crate::instance::{self, Device};
@@ -73,6 +73,8 @@ impl NativeQueue {
 struct Queue {
     /// Native transport whose teardown follows public producer retirement.
     native: NativeQueue,
+    /// Policy retained for frontend mapping records.
+    host_allocator: Allocator,
     /// Borrowed activated device kept alive by registration.
     device: *mut Device,
     /// Borrowed queue count of the public device, kept live by registration.
@@ -473,7 +475,7 @@ pub(crate) unsafe extern "C" fn create(
         let (scratch, scratch_memory) = scratch_descriptor(&create_info, &family, pointer.cast())?;
         let desc = descriptor(&create_info, &family, scratch)?;
         let instance = instance::device_instance(device);
-        let slot = Owned::<Queue>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+        let slot = instance.owner_slot::<Queue>()?;
         let id = next_id(&instance.ids)?;
         register(&device.queues)?;
         let scratch_borrow = if scratch_memory.is_null() {
@@ -547,6 +549,7 @@ pub(crate) unsafe extern "C" fn create(
         };
         let owner = slot.write(Queue {
             native: NativeQueue::Provider(native_queue),
+            host_allocator: instance.host_allocator,
             device: pointer.cast(),
             device_queues: &raw const device.queues,
             #[cfg(test)]
@@ -601,7 +604,10 @@ pub(crate) unsafe extern "C" fn map(
             }
             Some(producer)
         };
-        let slot = Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+        let slot = {
+            let _scope = queue.host_allocator.scope();
+            Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED)?
+        };
         let info = if host {
             queue.host_mapping
         } else if peer.is_none() {

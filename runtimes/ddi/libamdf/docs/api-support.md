@@ -7,16 +7,16 @@ This map describes the implementation in this tree. Hardware results are
 recorded separately in the [validation record](../tests/README.md).
 
 The [vendored headers](../../../api-headers/README.md), based on
-`hrx-system@bd24215e6a5d1e12570c892356fd5b343ac38a6d` with local pre-beta
-API changes, define the sole public contract.
+`hrx-system@8bdaeca172e5cbcbcd83edb5284c4407e7e02ee8` with a local
+native-event clarification, define the sole public contract.
 This page records implementation support; it does not define another ABI or
 promise every service described by those headers. The libamdf frontend translates
 the ABI to private rocddi Rust types and its private platform `Driver`.
 
 ## Negotiation and table composition
 
-`amdf_query_api` selects core ABI v5 from the caller's inclusive version range.
-The immutable table has 40 nonnull function slots. GPU extension v1 has six
+`amdf_query_api` selects core ABI v12 from the caller's inclusive version range.
+The immutable table has 49 nonnull function slots. GPU extension v3 has 13
 slots; the XDNA extension is absent. Table presence describes library
 composition, while endpoint capabilities, profiles, and queue families describe
 which requests the provider can fulfill. Invalid inputs are validated even on
@@ -28,17 +28,31 @@ performs no allocation, discovery, activation, or native call, and tables
 remain valid until library unloading. No global initialization or symbol-by-
 symbol compatibility adapter is required.
 
+The v12 memory function pointers differ from v11 at the same table offsets.
+This provider negotiates v12 only; v11 binaries must use a v11 provider.
+An instance allocator supplies frontend owner records and variable length
+metadata. Each allocation retains its allocator for release, including when
+the final owner moves to another thread. Native device backing and OS
+allocations keep their rocddi and platform ownership.
+
+The optional memory release record is initialized on every call. Construction
+returns its original error and separately reports a native rollback error.
+Explicit destruction consumes the handle, reports its first native cleanup
+error, and charges allocation-owned backing still tied to a native handle.
+Registered and imported backing have zero allocation charge; a cleanup error
+still leaves their source lifetime obligation in force.
+
 ## Core slots
 
 | Slots | Current behavior and limits | Implementation |
 |---|---|---|
-| `query_extension` | GPU v1 negotiated independently; unknown/XDNA extension unsupported. | [lib.rs](../src/lib.rs) |
+| `query_extension` | GPU v1-v3 and observation v1 are negotiated independently; unknown/XDNA extensions are unsupported. | [lib.rs](../src/lib.rs) |
 | `instance_create`, `instance_destroy` | Explicit driver context lifetime policy; inert creation. Both PROCESS and INSTANCE requests work for CPU services. An inherited instance rejects work before touching files or locks. KFD shutdown disables only an owned runtime before closing its file; failed shutdown preserves retry ownership. | [instance.rs](../src/instance.rs) |
 | `endpoint_enumerate`, `endpoint_open`, `endpoint_query_info`, `endpoint_close`, `endpoint_query_queue_family_info` | Passive Linux KFD discovery and cached GPU/family facts. Opening does not activate a device. Endpoint info includes the Linux DRM major/minor identity for inter-provider correlation. Family facts include the exact native queue encoding feature mask. Endpoint IDs describe discovery identities, not native file descriptors. | [instance.rs](../src/instance.rs) |
 | `device_destroy` | Explicit teardown with queue-child BUSY checks. Memory dependencies are caller-enforced, as the header requires. | [instance.rs](../src/instance.rs) |
 | `instance_enumerate_memory_scopes`, `device_enumerate_memory_scopes`, `memory_scope_query_info` | Instance SYSTEM scope and live-device enumeration of endpoint-owned LOCAL scopes where storage is reported. | [memory.rs](../src/memory.rs) |
 | `memory_scope_query_device_profile` | CPU CREATE/REGISTER; single- and multi-device SYSTEM CREATE/REGISTER; SYSTEM EXPORT; one-native-VM SYSTEM IMPORT when DRM qualification is available; and LOCAL CREATE for the physical owner plus qualified direct peers. Registration requires the declared host cacheability. Multi-device requests require identical access requirements and intersect their address envelopes. Distinct-GPU IMPORT is unadvertised. A LOCAL request must include its owner; every peer needs a cached directional XGMI or kernel-validated PCIe route. | [memory.rs](../src/memory.rs) |
-| `memory_create`, `memory_query_info`, `memory_query_access_info`, `memory_query_address`, `memory_destroy` | Construction establishes every requested access before publication. Multi-device SYSTEM and LOCAL allocation maps one backing through the ordered distinct KFD VM list at one common GPU VA and publishes one immutable access/address record per request. LOCAL backing is allocated on the scope owner even when it is not first in caller order. Repeated live consumers of one VM reuse its mapping. GPU registration maps the caller's page cover while preserving its logical host range. Registration of an exact provider-owned SYSTEM host view borrows its existing backing and VM access. Provider-created allocations report zero payload prefix and exact native rounding. Destruction consumes the public memory handle even when native release reports an error. | [memory.rs](../src/memory.rs) |
+| `memory_create`, `memory_query_info`, `memory_query_access_info`, `memory_query_address`, `memory_destroy` | Construction establishes every requested access before publication. Multi-device SYSTEM and LOCAL allocation maps one backing through the ordered distinct KFD VM list at one common GPU VA and publishes one immutable access/address record per request. LOCAL backing is allocated on the scope owner even when it is not first in caller order. Repeated live consumers of one VM reuse its mapping. GPU registration maps the caller's page cover while preserving its logical host range. Registration of an exact provider-owned SYSTEM host view borrows its existing backing and VM access. Provider-created allocations report zero payload prefix and exact native rounding. V12 release records distinguish cleanup from operation status and charge unreleased owned payload. Destruction consumes the public handle. | [memory.rs](../src/memory.rs) |
 | `memory_map`, `host_mapping_query_info`, `host_mapping_cache_control`, `host_mapping_destroy` | Explicit ranged host views. Known WB/WC recipes require qualified host instructions. Registered pages use the cacheability declared by the selected profile; current CPU and GPU registration profiles require write-back pages. | [memory.rs](../src/memory.rs) |
 | `memory_query_pair_info`, `memory_scope_query_pair_info` | Concrete and pre-construction host/host, host↔device, and device→device descriptions for coherent SYSTEM memory on qualified PM4, AQL, and SDMA families. Producer WRITE and consumer READ are required. A device pair composes a queue-executed GLOBAL release and GLOBAL acquire. Single-owner, host-visible WC LOCAL pairs are qualified for GFX1201 PM4, AQL, and SDMA; LOCAL peers, unavailable identity, and unknown recipes are unsupported. Different valid backing identities fail the precondition. | [memory.rs](../src/memory.rs) |
 | `memory_import`, `memory_export` | Same-device SYSTEM/GTT DMA-BUF import uses KFD placement plus DRM GEM creation and same-device handle facts, requires coherent/uncached GPU storage and a write-back CPU view, and maps exact requested GPU permissions. Import retains its own descriptor and consumes the external value only after complete success. Page-aligned source offsets, cross-process transport, physical identity, re-export, and failure preservation are qualified. EXPORT remains available on supported one- and multi-device SYSTEM CREATE profiles. Foreign API, distinct-GPU and LOCAL imports are unadvertised. | [memory.rs](../src/memory.rs) |
@@ -48,6 +62,15 @@ symbol compatibility adapter is required.
 | `kernel_queue_request_notification` | The queue reports no supported native event types. Descriptor validation is available, and valid requests return UNSUPPORTED. | [kernel_queue.rs](../src/kernel_queue.rs) |
 
 ## GPU extension slots
+
+V12 PM4 family records advertise command-owned dispatch scratch only for
+single-XCC GFX11/GFX12 endpoints with reported shader-engine and scratch-wave
+geometry. This advertises the packet format; callers provide aligned backing,
+program the registers, and retain it through completion. SDMA kernel commands
+require a 32-byte-aligned indirect-buffer address. Host reservations permit a
+final mapping unit shorter than the caller's selected unit when it ends exactly
+at the reservation boundary. Linux KFD does not advertise SDMA submission GCR;
+its native submission boundary has not been qualified for that guarantee.
 
 | Slots | Current behavior and limits | Implementation |
 |---|---|---|

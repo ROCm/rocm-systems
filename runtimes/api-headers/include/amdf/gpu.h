@@ -265,6 +265,23 @@ enum amdf_gpu_pm4_format_feature_bits_e {
   /// instead controls dynamic VGPR allocation. The caller preserves the
   /// compiler descriptor and adds the required bit to its emitted register.
   AMDF_GPU_PM4_FORMAT_FEATURE_COMPUTE_TRAP_PRESENT = UINT64_C(1) << 2,
+  /// Commands can provision architected flat scratch on a single-XCC RDNA
+  /// endpoint. SET_SH_REG programs COMPUTE_DISPATCH_SCRATCH_BASE_LO/HI at
+  /// DWORD addresses 0x2e10/0x2e11 with the 256-byte-aligned GPU base shifted
+  /// right by 8, low word first. COMPUTE_TMPRING_SIZE is at 0x2e18 (GFX11 and
+  /// GFX12.0) or 0x2e16 (GFX12.5). Bits 11:0 count scratch waves per shader
+  /// engine; bits starting at 12 give the per-wave size in 256-byte units.
+  /// The size field is 15 bits on GFX11 and 18 bits on GFX12. Other bits are
+  /// zero. Each slot covers the kernel's private bytes times its wave width.
+  ///
+  /// Full-capacity backing covers ceil(compute_unit_count / engine_count)
+  /// times maximum_scratch_wave_count_per_compute_unit slots per engine.
+  /// Each engine owns an equal contiguous partition. Commands join prior
+  /// scratch users before changing the base or layout. The caller retains
+  /// backing through execution completion, isolates concurrent queues, and
+  /// sets SCRATCH_EN in the shader's COMPUTE_PGM_RSRC2. No firmware growth,
+  /// reclamation, or queue-create scratch attachment participates in this mode.
+  AMDF_GPU_PM4_FORMAT_FEATURE_DISPATCH_SCRATCH = UINT64_C(1) << 3,
 };
 
 /// First native SDMA command-stream format.
@@ -366,6 +383,17 @@ enum amdf_gpu_sdma_format_feature_bits_e {
   /// unchanged. Requires COPY_LINEAR_RECT and is mutually exclusive with
   /// COPY_LINEAR_RECT_EXTENDED_Z. MEMORY_SCOPE independently admits scopes.
   AMDF_GPU_SDMA_FORMAT_FEATURE_COPY_LINEAR_RECT_WIDE = UINT64_C(1) << 6,
+  /// KERNEL publication brackets each submitted stream with native global
+  /// ACQUIRE_FROM_SYSTEM and RELEASE_TO_SYSTEM operations. Incoming producer
+  /// dependencies must precede the submission; native submission retirement
+  /// proves the outgoing release. An in-stream wait or fence cannot substitute
+  /// for those boundaries. Callers split streams at such handoffs. A required
+  /// GLOBAL QUEUE recipe is realized by the submission boundary instead of an
+  /// encoded USER_GCR packet; this feature does not make it a no-op. This
+  /// feature
+  /// grants neither USER_GCR encoding nor cache transitions for USER
+  /// publication.
+  AMDF_GPU_SDMA_FORMAT_FEATURE_SUBMISSION_GCR = UINT64_C(1) << 7,
 };
 
 /// First directly published AQL queue format.
@@ -430,10 +458,12 @@ enum amdf_gpu_aql_format_feature_bits_e {
 
 /// Scratch backing borrowed by one directly published compute queue.
 ///
-/// An all-zero value disables scratch and accepts only commands whose private
-/// segment is empty. Otherwise the selected access must belong to the queue's
-/// device and provide read/write permission and a stable GPU address. The queue
-/// borrows the memory without lifetime tracking. The caller keeps the scratch
+/// An all-zero value disables queue-owned scratch provisioning. AQL then
+/// accepts only commands whose private segment is empty. PM4 command-owned
+/// scratch uses DISPATCH_SCRATCH with this value zero. Otherwise the selected
+/// access must belong to the queue's device and provide read/write permission
+/// and a stable GPU address. The queue borrows the memory without lifetime
+/// tracking. The caller keeps the scratch
 /// backing live until queue destruction succeeds.
 ///
 /// AQL format 1 retains fixed scratch across dispatches. Let C be
@@ -530,6 +560,8 @@ typedef struct amdf_gpu_kernel_command_t {
   /// Reserved for compatible growth; always zero.
   uint32_t reserved;
   /// Dword-aligned byte offset from the attachment's stable device base.
+  /// The resulting command address must be 32-byte aligned for SDMA indirect
+  /// buffers and dword aligned for PM4 command buffers.
   uint64_t byte_offset;
   /// Nonzero dword-aligned command length.
   uint64_t byte_length;
@@ -706,6 +738,10 @@ typedef struct amdf_gpu_api_t {
   /// object live until the submission retires.
   /// Successful calls return increasing queue-local completion points. Callers
   /// use returned points without assuming a starting value or dense numbering.
+  /// Success means acceptance, not successful execution. A native failure after
+  /// command acceptance returns OK and the accepted point, latches terminal
+  /// queue failure, and prevents subsequent publication. Observe both queue
+  /// status and checked retirement; failure never authorizes storage reuse.
   /// A successful wait for one point covers all earlier accepted submissions
   /// on this queue, not independently scheduled work on other queues.
   ///
