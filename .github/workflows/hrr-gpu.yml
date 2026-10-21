@@ -107,16 +107,16 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  simulator:
-    name: rocJitsu (${{ matrix.family }})
-    needs: build
+  # rocJitsu has no family or architecture argument: every simulator job would
+  # build the same binary, so build it once here. The simulator jobs download
+  # it from the artifact. The launcher finds librocjitsu.so at ../../ from its
+  # own path, so the tarball keeps the build/rocjitsu layout, and tar keeps the
+  # exec bit that upload-artifact would drop.
+  rocjitsu-build:
+    name: Build rocJitsu
     if: inputs.simulator_families != '[]'
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(inputs.simulator_families) }}
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -124,7 +124,6 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             emulation/rocjitsu
-            projects/hrr/tests
             runtimes/api-headers
             shared/machine-readable-isa
 
@@ -168,7 +167,91 @@ jobs:
           set -euo pipefail
           cmake -S emulation/rocjitsu -B build/rocjitsu -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/rocjitsu --target rocjitsu_bin rocjitsu_shared -j
-          echo "${GITHUB_WORKSPACE}/build/rocjitsu/tools/rocjitsu" >> "${GITHUB_PATH}"
+
+      - name: Package rocJitsu
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar -C build/rocjitsu -cf rocjitsu.tar tools/rocjitsu librocjitsu.so*
+          tar -tvf rocjitsu.tar
+
+      - name: Upload rocJitsu
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rocjitsu-${{ github.run_id }}
+          path: rocjitsu.tar
+          if-no-files-found: error
+          retention-days: 7
+
+  simulator:
+    name: rocJitsu (${{ matrix.family }})
+    needs: [build, rocjitsu-build]
+    if: inputs.simulator_families != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.simulator_families) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            emulation/rocjitsu/configs
+            projects/hrr/tests
+
+      - name: Checkout TheRock artifact tools
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          repository: ROCm/TheRock
+          ref: ${{ env.THEROCK_PIN }} # 2026-10-12
+          path: therock
+          sparse-checkout: |
+            build_tools
+            cmake/therock_amdgpu_targets.cmake
+            requirements.txt
+          sparse-checkout-cone-mode: false
+
+      # The prebuilt rocJitsu and the capture-enabled amdhip64 load libdrm at run
+      # time; the build packages are no longer needed.
+      - name: Install libdrm
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -n apt-get update
+          sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            libdrm2 libdrm-amdgpu1
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "${RUNNER_TEMP}/hrr-venv"
+          "${RUNNER_TEMP}/hrr-venv/bin/python" -m pip install --no-cache-dir \
+            -r therock/requirements.txt 'PyYAML==6.0.2'
+          echo "${RUNNER_TEMP}/hrr-venv/bin" >> "${GITHUB_PATH}"
+
+      - name: Download rocJitsu
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rocjitsu-${{ github.run_id }}
+          path: rocjitsu-artifact
+
+      - name: Unpack rocJitsu
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/rocjitsu
+          tar -C build/rocjitsu -xf rocjitsu-artifact/rocjitsu.tar
+          ls -l build/rocjitsu/tools build/rocjitsu/librocjitsu.so*
+          echo "${GITHUB_WORKSPACE}/build/rocjitsu/tools" >> "${GITHUB_PATH}"
 
       - name: Download build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

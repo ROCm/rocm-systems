@@ -70,6 +70,21 @@ class RocJitsuJobTest(unittest.TestCase):
         self.assertEqual(rpt.missing_families(families, rows), [])
 
 
+    def test_a_failed_rocjitsu_build_fails_the_summary_and_is_no_missing_family(self):
+        rows = rpt.classify_jobs(
+            [
+                {"name": "GPU / Build rocJitsu", "conclusion": "failure", "html_url": "u0"},
+                {"name": "GPU / rocJitsu (gfx90a)", "conclusion": "skipped", "html_url": "u1"},
+            ]
+        )
+        self.assertEqual(
+            [(r["kind"], r["name"], r["conclusion"]) for r in rows],
+            [("Build", "", "failure"), ("Integration", "gfx90a", "skipped")],
+        )
+        self.assertEqual(rpt.missing_families([{"family": "gfx90a"}], rows), [])
+        self.assertFalse(rpt.overall_ok(rows, []))
+
+
 class OverallTest(unittest.TestCase):
     def test_failure_or_cancel_fails(self):
         self.assertFalse(rpt.overall_ok(rpt.classify_jobs(JOBS), []))
