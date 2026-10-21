@@ -552,3 +552,55 @@ def test_rdci_shows_control_characters_from_rdcd_escaped(rdcd, client):
     finally:
         rdcd.rdci("stats", "-x", "named_job")
         rdcd.rdci("stats", "-r", "named_job")
+
+
+# ---------------------------------------------------------------------------
+# rdci diag and rdcd's diagnostic log
+# ---------------------------------------------------------------------------
+def test_diag_config_option_prints_no_debug_lines(rdcd):
+    gid = _all_gpus_group(rdcd, "diag")
+    r = rdcd.rdci("diag", "-g", gid, "-r", "1", "-c", "custom", timeout=120)
+    assert "config_test_" not in r.stdout + r.stderr, r.stdout + r.stderr
+
+
+def _run_calls(d):
+    return sum(1 for api, _, _ in d.calls() if api != "amdsmi_get_gpu_event_notification")
+
+
+def test_rdcd_logs_a_diag_client_that_goes_away_once(tools, tmp_path):
+    # Each temperature read takes 50 ms, so the run goes on for seconds after rdci is gone.
+    d = Rdcd(tools, tmp_path, RDC_FAKE_DELAY_MS="amdsmi_get_temp_metric=50")
+    d.arm()
+    d.start()
+    try:
+        gid = _all_gpus_group(d, "diag")
+        log_start = d.out_log.stat().st_size
+        cmd = [d.rdci_path, "diag", "-g", gid, "-r", "1", "-u", "--host", f"127.0.0.1:{d.port}"]
+        proc = subprocess.Popen(
+            cmd, env=d.rdci_env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        )
+        try:
+            first = proc.stdout.readline()
+        finally:
+            proc.kill()
+            proc.communicate()
+        assert first.startswith("LOG:"), first
+        gone = len(d.calls())
+        # The run has ended when the fake has seen no call for 3 s but the event waits rdcd
+        # makes every second anyway.
+        deadline = time.monotonic() + 120 * FACTOR
+        seen, quiet_since = _run_calls(d), time.monotonic()
+        while time.monotonic() - quiet_since < 3 * FACTOR:
+            assert time.monotonic() < deadline, "the diagnostic run did not end"
+            time.sleep(0.5)
+            now = _run_calls(d)
+            if now != seen:
+                seen, quiet_since = now, time.monotonic()
+        d.check_alive("a diagnostic run whose client went away")
+        later = [api for api, _, _ in d.calls()[gone:]]
+        assert "amdsmi_get_temp_metric" in later, f"the run stopped with its client: {later}"
+        log = d.out_log.read_text(errors="replace")[log_start:]
+        assert "Failed to write log message" not in log, log[-4000:]
+    finally:
+        code = d.stop()
+    assert code == 0, f"rdcd exited with {code}\n{d.output()}"

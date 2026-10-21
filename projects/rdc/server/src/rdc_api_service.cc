@@ -630,6 +630,13 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  // The log callback runs on this RPC's thread while the run below goes on (that path
+  // starts no thread), so its cookie can live here and `failed` needs no atomic.
+  struct LogCookie {
+    ::grpc::ServerWriter<::rdc::DiagnosticRunResponse>* writer;
+    bool failed;
+  } cookie = {writer, false};
+
   auto cb_lambda = [](void* w, void* m) -> void {
     if (w == nullptr) {
       RDC_LOG(RDC_ERROR, "BAD WRITER");
@@ -641,21 +648,26 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
       return;
     }
 
-    auto writer = static_cast<::grpc::ServerWriter<::rdc::DiagnosticRunResponse>*>(w);
+    auto* cookie = static_cast<LogCookie*>(w);
+    if (cookie->failed) {
+      return;
+    }
     char* message = static_cast<char*>(m);
 
     ::rdc::DiagnosticRunResponse reply;
 
     reply.set_log(std::string(message));
-    if (!writer->Write(reply)) {
-      RDC_LOG(RDC_ERROR, "Failed to write log message");
+    if (!cookie->writer->Write(reply)) {
+      // The run goes on without the client
+      cookie->failed = true;
+      RDC_LOG(RDC_DEBUG, "Diagnostic client is gone; dropping the remaining log lines");
     }
   };
 
   rdc_callback_t cb = cb_lambda;
   rdc_diag_callback_t callback = {
       cb,
-      writer,
+      &cookie,
   };
 
   rdc_diag_response_t diag_response;
@@ -723,6 +735,13 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
 
+  // The log callback runs on this RPC's thread while the run below goes on (that path
+  // starts no thread), so its cookie can live here and `failed` needs no atomic.
+  struct LogCookie {
+    ::grpc::ServerWriter<::rdc::DiagnosticTestCaseRunResponse>* writer;
+    bool failed;
+  } cookie = {writer, false};
+
   auto cb_lambda = [](void* w, void* m) -> void {
     if (w == nullptr) {
       RDC_LOG(RDC_ERROR, "BAD WRITER");
@@ -734,21 +753,26 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
       return;
     }
 
-    auto writer = static_cast<::grpc::ServerWriter<::rdc::DiagnosticTestCaseRunResponse>*>(w);
+    auto* cookie = static_cast<LogCookie*>(w);
+    if (cookie->failed) {
+      return;
+    }
     char* message = static_cast<char*>(m);
 
     ::rdc::DiagnosticTestCaseRunResponse reply;
 
     reply.set_log(std::string(message));
-    if (!writer->Write(reply)) {
-      RDC_LOG(RDC_ERROR, "Failed to write log message");
+    if (!cookie->writer->Write(reply)) {
+      // The run goes on without the client
+      cookie->failed = true;
+      RDC_LOG(RDC_DEBUG, "Diagnostic client is gone; dropping the remaining log lines");
     }
   };
 
   rdc_callback_t cb = cb_lambda;
   rdc_diag_callback_t callback = {
       cb,
-      writer,
+      &cookie,
   };
 
   rdc_diag_test_result_t test_result;

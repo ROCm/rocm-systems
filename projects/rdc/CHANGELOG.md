@@ -38,6 +38,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdci discovery -i` shows N/A instead of 0 for an XCC or decoder count that it cannot get.
 
+- `rdci diag -c` no longer prints two debug lines.
+
+- rdcd logs a diagnostic client that goes away once, at debug level, instead of an error for each progress line.
+
 - `rdci policy --help` and `rdci topo --help` print their help and exit successfully, and the topo help lists the options `rdci topo` accepts.
 
 - `rdci health -s` on a GPU group that does not exist no longer leaves an unused field group in rdcd. Repeated failures filled the field group table, and commands that need a new field group, such as `rdci dmon`, then failed until rdcd was restarted.

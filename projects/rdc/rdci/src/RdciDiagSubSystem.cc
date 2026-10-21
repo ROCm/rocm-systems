@@ -69,8 +69,6 @@ void RdciDiagSubSystem::parse_cmd_opts(int argc, char** argv) {
         break;
       case 'c':
         config_test_ = optarg;
-        printf("config_test_ = %s\n", config_test_.c_str());
-        printf("config_test_.length = %zu\n", config_test_.length());
         break;
       case 'g':
         if (!IsNumber(optarg)) {
