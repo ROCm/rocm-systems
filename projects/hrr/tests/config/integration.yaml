@@ -98,6 +98,9 @@ cases:
   Unit_HRR_ChevronLaunch_Direct: {}
   Unit_HRR_CloseDuringCrashManifest: {}
   Unit_HRR_CloseDuringCrashManifest_Direct: {}
+  Unit_HRR_CodeObjectScrub: {}
+  Unit_HRR_CodeObjectScrubWalker: {}
+  Unit_HRR_CodeObjectScrub_Direct: {}
   Unit_HRR_ConfigureCallRoundtrip: {}
   Unit_HRR_ConfigureCall_Direct: {}
   Unit_HRR_ContextRoundtrip: {}
