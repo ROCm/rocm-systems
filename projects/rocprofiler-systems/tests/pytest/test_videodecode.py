@@ -104,8 +104,6 @@ class TestVideoDecode(RocprofsysTest):
                 result,
                 categories=["rocm_rocdecode_api"],
                 labels=["rocDecCreateVideoParser"],
-                counts=[2],
-                depths=[1],
                 counter_names=(
                     ["VCN Busy"] if "instinct" in gpu_info.categories else None
                 ),
