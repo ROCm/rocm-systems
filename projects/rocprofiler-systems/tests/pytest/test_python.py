@@ -116,18 +116,18 @@ class TestPython(RocprofsysTest):
         "file": "trip_count.json",  # Timemory
         "categories": ["python"],  # Perfetto
         "labels": [
-            "[run][builtin.py:31]",
-            "[fib][builtin.py:13]",
-            "[fib][builtin.py:13]",
-            "[fib][builtin.py:13]",
-            "[fib][builtin.py:13]",
-            "[fib][builtin.py:13]",
-            "[fib][builtin.py:13]",
-            "[fib][builtin.py:13]",
-            "[fib][builtin.py:13]",
-            "[fib][builtin.py:13]",
-            "[fib][builtin.py:13]",
-            "[inefficient][builtin.py:17]",
+            "[run][builtin.py:30]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[inefficient][builtin.py:16]",
         ],
         "counts": [5, 5, 10, 20, 40, 80, 160, 260, 220, 80, 10, 5],
         "depths": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1],
@@ -220,7 +220,7 @@ class TestPython(RocprofsysTest):
         if not annotated:
             self.assert_file_regex(
                 result.output_dir / "trip_count.txt",
-                pass_regex=[r"\[inefficient\]\[builtin.py:17\]"],
+                pass_regex=[r"\[inefficient\]\[builtin.py:16\]"],
             )
             self.assert_timemory(
                 result,
