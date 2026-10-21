@@ -610,9 +610,11 @@ TEST_F(NetIbCastInitDevicesMicrotest, FinalizeDevices_LastReferenceWithoutValida
 }
 
 TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_IbDisabled_FailsBeforeLoadingVerbs) {
+  FakeIbWorld& world = World();
+  world.AddHca("ionic_0");
   params_.Set("IB_DISABLE", 1);
   EXPECT_EQ(Init(), ncclInternalError);
-  EXPECT_EQ(World().ibvSymbols.calls, 0);
+  EXPECT_EQ(world.ibvSymbols.calls, 0);
 }
 
 // The reference is taken before the checks that can fail and is never dropped, so a retry
