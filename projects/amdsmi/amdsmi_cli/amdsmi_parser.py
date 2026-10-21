@@ -1957,7 +1957,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         cpu_power_metrics_help = "CPU power metrics"
         cpu_proc_help = "Displays prochot status"
         cpu_xgmi_link_width_help = (
-            "Displays XGMI link width range, min and max values for the selected CPU"
+            "Displays XGMI link width range, min and max values for the selected CPU. "
+            "Values are encoded width levels (0-2), not lane counts: "
+            "0 = 4 lanes (family 19h model 10h) or 2 lanes (other models), 1 = 8 lanes, 2 = 16 lanes"
         )
         cpu_apb_help = "Displays APB status"
         cpu_freq_help = "Displays currentFclkMemclk frequencies and cclk frequency limit"

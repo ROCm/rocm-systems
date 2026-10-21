@@ -9810,11 +9810,15 @@ amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_hand
  *
  * @platform{cpu_bm}
  *
+ * @note @p min and @p max are ESMI-encoded width levels (range 0-2), not a
+ * count of lanes: 0 => 4 lanes on family 19h model 10h and 2 lanes on other
+ * models, 1 => 8 lanes, 2 => 16 lanes.
+ *
  * @param[in] processor_handle Cpu socket which to query
  *
- * @param[out] min - Output buffer to receive minimum XGMI link width
+ * @param[out] min - Output buffer to receive minimum XGMI link width level
  *
- * @param[out] max - Output buffer to receive maximum XGMI link width
+ * @param[out] max - Output buffer to receive maximum XGMI link width level
  *
  * @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

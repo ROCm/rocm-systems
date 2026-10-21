@@ -236,7 +236,3 @@ class TestCliMetricCpuFlags(unittest.TestCase):
         self.interface.amdsmi_get_cpu_df_pstate_range = _raise
         captured = self._run_metric_cpu(cpu_df_pstate_range=True)
         self.assertEqual(captured["df_pstate_range"], {"min_pstate": "N/A", "max_pstate": "N/A"})
-
-
-if __name__ == "__main__":
-    unittest.main()

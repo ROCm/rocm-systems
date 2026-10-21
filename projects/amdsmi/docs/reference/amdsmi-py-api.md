@@ -8417,6 +8417,8 @@ Input: processor handle
 
 Output: dictionary with fields `min_width` and `max_width`
 
+Note: `min_width` and `max_width` are ESMI-encoded width levels (range 0-2), not a count of lanes: `0` => 4 lanes on family 19h model 10h and 2 lanes on other models, `1` => 8 lanes, `2` => 16 lanes.
+
 Exceptions that can be thrown by `amdsmi_get_cpu_xgmi_width` function:
 
 * `AmdSmiLibraryException`

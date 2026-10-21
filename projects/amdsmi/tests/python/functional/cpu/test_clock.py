@@ -120,49 +120,38 @@ class TestCpuClock(unittest.TestCase):
         # A null (default-constructed) handle hits the C-layer null check -> INVAL.
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
-        # Independent sweeps: a bug in one handle type's loop must not
-        # prevent the other handle types from being exercised.
-        failures = []
-
         try:
             cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_handles = []
         self.common.print(f"\t### amdsmi_get_cpu_handles(): cpu_count={len(cpu_handles)}")
-        try:
-            with self.common.status_sweep():
-                for i, cpu in enumerate(cpu_handles):
-                    msg = f"\t### amdsmi_get_cpu_apb_status(cpu={i}):"
-                    val = "N/A"
-                    with self.common.expect_status(msg, correct_processor):
-                        val = amdsmi.amdsmi_get_cpu_apb_status(cpu)
-                    self.common.print(f"\t    data: {val}")
-                    # A SUCCESS must also carry sane data -- status alone would let
-                    # swapped or garbage out-params (eg. apb_disabled == 7) pass.
-                    if isinstance(val, dict):
-                        assert val["apb_disabled"] in (0, 1), (
-                            f"apb_disabled must be 0 or 1, got {val['apb_disabled']}"
-                        )
-                        if val["apb_disabled"] == 1:
-                            assert 0 <= val["pstate"] <= 7, (
-                                f"pstate out of range [0, 7], got {val['pstate']}"
-                            )
-        except Exception as e:
-            failures.append(e)
 
-        try:
-            with self.common.status_sweep():
-                null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
-                msg = "\t### amdsmi_get_cpu_apb_status(null handle):"
+        # status_sweep() collects every expect_status failure in the block and
+        # raises once at the end, so a single sweep covers both handle types.
+        with self.common.status_sweep():
+            for i, cpu in enumerate(cpu_handles):
+                msg = f"\t### amdsmi_get_cpu_apb_status(cpu={i}):"
                 val = "N/A"
-                with self.common.expect_status(msg, null_check):
-                    val = amdsmi.amdsmi_get_cpu_apb_status(null_handle)
+                with self.common.expect_status(msg, correct_processor):
+                    val = amdsmi.amdsmi_get_cpu_apb_status(cpu)
                 self.common.print(f"\t    data: {val}")
-        except Exception as e:
-            failures.append(e)
+                # A SUCCESS must also carry sane data -- status alone would let
+                # swapped or garbage out-params (eg. apb_disabled == 7) pass.
+                if isinstance(val, dict):
+                    assert val["apb_disabled"] in (0, 1), (
+                        f"apb_disabled must be 0 or 1, got {val['apb_disabled']}"
+                    )
+                    if val["apb_disabled"] == 1:
+                        assert 0 <= val["pstate"] <= 7, (
+                            f"pstate out of range [0, 7], got {val['pstate']}"
+                        )
 
-        if failures:
-            raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
+            null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
+            msg = "\t### amdsmi_get_cpu_apb_status(null handle):"
+            val = "N/A"
+            with self.common.expect_status(msg, null_check):
+                val = amdsmi.amdsmi_get_cpu_apb_status(null_handle)
+            self.common.print(f"\t    data: {val}")
         return
 
     def test_get_cpu_cclk_limit(self):
@@ -263,46 +252,37 @@ class TestCpuClock(unittest.TestCase):
         # A null (default-constructed) handle hits the C-layer null check -> INVAL.
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
-        failures = []
-
         try:
             cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_handles = []
         self.common.print(f"\t### amdsmi_get_cpu_handles(): cpu_count={len(cpu_handles)}")
-        try:
-            with self.common.status_sweep():
-                for i, cpu in enumerate(cpu_handles):
-                    msg = f"\t### amdsmi_get_cpu_df_pstate_range(cpu={i}):"
-                    val = "N/A"
-                    with self.common.expect_status(msg, correct_processor):
-                        val = amdsmi.amdsmi_get_cpu_df_pstate_range(cpu)
-                    self.common.print(f"\t    data: {val}")
-                    # A SUCCESS must also carry sane data -- status alone would let
-                    # out-of-range P-states pass. Note DF P-states are numbered
-                    # with P0 as the highest-performance state, so min/max are not
-                    # numerically ordered (eg. a valid result is min_pstate=2,
-                    # max_pstate=0); only the [0, 7] range is asserted.
-                    if isinstance(val, dict):
-                        assert 0 <= val["min_pstate"] <= 7 and 0 <= val["max_pstate"] <= 7, (
-                            f"df pstate values out of range [0, 7]: {val}"
-                        )
-        except Exception as e:
-            failures.append(e)
 
-        try:
-            with self.common.status_sweep():
-                null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
-                msg = "\t### amdsmi_get_cpu_df_pstate_range(null handle):"
+        # status_sweep() collects every expect_status failure in the block and
+        # raises once at the end, so a single sweep covers both handle types.
+        with self.common.status_sweep():
+            for i, cpu in enumerate(cpu_handles):
+                msg = f"\t### amdsmi_get_cpu_df_pstate_range(cpu={i}):"
                 val = "N/A"
-                with self.common.expect_status(msg, null_check):
-                    val = amdsmi.amdsmi_get_cpu_df_pstate_range(null_handle)
+                with self.common.expect_status(msg, correct_processor):
+                    val = amdsmi.amdsmi_get_cpu_df_pstate_range(cpu)
                 self.common.print(f"\t    data: {val}")
-        except Exception as e:
-            failures.append(e)
+                # A SUCCESS must also carry sane data -- status alone would let
+                # out-of-range P-states pass. Note DF P-states are numbered
+                # with P0 as the highest-performance state, so min/max are not
+                # numerically ordered (eg. a valid result is min_pstate=2,
+                # max_pstate=0); only the [0, 7] range is asserted.
+                if isinstance(val, dict):
+                    assert 0 <= val["min_pstate"] <= 7 and 0 <= val["max_pstate"] <= 7, (
+                        f"df pstate values out of range [0, 7]: {val}"
+                    )
 
-        if failures:
-            raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
+            null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
+            msg = "\t### amdsmi_get_cpu_df_pstate_range(null handle):"
+            val = "N/A"
+            with self.common.expect_status(msg, null_check):
+                val = amdsmi.amdsmi_get_cpu_df_pstate_range(null_handle)
+            self.common.print(f"\t    data: {val}")
         return
 
     def test_set_cpu_gmi3_link_width_range(self):
@@ -404,42 +384,32 @@ class TestCpuClock(unittest.TestCase):
         # A null (default-constructed) handle hits the C-layer null check -> INVAL.
         null_check = [amdsmi.AmdSmiStatus.INVAL]
 
-        failures = []
-
         try:
             cpu_handles = amdsmi.amdsmi_get_cpu_handles()["processor_handles"]
         except amdsmi.AmdSmiLibraryException:
             cpu_handles = []
         self.common.print(f"\t### amdsmi_get_cpu_handles(): cpu_count={len(cpu_handles)}")
-        try:
-            with self.common.status_sweep():
-                for i, cpu in enumerate(cpu_handles):
-                    msg = f"\t### amdsmi_get_cpu_xgmi_width(cpu={i}):"
-                    val = "N/A"
-                    with self.common.expect_status(msg, correct_processor):
-                        val = amdsmi.amdsmi_get_cpu_xgmi_width(cpu)
-                    self.common.print(f"\t    data: {val}")
-                    # A SUCCESS must also carry sane data -- status alone would let
-                    # swapped min/max out-params pass.
-                    if isinstance(val, dict):
-                        assert val["min_width"] <= val["max_width"], (
-                            f"xgmi width min ({val['min_width']}) must be <= "
-                            f"max ({val['max_width']})"
-                        )
-        except Exception as e:
-            failures.append(e)
 
-        try:
-            with self.common.status_sweep():
-                null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
-                msg = "\t### amdsmi_get_cpu_xgmi_width(null handle):"
+        # status_sweep() collects every expect_status failure in the block and
+        # raises once at the end, so a single sweep covers both handle types.
+        with self.common.status_sweep():
+            for i, cpu in enumerate(cpu_handles):
+                msg = f"\t### amdsmi_get_cpu_xgmi_width(cpu={i}):"
                 val = "N/A"
-                with self.common.expect_status(msg, null_check):
-                    val = amdsmi.amdsmi_get_cpu_xgmi_width(null_handle)
+                with self.common.expect_status(msg, correct_processor):
+                    val = amdsmi.amdsmi_get_cpu_xgmi_width(cpu)
                 self.common.print(f"\t    data: {val}")
-        except Exception as e:
-            failures.append(e)
+                # A SUCCESS must also carry sane data -- status alone would let
+                # swapped min/max out-params pass.
+                if isinstance(val, dict):
+                    assert val["min_width"] <= val["max_width"], (
+                        f"xgmi width min ({val['min_width']}) must be <= max ({val['max_width']})"
+                    )
 
-        if failures:
-            raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
+            null_handle = amdsmi.amdsmi_wrapper.amdsmi_processor_handle()
+            msg = "\t### amdsmi_get_cpu_xgmi_width(null handle):"
+            val = "N/A"
+            with self.common.expect_status(msg, null_check):
+                val = amdsmi.amdsmi_get_cpu_xgmi_width(null_handle)
+            self.common.print(f"\t    data: {val}")
         return
