@@ -207,15 +207,15 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device,
                                           amdsmi_board_info_t* info) {
   SMIGPUDEVICE_MUTEX(device->get_mutex())
   std::string model_number_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_number");
+      smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + std::string("/device/product_number");
   std::string product_serial_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/serial_number");
+      smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + std::string("/device/serial_number");
   std::string fru_id_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/fru_id");
+      smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + std::string("/device/fru_id");
   std::string manufacturer_name_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/manufacturer");
+      smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + std::string("/device/manufacturer");
   std::string product_name_path =
-      "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_name");
+      smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + std::string("/device/product_name");
 
   auto ret_mod =
       openFileAndModifyBuffer(model_number_path, info->model_number, AMDSMI_MAX_STRING_LENGTH);
@@ -842,7 +842,8 @@ amdsmi_status_t smi_amdgpu_get_vcn_busy_percent(amd::smi::AMDSmiGPUDevice* devic
   }
 
   SMIGPUDEVICE_MUTEX(device->get_mutex())
-  std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device/vcn_busy_percent";
+  std::string fullpath =
+      smi_amdgpu_sysfs_drm_root() + device->get_gpu_path() + "/device/vcn_busy_percent";
 
   std::ifstream fs(fullpath.c_str());
   if (fs.fail()) {
