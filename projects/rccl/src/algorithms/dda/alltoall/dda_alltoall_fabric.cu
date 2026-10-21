@@ -20,6 +20,7 @@
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -35,11 +36,11 @@ RCCL_PARAM(DdaA2ATdmTileKB, "DDA_A2A_TDM_TILE_KB", 8);
 // RCCL_DDA_A2A_PUSH_PEER=1 (with RCCL_DDA_A2A_PUSH=1): peer-major vector push. Each block works on a single peer
 // and the grid is nRanks * blocksPerPeer. Out of place only.
 RCCL_PARAM(DdaA2APushPeer, "DDA_A2A_PUSH_PEER", 0);
-// RCCL_DDA_A2A_PUSH_PEER_PIECES: pipeline the peer-major vector push, cutting each block's share of the chunk into
-// this many pieces so the drain of one piece overlaps the push of the next. >= 2 = that many pieces (up to 64),
-// 0 or 1 = no pipeline, -1 (default) = automatic: no pipeline below a 16 MiB chunk per peer, otherwise one piece per
-// 4 MiB of chunk, at most 16. Every piece costs a flag round trip, so small messages lose and large ones gain.
-RCCL_PARAM(DdaA2APushPeerPieces, "DDA_A2A_PUSH_PEER_PIECES", -1);
+// RCCL_DDA_A2A_PUSH_PEER_PIPE: 1 (default) pipelines the peer-major vector push: each block's share of the chunk is cut
+// into one piece per 4 MiB of the chunk per peer (at least 1, at most 16), so the drain of one piece overlaps the push
+// of the next. Every piece costs a flag round trip, so small chunks get a single piece. 0 = always a single piece,
+// i.e. no overlap.
+RCCL_PARAM(DdaA2APushPeerPipe, "DDA_A2A_PUSH_PEER_PIPE", 1);
 
 namespace {
 
@@ -261,32 +262,18 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
     const size_t vecWaves = (count * sizeof(T) / sizeof(uint4) + 31) / 32;
     const DdaA2APeerGeom pg = ddaAllToAllFabricPeerGeom(comm, vecWaves, 8);
     if (pg.blocksPerPeer > 0) {
-      const int64_t pc = rcclParamDdaA2APushPeerPieces();
-      const size_t chunkBytes = count * sizeof(T);
-      unsigned pieces = 0;
-      if (pc < 0) {
-        if (chunkBytes >= (static_cast<size_t>(16) << 20)) {
-          pieces = static_cast<unsigned>(std::min<size_t>(16, chunkBytes >> 22));
-        }
-      } else if (pc >= 2) {
-        pieces = static_cast<unsigned>(std::min<int64_t>(pc, 64));
-      }
+      const unsigned pieces = rcclParamDdaA2APushPeerPipe()
+                                ? static_cast<unsigned>(std::clamp<size_t>((count * sizeof(T)) >> 22, 1, 16))
+                                : 1;
       INFO(NCCL_COLL,
            "DDA fabric AllToAll: launching peer-major push kernel: nRanks=%d count=%zu grid=%u block=%u "
            "blocksPerPeer=%d pieces=%u",
            nRanks, count, pg.grid.x, pg.block.x, pg.blocksPerPeer, pieces);
       const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-      if (pieces) {
-        hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricPushPeer<T, true>), pg.grid, pg.block, 0, stream,
-                              /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
-                              count, static_cast<const T*>(sendbuff), comm->rank, nRanks, pg.blocksPerPeer, pieces,
-                              barrierHost);
-      } else {
-        hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricPushPeer<T, false>), pg.grid, pg.block, 0, stream,
-                              /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
-                              count, static_cast<const T*>(sendbuff), comm->rank, nRanks, pg.blocksPerPeer, pieces,
-                              barrierHost);
-      }
+      hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricPushPeer<T>), pg.grid, pg.block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, pg.blocksPerPeer, pieces,
+                            barrierHost);
       CUDACHECK(cudaGetLastError());
       return ncclSuccess;
     }

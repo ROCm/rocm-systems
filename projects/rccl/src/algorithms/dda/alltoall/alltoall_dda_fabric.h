@@ -147,12 +147,13 @@ __device__ __forceinline__ void ddaA2APeerCopy(T* dst, const T* src, size_t begi
 // The mid-kernel sync is a two-rank handshake (push destination, drain source) rather than an all-rank barrier,
 // since a block only depends on those two ranks. Block group k == 0 pushes to this rank's own scratch like any
 // other peer, so every block takes part in the handshake and the flag slots stay paired.
-// kPipelined: the block's share of the chunk is cut into `pieces` runs of rows (a row is the block's stride loop
+// pieces >= 1 (the host never passes 0): the block's share of the chunk is cut into `pieces` runs of rows (a row is the block's stride loop
 // index, rounded to whole unroll groups). Step p pushes piece p, waits for the source's piece p - 1 and drains it
 // while piece p's remote stores are still in flight, then waits for its own stores and posts piece p. The flag slot
 // holds one token, so a post first waits for the destination to consume the previous piece, and every post is matched
-// by exactly one wait. The pieces land at their place in the chunk, so the scratch needed is unchanged.
-template <typename T, bool kPipelined>
+// by exactly one wait. The pieces land at their place in the chunk, so the scratch needed is unchanged. One piece
+// pushes the whole share, posts, waits and drains: no overlap.
+template <typename T>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
@@ -175,13 +176,10 @@ __launch_bounds__(512)
   const T* const src = sendbuff + static_cast<size_t>(peer) * count;
   const size_t slot = static_cast<size_t>(srcRank) * count;
 
-  if constexpr (!kPipelined) {
-    ddaA2APeerCopy(dst, src, begin, nLines, stride);
-
-    barrier.signalWaitPeer(peer, srcRank, blockIdx.x);
-
-    ddaA2APeerCopy(recvbuff + slot, ipcbuffs[selfRank] + slot, begin, nLines, stride);
-  } else {
+  {
+    // The host never passes pieces == 0, so the kernel does not guard it. Adding a check inside the kernel (for example
+    // `pieces ? pieces : 1` in the divisions below) lowers the kernel from 80 to 64 VGPRs; neither version spills and
+    // the speed is the same, so the simpler form is kept.
     // Every thread has at most nRows rows; pieces are whole unroll groups of rows. All ranks derive the same piece
     // count, since it depends only on count, blocksPerPeer and blockDim.
     const size_t nRows = (nLines + stride - 1) / stride;
