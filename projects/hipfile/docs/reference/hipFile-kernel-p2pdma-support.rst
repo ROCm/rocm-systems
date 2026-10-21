@@ -15,7 +15,7 @@ using PCIe peer-to-peer DMA (P2PDMA). This requires a Linux kernel built with
 .. warning::
 
    Not all ROCm-supported distributions have a default kernel that
-   enables ``CONFIG_PCI_P2PDMA``. See :ref:`hipfile-os-vm-testing` for a list of tested distribution kernels and their P2PDMA support.
+   enables ``CONFIG_PCI_P2PDMA``. See :ref:`hipfile-distro-p2pdma-support` for the distribution kernels that were inspected and their P2PDMA support.
 
 .. _hipfile-check-p2pdma:
 
@@ -48,19 +48,21 @@ configuration files in these directories instead:
    support, boot a kernel that was built with the option, as described in
    :ref:`hipfile-ubuntu-2204-fastpath` for Ubuntu 22.04.
 
-.. _hipfile-os-vm-testing:
+.. _hipfile-distro-p2pdma-support:
 
-OS VM testing
-=============
+Linux distribution P2PDMA support
+=================================
 
-A set of tests was run in virtual machines using operating systems from the
-`ROCm operating system compatibility matrix
-<https://rocm.docs.amd.com/en/latest/about/release-notes.html#operating-system-support>`_.
-Equivalent or closest open-source releases were used for RHEL and SLES.
+The default kernel of each operating system in the `ROCm operating system
+compatibility matrix
+<https://rocm.docs.amd.com/en/latest/about/release-notes.html#operating-system-support>`_
+was installed in a virtual machine and its kernel configuration was inspected
+for ``CONFIG_PCI_P2PDMA``. Equivalent or closest open-source releases were used
+for RHEL and SLES.
 
 In the table, ``TARGET`` refers to the operating system from the ROCm
 compatibility matrix and ``OS`` refers to the actual operating system that was
-used for testing. ``KERNEL`` shows the kernel version tested. ``P2PDMA``
+inspected. ``KERNEL`` shows the kernel version inspected. ``P2PDMA``
 indicates whether the kernel has ``CONFIG_PCI_P2PDMA`` set in its config.
 
 .. list-table::
@@ -144,7 +146,6 @@ indicates whether the kernel has ``CONFIG_PCI_P2PDMA`` set in its config.
      - ``7.0.0-34-generic``
      - Yes
 
-All OS kernels that support P2PDMA pass the fastpath I/O tests except for RHEL
-9.8 and RHEL 10.2. These two kernels report ``CONFIG_PCI_P2PDMA=y``, but using
+RHEL 9.8 and RHEL 10.2 report ``CONFIG_PCI_P2PDMA=y``, but using
 P2PDMA on them can cause memory corruption, so don't use the fastpath on these
 kernels.

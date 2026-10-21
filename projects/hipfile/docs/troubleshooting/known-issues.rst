@@ -54,7 +54,7 @@ when one is present. This warning won't change the exit code.
 Memory corruption on RHEL 9.8 and RHEL 10.2 kernels
 ===================================================
 
-All OS kernels that support P2PDMA pass the fastpath I/O tests except for RHEL 9.8 and RHEL 10.2. A change was backported to RHEL 9.8 and 10.2 that broke DMA mapping for P2PDMA pages that are transferred through the host bridge. These two kernels report ``CONFIG_PCI_P2PDMA=y``, but using P2PDMA on them can cause memory corruption, so don't use the fastpath on these kernels.
+A change was backported to RHEL 9.8 and 10.2 that broke DMA mapping for P2PDMA pages that are transferred through the host bridge. These two kernels report ``CONFIG_PCI_P2PDMA=y``, but using P2PDMA on them can cause memory corruption, so don't use the fastpath on these kernels.
 
 RHEL 9.9 and RHEL 10.3, which are in development, contain a fix. See `dma-mapping: direct: fix missing mapping for THRU_HOST_BRIDGE segments <https://github.com/torvalds/linux/commit/560000d619ef162568746ce287f0c725e24ea967>`_.
 
