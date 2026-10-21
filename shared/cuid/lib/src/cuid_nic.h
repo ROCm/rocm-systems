@@ -28,7 +28,8 @@ class CuidNic : public CuidDevice {
   amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;
   static amdcuid_status_t discover(std::vector<DevicePtr>& nics);
   // The same over a directory other than /sys/class/net, for tests.
-  static amdcuid_status_t discover(const std::string& nic_base_path, std::vector<DevicePtr>& nics);
+  static amdcuid_status_t discover(const std::string& pci_base_path,
+                                   const std::string& net_base_path, std::vector<DevicePtr>& nics);
   static amdcuid_status_t discover_single(amdcuid_nic_info* nic_info,
                                           const std::string& device_path);
 

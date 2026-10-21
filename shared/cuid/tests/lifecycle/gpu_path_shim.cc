@@ -36,8 +36,8 @@ __attribute__((constructor(101))) void require_private_namespace() {
     _exit(90);
 }
 
-// A fixture that provides SMBIOS and NIC data opts in to real CPU, NIC and
-// Platform discovery; the rest see GPUs only.
+// A fixture that provides NIC data opts in to real CPU, NIC and Platform
+// discovery; the rest see GPUs only.
 bool components() { return access("/sys/.cuid-path-components", F_OK) == 0; }
 
 void drm_number(const std::string& path, struct stat* st) {
