@@ -2607,6 +2607,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
   // Honor Tuner config if available
   if (!isTunerMatchFound && info->algorithm != NCCL_ALGO_PAT) {
     rcclUpdateCollectiveProtocol(comm, nBytes, info);
+    rcclUpdateAllReduceAlgoProto(comm, nBytes, info, table);
   }
   rcclSetPipelining(comm, nBytes, info);
   if (simInfo) simInfo->estimatedTime = time;

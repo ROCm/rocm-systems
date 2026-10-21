@@ -129,6 +129,8 @@ ncclResult_t rcclOverrideProtocol(const char* ncclProtoStr[], float table[][NCCL
 ncclResult_t rcclOverrideAlgorithm(const char* ncclAlgoStr[], float table[][NCCL_NUM_PROTOCOLS],
                                    struct ncclTaskColl* info);
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info);
+void rcclUpdateAllReduceAlgoProto(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
+                                  float (*table)[NCCL_NUM_PROTOCOLS]);
 void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info,
                                int& threadThreshold);
 void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info);
