@@ -128,11 +128,16 @@ ddaAllToAllFabricTdmPush(uint8_t* const* __restrict__ peerScratch, uint8_t* __re
 // rank's block b wrote with the same tiles, so the two-rank handshake between block b on the destination and on the
 // source pairs the write with the read, as in ddaAllToAllFabricPushPeer. Out of place only: a block drains into
 // recvbuff slots that other blocks of this rank may still be reading from sendbuff.
+// pieces >= 1 (the host never passes 0): a wave goes through nRounds rounds of UnrollPeers tiles, and a piece is a
+// run of those rounds. Step p pushes piece p, waits for the source's piece p - 1 and drains it, then posts piece p.
+// The flag slot holds one token, so a post first waits for the destination to consume the previous piece, and every
+// post is matched by exactly one wait. The pieces land at their place in the chunk, so the scratch needed is
+// unchanged. One piece pushes the whole share, posts, waits and drains: no overlap.
 template <int TileBytes, int UnrollPeers>
 __global__ void __launch_bounds__(kDdaA2ATdmMaxWarpsPerBlock* kDdaA2ATdmWave)
 ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* __restrict__ recvbuff,
                               const uint8_t* __restrict__ sendbuff, size_t bytesPerRank, int selfRank, int nRanks,
-                              int blocksPerPeer, FabricGpuBarrier barrier) {
+                              int blocksPerPeer, unsigned pieces, FabricGpuBarrier barrier) {
   static_assert(TileBytes * UnrollPeers == kDdaA2ATdmWindowBytes, "tiles must fill one wave window");
   static_assert(TileBytes % kDdaA2ATdmAlign == 0, "tiles must be whole 256 B rows");
 #if TDM_SUPPORTED
@@ -154,9 +159,17 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
   // The previous collective's readers must be done with every scratch slot this block is about to overwrite.
   barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
 
-  // Copies this wave's tiles of a bytesPerRank chunk from src to dst through its LDS window.
-  auto pass = [&](const uint8_t* src, uint8_t* dst) {
-    for (size_t base = first; base < nTiles; base += stride) {
+  // Rounds a wave goes through and the pieces they are cut into. Every wave of every rank derives the same piece
+  // count, since it depends only on bytesPerRank, blocksPerPeer and blockDim.
+  const size_t nRounds = (nTiles + stride - 1) / stride;
+  const size_t perPiece = (nRounds + pieces - 1) / pieces;
+  const size_t nPieces = (nRounds + perPiece - 1) / perPiece;
+
+  // Copies this wave's rounds [p * perPiece, (p + 1) * perPiece) of a bytesPerRank chunk from src to dst through its
+  // LDS window.
+  auto pass = [&](const uint8_t* src, uint8_t* dst, size_t p) {
+    const size_t limit = first + (p + 1) * perPiece * stride;
+    for (size_t base = first + p * perPiece * stride; base < nTiles && base < limit; base += stride) {
 #pragma unroll
       for (int u = 0; u < UnrollPeers; ++u) {
         const size_t t = base + u;
@@ -182,13 +195,20 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
     }
   };
 
-  pass(sendbuff + static_cast<size_t>(peer) * bytesPerRank, peerScratch[peer] + static_cast<size_t>(selfRank) * bytesPerRank);
-
-  // Every TDM store above has drained (tdmWait); signalWaitPeer also waits for the wave's stores and syncs the block
-  // before thread 0 posts.
-  barrier.signalWaitPeer(peer, from, blockIdx.x);
-
-  pass(peerScratch[selfRank] + static_cast<size_t>(from) * bytesPerRank, recvbuff + static_cast<size_t>(from) * bytesPerRank);
+  uint8_t* const dst = peerScratch[peer] + static_cast<size_t>(selfRank) * bytesPerRank;
+  const uint8_t* const src = sendbuff + static_cast<size_t>(peer) * bytesPerRank;
+  const uint8_t* const slot = peerScratch[selfRank] + static_cast<size_t>(from) * bytesPerRank;
+  uint8_t* const out = recvbuff + static_cast<size_t>(from) * bytesPerRank;
+  // Every TDM store of a piece has drained (tdmWait) before postPeer, which also waits for the wave's stores and
+  // syncs the block before thread 0 posts.
+  for (size_t p = 0; p <= nPieces; ++p) {
+    if (p < nPieces) pass(src, dst, p);
+    if (p > 0) {
+      barrier.waitPeer(from);
+      pass(slot, out, p - 1);
+    }
+    if (p < nPieces) barrier.postPeer(peer, blockIdx.x);
+  }
 #else
   // Only dispatched on gfx1250; every other arch still has to compile this kernel.
   (void)peerScratch;
@@ -198,6 +218,7 @@ ddaAllToAllFabricTdmPushPeer(uint8_t* const* __restrict__ peerScratch, uint8_t* 
   (void)selfRank;
   (void)nRanks;
   (void)blocksPerPeer;
+  (void)pieces;
   (void)barrier;
   __builtin_trap();
 #endif
