@@ -56,6 +56,10 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   ASSIGN_SYM(ibvSymbols, ibv_set_ece, ibv_internal_set_ece);
   ASSIGN_SYM(ibvSymbols, ibv_query_port_speed, ibv_internal_query_port_speed);
 
+  ASSIGN_SYM(ibvSymbols, ibv_create_cq_ex, ibv_internal_create_cq_ex);
+  ASSIGN_SYM(ibvSymbols, ibv_alloc_parent_domain, ibv_internal_alloc_parent_domain);
+  ASSIGN_SYM(ibvSymbols, _ibv_query_gid_table, ibv_internal_query_gid_table);
+
   ibvSymbols->ibv_internal_reg_mr = &ibv_internal_reg_mr;
   ibvSymbols->ibv_internal_query_port = &ibv_internal_query_port;
 
@@ -139,6 +143,12 @@ ncclResult_t buildIbvSymbols(struct ncclIbvSymbols* ibvSymbols) {
   LOAD_SYM_VERSION(ibvhandle, "ibv_set_ece", ibvSymbols->ibv_internal_set_ece, "IBVERBS_1.10");
   LOAD_SYM_VERSION(ibvhandle, "ibv_query_port_speed", ibvSymbols->ibv_internal_query_port_speed, "IBVERBS_1.16");
 
+  // Extended verbs for the GIN QP factory. Optional — leave NULL if absent.
+  LOAD_SYM_VERSION(ibvhandle, "ibv_create_cq_ex", ibvSymbols->ibv_internal_create_cq_ex, "IBVERBS_1.1");
+  LOAD_SYM_VERSION(ibvhandle, "ibv_alloc_parent_domain", ibvSymbols->ibv_internal_alloc_parent_domain, "IBVERBS_1.4");
+  // Exported with a leading underscore and a trailing entry-size argument.
+  LOAD_SYM_VERSION(ibvhandle, "_ibv_query_gid_table", ibvSymbols->ibv_internal_query_gid_table, "IBVERBS_1.11");
+
   return ncclSuccess;
 
 teardown:
@@ -170,6 +180,9 @@ teardown:
   ibvSymbols->ibv_internal_query_ece = NULL;
   ibvSymbols->ibv_internal_set_ece = NULL;
   ibvSymbols->ibv_internal_query_port_speed = NULL;
+  ibvSymbols->ibv_internal_create_cq_ex = NULL;
+  ibvSymbols->ibv_internal_alloc_parent_domain = NULL;
+  ibvSymbols->ibv_internal_query_gid_table = NULL;
 
   if (ibvhandle != NULL) dlclose(ibvhandle);
   return ncclSystemError;

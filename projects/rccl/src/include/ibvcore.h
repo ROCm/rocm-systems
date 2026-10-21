@@ -865,6 +865,26 @@ struct ibv_cq {
 	uint32_t		async_events_completed;
 };
 
+/* Extended CQ. Shares its leading members with struct ibv_cq so that
+ * ibv_cq_ex_to_cq() is a plain pointer cast. The trailing poll/read
+ * function pointers are managed by libibverbs and left opaque here —
+ * GIN only passes the pointer back to cq_ex_to_cq(), never dereferences
+ * the extended fields. */
+struct ibv_cq_ex {
+	struct ibv_context     *context;
+	struct ibv_comp_channel *channel;
+	void		       *cq_context;
+	uint32_t		handle;
+	int			cqe;
+
+	pthread_mutex_t		mutex;
+	pthread_cond_t		cond;
+	uint32_t		comp_events_completed;
+	uint32_t		async_events_completed;
+
+	uint32_t		comp_mask;
+};
+
 struct ibv_ah {
 	struct ibv_context     *context;
 	struct ibv_pd	       *pd;

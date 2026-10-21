@@ -631,6 +631,7 @@ if(ENABLE_ROCSHMEM_GIN)
   list(APPEND SRC_FILES
     src/gin/gin_plugin_rocshmem_gda.cc
     src/gin/gin_rocshmem_gda_factory.cc
+    src/gin/gin_ibv_shim.cc
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_sdma_factory.cc
     src/gin/gin_anvil_ipc_table_host.cc
