@@ -46,17 +46,11 @@ COUNTER_COLLECTION_COLUMNS = {
 TORCH_TRACE_WALL_CLOCK_OVERHEAD_PCT = 50.0
 
 
-ADDMM_NATIVE = re.compile(r"aten::addmm(?![A-Za-z0-9_])")
-ADDMM_FALLBACK = re.compile(r"torch\.ops\.aten\.addmm(?![A-Za-z0-9_])")
-
-
-def find_addmm_marker(text: str):
-    """Return an addmm marker in either the native or Python-tier spelling."""
-    return ADDMM_NATIVE.search(text) or ADDMM_FALLBACK.search(text)
+ADDMM_MARKER = re.compile(r"aten::addmm(?![A-Za-z0-9_])")
 
 
 def check_torch_trace_markers(marker_rows):
-    """Check simple_net metadata for the tracing tier present in the marker wire."""
+    """Check the native collector's argument, scope, and launcher metadata."""
     backward_launchers = set()
     torch_markers = []
     for row in marker_rows:
@@ -68,10 +62,9 @@ def check_torch_trace_markers(marker_rows):
         torch_markers.append((row, marker))
 
     assert backward_launchers, "Missing torch.Tensor.backward wrapper markers"
-    if not any(
+    assert any(
         marker["Operator_Name"].startswith("aten::") for _, marker in torch_markers
-    ):
-        return
+    ), "No aten:: markers: the torch trace collector did not load"
 
     relu_markers = [
         (row, marker)
@@ -136,21 +129,6 @@ def print_torch_trace_overhead_report(wall_clock):
         f"  {f'{overhead_pct:+.1f}%':>10}"
     )
     print(f"{'=' * 72}\n")
-
-
-@pytest.fixture
-def addmm_operator_name(torch_trace_profiled_workload):
-    """Select the operator name from the profiled workload's marker wire."""
-    marker_files = Path(torch_trace_profiled_workload).glob(
-        "**/*marker_api_trace.csv.gz"
-    )
-    for marker_file in marker_files:
-        with csv_compression.open_gzip_csv_read(marker_file) as stream:
-            if any(
-                row["Function"].startswith("aten::") for row in csv.DictReader(stream)
-            ):
-                return "aten::addmm"
-    return "torch.ops.aten.addmm"
 
 
 @pytest.fixture(scope="module")
@@ -233,10 +211,8 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
                 assert row["Start_Timestamp"], f"Empty Start_Timestamp in {marker_file}"
                 assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
             assert any("nn.Module.Linear.forward" in fn for fn in functions)
-            assert any(find_addmm_marker(fn) for fn in functions)
-            if any(fn.startswith("aten::") for fn in functions):
-                assert any("aten::addmm" in fn for fn in functions)
-                assert any("scope=FUNCTION" in fn for fn in functions)
+            assert any(ADDMM_MARKER.search(fn) for fn in functions)
+            assert any("scope=FUNCTION" in fn for fn in functions)
             assert any("|seqNr=" in fn for fn in functions)
             assert any("|tid=" in fn for fn in functions)
             assert any("|ftid=" in fn for fn in functions)
@@ -470,7 +446,6 @@ def test_list_torch_operators_prints_call_tree(
     torch_trace_profiled_workload,
     binary_handler_analyze_rocprof_compute,
     capsys,
-    addmm_operator_name,
 ):
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -484,7 +459,7 @@ def test_list_torch_operators_prints_call_tree(
     out = captured.out + captured.err
     assert "PyTorch Operator Call Tree:" in out
     assert "nn.Module.Linear.forward" in out
-    assert addmm_operator_name in out
+    assert ADDMM_MARKER.search(out)
     assert "(id " in out
     assert not (
         Path(torch_trace_profiled_workload) / "ml_api_trace" / "consolidated.csv"
@@ -495,7 +470,6 @@ def test_torch_operator_addmm_selects_kernels(
     torch_trace_profiled_workload,
     binary_handler_analyze_rocprof_compute,
     capsys,
-    addmm_operator_name,
 ):
     code = binary_handler_analyze_rocprof_compute([
         "--experimental",
@@ -509,7 +483,7 @@ def test_torch_operator_addmm_selects_kernels(
     captured = capsys.readouterr()
     out = captured.out + captured.err
     assert "Matched PyTorch Operators:" in out
-    assert addmm_operator_name in out
+    assert ADDMM_MARKER.search(out)
     assert "nn.Module.Linear.forward" in out
     assert "operator filter selected" in out
 
@@ -606,8 +580,6 @@ def test_torch_trace_user_range_and_backward_thread_in_marker_csv(
         assert any(fn == "TrainingLoop_UserDefinedMarker" for fn in functions)
         assert any("torch.Tensor.backward" in fn for fn in functions)
         assert len(thread_ids) >= 2
-        assert any("|ltid=" in fn for fn in functions)
-        if any(fn.startswith("aten::") for fn in functions):
-            assert any(re.search(r"ltid=\d+", fn) for fn in functions)
+        assert any(re.search(r"\|ltid=\d+\|", fn) for fn in functions)
     finally:
         common.clean_output_dir(config["cleanup"], workload_dir)
