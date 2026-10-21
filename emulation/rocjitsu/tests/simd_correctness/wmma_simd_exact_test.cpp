@@ -601,8 +601,15 @@ TEST(WmmaSimdExact, I32) {
     });
   }
   run_case("swmmac_i32_16x16x32_i8", Fmt::I8, Fmt::I8, [](WmmaFixture &fx, uint32_t ca) {
-    amdgpu::exec_swmmac_i32_i8(*fx.cu, 16, 16, 32, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
-                               fx.vbase + ACC, fx.vbase + INDEX, 16, INDEX_KEY, ca);
+    // RDNA4 sparse instructions accumulate into D rather than a separate C operand.
+    if (ca != amdgpu::ACC_FROM_VGPR)
+      for (uint32_t reg = 0; reg < ACC_REGS; ++reg)
+        for (uint32_t lane = 0; lane < WF; ++lane)
+          fx.cu->write_vgpr(fx.vbase + ACC + reg, lane, ca);
+    amdgpu::exec_rdna_swmmac_i32<8, 32>(*fx.cu, WF, fx.vbase + ACC, fx.vbase + S0, fx.vbase + S1,
+                                        fx.vbase + INDEX, /*index_key=*/INDEX_KEY,
+                                        /*a_signed=*/true,
+                                        /*b_signed=*/true, /*clamp=*/false);
   });
 }
 
