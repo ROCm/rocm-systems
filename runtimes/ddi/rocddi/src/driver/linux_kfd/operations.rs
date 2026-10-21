@@ -24,28 +24,28 @@ pub(super) fn device_counter_frequency_hz(info: drm::DeviceInfoPrefix) -> Option
         .then_some(u64::from(info.gpu_counter_frequency_khz) * 1000)
 }
 
-pub(super) fn query_endpoint_details(endpoint: &Endpoint) -> EndpointDetails {
+pub(super) fn populate_endpoint(endpoint: &mut Endpoint) {
     let Some(pci) = endpoint.pci else {
-        return EndpointDetails::default();
+        return;
     };
     let Some(native) = crate::topology::platform::linux::kfd_drm_info(endpoint) else {
-        return EndpointDetails::default();
+        return;
     };
     let device_info = native
         .render_minor
         .and_then(|minor| sysfs::open_render(minor).ok())
         .and_then(|render| matching_device_info(endpoint, &render));
-    EndpointDetails {
-        gpu: device_info.map(|info| GpuDetails {
-            asic_family_id: (info.family_id != 0).then_some(info.family_id),
-            counter_frequency_hz: device_counter_frequency_hz(info),
-        }),
-        product_name: std::fs::metadata("/usr/share/libdrm/amdgpu.ids")
-            .ok()
-            .filter(|metadata| metadata.len() <= 1024 * 1024)
-            .and_then(|_| std::fs::read_to_string("/usr/share/libdrm/amdgpu.ids").ok())
-            .and_then(|contents| marketing_name(&contents, pci.device_id, pci.revision_id)),
+    if let (Some(device_info), crate::topology::EndpointKind::Gpu { info }) =
+        (device_info, &mut endpoint.kind)
+    {
+        info.drm_asic_family_id = (device_info.family_id != 0).then_some(device_info.family_id);
+        info.counter_frequency_hz = device_counter_frequency_hz(device_info);
     }
+    endpoint.product_name = std::fs::metadata("/usr/share/libdrm/amdgpu.ids")
+        .ok()
+        .filter(|metadata| metadata.len() <= 1024 * 1024)
+        .and_then(|_| std::fs::read_to_string("/usr/share/libdrm/amdgpu.ids").ok())
+        .and_then(|contents| marketing_name(&contents, pci.device_id, pci.revision_id));
 }
 
 impl GpuDriver for LinuxKfdDriver {
