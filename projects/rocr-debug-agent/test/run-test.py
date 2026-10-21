@@ -12,11 +12,21 @@ import hashlib
 import logging
 import shutil
 import signal
-import threading
 
 DEFAULT_TIMEOUT = 60
 
 AGENT_LIBRARY = "librocm-debug-agent.so.2"
+
+# Output of the assert trap (test binary case 1), however the agent is loaded.
+ASSERT_TRAP_PATTERNS = [
+    r"HSA_STATUS_ERROR_EXCEPTION: An HSAIL operation resulted in a hardware exception\.",
+    r"\(stopped, reason: ASSERT_TRAP\)",
+    r"exec: (00000000)?00000001",
+    r"s0:",
+    r"v0:",
+    r"0x0000: 22222222 11111111",
+    r"Disassembly for function vector_add_assert_trap\(int\*, int\*, int\*\)",
+]
 
 LOGGER_NAME = "rocm-debug-agent-test"
 
@@ -132,7 +142,7 @@ else:
         os.environ["LD_LIBRARY_PATH"] = agent_library_directory
     else:
         os.environ["LD_LIBRARY_PATH"] += ":" + agent_library_directory
-    os.environ["HSA_TOOLS_LIB"] = "librocm-debug-agent.so.2"
+    os.environ["HSA_TOOLS_LIB"] = AGENT_LIBRARY
     os.chdir(test_binary_directory)
 
     # Set up file-only logging for diagnostic output (stdout/stderr dumps).
@@ -646,16 +656,12 @@ def agent_loaded_by(mode):
     starts by itself and reads code objects from r_debug when waves stop)."""
     with unittest.mock.patch.dict(os.environ):
         if mode == "preload":
-            os.environ.pop("HSA_TOOLS_LIB", None)
-            os.environ["LD_PRELOAD"] = AGENT_LIBRARY
+            os.environ["LD_PRELOAD"] = os.environ.pop("HSA_TOOLS_LIB", AGENT_LIBRARY)
         yield
 
 
-def test_preload_dump(*, name, args, **_):
+def test_preload_dump(*, name, args, patterns=(), **_):
     """The assert trap of test_assert_trap, with the agent preloaded instead."""
-    patterns = next(
-        t["patterns"] for t in TEST_DEFINITIONS if t["name"] == "test_assert_trap"
-    )
     with agent_loaded_by("preload"):
         out_str, err_str, success = run_and_communicate(test_name=name, args=args)
     if not success:
@@ -686,82 +692,6 @@ def test_preload_save_code_objects(*, name, args, **_):
             )
             return False
     return True
-
-
-def run_sigquit_resume(name, args, mode, patterns):
-    """SIGQUIT a running kernel, release it once the waves are printed, and
-    expect the program to finish: the agent resumes the waves it stopped."""
-    check_list = [re.compile(s) for s in patterns]
-    _log = logger()
-    with agent_loaded_by(mode):
-        p = Popen(
-            ["./rocm-debug-agent-test", args], stdin=PIPE, stdout=PIPE, stderr=PIPE
-        )
-
-    lock = threading.Lock()
-    collected = {"out": b"", "err": b""}
-
-    def drain(stream, key):
-        for chunk in iter(lambda: stream.read1(4096), b""):
-            with lock:
-                collected[key] += chunk
-
-    readers = [
-        threading.Thread(target=drain, args=(p.stdout, "out"), daemon=True),
-        threading.Thread(target=drain, args=(p.stderr, "err"), daemon=True),
-    ]
-    for t in readers:
-        t.start()
-
-    def wait_for(key, text):
-        end = time.monotonic() + DEFAULT_TIMEOUT
-        while time.monotonic() < end:
-            with lock:
-                if text in collected[key]:
-                    return True
-            if p.poll() is not None:
-                break
-            time.sleep(0.1)
-        return False
-
-    def fail(reason):
-        _log.info("Test %s (%s) FAIL: %s", name, mode, reason)
-        p.kill()
-        p.wait()
-        for t in readers:
-            t.join(timeout=5)
-        log_program_output(
-            collected["out"].decode("utf-8", "replace"),
-            collected["err"].decode("utf-8", "replace"),
-        )
-        return False
-
-    if not wait_for("out", b"Kernel started"):
-        return fail("the kernel did not start")
-    p.send_signal(signal.SIGQUIT)
-    if not wait_for("err", b"End of disassembly"):
-        return fail("no wave dump with disassembly after SIGQUIT")
-    p.stdin.write(b"go\n")
-    p.stdin.flush()
-    try:
-        rc = p.wait(timeout=DEFAULT_TIMEOUT)
-    except TimeoutExpired:
-        return fail("the program did not finish: waves left stopped after the dump")
-    for t in readers:
-        t.join(timeout=5)
-    out_str = collected["out"].decode("utf-8", "replace")
-    err_str = collected["err"].decode("utf-8", "replace")
-    log_program_output(out_str, err_str)
-    if rc != 0 or "Kernel finished" not in out_str:
-        _log.info("Test %s (%s): exit code %d", name, mode, rc)
-        return False
-    return check_errors(check_list, out_str, err_str)
-
-
-def test_sigquit_resumes(*, name, args, patterns=(), **_):
-    return all(
-        run_sigquit_resume(name, args, mode, patterns) for mode in ("tools", "preload")
-    )
 
 
 # ==============================================================================
@@ -799,15 +729,7 @@ TEST_DEFINITIONS = [
         'name': 'test_assert_trap',
         'description': 'Assert trap dumps faulting wave with registers and disassembly',
         'args': '1',
-        'patterns': [
-            r"HSA_STATUS_ERROR_EXCEPTION: An HSAIL operation resulted in a hardware exception\.",
-            r"\(stopped, reason: ASSERT_TRAP\)",
-            r"exec: (00000000)?00000001",
-            r"s0:",
-            r"v0:",
-            r"0x0000: 22222222 11111111",
-            r"Disassembly for function vector_add_assert_trap\(int\*, int\*, int\*\)",
-        ],
+        'patterns': ASSERT_TRAP_PATTERNS,
     },
     {
         'name': 'test_memory_violation',
@@ -911,19 +833,10 @@ TEST_DEFINITIONS = [
         ],
     },
     {
-        'name': 'test_sigquit_resumes',
-        'description': 'SIGQUIT dump names the kernel and the program then finishes',
-        'args': '8',
-        'function': test_sigquit_resumes,
-        'patterns': [
-            r"<sigquit_resume_kern\(int\*, int const\*\)>",
-            r"Disassembly for function sigquit_resume_kern\(int\*, int const\*\)",
-        ],
-    },
-    {
         'name': 'test_preload_dump',
         'description': 'Agent preloaded without HSA_TOOLS_LIB dumps a faulting wave',
         'args': '1',
+        'patterns': ASSERT_TRAP_PATTERNS,
         'function': test_preload_dump,
     },
     {

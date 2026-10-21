@@ -39,7 +39,6 @@ extern void SnapshotCodeObjOnLoadTest ();
 extern void SaveCodeObjectTest ();
 extern void PrintAllWavesTest ();
 extern void SigquitTest ();
-extern void SigquitResumeTest ();
 extern void VectorAddDebugTrapTestNoDebug ();
 
 static void PrintTestInfo (const char *header);
@@ -50,7 +49,6 @@ static void RunSnapshotCodeObjOnLoadTest ();
 static void RunSaveCodeObjectTest ();
 static void RunPrintAllWavesTest ();
 static void RunSigquitTest ();
-static void RunSigquitResumeTest ();
 static void RunVectorAddDebugTrapTestNoDebug ();
 
 int
@@ -104,9 +102,6 @@ main (int argc, char *argv[])
           break;
         case 7:
           RunVectorAddDebugTrapTestNoDebug ();
-          break;
-        case 8:
-          RunSigquitResumeTest ();
           break;
         default:
           std::cout << "  *** Invalid Test ID ***" << std::endl;
@@ -261,14 +256,6 @@ RunSigquitTest ()
       TEST_ASSERT (err == hipSuccess, "hipDeviceReset");
     }
   PrintTestInfo ("Sigquit end");
-}
-
-static void
-RunSigquitResumeTest ()
-{
-  PrintTestInfo ("SigquitResume start");
-  SigquitResumeTest ();
-  PrintTestInfo ("SigquitResume end");
 }
 
 static void
