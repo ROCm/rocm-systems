@@ -300,7 +300,10 @@ WORKLOAD_CONFIGS = {
         "family": "sglang-disagg",
         # madengine names each result row <this>_2p2d_isl<I>_osl<O>_con<C>.
         "model_repo": "sglang-disagg-deepseek-r1",
-        "base_image": "rocm/sgl-dev:v0.5.16-rocm720-mi35x-20260807",
+        # A ROCm SDK (TheRock) base, not a rocm7xx one: the candidate librccl
+        # is kpack-split, and a pre-kpack HIP runtime segfaults on it in
+        # ncclInitKernelsForDevice.
+        "base_image": "rocm/sgl-dev:v0.5.22-rocm10-mi35x-20261020",
         "gpu_target": "gfx950",
         "metric_key": "output_token_throughput_tok_s",
         "metric_unit": "output tok/s of the whole 2P+2D deployment",
@@ -1229,9 +1232,10 @@ def stage_maxtext_baseline(
 
 # MAD's Dockerfile ends with `dpkg -r --force-all` on the distro rdma-core,
 # which leaves apt unusable, so the swap's patchelf has to come from pip.
-SGLANG_SWAP_TOOLS = (
-    "RUN command -v patchelf >/dev/null || pip install --no-cache-dir patchelf\n"
-)
+# Pinned to the version the MaxText swap gets from apt: the 0.19.1 the
+# rocm10 sgl-dev venv ships refuses to set a RUNPATH on the kpack-split
+# librccl ("section content is not naturally aligned").
+SGLANG_SWAP_TOOLS = "RUN pip install --no-cache-dir patchelf==0.18.0.0\n"
 
 
 def sglang_recipe(mad_dir: Path, from_ref: str) -> str:
