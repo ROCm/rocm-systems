@@ -200,9 +200,9 @@ struct QueueRegistrationRequest {
   QueueDoorbellBinding doorbell;
   std::shared_ptr<QueueBindingFactory> binding_factory;
   /// @brief Optional initial hardware read cursor.
-  /// @details MES supplies the cursor captured from the SDMA MQD; legacy/KFD
-  /// queues leave it unset so the binding loads the already-published cursor
-  /// from the consumer pointer address on first service.
+  /// @details MES supplies the cursor captured from the SDMA MQD; fresh KFD SDMA
+  /// and native PM4 queues supply zero. Bindings that leave it unset load the
+  /// already-published cursor from the consumer pointer address on first service.
   std::optional<uint64_t> initial_consumer_cursor = std::nullopt;
   QueueAbi abi = QueueAbi::Generic;
   uint64_t queue_descriptor_address = 0;

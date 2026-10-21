@@ -32,14 +32,30 @@ test_categories:
       - "MappingStages/P2pImportMapStageFails.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      - "ConnStepAcquireMicrotest.*"
       # ras/ras.cc
       - "RasMicrotest.*"
       # ras/diagnostics_checks_common.cc
       - "RasDiagnosticsCommonMicrotest.*"
       # ras/collectives.cc
       - "RasCollectivesMicrotest.*"
+      # ras/diagnostics.cc
+      - "RasDiagnosticsMicrotest.*"
+      # ras/rasnet.cc
+      - "RasNetMicrotest.*"
+      # ras/diagnostics_gpu.cc
+      - "RasDiagnosticsGpuMicrotest.*"
+      # ras/peers.cc
+      - "RasPeersMicrotest.*"
+      # ras/diagnostics_env.cc
+      - "RasDiagnosticsEnvMicrotest.*"
       # ras/client.cc
       - "RasClientMicrotest.*"
+      # ras/client_support.cc
+      - "RasClientSupportMicrotest.*"
+      - "Commands/RasClientSupportEnqueueFailureMicrotest.*"
+      # ras/ras_param.cc
+      - "RasParamMicrotest.*"
       # rma/rma_proxy_launch.cc
       - "RmaProxyBatchMemOpTest.*"
       - "RmaProxyDescriptorTest.*"
@@ -69,18 +85,48 @@ test_categories:
       - "TuningGeneralMicrotest.*"
       # tuning/tuning.cc
       - "TuningMicrotest.*"
+      # plugin/tuner/csv_tuner.cc
+      - "CsvTunerMicrotest.*"
+      # include/param/utils.h, include/param/parser_common.h
+      - "ParamUtilsMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
+      - "GroupCommHeadChainTest.*"
       - "ReclaimPlannerStateTest.*"
       - "AsyncLaunchTest.*"
       - "GroupJobAbortTest.*"
       - "GroupApiWrapperTest.*"
       - "ArgsGlobalCheckTest.*"
+      - "GroupJobUnlinkCommsTest.*"
+      - "JobFreeCallbacksTest.*"
+      - "MgmtTaskJobFuncTest.*"
+      - "GroupRegisterSymmetricCeInitTest.*"
+      - "GroupRegisterSymmetricTest.*"
+      - "GroupCleanupTest.*"
+      - "AsyncJobLaunchDirectTest.*"
       # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
+      # misc/ionicdvsymbols.cc, misc/mlx5dvsymbols.cc
+      - "DvSymbolsTestIsolated.*"
+      # ce_coll.cc (rccl-UnitTestsMicroCe)
+      - "CeCollMicrotest.*"
+      - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
+      # graph/rccl_graph_gen.cc
+      - "GraphGenPermuteTest.*"
+      - "GraphGenIsPrimeTest.*"
+      - "NodeCounts/GraphGenWaleckiTest.*"
+      - "EvenNodeCounts/GraphGenWaleckiEvenTest.*"
+      - "GraphGenWaleckiGuardTest.*"
+      - "Tables/GraphGenFixedRingTableTest.*"
+      - "PrimeNodeCounts/GraphGenPrimeRingTest.*"
+      - "GraphGenPrimeRingGuardTest.*"
+      - "GraphGenGreedyTest.*"
+      - "GraphGenGenerateRingsTest.*"
+      - "Constructions/GraphGenDispatchTest.*"
+      - "GraphGenCutIndicesTest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
@@ -91,6 +137,8 @@ test_categories:
       - "Nccl*"
       - "Sym*"
       - "Win*"
+      # test/common/ProcessIsolatedTestRunner.cpp
+      - "ProcessIsolatedRunnerMicrotest.*"
     exclude_windows:
       - "*"
     labels:

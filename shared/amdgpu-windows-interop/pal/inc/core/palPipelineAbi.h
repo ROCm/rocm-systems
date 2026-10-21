@@ -81,6 +81,8 @@ enum class AmdGpuMachineType : uint8
     Gfx1151 = 0x4A,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1151
     Gfx1152 = 0x55,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1152
     Gfx1153 = 0x58,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1153
+    Gfx1170    = 0x5D,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1170
+    Gfx1171 = 0x5E,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1171
     Gfx1200   = 0x48,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1200
     Gfx1201   = 0x4E,  ///< EF_AMDGPU_MACH_AMDGCN_GFX1201
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 958
@@ -124,6 +126,9 @@ enum GfxIpStepping : uint16
     GfxIpSteppingStrixHalo     = 1,
     GfxIpSteppingKrackan1      = 2,
     GfxIpSteppingKrackan2      = 3,
+    // GFXIP 11.7.x steppings:
+    GfxIpSteppingGfx1170       = 0,
+    GfxIpSteppingGfx1171       = 1,
 
     // GFXIP 12.0.x steppings:
     GfxIpSteppingNavi44        = 0,
@@ -575,6 +580,20 @@ enum class UserDataMapping : uint32
                                          ///  and topology. It can be valid for various shader stages.
     DynamicStateTable     = 0x10000024,  ///< 32-bit pointer to GPU memory containing dynamic state table.
 
+#if PAL_WORK_LISTS_SUPPORT
+    StateTableEntryAddr   = 0x10000025,  ///< 64-bit pointer to GPU memory containing the current state-block table
+                                         ///  entry active during a Work List dispatch or draw.  Can be omitted if
+                                         ///  the shader doesn't have non-uniform user-data arguments stored in the
+                                         ///  state-block table.
+    PrimaryRecordAddr     = 0x10000026,  ///< 64-bit pointer to GPU memory containing the current primary record which
+                                         ///  corresponds to the current Work List dispatch or draw.  Can be omitted if
+                                         ///  the shader doesn't have any user-data overridden in its primary record.
+    SecondaryRecordAddr   = 0x10000027,  ///< 64-bit pointer to GPU memory containing the current secondary record
+                                         ///  which corresponds to the current Work List dispatch or draw.  Can be
+                                         ///  omitted if the shader doesn't have any user-data overridden in its
+                                         ///  secondary record.
+#endif
+
     // Range of values for a user data PAL metadata register to be resolved at pipeline create time in PAL.
     // PipelineLinkStart+N is initialized by PAL to the (low 32 bits of the) address of symbol _amdgpu_pipelineLinkN
     // in any ELF piece of the pipeline. For odd N, the symbol is optional; if it is not present, the register is
@@ -888,6 +907,17 @@ enum class CbConstUsageType : uint8
     Gt0Int,
     Other
 };
+
+#if PAL_WORK_LISTS_SUPPORT
+/// Different draw/dispatch operation types for a Work List.
+enum class WorkListOpType : uint8
+{
+    Dispatch     = 0,
+    Draw         = 1,
+    DrawIndexed  = 2,
+    DispatchMesh = 3,
+};
+#endif
 
 /// Defines the various methods for how tessellated patches can be distributed amongst the GPU's shader engines.
 enum class TessDistributionMode : uint8

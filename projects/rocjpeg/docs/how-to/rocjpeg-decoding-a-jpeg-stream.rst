@@ -116,6 +116,7 @@ The behaviors of ``rocJpegDecode()`` and ``rocJpegDecodeBatched()`` depend on ``
                             If specified, allocate the RocJpegImage buffers based on these dimensions. */
   } RocJpegDecodeParams;
 
+To decode the full image, set the coordinates of ``crop_rectangle`` to 0.  To decode an area within the image,  ensure that the coordinate of ``crop_rectangle`` lie within the image. The decode functions will return ``ROCJPEG_STATUS_INVALID_PARAMETER`` for crop areas that lie outside the image. When using a batched decode, any invalid crop rectangle will cause the whole batch to be rejected, and no image in the batch will be decoded.
 
 For example, consider a situation where ``RocJpegOutputFormat`` is set to ``ROCJPEG_OUTPUT_NATIVE``. Based on the chroma subsampling of the input image, ``rocJpegDecode()`` does one of the following:
 

@@ -248,7 +248,11 @@ class spm_config:
 
     @staticmethod
     def get_type_string(key):
-        type_map = {0: "None", 1: "SAMPLE_INTERVAL_SCLK_CYCLES"}
+        type_map = {
+            0: "None",
+            1: "SAMPLE_INTERVAL_SCLK_CYCLES",
+            2: "SAMPLE_INTERVAL_REFCLK_CYCLES",
+        }
         return type_map[key]
 
     def get_as_dict(self):

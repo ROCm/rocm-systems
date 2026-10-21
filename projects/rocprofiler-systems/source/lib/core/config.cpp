@@ -16,7 +16,7 @@
 #include "logger/logger.hpp"
 #include "mproc.hpp"
 #include "perf.hpp"
-#include "perfetto.hpp"
+#include "perfetto/category_registry.hpp"
 #include "sdk/tracing-config-deps.hpp"
 #include "sdk/tracing-config.hpp"
 #include "utility.hpp"
@@ -789,14 +789,6 @@ configure_settings(bool _init)
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE,
                               "Enable perfetto backend for tracing", false, "backend",
                               "perfetto");
-
-    ROCPROFSYS_CONFIG_SETTING(bool, env_vars::TRACE_LEGACY,
-                              "[DEPRECATED] The new default option is to use data from "
-                              "cached buffer. When set to true system will use "
-                              "legacy direct mode for perfetto tracing instead of "
-                              "deferred trace generation. When false (default), uses "
-                              "cached mode with minimal runtime overhead.",
-                              false, "backend", "perfetto");
 
     ROCPROFSYS_CONFIG_SETTING(bool, env_vars::USE_PERFETTO,
                               "[DEPRECATED] Renamed to ROCPROFSYS_TRACE", false,
@@ -1807,8 +1799,6 @@ configure_settings(bool _init)
                               std::string{ env_vars::LOG_LEVEL });
     handle_deprecated_setting(std::string{ env_vars::VERBOSE },
                               std::string{ env_vars::LOG_LEVEL });
-    handle_deprecated_setting(std::string{ env_vars::TRACE_LEGACY },
-                              std::string{ env_vars::TRACE });
     handle_deprecated_setting(std::string{ env_vars::USE_SHMEM },
                               std::string{ env_vars::USE_OPENSHMEM });
 
@@ -2702,17 +2692,6 @@ get_verbose()
 }
 
 bool&
-get_use_perfetto()
-{
-    static auto const _trace_setting  = get_config()->at(env_vars::TRACE);
-    static auto const _legacy_setting = get_config()->at(env_vars::TRACE_LEGACY);
-    auto const&       _trace = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
-    auto const& _legacy      = static_cast<tim::tsettings<bool>&>(*_legacy_setting).get();
-    static bool _v           = _trace && _legacy;
-    return _v;
-}
-
-bool&
 get_use_timemory()
 {
     static auto const _v = get_config()->find(std::string{ env_vars::PROFILE });
@@ -3092,7 +3071,9 @@ get_perfetto_output_filename()
     auto basename = dynamic_cast<tim::tsettings<std::string>&>(*setting->second).get();
 
     auto dir = std::string{};
-    auto ext = std::string{ "pftrace" };
+    // Perfetto output is always .pftrace, regardless of what extension the user's
+    // basename implies.
+    const auto ext = std::string{ "pftrace" };
 
     if(const auto pos_dir = basename.find_last_of('/'); pos_dir != std::string::npos)
     {
@@ -3102,7 +3083,6 @@ get_perfetto_output_filename()
 
     if(const auto pos_ext = basename.find_last_of('.'); pos_ext + 1 < basename.length())
     {
-        ext      = basename.substr(pos_ext + 1);
         basename = basename.substr(0, pos_ext);
     }
 
@@ -3402,14 +3382,6 @@ get_use_tmp_files()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
-bool
-get_merge_perfetto_files()
-{
-    static auto const _v =
-        get_config()->find(std::string{ env_vars::MERGE_PERFETTO_FILES });
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
 std::string
 get_tmpdir()
 {
@@ -3507,9 +3479,16 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
 
     LOG_DEBUG("Initial ROCPROFSYS_PERFETTO_FILE='{}', suffix='{}'", val, suffix);
 
-    // If absolute path is provided, return it as-is
+    // If absolute path is provided, enforce the .pftrace extension and
+    // return it as-is otherwise
     if(!val.empty() && val.at(0) == '/')
     {
+        const auto pos_ext = val.find_last_of('.');
+        if(pos_ext != std::string::npos)
+        {
+            val.resize(pos_ext);
+        }
+        val += ".pftrace";
         LOG_DEBUG("Absolute path, returning: '{}'", val);
         return val;
     }
@@ -3517,7 +3496,7 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     // Parse the filename into directory, basename, and extension
     auto const pos_dir = val.find_last_of('/');
     auto       dir     = std::string{};
-    auto       ext     = std::string{ "pftrace" };
+    const auto ext     = std::string{ "pftrace" };
 
     // If the filename contains a directory, extract it
     if(pos_dir != std::string::npos)
@@ -3530,7 +3509,6 @@ get_perfetto_output_filename_with_suffix(std::string_view suffix)
     auto const pos_ext = val.find_last_of('.');
     if(pos_ext != std::string::npos && pos_ext + 1 < val.length())
     {
-        ext = val.substr(pos_ext + 1);
         val = val.substr(0, pos_ext);
     }
 
@@ -3643,10 +3621,9 @@ get_ump_absolute_path()
     }
 
     // Co-locate UMP output with the active backend: rocpd's .db dir when
-    // rocpd is on and trace-cache Perfetto is not; otherwise the Perfetto
-    // file's dir (covers both trace-cache and legacy Perfetto).
+    // rocpd is on and Perfetto is not; otherwise the Perfetto file's dir.
     const auto source =
-        (get_use_rocpd() && !get_caching_perfetto())
+        (get_use_rocpd() && !get_use_perfetto())
             ? get_database_absolute_path("rocpd", std::to_string(process::get_id()))
             : get_perfetto_output_filename();
     return path::parent_path(source);
@@ -3667,13 +3644,11 @@ get_use_unified_memory_profiling()
 }
 
 bool&
-get_caching_perfetto()
+get_use_perfetto()
 {
-    static auto const _trace_setting  = get_config()->at(env_vars::TRACE);
-    static auto const _legacy_setting = get_config()->at(env_vars::TRACE_LEGACY);
+    static auto const _trace_setting = get_config()->at(env_vars::TRACE);
     auto const&       _trace = static_cast<tim::tsettings<bool>&>(*_trace_setting).get();
-    auto const& _legacy      = static_cast<tim::tsettings<bool>&>(*_legacy_setting).get();
-    static bool _v           = _trace && !_legacy;
+    static bool       _v     = _trace;
     return _v;
 }
 

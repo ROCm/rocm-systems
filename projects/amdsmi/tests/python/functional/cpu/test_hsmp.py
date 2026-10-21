@@ -51,7 +51,6 @@ class TestCpuHsmp(unittest.TestCase):
             pass
 
     def setUp(self):
-        self.raise_exception = None
         self.common.amdsmi_smart_init()
 
     def tearDown(self):

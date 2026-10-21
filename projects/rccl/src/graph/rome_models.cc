@@ -3951,6 +3951,21 @@ end:
   return ncclSuccess;
 }
 
+/* Append one character to a treeBase row, refusing to overrun it. The bound
+ * lives here so the two call sites below cannot drift apart.
+ */
+static ncclResult_t appendTreeBaseChar(struct ncclTopoGraph* graph, int x, int* y, char c) {
+  // Longest segment transcription that still leaves room for the terminating 0.
+  const int maxTreeBaseLen = (int)sizeof(graph->treeBase[0]) - 1;
+  if (*y >= maxTreeBaseLen) {
+    WARN("Tree too long in user-defined trees (max %d) (RCCL_TREES); initialization will fail", maxTreeBaseLen);
+    return ncclInvalidUsage;
+  }
+  graph->treeBase[x][*y] = c;
+  (*y)++;
+  return ncclSuccess;
+}
+
 /* Parse user defined treeBase for complicated trees. Format is like :
  * "(4(2(3)(1))(6(5)))"
  *
@@ -3963,6 +3978,10 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
   int gpu = 0;
   int offset = 0;
   int start_offset = offset;
+  if (str == NULL) {
+    WARN("No user-defined trees to parse");
+    return ncclInvalidArgument;
+  }
   if (str[0] == 0) {
     graph->treeBase[0][0] = 0;
     return ncclSuccess;
@@ -3970,15 +3989,25 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
   int status = 0; // 0 : between numbers, 1 : inside number
   int ngpus = system->nodes[GPU].count;
   int x = 0;
+  // Most trees that still leave a row for the terminating empty one.
+  const int maxTrees = (int)(sizeof(graph->treeBase) / sizeof(graph->treeBase[0])) - 1;
   do {
     int digit = str[offset] - '0';
     if (digit >= 0 && digit <= 9) {
       switch (status) {
       case 0:
+        if (gpu >= NCCL_TOPO_MAX_NODES) {
+          WARN("Too many GPUs in one tree (max %d) in user-defined trees (RCCL_TREES); initialization will fail", NCCL_TOPO_MAX_NODES);
+          return ncclInvalidUsage;
+        }
         gpus[gpu] = digit;
         status = 1;
         break;
       case 1:
+        if (gpus[gpu] > (INT_MAX - digit) / 10) {
+          WARN("GPU number too large in user-defined trees (RCCL_TREES); initialization will fail");
+          return ncclInvalidUsage;
+        }
         gpus[gpu] = gpus[gpu] * 10 + digit;
         break;
       }
@@ -3988,34 +4017,64 @@ ncclResult_t parseGraphLight(const char* str, struct ncclTopoSystem* system, str
       }
       status = 0;
       if (str[offset] == '|' || str[offset] == 0) {
+        if (x >= maxTrees) {
+          WARN("Too many trees in user-defined trees (max %d) (RCCL_TREES); initialization will fail", maxTrees);
+          return ncclInvalidUsage;
+        }
         int r = 0, y = 0;
         while (start_offset < offset) {
         // for (int r=0; r<gpu; r++) {
           if (str[start_offset] == '(' || str[start_offset] == ')') {
-            graph->treeBase[x][y] = str[start_offset];
-            y++;
+            NCCLCHECK(appendTreeBaseChar(graph, x, &y, str[start_offset]));
             start_offset++;
           } else {
+            if (r >= gpu) {
+              WARN("More tokens than GPU numbers in a user-defined tree (RCCL_TREES); initialization will fail");
+              return ncclInvalidUsage;
+            }
             int g = gpus[r];
-            // remap if needed
-            if (gpu_map) g = gpu_map[g];
+            // remap if needed; gpu_map is indexed by GPU number and only has ngpus entries
+            if (gpu_map) {
+              if (g >= ngpus) {
+                WARN("GPU %d in user-defined trees (RCCL_TREES) is out of range; initialization will fail", g);
+                return ncclInvalidUsage;
+              }
+              g = gpu_map[g];
+            }
             r++;
             int j = 0;
             // Translate gpu numbers into ranks
             for (j = 0; j < ngpus; j++)
               if (g == system->nodes[GPU].nodes[j].gpu.dev) break;
             if (j < ngpus) {
-              while (str[start_offset] != '(' && str[start_offset] != ')') start_offset++;
-              char number_str[10];
-              sprintf(number_str, "%d", g);
+              while (start_offset < offset && str[start_offset] != '(' && str[start_offset] != ')') {
+                if (str[start_offset] < '0' || str[start_offset] > '9') {
+                  WARN("Stray character '%c' in a user-defined tree (RCCL_TREES); initialization will fail",
+                       str[start_offset]);
+                  return ncclInvalidUsage;
+                }
+                start_offset++;
+              }
+              if (start_offset >= offset) {
+                WARN("GPU number not closed by ')' in a user-defined tree (RCCL_TREES); initialization will fail");
+                return ncclInvalidUsage;
+              }
+              // Wide enough for any int, including "-2147483648", plus its terminator.
+              char number_str[12];
+              snprintf(number_str, sizeof(number_str), "%d", g);
               int k = 0;
               while (number_str[k] != 0) {
-                graph->treeBase[x][y] = number_str[k];
-                y++;
+                NCCLCHECK(appendTreeBaseChar(graph, x, &y, number_str[k]));
                 k++;
               }
             } else return ncclInternalError;
           }
+        }
+        // Every number the scanner found must have been transcribed, or a stray separator
+        // swallowed one and the tree would silently lose a GPU.
+        if (r != gpu) {
+          WARN("Fewer GPU numbers transcribed than parsed in a user-defined tree (RCCL_TREES); initialization will fail");
+          return ncclInvalidUsage;
         }
         graph->treeBase[x][y] = 0;
         x++;
@@ -4284,6 +4343,12 @@ static ncclResult_t parseRomeSystem(struct ncclTopoSystem* system, struct rcclRo
       // Only count direct XGMI links: since NCCL 2.30, GPU->GPU routes via DEV nodes, so direct is
       // count==3 and indirect count==4. Counting indirect breaks Rome matching on sparse topos.
       if (path->type != PATH_NVL || path->count > 3) continue;
+      // A hop between compute partitions of one physical device is on-package, not a board-level
+      // XGMI link, and these models describe how GPUs are wired to each other on a board. Counting
+      // it makes a comm of one device's partitions look like a hive to parseRome4P2H(), which then
+      // sets RCCL_TOPO_4P2H_ROME even with no model matched and caps the ring at 2 channels. Its bw
+      // is MLOPART_LOC_BW as well, so the width division below would score it at ~54 links.
+      if (ncclTopoIsMloPartSibling(node, system->nodes[GPU].nodes + gpu_scores[n].g)) continue;
       romeTopo->connMatrix[i * romeTopo->nGpus + n] = path->bw / ncclTopoXGMISpeed(node->gpu.gcn);
       count++;
     }
