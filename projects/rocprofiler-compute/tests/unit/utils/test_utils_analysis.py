@@ -43,6 +43,13 @@ from utils.utils_analysis import (
 )
 
 ALL_NATIVE_KINDS = ("counters", "dispatch", "kernel_symbols", "agents")
+LINEAR_FORWARD_WIRE = (
+    "nn.Module.Linear.forward:simple_torch_code.py:19"
+    "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=()|torch"
+)
+ADDMM_WIRE = "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|scope=FUNCTION|args=()|torch"
+TEST_GUID = "00000000-0000-0000-0000-000000000001"
+TEST_GUID_OTHER = "00000000-0000-0000-0000-000000000002"
 
 
 def native_counters(*rows):
@@ -180,15 +187,6 @@ def parsed_marker_row(
         "Kernel_End_Timestamps": [] if kernel_ends is None else kernel_ends,
         "launcher_thread_id": launcher_thread_id,
     }
-
-
-LINEAR_FORWARD_WIRE = (
-    "nn.Module.Linear.forward:simple_torch_code.py:19"
-    "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=()|torch"
-)
-ADDMM_WIRE = "aten::addmm:n/a|seqNr=1|tid=1|ftid=0|scope=FUNCTION|args=()|torch"
-TEST_GUID = "00000000-0000-0000-0000-000000000001"
-TEST_GUID_OTHER = "00000000-0000-0000-0000-000000000002"
 
 
 def linear_marker_row(
@@ -3462,6 +3460,19 @@ def test_process_one_pass_builds_ml_api_trace_df(tmp_path):
     process_ml_api_trace_output(workload, str(workload_dir))
     assert len(workload.ml_api_trace_df) == 1
     assert workload.ml_api_call_trees["1"][0].kernel_launches == 1
+
+
+@pytest.mark.parametrize("csv_kind", ["marker", "counter"])
+def test_process_exits_when_guid_column_is_missing(tmp_path, monkeypatch, csv_kind):
+    messages = record_console_error_and_exit(monkeypatch)
+    marker = linear_marker_row(1, 0, 100)
+    counter = counter_row(1, "addmm_kernel", 10, 40)
+    row_without_guid = marker if csv_kind == "marker" else counter
+    del row_without_guid["GUID"]
+    write_ml_api_pass(tmp_path, 0, [marker], [counter])
+    with pytest.raises(SystemExit):
+        process_ml_api_trace_output(schema.Workload(), str(tmp_path))
+    assert "missing required columns ['GUID']" in messages[-1]
 
 
 def test_process_two_passes_collapse_to_one_launch(tmp_path):

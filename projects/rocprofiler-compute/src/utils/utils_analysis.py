@@ -115,30 +115,22 @@ _REQUIRED_MARKER_COLUMNS = (
     "Function",
     "Thread_Id",
     "Correlation_ID",
+    "GUID",
     "Start_Timestamp",
     "End_Timestamp",
 )
 _REQUIRED_COUNTER_COLUMNS = (
     "Correlation_ID",
-    "Dispatch_ID",
-    "Kernel_Name",
-    "Grid_Size",
-    "Workgroup_Size",
-    "LDS_Per_Workgroup",
-    "Start_Timestamp",
-    "End_Timestamp",
-)
-_DISPATCH_KEEP_COLUMNS = (
-    "Kernel_Name",
-    "Start_Timestamp",
-    "End_Timestamp",
-    "Correlation_ID",
-    "Dispatch_ID",
     "GUID",
+    "Dispatch_ID",
+    "Kernel_Name",
     "Grid_Size",
     "Workgroup_Size",
     "LDS_Per_Workgroup",
+    "Start_Timestamp",
+    "End_Timestamp",
 )
+_MARKER_DISPATCH_JOIN_KEYS = ("Correlation_ID", "GUID")
 _PASS_DROP_COLUMNS = (
     "Correlation_ID",
     "GUID",
@@ -1313,8 +1305,6 @@ def _load_marker_trace_dataframe(marker_path: Path) -> pd.DataFrame:
             f"Marker CSV {marker_path} is missing required columns {missing_columns}",
         )
     kept_columns = list(_REQUIRED_MARKER_COLUMNS)
-    if "GUID" in marker_df.columns:
-        kept_columns.append("GUID")
     null_columns = [column for column in kept_columns if marker_df[column].isna().any()]
     if null_columns:
         console_error(
@@ -1348,18 +1338,9 @@ def _collapse_counter_dispatches(
             "analysis",
             f"Counter CSV {counter_path} has null values in {null_columns}",
         )
-    group_keys = ["Dispatch_ID"]
-    if "GUID" in counter_df.columns:
-        group_keys.append("GUID")
-    keep_columns = [
-        column for column in _DISPATCH_KEEP_COLUMNS if column in counter_df.columns
-    ]
-    for group_key in group_keys:
-        if group_key not in keep_columns:
-            keep_columns.append(group_key)
     collapsed = (
-        counter_df[keep_columns]
-        .groupby(group_keys, sort=False, dropna=False)
+        counter_df[list(_REQUIRED_COUNTER_COLUMNS)]
+        .groupby(["Dispatch_ID", "GUID"], sort=False, dropna=False)
         .first()
         .reset_index()
     )
@@ -1369,17 +1350,6 @@ def _collapse_counter_dispatches(
             "End_Timestamp": "Kernel_End_Timestamp",
         }
     )
-
-
-def _join_keys_for_marker_and_dispatch(
-    marker_df: pd.DataFrame,
-    dispatch_df: pd.DataFrame,
-) -> list[str]:
-    """Correlation_ID and GUID."""
-    join_keys = ["Correlation_ID"]
-    if "GUID" in marker_df.columns and "GUID" in dispatch_df.columns:
-        join_keys.append("GUID")
-    return join_keys
 
 
 def _outer_join_dispatches_and_markers(
@@ -1392,7 +1362,7 @@ def _outer_join_dispatches_and_markers(
     return pd.merge(
         dispatch_df,
         marker_ordered,
-        on=_join_keys_for_marker_and_dispatch(marker_df, dispatch_df),
+        on=list(_MARKER_DISPATCH_JOIN_KEYS),
         how="outer",
     )
 
@@ -1592,13 +1562,12 @@ def _group_kernels_onto_markers(joined_df: pd.DataFrame) -> pd.DataFrame:
             "Start_Timestamp": first["Start_Timestamp"],
             "End_Timestamp": first["End_Timestamp"],
             "Correlation_ID": first["Correlation_ID"],
+            "GUID": first["GUID"],
             "Kernel_Names": kernel_names,
             "Kernel_Start_Timestamps": kernel_starts,
             "Kernel_End_Timestamps": kernel_ends,
             "Kernel_Pmc_Group_Keys": pmc_group_keys,
         }
-        if "GUID" in group.columns:
-            record["GUID"] = first["GUID"]
         if "_marker_order" in group.columns:
             record["_marker_order"] = first["_marker_order"]
         records.append(record)
