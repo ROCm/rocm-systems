@@ -203,7 +203,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 538 · build snapshot" aria-label="Stars: 538">538</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 461 · build snapshot" aria-label="Forks: 461">461</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 462 · build snapshot" aria-label="Forks: 462">462</li>
       </ul>
     </div>
   </a>
@@ -256,7 +256,7 @@
       ROCm/rocm-systems
       <ul class="md-source__facts">
         <li class="md-source__fact md-source__fact--stars" data-repository-stat="stargazers_count" title="Stars: 538 · build snapshot" aria-label="Stars: 538">538</li>
-        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 461 · build snapshot" aria-label="Forks: 461">461</li>
+        <li class="md-source__fact md-source__fact--forks" data-repository-stat="forks_count" title="Forks: 462 · build snapshot" aria-label="Forks: 462">462</li>
       </ul>
     </div>
   </a>
@@ -2632,9 +2632,10 @@ smin/umin, smax/umax, and, or, xor, inc, dec.</p>
 <p><strong>Scalar atomics</strong> (<code>s_atomic_*</code> and <code>s_atomic_*_x2</code>, CDNA1–4) bypass the
 L1 scalar cache and perform read-modify-write at L2; the atomic boundary's
 coherence epoch makes stale K$ lines refetch. The old value is returned to
-SDATA when GLC is set. Supported: swap, add, sub, smin/umin, smax/umax,
-and, or, xor, inc, dec. <code>s_atomic_cmpswap[_x2]</code> and <code>s_buffer_atomic_*</code> are
-not yet implemented.</p>
+SDATA when GLC is set. Supported: swap, cmpswap, add, sub, smin/umin,
+smax/umax, and, or, xor, inc, dec. Compare-swap reads the source and then
+the compare value from SDATA and returns only the old value, to the low half.
+<code>s_buffer_atomic_*</code> are not yet implemented.</p>
 <p><strong>Cache management instructions:</strong></p>
 <ul>
 <li><code>s_dcache_inv</code> / <code>s_dcache_inv_vol</code> — invalidate the L1 scalar cache</li>
