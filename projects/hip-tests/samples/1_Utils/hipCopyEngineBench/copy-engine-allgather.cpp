@@ -130,6 +130,12 @@ struct Rank {
   std::vector<void*> mapped;
 };
 
+std::string Fixed2(double value) {
+  std::ostringstream text;
+  text << std::fixed << std::setprecision(2) << value;
+  return text.str();
+}
+
 uint32_t ExpectedWord(size_t rank, size_t index) { return static_cast<uint32_t>(rank + index); }
 
 // Launches one kernel per GPU that runs the collective |repeats| times, with epochs |epoch| to
@@ -310,12 +316,12 @@ int Run(const Params& params, const World& world) {
     std::cout << "GPUs: " << num_gpus << ", one block of " << (num_gpus - 1)
               << " submitting warp(s) per GPU"
               << (world.size > 1 ? ", one MPI rank per GPU" : ", one process") << "\n";
-    std::cout << std::left << std::setw(14) << "TotalBytes" << std::setw(12) << "ChunkBytes"
+    std::cout << std::left << std::setw(14) << "Size(B)" << std::setw(18) << "SizePerRank (B)"
               << std::setw(14) << "Device(us)" << std::setw(14) << "DevMax(us)" << std::setw(14)
               << "Host(us)" << std::setw(14) << "AlgBW(GiB/s)" << std::setw(14) << "BusBW(GiB/s)"
               << std::setw(8) << "Errors" << "\n";
     csv = std::make_unique<CsvWriter>(params.output_file);
-    csv->WriteHeader({"#GPUs", "Total Size [B]", "Chunk Size [B]", "Device Latency [us] (Mean)",
+    csv->WriteHeader({"#GPUs", "Size [B]", "Size Per Rank [B]", "Device Latency [us] (Mean)",
                       "Device Latency [us] (Max)", "Host Latency [us]",
                       "Algorithm Bandwidth [GiB/s]", "Bus Bandwidth [GiB/s]", "Errors"});
   }
@@ -378,12 +384,12 @@ int Run(const Params& params, const World& world) {
 
     if (world.IsRoot()) {
       const std::string error_text = verified ? std::to_string(errors) : std::string("N/A");
-      std::cout << std::left << std::setw(14) << total << std::setw(12) << chunk << std::setw(14)
-                << device_us << std::setw(14) << device_max_us << std::setw(14) << host_mean_us
-                << std::setw(14) << alg_bw << std::setw(14) << bus_bw << std::setw(8) << error_text
-                << "\n";
-      csv->WriteRow(num_gpus, total, chunk, device_us, device_max_us, host_mean_us, alg_bw, bus_bw,
-                    error_text);
+      std::cout << std::left << std::setw(14) << total << std::setw(18) << chunk << std::setw(14)
+                << Fixed2(device_us) << std::setw(14) << Fixed2(device_max_us) << std::setw(14)
+                << Fixed2(host_mean_us) << std::setw(14) << Fixed2(alg_bw) << std::setw(14)
+                << Fixed2(bus_bw) << std::setw(8) << error_text << "\n";
+      csv->WriteRow(num_gpus, total, chunk, Fixed2(device_us), Fixed2(device_max_us),
+                    Fixed2(host_mean_us), Fixed2(alg_bw), Fixed2(bus_bw), error_text);
     }
     if (errors != 0) {
       if (world.IsRoot()) std::cerr << "Data verification failed\n";
