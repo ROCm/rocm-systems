@@ -168,6 +168,12 @@ reader_t::get_memory_alloc_details(const reader_types::timeline_event_t& event) 
     return m_impl->get_memory_alloc_details(event);
 }
 
+reader_types::track_info_ptr_t
+reader_t::track_of(const reader_types::timeline_event_t& event) const
+{
+    return m_impl->track_of(event);
+}
+
 std::optional<reader_types::sample_data_t>
 reader_t::get_sample_details(const reader_types::timeline_event_t& event) const
 {

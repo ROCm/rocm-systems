@@ -259,9 +259,9 @@ extern "C"
 
     /**
      * @brief Retrieves region_data_t for @p event.
-     * @param event Event returned by ph_get_track_events(). Only id and type
-     *        are used. The object does not need to stay alive after this call
-     *        returns.
+     * @param event Event identified by id and type. On success, track_id is set
+     *        to the track this row is placed on. The object must stay alive
+     *        until the call, or the future, has finished.
      * @param details Out parameter. is_valid is 0 before the call returns and
      *        stays 0 when the event is not a region or the row is missing.
      * @param future Same contract as ph_get_correlated_events().
@@ -274,7 +274,7 @@ extern "C"
      *       not invalidate an earlier result.
      */
     ph_result_t ph_get_region_details(ph_ctx_t             ctx,
-                                      const ph_event_t*    event,
+                                      ph_event_t*          event,
                                       ph_region_details_t* details,
                                       ph_future_t          future);
 
@@ -290,7 +290,7 @@ extern "C"
      *       ph_ctx_free(). A later call does not invalidate an earlier result.
      */
     ph_result_t ph_get_kernel_dispatch_details(ph_ctx_t                      ctx,
-                                               const ph_event_t*             event,
+                                               ph_event_t*                   event,
                                                ph_kernel_dispatch_details_t* details,
                                                ph_future_t                   future);
 
@@ -306,7 +306,7 @@ extern "C"
      *       ph_ctx_free(). A later call does not invalidate an earlier result.
      */
     ph_result_t ph_get_memory_copy_details(ph_ctx_t                  ctx,
-                                           const ph_event_t*         event,
+                                           ph_event_t*               event,
                                            ph_memory_copy_details_t* details,
                                            ph_future_t               future);
 
@@ -322,7 +322,7 @@ extern "C"
      *       ph_ctx_free(). A later call does not invalidate an earlier result.
      */
     ph_result_t ph_get_memory_alloc_details(ph_ctx_t                   ctx,
-                                            const ph_event_t*          event,
+                                            ph_event_t*                event,
                                             ph_memory_alloc_details_t* details,
                                             ph_future_t                future);
 

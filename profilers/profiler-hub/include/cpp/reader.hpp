@@ -235,6 +235,14 @@ struct reader_t
     get_memory_alloc_details(const reader_types::timeline_event_t& event) const;
 
     /**
+     * @brief Track this event is placed on
+     * @param event Timeline event identified by id and type
+     * @return The track resolve_track would choose, or null when the row is missing
+     */
+    [[nodiscard]] reader_types::track_info_ptr_t track_of(
+        const reader_types::timeline_event_t& event) const;
+
+    /**
      * @brief Get full sample details for a timeline event
      * @param event Timeline event to fetch details for
      * @return Sample data, or nullopt if type mismatch or not found

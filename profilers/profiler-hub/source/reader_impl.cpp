@@ -765,6 +765,18 @@ reader_t::impl::build_event_data(
 // Event detail methods
 // ============================================================================
 
+reader_types::track_info_ptr_t
+reader_t::impl::track_of(const reader_types::timeline_event_t& event)
+{
+    const auto& statements =
+        statements_for(*m_read_statements, event.unique_identifier.type);
+    const auto rows = statements.by_id(event.unique_identifier.id).to_vector();
+    if(rows.empty()) return {};
+
+    timeline_event_builder build_event{ *m_catalog };
+    return build_event(rows.front(), event.unique_identifier.type).track;
+}
+
 std::optional<reader_types::region_data_t>
 reader_t::impl::get_region_details(const reader_types::timeline_event_t& event)
 {

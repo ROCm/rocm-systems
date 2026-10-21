@@ -84,6 +84,10 @@ struct reader_t::impl
     [[nodiscard]] std::optional<reader_types::memory_alloc_data_t>
     get_memory_alloc_details(const reader_types::timeline_event_t& event);
 
+    // Track the same placement ph_get_track_events uses for this row.
+    [[nodiscard]] reader_types::track_info_ptr_t track_of(
+        const reader_types::timeline_event_t& event);
+
     // Event property queries
     [[nodiscard]] reader_types::call_stack_t get_call_stack(
         const reader_types::timeline_event_t& event);

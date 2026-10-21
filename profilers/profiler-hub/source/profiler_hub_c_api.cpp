@@ -77,12 +77,12 @@ is_duration_event_type(ph_event_type_t type)
 
 template <typename Details, typename Fetch>
 ph_result_t
-get_event_details(ph_ctx_t          ctx,
-                  const ph_event_t* event,
-                  Details*          details,
-                  ph_future_t       future,
-                  ph_event_type_t   expected_type,
-                  Fetch             fetch)
+get_event_details(ph_ctx_t        ctx,
+                  ph_event_t*     event,
+                  Details*        details,
+                  ph_future_t     future,
+                  ph_event_type_t expected_type,
+                  Fetch           fetch)
 {
     if(details != nullptr)
     {
@@ -98,14 +98,20 @@ get_event_details(ph_ctx_t          ctx,
     }
 
     const uint64_t event_id = event->id;
-    return run_operation(ctx, future, [ctx, event_id, details, fetch]() -> ph_result_t {
-        if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
-        {
-            return ready;
-        }
-        *details = fetch(ctx, event_id);
-        return PH_RESULT_SUCCESS;
-    });
+    return run_operation(
+        ctx, future, [ctx, event, event_id, expected_type, details, fetch]() -> ph_result_t {
+            if(const auto ready = ctx->wait_until_ready(); ready != PH_RESULT_SUCCESS)
+            {
+                return ready;
+            }
+            *details = fetch(ctx, event_id);
+            if(const auto track_id = ctx->track_id_of(event_id, expected_type);
+               track_id.has_value())
+            {
+                event->track_id = track_id.value();
+            }
+            return PH_RESULT_SUCCESS;
+        });
 }
 }  // namespace
 
@@ -388,7 +394,7 @@ ph_get_call_stack(ph_ctx_t          ctx,
 
 ph_result_t
 ph_get_region_details(ph_ctx_t             ctx,
-                      const ph_event_t*    event,
+                      ph_event_t*          event,
                       ph_region_details_t* details,
                       ph_future_t          future)
 {
@@ -403,7 +409,7 @@ ph_get_region_details(ph_ctx_t             ctx,
 
 ph_result_t
 ph_get_kernel_dispatch_details(ph_ctx_t                      ctx,
-                               const ph_event_t*             event,
+                               ph_event_t*                   event,
                                ph_kernel_dispatch_details_t* details,
                                ph_future_t                   future)
 {
@@ -419,7 +425,7 @@ ph_get_kernel_dispatch_details(ph_ctx_t                      ctx,
 
 ph_result_t
 ph_get_memory_copy_details(ph_ctx_t                  ctx,
-                           const ph_event_t*         event,
+                           ph_event_t*               event,
                            ph_memory_copy_details_t* details,
                            ph_future_t               future)
 {
@@ -435,7 +441,7 @@ ph_get_memory_copy_details(ph_ctx_t                  ctx,
 
 ph_result_t
 ph_get_memory_alloc_details(ph_ctx_t                   ctx,
-                            const ph_event_t*          event,
+                            ph_event_t*                event,
                             ph_memory_alloc_details_t* details,
                             ph_future_t                future)
 {

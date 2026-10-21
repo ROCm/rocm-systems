@@ -78,6 +78,8 @@ struct ph_ctx
         uint64_t event_id);
     [[nodiscard]] ph_memory_copy_details_t  get_memory_copy_details(uint64_t event_id);
     [[nodiscard]] ph_memory_alloc_details_t get_memory_alloc_details(uint64_t event_id);
+    [[nodiscard]] std::optional<uint32_t>  track_id_of(uint64_t        event_id,
+                                                       ph_event_type_t event_type);
     [[nodiscard]] ph_sample_list_t          get_track_samples(uint32_t track_id,
                                                               uint64_t start_ts,
                                                               uint64_t end_ts);

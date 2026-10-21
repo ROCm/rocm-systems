@@ -1601,6 +1601,13 @@ private:
 
         initialize_timeline_event_variants(
             base, "K", m_kernel_dispatch_statements, std::string("agent_id"));
+        m_kernel_dispatch_statements.by_id = make_timeline_statement<bind_types<size_t>>(
+            std::string("SELECT K.id, K.start, K.end, K.region_name_id, E.category_id, "
+                        "K.nid, K.pid, K.tid, S.track_id, K.agent_id, K.queue_id, "
+                        "K.stream_id FROM rocpd_kernel_dispatch_") +
+            m_uuid +
+            " K INNER JOIN rocpd_event E ON E.id = K.event_id "
+            "LEFT JOIN rocpd_sample S ON S.event_id = K.event_id WHERE K.id = ?");
         m_kernel_dispatch_statements.track_range_filtered = make_track_range_statement(
             "rocpd_kernel_dispatch",
             "K",
@@ -1631,6 +1638,13 @@ private:
 
         initialize_timeline_event_variants(
             base, "MA", m_memory_allocate_statements, std::string("agent_id"));
+        m_memory_allocate_statements.by_id = make_timeline_statement<bind_types<size_t>>(
+            std::string("SELECT MA.id, MA.start, MA.end, E.category_id, E.category_id, "
+                        "MA.nid, MA.pid, MA.tid, S.track_id, MA.agent_id, MA.queue_id, "
+                        "MA.stream_id FROM rocpd_memory_allocate_") +
+            m_uuid +
+            " MA INNER JOIN rocpd_event E ON E.id = MA.event_id "
+            "LEFT JOIN rocpd_sample S ON S.event_id = MA.event_id WHERE MA.id = ?");
         m_memory_allocate_statements.track_range_filtered = make_track_range_statement(
             "rocpd_memory_allocate",
             "MA",
@@ -1661,6 +1675,13 @@ private:
 
         initialize_timeline_event_variants(
             base, "MC", m_memory_copy_statements, std::string("dst_agent_id"));
+        m_memory_copy_statements.by_id = make_timeline_statement<bind_types<size_t>>(
+            std::string("SELECT MC.id, MC.start, MC.end, MC.region_name_id, E.category_id, "
+                        "MC.nid, MC.pid, MC.tid, S.track_id, MC.dst_agent_id, MC.queue_id, "
+                        "MC.stream_id FROM rocpd_memory_copy_") +
+            m_uuid +
+            " MC INNER JOIN rocpd_event E ON MC.event_id = E.id "
+            "LEFT JOIN rocpd_sample S ON S.event_id = MC.event_id WHERE MC.id = ?");
         m_memory_copy_statements.track_range_filtered = make_track_range_statement(
             "rocpd_memory_copy",
             "MC",

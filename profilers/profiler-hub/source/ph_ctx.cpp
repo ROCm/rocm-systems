@@ -695,6 +695,23 @@ ph_ctx::get_call_stack(uint64_t event_id, ph_event_type_t event_type)
     return view;
 }
 
+std::optional<uint32_t>
+ph_ctx::track_id_of(uint64_t event_id, ph_event_type_t event_type)
+{
+    const auto type = to_reader_event_type(event_type);
+    if(!type.has_value()) return std::nullopt;
+
+    profiler_hub::reader_types::timeline_event_t source;
+    source.unique_identifier = { .id   = static_cast<size_t>(event_id),
+                                 .type = type.value() };
+    const auto track = m_connection_pool.with_connection(
+        [&source](profiler_hub::common::connection& connection) {
+            return connection.reader().track_of(source);
+        });
+    if(!track) return std::nullopt;
+    return static_cast<uint32_t>(track->id);
+}
+
 ph_region_details_t
 ph_ctx::get_region_details(uint64_t event_id)
 {
