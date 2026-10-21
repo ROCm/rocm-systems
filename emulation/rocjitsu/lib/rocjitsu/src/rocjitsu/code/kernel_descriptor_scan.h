@@ -18,6 +18,8 @@
 
 namespace rocjitsu {
 
+class CodeObject;
+
 /// @brief One AMDHSA kernel descriptor located in an ELF image.
 struct KernelDescriptorInfo {
   uint64_t descriptor_file_offset = 0; ///< File offset of the 64-byte descriptor (pre-growth).
@@ -35,6 +37,14 @@ struct KernelDescriptorInfo {
 [[nodiscard]] std::vector<KernelDescriptorInfo>
 scan_kernel_descriptors(std::span<const uint8_t> image, uint64_t text_offset, uint64_t text_size,
                         std::optional<size_t> text_section_index = std::nullopt);
+
+/// @brief Every descriptor of @p object: scan_kernel_descriptors() over each
+///        .text section, in section order.
+///
+/// @details Each entry_text_offset is relative to the .text section its entry
+/// lands in, so with more than one .text the offsets do not share an origin.
+[[nodiscard]] std::vector<KernelDescriptorInfo>
+scan_object_kernel_descriptors(const CodeObject &object);
 
 /// @brief SGPRs at the top of a CDNA kernel's allocation that hold special
 ///        registers rather than ordinary ones.

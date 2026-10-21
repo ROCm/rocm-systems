@@ -10,6 +10,7 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
+#include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/patch/error_report.h"
@@ -824,16 +825,30 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   decoder_ = std::move(decoder);
+  std::vector<uint64_t> kernel_entries;
+  if (obj_.text_sections().size() == 1) {
+    for (const KernelDescriptorInfo &kernel : scan_object_kernel_descriptors(obj_))
+      kernel_entries.push_back(kernel.entry_text_offset);
+  }
+  // Decoding from the kernel entries leaves padding and unreferenced functions
+  // alone, which need not decode on the target: RDNA4 has no encoding for the
+  // zero words a linker pads .text with. Without a kernel there is no root, so
+  // the whole section is decoded.
   util::StringDiagnostic decode_error;
-  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter());
+  auto blocks = kernel_entries.empty()
+                    ? BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter())
+                    : BasicBlock::build_reachable(obj_, *decoder_, arch_, kernel_entries,
+                                                  decode_error.emitter());
   if (blocks.failed()) {
     report(error_out, decode_error.message().c_str());
     return false;
   }
   blocks_ = std::move(blocks).value();
-  // BasicBlock::build returns blocks in .text order. Keep clause state across
+  kernel_entries_ = std::move(kernel_entries);
+  // Both builders return blocks in .text order. Keep clause state across
   // block boundaries because a branch target may split the linear instruction
-  // stream in the middle of a clause.
+  // stream in the middle of a clause. Carrying it across undecoded bytes can
+  // only block more anchors.
   uint32_t clause_remaining = 0;
   for (const auto &block : blocks_) {
     uint64_t cur = block->start_offset();
@@ -852,32 +867,87 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   return true;
 }
 
+std::optional<std::span<const uint8_t>> Instrumentor::anchor_text(std::string *error_out) {
+  if (!ensure_blocks_built(error_out))
+    return std::nullopt;
+  if (obj_.text_sections().empty()) {
+    report(error_out, "code object has no .text section");
+    return std::nullopt;
+  }
+  // TODO: support multi-text code objects. Anchor offsets would need to identify
+  // which .text section they belong to.
+  if (obj_.text_sections().size() > 1) {
+    report(error_out, "code object has multiple .text sections; currently supports only one");
+    return std::nullopt;
+  }
+  const Section *text = obj_.text_sections().front();
+  return std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
+}
+
 const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offset) const {
   auto it = offset_to_inst_.find(anchor_offset);
   return it == offset_to_inst_.end() ? nullptr : it->second;
+}
+
+std::string Instrumentor::undecoded_anchor_error(uint64_t anchor_offset, uint64_t text_size) const {
+  const std::string message = "no decoded instruction starts at the requested anchor_offset = " +
+                              std::to_string(anchor_offset);
+  if (anchor_offset >= text_size)
+    return message + ": it is past the end of .text";
+  if (block_for_offset(build_block_offset_index(blocks_), anchor_offset) != nullptr)
+    return message + ": it is inside a decoded instruction";
+  if (!kernel_entries_.empty())
+    return message + ": it is not in code reachable from a kernel entry, which is all that is "
+                     "decoded";
+  return message;
+}
+
+std::optional<std::vector<const BasicBlock *>> Instrumentor::kernel_blocks(uint64_t entry,
+                                                                           std::string *error_out) {
+  if (!anchor_text(error_out))
+    return std::nullopt;
+  const BlockOffsetIndex block_index = build_block_offset_index(blocks_);
+  BasicBlock *entry_block = block_for_offset(block_index, entry);
+  if (entry_block == nullptr || entry_block->start_offset() != entry) {
+    report(error_out, ("no decoded block starts at kernel entry " + std::to_string(entry)).c_str());
+    return std::nullopt;
+  }
+  KernelScopeSpec spec;
+  spec.kernel_entries.insert(kernel_entries_.begin(), kernel_entries_.end());
+  spec.own_entries.insert(entry);
+  const std::vector<BasicBlock *> blocks = reachable_kernel_blocks(
+      blocks_, block_index, build_block_position_index(blocks_), *entry_block, spec);
+  return std::vector<const BasicBlock *>(blocks.begin(), blocks.end());
+}
+
+std::optional<uint64_t> Instrumentor::first_anchor(const BasicBlock &block) const {
+  const Section *text = obj_.text_sections().front();
+  const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
+                                            text->size());
+  // Walked through offset_to_inst_ because a const block's instruction list
+  // cannot be iterated.
+  for (uint64_t cur = block.start_offset(); cur < block.end_offset();) {
+    const Instruction *inst = find_instruction_at_offset(cur);
+    if (inst == nullptr || inst->size() <= 0)
+      break;
+    if (!clause_blocked_offsets_.contains(cur) &&
+        is_relocatable_anchor(*inst, cur, text_bytes, arch_))
+      return cur;
+    cur += static_cast<uint64_t>(inst->size());
+  }
+  return std::nullopt;
 }
 
 Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   ResolvedPoints out;
 
   std::string err;
-  if (!ensure_blocks_built(&err)) {
+  const std::optional<std::span<const uint8_t>> text = anchor_text(&err);
+  if (!text) {
     out.errors.push_back(std::move(err));
     return out;
   }
-  if (obj_.text_sections().empty()) {
-    out.errors.emplace_back("code object has no .text section");
-    return out;
-  }
-  // TODO: support multi-text code objects. Anchor offsets would need to identify
-  // which .text section they belong to.
-  if (obj_.text_sections().size() > 1) {
-    out.errors.emplace_back("code object has multiple .text sections; currently supports only one");
-    return out;
-  }
-  const Section *text = obj_.text_sections().front();
-  const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
-                                            text->size());
+  const std::span<const uint8_t> text_bytes = *text;
 
   const auto &registry = default_isa_target_registry();
   const IsaTargetDescriptor *arch_descriptor = registry.find(arch_);
@@ -995,8 +1065,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   for (const auto &pt : points_) {
     const Instruction *anchor = find_instruction_at_offset(pt.anchor_offset);
     if (anchor == nullptr) {
-      out.errors.emplace_back("no decoded instruction starts at the requested anchor_offset = " +
-                              std::to_string(pt.anchor_offset));
+      out.errors.push_back(undecoded_anchor_error(pt.anchor_offset, text_bytes.size()));
       continue;
     }
 
