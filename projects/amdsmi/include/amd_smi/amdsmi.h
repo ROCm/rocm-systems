@@ -2103,7 +2103,7 @@ typedef struct {
 /**
  * @brief This structure holds version information.
  *
- * @cond @tag{gpu_bm_linux} @endcond
+ * @cond @tag{gpu_bm_linux} @tag{guest_windows} @endcond
  */
 typedef struct {
   uint32_t major;     //!< Major version
@@ -6571,6 +6571,25 @@ amdsmi_status_t amdsmi_set_gpu_fabric_station_config(amdsmi_processor_handle pro
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_lib_version(amdsmi_version_t* version);
+
+/**
+ *  @brief Get the ROCm version
+ *
+ *  @ingroup tagVersionQuery
+ *
+ *  @platform{gpu_bm_linux} @platform{guest_windows}
+ *
+ *  @details Returns the ROCm version through @p version.
+ *
+ *  @param[in,out] version A pointer to an ::amdsmi_version_t structure that will
+ *  be updated with the ROCm version information upon return.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success;
+ *  ::AMDSMI_STATUS_NOT_SUPPORTED if the ROCm core runtime isn't installed;
+ *  other non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_rocm_version(amdsmi_version_t* version);
 
 /** @} End tagVersionQuery */
 

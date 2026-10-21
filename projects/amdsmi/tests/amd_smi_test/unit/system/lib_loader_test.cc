@@ -30,6 +30,16 @@ TEST(SystemUnit, LibLoaderAllCandidatesMissingFails) {
             AMDSMI_STATUS_FAIL_LOAD_MODULE);
 }
 
+// log_on_failure=false must still report the same failure status as the
+// logging path above; this repo has no stderr-capture idiom in this suite, so
+// only the return value is asserted.
+TEST(SystemUnit, LibLoaderAllCandidatesMissingFailsSilently) {
+  amd::smi::AMDSmiLibraryLoader loader;
+  EXPECT_EQ(loader.load(std::vector<const char*>{"nope_a.so.9", "nope_b.so.9"},
+                        /*log_on_failure=*/false),
+            AMDSMI_STATUS_FAIL_LOAD_MODULE);
+}
+
 // When a candidate is already loaded in the process, the loader must still keep
 // a usable handle so load_symbol() resolves.
 TEST(SystemUnit, LibLoaderAlreadyLoadedResolvesSymbol) {
