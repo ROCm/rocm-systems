@@ -119,7 +119,11 @@ amdcuid_status_t CuidDeviceManager::discover_devices() {
   std::lock_guard<std::recursive_mutex> operation(cuid_operation_mutex());
   const auto status = get_devices_on_system();
   if (status != AMDCUID_STATUS_SUCCESS) return status;
-  return build_cuid_index();
+  // A device list without an index would answer the next call as if discovery
+  // had succeeded and found nothing.
+  const auto indexed = build_cuid_index();
+  if (indexed != AMDCUID_STATUS_SUCCESS) shutdown();
+  return indexed;
 }
 
 amdcuid_status_t CuidDeviceManager::shutdown() {
