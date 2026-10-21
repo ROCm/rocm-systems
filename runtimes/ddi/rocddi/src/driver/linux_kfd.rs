@@ -209,10 +209,6 @@ impl DeviceState {
         self.vm.address_range()
     }
 
-    pub(crate) fn supports_system_dma_buf_import(&self) -> bool {
-        self.vm.supports_system_dma_buf_import()
-    }
-
     pub(crate) fn shares_vm(&self, other: &Self) -> bool {
         Shared::ptr_eq(&self.vm, &other.vm)
     }

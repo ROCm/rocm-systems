@@ -1313,27 +1313,27 @@ mod tests {
         )
         .unwrap();
         let to_host = endpoint.memory_link_to_host().unwrap();
-        assert_eq!(to_host.kind(), MemoryLinkType::Pcie);
-        assert_eq!(to_host.minimum_latency(), 1);
-        assert_eq!(to_host.maximum_latency(), 2);
-        assert_eq!(to_host.minimum_bandwidth(), 3);
-        assert_eq!(to_host.maximum_bandwidth(), 64_000);
-        assert!(to_host.supports_32bit_atomics());
-        assert!(to_host.supports_64bit_atomics());
-        assert!(to_host.is_coherent());
-        assert_eq!(to_host.numa_distance(), 20);
+        assert_eq!(to_host.kind, MemoryLinkType::Pcie);
+        assert_eq!(to_host.minimum_latency, 1);
+        assert_eq!(to_host.maximum_latency, 2);
+        assert_eq!(to_host.minimum_bandwidth, 3);
+        assert_eq!(to_host.maximum_bandwidth, 64_000);
+        assert!(to_host.atomic_support_32bit);
+        assert!(to_host.atomic_support_64bit);
+        assert!(to_host.coherent_support);
+        assert_eq!(to_host.numa_distance, 20);
         assert_eq!(to_host.hop_count(), 1);
 
         let from_host = endpoint.memory_link_from_host().unwrap();
-        assert_eq!(from_host.kind(), MemoryLinkType::Pcie);
-        assert_eq!(from_host.minimum_latency(), 4);
-        assert_eq!(from_host.maximum_latency(), 5);
-        assert_eq!(from_host.minimum_bandwidth(), 6);
-        assert_eq!(from_host.maximum_bandwidth(), 63_000);
-        assert!(from_host.supports_32bit_atomics());
-        assert!(from_host.supports_64bit_atomics());
-        assert!(!from_host.is_coherent());
-        assert_eq!(from_host.numa_distance(), 21);
+        assert_eq!(from_host.kind, MemoryLinkType::Pcie);
+        assert_eq!(from_host.minimum_latency, 4);
+        assert_eq!(from_host.maximum_latency, 5);
+        assert_eq!(from_host.minimum_bandwidth, 6);
+        assert_eq!(from_host.maximum_bandwidth, 63_000);
+        assert!(from_host.atomic_support_32bit);
+        assert!(from_host.atomic_support_64bit);
+        assert!(!from_host.coherent_support);
+        assert_eq!(from_host.numa_distance, 21);
         assert_eq!(from_host.hop_count(), 1);
     }
 
@@ -1371,8 +1371,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(endpoint.caches().len(), 4);
-        assert_eq!(endpoint.caches()[0].level(), 1);
-        assert_eq!(endpoint.caches()[0].size_bytes(), 32_768);
+        assert_eq!(endpoint.caches()[0].level, 1);
+        assert_eq!(endpoint.caches()[0].size_bytes, 32_768);
         assert!(crate::device::gpu::is_compute_data_cache(
             &endpoint.caches()[0]
         ));
@@ -1385,9 +1385,9 @@ mod tests {
         assert!(crate::device::gpu::is_compute_data_cache(
             &endpoint.caches()[3]
         ));
-        assert_eq!(endpoint.caches()[3].level(), 2);
-        assert_eq!(endpoint.caches()[3].size_bytes(), 262_144);
-        assert_eq!(endpoint.caches()[3].line_size_bytes(), 64);
+        assert_eq!(endpoint.caches()[3].level, 2);
+        assert_eq!(endpoint.caches()[3].size_bytes, 262_144);
+        assert_eq!(endpoint.caches()[3].line_size_bytes, Some(64));
         assert_eq!(endpoint.gpu().unwrap().persisting_l2_cache_size_max, 0);
     }
 
