@@ -197,6 +197,18 @@ ______________________________________________________________________
 All pre-commit hooks defined in `.pre-commit-config.yaml` must pass.
 This typically includes linting, formatting (black, isort), and other code-quality checks.
 
+The bot reads producer workflows from its trusted base checkout and applies
+their PR path and base-branch filters. It does not wait for a missing check
+when every known producer excludes the PR. For example, a CLR-only change
+does not trigger `rocjitsu-formatting` and does not wait for its `pre-commit`
+check. Mixed changes that include a covered project still require the check.
+Already observed checks remain required, as do external checks without a
+known producer and workflows whose applicability cannot be established.
+
+Scope matching supports the literal, `*`, `**`, and ordered negative filters
+used by the current producers. Other glob syntax, indirect triggers, and
+invalid definitions keep the requirement rather than silently dropping it.
+
 **How to fix**
 Run the checks locally, let them auto-fix where possible, then commit the result:
 
@@ -281,12 +293,16 @@ These run as separate CI workflows. The bot waits for them and folds their resul
 **The bot timed out — what do I do?**
 
 If `pre-commit` or CodeQL takes longer than 15 minutes, the bot times out.
-Push an empty commit to re-trigger the workflow or close and reopen PR:
+First verify that the required check is applicable and actually exists. For an
+applicable check, let the underlying workflow complete and then re-run policy.
+If a check is absent because the trusted producer or policy configuration is
+incorrect, fix that configuration first; retrying an unchanged configuration
+will time out again. The bot uses the PR base, so that fix must reach the base
+and a new policy event must use the updated base SHA.
 
-```bash
-git commit --allow-empty -m "ci: retrigger policy check"
-git push
-```
+Maintainers can re-run a policy job with Actions write access. A PR description
+edit also starts a fresh policy run without pushing a new code commit, once
+the base configuration and applicable checks are ready.
 
 **How do I re-run the bot after fixing issues?**
 

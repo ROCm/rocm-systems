@@ -12,18 +12,21 @@ Run locally:
     pytest .github/therock_pr_bot/test_policy_check_ut.py
 """
 
+import io
 import re
 import sys
+import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from unittest import mock
 
 # Make `policy_check` importable regardless of the working directory.
 THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(THIS_DIR))
 
 import policy_check as pc  # noqa: E402
-
 
 # ----------------------------- helpers ---------------------------------------
 
@@ -500,6 +503,268 @@ class IntegrationBlobTests(unittest.TestCase):
 
 
 # ----------------------------- load_policy -----------------------------------
+
+
+class RequiredCheckMainTests(unittest.TestCase):
+    """Use real trusted workflow filters, with every GitHub operation mocked."""
+
+    def run_policy(self, filename: str, runs: List[Dict[str, Any]]) -> int:
+        pr = {
+            "body": "Fixes #13877\n- [x] Look over the contributing guidelines.\n",
+            "base": {"ref": "develop"},
+            "user": {"login": "contributor"},
+        }
+        with (
+            mock.patch.dict(
+                pc.os.environ,
+                {
+                    "GH_TOKEN": "test-only",
+                    "OWNER": "test",
+                    "REPO": "test",
+                    "PR_NUMBER": "1",
+                    "SHA": "test-only",
+                },
+                clear=True,
+            ),
+            mock.patch.object(pc, "load_policy", return_value=make_policy()),
+            mock.patch.object(pc, "get_pr", return_value=pr),
+            mock.patch.object(pc, "iter_pr_files", return_value=[make_file(filename)]),
+            mock.patch.object(pc, "get_check_runs", return_value=runs),
+            mock.patch.object(
+                pc, "gh_get", side_effect=AssertionError("unexpected API read")
+            ),
+            mock.patch.object(pc, "upsert_comment"),
+            mock.patch.object(pc, "update_comment_if_exists"),
+            mock.patch.object(pc, "add_label"),
+            mock.patch.object(pc, "remove_label"),
+            mock.patch.object(pc, "maybe_comment_precommit_failure"),
+            redirect_stdout(io.StringIO()),
+        ):
+            return pc.main(["--timeout-seconds", "0", "--poll-seconds", "0"])
+
+    def test_clr_does_not_wait_for_untriggered_precommit(self) -> None:
+        self.assertEqual(
+            self.run_policy("projects/clr/hipamd/src/hip_graph.cpp", []), 0
+        )
+
+    def test_covered_missing_check_still_fails(self) -> None:
+        self.assertEqual(self.run_policy("emulation/rocjitsu/example.py", []), 1)
+
+    def test_covered_failure_still_fails(self) -> None:
+        runs = [{"name": "pre-commit", "conclusion": "failure"}]
+        self.assertEqual(self.run_policy("emulation/rocjitsu/example.py", runs), 1)
+
+    def test_covered_success_passes(self) -> None:
+        runs = [{"name": "pre-commit", "conclusion": "success"}]
+        self.assertEqual(self.run_policy("emulation/rocjitsu/example.py", runs), 0)
+
+    def test_observed_failure_outside_scope_still_fails(self) -> None:
+        runs = [{"name": "pre-commit", "conclusion": "failure"}]
+        self.assertEqual(self.run_policy("projects/clr/example.cpp", runs), 1)
+
+    def test_covered_running_check_still_waits(self) -> None:
+        runs = [{"name": "pre-commit", "conclusion": None}]
+        self.assertEqual(self.run_policy("emulation/rocjitsu/example.py", runs), 1)
+
+
+class RequiredCheckScopeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.workflows = Path(self.directory.name)
+
+    def workflow(self, trigger: str, *, name: str = "format.yml") -> None:
+        (self.workflows / name).write_text(
+            "on:\n" + trigger + "\njobs:\n  pre-commit:\n    runs-on: ubuntu-latest\n"
+        )
+
+    def required(
+        self, *paths: str, base: str = "develop", observed: tuple = ()
+    ) -> List[str]:
+        return pc.required_checks_for_pr(
+            ["pre-commit"],
+            [make_file(path) for path in paths],
+            base,
+            observed_checks=observed,
+            workflows_dir=self.workflows,
+        )
+
+    def test_no_known_producer_remains_required(self) -> None:
+        self.assertEqual(self.required("projects/clr/a.cpp"), ["pre-commit"])
+
+    def test_uncovered_path_does_not_create_a_requirement(self) -> None:
+        self.workflow('  pull_request:\n    paths: ["emulation/**"]\n')
+        self.assertEqual(self.required("projects/clr/a.cpp"), [])
+        self.assertEqual(self.required("emulation/module/a.py"), ["pre-commit"])
+
+    def test_mixed_scope_changes_still_require_the_check(self) -> None:
+        self.workflow('  pull_request:\n    paths: ["emulation/**"]\n')
+        self.assertEqual(
+            self.required("projects/clr/a.cpp", "emulation/a.py"), ["pre-commit"]
+        )
+
+    def test_ordered_negative_filters_and_reinclusion(self) -> None:
+        self.workflow(
+            '  pull_request:\n    paths: ["shared/**", "!**/*.md", "shared/KEEP.md"]\n'
+        )
+        self.assertEqual(self.required("shared/docs/README.md"), [])
+        self.assertEqual(self.required("shared/KEEP.md"), ["pre-commit"])
+
+    def test_paths_ignore_requires_any_nonignored_file(self) -> None:
+        self.workflow('  pull_request:\n    paths-ignore: ["docs/**", "**/*.md"]\n')
+        self.assertEqual(self.required("docs/a.txt", "README.md"), [])
+        self.assertEqual(self.required("docs/a.txt", "a.cpp"), ["pre-commit"])
+
+    def test_single_star_does_not_cross_a_directory(self) -> None:
+        self.workflow('  pull_request:\n    paths: ["src/*.py"]\n')
+        self.assertEqual(self.required("src/nested/a.py"), [])
+        self.assertEqual(self.required("src/a.py"), ["pre-commit"])
+
+    def test_double_star_matches_zero_or_more_directories(self) -> None:
+        self.workflow('  pull_request:\n    paths: ["src/**/*.py"]\n')
+        for path in ("src/a.py", "src/one/two/a.py"):
+            with self.subTest(path=path):
+                self.assertEqual(self.required(path), ["pre-commit"])
+
+    def test_base_branch_filter(self) -> None:
+        self.workflow('  pull_request:\n    branches: ["testbranch"]\n')
+        self.assertEqual(self.required("a.py"), [])
+        self.assertEqual(self.required("a.py", base="testbranch"), ["pre-commit"])
+        self.assertEqual(self.required("a.py", base=""), ["pre-commit"])
+
+    def test_branches_ignore(self) -> None:
+        self.workflow('  pull_request:\n    branches-ignore: ["release/**"]\n')
+        self.assertEqual(self.required("a.py", base="release/10.0"), [])
+        self.assertEqual(self.required("a.py"), ["pre-commit"])
+
+    def test_another_applicable_producer_keeps_the_check_required(self) -> None:
+        self.workflow('  pull_request:\n    paths: ["emulation/**"]\n')
+        self.workflow(
+            '  pull_request:\n    paths: ["shared/cuid/**"]\n', name="cuid.yml"
+        )
+        self.assertEqual(self.required("shared/cuid/a.h"), ["pre-commit"])
+
+    def test_renamed_from_covered_path_remains_required(self) -> None:
+        self.workflow('  pull_request:\n    paths: ["emulation/**"]\n')
+        files = [
+            dict(make_file("projects/clr/a.py"), previous_filename="emulation/a.py")
+        ]
+        self.assertEqual(
+            pc.required_checks_for_pr(
+                ["pre-commit"], files, "develop", workflows_dir=self.workflows
+            ),
+            ["pre-commit"],
+        )
+
+    def test_observed_check_is_kept_even_if_all_filters_exclude_it(self) -> None:
+        self.workflow('  pull_request:\n    paths: ["emulation/**"]\n')
+        self.assertEqual(
+            self.required("a.py", observed=("pre-commit",)), ["pre-commit"]
+        )
+
+    def test_external_check_without_known_producer_remains_required(self) -> None:
+        self.workflow('  pull_request:\n    paths: ["emulation/**"]\n')
+        self.assertEqual(
+            pc.required_checks_for_pr(
+                ["pre-commit", "external-security"],
+                [make_file("projects/clr/a.cpp")],
+                "develop",
+                workflows_dir=self.workflows,
+            ),
+            ["external-security"],
+        )
+
+    def test_unsupported_glob_remains_required(self) -> None:
+        for pattern in (
+            "src/a?.py",
+            "src/a+.py",
+            "src/[ab].py",
+            "src/a**b.py",
+            "src/{a,b}.py",
+            "src/@(a|b).py",
+        ):
+            with self.subTest(pattern=pattern):
+                self.workflow(f'  pull_request:\n    paths: ["{pattern}"]\n')
+                self.assertEqual(self.required("elsewhere/a.cpp"), ["pre-commit"])
+
+    def test_indirect_or_manual_trigger_remains_required(self) -> None:
+        for event in ("workflow_call", "workflow_run", "workflow_dispatch"):
+            with self.subTest(event=event):
+                self.workflow(f"  {event}:\n")
+                self.assertEqual(self.required("a.cpp"), ["pre-commit"])
+
+    def test_unconditional_pr_trigger_requires_the_check(self) -> None:
+        (self.workflows / "format.yml").write_text(
+            "on: [push, pull_request]\njobs:\n  pre-commit:\n    runs-on: ubuntu-latest\n"
+        )
+        self.assertEqual(self.required("a.cpp"), ["pre-commit"])
+
+    def test_yaml_merge_does_not_hide_a_producer(self) -> None:
+        (self.workflows / "format.yml").write_text(
+            "defaults: &job\n  name: pre-commit\n  runs-on: ubuntu-latest\n"
+            "on:\n  pull_request:\n    paths: [emulation/**]\n"
+            "jobs:\n  format:\n    <<: *job\n"
+        )
+        self.assertEqual(self.required("a.cpp"), [])
+        self.assertEqual(self.required("emulation/a.py"), ["pre-commit"])
+
+    def test_target_event_filters_apply(self) -> None:
+        self.workflow('  pull_request_target:\n    paths: ["emulation/**"]\n')
+        self.assertEqual(self.required("a.cpp"), [])
+
+    def test_malformed_workflow_does_not_relax_the_gate(self) -> None:
+        (self.workflows / "format.yml").write_text("on: [\n")
+        self.assertEqual(self.required("a.cpp"), ["pre-commit"])
+
+    def test_invalid_filters_do_not_relax_the_gate(self) -> None:
+        for filters in (
+            "paths: []",
+            'paths: ["!emulation/**"]',
+            'paths: ["emulation/**"]\n    paths-ignore: ["docs/**"]',
+        ):
+            with self.subTest(filters=filters):
+                self.workflow("  pull_request:\n    " + filters + "\n")
+                self.assertEqual(self.required("a.cpp"), ["pre-commit"])
+
+    def test_actual_trusted_workflow_scopes(self) -> None:
+        cases = {
+            "projects/clr/a.cpp": [],
+            "projects/hip-tests/catch/unit/stream/a.cc": [],
+            "emulation/mirage/a.py": ["pre-commit"],
+            "shared/cuid/a.h": ["pre-commit"],
+            "shared/cuid/docs/a.md": [],
+            "projects/rocprofiler-compute/a.py": ["pre-commit"],
+            ".pre-commit-config.yaml": ["pre-commit"],
+            ".github/workflows/rocjitsu-formatting.yml": ["pre-commit"],
+        }
+        for path, expected in cases.items():
+            with self.subTest(path=path):
+                self.assertEqual(
+                    pc.required_checks_for_pr(
+                        ["pre-commit"], [make_file(path)], "develop"
+                    ),
+                    expected,
+                )
+
+
+class CheckRunPaginationTests(unittest.TestCase):
+    def test_required_check_after_first_page_is_not_lost(self) -> None:
+        pages = [
+            {"check_runs": [{"name": f"build-{i}"} for i in range(100)]},
+            {"check_runs": [{"name": "pre-commit", "conclusion": "failure"}]},
+        ]
+        with mock.patch.object(pc, "gh_get", side_effect=pages) as get:
+            runs = pc.get_check_runs("test", "test", "head", "test-only")
+        self.assertEqual(len(runs), 101)
+        self.assertIn("page=2", get.call_args_list[1].args[0])
+        self.assertEqual(
+            pc.summarize_required_checks(make_policy(), runs)[1], ["pre-commit=failure"]
+        )
+
+    def test_malformed_response_is_an_error(self) -> None:
+        with mock.patch.object(pc, "gh_get", return_value={"check_runs": None}):
+            with self.assertRaises(RuntimeError):
+                pc.get_check_runs("test", "test", "head", "test-only")
 
 
 class LoadPolicyTests(unittest.TestCase):

@@ -152,6 +152,11 @@ checks:
   required_check_runs:
     - pre-commit
 
+  # The bot derives applicability from producer workflows in the trusted base.
+  # A missing check is not awaited when every known producer's PR path/branch
+  # filters exclude the change. Unknown producers/filters and observed checks
+  # remain required, including external checks without a local workflow.
+
   failure_comments:
     pre-commit:
       title: "Pre-commit check failed"
