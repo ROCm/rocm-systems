@@ -36,7 +36,7 @@ dispatch.scratch_allocation:
     Scratch memory is used for stack memory on the accelerator, as well as for register
     spills and restores.
 dispatch.scratch_allocation_per_wave:
-  name: Scratch Allocation
+  name: Scratch Allocation per Wave
   formula: AVG(Scratch_Per_Workitem) * $wave_size / 1024
   unit: KB per Wave
   description: >-

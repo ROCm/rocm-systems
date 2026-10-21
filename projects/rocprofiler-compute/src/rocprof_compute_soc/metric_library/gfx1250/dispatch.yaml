@@ -22,7 +22,7 @@ dispatch.scratch_allocation:
   unit: Bytes per Work-item
   description: Bytes of scratch (private) memory allocated per work-item.
 dispatch.scratch_allocation_per_wave:
-  name: Scratch Allocation
+  name: Scratch Allocation per Wave
   formula: AVG(Scratch_Per_Workitem) * $wave_size / 1024
   unit: KB per Wave
   description: >-

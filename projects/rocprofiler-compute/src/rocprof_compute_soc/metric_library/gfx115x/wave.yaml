@@ -36,7 +36,7 @@ wave.occupancy:
     or LDS usage per wavefront may limit occupancy.
   peak: $max_waves_per_cu * $cu_per_gpu
 wave.occupancy_pct:
-  name: Wavefront Occupancy
+  name: Wavefront Occupancy (Percent)
   formula: 100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum * 2 * $max_waves_per_cu)
   unit: Percent
   description: >-

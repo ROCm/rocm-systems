@@ -50,7 +50,7 @@ wave.occupancy:
   peak: $max_waves_per_cu * $cu_per_gpu
   coll_level: SQ_LEVEL_WAVES
 wave.occupancy_pct:
-  name: Wavefront Occupancy
+  name: Wavefront Occupancy (Percent)
   formula: 100 * SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs * $max_waves_per_cu)
   unit: Percent
   description: >-
