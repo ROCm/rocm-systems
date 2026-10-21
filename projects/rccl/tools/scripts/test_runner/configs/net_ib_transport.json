@@ -556,6 +556,26 @@
       ]
     },
 
+    "net_ib_multisegment_old_peer": {
+      "extends": "net_ib_base",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 600,
+      "description": "The sender forces NCCL_MULTI_SEGMENT_REGISTER off before connect and does not advertise. The receiver declines a multi-segment registration, posts one MR, and the boundary-crossing send uses that rkey.",
+      "env_variables": {
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,REG"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiSeg_OldPeer_SingleRkeyCrossBoundaryTransfer",
+          "description": "Sender cap off, receiver cap on: the receiver declines multi-segment registration and the cross-boundary write completes on one rkey",
+          "test_filter": "NetIbMultiSegmentMPITest.OldPeer_SingleRkeyCrossBoundaryTransfer"
+        }
+      ]
+    },
+
     "net_ib_multisegment_scale_2x4": {
       "extends": "net_ib_base",
       "num_ranks": 8,
@@ -2119,6 +2139,12 @@
       "name": "NET IB - Multi-Segment DMA-BUF (register off)",
       "description": "Classic NET/IB with NCCL_MULTI_SEGMENT_REGISTER=0: multi-segment registration declined, single-region paths unchanged",
       "config": "net_ib_multisegment_register_off",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multi-Segment DMA-BUF (old peer)",
+      "description": "Sender forces the multi-segment cap off. The receiver declines multi-segment registration and the boundary-crossing write uses one rkey.",
+      "config": "net_ib_multisegment_old_peer",
       "enabled": true
     },
     {

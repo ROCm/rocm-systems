@@ -409,6 +409,78 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentRegisterOff_DeclinesRegistration) {
     MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// Rank 1 keeps the cap off, so it does not advertise. Rank 0 declines the
+// multi-segment registration and the boundary-crossing send uses one rkey.
+extern int64_t ncclParamMultiSegmentRegister();
+TEST_F(NetIbMultiSegmentMPITest, OldPeer_SingleRkeyCrossBoundaryTransfer) {
+    const int rank = MPIEnvironment::world_rank;
+    setenv("NCCL_MULTI_SEGMENT_REGISTER", rank == 0 ? "1" : "0", 1);
+    ASSERT_EQ(ncclParamMultiSegmentRegister(), rank == 0 ? 1 : 0);
+
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, /*min_nodes=*/2, kNoNodeLimit);
+#if !NCCL_CUMEM_DMABUF_EXPORT_GATE
+    GTEST_SKIP() << "dma-buf export API unavailable at build time";
+#endif
+    int ndev = 0; AssertInitAndGetDevices(&ndev);
+    if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) GTEST_SKIP() << "DMA-BUF registration not supported";
+
+    MultiSegmentVmmBuffer* sendWin = AllocSym(kNumSegments);
+    if (SyncSkip(sendWin == nullptr)) GTEST_SKIP() << "multi-segment VMM allocation unavailable";
+
+    ConnectionPair pair; NetConnectionGuard guard(net_);
+    ASSERT_SETUP_CONNECTION(0, pair, guard);
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+
+    void* multiMh = nullptr;
+    ncclResult_t multi = RegisterMultiSegmentMr(comm, *sendWin, &multiMh);
+    bool regOk = true;
+    if (rank == 0) {
+        EXPECT_EQ(multi, ncclInvalidUsage) << "receiver accepted a multi-segment registration from a peer that did not advertise";
+        EXPECT_EQ(multiMh, nullptr);
+        if (multiMh != nullptr) (void)net_->deregMr(comm, multiMh);
+        regOk = (multi == ncclInvalidUsage && multiMh == nullptr);
+    } else {
+        EXPECT_EQ(multi, ncclSuccess) << "sender multi-segment registration must not depend on the peer cap";
+        EXPECT_NE(multiMh, nullptr);
+        regOk = (multi == ncclSuccess && multiMh != nullptr);
+        sendMh_ = multiMh;
+    }
+    if (!MPIHelpers::allRanksTrue(regOk)) {
+        if (rank == 1 && multiMh != nullptr) (void)net_->deregMr(comm, multiMh);
+        return;
+    }
+
+    const size_t size = 131072;
+    void* recvBuf = nullptr;
+    void* recvMh = nullptr;
+    bool recvOk = true;
+    if (rank == 0) {
+        recvOk = hipMalloc(&recvBuf, size) == hipSuccess;
+        if (recvOk) {
+            recvOk = RegisterMemory(comm, recvBuf, size, NCCL_PTR_CUDA, &recvMh) == ncclSuccess && recvMh != nullptr;
+        }
+        recvMh_ = recvMh;
+    }
+    if (SyncSkip(!recvOk)) {
+        if (recvMh != nullptr) (void)net_->deregMr(comm, recvMh);
+        if (recvBuf != nullptr) (void)hipFree(recvBuf);
+        if (rank == 1 && multiMh != nullptr) (void)net_->deregMr(comm, multiMh);
+        GTEST_SKIP() << "single-segment receive registration unavailable";
+    }
+
+    const size_t srcOff = sendWin->segSize - 65536;
+    SendRecvChunkAtOffsets(pair, sendWin->ptr, recvBuf, srcOff, /*dstOff=*/0, size,
+                           /*tag=*/910, /*seed=*/0xB1);
+
+    if (rank == 0) {
+        if (recvMh != nullptr) EXPECT_EQ(ncclSuccess, net_->deregMr(comm, recvMh));
+        if (recvBuf != nullptr) EXPECT_EQ(hipFree(recvBuf), hipSuccess);
+    } else if (multiMh != nullptr) {
+        EXPECT_EQ(ncclSuccess, net_->deregMr(comm, multiMh));
+    }
+}
+
 // REGRESSION: a single-segment window registered through the multi-segment
 // entry point still registers and transfers via the nSeg==1 fast path (which
 // leaves ncclIbMultiSend on its original, unmodified code path).

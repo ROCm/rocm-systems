@@ -349,10 +349,9 @@ TEST(NetIbSplit, IndependentLocalAndRemoteStartOffsets) {
     EXPECT_EQ(out[1].remoteSeg, 1);
 }
 
-// DeepEP Engram uses one unequal [GPU][CPU] window and reads remote CPU storage
-// into a different offset in the local GPU segment. Preserve that consumer
-// geometry as a host-only regression for independent offset/key selection.
-TEST(NetIbSplit, DeepEP_EngramCpuToGpuOffsets) {
+// One window is a GPU segment followed by a smaller CPU segment. A transfer
+// from the remote CPU segment into the local GPU segment keeps both offsets.
+TEST(NetIbSplit, GpuCpuWindowIndependentOffsets) {
     constexpr uint64_t gpuBytes = 6u * 1024 * 1024;
     constexpr uint64_t cpuBytes = 2u * 1024 * 1024;
     constexpr uint64_t remoteBase = 0x900000000ULL;
