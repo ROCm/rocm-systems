@@ -110,7 +110,7 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
   }
 
   // Common to all four tiers: everything the shape checks look at but the size.
-  void ExpectShapeRejections(EligibleFn fn) {
+  void ExpectShapeRejections(EligibleFn fn, bool gatedByDdaLL) {
     EXPECT_TRUE(Eligible(fn, 64));
     EXPECT_FALSE(Eligible(fn, 0));
     EXPECT_FALSE(fn(nullptr, kSendbuff, kRecvbuff, 64, ncclFloat32, ncclSum));
@@ -152,7 +152,8 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     }
     mock_.setFabricResourcesPresent(true);
     params_["RCCL_DDA_LL"] = 0;
-    EXPECT_FALSE(Eligible(fn, 64));
+    // RCCL_DDA_LL gates only the LL tier; LL128 is gated by RCCL_DDA_LL128 upstream of these checks.
+    EXPECT_EQ(!gatedByDdaLL, Eligible(fn, 64));
     params_.erase("RCCL_DDA_LL");
   }
 
@@ -161,19 +162,19 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
 };
 
 TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_SharedShapeChecks) {
-  ExpectShapeRejections(ddaLLArOneShotEligible);
+  ExpectShapeRejections(ddaLLArOneShotEligible, true);
   comm().ddaLLEpochDev = nullptr;
   EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 64));
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, LLTwoShotEligible_SharedShapeChecks) {
-  ExpectShapeRejections(ddaLLArTwoShotEligible);
+  ExpectShapeRejections(ddaLLArTwoShotEligible, true);
   comm().ddaLLEpochDev = nullptr;
   EXPECT_TRUE(Eligible(ddaLLArTwoShotEligible, 64));
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, LL128OneShotEligible_SharedShapeChecksAndEpoch) {
-  ExpectShapeRejections(ddaLL128ArOneShotEligible);
+  ExpectShapeRejections(ddaLL128ArOneShotEligible, false);
   comm().ddaLLEpochLen = 0;
   EXPECT_FALSE(Eligible(ddaLL128ArOneShotEligible, 64));
   comm().ddaLLEpochLen = 1;
@@ -182,7 +183,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LL128OneShotEligible_SharedShapeChecksAndE
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, LL128TwoShotEligible_SharedShapeChecksAndEpoch) {
-  ExpectShapeRejections(ddaLL128ArTwoShotEligible);
+  ExpectShapeRejections(ddaLL128ArTwoShotEligible, false);
   comm().ddaLLEpochLen = 0;
   EXPECT_FALSE(Eligible(ddaLL128ArTwoShotEligible, 64));
   comm().ddaLLEpochLen = 1;

@@ -31,6 +31,7 @@
 
 #include "hip_capture.h"
 #include "hip_capture_metadata.h"
+#include "hip_capture_scrub.h"
 #include "hip_capture_writer.h"
 
 // hrr_api_args.h — for hrr_args_* struct types and hrr_api_id_t enum
@@ -1807,6 +1808,15 @@ static size_t compute_bundle_size(const void* blob) {
   return static_cast<size_t>(end);
 }
 
+// Stores a fat binary with the .comment and debug sections of its code
+// objects zeroed; the application's own copy is left alone.
+static hrr_cap::Hash128 write_fat_binary_blob(const void* blob, size_t blob_size) {
+  std::vector<uint8_t> scrubbed(static_cast<const uint8_t*>(blob),
+                                static_cast<const uint8_t*>(blob) + blob_size);
+  hrr_cap::scrub::scrub_code_object(scrubbed.data(), scrubbed.size());
+  return hrr_cap::writer::write_blob(scrubbed.data(), scrubbed.size());
+}
+
 void** capture___hipRegisterFatBinary(const void* data) {
   void** r = g_real_compiler_table.__hipRegisterFatBinary_fn(data);
   // Shim is only installed when capture is active — no hip_capture_enabled() check needed.
@@ -1835,7 +1845,7 @@ void** capture___hipRegisterFatBinary(const void* data) {
   a.ret      = reinterpret_cast<uint64_t>(r);
   a.blob_size = static_cast<uint64_t>(blob_size);
   if (blob && blob_size > 0) {
-    auto h = hrr_cap::writer::write_blob(blob, blob_size);
+    auto h = write_fat_binary_blob(blob, blob_size);
     a.blob_hash_lo = h.lo;
     a.blob_hash_hi = h.hi;
   }
@@ -3036,7 +3046,7 @@ static void record_fat_binary_blob(const void* blob_ptr) {
   hrr_args___hipRegisterFatBinary a{};
   a.ret      = 0;  // handle not meaningful at init time
   a.blob_size = static_cast<uint64_t>(blob_size);
-  auto h = hrr_cap::writer::write_blob(blob_ptr, blob_size);
+  auto h = write_fat_binary_blob(blob_ptr, blob_size);
   a.blob_hash_lo = h.lo;
   a.blob_hash_hi = h.hi;
   hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
