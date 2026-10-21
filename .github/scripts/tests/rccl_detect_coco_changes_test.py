@@ -157,16 +157,10 @@ class MainTest(unittest.TestCase):
             return output.read_text()
 
     def test_emits_false_for_an_untouched_pr(self):
-        self.assertEqual(
-            self._run_main(["docs/index.md"]),
-            "rccl=false\n",
-        )
+        self.assertEqual(self._run_main(["docs/index.md"]), "rccl=false\n")
 
     def test_emits_true_for_a_touched_pr(self):
-        self.assertEqual(
-            self._run_main(["projects/rccl/src/init.cc"]),
-            "rccl=true\n",
-        )
+        self.assertEqual(self._run_main(["projects/rccl/src/init.cc"]), "rccl=true\n")
 
     def test_emits_false_for_a_host_test_only_pr_to_develop(self):
         changed = [
@@ -174,24 +168,19 @@ class MainTest(unittest.TestCase):
             "projects/rccl/test/host/fakes/os_fakes.cc",
         ]
         self.assertEqual(
-            self._run_main(changed, "--base-branch", "develop"),
-            "rccl=false\n",
+            self._run_main(changed, "--base-branch", "develop"), "rccl=false\n"
         )
 
     def test_emits_true_for_a_host_test_only_pr_elsewhere(self):
         changed = ["projects/rccl/test/host/net-test.cc"]
         for args in [(), ("--base-branch", "main")]:
             with self.subTest(args=args):
-                self.assertEqual(
-                    self._run_main(changed, *args),
-                    "rccl=true\n",
-                )
+                self.assertEqual(self._run_main(changed, *args), "rccl=true\n")
 
     def test_emits_true_for_host_tests_plus_rccl_code(self):
         changed = ["projects/rccl/test/host/net-test.cc", "projects/rccl/src/net.cc"]
         self.assertEqual(
-            self._run_main(changed, "--base-branch", "develop"),
-            "rccl=true\n",
+            self._run_main(changed, "--base-branch", "develop"), "rccl=true\n"
         )
 
 

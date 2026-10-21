@@ -64,6 +64,7 @@ jobs:
           sparse-checkout: .github/scripts
           # HEAD^ on a PR merge commit is the base branch tip.
           fetch-depth: 2
+          persist-credentials: false
 
       - name: Check for RCCL changes
         id: filter

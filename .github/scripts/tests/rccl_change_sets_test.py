@@ -4,70 +4,57 @@
 """Tests for rccl_change_sets.py."""
 
 import os
-import re
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
+sys.path.insert(0, os.fspath(Path(__file__).parent))
 import rccl_change_sets as sets
+from workflow_filters import DEFAULT_TYPES, STATUS_ONLY_IFS, pull_request_trigger
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 OTHER_BRANCHES = ["", "main", "rccl-develop", "rocprofiler-compute-develop"]
 
-
-def pull_request_filters(workflow: Path) -> tuple[set[str], list[str]]:
-    """(branches, paths) of a workflow's pull_request trigger.
-
-    Strict on purpose: anything it cannot vouch for (negations, *-ignore keys,
-    unknown keys) fails the test instead of being skipped.
-    """
-    lines = [
-        re.sub(r"\s+#.*$", "", l)
-        for l in workflow.read_text(encoding="utf-8").splitlines()
-    ]
-    start = next(i for i, l in enumerate(lines) if re.match(r"^  pull_request:\s*$", l))
-    filters: dict[str, list[str]] = {}
-    key = None
-    for line in lines[start + 1 :]:
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        if not line.startswith("    "):
-            break
-        if m := re.match(r"^    ([\w-]+):\s*(.*)$", line):
-            key, inline = m.groups()
-            if key not in ("branches", "paths", "types"):
-                raise AssertionError(f"{workflow}: unsupported pull_request key {key}")
-            filters[key] = re.findall(r"[^\[\],'\"\s]+", inline)
-        elif key and (item := re.match(r"^\s+-\s*['\"]?([^'\"\s]+)", line)):
-            filters[key].append(item.group(1))
-        else:
-            raise AssertionError(f"{workflow}: cannot parse {line!r}")
-    paths = filters.get("paths", [])
-    if any(p.startswith("!") for p in paths):
-        raise AssertionError(f"{workflow}: negated paths {paths}")
-    return set(filters.get("branches", [])), paths
+# Per COVERAGE_RULES name: (paths it covers, look-alikes it must not cover).
+EXAMPLES = {
+    "host-only unit tests": (
+        [
+            "projects/rccl/test/host/CMakeLists.txt",
+            "projects/rccl/test/host/run_host_tests.sh",
+            "projects/rccl/test/host/fakes/os_fakes.cc",
+        ],
+        [
+            "projects/rccl/test/host",
+            "projects/rccl/test/hostile.cc",
+            "projects/rccl/test/hostfoo/x.cc",
+            "projects/rccl/test/CMakeLists.txt",
+            "projects/rccl/src/test/host/x.cc",
+            "projects/rccl-tests/test/host/x.cc",
+        ],
+    ),
+}
 
 
 class CoverageRulesTest(unittest.TestCase):
     def test_every_rule_has_examples(self):
-        for rule in sets.COVERAGE_RULES:
-            with self.subTest(rule=rule.name):
-                self.assertTrue(rule.branches)
-                self.assertTrue(rule.covered_examples)
-                self.assertTrue(rule.lookalike_examples)
+        self.assertEqual(set(EXAMPLES), {r.name for r in sets.COVERAGE_RULES})
+        for name, (covered, lookalikes) in EXAMPLES.items():
+            with self.subTest(rule=name):
+                self.assertTrue(covered)
+                self.assertTrue(lookalikes)
 
     def test_covered_examples_on_rule_branches(self):
         for rule in sets.COVERAGE_RULES:
-            for path in rule.covered_examples:
+            for path in EXAMPLES[rule.name][0]:
                 for branch in rule.branches:
                     with self.subTest(rule=rule.name, path=path, branch=branch):
                         self.assertTrue(sets.covered_elsewhere(path, branch))
 
     def test_covered_examples_not_on_other_branches(self):
         for rule in sets.COVERAGE_RULES:
-            for path in rule.covered_examples:
+            for path in EXAMPLES[rule.name][0]:
                 for branch in OTHER_BRANCHES:
                     if branch in rule.branches:
                         continue
@@ -76,7 +63,7 @@ class CoverageRulesTest(unittest.TestCase):
 
     def test_lookalikes_never_covered(self):
         for rule in sets.COVERAGE_RULES:
-            for path in rule.lookalike_examples:
+            for path in EXAMPLES[rule.name][1]:
                 for branch in rule.branches:
                     with self.subTest(rule=rule.name, path=path, branch=branch):
                         self.assertFalse(sets.covered_elsewhere(path, branch))
@@ -88,13 +75,22 @@ class CoverageWorkflowTest(unittest.TestCase):
     def test_workflow_runs_on_rule_branches(self):
         for rule in sets.COVERAGE_RULES:
             with self.subTest(rule=rule.name):
-                branches, _ = pull_request_filters(REPO_ROOT / rule.workflow)
-                self.assertTrue(branches, f"{rule.workflow}: no pull_request branches")
-                self.assertLessEqual(set(rule.branches), branches)
+                trigger = pull_request_trigger(REPO_ROOT / rule.workflow)
+                self.assertTrue(trigger.branches, f"{rule.workflow}: no branches")
+                self.assertLessEqual(set(rule.branches), trigger.branches)
+
+    def test_workflow_runs_on_every_push(self):
+        for rule in sets.COVERAGE_RULES:
+            with self.subTest(rule=rule.name):
+                trigger = pull_request_trigger(REPO_ROOT / rule.workflow)
+                self.assertLessEqual(DEFAULT_TYPES, trigger.types)
+                self.assertLessEqual(
+                    set(trigger.ifs), STATUS_ONLY_IFS, "an if: can skip the tests"
+                )
 
     def test_workflow_paths_include_rule_patterns(self):
         for rule in sets.COVERAGE_RULES:
-            _, paths = pull_request_filters(REPO_ROOT / rule.workflow)
+            paths = pull_request_trigger(REPO_ROOT / rule.workflow).paths
             prefixes = [p.removesuffix("**") for p in paths if p.endswith("/**")]
             for pattern in rule.patterns:
                 with self.subTest(rule=rule.name, pattern=pattern):
@@ -103,27 +99,51 @@ class CoverageWorkflowTest(unittest.TestCase):
                         f"{rule.workflow} paths {paths} do not include {pattern}",
                     )
 
-    def _parse(self, body):
+
+class WorkflowFiltersTest(unittest.TestCase):
+    def _parse(self, body, jobs=""):
         with tempfile.TemporaryDirectory() as tmp:
             wf = Path(tmp) / "wf.yml"
-            wf.write_text("on:\n  pull_request:\n" + body + "  workflow_dispatch:\n")
-            return pull_request_filters(wf)
+            wf.write_text(
+                "on:\n  pull_request:\n"
+                + body
+                + "  workflow_dispatch:\n\njobs:\n  a:\n    runs-on: x\n"
+                + jobs
+            )
+            return pull_request_trigger(wf)
 
-    def test_parser_reads_both_branch_forms(self):
-        self.assertEqual(
-            self._parse(
-                "    branches: [main, develop]  # trailing comment\n"
-                "    # full-line comment\n"
-                "  # shallow comment\n"
-                "    paths:\n      - 'projects/rccl/**'\n"
-            ),
-            ({"main", "develop"}, ["projects/rccl/**"]),
+    def test_reads_both_branch_forms(self):
+        trigger = self._parse(
+            "    branches: [main, develop]  # trailing comment\n"
+            "    # full-line comment\n"
+            "  # shallow comment\n"
+            "    paths:\n      - 'projects/rccl/**'\n"
         )
+        self.assertEqual(trigger.branches, {"main", "develop"})
+        self.assertEqual(trigger.paths, ["projects/rccl/**"])
+        self.assertEqual(trigger.types, DEFAULT_TYPES)
+        self.assertEqual(trigger.ifs, [])
         self.assertEqual(
-            self._parse("    branches:\n      - develop\n"), ({"develop"}, [])
+            self._parse("    branches:\n      - develop\n").branches, {"develop"}
         )
 
-    def test_parser_rejects_what_it_cannot_vouch_for(self):
+    def test_reads_types_and_ifs(self):
+        trigger = self._parse(
+            "    types: [labeled]\n",
+            jobs="    if: contains(labels, 'x')\n"
+            "    steps:\n"
+            "      - if: ${{ always() }}\n"
+            "        run: a\n"
+            "      - name: b\n"
+            "        if: github.event_name == 'push'\n",
+        )
+        self.assertEqual(trigger.types, {"labeled"})
+        self.assertEqual(
+            trigger.ifs,
+            ["contains(labels, 'x')", "always()", "github.event_name == 'push'"],
+        )
+
+    def test_rejects_what_it_cannot_vouch_for(self):
         for body in [
             "    branches: [develop]\n  # note\n    paths-ignore:\n      - 'x/**'\n",
             "    branches-ignore: [main]\n",

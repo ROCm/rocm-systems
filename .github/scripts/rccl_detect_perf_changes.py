@@ -5,8 +5,9 @@
 """Decide what the RCCL perf regression gate should do for a pull request.
 
 Emits for the `changes` job in rccl_perf_regression.yml:
-  run_gate=true|false   false only when there is a non-doc change and every one
-                        is covered by a COVERAGE_RULES workflow on the base branch.
+  run_gate=true|false   false only when there is a non-doc PERF_PATH_PATTERNS
+                        change and every one is covered by a COVERAGE_RULES
+                        workflow on the base branch.
   build_rccl=1|0        1 when anything under projects/rccl/ changed; 0 runs the
                         A/B against the fixed library instead.
 """
@@ -21,17 +22,25 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from ci_utils import get_modified_paths, set_github_output
-from rccl_change_sets import covered_elsewhere, is_doc, is_rccl
+from ci_utils import get_modified_paths, matches_paths, set_github_output
+from rccl_change_sets import RCCL_PATTERNS, covered_elsewhere, is_doc, is_rccl
+
+# fnmatch twin of rccl_perf_regression.yml's pull_request paths (tested).
+PERF_PATH_PATTERNS = (
+    *RCCL_PATTERNS,
+    ".github/workflows/rccl_perf_regression.yml",
+    ".github/scripts/rccl_detect_perf_changes.py",
+    ".github/scripts/rccl_change_sets.py",
+)
 
 
 def should_run_gate(changed_files: Iterable[str], base_branch: str = "") -> bool:
-    """False only when there is a non-doc change and every one is covered.
-
-    Unlike coco, files outside the gate's trigger paths are not filtered out
-    first; they are never covered, so they can only make the gate run.
-    """
-    code = [f for f in changed_files if not is_doc(f)]
+    """See run_gate in the module docstring."""
+    code = [
+        f
+        for f in changed_files
+        if matches_paths([f], PERF_PATH_PATTERNS) and not is_doc(f)
+    ]
     return not (code and all(covered_elsewhere(f, base_branch) for f in code))
 
 
