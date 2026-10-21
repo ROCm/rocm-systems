@@ -833,6 +833,13 @@ add_test(
         tests/unit/test_argparser.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_run_evals
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_run_evals.xml ${COV_OPTION}
+        tests/unit/test_run_evals.py ${WORKING_DIR_OPTION}
+)
+
 # ---------------------------
 # PC sampling tests
 # ---------------------------
@@ -1090,6 +1097,7 @@ if(${ENABLE_COVERAGE})
         test_utils_counter_defs
         test_parser
         test_argparser
+        test_run_evals
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
@@ -1394,6 +1402,12 @@ if(INSTALL_TESTS)
         FILES_MATCHING
         PATTERN "*.py"
         PATTERN "__pycache__" EXCLUDE
+    )
+    # The tests need an importable copy of the grader shipped with the skills.
+    install(
+        FILES skills/run_evals.py
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/skills
+        COMPONENT tests
     )
     # The conjugate_gradient driver resolves its kernel libraries relative to
     # its own path, so the whole directory installs as a unit.

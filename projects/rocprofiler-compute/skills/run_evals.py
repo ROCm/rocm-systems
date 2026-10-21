@@ -21,6 +21,7 @@ is missing so a caller can treat that as skipped rather than broken.
 import argparse
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -282,6 +283,9 @@ def grade(
     if not behavioral:
         return failures
 
+    if _has_command_usage_error(transcript):
+        failures.append("rocprof-compute command failed with a usage error")
+
     for needle in case.get("logs_contain", []):
         if needle not in transcript:
             failures.append(f"logs missing {needle!r}")
@@ -385,6 +389,44 @@ def main() -> int:
     total = len(queued)
     print(f"\n{total - failed}/{total} passed in {elapsed:.0f}s ({args.mode} mode)")
     return 1 if failed else 0
+
+
+def _has_command_usage_error(transcript: str) -> bool:
+    """Detect a CLI usage error within one Bash command's output."""
+    command_ids = set()
+    for event_line in transcript.splitlines():
+        try:
+            event = json.loads(event_line)
+        except json.JSONDecodeError:
+            continue
+        message = event.get("message") if isinstance(event, dict) else None
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            command_id = block.get("id")
+            if (
+                block.get("type") == "tool_use"
+                and block.get("name") == "Bash"
+                and isinstance(command_id, str)
+            ):
+                command_ids.add(command_id)
+                continue
+            if (
+                block.get("type") != "tool_result"
+                or block.get("tool_use_id") not in command_ids
+            ):
+                continue
+            output = block.get("content")
+            if isinstance(output, str) and re.search(
+                r"^usage:\s*`?rocprof-compute\b.*?^tool: error:",
+                output,
+                re.DOTALL | re.MULTILINE,
+            ):
+                return True
+    return False
 
 
 if __name__ == "__main__":
