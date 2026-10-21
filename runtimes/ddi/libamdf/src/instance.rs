@@ -406,7 +406,7 @@ fn name(endpoint: &topology::Endpoint) -> [std::ffi::c_char; 128] {
 }
 
 fn summary(endpoint: &topology::Endpoint) -> amdf_endpoint_summary_t {
-    let engine_kind = match endpoint.kind() {
+    let engine_kind = match endpoint.kind {
         topology::EndpointKind::Gpu { .. } => AMDF_ENGINE_KIND_GPU,
         topology::EndpointKind::Npu => AMDF_ENGINE_KIND_XDNA,
         _ => AMDF_ENGINE_KIND_UNKNOWN,

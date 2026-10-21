@@ -943,8 +943,8 @@ impl HsaState {
                 caches.push(Cache::new(
                     agent,
                     name.as_bytes(),
-                    cache.level(),
-                    u32::try_from(cache.size_bytes()).unwrap_or(u32::MAX),
+                    cache.level,
+                    u32::try_from(cache.size_bytes).unwrap_or(u32::MAX),
                 ));
             }
             let details = session

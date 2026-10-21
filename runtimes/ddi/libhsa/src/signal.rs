@@ -866,7 +866,7 @@ impl HsaState {
                 &self.session,
                 &devices,
                 &devices,
-                KfdIpcMemoryHandle::from_words(words),
+                KfdIpcMemoryHandle { words },
                 IPC_SIGNAL_ALLOCATION_BYTES,
             )
             .map_err(|error| match error.kind() {
@@ -1001,7 +1001,7 @@ impl SignalState {
             })
             .ok_or(INVALID_ARGUMENT)?;
         linux_interop::export_kfd_ipc_memory(allocation)
-            .map(KfdIpcMemoryHandle::words)
+            .map(|handle| handle.words)
             .map_err(map_error)
     }
 

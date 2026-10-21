@@ -822,7 +822,7 @@ pub(crate) fn signal_batch_pool(
         kind == GPU_POOL_EXTENDED && gpu.info.gfx_major == 9 && matches!(gpu.info.gfx_minor, 4 | 5);
     let coarse = kind == GPU_POOL_COARSE && gpu.info.gfx_major == 12 && gpu.info.gfx_minor >= 5;
     let host_atomic_link = gpu.endpoint.memory_link_from_host().is_some_and(|link| {
-        link.kind() == MemoryLinkType::Xgmi && link.is_coherent() && link.supports_64bit_atomics()
+        link.kind == MemoryLinkType::Xgmi && link.coherent_support && link.atomic_support_64bit
     });
     (gpu_pool_host_visible(runtime, index) && (uncached || coarse)).then_some(
         SignalBatchPool::Device {
@@ -840,7 +840,7 @@ fn gpu_pcie_dmabuf_supported(runtime: &HsaState, index: usize) -> bool {
         || runtime.gpus[index]
             .endpoint
             .memory_link_from_host()
-            .is_some_and(|link| link.kind() == MemoryLinkType::Xgmi)
+            .is_some_and(|link| link.kind == MemoryLinkType::Xgmi)
 }
 
 fn gpu_pool_coherent(pool_kind: u64, uncached: bool, pcie: bool) -> bool {
@@ -907,15 +907,15 @@ fn pool_link_info(link: Option<MemoryLinkInfo>) -> PoolLinkInfo {
         };
     };
     PoolLinkInfo {
-        min_latency: link.minimum_latency(),
-        max_latency: link.maximum_latency(),
-        min_bandwidth: link.minimum_bandwidth(),
-        max_bandwidth: link.maximum_bandwidth(),
-        atomic_support_32bit: link.supports_32bit_atomics(),
-        atomic_support_64bit: link.supports_64bit_atomics(),
-        coherent_support: link.is_coherent(),
-        link_type: hsa_link_type(link.kind()),
-        numa_distance: link.numa_distance(),
+        min_latency: link.minimum_latency,
+        max_latency: link.maximum_latency,
+        min_bandwidth: link.minimum_bandwidth,
+        max_bandwidth: link.maximum_bandwidth,
+        atomic_support_32bit: link.atomic_support_32bit,
+        atomic_support_64bit: link.atomic_support_64bit,
+        coherent_support: link.coherent_support,
+        link_type: hsa_link_type(link.kind),
+        numa_distance: link.numa_distance,
     }
 }
 

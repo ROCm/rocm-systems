@@ -472,11 +472,11 @@ pub(crate) struct DeviceVm {
     /// Exact render descriptor acquired for this KFD VM.
     render: Option<File>,
     /// Whether the render VM can import system-memory DMA-BUFs.
-    system_dma_buf_import: bool,
+    pub(super) system_dma_buf_import: bool,
     /// Native GPU identifier for KFD requests.
-    gpu_id: u32,
+    pub(super) gpu_id: u32,
     /// DRM render node minor number for this GPU.
-    render_minor: u32,
+    pub(super) render_minor: u32,
     /// Stable endpoint identity captured during activation.
     identity: [u8; 16],
     /// Hardware identifier when reported by KFD.
@@ -502,13 +502,6 @@ pub(crate) struct DeviceVm {
 }
 
 impl DeviceVm {
-    pub(super) fn render_minor(&self) -> u32 {
-        self.render_minor
-    }
-
-    pub(super) fn supports_system_dma_buf_import(&self) -> bool {
-        self.system_dma_buf_import
-    }
     pub(super) fn render(&self) -> Result<&File, Error> {
         self.render
             .as_ref()
@@ -554,10 +547,6 @@ impl DeviceVm {
 
     pub(super) fn address_range(&self) -> (u64, u64) {
         (self.base, self.limit)
-    }
-
-    pub(super) fn gpu_id(&self) -> u32 {
-        self.gpu_id
     }
 
     pub(super) fn next_sdma_engine_id(&self, count: u32) -> u32 {
@@ -2582,16 +2571,18 @@ impl KfdAllocation {
             .kfd
             .export_ipc_handle(handle, self.origin_gpu_id, self.native_flags)
             .map_err(|source| native_error("AMDKFD_IOC_IPC_EXPORT_HANDLE", source))?;
-        Ok(KfdIpcMemoryHandle::from_words([
-            share_handle[0],
-            share_handle[1],
-            share_handle[2],
-            share_handle[3],
-            IPC_APERTURE_DGPU,
-            0,
-            pages,
-            self.origin_gpu_id,
-        ]))
+        Ok(KfdIpcMemoryHandle {
+            words: [
+                share_handle[0],
+                share_handle[1],
+                share_handle[2],
+                share_handle[3],
+                IPC_APERTURE_DGPU,
+                0,
+                pages,
+                self.origin_gpu_id,
+            ],
+        })
     }
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
