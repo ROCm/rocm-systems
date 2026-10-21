@@ -260,9 +260,10 @@ bool rcclAllReduceShouldTakeDdaPath(const ncclComm* comm, size_t count, ncclData
 }
 
 // Addon backends (DDA / CE 2-shot / GIN-SDMA) return from the collective impl
-// without ncclEnqueueCheck, which is where NCCL_CHECK_MODE pointer checks and the
-// suspend-while-collective guard live. Divert those calls through enqueue so the
-// guards still fire; debug-mode collectives then use the native/CE path.
+// without ncclEnqueueCheck, which is where NCCL_CHECK_MODE pointer checks, the
+// suspend-while-collective guard and the revoked-comm rejection live. Divert those
+// calls through enqueue so the guards still fire; debug-mode collectives then use
+// the native/CE path.
 bool ncclCommIsSuspended(ncclComm* comm) {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (comm == nullptr || comm->memManager == nullptr) return false;
@@ -279,6 +280,7 @@ bool rcclCollectiveMustUseEnqueuePath(ncclComm* comm) {
   if (comm == nullptr) return true;
   if (comm->checkMode != ncclCheckModeDefault) return true;
   if (ncclCommIsSuspended(comm)) return true;
+  if (__atomic_load_n(&comm->revokedFlag, __ATOMIC_ACQUIRE)) return true;
   return false;
 }
 
