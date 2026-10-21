@@ -508,12 +508,14 @@ TEST_F(SchedulerMicrotest, SymBatchAligned16B_InPlaceFloat32Slice_UsesBytesNotEl
 // Both operands in one window, 512 B apart rather than rank * 24 B: only the in-place comparison
 // separates this from the unaligned in-place case, since the window offsets alone align.
 TEST_F(SchedulerMicrotest, SymBatchAligned16B_OutOfPlaceUnalignedSlice_StaysAligned) {
+  // recvbuff is rank 2's slice of sendbuff, so the task is in place only at rank 2.
   ncclDevrWindow win = SymWindow(0x10000);
-  ncclTaskColl t = SymTask(&win, 0, &win, 512);
+  ncclTaskColl t = SymTask(&win, 0, &win, 2 * 24);
   t.func = ncclFuncReduceScatter;
   t.datatype = ncclInt8;
   t.count = 24;
   EXPECT_TRUE(SymBatchAligned16B(&t, /*rank=*/1));
+  EXPECT_FALSE(SymBatchAligned16B(&t, /*rank=*/2));
 }
 
 TEST_F(SchedulerMicrotest, ScheduleBcastTasksToPlan_NoBcastTasks_ReturnsSuccessWithoutTouchingPeers) {
