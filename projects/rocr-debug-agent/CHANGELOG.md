@@ -8,6 +8,9 @@ Full documentation for the ROCR Debug Agent library is available at
 - The `--output` and `--save-code-objects` options now support '%' format
   tokens to produce the output file names.  The `%p`, `%h`, `%t`, `%e`, `%u`,
   `%g` and `%%` tokens are supported.
+- After printing the waves on `SIGQUIT`, the agent resumes them and the
+  program continues.  Previously the waves stayed stopped and the program
+  hung after the dump.
 
 ## ROCR Debug Agent 2.1.0 for ROCm 7.0
 
