@@ -53,6 +53,15 @@ for ((i = 1; i <= COMP_CWORD; ++i)); do
     COMP_LINE+=" ${COMP_WORDS[i]}"
 done
 COMP_POINT=${#COMP_LINE}
+if [[ -n ${ROCPROFV3_TEST_CWORD+x} ]]; then
+    COMP_CWORD=${ROCPROFV3_TEST_CWORD}
+fi
+if [[ -n ${ROCPROFV3_TEST_COMP_LINE+x} ]]; then
+    COMP_LINE=${ROCPROFV3_TEST_COMP_LINE}
+fi
+if [[ -n ${ROCPROFV3_TEST_COMP_POINT+x} ]]; then
+    COMP_POINT=${ROCPROFV3_TEST_COMP_POINT}
+fi
 
 _rocprofv3
 if ((${#COMPREPLY[@]})); then
@@ -70,6 +79,9 @@ def _complete(
     stub_offset=False,
     comp_type=37,
     columns=160,
+    cword=None,
+    comp_line=None,
+    comp_point=None,
 ):
     process_env = os.environ.copy()
     if env:
@@ -78,6 +90,12 @@ def _complete(
         process_env["ROCPROFV3_TEST_STUB_COMMAND_OFFSET"] = "1"
     process_env["ROCPROFV3_TEST_COMP_TYPE"] = str(comp_type)
     process_env["ROCPROFV3_TEST_COLUMNS"] = str(columns)
+    if cword is not None:
+        process_env["ROCPROFV3_TEST_CWORD"] = str(cword)
+    if comp_line is not None:
+        process_env["ROCPROFV3_TEST_COMP_LINE"] = comp_line
+    if comp_point is not None:
+        process_env["ROCPROFV3_TEST_COMP_POINT"] = str(comp_point)
 
     result = subprocess.run(
         [
@@ -124,7 +142,9 @@ def _declaration_options(declaration):
 def _display_fields(lines):
     fields = []
     for line in lines:
-        fields.append(re.split(r"\s{2,}", line, maxsplit=1))
+        match = re.match(r"^(.*?\S)(?:\s{2,}(.*))?$", line)
+        assert match
+        fields.append([match.group(1), match.group(2) or ""])
     return fields
 
 
@@ -143,19 +163,71 @@ def test_completion_script_has_valid_bash_syntax(rocprofv3_completion_path):
 
 
 def test_public_options_match_generated_help(rocprofv3, rocprofv3_completion_path):
-    expected = {
+    help_options = {
         option
         for declaration in _help_declarations(_help_text(rocprofv3))
         for option in _declaration_options(declaration)
     }
-    completed = set(_complete(rocprofv3_completion_path, ["rocprofv3", "-"]))
+    parser = rocprofv3.build_argument_parser()
+    public_actions = [
+        action
+        for action in parser._actions
+        if action.help != rocprofv3.argparse.SUPPRESS and action.option_strings
+    ]
+    parser_options = {
+        option for action in public_actions for option in action.option_strings
+    }
+    assert parser_options == help_options
 
-    assert "--" in completed
-    completed.remove("--")
+    for option in parser_options:
+        records = rocprofv3._bash_completion_records(parser, ["rocprofv3", option], 1)
+        assert option in {record.split("\t", 1)[0] for record in records}
+
+    expected = {"--"}
+    for action in public_actions:
+        long_options = [
+            option for option in action.option_strings if option.startswith("--")
+        ]
+        expected.add(long_options[0] if long_options else action.option_strings[0])
+
+    completed = set(_complete(rocprofv3_completion_path, ["rocprofv3", "-"]))
     assert completed == expected, (
         f"missing completion options: {sorted(expected - completed)}; "
         f"stale completion options: {sorted(completed - expected)}"
     )
+
+
+def test_grouped_option_alias_display(rocprofv3_completion_path):
+    fields = _display_fields(
+        _complete(
+            rocprofv3_completion_path,
+            ["rocprofv3", "-"],
+            comp_type=9,
+            columns=240,
+        )
+    )
+    labels = [label for label, _ in fields]
+
+    assert labels.count("-o, --output-file") == 1
+    assert labels.count("-p, --pid, --attach") == 1
+    assert labels.count("--output-config") == 1
+    assert labels.count("--advanced-thread-trace, --att") == 1
+
+    long_labels = [
+        label
+        for label, _ in _display_fields(
+            _complete(
+                rocprofv3_completion_path,
+                ["rocprofv3", "--out"],
+                comp_type=9,
+                columns=240,
+            )
+        )
+    ]
+    assert "--output-file (-o)" in long_labels
+    assert "--output-directory (-d)" in long_labels
+    assert "--output-format (-f)" in long_labels
+    assert "--output-config" in long_labels
 
 
 def test_option_descriptions_come_from_parser(rocprofv3, rocprofv3_completion_path):
@@ -231,6 +303,163 @@ def test_output_format_equals_and_multiple_values(rocprofv3_completion_path):
         rocprofv3_completion_path,
         ["rocprofv3", "--output-format", "json", "p"],
     ) == ["pftrace"]
+
+
+def test_value_completion_with_cursor_before_later_words(rocprofv3_completion_path):
+    prefix = "rocprofv3 --output-format rocpd --output-directory " "$PWD --replay-mode "
+    line = f"{prefix} -- hip-stream"
+    completed = _complete(
+        rocprofv3_completion_path,
+        [
+            "rocprofv3",
+            "--output-format",
+            "rocpd",
+            "--output-directory",
+            "$PWD",
+            "--replay-mode",
+            "--",
+            "hip-stream",
+        ],
+        cword=6,
+        comp_line=line,
+        comp_point=len(prefix),
+    )
+    assert completed == ["application", "kernel"]
+
+
+def test_short_option_values_with_cursor_before_later_words(
+    rocprofv3_completion_path,
+):
+    prefix = "rocprofv3 --output-directory $PWD -f "
+    line = f"{prefix} -- hip-stream"
+    completed = _complete(
+        rocprofv3_completion_path,
+        [
+            "rocprofv3",
+            "--output-directory",
+            "$PWD",
+            "-f",
+            "--",
+            "hip-stream",
+        ],
+        cword=4,
+        comp_line=line,
+        comp_point=len(prefix),
+    )
+    assert completed == ["rocpd", "json", "csv", "pftrace", "otf2"]
+
+
+def test_long_option_completion_does_not_insert_display_padding(
+    rocprofv3_completion_path,
+):
+    prefix = "rocprofv3 -f rocpd -o trace-%hostname% " "--replay-mode kernel --kernel-"
+    line = f"{prefix} -- hip-stream"
+    words = [
+        "rocprofv3",
+        "-f",
+        "rocpd",
+        "-o",
+        "trace-%hostname%",
+        "--replay-mode",
+        "kernel",
+        "--kernel-",
+        "--",
+        "hip-stream",
+    ]
+    completed = _complete(
+        rocprofv3_completion_path,
+        words,
+        cword=7,
+        comp_line=line,
+        comp_point=len(prefix),
+    )
+    assert "--kernel-replay-beta-enabled" in completed
+    assert all(value.startswith("--kernel-") for value in completed)
+
+    labels = [
+        label
+        for label, _ in _display_fields(
+            _complete(
+                rocprofv3_completion_path,
+                words,
+                comp_type=9,
+                columns=200,
+                cword=7,
+                comp_line=line,
+                comp_point=len(prefix),
+            )
+        )
+    ]
+    assert labels
+    assert all(label.startswith("--kernel-") for label in labels)
+
+
+def test_output_file_substitutions(rocprofv3, rocprofv3_completion_path):
+    expected = [
+        long_form for long_form, _, _ in rocprofv3._BASH_COMPLETION_OUTPUT_SUBSTITUTIONS
+    ]
+    completed = _complete(
+        rocprofv3_completion_path,
+        ["rocprofv3", "-o", ""],
+    )
+    assert completed == expected
+
+    fields = dict(
+        _display_fields(
+            _complete(
+                rocprofv3_completion_path,
+                ["rocprofv3", "--output-file", ""],
+                comp_type=9,
+                columns=160,
+            )
+        )
+    )
+    assert fields["%p, %pid%"] == "Process identifier"
+    assert fields["%r, %rank%"] == "SLURM or MPI rank"
+    assert fields["%env{NAME}%"] == "Value of environment variable NAME"
+
+    assert _complete(
+        rocprofv3_completion_path,
+        ["rocprofv3", "-o", "results_%pi"],
+    ) == ["results_%pid%"]
+    assert (
+        _complete(
+            rocprofv3_completion_path,
+            ["rocprofv3", "-o", "trace-%pid%"],
+        )
+        == []
+    )
+
+    appended = _complete(
+        rocprofv3_completion_path,
+        ["rocprofv3", "-o", "trace-%pid%-"],
+    )
+    assert appended == [f"trace-%pid%-{value}" for value in expected]
+
+
+def test_output_file_substitutions_with_cursor_before_later_words(
+    rocprofv3, rocprofv3_completion_path
+):
+    prefix = "rocprofv3 --output-format rocpd -o "
+    line = f"{prefix} -- hip-stream"
+    completed = _complete(
+        rocprofv3_completion_path,
+        [
+            "rocprofv3",
+            "--output-format",
+            "rocpd",
+            "-o",
+            "--",
+            "hip-stream",
+        ],
+        cword=4,
+        comp_line=line,
+        comp_point=len(prefix),
+    )
+    expected = [
+        long_form for long_form, _, _ in rocprofv3._BASH_COMPLETION_OUTPUT_SUBSTITUTIONS
+    ]
+    assert completed == expected
 
 
 def test_output_format_descriptions_and_deprecations(rocprofv3_completion_path):
