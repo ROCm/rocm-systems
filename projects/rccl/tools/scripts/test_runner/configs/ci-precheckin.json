@@ -281,7 +281,7 @@
       "binary": "host/rccl-UnitTestsMicroGinHostProxy",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "GinHostProxyMicrotests", "description": "Host-only GIN host proxy microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
