@@ -195,6 +195,14 @@ def has_time_data(df: pd.DataFrame) -> bool:
     )
 
 
+def _print_roofline_html_path(runs: dict[str, Any], output: Optional[TextIO]) -> None:
+    """Print where analyze saved the interactive roofline HTML, if it did."""
+    for workload in runs.values():
+        html_path = getattr(workload, "roofline_html_path", None)
+        if html_path:
+            print(f"\nInteractive roofline plot saved to {html_path}", file=output)
+
+
 def is_roofline_shown(
     args: argparse.Namespace,
     runs: dict[str, Any],
@@ -227,6 +235,7 @@ def is_roofline_shown(
 
     print(f"\n{'-' * 80}", file=output)
     print("4. Roofline", file=output)
+    _print_roofline_html_path(runs, output)
 
     # Display roofline metrics for each run
     for run_path, workload in runs.items():
@@ -1045,6 +1054,8 @@ def show_all(
             else:
                 print(f"\n{'-' * 80}", file=output)
                 print(f"{panel_id // 100}. {panel['title']}", file=output)
+                if panel_id == 400:
+                    _print_roofline_html_path(runs, output)
                 print(panel_content, file=output)
 
 

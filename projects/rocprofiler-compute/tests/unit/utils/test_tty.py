@@ -7,6 +7,7 @@ import argparse
 import sys
 from io import StringIO
 from types import SimpleNamespace
+from typing import Optional
 
 import pandas as pd
 import pytest
@@ -95,6 +96,57 @@ def make_membw_panel(*, include_panel: bool = True) -> SimpleNamespace:
     return SimpleNamespace(
         metric_dataframe=metric_dataframe, arch_configs=arch_configs, runs=runs
     )
+
+
+def make_roofline_panel(*, html_path: Optional[str] = None) -> SimpleNamespace:
+    """Arch configs and runs holding the single rates table of roofline panel 400."""
+    metric_dataframe = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
+    table_config = {
+        "id": 401,
+        "title": "Roofline Performance Rates",
+        "cli_style": "Roofline",
+        "header": {"metric": "Metric", "value": "Value"},
+    }
+    arch_configs = SimpleNamespace(
+        panel_configs={
+            400: {
+                "id": 400,
+                "title": "Roofline",
+                "data source": [{"metric_table": table_config}],
+            }
+        }
+    )
+    runs = {
+        "fixture": SimpleNamespace(
+            dfs={401: metric_dataframe},
+            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
+            roofline_peaks=pd.DataFrame([{"peak": 1.0}]),
+            roofline_html_path=html_path,
+        )
+    }
+    return SimpleNamespace(
+        metric_dataframe=metric_dataframe, arch_configs=arch_configs, runs=runs
+    )
+
+
+def render_roofline_panel(panel: SimpleNamespace, view: Optional[str]) -> str:
+    """Run show_all over a make_roofline_panel fixture and return its output."""
+    rendered_output = StringIO()
+    show_all(
+        make_args(
+            filter_metrics=None,
+            include_cols=None,
+            membw_analysis=False,
+            path=[["fixture"]],
+            time_unit="ns",
+            view=view,
+        ),
+        panel.runs,
+        panel.arch_configs,
+        rendered_output,
+        profiling_config={"filter_blocks": []},
+    )
+    return rendered_output.getvalue()
 
 
 def sample_time_data() -> pd.DataFrame:
@@ -876,12 +928,13 @@ def test_show_all_view_table_replaces_memory_chart_panel(
         pytest.param("table", False, id="view_table"),
     ],
 )
-def test_show_all_view_table_skips_roofline_plot(
+def test_show_all_view_table_skips_per_kernel_roofline_layout(
     monkeypatch: pytest.MonkeyPatch,
     view,
     expect_roofline_called: bool,
 ) -> None:
-    """--view table do not render roofline plot."""
+    """--view table prints the roofline tables as plain tables instead of the
+    per-kernel layout."""
     roofline_called = False
 
     def _spy(*_a, **_k) -> bool:
@@ -890,57 +943,40 @@ def test_show_all_view_table_skips_roofline_plot(
         return False
 
     monkeypatch.setattr("utils.tty.is_roofline_shown", _spy)
-    df = pd.DataFrame({"Metric": ["Metric A"], "Value": [1]})
-    monkeypatch.setattr("utils.tty.process_table_data", lambda *_a, **_k: df)
-    rendered_output = StringIO()
-
-    arch_configs = SimpleNamespace(
-        panel_configs={
-            400: {
-                "id": 400,
-                "title": "Roofline",
-                "data source": [
-                    {
-                        "metric_table": {
-                            "id": 401,
-                            "title": "Roofline Performance Rates",
-                            "cli_style": "Roofline",
-                            "header": {"metric": "Metric", "value": "Value"},
-                        }
-                    }
-                ],
-            }
-        }
+    panel = make_roofline_panel()
+    monkeypatch.setattr(
+        "utils.tty.process_table_data", lambda *_a, **_k: panel.metric_dataframe
     )
-    runs = {
-        "fixture": SimpleNamespace(
-            dfs={401: df},
-            sys_info=pd.DataFrame([{"gpu_arch": "gfx950"}]),
-            roofline_peaks=pd.DataFrame([{"peak": 1.0}]),
-        )
-    }
 
-    show_all(
-        make_args(
-            filter_metrics=None,
-            include_cols=None,
-            membw_analysis=False,
-            path=[["fixture"]],
-            time_unit="ns",
-            view=view,
-        ),
-        runs,
-        arch_configs,
-        rendered_output,
-        profiling_config={"filter_blocks": []},
-    )
+    output = render_roofline_panel(panel, view)
 
     assert roofline_called is expect_roofline_called
-
-    output = rendered_output.getvalue()
     if view == "table":
         assert "4.1 Roofline Performance Rates" in output
         assert "Metric A" in output
+
+
+@pytest.mark.parametrize("view", [None, "table"], ids=["default", "view_table"])
+@pytest.mark.parametrize("html_path", [None, "wl/empirRoof_gpu-0.html"])
+def test_show_all_prints_roofline_html_path_under_heading(
+    monkeypatch: pytest.MonkeyPatch,
+    view: Optional[str],
+    html_path: Optional[str],
+) -> None:
+    """Both views name the saved roofline HTML right under the block heading."""
+    panel = make_roofline_panel(html_path=html_path)
+    monkeypatch.setattr(
+        "utils.tty.process_table_data", lambda *_a, **_k: panel.metric_dataframe
+    )
+
+    output = render_roofline_panel(panel, view)
+
+    if html_path:
+        assert (
+            f"4. Roofline\n\nInteractive roofline plot saved to {html_path}\n" in output
+        )
+    else:
+        assert "Interactive roofline plot" not in output
 
 
 # ---------------------------------------------------------------------------

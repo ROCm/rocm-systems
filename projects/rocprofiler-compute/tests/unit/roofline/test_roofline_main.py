@@ -544,6 +544,21 @@ def test_combined_document_embeds_the_plotly_frame(benchmarked_roofline) -> None
     assert embedded_frame["y"] == pytest.approx(layout_frame[1])
 
 
+def test_save_html_files_returns_the_written_path(
+    benchmarked_roofline, tmp_path: Path
+) -> None:
+    """The returned path is the HTML document written into the workload dir."""
+    roofline = benchmarked_roofline(["FP64"])
+    figures = roofline.construct_plotly_figures(
+        {"ai_hbm": [[0.5], [2000.0]], "kernelNames": ["slow"]}, datatypes=["FP64"]
+    )
+
+    path = roofline.save_html_files(*figures)
+
+    assert path == f"{tmp_path}/empirRoof_gpu-0.html"
+    assert Path(path).is_file()
+
+
 @pytest.mark.parametrize("source_key", ["FLOP", "OP"])
 def test_combined_model_copies_either_source_frame(source_key: str) -> None:
     """The combined model retains the frame from either available figure class."""

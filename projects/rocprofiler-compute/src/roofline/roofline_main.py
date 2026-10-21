@@ -37,7 +37,6 @@ from roofline.run_benchmark import (
 from utils.logger import (
     console_debug,
     console_error,
-    console_log,
     console_warning,
     demarcate,
 )
@@ -57,14 +56,14 @@ from utils.utils_analysis import get_matrix_ops_type
 _KERNEL_PALETTE: list[str] = pcolors.qualitative.Dark24 + pcolors.qualitative.Light24
 DEFAULT_AXIS_BOUNDS = (XMIN, XMAX_DEFAULT, 1.0, 1000000.0)
 ROOF_DENSE_PAD_FACTOR = 1e3
-TRACE_COLORS: dict[str, dict[str, str]] = {
-    "l0": {"html": "#F0E442", "cli": "brown+"},
-    "l1": {"html": "#0072B2", "cli": "red+"},
-    "l2": {"html": "#009E73", "cli": "green+"},
-    "hbm": {"html": "#D55E00", "cli": "blue+"},
-    "lds": {"html": "#E69F00", "cli": "orange+"},
-    "valu": {"html": "#CC79A7", "cli": "white"},
-    "matrix_ops": {"html": "#56B4E9", "cli": "magenta+"},
+TRACE_COLORS: dict[str, str] = {
+    "l0": "#F0E442",
+    "l1": "#0072B2",
+    "l2": "#009E73",
+    "hbm": "#D55E00",
+    "lds": "#E69F00",
+    "valu": "#CC79A7",
+    "matrix_ops": "#56B4E9",
 }
 
 # Dense roof sampling so hover hits a vertex anywhere on the line.
@@ -115,15 +114,13 @@ def _roof_clipped_to_peak(
     return xs, ys
 
 
-def get_color(category: str, backend: str = "html") -> str:
+def get_color(category: str) -> str:
     key = category.removeprefix("ai_").lower()
 
     if key not in TRACE_COLORS:
         raise RuntimeError(f"Invalid category passed to get_color(): {category}")
-    if backend not in TRACE_COLORS[key]:
-        raise RuntimeError(f"Invalid backend passed to get_color(): {backend}")
 
-    return TRACE_COLORS[key][backend]
+    return TRACE_COLORS[key]
 
 
 def _roof_sample_count(low_ai: float, high_ai: float) -> int:
@@ -637,8 +634,9 @@ class Roofline:
         flops_figure: Optional[go.Figure],
         ops_dt_list: str,
         flops_dt_list: str,
-    ) -> None:
-        """Write one precision-selectable Plotly HTML document to disk."""
+    ) -> Optional[str]:
+        """Write one precision-selectable Plotly HTML document to disk and
+        return its path, or None when there is nothing to plot."""
         dev_id = str(self.__run_parameters["device_id"])
         kernel_list = ""
         if self.__run_parameters.get("kernel_filter", False):
@@ -662,7 +660,8 @@ class Roofline:
             )
             path = f"{workload_dir}/empirRoof_gpu-{dev_id}{kernel_list}.html"
             Path(path).write_text(document, encoding="utf-8")
-            console_log("roofline", "Roofline HTML files saved.")
+            return path
+        return None
 
     def _combined_html_figure(
         self,
@@ -1083,10 +1082,3 @@ class Roofline:
                 font=dict(size=13, color="#1b1f24"),
             ),
         )
-
-    def get_dtype(self) -> list[str]:
-        """
-        Return the data types requested by the user (else the default data type)
-        for the roofline plot.
-        """
-        return self.__run_parameters["roofline_data_type"]
