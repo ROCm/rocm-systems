@@ -79,7 +79,7 @@ CANDIDATE = "candidate"
 OVERLAY_CTX = "overlay_ctx"
 OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 # The maxtext family needs a second image: its A/B baseline cannot be the stock
-# registry tag, which carries no Primus. See build_maxtext_baseline_image().
+# registry tag, which carries no Primus. See stage_maxtext_baseline().
 MAXTEXT_BASELINE_DOCKERFILE = "Dockerfile.maxtext-baseline"
 
 # The A/B below needs both runs in one allocation, which requires madengine to
@@ -895,7 +895,7 @@ def _stage_primus_context(ctx_dir: Path, primus_dir: Path) -> None:
 
 
 def resolve_base_digest(base_image: str) -> str:
-    """Pull *base_image* once and return it pinned by digest.
+    """Return *base_image* pinned by digest, without pulling it.
 
     Both A/B images must come from the same base, and a tag cannot promise
     that: the baseline and the candidate are separate `docker build`
@@ -904,25 +904,43 @@ def resolve_base_digest(base_image: str) -> str:
     between the two builds still splits the pair. A digest is immutable, so
     resolving it once and writing it into both Dockerfiles closes it.
 
-    Falls back to the tag when the image has no RepoDigest, which is the case
-    for a locally built base; there is nothing to pin to and nothing remote
-    that could move underneath us either.
+    The query goes to the registry, not to a local copy: this host builds no
+    images and has no use for a multi-GB base, and every runner on it shares
+    one Docker disk. The nodes do the pulling, once each, as part of their
+    own build.
+
+    Falls back to the tag when the digest cannot be resolved -- a locally
+    built base has nothing remote to pin to, and an unreachable registry is
+    not worth failing the run over this far ahead of the allocation.
     """
-    subprocess.run(["docker", "pull", base_image], check=True)
-    result = subprocess.run(
-        ["docker", "image", "inspect", "--format", "{{index .RepoDigests 0}}", base_image],
-        capture_output=True, text=True,
+    repo = base_image.split("@", 1)[0].rsplit(":", 1)[0]
+    probes = (
+        ["docker", "buildx", "imagetools", "inspect",
+         "--format", "{{.Manifest.Digest}}", base_image],
+        # Already-pulled bases still resolve, so a host that happens to carry
+        # one does not depend on the registry being reachable.
+        ["docker", "image", "inspect",
+         "--format", "{{index .RepoDigests 0}}", base_image],
     )
-    digest = result.stdout.strip()
-    if result.returncode != 0 or "@sha256:" not in digest:
-        log.warning(
-            "No RepoDigest for %s; both A/B images will use the tag. They are "
-            "built minutes apart, so a push in between would split the pair.",
-            base_image,
-        )
-        return base_image
-    log.info("Base pinned for both A/B images: %s", digest)
-    return digest
+    for probe in probes:
+        try:
+            result = subprocess.run(probe, capture_output=True, text=True, timeout=120)
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.debug("%s failed: %s", probe[1], exc)
+            continue
+        out = result.stdout.strip()
+        if result.returncode != 0 or "sha256:" not in out:
+            continue
+        digest = out if "@sha256:" in out else f"{repo}@{out}"
+        log.info("Base pinned for both A/B images: %s", digest)
+        return digest
+
+    log.warning(
+        "Could not resolve a digest for %s; both A/B images will use the tag. "
+        "They are built minutes apart, so a push in between would split the pair.",
+        base_image,
+    )
+    return base_image
 
 
 def base_identity(from_ref: str) -> str:
@@ -940,14 +958,19 @@ def base_identity(from_ref: str) -> str:
     return hashlib.sha256(from_ref.encode()).hexdigest()[:10]
 
 
-def build_maxtext_baseline_image(
+def stage_maxtext_baseline(
     base_image: str,
     work_dir: Path,
     primus_dir: Path,
     run_token: str,
     from_ref: str,
 ) -> str:
-    """Build the A/B baseline for the MaxText family: Primus, stock RCCL.
+    """Stage the A/B baseline for the MaxText family: Primus, stock RCCL.
+
+    Writes the Dockerfile and its build context under ``overlay_ctx`` and
+    returns the tag, exactly as stage_rccl_overlay() does for the candidate.
+    Nothing is built here: the baseline manifest advertises this Dockerfile,
+    so node 0 of the allocation builds it and the others load it.
 
     The Megatron workloads use the stock registry image as their baseline, but
     that cannot work here: ``rocm/jax-training:maxtext-*`` ships MaxText and no
@@ -966,19 +989,13 @@ def build_maxtext_baseline_image(
     dockerfile = ctx_dir / MAXTEXT_BASELINE_DOCKERFILE
     dockerfile.write_text(f"FROM {from_ref}\n\n{MAXTEXT_PRIMUS_PAYLOAD}")
 
-    # Rebuilt every run under a per-run tag, with the same token the candidate
-    # uses: a cached tag would skip the build and could pair a fresh candidate
-    # with a stale baseline, breaking the one invariant this pair exists to
-    # hold -- that the two differ by the RCCL swap alone. The payload layers
-    # are shared with the candidate, so a cached rebuild takes ~2 s.
+    # Tagged per A/B run, with the same token the candidate carries: the nodes
+    # rebuild on a tag they cannot find, and a tag shared with an earlier run
+    # would let one of them skip that build and pair a fresh candidate with a
+    # stale baseline -- breaking the one invariant this pair exists to hold,
+    # that the two differ by the RCCL swap alone.
     tag = f"{base_image}-primus-{PRIMUS_REF}-{run_token}-{base_identity(from_ref)}"
-    log.info("Building MaxText baseline image (Primus, stock RCCL): %s", tag)
-    # No --pull: from_ref is already a digest, resolved once for both images.
-    subprocess.run(
-        ["docker", "build", "-t", tag, "-f", str(dockerfile), str(ctx_dir)],
-        check=True,
-    )
-    log.info("MaxText baseline image built: %s", tag)
+    log.info("MaxText baseline staged for the nodes to build: %s", tag)
     return tag
 
 
@@ -2342,10 +2359,11 @@ def main() -> None:
 
     # The maxtext baseline cannot be the stock tag: that image ships MaxText
     # but no Primus, so run.sh would not find primus-cli and the baseline
-    # phase would die before step 0. Build base + Primus instead, which also
-    # makes the pair differ by the RCCL swap and nothing else.
+    # phase would die before step 0. Stage base + Primus instead, which also
+    # makes the pair differ by the RCCL swap and nothing else. Staged, not
+    # built: the nodes build both images of the pair, this host neither.
     if family == "maxtext":
-        baseline_image = build_maxtext_baseline_image(
+        baseline_image = stage_maxtext_baseline(
             workload_config["base_image"], work_dir, primus_dir,
             # Same token the candidate tag carries, so the pair is unambiguously
             # from one run, and the same pinned base digest.
