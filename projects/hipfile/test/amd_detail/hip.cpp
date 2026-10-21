@@ -11,6 +11,9 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 
+#include <cerrno>
+#include <system_error>
+
 using namespace hipFile;
 using namespace testing;
 
@@ -86,6 +89,56 @@ TEST(Hip, getHipAmdFileWriteHandlesHipGetProcAddressFailure)
         .WillOnce(Throw(Hip::RuntimeError(hipErrorTbd)));
 
     ASSERT_EQ(getHipAmdFileWritePtr(), nullptr);
+}
+
+static int
+aisIoErrorCode(hipError_t hip_error, int32_t status, int ais_errno)
+{
+    try {
+        throwOnAisIoError(hip_error, status, ais_errno);
+    }
+    catch (const std::system_error &e) {
+        return e.code().value();
+    }
+    return 0;
+}
+
+TEST(Hip, throwOnAisIoErrorAcceptsSuccess)
+{
+    ASSERT_NO_THROW(throwOnAisIoError(hipSuccess, 0, 0));
+}
+
+TEST(Hip, throwOnAisIoErrorIgnoresStaleENOTTYOnSuccess)
+{
+    ASSERT_NO_THROW(throwOnAisIoError(hipSuccess, 0, ENOTTY));
+}
+
+TEST(Hip, throwOnAisIoErrorThrowsENOTTYIfAisIoctlNotImplemented)
+{
+    ASSERT_EQ(aisIoErrorCode(hipErrorUnknown, 0, ENOTTY), ENOTTY);
+}
+
+// Older libhsakmt copies the in/out union back on ioctl failure, so status
+// aliases the input handle_offset.
+TEST(Hip, throwOnAisIoErrorThrowsENOTTYIfAisIoctlNotImplementedWithStaleStatus)
+{
+    ASSERT_EQ(aisIoErrorCode(hipErrorUnknown, 16384, ENOTTY), ENOTTY);
+}
+
+TEST(Hip, throwOnAisIoErrorThrowsKernelStatus)
+{
+    ASSERT_EQ(aisIoErrorCode(hipErrorUnknown, -ENODEV, ENODEV), ENODEV);
+}
+
+TEST(Hip, throwOnAisIoErrorThrowsRuntimeErrorOnOtherHipError)
+{
+    try {
+        throwOnAisIoError(hipErrorInvalidDevice, 0, EINVAL);
+        FAIL() << "throwOnAisIoError() was expected to throw";
+    }
+    catch (const Hip::RuntimeError &e) {
+        ASSERT_EQ(e.error, hipErrorInvalidDevice);
+    }
 }
 
 HIPFILE_WARN_NO_GLOBAL_CTOR_ON

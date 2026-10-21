@@ -53,6 +53,13 @@ hipAmdFileRead_t getHipAmdFileReadPtr();
 /// @return The address of hipAmdFileWrite if the function was found, null otherwise
 hipAmdFileWrite_t getHipAmdFileWritePtr();
 
+/// @brief Throw if a hipAmdFileRead()/hipAmdFileWrite() call failed
+/// @param hip_error The value returned by the call
+/// @param status The status out-param of the call
+/// @param ais_errno errno captured immediately after the call
+/// @throws std::system_error for an AIS/KFD error, Hip::RuntimeError for any other HIP error
+void throwOnAisIoError(hipError_t hip_error, int32_t status, int ais_errno);
+
 struct Hip {
     virtual ~Hip() = default;
     virtual hipPointerAttribute_t hipPointerGetAttributes(const void *ptr) const;

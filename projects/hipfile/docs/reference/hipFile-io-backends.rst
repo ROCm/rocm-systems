@@ -47,5 +47,5 @@ I/O fails when both backends reject the request, or when a fastpath runtime erro
 - The buffer isn't ``hipMemoryTypeDevice``. Both fastpath and fallback require device memory. Non-device buffers cause both backends to reject the request.
 - The file offset or I/O size isn't aligned to the file system's offset alignment, or the device buffer address isn't aligned to the memory alignment. These two alignment values can differ depending on what the kernel reports through ``statx()``.
 
-When the fastpath accepts a request but encounters a runtime error, only ``ENODEV`` and ``EREMOTEIO`` trigger an automatic retry on the fallback backend. All other errors, including ``EINVAL``, ``EBADF``, and ``EIO``, cause the I/O to fail immediately. Setting ``HIPFILE_ALLOW_COMPAT_MODE`` to ``false`` disables the fallback backend entirely, which also prevents automatic retry.
+When the fastpath accepts a request but encounters a runtime error, only ``ENODEV``, ``EREMOTEIO``, and ``ENOTTY`` trigger an automatic retry on the fallback backend. ``ENOTTY`` means the amdgpu kernel driver doesn't support AIS (for example, the inbox Linux driver). All other errors, including ``EINVAL``, ``EBADF``, and ``EIO``, cause the I/O to fail immediately. Setting ``HIPFILE_ALLOW_COMPAT_MODE`` to ``false`` disables the fallback backend entirely, which also prevents automatic retry.
 
