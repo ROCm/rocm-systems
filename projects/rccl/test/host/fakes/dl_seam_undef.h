@@ -9,4 +9,5 @@
 #undef dlerror
 #undef dlclose
 #undef dlvsym
+#undef dlsym
 #undef dlopen

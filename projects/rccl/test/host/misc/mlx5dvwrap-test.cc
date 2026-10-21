@@ -9,10 +9,10 @@
 #include <gtest/gtest.h>
 
 #include <cerrno>
-#include <cstring>
 
 #include "../common/ProcessIsolatedTestRunner.hpp"  // RUN_ISOLATED_TEST
 #include "fakes/dl_fakes.h"
+#include "misc/WrapTable.h"
 
 #include MLX5DVWRAP_CC_PATH
 
@@ -49,15 +49,12 @@ void InstallRegDmabufMr() {
 class Mlx5dvwrapMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    saved_ = mlx5dvSymbols;
-    std::memset(&mlx5dvSymbols, 0, sizeof(mlx5dvSymbols));
     g_ret = 0;
     g_mr = kMr;
   }
-  void TearDown() override { mlx5dvSymbols = saved_; }
 
  private:
-  ncclMlx5dvSymbols saved_;
+  ScopedZeroedTable<ncclMlx5dvSymbols> table_{mlx5dvSymbols};
 };
 
 TEST_F(Mlx5dvwrapMicrotest, IsSupported_SymbolNotLoaded_ReturnsFalse) {

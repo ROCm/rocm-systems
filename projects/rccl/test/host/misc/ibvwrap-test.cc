@@ -22,6 +22,7 @@
 #include "fakes/env_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/net_ib_ops_fault_fakes.h"
+#include "misc/WrapTable.h"
 
 #include "fakes/param_redirect.h"
 #include IBVWRAP_CC_PATH
@@ -55,34 +56,19 @@ ibv_device* g_deviceList[2] = {kDevice, nullptr};
 class IbvwrapMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    saved_ = ibvSymbols;
-    std::memset(&ibvSymbols, 0, sizeof(ibvSymbols));
     g_ret = 0;
     g_returned = kAddr;
     g_out = nullptr;
     g_calls = 0;
   }
   void TearDown() override {
-    ibvSymbols = saved_;
     ResetNcclFakes();
     ResetNetIbOpsFaultFakes();
   }
 
  private:
-  ncclIbvSymbols saved_;
+  ScopedZeroedTable<ncclIbvSymbols> table_{ibvSymbols};
 };
-
-// One wrapper and the fake verb behind it; the fake checks the arguments it was forwarded.
-struct WrapCase {
-  const char* name;
-  void (*install)();
-  ncclResult_t (*call)();
-};
-
-template <typename Case>
-std::string CaseName(const ::testing::TestParamInfo<Case>& info) {
-  return info.param.name;
-}
 
 // Runs an object-returning wrapper with a stale *ret and records what it wrote there.
 template <typename T, typename Call>
@@ -479,7 +465,8 @@ TEST_P(IbvwrapPassthroughMicrotest, SymbolNotLoaded_ReturnsInternalError) {
   EXPECT_EQ(GetParam().call(), ncclInternalError);
 }
 
-INSTANTIATE_TEST_SUITE_P(Ibvwrap, IbvwrapPassthroughMicrotest, ::testing::ValuesIn(kPassthroughCases), CaseName<WrapCase>);
+INSTANTIATE_TEST_SUITE_P(Ibvwrap, IbvwrapPassthroughMicrotest, ::testing::ValuesIn(kPassthroughCases),
+                         CaseName<WrapCase>);
 
 // --- ECE is optional: a missing or unsupported verb is not an error ---
 
