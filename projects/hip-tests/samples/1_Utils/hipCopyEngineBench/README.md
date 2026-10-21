@@ -80,10 +80,13 @@ reserve/build/atomic latency breakdown).
 `copy-engine-latency --handleRank N` submits on the Nth and `copy-engine-bw
 --numOfQueuesPerDestination N` spreads a destination's work-groups over the best N.
 
-On an 8x MI300X node only the even ranks are usable from a kernel: a 16 KiB copy through rank 0, 2,
-4 or 6 takes about 7 us, through rank 1, 3, 5 or 7 about 340 ms. Check a rank with
-`copy-engine-latency --handleRank N -b 16384 -e 16384 -n 20` before trusting a multi-queue run;
-`--numOfQueuesPerDestination 2` and up currently includes a slow ring.
+On an 8x MI300X node some of the returned engines are unusable from a kernel: a 16 KiB copy takes
+about 7 us on most and 200-340 ms on the others. Which ranks are slow depends on the pair (GPU 0 to
+GPU 1: ranks 1, 3, 5, 7; GPU 0 to GPU 2 and 0 to GPU 5: rank 2; GPU 1 to GPU 0: ranks 1 and 3), so
+it is not rank parity. The runtime ranks engines for the pair's route but does not check that a
+kernel can drive the ring. Check a rank with `copy-engine-latency --handleRank N --srcGpu S --dstGpu D
+-b 16384 -e 16384 -n 20` before trusting a multi-queue run; `--numOfQueuesPerDestination 2` and up
+may include a slow ring.
 
 ## Differences from sdma-ep-bench
 
