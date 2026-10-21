@@ -5,7 +5,6 @@
 #include "core/trace_cache/sample_type.hpp"
 
 #include "library/pmc/collectors/cpu/sample.hpp"
-#include "library/pmc/collectors/gpu/sample.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/sample.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
 
@@ -28,7 +27,6 @@ public:
     virtual void handle(const region_sample& sample)           = 0;
     virtual void handle(const in_time_sample& sample)          = 0;
     virtual void handle(const pmc_event_with_sample& sample)   = 0;
-    virtual void handle(const gpu_pmc_sample& sample)          = 0;
     virtual void handle(const pmc_values_sample& sample)       = 0;
     virtual void handle(const cpu_pmc_sample& sample)          = 0;
     virtual void handle(const gpu_perf_counter_sample& sample) = 0;

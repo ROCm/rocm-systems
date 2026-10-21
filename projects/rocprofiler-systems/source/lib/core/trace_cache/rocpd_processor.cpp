@@ -15,7 +15,6 @@
 #include "core/trace_cache/rocpd_helpers.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/pmc/collectors/cpu/sample.hpp"
-#include "library/pmc/collectors/gpu/types.hpp"
 #include "library/pmc/collectors/hipfile/sample.hpp"
 #include "library/pmc/collectors/hipfile/types.hpp"
 #include "library/thread_info.hpp"
@@ -33,6 +32,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -373,213 +373,6 @@ rocpd_processor_t::handle(const pmc_event_with_sample& pmc)
 }
 
 void
-rocpd_processor_t::handle([[maybe_unused]] const gpu_pmc_sample& gpu_pmc)
-{
-    const auto* name         = trait::name<category::amd_smi>::value;
-    const auto& process_info = m_metadata->get_process_info();
-
-    const agent* agent_ptr = nullptr;
-    try
-    {
-        agent_ptr =
-            &m_agent_manager->get_agent_by_type_index(gpu_pmc.device_id, agent_type::gpu);
-    } catch(const std::out_of_range& e)
-    {
-        LOG_WARNING("GPU PMC sample skipped: agent lookup failed for device_id={}: {}",
-                    gpu_pmc.device_id, e.what());
-        return;
-    }
-
-    const auto& agent_ref = *agent_ptr;
-    const auto  agent_uid = make_agent_uid(agent_ref);
-
-    auto event = make_event(0, 0, 0, name);
-
-    auto insert_event_and_sample = [&](bool is_enabled, const char* pmc_name,
-                                       const char* track_name, double value) {
-        if(!is_enabled)
-        {
-            return;
-        }
-
-        profiler_hub::writer_types::pmc_event_data_t pmc_data;
-        pmc_data.event = event;
-        pmc_data.value = value;
-
-        profiler_hub::writer_types::track_info_t track;
-        track.name       = track_name;
-        track.node_id    = node_info::get_instance().id;
-        track.process_id = process_info.pid;
-
-        profiler_hub::writer_types::sample_data_t sample;
-        sample.timestamp = gpu_pmc.timestamp;
-        sample.track     = track;
-        pmc_data.sample  = sample;
-
-        profiler_hub::writer_types::pmc_info_unique_id_t pmc_uid;
-        pmc_uid.name     = pmc_name;
-        pmc_uid.agent_id = agent_uid;
-
-        try_insert_pmc_event(pmc_data, pmc_uid, "GPU PMC sample");
-    };
-
-    const auto& m       = gpu_pmc.metric_values;
-    const auto& enabled = gpu_pmc.enabled_metric;
-
-    auto const insert_scalar = [&](const char* metric_name, const std::string& track,
-                                   bool is_enabled, double value) {
-        insert_event_and_sample(is_enabled, metric_name, track.c_str(), value);
-    };
-
-    insert_scalar(trait::name<category::amd_smi_gfx_busy>::value,
-                  info::format_track_name<category::amd_smi_gfx_busy>(),
-                  enabled.bits.gfx_activity, m.gfx_activity);
-    insert_scalar(trait::name<category::amd_smi_umc_busy>::value,
-                  info::format_track_name<category::amd_smi_umc_busy>(),
-                  enabled.bits.umc_activity, m.umc_activity);
-    insert_scalar(trait::name<category::amd_smi_mm_busy>::value,
-                  info::format_track_name<category::amd_smi_mm_busy>(),
-                  enabled.bits.mm_activity, m.mm_activity);
-    insert_scalar(trait::name<category::amd_smi_temp>::value,
-                  info::format_track_name<category::amd_smi_temp>(),
-                  enabled.bits.hotspot_temperature || enabled.bits.edge_temperature,
-                  enabled.bits.hotspot_temperature ? m.hotspot_temperature
-                                                   : m.edge_temperature);
-    insert_scalar(trait::name<category::amd_smi_power>::value,
-                  info::format_track_name<category::amd_smi_power>(),
-                  enabled.bits.current_socket_power || enabled.bits.average_socket_power,
-                  pmc::collectors::gpu::select_socket_power(enabled, m));
-    insert_scalar(
-        trait::name<category::amd_smi_memory_usage>::value,
-        info::format_track_name<category::amd_smi_memory_usage>(),
-        enabled.bits.memory_usage,
-        data_size_cast<megabytes>(bytes{ static_cast<double>(m.memory_usage) }).count());
-    insert_scalar(trait::name<category::amd_smi_sdma_usage>::value,
-                  info::format_track_name<category::amd_smi_sdma_usage>(),
-                  enabled.bits.sdma_usage, m.sdma_usage);
-    insert_scalar(trait::name<category::amd_smi_gfx_clock>::value,
-                  info::format_track_name<category::amd_smi_gfx_clock>(),
-                  enabled.bits.gfx_clock, m.gfx_clock_mhz);
-    insert_scalar(trait::name<category::amd_smi_mem_clock>::value,
-                  info::format_track_name<category::amd_smi_mem_clock>(),
-                  enabled.bits.mem_clock, m.mem_clock_mhz);
-
-    auto const insert_xcp_metrics = [&](bool is_enabled, const auto& get_array,
-                                        const auto& format_name) {
-        if(!is_enabled)
-        {
-            return;
-        }
-        for(size_t xcp = 0; xcp < m.xcp_stats.size(); ++xcp)
-        {
-            const auto& arr = get_array(m.xcp_stats[xcp]);
-            for(size_t i = 0; i < arr.size(); ++i)
-            {
-                if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16)
-                {
-                    continue;
-                }
-                auto const metric_name =
-                    format_name(static_cast<int>(xcp), static_cast<int>(i));
-                insert_event_and_sample(true, metric_name.c_str(), metric_name.c_str(),
-                                        static_cast<double>(arr[i]));
-            }
-        }
-    };
-
-    insert_xcp_metrics(
-        enabled.bits.vcn_busy,
-        [](const auto& xcp) -> const auto& { return xcp.vcn_busy; },
-        [](int xcp, int engine) {
-            return info::format_track_name<category::amd_smi_vcn_activity>(xcp, engine);
-        });
-    insert_xcp_metrics(
-        enabled.bits.jpeg_busy,
-        [](const auto& xcp) -> const auto& { return xcp.jpeg_busy; },
-        [](int xcp, int engine) {
-            return info::format_track_name<category::amd_smi_jpeg_activity>(xcp, engine);
-        });
-
-    auto const insert_device_level_metrics = [&](const std::string_view base_name,
-                                                 bool is_enabled, const auto& arr) {
-        if(!is_enabled)
-        {
-            return;
-        }
-        for(std::size_t i = 0; i < arr.size(); ++i)
-        {
-            if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_16)
-            {
-                continue;
-            }
-
-            auto pmc_name   = fmt::format("{}_{}", base_name, i);
-            auto track_name = pmc_name;
-
-            LOG_TRACE("Inserting metric: pmc_name: {}, track_name: {}, value: {}",
-                      pmc_name, track_name, arr[i]);
-            insert_event_and_sample(true, pmc_name.c_str(), track_name.c_str(),
-                                    static_cast<double>(arr[i]));
-        }
-    };
-
-    insert_device_level_metrics(info::format_track_name<category::amd_smi_vcn_activity>(),
-                                enabled.bits.vcn_activity, m.vcn_activity);
-
-    insert_device_level_metrics(
-        info::format_track_name<category::amd_smi_jpeg_activity>(),
-        enabled.bits.jpeg_activity, m.jpeg_activity);
-
-    insert_scalar(trait::name<category::amd_smi_pcie_link_width>::value,
-                  info::format_track_name<category::amd_smi_pcie_link_width>(),
-                  enabled.bits.pcie, m.pcie.link.width);
-    insert_scalar(trait::name<category::amd_smi_pcie_link_speed>::value,
-                  info::format_track_name<category::amd_smi_pcie_link_speed>(),
-                  enabled.bits.pcie, m.pcie.link.speed);
-    insert_scalar(trait::name<category::amd_smi_pcie_bandwidth_acc>::value,
-                  info::format_track_name<category::amd_smi_pcie_bandwidth_acc>(),
-                  enabled.bits.pcie, m.pcie.bandwidth.acc);
-    insert_scalar(trait::name<category::amd_smi_pcie_bandwidth_inst>::value,
-                  info::format_track_name<category::amd_smi_pcie_bandwidth_inst>(),
-                  enabled.bits.pcie, m.pcie.bandwidth.inst);
-
-    // XGMI metrics
-    insert_scalar(trait::name<category::amd_smi_xgmi_link_width>::value,
-                  info::format_track_name<category::amd_smi_xgmi_link_width>(),
-                  enabled.bits.xgmi, m.xgmi.link.width);
-    insert_scalar(trait::name<category::amd_smi_xgmi_link_speed>::value,
-                  info::format_track_name<category::amd_smi_xgmi_link_speed>(),
-                  enabled.bits.xgmi, m.xgmi.link.speed);
-
-    // XGMI data accumulators (per-link arrays)
-    auto const insert_xgmi_link_metrics = [&](const std::string& base_track_name,
-                                              bool is_enabled, const auto& arr) {
-        if(!is_enabled)
-        {
-            return;
-        }
-        for(size_t i = 0; i < arr.size(); ++i)
-        {
-            if(arr[i] == pmc::collectors::gpu::METRIC_VALUE_NOT_SUPPORTED_64)
-            {
-                continue;
-            }
-
-            const std::string pmc_name = info::format_link_pmc_name(base_track_name, i);
-            const std::string track_name =
-                info::format_link_track_name(base_track_name, i);
-            insert_event_and_sample(true, pmc_name.c_str(), track_name.c_str(),
-                                    static_cast<double>(arr[i]));
-        }
-    };
-
-    insert_xgmi_link_metrics(trait::name<category::amd_smi_xgmi_read_data>::value,
-                             enabled.bits.xgmi, m.xgmi.data_acc.read);
-    insert_xgmi_link_metrics(trait::name<category::amd_smi_xgmi_write_data>::value,
-                             enabled.bits.xgmi, m.xgmi.data_acc.write);
-}
-
-void
 rocpd_processor_t::handle(const pmc_values_sample& values_sample)
 {
     const auto* schema = m_metadata->find_pmc_schema(values_sample.schema_id);
@@ -610,10 +403,15 @@ rocpd_processor_t::handle(const pmc_values_sample& values_sample)
     for(std::size_t idx = 0; idx < value_count; ++idx)
     {
         const auto& series = schema->series[idx];
+        const auto  value  = values_sample.value(idx);
+        if(std::isnan(value))
+        {
+            continue;  // the collector reported no value
+        }
 
         profiler_hub::writer_types::pmc_event_data_t pmc_data;
         pmc_data.event = event;
-        pmc_data.value = values_sample.value(idx);
+        pmc_data.value = value;
 
         profiler_hub::writer_types::track_info_t track;
         track.name       = series.rocpd_track;

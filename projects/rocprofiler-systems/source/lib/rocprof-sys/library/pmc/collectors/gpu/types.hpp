@@ -75,27 +75,26 @@ union enabled_metrics
     std::uint32_t value = 0;
 };
 
-// Socket power: prefer the instantaneous "current" reading, falling back to the
-// time-averaged reading only when current is unavailable.
-[[nodiscard]] inline bool
-has_current_socket_power(const enabled_metrics& enabled)
+/// enabled_metrics bit masks, in the bit order documented above.
+namespace metric_bit
 {
-    return enabled.bits.current_socket_power != 0;
-}
-
-[[nodiscard]] inline double
-select_socket_power(const enabled_metrics& enabled, const metrics& values)
-{
-    return has_current_socket_power(enabled)
-               ? static_cast<double>(values.current_socket_power)
-               : static_cast<double>(values.average_socket_power);
-}
-
-// Display label for the socket-power track, matching select_socket_power().
-[[nodiscard]] inline const char*
-socket_power_track_label(const enabled_metrics& enabled)
-{
-    return has_current_socket_power(enabled) ? "Current Power" : "Avg. Power";
-}
+inline constexpr std::uint32_t k_current_socket_power = 1U << 0U;
+inline constexpr std::uint32_t k_average_socket_power = 1U << 1U;
+inline constexpr std::uint32_t k_memory_usage         = 1U << 2U;
+inline constexpr std::uint32_t k_hotspot_temperature  = 1U << 3U;
+inline constexpr std::uint32_t k_edge_temperature     = 1U << 4U;
+inline constexpr std::uint32_t k_gfx_activity         = 1U << 5U;
+inline constexpr std::uint32_t k_umc_activity         = 1U << 6U;
+inline constexpr std::uint32_t k_mm_activity          = 1U << 7U;
+inline constexpr std::uint32_t k_vcn_activity         = 1U << 8U;
+inline constexpr std::uint32_t k_jpeg_activity        = 1U << 9U;
+inline constexpr std::uint32_t k_vcn_busy             = 1U << 10U;
+inline constexpr std::uint32_t k_jpeg_busy            = 1U << 11U;
+inline constexpr std::uint32_t k_xgmi                 = 1U << 12U;
+inline constexpr std::uint32_t k_pcie                 = 1U << 13U;
+inline constexpr std::uint32_t k_sdma_usage           = 1U << 14U;
+inline constexpr std::uint32_t k_gfx_clock            = 1U << 15U;
+inline constexpr std::uint32_t k_mem_clock            = 1U << 16U;
+}  // namespace metric_bit
 
 }  // namespace rocprofsys::pmc::collectors::gpu

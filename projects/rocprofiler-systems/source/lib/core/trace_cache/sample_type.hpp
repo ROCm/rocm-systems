@@ -20,13 +20,13 @@ namespace rocprofsys::trace_cache
 
 enum class type_identifier_t : std::uint32_t
 {
-    in_time_sample          = 0x0000,
-    pmc_event_with_sample   = 0x0001,
-    region                  = 0x0002,
-    kernel_dispatch         = 0x0003,
-    memory_copy             = 0x0004,
-    memory_alloc            = 0x0005,
-    gpu_pmc_sample          = 0x0006,
+    in_time_sample        = 0x0000,
+    pmc_event_with_sample = 0x0001,
+    region                = 0x0002,
+    kernel_dispatch       = 0x0003,
+    memory_copy           = 0x0004,
+    memory_alloc          = 0x0005,
+    // 0x0006 was gpu_pmc_sample (GPU samples are pmc_values_sample now)
     cpu_pmc_sample          = 0x0007,
     backtrace_region_sample = 0x0008,
     scratch_memory          = 0x0009,
@@ -732,7 +732,8 @@ get_size(const kfd_sample& item)
 /**
  * Values of one PMC schema (metadata_registry::add_pmc_schema) at one timestamp, in
  * schema order: the schema carries every name, unit and the agent, so the record carries
- * only values.
+ * only values. A NaN value means the collector had no value for that series in this
+ * sample (e.g. an AMD SMI "not supported" sentinel); the processors skip it.
  *
  * Written from a span of the collector's values without copying them into the sample.
  * When read back, value_bytes points into the parse buffer (like the string_view members

@@ -5,7 +5,7 @@ add_library(
     pmc-gpu-collector-tests
     OBJECT
     test_device.cpp
-    test_power_metrics.cpp
+    test_counters.cpp
     test_gpu_traits.cpp
 )
 
@@ -17,6 +17,7 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-headers
         rocprofiler-systems::rocprofiler-systems-rocm
         rocprofiler-systems::rocprofiler-systems-compile-definitions
+        rocprofiler-systems::rocprofiler-systems-timemory
 )
 
 if(ROCPROFSYS_BUILD_AINIC)

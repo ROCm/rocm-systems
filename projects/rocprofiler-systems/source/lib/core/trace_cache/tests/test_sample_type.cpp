@@ -490,7 +490,6 @@ TEST_F(sample_type_test, type_identifier_enum_values)
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::kernel_dispatch), 0x0003);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::memory_copy), 0x0004);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::memory_alloc), 0x0005);
-    EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::gpu_pmc_sample), 0x0006);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::cpu_pmc_sample), 0x0007);
     EXPECT_EQ(static_cast<std::uint32_t>(type_identifier_t::backtrace_region_sample),
               0x0008);
