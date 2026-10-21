@@ -590,7 +590,8 @@ in the following table.
         | Used with Rome 4P2H topology
 
     * - | ``RCCL_PCIE_ORDERED_RING``
-        | Pins ring graph search to the order GPUs appear in the topology
+        | This varilable applies only to gfx1250 scale-up single-host communicators.
+          Pins ring graph search to the order GPUs appear in the topology
           array, so every channel uses the same ring. Without it the search
           picks a different permutation per channel, so a device exchanges
           with many different peers; pinning the order reduces fan-out to
@@ -610,7 +611,7 @@ in the following table.
         | ``1``: Enabled (default). If no ordered ring passes validation,
           warn and fall back to the default ordering.
         | ``2``: Enabled, strict. If no ordered ring passes validation,
-          fail communicator initialization instead of falling back.
+          fail communicator initialization instead of falling back.     
 
     * - | ``NCCL_GIN_PLUGIN``
         | Selects external GIN (GPU-Initiated Networking) plugins.
