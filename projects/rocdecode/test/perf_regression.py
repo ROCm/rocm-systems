@@ -146,7 +146,21 @@ def _run(cmd, **kw):
     return result
 
 
-def detect_gpu():
+def _extract_hipinfo_device_block(output, device):
+    """Extract the hipInfo output block for a specific device index.
+
+    hipInfo prints one block per GPU, each starting with a '---' separator
+    followed by 'device#  N'. Return only the text for the requested device,
+    or the full output if parsing fails (single-GPU fallback)."""
+    blocks = re.split(r"^-{10,}$", output, flags=re.M)
+    for block in blocks:
+        m = re.search(r"^device#\s+(\d+)", block, re.M)
+        if m and int(m.group(1)) == device:
+            return block
+    return output  # fallback: return everything (single-GPU or unexpected format)
+
+
+def detect_gpu(device=0):
     """Return (column_label, detail) or (None, reason)."""
     override = os.environ.get("ROCDECODE_PERF_GPU")
     if override:
@@ -181,21 +195,23 @@ def detect_gpu():
             if m and m.group(1) in GFX_MAP:
                 return GFX_MAP[m.group(1)], f"rocm-smi GFX Version={m.group(1)}"
 
-    # 3. hipInfo (available on both Linux and Windows).
+    # 3. hipInfo (available on both Linux and Windows). Restrict to the
+    #    output block for the selected device so that --device N detects the
+    #    right GPU on multi-GPU systems.
     hip_info = find_tool("hipInfo.exe" if IS_WINDOWS else "hipInfo")
     if hip_info:
-        out = _run([hip_info]).stdout
+        out = _extract_hipinfo_device_block(_run([hip_info]).stdout, device)
         # Try market-name matching on the Name: field first.
         m = re.search(r"^Name:\s*(.+)", out, re.M)
         if m:
             name = m.group(1).strip()
             for pat, label in MARKET_MAP:
                 if pat.search(name):
-                    return label, f"hipInfo Name='{name}'"
+                    return label, f"hipInfo Name='{name}' (device {device})"
         # Fall back to gfx target from gcnArchName.
         m = re.search(r"^gcnArchName:\s*(gfx[0-9a-f]+)", out, re.M)
         if m and m.group(1) in GFX_MAP:
-            return GFX_MAP[m.group(1)], f"hipInfo gcnArchName={m.group(1)}"
+            return GFX_MAP[m.group(1)], f"hipInfo gcnArchName={m.group(1)} (device {device})"
 
     # 4. KFD topology gfx_target_version (Linux only; unambiguous targets only)
     for props in sorted(Path("/sys/class/kfd/kfd/topology/nodes").glob("*/properties")):
@@ -331,7 +347,7 @@ def main():
         print("       Download it from SharePoint and set ROCDECODE_PERF_DIR to its parent.", file=sys.stderr)
         return 1
 
-    label, detail = detect_gpu()
+    label, detail = detect_gpu(args.device)
     if label is None:
         print(f"ERROR: could not identify the GPU ({detail}).", file=sys.stderr)
         print("       Set ROCDECODE_PERF_GPU to a baseline column (e.g. Navi31).", file=sys.stderr)
