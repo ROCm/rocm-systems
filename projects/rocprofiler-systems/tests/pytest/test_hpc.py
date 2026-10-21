@@ -83,17 +83,14 @@ def split_copy_compute_hw_queues_rules(validation_rules_dir) -> list[Path]:
 @pytest.mark.gpu
 class TestJacobi(RocprofsysTest):
 
-    openmp_non_usm_run_args = ["-m", "512"]
-    # With OMPX_APU_MAPS=1, it takes longer, so reduce domain size
-    openmp_usm_run_args = ["-m", "64"]
-    hip_run_args = ["-g", "2", "1"]
-
     @pytest.mark.slow
     @pytest.mark.openmp
     @pytest.mark.xnack
     @pytest.mark.rocpd("hpc_openmp_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
     def test_usm(self, mode, hpc_openmp_environment, gpu_info, kfd_rules):
+        # With OMPX_APU_MAPS=1, it takes longer, so reduce domain size
+        openmp_usm_run_args = ["-m", "64"]
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,memory_copy"
         env["HSA_XNACK"] = "1"
@@ -107,7 +104,7 @@ class TestJacobi(RocprofsysTest):
             mode,
             target="jacobi-fortran-usm",
             env=env,
-            run_args=self.openmp_usm_run_args,
+            run_args=openmp_usm_run_args,
             check_target_arch=True,
         )
 
@@ -146,6 +143,7 @@ class TestJacobi(RocprofsysTest):
     @pytest.mark.roctx
     @pytest.mark.parametrize("mode", ["binary_rewrite", "sys_run"])
     def test_roctx(self, mode, hpc_openmp_environment):
+        openmp_non_usm_run_args = ["-m", "512"]
         env = hpc_openmp_environment.copy()
         env["ROCPROFSYS_ROCM_DOMAINS"] = "hip_api,kernel_dispatch,roctx,memory_copy"
         env["ROCPROFSYS_COUT_OUTPUT"] = "OFF"
@@ -155,7 +153,7 @@ class TestJacobi(RocprofsysTest):
             target="jacobi-fortran-targetdata-markers",
             env=env,
             check_target_arch=True,
-            run_args=self.openmp_non_usm_run_args,
+            run_args=openmp_non_usm_run_args,
         )
         self.assert_regex(result)
 
@@ -181,6 +179,7 @@ class TestJacobi(RocprofsysTest):
     @pytest.mark.rocpd("hpc_hip_environment")
     @pytest.mark.parametrize("mode", ["sys_run"])
     def test_hip(self, mode, hpc_hip_environment):
+        hip_run_args = ["-g", "2", "1"]
         env = hpc_hip_environment.copy()
         env["ROCPROFSYS_PERFETTO_COMBINE_TRACES"] = "ON"
 
@@ -188,7 +187,7 @@ class TestJacobi(RocprofsysTest):
             mode,
             target="jacobi-hip",
             env=env,
-            run_args=self.hip_run_args,
+            run_args=hip_run_args,
             launcher="mpi",
             num_procs=2,
         )
@@ -223,7 +222,7 @@ class TestJacobi(RocprofsysTest):
 @pytest.mark.class_name("matrix-exponential")
 class TestMatrixExponential(RocprofsysTest):
 
-    rocblas_gemm_kernel_prefix = ["Cijk_Ailk_Bljk"]
+    rocblas_gemm_kernel_prefix = ("Cijk_Ailk_Bljk",)
 
     @pytest.mark.rocpd("hpc_hip_environment")
     @pytest.mark.parametrize(

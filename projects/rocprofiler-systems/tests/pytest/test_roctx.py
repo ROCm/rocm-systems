@@ -76,9 +76,6 @@ class TestROCTx(RocprofsysTest):
     def roctx_expected_depth(self) -> list[int]:
         return [1, 1, 2, 0, 3, 1, 0, 0, 2, 1]
 
-    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
-    RUNTIME_INSTRUMENT_ARGS = ["-v", "2"]
-
     @pytest.mark.parametrize(
         "mode",
         [
@@ -89,12 +86,14 @@ class TestROCTx(RocprofsysTest):
         ],
     )
     def test(self, mode, roctx_env):
+        binary_rewrite_args = ["-e", "-v", "2", "--instrument-loops"]
+        runtime_instrument_args = ["-v", "2"]
         result = self.run_test(
             mode,
             "roctx",
             env=roctx_env,
-            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
-            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
+            binary_rewrite_args=binary_rewrite_args,
+            runtime_instrument_args=runtime_instrument_args,
             check_target_arch=True,
         )
         self.assert_regex(result)

@@ -42,7 +42,7 @@ def overflow_env() -> dict[str, str]:
     "mode", ["sampling", "binary_rewrite", "runtime_instrument", "sys_run"]
 )
 class TestOverflow(RocprofsysTest):
-    PASS_REGEX = ["sampling_wall_clock.txt"]
+    PASS_REGEX = ("sampling_wall_clock.txt",)
 
     def test_parallel_overhead(self, mode, overflow_env):
         result = self.run_test(

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 from conftest import RocprofsysTest, check_use_perfetto
@@ -156,22 +157,20 @@ def ompt_base_env() -> dict[str, str]:
 @pytest.fixture
 def ompt_sampling_env(ompt_base_env: dict[str, str]) -> dict[str, str]:
     """Environment variables for sampling duration tests."""
-    env = ompt_base_env.copy()
-    env.update(
-        {
-            "ROCPROFSYS_USE_OMPT": "OFF",
-            "ROCPROFSYS_USE_SAMPLING": "ON",
-            "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
-            "ROCPROFSYS_SAMPLING_FREQ": "100",
-            "ROCPROFSYS_SAMPLING_DELAY": "0.1",
-            "ROCPROFSYS_SAMPLING_DURATION": "0.25",
-            "ROCPROFSYS_SAMPLING_CPUTIME": "ON",
-            "ROCPROFSYS_SAMPLING_REALTIME": "ON",
-            "ROCPROFSYS_SAMPLING_CPUTIME_FREQ": "1000",
-            "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "500",
-            "ROCPROFSYS_MONOCHROME": "ON",
-        }
-    )
+    env = {
+        **ompt_base_env,
+        "ROCPROFSYS_USE_OMPT": "OFF",
+        "ROCPROFSYS_USE_SAMPLING": "ON",
+        "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
+        "ROCPROFSYS_SAMPLING_FREQ": "100",
+        "ROCPROFSYS_SAMPLING_DELAY": "0.1",
+        "ROCPROFSYS_SAMPLING_DURATION": "0.25",
+        "ROCPROFSYS_SAMPLING_CPUTIME": "ON",
+        "ROCPROFSYS_SAMPLING_REALTIME": "ON",
+        "ROCPROFSYS_SAMPLING_CPUTIME_FREQ": "1000",
+        "ROCPROFSYS_SAMPLING_REALTIME_FREQ": "500",
+        "ROCPROFSYS_MONOCHROME": "ON",
+    }
     return env
 
 
@@ -190,19 +189,17 @@ def ompt_target_env(ompt_base_env: dict[str, str]) -> dict[str, str]:
 @pytest.fixture
 def ompt_no_tmp_env(ompt_base_env: dict[str, str]) -> dict[str, str]:
     """Environment variables for no-tmp-files tests."""
-    env = ompt_base_env.copy()
-    env.update(
-        {
-            "ROCPROFSYS_USE_OMPT": "OFF",
-            "ROCPROFSYS_USE_SAMPLING": "ON",
-            "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
-            "ROCPROFSYS_SAMPLING_CPUTIME": "ON",
-            "ROCPROFSYS_SAMPLING_REALTIME": "OFF",
-            "ROCPROFSYS_SAMPLING_CPUTIME_FREQ": "700",
-            "ROCPROFSYS_USE_TEMPORARY_FILES": "OFF",
-            "ROCPROFSYS_MONOCHROME": "ON",
-        }
-    )
+    env = {
+        **ompt_base_env,
+        "ROCPROFSYS_USE_OMPT": "OFF",
+        "ROCPROFSYS_USE_SAMPLING": "ON",
+        "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
+        "ROCPROFSYS_SAMPLING_CPUTIME": "ON",
+        "ROCPROFSYS_SAMPLING_REALTIME": "OFF",
+        "ROCPROFSYS_SAMPLING_CPUTIME_FREQ": "700",
+        "ROCPROFSYS_USE_TEMPORARY_FILES": "OFF",
+        "ROCPROFSYS_MONOCHROME": "ON",
+    }
     return env
 
 
@@ -222,23 +219,23 @@ def openmp_target_rules(validation_rules_dir: Path) -> list[Path]:
 
 
 class TestOpenMPCG(RocprofsysTest):
-    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
-    DURATION_SAMPLING_PASS_REGEX = [
+    DURATION_SAMPLING_PASS_REGEX = (
         r"Sampler for thread 0 will be triggered 1000\.0x per second of CPU-time",
         r"Sampler for thread 0 will be triggered 500\.0x per second of wall-time",
         r"sampling_percent\.(json|txt)",
         r"sampling_cpu_clock\.(json|txt)",
         r"sampling_wall_clock\.(json|txt)",
-    ]
-    NOTMP_SAMPLING_FILE_REGEX = [
+    )
+    NOTMP_SAMPLING_FILE_REGEX = (
         r"sampling_percent\.(json|txt)",
         r"sampling_cpu_clock\.(json|txt)",
         r"sampling_wall_clock\.(json|txt)",
-    ]
+    )
 
     @pytest.mark.timeout(180)
     @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite"])
     def test(self, mode, ompt_base_env):
+        binary_rewrite_args = ["-e", "-v", "2", "--instrument-loops"]
         env = ompt_base_env.copy()
         env["ROCPROFSYS_USE_SAMPLING"] = "OFF"
         env["ROCPROFSYS_COUT_OUTPUT"] = "ON"
@@ -247,7 +244,7 @@ class TestOpenMPCG(RocprofsysTest):
             mode,
             "openmp-cg",
             env=env,
-            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            binary_rewrite_args=binary_rewrite_args,
         )
         self.assert_regex(result)
 
@@ -278,25 +275,25 @@ class TestOpenMPCG(RocprofsysTest):
 
 
 class TestOpenMPLU(RocprofsysTest):
-    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
-    BINARY_REWRITE_PASS_REGEX = ["\\|_omp_"]
-    BINARY_REWRITE_FAIL_REGEX = ["0 instrumented loops in procedure"]
-    DURATION_SAMPLING_PASS_REGEX = [
+    BINARY_REWRITE_PASS_REGEX = ("\\|_omp_",)
+    BINARY_REWRITE_FAIL_REGEX = ("0 instrumented loops in procedure",)
+    DURATION_SAMPLING_PASS_REGEX = (
         r"Sampler for thread 0 will be triggered 1000\.0x per second of CPU-time",
         r"Sampler for thread 0 will be triggered 500\.0x per second of wall-time",
         r"sampling_percent\.(json|txt)",
         r"sampling_cpu_clock\.(json|txt)",
         r"sampling_wall_clock\.(json|txt)",
-    ]
-    NOTMP_SAMPLING_FILE_REGEX = [
+    )
+    NOTMP_SAMPLING_FILE_REGEX = (
         r"sampling_percent\.(json|txt)",
         r"sampling_cpu_clock\.(json|txt)",
         r"sampling_wall_clock\.(json|txt)",
-    ]
+    )
 
     @pytest.mark.timeout(180)
     @pytest.mark.parametrize("mode", ["baseline", "sampling", "binary_rewrite"])
     def test(self, mode, ompt_base_env):
+        binary_rewrite_args = ["-e", "-v", "2", "--instrument-loops"]
         env = ompt_base_env.copy()
         env["ROCPROFSYS_USE_SAMPLING"] = "ON"
         env["ROCPROFSYS_SAMPLING_FREQ"] = "50"
@@ -306,7 +303,7 @@ class TestOpenMPLU(RocprofsysTest):
             mode,
             "openmp-lu",
             env=env,
-            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
+            binary_rewrite_args=binary_rewrite_args,
         )
         self.assert_regex(
             result,
@@ -383,8 +380,15 @@ class TestOpenMPTarget(RocprofsysTest):
 @pytest.mark.class_name("openmp-fortran")
 class TestOpenMPFortran(RocprofsysTest):
 
-    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--instrument-loops"]
-    RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "2", "--label", "return", "args"]
+    BINARY_REWRITE_ARGS: ClassVar[list[str]] = ["-e", "-v", "2", "--instrument-loops"]
+    RUNTIME_INSTRUMENT_ARGS: ClassVar[list[str]] = [
+        "-e",
+        "-v",
+        "2",
+        "--label",
+        "return",
+        "args",
+    ]
 
     @pytest.mark.parametrize(
         "mode",

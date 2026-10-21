@@ -121,8 +121,8 @@ def ainic_rocpd_rules(validation_rules_dir) -> list[Path]:
 class TestAINIC(RocprofsysTest):
     """Tests for AI NIC support and performance metric collection."""
 
-    PERFETTO_PASS_REGEX = [r"perfetto-trace\.pftrace validated"]
-    PERFETTO_FAIL_REGEX = [r"Failure validating.*perfetto-trace\.pftrace"]
+    PERFETTO_PASS_REGEX = (r"perfetto-trace\.pftrace validated",)
+    PERFETTO_FAIL_REGEX = (r"Failure validating.*perfetto-trace\.pftrace",)
 
     # This test does _not_ requires NIC hardware, so "mark.ainic_required" is not added.
     @pytest.mark.timeout(30)

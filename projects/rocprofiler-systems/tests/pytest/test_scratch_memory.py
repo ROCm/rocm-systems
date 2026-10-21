@@ -47,18 +47,18 @@ def scratch_memory_rules(validation_rules_dir: Path) -> list[Path]:
 
 @pytest.mark.class_name("scratch-memory")
 class TestScratchMemory(RocprofsysTest):
-    SCRATCH_MEMORY_PASS_REGEX = [
+    SCRATCH_MEMORY_PASS_REGEX = (
         "Detected [1-9][0-9]* agents",
         "Running test_primary_then_uso",
         "Running test_gridx",
         "Running Small",
         "Running Medium",
         "Running Large",
-    ]
-    SCRATCH_MEMORY_FAIL_REGEX = [
+    )
+    SCRATCH_MEMORY_FAIL_REGEX = (
         "hip error",
         "HSA error",
-    ]
+    )
 
     @pytest.mark.rocpd("scratch_memory_env")
     @pytest.mark.parametrize(

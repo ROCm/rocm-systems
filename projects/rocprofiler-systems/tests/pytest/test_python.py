@@ -89,61 +89,6 @@ def get_cat_command() -> list[str]:
 @pytest.mark.python_versions
 class TestPython(RocprofsysTest):
 
-    PYTHON_SOURCE_GENERAL = {
-        "metric": "trip_count",  # Timemory
-        "file": "trip_count.json",  # Timemory
-        "categories": ["python", "rocm_marker_api"],  # Perfetto
-        "labels": [
-            "main_loop",
-            "run",
-            "fib",
-            "fib",
-            "fib",
-            "fib",
-            "fib",
-            "inefficient",
-            "_sum",
-        ],
-        # main_loop=4 as roctx.profilerPause() called mid 4th iteration
-        # supresses all marker writes from that point on.
-        # This includes the RoctxRange wrapper for 5th iteration
-        "counts": [4, 3, 3, 6, 12, 18, 6, 3, 3],
-        "depths": [0, 1, 2, 3, 4, 5, 6, 2, 3],
-    }
-
-    PYTHON_BUILTIN_GENERAL = {
-        "metric": "trip_count",  # Timemory
-        "file": "trip_count.json",  # Timemory
-        "categories": ["python"],  # Perfetto
-        "labels": [
-            "[run][builtin.py:30]",
-            "[fib][builtin.py:12]",
-            "[fib][builtin.py:12]",
-            "[fib][builtin.py:12]",
-            "[fib][builtin.py:12]",
-            "[fib][builtin.py:12]",
-            "[fib][builtin.py:12]",
-            "[fib][builtin.py:12]",
-            "[fib][builtin.py:12]",
-            "[fib][builtin.py:12]",
-            "[fib][builtin.py:12]",
-            "[inefficient][builtin.py:16]",
-        ],
-        "counts": [5, 5, 10, 20, 40, 80, 160, 260, 220, 80, 10, 5],
-        "depths": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1],
-    }
-
-    # Per-function debug annotations that -a/--annotate-trace attaches to every
-    # profiled python region (see libpyrocprofsys.cpp's config::annotations).
-    PYTHON_ANNOTATE_DEBUG_KEYS = [
-        "file",
-        "line",
-        "lasti",
-        "argcount",
-        "nlocals",
-        "stacksize",
-    ]
-
     @pytest.mark.timeout(120)
     @pytest.mark.parametrize(
         "annotated, exclude",
@@ -207,6 +152,36 @@ class TestPython(RocprofsysTest):
         python_builtin_rocpd_rules,
         python_builtin_annotated_rocpd_rules,
     ):
+        timemory_metric = "trip_count"
+        timemory_file = "trip_count.json"
+        perfetto_category = ["python"]
+        test_labels = [
+            "[run][builtin.py:30]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[fib][builtin.py:12]",
+            "[inefficient][builtin.py:16]",
+        ]
+        test_counts = [5, 5, 10, 20, 40, 80, 160, 260, 220, 80, 10, 5]
+        test_depths = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 1]
+
+        # Per-function debug annotations that -a/--annotate-trace attaches to every
+        # profiled python region (see libpyrocprofsys.cpp's config::annotations).
+        python_annotate_debug_keys = [
+            "file",
+            "line",
+            "lasti",
+            "argcount",
+            "nlocals",
+            "stacksize",
+        ]
         result = self.run_test(
             "python",
             target="builtin.py",
@@ -224,18 +199,18 @@ class TestPython(RocprofsysTest):
             )
             self.assert_timemory(
                 result,
-                file_name=self.PYTHON_BUILTIN_GENERAL["file"],
-                metric=self.PYTHON_BUILTIN_GENERAL["metric"],
-                labels=self.PYTHON_BUILTIN_GENERAL["labels"],
-                counts=self.PYTHON_BUILTIN_GENERAL["counts"],
-                depths=self.PYTHON_BUILTIN_GENERAL["depths"],
+                file_name=timemory_file,
+                metric=timemory_metric,
+                labels=test_labels,
+                counts=test_counts,
+                depths=test_depths,
             )
             self.assert_perfetto(
                 result,
-                categories=self.PYTHON_BUILTIN_GENERAL["categories"],
-                labels=self.PYTHON_BUILTIN_GENERAL["labels"],
-                counts=self.PYTHON_BUILTIN_GENERAL["counts"],
-                depths=self.PYTHON_BUILTIN_GENERAL["depths"],
+                categories=perfetto_category,
+                labels=test_labels,
+                counts=test_counts,
+                depths=test_depths,
             )
             self.assert_rocpd(
                 result,
@@ -245,8 +220,8 @@ class TestPython(RocprofsysTest):
             # reach the trace (see test below for the annotated=True counterpart)
             self.assert_perfetto(
                 result,
-                key_names=self.PYTHON_ANNOTATE_DEBUG_KEYS,
-                key_counts=[0] * len(self.PYTHON_ANNOTATE_DEBUG_KEYS),
+                key_names=python_annotate_debug_keys,
+                key_counts=[0] * len(python_annotate_debug_keys),
             )
         else:
             # regression: -a/--annotate-trace annotations were dropped by
@@ -254,11 +229,11 @@ class TestPython(RocprofsysTest):
             # the perfetto trace, identical with or without -a). Every profiled
             # python region carries all six annotation fields, so each key's
             # count must equal the total number of profiled slices.
-            total_slices = sum(self.PYTHON_BUILTIN_GENERAL["counts"])
+            total_slices = sum(test_counts)
             self.assert_perfetto(
                 result,
-                key_names=self.PYTHON_ANNOTATE_DEBUG_KEYS,
-                key_counts=[total_slices] * len(self.PYTHON_ANNOTATE_DEBUG_KEYS),
+                key_names=python_annotate_debug_keys,
+                key_counts=[total_slices] * len(python_annotate_debug_keys),
             )
             self.assert_rocpd(
                 result,
@@ -379,6 +354,26 @@ class TestPython(RocprofsysTest):
     def test_source(
         self, python_version, python_rocpd_env, python_source_rocpd_rules, rocprof_config
     ):
+        timemory_metric = "trip_count"
+        timemory_file = "trip_count.json"
+        perfetto_category = ["python", "rocm_marker_api"]
+        test_labels = [
+            "main_loop",
+            "run",
+            "fib",
+            "fib",
+            "fib",
+            "fib",
+            "fib",
+            "inefficient",
+            "_sum",
+        ]
+        # main_loop=4 as roctx.profilerPause() called mid 4th iteration
+        # supresses all marker writes from that point on.
+        # This includes the RoctxRange wrapper for 5th iteration
+        test_counts = [4, 3, 3, 6, 12, 18, 6, 3, 3]
+        test_depths = [0, 1, 2, 3, 4, 5, 6, 2, 3]
+
         if not rocprof_config.capabilities.roctx_available_for(python_version):
             pytest.skip(
                 f"roctx Python bindings not installed for Python {python_version}"
@@ -394,18 +389,18 @@ class TestPython(RocprofsysTest):
         self.assert_regex(result)
         self.assert_timemory(
             result,
-            file_name=self.PYTHON_SOURCE_GENERAL["file"],
-            metric=self.PYTHON_SOURCE_GENERAL["metric"],
-            labels=self.PYTHON_SOURCE_GENERAL["labels"],
-            counts=self.PYTHON_SOURCE_GENERAL["counts"],
-            depths=self.PYTHON_SOURCE_GENERAL["depths"],
+            file_name=timemory_file,
+            metric=timemory_metric,
+            labels=test_labels,
+            counts=test_counts,
+            depths=test_depths,
         )
         self.assert_perfetto(
             result,
-            categories=self.PYTHON_SOURCE_GENERAL["categories"],
-            labels=self.PYTHON_SOURCE_GENERAL["labels"],
-            counts=self.PYTHON_SOURCE_GENERAL["counts"],
-            depths=self.PYTHON_SOURCE_GENERAL["depths"],
+            categories=perfetto_category,
+            labels=test_labels,
+            counts=test_counts,
+            depths=test_depths,
         )
         self.assert_rocpd(
             result,

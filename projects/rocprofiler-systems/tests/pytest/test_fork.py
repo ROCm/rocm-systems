@@ -52,10 +52,18 @@ def fork_env() -> dict[str, str]:
     ],
 )
 class TestFork(RocprofsysTest):
-    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "--print-instrumented", "modules", "-i", "16"]
-    RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "1", "--label", "file", "-i", "16"]
 
     def test(self, mode, target, fork_env):
+        binary_rewrite_args = [
+            "-e",
+            "-v",
+            "2",
+            "--print-instrumented",
+            "modules",
+            "-i",
+            "16",
+        ]
+        runtime_instrument_args = ["-e", "-v", "1", "--label", "file", "-i", "16"]
         if target == "hipMallocConcurrencyMproc":
             pass_regex = ["Validation PASSED|fork.. called on PID"]
         else:
@@ -65,8 +73,8 @@ class TestFork(RocprofsysTest):
             mode,
             target,
             env=fork_env,
-            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
-            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
+            binary_rewrite_args=binary_rewrite_args,
+            runtime_instrument_args=runtime_instrument_args,
             check_target_arch=True,
         )
 

@@ -120,10 +120,19 @@ def get_thread_limit_warning_regex(thread_limit: int) -> str:
 @pytest.mark.parametrize("thread_ratio", list(THREAD_LIMIT_CASES))
 @pytest.mark.class_name("thread-limit")
 class TestThreadLimit(RocprofsysTest):
-    BINARY_REWRITE_ARGS = ["-e", "-v", "2", "-i", "1024", "--label", "return", "args"]
-    RUNTIME_INSTRUMENT_ARGS = ["-e", "-v", "2", "-i", "1024", "--label", "return", "args"]
 
     def test(self, mode, thread_ratio, thread_limit_env):
+        binary_rewrite_args = ["-e", "-v", "2", "-i", "1024", "--label", "return", "args"]
+        runtime_instrument_args = [
+            "-e",
+            "-v",
+            "2",
+            "-i",
+            "1024",
+            "--label",
+            "return",
+            "args",
+        ]
         thread_limit = get_thread_limit()
         case = THREAD_LIMIT_CASES[thread_ratio]
         thread_count = case.thread_count(thread_limit)
@@ -136,8 +145,8 @@ class TestThreadLimit(RocprofsysTest):
                 str(WORKLOAD_CONCURRENCY),
                 str(thread_count),
             ],
-            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
-            runtime_instrument_args=self.RUNTIME_INSTRUMENT_ARGS,
+            binary_rewrite_args=binary_rewrite_args,
+            runtime_instrument_args=runtime_instrument_args,
         )
         pass_regex = [f"\\|{case.pass_value(thread_count, thread_limit)}>>>"]
         if case.expect_exhausted_warning:

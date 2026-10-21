@@ -49,9 +49,9 @@ class TestCausal(RocprofsysTest):
     # Use #\d+ instead of #1: when perf backend falls back to timer,
     # the first experiment is a microsecond no-op baseline that consumes index #1,
     # so the first user-visible experiment is logged as #2.
-    PASS_REGEX = [
-        r"Starting causal experiment #\d+(.*)causal/experiments.json(.*)causal/experiments.coz"
-    ]
+    PASS_REGEX = (
+        r"Starting causal experiment #\d+(.*)causal/experiments.json(.*)causal/experiments.coz",
+    )
 
     @pytest.mark.parametrize(
         "target",
@@ -180,10 +180,9 @@ class TestCausal(RocprofsysTest):
 )
 @pytest.mark.class_name("causal-e2e")
 class TestCausalE2E(RocprofsysTest):
-    PASS_REGEX = [
-        r"Starting causal experiment #\d+(.*)causal/experiments.json(.*)causal/experiments.coz"
-    ]
-    RUN_ARGS = ["80", "50", "432525", "100000000"]
+    PASS_REGEX = (
+        r"Starting causal experiment #\d+(.*)causal/experiments.json(.*)causal/experiments.coz",
+    )
 
     def get_causal_args(self, causal_mode, test_type) -> list[str]:
         ret = [
@@ -235,6 +234,7 @@ class TestCausalE2E(RocprofsysTest):
         return ret
 
     def test(self, target, causal_mode, test_type, causal_e2e_env):
+        run_args = ["80", "50", "432525", "100000000"]
         causal_args = self.get_causal_args(causal_mode, test_type)
         validation_args = self.get_validation_args(causal_mode, test_type)
 
@@ -242,7 +242,7 @@ class TestCausalE2E(RocprofsysTest):
             "causal",
             target,
             env=causal_e2e_env,
-            run_args=self.RUN_ARGS,
+            run_args=run_args,
             causal_mode=causal_mode,
             causal_args=causal_args,
         )

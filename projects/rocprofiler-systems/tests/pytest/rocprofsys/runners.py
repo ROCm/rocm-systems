@@ -370,13 +370,15 @@ class BaselineRunner(BaseRunner):
     """
 
     # rocprof-sys binaries that should use the "binary" base environment preset
-    ROCPROFSYS_BINARIES = {
-        "rocprof-sys-instrument",
-        "rocprof-sys-sample",
-        "rocprof-sys-run",
-        "rocprof-sys-avail",
-        "rocsys",
-    }
+    ROCPROFSYS_BINARIES = frozenset(
+        {
+            "rocprof-sys-instrument",
+            "rocprof-sys-sample",
+            "rocprof-sys-run",
+            "rocprof-sys-avail",
+            "rocsys",
+        }
+    )
 
     def __init__(
         self,

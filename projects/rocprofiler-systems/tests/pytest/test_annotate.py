@@ -46,33 +46,33 @@ def annotate_env(annotate_papi_condition) -> dict[str, str]:
 @pytest.mark.annotate
 @pytest.mark.parametrize("mode", ["sampling", "binary_rewrite", "sys_run"])
 class TestAnnotate(RocprofsysTest):
-    BINARY_REWRITE_ARGS = [
-        "-e",
-        "-v",
-        "2",
-        "-R",
-        "run",
-        "--allow-overlapping",
-        "--print-available",
-        "functions",
-        "--print-overlapping",
-        "functions",
-        "--print-excluded",
-        "functions",
-        "--print-instrumented",
-        "functions",
-        "--print-instructions",
-    ]
-    RUN_ARGS = ["30", "2", "200"]
 
     def test_parallel_overhead(self, mode, annotate_env):
 
+        binary_rewrite_args = [
+            "-e",
+            "-v",
+            "2",
+            "-R",
+            "run",
+            "--allow-overlapping",
+            "--print-available",
+            "functions",
+            "--print-overlapping",
+            "functions",
+            "--print-excluded",
+            "functions",
+            "--print-instrumented",
+            "functions",
+            "--print-instructions",
+        ]
+        run_args = ["30", "2", "200"]
         result = self.run_test(
             mode,
             "parallel-overhead",
             env=annotate_env,
-            binary_rewrite_args=self.BINARY_REWRITE_ARGS,
-            run_args=self.RUN_ARGS,
+            binary_rewrite_args=binary_rewrite_args,
+            run_args=run_args,
         )
         self.assert_regex(result)
         # Perfetto annotation key checks (thread_cpu_clock, PAPI) return with the

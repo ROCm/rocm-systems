@@ -48,7 +48,7 @@ def pthread_timemory_env(lock_env) -> dict[str, str]:
 
 
 class TestPthreads(RocprofsysTest):
-    OVERHEAD_LOCKS_PASS_REGEX = [
+    OVERHEAD_LOCKS_PASS_REGEX = (
         (
             r"wall_clock .*"
             r"\|_pthread_create .* 4 .*"
@@ -60,26 +60,15 @@ class TestPthreads(RocprofsysTest):
             r"\|_pthread_mutex_unlock .* 1000 .*"
             r"\|_pthread_mutex_lock .* 1000 .*"
             r"\|_pthread_mutex_unlock .* 1000"
-        )
-    ]
-    OVERHEAD_LOCKS_TIMEMORY_PASS_REGEX = [
+        ),
+    )
+    OVERHEAD_LOCKS_TIMEMORY_PASS_REGEX = (
         (
             r"start_thread (.*) 4 (.*) "
             r"pthread_mutex_lock (.*) 4000 (.*) "
             r"pthread_mutex_unlock (.*) 4000"
-        )
-    ]
-
-    TIMEMORY_BINARY_REWRITE_ARGS = [
-        "-e",
-        "-v",
-        "2",
-        "--min-instructions=32",
-        "--dyninst-options",
-        "InstrStackFrames",
-        "SaveFPR",
-        "TrampRecursive",
-    ]
+        ),
+    )
 
     @pytest.mark.parametrize(
         "mode",
@@ -105,11 +94,21 @@ class TestPthreads(RocprofsysTest):
         "mode", ["baseline", "sampling", "binary_rewrite", "sys_run"]
     )
     def test_parallel_overhead_locks_timemory(self, mode, pthread_timemory_env):
+        timemory_binary_rewrite_args = [
+            "-e",
+            "-v",
+            "2",
+            "--min-instructions=32",
+            "--dyninst-options",
+            "InstrStackFrames",
+            "SaveFPR",
+            "TrampRecursive",
+        ]
         result = self.run_test(
             mode,
             "parallel-overhead-locks",
             env=pthread_timemory_env,
-            binary_rewrite_args=self.TIMEMORY_BINARY_REWRITE_ARGS,
+            binary_rewrite_args=timemory_binary_rewrite_args,
             run_args=["10", "4", "1000"],
         )
         self.assert_regex(
