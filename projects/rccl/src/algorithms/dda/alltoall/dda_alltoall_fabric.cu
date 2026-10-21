@@ -35,12 +35,6 @@ RCCL_PARAM(DdaA2ATdmTileKB, "DDA_A2A_TDM_TILE_KB", 8);
 // RCCL_DDA_A2A_PUSH_PEER=1 (with RCCL_DDA_A2A_PUSH=1): peer-major vector push. Each block works on a single peer
 // and the grid is nRanks * blocksPerPeer. Out of place only.
 RCCL_PARAM(DdaA2APushPeer, "DDA_A2A_PUSH_PEER", 0);
-// RCCL_DDA_A2A_PUSH_PEER_CONTIG=1: the blocks of a peer group each take one contiguous range of the chunk instead of
-// interleaving over it.
-RCCL_PARAM(DdaA2APushPeerContig, "DDA_A2A_PUSH_PEER_CONTIG", 0);
-// Contiguous layout: each block's part of a peer chunk is rounded up to this many KiB (0 = 16 B lines only). Parts
-// that start off a 64 KiB boundary run the push about 25-35% slower.
-RCCL_PARAM(DdaA2APushPeerAlignKB, "DDA_A2A_PUSH_PEER_ALIGN_KB", 64);
 
 namespace {
 
@@ -73,17 +67,6 @@ static inline DdaA2APeerGeom ddaAllToAllFabricPeerGeom(ncclComm* comm, size_t by
   const size_t wavesPerBlock = std::min(kMaxWaves, (waves + bpp - 1) / bpp);
   return {dim3(static_cast<unsigned>(bpp * comm->nRanks)), dim3(static_cast<unsigned>(wavesPerBlock * kWave)),
           static_cast<int>(bpp)};
-}
-
-// Lines per block part of a peer chunk of nLines 16 B lines split over perPeer blocks, rounded up to alignKB (and to
-// whole lines). The alignment is halved while rounding would leave more than a quarter of the blocks without a part
-// (small messages).
-static inline size_t ddaAllToAllFabricPeerPartLines(size_t nLines, uint32_t perPeer, int64_t alignKB) {
-  size_t alignLines = alignKB > 0 ? std::max<size_t>(1, (static_cast<size_t>(alignKB) << 10) / sizeof(uint4)) : 1;
-  const size_t even = (nLines + perPeer - 1) / perPeer;
-  auto part = [&]() { return (even + alignLines - 1) / alignLines * alignLines; };
-  while (alignLines > 1 && 4 * ((nLines + part() - 1) / part()) < 3 * static_cast<size_t>(perPeer)) alignLines /= 2;
-  return part();
 }
 
 // One warp per window of UnrollPeers tiles. The block count stays inside the
@@ -217,28 +200,15 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
   if (rcclParamDdaA2APush() && rcclParamDdaA2APushPeer() && sendbuff != recvbuff) {
     const DdaA2APeerGeom pg = ddaAllToAllFabricPeerGeom(comm, count * sizeof(T));
     if (pg.blocksPerPeer > 0) {
-      const bool contiguous = rcclParamDdaA2APushPeerContig() != 0;
-      const size_t partLines = contiguous ? ddaAllToAllFabricPeerPartLines(count * sizeof(T) / sizeof(uint4),
-                                                                           pg.blocksPerPeer,
-                                                                           rcclParamDdaA2APushPeerAlignKB())
-                                          : 0;
       INFO(NCCL_COLL,
            "DDA fabric AllToAll: launching peer-major push kernel: nRanks=%d count=%zu grid=%u block=%u "
-           "blocksPerPeer=%d layout=%s partBytes=%zu",
-           nRanks, count, pg.grid.x, pg.block.x, pg.blocksPerPeer, contiguous ? "contiguous" : "interleaved",
-           partLines * sizeof(uint4));
+           "blocksPerPeer=%d",
+           nRanks, count, pg.grid.x, pg.block.x, pg.blocksPerPeer);
       const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
-      if (contiguous) {
-        hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricPushPeer<T, true>), pg.grid, pg.block, 0, stream,
-                              /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
-                              count, static_cast<const T*>(sendbuff), comm->rank, nRanks, pg.blocksPerPeer,
-                              partLines, barrierHost);
-      } else {
-        hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricPushPeer<T, false>), pg.grid, pg.block, 0, stream,
-                              /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
-                              count, static_cast<const T*>(sendbuff), comm->rank, nRanks, pg.blocksPerPeer,
-                              partLines, barrierHost);
-      }
+      hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricPushPeer<T>), pg.grid, pg.block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, pg.blocksPerPeer,
+                            barrierHost);
       CUDACHECK(cudaGetLastError());
       return ncclSuccess;
     }
