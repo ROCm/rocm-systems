@@ -463,7 +463,7 @@ TEST_F(Cdna2ImageAccessTest, DecodedImageChecksTheScaledResourceRegisterRange) {
     for (uint16_t reg : {uint16_t{4}, uint16_t{16}}) {
       state.clear();
       reports = 0;
-      const auto counter = WaitCounterKind::Ds;
+      const auto counter = amdgpu::WaitCounterKind::Ds;
       state.add({state.issue(counter), 0x100, 1, {RegClass::SGPR, reg, 8}, counter, 0xf});
       state.check_instruction(*decoded.value(), *wf);
       EXPECT_EQ(reports, reg == 16 ? 1u : 0u);
