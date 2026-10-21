@@ -108,12 +108,6 @@ static ncclResult_t DefaultTransportCollNetFree(struct ncclComm*) {
 }
 std::function<ncclResult_t(struct ncclComm*)> g_ncclTransportCollNetFree = DefaultTransportCollNetFree;
 
-static ncclResult_t DefaultInitCollnetChannel(struct ncclComm*, int, struct ncclComm*, bool) {
-  FailLoudUnfaked("transport_stubs", "initCollnetChannel");
-}
-std::function<ncclResult_t(struct ncclComm*, int, struct ncclComm*, bool)> g_initCollnetChannel =
-    DefaultInitCollnetChannel;
-
 void ResetTransportStubs() {
   g_rcclUseAinicValue = false;
   g_useAinic = DefaultUseAinic;
@@ -131,7 +125,6 @@ void ResetTransportStubs() {
   g_ncclTransportCollNetSetup = DefaultTransportCollNetSetup;
   g_ncclTransportCollNetCheck = DefaultTransportCollNetCheck;
   g_ncclTransportCollNetFree = DefaultTransportCollNetFree;
-  g_initCollnetChannel = DefaultInitCollnetChannel;
 }
 
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
@@ -193,9 +186,6 @@ ncclResult_t ncclTransportCollNetCheck(struct ncclComm* comm, int collNetSetupFa
   return g_ncclTransportCollNetCheck(comm, collNetSetupFail);
 }
 ncclResult_t ncclTransportCollNetFree(struct ncclComm* comm) { return g_ncclTransportCollNetFree(comm); }
-ncclResult_t initCollnetChannel(struct ncclComm* comm, int channelId, struct ncclComm* parent, bool share) {
-  return g_initCollnetChannel(comm, channelId, parent, share);
-}
 ncclResult_t ncclTransportP2pSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, int connIndex,
                                    bool* needsProxy) {
   return g_ncclTransportP2pSetup(comm, graph, connIndex, needsProxy);

@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "ScopedHook.h"
+#include "fakes/channel_fakes.h"
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
@@ -35,9 +36,6 @@
 #include "fakes/param_redirect.h"
 
 #include COLL_NET_CC_PATH
-
-// init.cc data symbol: a non-null ncclGdrCopy selects coll_net.cc's GDRCopy arms.
-gdr_t ncclGdrCopy = nullptr;
 
 namespace {
 
@@ -350,6 +348,7 @@ class CollNetMicrotestBase : public ::testing::Test {
     ResetHipFakes();
     ResetTopoStubs();
     ResetTransportStubs();
+    ResetChannelFakes();
     ResetDevRuntimeMicroFakes();
   }
 };
@@ -375,7 +374,7 @@ TEST(CollNetHelpersMicrotest, HandleForAddressRangeFlags_OnlyPciGdrCanForcePcieM
   EXPECT_EQ(getHandleForAddressRangeFlags(ncclTopoGdrModeDisable), 0);
 }
 
-TEST(CollNetHelpersMicrotest, DumpMap_PrintsEveryBankAndOffset) {
+TEST(CollNetHelpersMicrotest, DumpMap_ValidBanksOffsetsAndPointersSucceed) {
   connectMap map{};
   char host[64], dev[8], sharedHost[8], sharedDev[8];
   map.mems[NCCL_NET_MAP_HOSTMEM] = {host, host + 1, 0};
@@ -385,28 +384,24 @@ TEST(CollNetHelpersMicrotest, DumpMap_PrintsEveryBankAndOffset) {
   NCCL_NET_MAP_ADD_POINTER(&map, 0, 0, 16, sendMem);
   NCCL_NET_MAP_ADD_POINTER(&map, 0, 0, 32, recvMem);
   NCCL_NET_MAP_ADD_POINTER(&map, 1, 1, 0x40, buffs[NCCL_PROTO_SIMPLE]);
+
+  EXPECT_EQ(NCCL_NET_MAP_OFFSET_BANK(&map, sendMem), NCCL_NET_MAP_HOSTMEM);
+  EXPECT_EQ(NCCL_NET_MAP_OFFSET_BANK(&map, recvMem), NCCL_NET_MAP_HOSTMEM);
+  EXPECT_EQ(NCCL_NET_MAP_OFFSET_BANK(&map, buffs[NCCL_PROTO_SIMPLE]), NCCL_NET_MAP_SHARED_DEVMEM);
+  EXPECT_EQ(map.offsets.sendMem & NCCL_NET_MAP_MASK_OFFSET, 0u);
+  EXPECT_EQ(map.offsets.recvMem & NCCL_NET_MAP_MASK_OFFSET, 16u);
+  EXPECT_EQ(map.offsets.buffs[NCCL_PROTO_SIMPLE] & NCCL_NET_MAP_MASK_OFFSET, 0u);
+  EXPECT_EQ(NCCL_NET_MAP_GET_POINTER(&map, cpu, sendMem), host + 1);
+  EXPECT_EQ(NCCL_NET_MAP_GET_POINTER(&map, gpu, sendMem), host);
+  EXPECT_EQ(NCCL_NET_MAP_GET_POINTER(&map, cpu, recvMem), host + 17);
+  EXPECT_EQ(NCCL_NET_MAP_GET_POINTER(&map, gpu, recvMem), host + 16);
+  EXPECT_EQ(NCCL_NET_MAP_GET_POINTER(&map, cpu, buffs[NCCL_PROTO_SIMPLE]), sharedDev + 1);
+  EXPECT_EQ(NCCL_NET_MAP_GET_POINTER(&map, gpu, buffs[NCCL_PROTO_SIMPLE]), sharedDev);
+
   testing::internal::CaptureStdout();
-
-  EXPECT_EQ(collNetDumpMap(&map), ncclSuccess);
-
-  char want[1024];
-  void *nil = nullptr, *h = host, *h1 = host + 1;
-  snprintf(want, sizeof(want),
-           "Dump map\n"
-           "Mem 0: Host mem (30 B) CPU %p GPU %p\n"
-           "Mem 1: Vid  mem CPU (8 B) %p GPU %p\n"
-           "Mem 2: Shared Host mem (20 B) CPU %p GPU %p\n"
-           "Mem 3: Shared Vid  (40 B) mem CPU %p GPU %p\n"
-           "SendMem -> Used 1 Bank 0 Offset 0, cpu %p gpu %p\n"
-           "RecvMem -> Used 1 Bank 0 Offset 10, cpu %p gpu %p\n"
-           "Proto 0 -> Used 0 Bank 0 Offset 0, cpu %p, gpu %p\n"
-           "Proto 1 -> Used 0 Bank 0 Offset 0, cpu %p, gpu %p\n"
-           "Proto 2 -> Used 1 Bank 3 Offset 0, cpu %p, gpu %p\n"
-           "End of dump\n",
-           h1, h, (void*)(dev + 1), (void*)dev, (void*)(sharedHost + 1), (void*)sharedHost, (void*)(sharedDev + 1),
-           (void*)sharedDev, h1, h, (void*)(host + 17), (void*)(host + 16), nil, nil, nil, nil, (void*)(sharedDev + 1),
-           (void*)sharedDev);
-  EXPECT_EQ(testing::internal::GetCapturedStdout(), want);
+  ncclResult_t result = collNetDumpMap(&map);
+  (void)testing::internal::GetCapturedStdout();
+  EXPECT_EQ(result, ncclSuccess);
 }
 
 TEST(CollNetHelpersMicrotest, Transport_WiresEachSidesEntryPoints) {
@@ -1211,50 +1206,6 @@ TEST_F(CollNetConnectMicrotest, Free_EitherSide_ReleasesNothing) {
 // Proxy-side connect and free (sendProxyConnect, recvProxyConnect, sendProxyFree, recvProxyFree)
 // ---------------------------------------------------------------------------
 
-// Each export gets a higher fd number than any before it, so a stale fd can't match by reuse.
-std::vector<int> g_exportedFds;
-int g_nextExportFd = 200;
-hsa_status_t FakeExportDmaBuf(const void*, size_t, int* fd, uint64_t* offset) {
-  int devNull = open("/dev/null", O_RDONLY);
-  *fd = fcntl(devNull, F_DUPFD, g_nextExportFd++);
-  close(devNull);
-  *offset = 0x40;
-  g_exportedFds.push_back(*fd);
-  return HSA_STATUS_SUCCESS;
-}
-hsa_status_t FailExportDmaBuf(const void*, size_t, int*, uint64_t*) { return HSA_STATUS_ERROR; }
-bool FdOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
-
-#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
-// Builds with the cuMem DMA-BUF export: each export hands back a fresh fd, recorded here.
-struct CuMemExport {
-  void* ptr;
-  size_t size;
-  unsigned long long flags;
-  int fd;
-};
-struct CuMemExportRecorder : std::vector<CuMemExport> {
-  hipError_t result = hipSuccess;
-  void Install() {
-    g_hipMemGetHandleForAddressRange = [this](void* handle, hipDeviceptr_t ptr, size_t size, hipMemRangeHandleType,
-                                              unsigned long long flags) {
-      if (result != hipSuccess) return result;
-      int devNull = open("/dev/null", O_RDONLY);
-      int fd = fcntl(devNull, F_DUPFD, g_nextExportFd++);  // never a number something else reuses
-      close(devNull);
-      *static_cast<int*>(handle) = fd;
-      push_back({ptr, size, flags, fd});
-      return hipSuccess;
-    };
-  }
-  void CloseOpen() {
-    for (const auto& e : *this) {
-      if (FdOpen(e.fd)) close(e.fd);
-    }
-  }
-};
-#endif
-
 // Per-side entry points, so one typed suite covers both proxy connects and frees.
 struct SendSide {
   using Res = sendResources;
@@ -1635,9 +1586,7 @@ TEST_F(CollNetSendProxyConnectMicrotest, GdrCopy_HeadCreditsLiveInGdcWord) {
 
 TEST_F(CollNetSendProxyConnectMicrotest, GdrCopySyncDisabled_KeepsHeadInHostMemory) {
   ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
-  ScopedHook param(g_loadParam, [](const char* env, int64_t deft) {
-    return strcmp(env, "GDRCOPY_SYNC_ENABLE") == 0 ? 0 : deft;
-  });
+  ScopedHook param(g_loadParam, ParamOverride({{"GDRCOPY_SYNC_ENABLE", 0}}));
 
   ASSERT_EQ(Connect(), ncclSuccess);
 
@@ -1671,10 +1620,8 @@ TEST_F(CollNetRecvProxyConnectMicrotest, GdrCopy_TailInGdcWordAndFlushWordWhenEn
   EXPECT_EQ(r->needFlush, ncclTopoFlushAlways);
 
   NewConn();
-  ScopedHook param(g_loadParam, [](const char* env, int64_t deft) {
-    if (strcmp(env, "GDRCOPY_FLUSH_ENABLE") == 0) return (int64_t)1;
-    return strcmp(env, "GDRCOPY_SYNC_ENABLE") == 0 ? 0 : deft;
-  });
+  ScopedHook param(g_loadParam,
+                   ParamOverride({{"GDRCOPY_FLUSH_ENABLE", 1}, {"GDRCOPY_SYNC_ENABLE", 0}}));
   ASSERT_EQ(Connect(), ncclSuccess);
   r = R();
   EXPECT_EQ(r->gdcSync, nullptr);

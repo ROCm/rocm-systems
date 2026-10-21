@@ -35,9 +35,6 @@ extern std::function<bool(struct ncclComm*, struct ncclTopoGraph*, struct ncclCh
     g_ncclTransportCollNetSetup;
 extern std::function<ncclResult_t(struct ncclComm*, int /*collNetSetupFail*/)> g_ncclTransportCollNetCheck;
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTransportCollNetFree;
-// initCollnetChannel (src/channel.cc), CollNet's per-channel setup. Fail-loud by default.
-extern std::function<ncclResult_t(struct ncclComm*, int /*channelId*/, struct ncclComm* /*parent*/, bool /*share*/)>
-    g_initCollnetChannel;
 
 // rcclUseAinic (src/transport/net.cc:343) queries whether an AINIC is present.
 // A host-only binary has no device, so `false` is the honest answer rather than
