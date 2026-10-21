@@ -572,71 +572,109 @@ TEST(ImageAccessTest, RdnaLinearR32DescriptorsPrepareTheExpectedMemoryAccess) {
   }
 }
 
-TEST(ImageAccessTest, DecodedRdnaImagesUseNonconsecutiveCoordinateRegisters) {
-  for (auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
-    for (bool load : {false, true}) {
-      SCOPED_TRACE(testing::Message() << "arch=" << arch << " load=" << load);
-      amdgpu::GpuMemory memory{"rdna_image_memory"};
-      amdgpu::L2Cache l2{"rdna_image_l2"};
-      l2.set_backing_memory(&memory);
-      amdgpu::ComputeUnitCore::Config cfg{};
-      cfg.arch = arch;
-      cfg.num_wf_slots = 1;
-      cfg.sgprs_per_wf = 32;
-      cfg.vgprs_per_wf = 32;
-      auto cu = amdgpu::ComputeUnitCore::create("rdna_image_cu", cfg, &memory, &l2);
-      auto *wf = cu->dispatch_wf(0, 0, 32, 32);
-      ASSERT_NE(wf, nullptr);
-      wf->set_exec(1);
+class RdnaDecodedImageAccessTest : public testing::TestWithParam<rj_code_arch_t> {
+protected:
+  amdgpu::GpuMemory memory{"rdna_image_memory"};
+  amdgpu::L2Cache l2{"rdna_image_l2"};
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  std::unique_ptr<Decoder> decoder;
+  amdgpu::Wavefront *wf = nullptr;
 
-      const auto resource = rdna_r32_descriptor(arch);
-      for (uint32_t i = 0; i < resource.size(); ++i)
-        cu->write_sgpr(wf->sgpr_alloc().base + i, resource[i]);
-      cu->write_vgpr(wf->vgpr_alloc().base + 2, 0, 2);
-      cu->write_vgpr(wf->vgpr_alloc().base + 3, 0, 0);
-      cu->write_vgpr(wf->vgpr_alloc().base + 6, 0, 1);
+  void SetUp() override {
+    l2.set_backing_memory(&memory);
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = 32;
+    cfg.vgprs_per_wf = 32;
+    cu = amdgpu::ComputeUnitCore::create("rdna_image_cu", cfg, &memory, &l2);
+    wf = cu->dispatch_wf(0, 0, 32, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(5); // Lane 1 must not store or receive a load result.
+    decoder = Decoder::create(GetParam());
+    ASSERT_NE(decoder, nullptr);
 
-      auto decoder = Decoder::create(arch);
-      ASSERT_NE(decoder, nullptr);
-      auto decoded = [&] {
-        if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
-          const auto base = rdna3::build_mimg(
-              load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg,
-              {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .vaddr = 2, .vdata = 8});
-          const std::array<uint32_t, 3> words{base[0], base[1], 6};
-          return decoder->decode(words.data());
-        }
-        if (arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
-          const auto base = rdna3_5::build_mimg(
-              load ? rdna3_5::kImageLoadMimg : rdna3_5::kImageStoreMimg,
-              {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .vaddr = 2, .vdata = 8});
-          const std::array<uint32_t, 3> words{base[0], base[1], 6};
-          return decoder->decode(words.data());
-        }
-        const auto words =
-            rdna4::build_vimage(load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage,
-                                {.dim = 1, .dmask = 1, .vdata = 8, .vaddr0 = 2, .vaddr1 = 6});
-        return decoder->decode(words.data());
-      }();
-      ASSERT_TRUE(decoded.succeeded());
-      std::unique_ptr<Instruction> inst = std::move(decoded).value();
-      ASSERT_NE(inst, nullptr);
-
-      const InstDefUse def_use(*inst);
-      EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 2, 1}));
-      EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 6, 1}));
-      EXPECT_FALSE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 3, 1}));
-
-      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-      const auto *state = inst->data_as<amdgpu::VectorMemState>();
-      ASSERT_NE(state, nullptr);
-      EXPECT_EQ(state->lane_mask, 1u);
-      EXPECT_EQ(state->per_lane_addr[0], kBase + 264);
-      wf->halt();
-    }
+    const auto resource = rdna_r32_descriptor(GetParam());
+    for (uint32_t i = 0; i < resource.size(); ++i)
+      cu->write_sgpr(wf->sgpr_alloc().base + i, resource[i]);
   }
+
+  void TearDown() override {
+    if (wf)
+      wf->halt();
+  }
+
+  DecodeResult decode(bool load) {
+    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
+      const auto base =
+          rdna3::build_mimg(load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg,
+                            {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .vaddr = 2, .vdata = 8});
+      const std::array<uint32_t, 3> words{base[0], base[1], 6};
+      return decoder->decode(words.data());
+    }
+    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+      const auto base =
+          rdna3_5::build_mimg(load ? rdna3_5::kImageLoadMimg : rdna3_5::kImageStoreMimg,
+                              {.nsa = 1, .dim = 1, .unorm = 1, .dmask = 1, .vaddr = 2, .vdata = 8});
+      const std::array<uint32_t, 3> words{base[0], base[1], 6};
+      return decoder->decode(words.data());
+    }
+    const auto words =
+        rdna4::build_vimage(load ? rdna4::kImageLoadVimage : rdna4::kImageStoreVimage,
+                            {.dim = 1, .dmask = 1, .vdata = 8, .vaddr0 = 2, .vaddr1 = 6});
+    return decoder->decode(words.data());
+  }
+
+  void issue(bool load) {
+    auto decoded = decode(load);
+    ASSERT_TRUE(decoded.succeeded());
+    std::unique_ptr<Instruction> inst = std::move(decoded).value();
+    ASSERT_NE(inst, nullptr);
+
+    const InstDefUse def_use(*inst);
+    EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 2, 1}));
+    EXPECT_TRUE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 6, 1}));
+    EXPECT_FALSE(def_use.uses.contains(RegisterRef{RegClass::VGPR, 3, 1}));
+
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+    cu->l1_vector().flush_all();
+    l2.flush_all();
+  }
+};
+
+TEST_P(RdnaDecodedImageAccessTest,
+       StoreThenLoadUsesPaddedRowsNonconsecutiveCoordinatesAndExecMask) {
+  const uint32_t vb = wf->vgpr_alloc().base;
+  cu->write_vgpr(vb + 2, 0, 2);
+  cu->write_vgpr(vb + 6, 0, 1);
+  cu->write_vgpr(vb + 2, 1, 0);
+  cu->write_vgpr(vb + 6, 1, 0);
+  cu->write_vgpr(vb + 2, 2, 1);
+  cu->write_vgpr(vb + 6, 2, 0);
+  for (uint32_t lane = 0; lane < 3; ++lane)
+    cu->write_vgpr(vb + 3, lane, 0); // Consecutive-register bug reads this as Y.
+
+  cu->write_vgpr(vb + 8, 0, 0x11111111);
+  cu->write_vgpr(vb + 8, 1, 0x22222222);
+  cu->write_vgpr(vb + 8, 2, 0x33333333);
+  issue(false);
+  EXPECT_EQ(memory.read32(kBase + 264), 0x11111111u);
+  EXPECT_EQ(memory.read32(kBase), 0u);
+  EXPECT_EQ(memory.read32(kBase + 4), 0x33333333u);
+
+  for (uint32_t lane = 0; lane < 3; ++lane)
+    cu->write_vgpr(vb + 8, lane, 0xdeadbeef);
+  issue(true);
+  EXPECT_EQ(cu->read_vgpr(vb + 8, 0), 0x11111111u);
+  EXPECT_EQ(cu->read_vgpr(vb + 8, 1), 0xdeadbeefu);
+  EXPECT_EQ(cu->read_vgpr(vb + 8, 2), 0x33333333u);
 }
+
+INSTANTIATE_TEST_SUITE_P(RdnaArchitectures, RdnaDecodedImageAccessTest,
+                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
+                                         ROCJITSU_CODE_ARCH_RDNA4));
 
 TEST(ImageAccessTest, RdnaLayeredAnd3dLinearImagesRejectUnknownPitch) {
   for (auto arch :
