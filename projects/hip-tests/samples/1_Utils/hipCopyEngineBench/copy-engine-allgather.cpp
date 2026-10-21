@@ -34,6 +34,7 @@ struct Params {
   size_t step_factor = 2;
   size_t warmup = 5;
   size_t iterations = 20;
+  size_t repeats = 1;
   bool skip_verification = false;
   std::string output_file = "copy_engine_allgather.csv";
 };
@@ -57,26 +58,29 @@ struct AllgatherArgs {
 // that says the chunk landed, one in this GPU's memory that says it was sent. Then it waits for the
 // peer's chunk to land here. Signals carry a rising epoch so they are never reset, and a peer that
 // runs an iteration ahead can only raise them.
-__global__ void AllgatherKernel(AllgatherArgs args, uint64_t epoch) {
+__global__ void AllgatherKernel(AllgatherArgs args, uint64_t epoch, uint32_t repeats) {
   const uint32_t warp = threadIdx.x / warpSize;
   if (threadIdx.x % warpSize != 0 || warp + 1 >= args.num_ranks) return;
   const uint32_t peer = warp < args.rank ? warp : warp + 1;
   const uint64_t offset = uint64_t{args.rank} * args.chunk_bytes;
-
-  const hipExtCopyEngineSignal arrived{reinterpret_cast<uint64_t>(args.arrivals[peer] + args.rank),
-                                       epoch, hipExtCopyEngineSignalSet, 0};
-  const hipExtCopyEngineSignal sent{reinterpret_cast<uint64_t>(args.sends_done + peer), epoch,
-                                    hipExtCopyEngineSignalSet, 0};
   const hipExtCopyEngineDeviceHandle* handle = &args.handles.handles[peer];
 
-  hipError_t result = hipExtCopyEngineSubmitLinearOneLane(handle, args.buffers[peer] + offset,
-                                                          args.buffers[args.rank] + offset,
-                                                          args.chunk_bytes, &arrived);
-  if (result == hipSuccess) result = hipExtCopyEngineSubmitSignalOneLane(handle, &sent);
-  if (result == hipSuccess) {
-    const bool landed = WaitForSignal(args.arrivals[args.rank] + peer, epoch, kMaxSpins);
-    const bool sent_done = WaitForSignal(args.sends_done + peer, epoch, kMaxSpins);
-    if (!landed || !sent_done) result = hipErrorNotReady;
+  hipError_t result = hipSuccess;
+  for (uint32_t repeat = 0; repeat < repeats && result == hipSuccess; ++repeat, ++epoch) {
+    const hipExtCopyEngineSignal arrived{
+        reinterpret_cast<uint64_t>(args.arrivals[peer] + args.rank), epoch,
+        hipExtCopyEngineSignalSet, 0};
+    const hipExtCopyEngineSignal sent{reinterpret_cast<uint64_t>(args.sends_done + peer), epoch,
+                                      hipExtCopyEngineSignalSet, 0};
+    result = hipExtCopyEngineSubmitLinearOneLane(handle, args.buffers[peer] + offset,
+                                                 args.buffers[args.rank] + offset, args.chunk_bytes,
+                                                 &arrived);
+    if (result == hipSuccess) result = hipExtCopyEngineSubmitSignalOneLane(handle, &sent);
+    if (result == hipSuccess) {
+      const bool landed = WaitForSignal(args.arrivals[args.rank] + peer, epoch, kMaxSpins);
+      const bool sent_done = WaitForSignal(args.sends_done + peer, epoch, kMaxSpins);
+      if (!landed || !sent_done) result = hipErrorNotReady;
+    }
   }
   args.statuses[warp] = result;
 }
@@ -128,7 +132,9 @@ struct Rank {
 
 uint32_t ExpectedWord(size_t rank, size_t index) { return static_cast<uint32_t>(rank + index); }
 
-void LaunchAll(std::vector<Rank>& ranks, size_t chunk_bytes, uint64_t epoch) {
+// Launches one kernel per GPU that runs the collective |repeats| times, with epochs |epoch| to
+// |epoch| + |repeats| - 1.
+void LaunchAll(std::vector<Rank>& ranks, size_t chunk_bytes, uint64_t epoch, uint32_t repeats = 1) {
   for (Rank& rank : ranks) {
     HIP_CHECK(hipSetDevice(rank.device));
     rank.args.chunk_bytes = chunk_bytes;
@@ -136,7 +142,7 @@ void LaunchAll(std::vector<Rank>& ranks, size_t chunk_bytes, uint64_t epoch) {
     HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, rank.device));
     hipLaunchKernelGGL(AllgatherKernel, dim3(1),
                        dim3(static_cast<unsigned>((rank.args.num_ranks - 1) * warp_size)), 0,
-                       rank.stream, rank.args, epoch);
+                       rank.stream, rank.args, epoch, repeats);
   }
 }
 
@@ -326,7 +332,11 @@ int Run(const Params& params, const World& world) {
     const bool verified = !params.skip_verification;
     if (verified) errors = Verify(world, ranks, chunk, ++epoch);
 
-    for (size_t i = 0; i < params.warmup; ++i) LaunchAll(ranks, chunk, ++epoch);
+    const auto repeats = static_cast<uint32_t>(params.repeats);
+    for (size_t i = 0; i < params.warmup; ++i) {
+      LaunchAll(ranks, chunk, epoch + 1, repeats);
+      epoch += repeats;
+    }
     SyncAll(ranks);
     world.Barrier();
 
@@ -335,7 +345,10 @@ int Run(const Params& params, const World& world) {
       HIP_CHECK(hipEventRecord(rank.start, rank.stream));
     }
     const auto host_begin = std::chrono::steady_clock::now();
-    for (size_t i = 0; i < params.iterations; ++i) LaunchAll(ranks, chunk, ++epoch);
+    for (size_t i = 0; i < params.iterations; ++i) {
+      LaunchAll(ranks, chunk, epoch + 1, repeats);
+      epoch += repeats;
+    }
     for (Rank& rank : ranks) {
       HIP_CHECK(hipSetDevice(rank.device));
       HIP_CHECK(hipEventRecord(rank.stop, rank.stream));
@@ -344,7 +357,7 @@ int Run(const Params& params, const World& world) {
     const double host_us =
         std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - host_begin)
             .count() /
-        static_cast<double>(params.iterations);
+        static_cast<double>(params.iterations * params.repeats);
     world.Barrier();
 
     double sum_us = 0.0;
@@ -352,7 +365,7 @@ int Run(const Params& params, const World& world) {
     for (const Rank& rank : ranks) {
       float ms = 0.0f;
       HIP_CHECK(hipEventElapsedTime(&ms, rank.start, rank.stop));
-      const double us = ms * 1000.0 / static_cast<double>(params.iterations);
+      const double us = ms * 1000.0 / static_cast<double>(params.iterations * params.repeats);
       sum_us += us;
       max_us = std::max(max_us, us);
     }
@@ -411,7 +424,10 @@ int main(int argc, char** argv) {
   parser.AddOption("-e,--maxBytes", &params.max_bytes, "Largest total buffer size in bytes");
   parser.AddOption("-f,--stepFactor", &params.step_factor, "Factor between sizes");
   parser.AddOption("-w,--warmup", &params.warmup, "Warmup iterations");
-  parser.AddOption("-n,--iterations", &params.iterations, "Measured iterations");
+  parser.AddOption("-n,--iterations", &params.iterations, "Measured kernel launches");
+  parser.AddOption("-r,--repeats", &params.repeats,
+                   "Collectives each launch runs back to back; above 1 the time leaves out the gap "
+                   "between kernels");
   parser.AddFlag("--skip-verification", &params.skip_verification, "Skip verification");
   parser.AddOption("-o,--outputFile", &params.output_file, "Filename for CSV results");
 
@@ -421,8 +437,8 @@ int main(int argc, char** argv) {
     result = exit_code;
   } else if (!ValidateSweep(params.min_bytes, params.max_bytes)) {
     result = 2;
-  } else if (params.step_factor < 2 || params.iterations == 0) {
-    std::cerr << "error: --stepFactor must be at least 2 and --iterations non-zero\n";
+  } else if (params.step_factor < 2 || params.iterations == 0 || params.repeats == 0) {
+    std::cerr << "error: --stepFactor must be at least 2 and --iterations and --repeats non-zero\n";
     result = 2;
   } else {
     result = Run(params, world);

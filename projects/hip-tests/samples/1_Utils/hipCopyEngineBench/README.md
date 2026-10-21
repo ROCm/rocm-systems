@@ -138,19 +138,23 @@ host chose, and every copy retires its own completion word. So:
 
 - On an 8x MI300X node, `copy-engine-bw -d 7` reached ~290 GB/s against ~41 GB/s for `-d 1`.
   Warps sharing a destination share one ring, while different destinations use different routes.
-- Allgather on 8 MI300X GPUs, three interleaved rounds of this tool as one process, this tool
-  under MPI, and the reference `sdma-ep-allgather` under MPI:
-  - 32 MiB and 256 MiB: all three reach 98 - 103 us and 693 - 725 us. The single-process run is 4%
-    faster at 256 MiB (693 against 724 us); both MPI runs, ours and the reference, are at 724.
-    Buffers opened through IPC may be mapped differently, but I did not check.
-  - 4 KiB to 1 MiB: both MPI runs sat at 14 - 31 us (4 KiB: 25 - 31 us in every round, ours and
-    the reference), the single process at 13.7 us in two rounds and 35 us in the third. MPI is not
-    what stabilises these sizes. The same variation showed up with 2 and 4 GPUs only as a
-    steady 12 us.
-  - Multi-millisecond stalls appeared in single iterations of the MPI runs (ours: 5.3 ms mean at
-    32 MiB once; the reference: 1.2 - 2.5 ms at 256 MiB in two rounds). I do not know the cause.
-  - The HIP version needs a second submit for the "sent" signal (about 1.6 us), where the
-    reference packs its put, signal and counter into one reservation.
+- Allgather on 8 MI300X GPUs, 4 KiB total (one 512 B chunk per GPU). Each iteration is a kernel
+  launch, and the time per iteration is the kernel (about 10 us: two submits per warp, then the
+  waits) plus the gap before the next kernel starts on that GPU. That gap is 2.5 us in some runs and
+  12 - 35 us in others, at random from run to run, and in long runs it settles at about 12 us. The
+  host launch call takes only 1.4 - 2.2 us, so the host is not the limit. So with the default one
+  collective per launch, `copy-engine-allgather` (one process or MPI) and the reference
+  `sdma-ep-allgather` all print anything from 11.4 to 33 us for the same work, in repeated runs of
+  the same binary.
+  `--repeats N` runs N collectives inside each kernel launch, which leaves the gap out. With
+  `--repeats 200` the single-process run gives 10.7 - 11.1 us on every run. The MPI build gives
+  15.7 - 17.4 us, 5 us more than the single process; peers reached through IPC handles are slower,
+  and at 256 MiB too (about 4%: 724 us against 693 us). The reference has no such option.
+  At 32 MiB and 256 MiB (about 100 us and 690 - 725 us) all three agree within 5%. Single
+  iterations of the MPI runs sometimes stalled for milliseconds (ours: 5.3 ms mean at 32 MiB once;
+  the reference: 1.2 - 2.5 ms at 256 MiB); the cause is unknown.
+- The HIP version needs a second submit for the "sent" signal (about 1.6 us), where the reference
+  packs its put, signal and counter into one reservation.
 - A submit call costs about 2.8 us: reserve ring space, write the packets, ring the doorbell. That
   is the `Submit [us]` column.
 - Mean device latency of one copy, 5 interleaved runs against `sdma-ep-latency` (which reports one
