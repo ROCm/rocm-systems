@@ -2629,6 +2629,12 @@ read-modify-write at L2. The old value is returned to vdst when
 SC0/GLC is set. The L1 line is invalidated after the atomic to prevent
 stale reads. Supported integer atomics: swap, cmpswap, add, sub,
 smin/umin, smax/umax, and, or, xor, inc, dec.</p>
+<p><strong>Scalar atomics</strong> (<code>s_atomic_*</code> and <code>s_atomic_*_x2</code>, CDNA1–4) bypass the
+L1 scalar cache and perform read-modify-write at L2; the atomic boundary's
+coherence epoch makes stale K$ lines refetch. The old value is returned to
+SDATA when GLC is set. Supported: swap, add, sub, smin/umin, smax/umax,
+and, or, xor, inc, dec. <code>s_atomic_cmpswap[_x2]</code> and <code>s_buffer_atomic_*</code> are
+not yet implemented.</p>
 <p><strong>Cache management instructions:</strong></p>
 <ul>
 <li><code>s_dcache_inv</code> / <code>s_dcache_inv_vol</code> — invalidate the L1 scalar cache</li>
