@@ -299,17 +299,12 @@ bool is_gpu_vf_mode(int fd) {
 }
 
 uint16_t get_vf_index_from_sysfs(const std::string& device_path) {
-  // device_path is /sys/class/drm/renderDXXX/device
-  // Check if physfn symlink exists (present on VFs visible from the host)
+  // device_path is the VF's PCI function directory, or a link to it.
   std::string physfn_path = device_path + "/physfn";
 
-  // Get our own BDF from the device symlink
-  char dev_link[PATH_MAX];
-  ssize_t len = readlink(device_path.c_str(), dev_link, sizeof(dev_link) - 1);
-  if (len <= 0) return 0;
-  dev_link[len] = '\0';
-
-  const char* our_bdf_ptr = strrchr(dev_link, '/');
+  char own_real[PATH_MAX];
+  if (realpath(device_path.c_str(), own_real) == nullptr) return 0;
+  const char* our_bdf_ptr = strrchr(own_real, '/');
   if (our_bdf_ptr == nullptr) return 0;
   std::string our_bdf(our_bdf_ptr + 1);
 
@@ -322,7 +317,7 @@ uint16_t get_vf_index_from_sysfs(const std::string& device_path) {
   for (int idx = 0; idx < 256; ++idx) {
     std::string virtfn_symlink = pf_path + "/virtfn" + std::to_string(idx);
     char vfn_link[PATH_MAX];
-    len = readlink(virtfn_symlink.c_str(), vfn_link, sizeof(vfn_link) - 1);
+    const ssize_t len = readlink(virtfn_symlink.c_str(), vfn_link, sizeof(vfn_link) - 1);
     if (len <= 0) break;  // no more VFs
     vfn_link[len] = '\0';
 
@@ -339,36 +334,34 @@ uint16_t get_vf_index_from_sysfs(const std::string& device_path) {
 
 CuidUtilities::VfIdentity CuidUtilities::get_gpu_vf_identity(const std::string& device_path) {
   VfIdentity id;
+  // Only world-readable evidence counts, so every caller sees the same
+  // component: the physfn link a host shows on its VFs. A guest's VF has none
+  // and is named by its own BDF like any other function.
+  // The link itself decides: a container may show it without the PF it names,
+  // and such a VF has no index rather than none of a VF's limits.
+  struct stat link = {};
+  if (lstat((device_path + "/physfn").c_str(), &link) != 0 || !S_ISLNK(link.st_mode)) return id;
+  id.is_vf = true;
 
-  int render_minor = extract_render_minor(device_path);
-  if (render_minor < 0) return id;
-
-  std::string dev_node = "/dev/dri/renderD" + std::to_string(render_minor);
-
-  int fd = open(dev_node.c_str(), O_RDWR | O_CLOEXEC);
-  if (fd < 0) {
-    // Fall back to read-only if we lack write permission
-    fd = open(dev_node.c_str(), O_RDONLY | O_CLOEXEC);
-    if (fd < 0) return id;
-  }
-
-  id.is_vf = is_gpu_vf_mode(fd);
-  close(fd);
-
-  if (!id.is_vf) return id;
-
-  // physfn is visible, so we know which share of the card this is. The index is
-  // 1-based, leaving 0 to mean the card as a whole -- the same encoding a
-  // spatial partition uses, so a device and its first sub-unit never collide.
+  // The index is 1-based, leaving 0 to mean the card as a whole.
   const uint16_t vf_index = get_vf_index_from_sysfs(device_path);
   if (vf_index > 0) {
     id.index_known = true;
     id.unit_id = vf_index;
   }
-
-  // Otherwise index_known stays false: a VF we cannot name, which is what a
-  // guest sees, and whose caller must not fall back to the card's serial.
   return id;
+}
+
+bool CuidUtilities::gpu_reports_vf_mode(const std::string& device_path) {
+  const int render_minor = extract_render_minor(device_path);
+  if (render_minor < 0) return false;
+  const std::string dev_node = "/dev/dri/renderD" + std::to_string(render_minor);
+  int fd = open(dev_node.c_str(), O_RDWR | O_CLOEXEC);
+  if (fd < 0) fd = open(dev_node.c_str(), O_RDONLY | O_CLOEXEC);
+  if (fd < 0) return false;
+  const bool vf = is_gpu_vf_mode(fd);
+  close(fd);
+  return vf;
 }
 
 uint16_t CuidUtilities::segment_high_from_bdf(const std::string& bdf) {
@@ -481,7 +474,7 @@ amdcuid_status_t CuidUtilities::host_machine_id(const std::string& path,
   if (!read_machine_id(path, fallback, out)) {
     static std::once_flag warned;
     std::call_once(warned, [] {
-      LOG(WARN,
+      LOG(INFO,
           "No machine identity (/etc/machine-id, /var/lib/dbus/machine-id): refusing to "
           "emit a temporary CUID, which would collide with every identically-configured host");
     });
