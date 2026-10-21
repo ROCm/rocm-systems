@@ -490,7 +490,7 @@
       "binary": "host/rccl-UnitTestsMicroNetIbCastInit",
       "num_ranks": 1,
       "num_nodes": 1,
-      "num_gpus": 1,
+      "num_gpus": 0,
       "timeout": 60,
       "tests": [
         {"name": "NetIbCastInitMicrotests", "description": "Host-only net_ib_cast init, capability and GIN microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
