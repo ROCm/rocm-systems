@@ -835,6 +835,66 @@ class TestDeriveVectorUnary:
             assert len(cpp) > 0
 
     @pytest.mark.parametrize(
+        ('dtype', 'mode'), [('F16', 'f16_f64'), ('F32', 'f32'), ('F64', 'f16_f64')]
+    )
+    def test_fract_writes_the_shared_raw_result(self, dtype, mode):
+        sem = derive_semantics(f'V_FRACT_{dtype}', 'ENC_VOP1')
+        cpp = lower_sema_block(derive_sema_block(sem))
+        policy = (
+            f'amdgpu::fract::Policy::make(wf.fp_denorm_mode_{mode}(), '
+            f'wf.fp_round_mode_{mode}())'
+        )
+        assert f'const auto fract_policy = {policy};' in cpp
+        assert 'std::floor' not in cpp and 'f32_to_f16' not in cpp
+        # Result bits are written directly; an SDWA store applies OMOD to them.
+        assert f'amdgpu::fract::evaluate<amdgpu::fp_format::{dtype}>(' in cpp
+        assert 'sdwa::output_modifier' not in cpp
+
+    @pytest.mark.parametrize('dtype', ['F16', 'F32', 'F64'])
+    def test_fract_vop3_applies_shared_modifiers(self, dtype):
+        sem = derive_semantics(f'V_FRACT_{dtype}', 'ENC_VOP3')
+        fields = frozenset({'abs', 'neg', 'clamp', 'omod'})
+        cpp = lower_sema_block(
+            enrich_block(derive_sema_block(sem), enc_field_names=fields)
+        )
+        assert f'amdgpu::floating_operation::apply<amdgpu::fp_format::{dtype}>(' in cpp
+        assert (
+            'amdgpu::floating_operation::SourceModifiers{inst_.abs & 1u, inst_.neg & 1u}'
+            in cpp
+        )
+        assert (
+            f'amdgpu::output_modifier_policy<amdgpu::fp_format::{dtype}>'
+            '(wf, inst_.omod, inst_.clamp)' in cpp
+        )
+        assert 'apply_omod' not in cpp and 'clamp_floating_result' not in cpp
+
+    @pytest.mark.parametrize(
+        ('dtype', 'operation'),
+        [
+            ('F16', 'Operation<amdgpu::fp_format::F16>'),
+            ('F32', 'Operation<amdgpu::fp_format::F32>'),
+            ('F64', 'Operation<amdgpu::fp_format::F64, 32>'),
+        ],
+    )
+    def test_ldexp_vop3_modifies_only_the_value(self, dtype, operation):
+        sem = derive_semantics(f'V_LDEXP_{dtype}', 'ENC_VOP3')
+        fields = frozenset({'abs', 'neg', 'clamp', 'omod'})
+        cpp = lower_sema_block(
+            enrich_block(derive_sema_block(sem), enc_field_names=fields)
+        )
+        assert f'amdgpu::floating_operation::apply<amdgpu::fp_format::{dtype}>(' in cpp
+        assert f'amdgpu::ldexp::{operation}{{ldexp_policy}}' in cpp
+        assert (
+            'amdgpu::floating_operation::SourceModifiers{inst_.abs & 1u, inst_.neg & 1u}'
+            in cpp
+        )
+        assert (
+            f'amdgpu::output_modifier_policy<amdgpu::fp_format::{dtype}>'
+            '(wf, inst_.omod, inst_.clamp)' in cpp
+        )
+        assert 'ldexp_float' not in cpp and 'div_apply_omod' not in cpp
+
+    @pytest.mark.parametrize(
         ('name', 'enc', 'op', 'scale'),
         [
             ('V_CVT_NORM_I16_F16', 'ENC_VOP1', 'cvt_norm_i16_f16', '32767.0'),
@@ -2193,6 +2253,79 @@ class TestDeriveSmemHints:
         block = derive_sema_block(sem)
         assert block is not None
         assert block.is_empty
+
+
+_SCALAR_ATOMIC_OPS = (
+    'SWAP',
+    'CMPSWAP',
+    'ADD',
+    'SUB',
+    'SMIN',
+    'UMIN',
+    'SMAX',
+    'UMAX',
+    'AND',
+    'OR',
+    'XOR',
+    'INC',
+    'DEC',
+)
+
+
+# Compare-swap carries its compare value after the source, doubling its data.
+_IMPLEMENTED_SCALAR_ATOMICS = {
+    f'S_ATOMIC_{op}{width}': (
+        op.lower(),
+        elem_size,
+        2 * num_elems if op == 'CMPSWAP' else num_elems,
+    )
+    for op in _SCALAR_ATOMIC_OPS
+    for width, elem_size, num_elems in (('', 4, 1), ('_X2', 8, 2))
+}
+
+
+class TestDeriveSmemAtomic:
+    @pytest.mark.parametrize('name', sorted(_IMPLEMENTED_SCALAR_ATOMICS))
+    def test_implemented_scalar_atomics_derive_operation_and_widths(self, name):
+        operation, elem_size, num_elems = _IMPLEMENTED_SCALAR_ATOMICS[name]
+        sem = derive_semantics(name, 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'smem_atomic'
+        assert sem.operation == operation
+        assert sem.elem_size == elem_size
+        assert sem.num_elems == num_elems
+
+    @pytest.mark.parametrize(
+        'name',
+        [
+            f'{prefix}{op}{width}'
+            for prefix in ('S_ATOMIC_', 'S_BUFFER_ATOMIC_')
+            for op in _SCALAR_ATOMIC_OPS
+            for width in ('', '_X2')
+            if f'{prefix}{op}{width}' not in _IMPLEMENTED_SCALAR_ATOMICS
+        ],
+    )
+    def test_unimplemented_scalar_atomics_stay_nop(self, name):
+        sem = derive_semantics(name, 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
+
+    # No CDNA ISA defines these. The flat atomic tables know their operations,
+    # so they pin that scalar support comes from the allowlist, not that table.
+    @pytest.mark.parametrize(
+        'name',
+        [
+            'S_ATOMIC_ADD_F32',
+            'S_ATOMIC_FMIN',
+            'S_ATOMIC_PK_ADD_F16',
+            'S_ATOMIC_CSUB',
+            'S_ATOMIC_COND_SUB_U32',
+        ],
+    )
+    def test_scalar_atomic_operations_outside_allowlist_stay_nop(self, name):
+        sem = derive_semantics(name, 'ENC_SMEM')
+        assert sem is not None
+        assert sem.semantic_class == 'nop'
 
 
 class TestDeriveBufferLoad:
