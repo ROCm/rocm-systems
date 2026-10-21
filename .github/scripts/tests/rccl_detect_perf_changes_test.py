@@ -13,8 +13,14 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
+sys.path.insert(0, os.fspath(Path(__file__).parent))
 import rccl_detect_coco_changes as coco
 import rccl_detect_perf_changes as perf
+from workflow_filters import pull_request_trigger
+
+PERF_WORKFLOW = (
+    Path(__file__).resolve().parents[2] / "workflows" / "rccl_perf_regression.yml"
+)
 
 HOST = "projects/rccl/test/host/net-test.cc"
 SRC = "projects/rccl/src/net.cc"
@@ -35,17 +41,27 @@ class RunGateTest(unittest.TestCase):
             with self.subTest(branch=branch):
                 self.assertTrue(perf.should_run_gate([HOST], branch))
 
-    def test_runs_when_any_code_is_uncovered(self):
+    def test_runs_when_any_gate_path_is_uncovered(self):
         for other in [
             SRC,
             "projects/rccl/test/CMakeLists.txt",
             "projects/rccl/test/hostile.cc",
-            "projects/rccl-tests/src/all_reduce.cu",
             ".github/workflows/rccl_perf_regression.yml",
+            ".github/scripts/rccl_detect_perf_changes.py",
             ".github/scripts/rccl_change_sets.py",
         ]:
             with self.subTest(other=other):
                 self.assertTrue(perf.should_run_gate([HOST, other], "develop"))
+
+    def test_ignores_paths_the_gate_does_not_watch(self):
+        for other in [
+            "projects/rccl-tests/src/all_reduce.cu",
+            "projects/hip/src/hip.cc",
+            ".github/workflows/therock-ci.yml",
+            ".github/scripts/ci_utils.py",
+        ]:
+            with self.subTest(other=other):
+                self.assertFalse(perf.should_run_gate([HOST, other], "develop"))
 
     def test_runs_without_code_changes(self):
         # Unchanged from before COVERAGE_RULES: no code means nothing is covered.
@@ -72,28 +88,44 @@ class BuildRcclTest(unittest.TestCase):
                 self.assertFalse(perf.should_build_rccl(changed))
 
 
-class CocoConsistencyTest(unittest.TestCase):
-    """If the perf gate skips as covered, coco must skip too."""
+class PerfPathPatternsTest(unittest.TestCase):
+    def test_match_workflow_trigger_paths(self):
+        # GitHub `**` spans `/`; fnmatch `*` already does.
+        paths = pull_request_trigger(PERF_WORKFLOW).paths
+        self.assertEqual(
+            {p.replace("**", "*") for p in paths}, set(perf.PERF_PATH_PATTERNS)
+        )
 
-    POOL = [
+
+class CocoConsistencyTest(unittest.TestCase):
+    """Coverage makes both gates skip, or neither.
+
+    Only over paths both gates watch or both ignore: projects/rccl-tests (coco
+    only) or the perf workflow (perf only) can rightly run just one gate.
+    """
+
+    SHARED = [
         HOST,
         "projects/rccl/test/host/fakes/os_fakes.cc",
         SRC,
         "projects/rccl/test/hostile.cc",
         "projects/rccl/README.md",
-        "projects/rccl-tests/src/all_reduce.cu",
         "projects/hip/src/hip.cc",
         ".github/scripts/rccl_change_sets.py",
     ]
 
-    def test_skip_implies_no_coco(self):
+    def test_coverage_skips_both_gates_or_neither(self):
         for branch in ["develop", "main"]:
             for n in range(1, 3):
-                for changed in itertools.combinations(self.POOL, n):
-                    if perf.should_run_gate(changed, branch):
-                        continue
+                for changed in itertools.combinations(self.SHARED, n):
+                    coco_skip = bool(coco.coco_paths(changed, "")) and not (
+                        coco.coco_paths(changed, branch)
+                    )
+                    perf_skip = perf.should_run_gate(changed, "") and not (
+                        perf.should_run_gate(changed, branch)
+                    )
                     with self.subTest(branch=branch, changed=changed):
-                        self.assertFalse(coco.coco_paths(changed, branch))
+                        self.assertEqual(coco_skip, perf_skip)
 
 
 class MainTest(unittest.TestCase):
