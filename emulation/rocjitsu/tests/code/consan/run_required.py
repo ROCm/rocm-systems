@@ -24,6 +24,8 @@ def required_names():
     names = {
         'ConSanContract.TargetWaveFactsRoundTripAndRowsFollowActualGeometry',
         'ConSanAnalysis.Wave64HighLanesAndFullMasksRetainExactLanePairCounts',
+        'ConSanAnalysis.InvalidUtf8EntryNamesAreAnalysisInputErrorsAfterBinaryRoundTrip',
+        'ConSanAnalysis.Utf8ScalarBoundariesRetainTheirBytesInJson',
     }
     for gpu, wave in MODES:
         suffix = f'{gpu}Wave{wave}'
