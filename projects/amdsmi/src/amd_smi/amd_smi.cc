@@ -1482,6 +1482,14 @@ std::string cuid_partition_node(amdsmi_processor_handle processor_handle) {
   return node;
 }
 
+// A GPU amd-smi has a handle for but the library cannot name has no CUID: it
+// is not a bad handle. Under WSL there is neither a render node nor a PCI
+// function in sysfs for the library to find.
+amdsmi_status_t cuid_lookup_status(amdcuid_status_t status) {
+  return status == AMDCUID_STATUS_DEVICE_NOT_FOUND ? AMDSMI_STATUS_NOT_SUPPORTED
+                                                   : cuid_status_to_amdsmi(status);
+}
+
 // Resolve a processor handle to its CUID handle, which is the component's
 // derived CUID. A partition node amdgpu publishes names the partition, and
 // its answer stands. Otherwise the library resolves the render node: to a
@@ -1491,12 +1499,12 @@ amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle,
                                 amdcuid_id_t& handle_out) {
   const std::string partition_node = cuid_partition_node(processor_handle);
   if (!partition_node.empty()) {
-    return cuid_status_to_amdsmi(amdcuid_get_handle_by_dev_path(
-        partition_node.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out));
+    return cuid_lookup_status(amdcuid_get_handle_by_dev_path(partition_node.c_str(),
+                                                             AMDCUID_DEVICE_TYPE_GPU, &handle_out));
   }
   const std::string render = cuid_render_node(processor_handle, "/sys");
   if (!render.empty() && access(render.c_str(), F_OK) == 0) {
-    return cuid_status_to_amdsmi(
+    return cuid_lookup_status(
         amdcuid_get_handle_by_dev_path(render.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out));
   }
   amdsmi_bdf_t bdf = {};
@@ -1505,7 +1513,7 @@ amdsmi_status_t cuid_handle_for(amdsmi_processor_handle processor_handle,
     return smi_status;
   }
   const std::string bdf_str = stringify_bdf(bdf);
-  return cuid_status_to_amdsmi(
+  return cuid_lookup_status(
       amdcuid_get_handle_by_bdf(bdf_str.c_str(), AMDCUID_DEVICE_TYPE_GPU, &handle_out));
 }
 

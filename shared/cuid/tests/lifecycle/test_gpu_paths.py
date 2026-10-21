@@ -560,6 +560,43 @@ class GpuPaths(unittest.TestCase):
                 with self.subTest(state=state, nonroot=role):
                     self.run_probe("unnamed-vf", *forms, nonroot=role)
 
+    def repeated(self, names, nonroot):
+        statuses = {}
+        for line in self.run_probe("repeat", *names, nonroot=nonroot).splitlines():
+            name, status = line.split("\t")
+            statuses.setdefault(name, []).append(status)
+        return statuses
+
+    def hide_machine_id(self):
+        empty = ROOT / "empty-machine-id"
+        self.write(empty, "")
+        for path in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+            if os.path.exists(path):
+                mount(str(empty), path, flags=4096)
+                self.addCleanup(self.unmount, path)
+
+    def test_lookups_answer_the_same_every_time(self):
+        """A lookup's answer does not depend on what was asked before it: a
+        failed enumeration is not cached as an empty one (ROCM-33270, where a
+        GPU without sysfs answered HARDWARE_FINGERPRINT_NOT_FOUND once and
+        DEVICE_NOT_FOUND after)."""
+        absent = "bdf=0000:77:00.0"
+        names = [absent, "/sys/class/drm/renderD128", "bdf=0000:63:00.0"]
+        for role in (False, True):
+            with self.subTest(nonroot=role):
+                statuses = self.repeated(names, role)
+                for name in names:
+                    self.assertEqual(len(set(statuses[name])), 1, f"{name}: {statuses[name]}")
+                self.assertEqual(statuses[absent][0], "DEVICE_NOT_FOUND")
+                self.assertEqual(statuses[names[1]][0], "SUCCESS")
+        self.hide_machine_id()
+        for role in (False, True):
+            with self.subTest(nonroot=role, machine_id=False):
+                statuses = self.repeated(names, role)
+                for name in names:
+                    self.assertEqual(len(set(statuses[name])), 1, f"{name}: {statuses[name]}")
+                    self.assertNotEqual(statuses[name][0], "SUCCESS")
+
     def test_components_are_temporary(self):
         self.components()
         for role in (False, True):
