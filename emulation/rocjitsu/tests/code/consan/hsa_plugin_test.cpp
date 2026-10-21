@@ -5,6 +5,7 @@
 #include "rocjitsu/code/consan/capture.h"
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/hooks/consan/api.h"
+#include "rocjitsu/hooks/consan/testing.h"
 
 #include <gtest/gtest.h>
 

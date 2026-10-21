@@ -22,6 +22,8 @@ MODES = (
 
 def required_names():
     names = {
+        'ConSanRuntime.SymbolBoundary',
+        'ConSanSimProductionE2E.gfx1250.wave32.assembly.missing-statistics',
         'ConSanContract.TargetWaveFactsRoundTripAndRowsFollowActualGeometry',
         'ConSanAnalysis.Wave64HighLanesAndFullMasksRetainExactLanePairCounts',
         'ConSanAnalysis.InvalidUtf8EntryNamesAreAnalysisInputErrorsAfterBinaryRoundTrip',
@@ -46,6 +48,7 @@ def required_names():
             names.add(f'ConSanTargets/ConSanTargetSim.{case}/{suffix}')
         names.add(f'ConSanSimE2E.{gpu}.wave{wave}.assembly.high_lane')
         kind = 'assembly' if gpu == 'gfx1250' else 'hip'
+        names.add(f'ConSanSimProductionE2E.{gpu}.wave{wave}.{kind}.disjoint')
         for case in ('race', 'disjoint', 'read_read'):
             names.add(f'ConSanSimE2E.{gpu}.wave{wave}.{kind}.{case}')
         if kind == 'hip':

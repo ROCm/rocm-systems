@@ -930,7 +930,8 @@ if(RJ_BUILD_CONSAN_RUNTIME)
                 ${CMAKE_COMMAND} -DNM=${CMAKE_NM}
                 -DRUNTIME_CORE=$<TARGET_FILE:rocjitsu_consan_runtime_core>
                 -DIMAGE_ARCHIVE=$<TARGET_FILE:rocjitsu_consan_image>
-                -DPLUGIN=$<TARGET_FILE:hsa_consan> -P
+                -DPLUGIN=$<TARGET_FILE:hsa_consan>
+                -DTEST_PLUGIN=$<TARGET_FILE:hsa_consan_testable> -P
                 ${CMAKE_CURRENT_SOURCE_DIR}/code/consan/check_runtime_symbols.cmake
         )
     endif()

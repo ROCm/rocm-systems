@@ -39,6 +39,7 @@ CASES = (
     'bad-geometry',
     'profiling',
     'reused-signal',
+    'missing-statistics',
 )
 
 
@@ -131,6 +132,7 @@ class Driver:
             'bad-geometry': 'disjoint',
             'profiling': 'disjoint',
             'reused-signal': 'disjoint',
+            'missing-statistics': 'disjoint',
         }.get(args.case, args.case)
         if args.fixture_kind == 'legacy-assembly':
             fixture = args.fixtures / f'{fixture_name}.hsaco'
@@ -192,6 +194,22 @@ class Driver:
             'profiling': ['--profiling'],
             'reused-signal': ['--reuse-signal'],
         }.get(args.case, [])
+        if args.test_statistics:
+            options.append('--test-statistics')
+        if args.case == 'missing-statistics':
+            assert not args.test_statistics
+            self.run(
+                'application',
+                [args.runner, original, entry, launches, mode, '--test-statistics'],
+                3,
+                environment,
+            )
+            assert (
+                'required ConSan test statistics interface is unavailable'
+                in (self.directory / 'application.stderr').read_text()
+            )
+            assert not capture.exists(), 'missing test API published a capture'
+            return
         expected_status = (
             20
             if args.case == 'wrong-artifact'
@@ -212,16 +230,22 @@ class Driver:
         assert statistics['app_status'] == expected_status
         if expected_status:
             count = 1 if args.case == 'reused-signal' else 0
-            assert statistics['submitted'] == count
+            if args.test_statistics:
+                assert statistics['submitted'] == count
             assert statistics['completed'] == count
             assert statistics['finish_status'] != 0
             assert not capture.exists(), 'failed run published a successful capture'
             return
         assert statistics['finish_status'] == 0
-        for field in ('completed', 'submitted', 'forwarded', 'copied', 'written'):
-            assert statistics[field] == launches, (field, statistics)
-        if launches > 1:
-            assert statistics['reused'] == launches - 1
+        assert statistics['completed'] == launches
+        counter_fields = ('submitted', 'forwarded', 'copied', 'written', 'reused')
+        if args.test_statistics:
+            for field in counter_fields[:-1]:
+                assert statistics[field] == launches, (field, statistics)
+            if launches > 1:
+                assert statistics['reused'] == launches - 1
+        else:
+            assert not set(counter_fields) & statistics.keys(), statistics
         if args.case == 'profiling':
             assert statistics['profiling_status'] != 0
         maps = (self.directory / 'process-maps.txt').read_text()
@@ -360,6 +384,7 @@ class Driver:
 
 
 def add_target_arguments(parser):
+    parser.add_argument('--test-statistics', action='store_true')
     parser.add_argument(
         '--target',
         default='gfx1100',
