@@ -791,9 +791,12 @@ def pytest_sessionfinish(session, exitstatus):
 # ============================================================================
 
 # ----------------------------------------------------------------------------
-# Resolved settings: the value the profiled process stored after config
-# parsing. The launcher also prints the setting on stdout before exec; a
-# regex on that line still passes if the runtime dropped or rewrote it.
+# Resolved profiler settings: Used to validate the settings actually used by the profiler
+# after configuration parsing.
+# The launcher will output settings found in the environment and in the configuration file, so
+# a simple `regex` is not a reliable way to verify the expected configuration settings are used.
+# These functions help to parse the output `metadata.json` to verify that the expected configuration
+# settings are actually used.
 # ----------------------------------------------------------------------------
 
 

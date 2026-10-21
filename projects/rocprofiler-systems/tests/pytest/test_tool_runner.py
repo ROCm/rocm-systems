@@ -605,6 +605,7 @@ class TestWaitDuration(RocprofsysTest):
             {"ROCPROFSYS_TRACE_DURATION": 2.5, "ROCPROFSYS_SAMPLING_DURATION": 2.5},
         )
 
+
 # =============================================================================
 # --periods
 # =============================================================================
