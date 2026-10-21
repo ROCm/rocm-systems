@@ -35,7 +35,7 @@ use rocddi::session::{DriverContextLifetime, Session};
 use rocddi::topology::host::{
     self as host_topology, CpuCacheKind, CpuInfo, HostCaches, HostTopologySnapshot,
 };
-use rocddi::topology::{Endpoint, EndpointDetailsKind, GpuInfo};
+use rocddi::topology::{Endpoint, GpuInfo};
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
@@ -950,17 +950,9 @@ impl HsaState {
             let details = session
                 .query_endpoint_details(&endpoint)
                 .map_err(map_error)?;
-            let (asic_family_id, timestamp_frequency_hz) = match details.kind {
-                EndpointDetailsKind::Gpu {
-                    asic_family_id,
-                    counter_frequency_hz,
-                    ..
-                } => (
-                    asic_family_id.unwrap_or(info.asic_family_id),
-                    counter_frequency_hz.unwrap_or(0),
-                ),
-                _ => return Err(ERROR),
-            };
+            let gpu_details = details.gpu.unwrap_or_default();
+            let asic_family_id = gpu_details.asic_family_id.unwrap_or(info.asic_family_id);
+            let timestamp_frequency_hz = gpu_details.counter_frequency_hz.unwrap_or(0);
             if lifetime == DriverContextLifetime::Process {
                 // Activation may retain a primary VM even when it returns an
                 // error. A later generation must use a private context.

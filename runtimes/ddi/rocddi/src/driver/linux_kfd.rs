@@ -48,7 +48,7 @@ use crate::memory::{
 };
 use crate::os::native_error;
 use crate::session::DriverContextLifetime;
-use crate::topology::{Endpoint, EndpointDetails, EndpointDetailsKind};
+use crate::topology::{Endpoint, EndpointDetails, GpuDetails};
 use crate::{Error, ErrorKind};
 pub(crate) use allocation::LinuxAllocation;
 pub(crate) use event::KfdSignalEvent;

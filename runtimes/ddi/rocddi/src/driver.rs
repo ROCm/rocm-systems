@@ -131,10 +131,10 @@ pub(crate) trait Driver: Send + Sync {
     /// Re-reads an endpoint by its driver-assigned ID without activating it.
     fn open_endpoint(&self, id: [u8; 16]) -> Result<Endpoint, Error>;
     /// Queries optional information about a passive endpoint without
-    /// activating it. Kind-specific details must match the endpoint kind.
+    /// activating it. GPU details, when present, describe GPU endpoints only.
     /// Drivers with no additional source return empty details.
-    fn query_endpoint_details(&self, endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
-        Ok(EndpointDetails::empty_for(endpoint))
+    fn query_endpoint_details(&self, _endpoint: &Endpoint) -> Result<EndpointDetails, Error> {
+        Ok(EndpointDetails::default())
     }
     /// Revalidates an endpoint and acquires its device state.
     fn activate(&self, endpoint: &Endpoint) -> Result<Self::DeviceState, Error>;
