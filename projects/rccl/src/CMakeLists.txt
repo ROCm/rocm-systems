@@ -221,7 +221,6 @@ set(SRC_FILES
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
-  include/gin/gin_ibv_shim.h
   include/dv_dlopen.h
   include/gin/gin_host_anvil_sdma.h
   include/gin/gin_anvil_sdma_factory.h
@@ -632,7 +631,7 @@ if(ENABLE_ROCSHMEM_GIN)
   list(APPEND SRC_FILES
     src/gin/gin_plugin_rocshmem_gda.cc
     src/gin/gin_rocshmem_gda_factory.cc
-    src/gin/gin_ibv_shim.cc
+    src/gin/gin_rocshmem_gda_ibv_shim.cc
     src/gin/gin_plugin_anvil_sdma.cc
     src/gin/gin_anvil_sdma_factory.cc
     src/gin/gin_anvil_ipc_table_host.cc
@@ -642,6 +641,8 @@ if(ENABLE_ROCSHMEM_GIN)
   )
   # GIN shim headers: in SRC_FILES so hipify copies them to the build tree.
   list(APPEND SRC_FILES
+    src/include/gin/gin_rocshmem_gda_ibv_shim.h
+    src/include/gin/gin_rocshmem_gda_debug_ibv.h
     src/include/nccl_device/gin/rocshmem_gda/log.hpp
     src/include/nccl_device/gin/rocshmem_gda/util.hpp
     src/include/nccl_device/gin/rocshmem_gda/containers/free_list.hpp
@@ -1164,8 +1165,8 @@ if (ENABLE_ROCSHMEM_GIN)
       gda/queue_pair/queue_pair_shmem.hpp
       gda/queue_pair/queue_pair_device.hpp
       gda/queue_pair_provider.hpp
-      # GDA_MUX (Multiplexing provider)
-      gda/queue_pair_mux.hpp
+      # GDA_MUX (Multiplexing provider): queue_pair_mux.hpp is copied by a
+      # dedicated block below (it needs sed overrides to drop __constant__ constmem).
       # GDA_IONIC (AMD Pensando IONIC RDMA provider)
       gda/ionic/queue_pair_ionic.hpp
       gda/ionic/provider_gda_ionic.hpp
@@ -1187,8 +1188,9 @@ if (ENABLE_ROCSHMEM_GIN)
       gda/endian.hpp
       gda/gda_enums.hpp
       bit.hpp
-      constmem.hpp
       constants.hpp
+      # NOTE: constmem.hpp intentionally NOT copied — the rccl mux override reads
+      # the provider from the QueuePair instance, so no copied header references it.
     )
     copy_files(
       ROCSHMEM_SOURCE_HEADERS
@@ -1198,6 +1200,45 @@ if (ENABLE_ROCSHMEM_GIN)
     )
     add_custom_target(copy_rocshmem_source_headers DEPENDS ${GIN_GDA_ROCSHMEM_SOURCE_HEADERS})
     add_dependencies(copy_rocshmem_headers copy_rocshmem_source_headers)
+
+    # queue_pair_mux.hpp: copied with sed overrides so rccl's GIN device path
+    # reads the GDA provider from the QueuePair *instance* (a per-QP member),
+    # not rocSHMEM's __constant__ constmem.gda_provider. This keeps the rocSHMEM
+    # source copyable verbatim while removing any __constant__/__device__ global
+    # from a consumer kernel that includes these headers (API-conformant, matches
+    # how PROXY/GDAKI pass device state). Transforms (token-anchored, fail-loud):
+    #   1. drop #include "constmem.hpp"
+    #   2. qualify #include "log.hpp" (as copy_files does for the other headers)
+    #   3. add a per-instance `provider_` member right after `QueuePairUnion qp;`
+    #   4. set provider_ alongside the host static `provider` in each constructor
+    #   5. split the get_provider accessor into get_static_provider() (host static,
+    #      for the static can_inline/to_provider_endianness methods) and
+    #      get_this_provider() const (instance, reads provider_); delete the old
+    #      device get_provider that read constmem.gda_provider
+    #   6. point the 7 instance-method switches at get_this_provider() and the 2
+    #      static-method switches at get_static_provider()
+    set(_GIN_MUX_SRC "${ROCSHMEM_SOURCE_DIR}/src/gda/queue_pair_mux.hpp")
+    set(_GIN_MUX_DST "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/gda/queue_pair_mux.hpp")
+    add_custom_command(
+      OUTPUT "${_GIN_MUX_DST}"
+      COMMAND ${CMAKE_COMMAND} -E make_directory "${PROJECT_BINARY_DIR}/include/nccl_device/gin/rocshmem_gda/gda"
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_GIN_MUX_SRC}" "${_GIN_MUX_DST}"
+      COMMAND sed -i "s|^#include \"constmem\\.hpp\".*|// constmem.hpp removed: rccl GIN reads the provider from the QueuePair instance, not __constant__|" "${_GIN_MUX_DST}"
+      COMMAND sed -i "s|#include \"log\\.hpp\"|#include \"nccl_device/gin/rocshmem_gda/log.hpp\"|g" "${_GIN_MUX_DST}"
+      COMMAND sed -i "s|^\\(\\s*\\)QueuePairUnion qp;|\\1QueuePairUnion qp;\\n\\1// rccl GIN: per-instance provider; device dispatch needs no __constant__ constmem.\\n\\1GDAProvider provider_{GDAProvider::UNSET};|" "${_GIN_MUX_DST}"
+      COMMAND sed -i -E "s|provider = (GDAProvider::[A-Z0-9_]+);|provider = provider_ = \\1;|g" "${_GIN_MUX_DST}"
+      COMMAND sed -i -E "s|static __host__ +__forceinline__ GDAProvider get_provider\\(\\) \\{ return provider; \\}|static __host__ __device__ __forceinline__ GDAProvider get_static_provider() { return provider; }\\n  __host__ __device__ __forceinline__ GDAProvider get_this_provider() const { return provider_; }|" "${_GIN_MUX_DST}"
+      COMMAND sed -i "/__device__ __forceinline__ GDAProvider get_provider() { return constmem\\.gda_provider; }/d" "${_GIN_MUX_DST}"
+      # host-static invalid_provider() logs via get_provider() -> must read the static provider (done before the global rename)
+      COMMAND sed -i "s|\\(LOG_ERROR_ABORT(\"Invalid GDAProvider.*static_cast<int>(\\)get_provider()|\\1get_static_provider()|" "${_GIN_MUX_DST}"
+      COMMAND sed -i "s|get_provider()|get_this_provider()|g" "${_GIN_MUX_DST}"
+      COMMAND sed -i "/QueuePairMux::can_inline(size_t size)/,/switch (get_this_provider())/ s|switch (get_this_provider())|switch (get_static_provider())|" "${_GIN_MUX_DST}"
+      COMMAND sed -i "/QueuePairMux::to_provider_endianness(T val)/,/switch (get_this_provider())/ s|switch (get_this_provider())|switch (get_static_provider())|" "${_GIN_MUX_DST}"
+      DEPENDS "${_GIN_MUX_SRC}"
+      COMMENT "Copying queue_pair_mux.hpp with rccl GIN provider override (no __constant__ constmem)"
+      VERBATIM)
+    add_custom_target(copy_rocshmem_mux_header DEPENDS "${_GIN_MUX_DST}")
+    add_dependencies(copy_rocshmem_headers copy_rocshmem_mux_header)
 
     # SDMA anvil host code: copied into build tree (no sed — host code needs
     # unqualified log.hpp to find the host shim via include path ordering).

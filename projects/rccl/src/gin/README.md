@@ -109,16 +109,16 @@ NCCL 2.31 inserted EFA GDA at value 5, so AMD backends shifted:
 
 Scripts and jobs that still set `NCCL_GIN_TYPE=6` now select rocSHMEM GDA, not Anvil SDMA.
 
-## Known limitations
+## Device-side provider dispatch
 
-- **GDA on symmetric kernels**: the `__constant__` device memory
-  (`constmem`, `logd_constants`) used by QueuePair is zero-initialized via
-  stub definitions in `gin_rocshmem_constmem.hip`.  This is sufficient for
-  SDMA (which does not read constmem) but GDA dispatch on symmetric kernels
-  (e.g. `reduce_scatter_gin_*`) is not functional until a proper
-  `hipMemcpyToSymbol` init path is added to librccl.so.
-- **GDA on AlltoAllPivot**: works via the specialized kernel path (per-arch
-  bitcode injection via `--rocshmem-bitcode`).
+The rccl build copies `queue_pair_mux.hpp` with an override so QueuePair device
+dispatch reads the GDA provider from the **QueuePair instance** (a per-QP member)
+rather than rocSHMEM's `__constant__ constmem.gda_provider`. This removes all
+`__constant__`/`__device__` globals from rccl's GIN device path, so a consumer
+kernel that includes the GIN headers inherits no hidden device state and needs no
+`hipMemcpyToSymbol` init (matching how the PROXY/GDAKI backends pass device state
+through the GPU context). The old zero-initialized `constmem` stub and its
+device-bitcode injection are gone.
 
 ## Writing tests that use the GIN device API
 
@@ -138,6 +138,6 @@ GIN plugin functions from the executable at runtime.
 | `gin_plugin_rocshmem_gda.cc` | rocSHMEM GDA plugin vtable (`NCCL_GIN_TYPE=6`) |
 | `gin_plugin_anvil_sdma.cc` | Anvil SDMA plugin vtable (`NCCL_GIN_TYPE=7`) |
 | `gin_rocshmem_gda_factory.cc` | QueuePair creation, MR registration, topology discovery |
-| `gin_rocshmem_constmem.hip` | Stub `__constant__` definitions for device bitcode linking |
+| `gin_rocshmem_gda_ibv_shim.cc` | rccl-native IB verbs backend for the factory |
 | `gin_anvil_ipc_table_host.cc` | IPC table management for SDMA |
 | `gin_anvil_conn_check_device.cc` | LSA signal connectivity self-test kernels (device-linked) |

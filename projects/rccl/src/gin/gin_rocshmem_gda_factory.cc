@@ -39,12 +39,12 @@
  */
 
 #include "gin/gin_rocshmem_gda_factory.h"
-#include "gin/gin_ibv_shim.h"
+#include "gin/gin_rocshmem_gda_ibv_shim.h"
 #include "rocmwrap.h"
 #include "dv_dlopen.h"
 #include <gda/queue_pair_provider.hpp>
+#include "gin/gin_rocshmem_gda_debug_ibv.h"
 #include <gda/gda_enums.hpp>
-#include <gda/debug_gda.hpp>
 #include <envvar.hpp>
 #include <bit.hpp>
 #include <util.hpp>
@@ -79,7 +79,7 @@
 
 using namespace rocshmem;
 
-// All IB verbs go through gin_ibv_shim.h (rccl's wrap_ibv_* layer). The shim is
+// All IB verbs go through gin_rocshmem_gda_ibv_shim.h (rccl's wrap_ibv_* layer). The shim is
 // the only place that includes rccl's ibv headers, keeping them out of this TU
 // where they would clash with rocSHMEM's gda/ibv_core.hpp.
 
