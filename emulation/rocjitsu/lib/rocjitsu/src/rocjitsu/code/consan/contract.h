@@ -29,7 +29,7 @@ inline constexpr std::array<uint8_t, 16> kProducerContract = {
 // Canonical hash input for the manifest's options identity. Changing any byte
 // changes the identity required by artifact and capture admission.
 inline constexpr std::string_view kMvpOptions =
-    "native-lds-b32;no-sync;one-workgroup-1d;mask64;range-banks=4;collision=on";
+    "native-lds-b32;no-sync;one-workgroup-1d;mask64;address-groups-per-site=4;collision=on";
 // Software record slots for distinct effective LDS address groups per wave/site.
 // Remaining lanes after these slots are filled cause one lost occurrence;
 // this reservation count is independent of the GPU's hardware LDS banks.
