@@ -17,7 +17,6 @@ from utils.metrics.collectable import (
     COLLECT_SUM_SPECS_ATTR,
     COLLECTABLE_EXPR_CACHE_ATTR,
     apply_composite_metrics,
-    is_negated_piece,
 )
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import (
@@ -231,14 +230,14 @@ _ABSOLUTE_PIECES = {
 
 
 @pytest.mark.misc
-def test_collect_ratio_across_passes_stays_unset():
+def test_collect_ratio_divides_pieces_from_different_passes():
     table = _two_piece_table(
         COLLECT_RATIO_SPECS_ATTR,
         _RATIO_SPEC,
         _ABSOLUTE_PIECES,
         ("pmc_perf_0", "pmc_perf_1"),
     )
-    assert _evaluate_parent(table) == "N/A"
+    assert _evaluate_parent(table) == pytest.approx(2.0)
 
 
 @pytest.mark.misc
@@ -264,8 +263,11 @@ def test_collect_sum_of_absolute_pieces_across_passes_evaluates():
 
 
 @pytest.mark.misc
-def test_gfx942_cache_hit_rate_stays_unset_across_tcp_passes():
-    """Five TCP counters do not share gfx942's four TCP slots."""
+def test_collect_sum_adds_tcp_hit_pieces_that_cannot_share_a_bucket():
+    """Five TCP counters do not share gfx942's four TCP slots.
+
+    Each piece still fits one pass. The parent adds those finished values.
+    """
     perfmon_config = dict(mi_gpu_specs.get_perfmon_config("gfx942"))
     assert perfmon_config["TCP"] == 4
     non_rw = frozenset({
@@ -290,18 +292,18 @@ def test_gfx942_cache_hit_rate_stays_unset_across_tcp_passes():
         },
         ("pmc_perf_0", "pmc_perf_1"),
     )
-    assert _evaluate_parent(table) == "N/A"
+    assert _evaluate_parent(table) == pytest.approx(-490.0)
 
 
 @pytest.mark.misc
-def test_collect_sum_subtracting_a_piece_from_another_pass_stays_unset():
+def test_collect_sum_adds_a_negative_piece_from_another_pass():
     table = _two_piece_table(
         COLLECT_SUM_SPECS_ATTR,
         ["first", "second"],
         {"first": "to_sum(raw_pmc_df['A'])", "second": "to_sum(-(raw_pmc_df['B']))"},
         ("pmc_perf_0", "pmc_perf_1"),
     )
-    assert _evaluate_parent(table) == "N/A"
+    assert _evaluate_parent(table) == pytest.approx(5.0)
 
 
 @pytest.mark.misc
@@ -313,13 +315,3 @@ def test_collect_sum_subtracting_on_one_pass_evaluates():
         ("pmc_perf_1", "pmc_perf_1"),
     )
     assert _evaluate_parent(table) == pytest.approx(5.0)
-
-
-@pytest.mark.misc
-def test_is_negated_piece_reads_unary_minus_only():
-    assert is_negated_piece("-x", "to_sum(raw_pmc_df['A'])")
-    assert is_negated_piece("x", "-100 * to_sum(raw_pmc_df['A'])")
-    assert is_negated_piece("x", "to_sum(-(raw_pmc_df['A'] + raw_pmc_df['B']))")
-    assert not is_negated_piece(
-        "x", "to_sum(raw_pmc_df['A'] - (raw_pmc_df['B'] + raw_pmc_df['C']))"
-    )
