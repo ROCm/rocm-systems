@@ -6,9 +6,11 @@ HPC Example Tests.
 """
 
 from __future__ import annotations
+
+from pathlib import Path
+
 import pytest
 from conftest import RocprofsysTest
-from pathlib import Path
 
 pytestmark = [pytest.mark.hpc]
 

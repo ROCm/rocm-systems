@@ -3,12 +3,12 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import argparse
+import json
+import math
 import os
 import re
 import sys
-import json
-import math
-import argparse
 from collections import OrderedDict
 
 num_stddev = 1.0
@@ -42,7 +42,7 @@ def simpsons_rule(a, b, fa, fb):
     return factor * (fa + (4.0 * fm) + fb)
 
 
-class validation(object):
+class validation:
     def __init__(self, _exp_re, _pp_re, _virt, _expected, _tolerance):
         self.experiment_filter = re.compile(_exp_re)
         self.progress_pt_filter = re.compile(_pp_re)
@@ -100,7 +100,7 @@ class validation(object):
         return _compute(_prog_speedup, _tolerance)
 
 
-class throughput_point(object):
+class throughput_point:
     def __init__(self, _speedup):
         self.speedup = _speedup
         self.delta = []
@@ -129,7 +129,7 @@ class throughput_point(object):
         return sum(self.duration) / sum(self.delta)
 
 
-class latency_point(object):
+class latency_point:
     def __init__(self, _speedup):
         self.speedup = _speedup
         self.arrivals = []
@@ -166,7 +166,7 @@ class latency_point(object):
         return sum(self.get_difference()) / rate
 
 
-class line_speedup(object):
+class line_speedup:
     def __init__(self, _name="", _prog="", _exp_data=None, _exp_base=None):
         self.name = _name
         self.prog = _prog
@@ -231,7 +231,7 @@ class line_speedup(object):
         return False
 
 
-class experiment_progress(object):
+class experiment_progress:
     def __init__(self, _data):
         self.data = _data
 
@@ -346,7 +346,6 @@ def compute_speedups(_data, args):
         for progpt, ditr in pitr.items():
             data[selected][progpt] = OrderedDict(sorted(ditr.items()))
 
-    from os.path import dirname
 
     ret = []
     for selected, pitr in _data.items():
@@ -405,7 +404,6 @@ def get_validations(args):
 
 
 def main():
-    import argparse
 
     global num_stddev
 
@@ -502,12 +500,12 @@ def main():
             print(f"    {count:{width}} :: {name}")
 
     results = compute_speedups(data, args)
-    print("")
+    print()
     print("Experiments:")
     for itr in results:
         if len(itr) < args.num_points:
             continue
-        print("")
+        print()
         # split each line, indent each line, and join again into single string
         print("{}".format("\n".join([f"    {x}" for x in f"{itr}".split("\n")])))
 

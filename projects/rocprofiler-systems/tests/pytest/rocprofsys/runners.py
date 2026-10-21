@@ -13,16 +13,17 @@ Provides classes for running tests with:
 """
 
 from __future__ import annotations
-from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from enum import Enum
-import getpass
+
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
 from typing import Optional
+
 from .cache import resolve_username
 from .config import RocprofsysConfig
 from .environment import TestEnvironment, TestEnvKind
@@ -244,7 +245,6 @@ class BaseRunner(ABC):
         Returns:
             List of command components
         """
-        pass
 
     def _wrap_with_launcher(self, command: list[str]) -> list[str]:
         """Wrap command with launcher if needed.

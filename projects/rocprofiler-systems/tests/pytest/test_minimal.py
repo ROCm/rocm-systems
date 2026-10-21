@@ -6,9 +6,11 @@ These tests exercise minimal examples to verify targeted behavior of the profile
 """
 
 from __future__ import annotations
+
 import os
-import pytest
 from pathlib import Path
+
+import pytest
 from conftest import RocprofsysTest, check_use_perfetto
 
 pytestmark = [pytest.mark.minimal]

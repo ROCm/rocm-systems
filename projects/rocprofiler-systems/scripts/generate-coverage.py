@@ -407,7 +407,7 @@ def generate_markdown(
         for group_label, group_files in groups:
             if not group_files:
                 continue
-            lines.append(f"<details>")
+            lines.append("<details>")
             lines.append(f"<summary>{group_label} ({len(group_files)} files)</summary>")
             lines.append("")
             lines.append("| Lines | Functions | File |")

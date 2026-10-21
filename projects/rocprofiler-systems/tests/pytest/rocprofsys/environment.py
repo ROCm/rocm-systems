@@ -31,9 +31,10 @@ The following environment variables are excluded from the user layer overrides:
 """
 
 from __future__ import annotations
+
+import os
 from dataclasses import dataclass, field
 from enum import Enum
-import os
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
@@ -75,7 +76,7 @@ class TestEnvironment:
 
     def set_base_environment(
         self,
-        config: "RocprofsysConfig",
+        config: RocprofsysConfig,
         test_type: TestEnvKind = TestEnvKind.BASE,
         python_version: Optional[str] = None,
     ) -> None:
@@ -121,7 +122,7 @@ class TestEnvironment:
                 origin[key] = layer
         return merged, origin
 
-    def get_merged_environment(self, config: "RocprofsysConfig") -> dict[str, str]:
+    def get_merged_environment(self, config: RocprofsysConfig) -> dict[str, str]:
         """Return the effective merged environment (highest-precedence layer wins).
 
         ROCm-derived defaults (:func:`derived_defaults`) are applied at the
@@ -188,7 +189,7 @@ class TestEnvironment:
         self.user.update({k: v for k, v in os.environ.items() if k not in owned})
 
 
-def derived_defaults(config: "RocprofsysConfig") -> dict[str, str]:
+def derived_defaults(config: RocprofsysConfig) -> dict[str, str]:
     """ROCm-derived defaults, applied at the lowest precedence by
     :meth:`TestEnvironment.get_merged_environment` (any layer overrides them).
     Each entry is only produced when its derived target exists on disk.
@@ -252,7 +253,7 @@ def base_binary_environment() -> dict[str, str]:
 
 
 def base_python_environment(
-    config: "RocprofsysConfig", python_version: Optional[str] = None
+    config: RocprofsysConfig, python_version: Optional[str] = None
 ) -> dict[str, str]:
     """Framework default environment for Python test execution.
 

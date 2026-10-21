@@ -6,8 +6,10 @@ Thread limit tests.
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Callable
+
 import pytest
 from conftest import RocprofsysTest, get_rocprof_config
 

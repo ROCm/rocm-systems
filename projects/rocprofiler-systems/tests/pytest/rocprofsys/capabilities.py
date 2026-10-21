@@ -3,14 +3,14 @@
 
 from __future__ import annotations
 
+import functools
+import os
+import re
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
-import functools
-import os
-import shutil
-import subprocess
-import re
 
 from .cache import persistent_cache, persistent_cached_property
 

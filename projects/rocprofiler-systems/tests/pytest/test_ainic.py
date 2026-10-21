@@ -23,10 +23,11 @@ Two independent checks live here:
 from __future__ import annotations
 
 import os
-import subprocess
-import pytest
 import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 from conftest import RocprofsysTest
 from rocprofsys import RocprofsysConfig
 

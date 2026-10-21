@@ -3,18 +3,18 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import argparse
+import base64
+import glob
+import multiprocessing
 import os
 import re
-import sys
-import glob
-import zlib
-import base64
-import socket
 import shutil
-import argparse
+import socket
+import sys
 import urllib.parse
-import multiprocessing
 import xml.etree.ElementTree as ET
+import zlib
 
 IS_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 

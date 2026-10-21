@@ -6,12 +6,14 @@ Python tests.
 """
 
 from __future__ import annotations
+
 import os
 import subprocess
 import sys
+from pathlib import Path
+
 import pytest
 from conftest import RocprofsysTest
-from pathlib import Path
 
 pytestmark = [pytest.mark.python]
 

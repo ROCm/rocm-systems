@@ -6,12 +6,12 @@ Julia Tests.
 """
 
 from __future__ import annotations
-import pytest
-from conftest import RocprofsysTest
 
 import subprocess
 from typing import Optional
 
+import pytest
+from conftest import RocprofsysTest
 from rocprofsys.cache import persistent_cache
 
 pytestmark = [pytest.mark.julia]

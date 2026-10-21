@@ -8,16 +8,16 @@ This module provides shared fixtures and configuration for all test modules.
 """
 
 from __future__ import annotations
-from pathlib import Path
-from functools import lru_cache
-from typing import Any, Callable, Generator, Optional
 
-import re
 import os
-import sys
+import re
 import shutil
 import signal
+import sys
 import traceback
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Callable, Generator, Optional
 
 try:
     import yaml
@@ -29,35 +29,34 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pytest
 from pytest import StashKey
-
-from rocprofsys import environment
 from rocprofsys import (
-    RocprofsysConfig,
-    discover_build_config,
+    BaselineRunner,
+    BinaryRewriteRunner,
+    CausalRunner,
     GPUInfo,
-    get_rocminfo,
-    detect_gpu,
-    get_offload_extractor,
-    get_target_gpu_arch,
-    get_xnack_support,
+    PythonRunner,
+    RocprofsysConfig,
+    RuntimeInstrumentRunner,
+    SamplingRunner,
+    SysRunRunner,
     TestResult,
     ValidationResult,
-    validate_regex,
+    detect_gpu,
+    discover_build_config,
+    environment,
+    get_offload_extractor,
+    get_rocminfo,
+    get_target_gpu_arch,
+    get_xnack_support,
+    safe_remove,
+    validate_causal_json,
+    validate_file_exists,
     validate_file_regex,
     validate_perfetto_trace,
+    validate_regex,
     validate_rocpd_database,
     validate_timemory_json,
-    validate_causal_json,
     validate_unified_memory_outputs,
-    validate_file_exists,
-    BaselineRunner,
-    SamplingRunner,
-    BinaryRewriteRunner,
-    RuntimeInstrumentRunner,
-    SysRunRunner,
-    CausalRunner,
-    PythonRunner,
-    safe_remove,
 )
 
 # Key for storing the single test result on pytest items
@@ -1910,8 +1909,8 @@ def get_gpu_info() -> GPUInfo:
 
 def _run_cleanup() -> None:
     """Run cleanup of temp files and optionally the test output directory."""
-    import glob
     import getpass
+    import glob
 
     # Clean up temp files
     for pattern in _cleanup_temp_patterns():

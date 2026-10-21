@@ -2,14 +2,15 @@
 # SPDX-License-Identifier: MIT
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+
 import os
-from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
-import re
 
 from .cache import persistent_cache, persistent_cached_property, resolve_username
 from .capabilities import SystemCapabilities

@@ -3,11 +3,11 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-import atexit
-import sys
-import os
-import time
 import argparse
+import atexit
+import os
+import sys
+import time
 from collections import defaultdict
 
 from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
