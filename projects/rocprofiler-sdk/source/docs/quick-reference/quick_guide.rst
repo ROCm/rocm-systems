@@ -19,6 +19,14 @@ Export the ROCm binary path:
 
    source /opt/rocm/share/rocprofiler-sdk/setup-env.sh
 
+In interactive Bash shells, the setup script also enables command completion for
+``rocprofv3``. If you configure ``PATH`` without using the setup script, enable
+completion directly:
+
+.. code-block:: bash
+
+   source /opt/rocm/share/bash-completion/completions/rocprofv3
+
 Check rocprofv3 version and help:
 
 .. code-block:: bash
