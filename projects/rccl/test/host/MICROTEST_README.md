@@ -647,7 +647,7 @@ symbol.
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/net_ib/connect.cc` | `fakes/transport_net_ib_fakes.{h,cc}` |
-| `src/transport/net_ib/p2p.cc` | `fakes/transport_net_ib_p2p_fakes.cc` |
+| `src/transport/net_ib/p2p.cc` | `fakes/transport_net_ib_p2p_fakes.{h,cc}` |
 | `src/transport/net_ib/p2p_resiliency.cc` | `fakes/transport_net_ib_resiliency_fakes.{h,cc}` |
 | `src/transport/net_ib/p2p_resiliency_recovery.cc` | `fakes/transport_net_ib_recovery_fakes.{h,cc}` |
 | `src/transport/net_socket.cc` | `fakes/transport_net_socket_fakes.{h,cc}` |
