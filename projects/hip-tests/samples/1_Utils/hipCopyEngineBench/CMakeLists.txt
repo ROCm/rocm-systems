@@ -42,7 +42,7 @@ else()
   set(EXCLUDE_OPTION)
 endif()
 
-set(COPY_ENGINE_BENCHMARKS copy-engine-bw copy-engine-latency)
+set(COPY_ENGINE_BENCHMARKS copy-engine-allgather copy-engine-bw copy-engine-latency)
 
 foreach(benchmark ${COPY_ENGINE_BENCHMARKS})
   set_source_files_properties(${benchmark}.cpp PROPERTIES LANGUAGE HIP)
