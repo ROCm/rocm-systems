@@ -99,7 +99,11 @@ struct Prefix {
     size: u32,
 }
 
-unsafe fn validate<T>(p: *const T, kind: u32) -> Result<amdf_input_structure_t, u64> {
+unsafe fn validate_header<T>(
+    p: *const T,
+    kind: u32,
+    allow_next: bool,
+) -> Result<amdf_input_structure_t, u64> {
     output_pointer(p.cast_mut())?;
     // Only the universal eight-byte prefix is read until its extent is valid.
     // In particular, a short record can safely end at a guard page.
@@ -109,10 +113,14 @@ unsafe fn validate<T>(p: *const T, kind: u32) -> Result<amdf_input_structure_t, 
     }
     // SAFETY: Every typed record has this prefix, now covered by its size.
     let header = unsafe { p.cast::<amdf_input_structure_t>().read() };
-    if !header.next.is_null() {
+    if !allow_next && !header.next.is_null() {
         return Err(UNSUPPORTED);
     }
     Ok(header)
+}
+
+unsafe fn validate<T>(p: *const T, kind: u32) -> Result<amdf_input_structure_t, u64> {
+    unsafe { validate_header(p, kind, false) }
 }
 
 pub(crate) unsafe fn input<T: Copy>(p: *const T, kind: u32) -> Result<T, u64> {
@@ -138,6 +146,20 @@ pub(crate) unsafe fn output<T>(p: *mut T, kind: u32) -> Result<Output<T>, u64> {
         pointer: p,
         header: unsafe { validate(p, kind)? },
     })
+}
+
+/// Admits the single extension chain explicitly supported by the caller.
+pub(crate) unsafe fn output_with_next<T>(p: *mut T, kind: u32) -> Result<Output<T>, u64> {
+    Ok(Output {
+        pointer: p,
+        header: unsafe { validate_header(p, kind, true)? },
+    })
+}
+
+impl<T> Output<T> {
+    pub(crate) fn next(&self) -> *mut std::ffi::c_void {
+        self.header.next.cast_mut()
+    }
 }
 
 impl<T> Output<T> {

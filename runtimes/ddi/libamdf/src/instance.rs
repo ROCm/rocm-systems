@@ -12,6 +12,7 @@ use crate::memory::Scope;
 use crate::platform;
 use crate::support::*;
 use rocddi::device::event::{DeviceEvent, DeviceEventSubscription, subscribe};
+use rocddi::device::gpu::event::linux::{SignalEventPage, lock_process_signal_event_page};
 use rocddi::memory::storage::TryPush;
 use rocddi::memory::storage::{Owned, Shared};
 use rocddi::{device as native_device, memory as native_memory, session, topology};
@@ -39,6 +40,10 @@ pub(crate) struct Instance {
     pub ids: AtomicU64,
     /// Head of the linked list of provider-owned host backings.
     pub host_backing_head: Mutex<usize>,
+    /// Native signal page for the process KFD connection, prepared on demand.
+    pub event_page: Mutex<Option<EventPageState>>,
+    /// Whether this instance uses process-wide native resource lifetime.
+    pub process_lifetime: bool,
     /// One observer per activated endpoint, shared by its device handles.
     event_observers: Mutex<Vec<ObserverRecord>>,
     /// Host page size cached for memory profile queries.
@@ -55,6 +60,8 @@ pub(crate) struct Endpoint {
     pub instance: *mut Instance,
     /// Passive topology record used for activation and metadata queries.
     pub native: topology::Endpoint,
+    /// Host NUMA locality captured during passive open.
+    pub host_numa_node: u32,
     /// Number of public devices that borrow this endpoint.
     pub children: AtomicU64,
     /// Embedded endpoint memory profile namespace.
@@ -75,10 +82,19 @@ pub(crate) struct Device {
     pub id: amdf_device_id_t,
     /// Number of public queues that borrow this device.
     pub queues: AtomicU64,
+    /// Public native events borrowing this device.
+    pub events: AtomicU64,
     /// Generation shared with the endpoint's exception observer.
     pub reset_epoch: Shared<AtomicU64>,
     /// Keeps exception polling alive while this handle is public.
     event_observer: Shared<EventObserver>,
+}
+
+pub(crate) struct EventPageState {
+    pub page: SignalEventPage,
+    pub endpoint_id: [u8; 16],
+    pub address: u64,
+    pub host_address: usize,
 }
 
 /// Instance registry entry for one endpoint's shared exception observer.
@@ -621,6 +637,8 @@ pub(crate) unsafe extern "C" fn create(
             closing: false,
             ids: AtomicU64::new(1),
             host_backing_head: Mutex::new(0),
+            event_page: Mutex::new(None),
+            process_lifetime: info.native_lifetime == AMDF_NATIVE_LIFETIME_PROCESS,
             event_observers: Mutex::new(Vec::new()),
             scope: Scope {
                 instance: std::ptr::null_mut(),
@@ -649,6 +667,12 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_instance_t) -> u64 {
             // Native cleanup can make partial progress. Retain this handle on
             // failure for destruction only; no new child may borrow it then.
             instance.closing = true;
+            if let Some(state) = instance.event_page.lock().map_err(|_| INTERNAL)?.as_mut() {
+                state
+                    .page
+                    .retain_for_process()
+                    .map_err(|error| native(&error))?;
+            }
             instance.native.destroy().map_err(|e| native(&e))?;
             drop(Owned::from_raw(pointer.cast::<Instance>()));
             Ok(())
@@ -729,9 +753,11 @@ pub(crate) unsafe extern "C" fn open(
                     }
                 })?;
             register(&instance.children)?;
+            let host_numa_node = platform::host_numa_node(&native);
             let owner = slot.write(Endpoint {
                 instance: pointer.cast(),
                 native,
+                host_numa_node,
                 children: AtomicU64::new(0),
                 scope: Scope {
                     instance: pointer.cast(),
@@ -764,7 +790,16 @@ pub(crate) unsafe extern "C" fn endpoint_info(
 ) -> u64 {
     crate::support::boundary(|| unsafe {
         let endpoint = object(pointer.cast::<Endpoint>())?;
-        let out = output(out, AMDF_STRUCTURE_TYPE_ENDPOINT_INFO)?;
+        let out = output_with_next(out, AMDF_STRUCTURE_TYPE_ENDPOINT_INFO)?;
+        let locality = out.next().cast::<amdf_endpoint_host_locality_t>();
+        let locality = if locality.is_null() {
+            None
+        } else {
+            Some(output(
+                locality,
+                AMDF_STRUCTURE_TYPE_ENDPOINT_HOST_LOCALITY,
+            )?)
+        };
         let p = endpoint.native.pci.unwrap_or_default();
         let summary = summary(&endpoint.native);
         out.publish(amdf_endpoint_info_t {
@@ -783,6 +818,12 @@ pub(crate) unsafe extern "C" fn endpoint_info(
             native_identity: platform::native_identity(&endpoint.native),
             ..Default::default()
         });
+        if let Some(locality) = locality {
+            locality.publish(amdf_endpoint_host_locality_t {
+                numa_node: endpoint.host_numa_node,
+                ..Default::default()
+            });
+        }
         Ok(())
     })
 }
@@ -882,6 +923,7 @@ pub(crate) unsafe extern "C" fn device_create(
                 words: [endpoint.instance as u64, id],
             },
             queues: AtomicU64::new(0),
+            events: AtomicU64::new(0),
             reset_epoch,
             event_observer,
         });
@@ -905,7 +947,16 @@ pub(crate) unsafe extern "C" fn device_info(
                 device_instance(device)
                     .native
                     .supports_host_registration(device.native.endpoint()),
-            ),
+            ) | if device_instance(device).process_lifetime {
+                let page = lock_process_signal_event_page().map_err(|_| INTERNAL)?;
+                if page.can_create_for(device.native.endpoint().id) {
+                    AMDF_GPU_DEVICE_FEATURE_NATIVE_EVENTS
+                } else {
+                    0
+                }
+            } else {
+                0
+            },
             ..Default::default()
         });
         Ok(())
@@ -915,7 +966,8 @@ pub(crate) unsafe extern "C" fn device_info(
 pub(crate) unsafe extern "C" fn device_destroy(pointer: *mut amdf_device_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let device = exclusive(pointer.cast::<Device>())?;
-        if device.queues.load(Ordering::Acquire) != 0 {
+        if device.queues.load(Ordering::Acquire) != 0 || device.events.load(Ordering::Acquire) != 0
+        {
             return Err(BUSY);
         }
         unregister_event_observer(device)?;

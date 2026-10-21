@@ -189,8 +189,11 @@ fn descriptor(
     family: &amdf_queue_family_info_t,
     scratch: Option<QueueScratch>,
 ) -> Result<QueueRequest, u64> {
-    if info.reserved != 0 {
+    if info.flags & !AMDF_GPU_USER_QUEUE_FLAG_DISPATCH_TIMESTAMPS != 0 {
         return Err(INVALID);
+    }
+    if info.flags != 0 {
+        return Err(UNSUPPORTED);
     }
     if info.required_capabilities & !family.user_queue_capabilities != 0 {
         return Err(UNSUPPORTED);
@@ -403,10 +406,19 @@ fn rollback_creation(
     // SAFETY: No public queue was issued. The scratch child borrow retains
     // any external address a GPU engine could still reach after failed cleanup.
     let result = unsafe { queue.abandon_unpublished_with_dependencies(scratch_borrow) };
-    unregister(&device.queues);
-    result
-        .err()
-        .map_or(status, |error| device.native_error_status(&error))
+    rollback_creation_result(&device.queues, status, result, |error| {
+        device.native_error_status(error)
+    })
+}
+
+fn rollback_creation_result(
+    queues: &AtomicU64,
+    status: u64,
+    result: Result<(), rocddi::Error>,
+    native_status: impl FnOnce(&rocddi::Error) -> u64,
+) -> u64 {
+    unregister(queues);
+    result.err().map_or(status, |error| native_status(&error))
 }
 
 fn wait_consumed(

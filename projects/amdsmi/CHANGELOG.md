@@ -223,7 +223,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 ### Resolved Issues
 
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
-  - `amdsmi_get_gpu_metrics_info()` answered `AMDSMI_STATUS_UNEXPECTED_DATA` on APUs such as gfx1103, which also left PLX temperature and the `amd-smi metric` output empty. These devices now return the values they provide with everything else marked N/A, and a metrics version amd-smi cannot read reports `AMDSMI_STATUS_NOT_SUPPORTED`.
+  - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_activity()` failed on APUs such as gfx1103, leaving PLX temperature, GPU utilization and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
 
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
@@ -249,6 +249,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed APU core and skin temperatures showing `0.0 °C` when the sensor is not measured**.  
   - On APUs such as Ryzen AI Max (Strix Halo), `amd-smi metric` and the library now report these readings as not available instead of a false 0 °C.
+
+- **Fixed APU video engine (VCN) utilization reading 100 times too high**.  
+  - On APUs such as Ryzen AI Max (Strix Halo), `amdsmi_get_gpu_metrics_info()` returned `apu_metrics.average_vcn_activity` in hundredths of a percent (6067 for 61 %), so Python reported it as N/A and `amd-smi metric --usage` left it out. It is now whole percent.
 
 - **Fixed xGMI read and write data counters reading as unavailable on MI450**.  
   - On MI450 the GPU connects to the CPU over xGMI, and the driver reports that link's traffic as a single counter. It was dropped instead of being stored as the first link, so `xgmi_read_data_acc` and `xgmi_write_data_acc` from `amdsmi_get_gpu_metrics_info()`, and the link `read`/`write` from `amdsmi_get_link_metrics()`, read `UINT64_MAX` (`N/A`).

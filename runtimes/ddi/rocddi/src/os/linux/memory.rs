@@ -9,8 +9,10 @@
 
 #![allow(unsafe_code)]
 
+mod host_reservation;
 mod reservation;
 
+pub(crate) use host_reservation::HostReservation;
 pub(crate) use reservation::Reservation;
 
 use super::{invalid_data, process_identity};
@@ -19,7 +21,9 @@ use crate::memory::storage::Shared;
 use crate::os::native_error;
 use crate::{Error, ErrorKind};
 use std::ffi::{c_int, c_void};
+use std::fs::File;
 use std::io;
+use std::os::fd::FromRawFd;
 use std::ptr;
 use std::sync::atomic::AtomicU32;
 
@@ -116,6 +120,8 @@ pub(crate) struct HostAllocation {
     /// `Some` until the mapping is released successfully. A failed release
     /// leaves the same owner here for a later explicit retry.
     mapping: Option<Reservation>,
+    /// File backing only for allocations requested as remappable sources.
+    source: Option<File>,
 }
 
 impl HostAllocation {
@@ -154,7 +160,78 @@ impl HostAllocation {
                 .map_err(|e| native_error("host allocation mmap", e))?;
         Ok(owner.write(Self {
             mapping: Some(mapping),
+            source: None,
         }))
+    }
+
+    pub(crate) fn create_remappable(
+        size: u64,
+        alignment: u64,
+        process: u32,
+    ) -> Result<Shared<Self>, Error> {
+        process_identity::prepare_for_hot_checks();
+        let size = usize::try_from(size).map_err(|_| {
+            error(
+                ErrorKind::InvalidArgument,
+                "host source exceeds address width",
+            )
+        })?;
+        let alignment = usize::try_from(alignment).map_err(|_| {
+            error(
+                ErrorKind::InvalidArgument,
+                "host source alignment exceeds address width",
+            )
+        })?;
+        let page = page_size().map_err(|source| native_error("host page size", source))?;
+        if size == 0
+            || size % page != 0
+            || size > isize::MAX as usize
+            || !alignment.is_power_of_two()
+            || alignment < page
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "invalid host source geometry",
+            ));
+        }
+        let file_size = i64::try_from(size).map_err(|_| {
+            error(
+                ErrorKind::InvalidArgument,
+                "host source exceeds file offset width",
+            )
+        })?;
+        let owner = Shared::try_new_uninit()?;
+        // SAFETY: memfd_create returns a newly owned descriptor or -1.
+        let descriptor = unsafe { libc::memfd_create(c"rocddi-host".as_ptr(), libc::MFD_CLOEXEC) };
+        if descriptor < 0 {
+            return Err(native_error(
+                "host source memfd_create",
+                io::Error::last_os_error(),
+            ));
+        }
+        // SAFETY: The successful syscall transferred this descriptor to us.
+        let file = unsafe { File::from_raw_fd(descriptor) };
+        // SAFETY: ftruncate only changes the owned file's length.
+        if unsafe { libc::ftruncate(descriptor, file_size) } != 0 {
+            return Err(native_error(
+                "host source ftruncate",
+                io::Error::last_os_error(),
+            ));
+        }
+        let mut mapping =
+            Reservation::new_host_in_process(size, alignment, (0, isize::MAX as u64), process)
+                .map_err(|source| native_error("host source reservation", source))?;
+        mapping
+            .map_file_read_write(&file, 0)
+            .map_err(|source| native_error("host source mmap", source))?;
+        Ok(owner.write(Self {
+            mapping: Some(mapping),
+            source: Some(file),
+        }))
+    }
+
+    pub(crate) fn source(&self) -> Option<&File> {
+        self.source.as_ref()
     }
 
     /// Returns the numeric address and size of the live mapped extent.
