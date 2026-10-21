@@ -49,6 +49,8 @@ void *operator new(std::size_t size) {
 void operator delete(void *memory) noexcept { std::free(memory); }
 void operator delete(void *memory, std::size_t) noexcept { std::free(memory); }
 
+// Keep nothrow allocations paired with our free-based delete under ASan.
+// GoogleTest's std::stable_sort buffer would otherwise use ASan's nothrow new.
 void *operator new(std::size_t size, const std::nothrow_t &) noexcept {
   try {
     return ::operator new(size);
