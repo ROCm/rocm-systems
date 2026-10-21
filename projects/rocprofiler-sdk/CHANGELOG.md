@@ -11,7 +11,6 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - Device counting mode for the Streaming Performance Monitor (SPM) service (experimental):
     - New `rocprofiler_configure_spm_device_counting_service` samples SPM counters on an agent for as long as the context is active, without tying samples to individual kernel dispatches.
     - Samples are delivered to a buffer as `rocprofiler_spm_counter_record_t` records with no dispatch information.
-  - New experimental `rocprofiler_spm_dispatch_counting_service_set_agents` limits dispatch SPM to a set of GPU agents. Two SPM contexts can be active at the same time when their agent sets do not overlap.
   - SPM support for gfx12 and gfx1250:
     - aqlprofile handles the shader array (SA) and workgroup processor (WGP) topology, per-counter SPM depth, and sample-interval reporting for these architectures, and provides `aqlprofile_spm_decode_shader_engine` to decode the packed `shader_engine` value.
     - gfx1250 SPM samples report the shader array and WGP. Both are encoded in the counter instance ID together with XCC, shader engine, and instance.
@@ -34,6 +33,15 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 **rocprofv3 (CLI):**
 
+  - `rocprofv3 --doctor` setup check:
+    - New `rocprofv3 --doctor` option that inspects the ROCprofiler-SDK installation and system configuration and reports what would prevent profiling from working, with a fix for each problem.
+    - Covers 10 check groups: installation, driver/device, runtime stack, counter collection, environment variables, container/virtualization, Python environment, filesystem, companion tools, and optional live smoke tests.
+    - Verifies that the ROCm libraries actually load (missing dependencies, mixed ROCm versions, old `libstdc++`), not only that they exist, and explains failed or crashed commands by matching their output against known error messages. Each diagnosis separates what the output shows from the candidate cause, and rates the cause `likely` only when facts on the machine corroborate it.
+    - Every check declares what it does to the machine (`passive`, `process`, or `gpu`); child processes are time-limited and their whole process tree is killed on timeout, Python package imports run in a child process, and the only file written is an exclusively-created temporary probe.
+    - Human-readable grouped text output with color-coded status and a copy-pasteable remediation section; machine-readable JSON output with a versioned schema for CI consumption.
+    - Extensible check framework with decorator-based registration; prerequisites run first and are pulled into `--only` selections, and skip propagation keeps one root cause from cascading. A check that breaks is reported as `error` (a doctor bug), never as a system failure.
+    - Exit code 0 (warnings only), 1 (at least one failure), 2 (tool error, an `--only` pattern matching no check, or a broken check with no failures).
+    - Works with every ROCm installation layout, not only `/opt/rocm`: legacy system packages, TheRock system packages (`/opt/rocm/core-X.Y`), TheRock Python packages, tarballs, and custom prefixes. The inspected root, how it was found, and the installation type are reported, and remediation commands match the installation type.
   - New `--att-resource-mode` option (`default`, `hsa`, or `code-object`) sets when thread trace resources are allocated. The default is `code-object`.
   - `--spm-sample-interval-unit` accepts the new `refclk_cycles` value, which sets `--spm-sample-interval` in reference-clock cycles. It works only on gfx1250.
   - New `ROCPROF_FINALIZE_WAIT_TIMEOUT_SECONDS` environment variable (default: 10) sets how long finalization waits for child processes or an abort to finish.
@@ -42,7 +50,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 - rocPD schema 3.0.5 stores SPM counter location on `rocpd_info_pmc`. Each agent and combination of counter, XCC, shader engine, shader array, WGP, and instance has its own pmc id. Location dimensions not provided for a counter are stored as `NULL` and left blank in CSV output. The instance index is always stored. `rocpd_pmc_event` keeps the sample value and points at that id.
 - Request ROCr high-precision timestamp correlation during HSA registration when GPU timestamp collection is configured and the runtime provides the tools API. Older runtimes and tools that only trace CPU APIs or markers retain the existing behavior.
-- Queue interposition now tracks counter collection, thread trace, SPM, and PC sampling separately for each GPU agent. Queues on GPUs that have none of these services active stay on the low-overhead path. Kernel serialization is reference counted per agent, and two thread trace or two SPM contexts can be active at the same time when they target different agents.
+- Dispatch counter collection, Advanced Thread Trace (ATT), SPM, and PC sampling no longer register with the HSA queue controller's per-queue callback registry. The write interceptor and async completion path call each service's dispatch hooks explicitly, with agent-scoped active checks so a service configured on one GPU does not pull other GPUs off the fast path (#11967, #11968, #11969, #11970).
+- Experimental `rocprofiler_spm_dispatch_counting_service_set_agents()` scopes dispatch SPM to selected GPU agents; two SPM contexts may be active together when their agent sets are disjoint (#11968).
 - Thread trace now allocates its memory and signals through KFD and copies data with SDMA. If an SDMA copy isn't possible, it falls back to HSA and prints a warning. This fixes several crashes and hangs that occurred when thread trace ran after `main()` returned.
 - By default, thread trace now creates its queue on each GPU when the first code object is loaded there, not at HSA initialization. To keep the old behavior, use `--att-resource-mode hsa` or `ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA`.
 - ROCprofiler-SDK takes the OpenMP tools (OMPT) interface only when a registered client subscribes to OMPT tracing. Otherwise it passes the interface to the next OMPT tool, so a user's own OMPT tool can run alongside ROCprofiler-SDK.
@@ -59,9 +68,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
+- When a context that needs packet interception replaces a queue created by `hsa_amd_queue_create` with a system-memory intercept queue, the device-memory placement flags are now cleared in the caller's descriptor. HIP reads these flags back and previously assumed a device-memory ring buffer that profiling had silently replaced.
 - Fixed a deadlock in queue interposition that occurred when more kernels were linked by barriers than `ROCPROFILER_ASYNC_SIGNAL_HANDLER_THREADS` allowed, for example in a HIP graph fork/join or an all-reduce. A single thread now waits for any completion signal. This also works with older ROCr versions.
 - Fixed `rocprofv3` hanging at normal exit when the application left a long-running child process. Child processes are now waited for only when exiting on a signal, and that wait has a time limit.
-- Fixed `--kernel-iteration-range` with `--replay-mode kernel` counting every replay pass as a separate kernel launch. Passes beyond the end of the range were rejected, so some counter groups were dropped while the run still reported success.
+- Fixed kernel replay dropping later `--pmc` groups when used with `--kernel-iteration-range`: the range is evaluated once per logical dispatch (pass 0), and later replay passes reuse that decision instead of consuming another iteration each pass (#11335).
 - Fixed `roctxProfilerPause` and `roctxProfilerResume` with `rocprofv3` process attachment. A pause issued before attaching no longer affects the attached session. With `--selected-regions`, collection starts at the first `roctxProfilerResume` after attaching.
 - Fixed two process attachment issues. Reusing a pooled HSA signal leaked the signal's previous handle. Attach callbacks could also be associated with the wrong tool when `rocprofiler_configure` and `rocprofiler_configure_attach` came from different shared objects, for example when PyTorch exports `rocprofiler_configure`.
 - Fixed `rocprofiler-sdk-rocattach` failing to find symbols such as `rocprofiler_register_detach` in the target process when the library's memory mappings didn't line up one-to-one, in address order, with its loadable segments.

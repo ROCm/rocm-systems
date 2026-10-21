@@ -78,11 +78,15 @@ validated_load_destinations(const amdgpu::VectorMemState &state, const amdgpu::W
   std::vector<uint32_t> registers;
   registers.reserve(vgpr_count + ds2_vgpr_count);
   auto append_range = [&](uint32_t physical_base, uint32_t count) {
-    if (!registers_for.owns_vgpr_range(physical_base, count))
+    if (!state.is_block_transfer && !registers_for.owns_vgpr_range(physical_base, count))
       return false;
     const uint32_t logical_base = physical_base - wave.vgpr_alloc().base;
+    // Blocks validate each enabled word independently; other loads retain their
+    // full-span contract. An empty result still represents a counter event.
     for (uint32_t i = 0; i < count; ++i)
-      registers.push_back(logical_base + i);
+      if (state.block_dword_enabled(i) &&
+          (!state.is_block_transfer || registers_for.owns_vgpr_range(physical_base + i, 1)))
+        registers.push_back(logical_base + i);
     return true;
   };
 
@@ -104,8 +108,8 @@ routed_flat_issue_info(const amdgpu::MemoryAccessObservation &access,
 
   const uint64_t shared_lanes =
       (access.flat_local_lane_mask | access.flat_dds_lane_mask) & access.request_lane_mask;
-  // Mixed-space execution still routes by the first requesting lane (#11456).
-  // Narrow dependencies only when every requesting lane uses the same pipeline.
+  // Functional execution splits mixed requests by address space. The plugin's
+  // single mixed event retains both obligations until both domains are ready.
   if (shared_lanes != 0 && shared_lanes != access.request_lane_mask)
     return decoded;
   if (access.route != (shared_lanes ? amdgpu::MemoryRoute::LOCAL : amdgpu::MemoryRoute::GLOBAL))
@@ -321,7 +325,8 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   detectors_[key] = std::make_unique<RaceDetector>(
       static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
       static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)), std::move(handler),
-      counterCapacitiesForArch(wavefronts.front()->cu().arch()));
+      counterCapacitiesForArch(wavefronts.front()->cu().arch()),
+      wavefronts.front()->lds().size_bytes());
 
   auto &det = *detectors_[key];
   auto &dc = dispatch_disasm_[dispatch_id];
@@ -354,9 +359,15 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
   if (routed && access.request_lane_mask != 0 && supports_counter_capacity(wf.cu().arch()))
     rs->prepareForMemoryIssue(issue);
 
-  if (inst.data()->tag() == amdgpu::LOCAL_MEM) {
+  const uint64_t sharedLanes = access.flat_local_lane_mask | access.flat_dds_lane_mask;
+  const bool mixedFlat = inst.data()->tag() == amdgpu::GLOBAL_MEM && sharedLanes != 0;
+  if (inst.data()->tag() == amdgpu::LOCAL_MEM || mixedFlat) {
     auto &d = *inst.data_as<amdgpu::VectorMemState>();
     const uint64_t execMask = d.exec_mask;
+    // DDS participates in the instruction's dependencies, but its addresses
+    // do not describe bytes in the ordinary LDS allocation.
+    const uint64_t ldsMask =
+        (mixedFlat ? execMask & access.flat_local_lane_mask : execMask) & ~d.flat_dds_lane_mask;
     if (execMask == 0)
       return;
     auto type = d.is_load ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
@@ -370,25 +381,28 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
       registers = std::move(*destinations);
     }
 
+    uint32_t laneAddrs[64]{};
+    uint32_t secondLaneAddrs[64]{};
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(execMask & (1ULL << lane)))
+      if (!(ldsMask & (1ULL << lane)))
         continue;
-      int addr = static_cast<int>(d.per_lane_addr[lane]);
-      if (d.is_load)
-        detector->validateRead(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
-      else
-        detector->validateWrite(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
-      if (d.ds2_active) {
-        addr = static_cast<int>(d.ds2_per_lane_addr[lane]);
+      auto validate = [&](uint64_t address) {
+        const auto bytes = detector->ldsBytesInRange(address, perLaneBytes, d.elem_size);
+        if (bytes == 0)
+          return amdgpu::kInvalidLdsAddress;
+        const auto addr = static_cast<uint32_t>(address);
         if (d.is_load)
-          detector->validateRead(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
+          detector->validateRead(static_cast<int>(addr), waveId, static_cast<int>(lane), bytes,
+                                 memoryOrder);
         else
-          detector->validateWrite(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
-      }
+          detector->validateWrite(static_cast<int>(addr), waveId, static_cast<int>(lane), bytes,
+                                  memoryOrder);
+        return addr;
+      };
+      laneAddrs[lane] = validate(d.per_lane_addr[lane]);
+      if (d.ds2_active)
+        secondLaneAddrs[lane] = validate(d.ds2_per_lane_addr[lane]);
     }
-    uint32_t laneAddrs[64];
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-      laneAddrs[lane] = static_cast<uint32_t>(d.per_lane_addr[lane]);
     uint8_t byte_mask = vector_memory_byte_mask(d, wf);
     if (d.is_load) {
       for (uint32_t reg : registers)
@@ -397,18 +411,18 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     if (obligations.empty())
       return;
     if (d.ds2_active) {
-      uint32_t secondLaneAddrs[64];
-      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-        secondLaneAddrs[lane] = static_cast<uint32_t>(d.ds2_per_lane_addr[lane]);
       rs->registerLdsEvent(wf.pc, type, std::move(registers), execMask, wf.wf_size(),
                            std::span<const uint32_t>(laneAddrs, wf.wf_size()),
                            std::span<const uint32_t>(secondLaneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder);
+                           byte_mask, obligations, memoryOrder, d.elem_size);
     } else {
       rs->registerLdsEvent(wf.pc, type, std::move(registers), execMask, wf.wf_size(),
                            std::span<const uint32_t>(laneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder);
+                           byte_mask, obligations, memoryOrder, ldsMask, d.elem_size);
     }
+    // A mixed instruction has one counter entry, with all register lanes but
+    // only the ordinary LDS lanes' intervals. Do not also register a global event.
+    return;
   }
 
   if (inst.data()->tag() == amdgpu::GLOBAL_MEM) {
@@ -418,7 +432,9 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     if (d.lds_dst) {
       if (obligations.empty())
         return;
-      uint32_t perLaneBytes = d.num_elems * d.elem_size;
+      uint32_t perLaneBytes = d.buffer_components
+                                  ? 4u * d.destination_vgpr_count()
+                                  : d.num_elems * (d.lds_dword_extend ? 4u : d.elem_size);
       if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
         uint32_t selfMask = amdgpu::cluster_multicast_rank_mask(wf.cluster_rank());
         uint32_t peerMask = d.cluster_mcast_mask & ~selfMask;
@@ -428,12 +444,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
           return;
       }
       uint32_t ldsAddrs[64];
-      uint64_t validLaneMask = d.lane_mask;
+      const uint64_t validLaneMask = amdgpu::lds_destination_write_mask(d, wf.cu().arch());
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         ldsAddrs[lane] =
             d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * perLaneBytes;
-        if (ldsAddrs[lane] == amdgpu::kInvalidLdsAddress)
-          validLaneMask &= ~(1ULL << lane);
       }
       rs->registerLdsEvent(wf.pc, MemoryEventType::GLOBAL_TO_LDS, {}, validLaneMask, wf.wf_size(),
                            std::span<const uint32_t>(ldsAddrs, wf.wf_size()), perLaneBytes, 0xF,
@@ -444,7 +458,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
         return;
       std::vector<uint32_t> registers = std::move(*destinations);
       const uint8_t byte_mask = vector_memory_byte_mask(d, wf);
-      const uint8_t last_byte_mask = vector_memory_byte_mask(d, wf, registers.size() - 1);
+      const uint8_t last_byte_mask =
+          registers.empty() ? byte_mask : vector_memory_byte_mask(d, wf, registers.size() - 1);
       for (uint32_t i = 0; i < registers.size(); ++i)
         rs->checkVgprWrite(static_cast<int>(registers[i]), d.exec_mask,
                            vector_memory_byte_mask(d, wf, i), memoryOrder);

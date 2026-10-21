@@ -48,6 +48,17 @@
             "name": "debug"
         },
         {
+            "binaryDir": "${sourceDir}/build/debug-amdclang",
+            "cacheVariables": {
+                "CMAKE_CXX_COMPILER": "amdclang++",
+                "CMAKE_C_COMPILER": "amdclang"
+            },
+            "description": "Debug build with tests using ROCm's amdclang/amdclang++",
+            "displayName": "Debug build (amdclang)",
+            "inherits": "debug",
+            "name": "debug-amdclang"
+        },
+        {
             "binaryDir": "${sourceDir}/build/debug-optimized",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "RelWithDebInfo",
@@ -78,6 +89,16 @@
             "displayName": "Debug build with MPI",
             "inherits": "debug",
             "name": "debug-mpi"
+        },
+        {
+            "binaryDir": "${sourceDir}/build/debug-mpi-amdclang",
+            "description": "Debug build with MPI support using ROCm's amdclang/amdclang++",
+            "displayName": "Debug build with MPI (amdclang)",
+            "inherits": [
+                "debug-amdclang",
+                "debug-mpi"
+            ],
+            "name": "debug-mpi-amdclang"
         },
         {
             "binaryDir": "${sourceDir}/build/release-mpi",

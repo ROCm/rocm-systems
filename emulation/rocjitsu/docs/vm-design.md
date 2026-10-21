@@ -549,6 +549,13 @@ SC0/GLC is set. The L1 line is invalidated after the atomic to prevent
 stale reads. Supported integer atomics: swap, cmpswap, add, sub,
 smin/umin, smax/umax, and, or, xor, inc, dec.
 
+**Scalar atomics** (`s_atomic_*` and `s_atomic_*_x2`, CDNA1–4) bypass the
+L1 scalar cache and perform read-modify-write at L2; the atomic boundary's
+coherence epoch makes stale K$ lines refetch. The old value is returned to
+SDATA when GLC is set. Supported: swap, add, sub, smin/umin, smax/umax,
+and, or, xor, inc, dec. `s_atomic_cmpswap[_x2]` and `s_buffer_atomic_*` are
+not yet implemented.
+
 **Cache management instructions:**
 
 - `s_dcache_inv` / `s_dcache_inv_vol` — invalidate the L1 scalar cache
@@ -671,7 +678,7 @@ ROCm application
 
 | ioctl | Handler | Notes |
 |-------|---------|-------|
-| `GET_VERSION` | `get_version_ioctl` | Returns KFD_IOCTL_MAJOR/MINOR_VERSION |
+| `GET_VERSION` | `get_version_ioctl` | Returns the implemented KFD UAPI version 1.18; the shared header describes 1.19, whose metadata-ring queue creation is unsupported |
 | `GET_PROCESS_APERTURES_NEW` | `get_process_apertures_ioctl` | Returns `gpu_apertures(ordinal)` — LDS/scratch shifted by `kApertureStride` per GPU, with per-instance `gpu_id` |
 | `ACQUIRE_VM` | `acquire_vm_ioctl` | No-op (VM is always acquired) |
 | `ALLOC_MEMORY_OF_GPU` | `alloc_memory_ioctl` | Allocates host memory, assigns GPU VA from a linear bump allocator |
