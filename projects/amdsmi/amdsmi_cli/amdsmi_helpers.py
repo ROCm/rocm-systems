@@ -31,6 +31,15 @@ from BDF import BDF
 
 import amdsmi_cli_exceptions
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.abspath(__file__)))
+from amdsmi_i18n import gettext as _T, lazy as _L
+
 
 class AMDSMIHelpers:
     """Helper functions that aren't apart of the AMDSMI API
@@ -293,13 +302,17 @@ class AMDSMIHelpers:
                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
             ):
                 logging.info(
-                    "Unable to get device choices, driver not initialized (amd_hsmp  or hsmp_acpi not found in modules)"
+                    _T(
+                        "Unable to get device choices, driver not initialized (amd_hsmp  or hsmp_acpi not found in modules)"
+                    )
                 )
             else:
                 raise e
         if len(cpu_handles) == 0:
             logging.info(
-                "Unable to find any devices, check if driver is initialized (amd_hsmp or hsmp_acpi not found in modules)"
+                _T(
+                    "Unable to find any devices, check if driver is initialized (amd_hsmp or hsmp_acpi not found in modules)"
+                )
             )
         else:
             # Handle spacing for the gpu_choices_str
@@ -342,13 +355,17 @@ class AMDSMIHelpers:
                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
             ):
                 logging.info(
-                    "Unable to get device choices, driver not initialized (amd_hsmp  or hsmp_acpi not found in modules)"
+                    _T(
+                        "Unable to get device choices, driver not initialized (amd_hsmp  or hsmp_acpi not found in modules)"
+                    )
                 )
             else:
                 raise e
         if len(core_handles) == 0:
             logging.info(
-                "Unable to find any devices, check if driver is initialized (amd_hsmp or hsmp_acpi  not found in modules)"
+                _T(
+                    "Unable to find any devices, check if driver is initialized (amd_hsmp or hsmp_acpi  not found in modules)"
+                )
             )
         else:
             # Handle spacing for the gpu_choices_str
@@ -471,14 +488,18 @@ class AMDSMIHelpers:
                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
             ):
                 logging.info(
-                    "Unable to get device choices, driver not initialized (amdgpu not found in modules)"
+                    _T(
+                        "Unable to get device choices, driver not initialized (amdgpu not found in modules)"
+                    )
                 )
             else:
                 raise e
 
         if len(device_handles) == 0:
             logging.info(
-                "Unable to find any devices, check if driver is initialized (amdgpu not found in modules)"
+                _T(
+                    "Unable to find any devices, check if driver is initialized (amdgpu not found in modules)"
+                )
             )
         else:
             # Handle spacing for the gpu_choices_str
@@ -541,14 +562,18 @@ class AMDSMIHelpers:
                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
             ):
                 logging.info(
-                    "Unable to get device choices, driver not initialized (BRCM_NIC, IONIC_NIC, RDMA_NIC not found in modules)"
+                    _T(
+                        "Unable to get device choices, driver not initialized (BRCM_NIC, IONIC_NIC, RDMA_NIC not found in modules)"
+                    )
                 )
             else:
                 raise e
 
         if len(nic_device_handles) == 0 and len(ainic_device_handles) == 0:
             logging.info(
-                "Unable to find any devices, check if driver is initialized (BRCM_NIC, IONIC_NIC, RDMA_NIC not found in modules)"
+                _T(
+                    "Unable to find any devices, check if driver is initialized (BRCM_NIC, IONIC_NIC, RDMA_NIC not found in modules)"
+                )
             )
         else:
             # Handle spacing for the gpu_choices_str
@@ -590,7 +615,9 @@ class AMDSMIHelpers:
                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
             ):
                 logging.info(
-                    "Unable to get device choices, driver not initialized (BRCM_switch not found in modules)"
+                    _T(
+                        "Unable to get device choices, driver not initialized (BRCM_switch not found in modules)"
+                    )
                 )
 
             else:
@@ -598,7 +625,9 @@ class AMDSMIHelpers:
 
         if len(device_handles) == 0:
             logging.info(
-                "Unable to find any devices, check if driver is initialized (BRCM_switch not found in modules)"
+                _T(
+                    "Unable to find any devices, check if driver is initialized (BRCM_switch not found in modules)"
+                )
             )
         else:
             # Handle spacing for the gpu_choices_str
@@ -1357,7 +1386,7 @@ class AMDSMIHelpers:
         args.iterations = None
 
         # Set the signal handler to flush a delmiter to file if the format is json
-        print("'CTRL' + 'C' to stop watching output:")
+        print(_T("'CTRL' + 'C' to stop watching output:"))
         if watch_time:  # Run for set amount of time
             iterations_ran = 0
             end_time = time.time() + watch_time
@@ -1393,7 +1422,7 @@ class AMDSMIHelpers:
         raise amdsmi_exception.AmdSmiParameterException(
             input_device_handle,
             amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
-            "Unable to find gpu ID from device_handle",
+            _T("Unable to find gpu ID from device_handle"),
         )
 
     def get_nic_id_from_device_handle(self, input_device_handle):
@@ -1409,7 +1438,7 @@ class AMDSMIHelpers:
         raise amdsmi_exception.AmdSmiParameterException(
             input_device_handle,
             amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
-            "Unable to find nic ID from device_handle",
+            _T("Unable to find nic ID from device_handle"),
         )
 
     def get_ainic_id_from_device_handle(self, input_device_handle):
@@ -1425,7 +1454,7 @@ class AMDSMIHelpers:
         raise amdsmi_exception.AmdSmiParameterException(
             input_device_handle,
             amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
-            "Unable to find nic ID from device_handle",
+            _T("Unable to find nic ID from device_handle"),
         )
 
     def get_switch_id_from_device_handle(self, input_device_handle):
@@ -1439,7 +1468,7 @@ class AMDSMIHelpers:
         raise amdsmi_exception.AmdSmiParameterException(
             input_device_handle,
             amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
-            "Unable to find switch ID from device_handle",
+            _T("Unable to find switch ID from device_handle"),
         )
 
     def get_cpu_id_from_device_handle(self, input_device_handle):
@@ -1454,7 +1483,7 @@ class AMDSMIHelpers:
         raise amdsmi_exception.AmdSmiParameterException(
             input_device_handle,
             amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
-            "Unable to find cpu ID from device_handle",
+            _T("Unable to find cpu ID from device_handle"),
         )
 
     def get_core_id_from_device_handle(self, input_device_handle):
@@ -1468,7 +1497,7 @@ class AMDSMIHelpers:
         raise amdsmi_exception.AmdSmiParameterException(
             input_device_handle,
             amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
-            "Unable to find core ID from device_handle",
+            _T("Unable to find core ID from device_handle"),
         )
 
     def get_amd_gpu_bdfs(self):
@@ -2076,7 +2105,8 @@ class AMDSMIHelpers:
 
         @param auto_respond: Response to automatically provide for all prompts
         """
-        print("""
+        print(
+            _T("""
             ******WARNING******\n
             Operating your AMD GPU outside of official AMD specifications or outside of
             factory settings, including but not limited to the conducting of overclocking,
@@ -2089,11 +2119,12 @@ class AMDSMIHelpers:
             MAY NOT BE COVERED BY YOUR BOARD OR SYSTEM MANUFACTURER'S WARRANTY.
             Please use this utility with caution.
             """)
-        user_input = self._read_confirmation("Do you accept these terms? [y/n] ", auto_respond)
+        )
+        user_input = self._read_confirmation(_T("Do you accept these terms? [y/n] "), auto_respond)
         if user_input in ["y", "Y", "yes", "Yes", "YES"]:
             return
         else:
-            print("Confirmation not given. Exiting without setting value", file=sys.stderr)
+            print(_T("Confirmation not given. Exiting without setting value"), file=sys.stderr)
             sys.exit(int(amdsmi_cli_exceptions.AmdSmiExitCode.USER_ABORTED))
 
     def confirm_changing_memory_partition_gpu_reload_warning(self, auto_respond=False):
@@ -2102,7 +2133,8 @@ class AMDSMIHelpers:
         :param autoRespond: Response to automatically provide for all prompts
         """
 
-        print("""
+        print(
+            _T("""
             ******WARNING******\n
             After changing memory (NPS) partition modes, users MUST restart
             (reload) the AMD GPU driver. Use modprobe to reload the driver:
@@ -2124,13 +2156,14 @@ class AMDSMIHelpers:
             In order to reload the AMD GPU driver, users MUST quit all GPU
             workloads across all devices.
             """)
+        )
 
-        user_input = self._read_confirmation("Do you accept these terms? [Y/N] ", auto_respond)
+        user_input = self._read_confirmation(_T("Do you accept these terms? [Y/N] "), auto_respond)
         if user_input in ["Yes", "yes", "y", "Y", "YES"]:
             print("")
             return
         else:
-            print("Confirmation not given. Exiting without setting value")
+            print(_T("Confirmation not given. Exiting without setting value"))
             sys.exit(int(amdsmi_cli_exceptions.AmdSmiExitCode.USER_ABORTED))
 
     def is_valid_profile(self, profile):
@@ -3048,7 +3081,7 @@ class AMDSMIHelpers:
                     raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
                         logger.format,
                         e.get_error_code(),
-                        detail="Error opening CPER file. Unable to read CPER File",
+                        detail=_L("Error opening CPER file. Unable to read CPER File"),
                     ) from e
                 else:
                     logging.debug(f"Cannot retrieve CPER entries: {e}")
@@ -3114,7 +3147,7 @@ class AMDSMIHelpers:
                     raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
                         logger.format,
                         e.get_error_code(),
-                        detail="Fabric CPER entries exceed internal buffer capacity",
+                        detail=_L("Fabric CPER entries exceed internal buffer capacity"),
                     ) from e
                 logging.debug(f"Cannot retrieve fabric CPER entries: {e}")
                 break
@@ -3148,7 +3181,7 @@ class AMDSMIHelpers:
             raise amdsmi_cli_exceptions.AmdSmiLibraryErrorException(
                 logger.format,
                 gpu_cper_error_code,
-                detail="Error accessing CPER files. This command requires CPER to be enabled.",
+                detail=_L("Error accessing CPER files. This command requires CPER to be enabled."),
             )
 
         if num_entries == 0 and not args.follow:
@@ -3586,9 +3619,12 @@ class AMDSMIHelpers:
                 self.error_collector.record(
                     int(amdsmi_cli_exceptions.AmdSmiExitCode.INVALID_PARAMETER_VALUE)
                 )
-                message = (
-                    f"Unable to set {power_type_key} power cap to {requested_power_cap}W. "
-                    f"Power cap must be between {min_power_cap}W and {max_power_cap}W"
+                message = _L(
+                    "Unable to set {power_type_key} power cap to {requested_power_cap}W. Power cap must be between {min_power_cap}W and {max_power_cap}W",
+                    power_type_key=power_type_key,
+                    requested_power_cap=requested_power_cap,
+                    min_power_cap=min_power_cap,
+                    max_power_cap=max_power_cap,
                 )
                 if logger.is_json_format() or logger.is_csv_format():
                     return {
@@ -3643,7 +3679,7 @@ class AMDSMIHelpers:
             dict or str: Structured data for JSON/CSV or formatted string for human-readable output
         """
         if node_handle is None:
-            message = "No node handle available; cannot set balancing mode"
+            message = _L("No node handle available; cannot set balancing mode")
             self.error_collector.record(int(amdsmi_cli_exceptions.AmdSmiExitCode.DEVICE_NOT_FOUND))
             if logger.is_json_format() or logger.is_csv_format():
                 return {"status": "error", "message": message}
@@ -3679,7 +3715,10 @@ class AMDSMIHelpers:
             amdsmi_interface.amdsmi_set_npm_balancing_mode(
                 node_handle, self.NPM_BALANCING_MODE_FROM_CLI[requested_mode]
             )
-            message = f"Successfully set NPM balancing mode to {requested_mode}"
+            message = _L(
+                "Successfully set NPM balancing mode to {requested_mode}",
+                requested_mode=requested_mode,
+            )
             if logger.is_json_format() or logger.is_csv_format():
                 return {"status": "success", "balancing_mode": requested_mode, "message": message}
             return message
@@ -3690,12 +3729,13 @@ class AMDSMIHelpers:
                 e.get_error_code()
                 == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE
             ):
-                message = (
-                    f"BALANCING_MODE: [{e.get_error_info(detailed=False)}] "
-                    f"{requested_mode} is not supported on this platform"
+                message = _L(
+                    "BALANCING_MODE: [{get_error_info}] {requested_mode} is not supported on this platform",
+                    get_error_info=e.get_error_info(detailed=False),
+                    requested_mode=requested_mode,
                 )
             elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
-                message = (
+                message = _L(
                     "NPM balancing mode is not supported on this node; cannot set balancing mode"
                 )
             else:
@@ -3757,7 +3797,7 @@ class AMDSMIHelpers:
                     sys.argv[1] if len(sys.argv) > 1 else "unknown",
                     f"{requested_limit}",
                     self.get_output_format(),
-                    hint="Node power limit cannot be set: NPM is disabled on this node",
+                    hint=_L("Node power limit cannot be set: NPM is disabled on this node"),
                 )
             elif max_node_power_limit == "N/A":
                 # Fail closed: the platform max is unreadable (degraded driver /
@@ -3768,7 +3808,9 @@ class AMDSMIHelpers:
                     sys.argv[1] if len(sys.argv) > 1 else "unknown",
                     f"{requested_limit}",
                     self.get_output_format(),
-                    hint="Node power limit cannot be validated: platform maximum is unavailable",
+                    hint=_L(
+                        "Node power limit cannot be validated: platform maximum is unavailable"
+                    ),
                 )
             elif not 0 < requested_limit <= max_node_power_limit:
                 # Raise so the caller exits with a non-zero return code
@@ -3776,7 +3818,10 @@ class AMDSMIHelpers:
                     sys.argv[1] if len(sys.argv) > 1 else "unknown",
                     f"{requested_limit}",
                     self.get_output_format(),
-                    hint=f"Node power limit must be between 1W and {max_node_power_limit}W",
+                    hint=_L(
+                        "Node power limit must be between 1W and {max_node_power_limit}W",
+                        max_node_power_limit=max_node_power_limit,
+                    ),
                 )
 
             amdsmi_interface.amdsmi_set_npm_limit(node_handle, requested_limit)
@@ -3816,10 +3861,10 @@ class AMDSMIHelpers:
             bool: True if reboot was successful or user declined, False on error
         """
         if not sys.stdin.isatty():
-            print("Reboot required for changes to take effect. Please reboot manually.")
+            print(_T("Reboot required for changes to take effect. Please reboot manually."))
             return True
         try:
-            response = input("Would you like to reboot the system now? (y/n): ").strip().lower()
+            response = input(_T("Would you like to reboot the system now? (y/n): ")).strip().lower()
             if response in ("y", "yes"):
                 return self._reboot_system()
             return True
@@ -3838,7 +3883,7 @@ class AMDSMIHelpers:
             return True
 
         # Fallback to systemctl/reboot command
-        print("D-Bus reboot failed, falling back to systemctl...")
+        print(_T("D-Bus reboot failed, falling back to systemctl..."))
         import subprocess
 
         try:
@@ -3849,7 +3894,7 @@ class AMDSMIHelpers:
                 subprocess.run(["reboot"], check=True)
                 return True
             except (subprocess.CalledProcessError, FileNotFoundError):
-                print("Failed to initiate reboot. Please reboot manually.")
+                print(_T("Failed to initiate reboot. Please reboot manually."))
                 return False
 
     def _reboot_logind(self):

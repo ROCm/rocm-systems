@@ -10,6 +10,22 @@ from typing import Dict
 from enum import Enum
 from amdsmi_helpers import AMDSMIHelpers
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.abspath(__file__)))
+from amdsmi_i18n import gettext as _T
+from amdsmi_i18n import header as _hdr, label_key_part as _label_key, tr as _tr
+from amdsmi_i18n import pgettext
+
+
+def _TBL(message):
+    """Fixed-width table text (msgctxt \"table\"): translations must keep the width."""
+    return pgettext("table", message)
+
 
 class AMDSMILogger:
     def __init__(self, format="human_readable", destination="stdout", helpers=None) -> None:
@@ -374,6 +390,7 @@ class AMDSMILogger:
             # Remove dashes and increase tabbing split key (key is before first ":")
             parts[0] = parts[0].replace("-", " ", 1)
             parts[0] = parts[0].replace("  ", "    ")
+            parts[0] = _label_key(parts[0])  # display-only label translation (human-readable only)
             clean_yaml_output += ":".join(parts) + "\n"
 
         return clean_yaml_output
@@ -576,7 +593,7 @@ class AMDSMILogger:
             else:
                 self.output[argument] = data
         else:
-            raise ValueError("Invalid output format: expected json, csv, or human_readable")
+            raise ValueError(_T("Invalid output format: expected json, csv, or human_readable"))
 
     def _store_cpu_output_amdsmi(self, cpu_id, argument, data):
         if argument == "timestamp":  # Make sure timestamp is the first element in the output
@@ -597,7 +614,7 @@ class AMDSMILogger:
             else:
                 self.output[argument] = data
         else:
-            raise ValueError("Invalid output format: expected json, csv, or human_readable")
+            raise ValueError(_T("Invalid output format: expected json, csv, or human_readable"))
 
     def _store_output_amdsmi(self, gpu_id, argument, data):
         if argument == "timestamp":  # Make sure timestamp is the first element in the output
@@ -618,7 +635,7 @@ class AMDSMILogger:
             else:
                 self.output[argument] = data
         else:
-            raise ValueError("Invalid output format: expected json, csv, or human_readable")
+            raise ValueError(_T("Invalid output format: expected json, csv, or human_readable"))
 
     def _store_nic_output_amdsmi(self, nic_id, argument, data):
         if argument == "timestamp":  # Make sure timestamp is the first element in the output
@@ -639,7 +656,7 @@ class AMDSMILogger:
             else:
                 self.output[argument] = data
         else:
-            raise ValueError("Invalid output format: expected json, csv, or human_readable")
+            raise ValueError(_T("Invalid output format: expected json, csv, or human_readable"))
 
     def _store_ainic_output_amdsmi(self, nic_id, argument, data):
         if argument == "timestamp":  # Make sure timestamp is the first element in the output
@@ -660,7 +677,7 @@ class AMDSMILogger:
             else:
                 self.output[argument] = data
         else:
-            raise ValueError("Invalid output format: expected json, csv, or human_readable")
+            raise ValueError(_T("Invalid output format: expected json, csv, or human_readable"))
 
     def _store_switch_output_amdsmi(self, switch_id, argument, data):
         if argument == "timestamp":  # Make sure timestamp is the first element in the output
@@ -681,7 +698,7 @@ class AMDSMILogger:
             else:
                 self.output[argument] = data
         else:
-            raise ValueError("Invalid output format: expected json, csv, or human_readable")
+            raise ValueError(_T("Invalid output format: expected json, csv, or human_readable"))
 
     def store_multiple_device_output(self):
         """Store the current output into the multiple_device_output
@@ -798,7 +815,7 @@ class AMDSMILogger:
         elif self.is_json_format():
             self._write_event_line(json.dumps(self.output))
         else:
-            raise ValueError("Invalid output format: expected json, csv, or human_readable")
+            raise ValueError(_T("Invalid output format: expected json, csv, or human_readable"))
 
     def _write_event_line(self, line):
         """Emit a single event line to stdout or append it to the output file."""
@@ -1200,10 +1217,10 @@ class AMDSMILogger:
         if primary_table:
             primary_table_heading = ""
             if self.table_title:
-                primary_table_heading = self.table_title + ":\n"
+                primary_table_heading = _hdr(self.table_title) + ":\n"
             if self.warning_message:  # Add warning message below the table title
-                primary_table_heading += self.warning_message + "\n"
-            primary_table_heading += self.table_header + "\n"
+                primary_table_heading += _tr(self.warning_message) + "\n"
+            primary_table_heading += _hdr(self.table_header) + "\n"
             primary_table = primary_table_heading + primary_table
 
         # Add secondary table title and header to secondary_table
@@ -1211,8 +1228,8 @@ class AMDSMILogger:
         if secondary_table:
             secondary_table_heading = ""
             if self.secondary_table_title:
-                secondary_table_heading = "\n" + self.secondary_table_title + ":\n"
-            secondary_table_heading += self.secondary_table_header + "\n"
+                secondary_table_heading = "\n" + _hdr(self.secondary_table_title) + ":\n"
+            secondary_table_heading += _hdr(self.secondary_table_header) + "\n"
             secondary_table = secondary_table_heading + secondary_table
 
         if self.destination == "stdout":
@@ -1264,10 +1281,10 @@ class AMDSMILogger:
                     if primary_table:
                         primary_table_heading = ""
                         if self.table_title:
-                            primary_table_heading = self.table_title + ":\n"
+                            primary_table_heading = _hdr(self.table_title) + ":\n"
                         if self.warning_message:  # Add warning message below the table title
-                            primary_table_heading += self.warning_message + "\n"
-                        primary_table_heading += self.table_header + "\n"
+                            primary_table_heading += _tr(self.warning_message) + "\n"
+                        primary_table_heading += _hdr(self.table_header) + "\n"
                         primary_table = primary_table_heading + primary_table
 
                     # Add secondary table title and header to secondary_table
@@ -1275,8 +1292,10 @@ class AMDSMILogger:
                     if secondary_table:
                         secondary_table_heading = ""
                         if self.secondary_table_title:
-                            secondary_table_heading = "\n" + self.secondary_table_title + ":\n"
-                        secondary_table_heading += self.secondary_table_header + "\n"
+                            secondary_table_heading = (
+                                "\n" + _hdr(self.secondary_table_title) + ":\n"
+                            )
+                        secondary_table_heading += _hdr(self.secondary_table_header) + "\n"
                         secondary_table = secondary_table_heading + secondary_table
 
                     # Write both full tables to the file
@@ -1378,30 +1397,34 @@ class AMDSMILogger:
         #####################################################################################
         # print GPU info
         print(default_line_1)
-        print("| AMD-SMI            {0:<{w}s} |".format(amd_smi_version, w=_COL_WIDTH))
+        print(_TBL("| AMD-SMI            {0:<{w}s} |").format(amd_smi_version, w=_COL_WIDTH))
 
         if amdgpu_version != "N/A":
-            print("| amdgpu Version:    {0:<{w}s} |".format(amdgpu_version, w=_COL_WIDTH))
+            print(_TBL("| amdgpu Version:    {0:<{w}s} |").format(amdgpu_version, w=_COL_WIDTH))
         elif kernel_version != "N/A":
-            print("| OS kernel Version: {0:<{w}s} |".format(kernel_version, w=_COL_WIDTH))
+            print(_TBL("| OS kernel Version: {0:<{w}s} |").format(kernel_version, w=_COL_WIDTH))
 
         if rocm_version != "N/A":
-            print("| ROCm Version:      {0:<{w}s} |".format(rocm_version, w=_COL_WIDTH))
+            print(_TBL("| ROCm Version:      {0:<{w}s} |").format(rocm_version, w=_COL_WIDTH))
 
         # only print if the version is not "N/A"
         if vbios_version != "N/A":
-            print("| VBIOS Version:     {0:<{w}s} |".format(vbios_version, w=_COL_WIDTH))
+            print(_TBL("| VBIOS Version:     {0:<{w}s} |").format(vbios_version, w=_COL_WIDTH))
         if fw_pldm_version != "N/A":
-            print("| FW PLDM:           {0:<{w}s} |".format(fw_pldm_version, w=_COL_WIDTH))
+            print(_TBL("| FW PLDM:           {0:<{w}s} |").format(fw_pldm_version, w=_COL_WIDTH))
 
         print(
-            "| Platform:          {0:<{w}s} |".format(
+            _TBL("| Platform:          {0:<{w}s} |").format(
                 _trunc(str(self.helpers.os_info())), w=_COL_WIDTH
             )
         )
         print(default_line_2)
-        print("| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |")
-        print("| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |")
+        print(
+            _TBL("| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |")
+        )
+        print(
+            _TBL("| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |")
+        )
         print(default_line_3)
 
         line_count = 0
@@ -1485,8 +1508,10 @@ class AMDSMILogger:
 
         # print process list of all GPUs last
         print(default_line_1)
-        print("| Processes:                                                                   |")
-        print(self.PROCESS_TABLE_HEADER)
+        print(
+            _TBL("| Processes:                                                                   |")
+        )
+        print(_TBL(self.PROCESS_TABLE_HEADER))
         print(default_line_5)
         elevated_permission_error = False
         if len(output["processes"]) != 0:
@@ -1496,8 +1521,10 @@ class AMDSMILogger:
                     elevated_permission_error = True
         else:
             print(
-                "|  No running processes found                                                  |"
+                _TBL(
+                    "|  No running processes found                                                  |"
+                )
             )
         print(default_line_1)
         if elevated_permission_error:
-            print("Process Name may require elevated permissions.")
+            print(_T("Process Name may require elevated permissions."))

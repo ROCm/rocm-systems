@@ -32,6 +32,15 @@ from subcommands import (
     XgmiCommands,
 )
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.abspath(__file__)))
+from amdsmi_i18n import gettext as _T
+
 
 def _exit_on_init_error(output_format, error, device_kind: AmdSmiDeviceKind):
     """Report a device-init library failure and exit with its status code.
@@ -108,7 +117,9 @@ class AMDSMICommands(
                     amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
                 ):
                     logging.error(
-                        "Unable to get devices, driver not initialized (amdgpu not found in modules)"
+                        _T(
+                            "Unable to get devices, driver not initialized (amdgpu not found in modules)"
+                        )
                     )
                 else:
                     _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.GPU)
@@ -116,7 +127,9 @@ class AMDSMICommands(
             if len(self.device_handles) == 0:
                 # No GPU's found post amdgpu driver initialization
                 logging.error(
-                    "Unable to detect any GPU devices, check amdgpu version and module status (sudo modprobe amdgpu)"
+                    _T(
+                        "Unable to detect any GPU devices, check amdgpu version and module status (sudo modprobe amdgpu)"
+                    )
                 )
                 exit_flag = True
 
@@ -137,7 +150,9 @@ class AMDSMICommands(
                     amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED,
                 ):
                     logging.error(
-                        "Unable to get devices, driver not initialized (BRCMNIC not found in modules)"
+                        _T(
+                            "Unable to get devices, driver not initialized (BRCMNIC not found in modules)"
+                        )
                     )
                 else:
                     _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.NIC)
@@ -164,7 +179,9 @@ class AMDSMICommands(
                     amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DRV,
                 ):
                     logging.info(
-                        "Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)"
+                        _T(
+                            "Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)"
+                        )
                     )
                 else:
                     _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.CPU)
@@ -178,7 +195,9 @@ class AMDSMICommands(
                     amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DRV,
                 ):
                     logging.info(
-                        "Unable to get CORE devices, amd_hsmp driver not loaded (sudo modprobe amd_hsmp)"
+                        _T(
+                            "Unable to get CORE devices, amd_hsmp driver not loaded (sudo modprobe amd_hsmp)"
+                        )
                     )
                 else:
                     _exit_on_init_error(self.logger.format, e, AmdSmiDeviceKind.CPU_CORE)
@@ -186,7 +205,9 @@ class AMDSMICommands(
             if len(self.cpu_handles) == 0 and len(self.core_handles) == 0:
                 # No CPU's found post amd_hsmp driver initialization
                 logging.error(
-                    "Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)"
+                    _T(
+                        "Unable to detect any CPU devices, check amd_hsmp (or) hsmp_acpi version and module status (sudo modprobe amd_hsmp (or) sudo modprobe hsmp_acpi)"
+                    )
                 )
                 exit_flag = True
 
@@ -200,7 +221,7 @@ class AMDSMICommands(
 
     def profile(self, args):
         """Not applicable to linux baremetal"""
-        print("Not applicable to linux baremetal")
+        print(_T("Not applicable to linux baremetal"))
 
     def rocm_smi(self, args):
         """
@@ -229,7 +250,7 @@ class AMDSMICommands(
 
             # Initialize AMD SMI
             if not initializeRsmi():
-                logging.error("Failed to initialize AMD SMI")
+                logging.error(_T("Failed to initialize AMD SMI"))
                 return
 
             try:
@@ -237,13 +258,15 @@ class AMDSMICommands(
                 deviceList = listDevices()
 
                 if not deviceList:
-                    logging.error("No AMD GPU devices found")
+                    logging.error(_T("No AMD GPU devices found"))
                     return
 
                 # Check runtime status (low power state warning)
                 if not check_runtime_status():
                     print(
-                        "\nWARNING: AMD GPU device(s) is/are in a low-power state. Check power control/runtime_status\n"
+                        _T(
+                            "\nWARNING: AMD GPU device(s) is/are in a low-power state. Check power control/runtime_status\n"
+                        )
                     )
 
                 # Display ROCm-SMI compatible output
@@ -257,9 +280,9 @@ class AMDSMICommands(
                     pass
 
         except ImportError as e:
-            logging.error(f"Could not import ROCm-SMI compatibility module: {e}")
-            logging.error("Make sure amdsmi_rocm_smi_compat.py is in the amdsmi_cli directory")
-            print("ERROR: ROCm-SMI compatibility mode not available")
+            logging.error(_T("Could not import ROCm-SMI compatibility module: {e}").format(e=e))
+            logging.error(_T("Make sure amdsmi_rocm_smi_compat.py is in the amdsmi_cli directory"))
+            print(_T("ERROR: ROCm-SMI compatibility mode not available"))
         except Exception as e:
-            logging.error(f"Error in ROCm-SMI compatibility mode: {e}")
+            logging.error(_T("Error in ROCm-SMI compatibility mode: {e}").format(e=e))
             print(f"ERROR: {e}")

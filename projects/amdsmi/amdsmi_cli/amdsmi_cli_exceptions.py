@@ -7,6 +7,24 @@ import enum
 import io
 import json
 
+try:
+    from amdsmi_i18n import lazy as _L, tr as _tr
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.abspath(__file__)))
+    try:
+        from amdsmi_i18n import lazy as _L, tr as _tr
+    except ImportError:  # copied without amdsmi_i18n.py: English only
+
+        def _L(template, **kwargs):
+            return template.format(**kwargs) if kwargs else template
+
+        def _tr(value):
+            return value
+
+
 # NOTE: intentionally no module-level ``from amdsmi import amdsmi_wrapper`` here.
 # This module (and its AmdSmiExitCode enum) must stay importable even when the
 # amdsmi package failed to load, so the import-error paths can exit with
@@ -125,55 +143,55 @@ AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF
 
 
 AMDSMI_ERROR_MESSAGES = {
-    0: "Success",
-    1: "Invalid parameters",
-    2: "Command not supported",
-    3: "Command not yet implemented",
-    4: "Failed load module",
-    5: "Failed load symbol",
-    6: "Drm error",
-    7: "API call failed",
-    8: "Timeout in API call",
-    9: "Retry operation",
-    10: "Permission Denied",
-    11: "Interrupt occurred during execution",
-    12: "I/O Error",
-    13: "Address fault",
-    14: "Error opening file",
-    15: "Not enough memory",
-    16: "Internal error",
-    17: "Out of bounds",
-    18: "Initialization error",
-    19: "Internal reference counter exceeded",
-    20: "Directory not found",
-    21: "IPC error",
+    0: _L("Success"),
+    1: _L("Invalid parameters"),
+    2: _L("Command not supported"),
+    3: _L("Command not yet implemented"),
+    4: _L("Failed load module"),
+    5: _L("Failed load symbol"),
+    6: _L("Drm error"),
+    7: _L("API call failed"),
+    8: _L("Timeout in API call"),
+    9: _L("Retry operation"),
+    10: _L("Permission Denied"),
+    11: _L("Interrupt occurred during execution"),
+    12: _L("I/O Error"),
+    13: _L("Address fault"),
+    14: _L("Error opening file"),
+    15: _L("Not enough memory"),
+    16: _L("Internal error"),
+    17: _L("Out of bounds"),
+    18: _L("Initialization error"),
+    19: _L("Internal reference counter exceeded"),
+    20: _L("Directory not found"),
+    21: _L("IPC error"),
     # Reserved for future error messages
-    30: "Device busy",
-    31: "Device Not found",
-    32: "Device not initialized",
-    33: "No more free slot",
-    34: "Driver not loaded",
+    30: _L("Device busy"),
+    31: _L("Device Not found"),
+    32: _L("Device not initialized"),
+    33: _L("No more free slot"),
+    34: _L("Driver not loaded"),
     # Reserved for future error messages
-    39: "More data available than the provided buffer",
-    40: "No data was found for given input",
-    41: "Insufficient size for operation",
-    42: "Unexpected size of data was read",
-    43: "The data read or provided was unexpected",
-    44: "System has different cpu than AMD",
-    45: "Energy driver not found",
-    46: "MSR driver not found",
-    47: "HSMP driver not found",
-    48: "HSMP not supported",
-    49: "HSMP message/feature not supported",
-    50: "HSMP message timed out",
-    51: "No Energy and HSMP driver present",
-    52: "File or directory not found",
-    53: "Parsed argument is invalid",
-    54: "AMDGPU restart error",
-    55: "Setting is not available",
-    56: "EEPROM is corrupted",
-    AMDSMI_STATUS_MAP_ERROR: "AMD-SMI Library error did not map to a status code",
-    AMDSMI_STATUS_UNKNOWN_ERROR: "Unknown error",
+    39: _L("More data available than the provided buffer"),
+    40: _L("No data was found for given input"),
+    41: _L("Insufficient size for operation"),
+    42: _L("Unexpected size of data was read"),
+    43: _L("The data read or provided was unexpected"),
+    44: _L("System has different cpu than AMD"),
+    45: _L("Energy driver not found"),
+    46: _L("MSR driver not found"),
+    47: _L("HSMP driver not found"),
+    48: _L("HSMP not supported"),
+    49: _L("HSMP message/feature not supported"),
+    50: _L("HSMP message timed out"),
+    51: _L("No Energy and HSMP driver present"),
+    52: _L("File or directory not found"),
+    53: _L("Parsed argument is invalid"),
+    54: _L("AMDGPU restart error"),
+    55: _L("Setting is not available"),
+    56: _L("EEPROM is corrupted"),
+    AMDSMI_STATUS_MAP_ERROR: _L("AMD-SMI Library error did not map to a status code"),
+    AMDSMI_STATUS_UNKNOWN_ERROR: _L("Unknown error"),
 }
 
 
@@ -185,7 +203,7 @@ def _get_error_message(error_code):
     code = abs(error_code)
     if code in AMDSMI_ERROR_MESSAGES:
         return AMDSMI_ERROR_MESSAGES[code]
-    return f"Unrecognized error code {code}"
+    return _L("Unrecognized error code {code}", code=code)
 
 
 def _get_error_name(error_code):
@@ -262,7 +280,12 @@ class AmdSmiException(Exception):
         self.json_message["code"] = self.value
         self.json_message["error_type"] = error_type_name
         self.csv_message = _csv_error(flat, self.value, error_type_name)
-        self.stdout_message = f"{common_message} Error code: {self.value} [{error_type_name}]"
+        self.stdout_message = _L(
+            "{common_message} Error code: {value} [{error_type_name}]",
+            common_message=common_message,
+            value=self.value,
+            error_type_name=error_type_name,
+        )
 
     def __str__(self):
         # Return message according to the current output format
@@ -271,7 +294,8 @@ class AmdSmiException(Exception):
         elif self.output_format == "csv":
             self.message = self.csv_message
         else:
-            self.message = self.stdout_message
+            # Human-readable only: localized text (identical English str when no catalog)
+            self.message = _tr(self.stdout_message)
 
         return self.message
 
@@ -283,7 +307,9 @@ class AmdSmiInvalidCommandException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Command '{self.command}' is invalid. Run 'amd-smi -h' for more info."
+        common_message = _L(
+            "Command '{command}' is invalid. Run 'amd-smi -h' for more info.", command=self.command
+        )
 
         if message:
             common_message = message
@@ -299,8 +325,10 @@ class AmdSmiInvalidParameterException(AmdSmiException):
         self.arg = arg
         self.output_format = outputformat
 
-        common_message = (
-            f"Parameter '{self.arg}' is invalid. Run 'amd-smi {self.command} -h' for more info."
+        common_message = _L(
+            "Parameter '{arg}' is invalid. Run 'amd-smi {command} -h' for more info.",
+            arg=self.arg,
+            command=self.command,
         )
         if message:
             common_message = message
@@ -318,7 +346,11 @@ class AmdSmiDeviceNotFoundException(AmdSmiException):
         self.output_format = outputformat
         self.device_type = device_kind.value
 
-        common_message = f"Can not find a device: {self.device_type} '{self.command}'"
+        common_message = _L(
+            "Can not find a device: {device_type} '{command}'",
+            device_type=self.device_type,
+            command=self.command,
+        )
 
         self._build_output_messages(common_message)
 
@@ -330,7 +362,7 @@ class AmdSmiInvalidFilePathException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Path '{self.command}' cannot be found."
+        common_message = _L("Path '{command}' cannot be found.", command=self.command)
 
         if message:
             common_message = message
@@ -346,7 +378,11 @@ class AmdSmiInvalidParameterValueException(AmdSmiException):
         self.arg = arg
         self.output_format = outputformat
 
-        common_message = f"Value '{self.arg}' is not of valid type or format. Run 'amd-smi {self.command} -h' for more info."
+        common_message = _L(
+            "Value '{arg}' is not of valid type or format. Run 'amd-smi {command} -h' for more info.",
+            arg=self.arg,
+            command=self.command,
+        )
         if hint:
             common_message += f" {hint}"
 
@@ -360,7 +396,10 @@ class AmdSmiMissingParameterValueException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Parameter '{self.command}' requires a value. Run '--help' for more info."
+        common_message = _L(
+            "Parameter '{command}' requires a value. Run '--help' for more info.",
+            command=self.command,
+        )
 
         self._build_output_messages(common_message)
 
@@ -375,8 +414,9 @@ class AmdSmiCommandNotSupportedException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = (
-            f"Command '{self.command}' is not supported on the system. Run '--help' for more info."
+        common_message = _L(
+            "Command '{command}' is not supported on the system. Run '--help' for more info.",
+            command=self.command,
         )
 
         self._build_output_messages(common_message)
@@ -389,7 +429,10 @@ class AmdSmiRequiredCommandException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Command '{self.command}' requires a target argument. Run 'amd-smi {self.command} -h' for more info."
+        common_message = _L(
+            "Command '{command}' requires a target argument. Run 'amd-smi {command} -h' for more info.",
+            command=self.command,
+        )
 
         self._build_output_messages(common_message)
 
@@ -401,7 +444,10 @@ class AmdSmiInvalidSubcommandException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"AMD-SMI Command '{self.command}' is invalid. Must receive valid AMD-SMI Command first. Run 'amd-smi -h' for more info."
+        common_message = _L(
+            "AMD-SMI Command '{command}' is invalid. Must receive valid AMD-SMI Command first. Run 'amd-smi -h' for more info.",
+            command=self.command,
+        )
 
         self._build_output_messages(common_message)
 
@@ -417,8 +463,9 @@ class AmdSmiPermissionDeniedException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = (
-            f"AMD-SMI Command '{self.command}' requires elevation (sudo privileges required)"
+        common_message = _L(
+            "AMD-SMI Command '{command}' requires elevation (sudo privileges required)",
+            command=self.command,
         )
 
         self._build_output_messages(common_message)
@@ -442,7 +489,8 @@ class AmdSmiLibraryErrorException(AmdSmiException):
         # pieces separately (e.g. structured JSON/CSV rows).
         self.status_name = _get_error_name(self.amdsmi_lib_code)
         self.status_message = detail if detail else _get_error_message(self.amdsmi_lib_code)
-        common_message = f"[{self.status_name}] {self.status_message}"
+        # LazyStr.__radd__ keeps the localized companion of status_message (English str unchanged)
+        common_message = f"[{self.status_name}] " + self.status_message
 
         self._build_output_messages(common_message, error_type_name=self.status_name)
 

@@ -16,6 +16,15 @@ from amdsmi_helpers import AMDSMIHelpers
 from amdsmi import amdsmi_exception, amdsmi_interface
 from amdsmi.amdsmi_interface import AMDSMI_MAX_PPT_LIMIT, AMDSMI_MAX_UTIL
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+from amdsmi_i18n import gettext as _T, lazy as _L
+
 
 class SetValueCommands:
     def set_core(
@@ -858,19 +867,25 @@ class SetValueCommands:
                 file_data = json.load(f)
         except OSError as e:
             raise AmdSmiInvalidFilePathException(
-                command, self.logger.format, f"Unable to read '{file_path}': {e}"
+                command,
+                self.logger.format,
+                _L("Unable to read '{file_path}': {e}", file_path=file_path, e=e),
             ) from e
         except json.JSONDecodeError as e:
             raise AmdSmiInvalidFilePathException(
-                command, self.logger.format, f"'{file_path}' is not valid JSON: {e}"
+                command,
+                self.logger.format,
+                _L("'{file_path}' is not valid JSON: {e}", file_path=file_path, e=e),
             ) from e
 
         if not isinstance(file_data, dict) or not isinstance(file_data.get("gpu_data"), list):
             raise AmdSmiInvalidFilePathException(
                 command,
                 self.logger.format,
-                f"'{file_path}' is not an 'amd-smi static --ampp --json' shaped file "
-                "(expected a top-level 'gpu_data' list).",
+                _L(
+                    "'{file_path}' is not an 'amd-smi static --ampp --json' shaped file (expected a top-level 'gpu_data' list).",
+                    file_path=file_path,
+                ),
             )
 
         gpu_entry = next(
@@ -888,8 +903,13 @@ class SetValueCommands:
             raise AmdSmiInvalidFilePathException(
                 command,
                 self.logger.format,
-                f"'{file_path}' has no entry for GPU {gpu_id} (BDF:{gpu_bdf}). Found gpu ids: "
-                f"{', '.join(str(i) for i in found_ids) or 'none'}",
+                _L(
+                    "'{file_path}' has no entry for GPU {gpu_id} (BDF:{gpu_bdf}). Found gpu ids: {value}",
+                    file_path=file_path,
+                    gpu_id=gpu_id,
+                    gpu_bdf=gpu_bdf,
+                    value=", ".join(str(i) for i in found_ids) or "none",
+                ),
             )
 
         ampp_entry = gpu_entry.get("ampp")
@@ -897,7 +917,12 @@ class SetValueCommands:
             raise AmdSmiInvalidFilePathException(
                 command,
                 self.logger.format,
-                f"'{file_path}' has no AMPP data for GPU {gpu_id} (BDF:{gpu_bdf}).",
+                _L(
+                    "'{file_path}' has no AMPP data for GPU {gpu_id} (BDF:{gpu_bdf}).",
+                    file_path=file_path,
+                    gpu_id=gpu_id,
+                    gpu_bdf=gpu_bdf,
+                ),
             )
 
         profiles = ampp_entry.get("profiles")
@@ -1253,7 +1278,11 @@ class SetValueCommands:
                         .replace("'", "")
                         .replace(" ", "")
                     )
-                    print(f"\nPerformance Level Options:\n\t{perf_options}\n")
+                    print(
+                        _T("\nPerformance Level Options:\n\t{perf_options}\n").format(
+                            perf_options=perf_options
+                        )
+                    )
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
@@ -1328,7 +1357,11 @@ class SetValueCommands:
                     self.helpers.store_device_error(
                         self.logger, args.gpu, "profile", error_msg, exception=e
                     )
-                    print(f"\nAvailable Power Profiles:\n\t{available_str}\n")
+                    print(
+                        _T("\nAvailable Power Profiles:\n\t{available_str}\n").format(
+                            available_str=available_str
+                        )
+                    )
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
@@ -1505,7 +1538,11 @@ class SetValueCommands:
                         self.logger.clear_multiple_devices_output()
                         raise PermissionError("Command requires elevation") from e
                     elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
-                        print(f"Valid Memory partition Modes: {memory_dict['caps']}\n")
+                        print(
+                            _T("Valid Memory partition Modes: {caps}\n").format(
+                                caps=memory_dict["caps"]
+                            )
+                        )
                         self.helpers.store_device_error(
                             self.logger, args.gpu, "memory_partition", out, exception=e
                         )
@@ -1542,7 +1579,11 @@ class SetValueCommands:
                             policy_string = policy_string.rstrip(
                                 ", "
                             )  # Remove trailing comma and space
-                        print(f"Valid SOC P-State Policies: [{policy_string}]\n")
+                        print(
+                            _T("Valid SOC P-State Policies: [{policy_string}]\n").format(
+                                policy_string=policy_string
+                            )
+                        )
                     self.helpers.store_device_error(
                         self.logger,
                         args.gpu,
@@ -1580,7 +1621,11 @@ class SetValueCommands:
                             policy_string = policy_string.rstrip(
                                 ", "
                             )  # Remove trailing comma and space
-                        print(f"Valid XGMI PLPD Policies: [{policy_string}]\n")
+                        print(
+                            _T("Valid XGMI PLPD Policies: [{policy_string}]\n").format(
+                                policy_string=policy_string
+                            )
+                        )
                     self.helpers.store_device_error(
                         self.logger,
                         args.gpu,
@@ -1861,7 +1906,7 @@ class SetValueCommands:
                 elif clk_type == "fclk":
                     amdsmi_clk_type = amdsmi_interface.AmdSmiClkType.DF
                 else:
-                    print("Valid clock types are: sclk, mclk, fclk\n")
+                    print(_T("Valid clock types are: sclk, mclk, fclk\n"))
                     self.helpers.store_device_error(
                         self.logger,
                         args.gpu,
@@ -2048,7 +2093,7 @@ class SetValueCommands:
                     "set",
                     "--mem-carveout",
                     self.logger.format,
-                    "VRAM carveout can only be set for a single GPU. Please specify --gpu <id>",
+                    _L("VRAM carveout can only be set for a single GPU. Please specify --gpu <id>"),
                 )
 
             try:
@@ -2157,7 +2202,11 @@ class SetValueCommands:
                 self.helpers.store_device_error(
                     self.logger, args.gpu, "ampp_activate", error_msg, exception=e
                 )
-                print(f"\nValid AMPP Profiles: [{available_str}]\n")
+                print(
+                    _T("\nValid AMPP Profiles: [{available_str}]\n").format(
+                        available_str=available_str
+                    )
+                )
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
@@ -2202,7 +2251,11 @@ class SetValueCommands:
                 self.helpers.store_device_error(
                     self.logger, args.gpu, "ampp_configure", error_msg, exception=e
                 )
-                print(f"\nWritable AMPP Profiles: [{available_str}]\n")
+                print(
+                    _T("\nWritable AMPP Profiles: [{available_str}]\n").format(
+                        available_str=available_str
+                    )
+                )
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
@@ -2370,7 +2423,7 @@ class SetValueCommands:
         # Special GTT handling (system-wide, not per-GPU) — handle before device dispatch
         if hasattr(args, "gtt") and args.gtt is not None:
             if hasattr(args, "gpu") and args.gpu is not None:
-                msg = (
+                msg = _L(
                     "amd-smi set: error: argument --gtt/-G: not allowed with argument --gpu/-g "
                     "(--gtt is a system-wide setting, not per-GPU)"
                 )
@@ -2404,7 +2457,7 @@ class SetValueCommands:
         # Special node balancing mode handling (system-wide, not per-GPU) — handle before device dispatch
         if hasattr(args, "node_balancing_mode") and args.node_balancing_mode is not None:
             if hasattr(args, "gpu") and args.gpu is not None:
-                msg = (
+                msg = _L(
                     "amd-smi set: error: argument --node-balancing-mode: not allowed with argument "
                     "--gpu/-g (--node-balancing-mode is a system-wide setting, not per-GPU)"
                 )
@@ -2422,8 +2475,10 @@ class SetValueCommands:
         if hasattr(args, "node_power_limit") and args.node_power_limit is not None:
             if hasattr(args, "gpu") and args.gpu is not None:
                 print(
-                    "amd-smi set: error: argument --node-power-limit/-n: not allowed with "
-                    "argument --gpu/-g (--node-power-limit is a node-wide setting, not per-GPU)",
+                    _T(
+                        "amd-smi set: error: argument --node-power-limit/-n: not allowed with "
+                        "argument --gpu/-g (--node-power-limit is a node-wide setting, not per-GPU)"
+                    ),
                     file=sys.stderr,
                 )
                 sys.exit(2)
@@ -2603,14 +2658,14 @@ class SetValueCommands:
                 "set",
                 "--gpu/--cpu/--core",
                 self.logger.format,
-                "Cannot set GPU, CPU, and CORE arguments at the same time",
+                _L("Cannot set GPU, CPU, and CORE arguments at the same time"),
             )
         elif not (gpu_args_enabled ^ cpu_args_enabled ^ core_args_enabled):
             raise AmdSmiInvalidParameterException(
                 "set",
                 "--gpu/--cpu/--core",
                 self.logger.format,
-                "Cannot set GPU, CPU, or CORE arguments at the same time",
+                _L("Cannot set GPU, CPU, or CORE arguments at the same time"),
             )
 
         if self.helpers.is_amdgpu_initialized() and gpu_args_enabled:

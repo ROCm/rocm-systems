@@ -12,6 +12,15 @@ from amdsmi_helpers import AMDSMIHelpers
 
 from amdsmi import amdsmi_exception, amdsmi_interface
 
+try:
+    import amdsmi_i18n  # noqa: F401
+except ImportError:  # loaded by file path (e.g. unit tests): make the CLI dir importable
+    import os as _os
+    import sys as _sys
+
+    _sys.path.append(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
+from amdsmi_i18n import lazy as _L
+
 
 class ResetCommands:
     def reset(
@@ -79,7 +88,7 @@ class ResetCommands:
         # Special GTT handling (system-wide, not per-GPU) — handle before device dispatch
         if hasattr(args, "gtt") and args.gtt:
             if hasattr(args, "gpu") and args.gpu is not None:
-                msg = (
+                msg = _L(
                     "amd-smi reset: error: argument --gtt: not allowed with argument --gpu/-g "
                     "(--gtt is a system-wide setting, not per-GPU)"
                 )
