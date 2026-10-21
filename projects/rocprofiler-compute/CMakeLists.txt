@@ -414,33 +414,29 @@ add_test(
 add_test(
     NAME test_profile_torch_trace
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m torch_trace
-        --junitxml=tests/test_profile_torch_trace.xml ${COV_OPTION}
-        tests/integration/test_profile_torch_trace.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_torch_trace.xml
+        ${COV_OPTION} tests/integration/test_profile_torch_trace.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_triton_trace
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m triton_trace
-        --junitxml=tests/test_profile_triton_trace.xml ${COV_OPTION}
-        tests/integration/test_profile_triton_trace.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_triton_trace.xml
+        ${COV_OPTION} tests/integration/test_profile_triton_trace.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_profile_ml_api_trace
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m ml_api_trace
-        --junitxml=tests/test_profile_ml_api_trace.xml ${COV_OPTION}
-        tests/integration/test_profile_ml_api_trace.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_profile_ml_api_trace.xml
+        ${COV_OPTION} tests/integration/test_profile_ml_api_trace.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
     NAME test_torch_trace_coverage
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest -m torch_trace_coverage
-        --junitxml=tests/test_torch_trace_coverage.xml ${COV_OPTION}
-        tests/integration/test_torch_trace_coverage.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_torch_trace_coverage.xml
+        ${COV_OPTION} tests/integration/test_torch_trace_coverage.py ${WORKING_DIR_OPTION}
 )
 
 add_test(

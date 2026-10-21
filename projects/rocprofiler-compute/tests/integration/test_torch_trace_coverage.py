@@ -3,8 +3,8 @@
 
 """ROCTX marker coverage for ``--torch-trace``.
 
-``--coverage-n`` is the CUDA ``torch.ops`` sample budget (default 20).
-Structural operators are always included as extras. Compares
+``--coverage-n`` is the number of sampled operators (default 20), split
+evenly between CUDA ``torch.ops`` and structural operators. Compares
 ``torch.profiler`` to the analyze call forest. Use ``--coverage-n 100``
 for a nightly run. Requires a GPU.
 """
@@ -13,6 +13,7 @@ import json
 import os
 import random
 import sys
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -27,12 +28,14 @@ try:
 except Exception:
     torch = None
 
+try:
+    import torch_trace_coverage_utils as coverage_utils
+except ImportError:
+    coverage_utils = None
+
 COVERAGE_TEST_CONFIG: Dict[str, Any] = {"cleanup": True}
 
 os.environ["ROCPROF"] = "rocprofiler-sdk"
-
-
-pytestmark = pytest.mark.torch_trace_coverage
 
 
 @pytest.fixture
@@ -50,22 +53,6 @@ def test_random_operator_kernel_coverage(
     torch_trace_coverage_sampling,
 ):
     require_torch(gpu=True)
-    from collections import Counter, defaultdict
-
-    from torch_trace_coverage_utils import (
-        call_trees_from_workload,
-        categorize_skip_reason,
-        compare_single_op,
-        discover_operators,
-        format_missing_arg_builder_report,
-        format_skip_breakdown_lines,
-        multiline_coverage_failure_warning,
-        print_torch_trace_coverage_session_header,
-        run_ground_truth_torch_profiler_subprocess,
-        unique_output_param_id,
-        write_coverage_workload_artifacts,
-    )
-
     seed, sample_budget = torch_trace_coverage_sampling
     rng = random.Random(seed)
 
@@ -76,11 +63,14 @@ def test_random_operator_kernel_coverage(
         "on",
     }
 
-    aten_ops, structural_ops, excluded_aten_ops = discover_operators()
-    aten_sample_count = min(sample_budget, len(aten_ops))
-    sampled = rng.sample(aten_ops, aten_sample_count) + structural_ops
+    aten_ops, structural_ops, excluded_aten_ops = coverage_utils.discover_operators()
+    structural_sample_count = min(sample_budget // 2, len(structural_ops))
+    aten_sample_count = min(sample_budget - structural_sample_count, len(aten_ops))
+    sampled_aten = rng.sample(aten_ops, aten_sample_count)
+    sampled = sampled_aten + rng.sample(structural_ops, structural_sample_count)
+    sampled_aten_names = {op.name for op in sampled_aten}
 
-    print_torch_trace_coverage_session_header(
+    coverage_utils.print_torch_trace_coverage_session_header(
         seed,
         sample_budget,
         len(sampled),
@@ -90,12 +80,12 @@ def test_random_operator_kernel_coverage(
     )
 
     ground_truth_dir = common.get_output_dir(
-        param_id=unique_output_param_id("torch_trace_gt"),
+        param_id=common.unique_output_param_id("torch_trace_gt"),
         suffix="_tmp",
         clean_existing=True,
     )
     workload_dir = common.get_output_dir(
-        param_id=unique_output_param_id("random_op_coverage"),
+        param_id=common.unique_output_param_id("random_op_coverage"),
         clean_existing=True,
     )
     Path(ground_truth_dir).mkdir(parents=True, exist_ok=True)
@@ -108,20 +98,20 @@ def test_random_operator_kernel_coverage(
     )
 
     try:
-        write_coverage_workload_artifacts(
+        coverage_utils.write_coverage_workload_artifacts(
             sampled,
             workload_script_path,
             ground_truth_runner_script_path,
         )
 
-        run_ground_truth_torch_profiler_subprocess(
+        coverage_utils.run_ground_truth_torch_profiler_subprocess(
             ground_truth_runner_script_path,
             workload_script_path,
             ground_truth_path,
             coverage_seed=seed,
             coverage_sample_budget=sample_budget,
         )
-        with open(ground_truth_path) as f:
+        with open(ground_truth_path, encoding="utf-8") as f:
             ground_truth = json.load(f)
 
         binary_handler_profile_rocprof_compute(
@@ -138,14 +128,14 @@ def test_random_operator_kernel_coverage(
             app_name="coverage_workload",
         )
 
-        forest = call_trees_from_workload(workload_dir)
+        forest = coverage_utils.call_trees_from_workload(workload_dir)
 
         failure_detail: List[Tuple[str, str]] = []
         skip_categories: "Counter[str]" = Counter()
         skip_op_names: Dict[str, List[str]] = defaultdict(list)
-        passed = skipped = 0
+        passed = skipped = aten_passed = 0
         for op in sampled:
-            outcome = compare_single_op(
+            outcome = coverage_utils.compare_single_op(
                 op,
                 ground_truth,
                 forest,
@@ -155,11 +145,13 @@ def test_random_operator_kernel_coverage(
                 print(line)
             if outcome.status == "pass":
                 passed += 1
+                if op.name in sampled_aten_names:
+                    aten_passed += 1
             elif outcome.status == "fail":
                 failure_detail.append((op.name, outcome.reason))
             else:
                 skipped += 1
-                category = categorize_skip_reason(outcome.reason)
+                category = coverage_utils.categorize_skip_reason(outcome.reason)
                 skip_categories[category] += 1
                 skip_op_names[category].append(op.name)
 
@@ -167,7 +159,7 @@ def test_random_operator_kernel_coverage(
             f"\n  Summary: {len(sampled)} ops - "
             f"{passed} PASS, {len(failure_detail)} FAIL, {skipped} SKIP"
         )
-        breakdown_lines = format_skip_breakdown_lines(
+        breakdown_lines = coverage_utils.format_skip_breakdown_lines(
             dict(skip_categories),
             skip_op_names=dict(skip_op_names),
         )
@@ -177,12 +169,12 @@ def test_random_operator_kernel_coverage(
 
         arg_gap_ops = skip_op_names.get("argument_builder_gap") or []
         if arg_gap_ops:
-            for line in format_missing_arg_builder_report(arg_gap_ops):
+            for line in coverage_utils.format_missing_arg_builder_report(arg_gap_ops):
                 print(line)
             print()
 
         if failure_detail:
-            for line in multiline_coverage_failure_warning(
+            for line in coverage_utils.multiline_coverage_failure_warning(
                 failure_detail,
                 max_ops=48,
                 seed=seed,
@@ -196,9 +188,10 @@ def test_random_operator_kernel_coverage(
                 f"Summary: {passed} PASS / {len(failure_detail)} FAIL "
                 f"/ {skipped} SKIP. Re-run with pytest -s for per-op lines."
             )
-        assert passed > 0, (
-            f"no operators PASSed forest coverage "
-            f"(sampled={len(sampled)}, FAIL={len(failure_detail)}, SKIP={skipped})"
+        assert aten_passed > 0, (
+            f"no ATen operators PASSed forest coverage "
+            f"(seed={seed}, sampled={len(sampled)}, PASS={passed}, "
+            f"FAIL={len(failure_detail)}, SKIP={skipped})"
         )
     finally:
         common.clean_output_dir(

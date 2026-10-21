@@ -4,10 +4,10 @@
 """Unit tests for src/rocprof_compute_analyze/analysis_base.py."""
 
 import argparse
+import functools
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
 
 import common
 import pandas as pd
@@ -24,6 +24,12 @@ PRE_PROCESSING_ARGS = {
     "gpu_id": None,
     "gpu_dispatch_id": None,
 }
+
+
+def record_error_and_exit(errors, *args, **kwargs):
+    """Record a console_error call, then exit like the real one."""
+    errors.append(args)
+    raise SystemExit(1)
 
 
 def test_sanitize_rejects_paths_sharing_a_workload_name(tmp_path, monkeypatch) -> None:
@@ -218,10 +224,13 @@ def test_sanitize_errors_when_operator_flag_without_trace(
     workload = tmp_path / "app" / "MI300"
     workload.mkdir(parents=True)
     (workload / "profiling_config.yaml").write_text(
-        "torch_trace: false\ntriton_trace: false\nml_api_trace: false\n"
+        "torch_trace: false\ntriton_trace: false\nml_api_trace: false\n",
+        encoding="utf-8",
     )
-    mock_error = Mock(side_effect=SystemExit(1))
-    common.patch_console(monkeypatch, MODULE, "error", error=mock_error)
+    errors = []
+    monkeypatch.setattr(
+        f"{MODULE}.console_error", functools.partial(record_error_and_exit, errors)
+    )
     with pytest.raises(SystemExit):
         OmniAnalyze_Base(
             argparse.Namespace(
@@ -231,5 +240,5 @@ def test_sanitize_errors_when_operator_flag_without_trace(
             ),
             {},
         ).sanitize()
-    assert "was not profiled" in mock_error.call_args.args[1]
-    assert expected_trace in mock_error.call_args.args[1]
+    assert "was not profiled" in errors[-1][1]
+    assert expected_trace in errors[-1][1]

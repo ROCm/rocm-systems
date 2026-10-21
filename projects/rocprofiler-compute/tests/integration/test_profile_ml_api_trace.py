@@ -14,8 +14,6 @@ import pytest
 from tests.integration.common import config, require_triton
 from utils import csv_compression
 
-pytestmark = pytest.mark.ml_api_trace
-
 RELU_MARKER_PATTERN = re.compile(
     r"(?:aten::relu|torch\.ops\.aten\.relu)(?![A-Za-z0-9_])"
 )
@@ -41,10 +39,8 @@ def ml_api_trace_profiled_workload(
 ):
     require_triton(gpu=True)
     if not ml_api_trace_workload_state["profiled"]:
-        from torch_trace_coverage_utils import unique_output_param_id
-
         workload_dir = common.get_output_dir(
-            param_id=unique_output_param_id("ml_api_trace"),
+            param_id=common.unique_output_param_id("ml_api_trace"),
         )
         ml_api_trace_workload_state["dir"] = workload_dir
         profile_config = dict(config)

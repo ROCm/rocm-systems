@@ -4,14 +4,19 @@
 """Unit tests for rocprof_compute_analyze/analysis_cli.py."""
 
 import argparse
+import functools
 from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
-from rocprof_compute_analyze.analysis_cli import cli_analysis
+from rocprof_compute_analyze.analysis_cli import (
+    _intersect_with_user_dispatch_filter,
+    cli_analysis,
+    parse_operator_patterns,
+)
 from utils import schema
-from utils.utils_analysis import CallTreeNode, KernelStats
+from utils.utils_analysis import CallTreeNode, KernelStats, iter_call_tree_paths
 
 ADDMM_PMC_GROUP_KEY = (1, "addmm_kernel", 0, 0, 0)
 RELU_PMC_GROUP_KEY = (2, "relu_kernel", 0, 0, 0)
@@ -68,17 +73,17 @@ def apply_torch_operator_glob(pattern):
 
 
 def forest_node_names(forest):
-    names = []
+    return [
+        node.name
+        for roots in forest.values()
+        for node, _path in iter_call_tree_paths(roots)
+    ]
 
-    def collect(node):
-        names.append(node.name)
-        for child in node.children:
-            collect(child)
 
-    for roots in forest.values():
-        for root in roots:
-            collect(root)
-    return names
+def append_args_and_exit(errors, *argv, **_kwargs):
+    """Stand-in for console_error: record the call, then exit like it does."""
+    errors.append(argv)
+    raise SystemExit(1)
 
 
 def cli_with_two_operator_workloads(args):
@@ -169,7 +174,6 @@ def test_pre_processing_membw_auto_run(membw_collected, expect_called, monkeypat
 
 def test_parse_patterns_basic():
     """Single and multiple patterns are parsed correctly."""
-    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
 
     args = argparse.Namespace(torch_operator=["relu"])
     assert parse_operator_patterns(args, ["torch"]) == {"torch": ["relu"]}
@@ -180,7 +184,6 @@ def test_parse_patterns_basic():
 
 def test_parse_patterns_comma_split():
     """Comma-separated patterns in a single arg are split."""
-    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
 
     args = argparse.Namespace(torch_operator=["relu,conv2d"])
     assert parse_operator_patterns(args, ["torch"]) == {"torch": ["relu", "conv2d"]}
@@ -188,7 +191,6 @@ def test_parse_patterns_comma_split():
 
 def test_parse_patterns_whitespace():
     """Leading/trailing whitespace is stripped."""
-    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
 
     args = argparse.Namespace(torch_operator=["  relu  ", " conv2d , linear "])
     result = parse_operator_patterns(args, ["torch"])
@@ -197,7 +199,6 @@ def test_parse_patterns_whitespace():
 
 def test_parse_patterns_empty():
     """Flag given with no args defaults to '**'; absent flag returns None."""
-    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
 
     parse = parse_operator_patterns
     assert parse(argparse.Namespace(torch_operator=[]), ["torch"]) == {"torch": ["**"]}
@@ -207,7 +208,6 @@ def test_parse_patterns_empty():
 
 def test_parse_operator_patterns_generic_attr():
     """parse_operator_patterns reads the given dest attribute."""
-    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
 
     args = argparse.Namespace(
         triton_operator=["*matmul*,*softmax*"], torch_operator=None
@@ -225,7 +225,6 @@ def test_parse_operator_patterns_generic_attr():
 
 def test_parse_patterns_star():
     """'*' is passed through as-is by the pattern parser."""
-    from rocprof_compute_analyze.analysis_cli import parse_operator_patterns
 
     args = argparse.Namespace(torch_operator=["*"])
     assert parse_operator_patterns(args, ["torch"]) == {"torch": ["*"]}
@@ -309,6 +308,21 @@ def test_apply_operator_filter_missed_glob_errors(monkeypatch):
         for item in errors
     )
     assert "aten::addmm" in forest_node_names(workload.ml_api_call_trees)
+
+
+def test_dispatch_filter_keeps_only_operator_dispatches():
+    assert _intersect_with_user_dispatch_filter([1, 2, 3], ["2", "9"], "PyTorch") == [2]
+
+
+def test_dispatch_filter_outside_operator_dispatches_errors(monkeypatch):
+    errors = []
+    monkeypatch.setattr(
+        "rocprof_compute_analyze.analysis_cli.console_error",
+        functools.partial(append_args_and_exit, errors),
+    )
+    with pytest.raises(SystemExit):
+        _intersect_with_user_dispatch_filter([1, 2, 3], ["9"], "PyTorch")
+    assert "No PyTorch dispatches matched the -d filter" in str(errors[-1])
 
 
 def test_apply_operator_filter_keeps_nodes_from_requested_backend():

@@ -13,8 +13,6 @@ import pytest
 from tests.integration.common import config, require_triton
 from utils import csv_compression
 
-pytestmark = pytest.mark.triton_trace
-
 
 @pytest.fixture(scope="module")
 def triton_trace_workload_state():
@@ -31,10 +29,8 @@ def triton_trace_profiled_workload(
 ):
     require_triton(gpu=True)
     if not triton_trace_workload_state["profiled"]:
-        from torch_trace_coverage_utils import unique_output_param_id
-
         workload_dir = common.get_output_dir(
-            param_id=unique_output_param_id("triton_trace"),
+            param_id=common.unique_output_param_id("triton_trace"),
         )
         triton_trace_workload_state["dir"] = workload_dir
         profile_config = dict(config)

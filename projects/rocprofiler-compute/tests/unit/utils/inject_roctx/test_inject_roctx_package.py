@@ -7,11 +7,24 @@ and ``core._push_scope`` / ``_pop_scope``."""
 
 import functools
 import importlib
+import os
+import runpy
 import sys
 import types
+from pathlib import Path
 
 import common  # noqa: F401
 import pytest
+
+from utils.inject_roctx import core
+from utils.inject_roctx import registry as registry_pkg
+from utils.inject_roctx._backends import triton as triton_backend
+from utils.inject_roctx.core import (
+    compose_marker,
+    encode_marker_name,
+    install_global_wraps,
+)
+from utils.inject_roctx.marker_format import cap_args, encode_args
 
 # ---------------------------------------------------------------------------
 # Test helpers
@@ -50,8 +63,6 @@ def make_backend(name, install_fn=None):
 @pytest.fixture
 def captured_install(monkeypatch):
     """Replace ``registry.install_many`` with a recorder."""
-    from utils.inject_roctx import registry as registry_pkg
-
     calls: list[list[str]] = []
     monkeypatch.setattr(
         registry_pkg, "install_many", functools.partial(record_call, calls)
@@ -60,16 +71,12 @@ def captured_install(monkeypatch):
 
 
 def test_install_global_wraps_empty_input_is_noop(captured_install):
-    from utils.inject_roctx.core import install_global_wraps
-
     install_global_wraps([])
     install_global_wraps(())
     assert captured_install == []
 
 
 def test_install_global_wraps_list_input(captured_install):
-    from utils.inject_roctx.core import install_global_wraps
-
     install_global_wraps(["torch"])
     install_global_wraps(["torch", "triton"])
     assert captured_install == [["torch"], ["torch", "triton"]]
@@ -83,8 +90,6 @@ def test_install_global_wraps_list_input(captured_install):
 @pytest.fixture
 def fresh_registry(monkeypatch):
     """Provide an isolated registry for ``install_many`` tests."""
-    from utils.inject_roctx import registry as registry_pkg
-
     monkeypatch.setattr(registry_pkg, "_REGISTRY", {})
     return registry_pkg
 
@@ -151,8 +156,6 @@ def test_install_many_warns_when_module_does_not_register(fresh_registry, monkey
 
 
 def test_triton_backend_skips_when_triton_missing(monkeypatch):
-    from utils.inject_roctx._backends import triton as triton_backend
-
     real_find_spec = importlib.util.find_spec
     monkeypatch.setattr(
         importlib.util,
@@ -173,8 +176,6 @@ def test_triton_backend_skips_when_triton_missing(monkeypatch):
 
 def test_triton_backend_wraps_compiled_kernel_run(monkeypatch):
     """CompiledKernel.run() is wrapped in preference to __call__."""
-    from utils.inject_roctx._backends import triton as triton_backend
-
     pushes: list[tuple] = []
     monkeypatch.setattr(
         triton_backend,
@@ -199,8 +200,6 @@ def test_triton_backend_wraps_compiled_kernel_run(monkeypatch):
 
 def test_triton_backend_wraps_jitfunction_run(monkeypatch):
     """JITFunction.run is wrapped for eager launches."""
-    from utils.inject_roctx._backends import triton as triton_backend
-
     pushes: list[str] = []
     monkeypatch.setattr(
         triton_backend,
@@ -226,8 +225,6 @@ def test_triton_backend_wraps_jitfunction_run(monkeypatch):
 
 def test_triton_backend_patch_is_idempotent(monkeypatch):
     """Patching twice does not re-wrap the launch entry point."""
-    from utils.inject_roctx._backends import triton as triton_backend
-
     pushes: list[str] = []
     monkeypatch.setattr(
         triton_backend,
@@ -258,8 +255,6 @@ def test_triton_backend_patch_is_idempotent(monkeypatch):
 
 def test_triton_backend_registers_framework_root(monkeypatch):
     """install() registers triton's package directory as a framework root."""
-    from utils.inject_roctx._backends import triton as triton_backend
-
     monkeypatch.setattr(triton_backend, "_resolve_triton", lambda: True)
     monkeypatch.setattr(triton_backend.core, "ensure_python_tier", lambda: True)
     monkeypatch.setattr(triton_backend, "patch_triton_launcher", lambda: None)
@@ -278,8 +273,6 @@ def test_triton_backend_registers_framework_root(monkeypatch):
 
 
 def test_triton_backend_skips_when_python_tier_unavailable(monkeypatch):
-    from utils.inject_roctx._backends import triton as triton_backend
-
     monkeypatch.setattr(triton_backend, "_resolve_triton", lambda: True)
     monkeypatch.setattr(triton_backend.core, "ensure_python_tier", lambda: False)
 
@@ -298,8 +291,6 @@ def test_triton_backend_skips_when_python_tier_unavailable(monkeypatch):
 
 
 def test_ensure_python_tier_short_circuits_when_already_configured(monkeypatch):
-    from utils.inject_roctx import core
-
     saved_push, saved_pop = core._STATE.range_push, core._STATE.range_pop
     try:
         core.set_python_tier_io(lambda _s: None, lambda: None)
@@ -311,8 +302,6 @@ def test_ensure_python_tier_short_circuits_when_already_configured(monkeypatch):
 
 
 def test_extract_kernel_name_prefers_attr_then_meta_then_fn():
-    from utils.inject_roctx._backends import triton as triton_backend
-
     named = types.SimpleNamespace(name="direct")
     assert triton_backend._extract_kernel_name(named) == "direct"
 
@@ -329,16 +318,12 @@ def test_extract_kernel_name_prefers_attr_then_meta_then_fn():
 
 
 def test_encode_marker_name_wrap_chars():
-    from utils.inject_roctx.core import encode_marker_name
-
     assert encode_marker_name("nn.Module.Linear.forward") == "nn.Module.Linear.forward"
     assert encode_marker_name("pkg/mod%hook") == "pkg%2Fmod%25hook"
     assert encode_marker_name("aten::addmm") == "aten::addmm"
 
 
 def test_compose_marker_python_wrap_wire():
-    from utils.inject_roctx.core import compose_marker
-
     expected = (
         "nn.Module.Linear.forward:simple_net.py:51"
         "|seqNr=n/a|tid=n/a|ftid=n/a|ltid=n/a|scope=n/a|args=n/a|torch"
@@ -355,15 +340,11 @@ def test_compose_marker_python_wrap_wire():
 
 
 def test_encode_args_wrap_delimiters():
-    from utils.inject_roctx.marker_format import encode_args
-
     assert "%7C" in encode_args("(float32[2x4], bias=float32[2x4]|x)")
     assert encode_args("%|;|\r\n") == "%25%7C%3B%7C%0D%0A"
 
 
 def test_cap_args_balanced_parens():
-    from utils.inject_roctx.marker_format import cap_args
-
     assert cap_args("x" * 512) == "x" * 512
     assert cap_args("x" * 513).endswith("...")
     blob = "(" + "float32[2x4], " * 40 + ")"
@@ -371,8 +352,6 @@ def test_cap_args_balanced_parens():
 
 
 def test_push_scope_emits_composed_marker_and_pop_is_idempotent():
-    from utils.inject_roctx import core
-
     previous = core.get_python_tier_io()
     pushes = []
     pops = []
@@ -390,10 +369,6 @@ def test_push_scope_emits_composed_marker_and_pop_is_idempotent():
 
 
 def test_resolve_user_caller_location_skips_package_and_framework_roots():
-    import os
-    from pathlib import Path
-
-    from utils.inject_roctx import core
 
     location = core.resolve_user_caller_location()
     assert location.startswith(Path(__file__).name)
@@ -411,16 +386,12 @@ def test_resolve_user_caller_location_skips_package_and_framework_roots():
 
 
 def test_launch_parses_frameworks_and_runs_target(tmp_path, monkeypatch):
-    import runpy
-    import sys
-    from pathlib import Path
-
-    from utils.inject_roctx import core
 
     target = tmp_path / "target.py"
     ok_path = tmp_path / "ok.txt"
     target.write_text(
-        f"from pathlib import Path\nPath({str(ok_path)!r}).write_text('ok')\n"
+        f"from pathlib import Path\nPath({str(ok_path)!r}).write_text('ok')\n",
+        encoding="utf-8",
     )
     launch = Path(core.__file__).resolve().parent / "launch.py"
     recorded = []
@@ -434,15 +405,10 @@ def test_launch_parses_frameworks_and_runs_target(tmp_path, monkeypatch):
     )
     runpy.run_path(str(launch))
     assert recorded == [["torch", "triton"]]
-    assert ok_path.read_text() == "ok"
+    assert ok_path.read_text(encoding="utf-8") == "ok"
 
 
 def test_launch_exits_2_without_target(monkeypatch, capsys):
-    import runpy
-    import sys
-    from pathlib import Path
-
-    from utils.inject_roctx import core
 
     launch = Path(core.__file__).resolve().parent / "launch.py"
     monkeypatch.setattr(sys, "argv", [str(launch), "--frameworks", "torch"])
