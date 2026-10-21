@@ -1340,7 +1340,10 @@ static uint64_t hrr_redirect_stream_create(const fs::path& events_bin) {
  *     replay it unchanged: exit 0.
  *   - Rewrite the archive so the creating call maps another handle. The
  *     replay must stop at the memset, naming the API and the recorded handle,
- *     rather than run it on the null stream.
+ *     rather than run it on the null stream. Multi-threaded too, and at
+ *     once: the main thread's waits for a turn the stopped memset thread
+ *     never hands on end on the fatal flag, not on --max-seq-waits or the
+ *     test's deadline.
  *   - With --lossy-streams the same archive replays with exit 0: its bytes
  *     alone cannot tell a missing stream from a present one, which is why the
  *     strict default refuses.
@@ -1361,14 +1364,17 @@ HRR_TEST_CASE(Unit_HRR_ElidedStreamRoundtrip) {
   char handle[32];
   snprintf(handle, sizeof(handle), "0x%llx", (unsigned long long)recorded);
 
-  {
-    auto [rc, out] = hrr_playback_merged(arc);
-    INFO("Replay output:\n" << out);
+  for (const char* mode : {"", "--multi-thread"}) {
+    auto [rc, out] = hrr_playback_watchdog(arc, 120, mode);
+    INFO("Replay " << mode << " output:\n" << out);
+    CHECK(rc != kHrrWatchdogKilled);
     CHECK(rc != 0);
     CHECK(rc < 128);
     CHECK(out.find("(hipMemsetAsync, seq") != std::string::npos);
     CHECK(out.find(std::string("recorded stream ") + handle + " has no live stream") !=
           std::string::npos);
+    CHECK(out.find("--max-seq-waits") == std::string::npos);
+    if (*mode) CHECK(out.find("Mode    : multi-threaded") != std::string::npos);
   }
 
   {

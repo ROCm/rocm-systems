@@ -77,12 +77,14 @@ __device__ int g_hrr_spt_symbol[256];
 //
 // Exercises hipMemcpy_spt, hipMemcpyAsync_spt, hipMemcpy2D_spt,
 // hipMemcpy2DAsync_spt, hipMemcpyToSymbol_spt and hipMemcpyToSymbolAsync_spt
-// through their ordinary names, and hipMemcpyFromSymbolAsync_spt by name.  All six have no-op playback handlers, so they
-// run against a scratch buffer that is freed before the validated one is
-// written: routing the oracle through them would leave the replayed buffer at
-// its zero-init value and fail the D2H for a reason that has nothing to do with
-// whether the redirect took effect.  This is capture-path coverage, and
-// Unit_HRR_MemcpySptRoundtrip asserts each recorded id.
+// through their ordinary names, and hipMemcpyFromSymbolAsync_spt by name.  All
+// seven have no-op playback handlers.  The first six run against a scratch
+// buffer that is freed before the validated one is written: routing the oracle
+// through them would leave the replayed buffer at its zero-init value and fail
+// the D2H for a reason that has nothing to do with whether the redirect took
+// effect.  The seventh replays through the hipMemcpyAsync it makes, a D2H of
+// the symbol's zero initial value that replay validates.  This is capture-path
+// coverage, and Unit_HRR_MemcpySptRoundtrip asserts each recorded id.
 //
 // The oracle is hipMemcpyHtoD / hipMemcpyDtoH rather than the plain hipMemcpy
 // the later workloads use, because hipMemcpy has to stay redirected here to

@@ -901,11 +901,13 @@ hipError_t capture_hipMemcpy(void* dst, const void* src,
   return r;
 }
 
-// hipMemcpyFromSymbolAsync_spt resolves a null or hipStreamPerThread stream to
+// hipMemcpyFromSymbolAsync_spt resolves a null or hipStreamLegacy stream to
 // this thread's per-thread default stream object and then calls hipMemcpyAsync,
 // whose shim would record that object's address. Replay saw no call create it,
 // so record the hipStreamPerThread it stands for, which replay resolves on its
-// own thread.
+// own thread. That hipMemcpyAsync is the only call the runtime makes into a
+// captured API with a stream: the other _spt entry points pass the resolved
+// stream to internal helpers, which capture does not see.
 static uint64_t recorded_stream(hipStream_t stream) {
   if (stream != nullptr && stream != hipStreamLegacy && stream != hipStreamPerThread &&
       stream == hip::tls.stream_per_thread_obj_.Peek())
