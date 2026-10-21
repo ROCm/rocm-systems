@@ -23,7 +23,8 @@ namespace {
 
 constexpr int kWaves = 4;
 // Wave 1 publishes this late, so a block barrier that releases early is seen by thread 0.
-constexpr long long kPublishDelayCycles = 200000;
+// wall_clock64() ticks: clock64() is a 20-bit counter on gfx11 and can wrap inside the loop.
+constexpr long long kPublishDelayTicks = 200000;
 
 struct CoopThreadCase {
   __device__ static bool participates(int lane) { return lane == 0; }
@@ -53,8 +54,8 @@ __global__ void kernelCoopSyncInOneWave(int* out) {
   if (wave == 1 && Case::participates(lane)) Case::sync();
   if (lane == 0) {
     if (wave == 1) {
-      const long long start = clock64();
-      while (clock64() - start < kPublishDelayCycles) {
+      const long long start = wall_clock64();
+      while (wall_clock64() - start < kPublishDelayTicks) {
       }
     }
     slots[wave] = 1;
