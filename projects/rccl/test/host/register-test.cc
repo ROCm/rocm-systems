@@ -31,7 +31,9 @@
 
 #include "fakes/register_seam.h"
 #include "fakes/transport_p2p_reg_seam.h"
+#include "fakes/transport_collnet_reg_seam.h"
 #include REGISTER_CC_PATH
+#include "fakes/transport_collnet_reg_seam_undef.h"
 #include "fakes/transport_p2p_reg_seam_undef.h"
 #include "fakes/register_seam_undef.h"
 
