@@ -29,6 +29,31 @@ struct ImageFields {
   bool unorm = false;
 };
 
+using ImageAddressRegisters = std::array<uint32_t, 4>;
+
+inline uint32_t image_coordinate_register_count(uint32_t dim, bool a16) {
+  static constexpr uint8_t coordinates[] = {1, 2, 3, 3, 2, 3, 3, 4};
+  const uint32_t count = coordinates[dim & 7u];
+  return a16 ? (count + 1) / 2 : count;
+}
+
+inline ImageAddressRegisters contiguous_image_address_registers(uint32_t first) {
+  return {first, first + 1, first + 2, first + 3};
+}
+
+inline ImageAddressRegisters gfx11_image_address_registers(bool nsa, uint32_t first,
+                                                           const uint32_t *raw_encoding) {
+  if (!nsa)
+    return contiguous_image_address_registers(first);
+  return {first, raw_encoding[2] & 0xffu, (raw_encoding[2] >> 8) & 0xffu,
+          (raw_encoding[2] >> 16) & 0xffu};
+}
+
+template <typename VimageMachineInst>
+inline ImageAddressRegisters gfx12_image_address_registers(const VimageMachineInst &inst) {
+  return {inst.vaddr0, inst.vaddr1, inst.vaddr2, inst.vaddr3};
+}
+
 /// @brief Set up IMAGE_LOAD or IMAGE_STORE as a formatted vector access.
 /// @details Each active lane addresses one texel of a linear, single-level
 /// GFX9, GFX11 or GFX12 image with unnormalized coordinates read from @p vaddr.
@@ -44,7 +69,8 @@ struct ImageFields {
 /// UNORM=0 store) or an unimplemented feature (tiling, mips, cube, MSAA,
 /// nonzero base array, format outside the buffer table, or LWE).
 inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
-                                         uint32_t resource_reg, uint32_t vaddr,
+                                         uint32_t resource_reg,
+                                         const ImageAddressRegisters &address_registers,
                                          ImageFields fields) {
   const auto fail = [&](InstructionExecutionError error) {
     wf.report_instruction_execution_error(error);
@@ -134,17 +160,24 @@ inline util::Result prepare_image_access(Wavefront &wf, VectorMemState &state,
   const bool has_y = resource.type != kImage1d && resource.type != kImage1dArray;
   const bool has_slice = resource.type == kImage3d || (layered && fields.da);
   const uint32_t coordinates = 1 + (has_y ? 1 : 0) + (has_slice ? 1 : 0);
+  const uint32_t address_words = fields.a16 ? (coordinates + 1) / 2 : coordinates;
   const uint32_t slice_rows = has_y ? resource.height : 1;
   RegisterAccess regs(wf);
-  const auto addresses = regs.read_vgpr_region(
-      wf.vgpr_alloc().base + vaddr, fields.a16 ? (coordinates + 1) / 2 : coordinates, exec);
+  std::array<std::array<uint32_t, 64>, 3> addresses{};
+  for (uint32_t word = 0; word < address_words; ++word) {
+    const auto values =
+        regs.read_vgpr_region(wf.vgpr_alloc().base + address_registers[word], 1, exec);
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+      if (exec & (uint64_t{1} << lane))
+        addresses[word][lane] = values.lane(0, lane);
+  }
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (uint64_t{1} << lane)))
       continue;
     std::array<uint32_t, 3> coords{};
     for (uint32_t i = 0; i < coordinates; ++i)
-      coords[i] = fields.a16 ? (addresses.lane(i / 2, lane) >> (16 * (i % 2))) & 0xffffu
-                             : addresses.lane(i, lane);
+      coords[i] =
+          fields.a16 ? (addresses[i / 2][lane] >> (16 * (i % 2))) & 0xffffu : addresses[i][lane];
     const uint32_t x = coords[0];
     const uint32_t y = has_y ? coords[1] : 0;
     const uint32_t slice = has_slice ? coords[has_y ? 2 : 1] : 0;

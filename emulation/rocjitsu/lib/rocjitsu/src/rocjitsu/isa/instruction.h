@@ -352,6 +352,13 @@ public:
   /// non-branches return nullopt.
   [[nodiscard]] virtual std::optional<int64_t> branch_offset_bytes() const { return std::nullopt; }
 
+  /// @brief Whether an explicit source operand contributes its ordinary register dependency.
+  /// @details Encodings with non-contiguous source tuples can suppress the
+  /// placeholder tuple and report the actual registers through implicit_uses().
+  [[nodiscard]] virtual bool tracks_explicit_source(uint8_t /*operand_index*/) const {
+    return true;
+  }
+
   /// @brief Add registers implicitly read by this instruction.
   ///
   /// @details Used for encoded fields that affect execution but are not part of

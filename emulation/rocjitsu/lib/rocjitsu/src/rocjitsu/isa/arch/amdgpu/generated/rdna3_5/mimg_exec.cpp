@@ -28,13 +28,15 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->wait_counter_type = amdgpu::WaitCounterType::LOADCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
-  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr,
-                                   {.dmask = inst_.dmask,
-                                    .a16 = bool(inst_.a16),
-                                    .d16 = bool(inst_.d16),
-                                    .lwe = bool(inst_.lwe),
-                                    .da = true,
-                                    .unorm = bool(inst_.unorm)})
+  if (amdgpu::prepare_image_access(
+          wf, *d, inst_.srsrc * 4,
+          amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+          {.dmask = inst_.dmask,
+           .a16 = bool(inst_.a16),
+           .d16 = bool(inst_.d16),
+           .lwe = bool(inst_.lwe),
+           .da = true,
+           .unorm = bool(inst_.unorm)})
           .failed()) {
     return;
   }
@@ -71,13 +73,15 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx11(inst_.glc, inst_.dlc, inst_.slc);
   d->wait_counter_type = amdgpu::WaitCounterType::STORECNT;
-  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr,
-                                   {.dmask = inst_.dmask,
-                                    .a16 = bool(inst_.a16),
-                                    .d16 = bool(inst_.d16),
-                                    .lwe = bool(inst_.lwe),
-                                    .da = true,
-                                    .unorm = bool(inst_.unorm)})
+  if (amdgpu::prepare_image_access(
+          wf, *d, inst_.srsrc * 4,
+          amdgpu::gfx11_image_address_registers(inst_.nsa, inst_.vaddr, raw_encoding()),
+          {.dmask = inst_.dmask,
+           .a16 = bool(inst_.a16),
+           .d16 = bool(inst_.d16),
+           .lwe = bool(inst_.lwe),
+           .da = true,
+           .unorm = bool(inst_.unorm)})
           .failed()) {
     return;
   }

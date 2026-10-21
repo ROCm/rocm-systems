@@ -8027,13 +8027,10 @@ class CodeGenerator:
             return '  amdgpu::execute_lds_direct_load(*this, wf, inst_.vdst);'
 
         # ── Image execution and pipeline stubs ──────────────────────────────────────────
-        # NOTE for image execution: the image ADDRESS is carried as the
-        # fieldless ``vaddr`` operand (OPR_VGPR), currently emitted as an
-        # inert placeholder. The real gfx12 address is NSA -- up to
-        # 5 non-contiguous VGPRs (vaddr0..vaddr4 in the encoding) that a
-        # single base+width Operand cannot express -- so decode it from the
-        # machine-inst fields here. ``vdata`` and ``rsrc`` are field-bearing
-        # and already modeled.
+        # Image coordinates may use non-contiguous registers: GFX11 carries
+        # trailing NSA selectors in its extension word and GFX12 has explicit
+        # vaddr0..vaddr3 fields. Decode those selectors instead of treating
+        # VADDR as one contiguous tuple.
         if cls in ('image_load', 'image_store') and self._issues_image_memory(
             inst.name
         ):
@@ -8041,7 +8038,7 @@ class CodeGenerator:
             data_base = self._vgpr_base_expr('vdata')
             if self.isa_spec.arch_name == 'rdna4':
                 resource = 'inst_.rsrc'
-                vaddr = 'inst_.vaddr0'
+                address_registers = 'amdgpu::gfx12_image_address_registers(inst_)'
                 image_fields = (
                     '{.dmask = inst_.dmask, .a16 = bool(inst_.a16), '
                     '.d16 = bool(inst_.d16), .lwe = false, .da = true, '
@@ -8049,7 +8046,12 @@ class CodeGenerator:
                 )
             else:
                 resource = 'inst_.srsrc * 4'
-                vaddr = 'inst_.vaddr'
+                address_registers = (
+                    'amdgpu::gfx11_image_address_registers('
+                    'inst_.nsa, inst_.vaddr, raw_encoding())'
+                    if self.isa_spec.arch_name.startswith('rdna')
+                    else 'amdgpu::contiguous_image_address_registers(inst_.vaddr)'
+                )
                 da = (
                     'true'
                     if self.isa_spec.arch_name.startswith('rdna')
@@ -8070,7 +8072,7 @@ class CodeGenerator:
                 L.append(f'  d->dst_reg_base = {data_base};')
             L.append(
                 f'  if (amdgpu::prepare_image_access(wf, *d, {resource}, '
-                f'{vaddr}, {image_fields})'
+                f'{address_registers}, {image_fields})'
                 '.failed()) {'
             )
             L.append('    return;')
@@ -11522,6 +11524,27 @@ class CodeGenerator:
                         and self._supports_dpp_for_instruction(inst, inst_dpp_enc_name)
                         and any(o.name == 'sdst' and o.is_output for o in inst.operands)
                     )
+                    _image_address_metadata = self._issues_image_memory(
+                        inst.name
+                    ) and self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4')
+                    if _image_address_metadata:
+                        public_members.append(
+                            cgen.Statement(
+                                'void implicit_uses(RegisterSet &uses) const override'
+                            )
+                        )
+                        public_members.append(
+                            cgen.Statement(
+                                'bool tracks_explicit_source('
+                                'uint8_t operand_index) const override'
+                            )
+                        )
+                        assert not (
+                            _implicit_destination_uses
+                            or _dpp_secondary_mask_preserve_output
+                            or d16_implicit_use_opnd
+                            or _writelane_implicit_use_opnd
+                        ), inst.name
                     if (
                         _implicit_destination_uses
                         or _dpp_secondary_mask_preserve_output
@@ -13902,6 +13925,43 @@ class CodeGenerator:
                     )
                     inst_classes.append(s)
                     inst_impls = [class_ctor_impl]
+                    if _image_address_metadata:
+                        if self.isa_spec.arch_name == 'rdna4':
+                            address_registers = (
+                                'amdgpu::gfx12_image_address_registers(inst_)'
+                            )
+                        else:
+                            address_registers = (
+                                'amdgpu::gfx11_image_address_registers('
+                                'inst_.nsa, inst_.vaddr, raw_encoding())'
+                            )
+                        inst_impls.append(
+                            cgen.Line(
+                                f'void {inst.fmt_name}::implicit_uses'
+                                f'(RegisterSet &uses) const {{\n'
+                                f'  {inst.fmt_true_enc_name}::implicit_uses(uses);\n'
+                                f'  const auto registers = {address_registers};\n'
+                                '  const uint32_t count = amdgpu::image_coordinate_register_count(\n'
+                                '      inst_.dim, bool(inst_.a16));\n'
+                                '  for (uint32_t index = 0; index < count; ++index)\n'
+                                '    uses.expand(RegisterRef{RegClass::VGPR,\n'
+                                '        static_cast<uint16_t>(registers[index]), 1});\n'
+                                '}'
+                            )
+                        )
+                        suppress_address = (
+                            'inst_.nsa && src_operands_[operand_index] == &vaddr'
+                            if self.isa_spec.arch_name in ('rdna3', 'rdna3_5')
+                            else 'src_operands_[operand_index] == &vaddr'
+                        )
+                        inst_impls.append(
+                            cgen.Line(
+                                f'bool {inst.fmt_name}::tracks_explicit_source'
+                                f'(uint8_t operand_index) const {{\n'
+                                f'  return !({suppress_address});\n'
+                                '}'
+                            )
+                        )
                     decoder_factory = decoder_factories.get(inst.fmt_name)
                     if decoder_factory is not None:
                         factory_mnemonic_expr = mnemonic_expr.replace(
@@ -14572,6 +14632,15 @@ class CodeGenerator:
                         model_cpp_includes.extend(
                             (cache_flags_include, False)
                             for cache_flags_include in self._cache_flags_includes()
+                        )
+                    if self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4') and any(
+                        self._issues_image_memory(i.name) for i in all_insts
+                    ):
+                        model_cpp_includes.append(
+                            (
+                                'rocjitsu/isa/arch/amdgpu/shared/image_access.h',
+                                False,
+                            )
                         )
                     if enc.enc_name.upper() in _VOP_ENC_NAMES:
                         model_cpp_includes.append(

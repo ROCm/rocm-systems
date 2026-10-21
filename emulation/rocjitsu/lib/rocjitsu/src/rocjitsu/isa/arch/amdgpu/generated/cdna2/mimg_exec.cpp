@@ -27,7 +27,8 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr,
+  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4,
+                                   amdgpu::contiguous_image_address_registers(inst_.vaddr),
                                    {.dmask = inst_.dmask,
                                     .a16 = bool(inst_.a16),
                                     .d16 = bool(inst_.d16),
@@ -70,7 +71,8 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr,
+  if (amdgpu::prepare_image_access(wf, *d, inst_.srsrc * 4,
+                                   amdgpu::contiguous_image_address_registers(inst_.vaddr),
                                    {.dmask = inst_.dmask,
                                     .a16 = bool(inst_.a16),
                                     .d16 = bool(inst_.d16),
