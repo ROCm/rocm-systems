@@ -2,7 +2,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2025 Advanced Micro Devices, Inc.
+# Copyright (c) 2025-2026 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -50,7 +50,15 @@ _BLOB_DECODED_SUFFIX = "_decoded"
 
 
 def _sql_tokens(query: str):
-    """Yield ``(kind, text, start, end)`` without interpreting SQL expressions."""
+    """Yield lossless ``(kind, text, start, end)`` spans for SQLite query rewriting.
+
+    Strings, comments, and double-quoted/backtick/bracket identifiers remain
+    single tokens; doubled string and identifier quotes are retained verbatim.
+    Parentheses are individual symbols so callers can track nested expressions
+    and CTE bodies without treating their contents as top-level table factors.
+    Unterminated quotes/comments consume the remaining text; SQL validation is
+    left to SQLite rather than silently repairing the query.
+    """
     index = 0
     while index < len(query):
         start = index
@@ -167,6 +175,11 @@ def _cte_list_names(significant, index):
 
 def _cte_names(tokens):
     """Return the names of every CTE in the query, at any nesting depth.
+
+    Identifier quoting is removed and names are case-folded. Comments and
+    literals cannot introduce CTEs. WITH RECURSIVE, optional column lists, and
+    materialization hints are accepted; balanced nested bodies are skipped when
+    advancing through each WITH list, then inspected for their own WITH lists.
 
     Names are not scoped: a CTE that shadows a blob source table anywhere keeps
     that name unrewritten everywhere, so the query runs exactly as written.
