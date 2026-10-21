@@ -183,4 +183,4 @@ The current implementation achieves ABI independence by avoiding `std::regex` en
 
 ## SHA-256
 
-`sha256.hpp` is a shim over `shared/sha256`. This implementation is shared with other consumers (e.g. `projects/cuid`).
+`sha256.hpp` is a shim over `shared/sha256`. This implementation is shared with other consumers (e.g. `shared/cuid`).

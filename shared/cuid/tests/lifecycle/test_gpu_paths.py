@@ -946,8 +946,21 @@ class GpuPaths(unittest.TestCase):
                         child.wait()
 
 
-if __name__ == "__main__":
+def skip_reason():
     if os.geteuid() != 0:
+        return "needs root for a private mount namespace"
+    for hidden in ("/tmp", "/dev", "/run"):
+        if BUILD == Path(hidden) or Path(hidden) in BUILD.parents:
+            return f"build directory {BUILD} is under {hidden}, which the namespace replaces"
+    if os.statvfs(BUILD).f_flag & os.ST_NODEV:
+        return f"build directory {BUILD} is on a nodev filesystem; the fixture needs device nodes"
+    return None
+
+
+if __name__ == "__main__":
+    reason = skip_reason()
+    if reason:
+        print(f"SKIP: {reason}", file=sys.stderr)
         sys.exit(77)
     namespace()
     unittest.main()
