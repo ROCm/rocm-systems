@@ -444,8 +444,8 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredSelectsCe_Isol
     EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(options));
 }
 
-// FORCE + unregistered above the 32 MiB staging buffer still takes CE up to
-// the 2-shot cap; AllGather is pipelined through slots.
+// One slot per rank is the default 2-shot cap. The first forced call still
+// selects registered CE; a message past that cap does not.
 TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingSelectsCe_Isolated)
 {
     if (!isCeRuntimeDriverSupported()) GTEST_SKIP() << "CE is unsupported by this runtime";
@@ -463,13 +463,15 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingSel
                 mock.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
                 mock.comm.ceColl.ceARTmpBuf = nullptr;
 
-                const size_t staging =
-                    ncclCeAllReduceStagingBufBytes(mock.comm.nRanks, NCCL_CE_AR_STAGING_BYTES);
-                ASSERT_GT(staging, 0u);
-                size_t count = (staging / sizeof(float)) + static_cast<size_t>(mock.comm.nRanks);
-                while (count * sizeof(float) <= staging) count += static_cast<size_t>(mock.comm.nRanks);
+                const size_t slotBytes =
+                    ncclCeAllReduceMaxChunkBytes(mock.comm.nRanks, NCCL_CE_AR_STAGING_BYTES);
+                ASSERT_GT(slotBytes, 0u);
+                const size_t totalBytes = slotBytes * static_cast<size_t>(mock.comm.nRanks);
+                ASSERT_LE(totalBytes, static_cast<size_t>(NCCL_CE_AR_TMPBUF_DEFAULT_BYTES));
+                ASSERT_EQ(totalBytes % sizeof(float), 0u);
+                const size_t count = totalBytes / sizeof(float);
                 ASSERT_EQ(count % static_cast<size_t>(mock.comm.nRanks), 0u);
-                ASSERT_LE(count * sizeof(float), static_cast<size_t>(NCCL_CE_AR_TMPBUF_DEFAULT_BYTES));
+                ASSERT_EQ((count / static_cast<size_t>(mock.comm.nRanks)) * sizeof(float), slotBytes);
 
                 rcclCollDecision decision{};
                 ncclResult_t res = rcclSelectAllReduce(
@@ -477,7 +479,7 @@ TEST(RcclCeAllReduceEligibility, SelectAllReduce_ForceUnregisteredOverStagingSel
                     ncclProd, /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &decision);
                 EXPECT_EQ(res, ncclSuccess);
                 EXPECT_EQ(decision.algo, RCCL_CE_REGISTERED)
-                    << "FORCE unregistered above staging still enqueues CE up to the 2-shot cap";
+                    << "FORCE unregistered at one full slot still enqueues CE";
             })
             .withEnvironment({{"RCCL_CE_ALLREDUCE", "1"},
                               {"RCCL_FORCE_CE_ALLREDUCE", "1"},
