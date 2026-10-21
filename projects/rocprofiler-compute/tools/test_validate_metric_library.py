@@ -67,6 +67,15 @@ def gfx90a_copy(tmp_path, monkeypatch):
     return copy_shipped_trees(tmp_path, ["gfx908", "gfx90a"])
 
 
+@pytest.fixture
+def gfx950_copy(tmp_path, monkeypatch):
+    """Copies of the gfx950 chain's metric library and analysis configs."""
+    monkeypatch.setattr(MetricLibrary, "_cache", {})
+    return copy_shipped_trees(
+        tmp_path, ["gfx908", "gfx90a", "gfx940", "gfx942", "gfx950"]
+    )
+
+
 def copy_shipped_trees(root, archs):
     library = root / "metric_library"
     configs = root / "analysis_configs"
@@ -191,6 +200,28 @@ def test_metrics_cannot_share_a_formula(tree, formula):
         "['compute.valu_util', 'compute.valu_util_copy']: share a formula" in error
         for error in errors
     )
+
+
+def test_listed_ids_may_share_a_formula(tree, monkeypatch):
+    monkeypatch.setattr(
+        validate_metric_library,
+        "SHARED_FORMULA_IDS",
+        {"compute.valu_util_copy": "compute.valu_util"},
+    )
+    second = BASE_METRIC.replace("valu_util", "valu_util_copy")
+    write_base_metrics(tree, BASE_METRIC + second)
+    assert not any("share a formula" in error for error in validate(tree))
+
+
+def test_listed_id_may_share_only_with_its_partner(tree, monkeypatch):
+    monkeypatch.setattr(
+        validate_metric_library,
+        "SHARED_FORMULA_IDS",
+        {"compute.valu_util_copy": "compute.other_util"},
+    )
+    second = BASE_METRIC.replace("valu_util", "valu_util_copy")
+    write_base_metrics(tree, BASE_METRIC + second)
+    assert any("share a formula" in error for error in validate(tree))
 
 
 def test_child_file_must_inherit_from_its_parent(tree):
@@ -369,6 +400,58 @@ def test_changed_row_measured_peak(gfx90a_copy):
     replace_in(path, "$LDSBw_empirical_peak", "$L2Bw_empirical_peak")
     errors = validate(library, configs)
     assert any("4.1.11 LDS Bandwidth: peak $L2Bw_empirical_peak" in e for e in errors)
+
+
+def test_shared_formula_rows_show_the_id_their_label_names(gfx950_copy):
+    """MXF8 rows read the F8 counter but are checked against compute.mfma_flops_mxf8."""
+    library, configs = gfx950_copy
+    replace_in(
+        configs / "gfx950" / "0400_roofline.yaml",
+        "$MFMAMXF8Flops_empirical_peak",
+        "$MFMAF8Flops_empirical_peak",
+    )
+    errors = validate(library, configs)
+    assert any(
+        "MFMA FLOPs (MXF8): peak $MFMAF8Flops_empirical_peak is neither" in error
+        and error.endswith("compute.mfma_flops_mxf8")
+        for error in errors
+    )
+
+
+def test_shared_formula_id_must_keep_its_partners_formula(gfx950_copy):
+    library, configs = gfx950_copy
+    replace_in(
+        library / "gfx950" / "compute.yaml",
+        "name: MFMA FLOPs (MXF8)\n  formula: 512 *",
+        "name: MFMA FLOPs (MXF8)\n  formula: 999 *",
+    )
+    errors = validate(library, configs)
+    assert any(
+        "compute.mfma_flops_mxf8: SHARED_FORMULA_IDS lists it" in error
+        for error in errors
+    )
+
+
+def test_display_variant_row_is_checked_for_its_unit(gfx950_copy):
+    """30.7.1 names a metric whose generic name another id shares."""
+    library, configs = gfx950_copy
+    replace_in(
+        configs / "gfx950" / "3000_mem_bw.yaml",
+        "* TO_INT($total_l2_chan))\n          unit: Percent",
+        "* TO_INT($total_l2_chan))\n          unit: Cycles",
+    )
+    errors = validate(library, configs)
+    assert any("30.7.1 L2 utilization: unit 'Cycles'" in error for error in errors)
+
+
+def test_variant_position_must_exist(gfx908_copy, monkeypatch):
+    monkeypatch.setitem(
+        validate_metric_library.UNIT_VARIANTS,
+        "gfx908",
+        {**validate_metric_library.UNIT_VARIANTS["gfx908"], "99.9.9": ("X", "Y")},
+    )
+    errors = validate(*gfx908_copy)
+    assert "[gfx908] UNIT_VARIANTS lists 99.9.9, but no row has that position" in errors
 
 
 def test_changed_rewritten_display_variant(gfx908_copy):

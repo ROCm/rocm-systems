@@ -1,0 +1,120 @@
+inherit: ../gfx90a/td.yaml
+td.busy_cycles:
+  name: TD_TD_BUSY
+  formula: SUM(TD_TD_BUSY_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+td.coalescable_wavefronts_rate:
+  name: TD - coalescable wavefronts rate
+  formula: 100 * SUM(TD_COALESCABLE_WAVEFRONT_sum) / SUM(TD_LOAD_WAVEFRONT_sum)
+  unit: Percent
+  description: >-
+    Percentage of wavefronts that TA identified as coalescable. Higher is better for
+    bandwidth efficiency.
+td.input_fifo_full:
+  name: TD - input FIFO full
+  formula: 100 * SUM(TD_TC_TD_FIFO_FULL_sum) / SUM(TD_TD_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of TD busy time when the TCP-TD input FIFO is full. Indicates TD pipeline
+    stall or power throttling.
+td.l1_cu_throughput:
+  name: TD - L1-CU throughput
+  formula: SUM(TD_LOAD_WAVEFRONT_sum) / SUM(TD_TD_BUSY_sum)
+  unit: Instructions per Cycle
+  description: >-
+    Wavefronts returned to CU per TD busy cycle. Measures return path throughput.
+td.load_wavefronts:
+  name: TD - load wavefronts
+  formula: SUM(TD_LOAD_WAVEFRONT_sum) / SUM($denom)
+  unit: (Wavefronts + $normUnit)
+  description: >-
+    Number of load wavefronts processed by TD (includes atomics and stores per counter
+    definition).
+td.normalized_td_input_fifo_full:
+  name: Normalized TD - input FIFO full
+  formula: 100 * SUM(TD_TC_TD_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that TD's input FIFO (receiving data from TCP) was
+    full. Averaged across all CUs. This prevents TCP from sending more data and may
+    indicate TD processing is too slow or a downstream block is backed up.
+td.normalized_td_l1_cu_throughput:
+  name: Normalized TD - L1-CU throughput
+  formula: SUM(TD_LOAD_WAVEFRONT_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1000000000)
+  unit: Instructions/s
+  description: >-
+    Wavefronts returned to CU via TD per second of kernel execution. Normalized to
+    wall-clock time for absolute throughput measurement.
+td.normalized_td_output_fifo_full:
+  name: Normalized TD - output FIFO full
+  formula: 100 * SUM(TD_OUTPUT_FIFO_FULL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that TD's output FIFO was full, meaning TD could
+    not deliver completed data to the CU (VGPR/LDS). Averaged across all CUs. High
+    values indicate backpressure from the CU's register file or LDS.
+td.normalized_td_stalled_by_spi:
+  name: Normalized TD - stalled by SPI
+  formula: 100 * SUM(TD_SPI_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that TD was stalled because SPI (Shader Processor
+    Input) was not ready to accept write-back data to VGPRs. Averaged across all CUs.
+    High values indicate VGPR write port contention.
+td.normalized_td_stalled_by_tcp:
+  name: Normalized TD - stalled by TCP
+  formula: 100 * SUM(TD_TC_STALL_sum) / (SUM($GRBM_GUI_ACTIVE_PER_XCD) * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Percentage of GPU active time that TD was waiting for TCP (L1 Cache) to provide
+    data. Averaged across all CUs. High values indicate L1 cache read latency is slowing
+    the data return path to the CU.
+td.output_fifo_full:
+  name: TD - output FIFO full
+  formula: 100 * SUM(TD_OUTPUT_FIFO_FULL_sum) / SUM(TD_TD_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of TD busy time when the output FIFO is full. Indicates TD-to-VGPR/LDS
+    backpressure.
+td.output_fifo_full_cycles:
+  name: TD_OUTPUT_FIFO_FULL
+  formula: SUM(TD_OUTPUT_FIFO_FULL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+td.spi_stall_cycles:
+  name: TD_SPI_STALL
+  formula: SUM(TD_SPI_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+td.stalled_by_spi:
+  name: TD - stalled by SPI
+  formula: 100 * SUM(TD_SPI_STALL_sum) / SUM(TD_TD_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of TD busy time stalled by SPI (shader processor input). Indicates
+    VGPR write contention.
+td.stalled_by_tcp:
+  name: TD - stalled by TCP
+  formula: 100 * SUM(TD_TC_STALL_sum) / SUM(TD_TD_BUSY_sum)
+  unit: Percent
+  description: >-
+    Percentage of TD busy time spent waiting for TCP (L1 cache) data. A high rate
+    indicates L1 data return bottleneck.
+td.tc_stall_cycles:
+  name: TD_TC_STALL
+  formula: SUM(TD_TC_STALL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+td.tc_td_fifo_full:
+  name: TD_TC_TD_FIFO_FULL
+  formula: SUM(TD_TC_TD_FIFO_FULL_sum) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+td.wr_ack_insts:
+  name: Write Ack Instructions
+  formula: SUM(TD_WRITE_ACKT_WAVEFRONT_sum) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of write acknowledgements submitted by data-return unit to SQ,
+    summed over all compute units on the accelerator, per normalization unit.

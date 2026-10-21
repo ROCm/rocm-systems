@@ -1,0 +1,24 @@
+inherit: ../gfx908/grbm.yaml
+grbm.count:
+  name: GRBM_COUNT
+  formula: SUM(GRBM_COUNT) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+grbm.ea_busy:
+  name: GRBM_EA_BUSY
+  formula: SUM(GRBM_EA_BUSY) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''
+grbm.ea_util:
+  name: EA utilization
+  formula: 100 * SUM(GRBM_EA_BUSY) / SUM(GRBM_GUI_ACTIVE)
+  unit: Percent
+  description: >-
+    Percentage of kernel execution time the EA block is active. Measures overall EA
+    activity level. Low utilization with high memory traffic may indicate EA is not
+    the bottleneck; high utilization indicates heavy memory-side activity.
+grbm.gui_active:
+  name: GRBM_GUI_ACTIVE
+  formula: SUM(GRBM_GUI_ACTIVE) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: ''

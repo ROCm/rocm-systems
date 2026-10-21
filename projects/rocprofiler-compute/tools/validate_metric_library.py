@@ -88,9 +88,21 @@ METRIC_REQUIRED_FIELDS = ("name", "formula", "unit", "description")
 METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical", "coll_level")
 # A roofline benchmark ceiling, the measured peak in "peak_empirical".
 EMPIRICAL_PEAK_RE = re.compile(r"\$(\w+)_empirical_peak")
-# Ceilings the roofline benchmark measures that no metric is bounded by.
-CEILINGS_WITHOUT_METRIC = ("I8Ops", "I32Ops", "I64Ops")
+# Ceilings the roofline benchmark measures that no row shows as a peak: the VALU
+# integer rates, MALL bandwidth (analyze skips MALL, roofline_calc.py), and the gfx950
+# F4 and F6 MFMA rates (the roofline shows only the combined F6F4 rate).
+CEILINGS_WITHOUT_METRIC = (
+    "I8Ops",
+    "I32Ops",
+    "I64Ops",
+    "MALLBw",
+    "MFMAF4Flops",
+    "MFMAF6Flops",
+)
 VARIABLE_FIELDS = ("formula",)
+# Ids allowed to share another id's formula (id -> that id): the same counters bounded
+# by a different measured ceiling. gfx950 counts MXF8 MFMA work in the F8 counter.
+SHARED_FORMULA_IDS = {"compute.mfma_flops_mxf8": "compute.mfma_flops_f8"}
 
 ANALYSIS_CONFIGS = (
     Path(config.rocprof_compute_home) / "rocprof_compute_soc" / "analysis_configs"
@@ -106,7 +118,7 @@ NANOSECONDS = "/SUM(End_Timestamp-Start_Timestamp)"
 # Rows showing a metric in another display form (positional id -> label, metric id,
 # row equation). Without a row equation, the row shows the formula in Bytes/s (the
 # library keeps GB/s); with one, the row writes the formula differently.
-_CDNA_DISPLAY_VARIANTS = {
+_CDNA_MEMORY_CHART_VARIANTS = {
     "3.1.16": ("VL1_L2 Read BW", "vl1d.l2_rd_bw", None),
     "3.1.17": ("VL1_L2 Write BW", "vl1d.l2_wr_bw", None),
     "3.1.18": ("VL1_L2 Atomic BW", "vl1d.l2_atomic_bw", None),
@@ -114,35 +126,191 @@ _CDNA_DISPLAY_VARIANTS = {
     "3.1.24": ("IL1_L2 Read BW", "l1i.l2_bw", None),
     "3.1.26": ("L2-Fabric Read BW", "fabric.rd_bw", None),
     "3.1.27": ("L2-Fabric Write and Atomic BW", "fabric.wr_atomic_bw", None),
-    "4.1.9": (
-        "L2 Cache Bandwidth",
-        "vl1d.l2_bw",
-        "64 * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
-        "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) "
-        "/ SUM(End_Timestamp - Start_Timestamp)",
+}
+# The roofline's L2 bandwidth at its bytes per request (64 up to gfx941, then 128).
+_ROOFLINE_L2_BW_EQUATION = (
+    "{} * SUM(TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+    "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) "
+    "/ SUM(End_Timestamp - Start_Timestamp)"
+)
+_ROOFLINE_L2_BW = (
+    "L2 Cache Bandwidth",
+    "vl1d.l2_bw",
+    _ROOFLINE_L2_BW_EQUATION.format(64),
+)
+_ROOFLINE_L2_BW_128B = (
+    "L2 Cache Bandwidth",
+    "vl1d.l2_bw",
+    _ROOFLINE_L2_BW_EQUATION.format(128),
+)
+_ROOFLINE_LDS_BW = (
+    "LDS Bandwidth",
+    "lds.theoretical_bw",
+    "SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu) "
+    "/ SUM(End_Timestamp - Start_Timestamp)",
+)
+_PIPELINE_MFMA_UTIL = (
+    "MFMA Utilization",
+    "compute.mfma_util",
+    "100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) "
+    "/ (4 * SUM($cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))",
+)
+DISPLAY_VARIANTS = {
+    "gfx908": {
+        **_CDNA_MEMORY_CHART_VARIANTS,
+        "4.1.9": _ROOFLINE_L2_BW,
+        "4.1.11": _ROOFLINE_LDS_BW,
+    },
+    "gfx90a": {
+        **_CDNA_MEMORY_CHART_VARIANTS,
+        "4.1.9": _ROOFLINE_L2_BW,
+        "4.1.11": _ROOFLINE_LDS_BW,
+        "11.2.7": _PIPELINE_MFMA_UTIL,
+    },
+    "gfx940": {
+        **_CDNA_MEMORY_CHART_VARIANTS,
+        "3.1.28": ("Estimated HBM Read BW", "fabric.hbm_rd_bw_est", None),
+        "3.1.29": (
+            "Estimated HBM Write and Atomic BW",
+            "fabric.hbm_wr_atomic_bw_est",
+            None,
+        ),
+        "4.1.10": _ROOFLINE_L2_BW,
+        "4.1.12": _ROOFLINE_LDS_BW,
+        "11.2.7": _PIPELINE_MFMA_UTIL,
+    },
+}
+DISPLAY_VARIANTS["gfx941"] = DISPLAY_VARIANTS["gfx940"]
+DISPLAY_VARIANTS["gfx950"] = {
+    "2.1.23": (
+        "L2-Fabric Read BW",
+        "fabric.rd_bw",
+        "SUM(128 * TCC_EA0_RDREQ_128B_sum + 64 * TCC_EA0_RDREQ_64B_sum "
+        "+ 32 * TCC_EA0_RDREQ_32B_sum) / SUM(End_Timestamp - Start_Timestamp)",
     ),
-    "4.1.11": (
-        "LDS Bandwidth",
-        "lds.theoretical_bw",
-        "SUM((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu) "
-        "/ SUM(End_Timestamp - Start_Timestamp)",
+    "3.1.19": ("VL1_L2 Read BW", "vl1d.l2_rd_bw", None),
+    "3.1.20": ("VL1_L2 Write BW", "vl1d.l2_wr_bw", None),
+    "3.1.21": ("VL1_L2 Atomic BW", "vl1d.l2_atomic_bw", None),
+    "3.1.24": ("sL1D_L2 Read BW", "sl1d.l2_rd_bw", None),
+    "3.1.27": ("IL1_L2 Read BW", "l1i.l2_bw", None),
+    "3.1.29": ("L2-Fabric Read BW", "fabric.rd_bw", None),
+    "3.1.30": ("L2-Fabric Write and Atomic BW", "fabric.wr_atomic_bw", None),
+    "3.1.31": ("HBM Read BW", "fabric.hbm_rd_bw", None),
+    "3.1.32": ("HBM Write BW", "fabric.hbm_wr_bw", None),
+    "3.1.33": ("HBM Atomic BW", "fabric.hbm_atomic_bw", None),
+    "3.1.34": ("HBM Write and Atomic BW", "fabric.hbm_wr_atomic_bw", None),
+    "3.1.35": ("xGMI Read BW", "fabric.xgmi_rd_bw", None),
+    "3.1.36": ("xGMI Write BW", "fabric.xgmi_wr_bw", None),
+    "3.1.37": ("xGMI Atomic BW", "fabric.xgmi_atomic_bw", None),
+    "3.1.38": ("PCIe Read BW", "fabric.pcie_rd_bw", None),
+    "3.1.39": ("PCIe Write BW", "fabric.pcie_wr_bw", None),
+    "3.1.40": ("PCIe Atomic BW", "fabric.pcie_atomic_bw", None),
+    "4.1.12": _ROOFLINE_L2_BW_128B,
+    "4.1.14": _ROOFLINE_LDS_BW,
+    "11.2.9": _PIPELINE_MFMA_UTIL,
+    # Panel 3000 shows each latency as SUM/SUM and as AVG/AVG over the same rows: the
+    # counters are summed across CUs (channels), so both give the same value.
+    "30.2.6": (
+        "L1 latency",
+        "vl1d.average_lat",
+        "AVG(TCP_TCP_LATENCY_sum) / AVG(TCP_TOTAL_ACCESSES_sum)",
+    ),
+    "30.2.10": (
+        "L2 read latency",
+        "vl1d.l2_rd_average_lat",
+        "AVG(TCP_TCC_READ_REQ_LATENCY_sum) / AVG(TCP_TCC_READ_REQ_sum)",
+    ),
+    "30.2.12": (
+        "L2 write latency",
+        "vl1d.l2_wr_average_lat",
+        "AVG(TCP_TCC_WRITE_REQ_LATENCY_sum) / AVG(TCP_TCC_WRITE_REQ_sum)",
+    ),
+    "30.2.14": (
+        "UTCL1 latency",
+        "vl1d.utcl1_average_lat",
+        "AVG(TCP_CLIENT_UTCL1_INFLIGHT_sum) / AVG(TCP_UTCL1_REQUEST_sum)",
+    ),
+    "30.2.16": (
+        "UTCL1 to UTCL2 latency",
+        "vl1d.utcl1_to_utcl2_average_lat",
+        "AVG(TCP_UTCL1_UTCL2_INFLIGHT_sum) / AVG(TCP_UTCL1_TRANSLATION_MISS_sum)",
+    ),
+    "30.8.4": (
+        "L2 to EA read latency",
+        "fabric.rd_lat",
+        "AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)",
+    ),
+    "30.8.6": (
+        "L2 to EA write latency",
+        "fabric.wr_lat",
+        "AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)",
+    ),
+    "30.8.8": (
+        "L2 to EA atomic latency",
+        "fabric.atomic_lat",
+        "AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)",
+    ),
+    "30.14.11": (
+        "EA read latency",
+        "fabric.rd_lat",
+        "AVG(TCC_EA0_RDREQ_LEVEL_sum) / AVG(TCC_EA0_RDREQ_sum)",
+    ),
+    "30.14.13": (
+        "EA write latency",
+        "fabric.wr_lat",
+        "AVG(TCC_EA0_WRREQ_LEVEL_sum) / AVG(TCC_EA0_WRREQ_sum)",
+    ),
+    "30.14.15": (
+        "EA atomic latency",
+        "fabric.atomic_lat",
+        "AVG(TCC_EA0_ATOMIC_LEVEL_sum) / AVG(TCC_EA0_ATOMIC_sum)",
+    ),
+    "30.7.1": (
+        "L2 utilization",
+        "l2.util",
+        "100 * SUM(TCC_BUSY_sum) "
+        "/ (SUM($GRBM_GUI_ACTIVE_PER_XCD) * TO_INT($total_l2_chan))",
     ),
 }
-DISPLAY_VARIANTS = {
-    "gfx908": _CDNA_DISPLAY_VARIANTS,
-    "gfx90a": {
-        **_CDNA_DISPLAY_VARIANTS,
-        "11.2.7": (
-            "MFMA Utilization",
-            "compute.mfma_util",
-            "100 * SUM(SQ_VALU_MFMA_BUSY_CYCLES) "
-            "/ (4 * SUM($cu_per_gpu * $GRBM_GUI_ACTIVE_PER_XCD))",
-        ),
-    },
+DISPLAY_VARIANTS["gfx942"] = {
+    **DISPLAY_VARIANTS["gfx940"],
+    "4.1.10": _ROOFLINE_L2_BW_128B,
+    # TODO(AIPROFCOMP-820): the clamp is deferred (FOLLOWUPS); the other vL1D hit rate
+    # rows have no NOISE_CLAMP.
+    "16.3.5": (
+        "Cache Hit Rate",
+        "vl1d.hit_rate",
+        "100 * SUM(NOISE_CLAMP(TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum "
+        "+ TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum "
+        "+ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum), TCP_TOTAL_CACHE_ACCESSES_sum)) "
+        "/ SUM(TCP_TOTAL_CACHE_ACCESSES_sum)",
+    ),
 }
 # Rows whose unit differs from their metric's (positional id -> label, unit).
 _CDNA_UNIT_VARIANTS = {"7.1.8": ("LDS Allocation", "Bytes")}
-UNIT_VARIANTS = {"gfx908": _CDNA_UNIT_VARIANTS, "gfx90a": _CDNA_UNIT_VARIANTS}
+UNIT_VARIANTS = {
+    arch: _CDNA_UNIT_VARIANTS
+    for arch in ("gfx908", "gfx90a", "gfx940", "gfx941", "gfx942")
+}
+UNIT_VARIANTS["gfx950"] = {
+    **_CDNA_UNIT_VARIANTS,
+    "30.3.6": ("TD - atomic wavefronts", "(Wavefronts + $normUnit)"),
+    "30.3.7": ("TD - store wavefronts", "(Wavefronts + $normUnit)"),
+    "30.6.30": ("TCP_CLIENT_UTCL1_INFLIGHT", "(Cycles + $normUnit)"),
+    "30.6.43": ("TD_LOAD_WAVEFRONT", "(Instructions + $normUnit)"),
+    "30.8.3": ("L2 to EA read average latency", "Cycles per Request"),
+    "30.8.5": ("L2 to EA write average latency", "Cycles per Request"),
+    "30.8.7": ("L2 to EA atomic average latency", "Cycles per Request"),
+    "30.14.10": ("EA read average latency", "Cycles per Request"),
+    "30.14.12": ("EA write average latency", "Cycles per Request"),
+    "30.14.14": ("EA atomic average latency", "Cycles per Request"),
+    "30.8.4": ("L2 to EA read latency", "Cycles per Request"),
+    "30.8.6": ("L2 to EA write latency", "Cycles per Request"),
+    "30.8.8": ("L2 to EA atomic latency", "Cycles per Request"),
+    "30.14.11": ("EA read latency", "Cycles per Request"),
+    "30.14.13": ("EA write latency", "Cycles per Request"),
+    "30.14.15": ("EA atomic latency", "Cycles per Request"),
+}
 
 
 def validate(metric_dir: Path, analysis_dir: Optional[Path] = None) -> list[str]:
@@ -202,19 +370,24 @@ def equivalence_errors(metric_dir: Path, analysis_dir: Path, arch: str) -> list[
     formulas = {
         _canonical(metric["formula"]): metric_id
         for metric_id, metric in library.metrics.items()
+        if metric_id not in SHARED_FORMULA_IDS
     }
     names = {
         metric["name"].casefold(): metric_id
         for metric_id, metric in library.metrics.items()
     }
-    metric_ids = [_row_metric_id(row, variants, formulas, names) for row in rows]
+    metric_ids = [
+        _row_metric_id(row, variants, formulas, names, set(library.metrics))
+        for row in rows
+    ]
     return [
         *_row_errors(arch, rows, metric_ids, library),
         *_unshown_errors(arch, rows, metric_ids, library),
         *_unit_errors(arch, rows, metric_ids, library),
         *_peak_errors(arch, rows, metric_ids, library),
-        *_counter_errors(arch, library, analysis_dir),
+        *_counter_errors(arch, rows, library, analysis_dir),
         *_builtin_var_errors(arch, library),
+        *_unused_variant_errors(arch, rows),
     ]
 
 
@@ -375,11 +548,24 @@ def _shared_formula_errors(arch: str, metrics: dict[str, Any]) -> list[str]:
     ids_by_formula = defaultdict(list)
     for metric_id, metric in metrics.items():
         ids_by_formula[_canonical(metric.get("formula"))].append(metric_id)
-    return [
+    listed_pairs = [{shared, partner} for shared, partner in SHARED_FORMULA_IDS.items()]
+    errors = [
         f"[{arch}] {metric_ids}: share a formula; merge them into one id"
         for formula, metric_ids in ids_by_formula.items()
-        if formula is not None and len(metric_ids) > 1
+        if formula is not None
+        and len(metric_ids) > 1
+        and set(metric_ids) not in listed_pairs
     ]
+    errors.extend(
+        f"[{arch}] {shared}: SHARED_FORMULA_IDS lists it with {partner}, but their "
+        "formulas differ"
+        for shared, partner in SHARED_FORMULA_IDS.items()
+        if shared in metrics
+        and partner in metrics
+        and _canonical(metrics[shared].get("formula"))
+        != _canonical(metrics[partner].get("formula"))
+    )
+    return errors
 
 
 def _arch_ceilings(arch: str) -> set[str]:
@@ -411,17 +597,23 @@ def _row_metric_id(
     variants: dict[str, tuple],
     formulas: dict[str, str],
     names: dict[str, str],
+    library_ids: set[str],
 ) -> Optional[str]:
     """Return the id of the metric a row shows, or None if it shows none.
 
-    A row without an equation (value: None) is hidden; its label names the metric.
+    A row without an equation (value: None) is hidden; its label names the metric. A
+    row whose label names an id of SHARED_FORMULA_IDS shows that id.
     """
     if row.legacy_id in variants:
         metric_id = variants[row.legacy_id][1]
-        return metric_id if metric_id in formulas.values() else None
+        return metric_id if metric_id in library_ids else None
+    named_id = names.get(row.label.casefold())
     if row.equation is None:
-        return names.get(row.label.casefold())
-    return formulas.get(row.equation)
+        return named_id
+    metric_id = formulas.get(row.equation)
+    if metric_id is not None and SHARED_FORMULA_IDS.get(named_id) == metric_id:
+        return named_id
+    return metric_id
 
 
 def _row_errors(
@@ -458,6 +650,20 @@ def _variant_errors(
     if row.equation == expected:
         return []
     return [f"[{arch}] {row.legacy_id} {label}: not the listed form of {metric_id}"]
+
+
+def _unused_variant_errors(arch: str, rows: list["_Row"]) -> list[str]:
+    """Report DISPLAY_VARIANTS and UNIT_VARIANTS entries at a position no row has."""
+    positions = {row.legacy_id for row in rows}
+    return [
+        f"[{arch}] {name} lists {legacy_id}, but no row has that position"
+        for name, listed in (
+            ("DISPLAY_VARIANTS", DISPLAY_VARIANTS.get(arch, {})),
+            ("UNIT_VARIANTS", UNIT_VARIANTS.get(arch, {})),
+        )
+        for legacy_id in listed
+        if legacy_id not in positions
+    ]
 
 
 def _unshown_errors(
@@ -543,7 +749,16 @@ def _peak_errors(
     return errors
 
 
-def _counter_errors(arch: str, library: MetricLibrary, analysis_dir: Path) -> list[str]:
+def _counter_errors(
+    arch: str, rows: list["_Row"], library: MetricLibrary, analysis_dir: Path
+) -> list[str]:
+    """Check that the library selects the counters detect_counters() selects.
+
+    detect_counters() scans the panel text, so it also takes the counter name a
+    raw-counter row is labeled with ("TA_TA_BUSY", "TCP_GATE_EN1 (free running
+    cycles)"), whose formula reads "<name>_sum". The library takes counters from
+    formulas only (D1), so those names are not missing.
+    """
     has_membw_panel = any(
         (analysis_dir / arch).glob(f"{MEMBW_ANALYSIS_PANEL_ID}_*.yaml")
     )
@@ -552,9 +767,12 @@ def _counter_errors(arch: str, library: MetricLibrary, analysis_dir: Path) -> li
     actual = soc._expand_tcc_template_counters(
         library.get_counters_for_metrics(list(library.metrics), _gpu_series(arch))
     )
+    label_names = {row.label.split()[0] for row in rows}
+    row_labels = {name for name in label_names if f"{name}_sum" in actual}
     errors = []
-    if expected - actual:
-        errors.append(f"[{arch}] counters missing: {sorted(expected - actual)}")
+    if expected - actual - row_labels:
+        missing = sorted(expected - actual - row_labels)
+        errors.append(f"[{arch}] counters missing: {missing}")
     if actual - expected:
         errors.append(f"[{arch}] extra counters: {sorted(actual - expected)}")
     return errors
