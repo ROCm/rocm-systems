@@ -297,6 +297,10 @@ CREATE TABLE IF NOT EXISTS
     );
 
 -- GPU PC sampling data (common fields + event_id correlation to rocpd_blob_event)
+-- code_object_id intentionally has no FK: 0 means an unknown code object, and
+-- samples must survive missing code-object metadata without inventing a parent.
+-- IDs use INTEGER like their metadata keys. Timestamps/offsets retain BIGINT.
+-- Both declarations have SQLite INTEGER affinity and signed 64-bit storage.
 CREATE TABLE IF NOT EXISTS
     `rocpd_gpu_pc_sample{{uuid}}` (
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -310,7 +314,7 @@ CREATE TABLE IF NOT EXISTS
         "dispatch_id" INTEGER,
         "correlation_id" INTEGER,
         "exec_mask" TEXT,
-        "code_object_id" BIGINT,
+        "code_object_id" INTEGER,
         "code_object_offset" BIGINT,
         "wave_issued" INTEGER,
         "inst_type" INTEGER,
@@ -330,14 +334,18 @@ CREATE TABLE IF NOT EXISTS
 -- disassembled lazily from a code object whose recorded content hash matches
 -- are written back at process exit (disable with the rocpd
 -- --no-cache-disassembly flag / cache_disassembly=False).  Rows are deduplicated
--- per (guid, code_object_id, code_object_offset).
+-- by the collection writer per (code_object_id, code_object_offset) within one
+-- recording, and by cache write-back per (guid, code_object_id, code_object_offset)
+-- under BEGIN IMMEDIATE. This is an application invariant, not a UNIQUE constraint.
+-- As with PC samples, code_object_id has no FK so stored text remains readable
+-- even when the corresponding code-object metadata is unavailable.
 CREATE TABLE IF NOT EXISTS
     `rocpd_disassembly_data{{uuid}}` (
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
         "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
         "nid" INTEGER NOT NULL,
         "pid" INTEGER NOT NULL,
-        "code_object_id" BIGINT,
+        "code_object_id" INTEGER,
         "code_object_offset" BIGINT,
         "instruction" TEXT,
         "comment" TEXT,

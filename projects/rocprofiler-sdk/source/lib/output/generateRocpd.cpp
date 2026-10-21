@@ -1173,6 +1173,7 @@ using pc_sample_blob_layout = std::vector<pc_sample_blob_field<SampleT>>;
 
 enum class pc_sample_arch
 {
+    unknown,
     gfx9,
     gfx12,
     gfx1250,
@@ -1185,7 +1186,8 @@ get_pc_sample_arch(uint32_t gfx_target_version)
     const auto minor = (gfx_target_version / 100) % 100;
     if(major == 12 && minor == 5) return pc_sample_arch::gfx1250;
     if(major == 12) return pc_sample_arch::gfx12;
-    return pc_sample_arch::gfx9;
+    if(major == 9) return pc_sample_arch::gfx9;
+    return pc_sample_arch::unknown;
 }
 
 // Recover the record type Tp from a generator<Tp> so callers need not name it.
@@ -1301,28 +1303,31 @@ append_pc_sample_wave_workgroup_fields(pc_sample_blob_layout<SampleT>& out)
 }
 
 // Snapshot group (arbiter/dual-issue state) -- stochastic only.
-template <typename SampleT>
+template <pc_sample_arch Arch, typename SampleT>
 void
 append_pc_sample_snapshot_fields(pc_sample_blob_layout<SampleT>& out)
 {
-    out.push_back({"dual_issue_valu",
-                   "uint8_t",
-                   1,
-                   false,
-                   "Dual-issue VALU (stochastic only)",
-                   [](const SampleT& r) -> uint64_t { return r.snapshot.dual_issue_valu; }});
+    if constexpr(Arch == pc_sample_arch::gfx9)
+        out.push_back({"dual_issue_valu",
+                       "uint8_t",
+                       1,
+                       false,
+                       "Dual-issue VALU (stochastic only)",
+                       [](const SampleT& r) -> uint64_t { return r.snapshot.dual_issue_valu; }});
     out.push_back({"arb_state_issue_valu",
                    "uint8_t",
                    1,
                    false,
                    "Arbiter issued VALU instruction",
                    [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_valu; }});
-    out.push_back({"arb_state_issue_matrix",
-                   "uint8_t",
-                   1,
-                   false,
-                   "Arbiter issued matrix instruction",
-                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_matrix; }});
+    if constexpr(Arch == pc_sample_arch::gfx9)
+        out.push_back(
+            {"arb_state_issue_matrix",
+             "uint8_t",
+             1,
+             false,
+             "Arbiter issued matrix instruction",
+             [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_matrix; }});
     out.push_back({"arb_state_issue_lds",
                    "uint8_t",
                    1,
@@ -1342,36 +1347,42 @@ append_pc_sample_snapshot_fields(pc_sample_blob_layout<SampleT>& out)
          false,
          "Arbiter issued VMEM/TEX instruction",
          [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_vmem_tex; }});
-    out.push_back({"arb_state_issue_flat",
-                   "uint8_t",
-                   1,
-                   false,
-                   "Arbiter issued FLAT instruction",
-                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_flat; }});
+    if constexpr(Arch == pc_sample_arch::gfx9)
+        out.push_back(
+            {"arb_state_issue_flat",
+             "uint8_t",
+             1,
+             false,
+             "Arbiter issued FLAT instruction",
+             [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_flat; }});
     out.push_back({"arb_state_issue_exp",
                    "uint8_t",
                    1,
                    false,
                    "Arbiter issued export instruction",
                    [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_exp; }});
-    out.push_back({"arb_state_issue_misc",
-                   "uint8_t",
-                   1,
-                   false,
-                   "Arbiter issued misc instruction",
-                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_misc; }});
+    if constexpr(Arch == pc_sample_arch::gfx9)
+        out.push_back(
+            {"arb_state_issue_misc",
+             "uint8_t",
+             1,
+             false,
+             "Arbiter issued misc instruction",
+             [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_issue_misc; }});
     out.push_back({"arb_state_stall_valu",
                    "uint8_t",
                    1,
                    false,
                    "VALU stall",
                    [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_valu; }});
-    out.push_back({"arb_state_stall_matrix",
-                   "uint8_t",
-                   1,
-                   false,
-                   "Matrix stall",
-                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_matrix; }});
+    if constexpr(Arch == pc_sample_arch::gfx9)
+        out.push_back(
+            {"arb_state_stall_matrix",
+             "uint8_t",
+             1,
+             false,
+             "Matrix stall",
+             [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_matrix; }});
     out.push_back(
         {"arb_state_stall_lds", "uint8_t", 1, false, "LDS stall", [](const SampleT& r) -> uint64_t {
              return r.snapshot.arb_state_stall_lds;
@@ -1389,24 +1400,28 @@ append_pc_sample_snapshot_fields(pc_sample_blob_layout<SampleT>& out)
          false,
          "VMEM/TEX stall",
          [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_vmem_tex; }});
-    out.push_back({"arb_state_stall_flat",
-                   "uint8_t",
-                   1,
-                   false,
-                   "Flat stall",
-                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_flat; }});
+    if constexpr(Arch == pc_sample_arch::gfx9)
+        out.push_back(
+            {"arb_state_stall_flat",
+             "uint8_t",
+             1,
+             false,
+             "Flat stall",
+             [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_flat; }});
     out.push_back({"arb_state_stall_exp",
                    "uint8_t",
                    1,
                    false,
                    "Export stall",
                    [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_exp; }});
-    out.push_back({"arb_state_stall_misc",
-                   "uint8_t",
-                   1,
-                   false,
-                   "Misc stall",
-                   [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_misc; }});
+    if constexpr(Arch == pc_sample_arch::gfx9)
+        out.push_back(
+            {"arb_state_stall_misc",
+             "uint8_t",
+             1,
+             false,
+             "Misc stall",
+             [](const SampleT& r) -> uint64_t { return r.snapshot.arb_state_stall_misc; }});
 }
 
 // GFX12 adds two issue/stall pipes to the stochastic record.
@@ -1528,22 +1543,26 @@ append_pc_sample_gfx1250_memory_counter_fields(pc_sample_blob_layout<SampleT>& o
 // and the GFX12/GFX1250 groups the sample's architecture and memory-counter flag allow.
 // IsStochastic is a compile-time parameter so the snapshot extractors (which read .snapshot)
 // are only instantiated for the stochastic record.
-template <bool IsStochastic, typename SampleT>
+template <bool IsStochastic, pc_sample_arch Arch, typename SampleT>
 pc_sample_blob_layout<SampleT>
-make_pc_sample_layout(pc_sample_arch arch, bool has_memory_counters)
+make_pc_sample_layout(bool has_memory_counters)
 {
     auto out = pc_sample_blob_layout<SampleT>{};
     append_pc_sample_hw_id_fields(out);
     append_pc_sample_wave_workgroup_fields(out);
     if constexpr(IsStochastic)
     {
-        append_pc_sample_snapshot_fields(out);
-        if(arch >= pc_sample_arch::gfx12) append_pc_sample_gfx12_snapshot_fields(out);
-        if(arch == pc_sample_arch::gfx1250) append_pc_sample_gfx1250_snapshot_fields(out);
-        if(has_memory_counters && arch >= pc_sample_arch::gfx12)
-            append_pc_sample_gfx12_memory_counter_fields(out);
-        if(has_memory_counters && arch == pc_sample_arch::gfx1250)
-            append_pc_sample_gfx1250_memory_counter_fields(out);
+        append_pc_sample_snapshot_fields<Arch>(out);
+        if constexpr(Arch >= pc_sample_arch::gfx12) append_pc_sample_gfx12_snapshot_fields(out);
+        if constexpr(Arch == pc_sample_arch::gfx1250) append_pc_sample_gfx1250_snapshot_fields(out);
+        if constexpr(Arch >= pc_sample_arch::gfx12)
+        {
+            if(has_memory_counters) append_pc_sample_gfx12_memory_counter_fields(out);
+        }
+        if constexpr(Arch == pc_sample_arch::gfx1250)
+        {
+            if(has_memory_counters) append_pc_sample_gfx1250_memory_counter_fields(out);
+        }
     }
     return out;
 }
@@ -1672,6 +1691,17 @@ struct pc_dispatch_context
 };
 }  // namespace
 
+// ROCpd writer workflow (one connection, one writer thread):
+// 1. Initialize the recording schema and metadata. rocpd_db owns statement caches,
+//    pending batches, and an initially empty blob-buffer pool. PC layouts are registered
+//    on first use; flush a schema row before reading its generated id or adding its fields.
+// 2. Enqueue rows in per-table batches. Capacity, field-set changes, and cache eviction
+//    trigger flushes; FK-parent batches are recursively flushed before child rows.
+//    Pending rows own bound strings/blobs until step, reset, and clear-bindings complete,
+//    after which blob storage can return to the bounded pool.
+// 3. Drain pending rows before finalizing output. rocpd_db destruction also drains any
+//    remaining batches, finalizes cached statements, and closes the connection; its
+//    pooled storage therefore outlives every statement that could reference it.
 void
 write_rocpd(
     const output_config&                                                    cfg,
@@ -3191,15 +3221,32 @@ write_rocpd(
             auto key = layout_key_t{arch, has_memory_counters};
             if(auto itr = layouts.find(key); itr != layouts.end()) return itr->second;
 
-            auto fields = make_pc_sample_layout<is_stochastic, sample_t>(arch, has_memory_counters);
-            auto size   = pc_sample_blob_size(fields);
+            auto fields = [&]() {
+                if(arch == pc_sample_arch::gfx1250)
+                    return make_pc_sample_layout<is_stochastic, pc_sample_arch::gfx1250, sample_t>(
+                        has_memory_counters);
+                if(arch == pc_sample_arch::gfx12)
+                    return make_pc_sample_layout<is_stochastic, pc_sample_arch::gfx12, sample_t>(
+                        has_memory_counters);
+                if(arch == pc_sample_arch::gfx9)
+                    return make_pc_sample_layout<is_stochastic, pc_sample_arch::gfx9, sample_t>(
+                        has_memory_counters);
+                return make_pc_sample_layout<is_stochastic, pc_sample_arch::unknown, sample_t>(
+                    has_memory_counters);
+            }();
+            auto size        = pc_sample_blob_size(fields);
             auto schema_name = std::string{"pc_sample_extdata_hosttrap"};
             auto schema_desc = std::string{"PC sampling fields (host-trap, packed)"};
             if constexpr(is_stochastic)
             {
                 schema_name = "pc_sample_extdata_stochastic";
                 schema_desc = "PC sampling fields (stochastic, packed)";
-                if(arch == pc_sample_arch::gfx12)
+                if(arch == pc_sample_arch::unknown)
+                {
+                    schema_name += "_unknown_arch";
+                    schema_desc += ", architecture unavailable; shared fields only";
+                }
+                else if(arch == pc_sample_arch::gfx12)
                 {
                     schema_name += "_gfx12";
                     schema_desc += ", GFX12 layout";
@@ -3230,7 +3277,10 @@ write_rocpd(
         auto code_object_agent_ids = std::unordered_map<uint64_t, uint64_t>{};
         for(const auto& code_object : tool_metadata.get_code_objects())
         {
-            if(const auto* agent = tool_metadata.get_agent(code_object.agent_id))
+            const auto code_object_agent =
+                tool_metadata.get_code_object_agent(code_object.code_object_id);
+            if(!code_object_agent) continue;
+            if(const auto* agent = tool_metadata.get_agent(*code_object_agent))
             {
                 code_object_archs.emplace(code_object.code_object_id,
                                           get_pc_sample_arch(agent->gfx_target_version));
@@ -3272,7 +3322,7 @@ write_rocpd(
                         agent != code_object_agent_ids.end())
                     agent_id = agent->second;
 
-                auto arch                = pc_sample_arch::gfx9;
+                auto arch                = pc_sample_arch::unknown;
                 auto has_memory_counters = false;
                 if constexpr(is_stochastic)
                 {
