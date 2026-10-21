@@ -360,8 +360,9 @@ install(
 )
 
 # rdc_watch_table_tests: watches of destroyed groups, samples for every job and
-# health watch that holds them, and job stats from process events and power
-# samples. It compiles RdcWatchTableImpl.cc, RdcGroupSettingsImpl.cc and
+# health watch that holds them, job stats from process events and power
+# samples, the events that the cache keeps, rdc_field_get_value_since() and the
+# cache's sample count. It compiles RdcWatchTableImpl.cc, RdcGroupSettingsImpl.cc and
 # RdcCacheManagerImpl.cc instead of linking librdc and reads fields from a
 # recording telemetry module, so it needs no GPU; librdc_bootstrap provides the
 # logger.

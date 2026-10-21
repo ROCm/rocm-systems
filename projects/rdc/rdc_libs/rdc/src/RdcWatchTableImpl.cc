@@ -368,10 +368,10 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
             break;
           }
         }
-        if (not_supported) {
-          if (!notifications_->is_notification_event(it->second)) {
-            unsupported_fields++;
-          }
+        // Event fields come from the notifications, not from the telemetry module: they stay,
+        // so that the watch's limits apply to their cached samples, and are never read.
+        if (not_supported && !notifications_->is_notification_event(it->second)) {
+          unsupported_fields++;
           it = fields_in_watch.erase(it);
         } else {
           it++;
@@ -411,7 +411,8 @@ rdc_status_t RdcWatchTableImpl::rdc_field_watch(rdc_gpu_group_t group_id,
     std::vector<rdc_gpu_field_t> fields;
     auto fields_to_watch_iter = fields_to_watch_.begin();
     for (; fields_to_watch_iter != fields_to_watch_.end(); fields_to_watch_iter++) {
-      if (fields_to_watch_iter->second.is_watching) {
+      if (fields_to_watch_iter->second.is_watching &&
+          !notifications_->is_notification_event(fields_to_watch_iter->first.second)) {
         fields.push_back({fields_to_watch_iter->first.first, fields_to_watch_iter->first.second});
       }
     }
@@ -1118,7 +1119,9 @@ rdc_status_t RdcWatchTableImpl::rdc_field_update_all() {
   for (; fite != fields_to_watch_.end(); fite++) {
     // Is this field need to be updated?
     uint64_t track_freq = fite->second.update_freq / 1000;
-    if (!fite->second.is_watching || fite->second.last_update_time + track_freq > now) {
+    // Event fields are not read: their samples come with the events.
+    if (!fite->second.is_watching || fite->second.last_update_time + track_freq > now ||
+        notifications_->is_notification_event(fite->first.second)) {
       continue;
     }
     fields.push_back({fite->first.first, fite->first.second});
@@ -1165,8 +1168,10 @@ rdc_status_t RdcWatchTableImpl::rdc_notif_update_cache(rdc_evnt_notification_t* 
       continue;
     }
 
-    // Update the cache
-    cache_mgr_->rdc_update_cache(gpu_index, events[i].field);
+    // Update the cache, for a watch that holds the event field: its limits evict the samples
+    if (ite != fields_to_watch_.end() && ite->second.is_watching) {
+      cache_mgr_->rdc_update_cache(gpu_index, events[i].field);
+    }
 
     // Update the stats cache of every job, and of every health watch, that holds the field
     for (const auto& job_id : jobs_holding(gpu_index, field_id)) {

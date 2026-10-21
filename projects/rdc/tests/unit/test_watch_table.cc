@@ -20,8 +20,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-// Watches of destroyed groups, samples for every job and health watch that holds them, and the
-// job stats that process events and power samples make. Needs no GPU: the test builds
+// Watches of destroyed groups, samples for every job and health watch that holds them, the job
+// stats that process events and power samples make, and what the cache keeps of events and
+// returns from rdc_field_get_value_since(). Needs no GPU: the test builds
 // RdcWatchTableImpl.cc, RdcGroupSettingsImpl.cc and RdcCacheManagerImpl.cc itself instead of
 // linking librdc, with a telemetry module that records what it is asked, and links only
 // librdc_bootstrap.
@@ -207,6 +208,32 @@ class WatchTable : public ::testing::Test {
     return read;
   }
 
+  // Queues an event for the next rdc_field_listen_notif().
+  void deliver(uint32_t gpu, rdc_field_t field, const std::string& text, uint64_t ts) {
+    amd::rdc::rdc_evnt_notification_t event = {};
+    event.gpu_id = gpu;
+    event.field.field_id = field;
+    event.field.status = RDC_ST_OK;
+    event.field.type = STRING;
+    event.field.ts = ts;
+    strncpy(event.field.value.str, text.c_str(), sizeof(event.field.value.str) - 1);
+    events_->queued.push_back(event);
+  }
+
+  // The texts of the event samples that the cache holds for the field, oldest first.
+  std::vector<std::string> cached_events(uint32_t gpu, rdc_field_t field) {
+    std::vector<std::string> texts;
+    uint64_t since = 0;
+    for (int i = 0; i < 100; i++) {
+      rdc_field_value value = {};
+      uint64_t next = 0;
+      if (cache_->rdc_field_get_value_since(gpu, field, since, &next, &value) != RDC_ST_OK) break;
+      texts.emplace_back(value.value.str);
+      since = next;
+    }
+    return texts;
+  }
+
   std::shared_ptr<amd::rdc::RdcGroupSettingsImpl> groups_ =
       std::make_shared<amd::rdc::RdcGroupSettingsImpl>(std::make_shared<OnePartition>());
   std::shared_ptr<amd::rdc::RdcCacheManagerImpl> cache_ =
@@ -349,6 +376,60 @@ TEST_F(WatchTable, EveryHealthWatchOnAGpuGetsItsSamples) {
   }
 }
 
+TEST_F(WatchTable, EventSamplesFollowTheLimitsOfTheirWatch) {
+  const rdc_gpu_group_t gpus = group("gpus", {0});
+  const rdc_field_grp_t faults = field_group(RDC_EVNT_NOTIF_VMFAULT);
+  // Samples are kept for 60 s, and 2 at most.
+  ASSERT_EQ(watch_table_.rdc_field_watch(gpus, faults, 1000000, 60, 2), RDC_ST_OK);
+  const uint64_t now = now_ms();
+  deliver(0, RDC_EVNT_NOTIF_VMFAULT, "old", now - 120000);
+  for (int i = 1; i <= 4; i++) {
+    deliver(0, RDC_EVNT_NOTIF_VMFAULT, "fault " + std::to_string(i), now + i);
+  }
+  ASSERT_EQ(watch_table_.rdc_field_listen_notif(0), RDC_ST_OK);
+
+  update_all();
+  EXPECT_EQ(cached_events(0, RDC_EVNT_NOTIF_VMFAULT),
+            (std::vector<std::string>{"fault 3", "fault 4"}));
+}
+
+TEST_F(WatchTable, EventsThatNoWatchHoldsAreNotCached) {
+  const rdc_gpu_group_t gpus = group("gpus", {0});
+  char job[64] = "job";
+  ASSERT_EQ(watch_table_.rdc_job_start_stats(gpus, job, 1, gauges_), RDC_ST_OK);
+  deliver(0, RDC_EVNT_NOTIF_PROCESS_START, "PID: 42  task: p", now_ms());
+  ASSERT_EQ(watch_table_.rdc_field_listen_notif(0), RDC_ST_OK);
+
+  // The job lists the process; no watch holds the event field, so the cache keeps nothing.
+  auto info = std::make_unique<rdc_job_info_t>();
+  ASSERT_EQ(cache_->rdc_job_get_stats(job, gauges_, info.get()), RDC_ST_OK);
+  EXPECT_EQ(info->num_processes, 1u);
+  EXPECT_TRUE(cached_events(0, RDC_EVNT_NOTIF_PROCESS_START).empty());
+}
+
+TEST_F(WatchTable, EventsAfterTheUnwatchAreNotCached) {
+  const rdc_gpu_group_t gpus = group("gpus", {0});
+  const rdc_field_grp_t faults = field_group(RDC_EVNT_NOTIF_VMFAULT);
+  ASSERT_EQ(watch_table_.rdc_field_watch(gpus, faults, 1000000, 60, 10), RDC_ST_OK);
+  const uint64_t now = now_ms();
+  deliver(0, RDC_EVNT_NOTIF_VMFAULT, "watched", now);
+  ASSERT_EQ(watch_table_.rdc_field_listen_notif(0), RDC_ST_OK);
+  ASSERT_EQ(watch_table_.rdc_field_unwatch(gpus, faults), RDC_ST_OK);
+  deliver(0, RDC_EVNT_NOTIF_VMFAULT, "unwatched", now + 1);
+  ASSERT_EQ(watch_table_.rdc_field_listen_notif(0), RDC_ST_OK);
+
+  // The samples of the watch stay until they age out; none is added after the unwatch.
+  EXPECT_EQ(cached_events(0, RDC_EVNT_NOTIF_VMFAULT), (std::vector<std::string>{"watched"}));
+}
+
+TEST_F(WatchTable, EventFieldsAreNotRead) {
+  const rdc_gpu_group_t gpus = group("gpus", {0});
+  ASSERT_EQ(watch_table_.rdc_field_watch(gpus, field_group(RDC_EVNT_NOTIF_VMFAULT), 1, 60, 2),
+            RDC_ST_OK);
+  ASSERT_EQ(watch_table_.rdc_field_watch(gpus, field_group(RDC_FI_GPU_UTIL), 1, 60, 2), RDC_ST_OK);
+  EXPECT_EQ(update_all(), std::vector<RdcFieldKey>{RdcFieldKey(0, RDC_FI_GPU_UTIL)});
+}
+
 // A job on GPU 0 whose field group holds only the power usage, in the cache alone.
 class JobStats : public ::testing::Test {
  protected:
@@ -449,6 +530,78 @@ TEST_F(JobStats, EnergyKeepsFractionsOfAJoule) {
     power(ts, 5000000);  // 0.5 J each
   }
   EXPECT_EQ(stats()->gpus[0].energy_consumed, 5u);
+}
+
+rdc_field_value util_sample(uint64_t ts, int64_t value) {
+  rdc_field_value sample = {};
+  sample.field_id = RDC_FI_GPU_UTIL;
+  sample.status = RDC_ST_OK;
+  sample.type = INTEGER;
+  sample.ts = ts;
+  sample.value.l_int = value;
+  return sample;
+}
+
+// The values that a client loop over rdc_field_get_value_since() gets, from since 0 on; every
+// next_since must be later than the sample it came with.
+std::vector<int64_t> values_since(amd::rdc::RdcCacheManagerImpl& cache) {
+  std::vector<int64_t> values;
+  uint64_t since = 0;
+  for (int i = 0; i < 10; i++) {
+    rdc_field_value value = {};
+    uint64_t next = 0;
+    if (cache.rdc_field_get_value_since(0, RDC_FI_GPU_UTIL, since, &next, &value) != RDC_ST_OK) {
+      break;
+    }
+    values.push_back(value.value.l_int);
+    EXPECT_GT(next, value.ts);
+    since = next;
+  }
+  return values;
+}
+
+TEST(Cache, ValueSinceReturnsEachSampleOnce) {
+  amd::rdc::RdcCacheManagerImpl cache;
+  for (int64_t i = 0; i < 3; i++) {
+    cache.rdc_update_cache(0, util_sample(1000 + i, i));
+  }
+  EXPECT_EQ(values_since(cache), (std::vector<int64_t>{0, 1, 2}));
+}
+
+TEST(Cache, ValueSinceSkipsASampleThatSharesItsMillisecond) {
+  amd::rdc::RdcCacheManagerImpl cache;
+  cache.rdc_update_cache(0, util_sample(1000, 1));
+  cache.rdc_update_cache(0, util_sample(1000, 2));
+  cache.rdc_update_cache(0, util_sample(1001, 3));
+  EXPECT_EQ(values_since(cache), (std::vector<int64_t>{1, 3}));
+}
+
+TEST(Cache, WarnsOnceAboveItsSampleThreshold) {
+  amd::rdc::RdcCacheManagerImpl cache(10);
+  testing::internal::CaptureStdout();
+  for (uint64_t ts = 1; ts <= 30; ts++) {
+    cache.rdc_update_cache(0, util_sample(ts, 1));
+  }
+  const std::string log = testing::internal::GetCapturedStdout();
+  const size_t first = log.find("more than 10 samples");
+  ASSERT_NE(first, std::string::npos) << log;
+  EXPECT_EQ(log.find("more than 10 samples", first + 1), std::string::npos) << log;
+}
+
+TEST(Cache, CountsOnlyTheSamplesItHolds) {
+  amd::rdc::RdcCacheManagerImpl cache(10);
+  const uint64_t now = now_ms();
+  testing::internal::CaptureStdout();
+  // 10 samples are not more than 10. Eviction leaves 2 of them, and 8 more make 10 again.
+  for (uint64_t i = 0; i < 10; i++) {
+    cache.rdc_update_cache(0, util_sample(now + i, 1));
+  }
+  EXPECT_EQ(cache.evict_cache(0, RDC_FI_GPU_UTIL, 2, 3600), RDC_ST_OK);
+  for (uint64_t i = 10; i < 18; i++) {
+    cache.rdc_update_cache(0, util_sample(now + i, 1));
+  }
+  const std::string log = testing::internal::GetCapturedStdout();
+  EXPECT_EQ(log.find("more than 10 samples"), std::string::npos) << log;
 }
 
 }  // namespace

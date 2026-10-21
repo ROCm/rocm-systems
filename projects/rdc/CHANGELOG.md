@@ -22,6 +22,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdc.h` documents field value timestamps (`rdc_field_value.ts`) and the timestamps of `rdc_field_get_value_since()` in milliseconds. It said microseconds.
 
+- rdcd logs an error, at most once a minute, while its cache holds more than 4,000,000 field samples.
+
 ### Removed
 
 - Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
@@ -100,6 +102,10 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdci stats -j` no longer reports a huge energy after a power sample with an earlier timestamp or a negative power reading, and no longer drops energy below one joule per sample, which made it 0 at low power or short update intervals.
 
 - Job stats no longer list a process with ID 0 for a process event that names no process.
+
+- rdcd no longer keeps every GPU event in its cache for as long as it runs. It now caches an event only while a watch holds its field, within that watch's `max_keep_samples` and `max_keep_age`.
+
+- A loop over `rdc_field_get_value_since()` no longer gets the same sample again and again when two samples of a field share a millisecond: `next_since_time_stamp` is now always later than the returned sample, and the later sample of that millisecond is skipped.
 
 ## RDC 1.3.1 for ROCm 7.14.0
 
