@@ -6,9 +6,6 @@
 
 #include "fakes/libc_fakes.h"
 
-// Puts the seam's 34 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
-// this file. Without it the two lists are hand-maintained and both extern "C", so a drifted parameter type would link
-// cleanly and corrupt arguments at run time. Include the undef half immediately: this file's defaults call real libc.
 #include "fakes/libc_seam.h"
 #include "fakes/libc_seam_undef.h"
 
@@ -322,6 +319,15 @@ static int DefaultAtexit(void (*fn)(void)) {
   return 0;
 }
 
+static int DefaultClockGettime(clockid_t clk, struct timespec* ts) { return ::clock_gettime(clk, ts); }
+static int DefaultPosixMemalign(void** ptr, size_t alignment, size_t size) {
+  return ::posix_memalign(ptr, alignment, size);
+}
+static int DefaultPthreadCreate(pthread_t* thread, const pthread_attr_t* attr, void* (*fn)(void*), void* arg) {
+  return ::pthread_create(thread, attr, fn, arg);
+}
+static int DefaultNanosleep(const struct timespec* req, struct timespec* rem) { return ::nanosleep(req, rem); }
+
 // ---------------------------------------------------------------------------
 
 std::function<ssize_t(int, const void*, size_t)> g_write = DefaultWrite;
@@ -359,6 +365,11 @@ std::function<int(DIR*)> g_closedir = DefaultClosedir;
 std::function<ssize_t(const char*, char*, size_t)> g_readlink = DefaultReadlink;
 std::function<int(int, unsigned long, void*)> g_ioctl = DefaultIoctl;
 std::function<int(void (*)(void))> g_atexit = DefaultAtexit;
+std::function<int(clockid_t, struct timespec*)> g_clockGettime = DefaultClockGettime;
+std::function<int(void**, size_t, size_t)> g_posixMemalign = DefaultPosixMemalign;
+std::function<int(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*)> g_pthreadCreate =
+    DefaultPthreadCreate;
+std::function<int(const struct timespec*, struct timespec*)> g_nanosleep = DefaultNanosleep;
 
 ASSERT_HOOK_MATCHES_PROD(g_accept, ::accept);
 ASSERT_HOOK_MATCHES_PROD(g_recv, ::recv);
@@ -418,6 +429,10 @@ void ResetLibcFakes() {
   g_readlink = DefaultReadlink;
   g_ioctl = DefaultIoctl;
   g_atexit = DefaultAtexit;
+  g_clockGettime = DefaultClockGettime;
+  g_posixMemalign = DefaultPosixMemalign;
+  g_pthreadCreate = DefaultPthreadCreate;
+  g_nanosleep = DefaultNanosleep;
 
   g_writtenData.clear();
   g_stdoutData.clear();
@@ -537,6 +552,12 @@ int micro_ioctl(int fd, unsigned long request, ...) {
   return g_ioctl(fd, request, arg);
 }
 int micro_atexit(void (*fn)(void)) { return g_atexit(fn); }
+int micro_clock_gettime(clockid_t clk, struct timespec* ts) { return g_clockGettime(clk, ts); }
+int micro_posix_memalign(void** ptr, size_t alignment, size_t size) { return g_posixMemalign(ptr, alignment, size); }
+int micro_pthread_create(pthread_t* thread, const pthread_attr_t* attr, void* (*fn)(void*), void* arg) {
+  return g_pthreadCreate(thread, attr, fn, arg);
+}
+int micro_nanosleep(const struct timespec* req, struct timespec* rem) { return g_nanosleep(req, rem); }
 
 // Always forwards to the real vfprintf so stderr output still happens; records only the FILE* and never the
 // formatted text, since no test needs the diagnostic's wording, only whether and where one was printed.

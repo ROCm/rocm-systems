@@ -40,15 +40,6 @@
 #include "fakes/env_fakes.h"
 #include "fakes/libc_fakes.h"
 
-int NetTelemetryTestClockGettime(clockid_t clk, struct timespec* ts);
-int NetTelemetryTestPosixMemalign(void** ptr, size_t alignment, size_t size);
-int NetTelemetryTestPthreadCreate(pthread_t* thread, const pthread_attr_t* attr, void* (*fn)(void*), void* arg);
-int NetTelemetryTestNanosleep(const struct timespec* req, struct timespec* rem);
-
-#define clock_gettime NetTelemetryTestClockGettime
-#define posix_memalign NetTelemetryTestPosixMemalign
-#define pthread_create NetTelemetryTestPthreadCreate
-#define nanosleep NetTelemetryTestNanosleep
 #define getenv micro_getenv
 
 #include "fakes/libc_seam.h"
@@ -56,40 +47,14 @@ int NetTelemetryTestNanosleep(const struct timespec* req, struct timespec* rem);
 #include "fakes/libc_seam_undef.h"
 
 #undef getenv
-#undef nanosleep
-#undef pthread_create
-#undef posix_memalign
-#undef clock_gettime
 
 namespace {
 
 int64_t g_nowNs = 1000000000000;
 
-int DefaultPosixMemalign(void** ptr, size_t alignment, size_t size) { return ::posix_memalign(ptr, alignment, size); }
 void* RealCalloc(size_t count, size_t size) { return std::calloc(count, size); }
-int DefaultPthreadCreate(pthread_t* thread, const pthread_attr_t* attr, void* (*fn)(void*), void* arg) {
-  return ::pthread_create(thread, attr, fn, arg);
-}
-int DefaultNanosleep(const struct timespec* req, struct timespec* rem) { return ::nanosleep(req, rem); }
-
-std::function<int(void**, size_t, size_t)> g_posixMemalign = DefaultPosixMemalign;
-std::function<int(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*)> g_pthreadCreate = DefaultPthreadCreate;
-std::function<int(const struct timespec*, struct timespec*)> g_nanosleep = DefaultNanosleep;
 
 }  // namespace
-
-int NetTelemetryTestClockGettime(clockid_t, struct timespec* ts) {
-  ts->tv_sec = g_nowNs / 1000000000;
-  ts->tv_nsec = g_nowNs % 1000000000;
-  return 0;
-}
-int NetTelemetryTestPosixMemalign(void** ptr, size_t alignment, size_t size) {
-  return g_posixMemalign(ptr, alignment, size);
-}
-int NetTelemetryTestPthreadCreate(pthread_t* thread, const pthread_attr_t* attr, void* (*fn)(void*), void* arg) {
-  return g_pthreadCreate(thread, attr, fn, arg);
-}
-int NetTelemetryTestNanosleep(const struct timespec* req, struct timespec* rem) { return g_nanosleep(req, rem); }
 
 namespace {
 
@@ -302,6 +267,11 @@ class NetTelemetryMicrotest : public ::testing::Test {
     ResetTelemetryState();
     g_sys.Reset();
     g_nowNs = 1000000000000;
+    g_clockGettime = [](clockid_t, struct timespec* ts) {
+      ts->tv_sec = g_nowNs / 1000000000;
+      ts->tv_nsec = g_nowNs % 1000000000;
+      return 0;
+    };
     g_open = FakeOpen;
     g_read = FakeRead;
     g_close = FakeClose;
@@ -319,9 +289,6 @@ class NetTelemetryMicrotest : public ::testing::Test {
     g_sys.Reset();
     ResetLibcFakes();
     ResetEnvFakes();
-    g_posixMemalign = DefaultPosixMemalign;
-    g_pthreadCreate = DefaultPthreadCreate;
-    g_nanosleep = DefaultNanosleep;
   }
 
   static void Enable() {
@@ -1110,7 +1077,7 @@ TEST_F(NetTelemetryChannelMicrotest, BlocksGrow_LargerRequest_AppendsDoublingBlo
 TEST_F(NetTelemetryChannelMicrotest, AlignedCalloc_Allocates_ZeroedCacheLineAlignedBlock) {
   ScopedHook memalignHook(g_posixMemalign, [](void** p, size_t alignment, size_t size) {
     EXPECT_EQ(alignment, static_cast<size_t>(RCCL_TELEMETRY_CACHELINE));
-    int ret = DefaultPosixMemalign(p, alignment, size);
+    int ret = ::posix_memalign(p, alignment, size);
     std::memset(*p, 0xa5, size);
     return ret;
   });
@@ -2301,7 +2268,9 @@ TEST_F(NetTelemetrySamplerMicrotest, SamplerMain_LastFreeSlot_IsFilled) {
 }
 
 TEST_F(NetTelemetrySamplerMicrotest, SamplerStart_NoInterval_StartsNothing) {
-  ScopedHook createHook(g_pthreadCreate, DefaultPthreadCreate);
+  ScopedHook createHook(g_pthreadCreate, [](pthread_t* t, const pthread_attr_t* attr, void* (*fn)(void*), void* arg) {
+    return ::pthread_create(t, attr, fn, arg);
+  });
 
   rcclTelemetrySamplerStart();
 
@@ -2312,7 +2281,9 @@ TEST_F(NetTelemetrySamplerMicrotest, SamplerStart_NoInterval_StartsNothing) {
 TEST_F(NetTelemetrySamplerMicrotest, SamplerStart_BufferAllocFails_StartsNothing) {
   rcclTelemetrySampleIntervalMs = 5;
   ScopedHook callocHook(g_calloc, [](size_t, size_t) -> void* { return nullptr; });
-  ScopedHook createHook(g_pthreadCreate, DefaultPthreadCreate);
+  ScopedHook createHook(g_pthreadCreate, [](pthread_t* t, const pthread_attr_t* attr, void* (*fn)(void*), void* arg) {
+    return ::pthread_create(t, attr, fn, arg);
+  });
 
   rcclTelemetrySamplerStart();
 
@@ -2532,7 +2503,7 @@ TEST_F(NetTelemetryJsonMicrotest, WriteJson_ChannelWithUntrackedQpsOnly_IsActive
   int calls = 0;
   ScopedHook memalignHook(g_posixMemalign,
                           [&](void** p, size_t a, size_t n) {
-                            return calls++ == 0 ? DefaultPosixMemalign(p, a, n) : ENOMEM;
+                            return calls++ == 0 ? ::posix_memalign(p, a, n) : ENOMEM;
                           });
   ASSERT_EQ(rcclTelemetrySetupChannel(0, 1, 2, nullptr), -1);
 

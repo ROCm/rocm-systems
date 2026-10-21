@@ -28,7 +28,9 @@
 #include <dirent.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#include <pthread.h>
 #include <sys/time.h>
+#include <time.h>
 #include <sys/types.h>
 
 #include <cstddef>
@@ -121,6 +123,10 @@ extern std::function<int(DIR*)> g_closedir;
 extern std::function<ssize_t(const char*, char*, size_t)> g_readlink;
 extern std::function<int(int, unsigned long, void*)> g_ioctl;
 extern std::function<int(void (*)(void))> g_atexit;
+extern std::function<int(clockid_t, struct timespec*)> g_clockGettime;
+extern std::function<int(void**, size_t, size_t)> g_posixMemalign;
+extern std::function<int(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*)> g_pthreadCreate;
+extern std::function<int(const struct timespec*, struct timespec*)> g_nanosleep;
 
 // ---------------------------------------------------------------------------
 // Observation points fed by the default seams. A test that installs its own

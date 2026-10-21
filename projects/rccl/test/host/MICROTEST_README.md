@@ -179,6 +179,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `rasTimeoutFactorNs`, and `rasTimeoutFactorSec` symbols so it can link beside
     `fakes/ras_param_fakes.cc` and the `ras-test.cc` timeout fake in the shared
     microtest binary.
+  - `transport/net_telemetry.cc` and `include/net_telemetry.h`
+    (`NET_TELEMETRY_CC_PATH`, from `net-telemetry-test.cc`); suites
+    `NetTelemetry*Microtest.*`.
   - `tuning/tuning_general.cc` (`TUNING_GENERAL_CC_PATH`, from
     `tuning-general-test.cc`); suite `TuningGeneralMicrotest.*`. Covers the
     shared step-count, hardware-index, time-estimation, thread-threshold,
@@ -741,7 +744,7 @@ symbol.
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
-| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`) | `fakes/libc_fakes.cc` |
+| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`; files, `ioctl`, `atexit`, clock, aligned allocation, thread start and sleep for `transport/net_telemetry.cc`) | `fakes/libc_fakes.cc` |
 | reusable RAS poll-entry, message, and diagnostics-context seams | `fakes/ras_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
