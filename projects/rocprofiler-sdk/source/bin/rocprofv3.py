@@ -25,6 +25,7 @@
 import os
 import sys
 import re
+import stat
 import argparse
 import textwrap
 import subprocess
@@ -106,6 +107,90 @@ def fatal_error(msg, *args, exit_code=1):
     sys.stderr.write(f"[rocprofv3] Fatal error: {msg}\n")
     sys.stderr.flush()
     sys.exit(exit_code)
+
+
+def validate_output_directory(output_directory):
+    """Reject structurally invalid output paths that can be checked before launch.
+
+    For runtime-expanded paths, only the literal prefix is checked. The C++ output
+    layer remains responsible for the expanded path, directory creation, and races.
+    """
+    if output_directory is None:
+        return
+
+    output_directory = os.fspath(output_directory)
+    if not output_directory or output_directory in (
+        "stdout",
+        "STDOUT",
+        "stderr",
+        "STDERR",
+    ):
+        return
+
+    # Validate only the path components before the first runtime-expanded component.
+    marker_positions = [
+        output_directory.find(marker)
+        for marker in ("%", "{", "$")
+        if marker in output_directory
+    ]
+    path_to_check = output_directory
+    if marker_positions:
+        first_marker = min(marker_positions)
+        separator = output_directory.rfind(os.sep, 0, first_marker)
+        if separator < 0:
+            path_to_check = os.curdir
+        elif separator == 0:
+            path_to_check = os.sep
+        else:
+            path_to_check = output_directory[:separator]
+
+    # Find the nearest existing component without creating the requested directory.
+    existing_path = path_to_check
+    while True:
+        try:
+            existing_lstat = os.lstat(existing_path)
+            break
+        except (FileNotFoundError, NotADirectoryError):
+            parent = os.path.dirname(existing_path)
+            if not parent:
+                parent = os.curdir
+            if parent == existing_path:
+                fatal_error(f"Could not inspect output path '{output_directory}'")
+            existing_path = parent
+        except OSError as error:
+            fatal_error(f"Could not inspect output path '{output_directory}': {error}")
+
+    try:
+        existing_status = os.stat(existing_path)
+    except FileNotFoundError:
+        if stat.S_ISLNK(existing_lstat.st_mode):
+            fatal_error(
+                f"Output path '{output_directory}' contains a dangling symbolic link: "
+                f"'{existing_path}'"
+            )
+        # A non-symlink component disappeared between lstat and stat. Treat it as
+        # nonexistent and let the C++ runtime check the final path after launch.
+        return
+    except NotADirectoryError:
+        fatal_error(
+            f"Output path '{output_directory}' has a non-directory path component: "
+            f"'{existing_path}'"
+        )
+    except OSError as error:
+        fatal_error(f"Could not inspect output path '{output_directory}': {error}")
+
+    if stat.S_ISDIR(existing_status.st_mode):
+        return
+
+    if existing_path == output_directory:
+        fatal_error(
+            f"Output path '{output_directory}' already exists and is not a directory"
+        )
+
+    fatal_error(
+        f"Output path '{output_directory}' has a non-directory path component: "
+        f"'{existing_path}'"
+    )
 
 
 def warning(msg, *args):
@@ -1683,6 +1768,18 @@ def run(app_args, args, **kwargs):
                 except Exception as e:
                     fatal_error(f"{e}\n")
 
+    _output_path = (
+        args.output_directory if args.output_directory is not None else os.getcwd()
+    )
+    validate_output_directory(_output_path)
+
+    _pass_output_path = None
+    if app_pass is not None and args.sub_directory is not None:
+        _pass_output_path = os.path.join(
+            f"{_output_path}", f"{args.sub_directory}{app_pass}"
+        )
+        validate_output_directory(_pass_output_path)
+
     def setattrifnone(obj, attr, value):
         if getattr(obj, f"{attr}") is None:
             setattr(obj, f"{attr}", value)
@@ -1804,18 +1901,13 @@ def run(app_args, args, **kwargs):
     )
 
     _output_file = args.output_file
-    _output_path = (
-        args.output_directory if args.output_directory is not None else os.getcwd()
-    )
 
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)
     update_env("ROCPROF_OUTPUT_CONFIG_FILE", args.output_config, overwrite_if_true=True)
     update_env("ROCPROF_ATTACH_OUTPUT_GENERATION_SYNC", args.attach_sync_output)
-    if app_pass is not None and args.sub_directory is not None:
-        app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
-            f"{_output_path}", f"{args.sub_directory}{app_pass}"
-        )
+    if _pass_output_path is not None:
+        app_env["ROCPROF_OUTPUT_PATH"] = _pass_output_path
 
     if args.list_avail and (
         args.output_file is not None or args.output_directory is not None
