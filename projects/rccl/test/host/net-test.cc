@@ -329,17 +329,6 @@ struct FakeNet {
   static ncclResult_t TrampSetNetAttr(void* ctx, ncclNetAttr_t* attr) { return g_activeNet->setNetAttr(ctx, attr); }
 };
 
-// Param values for the redirected NCCL_PARAM / RCCL_PARAM bodies; unset names keep their defaults.
-std::function<int64_t(const char*, int64_t)> ParamOverride(std::initializer_list<std::pair<const char*, int64_t>> kv) {
-  std::vector<std::pair<std::string, int64_t>> table(kv.begin(), kv.end());
-  return [table](const char* env, int64_t deft) {
-    for (const auto& [name, value] : table) {
-      if (name == env) return value;
-    }
-    return deft;
-  };
-}
-
 class NetMicrotestBase : public ::testing::Test {
  protected:
   FakeNet net_;

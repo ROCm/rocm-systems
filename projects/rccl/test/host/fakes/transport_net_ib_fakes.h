@@ -12,10 +12,13 @@
 #include <functional>
 
 #include "nccl.h"
+#include "transport/net_ib/common.h"
 
 // The P2P QP policies a transport applies to an IB (or IB-cast) connect handle. Default to fail-loud.
 extern std::function<ncclResult_t(void* /*handle*/, int /*isP2p*/)> g_rcclNetP2pPolicy;
 extern std::function<ncclResult_t(void* /*handle*/, int /*isP2p*/)> g_rcclCastNetP2pPolicy;
+extern std::function<ncclResult_t(struct ibv_context*, uint8_t, struct ibv_port_attr*, struct ncclIbGidInfo*)>
+    g_ncclIbGidInfoQuery;
 
 void ResetTransportNetIbFakes();
 
