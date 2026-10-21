@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <numeric>
 #include <string>
@@ -575,6 +576,32 @@ TEST_F(GraphCaptureStreamOrdering, InterleavedUserWorkNetTransport)
                  {{"NCCL_P2P_DISABLE", "1"}, {"NCCL_SHM_DISABLE", "1"}, {"NCCL_NET", "Socket"}}));
 }
 
+// Known failure on ROCm 7.0.2: with NCCL_GRAPH_STREAM_ORDERING=0, ncclLaunchPrepare makes the
+// capturing stream wait on serialEvent with hipEventWaitExternal (rcclGraphOriginWaitSerialEvent),
+// and HIP segfaults in Graph::AddExternalEventWaitNode once that stream has captured any node.
+// Every capture here starts with a memset, so the first collective already crashes.
+// Skipped unless RCCL_TEST_KNOWN_FAILURES=1; a DISABLED_ prefix would not reach the re-exec children.
+TEST_F(GraphCaptureStreamOrdering, StreamOrdering0UserWorkBeforeCollective)
+{
+    const char* knownFailures = std::getenv("RCCL_TEST_KNOWN_FAILURES");
+    if(!knownFailures || std::string(knownFailures) != "1")
+        GTEST_SKIP() << "segfaults in HIP on ROCm 7.0.2; set RCCL_TEST_KNOWN_FAILURES=1 to run";
+    std::vector<ProcessIsolatedTestRunner::TestConfig> configs;
+    for(const char* implicitOrder : {"0", "1"})
+    {
+        bool bound = implicitOrder[0] == '0';
+        configs.push_back(isolated(std::string("ImplicitOrder") + implicitOrder,
+                                   [bound] { interleavedUserWork(hipStreamCaptureModeThreadLocal, bound, false); },
+                                   {{"NCCL_GRAPH_STREAM_ORDERING", "0"},
+                                    {"NCCL_LAUNCH_ORDER_IMPLICIT", implicitOrder}}));
+    }
+    configs.push_back(isolated("SingleCollective",
+                               [] { sequentialCollectives(1, hipStreamCaptureModeThreadLocal); },
+                               {{"NCCL_GRAPH_STREAM_ORDERING", "0"}}));
+    for(const auto& c : configs) ProcessIsolatedTestRunner::registerTest(c);
+    EXPECT_TRUE(ProcessIsolatedTestRunner::executeAllTests(parallelOptions()));
+}
+
 // The user stream already depends on two branches (fork/join with plain HIP work on a
 // second stream) when RCCL launches; RCCL itself only sees one stream.
 TEST_F(GraphCaptureStreamOrdering, ForkJoinBeforeCollective)
@@ -708,7 +735,7 @@ TEST_F(GraphCaptureStreamOrdering, GroupedAndPointToPoint)
 // for uncaptured work. Run with implicit launch order too, which sends eager
 // single-stream launches through the ncclLaunchFinish fast-forward as well.
 // NCCL_GRAPH_STREAM_ORDERING=0 is only exercised here, where the collective is the first
-// captured node: on ROCm 7.0 an external event wait after any captured node segfaults in HIP.
+// captured node; see StreamOrdering0UserWorkBeforeCollective.
 TEST_F(GraphCaptureStreamOrdering, EagerAroundCapture)
 {
     auto body = [] {
