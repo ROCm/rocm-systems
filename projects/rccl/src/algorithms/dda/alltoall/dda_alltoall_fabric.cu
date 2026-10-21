@@ -32,6 +32,9 @@
 RCCL_PARAM(DdaA2APush, "DDA_A2A_PUSH", 0);
 RCCL_PARAM(DdaA2ATdm, "DDA_A2A_TDM", 0);
 RCCL_PARAM(DdaA2ATdmTileKB, "DDA_A2A_TDM_TILE_KB", 8);
+// RCCL_DDA_A2A_PUSH_PEER=1 (with RCCL_DDA_A2A_PUSH=1): peer-major vector push. Each block works on a single peer
+// and the grid is nRanks * blocksPerPeer. Out of place only.
+RCCL_PARAM(DdaA2APushPeer, "DDA_A2A_PUSH_PEER", 0);
 
 namespace {
 
@@ -41,6 +44,29 @@ using nccl_dda_detail::DdaFabricBarrierState;
 // kernel is instantiated for int8_t, so `bytes` is the per-block element count.
 static inline std::pair<dim3, dim3> ddaAllToAllFabricGeom(ncclComm* comm, size_t bytes) {
   return dda::common::getGridAndBlockDims(bytes, 1, comm->ddaFabricMaxBlocks);
+}
+
+struct DdaA2APeerGeom {
+  dim3 grid;
+  dim3 block;
+  int blocksPerPeer;
+};
+
+// Peer-major vector grid: nRanks * blocksPerPeer blocks of up to 256 threads (256 keeps small messages fast; 512 is
+// slower below ~64 MB). blocksPerPeer is capped so the grid stays inside the barrier's flag allocation. It depends
+// only on the per-peer byte count, nRanks and the init-time cap, so every rank gets the same grid. Returns
+// blocksPerPeer == 0 when there are more peers than blocks.
+static inline DdaA2APeerGeom ddaAllToAllFabricPeerGeom(ncclComm* comm, size_t bytesPerPeer) {
+  constexpr size_t kWave = 32;
+  constexpr size_t kMaxWaves = 8;
+  const size_t cap = static_cast<size_t>(comm->ddaFabricMaxBlocks) / static_cast<size_t>(comm->nRanks);
+  if (cap == 0) return {dim3(1), dim3(1), 0};
+  const size_t waves = std::max<size_t>(1, (bytesPerPeer / sizeof(uint4) + kWave - 1) / kWave);
+  size_t bpp = (waves + kMaxWaves - 1) / kMaxWaves;
+  bpp = std::max<size_t>(1, std::min(bpp, cap));
+  const size_t wavesPerBlock = std::min(kMaxWaves, (waves + bpp - 1) / bpp);
+  return {dim3(static_cast<unsigned>(bpp * comm->nRanks)), dim3(static_cast<unsigned>(wavesPerBlock * kWave)),
+          static_cast<int>(bpp)};
 }
 
 // One warp per window of UnrollPeers tiles. The block count stays inside the
@@ -169,6 +195,27 @@ static ncclResult_t ncclAllToAllDdaFabricTyped(const void* sendbuff, void* recvb
     }
     INFO(NCCL_COLL, "DDA fabric AllToAll: TDM push unavailable (smem %d), using the vector push", smemBytes);
   }
+  // Peer-major push: each block works on exactly one peer. Out of place only: a block drains into recvbuff slots
+  // that other blocks of this rank may still be reading from sendbuff, so in-place calls take the all-peer push.
+  if (rcclParamDdaA2APush() && rcclParamDdaA2APushPeer() && sendbuff != recvbuff) {
+    const DdaA2APeerGeom pg = ddaAllToAllFabricPeerGeom(comm, count * sizeof(T));
+    if (pg.blocksPerPeer > 0) {
+      INFO(NCCL_COLL,
+           "DDA fabric AllToAll: launching peer-major push kernel: nRanks=%d count=%zu grid=%u block=%u "
+           "blocksPerPeer=%d",
+           nRanks, count, pg.grid.x, pg.block.x, pg.blocksPerPeer);
+      const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+      hipExtLaunchKernelGGL((dda::common::ddaAllToAllFabricPushPeer<T>), pg.grid, pg.block, 0, stream,
+                            /*startEvent=*/nullptr, stopEvent, /*flags=*/0, d_ipcbuffs, static_cast<T*>(recvbuff),
+                            count, static_cast<const T*>(sendbuff), comm->rank, nRanks, pg.blocksPerPeer,
+                            barrierHost);
+      CUDACHECK(cudaGetLastError());
+      return ncclSuccess;
+    }
+    INFO(NCCL_COLL, "DDA fabric AllToAll: peer-major push needs %d blocks, only %zu allowed; using the all-peer push",
+         nRanks, static_cast<size_t>(comm->ddaFabricMaxBlocks));
+  }
+
   if (rcclParamDdaA2APush()) {
     INFO(NCCL_COLL, "DDA fabric AllToAll: launching push kernel: nRanks=%d count=%zu grid=%u block=%u%s", nRanks,
          count, grid.x, block.x, unroll);
