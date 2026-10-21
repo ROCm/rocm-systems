@@ -1428,6 +1428,11 @@ enum class InstructionExecutionId : size_t {
   GlobalLoadLdsUshortFlat,
   GlobalLoadLdsSshortFlat,
   GlobalLoadLdsDwordFlat,
+  ScratchLoadLdsUbyteFlat,
+  ScratchLoadLdsSbyteFlat,
+  ScratchLoadLdsUshortFlat,
+  ScratchLoadLdsSshortFlat,
+  ScratchLoadLdsDwordFlat,
   Count,
 };
 
