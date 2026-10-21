@@ -4,7 +4,8 @@
 #pragma once
 
 /// @file gfx11_dot2.h
-/// @brief Hardware-characterized GFX11 DOT2 arithmetic with F32 or packed outputs.
+/// @brief GFX11 DOT2 arithmetic with F32 or packed outputs.
+/// See tests/fixtures/float_dot/README.md for the model's empirical basis.
 
 #include "dot_packed16.h"
 
@@ -90,7 +91,7 @@ inline uint32_t pack(int64_t units, int grid, bool frame_negative) {
 }
 } // namespace gfx11_dot2_detail
 
-/// @brief GFX11 DOT2 arithmetic with F32 or packed outputs, characterized on gfx1100.
+/// @brief GFX11 DOT2 with F32 or packed outputs.
 /// @details Used by VOP3P DOT2, VOP2/VOPD DOT2ACC and F32/packed-output WMMA. See
 /// https://github.com/ROCm/rocm-systems/issues/12056 for the finite arithmetic
 /// model. In S2's sign frame an opposing term contributes ~m, not -m, after
