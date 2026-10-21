@@ -31,16 +31,7 @@ HIP_TEST_CASE(Unit_hipGetProcAddress_VMM) {
     HIP_SKIP_TEST(HipTest::SkipReason::kVmmUnsupported);
   }
 
-  hipDeviceProp_t devProp;
-  int device;
-  bool xnackEnabled = false;
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipGetDeviceProperties(&devProp, device));
-  std::string gfxName(devProp.gcnArchName);
-
-  if (gfxName.find("xnack+") != std::string::npos) {
-    xnackEnabled = true;
-  }
+  const bool xnackEnabled = HipTest::isXnackOn();
 
   void* hipMemGetAllocationGranularity_ptr = nullptr;
   void* hipMemCreate_ptr = nullptr;
