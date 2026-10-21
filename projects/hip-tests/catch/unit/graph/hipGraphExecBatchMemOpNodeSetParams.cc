@@ -6,6 +6,7 @@
 
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
+#include <resource_guards.hh>
 /**
  * @addtogroup hipGraphExecBatchMemOpNodeSetParams
  hipGraphExecBatchMemOpNodeSetParams
@@ -275,6 +276,197 @@ HIP_TEST_CASE(Unit_hipGraphExecBatchMemOpNodeSetParams_UpdateTakesEffect) {
   HIP_CHECK(hipFree(reinterpret_cast<void*>(devPtr)));
   HIP_CHECK(hipCtxDestroy(ctx));
 }
+
+#if HT_AMD
+namespace {
+constexpr unsigned kMemOpUpdateElements = 128;
+
+__global__ void MemOpUpdateNoop(unsigned) {}
+
+template <typename T> __global__ void MemOpUpdateProducer(unsigned* input, T* gate, unsigned seed,
+                                                          unsigned long long delayTicks) {
+  const auto start = wall_clock64();
+  while (wall_clock64() - start < delayTicks) {
+  }
+  for (unsigned i = 0; i < kMemOpUpdateElements; ++i) input[i] = seed + 13 * i;
+  __threadfence_system();
+  __hip_atomic_store(gate, T{1}, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+}
+
+__global__ void MemOpUpdateConsumer(const unsigned* input, unsigned* output) {
+  const unsigned i = threadIdx.x;
+  if (i < kMemOpUpdateElements) output[i] = 3 * input[i] + 7;
+}
+
+struct MemOpUpdateSignal {
+  uint64_t* ptr = nullptr;
+  MemOpUpdateSignal() {
+    HIP_CHECK(
+        hipExtMallocWithFlags(reinterpret_cast<void**>(&ptr), sizeof(*ptr), hipMallocSignalMemory));
+    __atomic_store_n(ptr, uint64_t{0}, __ATOMIC_RELEASE);
+  }
+  ~MemOpUpdateSignal() { static_cast<void>(hipFree(ptr)); }
+};
+
+struct MemOpUpdateGraph {
+  hipGraph_t graph = nullptr;
+  hipGraphExec_t exec = nullptr;
+  ~MemOpUpdateGraph() {
+    if (exec) static_cast<void>(hipGraphExecDestroy(exec));
+    if (graph) static_cast<void>(hipGraphDestroy(graph));
+  }
+};
+
+template <typename T> void CheckMemOpUpdateCompletion(bool initiallyHasWrites, bool updateGraph) {
+  MemOpUpdateSignal gateMemory, tokenMemory;
+  auto* gate = reinterpret_cast<T*>(gateMemory.ptr);
+  auto* token = reinterpret_cast<T*>(tokenMemory.ptr);
+  LinearAllocGuard<unsigned> input(LinearAllocs::hipMalloc,
+                                   kMemOpUpdateElements * sizeof(unsigned));
+  LinearAllocGuard<unsigned> output(LinearAllocs::hipMalloc,
+                                    2 * kMemOpUpdateElements * sizeof(unsigned));
+  StreamGuard producer(Streams::withFlags, hipStreamNonBlocking);
+  StreamGuard launch(Streams::withFlags, hipStreamNonBlocking);
+  MemOpUpdateGraph graph;
+  HIP_CHECK(hipGraphCreate(&graph.graph, 0));
+
+  hipKernelNodeParams noop{};
+  unsigned epoch = 0;
+  void* noopArgs[] = {&epoch};
+  noop.func = reinterpret_cast<void*>(MemOpUpdateNoop);
+  noop.gridDim = noop.blockDim = dim3(1);
+  noop.kernelParams = noopArgs;
+  hipGraphNode_t previous;
+  HIP_CHECK(hipGraphAddKernelNode(&previous, graph.graph, nullptr, 0, &noop));
+  const hipGraphNode_t root = previous;
+  // Three diamonds make the segment dependency depth exceed four, so the
+  // default scheduler keeps multiple streams instead of collapsing this graph.
+  for (unsigned stage = 0; stage < 3; ++stage) {
+    hipGraphNode_t branches[2], join;
+    HIP_CHECK(hipGraphAddKernelNode(&branches[0], graph.graph, &previous, 1, &noop));
+    HIP_CHECK(hipGraphAddKernelNode(&branches[1], graph.graph, &previous, 1, &noop));
+    HIP_CHECK(hipGraphAddKernelNode(&join, graph.graph, branches, 2, &noop));
+    previous = join;
+  }
+
+  hipStreamBatchMemOpParams ops[2]{};
+  ops[0].operation = sizeof(T) == 4 ? hipStreamMemOpWaitValue32 : hipStreamMemOpWaitValue64;
+  ops[0].waitValue.address = reinterpret_cast<hipDeviceptr_t>(gate);
+  ops[0].waitValue.value64 = 1;
+  ops[0].waitValue.flags = hipStreamWaitValueGte;
+  ops[1].operation = sizeof(T) == 4 ? hipStreamMemOpWriteValue32 : hipStreamMemOpWriteValue64;
+  ops[1].writeValue.address = reinterpret_cast<hipDeviceptr_t>(token);
+  ops[1].writeValue.value64 = static_cast<T>(0x100000001ULL);
+  ops[1].writeValue.flags = hipStreamWriteValueDefault;
+  hipBatchMemOpNodeParams params{};
+  HIP_CHECK(hipCtxGetCurrent(&params.ctx));
+  params.count = initiallyHasWrites ? 2 : 1;
+  params.paramArray = ops;
+  hipGraphNode_t memop;
+  HIP_CHECK(hipGraphAddBatchMemOpNode(&memop, graph.graph, &previous, 1, &params));
+
+  // The memop ends a segment at this fork. At least one consumer runs on a
+  // different stream and needs the memop kernel's completion signal.
+  hipGraphNode_t consumers[2], join;
+  auto* src = input.ptr();
+  for (unsigned branch = 0; branch < 2; ++branch) {
+    auto* dst = output.ptr() + branch * kMemOpUpdateElements;
+    void* args[] = {&src, &dst};
+    hipKernelNodeParams consumer{};
+    consumer.func = reinterpret_cast<void*>(MemOpUpdateConsumer);
+    consumer.gridDim = dim3(1);
+    consumer.blockDim = dim3(kMemOpUpdateElements);
+    consumer.kernelParams = args;
+    HIP_CHECK(hipGraphAddKernelNode(&consumers[branch], graph.graph, &memop, 1, &consumer));
+  }
+  HIP_CHECK(hipGraphAddEmptyNode(&join, graph.graph, consumers, 2));
+  HIP_CHECK(hipGraphInstantiate(&graph.exec, graph.graph, nullptr, nullptr, 0));
+
+  int device = 0, clockKHz = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipDeviceGetAttribute(&clockKHz, hipDeviceAttributeWallClockRate, device));
+  auto delayTicks = static_cast<unsigned long long>(clockKHz) * 5;  // 5 ms
+  for (unsigned iteration = 0; iteration < 64; ++iteration) {
+    const bool hasWrites = initiallyHasWrites != ((iteration & 1) != 0);
+    unsigned seed = 101 + iteration * 107;
+    const T expectedToken = static_cast<T>(0x100000001ULL) + iteration;
+    params.count = hasWrites ? 2 : 1;
+    ops[1].writeValue.value64 = expectedToken;
+    if (iteration != 0) {
+      if (updateGraph) {
+        // Leave a same-size packet update pending before the layout change in
+        // hipGraphExecUpdate's batch, then verify that subsequent launches work.
+        epoch = iteration;
+        HIP_CHECK(hipGraphKernelNodeSetParams(root, &noop));
+        HIP_CHECK(hipGraphBatchMemOpNodeSetParams(memop, &params));
+        hipGraphNode_t errorNode = nullptr;
+        hipGraphExecUpdateResult result;
+        HIP_CHECK(hipGraphExecUpdate(graph.exec, graph.graph, &errorNode, &result));
+        REQUIRE(result == hipGraphExecUpdateSuccess);
+      } else {
+        HIP_CHECK(hipGraphExecBatchMemOpNodeSetParams(graph.exec, memop, &params));
+      }
+    }
+    __atomic_store_n(gate, T{0}, __ATOMIC_RELEASE);
+    __atomic_store_n(token, T{0}, __ATOMIC_RELEASE);
+    HIP_CHECK(hipMemsetAsync(input.ptr(), 0, input.size_bytes(), producer.stream()));
+    HIP_CHECK(hipMemsetAsync(output.ptr(), 0, output.size_bytes(), launch.stream()));
+    void* producerArgs[] = {&src, &gate, &seed, &delayTicks};
+    HIP_CHECK(hipLaunchKernel(reinterpret_cast<const void*>(MemOpUpdateProducer<T>), dim3(1),
+                              dim3(1), producerArgs, 0, producer.stream()));
+    HIP_CHECK(hipGraphLaunch(graph.exec, launch.stream()));
+    HIP_CHECK(hipStreamSynchronize(launch.stream()));
+    HIP_CHECK(hipStreamSynchronize(producer.stream()));
+    // Drain all graph streams before an assertion or another update. This is
+    // after the consumers have run, so it cannot hide an early data read.
+    HIP_CHECK(hipDeviceSynchronize());
+    unsigned actual[2 * kMemOpUpdateElements]{};
+    HIP_CHECK(hipMemcpy(actual, output.ptr(), sizeof(actual), hipMemcpyDeviceToHost));
+    unsigned mismatches = 0;
+    for (unsigned i = 0; i < 2 * kMemOpUpdateElements; ++i) {
+      mismatches += actual[i] != 3 * (seed + 13 * (i % kMemOpUpdateElements)) + 7;
+    }
+    INFO("iteration=" << iteration << ", graph update=" << updateGraph
+                      << ", has writes=" << hasWrites << ", branch outputs=" << actual[0] << ", "
+                      << actual[kMemOpUpdateElements] << ", expected=" << 3 * seed + 7);
+    REQUIRE(mismatches == 0);
+    REQUIRE(__atomic_load_n(token, __ATOMIC_ACQUIRE) == (hasWrites ? expectedToken : T{0}));
+  }
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ * - Update a segment-ending batch between WAIT-only and WAIT+WRITE in both
+ *   directions. Dependent segments must wait for the final memop kernel after
+ *   its captured packet layout grows or shrinks. Verify real producer data on
+ *   both branches and repeat the updates across graph replays, using both the
+ *   executable node setter and whole-graph updates with another pending update.
+ * Test source
+ * ------------------------
+ * - unit/graph/hipGraphExecBatchMemOpNodeSetParams.cc
+ * Test requirements
+ * ------------------------
+ * - AMD segmented graph executor and signal memory support
+ */
+HIP_TEMPLATE_TEST_CASE(Unit_hipGraphExecBatchMemOpNodeSetParams_LayoutChange, uint32_t, uint64_t) {
+#if HT_WIN
+  HIP_SKIP_TEST("Requires the ROCr segmented graph executor");
+#endif
+  const char* classic = std::getenv("DEBUG_HIP_GRAPH_CLASSIC_PATH");
+  if (classic && (std::atoi(classic) != 0 || std::strcmp(classic, "true") == 0)) {
+    HIP_SKIP_TEST("Requires the segmented graph executor");
+  }
+  int device = 0, supported = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipDeviceGetAttribute(&supported, hipDeviceAttributeCanUseStreamWaitValue, device));
+  if (!supported) HIP_SKIP_TEST(HipTest::SkipReason::kStreamWaitValueUnsupported);
+  const bool updateGraph = GENERATE(false, true);
+  SECTION("WaitToWrite") { CheckMemOpUpdateCompletion<TestType>(false, updateGraph); }
+  SECTION("WriteToWait") { CheckMemOpUpdateCompletion<TestType>(true, updateGraph); }
+}
+#endif
 
 /**
  * End doxygen group GraphTest.
