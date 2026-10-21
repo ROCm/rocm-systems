@@ -642,16 +642,10 @@ NetworkCounterSnapshot NetCounterCollectSnapshot(
 // Delta computation
 // =====================================================================
 
-// after - before. A decrease is taken as one 48-bit wrap (bnxt_re sysfs
-// counters are 48 bits wide); false if it cannot be one.
+// after - before. A decrease (a wrap or a counter reset) is unknown: false.
 static bool CounterDelta(uint64_t after, uint64_t before, uint64_t* delta) {
-  const uint64_t wrap48 = 1ULL << 48;
-  if (after >= before) {
-    *delta = after - before;
-    return true;
-  }
-  if (before >= wrap48 || after >= wrap48) { return false; }
-  *delta = after + wrap48 - before;
+  if (after < before) { return false; }
+  *delta = after - before;
   return true;
 }
 
@@ -668,7 +662,10 @@ bool NetCounterComputeDelta(
       auto it = before.counters.find(entry.first);
       if (it == before.counters.end()) { continue; }
       uint64_t d = 0;
-      if (!CounterDelta(entry.second, it->second, &d)) { return false; }
+      if (!CounterDelta(entry.second, it->second, &d)) {
+        *delta = 0;
+        return false;
+      }
       *delta += d;
       found = true;
     }
