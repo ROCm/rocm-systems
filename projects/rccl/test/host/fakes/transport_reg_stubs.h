@@ -15,27 +15,25 @@
 #include <cstddef>
 #include <functional>
 
-#include "comm.h"
 #include "nccl.h"
-
-using ncclRegCleanupQueue = struct ncclIntruQueue<struct ncclCommCallback, &ncclCommCallback::next>;
+#include "register_stubs.h"  // ncclCommCallbackQueue
 
 extern std::function<ncclResult_t(ncclComm*, const void*, size_t, struct ncclConnector**, int, int*, void**)>
   g_ncclNetLocalRegisterBuffer;
 extern std::function<ncclResult_t(ncclComm*, const void*, size_t, struct ncclConnector**, int, int*, void**,
-                                  ncclRegCleanupQueue*, int*)>
+                                  ncclCommCallbackQueue*, int*)>
   g_ncclNetGraphRegisterBuffer;
 
 extern std::function<ncclResult_t(struct ncclComm*, const void*, size_t, int /*type*/, int*, void**)>
   g_ncclCollnetLocalRegisterBuffer;
 extern std::function<ncclResult_t(struct ncclComm*, const void*, size_t, int /*type*/, int*, void**,
-                                  ncclRegCleanupQueue*, int*)>
+                                  ncclCommCallbackQueue*, int*)>
   g_ncclCollnetGraphRegisterBuffer;
 
 extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, size_t, int*, void**, void**)>
   g_ncclNvlsLocalRegisterBuffer;
 extern std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, size_t, int*, void**, void**,
-                                  ncclRegCleanupQueue*, int*)>
+                                  ncclCommCallbackQueue*, int*)>
   g_ncclNvlsGraphRegisterBuffer;
 extern std::function<ncclResult_t(struct ncclComm*, ncclFunc_t, int* /*recChannels*/)> g_ncclNvlsRegResourcesQuery;
 

@@ -13,13 +13,11 @@
 
 #include <cstdint>
 #include <cstdlib>
-#include <functional>
 #include <initializer_list>
 #include <memory>
 #include <utility>
 #include <vector>
 
-#include "RegisterScene.h"
 #include "ScopedHook.h"
 #include "fakes/argcheck_fakes.h"
 #include "fakes/hip_fakes.h"
@@ -31,33 +29,18 @@
 // Routes every NCCL_PARAM in register.cc through g_loadParam on each call.
 #include "fakes/param_redirect.h"
 
-#include "register.h"
-
-// nccl_fakes.cc keeps these names as seams for p2p-test.cc, so the unit's own definitions are renamed.
-#define ncclRegLocalIsValid micro_ncclRegLocalIsValid
-#define ncclCommGraphRegister micro_ncclCommGraphRegister
-#define ncclCommGraphDeregister micro_ncclCommGraphDeregister
+#include "fakes/register_seam.h"
 #include "fakes/transport_p2p_reg_seam.h"
 #include REGISTER_CC_PATH
 #include "fakes/transport_p2p_reg_seam_undef.h"
-#undef ncclCommGraphDeregister
-#undef ncclCommGraphRegister
-#undef ncclRegLocalIsValid
+#include "fakes/register_seam_undef.h"
 
 namespace {
 
+void* Ptr(uintptr_t addr) { return reinterpret_cast<void*>(addr); }
+
 constexpr uintptr_t kPage = 0x1000;
 constexpr int kCommDev = 3;
-
-// hipPointerGetAttribute answering the two attributes register.cc queries.
-std::function<hipError_t(void*, hipPointer_attribute, hipDeviceptr_t)> PointerAttrs(hipMemoryType memType,
-                                                                                    int legacyIpcCapable) {
-  return [=](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
-    if (attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) *static_cast<hipMemoryType*>(data) = memType;
-    if (attr == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) *static_cast<int*>(data) = legacyIpcCapable;
-    return hipSuccess;
-  };
-}
 
 // hipMemGetAddressRange reporting one allocation that starts at the queried address.
 hipError_t WholeAllocation(hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
@@ -328,7 +311,7 @@ class RegisterSysmemMicrotest : public RegisterMicrotestBase {
 };
 
 TEST_F(RegisterSysmemMicrotest, HostMemory_SkipsRegistration) {
-  g_hipPointerGetAttribute = PointerAttrs(hipMemoryTypeHost, /*legacyIpcCapable=*/0);
+  g_hipPointerGetAttribute = ForceMemoryType(hipMemoryTypeHost);
   void* handle = nullptr;
   EXPECT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), kPage, false, &handle), ncclSuccess);
   EXPECT_EQ(Population(), 0);
@@ -336,7 +319,7 @@ TEST_F(RegisterSysmemMicrotest, HostMemory_SkipsRegistration) {
 
 TEST_F(RegisterSysmemMicrotest, AddressRangeQueryFails_ReturnsCudaErrorWithoutCaching) {
   // Legacy-IPC device memory, so no later query can fail in its place.
-  g_hipPointerGetAttribute = PointerAttrs(hipMemoryTypeDevice, /*legacyIpcCapable=*/1);
+  g_hipPointerGetAttribute = ForceLegacyIpcCapable();
   g_hipMemGetAddressRange = [](hipDeviceptr_t*, size_t*, hipDeviceptr_t) { return hipErrorInvalidValue; };
   void* handle = nullptr;
   EXPECT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), kPage, false, &handle), ncclUnhandledCudaError);
@@ -345,7 +328,7 @@ TEST_F(RegisterSysmemMicrotest, AddressRangeQueryFails_ReturnsCudaErrorWithoutCa
 
 TEST_F(RegisterSysmemMicrotest, MemoryTypeQueryFails_ReturnsCudaErrorWithoutCaching) {
   // Legacy-IPC device memory, so no later query can fail in its place.
-  auto deviceMemory = PointerAttrs(hipMemoryTypeDevice, /*legacyIpcCapable=*/1);
+  auto deviceMemory = ForceLegacyIpcCapable();
   g_hipPointerGetAttribute = [deviceMemory](void* data, hipPointer_attribute attr, hipDeviceptr_t ptr) {
     return attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE ? hipErrorInvalidValue : deviceMemory(data, attr, ptr);
   };
@@ -356,7 +339,7 @@ TEST_F(RegisterSysmemMicrotest, MemoryTypeQueryFails_ReturnsCudaErrorWithoutCach
 
 TEST_F(RegisterSysmemMicrotest, CuMemDisabled_RegistersWithoutQueryingMemoryType) {
   g_cuMemEnable = [] { return 0; };
-  ScopedHook attrs(g_hipPointerGetAttribute, PointerAttrs(hipMemoryTypeHost, 0));
+  ScopedHook attrs(g_hipPointerGetAttribute, ForceMemoryType(hipMemoryTypeHost));
   void* handle = nullptr;
   EXPECT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), kPage, false, &handle), ncclSuccess);
   EXPECT_EQ(Population(), 1);
@@ -367,7 +350,7 @@ TEST_F(RegisterSysmemMicrotest, CuMemDisabled_RegistersWithoutQueryingMemoryType
 // Newer HIP: a non-legacy-IPC device buffer is walked segment by segment.
 
 TEST_F(RegisterSysmemMicrotest, LegacyIpcDeviceMemory_RegistersWithoutWalkingSegments) {
-  g_hipPointerGetAttribute = PointerAttrs(hipMemoryTypeDevice, /*legacyIpcCapable=*/1);
+  g_hipPointerGetAttribute = ForceLegacyIpcCapable();
   ScopedHook retain(g_hipMemRetainAllocationHandle,
                     [](hipMemGenericAllocationHandle_t*, void*) { return hipErrorInvalidValue; });
   void* handle = nullptr;
@@ -377,7 +360,7 @@ TEST_F(RegisterSysmemMicrotest, LegacyIpcDeviceMemory_RegistersWithoutWalkingSeg
 }
 
 TEST_F(RegisterSysmemMicrotest, LegacyIpcQueryFails_ReturnsCudaErrorWithoutCaching) {
-  auto deviceMemory = PointerAttrs(hipMemoryTypeDevice, /*legacyIpcCapable=*/1);
+  auto deviceMemory = ForceLegacyIpcCapable();
   g_hipPointerGetAttribute = [deviceMemory](void* data, hipPointer_attribute attr, hipDeviceptr_t ptr) {
     return attr == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE ? hipErrorInvalidValue
                                                                     : deviceMemory(data, attr, ptr);
@@ -393,7 +376,7 @@ class RegisterSegmentWalkMicrotest : public RegisterSysmemMicrotest {
 
   void SetUp() override {
     RegisterSysmemMicrotest::SetUp();
-    g_hipPointerGetAttribute = PointerAttrs(hipMemoryTypeDevice, /*legacyIpcCapable=*/0);
+    g_hipPointerGetAttribute = ForceMemoryType(hipMemoryTypeDevice);
     g_hipMemRetainAllocationHandle = [](hipMemGenericAllocationHandle_t* h, void*) {
       *h = reinterpret_cast<hipMemGenericAllocationHandle_t>(0x1);
       return hipSuccess;
@@ -433,14 +416,14 @@ TEST_F(RegisterSegmentWalkMicrotest, HostSegment_SkipsRegistration) {
 // Older HIP: only plain device memory is registered.
 
 TEST_F(RegisterSysmemMicrotest, DeviceMemory_Registers) {
-  g_hipPointerGetAttribute = PointerAttrs(hipMemoryTypeDevice, 0);
+  g_hipPointerGetAttribute = ForceMemoryType(hipMemoryTypeDevice);
   void* handle = nullptr;
   EXPECT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), kPage, false, &handle), ncclSuccess);
   EXPECT_EQ(Population(), 1);
 }
 
 TEST_F(RegisterSysmemMicrotest, ManagedMemory_SkipsRegistration) {
-  g_hipPointerGetAttribute = PointerAttrs(hipMemoryTypeManaged, 0);
+  g_hipPointerGetAttribute = ForceMemoryType(hipMemoryTypeManaged);
   void* handle = nullptr;
   EXPECT_EQ(ncclRegister(comm_.get(), Ptr(0x10000), kPage, false, &handle), ncclSuccess);
   EXPECT_EQ(Population(), 0);

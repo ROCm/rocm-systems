@@ -14,7 +14,6 @@
 #include <memory>
 #include <vector>
 
-#include "RegisterScene.h"
 #include "ScopedHook.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/transport_p2p_reg_fakes.h"
@@ -27,6 +26,8 @@
 
 namespace {
 
+void* Ptr(uintptr_t addr) { return reinterpret_cast<void*>(addr); }
+
 constexpr size_t kSize = 0x4000;
 constexpr int kPeer = 5;
 
@@ -34,7 +35,7 @@ class RegisterSendRecvMicrotestBase : public ::testing::Test {
  protected:
   std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
   ncclConnector conn_{};
-  ncclRegCleanupQueue cleanupQueue_{};
+  ncclCommCallbackQueue cleanupQueue_{};
   void* const buff_ = Ptr(0x100000);
 
   void SetUp() override { g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"GRAPH_REGISTER", 1}}); }
