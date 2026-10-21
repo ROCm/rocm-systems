@@ -2,10 +2,9 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Classify a pull request's changed files for RCCL CI gating.
+"""Decide whether a pull request touches anything the RCCL coco suites test.
 
-Emits ``rccl=true|false`` for the `changes` job in rccl-coco-pr.yml, and
-``host_tests_only=true|false`` for the one in rccl_perf_regression.yml.
+Emits ``rccl=true|false`` for the `changes` job in rccl-coco-pr.yml.
 """
 
 import argparse
@@ -19,10 +18,11 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from ci_utils import get_modified_paths, matches_paths, set_github_output
+from rccl_change_sets import RCCL_PATTERNS, covered_elsewhere, is_doc
 
 # fnmatch patterns: `*` also spans `/`.
 COCO_PATH_PATTERNS = [
-    "projects/rccl/*",
+    *RCCL_PATTERNS,
     "projects/rccl-tests/*",
     ".github/workflows/rccl-coco-pr.yml",
     ".github/workflows/rccl-coco-scheduled.yml",
@@ -32,45 +32,22 @@ COCO_PATH_PATTERNS = [
     ".github/actions/rccl-resolve-coco-run/*",
     ".github/actions/rccl-checkout-coco-harness/*",
     ".github/scripts/rccl_detect_coco_changes.py",
+    ".github/scripts/rccl_change_sets.py",
     ".github/scripts/ci_utils.py",
 ]
-
-# Subset of get_changed_projects.py's SKIPPABLE_PATH_PATTERNS, duplicated rather
-# than imported because that module pulls in pydantic.
-SKIPPABLE_PATH_PATTERNS = [
-    "*.md",
-    "*.rst",
-    "projects/*/docs/*",
-]
-
-# Host-only tests, which coco never runs. rccl-host-unit-tests.yml runs them,
-# but only on PRs to HOST_TEST_BRANCHES, so they are skipped only there.
-HOST_TEST_PATH_PATTERNS = [
-    "projects/rccl/test/host/*",
-]
-HOST_TEST_BRANCHES = ("develop",)
 
 _MAX_LOGGED_PATHS = 50
 
 
 def coco_paths(changed_files: Iterable[str], base_branch: str = "") -> list[str]:
     """The subset of ``changed_files`` that the coco suites cover."""
-    skippable = SKIPPABLE_PATH_PATTERNS
-    if base_branch in HOST_TEST_BRANCHES:
-        skippable = skippable + HOST_TEST_PATH_PATTERNS
     return [
         f
         for f in changed_files
-        if matches_paths([f], COCO_PATH_PATTERNS) and not matches_paths([f], skippable)
+        if matches_paths([f], COCO_PATH_PATTERNS)
+        and not is_doc(f)
+        and not covered_elsewhere(f, base_branch)
     ]
-
-
-def host_tests_only(changed_files: Iterable[str], base_branch: str = "") -> bool:
-    """Whether every non-doc change is a host-only test on HOST_TEST_BRANCHES."""
-    if base_branch not in HOST_TEST_BRANCHES:
-        return False
-    code = [f for f in changed_files if not matches_paths([f], SKIPPABLE_PATH_PATTERNS)]
-    return bool(code) and all(matches_paths([f], HOST_TEST_PATH_PATTERNS) for f in code)
 
 
 def touches_coco(changed_files: Iterable[str], base_branch: str = "") -> bool:
@@ -101,23 +78,14 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--base-branch",
         default="",
-        help="PR target branch; host-only tests are skipped only on "
-        + ", ".join(HOST_TEST_BRANCHES)
-        + ".",
+        help="PR target branch; selects which COVERAGE_RULES apply.",
     )
     args = parser.parse_args(argv)
 
-    # A file moved into an excluded path must still count as removed from its old one.
+    # A file moved into a covered path must still count as removed from its old one.
     changed_files = get_modified_paths(args.base_ref, no_renames=True)
     touched = touches_coco(changed_files, args.base_branch)
-    host_only = host_tests_only(changed_files, args.base_branch)
-    logging.info("Host-only test changes on %r: %s", args.base_branch, host_only)
-    set_github_output(
-        {
-            "rccl": "true" if touched else "false",
-            "host_tests_only": "true" if host_only else "false",
-        }
-    )
+    set_github_output({"rccl": "true" if touched else "false"})
     return 0
 
 
