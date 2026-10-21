@@ -17,7 +17,11 @@ text of its line, because a caption alone does not tell two inputs apart:
 every fread is "user input (string read by fread)". So an entry survives code
 moving around it, and stops matching when the flagged line changes or a new
 input reaches it, even one with a caption already listed.
-An entry that matches nothing is reported as stale, without failing.
+An entry that matches nothing is reported as stale, without failing, on a full
+scan only. On a pull request (GITHUB_EVENT_NAME pull_request or
+pull_request_target) CodeQL reports only the lines the PR changes, so a
+reviewed alert on any other line is missing by design; the stale check is
+skipped there and the run says so. New alerts fail on every event.
 
 Usage:
     codeql_gate.py --alerts <alerts.json> --source-root <dir> <in.sarif> <out.sarif>
@@ -25,11 +29,14 @@ Usage:
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
 STATUSES = ("false-positive", "open")
+# Events on which codeql-action limits the results to the PR's diff.
+DIFF_ONLY_EVENTS = ("pull_request", "pull_request_target")
 FIELDS = ("rule", "file", "code", "status", "reason")
 SOURCE_FIELDS = ("caption", "file", "code")
 # "[user input (a command-line argument)](1)" in a result message: the caption,
@@ -155,12 +162,18 @@ def main(argv=None) -> int:
     new, stale = gate(sarif, entries, args.source_root)
     args.output.write_text(json.dumps(sarif), encoding="utf-8")
 
+    diff_only = os.environ.get("GITHUB_EVENT_NAME") in DIFF_ONLY_EVENTS
+    if diff_only:
+        stale = []
+        print("Stale entries are checked on full scans only (develop pushes, "
+              "workflow_dispatch): on a pull request CodeQL reports only the changed lines.")
     for entry in stale:
         print(f"::warning file={entry['file']}::stale entry in {args.alerts}: "
               f"{entry['rule']} on `{entry['code']}` matched no result")
     for uri, line, rule, text in new:
         print(f"::error file={uri},line={line}::new CodeQL alert {rule}: {text}")
-    print(f"{len(new)} new alert(s); {len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'}.")
+    print(f"{len(new)} new alert(s); " + ("stale entries not checked." if diff_only else
+          f"{len(stale)} stale entr{'y' if len(stale) == 1 else 'ies'}."))
     return 1 if new else 0
 
 

@@ -6,10 +6,12 @@
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 TOOLS = Path(__file__).resolve().parents[2] / "tools"
 sys.path.insert(0, str(TOOLS))
@@ -79,14 +81,16 @@ class Gate(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("\n".join(lines) + "\n")
 
-    def run_gate(self, results: list[dict], entries: list[dict]) -> tuple[int, list, str]:
+    def run_gate(self, results: list[dict], entries: list[dict],
+                 event: str = "push") -> tuple[int, list, str]:
         alerts = self.root / "alerts.json"
         alerts.write_text(json.dumps({"alerts": entries}))
         sarif_in = self.root / "in.sarif"
         sarif_in.write_text(json.dumps({"runs": [{"results": results}]}))
         sarif_out = self.root / "out.sarif"
         out = io.StringIO()
-        with contextlib.redirect_stdout(out):
+        with contextlib.redirect_stdout(out), \
+                mock.patch.dict(os.environ, {"GITHUB_EVENT_NAME": event}):
             rc = codeql_gate.main(["--alerts", str(alerts), "--source-root", str(self.root),
                                    str(sarif_in), str(sarif_out)])
         kept = json.loads(sarif_out.read_text())["runs"][0]["results"] if sarif_out.exists() else None
@@ -164,6 +168,30 @@ class Gate(unittest.TestCase):
         self.assertEqual((rc, kept), (0, []))
         self.assertIn("::warning", out)
         self.assertIn("matched no result", out)
+
+    def test_full_scan_reports_stale_entries(self):
+        for event in ("push", "workflow_dispatch", "schedule"):
+            with self.subTest(event=event):
+                rc, _, out = self.run_gate([], [entry()], event=event)
+                self.assertEqual(rc, 0)
+                self.assertIn("matched no result", out)
+
+    def test_pull_request_skips_the_stale_check_and_says_so(self):
+        # CodeQL reports only the PR's changed lines, so reviewed alerts elsewhere
+        # are missing by design.
+        for event in ("pull_request", "pull_request_target"):
+            with self.subTest(event=event):
+                rc, kept, out = self.run_gate([], [entry()], event=event)
+                self.assertEqual((rc, kept), (0, []))
+                self.assertNotIn("::warning", out)
+                self.assertIn("full scans only", out)
+
+    def test_pull_request_still_fails_on_a_new_alert(self):
+        rc, kept, out = self.run_gate([result(2, flows=(FREAD_HEADER, ARGV))], [entry()],
+                                      event="pull_request")
+        self.assertEqual(rc, 1)
+        self.assertEqual(len(kept), 1)
+        self.assertIn("new CodeQL alert", out)
 
     def test_entry_without_reason_is_refused(self):
         rc, kept, out = self.run_gate([result(2)], [entry(reason=" ")])
