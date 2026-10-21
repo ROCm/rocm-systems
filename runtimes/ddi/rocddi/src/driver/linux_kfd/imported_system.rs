@@ -313,7 +313,8 @@ impl DrmImportedSystem {
 
 impl Drop for DrmImportedSystem {
     fn drop(&mut self) {
-        if self.free().is_err() {
+        if let Err(error) = self.free() {
+            crate::memory::device::record_rollback(error, 0);
             if let Some(mapping) = self.mapping.take() {
                 std::mem::forget(mapping);
             }

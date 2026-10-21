@@ -1148,6 +1148,8 @@ pub(crate) struct KfdAllocation {
     host_address: Option<usize>,
     /// Keeps registered runtime-owned host pages mapped.
     backing: Option<HostBackingLease>,
+    /// Whether this allocation owns payload rather than borrowed or imported backing.
+    owns_payload: bool,
     /// Offset from the native base to the public device address.
     device_byte_offset: usize,
     /// Requested public byte extent.
@@ -1315,6 +1317,10 @@ impl KfdAllocation {
             allocation_source(kind, native_size)?;
         vm.check()?;
         let owned_userptr = matches!(kind, BufferKind::OwnedUserptr { .. });
+        let owns_payload = matches!(
+            kind,
+            BufferKind::Vram { .. } | BufferKind::Gtt | BufferKind::OwnedUserptr { .. }
+        );
         let reservation = if owned_userptr {
             os_memory::Reservation::new_shared_host(native_size, alignment, bounds)
         } else {
@@ -1337,6 +1343,7 @@ impl KfdAllocation {
             handle: None,
             host_address,
             backing,
+            owns_payload,
             device_byte_offset,
             logical_size: desc.size,
             origin_gpu_id,
@@ -1497,6 +1504,7 @@ impl KfdAllocation {
             handle: None,
             host_address: None,
             backing: None,
+            owns_payload: true,
             device_byte_offset: 0,
             logical_size: desc.size,
             origin_gpu_id,
@@ -1644,6 +1652,7 @@ impl KfdAllocation {
             handle: None,
             host_address: None,
             backing: None,
+            owns_payload: false,
             device_byte_offset,
             logical_size: byte_length,
             origin_gpu_id: native_info.gpu_id,
@@ -1803,6 +1812,7 @@ impl KfdAllocation {
             handle: None,
             host_address: None,
             backing: None,
+            owns_payload: false,
             device_byte_offset: 0,
             logical_size: native_info.size,
             origin_gpu_id: native_info.gpu_id,
@@ -1948,6 +1958,7 @@ impl KfdAllocation {
             handle: None,
             host_address: None,
             backing: None,
+            owns_payload: false,
             device_byte_offset: 0,
             logical_size,
             origin_gpu_id: words[7],
@@ -2635,11 +2646,25 @@ impl KfdAllocation {
         self.backing = None;
         Ok(())
     }
+
+    /// Owned payload retained by a native KFD handle or a live CPU mapping.
+    pub(crate) fn remaining_backing_byte_length(&self) -> u64 {
+        let cpu_mapping = self
+            .reservation
+            .as_ref()
+            .is_some_and(os_memory::Reservation::has_writable_mapping);
+        if self.owns_payload && (self.handle.is_some() || self.uncertain || cpu_mapping) {
+            self.cached_info().native_size
+        } else {
+            0
+        }
+    }
 }
 
 impl Drop for KfdAllocation {
     fn drop(&mut self) {
-        if self.free().is_err() {
+        if let Err(error) = self.free() {
+            crate::memory::device::record_rollback(error, self.remaining_backing_byte_length());
             if self.handle.is_some() || self.uncertain {
                 if let Some(backing) = self.backing.take() {
                     // Native state may still address caller pages after teardown.

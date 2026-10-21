@@ -366,7 +366,8 @@ impl DrmRegisteredHost {
 
 impl Drop for DrmRegisteredHost {
     fn drop(&mut self) {
-        if self.free().is_err() {
+        if let Err(error) = self.free() {
+            crate::memory::device::record_rollback(error, 0);
             if self.mappings.iter().any(|mapping| {
                 mapping.handle != 0
                     || mapping.uncertain

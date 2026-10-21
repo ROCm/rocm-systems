@@ -4,7 +4,7 @@
 # libamdf
 
 libamdf implements the AMDF C API in Rust over [rocddi](../rocddi/README.md).
-`amdf_query_api` negotiates core ABI v11; the GPU extension supports v3 and
+`amdf_query_api` negotiates core ABI v12; the GPU extension supports v3 and
 the observation extension supports v1. The XDNA extension is not implemented.
 The [AMDF headers](../../api-headers/include/amdf/) define the public contract,
 including arguments, ownership, and error behavior.
