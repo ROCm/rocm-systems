@@ -41,7 +41,9 @@ class ScopedConnectHandshake {
         nextMagic_(firstMagic),
         readyPollsPerPeer_(readyPollsPerPeer > 0 ? readyPollsPerPeer : 1),
         init(g_ncclSocketInit,
-             [](ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType, volatile uint32_t*, int, int) {
+             [this](ncclSocket* sock, const ncclSocketAddress* addr, uint64_t magic, ncclSocketType,
+                    volatile uint32_t*, int, int) {
+               if (addr != nullptr) outgoingConnects.push_back({sock, addr, magic});
                return ncclSuccess;
              }),
         connect(g_ncclSocketConnect, [](ncclSocket*) { return ncclSuccess; }),
@@ -79,7 +81,14 @@ class ScopedConnectHandshake {
         }),
         close(g_ncclSocketClose, [](ncclSocket*, bool) { return ncclSuccess; }) {}
 
+  struct OutgoingConnect {
+    ncclSocket* sock;
+    const ncclSocketAddress* addr;
+    uint64_t magic;
+  };
+
   std::vector<int> sentRanks;
+  std::vector<OutgoingConnect> outgoingConnects;
   ScopedHook<ncclResult_t(ncclSocket*, const ncclSocketAddress*, uint64_t, ncclSocketType, volatile uint32_t*, int,
                           int)>
       init;
@@ -203,6 +212,8 @@ TEST_F(RmaSocketSetupMicrotest, Connect_AllPeersConnectedBuildsBidirectionalPeer
   constexpr int nranks = 2;
   ncclSocket listen{};
   std::array<ncclRmaSocketProxyHandle, nranks> handleStorage{};
+  handleStorage[0].magic = 0x1111;
+  handleStorage[1].magic = 0x2222;
   std::array<void*, nranks> handles{{&handleStorage[0], &handleStorage[1]}};
   ScopedConnectHandshake handshake({1, 0}, /*firstMagic=*/100, /*readyPollsPerPeer=*/2);
   void* opaque = nullptr;
@@ -224,6 +235,12 @@ TEST_F(RmaSocketSetupMicrotest, Connect_AllPeersConnectedBuildsBidirectionalPeer
   EXPECT_EQ(handshake.move.calls, nranks);
   EXPECT_EQ(comm->peerReceiver[0].sock.magic, 101u);
   EXPECT_EQ(comm->peerReceiver[1].sock.magic, 100u);
+  ASSERT_EQ(handshake.outgoingConnects.size(), static_cast<size_t>(nranks));
+  for (int peer = 0; peer < nranks; ++peer) {
+    EXPECT_EQ(handshake.outgoingConnects[peer].sock, &comm->peerSender[peer].sock);
+    EXPECT_EQ(handshake.outgoingConnects[peer].addr, &handleStorage[peer].connectAddr);
+    EXPECT_EQ(handshake.outgoingConnects[peer].magic, handleStorage[peer].magic);
+  }
   for (int peer = 0; peer < nranks; ++peer) {
     EXPECT_NE(comm->peerSender[peer].buffer, nullptr);
     EXPECT_NE(comm->peerReceiver[peer].buffer, nullptr);
