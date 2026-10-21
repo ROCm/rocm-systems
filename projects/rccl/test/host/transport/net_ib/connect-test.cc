@@ -430,6 +430,22 @@ TEST_F(NetIbConnectMicrotest, RoceVersion_OpenOrReadFailureReturnsExpectedStatus
   EXPECT_EQ(ncclIbRoceGetVersionNum("micro", 1, 0, &version), ncclSuccess);
 }
 
+TEST_F(NetIbConnectMicrotest, RoceVersion_NonContainerReadFailureReturnsSystemError) {
+  ScopedHook open(g_connectOpen, [](const char*, int) { return 6; });
+  ScopedHook read(g_connectRead, [](int, void*, size_t) {
+    errno = EIO;
+    return ssize_t{-1};
+  });
+  ScopedHook close(g_connectClose, [](int fd) {
+    EXPECT_EQ(fd, 6);
+    return 0;
+  });
+  int version = -1;
+
+  EXPECT_EQ(ncclIbRoceGetVersionNum("micro", 1, 0, &version), ncclSystemError);
+  EXPECT_EQ(close.calls, 1);
+}
+
 TEST_F(NetIbConnectMicrotest, GidInfoQuery_ConfiguredIndexPublishesLinkLayerIndexAndGid) {
   ibv_context context{};
   ibv_port_attr port{};
@@ -631,6 +647,59 @@ TEST_F(NetIbConnectMicrotest, QpCreate_OooPathUsesMlx5ExtendedCreation) {
   EXPECT_EQ(ncclIbQpCreate(&qp, &attrs), ncclSuccess);
   EXPECT_EQ(qp.qp, &verbsQp);
   EXPECT_EQ(create.calls, 1);
+}
+
+TEST_F(NetIbConnectMicrotest, SenderQps_EceEnabledQueriesAndAppliesReducedEce) {
+  ConfigureSingleDevice();
+  InstallSingleDeviceResourceFakes();
+  g_loadParam = [](const char* name, int64_t fallback) {
+    if (std::strcmp(name, "IB_ECE_ENABLE") == 0) return int64_t{1};
+    return fallback;
+  };
+  ncclIbSendComm comm{};
+  comm.base.vProps.ndevs = 1;
+  comm.base.nqps = 1;
+  comm.devs[0].base.ibDevN = 0;
+  comm.devs[0].base.pd = &pd_;
+  comm.devs[0].base.cq = &cq_;
+  comm.devs[0].base.pkeyIndex = 0;
+  comm.devs[0].base.gidInfo = ncclIbDevs[0].gidInfo;
+  ncclIbConnectionMetadata local{};
+  ScopedHook query(g_ibvQueryEce, [](ibv_qp*, ibv_ece* ece, int* supported) {
+    ece->vendor_id = 0x1234;
+    ece->options = 0x55;
+    *supported = 1;
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(ncclIbSenderQpsCreate(&comm, &local), ncclSuccess);
+  EXPECT_EQ(local.qpInfo[0].ece_supported, 1);
+  EXPECT_EQ(local.qpInfo[0].ece.vendor_id, 0x1234u);
+  EXPECT_EQ(query.calls, 1);
+
+  ncclIbConnectionMetadata remote{};
+  remote.ndevs = 1;
+  remote.sl = 2;
+  remote.tc = 3;
+  remote.qpInfo[0].qpn = 200;
+  remote.qpInfo[0].devIndex = 0;
+  remote.qpInfo[0].ece_supported = 1;
+  remote.qpInfo[0].ece.vendor_id = 0x4321;
+  remote.qpInfo[0].ece.options = 0xaa;
+  remote.devs[0].mtu = IBV_MTU_4096;
+  remote.devs[0].link_layer = IBV_LINK_LAYER_ETHERNET;
+  remote.devs[0].ib_port = 1;
+  remote.devs[0].gid = Ipv6Gid("2001:db8::2");
+  ScopedHook set(g_ibvSetEce, [](ibv_qp*, ibv_ece* ece, int* supported) {
+    EXPECT_EQ(ece->vendor_id, 0x4321u);
+    EXPECT_EQ(ece->options, 0xaau);
+    EXPECT_EQ(*supported, 1);
+    return ncclSuccess;
+  });
+
+  EXPECT_EQ(ncclIbSenderQpsToRts(&comm, &remote), ncclSuccess);
+  EXPECT_EQ(set.calls, 1);
+  EXPECT_EQ(comm.base.qps[0].ece.vendor_id, 0x4321u);
 }
 
 TEST_F(NetIbConnectMicrotest, QpRtr_RcRoceUsesGlobalRouteAndRcOnlyAttributes) {
@@ -1056,10 +1125,17 @@ TEST_F(NetIbConnectMicrotest, AcceptWrapper_UnexpectedStageIsRejected) {
 
 TEST_F(NetIbConnectMicrotest, CreateFlushQp_DisabledOrAlreadyCreatedIsNoOp) {
   ncclIbRecvComm comm{};
+  comm.base.vProps.ndevs = 1;
+  ScopedHook create(g_ibvCreateQp, [](ibv_qp**, ibv_pd*, ibv_qp_init_attr*) {
+    ADD_FAILURE() << "guarded no-op must not create a QP";
+    return ncclSystemError;
+  });
+
   EXPECT_EQ(ncclIbCreateFlushQp(&comm), ncclSuccess);
   comm.flushEnabled = 1;
   comm.flushQpsCreated = true;
   EXPECT_EQ(ncclIbCreateFlushQp(&comm), ncclSuccess);
+  EXPECT_EQ(create.calls, 0);
 }
 
 TEST_F(NetIbConnectMicrotest, CreateFlushQp_FirstUseCreatesLoopbackQpAndHostMr) {

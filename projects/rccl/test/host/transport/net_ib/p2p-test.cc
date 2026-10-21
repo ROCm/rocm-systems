@@ -58,12 +58,19 @@ struct PostedSend {
 
 std::vector<PostedSend> g_postedSends;
 int g_postSendResult = 0;
+int g_postSendCalls = 0;
+int g_postSendFailOnCall = -1;
 int g_postRecvCalls = 0;
 int g_postRecvResult = 0;
 std::vector<ibv_wc> g_pollCompletions;
 int g_pollResult = 0;
 
 int FakePostSend(struct ibv_qp* qp, struct ibv_send_wr* wr, struct ibv_send_wr** badWr) {
+  ++g_postSendCalls;
+  if (g_postSendCalls == g_postSendFailOnCall) {
+    if (badWr) *badWr = wr;
+    return EIO;
+  }
   if (g_postSendResult != 0) {
     if (badWr) *badWr = wr;
     return g_postSendResult;
@@ -147,6 +154,8 @@ class NetIbP2pMicrotest : public ::testing::Test {
   void TearDown() override {
     g_postedSends.clear();
     g_postSendResult = 0;
+    g_postSendCalls = 0;
+    g_postSendFailOnCall = -1;
     g_postRecvCalls = 0;
     g_postRecvResult = 0;
     g_pollCompletions.clear();
@@ -807,10 +816,26 @@ TEST_F(NetIbP2pMicrotest, Irecv_ReceivePostFailurePropagatesError) {
 
   EXPECT_EQ(NetIbP2pIrecv(&comm, 1, data, sizes, tags, handles, nullptr, &request), ncclSystemError);
   EXPECT_EQ(g_postRecvCalls, 1);
+}
 
-  // Production currently returns directly from the post helper. Reclaim the
-  // fixture-owned slot so this failure-path test remains isolated.
-  EXPECT_EQ(ncclIbFreeRequest(&comm.base.reqs[0]), ncclSuccess);
+// AICOMRCCL-3126: enable when receive-post failure releases the allocated slot.
+TEST_F(NetIbP2pMicrotest, DISABLED_Irecv_ReceivePostFailureReleasesAllocatedSlot) {
+  FakeVerbs verbs(55);
+  ncclIbRecvComm comm{};
+  InitOneQpBase(&comm.base, &verbs, /*isSend=*/false);
+  ibv_mr mr{};
+  ncclIbMrHandle handle{};
+  handle.mrs[0] = &mr;
+  void* data[] = {reinterpret_cast<void*>(0x6400)};
+  size_t sizes[] = {8};
+  int tags[] = {1};
+  void* handles[] = {&handle};
+  g_postRecvResult = EIO;
+  void* request = nullptr;
+
+  EXPECT_EQ(NetIbP2pIrecv(&comm, 1, data, sizes, tags, handles, nullptr, &request), ncclSystemError);
+  EXPECT_EQ(request, nullptr);
+  EXPECT_EQ(comm.base.reqs[0].type, NCCL_NET_IB_REQ_UNUSED);
 }
 
 TEST_F(NetIbP2pMicrotest, Irecv_PrepostedModeSkipsReceivePostButPublishesCts) {
@@ -916,6 +941,33 @@ TEST_F(NetIbP2pMicrotest, Iflush_FirstPostFailureReleasesRequestAndReturnsError)
   EXPECT_EQ(comm.base.reqs[0].type, NCCL_NET_IB_REQ_UNUSED);
   EXPECT_GT(comm.base.stats.fatalErrorCount, 0);
 }
+
+// AICOMRCCL-3126: enable when the READ-post result is returned to the caller.
+TEST_F(NetIbP2pMicrotest, DISABLED_Iflush_ReadPostFailurePropagatesError) {
+  FakeVerbs verbs(64);
+  ncclIbRecvComm comm{};
+  InitOneQpBase(&comm.base, &verbs, /*isSend=*/false);
+  comm.flushEnabled = 1;
+  comm.flushQpsCreated = true;
+  comm.devs[0].gpuFlush.qp.qp = &verbs.qp;
+  int scratch = 0;
+  ibv_mr gpuMr{};
+  comm.devs[0].gpuFlush.gpuFlushGpuMem = &scratch;
+  comm.devs[0].gpuFlush.gpuMr = &gpuMr;
+  ibv_mr receiveMr{};
+  ncclIbMrHandle handle{};
+  handle.mrs[0] = &receiveMr;
+  void* data[] = {reinterpret_cast<void*>(0x8300)};
+  int sizes[] = {4};
+  void* handles[] = {&handle};
+  g_postSendFailOnCall = 2;
+  void* request = nullptr;
+
+  EXPECT_EQ(NetIbP2pIflush(&comm, 1, data, sizes, handles, &request), ncclSystemError);
+  EXPECT_EQ(request, nullptr);
+  EXPECT_EQ(comm.base.reqs[0].type, NCCL_NET_IB_REQ_UNUSED);
+}
+
 TEST_F(NetIbP2pMicrotest, Test_NoCompletionsReturnsNotDoneWithoutSpinning) {
   FakeVerbs verbs;
   ncclIbRecvComm comm{};
@@ -1077,7 +1129,17 @@ TEST_F(NetIbP2pMicrotest, PostSpeedUpdate_ChangedSpeedPostsSignaledSnapshot) {
 }
 
 TEST_F(NetIbP2pMicrotest, PostSpeedUpdate_UnchangedOrPendingStatePostsNothing) {
+  FakeVerbs verbs(82);
   ncclIbRecvComm comm{};
+  InitOneQpBase(&comm.base, &verbs, /*isSend=*/false);
+  comm.base.vProps.devs[0] = 0;
+  comm.remSpeedBufAddr = 0xc000;
+  comm.base.remDevs[0].remSpeedBufRkey = 0xc1;
+  ibv_mr speedMr{};
+  speedMr.lkey = 0xc2;
+  comm.devs[0].speedUpdateMr = &speedMr;
+  COMPILER_ATOMIC_STORE(&ncclIbDevs[0].currSpeed, uint64_t{200000}, std::memory_order_relaxed);
+
   comm.base.speedChangeCounter = 7;
   COMPILER_ATOMIC_STORE(&ncclIbSpeedChangeCounter, uint64_t{7}, std::memory_order_release);
   EXPECT_EQ(ncclIbPostSpeedUpdateToRemote(&comm), ncclSuccess);
