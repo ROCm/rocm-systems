@@ -861,6 +861,7 @@ static ncclResult_t recvFree(struct ncclComm* comm, struct ncclConnector* recv) 
 
 #define NCCL_SHARED_STEPS 16
 
+#if defined(NCCL_OS_LINUX)
 // Host-memory shared P2P pools are registered on every NIC that serves a non-GDR P2P connection.
 // With 4 KiB pages a 256 MiB pool takes 65,536 NIC page-table entries; AINIC caps them per LIF
 // (rdma_npts_per_lif = 1,048,576), so one communicator's pools nearly fill a NIC and the next
@@ -888,47 +889,79 @@ static size_t rcclAnonHugeKb(const void* addr) {
   return kb;
 }
 
+// Backs state->hostBuff with a 2 MiB-aligned anonymous mapping that is registered with the GPU runtime. Returns false
+// when the huge-page path is disabled or fails; in that case nothing stays mapped or registered.
+static bool sharedHostBuffAllocHuge(struct ncclProxySharedP2p* state) {
+  if (!rcclParamNetSharedHostHugePages() || (size_t)state->size < rcclHugePageSize) return false;
+  size_t mapSize = ROUNDUP((size_t)state->size, rcclHugePageSize);
+  char* raw =
+    (char*)mmap(NULL, mapSize + rcclHugePageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (raw == MAP_FAILED) {
+    ATTN("NET/Shared host pool: mmap of %zu bytes failed (%s), using hipHostMalloc", mapSize, strerror(errno));
+    return false;
+  }
+  char* ptr = (char*)ROUNDUP((uintptr_t)raw, rcclHugePageSize);
+  size_t head = ptr - raw;
+  if (head) munmap(raw, head);
+  if (rcclHugePageSize - head) munmap(ptr + mapSize, rcclHugePageSize - head);
+  if (madvise(ptr, mapSize, MADV_HUGEPAGE) != 0) {
+    INFO(NCCL_ALLOC | NCCL_NET, "NET/Shared host pool: madvise(MADV_HUGEPAGE) failed: %s", strerror(errno));
+  }
+  memset(ptr, 0, mapSize);
+
+  // No CUDACHECK between the mapping and the end of this block: an early return would leak the mapping.
+  void* devPtr = NULL;
+  bool registered = false;
+  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+  cudaError_t err = cudaThreadExchangeStreamCaptureMode(&mode);
+  if (err == cudaSuccess) {
+#if defined(HIP_HOST_UNCACHED_MEMORY)
+    err = cudaHostRegister(ptr, mapSize,
+                           cudaHostRegisterPortable | cudaHostRegisterMapped | hipExtHostRegisterUncached);
+#else
+    err = cudaHostRegister(ptr, mapSize, cudaHostRegisterPortable | cudaHostRegisterMapped);
+#endif
+    registered = (err == cudaSuccess);
+    if (registered) err = cudaHostGetDevicePointer(&devPtr, ptr, 0);
+    // Restore the capture mode whether or not the registration succeeded.
+    cudaError_t restoreErr = cudaThreadExchangeStreamCaptureMode(&mode);
+    if (err == cudaSuccess) err = restoreErr;
+  }
+  if (err != cudaSuccess) {
+    ATTN("NET/Shared host pool: huge-page registration failed (%s), using hipHostMalloc", cudaGetErrorString(err));
+    if (registered) (void)cudaHostUnregister(ptr);
+    (void)cudaGetLastError();
+    munmap(ptr, mapSize);
+    return false;
+  }
+  state->hostBuff = ptr;
+  state->hostBuffDev = (char*)devPtr;
+  state->hostBuffMapSize = mapSize;
+  INFO(NCCL_INIT | NCCL_NET, "NET/Shared host pool %p (dev %p) size %zu: %zu kB on huge pages", ptr, devPtr, mapSize,
+       rcclAnonHugeKb(ptr));
+  return true;
+}
+
+static ncclResult_t sharedHostBuffFreeHuge(struct ncclProxySharedP2p* state) {
+  // Same rule as ncclCudaHostFree: at process exit the GPU runtime may already be destroyed, so leave the mapping to
+  // the OS instead of calling into it.
+  if (rcclShutdownFlag().load(std::memory_order_acquire)) {
+    INFO(NCCL_ALLOC, "NET/Shared host pool: skipping free (process shutdown) pointer %p", state->hostBuff);
+    return ncclSuccess;
+  }
+  CUDACHECK(cudaHostUnregister(state->hostBuff));
+  munmap(state->hostBuff, state->hostBuffMapSize);
+  return ncclSuccess;
+}
+#else
+// Huge-page backing is Linux only; other platforms use hipHostMalloc.
+static bool sharedHostBuffAllocHuge(struct ncclProxySharedP2p*) { return false; }
+static ncclResult_t sharedHostBuffFreeHuge(struct ncclProxySharedP2p*) { return ncclSuccess; }
+#endif  // NCCL_OS_LINUX
+
 static ncclResult_t sharedHostBuffAlloc(struct ncclProxySharedP2p* state) {
   state->hostBuffMapSize = 0;
-  if (rcclParamNetSharedHostHugePages() && (size_t)state->size >= rcclHugePageSize) {
-    size_t mapSize = ROUNDUP((size_t)state->size, rcclHugePageSize);
-    char* raw = (char*)mmap(NULL, mapSize + rcclHugePageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS,
-                            -1, 0);
-    if (raw != MAP_FAILED) {
-      char* ptr = (char*)ROUNDUP((uintptr_t)raw, rcclHugePageSize);
-      size_t head = ptr - raw;
-      if (head) munmap(raw, head);
-      if (rcclHugePageSize - head) munmap(ptr + mapSize, rcclHugePageSize - head);
-      if (madvise(ptr, mapSize, MADV_HUGEPAGE) != 0) {
-        INFO(NCCL_ALLOC | NCCL_NET, "NET/Shared host pool: madvise(MADV_HUGEPAGE) failed: %s", strerror(errno));
-      }
-      memset(ptr, 0, mapSize);
-      void* devPtr = NULL;
-      cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
-      CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-#if defined(HIP_HOST_UNCACHED_MEMORY)
-      cudaError_t err =
-        cudaHostRegister(ptr, mapSize, cudaHostRegisterPortable | cudaHostRegisterMapped | hipExtHostRegisterUncached);
-#else
-      cudaError_t err = cudaHostRegister(ptr, mapSize, cudaHostRegisterPortable | cudaHostRegisterMapped);
-#endif
-      if (err == cudaSuccess) err = cudaHostGetDevicePointer(&devPtr, ptr, 0);
-      CUDACHECK(cudaThreadExchangeStreamCaptureMode(&mode));
-      if (err == cudaSuccess) {
-        state->hostBuff = ptr;
-        state->hostBuffDev = (char*)devPtr;
-        state->hostBuffMapSize = mapSize;
-        INFO(NCCL_INIT | NCCL_NET, "NET/Shared host pool %p (dev %p) size %zu: %zu kB on huge pages", ptr, devPtr,
-             mapSize, rcclAnonHugeKb(ptr));
-        return ncclSuccess;
-      }
-      INFO(NCCL_ALLOC | NCCL_NET, "NET/Shared host pool: huge-page registration failed (%s), using hipHostMalloc",
-           cudaGetErrorString(err));
-      (void)cudaHostUnregister(ptr);
-      (void)cudaGetLastError();
-      munmap(ptr, mapSize);
-    }
-  }
+  if (sharedHostBuffAllocHuge(state)) return ncclSuccess;
   NCCLCHECK(ncclCudaHostCalloc(&state->hostBuff, state->size));
   state->hostBuffDev = state->hostBuff;
   return ncclSuccess;
@@ -936,8 +969,7 @@ static ncclResult_t sharedHostBuffAlloc(struct ncclProxySharedP2p* state) {
 
 static ncclResult_t sharedHostBuffFree(struct ncclProxySharedP2p* state) {
   if (state->hostBuffMapSize) {
-    CUDACHECK(cudaHostUnregister(state->hostBuff));
-    munmap(state->hostBuff, state->hostBuffMapSize);
+    NCCLCHECK(sharedHostBuffFreeHuge(state));
   } else {
     NCCLCHECK(ncclCudaHostFree(state->hostBuff));
   }

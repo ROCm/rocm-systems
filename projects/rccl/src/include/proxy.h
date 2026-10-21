@@ -271,7 +271,7 @@ struct ncclProxySharedP2p {
   int64_t size;
   char* cudaBuff;
   char* hostBuff;
-  char* hostBuffDev;      // Device-side address of hostBuff
+  char* hostBuffDev; // Device-side address of hostBuff
   size_t hostBuffMapSize; // Non-zero when hostBuff is a huge-page mmap registered with cudaHostRegister
   // CUDA IPC
   ncclIpcDesc ipcDesc;
